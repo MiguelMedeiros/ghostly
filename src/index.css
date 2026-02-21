@@ -1,0 +1,101 @@
+@import "tailwindcss";
+
+@theme {
+  --color-app-bg: #222e35;
+  --color-sidebar-bg: #111b21;
+  --color-chat-bg: #0b141a;
+  --color-panel-header: #202c33;
+  --color-surface: #111b21;
+  --color-surface-alt: #202c33;
+  --color-surface-hover: #2a3942;
+  --color-border: #222d34;
+  --color-border-bright: #334155;
+  --color-accent: #00a884;
+  --color-accent-dim: #005c4b;
+  --color-accent-hover: #06cf9c;
+  --color-danger: #ea4335;
+  --color-text-primary: #e9edef;
+  --color-text-secondary: #8696a0;
+  --color-text-muted: #667781;
+  --color-sent-bg: #005c4b;
+  --color-received-bg: #202c33;
+  --color-input-bg: #2a3942;
+  --color-search-bg: #202c33;
+  --color-unread: #00a884;
+  --color-chat-pattern: #0d1418;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-app-bg text-text-primary antialiased m-0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+#root {
+  @apply h-screen flex overflow-hidden;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out forwards;
+}
+
+.animate-pulse-dot {
+  animation: pulse-dot 1.5s ease-in-out infinite;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #374151;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4b5563;
+}
+
+.chat-wallpaper {
+  background-color: #0b141a;
+  background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23182229' fill-opacity='0.6'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+}
+
+/* Inline timestamp float (WhatsApp-style) */
+.msg-meta {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.clearfix::after {
+  content: '';
+  display: table;
+  clear: both;
+}
+
+/* emoji-mart dark theme overrides */
+em-emoji-picker {
+  --em-rgb-background: 32, 44, 51;
+  --em-rgb-input: 42, 57, 66;
+  --em-rgb-color: 233, 237, 239;
+  --em-color-border: rgba(34, 45, 52, 0.8);
+  border-radius: 12px !important;
+  border: 1px solid #222d34 !important;
+}

@@ -1,0 +1,91 @@
+import { useEffect, useRef } from "react";
+import { listSessions, loadSession, addMessage } from "../lib/storage";
+import { resolveMessages } from "../lib/pkarr";
+import type { ChatMessage } from "../lib/types";
+
+const BG_POLL_INTERVAL = 15_000;
+
+export function useBackgroundPoller(activeSessionId: string | null) {
+  const activeIdRef = useRef(activeSessionId);
+  activeIdRef.current = activeSessionId;
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const lastSeenMap: Record<string, number> = {};
+
+    const sessions = listSessions();
+    for (const s of sessions) {
+      const maxPeerTs = s.messages.reduce(
+        (max, m) => (m.sender === "peer" ? Math.max(max, m.timestamp) : max),
+        0,
+      );
+      lastSeenMap[s.id] = maxPeerTs;
+    }
+
+    const pollAll = async () => {
+      if (cancelled) return;
+
+      const sessions = listSessions();
+
+      for (const session of sessions) {
+        if (cancelled) break;
+        if (session.id === activeIdRef.current) continue;
+
+        try {
+          const batch = await resolveMessages(
+            session.peerPubKeyB64,
+            session.encKeyB64,
+          );
+
+          if (cancelled) break;
+          if (!batch) continue;
+
+          const lastSeen = lastSeenMap[session.id] ?? 0;
+
+          if (batch.latestTimestamp > 0 && batch.latestTimestamp > lastSeen) {
+            const newMsgs = batch.messages.filter(
+              (m) => m.timestamp > lastSeen,
+            );
+
+            for (const resolved of newMsgs) {
+              const newMsg: ChatMessage = {
+                id: `peer_${resolved.timestamp}`,
+                text: resolved.text,
+                sender: "peer",
+                timestamp: resolved.timestamp,
+                nick: resolved.nick,
+                meta: {
+                  dhtKey: session.peerPubKeyB64,
+                  encryptedPayloadLength: batch.encryptedPayloadLength,
+                  dnsRecords: batch.rawRecordNames,
+                  packetTimestamp: batch.packetTimestamp,
+                },
+              };
+              addMessage(session.id, newMsg);
+            }
+
+            lastSeenMap[session.id] = batch.latestTimestamp;
+          }
+        } catch (err) {
+          console.error(
+            `[bg-poll] error polling session ${session.id}:`,
+            err,
+          );
+        }
+      }
+
+      if (!cancelled) {
+        timer = setTimeout(pollAll, BG_POLL_INTERVAL);
+      }
+    };
+
+    timer = setTimeout(pollAll, 3_000);
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
+}
