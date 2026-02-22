@@ -6,7 +6,11 @@ use crate::types::{CompactMessage, PkarrMessage, ResolvedBatch};
 
 const MAX_MSGS_PAYLOAD_B64: usize = 800;
 
-fn trim_to_fit(messages: &[CompactMessage], enc_key: &[u8]) -> Result<(String, usize), String> {
+fn trim_to_fit(
+    messages: &[CompactMessage],
+    enc_key: &[u8],
+    max_payload: usize,
+) -> Result<(String, usize), String> {
     if messages.is_empty() {
         let encrypted = crypto::encrypt("[]", enc_key)?;
         return Ok((encrypted, 0));
@@ -17,14 +21,14 @@ fn trim_to_fit(messages: &[CompactMessage], enc_key: &[u8]) -> Result<(String, u
     while !batch.is_empty() {
         let json = serde_json::to_string(&batch).map_err(|e| format!("JSON serialize: {}", e))?;
         let encrypted = crypto::encrypt(&json, enc_key)?;
-        if encrypted.len() <= MAX_MSGS_PAYLOAD_B64 {
+        if encrypted.len() <= max_payload {
             return Ok((encrypted, batch.len()));
         }
         if batch.len() == 1 {
             eprintln!(
                 "[pkarr] single message too large ({} b64 chars > {} limit), truncating",
                 encrypted.len(),
-                MAX_MSGS_PAYLOAD_B64
+                max_payload
             );
             let msg = batch[0];
             let max_text = msg.m.chars().take(400).collect::<String>();
@@ -51,11 +55,12 @@ pub async fn publish_messages(
     enc_key: &[u8],
     ack_timestamp: i64,
     nick: Option<&str>,
+    call_signal: Option<&str>,
 ) -> Result<usize, String> {
     let mut sorted = messages.to_vec();
     sorted.sort_by_key(|m| m.t);
 
-    let (payload, kept) = trim_to_fit(&sorted, enc_key)?;
+    let (payload, kept) = trim_to_fit(&sorted, enc_key, MAX_MSGS_PAYLOAD_B64)?;
 
     let mut builder = SignedPacket::builder();
 
@@ -107,17 +112,43 @@ pub async fn publish_messages(
         );
     }
 
+    if let Some(signal) = call_signal {
+        let encrypted_signal = crypto::encrypt(signal, enc_key)?;
+        println!(
+            "[pkarr] call_signal size: {} chars (encrypted: {} chars)",
+            signal.len(),
+            encrypted_signal.len()
+        );
+        
+        builder = builder.txt(
+            "_call"
+                .try_into()
+                .map_err(|e| format!("Name error: {}", e))?,
+            encrypted_signal
+                .as_str()
+                .try_into()
+                .map_err(|e| format!("TXT error: {}", e))?,
+            300,
+        );
+    }
+
     let signed_packet = builder
         .sign(keypair)
         .map_err(|e| format!("Sign error: {}", e))?;
 
+    let packet_size = signed_packet.as_bytes().len();
     let pub_key_z32 = keypair.to_z32();
     println!(
-        "[pkarr] publish {} msgs, ack={} → {}...",
+        "[pkarr] publish {} msgs, ack={}, packet_size={} bytes → {}...",
         kept,
         ack_timestamp,
+        packet_size,
         &pub_key_z32[..12.min(pub_key_z32.len())]
     );
+    
+    if packet_size > 1000 {
+        eprintln!("[pkarr] WARNING: packet size {} exceeds recommended limit!", packet_size);
+    }
 
     client
         .publish(&signed_packet, None)
@@ -151,6 +182,7 @@ pub async fn resolve_messages(
     let mut peer_ack: i64 = 0;
     let mut raw_record_names: Vec<String> = Vec::new();
     let mut messages: Vec<PkarrMessage> = Vec::new();
+    let mut call_signal: Option<String> = None;
 
     let mut msgs_payload = String::new();
     let mut legacy_msg = String::new();
@@ -190,6 +222,16 @@ pub async fn resolve_messages(
                 "_nick" => {
                     if let Ok(decrypted) = crypto::decrypt(&value, enc_key) {
                         nick = Some(decrypted);
+                    }
+                }
+                "_call" => {
+                    println!("[pkarr] found _call record, length: {} chars", value.len());
+                    match crypto::decrypt(&value, enc_key) {
+                        Ok(decrypted) => {
+                            println!("[pkarr] decrypted _call: {} chars", decrypted.len());
+                            call_signal = Some(decrypted);
+                        }
+                        Err(e) => eprintln!("[pkarr] decrypt _call failed: {}", e),
                     }
                 }
                 _ => {}
@@ -241,5 +283,6 @@ pub async fn resolve_messages(
         encrypted_payload_length,
         packet_timestamp,
         message_count,
+        call_signal,
     }))
 }

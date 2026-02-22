@@ -64,6 +64,7 @@ pub async fn publish_messages(
     enc_key_b64: String,
     ack_timestamp: i64,
     nick: Option<String>,
+    call_signal: Option<String>,
 ) -> Result<usize, String> {
     let seed_bytes = crypto::from_base64_url(&seed_b64)?;
     let seed: [u8; 32] = seed_bytes
@@ -80,6 +81,7 @@ pub async fn publish_messages(
         &enc_key,
         ack_timestamp,
         nick.as_deref(),
+        call_signal.as_deref(),
     )
     .await
 }

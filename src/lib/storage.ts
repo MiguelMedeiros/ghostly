@@ -57,6 +57,24 @@ export function deleteSession(sessionId: string): void {
   }
 }
 
+export function deleteAllSessions(): void {
+  const prefix = getPrefix();
+  const keysToRemove: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key?.startsWith(prefix)) {
+      keysToRemove.push(key);
+    }
+  }
+  for (const key of keysToRemove) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // ignore
+    }
+  }
+}
+
 export function listSessions(): ChatSession[] {
   const sessions: ChatSession[] = [];
   for (let i = 0; i < localStorage.length; i++) {

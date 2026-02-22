@@ -5,6 +5,7 @@ import { useBackgroundPoller } from "../hooks/useBackgroundPoller";
 import {
   listSessions,
   deleteSession,
+  deleteAllSessions,
   getUnreadCount,
   markSessionAsRead,
   generateSessionId,
@@ -49,6 +50,7 @@ export function Sidebar() {
   const [inviteInput, setInviteInput] = useState("");
   const [joinError, setJoinError] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const prevTotalMsgsRef = useRef<Record<string, number>>({});
   const lastNotifRef = useRef<number>(0);
   const activeSessionIdRef = useRef<string | null>(null);
@@ -56,6 +58,7 @@ export function Sidebar() {
 
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_WIDTH);
   const isResizingRef = useRef(false);
+  const newChatPanelRef = useRef<HTMLDivElement>(null);
 
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -97,7 +100,7 @@ export function Sidebar() {
 
   activeSessionIdRef.current = activeSessionId;
 
-  const { initialSyncComplete } =
+  const { syncingSessions, initialSyncComplete } =
     useBackgroundPoller(activeSessionId);
 
   useEffect(() => {
@@ -153,6 +156,24 @@ export function Sidebar() {
     if (activeSessionId) markSessionAsRead(activeSessionId);
   }, [activeSessionId, sessions]);
 
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        showNewChat &&
+        newChatPanelRef.current &&
+        !newChatPanelRef.current.contains(e.target as Node)
+      ) {
+        setShowNewChat(false);
+        setJoinError("");
+        setInviteInput("");
+      }
+    };
+    if (showNewChat) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showNewChat]);
+
   const handleCreate = async () => {
     const drop = await createDrop();
     const sessionId = generateSessionId(drop.seedA, drop.pubKeyB);
@@ -162,15 +183,15 @@ export function Sidebar() {
     setTimeout(refreshSessions, 500);
   };
 
-  const handleJoin = () => {
+  const handleJoinWithInput = (input: string) => {
     setJoinError("");
-    const input = inviteInput.trim();
-    if (!input) return;
+    const trimmed = input.trim();
+    if (!trimmed) return;
 
     let chatPath: string | null = null;
 
     try {
-      const url = new URL(input);
+      const url = new URL(trimmed);
       const hash = url.hash;
       if (hash && hash.includes("/chat/")) {
         chatPath = hash.replace(/^#/, "");
@@ -179,13 +200,13 @@ export function Sidebar() {
       // not a valid URL — try other formats
     }
 
-    if (!chatPath && input.includes("/chat/")) {
-      const idx = input.indexOf("/chat/");
-      chatPath = input.slice(idx);
+    if (!chatPath && trimmed.includes("/chat/")) {
+      const idx = trimmed.indexOf("/chat/");
+      chatPath = trimmed.slice(idx);
     }
 
     if (!chatPath) {
-      const cleaned = input.replace(/^\/+/, "").replace(/\/+$/, "");
+      const cleaned = trimmed.replace(/^\/+/, "").replace(/\/+$/, "");
       const segments = cleaned.split("/");
       if (segments.length === 3 && segments.every((s) => s.length > 0)) {
         chatPath = `/chat/${cleaned}`;
@@ -202,6 +223,10 @@ export function Sidebar() {
     }
   };
 
+  const handleJoin = () => {
+    handleJoinWithInput(inviteInput);
+  };
+
   const handleDelete = (sessionId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
@@ -214,6 +239,17 @@ export function Sidebar() {
       }
     } else {
       setConfirmDeleteId(sessionId);
+    }
+  };
+
+  const handleDeleteAll = () => {
+    if (confirmDeleteAll) {
+      deleteAllSessions();
+      setConfirmDeleteAll(false);
+      refreshSessions();
+      navigate("/");
+    } else {
+      setConfirmDeleteAll(true);
     }
   };
 
@@ -281,7 +317,7 @@ export function Sidebar() {
 
       {/* New Chat Panel */}
       {showNewChat && (
-        <div className="border-b border-border bg-surface-alt p-4 space-y-3 animate-fade-in">
+        <div ref={newChatPanelRef} className="border-b border-border bg-surface-alt p-4 space-y-3 animate-fade-in">
           <div className="flex items-center justify-between">
             <span className="text-text-secondary text-xs font-bold uppercase tracking-wider">
               New Chat
@@ -303,17 +339,39 @@ export function Sidebar() {
               Paste an invite code to join an existing chat:
             </p>
             <div className="flex gap-2">
-              <input
-                type="text"
-                value={inviteInput}
-                onChange={(e) => {
-                  setInviteInput(e.target.value);
-                  setJoinError("");
-                }}
-                onKeyDown={(e) => e.key === "Enter" && handleJoin()}
-                placeholder="Paste invite code..."
-                className="flex-1 bg-input-bg border-none rounded-lg px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none font-mono"
-              />
+              <div className="flex-1 flex items-center bg-input-bg rounded-lg overflow-hidden">
+                <input
+                  type="text"
+                  value={inviteInput}
+                  onChange={(e) => {
+                    setInviteInput(e.target.value);
+                    setJoinError("");
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && handleJoin()}
+                  placeholder="Paste invite code..."
+                  className="flex-1 bg-transparent border-none px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none font-mono"
+                />
+                <button
+                  onClick={async () => {
+                    try {
+                      const text = await navigator.clipboard.readText();
+                      if (text && text.trim()) {
+                        setInviteInput(text);
+                        handleJoinWithInput(text);
+                      }
+                    } catch {
+                      // clipboard access denied
+                    }
+                  }}
+                  className="px-2 py-2 text-text-muted hover:text-accent transition-colors cursor-pointer"
+                  title="Paste and join"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
+                </button>
+              </div>
               <button
                 onClick={handleJoin}
                 disabled={!inviteInput.trim()}
@@ -450,7 +508,24 @@ export function Sidebar() {
                   <span className={`text-[15px] truncate ${unread > 0 ? "text-text-primary font-semibold" : "text-text-primary"}`}>
                     {peerLabel}
                   </span>
-                  <span className={`text-xs shrink-0 ${unread > 0 ? "text-accent font-medium" : "text-text-muted"}`}>
+                  <span className={`text-xs shrink-0 flex items-center gap-1.5 ${unread > 0 ? "text-accent font-medium" : "text-text-muted"}`}>
+                    {syncingSessions.has(session.id) && (
+                      <svg
+                        className="animate-spin w-3 h-3 text-text-muted"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                      >
+                        <circle
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="3"
+                          strokeDasharray="31.4 31.4"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    )}
                     {formatTime(session.lastSyncAt ?? session.createdAt)}
                   </span>
                 </div>
@@ -544,6 +619,51 @@ export function Sidebar() {
           );
         })}
       </div>
+
+      {/* Delete All Footer */}
+      {sessions.length > 0 && (
+        <div className="border-t border-border p-3 bg-sidebar-bg">
+          {confirmDeleteAll ? (
+            <div className="flex items-center justify-center gap-2 animate-fade-in">
+              <span className="text-text-muted text-xs">Delete all {sessions.length} chats?</span>
+              <button
+                onClick={handleDeleteAll}
+                className="px-3 py-1.5 text-[11px] font-bold text-danger bg-danger/20 border border-danger/30 rounded hover:bg-danger/30 transition-colors cursor-pointer"
+              >
+                Delete All
+              </button>
+              <button
+                onClick={() => setConfirmDeleteAll(false)}
+                className="px-3 py-1.5 text-[11px] font-bold text-text-muted bg-surface-hover border border-border rounded hover:text-text-secondary transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={handleDeleteAll}
+              className="w-full flex items-center justify-center gap-2 py-2 text-text-muted hover:text-danger hover:bg-danger/10 rounded-lg transition-colors cursor-pointer"
+              title="Delete all chats"
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M3 6h18" />
+                <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+              </svg>
+              <span className="text-xs font-medium">Delete All Chats</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Resize Handle */}
       <div

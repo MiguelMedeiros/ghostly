@@ -6,6 +6,7 @@ import type { ChatMessage } from "../lib/types";
 const BG_POLL_INTERVAL = 8_000;
 
 export interface BackgroundPollerState {
+  syncingSessions: Set<string>;
   initialSyncComplete: boolean;
 }
 
@@ -15,6 +16,9 @@ export function useBackgroundPoller(
   const activeIdRef = useRef(activeSessionId);
   activeIdRef.current = activeSessionId;
 
+  const [syncingSessions, setSyncingSessions] = useState<Set<string>>(
+    new Set(),
+  );
   const [initialSyncComplete, setInitialSyncComplete] = useState(false);
 
   useEffect(() => {
@@ -38,6 +42,13 @@ export function useBackgroundPoller(
 
       const sessions = listSessions();
 
+      const toSync = sessions
+        .filter((s) => s.id !== activeIdRef.current)
+        .map((s) => s.id);
+      if (toSync.length > 0) {
+        setSyncingSessions(new Set(toSync));
+      }
+
       for (const session of sessions) {
         if (cancelled) break;
         if (session.id === activeIdRef.current) continue;
@@ -49,6 +60,13 @@ export function useBackgroundPoller(
           );
 
           if (cancelled) break;
+
+          setSyncingSessions((prev) => {
+            const next = new Set(prev);
+            next.delete(session.id);
+            return next;
+          });
+
           if (!batch) continue;
 
           const lastSeen = lastSeenMap[session.id] ?? 0;
@@ -78,6 +96,11 @@ export function useBackgroundPoller(
             lastSeenMap[session.id] = batch.latestTimestamp;
           }
         } catch (err) {
+          setSyncingSessions((prev) => {
+            const next = new Set(prev);
+            next.delete(session.id);
+            return next;
+          });
           console.error(
             `[bg-poll] error polling session ${session.id}:`,
             err,
@@ -103,5 +126,5 @@ export function useBackgroundPoller(
     };
   }, []);
 
-  return { initialSyncComplete };
+  return { syncingSessions, initialSyncComplete };
 }

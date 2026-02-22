@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useNavigate, Navigate } from "react-router-dom";
 import { useChat } from "../hooks/useChat";
+import { useWebRTC } from "../hooks/useWebRTC";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
 import { TechPanel } from "../components/TechPanel";
+import { CallOverlay } from "../components/CallOverlay";
+import { IncomingCallNotification } from "../components/IncomingCallNotification";
 import {
   markSessionAsRead,
   generateSessionId,
@@ -11,8 +14,9 @@ import {
   deleteSession,
   loadSession,
   updateSessionLabel,
+  addMessage,
 } from "../lib/storage";
-import type { ChatParams } from "../lib/types";
+import type { ChatParams, CallSignal, CallEventType, ChatMessage } from "../lib/types";
 
 export function Chat() {
   const { "*": splat } = useParams();
@@ -40,14 +44,65 @@ export function Chat() {
     techInfo,
     peerAck,
     forceRefresh,
+    incomingCallSignal,
+    setCallSignal,
+    setChatFastPoll,
+    addSystemMessage,
   } = useChat(params);
+
+  const addCallEventMessage = useCallback(
+    (type: CallEventType, hasVideo: boolean, duration?: number) => {
+      const textMap: Record<CallEventType, string> = {
+        call_started: hasVideo ? "Video call started" : "Audio call started",
+        call_received: hasVideo ? "Incoming video call" : "Incoming audio call",
+        call_connected: hasVideo ? "Video call connected" : "Audio call connected",
+        call_ended: hasVideo ? "Video call ended" : "Audio call ended",
+        call_missed: hasVideo ? "Missed video call" : "Missed audio call",
+        call_rejected: hasVideo ? "Video call declined" : "Audio call declined",
+      };
+
+      const msg: ChatMessage = {
+        id: `system_call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        text: textMap[type],
+        sender: "system",
+        timestamp: Date.now(),
+        callEvent: {
+          type,
+          hasVideo,
+          duration,
+        },
+      };
+
+      addSystemMessage?.(msg);
+    },
+    [addSystemMessage],
+  );
+
+  const webrtc = useWebRTC({
+    incomingCallSignal,
+    publishCallSignal: setCallSignal,
+    setFastPoll: setChatFastPoll,
+    addCallEventMessage,
+  });
+
+  const incomingHasVideo = (() => {
+    if (!incomingCallSignal) return false;
+    try {
+      const sig: CallSignal = JSON.parse(incomingCallSignal);
+      return sig.m?.includes("v") ?? false;
+    } catch {
+      return false;
+    }
+  })();
 
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
   const [chatLabel, setChatLabel] = useState<string>("");
   const [isEditingLabel, setIsEditingLabel] = useState(false);
   const [labelDraft, setLabelDraft] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
   const labelInputRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (params) {
@@ -92,7 +147,20 @@ export function Chat() {
   useEffect(() => {
     setConfirmDelete(false);
     setCodeCopied(false);
+    setMenuOpen(false);
   }, [splat]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    if (menuOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [menuOpen]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -224,48 +292,13 @@ export function Chat() {
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {inviteCode && (
-            <button
-              onClick={() => handleCopyCode(inviteCode)}
-              className="p-2 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer"
-              title={codeCopied ? "Copied!" : "Copy invite code"}
-            >
-              {codeCopied ? (
-                <svg
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="text-accent"
-                >
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-              ) : (
-                <svg
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-                </svg>
-              )}
-            </button>
-          )}
+        <div className="flex items-center gap-1">
+          {/* Audio call button */}
           <button
-            onClick={forceRefresh}
-            className="p-2 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer"
-            title="Force refresh"
+            onClick={() => webrtc.startCall(false)}
+            disabled={webrtc.callState !== "idle"}
+            className="p-2 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+            title="Audio call"
           >
             <svg
               width="18"
@@ -277,33 +310,36 @@ export function Chat() {
               strokeLinecap="round"
               strokeLinejoin="round"
             >
-              <polyline points="23 4 23 10 17 10" />
-              <polyline points="1 20 1 14 7 14" />
-              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" />
-              <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" />
+              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
             </svg>
           </button>
-          {confirmDelete ? (
-            <div className="flex items-center gap-2 animate-fade-in">
-              <span className="text-danger text-xs">Delete?</span>
-              <button
-                onClick={handleDelete}
-                className="px-2.5 py-1 bg-danger/20 text-danger border border-danger/30 rounded text-xs font-bold hover:bg-danger/30 transition-colors cursor-pointer"
-              >
-                Yes
-              </button>
-              <button
-                onClick={() => setConfirmDelete(false)}
-                className="px-2.5 py-1 bg-surface-hover text-text-muted border border-border rounded text-xs font-bold hover:text-text-secondary transition-colors cursor-pointer"
-              >
-                No
-              </button>
-            </div>
-          ) : (
+          {/* Video call button */}
+          <button
+            onClick={() => webrtc.startCall(true)}
+            disabled={webrtc.callState !== "idle"}
+            className="p-2 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+            title="Video call"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M23 7l-7 5 7 5V7z" />
+              <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+            </svg>
+          </button>
+          {/* Options dropdown */}
+          <div className="relative" ref={menuRef}>
             <button
-              onClick={handleDelete}
-              className="p-2 text-text-secondary hover:text-danger rounded-full hover:bg-surface-hover transition-colors cursor-pointer"
-              title="Delete chat"
+              onClick={() => setMenuOpen(!menuOpen)}
+              className="p-2 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer"
+              title="Options"
             >
               <svg
                 width="18"
@@ -315,12 +351,85 @@ export function Chat() {
                 strokeLinecap="round"
                 strokeLinejoin="round"
               >
-                <path d="M3 6h18" />
-                <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-                <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                <circle cx="12" cy="12" r="1" />
+                <circle cx="12" cy="5" r="1" />
+                <circle cx="12" cy="19" r="1" />
               </svg>
             </button>
-          )}
+            {menuOpen && (
+              <div className="absolute right-0 top-full mt-1 bg-surface-alt border border-border rounded-lg shadow-lg py-1 min-w-[160px] z-50 animate-fade-in">
+                {inviteCode && (
+                  <button
+                    onClick={() => {
+                      handleCopyCode(inviteCode);
+                      setMenuOpen(false);
+                    }}
+                    className="w-full px-3 py-2 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors"
+                  >
+                    {codeCopied ? (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    ) : (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                      </svg>
+                    )}
+                    {codeCopied ? "Copied!" : "Copy invite code"}
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    forceRefresh();
+                    setMenuOpen(false);
+                  }}
+                  className="w-full px-3 py-2 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="23 4 23 10 17 10" />
+                    <polyline points="1 20 1 14 7 14" />
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" />
+                    <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" />
+                  </svg>
+                  Refresh
+                </button>
+                <div className="border-t border-border my-1" />
+                {confirmDelete ? (
+                  <div className="px-3 py-2 flex items-center gap-2">
+                    <span className="text-danger text-xs">Delete?</span>
+                    <button
+                      onClick={() => {
+                        handleDelete();
+                        setMenuOpen(false);
+                      }}
+                      className="px-2 py-0.5 bg-danger/20 text-danger border border-danger/30 rounded text-xs font-bold hover:bg-danger/30 transition-colors cursor-pointer"
+                    >
+                      Yes
+                    </button>
+                    <button
+                      onClick={() => setConfirmDelete(false)}
+                      className="px-2 py-0.5 bg-surface-hover text-text-muted border border-border rounded text-xs font-bold hover:text-text-secondary transition-colors cursor-pointer"
+                    >
+                      No
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleDelete}
+                    className="w-full px-3 py-2 text-left text-sm text-danger hover:bg-surface-hover flex items-center gap-2 transition-colors"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M3 6h18" />
+                      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                    </svg>
+                    Delete chat
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -373,6 +482,37 @@ export function Chat() {
 
       {/* Input */}
       <MessageInput key={splat} onSend={sendMessage} disabled={isSending} />
+
+      {/* Incoming call notification */}
+      {webrtc.callState === "incoming" && (
+        <IncomingCallNotification
+          peerName={displayName}
+          hasVideo={incomingHasVideo}
+          onAcceptAudio={() => webrtc.acceptCall(false)}
+          onAcceptVideo={() => webrtc.acceptCall(true)}
+          onReject={webrtc.rejectCall}
+        />
+      )}
+
+      {/* Active call overlay */}
+      {(webrtc.callState === "offering" ||
+        webrtc.callState === "answering" ||
+        webrtc.callState === "connecting" ||
+        webrtc.callState === "connected") && (
+        <CallOverlay
+          callState={webrtc.callState}
+          localStream={webrtc.localStream}
+          remoteStream={webrtc.remoteStream}
+          isMuted={webrtc.isMuted}
+          isVideoOff={webrtc.isVideoOff}
+          hasVideo={webrtc.hasVideo}
+          callStartedAt={webrtc.callStartedAt}
+          peerName={displayName}
+          onHangUp={() => webrtc.hangUp()}
+          onToggleMute={webrtc.toggleMute}
+          onToggleVideo={webrtc.toggleVideo}
+        />
+      )}
     </div>
   );
 }

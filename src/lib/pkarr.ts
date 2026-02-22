@@ -14,6 +14,7 @@ export interface PkarrResolvedBatch {
   encryptedPayloadLength: number;
   packetTimestamp: number;
   messageCount: number;
+  callSignal: string | null;
 }
 
 export interface CompactMessage {
@@ -29,6 +30,7 @@ interface RustResolvedBatch {
   encrypted_payload_length: number;
   packet_timestamp: number;
   message_count: number;
+  call_signal: string | null;
 }
 
 interface RustKeypairResult {
@@ -56,6 +58,7 @@ export async function publishMessages(
   encKeyB64: string,
   ackTimestamp: number,
   nick?: string,
+  callSignal?: string,
 ): Promise<number> {
   return invoke<number>("publish_messages", {
     seedB64,
@@ -63,6 +66,7 @@ export async function publishMessages(
     encKeyB64,
     ackTimestamp,
     nick: nick ?? null,
+    callSignal: callSignal ?? null,
   });
 }
 
@@ -89,6 +93,7 @@ export async function resolveMessages(
     encryptedPayloadLength: result.encrypted_payload_length,
     packetTimestamp: result.packet_timestamp,
     messageCount: result.message_count,
+    callSignal: result.call_signal,
   };
 }
 

@@ -16,10 +16,12 @@ import {
   saveSession,
   addMessage,
   generateSessionId,
+  getInviteCode,
 } from "../lib/storage";
 
 const POLL_INTERVAL_ACTIVE = 2_000;
 const POLL_INTERVAL_IDLE = 8_000;
+const POLL_INTERVAL_FAST = 1_000;
 const REPUBLISH_INTERVAL = 30 * 60 * 1000;
 const IDLE_THRESHOLD = 60_000;
 const MESSAGE_TTL = 300;
@@ -32,6 +34,9 @@ export function useChat(params: ChatParams | null) {
   const [isSending, setIsSending] = useState(false);
   const [peerAck, setPeerAck] = useState<number>(0);
   const [isBurned, setIsBurned] = useState(false);
+  const [incomingCallSignal, setIncomingCallSignal] = useState<string | null>(
+    null,
+  );
 
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const republishTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -52,6 +57,10 @@ export function useChat(params: ChatParams | null) {
   const sessionCreatedAtRef = useRef<number>(Date.now());
   const pollFnRef = useRef<(() => Promise<void>) | null>(null);
   const isPollingRef = useRef(false);
+  const callSignalOutRef = useRef<string | null>(null);
+  const doPublishRef = useRef<(() => Promise<void>) | null>(null);
+  const fastPollRef = useRef(false);
+  const joinMessageSentRef = useRef(false);
 
   useEffect(() => {
     if (!params) return;
@@ -95,6 +104,9 @@ export function useChat(params: ChatParams | null) {
       } else {
         const now = Date.now();
         sessionCreatedAtRef.current = now;
+        
+        const isCreator = !!getInviteCode(sessionId);
+        
         saveSession({
           id: sessionId,
           mySeedB64: params.seedB64,
@@ -107,6 +119,10 @@ export function useChat(params: ChatParams | null) {
         lastSeenTimestampRef.current = 0;
         sentBufferRef.current = [];
         myAckRef.current = 0;
+        
+        if (!isCreator) {
+          joinMessageSentRef.current = false;
+        }
       }
 
       burnedRef.current = false;
@@ -117,20 +133,74 @@ export function useChat(params: ChatParams | null) {
       const doPublish = async () => {
         if (burnedRef.current || effectIdRef.current !== currentEffectId)
           return;
+        const callSig = callSignalOutRef.current ?? undefined;
+        console.log("[chat] doPublish - callSignal:", callSig ? `${callSig.slice(0, 30)}...` : "none");
         await publishMessages(
           seedB64Ref.current,
           sentBufferRef.current,
           encKeyB64Ref.current,
           myAckRef.current,
           nickRef.current,
+          callSig,
         );
       };
+      doPublishRef.current = doPublish;
 
       if (myAckRef.current > 0) {
         doPublish().catch((err) =>
           console.error("[chat] initial publish error:", err),
         );
       }
+
+      const sendJoinMessage = async () => {
+        if (joinMessageSentRef.current) return;
+        if (burnedRef.current || effectIdRef.current !== currentEffectId) return;
+        
+        const isCreator = !!getInviteCode(sessionId);
+        if (isCreator) return;
+        
+        joinMessageSentRef.current = true;
+        
+        const timestamp = Date.now();
+        const joinText = "👋 joined";
+        
+        const joinMsg: ChatMessage = {
+          id: `me_${timestamp}`,
+          text: joinText,
+          sender: "system",
+          timestamp,
+          nick: nickRef.current,
+          systemEvent: {
+            type: "join",
+            pubKey: myPubKey,
+          },
+        };
+        
+        const updated = addMessage(sessionId, joinMsg);
+        if (updated) {
+          setMessages([...updated.messages]);
+        }
+        
+        sentBufferRef.current = [
+          ...sentBufferRef.current,
+          { t: timestamp, m: joinText },
+        ];
+        
+        try {
+          await publishMessages(
+            seedB64Ref.current,
+            sentBufferRef.current,
+            encKeyB64Ref.current,
+            myAckRef.current,
+            nickRef.current,
+          );
+          console.log("[chat] join message sent");
+        } catch (err) {
+          console.error("[chat] failed to send join message:", err);
+        }
+      };
+      
+      sendJoinMessage();
 
       const poll = async () => {
         if (burnedRef.current || effectIdRef.current !== currentEffectId)
@@ -177,10 +247,12 @@ export function useChat(params: ChatParams | null) {
               let latestSession = null;
 
               for (const resolved of newMsgs) {
+                const isJoinMessage = resolved.text === "👋 joined";
+                
                 const newMsg: ChatMessage = {
                   id: `peer_${resolved.timestamp}`,
                   text: resolved.text,
-                  sender: "peer",
+                  sender: isJoinMessage ? "system" : "peer",
                   timestamp: resolved.timestamp,
                   nick: resolved.nick,
                   meta: {
@@ -189,6 +261,12 @@ export function useChat(params: ChatParams | null) {
                     dnsRecords: batch.rawRecordNames,
                     packetTimestamp: batch.packetTimestamp,
                   },
+                  ...(isJoinMessage && {
+                    systemEvent: {
+                      type: "join" as const,
+                      pubKey: peerPubKeyZ32Ref.current,
+                    },
+                  }),
                 };
                 latestSession = addMessage(sessionIdRef.current, newMsg);
               }
@@ -199,6 +277,16 @@ export function useChat(params: ChatParams | null) {
 
               lastActivityRef.current = Date.now();
               receivedNew = true;
+            }
+
+            if (batch.callSignal !== null && batch.callSignal !== undefined) {
+              try {
+                const sig = JSON.parse(batch.callSignal);
+                console.log("[chat] received callSignal from peer", peerPubKeyZ32Ref.current.slice(0, 8), "- type:", sig.t, "ts:", sig.ts);
+              } catch {
+                console.log("[chat] received callSignal (unparseable):", batch.callSignal.slice(0, 50));
+              }
+              setIncomingCallSignal(batch.callSignal);
             }
           }
 
@@ -219,7 +307,11 @@ export function useChat(params: ChatParams | null) {
           ) {
             const idle =
               Date.now() - lastActivityRef.current > IDLE_THRESHOLD;
-            const interval = idle ? POLL_INTERVAL_IDLE : POLL_INTERVAL_ACTIVE;
+            const interval = fastPollRef.current
+              ? POLL_INTERVAL_FAST
+              : idle
+                ? POLL_INTERVAL_IDLE
+                : POLL_INTERVAL_ACTIVE;
             pollTimerRef.current = setTimeout(poll, interval);
           }
         }
@@ -294,6 +386,7 @@ export function useChat(params: ChatParams | null) {
             "_ts",
             "_ack",
             ...(nickRef.current ? ["_nick"] : []),
+            ...(callSignalOutRef.current ? ["_call"] : []),
           ],
           packetTimestamp: timestamp,
         },
@@ -364,6 +457,39 @@ export function useChat(params: ChatParams | null) {
     nickRef.current = nick || undefined;
   }, []);
 
+  const setCallSignal = useCallback(async (signal: string | null) => {
+    console.log("[chat] setCallSignal called:", signal ? `${signal.slice(0, 50)}...` : null);
+    callSignalOutRef.current = signal;
+    lastActivityRef.current = Date.now();
+    if (doPublishRef.current) {
+      try {
+        console.log("[chat] calling doPublish with call signal");
+        await doPublishRef.current();
+        console.log("[chat] doPublish completed");
+      } catch (err) {
+        console.error("[chat] call signal publish error:", err);
+      }
+    } else {
+      console.warn("[chat] doPublishRef.current is null!");
+    }
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    if (pollFnRef.current) {
+      pollFnRef.current();
+    }
+  }, []);
+
+  const setChatFastPoll = useCallback((fast: boolean) => {
+    fastPollRef.current = fast;
+    if (fast && pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+      if (pollFnRef.current) pollFnRef.current();
+    }
+  }, []);
+
   const forceRefresh = useCallback(() => {
     if (pollTimerRef.current) {
       clearTimeout(pollTimerRef.current);
@@ -371,6 +497,13 @@ export function useChat(params: ChatParams | null) {
     }
     if (pollFnRef.current) {
       pollFnRef.current();
+    }
+  }, []);
+
+  const addSystemMessage = useCallback((msg: ChatMessage) => {
+    const updated = addMessage(sessionIdRef.current, msg);
+    if (updated) {
+      setMessages([...updated.messages]);
     }
   }, []);
 
@@ -409,5 +542,9 @@ export function useChat(params: ChatParams | null) {
     techInfo,
     peerAck,
     forceRefresh,
+    incomingCallSignal,
+    setCallSignal,
+    setChatFastPoll,
+    addSystemMessage,
   };
 }

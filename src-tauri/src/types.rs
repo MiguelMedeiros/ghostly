@@ -21,6 +21,7 @@ pub struct ResolvedBatch {
     pub encrypted_payload_length: usize,
     pub packet_timestamp: i64,
     pub message_count: usize,
+    pub call_signal: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
