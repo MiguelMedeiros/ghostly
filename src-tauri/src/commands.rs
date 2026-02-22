@@ -12,7 +12,7 @@ pub struct AppState {
 
 #[tauri::command]
 pub fn get_profile() -> String {
-    env::var("DEADDROP_PROFILE").unwrap_or_default()
+    env::var("GHOSTLY_PROFILE").unwrap_or_default()
 }
 
 #[tauri::command]

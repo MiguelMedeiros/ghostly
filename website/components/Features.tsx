@@ -14,6 +14,26 @@ const features = [
     ),
   },
   {
+    title: "Video Calls",
+    description:
+      "Crystal clear peer-to-peer video calls via WebRTC. No servers routing your stream — direct connection with end-to-end encryption.",
+    icon: (
+      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+      </svg>
+    ),
+  },
+  {
+    title: "Audio Calls",
+    description:
+      "Private voice calls without middlemen. WebRTC peer-to-peer connection ensures your conversations stay between you and your contact.",
+    icon: (
+      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
+      </svg>
+    ),
+  },
+  {
     title: "No Accounts, No Servers",
     description:
       "Zero infrastructure. No sign-up, no login, no database. Your identity is a keypair. The network is the transport.",
@@ -34,17 +54,6 @@ const features = [
     ),
   },
   {
-    title: "Burn Feature",
-    description:
-      "Stop republishing with one click. Messages naturally vanish from the DHT. No recall needed — they simply cease to exist.",
-    icon: (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M15.362 5.214A8.252 8.252 0 0112 21 8.25 8.25 0 016.038 7.048 8.287 8.287 0 009 9.6a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z" />
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 18a3.75 3.75 0 00.495-7.467 5.99 5.99 0 00-1.925 3.546 5.974 5.974 0 01-2.133-1A3.75 3.75 0 0012 18z" />
-      </svg>
-    ),
-  },
-  {
     title: "QR Code Sharing",
     description:
       "Share chat invites as QR codes for seamless in-person onboarding. Scan and connect — no typing, no friction.",
@@ -56,9 +65,20 @@ const features = [
     ),
   },
   {
-    title: "Emoji & GIF Support",
+    title: "Giphy Integration",
     description:
-      "Full emoji picker and Giphy integration. Express yourself freely — all encrypted end-to-end like every other message.",
+      "Search and send GIFs directly from Giphy. Express yourself with animated reactions — all encrypted end-to-end.",
+    icon: (
+      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+        <rect x="2" y="4" width="20" height="16" rx="3" strokeLinecap="round" strokeLinejoin="round" />
+        <text x="12" y="14" textAnchor="middle" fill="currentColor" stroke="none" fontSize="7" fontWeight="bold" fontFamily="sans-serif">GIF</text>
+      </svg>
+    ),
+  },
+  {
+    title: "Emoji Support",
+    description:
+      "Full emoji picker with categories and search. Add personality to your messages with complete Unicode emoji support.",
     icon: (
       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M15.182 15.182a4.5 4.5 0 01-6.364 0M21 12a9 9 0 11-18 0 9 9 0 0118 0zM9.75 9.75c0 .414-.168.75-.375.75S9 10.164 9 9.75 9.168 9 9.375 9s.375.336.375.75zm-.375 0h.008v.015h-.008V9.75zm5.625 0c0 .414-.168.75-.375.75s-.375-.336-.375-.75.168-.75.375-.75.375.336.375.75zm-.375 0h.008v.015h-.008V9.75z" />
@@ -85,24 +105,17 @@ const features = [
       </svg>
     ),
   },
+  {
+    title: "Desktop App",
+    description:
+      "Native desktop application built with Tauri. Fast, lightweight, and runs on macOS, Windows, and Linux.",
+    icon: (
+      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25" />
+      </svg>
+    ),
+  },
 ];
-
-const containerVariants = {
-  hidden: {},
-  visible: {
-    transition: { staggerChildren: 0.08 },
-  },
-};
-
-const cardVariants = {
-  hidden: { opacity: 0, y: 24, scale: 0.96 },
-  visible: {
-    opacity: 1,
-    y: 0,
-    scale: 1,
-    transition: { duration: 0.5, ease: "easeOut" as const },
-  },
-};
 
 export function Features() {
   return (
@@ -127,26 +140,23 @@ export function Features() {
           </p>
         </motion.div>
 
-        <motion.div
-          variants={containerVariants}
-          initial="hidden"
-          whileInView="visible"
-          viewport={{ once: true, margin: "-50px" }}
-          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5"
-        >
-          {features.map((feature) => (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+          {features.map((feature, index) => (
             <motion.div
               key={feature.title}
-              variants={cardVariants}
+              initial={{ opacity: 0, y: 24 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, margin: "-50px" }}
+              transition={{ duration: 0.5, delay: index * 0.05 }}
               whileHover={{ y: -4, transition: { duration: 0.2 } }}
-              className="group relative rounded-2xl border border-border/50 bg-surface p-6 hover:border-cyan/30 transition-colors duration-300"
+              className="group relative rounded-2xl border border-border/50 bg-surface p-5 hover:border-cyan/30 transition-colors duration-300"
             >
-              <div className="absolute inset-0 rounded-2xl bg-linear-to-b from-cyan/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-              <div className="relative">
-                <div className="w-12 h-12 rounded-xl bg-cyan/10 text-cyan flex items-center justify-center mb-4 group-hover:bg-cyan/20 transition-colors">
+              <div className="absolute inset-0 rounded-2xl bg-linear-to-b from-cyan/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+              <div className="relative h-full">
+                <div className="w-10 h-10 rounded-lg bg-cyan/10 text-cyan flex items-center justify-center mb-3 group-hover:bg-cyan/20 transition-colors">
                   {feature.icon}
                 </div>
-                <h3 className="text-lg font-semibold text-gray-100 mb-2">
+                <h3 className="text-base font-semibold text-gray-100 mb-1.5">
                   {feature.title}
                 </h3>
                 <p className="text-sm text-gray-500 leading-relaxed">
@@ -155,7 +165,7 @@ export function Features() {
               </div>
             </motion.div>
           ))}
-        </motion.div>
+        </div>
       </div>
     </section>
   );

@@ -4,7 +4,7 @@ import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { MockupApp } from "./MockupApp";
 
-const title = "Dead Drop";
+const title = "Ghostly";
 
 function PlatformDownloadButton() {
   const [platform, setPlatform] = useState<"mac" | "linux" | "other">("other");

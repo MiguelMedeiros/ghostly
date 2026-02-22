@@ -19,7 +19,7 @@ export function Download() {
             Get Started
           </span>
           <h2 className="text-4xl sm:text-5xl lg:text-6xl font-mono font-bold mb-6">
-            Get <span className="text-gradient-animated">Dead Drop</span>
+            Get <span className="text-gradient-animated">Ghostly</span>
           </h2>
           <p className="text-lg text-gray-400 max-w-lg mx-auto mb-12">
             Download the app and start chatting in seconds.

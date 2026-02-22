@@ -96,7 +96,7 @@ const steps = [
     number: "04",
     title: "Messages Expire",
     description:
-      'Messages are kept alive by periodic republishing. Stop republishing and they naturally expire from the DHT in ~5 hours. Use the "Burn" feature to let them vanish immediately.',
+      "Messages are kept alive by periodic republishing. Stop republishing (close the app or delete the chat) and they naturally expire from the DHT in approximately 5 hours.",
     visual: (
       <div className="font-mono text-xs space-y-2">
         <div className="flex items-center gap-2">
@@ -110,7 +110,7 @@ const steps = [
           <span className="text-gray-400">TTL countdown (~5h)</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-red-400">● Burn</span>
+          <span className="text-gray-500">● Expired</span>
           <span className="text-gray-600">→</span>
           <span className="text-gray-500 line-through">messages gone</span>
         </div>

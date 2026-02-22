@@ -7,7 +7,7 @@ export function setStorageProfile(profile: string): void {
 }
 
 function getPrefix(): string {
-  return _profile ? `deaddrop_${_profile}_` : "deaddrop_";
+  return _profile ? `ghostly_${_profile}_` : "ghostly_";
 }
 
 function getKey(sessionId: string): string {

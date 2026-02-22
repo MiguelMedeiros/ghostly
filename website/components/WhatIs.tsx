@@ -104,12 +104,12 @@ export function WhatIs() {
         >
           <h2 className="text-4xl sm:text-5xl font-mono font-bold mb-6">
             What is{" "}
-            <span className="text-gradient">Dead Drop</span>?
+            <span className="text-gradient">Ghostly</span>?
           </h2>
           <p className="text-lg text-gray-400 max-w-2xl mx-auto leading-relaxed">
             A chat app with no backend. Messages are encrypted on your device,
             published as signed DNS records to the Mainline DHT, and expire
-            naturally when you stop — like a real dead drop.
+            naturally when you stop — like a ghost fading away.
           </p>
         </motion.div>
 

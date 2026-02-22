@@ -23,9 +23,15 @@ export function Home() {
   return (
     <div className="flex-1 flex items-center justify-center bg-chat-bg">
       <div className="text-center space-y-4 animate-fade-in max-w-md px-6">
-        <div className="text-accent text-6xl mb-2">&#9670;</div>
+        <div className="text-accent mb-2">
+          <svg className="w-16 h-16 mx-auto" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2C7.582 2 4 5.582 4 10v8c0 .75.6 1 1 .6l2-1.6 2 1.6c.4.3.8.3 1.2 0L12 17l1.8 1.6c.4.3.8.3 1.2 0l2-1.6 2 1.6c.4.4 1 .15 1-.6v-8c0-4.418-3.582-8-8-8z"/>
+            <circle cx="9" cy="9" r="1.5" fill="#111b21"/>
+            <circle cx="15" cy="9" r="1.5" fill="#111b21"/>
+          </svg>
+        </div>
         <h2 className="text-text-primary text-2xl font-light">
-          Dead Drop
+          Ghostly
         </h2>
         <p className="text-text-muted text-sm leading-relaxed">
           Ephemeral encrypted messaging over the DHT.

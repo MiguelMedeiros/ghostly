@@ -15,7 +15,7 @@ export function Header({ onBurn, showBurn, confirmBurn, onCancelBurn }: HeaderPr
     <header className="border-b border-border px-4 py-3 flex items-center justify-between bg-surface-alt/80 backdrop-blur-sm">
       <Link to="/" className="flex items-center gap-2 no-underline">
         <span className="text-accent text-xl font-bold tracking-tight">
-          DEAD DROP
+          GHOSTLY
         </span>
         <span className="text-text-muted text-xs hidden sm:inline">
           ephemeral · encrypted · serverless

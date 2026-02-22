@@ -13,12 +13,12 @@ const jetbrains = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Dead Drop — Encrypted Ephemeral Chat over the DHT",
+  title: "Ghostly — Encrypted Ephemeral Chat over the DHT",
   description:
     "Serverless, end-to-end encrypted, ephemeral messaging. No accounts, no servers. Messages travel through 10M+ DHT nodes and vanish when you stop.",
   icons: { icon: "/favicon.svg" },
   openGraph: {
-    title: "Dead Drop — Encrypted Ephemeral Chat over the DHT",
+    title: "Ghostly — Encrypted Ephemeral Chat over the DHT",
     description:
       "Serverless, end-to-end encrypted, ephemeral messaging through the Mainline DHT.",
     type: "website",

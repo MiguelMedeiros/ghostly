@@ -1299,6 +1299,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghostly"
+version = "0.0.1"
+dependencies = [
+ "base64 0.22.1",
+ "crypto_secretbox",
+ "pkarr",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "simple-dns",
+ "tauri",
+ "tauri-build",
+]
+
+[[package]]
 name = "gio"
 version = "0.18.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2753,21 +2768,6 @@ dependencies = [
  "tracing",
  "url",
  "wasm-bindgen-futures",
-]
-
-[[package]]
-name = "pkarr-dead-drop"
-version = "0.0.1"
-dependencies = [
- "base64 0.22.1",
- "crypto_secretbox",
- "pkarr",
- "rand 0.8.5",
- "serde",
- "serde_json",
- "simple-dns",
- "tauri",
- "tauri-build",
 ]
 
 [[package]]

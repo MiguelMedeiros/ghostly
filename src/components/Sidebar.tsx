@@ -286,7 +286,7 @@ export function Sidebar() {
       {/* Header */}
       <div className="h-14 flex items-center justify-between px-4 bg-panel-header">
         <span className="text-accent font-bold text-base tracking-tight">
-          DEAD DROP
+          GHOSTLY
         </span>
         <button
           onClick={() => {
@@ -429,7 +429,13 @@ export function Sidebar() {
       <div className="flex-1 overflow-y-auto">
         {filtered.length === 0 && sessions.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full px-8 text-center">
-            <div className="text-text-muted text-4xl mb-4">&#9670;</div>
+            <div className="text-text-muted mb-4">
+              <svg className="w-12 h-12 mx-auto" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2C7.582 2 4 5.582 4 10v8c0 .75.6 1 1 .6l2-1.6 2 1.6c.4.3.8.3 1.2 0L12 17l1.8 1.6c.4.3.8.3 1.2 0l2-1.6 2 1.6c.4.4 1 .15 1-.6v-8c0-4.418-3.582-8-8-8z"/>
+                <circle cx="9" cy="9" r="1.5" fill="#111b21"/>
+                <circle cx="15" cy="9" r="1.5" fill="#111b21"/>
+              </svg>
+            </div>
             <p className="text-text-secondary text-sm mb-1">No chats yet</p>
             <p className="text-text-muted text-xs">
               Create a drop or join with an invite link

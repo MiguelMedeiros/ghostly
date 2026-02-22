@@ -26,10 +26,14 @@ export function Navbar() {
       <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
         <a href="#" className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-[#0f172a] border border-border/50 flex items-center justify-center">
-            <span className="font-mono text-xs font-bold text-cyan">DD</span>
+            <svg className="w-5 h-5 text-cyan" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C7.582 2 4 5.582 4 10v8c0 .75.6 1 1 .6l2-1.6 2 1.6c.4.3.8.3 1.2 0L12 17l1.8 1.6c.4.3.8.3 1.2 0l2-1.6 2 1.6c.4.4 1 .15 1-.6v-8c0-4.418-3.582-8-8-8z"/>
+              <circle cx="9" cy="9" r="1.5" fill="#0f172a"/>
+              <circle cx="15" cy="9" r="1.5" fill="#0f172a"/>
+            </svg>
           </div>
           <span className="font-mono font-bold text-sm text-gradient hidden sm:inline">
-            Dead Drop
+            Ghostly
           </span>
         </a>
 

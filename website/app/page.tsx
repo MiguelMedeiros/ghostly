@@ -1,9 +1,10 @@
 import { Hero } from "@/components/Hero";
 import { WhatIs } from "@/components/WhatIs";
+import { ELI5 } from "@/components/ELI5";
 import { HowItWorks } from "@/components/HowItWorks";
 import { Features } from "@/components/Features";
 import { ProtocolDeepDive } from "@/components/ProtocolDeepDive";
-import { AppPreview } from "@/components/AppPreview";
+import { FAQ } from "@/components/FAQ";
 import { Download } from "@/components/Download";
 import { Footer } from "@/components/Footer";
 import { Navbar } from "@/components/Navbar";
@@ -15,10 +16,11 @@ export default function Home() {
       <main>
         <Hero />
         <WhatIs />
+        <ELI5 />
         <HowItWorks />
         <Features />
         <ProtocolDeepDive />
-        <AppPreview />
+        <FAQ />
         <Download />
       </main>
       <Footer />

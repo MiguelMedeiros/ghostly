@@ -21,7 +21,7 @@ async function captureScreenshots() {
   
   const sections = [
     { name: '01-hero-section', scrollY: 0, description: 'Hero section (top of page)' },
-    { name: '02-what-is-dead-drop', scrollY: 800, description: 'What is Dead Drop? section with stat cards' },
+    { name: '02-what-is-ghostly', scrollY: 800, description: 'What is Ghostly? section with stat cards' },
     { name: '03-how-it-works', scrollY: 1600, description: 'How It Works protocol steps' },
     { name: '04-features-grid', scrollY: 2400, description: 'Features grid' },
     { name: '05-protocol-deep-dive', scrollY: 3200, description: 'Protocol Deep Dive' },
