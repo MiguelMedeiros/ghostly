@@ -24,7 +24,7 @@ function detectContentType(text: string): ContentType {
 
 function isOnlyEmojis(text: string): boolean {
   const emojiPattern =
-    /^[\p{Emoji_Presentation}\p{Extended_Pictographic}\u200d\uFE0F\s]+$/u;
+    /^(?:[\p{Emoji_Presentation}\p{Extended_Pictographic}]|\u200d|\uFE0F|\s)+$/u;
   return emojiPattern.test(text.trim()) && text.trim().length <= 12;
 }
 

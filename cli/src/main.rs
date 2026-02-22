@@ -1,7 +1,5 @@
 use clap::{Parser, Subcommand};
-use ghostly::{
-    generate_invite, new_identity, parse_invite, ErrorOutput, GhostClient, WatchEvent,
-};
+use ghostly::{generate_invite, new_identity, parse_invite, ErrorOutput, GhostClient, WatchEvent};
 use std::io::{self, Write};
 
 #[derive(Parser)]
@@ -147,9 +145,8 @@ async fn main() {
 
         Commands::Invite { action } => match action {
             InviteAction::New { seed, key } => {
-                let shared_key = key.unwrap_or_else(|| {
-                    ghostly::to_base64_url(&ghostly::generate_key())
-                });
+                let shared_key =
+                    key.unwrap_or_else(|| ghostly::to_base64_url(&ghostly::generate_key()));
                 match generate_invite(&seed, &shared_key) {
                     Ok(invite) => output_json(&invite),
                     Err(e) => {
@@ -267,7 +264,9 @@ async fn main() {
                         }
 
                         if ack && !new_messages.is_empty() {
-                            let pkarr_client = pkarr::Client::builder().build().expect("Failed to create client");
+                            let pkarr_client = pkarr::Client::builder()
+                                .build()
+                                .expect("Failed to create client");
                             let _ = ghostly::publish_messages(
                                 &pkarr_client,
                                 &keypair,

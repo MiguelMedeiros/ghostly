@@ -59,7 +59,9 @@ pub async fn publish_messages(
     let mut builder = SignedPacket::builder();
 
     builder = builder.txt(
-        "_msgs".try_into().map_err(|e| format!("Name error: {}", e))?,
+        "_msgs"
+            .try_into()
+            .map_err(|e| format!("Name error: {}", e))?,
         payload
             .as_str()
             .try_into()
@@ -83,7 +85,9 @@ pub async fn publish_messages(
     if ack_timestamp > 0 {
         let ack_str = ack_timestamp.to_string();
         builder = builder.txt(
-            "_ack".try_into().map_err(|e| format!("Name error: {}", e))?,
+            "_ack"
+                .try_into()
+                .map_err(|e| format!("Name error: {}", e))?,
             ack_str
                 .as_str()
                 .try_into()
@@ -168,9 +172,8 @@ pub async fn resolve_messages(
                 }
                 "_msg" => {
                     encrypted_payload_length = value.len();
-                    match crypto::decrypt(&value, enc_key) {
-                        Ok(decrypted) => legacy_msg = decrypted,
-                        Err(_) => {}
+                    if let Ok(decrypted) = crypto::decrypt(&value, enc_key) {
+                        legacy_msg = decrypted;
                     }
                 }
                 "_ts" => {
@@ -195,23 +198,19 @@ pub async fn resolve_messages(
     }
 
     if !msgs_payload.is_empty() {
-        match crypto::decrypt(&msgs_payload, enc_key) {
-            Ok(json) => match serde_json::from_str::<Vec<CompactMessage>>(&json) {
-                Ok(batch) => {
-                    for entry in &batch {
-                        messages.push(PkarrMessage {
-                            text: entry.m.clone(),
-                            timestamp: entry.t,
-                            nick: nick.clone(),
-                        });
-                    }
-                    if latest_timestamp == 0 && !messages.is_empty() {
-                        latest_timestamp = messages.iter().map(|m| m.timestamp).max().unwrap_or(0);
-                    }
+        if let Ok(json) = crypto::decrypt(&msgs_payload, enc_key) {
+            if let Ok(batch) = serde_json::from_str::<Vec<CompactMessage>>(&json) {
+                for entry in &batch {
+                    messages.push(PkarrMessage {
+                        text: entry.m.clone(),
+                        timestamp: entry.t,
+                        nick: nick.clone(),
+                    });
                 }
-                Err(_) => {}
-            },
-            Err(_) => {}
+                if latest_timestamp == 0 && !messages.is_empty() {
+                    latest_timestamp = messages.iter().map(|m| m.timestamp).max().unwrap_or(0);
+                }
+            }
         }
     } else if !legacy_msg.is_empty() && legacy_ts > 0 {
         messages.push(PkarrMessage {
@@ -253,7 +252,10 @@ pub fn create_keypair() -> (Keypair, String, String) {
 pub fn keypair_from_seed(seed_b64: &str) -> Result<Keypair, String> {
     let seed_bytes = crypto::from_base64_url(seed_b64)?;
     if seed_bytes.len() != 32 {
-        return Err(format!("Invalid seed length: expected 32 bytes, got {}", seed_bytes.len()));
+        return Err(format!(
+            "Invalid seed length: expected 32 bytes, got {}",
+            seed_bytes.len()
+        ));
     }
     let mut arr = [0u8; 32];
     arr.copy_from_slice(&seed_bytes);

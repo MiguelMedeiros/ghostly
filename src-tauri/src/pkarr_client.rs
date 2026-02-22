@@ -65,7 +65,9 @@ pub async fn publish_messages(
     let mut builder = SignedPacket::builder();
 
     builder = builder.txt(
-        "_msgs".try_into().map_err(|e| format!("Name error: {}", e))?,
+        "_msgs"
+            .try_into()
+            .map_err(|e| format!("Name error: {}", e))?,
         payload
             .as_str()
             .try_into()
@@ -89,7 +91,9 @@ pub async fn publish_messages(
     if ack_timestamp > 0 {
         let ack_str = ack_timestamp.to_string();
         builder = builder.txt(
-            "_ack".try_into().map_err(|e| format!("Name error: {}", e))?,
+            "_ack"
+                .try_into()
+                .map_err(|e| format!("Name error: {}", e))?,
             ack_str
                 .as_str()
                 .try_into()
@@ -119,7 +123,7 @@ pub async fn publish_messages(
             signal.len(),
             encrypted_signal.len()
         );
-        
+
         builder = builder.txt(
             "_call"
                 .try_into()
@@ -145,9 +149,12 @@ pub async fn publish_messages(
         packet_size,
         &pub_key_z32[..12.min(pub_key_z32.len())]
     );
-    
+
     if packet_size > 1000 {
-        eprintln!("[pkarr] WARNING: packet size {} exceeds recommended limit!", packet_size);
+        eprintln!(
+            "[pkarr] WARNING: packet size {} exceeds recommended limit!",
+            packet_size
+        );
     }
 
     client

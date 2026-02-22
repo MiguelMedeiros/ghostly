@@ -4,7 +4,7 @@ pub mod types;
 
 pub use crypto::{from_base64_url, generate_key, to_base64_url};
 pub use pkarr::{
-    create_keypair, keypair_from_seed, publish_messages, pubkey_from_seed, resolve_messages,
+    create_keypair, keypair_from_seed, pubkey_from_seed, publish_messages, resolve_messages,
 };
 pub use types::*;
 
@@ -17,7 +17,9 @@ pub struct GhostClient {
 impl GhostClient {
     pub fn new() -> Self {
         Self {
-            client: Client::builder().build().expect("Failed to create pkarr client"),
+            client: Client::builder()
+                .build()
+                .expect("Failed to create pkarr client"),
         }
     }
 
@@ -31,7 +33,7 @@ impl GhostClient {
     ) -> Result<SendOutput, String> {
         let keypair = keypair_from_seed(seed)?;
         let key_bytes = from_base64_url(shared_key)?;
-        
+
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|e| format!("Time error: {}", e))?
@@ -45,7 +47,8 @@ impl GhostClient {
         let peer_batch = resolve_messages(&self.client, peer_pubkey, &key_bytes).await?;
         let ack = peer_batch.map(|b| b.latest_timestamp).unwrap_or(0);
 
-        let kept = publish_messages(&self.client, &keypair, &messages, &key_bytes, ack, nick).await?;
+        let kept =
+            publish_messages(&self.client, &keypair, &messages, &key_bytes, ack, nick).await?;
 
         Ok(SendOutput {
             ok: true,
@@ -56,7 +59,7 @@ impl GhostClient {
 
     pub async fn recv(&self, peer_pubkey: &str, shared_key: &str) -> Result<RecvOutput, String> {
         let key_bytes = from_base64_url(shared_key)?;
-        
+
         let batch = resolve_messages(&self.client, peer_pubkey, &key_bytes).await?;
 
         match batch {
