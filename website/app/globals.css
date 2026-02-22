@@ -1,0 +1,114 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-background: #060a10;
+  --color-foreground: #e8edf5;
+  --color-cyan: #22d3ee;
+  --color-cyan-dim: #0e7490;
+  --color-green: #00a884;
+  --color-green-dim: #005c4b;
+  --color-surface: #0d1117;
+  --color-surface-light: #161b22;
+  --color-border: #1e293b;
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-jetbrains);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #1e293b transparent;
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+.font-mono {
+  font-family: var(--font-mono), ui-monospace, monospace;
+}
+
+@keyframes grid-fade {
+  0%,
+  100% {
+    opacity: 0.03;
+  }
+  50% {
+    opacity: 0.06;
+  }
+}
+
+.bg-grid {
+  background-image: linear-gradient(
+      rgba(34, 211, 238, 0.03) 1px,
+      transparent 1px
+    ),
+    linear-gradient(90deg, rgba(34, 211, 238, 0.03) 1px, transparent 1px);
+  background-size: 60px 60px;
+  animation: grid-fade 8s ease-in-out infinite;
+}
+
+.glow-cyan {
+  box-shadow: 0 0 60px rgba(34, 211, 238, 0.15),
+    0 0 120px rgba(34, 211, 238, 0.05);
+}
+
+.glow-green {
+  box-shadow: 0 0 60px rgba(0, 168, 132, 0.15),
+    0 0 120px rgba(0, 168, 132, 0.05);
+}
+
+.text-gradient {
+  background: linear-gradient(135deg, #22d3ee 0%, #00a884 50%, #22d3ee 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+@keyframes gradient-shift {
+  0% {
+    background-position: 0% center;
+  }
+  100% {
+    background-position: 200% center;
+  }
+}
+
+.text-gradient-animated {
+  background: linear-gradient(135deg, #22d3ee 0%, #00a884 50%, #22d3ee 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: gradient-shift 4s linear infinite;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-12px);
+  }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}

@@ -1,17 +1,26 @@
-import { useEffect, useRef } from "react";
-import { listSessions, loadSession, addMessage } from "../lib/storage";
+import { useEffect, useRef, useState } from "react";
+import { listSessions, addMessage } from "../lib/storage";
 import { resolveMessages } from "../lib/pkarr";
 import type { ChatMessage } from "../lib/types";
 
-const BG_POLL_INTERVAL = 15_000;
+const BG_POLL_INTERVAL = 8_000;
 
-export function useBackgroundPoller(activeSessionId: string | null) {
+export interface BackgroundPollerState {
+  initialSyncComplete: boolean;
+}
+
+export function useBackgroundPoller(
+  activeSessionId: string | null,
+): BackgroundPollerState {
   const activeIdRef = useRef(activeSessionId);
   activeIdRef.current = activeSessionId;
+
+  const [initialSyncComplete, setInitialSyncComplete] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let isFirstRound = true;
 
     const lastSeenMap: Record<string, number> = {};
 
@@ -76,16 +85,23 @@ export function useBackgroundPoller(activeSessionId: string | null) {
         }
       }
 
+      if (isFirstRound) {
+        isFirstRound = false;
+        setInitialSyncComplete(true);
+      }
+
       if (!cancelled) {
         timer = setTimeout(pollAll, BG_POLL_INTERVAL);
       }
     };
 
-    timer = setTimeout(pollAll, 3_000);
+    timer = setTimeout(pollAll, 1_500);
 
     return () => {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
   }, []);
+
+  return { initialSyncComplete };
 }

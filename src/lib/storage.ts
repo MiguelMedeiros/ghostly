@@ -108,6 +108,29 @@ export function getUnreadCount(session: ChatSession): number {
   return Math.max(0, session.messages.length - lastRead);
 }
 
+export function updateSessionLabel(sessionId: string, label: string): void {
+  const session = loadSession(sessionId);
+  if (!session) return;
+  session.label = label || undefined;
+  saveSession(session);
+}
+
+export function saveInviteCode(sessionId: string, code: string): void {
+  try {
+    localStorage.setItem(`${getPrefix()}invite_${sessionId}`, code);
+  } catch {
+    // storage full or unavailable
+  }
+}
+
+export function getInviteCode(sessionId: string): string | null {
+  try {
+    return localStorage.getItem(`${getPrefix()}invite_${sessionId}`);
+  } catch {
+    return null;
+  }
+}
+
 export function generateSessionId(
   mySeedB64: string,
   peerPubKeyB64: string,

@@ -9,9 +9,11 @@ use commands::AppState;
 use pkarr::Client;
 
 fn main() {
-    let pkarr_client = Client::builder()
-        .build()
-        .expect("Failed to create pkarr client");
+    let mut builder = Client::builder();
+
+    builder.cache_size(50);
+
+    let pkarr_client = builder.build().expect("Failed to create pkarr client");
 
     tauri::Builder::default()
         .manage(AppState { pkarr_client })

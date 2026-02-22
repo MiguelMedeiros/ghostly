@@ -108,7 +108,7 @@ Since each key only holds one DNS packet at a time (latest overwrites previous),
 - **TailwindCSS v4** -- utility-first styling, dark mode support
 - `**@synonymdev/pkarr`** (`0.1.4-rc.2` on npm) -- WASM bindings for Pkarr (Keypair, SignedPacket builder, Client with relay support)
 - `**tweetnacl`** + `**tweetnacl-util`** -- NaCl secretbox (XSalsa20-Poly1305) for message encryption
-- `**qrcode.react`** -- QR code generation for sharing invite links
+- `**qrcode.react**` -- QR code generation for sharing invite links
 - **React Router** -- hash-based routing for chat URLs
 - **No backend** -- 100% client-side, communicates only with public Pkarr relays (`relay.pkarr.org`, `pkarr.pubky.org`)
 

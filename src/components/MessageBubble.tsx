@@ -127,7 +127,11 @@ export function MessageBubble({ message, peerAck = 0 }: MessageBubbleProps) {
       onDoubleClick={() => message.meta && setShowTech((v) => !v)}
     >
       <div
-        className={`relative max-w-[85%] min-w-[80px] rounded-[7.5px] ${
+        className={`relative max-w-[85%] min-w-[80px] ${
+          isMe
+            ? "rounded-tl-[7.5px] rounded-bl-[7.5px] rounded-br-[7.5px]"
+            : "rounded-tr-[7.5px] rounded-bl-[7.5px] rounded-br-[7.5px]"
+        } ${
           contentType === "image"
             ? "p-[3px] pb-[3px]"
             : "px-[9px] pt-[6px] pb-[8px]"

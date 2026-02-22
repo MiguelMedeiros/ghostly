@@ -1,11 +1,12 @@
 import { useState, useCallback } from "react";
 import { createKeypair, getPublicKeyFromSeed } from "../lib/pkarr";
 import { generateEncryptionKey } from "../lib/crypto";
-import { buildCreatorUrl, buildInviteUrl } from "../lib/url";
+import { buildCreatorUrl, buildInviteCode, buildInviteUrl } from "../lib/url";
 
 interface DropResult {
   creatorUrl: string;
   inviteUrl: string;
+  inviteCode: string;
   seedA: string;
   seedB: string;
   pubKeyA: string;
@@ -30,6 +31,11 @@ export function usePkarr() {
         keypairB.pubKeyZ32,
         encKey,
       );
+      const inviteCode = buildInviteCode(
+        keypairB.seedB64,
+        keypairA.pubKeyZ32,
+        encKey,
+      );
       const inviteUrl = buildInviteUrl(
         origin,
         keypairB.seedB64,
@@ -40,6 +46,7 @@ export function usePkarr() {
       return {
         creatorUrl,
         inviteUrl,
+        inviteCode,
         seedA: keypairA.seedB64,
         seedB: keypairB.seedB64,
         pubKeyA: keypairA.pubKeyZ32,

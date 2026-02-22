@@ -24,6 +24,14 @@ export function buildCreatorUrl(
   return `${origin}/#/chat/${seedA}/${pubKeyB}/${encKey}`;
 }
 
+export function buildInviteCode(
+  seedB: string,
+  pubKeyA: string,
+  encKey: string,
+): string {
+  return `${seedB}/${pubKeyA}/${encKey}`;
+}
+
 export function buildInviteUrl(
   origin: string,
   seedB: string,

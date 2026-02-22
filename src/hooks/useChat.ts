@@ -18,8 +18,8 @@ import {
   generateSessionId,
 } from "../lib/storage";
 
-const POLL_INTERVAL_ACTIVE = 5_000;
-const POLL_INTERVAL_IDLE = 15_000;
+const POLL_INTERVAL_ACTIVE = 2_000;
+const POLL_INTERVAL_IDLE = 8_000;
 const REPUBLISH_INTERVAL = 30 * 60 * 1000;
 const IDLE_THRESHOLD = 60_000;
 const MESSAGE_TTL = 300;
@@ -51,6 +51,7 @@ export function useChat(params: ChatParams | null) {
   const myPubKeyRef = useRef<string>("");
   const sessionCreatedAtRef = useRef<number>(Date.now());
   const pollFnRef = useRef<(() => Promise<void>) | null>(null);
+  const isPollingRef = useRef(false);
 
   useEffect(() => {
     if (!params) return;
@@ -102,6 +103,8 @@ export function useChat(params: ChatParams | null) {
           messages: [],
           createdAt: now,
         });
+        setMessages([]);
+        lastSeenTimestampRef.current = 0;
         sentBufferRef.current = [];
         myAckRef.current = 0;
       }
@@ -132,6 +135,8 @@ export function useChat(params: ChatParams | null) {
       const poll = async () => {
         if (burnedRef.current || effectIdRef.current !== currentEffectId)
           return;
+        if (isPollingRef.current) return;
+        isPollingRef.current = true;
 
         const n = ++pollCountRef.current;
         try {
@@ -207,6 +212,7 @@ export function useChat(params: ChatParams | null) {
           console.error(`[chat] poll #${n} error:`, err);
           setStatus("error");
         } finally {
+          isPollingRef.current = false;
           if (
             !burnedRef.current &&
             effectIdRef.current === currentEffectId
@@ -246,6 +252,7 @@ export function useChat(params: ChatParams | null) {
     return () => {
       cancelled = true;
       pollFnRef.current = null;
+      isPollingRef.current = false;
       if (pollTimerRef.current) {
         clearTimeout(pollTimerRef.current);
         pollTimerRef.current = null;
@@ -357,6 +364,16 @@ export function useChat(params: ChatParams | null) {
     nickRef.current = nick || undefined;
   }, []);
 
+  const forceRefresh = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    if (pollFnRef.current) {
+      pollFnRef.current();
+    }
+  }, []);
+
   const techInfo: ChatTechInfo = {
     sessionId: sessionIdRef.current,
     myPubKey: myPubKeyRef.current,
@@ -391,5 +408,6 @@ export function useChat(params: ChatParams | null) {
     isBurned,
     techInfo,
     peerAck,
+    forceRefresh,
   };
 }

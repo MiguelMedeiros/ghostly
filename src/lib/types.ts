@@ -23,6 +23,7 @@ export interface ChatSession {
   createdAt: number;
   lastSyncAt?: number;
   nick?: string;
+  label?: string;
 }
 
 export interface ChatParams {

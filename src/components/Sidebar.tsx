@@ -8,6 +8,8 @@ import {
   getUnreadCount,
   markSessionAsRead,
   generateSessionId,
+  saveInviteCode,
+  getInviteCode,
 } from "../lib/storage";
 import type { ChatSession } from "../lib/types";
 
@@ -33,49 +35,51 @@ function playNotificationSound() {
   }
 }
 
+const MIN_WIDTH = 280;
+const MAX_WIDTH = 600;
+const DEFAULT_WIDTH = 420;
+
 export function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const { createDrop } = usePkarr();
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [search, setSearch] = useState("");
-  const [showJoin, setShowJoin] = useState(false);
+  const [showNewChat, setShowNewChat] = useState(false);
   const [inviteInput, setInviteInput] = useState("");
   const [joinError, setJoinError] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const [showShare, setShowShare] = useState<{
-    inviteUrl: string;
-    creatorUrl: string;
-  } | null>(null);
   const prevTotalMsgsRef = useRef<Record<string, number>>({});
+  const lastNotifRef = useRef<number>(0);
+  const activeSessionIdRef = useRef<string | null>(null);
+  const initialSyncCompleteRef = useRef(false);
 
-  const refreshSessions = useCallback(() => {
-    const updated = listSessions();
+  const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_WIDTH);
+  const isResizingRef = useRef(false);
 
-    const prev = prevTotalMsgsRef.current;
-    let hasNewPeerMsg = false;
-    for (const s of updated) {
-      const peerMsgCount = s.messages.filter((m) => m.sender === "peer").length;
-      const prevCount = prev[s.id] ?? peerMsgCount;
-      if (peerMsgCount > prevCount) {
-        hasNewPeerMsg = true;
-      }
-      prev[s.id] = peerMsgCount;
-    }
-    prevTotalMsgsRef.current = prev;
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isResizingRef.current = true;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
 
-    if (hasNewPeerMsg) {
-      playNotificationSound();
-    }
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!isResizingRef.current) return;
+      const newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, ev.clientX));
+      setSidebarWidth(newWidth);
+    };
 
-    setSessions(updated);
+    const onMouseUp = () => {
+      isResizingRef.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
   }, []);
-
-  useEffect(() => {
-    refreshSessions();
-    const interval = setInterval(refreshSessions, 5000);
-    return () => clearInterval(interval);
-  }, [refreshSessions]);
 
   const currentChatPath = location.pathname.startsWith("/chat")
     ? location.pathname
@@ -91,7 +95,59 @@ export function Sidebar() {
     return null;
   })();
 
-  useBackgroundPoller(activeSessionId);
+  activeSessionIdRef.current = activeSessionId;
+
+  const { initialSyncComplete } =
+    useBackgroundPoller(activeSessionId);
+
+  useEffect(() => {
+    if (initialSyncComplete && !initialSyncCompleteRef.current) {
+      const updated = listSessions();
+      const baseline: Record<string, number> = {};
+      for (const s of updated) {
+        baseline[s.id] = s.messages.filter(
+          (m) => m.sender === "peer",
+        ).length;
+      }
+      prevTotalMsgsRef.current = baseline;
+      initialSyncCompleteRef.current = true;
+    }
+  }, [initialSyncComplete]);
+
+  const refreshSessions = useCallback(() => {
+    const updated = listSessions();
+
+    const prev = prevTotalMsgsRef.current;
+    let hasNewPeerMsg = false;
+    const currentActive = activeSessionIdRef.current;
+    for (const s of updated) {
+      const peerMsgCount = s.messages.filter((m) => m.sender === "peer").length;
+      const prevCount = prev[s.id] ?? peerMsgCount;
+      if (peerMsgCount > prevCount && s.id !== currentActive) {
+        hasNewPeerMsg = true;
+      }
+      prev[s.id] = peerMsgCount;
+    }
+    prevTotalMsgsRef.current = prev;
+
+    const now = Date.now();
+    if (
+      hasNewPeerMsg &&
+      now - lastNotifRef.current > 3_000 &&
+      initialSyncCompleteRef.current
+    ) {
+      lastNotifRef.current = now;
+      playNotificationSound();
+    }
+
+    setSessions(updated);
+  }, []);
+
+  useEffect(() => {
+    refreshSessions();
+    const interval = setInterval(refreshSessions, 3000);
+    return () => clearInterval(interval);
+  }, [refreshSessions]);
 
   useEffect(() => {
     if (activeSessionId) markSessionAsRead(activeSessionId);
@@ -99,49 +155,50 @@ export function Sidebar() {
 
   const handleCreate = async () => {
     const drop = await createDrop();
-    setShowShare({ inviteUrl: drop.inviteUrl, creatorUrl: drop.creatorUrl });
-  };
-
-  const handleEnterChat = () => {
-    if (!showShare) return;
-    try {
-      const url = new URL(showShare.creatorUrl);
-      const chatPath = url.hash.replace(/^#/, "");
-      setShowShare(null);
-      navigate(chatPath);
-      setTimeout(refreshSessions, 500);
-    } catch {
-      navigate("/");
-    }
+    const sessionId = generateSessionId(drop.seedA, drop.pubKeyB);
+    saveInviteCode(sessionId, drop.inviteCode);
+    setShowNewChat(false);
+    navigate(`/chat/${drop.seedA}/${drop.pubKeyB}/${drop.encKey}`);
+    setTimeout(refreshSessions, 500);
   };
 
   const handleJoin = () => {
     setJoinError("");
     const input = inviteInput.trim();
     if (!input) return;
+
+    let chatPath: string | null = null;
+
     try {
       const url = new URL(input);
       const hash = url.hash;
-      if (!hash || !hash.includes("/chat/")) {
-        setJoinError("Invalid link");
-        return;
+      if (hash && hash.includes("/chat/")) {
+        chatPath = hash.replace(/^#/, "");
       }
-      const chatPath = hash.replace(/^#/, "");
+    } catch {
+      // not a valid URL — try other formats
+    }
+
+    if (!chatPath && input.includes("/chat/")) {
+      const idx = input.indexOf("/chat/");
+      chatPath = input.slice(idx);
+    }
+
+    if (!chatPath) {
+      const cleaned = input.replace(/^\/+/, "").replace(/\/+$/, "");
+      const segments = cleaned.split("/");
+      if (segments.length === 3 && segments.every((s) => s.length > 0)) {
+        chatPath = `/chat/${cleaned}`;
+      }
+    }
+
+    if (chatPath) {
       setInviteInput("");
-      setShowJoin(false);
+      setShowNewChat(false);
       navigate(chatPath);
       setTimeout(refreshSessions, 500);
-    } catch {
-      if (input.includes("/chat/")) {
-        const idx = input.indexOf("/chat/");
-        const chatPath = input.slice(idx);
-        setInviteInput("");
-        setShowJoin(false);
-        navigate(chatPath);
-        setTimeout(refreshSessions, 500);
-      } else {
-        setJoinError("Invalid link format");
-      }
+    } else {
+      setJoinError("Invalid invite code");
     }
   };
 
@@ -152,6 +209,9 @@ export function Sidebar() {
       deleteSession(sessionId);
       setConfirmDeleteId(null);
       refreshSessions();
+      if (activeSessionId === sessionId) {
+        navigate("/");
+      }
     } else {
       setConfirmDeleteId(sessionId);
     }
@@ -182,155 +242,103 @@ export function Sidebar() {
     return s.messages.some((m) => m.text.toLowerCase().includes(q));
   });
 
-  const [copied, setCopied] = useState(false);
-  const handleCopy = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
-    }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
   return (
-    <div className="w-[420px] min-w-[320px] max-w-[420px] flex flex-col border-r border-border bg-sidebar-bg">
+    <div
+      className="relative flex flex-col border-r border-border bg-sidebar-bg shrink-0"
+      style={{ width: sidebarWidth, minWidth: MIN_WIDTH, maxWidth: MAX_WIDTH }}
+    >
       {/* Header */}
       <div className="h-14 flex items-center justify-between px-4 bg-panel-header">
         <span className="text-accent font-bold text-base tracking-tight">
           DEAD DROP
         </span>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => {
-              setShowJoin(!showJoin);
-              setShowShare(null);
-            }}
-            className="p-2 text-text-secondary hover:text-text-primary rounded-full hover:bg-surface-hover transition-colors cursor-pointer"
-            title="Join with invite link"
+        <button
+          onClick={() => {
+            setShowNewChat(!showNewChat);
+            setJoinError("");
+            setInviteInput("");
+          }}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-text-secondary hover:text-text-primary rounded-lg hover:bg-surface-hover transition-colors cursor-pointer"
+          title="New chat"
+        >
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
           >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-            </svg>
-          </button>
-          <button
-            onClick={handleCreate}
-            className="p-2 text-text-secondary hover:text-text-primary rounded-full hover:bg-surface-hover transition-colors cursor-pointer"
-            title="Create new drop"
-          >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-              <line x1="12" y1="8" x2="12" y2="14" />
-              <line x1="9" y1="11" x2="15" y2="11" />
-            </svg>
-          </button>
-        </div>
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            <line x1="12" y1="8" x2="12" y2="14" />
+            <line x1="9" y1="11" x2="15" y2="11" />
+          </svg>
+          <span className="text-xs font-medium">New</span>
+        </button>
       </div>
 
-      {/* Share Modal */}
-      {showShare && (
+      {/* New Chat Panel */}
+      {showNewChat && (
         <div className="border-b border-border bg-surface-alt p-4 space-y-3 animate-fade-in">
           <div className="flex items-center justify-between">
-            <span className="text-accent text-xs font-bold uppercase tracking-wider">
-              New Drop Created
-            </span>
-            <button
-              onClick={() => setShowShare(null)}
-              className="text-text-muted hover:text-text-primary transition-colors cursor-pointer text-lg leading-none"
-            >
-              &times;
-            </button>
-          </div>
-          <p className="text-text-secondary text-xs">
-            Share the invite link with your contact:
-          </p>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              readOnly
-              value={showShare.inviteUrl}
-              className="flex-1 bg-input-bg border-none rounded-lg px-3 py-2 text-xs text-text-muted truncate font-mono"
-            />
-            <button
-              onClick={() => handleCopy(showShare.inviteUrl)}
-              className="px-3 py-2 bg-accent text-[#111b21] rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer shrink-0"
-            >
-              {copied ? "Copied!" : "Copy"}
-            </button>
-          </div>
-          <button
-            onClick={handleEnterChat}
-            className="w-full py-2.5 bg-accent text-[#111b21] rounded-lg font-bold text-xs tracking-wider uppercase hover:bg-accent-hover transition-colors cursor-pointer"
-          >
-            Enter Chat
-          </button>
-        </div>
-      )}
-
-      {/* Join Input */}
-      {showJoin && !showShare && (
-        <div className="border-b border-border bg-surface-alt p-4 space-y-2 animate-fade-in">
-          <div className="flex items-center justify-between mb-1">
             <span className="text-text-secondary text-xs font-bold uppercase tracking-wider">
-              Join with invite link
+              New Chat
             </span>
             <button
               onClick={() => {
-                setShowJoin(false);
+                setShowNewChat(false);
                 setJoinError("");
+                setInviteInput("");
               }}
               className="text-text-muted hover:text-text-primary transition-colors cursor-pointer text-lg leading-none"
             >
               &times;
             </button>
           </div>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={inviteInput}
-              onChange={(e) => {
-                setInviteInput(e.target.value);
-                setJoinError("");
-              }}
-              onKeyDown={(e) => e.key === "Enter" && handleJoin()}
-              placeholder="Paste invite link..."
-              className="flex-1 bg-input-bg border-none rounded-lg px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none font-mono"
-            />
-            <button
-              onClick={handleJoin}
-              disabled={!inviteInput.trim()}
-              className="px-4 py-2 bg-accent text-[#111b21] rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
-            >
-              Join
-            </button>
+
+          <div className="space-y-2">
+            <p className="text-text-muted text-xs">
+              Paste an invite code to join an existing chat:
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={inviteInput}
+                onChange={(e) => {
+                  setInviteInput(e.target.value);
+                  setJoinError("");
+                }}
+                onKeyDown={(e) => e.key === "Enter" && handleJoin()}
+                placeholder="Paste invite code..."
+                className="flex-1 bg-input-bg border-none rounded-lg px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none font-mono"
+              />
+              <button
+                onClick={handleJoin}
+                disabled={!inviteInput.trim()}
+                className="px-4 py-2 bg-accent text-[#111b21] rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+              >
+                Join
+              </button>
+            </div>
+            {joinError && (
+              <p className="text-danger text-xs">{joinError}</p>
+            )}
           </div>
-          {joinError && (
-            <p className="text-danger text-xs">{joinError}</p>
-          )}
+
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-px bg-border" />
+            <span className="text-text-muted text-[10px] uppercase tracking-wider">or</span>
+            <div className="flex-1 h-px bg-border" />
+          </div>
+
+          <button
+            onClick={handleCreate}
+            className="w-full py-2.5 bg-accent text-[#111b21] rounded-lg font-bold text-xs tracking-wider uppercase hover:bg-accent-hover transition-colors cursor-pointer"
+          >
+            Create New Chat
+          </button>
         </div>
       )}
 
@@ -383,8 +391,9 @@ export function Sidebar() {
           const isActive = currentChatPath === path;
           const isConfirming = confirmDeleteId === session.id;
           const peerLabel =
-            session.nick || session.peerPubKeyB64.slice(0, 12) + "...";
+            session.label || session.nick || session.peerPubKeyB64.slice(0, 12) + "...";
           const unread = isActive ? 0 : getUnreadCount(session);
+          const isCreator = !!getInviteCode(session.id);
 
           return (
             <div
@@ -412,6 +421,27 @@ export function Sidebar() {
                     {unread > 99 ? "99+" : unread}
                   </span>
                 )}
+                <span
+                  className={`absolute -bottom-0.5 -right-0.5 w-[18px] h-[18px] flex items-center justify-center rounded-full text-[9px] ${
+                    isCreator
+                      ? "bg-accent text-[#111b21]"
+                      : "bg-blue-500 text-white"
+                  }`}
+                  title={isCreator ? "You created this chat" : "You joined this chat"}
+                >
+                  {isCreator ? (
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="12" y1="5" x2="12" y2="19" />
+                      <line x1="5" y1="12" x2="19" y2="12" />
+                    </svg>
+                  ) : (
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+                      <polyline points="10 17 15 12 10 7" />
+                      <line x1="15" y1="12" x2="3" y2="12" />
+                    </svg>
+                  )}
+                </span>
               </div>
 
               {/* Content */}
@@ -514,6 +544,12 @@ export function Sidebar() {
           );
         })}
       </div>
+
+      {/* Resize Handle */}
+      <div
+        onMouseDown={handleResizeStart}
+        className="absolute top-0 right-0 w-1 h-full cursor-col-resize z-10 hover:bg-accent/40 active:bg-accent/60 transition-colors"
+      />
     </div>
   );
 }

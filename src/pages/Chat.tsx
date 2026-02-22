@@ -1,16 +1,24 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams, Navigate } from "react-router-dom";
+import { useParams, useNavigate, Navigate } from "react-router-dom";
 import { useChat } from "../hooks/useChat";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
 import { TechPanel } from "../components/TechPanel";
-import { markSessionAsRead, generateSessionId } from "../lib/storage";
+import {
+  markSessionAsRead,
+  generateSessionId,
+  getInviteCode,
+  deleteSession,
+  loadSession,
+  updateSessionLabel,
+} from "../lib/storage";
 import type { ChatParams } from "../lib/types";
 
 export function Chat() {
   const { "*": splat } = useParams();
+  const navigate = useNavigate();
   const bottomRef = useRef<HTMLDivElement>(null);
-  const [confirmBurn, setConfirmBurn] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const params: ChatParams | null = (() => {
     if (!splat) return null;
@@ -29,14 +37,61 @@ export function Chat() {
     lastSync,
     isSending,
     sendMessage,
-    burn,
-    isBurned,
     techInfo,
     peerAck,
+    forceRefresh,
   } = useChat(params);
 
+  const [inviteCode, setInviteCode] = useState<string | null>(null);
+  const [codeCopied, setCodeCopied] = useState(false);
+  const [chatLabel, setChatLabel] = useState<string>("");
+  const [isEditingLabel, setIsEditingLabel] = useState(false);
+  const [labelDraft, setLabelDraft] = useState("");
+  const labelInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
-    setConfirmBurn(false);
+    if (params) {
+      const sessionId = generateSessionId(params.seedB64, params.peerPubKeyB64);
+      const code = getInviteCode(sessionId);
+      setInviteCode(code);
+      const session = loadSession(sessionId);
+      setChatLabel(session?.label || "");
+    }
+  }, [params?.seedB64, params?.peerPubKeyB64]);
+
+  const startEditLabel = () => {
+    setLabelDraft(chatLabel);
+    setIsEditingLabel(true);
+    setTimeout(() => labelInputRef.current?.focus(), 0);
+  };
+
+  const saveLabel = () => {
+    if (!params) return;
+    const trimmed = labelDraft.trim();
+    const sessionId = generateSessionId(params.seedB64, params.peerPubKeyB64);
+    updateSessionLabel(sessionId, trimmed);
+    setChatLabel(trimmed);
+    setIsEditingLabel(false);
+  };
+
+  const handleCopyCode = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
+    setCodeCopied(true);
+    setTimeout(() => setCodeCopied(false), 2000);
+  };
+
+  useEffect(() => {
+    setConfirmDelete(false);
+    setCodeCopied(false);
   }, [splat]);
 
   useEffect(() => {
@@ -54,12 +109,13 @@ export function Chat() {
     return <Navigate to="/" replace />;
   }
 
-  const handleBurn = () => {
-    if (confirmBurn) {
-      burn();
-      setConfirmBurn(false);
+  const handleDelete = () => {
+    if (confirmDelete) {
+      const sessionId = generateSessionId(params.seedB64, params.peerPubKeyB64);
+      deleteSession(sessionId);
+      navigate("/");
     } else {
-      setConfirmBurn(true);
+      setConfirmDelete(true);
     }
   };
 
@@ -78,22 +134,81 @@ export function Chat() {
       })
     : "";
 
-  const peerLabel = params.peerPubKeyB64.slice(0, 16) + "...";
+  const truncatedKey = params.peerPubKeyB64.slice(0, 12) + "...";
+  const displayName = chatLabel || truncatedKey;
 
   return (
     <div className="flex-1 flex flex-col h-full bg-chat-bg">
       {/* Chat Header */}
       <div className="h-14 flex items-center justify-between px-4 bg-panel-header border-b border-border shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-surface-hover flex items-center justify-center">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="relative w-10 h-10 rounded-full bg-surface-hover flex items-center justify-center shrink-0">
             <span className="text-text-muted text-sm">
-              {peerLabel.charAt(0).toUpperCase()}
+              {displayName.charAt(0).toUpperCase()}
+            </span>
+            <span
+              className={`absolute -bottom-0.5 -right-0.5 w-[16px] h-[16px] flex items-center justify-center rounded-full text-[8px] ${
+                inviteCode
+                  ? "bg-accent text-[#111b21]"
+                  : "bg-blue-500 text-white"
+              }`}
+              title={inviteCode ? "You created this chat" : "You joined this chat"}
+            >
+              {inviteCode ? (
+                <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+              ) : (
+                <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+                  <polyline points="10 17 15 12 10 7" />
+                  <line x1="15" y1="12" x2="3" y2="12" />
+                </svg>
+              )}
             </span>
           </div>
-          <div>
-            <p className="text-text-primary text-[15px] font-normal m-0 leading-tight">
-              {peerLabel}
-            </p>
+          <div className="min-w-0">
+            {isEditingLabel ? (
+              <input
+                ref={labelInputRef}
+                type="text"
+                value={labelDraft}
+                onChange={(e) => setLabelDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveLabel();
+                  if (e.key === "Escape") setIsEditingLabel(false);
+                }}
+                onBlur={saveLabel}
+                placeholder="Set a name..."
+                className="bg-input-bg border-none rounded px-2 py-0.5 text-[15px] text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent w-full max-w-[200px]"
+                maxLength={30}
+              />
+            ) : (
+              <p
+                onClick={startEditLabel}
+                className="text-text-primary text-[15px] font-normal m-0 leading-tight truncate cursor-pointer hover:text-accent transition-colors"
+                title="Click to set a name"
+              >
+                {displayName}
+                {!chatLabel && (
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="inline ml-1.5 text-text-muted opacity-0 group-hover:opacity-100"
+                  >
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                  </svg>
+                )}
+              </p>
+            )}
             <div className="flex items-center gap-1.5">
               <span
                 className={`w-1.5 h-1.5 rounded-full ${statusColor} ${status === "connecting" ? "animate-pulse-dot" : ""}`}
@@ -101,34 +216,36 @@ export function Chat() {
               <span className="text-text-muted text-xs">
                 {statusLabel}
                 {syncText && ` · ${syncText}`}
+                {" · "}
+                <span className={inviteCode ? "text-accent" : "text-blue-400"}>
+                  {inviteCode ? "created" : "joined"}
+                </span>
               </span>
             </div>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {confirmBurn ? (
-            <div className="flex items-center gap-2 animate-fade-in">
-              <span className="text-danger text-xs">Burn?</span>
-              <button
-                onClick={handleBurn}
-                className="px-2.5 py-1 bg-danger/20 text-danger border border-danger/30 rounded text-xs font-bold hover:bg-danger/30 transition-colors cursor-pointer"
-              >
-                Yes
-              </button>
-              <button
-                onClick={() => setConfirmBurn(false)}
-                className="px-2.5 py-1 bg-surface-hover text-text-muted border border-border rounded text-xs font-bold hover:text-text-secondary transition-colors cursor-pointer"
-              >
-                No
-              </button>
-            </div>
-          ) : (
-            !isBurned && (
-              <button
-                onClick={handleBurn}
-                className="p-2 text-text-secondary hover:text-danger rounded-full hover:bg-surface-hover transition-colors cursor-pointer"
-                title="Burn chat"
-              >
+          {inviteCode && (
+            <button
+              onClick={() => handleCopyCode(inviteCode)}
+              className="p-2 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer"
+              title={codeCopied ? "Copied!" : "Copy invite code"}
+            >
+              {codeCopied ? (
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="text-accent"
+                >
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              ) : (
                 <svg
                   width="18"
                   height="18"
@@ -139,10 +256,70 @@ export function Chat() {
                   strokeLinecap="round"
                   strokeLinejoin="round"
                 >
-                  <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z" />
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
                 </svg>
+              )}
+            </button>
+          )}
+          <button
+            onClick={forceRefresh}
+            className="p-2 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer"
+            title="Force refresh"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <polyline points="23 4 23 10 17 10" />
+              <polyline points="1 20 1 14 7 14" />
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" />
+              <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" />
+            </svg>
+          </button>
+          {confirmDelete ? (
+            <div className="flex items-center gap-2 animate-fade-in">
+              <span className="text-danger text-xs">Delete?</span>
+              <button
+                onClick={handleDelete}
+                className="px-2.5 py-1 bg-danger/20 text-danger border border-danger/30 rounded text-xs font-bold hover:bg-danger/30 transition-colors cursor-pointer"
+              >
+                Yes
               </button>
-            )
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="px-2.5 py-1 bg-surface-hover text-text-muted border border-border rounded text-xs font-bold hover:text-text-secondary transition-colors cursor-pointer"
+              >
+                No
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={handleDelete}
+              className="p-2 text-text-secondary hover:text-danger rounded-full hover:bg-surface-hover transition-colors cursor-pointer"
+              title="Delete chat"
+            >
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M3 6h18" />
+                <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+              </svg>
+            </button>
           )}
         </div>
       </div>
@@ -155,19 +332,30 @@ export function Chat() {
         messageCount={messages.length}
       />
 
-      {/* Burn Banner */}
-      {isBurned && (
-        <div className="bg-danger/10 border-b border-danger/20 px-4 py-2 text-center shrink-0">
-          <span className="text-danger text-xs font-bold">
-            Chat burned — messages will expire from the DHT
-          </span>
-        </div>
-      )}
-
       {/* Messages */}
       <div className="flex-1 overflow-y-auto chat-wallpaper">
         <div className="max-w-3xl mx-auto py-3">
-          {messages.length === 0 && (
+          {inviteCode && messages.length === 0 && (
+            <div className="flex items-center justify-center min-h-[120px]">
+              <div className="bg-surface-alt/90 rounded-xl px-5 py-4 text-center max-w-sm space-y-3">
+                <p className="text-text-secondary text-xs">
+                  Share this invite code with your contact to start chatting:
+                </p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 bg-input-bg rounded-lg px-3 py-2 text-[10px] text-text-muted font-mono truncate text-left select-all">
+                    {inviteCode}
+                  </code>
+                  <button
+                    onClick={() => handleCopyCode(inviteCode)}
+                    className="px-3 py-2 bg-accent text-[#111b21] rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer shrink-0"
+                  >
+                    {codeCopied ? "Copied!" : "Copy"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          {!inviteCode && messages.length === 0 && (
             <div className="flex items-center justify-center min-h-[200px]">
               <div className="bg-surface-alt/90 rounded-lg px-4 py-2 text-center">
                 <p className="text-text-muted text-xs">
@@ -184,7 +372,7 @@ export function Chat() {
       </div>
 
       {/* Input */}
-      <MessageInput onSend={sendMessage} disabled={isBurned || isSending} />
+      <MessageInput key={splat} onSend={sendMessage} disabled={isSending} />
     </div>
   );
 }
