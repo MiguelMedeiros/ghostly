@@ -51,6 +51,9 @@ export function Navbar() {
           <a href="/#protocol" className="hover:text-cyan transition-colors">
             Protocol
           </a>
+          <a href="/cli" className="hover:text-green transition-colors">
+            CLI
+          </a>
           <a href="/docs" className="hover:text-cyan transition-colors">
             Docs
           </a>

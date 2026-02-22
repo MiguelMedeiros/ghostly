@@ -1,0 +1,28 @@
+[package]
+name = "ghostly-cli"
+version = "0.1.0"
+edition = "2021"
+description = "CLI for Ghost protocol - encrypted ephemeral messaging for bots"
+license = "MIT"
+repository = "https://github.com/pkarr-chat/ghostly-cli"
+keywords = ["chat", "encrypted", "p2p", "dht", "cli"]
+categories = ["command-line-utilities", "cryptography"]
+
+[[bin]]
+name = "ghostly-cli"
+path = "src/main.rs"
+
+[lib]
+name = "ghostly"
+path = "src/lib.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+pkarr = "5"
+simple-dns = "0.9"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+crypto_secretbox = "0.1"
+rand = "0.8"
