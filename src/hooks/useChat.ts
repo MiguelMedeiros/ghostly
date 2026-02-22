@@ -37,8 +37,14 @@ export function useChat(params: ChatParams | null) {
   const [incomingCallSignal, setIncomingCallSignal] = useState<string | null>(
     null,
   );
+  const [pollCountdown, setPollCountdown] = useState<{
+    remaining: number;
+    total: number;
+    isPolling: boolean;
+  }>({ remaining: 0, total: POLL_INTERVAL_ACTIVE, isPolling: false });
 
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const republishTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastActivityRef = useRef<number>(Date.now());
   const burnedRef = useRef(false);
@@ -61,6 +67,7 @@ export function useChat(params: ChatParams | null) {
   const doPublishRef = useRef<(() => Promise<void>) | null>(null);
   const fastPollRef = useRef(false);
   const joinMessageSentRef = useRef(false);
+  const welcomeMessageSentRef = useRef(false);
 
   useEffect(() => {
     if (!params) return;
@@ -70,6 +77,7 @@ export function useChat(params: ChatParams | null) {
     seedB64Ref.current = params.seedB64;
     peerPubKeyZ32Ref.current = params.peerPubKeyB64;
     encKeyB64Ref.current = params.encKeyB64;
+    nickRef.current = params.nick;
     lastActivityRef.current = Date.now();
 
     let cancelled = false;
@@ -101,6 +109,12 @@ export function useChat(params: ChatParams | null) {
         lastSeenTimestampRef.current = maxPeerTs;
         myAckRef.current = maxPeerTs;
         sentBufferRef.current = [];
+        
+        // Check if welcome message was already sent (session has our join message)
+        const hasOurJoinMessage = existing.messages.some(m => 
+          m.sender === "system" && m.id.startsWith("me_") && m.systemEvent?.type === "join"
+        );
+        welcomeMessageSentRef.current = hasOurJoinMessage;
       } else {
         const now = Date.now();
         sessionCreatedAtRef.current = now;
@@ -119,9 +133,11 @@ export function useChat(params: ChatParams | null) {
         lastSeenTimestampRef.current = 0;
         sentBufferRef.current = [];
         myAckRef.current = 0;
+        welcomeMessageSentRef.current = false;
         
         if (!isCreator) {
-          joinMessageSentRef.current = false;
+          const joinKey = `joinSent_${sessionId}`;
+          joinMessageSentRef.current = localStorage.getItem(joinKey) === "true";
         }
       }
 
@@ -160,16 +176,18 @@ export function useChat(params: ChatParams | null) {
         if (isCreator) return;
         
         joinMessageSentRef.current = true;
+        localStorage.setItem(`joinSent_${sessionId}`, "true");
         
         const timestamp = Date.now();
-        const joinText = "👋 joined";
+        const nick = nickRef.current;
+        const joinText = nick ? `👋 ${nick} joined` : "👋 joined";
         
         const joinMsg: ChatMessage = {
           id: `me_${timestamp}`,
           text: joinText,
           sender: "system",
           timestamp,
-          nick: nickRef.current,
+          nick,
           systemEvent: {
             type: "join",
             pubKey: myPubKey,
@@ -192,9 +210,9 @@ export function useChat(params: ChatParams | null) {
             sentBufferRef.current,
             encKeyB64Ref.current,
             myAckRef.current,
-            nickRef.current,
+            nick,
           );
-          console.log("[chat] join message sent");
+          console.log("[chat] join message sent with nick:", nick || "(anonymous)");
         } catch (err) {
           console.error("[chat] failed to send join message:", err);
         }
@@ -202,11 +220,31 @@ export function useChat(params: ChatParams | null) {
       
       sendJoinMessage();
 
+      const startCountdown = (interval: number) => {
+        if (countdownTimerRef.current) {
+          clearInterval(countdownTimerRef.current);
+        }
+        const startTime = Date.now();
+        setPollCountdown({ remaining: interval, total: interval, isPolling: false });
+        countdownTimerRef.current = setInterval(() => {
+          const elapsed = Date.now() - startTime;
+          const remaining = Math.max(0, interval - elapsed);
+          setPollCountdown({ remaining, total: interval, isPolling: false });
+        }, 100);
+      };
+
       const poll = async () => {
         if (burnedRef.current || effectIdRef.current !== currentEffectId)
           return;
         if (isPollingRef.current) return;
+
+        if (countdownTimerRef.current) {
+          clearInterval(countdownTimerRef.current);
+          countdownTimerRef.current = null;
+        }
+        
         isPollingRef.current = true;
+        setPollCountdown(prev => ({ ...prev, remaining: 0, isPolling: true }));
 
         const n = ++pollCountRef.current;
         try {
@@ -246,8 +284,14 @@ export function useChat(params: ChatParams | null) {
               myAckRef.current = batch.latestTimestamp;
               let latestSession = null;
 
+              let receivedJoinMessage = false;
+              
               for (const resolved of newMsgs) {
-                const isJoinMessage = resolved.text === "👋 joined";
+                const isJoinMessage = resolved.text === "👋 joined" || resolved.text.match(/^👋 .+ joined$/);
+                
+                if (isJoinMessage) {
+                  receivedJoinMessage = true;
+                }
                 
                 const newMsg: ChatMessage = {
                   id: `peer_${resolved.timestamp}`,
@@ -273,6 +317,41 @@ export function useChat(params: ChatParams | null) {
 
               if (latestSession) {
                 setMessages([...latestSession.messages]);
+              }
+
+              // If creator receives a join message, send welcome message with our nick
+              if (receivedJoinMessage && !welcomeMessageSentRef.current) {
+                const isCreator = !!getInviteCode(sessionIdRef.current);
+                if (isCreator) {
+                  welcomeMessageSentRef.current = true;
+                  const timestamp = Date.now();
+                  const nick = nickRef.current;
+                  const welcomeText = nick ? `👋 ${nick} joined` : "👋 joined";
+                  
+                  const welcomeMsg: ChatMessage = {
+                    id: `me_${timestamp}`,
+                    text: welcomeText,
+                    sender: "system",
+                    timestamp,
+                    nick,
+                    systemEvent: {
+                      type: "join",
+                      pubKey: myPubKeyRef.current,
+                    },
+                  };
+                  
+                  const updatedSession = addMessage(sessionIdRef.current, welcomeMsg);
+                  if (updatedSession) {
+                    setMessages([...updatedSession.messages]);
+                  }
+                  
+                  sentBufferRef.current = [
+                    ...sentBufferRef.current,
+                    { t: timestamp, m: welcomeText },
+                  ];
+                  
+                  console.log("[chat] sending welcome message with nick:", nick || "(anonymous)");
+                }
               }
 
               lastActivityRef.current = Date.now();
@@ -301,6 +380,7 @@ export function useChat(params: ChatParams | null) {
           setStatus("error");
         } finally {
           isPollingRef.current = false;
+          setPollCountdown(prev => ({ ...prev, isPolling: false }));
           if (
             !burnedRef.current &&
             effectIdRef.current === currentEffectId
@@ -312,12 +392,14 @@ export function useChat(params: ChatParams | null) {
               : idle
                 ? POLL_INTERVAL_IDLE
                 : POLL_INTERVAL_ACTIVE;
+            startCountdown(interval);
             pollTimerRef.current = setTimeout(poll, interval);
           }
         }
       };
 
       pollFnRef.current = poll;
+      setPollCountdown({ remaining: 0, total: POLL_INTERVAL_ACTIVE, isPolling: true });
       poll();
 
       const republish = async () => {
@@ -353,8 +435,12 @@ export function useChat(params: ChatParams | null) {
         clearTimeout(republishTimerRef.current);
         republishTimerRef.current = null;
       }
+      if (countdownTimerRef.current) {
+        clearInterval(countdownTimerRef.current);
+        countdownTimerRef.current = null;
+      }
     };
-  }, [params?.seedB64, params?.peerPubKeyB64, params?.encKeyB64]);
+  }, [params?.seedB64, params?.peerPubKeyB64, params?.encKeyB64, params?.nick]);
 
   const sendMessage = useCallback(
     async (text: string): Promise<string | null> => {
@@ -546,5 +632,6 @@ export function useChat(params: ChatParams | null) {
     setCallSignal,
     setChatFastPoll,
     addSystemMessage,
+    pollCountdown,
   };
 }

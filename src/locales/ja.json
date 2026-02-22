@@ -1,0 +1,153 @@
+{
+  "common": {
+    "save": "保存",
+    "cancel": "キャンセル",
+    "delete": "削除",
+    "confirm": "確認",
+    "copy": "コピー",
+    "copied": "コピーしました！",
+    "close": "閉じる",
+    "back": "戻る",
+    "loading": "読み込み中...",
+    "error": "エラー",
+    "success": "成功"
+  },
+  "app": {
+    "name": "Ghostly",
+    "tagline": "DHT上の一時的な暗号化メッセージング"
+  },
+  "sidebar": {
+    "chats": "チャット",
+    "newChat": "新規チャット",
+    "searchPlaceholder": "チャットを検索...",
+    "noChats": "チャットがありません",
+    "deleteChat": "チャットを削除",
+    "deleteAllChats": "すべてのチャットを削除",
+    "copyInvite": "招待コードをコピー",
+    "settings": "設定"
+  },
+  "chat": {
+    "typeMessage": "メッセージを入力...",
+    "send": "送信",
+    "online": "オンライン",
+    "offline": "オフライン",
+    "connecting": "接続中",
+    "lastSeen": "最終オンライン {{time}}",
+    "today": "今日",
+    "yesterday": "昨日"
+  },
+  "home": {
+    "welcome": "Ghostlyへようこそ",
+    "description": "プライバシーを尊重する安全で一時的なメッセージング",
+    "createChat": "新規チャットを作成",
+    "features": {
+      "encrypted": "エンドツーエンド暗号化",
+      "ephemeral": "メッセージは消滅します",
+      "decentralized": "中央サーバーなし"
+    }
+  },
+  "settings": {
+    "title": "設定",
+    "profile": "プロフィール",
+    "defaultNickname": "デフォルトニックネーム",
+    "defaultNicknameHint": "この名前は新しいチャットのデフォルトとして使用されます",
+    "nicknamePlaceholder": "ニックネームを入力...",
+    "randomizeName": "ランダムな名前を生成",
+    "appearance": "外観",
+    "theme": "テーマ",
+    "themes": {
+      "dark": "ダーク",
+      "light": "ライト",
+      "system": "システム"
+    },
+    "colorTheme": "カラーテーマ",
+    "colorThemes": {
+      "classic": "クラシック",
+      "monochrome": "モノクロ",
+      "cyan": "シアン",
+      "purple": "パープル"
+    },
+    "colorScheme": "モード",
+    "colorSchemeDescription": "ライトまたはダークの外観を選択",
+    "colorSchemes": {
+      "dark": "ダーク",
+      "light": "ライト",
+      "system": "自動"
+    },
+    "language": "言語",
+    "security": "セキュリティ",
+    "lockScreen": "ロック画面",
+    "lockScreenDescription": "非アクティブ後にパスワードを要求",
+    "password": "パスワード",
+    "newPassword": "新しいパスワード",
+    "confirmPassword": "パスワードを確認",
+    "currentPassword": "現在のパスワード",
+    "changePassword": "パスワードを変更",
+    "setPassword": "パスワードを設定",
+    "removePassword": "パスワードを削除",
+    "timeout": "ロックまでの時間",
+    "timeoutOptions": {
+      "1": "1分",
+      "5": "5分",
+      "15": "15分",
+      "30": "30分",
+      "60": "1時間"
+    },
+    "passwordMismatch": "パスワードが一致しません",
+    "passwordTooShort": "パスワードは4文字以上必要です",
+    "passwordSet": "パスワードを設定しました",
+    "passwordChanged": "パスワードを変更しました",
+    "passwordRemoved": "パスワードを削除しました",
+    "incorrectPassword": "パスワードが正しくありません",
+    "lockNow": "今すぐロック",
+    "notifications": "通知",
+    "notificationSounds": "通知音",
+    "notificationSoundsDescription": "新しいメッセージが届いたときに音を再生",
+    "data": "データとストレージ",
+    "storageUsed": "使用中のストレージ",
+    "clearAllData": "すべてのデータを消去",
+    "clearAllDataDescription": "すべてのチャットを削除し、設定をリセット",
+    "clearAllDataConfirm": "本当によろしいですか？この操作は元に戻せません。",
+    "dataCleared": "すべてのデータが消去されました",
+    "about": "アプリについて",
+    "version": "バージョン",
+    "website": "ウェブサイト",
+    "sourceCode": "ソースコード",
+    "license": "ライセンス"
+  },
+  "lockScreen": {
+    "title": "Ghostlyはロックされています",
+    "enterPassword": "パスワードを入力してロック解除",
+    "unlock": "ロック解除",
+    "incorrectPassword": "パスワードが正しくありません。もう一度お試しください"
+  },
+  "calls": {
+    "audio": "音声通話",
+    "video": "ビデオ通話",
+    "incoming": "着信",
+    "outgoing": "発信中...",
+    "connected": "接続済み",
+    "ended": "通話終了",
+    "missed": "不在着信",
+    "rejected": "通話拒否",
+    "duration": "通話時間：{{duration}}",
+    "accept": "応答",
+    "decline": "拒否",
+    "hangUp": "終了",
+    "mute": "ミュート",
+    "unmute": "ミュート解除",
+    "camera": "カメラ",
+    "cameraOff": "カメラオフ"
+  },
+  "share": {
+    "title": "このチャットを共有",
+    "description": "QRコードをスキャンするかリンクを共有",
+    "copyLink": "リンクをコピー",
+    "linkCopied": "リンクをクリップボードにコピーしました"
+  },
+  "errors": {
+    "connectionFailed": "接続に失敗しました",
+    "messageFailed": "メッセージの送信に失敗しました",
+    "generic": "エラーが発生しました"
+  }
+}

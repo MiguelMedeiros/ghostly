@@ -35,7 +35,7 @@ const steps = [
     number: "02",
     title: "Share the Link",
     description:
-      "The invite URL contains everything your peer needs: their writing seed, your public key, and the shared encryption key — all in the URL fragment, which never leaves the browser.",
+      "The invite URL contains everything your peer needs: their writing seed, your public key, and the shared encryption key — all in the URL fragment, which never leaves the app.",
     visual: (
       <div className="font-mono text-xs">
         <div className="text-gray-500 mb-2">Invite URL:</div>

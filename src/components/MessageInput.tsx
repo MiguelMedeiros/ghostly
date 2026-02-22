@@ -142,7 +142,7 @@ export function MessageInput({
       )}
       <div className="flex items-end gap-2 relative">
         {/* Left action buttons */}
-        <div className="flex items-center gap-0.5 shrink-0 pb-1">
+        <div className="flex items-center gap-0.5 shrink-0 h-10">
           <button
             onClick={toggleEmoji}
             disabled={disabled}
@@ -182,7 +182,7 @@ export function MessageInput({
         </div>
 
         {/* Text input */}
-        <div className="flex-1 relative">
+        <div className="flex-1 relative flex items-center">
           <textarea
             ref={textareaRef}
             value={text}
@@ -192,7 +192,7 @@ export function MessageInput({
             placeholder={disabled ? "Chat burned" : "Type a message"}
             disabled={disabled}
             rows={1}
-            className="w-full bg-input-bg border-none rounded-lg px-3 py-2.5 text-[15px] text-text-primary placeholder-text-muted resize-none focus:outline-none disabled:opacity-50"
+            className="w-full bg-input-bg border-none rounded-lg px-3 py-2 text-[15px] text-text-primary placeholder-text-muted resize-none focus:outline-none disabled:opacity-50 min-h-10"
           />
           {remaining < 100 && (
             <span

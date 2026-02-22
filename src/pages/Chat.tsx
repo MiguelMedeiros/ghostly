@@ -2,11 +2,12 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useNavigate, Navigate } from "react-router-dom";
 import { useChat } from "../hooks/useChat";
 import { useWebRTC } from "../hooks/useWebRTC";
+import { useSettings } from "../contexts/SettingsContext";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
-import { TechPanel } from "../components/TechPanel";
 import { CallOverlay } from "../components/CallOverlay";
 import { IncomingCallNotification } from "../components/IncomingCallNotification";
+import { PollCountdown } from "../components/PollCountdown";
 import {
   markSessionAsRead,
   generateSessionId,
@@ -21,6 +22,7 @@ import type { ChatParams, CallSignal, CallEventType, ChatMessage } from "../lib/
 export function Chat() {
   const { "*": splat } = useParams();
   const navigate = useNavigate();
+  const { settings } = useSettings();
   const bottomRef = useRef<HTMLDivElement>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -32,6 +34,7 @@ export function Chat() {
       seedB64: parts[0],
       peerPubKeyB64: parts[1],
       encKeyB64: parts[2],
+      nick: settings.defaultNickname || undefined,
     };
   })();
 
@@ -48,7 +51,15 @@ export function Chat() {
     setCallSignal,
     setChatFastPoll,
     addSystemMessage,
+    setNick,
+    pollCountdown,
   } = useChat(params);
+
+  useEffect(() => {
+    if (settings.defaultNickname) {
+      setNick(settings.defaultNickname);
+    }
+  }, [settings.defaultNickname, setNick]);
 
   const addCallEventMessage = useCallback(
     (type: CallEventType, hasVideo: boolean, duration?: number) => {
@@ -98,9 +109,11 @@ export function Chat() {
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
   const [chatLabel, setChatLabel] = useState<string>("");
+  const [peerNick, setPeerNick] = useState<string>("");
   const [isEditingLabel, setIsEditingLabel] = useState(false);
   const [labelDraft, setLabelDraft] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [showTechInfo, setShowTechInfo] = useState(false);
   const labelInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -111,8 +124,33 @@ export function Chat() {
       setInviteCode(code);
       const session = loadSession(sessionId);
       setChatLabel(session?.label || "");
+      setPeerNick(session?.nick || "");
     }
   }, [params?.seedB64, params?.peerPubKeyB64]);
+
+  useEffect(() => {
+    const peerMessages = [...messages].reverse().filter(m => 
+      m.sender === "peer" || (m.sender === "system" && m.id.startsWith("peer_"))
+    );
+    
+    for (const msg of peerMessages) {
+      if (msg.nick) {
+        if (msg.nick !== peerNick) {
+          setPeerNick(msg.nick);
+        }
+        return;
+      }
+      
+      const joinMatch = msg.text.match(/^👋 (.+) joined$/);
+      if (joinMatch && joinMatch[1]) {
+        const extractedNick = joinMatch[1];
+        if (extractedNick !== peerNick) {
+          setPeerNick(extractedNick);
+        }
+        return;
+      }
+    }
+  }, [messages, peerNick]);
 
   const startEditLabel = () => {
     setLabelDraft(chatLabel);
@@ -127,6 +165,7 @@ export function Chat() {
     updateSessionLabel(sessionId, trimmed);
     setChatLabel(trimmed);
     setIsEditingLabel(false);
+    window.dispatchEvent(new Event("session-updated"));
   };
 
   const handleCopyCode = async (text: string) => {
@@ -202,8 +241,10 @@ export function Chat() {
       })
     : "";
 
-  const truncatedKey = params.peerPubKeyB64.slice(0, 12) + "...";
-  const displayName = chatLabel || truncatedKey;
+  const truncatedPeerKey = params.peerPubKeyB64.slice(0, 12) + "...";
+  const displayName = chatLabel || peerNick;
+  const isAnonymous = !displayName;
+  const showKeySubtitle = true;
 
   return (
     <div className="flex-1 flex flex-col h-full bg-chat-bg">
@@ -211,30 +252,19 @@ export function Chat() {
       <div className="h-14 flex items-center justify-between px-4 bg-panel-header border-b border-border shrink-0">
         <div className="flex items-center gap-3 min-w-0">
           <div className="relative w-10 h-10 rounded-full bg-surface-hover flex items-center justify-center shrink-0">
-            <span className="text-text-muted text-sm">
-              {displayName.charAt(0).toUpperCase()}
+            <span className={`text-sm ${isAnonymous ? "text-text-muted/50" : "text-text-muted"}`}>
+              {(displayName || "A").charAt(0).toUpperCase()}
             </span>
-            <span
-              className={`absolute -bottom-0.5 -right-0.5 w-[16px] h-[16px] flex items-center justify-center rounded-full text-[8px] ${
-                inviteCode
-                  ? "bg-accent text-[#111b21]"
-                  : "bg-blue-500 text-white"
-              }`}
-              title={inviteCode ? "You created this chat" : "You joined this chat"}
-            >
-              {inviteCode ? (
-                <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="12" y1="5" x2="12" y2="19" />
-                  <line x1="5" y1="12" x2="19" y2="12" />
+            {inviteCode && (
+              <span className="absolute -bottom-0.5 -right-0.5 w-[16px] h-[16px] flex items-center justify-center rounded-full text-[8px] bg-accent text-[#111b21] z-10 group/star">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
                 </svg>
-              ) : (
-                <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
-                  <polyline points="10 17 15 12 10 7" />
-                  <line x1="15" y1="12" x2="3" y2="12" />
-                </svg>
-              )}
-            </span>
+                <span className="absolute top-1/2 -translate-y-1/2 left-full ml-2 px-2 py-1 bg-surface-alt text-text-primary text-[10px] rounded whitespace-nowrap opacity-0 group-hover/star:opacity-100 transition-opacity pointer-events-none shadow-lg border border-border">
+                  You created this chat
+                </span>
+              </span>
+            )}
           </div>
           <div className="min-w-0">
             {isEditingLabel ? (
@@ -255,10 +285,10 @@ export function Chat() {
             ) : (
               <p
                 onClick={startEditLabel}
-                className="text-text-primary text-[15px] font-normal m-0 leading-tight truncate cursor-pointer hover:text-accent transition-colors"
+                className={`text-[15px] font-normal m-0 leading-tight truncate cursor-pointer hover:text-accent transition-colors ${isAnonymous ? "text-text-muted/60 italic" : "text-text-primary"}`}
                 title="Click to set a name"
               >
-                {displayName}
+                {displayName || "Anonymous"}
                 {!chatLabel && (
                   <svg
                     width="12"
@@ -277,18 +307,21 @@ export function Chat() {
                 )}
               </p>
             )}
-            <div className="flex items-center gap-1.5">
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${statusColor} ${status === "connecting" ? "animate-pulse-dot" : ""}`}
+            <div 
+              className="flex items-center gap-1.5 cursor-help"
+              title={techInfo ? `Status: ${statusLabel}\nYou: ${techInfo.myPubKey}\nPeer: ${techInfo.peerPubKey}` : `Status: ${statusLabel}`}
+            >
+              <PollCountdown
+                remaining={pollCountdown.remaining}
+                total={pollCountdown.total}
+                isPolling={pollCountdown.isPolling}
+                size={14}
               />
-              <span className="text-text-muted text-xs">
-                {statusLabel}
-                {syncText && ` · ${syncText}`}
-                {" · "}
-                <span className={inviteCode ? "text-accent" : "text-blue-400"}>
-                  {inviteCode ? "created" : "joined"}
+              {showKeySubtitle && (
+                <span className="text-text-muted/60 text-xs font-mono truncate">
+                  {truncatedPeerKey}
                 </span>
-              </span>
+              )}
             </div>
           </div>
         </div>
@@ -394,6 +427,20 @@ export function Chat() {
                   </svg>
                   Refresh
                 </button>
+                <button
+                  onClick={() => {
+                    setShowTechInfo(true);
+                    setMenuOpen(false);
+                  }}
+                  className="w-full px-3 py-2 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M12 16v-4" />
+                    <path d="M12 8h.01" />
+                  </svg>
+                  Tech Info
+                </button>
                 <div className="border-t border-border my-1" />
                 {confirmDelete ? (
                   <div className="px-3 py-2 flex items-center gap-2">
@@ -432,14 +479,6 @@ export function Chat() {
           </div>
         </div>
       </div>
-
-      {/* Tech Panel */}
-      <TechPanel
-        techInfo={techInfo}
-        status={status}
-        lastSync={lastSync}
-        messageCount={messages.length}
-      />
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto chat-wallpaper">
@@ -486,7 +525,7 @@ export function Chat() {
       {/* Incoming call notification */}
       {webrtc.callState === "incoming" && (
         <IncomingCallNotification
-          peerName={displayName}
+          peerName={displayName || "Anonymous"}
           hasVideo={incomingHasVideo}
           onAcceptAudio={() => webrtc.acceptCall(false)}
           onAcceptVideo={() => webrtc.acceptCall(true)}
@@ -507,11 +546,109 @@ export function Chat() {
           isVideoOff={webrtc.isVideoOff}
           hasVideo={webrtc.hasVideo}
           callStartedAt={webrtc.callStartedAt}
-          peerName={displayName}
+          peerName={displayName || "Anonymous"}
           onHangUp={() => webrtc.hangUp()}
           onToggleMute={webrtc.toggleMute}
           onToggleVideo={webrtc.toggleVideo}
         />
+      )}
+
+      {/* Tech Info Modal */}
+      {showTechInfo && techInfo && (
+        <div 
+          className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in"
+          onClick={() => setShowTechInfo(false)}
+        >
+          <div 
+            className="bg-surface-alt rounded-xl max-w-md w-full max-h-[80vh] overflow-y-auto shadow-2xl animate-fade-in"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b border-border">
+              <h2 className="text-lg font-semibold text-text-primary">Tech Info</h2>
+              <button
+                onClick={() => setShowTechInfo(false)}
+                className="p-1.5 text-text-muted hover:text-text-primary hover:bg-surface-hover rounded-full transition-colors"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-4 space-y-4 text-sm">
+              <TechInfoSection title="Identity">
+                <TechInfoRow label="Session ID" value={techInfo.sessionId} mono copyable />
+                <TechInfoRow label="My Key" value={techInfo.myPubKey} mono copyable />
+                <TechInfoRow label="Peer Key" value={techInfo.peerPubKey} mono copyable />
+                <TechInfoRow label="Enc Key" value={techInfo.encKeyPreview} mono />
+              </TechInfoSection>
+              <TechInfoSection title="Protocol">
+                <TechInfoRow label="Network" value={techInfo.protocol} />
+                <TechInfoRow label="Encryption" value={techInfo.encryption} />
+                <TechInfoRow label="TTL" value={`${techInfo.messageTtl}s`} />
+                <TechInfoRow label="Created" value={new Date(techInfo.createdAt).toLocaleString()} />
+              </TechInfoSection>
+              <TechInfoSection title="Sync">
+                <TechInfoRow label="Status" value={status} />
+                <TechInfoRow label="Poll Interval" value={`${techInfo.currentPollInterval / 1000}s`} />
+                <TechInfoRow label="Polls" value={techInfo.pollCount.toString()} />
+                <TechInfoRow label="Last Sync" value={lastSync ? new Date(lastSync).toLocaleTimeString() : "—"} />
+                <TechInfoRow label="Messages" value={messages.length.toString()} />
+              </TechInfoSection>
+              <TechInfoSection title="ACK Status">
+                <TechInfoRow 
+                  label="My ACK" 
+                  value={techInfo.myAck > 0 ? new Date(techInfo.myAck).toLocaleTimeString() : "none"} 
+                />
+                <TechInfoRow 
+                  label="Peer ACK" 
+                  value={techInfo.peerAck > 0 ? new Date(techInfo.peerAck).toLocaleTimeString() : "none"} 
+                />
+                <TechInfoRow label="Pending Buffer" value={`${techInfo.sentBufferSize} messages`} />
+              </TechInfoSection>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TechInfoSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-2">
+      <h3 className="text-xs font-bold text-accent uppercase tracking-wider">{title}</h3>
+      <div className="bg-surface rounded-lg p-3 space-y-1.5">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function TechInfoRow({ label, value, mono, copyable }: { label: string; value: string; mono?: boolean; copyable?: boolean }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(value);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <div className="flex justify-between gap-3 text-xs">
+      <span className="text-text-muted shrink-0">{label}</span>
+      {copyable ? (
+        <button
+          onClick={handleCopy}
+          className={`text-right break-all bg-transparent border-none p-0 cursor-pointer hover:text-accent transition-colors ${mono ? "font-mono" : ""} ${copied ? "text-accent" : "text-text-secondary"}`}
+          title="Click to copy"
+        >
+          {copied ? "Copied!" : value}
+        </button>
+      ) : (
+        <span className={`text-text-secondary text-right break-all ${mono ? "font-mono" : ""}`}>
+          {value}
+        </span>
       )}
     </div>
   );

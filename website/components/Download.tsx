@@ -1,12 +1,99 @@
 "use client";
 
 import { motion } from "motion/react";
+import { useEffect, useState } from "react";
+
+function FloatingGhost({ 
+  delay, 
+  duration, 
+  size, 
+  x, 
+  y, 
+  opacity 
+}: { 
+  delay: number; 
+  duration: number; 
+  size: number; 
+  x: number; 
+  y: number; 
+  opacity: number;
+}) {
+  return (
+    <motion.div
+      className="absolute pointer-events-none text-cyan"
+      style={{ 
+        left: `${x}%`, 
+        top: `${y}%`,
+        width: size,
+        height: size,
+      }}
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ 
+        opacity: [0, opacity, opacity, 0],
+        y: [20, 0, -30, -60],
+        x: [0, 10, -10, 0],
+        rotate: [0, 5, -5, 0],
+      }}
+      transition={{
+        duration,
+        delay,
+        repeat: Infinity,
+        ease: "easeInOut",
+      }}
+    >
+      <svg viewBox="0 0 24 24" fill="currentColor" className="w-full h-full">
+        <path d="M12 2C7.582 2 4 5.582 4 10v8c0 .75.6 1 1 .6l2-1.6 2 1.6c.4.3.8.3 1.2 0L12 17l1.8 1.6c.4.3.8.3 1.2 0l2-1.6 2 1.6c.4.4 1 .15 1-.6v-8c0-4.418-3.582-8-8-8z"/>
+        <circle cx="9" cy="9" r="1.5" className="fill-background"/>
+        <circle cx="15" cy="9" r="1.5" className="fill-background"/>
+      </svg>
+    </motion.div>
+  );
+}
+
+function GhostParticles() {
+  const [ghosts, setGhosts] = useState<Array<{
+    id: number;
+    x: number;
+    y: number;
+    size: number;
+    delay: number;
+    duration: number;
+    opacity: number;
+  }>>([]);
+
+  useEffect(() => {
+    setGhosts(
+      Array.from({ length: 15 }, (_, i) => ({
+        id: i,
+        x: Math.random() * 100,
+        y: Math.random() * 100,
+        size: 24 + Math.random() * 40,
+        delay: Math.random() * 8,
+        duration: 8 + Math.random() * 8,
+        opacity: 0.08 + Math.random() * 0.12,
+      }))
+    );
+  }, []);
+
+  if (ghosts.length === 0) return null;
+
+  return (
+    <div className="absolute inset-0 overflow-hidden">
+      {ghosts.map((ghost) => (
+        <FloatingGhost key={ghost.id} {...ghost} />
+      ))}
+    </div>
+  );
+}
 
 export function Download() {
   return (
-    <section id="download" className="relative py-32 px-6">
+    <section id="download" className="relative py-32 px-6 overflow-hidden">
       <div className="absolute inset-0 bg-linear-to-b from-transparent via-cyan/[0.03] to-transparent" />
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-cyan/5 rounded-full blur-3xl" />
+      
+      {/* Floating ghost particles */}
+      <GhostParticles />
 
       <div className="relative max-w-3xl mx-auto text-center">
         <motion.div
@@ -14,16 +101,28 @@ export function Download() {
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, margin: "-100px" }}
           transition={{ duration: 0.6 }}
+          className="flex flex-col items-center"
         >
-          <span className="inline-block font-mono text-sm text-cyan mb-4 tracking-wider uppercase">
-            Get Started
+          <motion.div
+            animate={{ y: [0, -8, 0] }}
+            transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+            className="mb-6"
+          >
+            <svg className="w-16 h-16 text-cyan" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C7.582 2 4 5.582 4 10v8c0 .75.6 1 1 .6l2-1.6 2 1.6c.4.3.8.3 1.2 0L12 17l1.8 1.6c.4.3.8.3 1.2 0l2-1.6 2 1.6c.4.4 1 .15 1-.6v-8c0-4.418-3.582-8-8-8z"/>
+              <circle cx="9" cy="9" r="1.5" className="fill-background"/>
+              <circle cx="15" cy="9" r="1.5" className="fill-background"/>
+            </svg>
+          </motion.div>
+          <span className="font-mono text-sm text-cyan mb-4 tracking-wider uppercase">
+            Join the Haunting
           </span>
           <h2 className="text-4xl sm:text-5xl lg:text-6xl font-mono font-bold mb-6">
-            Get <span className="text-gradient-animated">Ghostly</span>
+            Become a <span className="text-gradient-animated">Ghost</span>
           </h2>
           <p className="text-lg text-gray-400 max-w-lg mx-auto mb-12">
-            Download the app and start chatting in seconds.
-            No sign-up, no configuration, no compromise.
+            Download and start haunting in seconds.
+            No sign-up. No traces. Just you and your ghostly friends.
           </p>
         </motion.div>
 

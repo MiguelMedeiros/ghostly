@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { usePkarr } from "../hooks/usePkarr";
+import { useI18n } from "../contexts/I18nContext";
 import { generateSessionId, saveInviteCode } from "../lib/storage";
 
 export function Home() {
   const navigate = useNavigate();
   const { createDrop } = usePkarr();
+  const { t } = useI18n();
   const [isCreating, setIsCreating] = useState(false);
 
   const handleCreate = async () => {
@@ -31,31 +33,30 @@ export function Home() {
           </svg>
         </div>
         <h2 className="text-text-primary text-2xl font-light">
-          Ghostly
+          {t("app.name")}
         </h2>
         <p className="text-text-muted text-sm leading-relaxed">
-          Ephemeral encrypted messaging over the DHT.
-          <br />
-          No server. No accounts. No trace.
+          {t("app.tagline")}
         </p>
         <div className="border-t border-border pt-4 mt-6">
           <p className="text-text-muted text-xs leading-relaxed">
-            Messages are encrypted and published as DNS records to the Mainline
-            DHT via Pkarr. Your private keys never leave this device. Messages
-            expire when you stop republishing.
+            {t("home.features.encrypted")} · {t("home.features.ephemeral")} · {t("home.features.decentralized")}
           </p>
         </div>
+        <p className="text-text-muted text-xs">
+          {t("home.description")}
+        </p>
         <button
           onClick={handleCreate}
           disabled={isCreating}
-          className="inline-flex items-center gap-2 px-6 py-3 bg-accent text-[#111b21] rounded-lg font-bold text-sm tracking-wider uppercase hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          className="inline-flex items-center gap-2 px-6 py-3 bg-accent text-[#111b21] rounded-lg font-bold text-sm tracking-wider uppercase hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed mt-4"
         >
           {isCreating ? (
             <>
               <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
                 <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="31.4 31.4" strokeLinecap="round" />
               </svg>
-              Creating...
+              {t("common.loading")}
             </>
           ) : (
             <>
@@ -63,13 +64,10 @@ export function Home() {
                 <line x1="12" y1="5" x2="12" y2="19" />
                 <line x1="5" y1="12" x2="19" y2="12" />
               </svg>
-              Create New Chat
+              {t("home.createChat")}
             </>
           )}
         </button>
-        <p className="text-text-muted text-xs">
-          Or join with an invite link from the sidebar.
-        </p>
       </div>
     </div>
   );

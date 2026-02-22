@@ -1,0 +1,153 @@
+{
+  "common": {
+    "save": "Enregistrer",
+    "cancel": "Annuler",
+    "delete": "Supprimer",
+    "confirm": "Confirmer",
+    "copy": "Copier",
+    "copied": "Copié !",
+    "close": "Fermer",
+    "back": "Retour",
+    "loading": "Chargement...",
+    "error": "Erreur",
+    "success": "Succès"
+  },
+  "app": {
+    "name": "Ghostly",
+    "tagline": "Messagerie éphémère et chiffrée sur DHT"
+  },
+  "sidebar": {
+    "chats": "Discussions",
+    "newChat": "Nouvelle Discussion",
+    "searchPlaceholder": "Rechercher...",
+    "noChats": "Aucune discussion",
+    "deleteChat": "Supprimer la discussion",
+    "deleteAllChats": "Supprimer toutes les discussions",
+    "copyInvite": "Copier le code d'invitation",
+    "settings": "Paramètres"
+  },
+  "chat": {
+    "typeMessage": "Tapez un message...",
+    "send": "Envoyer",
+    "online": "en ligne",
+    "offline": "hors ligne",
+    "connecting": "connexion",
+    "lastSeen": "Vu {{time}}",
+    "today": "Aujourd'hui",
+    "yesterday": "Hier"
+  },
+  "home": {
+    "welcome": "Bienvenue sur Ghostly",
+    "description": "Messagerie sécurisée et éphémère respectant votre vie privée",
+    "createChat": "Créer une Discussion",
+    "features": {
+      "encrypted": "Chiffrement de bout en bout",
+      "ephemeral": "Les messages disparaissent",
+      "decentralized": "Pas de serveur central"
+    }
+  },
+  "settings": {
+    "title": "Paramètres",
+    "profile": "Profil",
+    "defaultNickname": "Pseudo par défaut",
+    "defaultNicknameHint": "Ce nom sera utilisé par défaut dans les nouveaux chats",
+    "nicknamePlaceholder": "Entrez votre pseudo...",
+    "randomizeName": "Générer un nom aléatoire",
+    "appearance": "Apparence",
+    "theme": "Thème",
+    "themes": {
+      "dark": "Sombre",
+      "light": "Clair",
+      "system": "Système"
+    },
+    "colorTheme": "Thème de Couleur",
+    "colorThemes": {
+      "classic": "Classique",
+      "monochrome": "Monochrome",
+      "cyan": "Cyan",
+      "purple": "Violet"
+    },
+    "colorScheme": "Mode",
+    "colorSchemeDescription": "Choisir apparence claire ou sombre",
+    "colorSchemes": {
+      "dark": "Sombre",
+      "light": "Clair",
+      "system": "Auto"
+    },
+    "language": "Langue",
+    "security": "Sécurité",
+    "lockScreen": "Écran de Verrouillage",
+    "lockScreenDescription": "Demander un mot de passe après inactivité",
+    "password": "Mot de passe",
+    "newPassword": "Nouveau mot de passe",
+    "confirmPassword": "Confirmer le mot de passe",
+    "currentPassword": "Mot de passe actuel",
+    "changePassword": "Changer le mot de passe",
+    "setPassword": "Définir le mot de passe",
+    "removePassword": "Supprimer le mot de passe",
+    "timeout": "Verrouiller après",
+    "timeoutOptions": {
+      "1": "1 minute",
+      "5": "5 minutes",
+      "15": "15 minutes",
+      "30": "30 minutes",
+      "60": "1 heure"
+    },
+    "passwordMismatch": "Les mots de passe ne correspondent pas",
+    "passwordTooShort": "Le mot de passe doit contenir au moins 4 caractères",
+    "passwordSet": "Mot de passe défini avec succès",
+    "passwordChanged": "Mot de passe modifié avec succès",
+    "passwordRemoved": "Mot de passe supprimé",
+    "incorrectPassword": "Mot de passe incorrect",
+    "lockNow": "Verrouiller Maintenant",
+    "notifications": "Notifications",
+    "notificationSounds": "Sons de notification",
+    "notificationSoundsDescription": "Jouer un son à l'arrivée de nouveaux messages",
+    "data": "Données et Stockage",
+    "storageUsed": "Stockage utilisé",
+    "clearAllData": "Effacer toutes les données",
+    "clearAllDataDescription": "Supprimer toutes les discussions et réinitialiser les paramètres",
+    "clearAllDataConfirm": "Êtes-vous sûr ? Cette action est irréversible.",
+    "dataCleared": "Toutes les données ont été effacées",
+    "about": "À propos",
+    "version": "Version",
+    "website": "Site web",
+    "sourceCode": "Code source",
+    "license": "Licence"
+  },
+  "lockScreen": {
+    "title": "Ghostly est verrouillé",
+    "enterPassword": "Entrez votre mot de passe pour déverrouiller",
+    "unlock": "Déverrouiller",
+    "incorrectPassword": "Mot de passe incorrect, réessayez"
+  },
+  "calls": {
+    "audio": "Appel audio",
+    "video": "Appel vidéo",
+    "incoming": "Appel entrant",
+    "outgoing": "Appel en cours...",
+    "connected": "Connecté",
+    "ended": "Appel terminé",
+    "missed": "Appel manqué",
+    "rejected": "Appel rejeté",
+    "duration": "Durée : {{duration}}",
+    "accept": "Accepter",
+    "decline": "Refuser",
+    "hangUp": "Raccrocher",
+    "mute": "Couper le son",
+    "unmute": "Activer le son",
+    "camera": "Caméra",
+    "cameraOff": "Caméra désactivée"
+  },
+  "share": {
+    "title": "Partager cette discussion",
+    "description": "Scannez le QR code ou partagez le lien",
+    "copyLink": "Copier le lien",
+    "linkCopied": "Lien copié dans le presse-papiers"
+  },
+  "errors": {
+    "connectionFailed": "Échec de connexion",
+    "messageFailed": "Échec d'envoi du message",
+    "generic": "Une erreur s'est produite"
+  }
+}

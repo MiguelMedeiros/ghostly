@@ -51,6 +51,7 @@ export interface ChatParams {
   seedB64: string;
   peerPubKeyB64: string;
   encKeyB64: string;
+  nick?: string;
 }
 
 export type ConnectionStatus = "connecting" | "online" | "offline" | "error";

@@ -1,0 +1,153 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "confirm": "Confirm",
+    "copy": "Copy",
+    "copied": "Copied!",
+    "close": "Close",
+    "back": "Back",
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success"
+  },
+  "app": {
+    "name": "Ghostly",
+    "tagline": "Ephemeral encrypted messaging over the DHT"
+  },
+  "sidebar": {
+    "chats": "Chats",
+    "newChat": "New Chat",
+    "searchPlaceholder": "Search chats...",
+    "noChats": "No chats yet",
+    "deleteChat": "Delete chat",
+    "deleteAllChats": "Delete all chats",
+    "copyInvite": "Copy invite code",
+    "settings": "Settings"
+  },
+  "chat": {
+    "typeMessage": "Type a message...",
+    "send": "Send",
+    "online": "online",
+    "offline": "offline",
+    "connecting": "connecting",
+    "lastSeen": "Last seen {{time}}",
+    "today": "Today",
+    "yesterday": "Yesterday"
+  },
+  "home": {
+    "welcome": "Welcome to Ghostly",
+    "description": "Secure, ephemeral messaging that respects your privacy",
+    "createChat": "Create New Chat",
+    "features": {
+      "encrypted": "End-to-end encrypted",
+      "ephemeral": "Messages disappear",
+      "decentralized": "No central server"
+    }
+  },
+  "settings": {
+    "title": "Settings",
+    "profile": "Profile",
+    "defaultNickname": "Default Nickname",
+    "defaultNicknameHint": "This name will be used as default in new chats",
+    "nicknamePlaceholder": "Enter your nickname...",
+    "randomizeName": "Generate random name",
+    "appearance": "Appearance",
+    "theme": "Theme",
+    "themes": {
+      "dark": "Dark",
+      "light": "Light",
+      "system": "System"
+    },
+    "colorTheme": "Color Theme",
+    "colorThemes": {
+      "classic": "Classic",
+      "monochrome": "Monochrome",
+      "cyan": "Cyan",
+      "purple": "Purple"
+    },
+    "colorScheme": "Mode",
+    "colorSchemeDescription": "Choose light or dark appearance",
+    "colorSchemes": {
+      "dark": "Dark",
+      "light": "Light",
+      "system": "Auto"
+    },
+    "language": "Language",
+    "security": "Security",
+    "lockScreen": "Lock Screen",
+    "lockScreenDescription": "Require password to access the app after inactivity",
+    "lockNow": "Lock Now",
+    "password": "Password",
+    "newPassword": "New password",
+    "confirmPassword": "Confirm password",
+    "currentPassword": "Current password",
+    "changePassword": "Change password",
+    "setPassword": "Set password",
+    "removePassword": "Remove password",
+    "timeout": "Lock after",
+    "timeoutOptions": {
+      "1": "1 minute",
+      "5": "5 minutes",
+      "15": "15 minutes",
+      "30": "30 minutes",
+      "60": "1 hour"
+    },
+    "passwordMismatch": "Passwords do not match",
+    "passwordTooShort": "Password must be at least 4 characters",
+    "passwordSet": "Password set successfully",
+    "passwordChanged": "Password changed successfully",
+    "passwordRemoved": "Password removed",
+    "incorrectPassword": "Incorrect password",
+    "notifications": "Notifications",
+    "notificationSounds": "Notification sounds",
+    "notificationSoundsDescription": "Play sound when new messages arrive",
+    "data": "Data & Storage",
+    "storageUsed": "Storage used",
+    "clearAllData": "Clear all data",
+    "clearAllDataDescription": "Delete all chats and reset settings",
+    "clearAllDataConfirm": "Are you sure? This cannot be undone.",
+    "dataCleared": "All data cleared",
+    "about": "About",
+    "version": "Version",
+    "website": "Website",
+    "sourceCode": "Source code",
+    "license": "License"
+  },
+  "lockScreen": {
+    "title": "Ghostly is locked",
+    "enterPassword": "Enter your password to unlock",
+    "unlock": "Unlock",
+    "incorrectPassword": "Incorrect password, try again"
+  },
+  "calls": {
+    "audio": "Audio call",
+    "video": "Video call",
+    "incoming": "Incoming call",
+    "outgoing": "Calling...",
+    "connected": "Connected",
+    "ended": "Call ended",
+    "missed": "Missed call",
+    "rejected": "Call rejected",
+    "duration": "Duration: {{duration}}",
+    "accept": "Accept",
+    "decline": "Decline",
+    "hangUp": "Hang up",
+    "mute": "Mute",
+    "unmute": "Unmute",
+    "camera": "Camera",
+    "cameraOff": "Camera off"
+  },
+  "share": {
+    "title": "Share this chat",
+    "description": "Scan the QR code or share the link below",
+    "copyLink": "Copy link",
+    "linkCopied": "Link copied to clipboard"
+  },
+  "errors": {
+    "connectionFailed": "Connection failed",
+    "messageFailed": "Failed to send message",
+    "generic": "Something went wrong"
+  }
+}

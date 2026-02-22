@@ -3,7 +3,7 @@ import { listSessions, addMessage } from "../lib/storage";
 import { resolveMessages } from "../lib/pkarr";
 import type { ChatMessage } from "../lib/types";
 
-const BG_POLL_INTERVAL = 8_000;
+const BG_POLL_INTERVAL = 20_000;
 
 export interface BackgroundPollerState {
   syncingSessions: Set<string>;

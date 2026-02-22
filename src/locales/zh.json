@@ -1,0 +1,153 @@
+{
+  "common": {
+    "save": "保存",
+    "cancel": "取消",
+    "delete": "删除",
+    "confirm": "确认",
+    "copy": "复制",
+    "copied": "已复制！",
+    "close": "关闭",
+    "back": "返回",
+    "loading": "加载中...",
+    "error": "错误",
+    "success": "成功"
+  },
+  "app": {
+    "name": "Ghostly",
+    "tagline": "基于DHT的临时加密通讯"
+  },
+  "sidebar": {
+    "chats": "聊天",
+    "newChat": "新建聊天",
+    "searchPlaceholder": "搜索聊天...",
+    "noChats": "暂无聊天",
+    "deleteChat": "删除聊天",
+    "deleteAllChats": "删除所有聊天",
+    "copyInvite": "复制邀请码",
+    "settings": "设置"
+  },
+  "chat": {
+    "typeMessage": "输入消息...",
+    "send": "发送",
+    "online": "在线",
+    "offline": "离线",
+    "connecting": "连接中",
+    "lastSeen": "最后上线 {{time}}",
+    "today": "今天",
+    "yesterday": "昨天"
+  },
+  "home": {
+    "welcome": "欢迎使用 Ghostly",
+    "description": "尊重隐私的安全临时通讯",
+    "createChat": "创建新聊天",
+    "features": {
+      "encrypted": "端到端加密",
+      "ephemeral": "消息自动消失",
+      "decentralized": "无中心服务器"
+    }
+  },
+  "settings": {
+    "title": "设置",
+    "profile": "个人资料",
+    "defaultNickname": "默认昵称",
+    "defaultNicknameHint": "此名称将作为新聊天的默认名称",
+    "nicknamePlaceholder": "输入您的昵称...",
+    "randomizeName": "生成随机名称",
+    "appearance": "外观",
+    "theme": "主题",
+    "themes": {
+      "dark": "深色",
+      "light": "浅色",
+      "system": "跟随系统"
+    },
+    "colorTheme": "颜色主题",
+    "colorThemes": {
+      "classic": "经典",
+      "monochrome": "单色",
+      "cyan": "青色",
+      "purple": "紫色"
+    },
+    "colorScheme": "模式",
+    "colorSchemeDescription": "选择浅色或深色外观",
+    "colorSchemes": {
+      "dark": "深色",
+      "light": "浅色",
+      "system": "自动"
+    },
+    "language": "语言",
+    "security": "安全",
+    "lockScreen": "锁屏",
+    "lockScreenDescription": "闲置后需要密码才能访问应用",
+    "password": "密码",
+    "newPassword": "新密码",
+    "confirmPassword": "确认密码",
+    "currentPassword": "当前密码",
+    "changePassword": "修改密码",
+    "setPassword": "设置密码",
+    "removePassword": "移除密码",
+    "timeout": "锁定时间",
+    "timeoutOptions": {
+      "1": "1分钟",
+      "5": "5分钟",
+      "15": "15分钟",
+      "30": "30分钟",
+      "60": "1小时"
+    },
+    "passwordMismatch": "密码不匹配",
+    "passwordTooShort": "密码至少需要4个字符",
+    "passwordSet": "密码设置成功",
+    "passwordChanged": "密码修改成功",
+    "passwordRemoved": "密码已移除",
+    "incorrectPassword": "密码错误",
+    "lockNow": "立即锁定",
+    "notifications": "通知",
+    "notificationSounds": "通知声音",
+    "notificationSoundsDescription": "收到新消息时播放声音",
+    "data": "数据与存储",
+    "storageUsed": "已用存储空间",
+    "clearAllData": "清除所有数据",
+    "clearAllDataDescription": "删除所有聊天记录并重置设置",
+    "clearAllDataConfirm": "确定吗？此操作无法撤销。",
+    "dataCleared": "所有数据已清除",
+    "about": "关于",
+    "version": "版本",
+    "website": "网站",
+    "sourceCode": "源代码",
+    "license": "许可证"
+  },
+  "lockScreen": {
+    "title": "Ghostly 已锁定",
+    "enterPassword": "输入密码解锁",
+    "unlock": "解锁",
+    "incorrectPassword": "密码错误，请重试"
+  },
+  "calls": {
+    "audio": "语音通话",
+    "video": "视频通话",
+    "incoming": "来电",
+    "outgoing": "呼叫中...",
+    "connected": "已连接",
+    "ended": "通话结束",
+    "missed": "未接来电",
+    "rejected": "通话被拒绝",
+    "duration": "通话时长：{{duration}}",
+    "accept": "接听",
+    "decline": "拒绝",
+    "hangUp": "挂断",
+    "mute": "静音",
+    "unmute": "取消静音",
+    "camera": "摄像头",
+    "cameraOff": "关闭摄像头"
+  },
+  "share": {
+    "title": "分享此聊天",
+    "description": "扫描二维码或分享下方链接",
+    "copyLink": "复制链接",
+    "linkCopied": "链接已复制到剪贴板"
+  },
+  "errors": {
+    "connectionFailed": "连接失败",
+    "messageFailed": "消息发送失败",
+    "generic": "出错了"
+  }
+}

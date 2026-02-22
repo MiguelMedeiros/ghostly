@@ -43,12 +43,20 @@ function AnimatedCounter({
   );
 }
 
+const GhostIcon = () => (
+  <svg className="w-8 h-8" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M12 2C7.582 2 4 5.582 4 10v8c0 .75.6 1 1 .6l2-1.6 2 1.6c.4.3.8.3 1.2 0L12 17l1.8 1.6c.4.3.8.3 1.2 0l2-1.6 2 1.6c.4.4 1 .15 1-.6v-8c0-4.418-3.582-8-8-8z"/>
+    <circle cx="9" cy="9" r="1.5" className="fill-surface"/>
+    <circle cx="15" cy="9" r="1.5" className="fill-surface"/>
+  </svg>
+);
+
 const stats = [
   {
     value: 10,
     suffix: "M+",
-    label: "DHT Nodes",
-    description: "Messages travel through the Mainline BitTorrent DHT — the largest distributed hash table on the planet.",
+    label: "Haunted Nodes",
+    description: "Your ghost messages float through the Mainline BitTorrent DHT — the largest haunted network on the planet.",
     icon: (
       <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5a17.92 17.92 0 01-8.716-2.247m0 0A9.015 9.015 0 003 12c0-1.605.42-3.113 1.157-4.418" />
@@ -58,19 +66,15 @@ const stats = [
   {
     value: 0,
     suffix: "",
-    label: "Servers Required",
-    description: "No servers, no infrastructure, no single point of failure. Messages are published directly to the decentralized network.",
-    icon: (
-      <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 14.25h13.5m-13.5 0a3 3 0 01-3-3m3 3a3 3 0 100 6h13.5a3 3 0 100-6m-16.5-3a3 3 0 013-3h13.5a3 3 0 013 3m-19.5 0a4.5 4.5 0 01.9-2.7L5.737 5.1a3.375 3.375 0 012.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 01.9 2.7m0 0a3 3 0 01-3 3m0 3h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008zm-3 6h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008z" />
-      </svg>
-    ),
+    label: "Servers to Exorcise",
+    description: "No servers to possess, no infrastructure to haunt, no single point of failure. Your ghost roams free.",
+    icon: <GhostIcon />,
   },
   {
     value: 256,
     suffix: "-bit",
-    label: "Encryption",
-    description: "End-to-end encrypted with NaCl secretbox (XSalsa20-Poly1305). Keys never leave your device.",
+    label: "Ghost Shield",
+    description: "Cloaked with NaCl secretbox encryption. Even other ghosts can't read your messages.",
     icon: (
       <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
@@ -107,9 +111,9 @@ export function WhatIs() {
             <span className="text-gradient">Ghostly</span>?
           </h2>
           <p className="text-lg text-gray-400 max-w-2xl mx-auto leading-relaxed">
-            A chat app with no backend. Messages are encrypted on your device,
-            published as signed DNS records to the Mainline DHT, and expire
-            naturally when you stop — like a ghost fading away.
+            A messenger from the spirit realm. Your messages are encrypted on your device,
+            float through the DHT as ghostly whispers, and fade away when you close the app
+            — leaving no trace behind, just like a proper ghost.
           </p>
         </motion.div>
 

@@ -24,30 +24,40 @@ export function Navbar() {
       }`}
     >
       <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-        <a href="#" className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-[#0f172a] border border-border/50 flex items-center justify-center">
-            <svg className="w-5 h-5 text-cyan" viewBox="0 0 24 24" fill="currentColor">
+        <a href="/" className="flex items-center gap-2.5 group">
+          <motion.div
+            animate={{ y: [0, -2, 0] }}
+            transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
+            className="relative"
+          >
+            <svg className="w-7 h-7 text-cyan transition-all group-hover:text-green group-hover:scale-110 duration-300" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 2C7.582 2 4 5.582 4 10v8c0 .75.6 1 1 .6l2-1.6 2 1.6c.4.3.8.3 1.2 0L12 17l1.8 1.6c.4.3.8.3 1.2 0l2-1.6 2 1.6c.4.4 1 .15 1-.6v-8c0-4.418-3.582-8-8-8z"/>
-              <circle cx="9" cy="9" r="1.5" fill="#0f172a"/>
-              <circle cx="15" cy="9" r="1.5" fill="#0f172a"/>
+              <circle cx="9" cy="9" r="1.5" className="fill-background"/>
+              <circle cx="15" cy="9" r="1.5" className="fill-background"/>
             </svg>
-          </div>
+          </motion.div>
           <span className="font-mono font-bold text-sm text-gradient hidden sm:inline">
             Ghostly
           </span>
         </a>
 
         <div className="hidden md:flex items-center gap-8 text-sm text-gray-400">
-          <a href="#how-it-works" className="hover:text-cyan transition-colors">
+          <a href="/#how-it-works" className="hover:text-cyan transition-colors">
             How it works
           </a>
-          <a href="#features" className="hover:text-cyan transition-colors">
+          <a href="/#features" className="hover:text-cyan transition-colors">
             Features
           </a>
-          <a href="#protocol" className="hover:text-cyan transition-colors">
+          <a href="/#protocol" className="hover:text-cyan transition-colors">
             Protocol
           </a>
-          <a href="#download" className="hover:text-cyan transition-colors">
+          <a href="/docs" className="hover:text-cyan transition-colors">
+            Docs
+          </a>
+          <a href="/#faq" className="hover:text-cyan transition-colors">
+            FAQ
+          </a>
+          <a href="/#download" className="hover:text-cyan transition-colors">
             Download
           </a>
         </div>
@@ -64,7 +74,7 @@ export function Navbar() {
             </svg>
           </a>
           <a
-            href="#download"
+            href="/#download"
             className="px-4 py-1.5 rounded-lg bg-cyan/10 text-cyan text-sm font-medium border border-cyan/20 hover:bg-cyan/20 transition-colors"
           >
             Download

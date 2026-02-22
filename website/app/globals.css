@@ -112,3 +112,33 @@ body {
 .animate-float {
   animation: float 6s ease-in-out infinite;
 }
+
+/* Mobile sidebar transform utilities */
+.-translate-x-full {
+  transform: translateX(-100%);
+}
+
+.mobile-menu-open {
+  transform: translateX(0) !important;
+}
+
+@media (min-width: 1024px) {
+  .lg\:translate-x-0 {
+    transform: translateX(0);
+  }
+}
+
+/* Boxed layout for docs */
+.docs-container {
+  max-width: 72rem; /* max-w-6xl = 1152px, same as navbar */
+  margin-left: auto;
+  margin-right: auto;
+  width: 100%;
+  padding-left: 1.5rem;
+  padding-right: 1.5rem;
+}
+
+/* Scroll offset for fixed navbar */
+.docs-container section[id] {
+  scroll-margin-top: 6rem; /* 96px - navbar height (64px) + extra padding */
+}

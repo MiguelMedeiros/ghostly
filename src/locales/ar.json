@@ -1,0 +1,153 @@
+{
+  "common": {
+    "save": "حفظ",
+    "cancel": "إلغاء",
+    "delete": "حذف",
+    "confirm": "تأكيد",
+    "copy": "نسخ",
+    "copied": "تم النسخ!",
+    "close": "إغلاق",
+    "back": "رجوع",
+    "loading": "جاري التحميل...",
+    "error": "خطأ",
+    "success": "نجاح"
+  },
+  "app": {
+    "name": "Ghostly",
+    "tagline": "رسائل مشفرة ومؤقتة عبر DHT"
+  },
+  "sidebar": {
+    "chats": "المحادثات",
+    "newChat": "محادثة جديدة",
+    "searchPlaceholder": "بحث في المحادثات...",
+    "noChats": "لا توجد محادثات",
+    "deleteChat": "حذف المحادثة",
+    "deleteAllChats": "حذف جميع المحادثات",
+    "copyInvite": "نسخ رمز الدعوة",
+    "settings": "الإعدادات"
+  },
+  "chat": {
+    "typeMessage": "اكتب رسالة...",
+    "send": "إرسال",
+    "online": "متصل",
+    "offline": "غير متصل",
+    "connecting": "جاري الاتصال",
+    "lastSeen": "آخر ظهور {{time}}",
+    "today": "اليوم",
+    "yesterday": "أمس"
+  },
+  "home": {
+    "welcome": "مرحباً بك في Ghostly",
+    "description": "رسائل آمنة ومؤقتة تحترم خصوصيتك",
+    "createChat": "إنشاء محادثة جديدة",
+    "features": {
+      "encrypted": "تشفير من طرف إلى طرف",
+      "ephemeral": "الرسائل تختفي",
+      "decentralized": "بدون خادم مركزي"
+    }
+  },
+  "settings": {
+    "title": "الإعدادات",
+    "profile": "الملف الشخصي",
+    "defaultNickname": "الاسم المستعار الافتراضي",
+    "defaultNicknameHint": "سيتم استخدام هذا الاسم كافتراضي في المحادثات الجديدة",
+    "nicknamePlaceholder": "أدخل اسمك المستعار...",
+    "randomizeName": "إنشاء اسم عشوائي",
+    "appearance": "المظهر",
+    "theme": "السمة",
+    "themes": {
+      "dark": "داكن",
+      "light": "فاتح",
+      "system": "النظام"
+    },
+    "colorTheme": "سمة الألوان",
+    "colorThemes": {
+      "classic": "كلاسيكي",
+      "monochrome": "أحادي اللون",
+      "cyan": "سماوي",
+      "purple": "بنفسجي"
+    },
+    "colorScheme": "الوضع",
+    "colorSchemeDescription": "اختر المظهر الفاتح أو الداكن",
+    "colorSchemes": {
+      "dark": "داكن",
+      "light": "فاتح",
+      "system": "تلقائي"
+    },
+    "language": "اللغة",
+    "security": "الأمان",
+    "lockScreen": "شاشة القفل",
+    "lockScreenDescription": "طلب كلمة مرور للوصول بعد عدم النشاط",
+    "password": "كلمة المرور",
+    "newPassword": "كلمة مرور جديدة",
+    "confirmPassword": "تأكيد كلمة المرور",
+    "currentPassword": "كلمة المرور الحالية",
+    "changePassword": "تغيير كلمة المرور",
+    "setPassword": "تعيين كلمة المرور",
+    "removePassword": "إزالة كلمة المرور",
+    "timeout": "القفل بعد",
+    "timeoutOptions": {
+      "1": "دقيقة واحدة",
+      "5": "٥ دقائق",
+      "15": "١٥ دقيقة",
+      "30": "٣٠ دقيقة",
+      "60": "ساعة واحدة"
+    },
+    "passwordMismatch": "كلمات المرور غير متطابقة",
+    "passwordTooShort": "يجب أن تكون كلمة المرور ٤ أحرف على الأقل",
+    "passwordSet": "تم تعيين كلمة المرور بنجاح",
+    "passwordChanged": "تم تغيير كلمة المرور بنجاح",
+    "passwordRemoved": "تم إزالة كلمة المرور",
+    "incorrectPassword": "كلمة المرور غير صحيحة",
+    "lockNow": "قفل الآن",
+    "notifications": "الإشعارات",
+    "notificationSounds": "أصوات الإشعارات",
+    "notificationSoundsDescription": "تشغيل صوت عند وصول رسائل جديدة",
+    "data": "البيانات والتخزين",
+    "storageUsed": "المساحة المستخدمة",
+    "clearAllData": "مسح جميع البيانات",
+    "clearAllDataDescription": "حذف جميع المحادثات وإعادة تعيين الإعدادات",
+    "clearAllDataConfirm": "هل أنت متأكد؟ لا يمكن التراجع عن هذا الإجراء.",
+    "dataCleared": "تم مسح جميع البيانات",
+    "about": "حول",
+    "version": "الإصدار",
+    "website": "الموقع",
+    "sourceCode": "الكود المصدري",
+    "license": "الترخيص"
+  },
+  "lockScreen": {
+    "title": "Ghostly مقفل",
+    "enterPassword": "أدخل كلمة المرور لإلغاء القفل",
+    "unlock": "إلغاء القفل",
+    "incorrectPassword": "كلمة المرور غير صحيحة، حاول مرة أخرى"
+  },
+  "calls": {
+    "audio": "مكالمة صوتية",
+    "video": "مكالمة فيديو",
+    "incoming": "مكالمة واردة",
+    "outgoing": "جاري الاتصال...",
+    "connected": "متصل",
+    "ended": "انتهت المكالمة",
+    "missed": "مكالمة فائتة",
+    "rejected": "تم رفض المكالمة",
+    "duration": "المدة: {{duration}}",
+    "accept": "قبول",
+    "decline": "رفض",
+    "hangUp": "إنهاء",
+    "mute": "كتم الصوت",
+    "unmute": "إلغاء كتم الصوت",
+    "camera": "الكاميرا",
+    "cameraOff": "إيقاف الكاميرا"
+  },
+  "share": {
+    "title": "مشاركة هذه المحادثة",
+    "description": "امسح رمز QR أو شارك الرابط",
+    "copyLink": "نسخ الرابط",
+    "linkCopied": "تم نسخ الرابط"
+  },
+  "errors": {
+    "connectionFailed": "فشل الاتصال",
+    "messageFailed": "فشل إرسال الرسالة",
+    "generic": "حدث خطأ ما"
+  }
+}

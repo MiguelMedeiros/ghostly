@@ -1,0 +1,153 @@
+{
+  "common": {
+    "save": "Salva",
+    "cancel": "Annulla",
+    "delete": "Elimina",
+    "confirm": "Conferma",
+    "copy": "Copia",
+    "copied": "Copiato!",
+    "close": "Chiudi",
+    "back": "Indietro",
+    "loading": "Caricamento...",
+    "error": "Errore",
+    "success": "Successo"
+  },
+  "app": {
+    "name": "Ghostly",
+    "tagline": "Messaggistica effimera e crittografata su DHT"
+  },
+  "sidebar": {
+    "chats": "Chat",
+    "newChat": "Nuova Chat",
+    "searchPlaceholder": "Cerca chat...",
+    "noChats": "Nessuna chat",
+    "deleteChat": "Elimina chat",
+    "deleteAllChats": "Elimina tutte le chat",
+    "copyInvite": "Copia codice invito",
+    "settings": "Impostazioni"
+  },
+  "chat": {
+    "typeMessage": "Scrivi un messaggio...",
+    "send": "Invia",
+    "online": "online",
+    "offline": "offline",
+    "connecting": "connessione",
+    "lastSeen": "Ultimo accesso {{time}}",
+    "today": "Oggi",
+    "yesterday": "Ieri"
+  },
+  "home": {
+    "welcome": "Benvenuto su Ghostly",
+    "description": "Messaggistica sicura ed effimera che rispetta la tua privacy",
+    "createChat": "Crea Nuova Chat",
+    "features": {
+      "encrypted": "Crittografia end-to-end",
+      "ephemeral": "I messaggi scompaiono",
+      "decentralized": "Nessun server centrale"
+    }
+  },
+  "settings": {
+    "title": "Impostazioni",
+    "profile": "Profilo",
+    "defaultNickname": "Nickname Predefinito",
+    "defaultNicknameHint": "Questo nome verrà usato come predefinito nelle nuove chat",
+    "nicknamePlaceholder": "Inserisci il tuo nickname...",
+    "randomizeName": "Genera nome casuale",
+    "appearance": "Aspetto",
+    "theme": "Tema",
+    "themes": {
+      "dark": "Scuro",
+      "light": "Chiaro",
+      "system": "Sistema"
+    },
+    "colorTheme": "Tema Colore",
+    "colorThemes": {
+      "classic": "Classico",
+      "monochrome": "Monocromatico",
+      "cyan": "Ciano",
+      "purple": "Viola"
+    },
+    "colorScheme": "Modalità",
+    "colorSchemeDescription": "Scegli aspetto chiaro o scuro",
+    "colorSchemes": {
+      "dark": "Scuro",
+      "light": "Chiaro",
+      "system": "Auto"
+    },
+    "language": "Lingua",
+    "security": "Sicurezza",
+    "lockScreen": "Schermata di Blocco",
+    "lockScreenDescription": "Richiedi password dopo inattività",
+    "password": "Password",
+    "newPassword": "Nuova password",
+    "confirmPassword": "Conferma password",
+    "currentPassword": "Password attuale",
+    "changePassword": "Cambia password",
+    "setPassword": "Imposta password",
+    "removePassword": "Rimuovi password",
+    "timeout": "Blocca dopo",
+    "timeoutOptions": {
+      "1": "1 minuto",
+      "5": "5 minuti",
+      "15": "15 minuti",
+      "30": "30 minuti",
+      "60": "1 ora"
+    },
+    "passwordMismatch": "Le password non corrispondono",
+    "passwordTooShort": "La password deve avere almeno 4 caratteri",
+    "passwordSet": "Password impostata con successo",
+    "passwordChanged": "Password modificata con successo",
+    "passwordRemoved": "Password rimossa",
+    "incorrectPassword": "Password errata",
+    "lockNow": "Blocca Ora",
+    "notifications": "Notifiche",
+    "notificationSounds": "Suoni di notifica",
+    "notificationSoundsDescription": "Riproduci un suono all'arrivo di nuovi messaggi",
+    "data": "Dati e Archiviazione",
+    "storageUsed": "Spazio utilizzato",
+    "clearAllData": "Cancella tutti i dati",
+    "clearAllDataDescription": "Elimina tutte le chat e reimposta le impostazioni",
+    "clearAllDataConfirm": "Sei sicuro? Questa azione non può essere annullata.",
+    "dataCleared": "Tutti i dati sono stati cancellati",
+    "about": "Informazioni",
+    "version": "Versione",
+    "website": "Sito web",
+    "sourceCode": "Codice sorgente",
+    "license": "Licenza"
+  },
+  "lockScreen": {
+    "title": "Ghostly è bloccato",
+    "enterPassword": "Inserisci la password per sbloccare",
+    "unlock": "Sblocca",
+    "incorrectPassword": "Password errata, riprova"
+  },
+  "calls": {
+    "audio": "Chiamata audio",
+    "video": "Videochiamata",
+    "incoming": "Chiamata in arrivo",
+    "outgoing": "Chiamata in corso...",
+    "connected": "Connesso",
+    "ended": "Chiamata terminata",
+    "missed": "Chiamata persa",
+    "rejected": "Chiamata rifiutata",
+    "duration": "Durata: {{duration}}",
+    "accept": "Accetta",
+    "decline": "Rifiuta",
+    "hangUp": "Riaggancia",
+    "mute": "Disattiva audio",
+    "unmute": "Attiva audio",
+    "camera": "Fotocamera",
+    "cameraOff": "Fotocamera disattivata"
+  },
+  "share": {
+    "title": "Condividi questa chat",
+    "description": "Scansiona il QR code o condividi il link",
+    "copyLink": "Copia link",
+    "linkCopied": "Link copiato negli appunti"
+  },
+  "errors": {
+    "connectionFailed": "Connessione fallita",
+    "messageFailed": "Invio messaggio fallito",
+    "generic": "Qualcosa è andato storto"
+  }
+}

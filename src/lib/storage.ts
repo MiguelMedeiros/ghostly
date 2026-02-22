@@ -1,5 +1,34 @@
 import type { ChatMessage, ChatSession } from "./types";
 
+export const GHOST_NAMES = [
+  "Casper", "Phantom", "Specter", "Shadow", "Wraith",
+  "Spirit", "Poltergeist", "Banshee", "Shade", "Apparition",
+  "Ghoul", "Spook", "Haunt", "Eidolon", "Revenant",
+  "Wisp", "Vapor", "Mist", "Echo", "Whisper",
+  "Glimmer", "Flicker", "Drift", "Haze", "Blur",
+  "Enigma", "Mystery", "Riddle", "Puzzle", "Cipher",
+  "Twilight", "Dusk", "Dawn", "Midnight", "Eclipse",
+  "Frost", "Storm", "Thunder", "Lightning", "Tempest",
+  "Raven", "Crow", "Owl", "Bat", "Wolf",
+  "Onyx", "Obsidian", "Cobalt", "Slate", "Ash"
+];
+
+export function getRandomGhostName(): string {
+  const index = Math.floor(Math.random() * GHOST_NAMES.length);
+  return GHOST_NAMES[index];
+}
+
+export function getGhostName(peerKey: string): string {
+  let hash = 0;
+  for (let i = 0; i < peerKey.length; i++) {
+    const char = peerKey.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  const index = Math.abs(hash) % GHOST_NAMES.length;
+  return GHOST_NAMES[index];
+}
+
 let _profile = "";
 
 export function setStorageProfile(profile: string): void {
@@ -45,6 +74,18 @@ export function addMessage(
   session.messages.push(message);
   session.messages.sort((a, b) => a.timestamp - b.timestamp);
   session.lastSyncAt = Date.now();
+  
+  if ((message.sender === "peer" || message.sender === "system") && message.id.startsWith("peer_")) {
+    if (message.nick) {
+      session.nick = message.nick;
+    } else {
+      const joinMatch = message.text.match(/^👋 (.+) joined$/);
+      if (joinMatch && joinMatch[1]) {
+        session.nick = joinMatch[1];
+      }
+    }
+  }
+  
   saveSession(session);
   return session;
 }
