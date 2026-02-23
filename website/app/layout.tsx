@@ -49,9 +49,9 @@ export const metadata: Metadata = {
   },
   description: siteConfig.description,
   keywords: siteConfig.keywords,
-  authors: [{ name: "Synonym" }],
-  creator: "Synonym",
-  publisher: "Synonym",
+  authors: [{ name: "Miguel Medeiros" }],
+  creator: "Miguel Medeiros",
+  publisher: "Miguel Medeiros",
   robots: {
     index: true,
     follow: true,
@@ -113,9 +113,9 @@ const jsonLd = {
     priceCurrency: "USD",
   },
   author: {
-    "@type": "Organization",
-    name: "Synonym",
-    url: "https://synonym.to",
+    "@type": "Person",
+    name: "Miguel Medeiros",
+    url: "https://miguelmedeiros.dev",
   },
   featureList: [
     "End-to-end encryption",
