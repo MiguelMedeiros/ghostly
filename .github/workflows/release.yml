@@ -79,9 +79,9 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ github.repository }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-${{ matrix.target }}-cargo-
+            ${{ runner.os }}-${{ matrix.target }}-cargo-${{ github.repository }}-
 
       - name: Install frontend dependencies
         run: npm ci
@@ -158,9 +158,9 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-${{ matrix.target }}-cargo-cli-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-cli-${{ github.repository }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-${{ matrix.target }}-cargo-cli-
+            ${{ runner.os }}-${{ matrix.target }}-cargo-cli-${{ github.repository }}-
 
       - name: Build CLI
         run: cargo build --manifest-path cli/Cargo.toml --release --target ${{ matrix.target }}

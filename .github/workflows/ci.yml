@@ -82,9 +82,9 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-tauri-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-tauri-${{ github.repository }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-tauri-
+            ${{ runner.os }}-cargo-tauri-${{ github.repository }}-
 
       - name: Check formatting (src-tauri)
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
@@ -126,9 +126,9 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-cli-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-cli-${{ github.repository }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-cli-
+            ${{ runner.os }}-cargo-cli-${{ github.repository }}-
 
       - name: Check formatting (cli)
         run: cargo fmt --manifest-path cli/Cargo.toml -- --check
