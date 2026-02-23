@@ -12,6 +12,7 @@
   <a href="#features">Features</a> •
   <a href="#download">Download</a> •
   <a href="#documentation">Docs</a> •
+  <a href="#troubleshooting">Troubleshooting</a> •
   <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
@@ -59,6 +60,18 @@ See [Installation Guide](docs/INSTALLATION.md) for all options and build instruc
 - [CLI Guide](docs/CLI.md) — Command reference and usage examples
 - [AI Agents](docs/AI-AGENTS.md) — Integration with OpenClaw, Cursor, bot examples
 - [Contributing](CONTRIBUTING.md) — How to contribute to the project
+
+## Troubleshooting
+
+### macOS: "Ghostly.app is damaged and can't be opened"
+
+This error occurs because macOS quarantines apps downloaded from outside the App Store. To fix it, run the following command in Terminal:
+
+```bash
+sudo xattr -cr /Applications/Ghostly.app
+```
+
+Enter your password when prompted, then try opening the app again.
 
 ---
 
