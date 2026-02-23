@@ -80,7 +80,7 @@ export function CLINavbar() {
             </svg>
           </a>
           <a
-            href="https://github.com/MiguelMedeiros/ghostly/releases/tag/v0.1.2"
+            href="https://github.com/MiguelMedeiros/ghostly/releases/tag/v0.1.3"
             target="_blank"
             rel="noopener noreferrer"
             className="px-4 py-1.5 rounded-lg bg-green/10 text-green text-sm font-medium border border-green/20 hover:bg-green/20 transition-colors"
