@@ -31,10 +31,10 @@ export default function GhostPet() {
       }
 
       lastMousePos.current = { x: e.clientX, y: e.clientY };
-      // Store viewport-relative position only (no scroll offset)
+      // Store absolute position (including scroll offset)
       mousePos.current = { 
-        x: e.clientX, 
-        y: e.clientY 
+        x: e.clientX + window.scrollX, 
+        y: e.clientY + window.scrollY 
       };
       lastMouseMove.current = now;
     };
@@ -57,14 +57,12 @@ export default function GhostPet() {
       const dy = targetY - currentPos.current.y;
       const distanceToTarget = Math.sqrt(dx * dx + dy * dy);
 
-      // Check if mouse is close to ghost (using absolute coordinates)
+      // Check if mouse is close to ghost (using absolute coordinates including scroll)
       const ghostCenterX = currentPos.current.x + 18;
       const ghostCenterY = currentPos.current.y + 22;
-      const mouseAbsX = mousePos.current.x;
-      const mouseAbsY = mousePos.current.y;
       const mouseToGhostDistance = Math.sqrt(
-        Math.pow(mouseAbsX - ghostCenterX, 2) +
-        Math.pow(mouseAbsY - ghostCenterY, 2)
+        Math.pow(mousePos.current.x - ghostCenterX, 2) +
+        Math.pow(mousePos.current.y - ghostCenterY, 2)
       );
 
       if (mouseToGhostDistance < 60 && !isHiding) {
@@ -91,11 +89,13 @@ export default function GhostPet() {
       // Calculate speed based on mood
       const speed = newMood === "tired" ? 0.004 : newMood === "sleeping" ? 0.002 : 0.008;
 
-      // Update position (clamped to viewport to prevent overflow)
+      // Update position (clamped to document to prevent overflow)
       const ghostWidth = 36;
       const ghostHeight = 45;
-      const maxX = window.innerWidth - ghostWidth - 10;
-      const maxY = window.innerHeight - ghostHeight - 10;
+      const docWidth = Math.max(document.body.scrollWidth, window.innerWidth);
+      const docHeight = Math.max(document.body.scrollHeight, window.innerHeight);
+      const maxX = docWidth - ghostWidth - 10;
+      const maxY = docHeight - ghostHeight - 10;
       
       const newX = Math.max(0, Math.min(maxX, currentPos.current.x + dx * speed));
       const newY = Math.max(0, Math.min(maxY, currentPos.current.y + dy * speed));
@@ -118,7 +118,7 @@ export default function GhostPet() {
 
   return (
     <div
-      className="fixed pointer-events-none z-50"
+      className="absolute pointer-events-none z-50"
       style={{
         left: position.x,
         top: position.y,

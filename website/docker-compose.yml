@@ -1,0 +1,10 @@
+services:
+  website:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${WEBSITE_PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped

@@ -1,4 +1,4 @@
-import { Navbar } from "@/components/Navbar";
+import { CLINavbar } from "@/components/cli/CLINavbar";
 import { Footer } from "@/components/Footer";
 import { CLIHero } from "@/components/cli/CLIHero";
 import { CLIInstall } from "@/components/cli/CLIInstall";
@@ -23,7 +23,7 @@ export const metadata: Metadata = {
 export default function CLIPage() {
   return (
     <>
-      <Navbar />
+      <CLINavbar />
       <main>
         <CLIHero />
         <CLIInstall />

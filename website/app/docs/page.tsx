@@ -1,5 +1,5 @@
 import { ProtocolDocs } from "@/components/ProtocolDocs";
-import { Navbar } from "@/components/Navbar";
+import { DocsNavbar } from "@/components/DocsNavbar";
 import { Footer } from "@/components/Footer";
 import type { Metadata } from "next";
 
@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 export default function DocsPage() {
   return (
     <>
-      <Navbar />
+      <DocsNavbar />
       <main className="pt-16">
         <ProtocolDocs />
       </main>

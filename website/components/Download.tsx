@@ -131,32 +131,122 @@ export function Download() {
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
           transition={{ delay: 0.2, duration: 0.5 }}
-          className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-12"
+          className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8 max-w-2xl mx-auto"
         >
-          <motion.a
-            href="#"
-            whileHover={{ scale: 1.03 }}
-            whileTap={{ scale: 0.97 }}
-            className="group flex items-center gap-3 px-8 py-4 rounded-xl bg-linear-to-r from-cyan to-green text-black font-semibold text-lg w-full sm:w-auto justify-center"
-          >
-            <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z" />
-            </svg>
-            Download for macOS
-          </motion.a>
+          {/* macOS */}
+          <div className="group relative rounded-xl border border-border/50 bg-surface/50 p-5 hover:border-cyan/40 transition-all">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-lg bg-gray-800 flex items-center justify-center">
+                <svg className="w-5 h-5 text-gray-300" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z" />
+                </svg>
+              </div>
+              <span className="font-semibold text-gray-100">macOS</span>
+            </div>
+            <div className="flex flex-col gap-2">
+              <a
+                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.0/Ghostly_0.0.1_aarch64.dmg"
+                className="flex items-center justify-between px-3 py-2 rounded-lg bg-cyan/10 text-cyan text-sm font-medium hover:bg-cyan/20 transition-colors"
+              >
+                <span>Apple Silicon</span>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+              </a>
+              <a
+                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.0/Ghostly_0.0.1_x64.dmg"
+                className="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-800/50 text-gray-400 text-sm hover:bg-gray-800 hover:text-gray-200 transition-colors"
+              >
+                <span>Intel</span>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+              </a>
+            </div>
+          </div>
 
-          <motion.a
-            href="#"
-            whileHover={{ scale: 1.03 }}
-            whileTap={{ scale: 0.97 }}
-            className="group flex items-center gap-3 px-8 py-4 rounded-xl border border-border text-gray-200 font-semibold text-lg hover:border-cyan/40 hover:text-cyan transition-all w-full sm:w-auto justify-center"
-          >
-            <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M20.581 19.049c-.55-.446-.336-1.431-.907-1.917.553-3.365-.997-6.331-2.845-8.232-1.551-1.595-1.051-3.147-1.051-4.49 0-2.146-.881-4.41-3.55-4.41C9.56 0 8.677 2.264 8.677 4.41c0 1.343.5 2.895-1.051 4.49-1.848 1.901-3.398 4.867-2.845 8.232-.571.486-.357 1.471-.907 1.917-.55.446-.027.934.638.934H6.54c.459 0 .88-.282 1.076-.721.166-.373.5-.665.89-.665h7.022c.39 0 .724.292.89.665.195.439.617.721 1.076.721h2.028c.665 0 1.188-.488.638-.934zM12.228 3.677a1.2 1.2 0 110 2.4 1.2 1.2 0 010-2.4z" />
-            </svg>
-            Download for Linux
-          </motion.a>
+          {/* Windows */}
+          <div className="group relative rounded-xl border border-border/50 bg-surface/50 p-5 hover:border-cyan/40 transition-all">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-lg bg-gray-800 flex items-center justify-center">
+                <svg className="w-5 h-5 text-gray-300" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801" />
+                </svg>
+              </div>
+              <span className="font-semibold text-gray-100">Windows</span>
+            </div>
+            <div className="flex flex-col gap-2">
+              <a
+                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.0/Ghostly_0.0.1_x64-setup.exe"
+                className="flex items-center justify-between px-3 py-2 rounded-lg bg-cyan/10 text-cyan text-sm font-medium hover:bg-cyan/20 transition-colors"
+              >
+                <span>Installer (.exe)</span>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+              </a>
+              <a
+                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.0/Ghostly_0.0.1_x64_en-US.msi"
+                className="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-800/50 text-gray-400 text-sm hover:bg-gray-800 hover:text-gray-200 transition-colors"
+              >
+                <span>MSI Package</span>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+              </a>
+            </div>
+          </div>
+
+          {/* Linux */}
+          <div className="group relative rounded-xl border border-border/50 bg-surface/50 p-5 hover:border-cyan/40 transition-all">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-lg bg-gray-800 flex items-center justify-center">
+                <svg className="w-5 h-5 text-gray-300" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M20.581 19.049c-.55-.446-.336-1.431-.907-1.917.553-3.365-.997-6.331-2.845-8.232-1.551-1.595-1.051-3.147-1.051-4.49 0-2.146-.881-4.41-3.55-4.41C9.56 0 8.677 2.264 8.677 4.41c0 1.343.5 2.895-1.051 4.49-1.848 1.901-3.398 4.867-2.845 8.232-.571.486-.357 1.471-.907 1.917-.55.446-.027.934.638.934H6.54c.459 0 .88-.282 1.076-.721.166-.373.5-.665.89-.665h7.022c.39 0 .724.292.89.665.195.439.617.721 1.076.721h2.028c.665 0 1.188-.488.638-.934zM12.228 3.677a1.2 1.2 0 110 2.4 1.2 1.2 0 010-2.4z" />
+                </svg>
+              </div>
+              <span className="font-semibold text-gray-100">Linux</span>
+            </div>
+            <div className="flex flex-col gap-2">
+              <a
+                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.0/Ghostly_0.0.1_amd64.deb"
+                className="flex items-center justify-between px-3 py-2 rounded-lg bg-cyan/10 text-cyan text-sm font-medium hover:bg-cyan/20 transition-colors"
+              >
+                <span>.deb</span>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+              </a>
+              <a
+                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.0/Ghostly_0.0.1_amd64.AppImage"
+                className="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-800/50 text-gray-400 text-sm hover:bg-gray-800 hover:text-gray-200 transition-colors"
+              >
+                <span>.AppImage</span>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+              </a>
+            </div>
+          </div>
         </motion.div>
+
+        <motion.p
+          initial={{ opacity: 0 }}
+          whileInView={{ opacity: 1 }}
+          viewport={{ once: true }}
+          transition={{ delay: 0.3 }}
+          className="text-sm text-gray-500 mb-8"
+        >
+          v0.1.0 •{" "}
+          <a
+            href="https://github.com/MiguelMedeiros/ghostly/releases/tag/v0.1.0"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-cyan transition-colors underline underline-offset-2"
+          >
+            View all releases
+          </a>
+        </motion.p>
 
         <motion.div
           initial={{ opacity: 0 }}
