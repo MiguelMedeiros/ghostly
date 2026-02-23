@@ -111,7 +111,6 @@ export function clearAllData(): void {
   keysToRemove.forEach((key) => localStorage.removeItem(key));
 }
 
-export const APP_VERSION = "0.0.1";
 export const APP_WEBSITE = "https://github.com/nicbus/ghostly";
 export const APP_LICENSE = "MIT";
 

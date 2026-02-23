@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
 import { useLockScreen } from "../contexts/LockScreenContext";
+import { getVersion } from "@tauri-apps/api/app";
 import {
   hashPassword,
   verifyPassword,
@@ -12,7 +13,6 @@ import {
   LANGUAGE_OPTIONS,
   COLOR_SCHEME_OPTIONS,
   COLOR_THEME_OPTIONS,
-  APP_VERSION,
   APP_WEBSITE,
   APP_LICENSE,
   type ColorScheme,
@@ -41,11 +41,13 @@ export function Settings() {
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const [storageInfo, setStorageInfo] = useState({ used: 0, keys: 0 });
   const [confirmClearData, setConfirmClearData] = useState(false);
+  const [appVersion, setAppVersion] = useState("0.0.0");
 
   const hasPassword = !!settings.lockScreen.passwordHash;
 
   useEffect(() => {
     setStorageInfo(getStorageUsage());
+    getVersion().then(setAppVersion).catch(() => setAppVersion("0.0.0"));
   }, []);
 
   const handleColorSchemeChange = (scheme: ColorScheme) => {
@@ -639,7 +641,7 @@ export function Settings() {
             <div className="bg-surface rounded-xl p-4 space-y-3">
               <div className="flex items-center justify-between py-1">
                 <span className="text-text-primary">{t("settings.version")}</span>
-                <span className="text-text-secondary font-mono">{APP_VERSION}</span>
+                <span className="text-text-secondary font-mono">{appVersion}</span>
               </div>
               <div className="flex items-center justify-between py-1">
                 <span className="text-text-primary">{t("settings.website")}</span>
