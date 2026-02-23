@@ -29,6 +29,33 @@
 
 **Ghostly** is a messenger from the spirit realm. Your messages are encrypted on your device, float through the DHT as ghostly whispers, and fade away when you close the app — leaving no trace behind, just like a proper ghost.
 
+## Screenshots
+
+<p align="center">
+  <img src="screenshots/02-welcome-cyan.png" alt="Home Screen" width="45%">
+  <img src="screenshots/05-chat-messages-glimmer.png" alt="Chat Conversation" width="45%">
+</p>
+
+<p align="center">
+  <img src="screenshots/08-video-call-incoming.png" alt="Incoming Call" width="45%">
+  <img src="screenshots/09-settings-themes.png" alt="Settings" width="45%">
+</p>
+
+<details>
+<summary><strong>More screenshots</strong></summary>
+
+| Theme Variants | Chat Flow |
+|:---:|:---:|
+| ![Purple Theme](screenshots/01-welcome-purple.png) | ![New Chat](screenshots/03-new-chat-invite.png) |
+| ![User Joined](screenshots/04-user-joined.png) | ![Messages](screenshots/06-chat-messages-midnight.png) |
+
+| Video Calls | Settings |
+|:---:|:---:|
+| ![Outgoing Call](screenshots/07-video-call-outgoing.png) | ![Security](screenshots/10-settings-security.png) |
+| ![Incoming Call](screenshots/08-video-call-incoming.png) | ![About](screenshots/11-settings-about.png) |
+
+</details>
+
 ## Features
 
 - **E2E Encrypted** — 256-bit NaCl secretbox encryption
