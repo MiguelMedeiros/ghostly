@@ -12,7 +12,7 @@ export function Footer() {
             <span className="text-sm text-gray-500">
               Haunting the internet with{" "}
               <a
-                href="https://pkarr.org"
+                href="https://github.com/pubky/pkarr"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-gray-400 hover:text-cyan transition-colors"
@@ -32,7 +32,7 @@ export function Footer() {
               GitHub
             </a>
             <a
-              href="https://pkarr.org"
+              href="https://github.com/pubky/pkarr"
               target="_blank"
               rel="noopener noreferrer"
               className="hover:text-cyan transition-colors"

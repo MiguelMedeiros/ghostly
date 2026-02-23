@@ -198,7 +198,7 @@ export function ProtocolDeepDive() {
                   {
                     name: "Pkarr",
                     description: "Public Key Addressable Resource Records. DNS packets signed with Ed25519 and published to the DHT.",
-                    link: "https://pkarr.org",
+                    link: "https://github.com/pubky/pkarr",
                   },
                   {
                     name: "BEP44",

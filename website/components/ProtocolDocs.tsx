@@ -310,7 +310,7 @@ export function ProtocolDocs() {
               View Source
             </a>
             <a
-              href="https://pkarr.org"
+              href="https://github.com/pubky/pkarr"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm text-gray-500 hover:text-gray-300 transition-colors"
