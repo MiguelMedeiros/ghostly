@@ -73,9 +73,12 @@ export function extractParamsFromSdp(sdp: string): Partial<CallSignal> {
 
   const srflxCandidates = candidates.filter(c => c.includes(" srflx "));
   const hostCandidates = candidates.filter(c => c.includes(" host ") && c.includes(" udp "));
-  const selectedCandidates = srflxCandidates.length > 0 
-    ? srflxCandidates.slice(0, 1) 
-    : hostCandidates.slice(0, 1);
+  // Include 1 host candidate (for local connections) and 1 srflx (for remote)
+  // Keep packet size under 1000 bytes DHT limit
+  const selectedCandidates = [
+    ...hostCandidates.slice(0, 1),
+    ...srflxCandidates.slice(0, 1),
+  ];
   
   const ssrcs: number[] = [];
   if (audioSsrc !== null) ssrcs.push(audioSsrc);
