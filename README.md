@@ -33,24 +33,36 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/MiguelMedeiros/ghostly/releases/latest/download/Ghostly.dmg">
-    <img src="https://img.shields.io/badge/Download_for_macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS">
-  </a>
-  &nbsp;
-  <a href="https://github.com/MiguelMedeiros/ghostly/releases/latest/download/Ghostly.AppImage">
-    <img src="https://img.shields.io/badge/Download_for_Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download for Linux">
-  </a>
-</p>
-
-<p align="center">
   <a href="https://github.com/MiguelMedeiros/ghostly/releases">
     <img src="https://img.shields.io/github/v/release/MiguelMedeiros/ghostly?style=flat-square&label=Latest%20Release&color=22d3ee" alt="Latest Release">
   </a>
 </p>
 
-<p align="center">
-  <sub>Or install the CLI: <code>cargo install ghostly-cli</code></sub>
-</p>
+### Desktop Apps
+
+| Platform | Architecture | Download |
+|----------|--------------|----------|
+| **macOS** | Apple Silicon (M1/M2/M3) | [Ghostly_aarch64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.0/Ghostly_0.0.1_aarch64.dmg) |
+| **macOS** | Intel (x64) | [Ghostly_x64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.0/Ghostly_0.0.1_x64.dmg) |
+| **Windows** | x64 (Installer) | [Ghostly_x64-setup.exe](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.0/Ghostly_0.0.1_x64-setup.exe) |
+| **Windows** | x64 (MSI) | [Ghostly_x64.msi](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.0/Ghostly_0.0.1_x64_en-US.msi) |
+| **Linux** | x64 (AppImage) | [Ghostly_amd64.AppImage](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.0/Ghostly_0.0.1_amd64.AppImage) |
+| **Linux** | x64 (Debian/Ubuntu) | [Ghostly_amd64.deb](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.0/Ghostly_0.0.1_amd64.deb) |
+
+### CLI (Command Line)
+
+| Platform | Download |
+|----------|----------|
+| **macOS** (Apple Silicon) | [ghostly-cli-macos-arm64](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.0/ghostly-cli-macos-arm64) |
+| **macOS** (Intel) | [ghostly-cli-macos-x64](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.0/ghostly-cli-macos-x64) |
+| **Linux** (x64) | [ghostly-cli-linux-x64](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.0/ghostly-cli-linux-x64) |
+| **Windows** (x64) | [ghostly-cli-windows-x64.exe](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.0/ghostly-cli-windows-x64.exe) |
+
+Or install via Cargo:
+
+```bash
+cargo install ghostly-cli
+```
 
 ---
 
