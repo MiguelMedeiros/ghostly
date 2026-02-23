@@ -39,18 +39,12 @@
 | **Voice Calls** | Crystal clear spectral communication |
 | **Open Source** | All code is open for audit |
 
-## 📥 Download
+## Download
 
 <p align="center">
   <a href="https://github.com/MiguelMedeiros/ghostly/releases">
     <img src="https://img.shields.io/github/v/release/MiguelMedeiros/ghostly?style=for-the-badge&label=Download&color=22d3ee" alt="Download">
   </a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/MiguelMedeiros/ghostly/releases"><strong>macOS</strong></a> •
-  <a href="https://github.com/MiguelMedeiros/ghostly/releases"><strong>Windows</strong></a> •
-  <a href="https://github.com/MiguelMedeiros/ghostly/releases"><strong>Linux</strong></a>
 </p>
 
 **CLI:** `cargo install ghostly-cli`
