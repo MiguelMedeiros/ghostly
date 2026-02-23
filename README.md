@@ -10,7 +10,7 @@
 <p align="center">
   <a href="https://ghostly.tools">Website</a> •
   <a href="#features">Features</a> •
-  <a href="#quick-start">Quick Start</a> •
+  <a href="#download">Download</a> •
   <a href="#documentation">Docs</a> •
   <a href="CONTRIBUTING.md">Contributing</a>
 </p>
@@ -30,40 +30,35 @@
 
 ## Features
 
-| Feature | Description |
-|---------|-------------|
-| **E2E Encrypted** | 256-bit NaCl secretbox encryption |
-| **Ephemeral** | Messages vanish from the DHT in ~5 hours |
-| **Serverless** | No servers, no infrastructure |
-| **Video Calls** | WebRTC face-to-face encounters |
-| **Voice Calls** | Crystal clear spectral communication |
-| **Open Source** | All code is open for audit |
+- **E2E Encrypted** — 256-bit NaCl secretbox encryption
+- **Ephemeral** — Messages vanish from the DHT in ~5 hours
+- **Serverless** — No servers, no infrastructure
+- **Video & Voice Calls** — WebRTC peer-to-peer communication
+- **Open Source** — All code is open for audit
 
 ## Download
 
-<p align="center">
-  <a href="https://github.com/MiguelMedeiros/ghostly/releases">
-    <img src="https://img.shields.io/github/v/release/MiguelMedeiros/ghostly?style=for-the-badge&label=Download&color=22d3ee" alt="Download">
-  </a>
-</p>
+<a href="https://github.com/MiguelMedeiros/ghostly/releases">
+  <img src="https://img.shields.io/github/v/release/MiguelMedeiros/ghostly?style=for-the-badge&label=Download&color=22d3ee" alt="Download">
+</a>
 
-**CLI:** `cargo install ghostly-cli`
+Available for macOS, Windows and Linux.
 
-> See [Installation Guide](docs/INSTALLATION.md) for all options and build instructions.
+**CLI:**
+
+```
+cargo install ghostly-cli
+```
+
+See [Installation Guide](docs/INSTALLATION.md) for all options and build instructions.
 
 ## Documentation
 
-| Document | Description |
-|----------|-------------|
-| [Installation](docs/INSTALLATION.md) | Download links, CLI install, build from source |
-| [Architecture](docs/ARCHITECTURE.md) | How it works, tech stack, security model |
-| [CLI Guide](docs/CLI.md) | Command reference and usage examples |
-| [AI Agents](docs/AI-AGENTS.md) | Integration with OpenClaw, Cursor, bot examples |
-| [Contributing](CONTRIBUTING.md) | How to contribute to the project |
-
-## Contributing
-
-Want to help? Check out our [Contributing Guide](CONTRIBUTING.md)!
+- [Installation](docs/INSTALLATION.md) — Download links, CLI install, build from source
+- [Architecture](docs/ARCHITECTURE.md) — How it works, tech stack, security model
+- [CLI Guide](docs/CLI.md) — Command reference and usage examples
+- [AI Agents](docs/AI-AGENTS.md) — Integration with OpenClaw, Cursor, bot examples
+- [Contributing](CONTRIBUTING.md) — How to contribute to the project
 
 ---
 
