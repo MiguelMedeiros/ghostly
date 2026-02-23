@@ -13,7 +13,7 @@
   <a href="#-how-it-works">How It Works</a> •
   <a href="#-download">Download</a> •
   <a href="#-cli">CLI</a> •
-  <a href="#-contributing">Contributing</a>
+  <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
 <p align="center">
@@ -32,12 +32,18 @@
 </p>
 
 <p align="center">
-  <a href="https://ghostly.chat/#download">
+  <a href="https://github.com/MiguelMedeiros/pkarr-chat/releases/latest/download/Ghostly.dmg">
     <img src="https://img.shields.io/badge/Download_for_macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS">
   </a>
   &nbsp;
-  <a href="https://ghostly.chat/#download">
+  <a href="https://github.com/MiguelMedeiros/pkarr-chat/releases/latest/download/Ghostly.AppImage">
     <img src="https://img.shields.io/badge/Download_for_Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download for Linux">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/MiguelMedeiros/pkarr-chat/releases">
+    <img src="https://img.shields.io/github/v/release/MiguelMedeiros/pkarr-chat?style=flat-square&label=Latest%20Release&color=22d3ee" alt="Latest Release">
   </a>
 </p>
 
@@ -115,7 +121,7 @@ Prefer to summon your own ghost? Here's how:
 
 ```bash
 # Clone the haunted repository
-git clone https://github.com/miguelmedeiros/pkarr-chat.git
+git clone https://github.com/MiguelMedeiros/pkarr-chat.git
 cd pkarr-chat
 
 # Install dependencies
@@ -170,50 +176,13 @@ ghostly-cli watch --seed "$SEED" --peer "$PEER" --key "$KEY" | while read -r msg
 done
 ```
 
-## 🏗️ Project Structure
-
-```
-pkarr-chat/
-├── src/                    # React frontend
-│   ├── components/         # UI components
-│   ├── hooks/              # React hooks (useChat, etc.)
-│   └── pages/              # App pages
-├── src-tauri/              # Rust backend
-│   └── src/                # Tauri commands & Pkarr integration
-├── cli/                    # ghostly-cli source
-├── website/                # ghostly.chat website (Next.js)
-└── ...
-```
-
-## 🤝 Contributing
-
-We welcome all ghosts, ghouls, and developers! Here's how to haunt our codebase:
-
-1. **Fork** the repository
-2. **Create** your feature branch (`git checkout -b feature/spooky-feature`)
-3. **Commit** your changes (`git commit -m 'Add some spookiness'`)
-4. **Push** to the branch (`git push origin feature/spooky-feature`)
-5. **Open** a Pull Request
-
-### Development
-
-```bash
-# Frontend development
-npm run dev
-
-# Run the full app
-npm run tauri dev
-
-# Run linter
-npm run lint
-
-# Type checking
-npm run typecheck
-```
-
 ## 📜 License
 
 MIT License - feel free to haunt this code anywhere!
+
+## 🤝 Contributing
+
+Want to help? Check out our [Contributing Guide](CONTRIBUTING.md)!
 
 ---
 
@@ -227,6 +196,6 @@ MIT License - feel free to haunt this code anywhere!
 
 <p align="center">
   <a href="https://ghostly.chat">🌐 Website</a> •
-  <a href="https://twitter.com/yourtwitter">🐦 Twitter</a> •
-  <a href="https://github.com/miguelmedeiros/pkarr-chat/issues">🐛 Issues</a>
+  <a href="https://github.com/MiguelMedeiros/pkarr-chat/issues">🐛 Issues</a> •
+  <a href="https://github.com/MiguelMedeiros/pkarr-chat/releases">📦 Releases</a>
 </p>
