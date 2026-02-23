@@ -299,7 +299,7 @@ export function ProtocolDocs() {
 
           <div className="mt-12 pt-6 border-t border-border/50">
             <a
-              href="https://github.com/miguelmedeiros/pkarr-chat"
+              href="https://github.com/MiguelMedeiros/ghostly"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm text-gray-500 hover:text-gray-300 transition-colors"
@@ -950,7 +950,7 @@ Both:  encrypt/decrypt with shared encKey (256-bit)`}</code>
             </p>
             <div className="flex justify-center gap-4">
               <a
-                href="https://github.com/miguelmedeiros/pkarr-chat"
+                href="https://github.com/MiguelMedeiros/ghostly"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-cyan/10 text-cyan font-medium border border-cyan/20 hover:bg-cyan/20 transition-colors"

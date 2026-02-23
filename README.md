@@ -32,18 +32,18 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/MiguelMedeiros/pkarr-chat/releases/latest/download/Ghostly.dmg">
+  <a href="https://github.com/MiguelMedeiros/ghostly/releases/latest/download/Ghostly.dmg">
     <img src="https://img.shields.io/badge/Download_for_macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS">
   </a>
   &nbsp;
-  <a href="https://github.com/MiguelMedeiros/pkarr-chat/releases/latest/download/Ghostly.AppImage">
+  <a href="https://github.com/MiguelMedeiros/ghostly/releases/latest/download/Ghostly.AppImage">
     <img src="https://img.shields.io/badge/Download_for_Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download for Linux">
   </a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/MiguelMedeiros/pkarr-chat/releases">
-    <img src="https://img.shields.io/github/v/release/MiguelMedeiros/pkarr-chat?style=flat-square&label=Latest%20Release&color=22d3ee" alt="Latest Release">
+  <a href="https://github.com/MiguelMedeiros/ghostly/releases">
+    <img src="https://img.shields.io/github/v/release/MiguelMedeiros/ghostly?style=flat-square&label=Latest%20Release&color=22d3ee" alt="Latest Release">
   </a>
 </p>
 
@@ -121,8 +121,8 @@ Prefer to summon your own ghost? Here's how:
 
 ```bash
 # Clone the haunted repository
-git clone https://github.com/MiguelMedeiros/pkarr-chat.git
-cd pkarr-chat
+git clone https://github.com/MiguelMedeiros/ghostly.git
+cd ghostly
 
 # Install dependencies
 npm install
@@ -196,6 +196,6 @@ Want to help? Check out our [Contributing Guide](CONTRIBUTING.md)!
 
 <p align="center">
   <a href="https://ghostly.chat">🌐 Website</a> •
-  <a href="https://github.com/MiguelMedeiros/pkarr-chat/issues">🐛 Issues</a> •
-  <a href="https://github.com/MiguelMedeiros/pkarr-chat/releases">📦 Releases</a>
+  <a href="https://github.com/MiguelMedeiros/ghostly/issues">🐛 Issues</a> •
+  <a href="https://github.com/MiguelMedeiros/ghostly/releases">📦 Releases</a>
 </p>

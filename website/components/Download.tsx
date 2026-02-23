@@ -166,7 +166,7 @@ export function Download() {
           className="flex flex-col sm:flex-row items-center justify-center gap-6 text-sm"
         >
           <a
-            href="https://github.com/miguelmedeiros/pkarr-chat"
+            href="https://github.com/MiguelMedeiros/ghostly"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2 text-gray-500 hover:text-cyan transition-colors"
@@ -180,7 +180,7 @@ export function Download() {
           <span className="text-gray-700 hidden sm:inline">|</span>
 
           <a
-            href="https://github.com/miguelmedeiros/pkarr-chat"
+            href="https://github.com/MiguelMedeiros/ghostly"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2 text-gray-500 hover:text-yellow-400 transition-colors"

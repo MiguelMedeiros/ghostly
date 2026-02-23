@@ -14,8 +14,8 @@ We welcome all ghosts, ghouls, and developers! Here's how to haunt our codebase.
 
 ```bash
 # Clone the haunted repository
-git clone https://github.com/MiguelMedeiros/pkarr-chat.git
-cd pkarr-chat
+git clone https://github.com/MiguelMedeiros/ghostly.git
+cd ghostly
 
 # Install dependencies
 npm install
@@ -49,7 +49,7 @@ npm run typecheck
 ## Project Structure
 
 ```
-pkarr-chat/
+ghostly/
 ├── src/                    # React frontend
 │   ├── components/         # UI components
 │   ├── hooks/              # React hooks (useChat, etc.)
@@ -65,7 +65,7 @@ pkarr-chat/
 
 ### Reporting Bugs
 
-1. Check if the issue already exists in [Issues](https://github.com/MiguelMedeiros/pkarr-chat/issues)
+1. Check if the issue already exists in [Issues](https://github.com/MiguelMedeiros/ghostly/issues)
 2. If not, create a new issue with:
    - Clear title and description
    - Steps to reproduce

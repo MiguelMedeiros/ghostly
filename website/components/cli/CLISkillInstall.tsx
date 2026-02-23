@@ -56,7 +56,7 @@ function CopyButton({ text, large = false }: { text: string; large?: boolean }) 
   );
 }
 
-const openClawCommand = `curl -fsSL https://raw.githubusercontent.com/pkarr-chat/ghostly-cli/main/cli/SKILL.md -o ~/.codex/skills/ghostly-cli/SKILL.md`;
+const openClawCommand = `curl -fsSL https://raw.githubusercontent.com/MiguelMedeiros/ghostly/main/cli/SKILL.md -o ~/.codex/skills/ghostly-cli/SKILL.md`;
 
 function LockIcon() {
   return (
@@ -188,7 +188,7 @@ export function CLISkillInstall() {
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <CopyButton text={openClawCommand} large />
             <a
-              href="https://github.com/pkarr-chat/ghostly-cli/blob/main/cli/SKILL.md"
+              href="https://github.com/MiguelMedeiros/ghostly/blob/main/cli/SKILL.md"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-2 px-6 py-3 rounded-xl border border-border text-gray-300 font-medium hover:border-cyan/40 hover:text-cyan transition-all"

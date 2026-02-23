@@ -24,7 +24,7 @@ export function Footer() {
 
           <div className="flex items-center gap-6 text-sm text-gray-500">
             <a
-              href="https://github.com/miguelmedeiros/pkarr-chat"
+              href="https://github.com/MiguelMedeiros/ghostly"
               target="_blank"
               rel="noopener noreferrer"
               className="hover:text-cyan transition-colors"

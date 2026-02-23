@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "CLI for Ghost protocol - encrypted ephemeral messaging for bots"
 license = "MIT"
-repository = "https://github.com/pkarr-chat/ghostly-cli"
+repository = "https://github.com/MiguelMedeiros/ghostly"
 keywords = ["chat", "encrypted", "p2p", "dht", "cli"]
 categories = ["command-line-utilities", "cryptography"]
 

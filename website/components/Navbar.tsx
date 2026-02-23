@@ -67,7 +67,7 @@ export function Navbar() {
 
         <div className="flex items-center gap-3">
           <a
-            href="https://github.com/miguelmedeiros/pkarr-chat"
+            href="https://github.com/MiguelMedeiros/ghostly"
             target="_blank"
             rel="noopener noreferrer"
             className="text-gray-500 hover:text-cyan transition-colors"

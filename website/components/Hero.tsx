@@ -557,7 +557,7 @@ export function Hero() {
         >
           <PlatformDownloadButton />
           <motion.a
-            href="https://github.com/miguelmedeiros/pkarr-chat"
+            href="https://github.com/MiguelMedeiros/ghostly"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2.5 px-8 py-4 rounded-xl border border-border text-gray-300 font-semibold text-lg hover:border-cyan/40 hover:text-cyan transition-all"
