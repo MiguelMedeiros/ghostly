@@ -145,7 +145,7 @@ export function Download() {
             </div>
             <div className="flex flex-col gap-2">
               <a
-                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.3/Ghostly_0.1.2_aarch64.dmg"
+                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.4/Ghostly_0.1.4_aarch64.dmg"
                 className="flex items-center justify-between px-3 py-2 rounded-lg bg-cyan/10 text-cyan text-sm font-medium hover:bg-cyan/20 transition-colors"
               >
                 <span>Apple Silicon</span>
@@ -154,7 +154,7 @@ export function Download() {
                 </svg>
               </a>
               <a
-                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.3/Ghostly_0.1.2_x64.dmg"
+                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.4/Ghostly_0.1.4_x64.dmg"
                 className="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-800/50 text-gray-400 text-sm hover:bg-gray-800 hover:text-gray-200 transition-colors"
               >
                 <span>Intel</span>
@@ -177,7 +177,7 @@ export function Download() {
             </div>
             <div className="flex flex-col gap-2">
               <a
-                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.3/Ghostly_0.1.2_x64-setup.exe"
+                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.4/Ghostly_0.1.4_x64-setup.exe"
                 className="flex items-center justify-between px-3 py-2 rounded-lg bg-cyan/10 text-cyan text-sm font-medium hover:bg-cyan/20 transition-colors"
               >
                 <span>Installer (.exe)</span>
@@ -186,7 +186,7 @@ export function Download() {
                 </svg>
               </a>
               <a
-                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.3/Ghostly_0.1.2_x64_en-US.msi"
+                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.4/Ghostly_0.1.4_x64_en-US.msi"
                 className="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-800/50 text-gray-400 text-sm hover:bg-gray-800 hover:text-gray-200 transition-colors"
               >
                 <span>MSI Package</span>
@@ -209,7 +209,7 @@ export function Download() {
             </div>
             <div className="flex flex-col gap-2">
               <a
-                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.3/Ghostly_0.1.2_amd64.deb"
+                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.4/Ghostly_0.1.4_amd64.deb"
                 className="flex items-center justify-between px-3 py-2 rounded-lg bg-cyan/10 text-cyan text-sm font-medium hover:bg-cyan/20 transition-colors"
               >
                 <span>.deb</span>
@@ -218,7 +218,7 @@ export function Download() {
                 </svg>
               </a>
               <a
-                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.3/Ghostly_0.1.2_amd64.AppImage"
+                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.4/Ghostly_0.1.4_amd64.AppImage"
                 className="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-800/50 text-gray-400 text-sm hover:bg-gray-800 hover:text-gray-200 transition-colors"
               >
                 <span>.AppImage</span>
@@ -237,9 +237,9 @@ export function Download() {
           transition={{ delay: 0.3 }}
           className="text-sm text-gray-500 mb-8"
         >
-          v0.1.3 •{" "}
+          v0.1.4 •{" "}
           <a
-            href="https://github.com/MiguelMedeiros/ghostly/releases/tag/v0.1.3"
+            href="https://github.com/MiguelMedeiros/ghostly/releases/tag/v0.1.4"
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-cyan transition-colors underline underline-offset-2"

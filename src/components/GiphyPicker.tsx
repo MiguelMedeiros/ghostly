@@ -15,7 +15,8 @@ interface GiphyGif {
   };
 }
 
-const GIPHY_API_KEY = "GlVGYHkr3WSBnllca54iNt0yFbjz7L65";
+const GIPHY_PUBLIC_KEY = "dc6zaTOxFJmzC";
+const GIPHY_API_KEY = import.meta.env.VITE_GIPHY_API_KEY || GIPHY_PUBLIC_KEY;
 const GIPHY_SEARCH_URL = "https://api.giphy.com/v1/gifs/search";
 const GIPHY_TRENDING_URL = "https://api.giphy.com/v1/gifs/trending";
 const RESULTS_LIMIT = 20;

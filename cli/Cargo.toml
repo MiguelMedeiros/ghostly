@@ -1,6 +1,6 @@
 [package]
 name = "ghostly-cli"
-version = "0.1.2"
+version = "0.1.4"
 edition = "2021"
 description = "CLI for Ghost protocol - encrypted ephemeral messaging for bots"
 license = "MIT"

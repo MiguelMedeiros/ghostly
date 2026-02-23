@@ -6,3 +6,8 @@ target
 src-tauri/target
 
 .cursor
+
+# Environment variables
+.env
+.env.local
+.env.*.local

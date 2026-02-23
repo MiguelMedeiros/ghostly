@@ -7,16 +7,16 @@ interface MessageBubbleProps {
 }
 
 const IMAGE_URL_RE =
-  /^https?:\/\/\S+\.(gif|png|jpe?g|webp|svg)(\?\S*)?$/i;
+  /^https?:\/\/\S+\.(gif|png|jpe?g|webp)(\?\S*)?$/i;
 const GIPHY_RE = /^https?:\/\/media\d*\.giphy\.com\//i;
-const DATA_IMAGE_RE = /^data:image\//i;
+const DATA_IMAGE_SAFE_RE = /^data:image\/(png|jpe?g|gif|webp);/i;
 const URL_RE = /https?:\/\/\S+/g;
 
 type ContentType = "text" | "image";
 
 function detectContentType(text: string): ContentType {
   const trimmed = text.trim();
-  if (DATA_IMAGE_RE.test(trimmed)) return "image";
+  if (DATA_IMAGE_SAFE_RE.test(trimmed)) return "image";
   if (GIPHY_RE.test(trimmed)) return "image";
   if (IMAGE_URL_RE.test(trimmed)) return "image";
   return "text";
