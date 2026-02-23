@@ -71,16 +71,20 @@ export function MockupApp() {
         transition={{ duration: 0.6, delay: 0.3 }}
         className="animate-float"
       >
-        <div className="relative rounded-2xl overflow-hidden border border-border/50 glow-cyan shadow-2xl shadow-cyan/10">
-          <motion.img
-            key={screenshots[activeIndex].id}
-            src={screenshots[activeIndex].src}
-            alt={screenshots[activeIndex].alt}
-            className="w-full h-auto"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.3 }}
-          />
+        <div className="relative rounded-2xl overflow-hidden border border-border/50 glow-cyan shadow-2xl shadow-cyan/10 aspect-[1024/821]">
+          {screenshots.map((screenshot, index) => (
+            <motion.img
+              key={screenshot.id}
+              src={screenshot.src}
+              alt={screenshot.alt}
+              className={`absolute inset-0 w-full h-full object-contain ${
+                index === activeIndex ? "z-10" : "z-0"
+              }`}
+              initial={false}
+              animate={{ opacity: index === activeIndex ? 1 : 0 }}
+              transition={{ duration: 0.3 }}
+            />
+          ))}
         </div>
       </motion.div>
 
