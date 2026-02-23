@@ -57,18 +57,6 @@
 
 **Ghostly** is a messenger from the spirit realm. Your messages are encrypted on your device, float through the DHT as ghostly whispers, and fade away when you close the app — leaving no trace behind, just like a proper ghost.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                                                             │
-│   👻 "Boo! Did you get my message?"                         │
-│                                                             │
-│                           💬 "Yep! Encrypted and all! 🔒"   │
-│                                                             │
-│   ✨ *messages vanish into the DHT void* ✨                 │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
-```
-
 ## ✨ Features
 
 | Feature | Description |
@@ -85,29 +73,14 @@
 
 Ghostly uses a clever combination of cryptography and the decentralized web:
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                                                                      │
-│  1️⃣  CREATE CHAT                                                     │
-│      Generate Ed25519 keypairs + 256-bit symmetric key               │
-│      └─ No server involved!                                          │
-│                                                                      │
-│  2️⃣  SHARE INVITE                                                    │
-│      URL contains: seed + peer pubkey + encryption key               │
-│      └─ Fragment never leaves the app!                               │
-│                                                                      │
-│  3️⃣  MESSAGES TRAVEL                                                 │
-│      plaintext → 🔒 encrypt → 📦 DNS TXT → ✍️ sign → 🌐 DHT          │
-│      └─ XSalsa20-Poly1305 + Ed25519 + BEP44                          │
-│                                                                      │
-│  4️⃣  MESSAGES EXPIRE                                                 │
-│      Stop republishing → TTL countdown (~5h) → 💨 gone forever       │
-│      └─ No data persists. No trace remains.                          │
-│                                                                      │
-└──────────────────────────────────────────────────────────────────────┘
-```
+| Step | What Happens |
+|------|--------------|
+| **1. Create Chat** | Generate Ed25519 keypairs + 256-bit symmetric key. No server involved! |
+| **2. Share Invite** | URL contains seed + peer pubkey + encryption key. Fragment never leaves the app! |
+| **3. Messages Travel** | Plaintext → Encrypt → DNS TXT → Sign → DHT (XSalsa20-Poly1305 + Ed25519 + BEP44) |
+| **4. Messages Expire** | Stop republishing → TTL countdown (~5h) → Gone forever. No trace remains. |
 
-### The Tech Stack of the Undead
+### Tech Stack
 
 - **[Pkarr](https://github.com/pubky/pkarr)** - Public Key Addressable Resource Records
 - **[Mainline DHT](https://en.wikipedia.org/wiki/Mainline_DHT)** - 10M+ nodes, largest P2P network on Earth
@@ -175,10 +148,6 @@ ghostly-cli watch --seed "$SEED" --peer "$PEER" --key "$KEY" | while read -r msg
   ghostly-cli send --seed "$SEED" --peer "$PEER" --key "$KEY" "Echo: $text 👻"
 done
 ```
-
-## 📜 License
-
-MIT License - feel free to haunt this code anywhere!
 
 ## 🤝 Contributing
 
