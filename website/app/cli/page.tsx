@@ -17,6 +17,22 @@ export const metadata: Metadata = {
     description:
       "CLI tool for bots and automation. Encrypted ephemeral messaging for scripts and AI agents.",
     type: "website",
+    url: "https://ghostly.tools/cli",
+    images: [
+      {
+        url: "https://ghostly.tools/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "Ghostly CLI - Ghost Protocol for Bots",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Ghostly CLI — Ghost Protocol for Bots",
+    description:
+      "CLI tool for bots and automation. Encrypted ephemeral messaging for scripts and AI agents.",
+    images: ["https://ghostly.tools/og-image.png"],
   },
 };
 
