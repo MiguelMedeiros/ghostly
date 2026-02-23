@@ -44,19 +44,12 @@ export function useWebRTC({
   }, []);
 
   const cleanupConnection = useCallback(() => {
-    console.log("[webrtc] cleanupConnection called");
-    
     if (localStreamRef.current) {
-      console.log("[webrtc] stopping local stream tracks:", localStreamRef.current.getTracks().map(t => t.kind));
-      localStreamRef.current.getTracks().forEach((t) => {
-        t.stop();
-        console.log("[webrtc] stopped track:", t.kind, t.readyState);
-      });
+      localStreamRef.current.getTracks().forEach((t) => t.stop());
       localStreamRef.current = null;
     }
     
     if (pcRef.current) {
-      console.log("[webrtc] closing peer connection");
       pcRef.current.close();
       pcRef.current = null;
     }
@@ -73,65 +66,34 @@ export function useWebRTC({
     const pc = new RTCPeerConnection(RTC_CONFIG);
 
     pc.ontrack = (event) => {
-      console.log("[webrtc] ontrack:", event.track.kind, "readyState:", event.track.readyState);
-      console.log("[webrtc] ontrack streams:", event.streams.length, "tracks in stream[0]:", event.streams[0]?.getTracks().length);
-      
       if (event.track.kind === "video") {
-        console.log("[webrtc] received video track, setting hasVideo to true");
         setHasVideo(true);
       }
       
       setRemoteStream((prev) => {
         if (event.streams[0]) {
-          console.log("[webrtc] Using event.streams[0] with tracks:", event.streams[0].getTracks().map(t => t.kind));
           return event.streams[0];
         }
         const stream = prev ?? new MediaStream();
         stream.addTrack(event.track);
-        console.log("[webrtc] Added track to stream, total tracks:", stream.getTracks().map(t => t.kind));
         return stream;
       });
     };
 
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        console.log("[webrtc] new ICE candidate:", event.candidate.candidate);
-      } else {
-        console.log("[webrtc] ICE gathering complete");
-      }
-    };
+    pc.onicecandidate = () => {};
 
     pc.oniceconnectionstatechange = () => {
       const state = pc.iceConnectionState;
-      const gatherState = pc.iceGatheringState;
-      console.log("[webrtc] ICE connection state:", state, "gathering:", gatherState);
       
-      if (state === "checking") {
-        console.log("[webrtc] ICE checking - attempting to connect...");
-      } else if (state === "connected" || state === "completed") {
-        console.log("[webrtc] ICE connected successfully! Updating state to connected...");
-        try {
-          updateCallState("connected");
-          setCallStartedAt(Date.now());
-          setFastPoll(false);
-          if (!callConnectedEventFiredRef.current) {
-            callConnectedEventFiredRef.current = true;
-            addCallEventMessage?.("call_connected", hasVideoRef.current);
-          }
-          console.log("[webrtc] State updated to connected");
-        } catch (err) {
-          console.error("[webrtc] Error updating state:", err);
-        }
-      } else if (state === "failed") {
-        console.log("[webrtc] ICE connection FAILED");
-        cleanupConnection();
-        updateCallState("idle");
-        publishCallSignal(null);
+      if (state === "connected" || state === "completed") {
+        updateCallState("connected");
+        setCallStartedAt(Date.now());
         setFastPoll(false);
-      } else if (state === "disconnected") {
-        console.log("[webrtc] ICE disconnected - may reconnect...");
-      } else if (state === "closed") {
-        console.log("[webrtc] ICE connection closed");
+        if (!callConnectedEventFiredRef.current) {
+          callConnectedEventFiredRef.current = true;
+          addCallEventMessage?.("call_connected", hasVideoRef.current);
+        }
+      } else if (state === "failed" || state === "closed") {
         cleanupConnection();
         updateCallState("idle");
         publishCallSignal(null);
@@ -141,26 +103,18 @@ export function useWebRTC({
 
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState;
-      console.log("[webrtc] connection state:", state);
       
       if (state === "connected") {
-        console.log("[webrtc] peer connection connected! Ensuring state is updated...");
         if (callStateRef.current === "connecting" || callStateRef.current === "answering") {
-          try {
-            updateCallState("connected");
-            setCallStartedAt(Date.now());
-            setFastPoll(false);
-            if (!callConnectedEventFiredRef.current) {
-              callConnectedEventFiredRef.current = true;
-              addCallEventMessage?.("call_connected", hasVideoRef.current);
-            }
-            console.log("[webrtc] State updated to connected via onconnectionstatechange");
-          } catch (err) {
-            console.error("[webrtc] Error updating state in onconnectionstatechange:", err);
+          updateCallState("connected");
+          setCallStartedAt(Date.now());
+          setFastPoll(false);
+          if (!callConnectedEventFiredRef.current) {
+            callConnectedEventFiredRef.current = true;
+            addCallEventMessage?.("call_connected", hasVideoRef.current);
           }
         }
       } else if (state === "failed") {
-        console.log("[webrtc] peer connection FAILED");
         cleanupConnection();
         updateCallState("idle");
         publishCallSignal(null);
@@ -168,9 +122,7 @@ export function useWebRTC({
       }
     };
 
-    pc.onsignalingstatechange = () => {
-      console.log("[webrtc] signaling state:", pc.signalingState);
-    };
+    pc.onsignalingstatechange = () => {};
 
     pcRef.current = pc;
     return pc;
@@ -194,22 +146,16 @@ export function useWebRTC({
         });
         localStreamRef.current = stream;
         setLocalStream(stream);
-        console.log("[webrtc] got local stream, tracks:", stream.getTracks().map(t => t.kind));
 
         const pc = createPeerConnection();
         stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-        console.log("[webrtc] senders:", pc.getSenders().map(s => s.track?.kind));
 
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        console.log("[webrtc] offer created, waiting for ICE gathering...");
         await waitForIceGathering(pc);
 
         const sdp = pc.localDescription!.sdp;
-        console.log("[webrtc] full offer SDP:\n", sdp);
         const params = extractParamsFromSdp(sdp);
-        console.log("[webrtc] extracted params:", params);
-        console.log("[webrtc] SSRCs extracted:", params.ss, "media:", params.m);
 
         const offerTs = Date.now();
         myOfferTimestampRef.current = offerTs;
@@ -221,10 +167,8 @@ export function useWebRTC({
         };
 
         const signalStr = JSON.stringify(signal);
-        console.log("[webrtc] signal size:", signalStr.length, "bytes, offer ts:", offerTs);
         publishCallSignal(signalStr);
-      } catch (err) {
-        console.error("[webrtc] startCall error:", err);
+      } catch {
         cleanupConnection();
         updateCallState("idle");
         setFastPoll(false);
@@ -251,8 +195,6 @@ export function useWebRTC({
         setHasVideo(withVideo || offerHasVideo);
         hasVideoRef.current = withVideo || offerHasVideo;
         callConnectedEventFiredRef.current = false;
-        console.log("[webrtc] accepting call, offer signal:", offer);
-        console.log("[webrtc] offer SSRCs:", offer.ss, "media:", offer.m);
 
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: true,
@@ -260,30 +202,23 @@ export function useWebRTC({
         });
         localStreamRef.current = stream;
         setLocalStream(stream);
-        console.log("[webrtc] got local stream for answer, tracks:", stream.getTracks().map(t => t.kind));
 
         const pc = createPeerConnection();
         stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
         const offerSdp = buildSdpFromSignal(offer, "offer");
-        console.log("[webrtc] reconstructed offer SDP:\n", offerSdp);
         
         await pc.setRemoteDescription({
           type: "offer",
           sdp: offerSdp,
         });
-        console.log("[webrtc] setRemoteDescription (offer) done");
 
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        console.log("[webrtc] answer created, waiting for ICE gathering...");
         await waitForIceGathering(pc);
 
         const sdp = pc.localDescription!.sdp;
-        console.log("[webrtc] full answer SDP:\n", sdp);
         const params = extractParamsFromSdp(sdp);
-        console.log("[webrtc] extracted answer params:", params);
-        console.log("[webrtc] answer SSRCs:", params.ss, "media:", params.m);
 
         const signal: CallSignal = {
           t: "a",
@@ -292,12 +227,10 @@ export function useWebRTC({
         };
 
         const signalStr = JSON.stringify(signal);
-        console.log("[webrtc] answer signal size:", signalStr.length, "bytes");
         publishCallSignal(signalStr);
         updateCallState("connecting");
         pendingOfferRef.current = null;
-      } catch (err) {
-        console.error("[webrtc] acceptCall error:", err);
+      } catch {
         cleanupConnection();
         updateCallState("idle");
         setFastPoll(false);
@@ -318,29 +251,15 @@ export function useWebRTC({
       if (!pc) return;
 
       try {
-        console.log("[webrtc] handling answer signal:", signal);
-        console.log("[webrtc] answer signal SSRCs:", signal.ss, "media:", signal.m);
-        
         if (signal.m?.includes("v")) {
-          console.log("[webrtc] answer includes video, setting hasVideo to true");
           setHasVideo(true);
         }
         
         const answerSdp = buildSdpFromSignal(signal, "answer");
-        console.log("[webrtc] reconstructed answer SDP:\n", answerSdp);
-        
-        const receivers = pc.getReceivers();
-        console.log("[webrtc] receivers before setRemoteDescription:", receivers.length);
-        
         await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
-        console.log("[webrtc] setRemoteDescription (answer) done");
-        
-        const receiversAfter = pc.getReceivers();
-        console.log("[webrtc] receivers after setRemoteDescription:", receiversAfter.length, receiversAfter.map(r => r.track?.kind));
 
         updateCallState("connecting");
-      } catch (err) {
-        console.error("[webrtc] handleAnswer error:", err);
+      } catch {
         cleanupConnection();
         updateCallState("idle");
         setFastPoll(false);
@@ -412,26 +331,20 @@ export function useWebRTC({
     try {
       signal = JSON.parse(incomingCallSignal);
     } catch {
-      console.warn("[webrtc] failed to parse incoming signal");
       return;
     }
-    
-    console.log("[webrtc] incoming signal type:", signal.t, "ts:", signal.ts, "current state:", callStateRef.current, "myOfferTs:", myOfferTimestampRef.current);
 
     if (signal.ts <= lastProcessedSignalRef.current) {
-      console.log("[webrtc] signal already processed (ts:", signal.ts, "<=", lastProcessedSignalRef.current, ")");
       return;
     }
 
     if (callStateRef.current === "connected") {
       if (signal.t !== "h") {
-        console.log("[webrtc] already connected, ignoring non-hangup signal:", signal.t);
         return;
       }
     }
 
     if (signal.t === "o" && callStateRef.current === "idle") {
-      console.log("[webrtc] received OFFER, showing incoming call");
       pendingOfferRef.current = signal;
       lastProcessedSignalRef.current = signal.ts;
       const offerHasVideo = signal.m?.includes("v") ?? false;
@@ -440,38 +353,23 @@ export function useWebRTC({
       addCallEventMessage?.("call_received", offerHasVideo);
       updateCallState("incoming");
       setFastPoll(true);
-    } else if (signal.t === "o" && callStateRef.current === "offering") {
-      console.log("[webrtc] received OFFER while offering - ignoring peer's old offer");
-    } else if (signal.t === "o" && callStateRef.current === "connecting") {
-      console.log("[webrtc] received OFFER while connecting - peer may have old offer cached, ignoring");
     } else if (signal.t === "a" && (callStateRef.current === "offering" || callStateRef.current === "connecting")) {
-      if (signal.ts <= myOfferTimestampRef.current) {
-        console.log("[webrtc] received ANSWER with old timestamp (", signal.ts, "<=", myOfferTimestampRef.current, "), ignoring stale answer");
-      } else {
-        console.log("[webrtc] received ANSWER in state", callStateRef.current, "ts:", signal.ts, "> offer ts:", myOfferTimestampRef.current);
+      if (signal.ts > myOfferTimestampRef.current) {
         lastProcessedSignalRef.current = signal.ts;
         if (callStateRef.current === "offering") {
           handleAnswer(signal);
-        } else {
-          console.log("[webrtc] already connecting, ignoring duplicate answer");
         }
       }
-    } else if (signal.t === "a" && callStateRef.current !== "offering") {
-      console.log("[webrtc] received ANSWER but not in offering state, ignoring");
     } else if (signal.t === "h") {
-      console.log("[webrtc] received HANGUP");
       lastProcessedSignalRef.current = signal.ts;
       if (callStateRef.current !== "idle") {
         hangUp(false);
       }
-    } else {
-      console.log("[webrtc] unhandled signal type:", signal.t, "in state:", callStateRef.current);
     }
   }, [incomingCallSignal, handleAnswer, hangUp, updateCallState, setFastPoll, addCallEventMessage]);
 
   useEffect(() => {
     return () => {
-      console.log("[webrtc] component unmounting, cleaning up...");
       if (hangupTimerRef.current) clearTimeout(hangupTimerRef.current);
       
       if (localStreamRef.current) {

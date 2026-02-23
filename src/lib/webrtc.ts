@@ -188,36 +188,23 @@ export function waitForIceGathering(
 ): Promise<void> {
   return new Promise((resolve) => {
     if (pc.iceGatheringState === "complete") {
-      console.log("[webrtc] ICE gathering already complete");
       resolve();
       return;
     }
 
-    let candidateCount = 0;
     const timeout = setTimeout(() => {
-      console.log(`[webrtc] ICE gathering timeout after ${timeoutMs}ms, collected ${candidateCount} candidates`);
       pc.removeEventListener("icegatheringstatechange", handler);
-      pc.removeEventListener("icecandidate", candidateHandler);
       resolve();
     }, timeoutMs);
 
-    const candidateHandler = (event: RTCPeerConnectionIceEvent) => {
-      if (event.candidate) {
-        candidateCount++;
-      }
-    };
-
     const handler = () => {
       if (pc.iceGatheringState === "complete") {
-        console.log(`[webrtc] ICE gathering complete, collected ${candidateCount} candidates`);
         clearTimeout(timeout);
         pc.removeEventListener("icegatheringstatechange", handler);
-        pc.removeEventListener("icecandidate", candidateHandler);
         resolve();
       }
     };
 
-    pc.addEventListener("icecandidate", candidateHandler);
     pc.addEventListener("icegatheringstatechange", handler);
   });
 }

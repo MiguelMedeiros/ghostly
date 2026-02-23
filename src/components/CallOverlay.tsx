@@ -49,8 +49,6 @@ export function CallOverlay({
     if (!remoteStream || !remoteVideoRef.current) return;
     
     if (remoteVideoRef.current.srcObject !== remoteStream) {
-      const videoTracks = remoteStream.getVideoTracks();
-      console.log("[CallOverlay] Setting remoteStream to video element, tracks:", videoTracks.length);
       remoteVideoRef.current.srcObject = remoteStream;
     }
   }, [remoteStream]);
@@ -59,7 +57,6 @@ export function CallOverlay({
     if (!remoteStream || !remoteAudioRef.current) return;
     
     if (remoteAudioRef.current.srcObject !== remoteStream) {
-      console.log("[CallOverlay] Setting remoteStream to audio element");
       remoteAudioRef.current.srcObject = remoteStream;
     }
   }, [remoteStream]);

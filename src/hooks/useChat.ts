@@ -86,11 +86,6 @@ export function useChat(params: ChatParams | null) {
       const myPubKey = await getPublicKeyFromSeed(params.seedB64);
       if (cancelled) return;
       myPubKeyRef.current = myPubKey;
-      console.log("[chat] init — my pubkey:", myPubKey.slice(0, 12) + "...");
-      console.log(
-        "[chat] init — peer pubkey:",
-        params.peerPubKeyB64.slice(0, 12) + "...",
-      );
 
       const sessionId = generateSessionId(
         params.seedB64,
@@ -150,7 +145,6 @@ export function useChat(params: ChatParams | null) {
         if (burnedRef.current || effectIdRef.current !== currentEffectId)
           return;
         const callSig = callSignalOutRef.current ?? undefined;
-        console.log("[chat] doPublish - callSignal:", callSig ? `${callSig.slice(0, 30)}...` : "none");
         await publishMessages(
           seedB64Ref.current,
           sentBufferRef.current,
@@ -163,9 +157,7 @@ export function useChat(params: ChatParams | null) {
       doPublishRef.current = doPublish;
 
       if (myAckRef.current > 0) {
-        doPublish().catch((err) =>
-          console.error("[chat] initial publish error:", err),
-        );
+        doPublish().catch(() => {});
       }
 
       const sendJoinMessage = async () => {
@@ -212,9 +204,8 @@ export function useChat(params: ChatParams | null) {
             myAckRef.current,
             nick,
           );
-          console.log("[chat] join message sent with nick:", nick || "(anonymous)");
-        } catch (err) {
-          console.error("[chat] failed to send join message:", err);
+        } catch {
+          // Join message failed - will retry on next poll
         }
       };
       
@@ -259,15 +250,9 @@ export function useChat(params: ChatParams | null) {
 
           if (batch) {
             if (batch.peerAck > 0) {
-              const before = sentBufferRef.current.length;
               sentBufferRef.current = sentBufferRef.current.filter(
                 (m) => m.t > batch.peerAck,
               );
-              if (before !== sentBufferRef.current.length) {
-                console.log(
-                  `[chat] poll #${n}: peer ACKed, buffer ${before}→${sentBufferRef.current.length}`,
-                );
-              }
               setPeerAck(batch.peerAck);
             }
 
@@ -278,7 +263,6 @@ export function useChat(params: ChatParams | null) {
               const newMsgs = batch.messages.filter(
                 (m) => m.timestamp > lastSeenTimestampRef.current,
               );
-              console.log(`[chat] poll #${n}: ${newMsgs.length} NEW msg(s)`);
 
               lastSeenTimestampRef.current = batch.latestTimestamp;
               myAckRef.current = batch.latestTimestamp;
@@ -349,8 +333,6 @@ export function useChat(params: ChatParams | null) {
                     ...sentBufferRef.current,
                     { t: timestamp, m: welcomeText },
                   ];
-                  
-                  console.log("[chat] sending welcome message with nick:", nick || "(anonymous)");
                 }
               }
 
@@ -359,12 +341,6 @@ export function useChat(params: ChatParams | null) {
             }
 
             if (batch.callSignal !== null && batch.callSignal !== undefined) {
-              try {
-                const sig = JSON.parse(batch.callSignal);
-                console.log("[chat] received callSignal from peer", peerPubKeyZ32Ref.current.slice(0, 8), "- type:", sig.t, "ts:", sig.ts);
-              } catch {
-                console.log("[chat] received callSignal (unparseable):", batch.callSignal.slice(0, 50));
-              }
               setIncomingCallSignal(batch.callSignal);
             }
           }
@@ -375,8 +351,7 @@ export function useChat(params: ChatParams | null) {
 
           setStatus("online");
           setLastSync(Date.now());
-        } catch (err) {
-          console.error(`[chat] poll #${n} error:`, err);
+        } catch {
           setStatus("error");
         } finally {
           isPollingRef.current = false;
@@ -497,15 +472,10 @@ export function useChat(params: ChatParams | null) {
           nickRef.current,
         );
 
-        console.log(
-          `[chat] sent "${trimmed.slice(0, 40)}…", kept=${kept}/${sentBufferRef.current.length}`,
-        );
-
         if (kept === 0) {
           return "Message could not be published — DHT payload limit exceeded.";
         }
-      } catch (err) {
-        console.error("Failed to publish message:", err);
+      } catch {
         setStatus("error");
         return "Failed to send message. Check your connection.";
       } finally {
@@ -544,19 +514,14 @@ export function useChat(params: ChatParams | null) {
   }, []);
 
   const setCallSignal = useCallback(async (signal: string | null) => {
-    console.log("[chat] setCallSignal called:", signal ? `${signal.slice(0, 50)}...` : null);
     callSignalOutRef.current = signal;
     lastActivityRef.current = Date.now();
     if (doPublishRef.current) {
       try {
-        console.log("[chat] calling doPublish with call signal");
         await doPublishRef.current();
-        console.log("[chat] doPublish completed");
-      } catch (err) {
-        console.error("[chat] call signal publish error:", err);
+      } catch {
+        // Call signal publish failed silently
       }
-    } else {
-      console.warn("[chat] doPublishRef.current is null!");
     }
     if (pollTimerRef.current) {
       clearTimeout(pollTimerRef.current);

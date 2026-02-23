@@ -25,11 +25,6 @@ fn trim_to_fit(
             return Ok((encrypted, batch.len()));
         }
         if batch.len() == 1 {
-            eprintln!(
-                "[pkarr] single message too large ({} b64 chars > {} limit), truncating",
-                encrypted.len(),
-                max_payload
-            );
             let msg = batch[0];
             let max_text = msg.m.chars().take(400).collect::<String>();
             let truncated = CompactMessage {
@@ -118,11 +113,6 @@ pub async fn publish_messages(
 
     if let Some(signal) = call_signal {
         let encrypted_signal = crypto::encrypt(signal, enc_key)?;
-        println!(
-            "[pkarr] call_signal size: {} chars (encrypted: {} chars)",
-            signal.len(),
-            encrypted_signal.len()
-        );
 
         builder = builder.txt(
             "_call"
@@ -139,23 +129,6 @@ pub async fn publish_messages(
     let signed_packet = builder
         .sign(keypair)
         .map_err(|e| format!("Sign error: {}", e))?;
-
-    let packet_size = signed_packet.as_bytes().len();
-    let pub_key_z32 = keypair.to_z32();
-    println!(
-        "[pkarr] publish {} msgs, ack={}, packet_size={} bytes → {}...",
-        kept,
-        ack_timestamp,
-        packet_size,
-        &pub_key_z32[..12.min(pub_key_z32.len())]
-    );
-
-    if packet_size > 1000 {
-        eprintln!(
-            "[pkarr] WARNING: packet size {} exceeds recommended limit!",
-            packet_size
-        );
-    }
 
     client
         .publish(&signed_packet, None)
@@ -215,9 +188,8 @@ pub async fn resolve_messages(
                 }
                 "_msg" => {
                     encrypted_payload_length = value.len();
-                    match crypto::decrypt(&value, enc_key) {
-                        Ok(decrypted) => legacy_msg = decrypted,
-                        Err(e) => eprintln!("[pkarr] decrypt _msg failed: {}", e),
+                    if let Ok(decrypted) = crypto::decrypt(&value, enc_key) {
+                        legacy_msg = decrypted;
                     }
                 }
                 "_ts" => {
@@ -232,13 +204,8 @@ pub async fn resolve_messages(
                     }
                 }
                 "_call" => {
-                    println!("[pkarr] found _call record, length: {} chars", value.len());
-                    match crypto::decrypt(&value, enc_key) {
-                        Ok(decrypted) => {
-                            println!("[pkarr] decrypted _call: {} chars", decrypted.len());
-                            call_signal = Some(decrypted);
-                        }
-                        Err(e) => eprintln!("[pkarr] decrypt _call failed: {}", e),
+                    if let Ok(decrypted) = crypto::decrypt(&value, enc_key) {
+                        call_signal = Some(decrypted);
                     }
                 }
                 _ => {}
@@ -247,23 +214,19 @@ pub async fn resolve_messages(
     }
 
     if !msgs_payload.is_empty() {
-        match crypto::decrypt(&msgs_payload, enc_key) {
-            Ok(json) => match serde_json::from_str::<Vec<CompactMessage>>(&json) {
-                Ok(batch) => {
-                    for entry in &batch {
-                        messages.push(PkarrMessage {
-                            text: entry.m.clone(),
-                            timestamp: entry.t,
-                            nick: nick.clone(),
-                        });
-                    }
-                    if latest_timestamp == 0 && !messages.is_empty() {
-                        latest_timestamp = messages.iter().map(|m| m.timestamp).max().unwrap_or(0);
-                    }
+        if let Ok(json) = crypto::decrypt(&msgs_payload, enc_key) {
+            if let Ok(batch) = serde_json::from_str::<Vec<CompactMessage>>(&json) {
+                for entry in &batch {
+                    messages.push(PkarrMessage {
+                        text: entry.m.clone(),
+                        timestamp: entry.t,
+                        nick: nick.clone(),
+                    });
                 }
-                Err(e) => eprintln!("[pkarr] parse _msgs JSON failed: {}", e),
-            },
-            Err(e) => eprintln!("[pkarr] decrypt _msgs failed: {}", e),
+                if latest_timestamp == 0 && !messages.is_empty() {
+                    latest_timestamp = messages.iter().map(|m| m.timestamp).max().unwrap_or(0);
+                }
+            }
         }
     } else if !legacy_msg.is_empty() && legacy_ts > 0 {
         messages.push(PkarrMessage {

@@ -2,6 +2,93 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { motion } from "motion/react";
+
+interface FloatingGhostData {
+  id: number;
+  x: number;
+  y: number;
+  size: number;
+  delay: number;
+  duration: number;
+  opacity: number;
+}
+
+function FloatingGhost({
+  delay,
+  duration,
+  size,
+  x,
+  y,
+  opacity,
+}: {
+  delay: number;
+  duration: number;
+  size: number;
+  x: number;
+  y: number;
+  opacity: number;
+}) {
+  return (
+    <motion.div
+      className="absolute pointer-events-none text-cyan-400"
+      style={{
+        left: `${x}%`,
+        top: `${y}%`,
+        width: size,
+        height: size,
+        filter: size > 40 ? "blur(1px)" : "none",
+      }}
+      initial={{ opacity: 0, y: 20 }}
+      animate={{
+        opacity: [0, opacity, opacity, 0],
+        y: [20, 0, -30, -60],
+        x: [0, 10, -10, 0],
+        rotate: [0, 5, -5, 0],
+      }}
+      transition={{
+        duration,
+        delay,
+        repeat: Infinity,
+        ease: "easeInOut",
+      }}
+    >
+      <svg viewBox="0 0 24 24" fill="currentColor" className="w-full h-full">
+        <path d="M12 2C7.582 2 4 5.582 4 10v8c0 .75.6 1 1 .6l2-1.6 2 1.6c.4.3.8.3 1.2 0L12 17l1.8 1.6c.4.3.8.3 1.2 0l2-1.6 2 1.6c.4.4 1 .15 1-.6v-8c0-4.418-3.582-8-8-8z" />
+        <circle cx="9" cy="9" r="1.5" className="fill-[#060a10]" />
+        <circle cx="15" cy="9" r="1.5" className="fill-[#060a10]" />
+      </svg>
+    </motion.div>
+  );
+}
+
+function GhostParticles() {
+  const [ghosts, setGhosts] = useState<FloatingGhostData[]>([]);
+
+  useEffect(() => {
+    setGhosts(
+      Array.from({ length: 25 }, (_, i) => ({
+        id: i,
+        x: Math.random() * 100,
+        y: Math.random() * 100,
+        size: 20 + Math.random() * 50,
+        delay: Math.random() * 10,
+        duration: 8 + Math.random() * 10,
+        opacity: 0.06 + Math.random() * 0.12,
+      }))
+    );
+  }, []);
+
+  if (ghosts.length === 0) return null;
+
+  return (
+    <div className="absolute inset-0 overflow-hidden">
+      {ghosts.map((ghost) => (
+        <FloatingGhost key={ghost.id} {...ghost} />
+      ))}
+    </div>
+  );
+}
 
 export default function NotFound() {
   const [ghostPosition, setGhostPosition] = useState({ x: 0, y: 0 });
@@ -30,21 +117,8 @@ export default function NotFound() {
       {/* Background grid */}
       <div className="absolute inset-0 bg-[linear-gradient(rgba(34,211,238,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(34,211,238,0.03)_1px,transparent_1px)] bg-[size:50px_50px] [mask-image:radial-gradient(ellipse_at_center,black_30%,transparent_70%)]" />
 
-      {/* Floating particles */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        {[...Array(20)].map((_, i) => (
-          <div
-            key={i}
-            className="absolute w-1 h-1 bg-cyan-400/30 rounded-full animate-float"
-            style={{
-              left: `${Math.random() * 100}%`,
-              top: `${Math.random() * 100}%`,
-              animationDelay: `${Math.random() * 5}s`,
-              animationDuration: `${5 + Math.random() * 10}s`,
-            }}
-          />
-        ))}
-      </div>
+      {/* Floating ghost particles */}
+      <GhostParticles />
 
       {/* Main content */}
       <div className="relative z-10 text-center max-w-2xl mx-auto">
@@ -262,26 +336,6 @@ export default function NotFound() {
       </div>
 
       <style jsx global>{`
-        @keyframes float {
-          0%,
-          100% {
-            transform: translateY(0) translateX(0);
-            opacity: 0.3;
-          }
-          25% {
-            transform: translateY(-20px) translateX(10px);
-            opacity: 0.6;
-          }
-          50% {
-            transform: translateY(-40px) translateX(-5px);
-            opacity: 0.3;
-          }
-          75% {
-            transform: translateY(-20px) translateX(-10px);
-            opacity: 0.6;
-          }
-        }
-
         @keyframes searchBeam {
           0%,
           100% {
@@ -310,10 +364,6 @@ export default function NotFound() {
           95% {
             transform: scaleY(0.1);
           }
-        }
-
-        .animate-float {
-          animation: float 8s ease-in-out infinite;
         }
 
         .animate-spin-slow {

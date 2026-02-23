@@ -19,7 +19,6 @@ async function boot() {
     const profile = await invoke<string>("get_profile");
     if (profile) {
       setStorageProfile(profile);
-      console.log(`[boot] profile: ${profile}`);
     }
   } catch {
     // running outside Tauri (browser dev) — no profile
