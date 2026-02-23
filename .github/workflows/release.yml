@@ -98,18 +98,18 @@ jobs:
         with:
           name: tauri-${{ matrix.name }}
           path: |
-            src-tauri/target/*/release/bundle/**/*.dmg
-            src-tauri/target/*/release/bundle/**/*.app
-            src-tauri/target/*/release/bundle/**/*.deb
-            src-tauri/target/*/release/bundle/**/*.AppImage
-            src-tauri/target/*/release/bundle/**/*.msi
-            src-tauri/target/*/release/bundle/**/*.exe
-            src-tauri/target/release/bundle/**/*.dmg
-            src-tauri/target/release/bundle/**/*.app
-            src-tauri/target/release/bundle/**/*.deb
-            src-tauri/target/release/bundle/**/*.AppImage
-            src-tauri/target/release/bundle/**/*.msi
-            src-tauri/target/release/bundle/**/*.exe
+            target/*/release/bundle/**/*.dmg
+            target/*/release/bundle/**/*.app
+            target/*/release/bundle/**/*.deb
+            target/*/release/bundle/**/*.AppImage
+            target/*/release/bundle/**/*.msi
+            target/*/release/bundle/**/*.exe
+            target/release/bundle/**/*.dmg
+            target/release/bundle/**/*.app
+            target/release/bundle/**/*.deb
+            target/release/bundle/**/*.AppImage
+            target/release/bundle/**/*.msi
+            target/release/bundle/**/*.exe
           if-no-files-found: error
 
   # ============================================
