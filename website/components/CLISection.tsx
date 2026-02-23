@@ -91,7 +91,7 @@ export function CLISection() {
             View CLI Documentation
           </a>
           <a
-            href="https://github.com/MiguelMedeiros/ghostly/releases/tag/v0.1.1"
+            href="https://github.com/MiguelMedeiros/ghostly/releases/tag/v0.1.2"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 text-gray-400 hover:text-gray-200 transition-colors text-sm"
