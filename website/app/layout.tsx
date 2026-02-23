@@ -17,11 +17,13 @@ export const metadata: Metadata = {
   description:
     "Serverless, end-to-end encrypted, ephemeral messaging. No accounts, no servers. Messages travel through 10M+ DHT nodes and vanish when you stop.",
   icons: { icon: "/favicon.svg" },
+  metadataBase: new URL("https://ghostly.tools"),
   openGraph: {
     title: "Ghostly — Encrypted Ephemeral Chat over the DHT",
     description:
       "Serverless, end-to-end encrypted, ephemeral messaging through the Mainline DHT.",
     type: "website",
+    url: "https://ghostly.tools",
   },
 };
 

@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="https://ghostly.chat">Website</a> •
+  <a href="https://ghostly.tools">Website</a> •
   <a href="#-features">Features</a> •
   <a href="#-how-it-works">How It Works</a> •
   <a href="#-download">Download</a> •
@@ -216,7 +216,7 @@ Want to help? Check out our [Contributing Guide](CONTRIBUTING.md)!
 </p>
 
 <p align="center">
-  <a href="https://ghostly.chat">🌐 Website</a> •
+  <a href="https://ghostly.tools">🌐 Website</a> •
   <a href="https://github.com/MiguelMedeiros/ghostly/issues">🐛 Issues</a> •
   <a href="https://github.com/MiguelMedeiros/ghostly/releases">📦 Releases</a>
 </p>

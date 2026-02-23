@@ -1,7 +1,7 @@
 ---
 name: ghostly-cli
 description: Send and receive encrypted ephemeral messages via the Ghost protocol using ghostly-cli. Use when user needs private, serverless messaging, building chat bots, sending encrypted notifications, or bridging messages to other platforms. Messages are E2E encrypted (NaCl) and transmitted via Mainline DHT (10M+ nodes).
-homepage: https://ghostly.chat/cli
+homepage: https://ghostly.tools/cli
 metadata:
   {
     "openclaw":

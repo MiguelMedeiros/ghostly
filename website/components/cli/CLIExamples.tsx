@@ -117,7 +117,7 @@ done`,
     language: "bash",
     code: `# Install ghostly-cli skill for OpenClaw
 mkdir -p ~/.openclaw/workspace/skills/ghostly-cli
-curl -fsSL https://ghostly.chat/SKILL.md \\
+curl -fsSL https://ghostly.tools/SKILL.md \\
   -o ~/.openclaw/workspace/skills/ghostly-cli/SKILL.md
 
 # The skill enables OpenClaw to:

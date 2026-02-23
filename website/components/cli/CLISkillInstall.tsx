@@ -56,7 +56,11 @@ function CopyButton({ text, large = false }: { text: string; large?: boolean }) 
   );
 }
 
-const openClawCommand = `curl -fsSL https://raw.githubusercontent.com/MiguelMedeiros/ghostly/main/cli/SKILL.md -o ~/.codex/skills/ghostly-cli/SKILL.md`;
+const codexCommand = `curl -fsSL https://raw.githubusercontent.com/MiguelMedeiros/ghostly/main/cli/SKILL.md \\
+  -o ~/.codex/skills/ghostly-cli/SKILL.md`;
+
+const cursorCommand = `curl -fsSL https://raw.githubusercontent.com/MiguelMedeiros/ghostly/main/cli/SKILL.md \\
+  -o ~/.cursor/skills/ghostly-cli/SKILL.md`;
 
 function LockIcon() {
   return (
@@ -160,33 +164,66 @@ export function CLISkillInstall() {
 
           <div className="text-center mb-8">
             <h3 className="text-2xl font-bold text-white mb-2">
-              Install the Skill for OpenClaw
+              Install the Skill
             </h3>
             <p className="text-gray-400">
               Run this command to teach your agent how to use Ghost protocol
             </p>
           </div>
 
-          <div className="bg-black/50 rounded-2xl p-6 mb-6 relative group">
-            <pre className="overflow-x-auto">
-              <code className="text-sm sm:text-base font-mono">
-                <span className="text-gray-500">$</span>{" "}
-                <span className="text-green">curl</span>{" "}
-                <span className="text-cyan">-fsSL</span>{" "}
-                <span className="text-gray-300 break-all">
-                  https://raw.githubusercontent.com/.../SKILL.md
-                </span>{" "}
-                <span className="text-cyan">-o</span>{" "}
-                <span className="text-yellow-400">~/.codex/skills/ghostly-cli/SKILL.md</span>
-              </code>
-            </pre>
-            <div className="absolute top-4 right-4">
-              <CopyButton text={openClawCommand} />
+          {/* OpenClaw / Codex */}
+          <div className="mb-6">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-gray-400 text-sm font-mono">#</span>
+              <span className="text-gray-300 text-sm font-medium">OpenClaw / Codex</span>
+            </div>
+            <div className="bg-black/50 rounded-xl p-4 relative group">
+              <pre className="overflow-x-auto">
+                <code className="text-sm font-mono">
+                  <span className="text-green">curl</span>{" "}
+                  <span className="text-cyan">-fsSL</span>{" "}
+                  <span className="text-gray-300 break-all">
+                    https://raw.githubusercontent.com/MiguelMedeiros/ghostly/main/cli/SKILL.md
+                  </span>{" "}
+                  <span className="text-gray-500">\</span>
+                  {"\n"}
+                  {"  "}<span className="text-cyan">-o</span>{" "}
+                  <span className="text-yellow-400">~/.codex/skills/ghostly-cli/SKILL.md</span>
+                </code>
+              </pre>
+              <div className="absolute top-3 right-3">
+                <CopyButton text={codexCommand} />
+              </div>
+            </div>
+          </div>
+
+          {/* Cursor */}
+          <div className="mb-8">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-gray-400 text-sm font-mono">#</span>
+              <span className="text-gray-300 text-sm font-medium">Cursor</span>
+            </div>
+            <div className="bg-black/50 rounded-xl p-4 relative group">
+              <pre className="overflow-x-auto">
+                <code className="text-sm font-mono">
+                  <span className="text-green">curl</span>{" "}
+                  <span className="text-cyan">-fsSL</span>{" "}
+                  <span className="text-gray-300 break-all">
+                    https://raw.githubusercontent.com/MiguelMedeiros/ghostly/main/cli/SKILL.md
+                  </span>{" "}
+                  <span className="text-gray-500">\</span>
+                  {"\n"}
+                  {"  "}<span className="text-cyan">-o</span>{" "}
+                  <span className="text-yellow-400">~/.cursor/skills/ghostly-cli/SKILL.md</span>
+                </code>
+              </pre>
+              <div className="absolute top-3 right-3">
+                <CopyButton text={cursorCommand} />
+              </div>
             </div>
           </div>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-            <CopyButton text={openClawCommand} large />
             <a
               href="https://github.com/MiguelMedeiros/ghostly/blob/main/cli/SKILL.md"
               target="_blank"
@@ -294,19 +331,11 @@ export function CLISkillInstall() {
           className="mt-12 text-center"
         >
           <p className="text-gray-500 text-sm mb-4">
-            Using a different AI agent? Install to your skills folder:
+            Using a different AI agent? Adjust the path to your skills folder:
           </p>
-          <div className="flex flex-wrap justify-center gap-4 text-sm">
-            <code className="bg-black/30 px-3 py-1.5 rounded-lg text-gray-400">
-              <span className="text-cyan">Cursor:</span> ~/.cursor/skills/
-            </code>
-            <code className="bg-black/30 px-3 py-1.5 rounded-lg text-gray-400">
-              <span className="text-cyan">Codex:</span> ~/.codex/skills/
-            </code>
-            <code className="bg-black/30 px-3 py-1.5 rounded-lg text-gray-400">
-              <span className="text-cyan">Custom:</span> ~/.ai-skills/
-            </code>
-          </div>
+          <code className="inline-block bg-black/30 px-3 py-1.5 rounded-lg text-gray-400 text-sm">
+            <span className="text-cyan">~/.your-agent/skills/</span>ghostly-cli/SKILL.md
+          </code>
         </motion.div>
       </div>
     </section>

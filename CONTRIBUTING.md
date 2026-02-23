@@ -57,7 +57,7 @@ ghostly/
 ├── src-tauri/              # Rust backend
 │   └── src/                # Tauri commands & Pkarr integration
 ├── cli/                    # ghostly-cli source
-├── website/                # ghostly.chat website (Next.js)
+├── website/                # ghostly.tools website (Next.js)
 └── ...
 ```
 
