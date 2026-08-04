@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "motion": "^12.34.3",
-    "next": "16.1.6",
+    "next": "16.2.12",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-syntax-highlighter": "^16.1.0"
@@ -22,9 +22,13 @@
     "@types/react-dom": "^19",
     "@types/react-syntax-highlighter": "^15.5.13",
     "eslint": "^9",
-    "eslint-config-next": "16.1.6",
+    "eslint-config-next": "16.2.12",
     "puppeteer": "^24.37.5",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "overrides": {
+    "sharp": "0.35.3",
+    "postcss": "8.5.24"
   }
 }
