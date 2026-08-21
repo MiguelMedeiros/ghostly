@@ -23,7 +23,7 @@
     "@types/react-syntax-highlighter": "^15.5.13",
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
-    "puppeteer": "^24.37.5",
+    "puppeteer": "^25.8.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   },
