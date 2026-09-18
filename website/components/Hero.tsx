@@ -540,10 +540,10 @@ export function Hero() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 1.4, duration: 0.6 }}
-          className="flex flex-col items-center gap-5"
+          className="flex flex-col items-center gap-8"
         >
           {/* The easiest way in gets a line of its own: nothing to install, nothing to sign up for. */}
-          <div className="flex flex-col items-center gap-2">
+          <div className="flex flex-col items-center gap-5">
             <motion.a
               href="https://app.ghostly.tools"
               target="_blank"
@@ -560,13 +560,12 @@ export function Hero() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
               </svg>
             </motion.a>
-            <p className="text-sm text-gray-500">
-              Nothing to install. No sign-up. You are a ghost in <span className="text-cyan">five seconds</span>.
+            <p className="text-base text-gray-400 tracking-wide">
+              Nothing to install. No sign-up. You are a ghost <span className="text-cyan">instantly</span>.
             </p>
           </div>
 
           <div className="flex flex-col sm:flex-row items-center gap-3">
-            <span className="text-xs font-mono uppercase tracking-wider text-gray-600">or</span>
             <PlatformDownloadButton />
             <motion.a
             href="https://github.com/MiguelMedeiros/ghostly"
