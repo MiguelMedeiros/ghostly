@@ -31,7 +31,9 @@ import type { PkarrTransport } from "./transport";
  * (how to reach Pkarr, how to create a peer connection, how to reach a local
  * HTTP server) are injected, so Desktop and Browser run the same code.
  */
+/** Unanswered offers are repeated less and less often: 1.5, 3, 6, then every 12 minutes. */
 const AUTO_CONNECT_RETRY_MS = 90_000;
+const AUTO_CONNECT_MAX_RETRY_MS = 12 * 60_000;
 
 export interface IncomingMessage {
   text: string;
@@ -91,6 +93,7 @@ export class GhostLink {
   private peerServicesOverride: ServiceAd[] | null = null;
   private openWaiters: { resolve: () => void; reject: (e: Error) => void }[] = [];
   private lastAutoConnectAt = 0;
+  private autoConnectFailures = 0;
 
   constructor(options: GhostLinkOptions) {
     this.options = options;
@@ -273,8 +276,10 @@ export class GhostLink {
   private maybeAutoConnect(presence: PeerPresence): void {
     if (!this.options.autoConnect || !presence.online || this.channel || this.dataLink.state !== "idle") return;
     if (this.myPubKeyZ32 > this.options.params.peerPubKeyZ32) return;
-    if (Date.now() - this.lastAutoConnectAt < AUTO_CONNECT_RETRY_MS) return;
+    const wait = Math.min(AUTO_CONNECT_RETRY_MS * 2 ** this.autoConnectFailures, AUTO_CONNECT_MAX_RETRY_MS);
+    if (Date.now() - this.lastAutoConnectAt < wait) return;
     this.lastAutoConnectAt = Date.now();
+    this.autoConnectFailures++;
     void this.dataLink.connect();
   }
 
@@ -285,6 +290,7 @@ export class GhostLink {
 
   private attach(channel: FrameChannel): void {
     this.channel = channel;
+    this.autoConnectFailures = 0;
     this.httpClient = new HttpClient(channel);
     this.httpHost = new HttpHost(channel, this.options.getHostedHttpService, this.options.localFetch);
     const events = this.options.events ?? {};

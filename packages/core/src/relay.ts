@@ -10,6 +10,15 @@ import type { PkarrTransport } from "./transport";
  */
 export const DEFAULT_RELAYS = ["https://pkarr.pubky.org", "https://pkarr.pubky.app"];
 
+/**
+ * Requests this client allows itself per relay and minute. Relays limit by IP
+ * (120 a minute when this was written) and one address is often shared by
+ * several peers: two browser profiles, a tab and an extension, a household.
+ */
+const REQUESTS_PER_MINUTE = 30;
+/** A relay that fails at the network level is left alone for this long. */
+const NETWORK_ERROR_COOLDOWN_MS = 20_000;
+
 export interface RelayTransportOptions {
   relays?: string[];
   timeoutMs?: number;
@@ -34,6 +43,9 @@ export class RelayTransport implements PkarrTransport {
   private readonly newest = new Map<string, SignedPacket>();
   private readonly coolingDown = new Map<string, number>();
   private cursor = 0;
+  private readonly spent = new Map<string, number[]>();
+  /** Timestamp of the last packet sent to each relay, per key: the compare-and-swap value for the next one. */
+  private readonly lastPut = new Map<string, bigint>();
 
   constructor(options: RelayTransportOptions = {}) {
     this.relays = [];
@@ -69,10 +81,15 @@ export class RelayTransport implements PkarrTransport {
     const payload = createRelayPayload(identity, records, timestamp);
     const results = await Promise.allSettled(
       this.relays.map(async (relay) => {
-        const response = await this.request(`${relay}/${identity.pubKeyZ32}`, {
-          method: "PUT",
-          body: payload as BodyInit,
-        });
+        const slot = `${relay} ${identity.pubKeyZ32}`;
+        const previous = this.lastPut.get(slot);
+        this.lastPut.set(slot, timestamp);
+
+        // A relay refuses (428) to replace a packet whose DHT put is still in flight, unless told which
+        // packet is being replaced. Links publish in bursts (a message, its ack, a signal), so say so.
+        let response = await this.put(relay, identity.pubKeyZ32, payload, previous);
+        // 412: the relay never got `previous` (it was busy, or restarted). There is one writer per key, so insist.
+        if (response.status === 412) response = await this.put(relay, identity.pubKeyZ32, payload);
         if (response.status === 429) this.coolDown(relay, response);
         if (!response.ok) throw new Error(`${relay} responded ${response.status}`);
       }),
@@ -98,7 +115,7 @@ export class RelayTransport implements PkarrTransport {
     let reachable = false;
     for (let i = 0; i < this.relays.length; i++) {
       const relay = this.relays[(start + i) % this.relays.length];
-      if ((this.coolingDown.get(relay) ?? 0) > Date.now()) continue;
+      if ((this.coolingDown.get(relay) ?? 0) > Date.now() || !this.take(relay)) continue;
       try {
         const response = await this.request(`${relay}/${pubKeyZ32}`, { method: "GET" });
         if (response.status === 429) {
@@ -114,11 +131,39 @@ export class RelayTransport implements PkarrTransport {
         reachable = true;
         break;
       } catch {
-        // try the next relay
+        // In a browser a rate-limited answer often arrives without CORS headers and
+        // surfaces as a network error, so this is treated like a 429: try the next relay.
+        this.coolingDown.set(relay, Date.now() + NETWORK_ERROR_COOLDOWN_MS);
       }
     }
-    if (!reachable) throw new Error("No Pkarr relay reachable");
+    if (!reachable) {
+      const resting = this.relays.every((r) => (this.coolingDown.get(r) ?? 0) > Date.now() || (this.spent.get(r)?.length ?? 0) >= REQUESTS_PER_MINUTE);
+      // Holding back is not an outage: report what is already known.
+      if (resting && this.newest.has(pubKeyZ32)) return this.newest.get(pubKeyZ32)!;
+      throw new Error("No Pkarr relay reachable");
+    }
     return this.newest.get(pubKeyZ32) ?? null;
+  }
+
+  private put(relay: string, pubKeyZ32: string, payload: Uint8Array, replaces?: bigint): Promise<Response> {
+    return this.request(`${relay}/${pubKeyZ32}`, {
+      method: "PUT",
+      body: payload as BodyInit,
+      headers: replaces === undefined ? undefined : { "If-Match": replaces.toString() },
+    });
+  }
+
+  /** Polls wait their turn; publishes are rare and always go out. */
+  private take(relay: string): boolean {
+    const now = Date.now();
+    const recent = (this.spent.get(relay) ?? []).filter((at) => now - at < 60_000);
+    if (recent.length >= REQUESTS_PER_MINUTE) {
+      this.spent.set(relay, recent);
+      return false;
+    }
+    recent.push(now);
+    this.spent.set(relay, recent);
+    return true;
   }
 
   private coolDown(relay: string, response: Response): void {

@@ -27,7 +27,7 @@ import {
 } from "@ghostly/core";
 import type { EngineImplementation } from "../shared/rpc";
 import { fileStore } from "../shared/idb";
-import { DEFAULT_MINTS } from "../shared/mints";
+import { DEFAULT_MINTS, TEST_MINT } from "../shared/mints";
 import type {
   EngineState,
   FileTransferView,
@@ -104,6 +104,7 @@ export class GhostlyNode implements EngineImplementation {
   private readonly wallet = new CashuWallet(() => this.settings.mints, {
     onChange: () => void this.refreshWallet(),
     onQuotePaid: (quote) => void this.desk.onQuotePaid(quote),
+    onTestMintNeeded: async () => void (await this.walletAddMint({ url: TEST_MINT })),
   });
   private readonly desk = new PaymentDesk(this.wallet, {
     getLink: (linkId) => this.links.get(linkId)?.link ?? null,

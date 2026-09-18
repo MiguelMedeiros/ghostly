@@ -1,5 +1,6 @@
 import { Wallet, getEncodedToken, getTokenMetadata, type Proof, type ProofLike } from "@cashu/cashu-ts";
 import { STORES, store, wrap } from "../shared/idb";
+import { TEST_MINT } from "../shared/mints";
 import type { MintInfoView, MintView, StoredProof, StoredQuote, WalletTx, WalletTxKind, WalletView } from "../shared/types";
 
 /**
@@ -40,6 +41,8 @@ const total = (proofs: { amount: number }[]) => proofs.reduce((sum, p) => sum + 
 
 export interface WalletEvents {
   onChange(): void;
+  /** Ecash arrived from the public test mint, which this wallet did not have yet. */
+  onTestMintNeeded(): Promise<void>;
   /** An invoice of ours was paid and its ecash is in the wallet. */
   onQuotePaid(quote: StoredQuote): void;
 }
@@ -218,6 +221,8 @@ export class CashuWallet {
     } catch {
       throw new Error("That is not a valid ecash token");
     }
+    // A mint is a custodian and only the user picks those. The test mint holds nothing of value.
+    if (!this.getMints().includes(mint) && mint === TEST_MINT) await this.events.onTestMintNeeded();
     if (!this.getMints().includes(mint)) throw new Error(`Ecash from ${new URL(mint).hostname} is not accepted`);
 
     return this.locked(mint, async () => {
