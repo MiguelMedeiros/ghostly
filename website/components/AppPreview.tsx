@@ -25,7 +25,7 @@ export function AppPreview() {
             A glimpse of <span className="text-gradient">Ghostly</span>
           </h2>
           <p className="text-gray-500 max-w-xl mx-auto">
-            Clean, intuitive interface. Everything you need, nothing you don&apos;t.
+            Real screenshots. Same interface on desktop, extension and web.
           </p>
         </motion.div>
 

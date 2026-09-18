@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "motion/react";
+import { Icon, IconTile } from "./icons";
 import { useEffect, useState } from "react";
 
 function FloatingGhost({ 
@@ -121,8 +122,7 @@ export function Download() {
             Become a <span className="text-gradient-animated">Ghost</span>
           </h2>
           <p className="text-lg text-gray-400 max-w-lg mx-auto mb-12">
-            Download and start haunting in seconds.
-            No sign-up. No traces. Just you and your ghostly friends.
+            Open a tab, add the extension, or download the app. No sign-up.
           </p>
         </motion.div>
 
@@ -145,7 +145,7 @@ export function Download() {
             </div>
             <div className="flex flex-col gap-2">
               <a
-                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.4/Ghostly_0.1.4_aarch64.dmg"
+                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.2.0/Ghostly_0.2.0_aarch64.dmg"
                 className="flex items-center justify-between px-3 py-2 rounded-lg bg-cyan/10 text-cyan text-sm font-medium hover:bg-cyan/20 transition-colors"
               >
                 <span>Apple Silicon</span>
@@ -154,7 +154,7 @@ export function Download() {
                 </svg>
               </a>
               <a
-                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.4/Ghostly_0.1.4_x64.dmg"
+                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.2.0/Ghostly_0.2.0_x64.dmg"
                 className="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-800/50 text-gray-400 text-sm hover:bg-gray-800 hover:text-gray-200 transition-colors"
               >
                 <span>Intel</span>
@@ -177,7 +177,7 @@ export function Download() {
             </div>
             <div className="flex flex-col gap-2">
               <a
-                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.4/Ghostly_0.1.4_x64-setup.exe"
+                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.2.0/Ghostly_0.2.0_x64-setup.exe"
                 className="flex items-center justify-between px-3 py-2 rounded-lg bg-cyan/10 text-cyan text-sm font-medium hover:bg-cyan/20 transition-colors"
               >
                 <span>Installer (.exe)</span>
@@ -186,7 +186,7 @@ export function Download() {
                 </svg>
               </a>
               <a
-                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.4/Ghostly_0.1.4_x64_en-US.msi"
+                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.2.0/Ghostly_0.2.0_x64_en-US.msi"
                 className="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-800/50 text-gray-400 text-sm hover:bg-gray-800 hover:text-gray-200 transition-colors"
               >
                 <span>MSI Package</span>
@@ -209,7 +209,7 @@ export function Download() {
             </div>
             <div className="flex flex-col gap-2">
               <a
-                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.4/Ghostly_0.1.4_amd64.deb"
+                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.2.0/Ghostly_0.2.0_amd64.deb"
                 className="flex items-center justify-between px-3 py-2 rounded-lg bg-cyan/10 text-cyan text-sm font-medium hover:bg-cyan/20 transition-colors"
               >
                 <span>.deb</span>
@@ -218,7 +218,7 @@ export function Download() {
                 </svg>
               </a>
               <a
-                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.1.4/Ghostly_0.1.4_amd64.AppImage"
+                href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.2.0/Ghostly_0.2.0_amd64.AppImage"
                 className="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-800/50 text-gray-400 text-sm hover:bg-gray-800 hover:text-gray-200 transition-colors"
               >
                 <span>.AppImage</span>
@@ -230,6 +230,59 @@ export function Download() {
           </div>
         </motion.div>
 
+        {/* No install at all, or a small one */}
+        <motion.div
+          id="extension"
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ delay: 0.25, duration: 0.5 }}
+          className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8 max-w-2xl mx-auto text-left scroll-mt-24"
+        >
+          <div className="rounded-xl border border-cyan/30 bg-surface/50 p-5">
+            <div className="flex items-center gap-3 mb-3">
+              <IconTile name="globe" />
+              <span className="font-semibold text-gray-100">In your browser</span>
+              <span className="ml-auto text-[10px] font-mono uppercase tracking-wider text-yellow-500 border border-yellow-500/40 rounded-full px-2 py-0.5">beta</span>
+            </div>
+            <p className="text-sm text-gray-500 mb-4">Nothing to install. Lives while the tab is open.</p>
+            <ul className="mb-4 text-xs text-gray-500 space-y-1.5">
+              <li className="flex items-center gap-2"><Icon name="chat" className="w-4 h-4 text-cyan/70 shrink-0" />Talks to the extension and the desktop app</li>
+              <li className="flex items-center gap-2"><Icon name="key" className="w-4 h-4 text-cyan/70 shrink-0" />Keys and sats stay in this browser</li>
+              <li className="flex items-center gap-2"><Icon name="leave" className="w-4 h-4 text-cyan/70 shrink-0" />Close the tab and you are gone</li>
+            </ul>
+            <a
+              href="https://app.ghostly.tools"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex w-full justify-center px-4 py-2.5 rounded-lg bg-linear-to-r from-cyan to-green text-black text-sm font-semibold hover:shadow-lg hover:shadow-cyan/20 transition-all"
+            >
+              Open app.ghostly.tools
+            </a>
+          </div>
+
+          <div className="rounded-xl border border-border/50 bg-surface/50 p-5">
+            <div className="flex items-center gap-3 mb-3">
+              <IconTile name="puzzle" tone="green" />
+              <span className="font-semibold text-gray-100">Browser extension</span>
+              <span className="ml-auto text-[10px] font-mono uppercase tracking-wider text-gray-500 border border-border/50 rounded-full px-2 py-0.5 shrink-0">Chromium</span>
+            </div>
+            <p className="text-sm text-gray-500 mb-3">Haunts while the browser is open. Shares your localhost.</p>
+            <a
+              href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.2.0/ghostly-browser-extension-0.2.0.zip"
+              className="inline-flex w-full justify-center px-4 py-2.5 rounded-lg border border-cyan/40 text-cyan text-sm font-semibold hover:bg-cyan/10 transition-all"
+            >
+              Download the .zip
+            </a>
+            <ol className="mt-3 text-xs text-gray-500 space-y-1 list-decimal list-inside">
+              <li>Unzip it somewhere you will keep.</li>
+              <li>Open <code className="text-gray-400">chrome://extensions</code> and turn on <span className="text-gray-400">Developer mode</span>.</li>
+              <li>Click <span className="text-gray-400">Load unpacked</span> and pick the folder.</li>
+            </ol>
+            <p className="mt-2 text-[11px] text-gray-600">Chrome, Brave, Edge. It asks to &quot;debug&quot; only the tabs it opens for a contact&apos;s app.</p>
+          </div>
+        </motion.div>
+
         <motion.p
           initial={{ opacity: 0 }}
           whileInView={{ opacity: 1 }}
@@ -237,9 +290,9 @@ export function Download() {
           transition={{ delay: 0.3 }}
           className="text-sm text-gray-500 mb-8"
         >
-          v0.1.4 •{" "}
+          v0.2.0 •{" "}
           <a
-            href="https://github.com/MiguelMedeiros/ghostly/releases/tag/v0.1.4"
+            href="https://github.com/MiguelMedeiros/ghostly/releases/tag/v0.2.0"
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-cyan transition-colors underline underline-offset-2"

@@ -10,6 +10,9 @@ import { FAQ } from "@/components/FAQ";
 import { Download } from "@/components/Download";
 import { Footer } from "@/components/Footer";
 import { Navbar } from "@/components/Navbar";
+import { ShareDemo } from "@/components/ShareDemo";
+import { Clients } from "@/components/Clients";
+import { FinePrint } from "@/components/FinePrint";
 import GhostPet from "@/components/GhostPet";
 
 export default function Home() {
@@ -18,13 +21,16 @@ export default function Home() {
       <Navbar />
       <main>
         <Hero />
+        <ShareDemo />
+        <Features />
         <AppPreview />
         <WhatIs />
         <ELI5 />
         <HowItWorks />
-        <Features />
+        <Clients />
         <CLISection />
         <ProtocolDeepDive />
+        <FinePrint />
         <FAQ />
         <Download />
       </main>

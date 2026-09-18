@@ -1,5 +1,6 @@
 "use client";
 
+import { ProtocolV1 } from "./ProtocolV1";
 import { motion } from "motion/react";
 import { useState, useEffect } from "react";
 
@@ -29,6 +30,36 @@ const SectionIcons = {
       <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
     </svg>
   ),
+  services: (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
+    </svg>
+  ),
+  "data-link": (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
+    </svg>
+  ),
+  http: (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
+    </svg>
+  ),
+  files: (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
+    </svg>
+  ),
+  payments: (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
+    </svg>
+  ),
+  clients: (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25" />
+    </svg>
+  ),
   encryption: (
     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
@@ -52,6 +83,12 @@ const sections = [
   { id: "dns-records", label: "DNS Records" },
   { id: "message-types", label: "Message Types" },
   { id: "call-signaling", label: "Call Signaling" },
+  { id: "services", label: "Services" },
+  { id: "data-link", label: "Data Link" },
+  { id: "http", label: "HTTP over WebRTC" },
+  { id: "files", label: "Files" },
+  { id: "payments", label: "Payments" },
+  { id: "clients", label: "Clients & Relays" },
   { id: "encryption", label: "Encryption" },
   { id: "timing", label: "Timing & Limits" },
   { id: "technical-faq", label: "Technical FAQ" },
@@ -127,6 +164,41 @@ const dnsRecords = [
 }`,
     example: `_call TXT "encrypted_signal_b64"`,
     notes: "Enables peer-to-peer voice/video calls. Signal is cleared after call ends.",
+  },
+  {
+    name: "_svc",
+    type: "TXT",
+    description: "Service advertisement: what this peer offers while it is online (since 0.2)",
+    encrypted: true,
+    required: false,
+    maxSize: "~200 chars",
+    schema: `{
+  "v": 1,
+  "s": ["chat", "voice", "video",
+    { "i": "my-photos", "t": "http",
+      "n": "My photos" }]
+}`,
+    example: `_svc TXT "encrypted_services_b64"`,
+    notes: "Older clients ignore it. Its presence in a fresh packet is what 'online' means. Never contains a local address.",
+  },
+  {
+    name: "_rtc",
+    type: "TXT",
+    description: "Offer or answer for the WebRTC data link (since 0.2)",
+    encrypted: true,
+    required: false,
+    maxSize: "~400 chars",
+    schema: `{
+  "t": "o",
+  "ts": 1789712672369,
+  "u": "ufrag",
+  "p": "pwd",
+  "f": "fingerprint",
+  "s": "actpass",
+  "c": ["s,203.0.113.7,61000"]
+}`,
+    example: `_rtc TXT "encrypted_signal_b64"`,
+    notes: "Cleared once the DataChannel is open. From then on the DHT is out of the picture.",
   },
 ];
 
@@ -356,12 +428,13 @@ export function ProtocolDocs() {
               </h1>
               
               <p className="text-lg text-gray-400 leading-relaxed mb-8">
-                Complete reference for the Ghostly messaging protocol. This document covers DNS TXT records
-                over Mainline DHT, end-to-end encryption schemes, message formats, and WebRTC call signaling.
+                Complete reference for the Ghost protocol. It covers DNS TXT records over the Mainline DHT,
+                end-to-end encryption, message formats and call signaling, and what 0.2 added on top: service
+                advertisements, the peer to peer data link, HTTP over WebRTC, files and payments.
               </p>
 
               <div className="flex flex-wrap gap-3">
-                {["Pkarr", "BEP44", "Ed25519", "NaCl", "WebRTC"].map((tech) => (
+                {["Pkarr", "BEP44", "Ed25519", "NaCl", "WebRTC", "DataChannels", "Cashu", "Paykit"].map((tech) => (
                   <span
                     key={tech}
                     className="px-3 py-1.5 rounded-lg bg-surface border border-border/50 text-sm font-mono text-gray-400"
@@ -662,6 +735,8 @@ Both:  encrypt/decrypt with shared encKey (256-bit)`}</code>
               </div>
             </motion.div>
           </section>
+
+          <ProtocolV1 />
 
           {/* Encryption Section */}
           <section id="encryption" className="mb-20">

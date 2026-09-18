@@ -7,62 +7,52 @@ const faqs = [
   {
     question: "What is Ghostly?",
     answer:
-      "Ghostly is an ephemeral, end-to-end encrypted messaging app that uses the Mainline DHT (BitTorrent's distributed hash table) instead of central servers. Messages are encrypted locally and published as DNS records to a network of 10+ million nodes.",
+      "A peer to peer way to chat, call, send files and sats, and share local web apps. Everything you offer exists only while you are online. No servers, no accounts.",
   },
   {
-    question: "How does encryption work?",
+    question: "Is sharing a localhost app safe?",
     answer:
-      "We use NaCl secretbox with XSalsa20-Poly1305 for message encryption. Each chat has a unique 256-bit encryption key that's shared via the invite link. Private keys never leave your device — not even we can read your messages.",
+      "Contacts see a name, never your address. Ghostly forwards their requests only to the app you picked: loopback only, no cookies, with limits. They can use that app exactly as you can, so share what you would let them use.",
   },
   {
-    question: "What makes messages ephemeral?",
+    question: "Where are my sats?",
     answer:
-      "Messages are continuously republished to the DHT to stay alive. When you close the app or delete a chat, republishing stops and messages naturally expire from the network within approximately 5 hours. No server stores them permanently.",
+      "In an ecash (Cashu) wallet. You receive and pay over Lightning through a mint. The mint holds the sats and could lose them, and there is no seed backup yet. Pocket money only.",
   },
   {
-    question: "Do I need to create an account?",
+    question: "Web, extension or desktop?",
     answer:
-      "No. Your identity is a cryptographic keypair generated locally on your device. There's no sign-up, no email, no phone number. Just open the app and start chatting.",
+      "Same client, same protocol. The web app needs no install but cannot share localhost or open a contact's app. The extension and desktop can. Desktop also reaches the DHT without relays.",
   },
   {
-    question: "How do I start a chat with someone?",
+    question: "How is it encrypted?",
     answer:
-      "Create a new chat to get an invite code or QR code. Share it with your contact through any channel. When they join, you're connected directly through the DHT — no server involved.",
+      "NaCl secretbox (XSalsa20-Poly1305) with a 256-bit key per chat, shared in the invite. Keys never leave your device.",
   },
   {
-    question: "What is the Mainline DHT?",
+    question: "Why do messages disappear?",
     answer:
-      "The Mainline DHT is BitTorrent's distributed hash table, the largest DHT in the world with over 10 million nodes. Ghostly uses Pkarr to publish encrypted messages as DNS records to this network.",
+      "They live on the DHT only while you republish them. Close the app and they expire in about 5 hours.",
   },
   {
-    question: "Can I make voice or video calls?",
+    question: "Do I need an account?",
     answer:
-      "Yes! Ghostly supports peer-to-peer audio and video calls using WebRTC. The signaling happens through the DHT, and the actual call is a direct connection between you and your contact.",
+      "No. Your identity is a keypair generated on your device. No email, no phone number.",
   },
   {
-    question: "What happens if I lose my device?",
+    question: "What if I lose my device?",
     answer:
-      "Since there are no accounts or central servers, your chat history only exists on your device. If you lose your device, your chats are gone. This is by design — it's the ultimate privacy protection.",
+      "Your chats are gone. There is no server to restore them from. That is the point.",
   },
   {
-    question: "Is Ghostly open source?",
+    question: "How is this different from Signal?",
     answer:
-      "Yes, completely. The entire codebase is available on GitHub. You can audit the code, verify the cryptography, and build from source. We believe trust is earned through transparency.",
+      "No central servers, no accounts, no stored messages.",
   },
   {
-    question: "What platforms does Ghostly support?",
+    question: "Is it free and open source?",
     answer:
-      "Ghostly is a desktop application built with Tauri. It runs natively on macOS, Windows, and Linux. Mobile versions may come in the future.",
-  },
-  {
-    question: "How is this different from Signal or WhatsApp?",
-    answer:
-      "Unlike Signal or WhatsApp, Ghostly has no central servers, no accounts, and no permanent message storage. Messages exist only while being actively republished. It's truly serverless and ephemeral by design.",
-  },
-  {
-    question: "Is it really free?",
-    answer:
-      "Yes, Ghostly is completely free and open source. There are no ads, no premium tiers, and no data collection. The only infrastructure cost is the Mainline DHT, which is maintained by the BitTorrent network.",
+      "Yes. No ads, no tiers, no data collection. The code is on GitHub.",
   },
 ];
 

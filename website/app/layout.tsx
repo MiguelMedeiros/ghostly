@@ -15,9 +15,9 @@ const jetbrains = JetBrains_Mono({
 
 const siteConfig = {
   name: "Ghostly",
-  title: "Ghostly — Encrypted Ephemeral Chat over the DHT",
+  title: "Ghostly — Your services exist while you are online",
   description:
-    "Serverless, end-to-end encrypted, ephemeral messaging. No accounts, no servers. Messages travel through 10M+ DHT nodes and vanish when you stop.",
+    "Ephemeral, peer-to-peer and serverless: chat, calls, files, sats and the web apps on your localhost, shared with the contacts you choose over the DHT and WebRTC. Close Ghostly and it all vanishes.",
   url: "https://ghostly.tools",
   ogImage: "https://ghostly.tools/og-image.png",
   keywords: [

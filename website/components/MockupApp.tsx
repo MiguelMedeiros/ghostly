@@ -4,42 +4,14 @@ import { motion } from "motion/react";
 import { useState, useEffect, useCallback } from "react";
 
 const screenshots = [
-  {
-    id: "home",
-    src: "/screenshots/app-home.png",
-    alt: "Ghostly - Home screen with cyan theme",
-    label: "Home",
-  },
-  {
-    id: "chat",
-    src: "/screenshots/app-new-chat.png",
-    alt: "Ghostly - New chat with invite code",
-    label: "New Chat",
-  },
-  {
-    id: "conversation",
-    src: "/screenshots/app-chat-conversation.png",
-    alt: "Ghostly - Chat conversation with messages and GIF",
-    label: "Conversation",
-  },
-  {
-    id: "incoming",
-    src: "/screenshots/app-incoming-call.png",
-    alt: "Ghostly - Incoming video call notification",
-    label: "Incoming Call",
-  },
-  {
-    id: "call",
-    src: "/screenshots/app-audio-call.png",
-    alt: "Ghostly - Video call in progress",
-    label: "Video Call",
-  },
-  {
-    id: "settings",
-    src: "/screenshots/app-settings.png",
-    alt: "Ghostly - Settings with theme selection",
-    label: "Settings",
-  },
+  { id: "conversation", src: "/screenshots/app-chat-conversation.png", alt: "A Ghostly chat with a shared app, a file and a sats payment", label: "Chat" },
+  { id: "share", src: "/screenshots/app-share.png", alt: "Sharing a local web app from the Ghostly sidebar", label: "Share an app" },
+  { id: "friend-app", src: "/screenshots/app-friend-app.png", alt: "A contact's local web app opened in the browser through Ghostly", label: "A friend's app" },
+  { id: "sats", src: "/screenshots/app-sats.png", alt: "The Ghostly wallet history with the fee of every movement", label: "Sats" },
+  { id: "incoming-call", src: "/screenshots/app-incoming-call.png", alt: "An incoming Ghostly video call", label: "Incoming call" },
+  { id: "call", src: "/screenshots/app-audio-call.png", alt: "A Ghostly voice call", label: "Call" },
+  { id: "new-chat", src: "/screenshots/app-new-chat.png", alt: "Creating a Ghostly chat and its invite", label: "New chat" },
+  { id: "settings", src: "/screenshots/app-settings.png", alt: "Ghostly settings: themes, language, lock screen", label: "Settings" },
 ];
 
 export function MockupApp() {
@@ -92,7 +64,7 @@ export function MockupApp() {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, delay: 0.5 }}
-        className="flex justify-center gap-2"
+        className="flex flex-wrap justify-center gap-2"
       >
         {screenshots.map((screenshot, index) => (
           <button

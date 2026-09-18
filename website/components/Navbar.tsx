@@ -77,6 +77,14 @@ export function Navbar() {
             Docs
           </a>
           <a
+            href="https://app.ghostly.tools"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hidden sm:inline-flex px-4 py-2 rounded-lg border border-cyan/40 text-cyan text-sm font-semibold hover:bg-cyan/10 transition-all"
+          >
+            Open app
+          </a>
+          <a
             href="/#download"
             className="px-4 py-1.5 rounded-lg bg-cyan/10 text-cyan text-sm font-medium border border-cyan/20 hover:bg-cyan/20 transition-colors"
           >
