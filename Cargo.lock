@@ -1453,11 +1453,14 @@ dependencies = [
  "crypto_secretbox",
  "pkarr",
  "rand 0.8.7",
+ "reqwest",
  "serde",
  "serde_json",
  "simple-dns",
  "tauri",
  "tauri-build",
+ "tokio",
+ "url",
 ]
 
 [[package]]

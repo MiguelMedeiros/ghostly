@@ -20,19 +20,20 @@
   "dependencies": {
     "@emoji-mart/data": "^1.2.1",
     "@emoji-mart/react": "^1.1.1",
-    "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/api": "^2.11.1",
     "emoji-mart": "^5.6.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-router-dom": "^7.13.0",
     "@ghostly/core": "*",
-    "@ghostly/react": "*"
+    "@ghostly/react": "*",
+    "@ghostly/browser": "*"
   },
   "devDependencies": {
     "@eslint/js": "^9.20.0",
     "@tailwindcss/vite": "^4.2.0",
-    "@tauri-apps/cli": "^2.10.0",
+    "@tauri-apps/cli": "^2.11.4",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.4",

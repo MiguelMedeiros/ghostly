@@ -173,12 +173,14 @@ Does not work yet:
 
 ## Desktop
 
-Desktop already shares the protocol code (call signaling and the `useWebRTC` hook live in `@ghostly/core` and `@ghostly/react`) and the UI for services: the sidebar's *Services* section, the strip under the chat header and the *Network* settings are Desktop components that stay hidden while `src/lib/platform.ts` exports `null`. To light them up, Desktop needs an implementation of that module on top of the same `GhostLink`, with three adapters:
+Ghostly Desktop runs this same peer in its WebView, as a third host (`src/desktop/host.ts`), with Rust doing what a WebView cannot:
 
 | Core interface | Browser | Desktop |
 |---|---|---|
-| `PkarrTransport` | `RelayTransport` (HTTP relays) | two generic Tauri commands, `publish_records` and `resolve_records`, on the existing Rust client (DHT + relays) |
-| `LocalFetch` | `fetch` with a host permission | a Rust command using an HTTP client; it can forward cookies |
-| viewer | `chrome.debugger` on a virtual origin | a Tauri custom URI scheme in a second WebView window, answered from the data link |
+| `PkarrTransport` | `RelayTransport` (HTTP relays) | `publish_records` / `resolve_records` on the Rust Pkarr client: the Mainline DHT directly, plus its relays, at Desktop's original poll timings |
+| `LocalFetch` | `fetch` with a host permission | `local_fetch` in Rust: loopback only, never follows redirects, forwards cookies, no `Origin` header |
+| viewer | `chrome.debugger` on a virtual origin | a window per service on a `ghostly-svc://<service>.<peer>` origin; requests go through the peer in the main window, and the window has no access to Tauri commands |
 
-The WebView has `RTCPeerConnection`, so `DataLink` runs as is.
+Checked by hand on macOS against the extension, both ways: chat, the WebRTC link (WebKit ↔ Chromium), a 3 MiB file, test sats, opening a service the extension shares, and sharing a local app that the extension opens. Not checked yet: Windows and Linux (WebKitGTK builds often ship without WebRTC), and calls between Desktop and the other clients.
+
+Profiles (`GHOSTLY_PROFILE`) get their own sessions, database and peer, so two instances can run side by side.

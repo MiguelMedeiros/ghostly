@@ -192,7 +192,7 @@ export interface LocalRequest {
 export interface LocalResponse {
   status: number;
   headers: HeaderList;
-  body: AsyncIterable<Uint8Array> | null;
+  body: AsyncIterable<Uint8Array> | Iterable<Uint8Array> | null;
   /** Final URL when the local stack followed redirects on its own. */
   finalUrl?: string;
 }

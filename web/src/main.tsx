@@ -3,12 +3,13 @@ import { createRoot } from "react-dom/client";
 import { setBrowserHost } from "@ghostly/browser/host";
 import { startSessionSync } from "@ghostly/browser/platform/sync";
 import { Root } from "../../src/Root";
-import { announceDeparture, becomeThePeer, webHost } from "./host";
+import { becomeThePeer } from "@ghostly/browser/inPageHost";
+import { webHost } from "./host";
 
 // The same UI and the same peer as the extension; only the host differs.
 const root = createRoot(document.getElementById("root")!);
 
-await becomeThePeer(() =>
+await becomeThePeer("ghostly-peer", () =>
   root.render(
     <div style={{ height: "100vh", display: "grid", placeItems: "center", background: "#0b141a", color: "#8696a0", font: "15px system-ui", textAlign: "center", padding: 24 }}>
       <div>
@@ -22,7 +23,7 @@ await becomeThePeer(() =>
 
 setBrowserHost(webHost);
 startSessionSync();
-addEventListener("pagehide", announceDeparture);
+addEventListener("pagehide", () => webHost.announceDeparture());
 
 root.render(
   <StrictMode>

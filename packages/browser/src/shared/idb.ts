@@ -3,7 +3,12 @@
  * the pages share an origin, so both open it: that is also how file contents
  * move between them without squeezing through runtime messages.
  */
-const DB_NAME = "ghostly";
+let dbName = "ghostly";
+
+/** Before first use: keeps profiles that share a browser storage area apart (Desktop's GHOSTLY_PROFILE). */
+export function setDatabaseName(name: string): void {
+  dbName = name;
+}
 const DB_VERSION = 4;
 
 export const STORES = {
@@ -30,7 +35,7 @@ let dbPromise: Promise<IDBDatabase> | null = null;
 
 export function openDb(): Promise<IDBDatabase> {
   dbPromise ??= new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    const request = indexedDB.open(dbName, DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
       const has = (name: string) => db.objectStoreNames.contains(name);

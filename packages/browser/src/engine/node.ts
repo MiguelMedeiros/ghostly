@@ -22,6 +22,9 @@ import {
   type HostedHttpService,
   type LinkParams,
   type LinkStatus,
+  type LocalFetch,
+  type PkarrTransport,
+  type PollIntervals,
   type PeerPresence,
   type ServiceAd,
 } from "@ghostly/core";
@@ -80,6 +83,15 @@ function newLiveLink(stored: StoredLink, lastMessageAt: number): LiveLink {
   };
 }
 
+/** What a host may replace. The defaults are what a browser can do on its own. */
+export interface NodeOptions {
+  /** How to reach Pkarr. Default: HTTP relays, the only way out of a browser. */
+  transport?: PkarrTransport;
+  pollIntervals?: PollIntervals;
+  /** How to reach a shared local web app. Default: `fetch`, which needs the app's or the browser's consent. */
+  localFetch?: LocalFetch;
+}
+
 export interface NodeEvents {
   onState(state: EngineState): void;
   onMessages(linkId: string, messages: StoredMessage[]): void;
@@ -93,7 +105,10 @@ export interface NodeEvents {
  */
 export class GhostlyNode implements EngineImplementation {
   private settings: Settings = DEFAULT_SETTINGS;
-  private readonly transport = new RelayTransport();
+  private readonly transport: PkarrTransport;
+  private readonly relays: RelayTransport | null;
+  private readonly pollIntervals: PollIntervals;
+  private readonly localFetch: LocalFetch;
   private readonly links = new Map<string, LiveLink>();
   private services: StoredService[] = [];
   private readonly requestCounts = new Map<string, number>();
@@ -112,7 +127,16 @@ export class GhostlyNode implements EngineImplementation {
     onChange: () => this.emitState(),
   });
 
-  constructor(private readonly events: NodeEvents) {}
+  constructor(
+    private readonly events: NodeEvents,
+    options: NodeOptions = {},
+  ) {
+    // Relays are a setting only where relays are the transport.
+    this.relays = options.transport ? null : new RelayTransport();
+    this.transport = options.transport ?? this.relays!;
+    this.pollIntervals = options.pollIntervals ?? RELAY_POLL_INTERVALS;
+    this.localFetch = options.localFetch ?? webLocalFetch;
+  }
 
   private async refreshWallet(): Promise<void> {
     this.walletView = await this.wallet.view();
@@ -125,7 +149,7 @@ export class GhostlyNode implements EngineImplementation {
       this.settings = { ...this.settings, mints: [...new Set([...this.settings.mints, ...DEFAULT_MINTS])], mintsInitialized: true };
       await db.putSettings(this.settings);
     }
-    this.transport.setRelays(this.settings.relays);
+    this.relays?.setRelays(this.settings.relays);
     this.services = await db.getServices();
     await this.desk.start();
     await this.refreshWallet();
@@ -133,7 +157,7 @@ export class GhostlyNode implements EngineImplementation {
 
     for (const stored of await db.getLinks()) {
       const messages = await db.getMessages(stored.id);
-      this.links.set(stored.id, newLiveLink(stored, messages.at(-1)?.timestamp ?? 0));
+      this.links.set(stored.id, newLiveLink(stored, messages[messages.length - 1]?.timestamp ?? 0));
       if (this.settings.online) this.startLink(stored.id, messages);
     }
     this.emitState();
@@ -445,8 +469,8 @@ export class GhostlyNode implements EngineImplementation {
     const wasOnline = this.settings.online;
     this.settings = { ...this.settings, ...settings };
     if (settings.relays) {
-      this.transport.setRelays(settings.relays);
-      this.settings.relays = this.transport.describe().relays;
+      this.relays?.setRelays(settings.relays);
+      if (this.relays) this.settings.relays = this.relays.describe().relays;
     }
     await db.putSettings(this.settings);
 
@@ -522,11 +546,11 @@ export class GhostlyNode implements EngineImplementation {
       transport: this.transport,
       nick: this.settings.nick || undefined,
       lastSeenTimestamp,
-      pollIntervals: RELAY_POLL_INTERVALS,
+      pollIntervals: this.pollIntervals,
       autoConnect: true,
       createPeerConnection: () =>
         new RTCPeerConnection({ iceServers: [...(RTC_CONFIG.iceServers ?? []), ...this.settings.iceServers] }),
-      localFetch: webLocalFetch,
+      localFetch: this.localFetch,
       getServices: () => this.advertisedServices(),
       getHostedHttpService: (id) => this.hostedService(id),
       events: {

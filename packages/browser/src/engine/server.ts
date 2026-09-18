@@ -1,5 +1,5 @@
 import type { EngineEvent, RpcRequest, RpcResponse } from "../shared/rpc";
-import { GhostlyNode } from "./node";
+import { GhostlyNode, type NodeOptions } from "./node";
 
 /**
  * The peer plus what it takes to serve UI clients: answer their calls, and
@@ -15,12 +15,15 @@ export class EngineServer {
   readonly ready: Promise<void>;
   private readonly clients = new Set<EngineClientSink>();
 
-  constructor() {
-    this.node = new GhostlyNode({
-      onState: (state) => this.broadcast({ kind: "state", state }),
-      onMessages: (linkId, messages) => this.broadcast({ kind: "messages", linkId, messages }),
-      onCallSignal: (linkId, signal) => this.broadcast({ kind: "call-signal", linkId, signal }),
-    });
+  constructor(options: NodeOptions = {}) {
+    this.node = new GhostlyNode(
+      {
+        onState: (state) => this.broadcast({ kind: "state", state }),
+        onMessages: (linkId, messages) => this.broadcast({ kind: "messages", linkId, messages }),
+        onCallSignal: (linkId, signal) => this.broadcast({ kind: "call-signal", linkId, signal }),
+      },
+      options,
+    );
     this.ready = this.node.start();
   }
 

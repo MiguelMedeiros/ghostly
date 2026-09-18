@@ -3,11 +3,15 @@ use std::env;
 use tauri::State;
 
 use crate::crypto;
+use crate::local_fetch::{self, LocalResponse};
 use crate::pkarr_client;
+use crate::records::{self, PublishLog, RecordInput, ResolvedPacket};
 use crate::types::{CompactMessage, KeypairResult, ResolvedBatch};
+use crate::viewer::{self, ServiceResponse};
 
 pub struct AppState {
     pub pkarr_client: Client,
+    pub publish_log: PublishLog,
 }
 
 #[tauri::command]
@@ -95,4 +99,53 @@ pub async fn resolve_messages(
     let enc_key = crypto::from_base64_url(&enc_key_b64)?;
 
     pkarr_client::resolve_messages(&state.pkarr_client, &public_key_z32, &enc_key).await
+}
+
+// -- the shared TypeScript peer -------------------------------------------------
+
+#[tauri::command]
+pub async fn publish_records(
+    state: State<'_, AppState>,
+    seed_b64: String,
+    records: Vec<RecordInput>,
+) -> Result<(), String> {
+    let seed_bytes = crypto::from_base64_url(&seed_b64)?;
+    let seed: [u8; 32] = seed_bytes
+        .try_into()
+        .map_err(|_| "Seed must be exactly 32 bytes")?;
+    let keypair = Keypair::from_secret_key(&seed);
+    records::publish(&state.pkarr_client, &state.publish_log, &keypair, &records).await
+}
+
+#[tauri::command]
+pub async fn resolve_records(
+    state: State<'_, AppState>,
+    public_key_z32: String,
+) -> Result<Option<ResolvedPacket>, String> {
+    records::resolve(&state.pkarr_client, &public_key_z32).await
+}
+
+#[tauri::command]
+pub async fn local_fetch(
+    url: String,
+    method: String,
+    headers: Vec<(String, String)>,
+    body_b64: Option<String>,
+) -> Result<LocalResponse, String> {
+    local_fetch::fetch(url, method, headers, body_b64).await
+}
+
+#[tauri::command]
+pub fn open_service_window(
+    app: tauri::AppHandle,
+    peer: String,
+    service: String,
+    title: String,
+) -> Result<(), String> {
+    viewer::open(&app, peer, service, title)
+}
+
+#[tauri::command]
+pub fn service_respond(app: tauri::AppHandle, id: u64, response: ServiceResponse) {
+    viewer::respond(&app, id, response);
 }
