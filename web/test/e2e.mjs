@@ -3,6 +3,7 @@
  * same UI, different hosts.
  *
  *   docker compose up --build -d     # the web app on http://localhost:8080
+ *   WEB_URL=https://app.example.org node web/test/e2e.mjs   # or a deployed one
  *   npm run build:extension && node web/test/e2e.mjs
  *
  * Original note of the extension test, which this one borrows its setup from:
@@ -65,7 +66,13 @@ async function launchWebPeer(name) {
   const context = await chromium.launchPersistentContext(join(work, name), {
     channel: "chromium",
     headless,
-    args: ["--disable-features=WebRtcHideLocalIpsWithMdns", "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"],
+    args: [
+      "--disable-features=WebRtcHideLocalIpsWithMdns",
+      "--use-fake-device-for-media-stream",
+      "--use-fake-ui-for-media-stream",
+      // e.g. "MAP app.example.org 203.0.113.7" while a new hostname has not reached the local resolver yet
+      ...(process.env.HOST_RESOLVER_RULES ? [`--host-resolver-rules=${process.env.HOST_RESOLVER_RULES}`] : []),
+    ],
   });
   const page = await context.newPage();
   page.on("console", (m) => m.type() === "error" && console.log(`  [${name}] ${m.text()}`));
