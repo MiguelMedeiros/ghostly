@@ -23,7 +23,8 @@ import {
 
 export function Settings() {
   const navigate = useNavigate();
-  const { settings, updateColorScheme, updateColorTheme, updateLanguage, updateLockScreen, updateNotifications, updateDefaultNickname, randomizeNickname } =
+  const { settings, updateColorScheme, updateColorTheme, updateLanguage, updateLockScreen, updateNotifications, updateDefaultNickname,
+    updateGiphyApiKey, randomizeNickname } =
     useSettings();
   const { t } = useI18n();
   const { lock } = useLockScreen();
@@ -234,6 +235,22 @@ export function Settings() {
                     </svg>
                   </button>
                 </div>
+              </div>
+
+              <div className="space-y-2 border-t border-border pt-4">
+                <label className="text-text-primary block font-medium">Giphy API key (optional)</label>
+                <p className="text-text-muted text-xs">
+                  GIFs work with the key built into Ghostly. Use your own if you prefer, or if you built the app
+                  yourself: create a free "API" key at developers.giphy.com. It is stored on this device only.
+                </p>
+                <input
+                  type="text"
+                  value={settings.giphyApiKey}
+                  onChange={(e) => updateGiphyApiKey(e.target.value)}
+                  placeholder="Using the built-in key"
+                  spellCheck={false}
+                  className="w-full px-3 py-2 bg-input-bg border border-border rounded-lg text-text-primary placeholder-text-muted font-mono text-sm focus:outline-none focus:border-accent transition-colors"
+                />
               </div>
             </div>
           </section>

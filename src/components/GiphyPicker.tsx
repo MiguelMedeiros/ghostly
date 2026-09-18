@@ -16,8 +16,8 @@ interface GiphyGif {
   };
 }
 
-const GIPHY_PUBLIC_KEY = "dc6zaTOxFJmzC";
-const BUILD_API_KEY = import.meta.env.VITE_GIPHY_API_KEY || GIPHY_PUBLIC_KEY;
+/** Set at build time for releases; the user's own key from Settings takes precedence. */
+const BUILD_API_KEY: string = import.meta.env.VITE_GIPHY_API_KEY ?? "";
 const GIPHY_SEARCH_URL = "https://api.giphy.com/v1/gifs/search";
 const GIPHY_TRENDING_URL = "https://api.giphy.com/v1/gifs/trending";
 const RESULTS_LIMIT = 20;
@@ -66,6 +66,11 @@ export function GiphyPicker({ onSelect, onClose }: GiphyPickerProps) {
         ? `${GIPHY_SEARCH_URL}?api_key=${apiKey}&q=${encodeURIComponent(searchQuery)}&limit=${RESULTS_LIMIT}&rating=g`
         : `${GIPHY_TRENDING_URL}?api_key=${apiKey}&limit=${RESULTS_LIMIT}&rating=g`;
 
+      if (!apiKey) {
+        setKeyRejected(true);
+        setGifs([]);
+        return;
+      }
       const res = await fetch(url);
       const json = await res.json();
       // Giphy answers 401/403 ("BANNED") for the key old builds shipped with.
@@ -137,8 +142,8 @@ export function GiphyPicker({ onSelect, onClose }: GiphyPickerProps) {
           >
             <p className="text-text-primary text-sm font-medium">GIFs need a Giphy API key</p>
             <p className="text-text-muted text-xs leading-snug">
-              Giphy retired the shared key Ghostly used. Create a free one at developers.giphy.com (an "API" key, not
-              "SDK") and paste it here. It is stored on this device only.
+              Create a free one at developers.giphy.com (an "API" key, not "SDK") and paste it here. It is stored on
+              this device only, and you can change it in Settings.
             </p>
             <input
               value={keyDraft}
