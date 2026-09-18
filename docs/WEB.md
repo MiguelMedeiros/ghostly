@@ -18,6 +18,8 @@ npm install && npm run dev -w @ghostly/web
 
 serves it on <http://localhost:5180> with hot reload, and `npm run build:web` writes the static site to `web/dist`.
 
+To put it behind a tunnel or a reverse proxy, choose where it listens with `GHOSTLY_WEB_BIND` (for example `GHOSTLY_WEB_BIND=0.0.0.0:8090 docker compose up --build -d`) and terminate HTTPS in front of it.
+
 What is served is static files (nginx, `web/nginx.conf`). There is no Ghostly backend: the peer runs in the visitor's tab, reaches Pkarr through relays, talks to contacts over WebRTC, and keeps its state in that browser's IndexedDB and localStorage. It needs a secure context, which `http://localhost` is; anywhere else, serve it over HTTPS.
 
 `node web/test/e2e.mjs` checks a web page against the extension: chat, WebRTC link, a file, sats on the test mint, a video call.

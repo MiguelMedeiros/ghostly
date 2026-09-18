@@ -8,5 +8,7 @@ services:
       args:
         VITE_GIPHY_API_KEY: ${VITE_GIPHY_API_KEY:-}
     ports:
-      - "127.0.0.1:8080:80"
+      # Only this machine by default. Behind a reverse proxy or a tunnel on another
+      # address, set e.g. GHOSTLY_WEB_BIND=0.0.0.0:8090 (the app itself needs HTTPS there).
+      - "${GHOSTLY_WEB_BIND:-127.0.0.1:8080}:80"
     restart: unless-stopped
