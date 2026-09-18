@@ -8,6 +8,7 @@ import { createInPageHost } from "@ghostly/browser/inPageHost";
  */
 export const webHost = createInPageHost({
   version: __APP_VERSION__,
+  notice: "Beta. Your keys and sats live in this browser, and this page's code comes from the server you opened it on. Keep pocket money only.",
   features: { shareLocalServices: false, openServices: false },
   requestLocalAccess: async () => false,
   openService: async () => {

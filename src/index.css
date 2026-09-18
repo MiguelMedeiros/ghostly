@@ -366,3 +366,80 @@ em-emoji-picker {
 [dir="rtl"] {
   direction: rtl;
 }
+
+/* ============================================
+   Motion: things arriving, money moving
+   ============================================ */
+
+@keyframes bubble-in-left {
+  from { opacity: 0; transform: translate(-10px, 8px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes bubble-in-right {
+  from { opacity: 0; transform: translate(10px, 8px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+.animate-bubble-in-left { animation: bubble-in-left 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both; transform-origin: bottom left; }
+.animate-bubble-in-right { animation: bubble-in-right 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both; transform-origin: bottom right; }
+
+/* A band of light crossing a payment that just settled. */
+@keyframes sats-shine {
+  from { background-position: -150% 0; }
+  to { background-position: 250% 0; }
+}
+.animate-sats-shine {
+  background-image: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.22) 50%, transparent 65%);
+  background-size: 60% 100%;
+  background-repeat: no-repeat;
+  animation: sats-shine 0.9s ease-out 0.1s both;
+}
+
+@keyframes bolt-pop {
+  0% { transform: scale(0.4) rotate(-20deg); opacity: 0; }
+  60% { transform: scale(1.35) rotate(6deg); opacity: 1; }
+  100% { transform: none; }
+}
+.animate-bolt-pop { display: inline-block; animation: bolt-pop 0.5s cubic-bezier(0.3, 1.5, 0.5, 1) both; }
+
+@keyframes nudge {
+  0%, 100% { transform: none; }
+  20% { transform: translateX(-5px) rotate(-1deg); }
+  40% { transform: translateX(5px) rotate(1deg); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(3px); }
+}
+.animate-nudge { animation: nudge 0.5s ease-in-out 0.25s both; }
+
+@keyframes check-draw {
+  from { stroke-dashoffset: 48; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes check-ring {
+  from { transform: scale(0.5); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+.animate-check-ring { animation: check-ring 0.35s cubic-bezier(0.3, 1.4, 0.5, 1) both; }
+.animate-check-draw { stroke-dasharray: 48; animation: check-draw 0.4s ease-out 0.25s both; }
+
+@keyframes pop {
+  0% { transform: scale(0.6); }
+  60% { transform: scale(1.2); }
+  100% { transform: none; }
+}
+.animate-pop { animation: pop 0.35s cubic-bezier(0.3, 1.5, 0.5, 1) both; }
+
+/* The user's choice in Settings, or the system's. */
+:root[data-reduce-motion="true"] *,
+:root[data-reduce-motion="true"] *::before,
+:root[data-reduce-motion="true"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

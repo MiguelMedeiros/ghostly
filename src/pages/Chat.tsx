@@ -10,6 +10,7 @@ import { IncomingCallNotification } from "../components/IncomingCallNotification
 import { PollCountdown } from "../components/PollCountdown";
 import { PeerServices } from "../components/PeerServices";
 import { formatFileSize } from "../lib/format";
+import { playSound, startRinging } from "../lib/sounds";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import {
   markSessionAsRead,
@@ -98,6 +99,16 @@ export function Chat() {
     setFastPoll: setChatFastPoll,
     addCallEventMessage,
   });
+
+  const callState = webrtc.callState;
+  const previousCallState = useRef(callState);
+  useEffect(() => {
+    const before = previousCallState.current;
+    previousCallState.current = callState;
+    if (callState === "incoming") return startRinging("ring");
+    if (callState === "offering") return startRinging("ringback");
+    if (callState === "idle" && before !== "idle") playSound("hangup");
+  }, [callState]);
 
   const incomingHasVideo = (() => {
     if (!incomingCallSignal) return false;

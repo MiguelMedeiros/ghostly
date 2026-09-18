@@ -29,6 +29,7 @@ interface SettingsContextValue {
   updateNotifications: (notifications: Partial<NotificationSettings>) => void;
   updateDefaultNickname: (nickname: string) => void;
   updateGiphyApiKey: (key: string) => void;
+  updateReduceMotion: (reduce: boolean) => void;
   randomizeNickname: () => void;
   resetSettings: () => void;
 }
@@ -86,6 +87,14 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setSettings((prev) => ({ ...prev, giphyApiKey: key.trim() }));
   }, []);
 
+  const updateReduceMotion = useCallback((reduce: boolean) => {
+    setSettings((prev) => ({ ...prev, reduceMotion: reduce }));
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.reduceMotion = String(settings.reduceMotion);
+  }, [settings.reduceMotion]);
+
   const randomizeNickname = useCallback(() => {
     const randomName = getRandomGhostName();
     setSettings((prev) => ({ ...prev, defaultNickname: randomName }));
@@ -109,6 +118,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         updateNotifications,
         updateDefaultNickname,
         updateGiphyApiKey,
+        updateReduceMotion,
         randomizeNickname,
         resetSettings,
       }}

@@ -37,6 +37,9 @@ export const servicesPlatform: ServicesPlatform | null = {
   get features() {
     return getBrowserHost().features;
   },
+  get notice() {
+    return getBrowserHost().notice;
+  },
 
   maxFileBytes: LIMITS.maxFileBytes,
 

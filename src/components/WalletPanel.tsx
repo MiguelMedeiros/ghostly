@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useCountUp } from "../hooks/useCountUp";
+import { playSound } from "../lib/sounds";
 import { QRCodeSVG } from "qrcode.react";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 
@@ -38,7 +40,8 @@ function describeBounds(bounds: { min: number | null; max: number | null } | nul
  * come in over Lightning or from contacts, and go out the same ways.
  */
 export function WalletPanel() {
-  const wallet = useServicesPlatform()?.wallet;
+  const platform = useServicesPlatform();
+  const wallet = platform?.wallet;
   const [view, setView] = useState<View>("closed");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -53,6 +56,13 @@ export function WalletPanel() {
   const [mintUrl, setMintUrl] = useState("");
 
   const state = wallet?.getState();
+  const testBalance = state?.mints.find((m) => m.url === wallet?.testMintUrl)?.balance ?? 0;
+  const realShown = useCountUp((state?.balance ?? 0) - testBalance);
+  const testShown = useCountUp(testBalance);
+  const invoicePaid = invoice !== null && state !== undefined && state !== null && state.balance >= balanceBefore + Number(amount);
+  useEffect(() => {
+    if (invoicePaid) playSound("coin");
+  }, [invoicePaid]);
   if (!wallet || !state) return null;
 
   const open = (next: View) => {
@@ -84,10 +94,14 @@ export function WalletPanel() {
   // Test sats are worth nothing and must never be added to real ones.
   const testMint = state.mints.find((m) => m.url === wallet.testMintUrl);
   const usesTestMint = testMint !== undefined;
-  const realBalance = state.balance - (testMint?.balance ?? 0);
 
   return (
     <div className="border-t border-border bg-sidebar-bg" data-testid="wallet">
+      {platform?.notice && (
+        <p className="mx-3 mt-3 mb-0 px-3 py-2 rounded-lg bg-yellow-500/10 text-yellow-500 text-[11px] leading-snug" data-testid="platform-notice">
+          {platform.notice}
+        </p>
+      )}
       <div className="flex items-center justify-between px-4 pt-3 pb-1">
         <span className="text-text-secondary text-xs font-bold uppercase tracking-wider">Wallet</span>
         <button
@@ -108,12 +122,12 @@ export function WalletPanel() {
           <div className="bg-surface-alt rounded-lg px-3 py-2 flex items-center justify-between gap-2">
             <p className="m-0 text-text-primary leading-tight">
               <span data-testid="wallet-balance">
-                <span className="text-lg font-semibold">{realBalance.toLocaleString()}</span>
+                <span className="text-lg font-semibold">{realShown.toLocaleString()}</span>
                 <span className="text-text-muted text-xs ml-1">sats</span>
               </span>
               {testMint && (
                 <span className="block text-[11px] text-yellow-500" data-testid="wallet-test-balance">
-                  {testMint.balance.toLocaleString()} test sats (worthless)
+                  {testShown.toLocaleString()} test sats (worthless)
                 </span>
               )}
             </p>
@@ -136,8 +150,12 @@ export function WalletPanel() {
 
         {view === "receive" && (
           <div className="bg-surface-alt rounded-lg p-3 space-y-2 animate-fade-in">
-            {invoice && state.balance >= balanceBefore + Number(amount) ? (
+            {invoicePaid ? (
               <div className="text-center py-3 space-y-2">
+                <svg width="56" height="56" viewBox="0 0 56 56" className="mx-auto text-accent animate-check-ring" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="28" cy="28" r="25" />
+                  <polyline points="16 29 25 38 41 20" className="animate-check-draw" />
+                </svg>
                 <p className="text-accent text-sm font-semibold m-0" data-testid="wallet-paid">
                   ⚡ {Number(amount).toLocaleString()} sats received
                 </p>

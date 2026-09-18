@@ -11,6 +11,8 @@ export interface EngineConnection {
 
 export interface BrowserHost {
   version: string;
+  /** Something the user should know about this client, shown in the sidebar. */
+  notice?: string;
   features: {
     /** Can this host reach web apps on the user's machine? A web page only can if they allow it with CORS. */
     shareLocalServices: boolean;

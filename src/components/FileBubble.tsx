@@ -13,6 +13,11 @@ export function FileBubble({ file }: { file: ChatFile }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [missing, setMissing] = useState(false);
   const settled = transfer === null || transfer.state === "done";
+  // A transfer seen in progress ends with a little pop; files from history just show up.
+  const [watched, setWatched] = useState(false);
+  useEffect(() => {
+    if (transfer?.state === "transferring") setWatched(true);
+  }, [transfer?.state]);
 
   useEffect(() => {
     if (!platform || !settled) return;
@@ -68,7 +73,7 @@ export function FileBubble({ file }: { file: ChatFile }) {
             href={blobUrl}
             download={file.name}
             data-testid="file-save"
-            className="w-9 h-9 rounded-full bg-black/20 hover:bg-black/30 flex items-center justify-center shrink-0 text-inherit transition-colors"
+            className={`w-9 h-9 rounded-full bg-black/20 hover:bg-black/30 flex items-center justify-center shrink-0 text-inherit transition-colors${watched ? " animate-pop" : ""}`}
             title="Save"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

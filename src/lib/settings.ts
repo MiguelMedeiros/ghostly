@@ -25,6 +25,8 @@ export interface AppSettings {
   defaultNickname: string;
   /** The user's own Giphy API key; the key shipped with old builds was retired by Giphy. */
   giphyApiKey: string;
+  /** Turns animations off, on top of the system's own preference. */
+  reduceMotion: boolean;
 }
 
 const SETTINGS_KEY = "ghostly_app_settings";
@@ -44,6 +46,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   defaultNickname: "",
   giphyApiKey: "",
+  reduceMotion: false,
 };
 
 export function loadSettings(getRandomName?: () => string): AppSettings {

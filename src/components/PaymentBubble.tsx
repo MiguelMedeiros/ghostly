@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useCountUp } from "../hooks/useCountUp";
+import { playSound } from "../lib/sounds";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 
 const STATE_LABEL = {
@@ -13,6 +15,28 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+
+  // Feedback for what happens while you watch: a payment landing, a request coming in, a confirmation.
+  const state = payment?.state;
+  const incomingMoney = payment ? (payment.kind === "payment" ? payment.direction === "in" : payment.direction === "out") : false;
+  const [fresh] = useState(() => payment !== null && Date.now() - payment.createdAt < 8000);
+  const [celebrate, setCelebrate] = useState(false);
+  const previous = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!payment || !state) return;
+    const first = previous.current === undefined;
+    const settledNow = state === "settled" && (first ? fresh : previous.current === "pending");
+    if (settledNow) {
+      setCelebrate(incomingMoney);
+      playSound(incomingMoney ? "coin" : "confirmed");
+    } else if (first && fresh && state === "pending") {
+      playSound(payment.kind === "request" && payment.direction === "in" ? "request" : "sent");
+    }
+    previous.current = state;
+    // `payment` only matters through the fields above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
+  const amountShown = useCountUp(celebrate ? (payment?.amount ?? 0) : 0, 650);
 
   if (!wallet || !payment) return <span className="text-[14.2px] leading-[19px]">{fallbackText}</span>;
 
@@ -36,10 +60,19 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
   const quiet = "px-3 py-1.5 bg-black/20 hover:bg-black/30 rounded-lg text-xs font-bold transition-colors cursor-pointer";
 
   return (
-    <div className="min-w-[210px] max-w-[300px] px-1 py-0.5" data-testid="payment-bubble" data-state={payment.state}>
+    <div
+      className={`min-w-[210px] max-w-[300px] px-1 py-0.5 rounded-md${celebrate ? " animate-sats-shine" : ""}${
+        fresh && isRequest && !outgoing && payment.state === "pending" ? " animate-nudge" : ""
+      }`}
+      data-testid="payment-bubble"
+      data-state={payment.state}
+    >
       <p className="text-[11px] uppercase tracking-wider text-[hsla(0,0%,100%,0.6)] m-0">{title}</p>
       <p className="m-0 leading-tight">
-        <span className="text-[22px] font-semibold">⚡ {payment.amount.toLocaleString()}</span>
+        <span className="text-[22px] font-semibold">
+          <span className={celebrate ? "animate-bolt-pop" : ""}>⚡</span>{" "}
+          {(celebrate ? amountShown : payment.amount).toLocaleString()}
+        </span>
         <span className="text-xs ml-1 text-[hsla(0,0%,100%,0.7)]">sats</span>
       </p>
       {payment.memo && <p className="text-[13px] m-0 mt-0.5 wrap-break-word">{payment.memo}</p>}

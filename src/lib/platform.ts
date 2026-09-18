@@ -76,6 +76,7 @@ export interface ChatPayment {
   unit: string;
   memo?: string;
   state: "pending" | "settled" | "failed" | "reclaimed";
+  createdAt: number;
   error?: string;
   /** Requests: a Lightning invoice anyone can pay. */
   invoice?: string;
@@ -103,6 +104,8 @@ export interface WalletPlatform {
 }
 
 export interface ServicesPlatform {
+  /** Something the user should know about this client, shown in the sidebar. */
+  notice?: string;
   features: {
     /** Whether this client can reach web apps on the user's machine to share them. */
     shareLocalServices: boolean;
