@@ -86,7 +86,7 @@ launches two Chromium profiles with the extension and walks through the whole mi
 
 **Identity.** Unchanged from Desktop: one identity per link, created with the link. There is no Pubky Ring integration and no long-lived key.
 
-**Relays.** Configurable in *Settings*. Every relay is used for both publishing and resolving, and the newest packet with a valid signature wins, so no single relay is a dependency.
+**Relays.** Configurable in *Settings*. Every relay is published to, they are read in turn, and the newest packet with a valid signature wins, so no single relay is a dependency. Public relays allow about 120 requests a minute per IP address; Ghostly polls accordingly and connects peers over WebRTC as soon as both are online, after which Pkarr is only touched once a minute.
 
 ## Sharing a service
 

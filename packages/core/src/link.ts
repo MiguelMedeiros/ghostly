@@ -14,14 +14,42 @@ import type { PkarrTransport } from "./transport";
 /**
  * The Pkarr side of a link: publish my records, poll the peer's. This is the
  * loop Ghostly Desktop runs in `useChat`, without React, so every client can
- * share it. Timings are the ones Desktop already uses.
+ * share it.
  */
-export const POLL_INTERVAL_ACTIVE = 2_000;
-export const POLL_INTERVAL_IDLE = 8_000;
-export const POLL_INTERVAL_FAST = 1_000;
-export const POLL_INTERVAL_BACKGROUND = 20_000;
-/** While the data link is up Pkarr only has to notice re-offers. */
-export const POLL_INTERVAL_CONNECTED = 30_000;
+export interface PollIntervals {
+  /** The user is looking at the link. */
+  active: number;
+  /** …but nothing happened for a minute. */
+  idle: number;
+  /** Signaling in progress. */
+  fast: number;
+  /** Nobody is looking. */
+  background: number;
+  /** The data link is up and carries everything; Pkarr only has to notice re-offers. */
+  connected: number;
+}
+
+/** What Ghostly Desktop uses against the DHT. */
+export const DHT_POLL_INTERVALS: PollIntervals = {
+  active: 2_000,
+  idle: 8_000,
+  fast: 1_000,
+  background: 20_000,
+  connected: 30_000,
+};
+
+/** Relays rate limit by IP, and several peers may sit behind one address. */
+export const RELAY_POLL_INTERVALS: PollIntervals = {
+  active: 4_000,
+  idle: 10_000,
+  fast: 2_000,
+  background: 30_000,
+  connected: 60_000,
+};
+
+/** Signaling that has not finished by then is not going to; stop polling fast. */
+const FAST_POLL_MAX_MS = 45_000;
+const PUBLISH_RETRY_MS = 4_000;
 export const IDLE_THRESHOLD = 60_000;
 export const MAX_DHT_TEXT_BYTES = 500;
 /** Presence is a fresh packet: advertising peers republish this often… */
@@ -58,6 +86,7 @@ export interface LinkSessionOptions {
   lastSeenTimestamp?: number;
   /** Services to advertise right now. Return undefined to advertise nothing. */
   getServices?: () => ServiceAd[] | undefined;
+  pollIntervals?: PollIntervals;
   events?: LinkSessionEvents;
 }
 
@@ -85,7 +114,9 @@ export class LinkSession {
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
   private lastActivity = Date.now();
-  private fastPoll = false;
+  private readonly intervals: PollIntervals;
+  private fastPollUntil = 0;
+  private publishRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private active = false;
   private connected = false;
   private presence: PeerPresence = { online: false, lastPacketAt: 0, services: null };
@@ -99,6 +130,7 @@ export class LinkSession {
     this.lastSeenTimestamp = options.lastSeenTimestamp ?? 0;
     this.myAck = this.lastSeenTimestamp;
     this.getServices = options.getServices ?? (() => undefined);
+    this.intervals = options.pollIntervals ?? DHT_POLL_INTERVALS;
     this.events = options.events ?? {};
   }
 
@@ -111,7 +143,7 @@ export class LinkSession {
     this.running = true;
     this.events.onStatus?.("connecting");
     // Presence: a peer that advertises services says so as soon as it is up.
-    if (this.getServices() !== undefined || this.myAck > 0) void this.publish();
+    if (this.getServices() !== undefined || this.myAck > 0) void this.publish().catch(() => {});
     this.scheduleHeartbeat();
     void this.poll();
   }
@@ -122,7 +154,8 @@ export class LinkSession {
     this.running = false;
     if (this.pollTimer) clearTimeout(this.pollTimer);
     if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
-    this.pollTimer = this.heartbeatTimer = null;
+    if (this.publishRetryTimer) clearTimeout(this.publishRetryTimer);
+    this.pollTimer = this.heartbeatTimer = this.publishRetryTimer = null;
     this.rtcSignal = null;
     this.callSignal = null;
     this.events.onStatus?.("offline");
@@ -146,7 +179,7 @@ export class LinkSession {
   }
 
   setFastPoll(fast: boolean): void {
-    this.fastPoll = fast;
+    this.fastPollUntil = fast ? Date.now() + FAST_POLL_MAX_MS : 0;
     if (fast) this.pollNow();
   }
 
@@ -187,8 +220,11 @@ export class LinkSession {
       const kept = await this.publishOnce(true);
       if (kept === 0) return "Message could not be published — DHT payload limit exceeded.";
     } catch {
+      // The message stays in the buffer; keep trying instead of losing it.
+      if (this.publishRetryTimer) clearTimeout(this.publishRetryTimer);
+      this.publishRetryTimer = setTimeout(() => void this.publish().catch(() => {}), PUBLISH_RETRY_MS);
       this.events.onStatus?.("error");
-      return "Failed to send message. Check your connection.";
+      return "Could not reach the network. Ghostly keeps trying to deliver the message.";
     }
     this.pollNow();
     return null;
@@ -202,10 +238,11 @@ export class LinkSession {
   }
 
   private nextInterval(): number {
-    if (this.fastPoll) return POLL_INTERVAL_FAST;
-    if (this.connected) return POLL_INTERVAL_CONNECTED;
-    if (!this.active) return POLL_INTERVAL_BACKGROUND;
-    return Date.now() - this.lastActivity > IDLE_THRESHOLD ? POLL_INTERVAL_IDLE : POLL_INTERVAL_ACTIVE;
+    // Connected peers signal over the data link; no reason to hurry Pkarr.
+    if (this.connected) return this.intervals.connected;
+    if (Date.now() < this.fastPollUntil) return this.intervals.fast;
+    if (!this.active) return this.intervals.background;
+    return Date.now() - this.lastActivity > IDLE_THRESHOLD ? this.intervals.idle : this.intervals.active;
   }
 
   private scheduleHeartbeat(): void {
@@ -223,12 +260,20 @@ export class LinkSession {
       this.publishAgain = true;
       return this.publishing;
     }
+    if (this.publishRetryTimer) clearTimeout(this.publishRetryTimer);
+    this.publishRetryTimer = null;
     this.publishing = (async () => {
       try {
         do {
           this.publishAgain = false;
           await this.publishOnce(this.running);
         } while (this.publishAgain && this.running);
+      } catch (error) {
+        // A signal that is not published is a call that never rings: try again.
+        if (this.running) {
+          this.publishRetryTimer = setTimeout(() => void this.publish().catch(() => {}), PUBLISH_RETRY_MS);
+        }
+        throw error;
       } finally {
         this.publishing = null;
       }
@@ -297,7 +342,7 @@ export class LinkSession {
         }
       }
 
-      if (receivedNew) await this.publish();
+      if (receivedNew) await this.publish().catch(() => {});
       this.events.onStatus?.("online");
     } catch {
       if (this.running) this.events.onStatus?.("error");

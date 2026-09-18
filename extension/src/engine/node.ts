@@ -4,6 +4,7 @@ import {
   GhostlyHttpError,
   HTTP_SERVICE_PROTO,
   LEGACY_SERVICES,
+  RELAY_POLL_INTERVALS,
   RTC_CONFIG,
   RelayTransport,
   createLink,
@@ -297,6 +298,8 @@ export class GhostlyNode implements EngineImplementation {
       transport: this.transport,
       nick: this.settings.nick || undefined,
       lastSeenTimestamp,
+      pollIntervals: RELAY_POLL_INTERVALS,
+      autoConnect: true,
       createPeerConnection: () =>
         new RTCPeerConnection({ iceServers: [...(RTC_CONFIG.iceServers ?? []), ...this.settings.iceServers] }),
       localFetch: webLocalFetch,

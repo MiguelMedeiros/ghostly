@@ -209,6 +209,16 @@ export function buildSdpFromSignal(
   return lines.join("\r\n") + "\r\n";
 }
 
+/** How long to keep collecting after the candidate we were waiting for showed up. */
+const ICE_SETTLE_MS = 400;
+
+/**
+ * Resolves when the local description is good enough to publish. Waiting for
+ * gathering to *complete* takes the full timeout whenever one STUN server or
+ * address family does not answer, which made every call ring ~10 s late. The
+ * signal only carries a host and a server reflexive candidate anyway (plus a
+ * relay one when TURN is configured), so that is what is waited for.
+ */
 export function waitForIceGathering(
   pc: RTCPeerConnection,
   timeoutMs = 10000,
@@ -219,19 +229,29 @@ export function waitForIceGathering(
       return;
     }
 
-    const timeout = setTimeout(() => {
-      pc.removeEventListener("icegatheringstatechange", handler);
-      resolve();
-    }, timeoutMs);
+    const usesTurn = (pc.getConfiguration().iceServers ?? []).some((server) =>
+      [server.urls].flat().some((url) => url.startsWith("turn")),
+    );
+    const wanted = usesTurn ? " typ relay" : " typ srflx";
+    let settle: ReturnType<typeof setTimeout> | null = null;
 
-    const handler = () => {
-      if (pc.iceGatheringState === "complete") {
-        clearTimeout(timeout);
-        pc.removeEventListener("icegatheringstatechange", handler);
-        resolve();
-      }
+    const finish = () => {
+      clearTimeout(timeout);
+      if (settle) clearTimeout(settle);
+      pc.removeEventListener("icegatheringstatechange", onState);
+      pc.removeEventListener("icecandidate", onCandidate);
+      resolve();
+    };
+    const timeout = setTimeout(finish, timeoutMs);
+
+    const onState = () => {
+      if (pc.iceGatheringState === "complete") finish();
+    };
+    const onCandidate = (event: RTCPeerConnectionIceEvent) => {
+      if (!settle && event.candidate?.candidate.includes(wanted)) settle = setTimeout(finish, ICE_SETTLE_MS);
     };
 
-    pc.addEventListener("icegatheringstatechange", handler);
+    pc.addEventListener("icegatheringstatechange", onState);
+    pc.addEventListener("icecandidate", onCandidate);
   });
 }

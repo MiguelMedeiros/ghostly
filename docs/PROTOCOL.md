@@ -48,7 +48,7 @@ Clients ignore labels they do not know. A v0 client therefore keeps working with
 
 **Presence.** A peer that advertises services publishes on start and republishes every 4 minutes. It is considered online while its packet carries `_svc` and is younger than 10 minutes. When it goes offline it publishes once more without `_svc` and `_rtc`. If it cannot (the machine lost power), the packet goes stale on its own. Presence is a hint; the real test is whether the data link comes up.
 
-**Transports.** Desktop and the CLI talk to the DHT directly and to Pkarr relays (the Rust client's defaults). Browsers cannot open UDP sockets and use relays only: `PUT /<key>` and `GET /<key>` with `<signature(64)><timestamp µs, u64 BE><DNS packet>`. A relay is an HTTP bridge to the DHT. It sees signed, encrypted packets, cannot forge or read them, and never carries application traffic. Browser peers publish to and read from every configured relay, keep the newest validly signed packet, and the relay list is user-configurable.
+**Transports.** Desktop and the CLI talk to the DHT directly and to Pkarr relays (the Rust client's defaults). Browsers cannot open UDP sockets and use relays only: `PUT /<key>` and `GET /<key>` with `<signature(64)><timestamp µs, u64 BE><DNS packet>`. A relay is an HTTP bridge to the DHT. It sees signed, encrypted packets, cannot forge or read them, and never carries application traffic. Browser peers publish to every configured relay and read from them in turn, one request per poll, keeping the newest validly signed packet seen; the relay list is user-configurable. Public relays rate limit by IP (120 requests a minute when this was written), so relay clients poll slower than DHT clients (4 s active, 2 s while signaling for at most 45 s, 30 s in the background, 60 s while the data link is up), back off from a relay that answers 429, and open the data link on their own when the peer is online so that chat and call signaling leave Pkarr alone.
 
 ## 3. Services (v1)
 
@@ -95,7 +95,8 @@ An answer has `"t": "a"` and `"o": <ts of the offer it answers>`. Candidates are
 - Signals older than 120 seconds are ignored.
 - If both offer at once, the peer with the lexicographically lower public key keeps its offer and the other answers it.
 - A new offer while connected means the peer lost the connection; the receiver drops the old one and answers.
-- Both peers poll every second while signaling, clear `_rtc` once the channel is open, and poll every 30 seconds while it stays open.
+- Both peers poll fast while signaling, clear `_rtc` once the channel is open, and poll slowly while it stays open.
+- Clients may open the data link unprompted when the peer is online. To avoid both offering at once, only the peer with the lower public key does.
 
 **Peer authentication.** The DTLS fingerprint travels inside a record that is encrypted with the link key and signed by the peer's identity. A DTLS session with that fingerprint is therefore a session with the peer. WebRTC encrypts everything on the channel (DTLS/SCTP).
 

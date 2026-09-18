@@ -18,7 +18,7 @@ import {
   type LocalFetch,
 } from "./http";
 import type { LinkParams } from "./invite";
-import { LinkSession, type LinkStatus, type PeerPresence } from "./link";
+import { LinkSession, type LinkStatus, type PeerPresence, type PollIntervals } from "./link";
 import type { ResolvedLink } from "./records";
 import { servicesFromWire, servicesToWire, type ServiceAd } from "./services";
 import type { PkarrTransport } from "./transport";
@@ -29,6 +29,8 @@ import type { PkarrTransport } from "./transport";
  * (how to reach Pkarr, how to create a peer connection, how to reach a local
  * HTTP server) are injected, so Desktop and Browser run the same code.
  */
+const AUTO_CONNECT_RETRY_MS = 90_000;
+
 export interface IncomingMessage {
   text: string;
   timestamp: number;
@@ -51,6 +53,13 @@ export interface GhostLinkOptions {
   transport: PkarrTransport;
   nick?: string;
   lastSeenTimestamp?: number;
+  pollIntervals?: PollIntervals;
+  /**
+   * Open the data link on its own whenever the peer is online, instead of on
+   * first use. Chat and call signaling then travel peer to peer and Pkarr is
+   * only polled once a minute, which is what keeps relays happy.
+   */
+  autoConnect?: boolean;
   createPeerConnection: () => RTCPeerConnection;
   localFetch: LocalFetch;
   /** Everything this peer currently offers on this link. */
@@ -69,6 +78,7 @@ export class GhostLink {
   private httpClient: HttpClient | null = null;
   private peerServicesOverride: ServiceAd[] | null = null;
   private openWaiters: { resolve: () => void; reject: (e: Error) => void }[] = [];
+  private lastAutoConnectAt = 0;
 
   constructor(options: GhostLinkOptions) {
     this.options = options;
@@ -79,12 +89,16 @@ export class GhostLink {
       transport: options.transport,
       nick: options.nick,
       lastSeenTimestamp: options.lastSeenTimestamp,
+      pollIntervals: options.pollIntervals,
       getServices: options.getServices,
       events: {
         onMessages: (messages, batch) => {
           for (const m of messages) events.onMessage?.({ ...m, via: "pkarr", batch });
         },
-        onPresence: (presence) => events.onPresence?.(this.mergePresence(presence)),
+        onPresence: (presence) => {
+          events.onPresence?.(this.mergePresence(presence));
+          this.maybeAutoConnect(presence);
+        },
         onPeerAck: (ack) => events.onPeerAck?.(ack),
         onCallSignal: (signal) => events.onCallSignal?.(signal),
         onRtcSignal: (signal) => void this.dataLink.handleSignal(signal),
@@ -192,6 +206,15 @@ export class GhostLink {
       }
     }
     await this.session.refreshAdvertisement();
+  }
+
+  /** Only the lower key offers, so two peers coming online together do not collide. */
+  private maybeAutoConnect(presence: PeerPresence): void {
+    if (!this.options.autoConnect || !presence.online || this.channel || this.dataLink.state !== "idle") return;
+    if (this.myPubKeyZ32 > this.options.params.peerPubKeyZ32) return;
+    if (Date.now() - this.lastAutoConnectAt < AUTO_CONNECT_RETRY_MS) return;
+    this.lastAutoConnectAt = Date.now();
+    void this.dataLink.connect();
   }
 
   private mergePresence(presence: PeerPresence): PeerPresence {

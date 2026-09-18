@@ -14,6 +14,8 @@ interface UseWebRTCParams {
   publishCallSignal: (signal: string | null) => void;
   setFastPoll: (fast: boolean) => void;
   addCallEventMessage?: (type: CallEventType, hasVideo: boolean, duration?: number) => void;
+  /** Called when a call could not be placed or answered, e.g. the microphone was denied. */
+  onError?: (error: unknown) => void;
 }
 
 export function useWebRTC({
@@ -21,7 +23,11 @@ export function useWebRTC({
   publishCallSignal,
   setFastPoll,
   addCallEventMessage,
+  onError,
 }: UseWebRTCParams) {
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
+
   const [callState, setCallState] = useState<CallState>("idle");
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
@@ -134,6 +140,13 @@ export function useWebRTC({
     async (withVideo: boolean) => {
       if (callStateRef.current !== "idle") return;
 
+      // A hang-up schedules clearing `_call` a few seconds later; that must not
+      // wipe the offer of a call placed in the meantime.
+      if (hangupTimerRef.current) {
+        clearTimeout(hangupTimerRef.current);
+        hangupTimerRef.current = null;
+      }
+
       try {
         setFastPoll(true);
         setHasVideo(withVideo);
@@ -170,7 +183,8 @@ export function useWebRTC({
 
         const signalStr = JSON.stringify(signal);
         publishCallSignal(signalStr);
-      } catch {
+      } catch (error) {
+        onErrorRef.current?.(error);
         cleanupConnection();
         updateCallState("idle");
         setFastPoll(false);
@@ -190,6 +204,11 @@ export function useWebRTC({
     async (withVideo: boolean) => {
       const offer = pendingOfferRef.current;
       if (!offer || callStateRef.current !== "incoming") return;
+
+      if (hangupTimerRef.current) {
+        clearTimeout(hangupTimerRef.current);
+        hangupTimerRef.current = null;
+      }
 
       try {
         const offerHasVideo = offer.m?.includes("v") ?? false;
@@ -232,7 +251,8 @@ export function useWebRTC({
         publishCallSignal(signalStr);
         updateCallState("connecting");
         pendingOfferRef.current = null;
-      } catch {
+      } catch (error) {
+        onErrorRef.current?.(error);
         cleanupConnection();
         updateCallState("idle");
         setFastPoll(false);
@@ -261,7 +281,8 @@ export function useWebRTC({
         await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
 
         updateCallState("connecting");
-      } catch {
+      } catch (error) {
+        onErrorRef.current?.(error);
         cleanupConnection();
         updateCallState("idle");
         setFastPoll(false);

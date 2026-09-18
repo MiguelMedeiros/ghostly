@@ -31,6 +31,9 @@ export class RelayTransport implements PkarrTransport {
   private readonly timeoutMs: number;
   private readonly fetchFn: typeof fetch;
   private readonly lastTimestamp = new Map<string, bigint>();
+  private readonly newest = new Map<string, SignedPacket>();
+  private readonly coolingDown = new Map<string, number>();
+  private cursor = 0;
 
   constructor(options: RelayTransportOptions = {}) {
     this.relays = [];
@@ -70,6 +73,7 @@ export class RelayTransport implements PkarrTransport {
           method: "PUT",
           body: payload as BodyInit,
         });
+        if (response.status === 429) this.coolDown(relay, response);
         if (!response.ok) throw new Error(`${relay} responded ${response.status}`);
       }),
     );
@@ -80,29 +84,47 @@ export class RelayTransport implements PkarrTransport {
     }
   }
 
-  /** Asks every relay and keeps the newest packet that carries a valid signature. */
+  /**
+   * Public relays rate limit by IP (120 requests a minute at the time of
+   * writing) and several peers may share one address, so a poll costs one
+   * request: relays are asked in turn, the next one only if this one fails.
+   * The newest validly signed packet seen so far wins, which also covers a
+   * relay that is still serving an older cached copy.
+   */
   async resolve(pubKeyZ32: string): Promise<SignedPacket | null> {
     if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
 
-    const results = await Promise.allSettled(
-      this.relays.map(async (relay) => {
-        const response = await this.request(`${relay}/${pubKeyZ32}`, { method: "GET" });
-        if (response.status === 404) return null;
-        if (!response.ok) throw new Error(`${relay} responded ${response.status}`);
-        return parseRelayPayload(pubKeyZ32, new Uint8Array(await response.arrayBuffer()));
-      }),
-    );
-
-    let newest: SignedPacket | null = null;
+    const start = this.cursor++;
     let reachable = false;
-    for (const result of results) {
-      if (result.status !== "fulfilled") continue;
-      reachable = true;
-      const packet = result.value;
-      if (packet && (!newest || packet.timestampMicros > newest.timestampMicros)) newest = packet;
+    for (let i = 0; i < this.relays.length; i++) {
+      const relay = this.relays[(start + i) % this.relays.length];
+      if ((this.coolingDown.get(relay) ?? 0) > Date.now()) continue;
+      try {
+        const response = await this.request(`${relay}/${pubKeyZ32}`, { method: "GET" });
+        if (response.status === 429) {
+          this.coolDown(relay, response);
+          continue;
+        }
+        if (response.status !== 404) {
+          if (!response.ok) throw new Error(`${relay} responded ${response.status}`);
+          const packet = parseRelayPayload(pubKeyZ32, new Uint8Array(await response.arrayBuffer()));
+          const known = this.newest.get(pubKeyZ32);
+          if (!known || packet.timestampMicros > known.timestampMicros) this.newest.set(pubKeyZ32, packet);
+        }
+        reachable = true;
+        break;
+      } catch {
+        // try the next relay
+      }
     }
     if (!reachable) throw new Error("No Pkarr relay reachable");
-    return newest;
+    return this.newest.get(pubKeyZ32) ?? null;
+  }
+
+  private coolDown(relay: string, response: Response): void {
+    const retryAfter = Number.parseInt(response.headers.get("retry-after") ?? "", 10);
+    const seconds = Number.isFinite(retryAfter) ? Math.min(Math.max(retryAfter, 1), 120) : 15;
+    this.coolingDown.set(relay, Date.now() + seconds * 1000);
   }
 
   private async request(url: string, init: RequestInit): Promise<Response> {

@@ -12,6 +12,16 @@ function Video({ stream, muted, className }: { stream: MediaStream | null; muted
   return <video ref={ref} className={className} autoPlay playsInline muted={muted} />;
 }
 
+function describeCallError(error: unknown): string {
+  const name = error instanceof Error ? error.name : "";
+  if (name === "NotAllowedError") {
+    return "Ghostly may not use your microphone or camera. Allow it from the icon in the address bar and try again.";
+  }
+  if (name === "NotFoundError") return "No microphone or camera was found.";
+  if (name === "NotReadableError") return "Your microphone or camera is in use by another application.";
+  return `The call failed: ${error instanceof Error ? error.message : String(error)}`;
+}
+
 /**
  * Voice and video calls, the same hook and `_call` signaling Ghostly Desktop
  * uses. The call lives in this page rather than in the background peer because
@@ -35,19 +45,26 @@ export function CallPanel({ engine, link }: { engine: Engine; link: LinkView }) 
     [call, link.id],
   );
 
-  const rtc = useWebRTC({ incomingCallSignal, publishCallSignal, setFastPoll });
+  const [error, setError] = useState<string | null>(null);
+  const onError = useCallback((e: unknown) => setError(describeCallError(e)), []);
+  const rtc = useWebRTC({ incomingCallSignal, publishCallSignal, setFastPoll, onError });
   const { callState } = rtc;
   const button = "rounded border border-edge px-3 py-1 text-sm hover:bg-panel";
 
   if (callState === "idle" || callState === "ended") {
+    const start = (withVideo: boolean) => {
+      setError(null);
+      void rtc.startCall(withVideo);
+    };
     return (
-      <div className="flex gap-2">
-        <button data-testid="call-voice" className={button} onClick={() => void rtc.startCall(false)}>
+      <div className="flex flex-wrap items-center gap-2">
+        <button data-testid="call-voice" className={button} onClick={() => start(false)}>
           Voice
         </button>
-        <button data-testid="call-video" className={button} onClick={() => void rtc.startCall(true)}>
+        <button data-testid="call-video" className={button} onClick={() => start(true)}>
           Video
         </button>
+        {error && <span data-testid="call-error" className="text-sm text-red-400">{error}</span>}
       </div>
     );
   }
