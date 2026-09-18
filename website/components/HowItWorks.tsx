@@ -153,12 +153,12 @@ const steps = [
         <div className="flex items-center gap-2">
           <span className="text-cyan">_svc</span>
           <span className="text-gray-600">=</span>
-          <span className="text-green">[chat, voice, video, atlas]</span>
+          <span className="text-green">[chat, voice, video, my-photos]</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-yellow-400">GET atlas /</span>
+          <span className="text-yellow-400">GET my-photos /</span>
           <span className="text-gray-600">→</span>
-          <span className="text-gray-400">localhost:3400</span>
+          <span className="text-gray-400">localhost:3000</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-gray-500">● Offline</span>

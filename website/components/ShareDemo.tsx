@@ -2,39 +2,91 @@
 
 import { motion, AnimatePresence } from "motion/react";
 import { useEffect, useState } from "react";
-import { GhostGlyph, Icon } from "./icons";
+import { GhostGlyph } from "./icons";
 
-/** The one thing no other messenger does, acted out: a localhost app, shared and opened. */
+/**
+ * The idea in one picture: something runs on your computer, you flip a switch,
+ * and the very same page shows up in a friend's browser. Close Ghostly and it
+ * is gone. The mini site is drawn identically on both sides on purpose.
+ */
 const STEPS = [
-  { host: "typing", caption: "You have something running on your machine." },
-  { host: "shared", caption: "Share it. Ghostly advertises it to your contacts, signed and encrypted." },
-  { host: "shared", guest: "sees", caption: "Your contact sees it appear. Not the address, just the name." },
-  { host: "shared", guest: "open", caption: "They open it. Every request rides WebRTC, straight to your localhost." },
-  { host: "gone", guest: "gone", caption: "Close Ghostly and it is gone. That is the point." },
+  { title: "It runs on your computer", text: "A site you are building, a dashboard, a photo gallery. Only you can see it, at localhost." },
+  { title: "You flip one switch", text: "Ghostly tells the friends you chose that it exists. They see its name, never your address." },
+  { title: "They open it in their browser", text: "The same page, live from your machine, through an encrypted peer to peer connection. Nothing is uploaded anywhere." },
+  { title: "Close Ghostly and the door is gone", text: "No server kept a copy, because there was no server. It only existed while you were online." },
 ] as const;
 
-function Window({ title, children, tone }: { title: string; children: React.ReactNode; tone: "cyan" | "green" }) {
+const TILES = ["from-cyan/70 to-cyan/20", "from-green/70 to-green/20", "from-purple-400/70 to-purple-400/20", "from-yellow-400/70 to-yellow-400/20", "from-pink-400/70 to-pink-400/20", "from-sky-400/70 to-sky-400/20"];
+
+/** The little site being shared. Same drawing on both sides: it IS the same page. */
+function MiniSite() {
   return (
-    <div className={`rounded-xl border bg-surface overflow-hidden ${tone === "cyan" ? "border-cyan/30" : "border-green/30"}`}>
-      <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50 bg-black/30">
-        <span className="w-2.5 h-2.5 rounded-full bg-red-500/70" />
-        <span className="w-2.5 h-2.5 rounded-full bg-yellow-500/70" />
-        <span className="w-2.5 h-2.5 rounded-full bg-green-500/70" />
-        <span className="ml-2 text-xs font-mono text-gray-500">{title}</span>
+    <div className="rounded-md bg-[#0d1420] border border-white/5 p-3">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[11px] font-semibold text-gray-200">My photos</span>
+        <span className="text-[9px] text-gray-500">summer ’26</span>
       </div>
-      <div className="p-4 min-h-[190px] font-mono text-sm">{children}</div>
+      <div className="grid grid-cols-3 gap-1.5">
+        {TILES.map((tile) => (
+          <div key={tile} className={`h-9 rounded bg-linear-to-br ${tile}`} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BrowserFrame({ address, tone, children, dim }: { address: React.ReactNode; tone: "cyan" | "green"; children: React.ReactNode; dim?: boolean }) {
+  return (
+    <motion.div
+      animate={{ opacity: dim ? 0.35 : 1 }}
+      transition={{ duration: 0.6 }}
+      className={`rounded-xl border bg-surface overflow-hidden ${tone === "cyan" ? "border-cyan/30" : "border-green/30"}`}
+    >
+      <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50 bg-black/30">
+        <span className="w-2 h-2 rounded-full bg-red-500/70" />
+        <span className="w-2 h-2 rounded-full bg-yellow-500/70" />
+        <span className="w-2 h-2 rounded-full bg-green-500/70" />
+        <span className="ml-2 flex-1 rounded bg-black/40 px-2 py-0.5 text-[10px] font-mono text-gray-400 truncate">{address}</span>
+      </div>
+      <div className="p-3">{children}</div>
+    </motion.div>
+  );
+}
+
+/** Packets running along the door between the two machines. */
+function Beam({ active }: { active: boolean }) {
+  return (
+    <div className="relative h-10 md:h-auto md:w-28 flex md:flex-col items-center justify-center">
+      <div className={`absolute md:static h-px w-full md:w-full transition-colors duration-500 ${active ? "bg-linear-to-r from-cyan to-green" : "bg-border/40"}`} />
+      {active &&
+        [0, 1, 2].map((i) => (
+          <motion.span
+            key={i}
+            className="absolute top-1/2 -mt-1 w-2 h-2 rounded-full bg-cyan shadow-[0_0_8px] shadow-cyan"
+            initial={{ left: "0%", opacity: 0 }}
+            animate={{ left: ["0%", "100%"], opacity: [0, 1, 1, 0] }}
+            transition={{ duration: 1.4, delay: i * 0.45, repeat: Infinity, ease: "linear" }}
+          />
+        ))}
+      <span className={`relative md:mt-3 px-2 text-[10px] font-mono uppercase tracking-wider bg-background transition-colors duration-500 ${active ? "text-green" : "text-gray-600"}`}>
+        {active ? "peer to peer" : "no connection"}
+      </span>
     </div>
   );
 }
 
 export function ShareDemo() {
-  const [index, setIndex] = useState(0);
+  const [step, setStep] = useState(0);
+  const [paused, setPaused] = useState(false);
   useEffect(() => {
-    const timer = setInterval(() => setIndex((i) => (i + 1) % STEPS.length), 3200);
+    if (paused) return;
+    const timer = setInterval(() => setStep((s) => (s + 1) % STEPS.length), 3800);
     return () => clearInterval(timer);
-  }, []);
-  const step = STEPS[index];
-  const guest = "guest" in step ? step.guest : undefined;
+  }, [paused]);
+
+  const sharing = step === 1 || step === 2;
+  const opened = step === 2;
+  const closed = step === 3;
 
   return (
     <section id="share" className="relative py-24 px-6">
@@ -47,104 +99,114 @@ export function ShareDemo() {
           className="text-center mb-12"
         >
           <h2 className="text-4xl sm:text-5xl font-mono font-bold mb-6">
-            Haunt your own <span className="text-gradient">localhost</span>
+            Open a door to your <span className="text-gradient">localhost</span>
           </h2>
           <p className="text-lg text-gray-400 max-w-2xl mx-auto">
-            You are the server while you are online. No deploy, no tunnel company, no account.
-            Your contact&apos;s browser talks to your machine through a peer to peer connection, and only to the app you picked.
+            Got something running on your computer? Flip one switch and the friends you chose can open it in their
+            browser, straight from your machine. It stays open <span className="text-cyan">only while Ghostly is open</span>.
           </p>
         </motion.div>
 
-        <div className="grid md:grid-cols-[1fr_auto_1fr] gap-4 items-center">
-          <Window title="you · Ghostly" tone="cyan">
-            <p className="text-gray-500 text-xs mb-3">SERVICES</p>
-            {step.host === "typing" && (
-              <div className="space-y-2">
-                <div className="rounded-lg bg-black/40 px-3 py-2 text-gray-300">Atlas</div>
-                <div className="rounded-lg bg-black/40 px-3 py-2 text-cyan">
-                  localhost:3400
-                  <motion.span animate={{ opacity: [1, 0, 1] }} transition={{ duration: 1, repeat: Infinity }}>▍</motion.span>
-                </div>
-                <div className="rounded-lg bg-cyan text-black text-center font-semibold py-2">Share</div>
-              </div>
-            )}
-            {step.host === "shared" && (
-              <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="rounded-lg bg-black/40 px-3 py-3">
-                <div className="flex justify-between text-gray-200"><span>Atlas</span><span className="text-xs text-gray-500">Stop</span></div>
-                <div className="text-xs text-gray-500">localhost:3400</div>
-                <div className="text-xs text-cyan mt-2 flex items-center gap-1.5">
-                  <motion.span className="w-1.5 h-1.5 rounded-full bg-cyan" animate={{ opacity: [1, 0.3, 1] }} transition={{ duration: 1.6, repeat: Infinity }} />
-                  Shared with your contacts
-                  {guest === "open" && <span className="ml-auto text-gray-500">12 requests</span>}
-                </div>
-              </motion.div>
-            )}
-            {step.host === "gone" && (
-              <motion.div initial={{ opacity: 1 }} animate={{ opacity: 0.25 }} transition={{ duration: 1.2 }} className="text-center text-gray-500 pt-10">
-                <GhostGlyph className="w-10 h-10 mx-auto mb-2" />
-                offline
-              </motion.div>
-            )}
-          </Window>
+        <div
+          className="grid md:grid-cols-[1fr_auto_1fr] gap-4 md:gap-2 items-center"
+          onMouseEnter={() => setPaused(true)}
+          onMouseLeave={() => setPaused(false)}
+        >
+          {/* Your computer */}
+          <div>
+            <p className="text-xs font-mono uppercase tracking-wider text-cyan mb-2">Your computer</p>
+            <BrowserFrame tone="cyan" address="localhost:3000" dim={closed}>
+              <MiniSite />
+            </BrowserFrame>
 
-          <div className="flex md:flex-col items-center justify-center gap-2 text-xs font-mono text-gray-500 py-2">
-            <span>Pkarr finds</span>
             <motion.div
-              className="h-px w-16 md:w-px md:h-16 bg-linear-to-r md:bg-linear-to-b from-cyan to-green"
-              animate={{ opacity: guest === "open" ? [0.3, 1, 0.3] : 0.3 }}
-              transition={{ duration: 0.8, repeat: Infinity }}
-            />
-            <span className={guest === "open" ? "text-green" : ""}>WebRTC carries</span>
+              animate={{ opacity: closed ? 0.35 : 1 }}
+              className="mt-3 rounded-xl border border-border/50 bg-surface px-4 py-3 flex items-center gap-3"
+            >
+              <GhostGlyph className="w-5 h-5 text-cyan shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-gray-200 leading-tight">{closed ? "Ghostly is closed" : "Share “My photos”"}</p>
+                <p className="text-[11px] text-gray-500">
+                  {closed ? "you went offline" : sharing ? "shared with your friends" : "only you can see it"}
+                </p>
+              </div>
+              <div className={`relative w-11 h-6 rounded-full transition-colors duration-300 ${sharing ? "bg-cyan" : "bg-border"}`}>
+                <motion.span
+                  className="absolute top-1 w-4 h-4 rounded-full bg-white"
+                  animate={{ left: sharing ? 24 : 4 }}
+                  transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                />
+              </div>
+            </motion.div>
           </div>
 
-          <Window title={guest === "open" ? "atlas.k7x…9d.ghostly" : "your contact · Ghostly"} tone="green">
-            {!guest && <p className="text-gray-600 pt-12 text-center">…</p>}
-            {guest === "sees" && (
-              <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}>
-                <p className="text-gray-500 text-xs mb-3">● Peer to peer</p>
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-green text-black font-semibold text-xs px-3 py-1.5"><Icon name="globe" className="w-3.5 h-3.5" />Atlas</span>
-              </motion.div>
-            )}
-            {guest === "open" && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-2">
-                <div className="h-3 w-24 rounded bg-green/40" />
-                <div className="grid grid-cols-3 gap-2">
-                  {[0, 1, 2].map((i) => (
-                    <motion.div key={i} className="h-14 rounded bg-white/5" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 * i }} />
-                  ))}
-                </div>
-                <div className="h-2 w-full rounded bg-white/5" />
-                <div className="h-2 w-2/3 rounded bg-white/5" />
-                <p className="text-[10px] text-gray-600 pt-1">served from your contact&apos;s machine</p>
-              </motion.div>
-            )}
-            {guest === "gone" && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center text-gray-500 pt-8">
-                <GhostGlyph className="w-10 h-10 mx-auto mb-2" />
-                <p className="text-xs">This service is not reachable.<br />Services exist while their ghost is online.</p>
-              </motion.div>
-            )}
-          </Window>
+          <Beam active={sharing} />
+
+          {/* Your friend's browser */}
+          <div>
+            <p className="text-xs font-mono uppercase tracking-wider text-green mb-2">Your friend&apos;s browser</p>
+            <BrowserFrame
+              tone="green"
+              address={opened ? <span className="text-green">my-photos · live from your computer</span> : "Ghostly"}
+            >
+              <div className="min-h-[124px] flex flex-col justify-center">
+                <AnimatePresence mode="wait">
+                  {step === 0 && (
+                    <motion.p key="nothing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-center text-sm text-gray-600">
+                      Nothing to see yet.
+                    </motion.p>
+                  )}
+                  {step === 1 && (
+                    <motion.div key="offer" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} className="text-center">
+                      <p className="text-xs text-gray-500 mb-2">Your friend shares something:</p>
+                      <motion.span
+                        animate={{ scale: [1, 1.06, 1] }}
+                        transition={{ duration: 1.2, repeat: Infinity }}
+                        className="inline-flex items-center rounded-full bg-green text-black font-semibold text-sm px-4 py-1.5"
+                      >
+                        Open “My photos”
+                      </motion.span>
+                    </motion.div>
+                  )}
+                  {step === 2 && (
+                    <motion.div key="site" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+                      <MiniSite />
+                    </motion.div>
+                  )}
+                  {step === 3 && (
+                    <motion.div key="gone" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-center text-gray-500">
+                      <GhostGlyph className="w-9 h-9 mx-auto mb-2 text-gray-600" />
+                      <p className="text-sm">Poof. It is gone.</p>
+                      <p className="text-[11px] text-gray-600">It only existed while your friend was online.</p>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </BrowserFrame>
+          </div>
         </div>
 
-        <AnimatePresence mode="wait">
-          <motion.p
-            key={index}
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            className="text-center text-gray-400 mt-8 min-h-[3rem]"
-          >
-            <span className="font-mono text-cyan mr-2">{String(index + 1).padStart(2, "0")}</span>
-            {step.caption}
-          </motion.p>
-        </AnimatePresence>
+        {/* The same story in words; click a step to jump to it. */}
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-10">
+          {STEPS.map((item, index) => (
+            <button
+              key={item.title}
+              onClick={() => setStep(index)}
+              className={`text-left rounded-xl border p-4 transition-all cursor-pointer ${
+                index === step ? "border-cyan/50 bg-cyan/5" : "border-border/40 bg-surface/50 hover:border-border"
+              }`}
+            >
+              <span className={`font-mono text-xs ${index === step ? "text-cyan" : "text-gray-600"}`}>{String(index + 1).padStart(2, "0")}</span>
+              <h3 className={`text-sm font-semibold mt-1 mb-1 ${index === step ? "text-gray-100" : "text-gray-400"}`}>{item.title}</h3>
+              <p className="text-xs text-gray-500 leading-relaxed">{item.text}</p>
+            </button>
+          ))}
+        </div>
 
-        <div className="flex flex-wrap justify-center gap-3 text-xs text-gray-600">
-          <span className="px-3 py-1 rounded-full border border-border/30">Only what you list is reachable</span>
-          <span className="px-3 py-1 rounded-full border border-border/30">Contacts ask for a name, never a URL</span>
-          <span className="px-3 py-1 rounded-full border border-border/30">Loopback only, no redirects out</span>
-          <span className="px-3 py-1 rounded-full border border-border/30">Its own origin, never Ghostly&apos;s</span>
+        <div className="flex flex-wrap justify-center gap-3 mt-8 text-xs text-gray-600">
+          <span className="px-3 py-1 rounded-full border border-border/30">Only the app you picked, nothing else on your machine</span>
+          <span className="px-3 py-1 rounded-full border border-border/30">Only the friends you linked with</span>
+          <span className="px-3 py-1 rounded-full border border-border/30">No upload, no deploy, no tunnel company</span>
         </div>
       </div>
     </section>

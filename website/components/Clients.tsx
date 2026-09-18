@@ -75,7 +75,7 @@ export function Clients() {
             >
               <div className="flex items-center justify-between gap-2 mb-4">
                 <IconTile name={client.icon} />
-                <span className="text-[10px] font-mono uppercase tracking-wider text-gray-500 border border-border/50 rounded-full px-2 py-0.5">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-gray-500 border border-border/50 rounded-full px-2 py-0.5 whitespace-nowrap">
                   {client.note}
                 </span>
               </div>
