@@ -23,6 +23,8 @@ export interface AppSettings {
   lockScreen: LockScreenSettings;
   notifications: NotificationSettings;
   defaultNickname: string;
+  /** The user's own Giphy API key; the key shipped with old builds was retired by Giphy. */
+  giphyApiKey: string;
 }
 
 const SETTINGS_KEY = "ghostly_app_settings";
@@ -41,6 +43,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     soundEnabled: true,
   },
   defaultNickname: "",
+  giphyApiKey: "",
 };
 
 export function loadSettings(getRandomName?: () => string): AppSettings {

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useSettings } from "../contexts/SettingsContext";
 
 interface GiphyPickerProps {
   onSelect: (url: string) => void;
@@ -16,7 +17,7 @@ interface GiphyGif {
 }
 
 const GIPHY_PUBLIC_KEY = "dc6zaTOxFJmzC";
-const GIPHY_API_KEY = import.meta.env.VITE_GIPHY_API_KEY || GIPHY_PUBLIC_KEY;
+const BUILD_API_KEY = import.meta.env.VITE_GIPHY_API_KEY || GIPHY_PUBLIC_KEY;
 const GIPHY_SEARCH_URL = "https://api.giphy.com/v1/gifs/search";
 const GIPHY_TRENDING_URL = "https://api.giphy.com/v1/gifs/trending";
 const RESULTS_LIMIT = 20;
@@ -25,6 +26,10 @@ export function GiphyPicker({ onSelect, onClose }: GiphyPickerProps) {
   const [query, setQuery] = useState("");
   const [gifs, setGifs] = useState<GiphyGif[]>([]);
   const [loading, setLoading] = useState(false);
+  const [keyRejected, setKeyRejected] = useState(false);
+  const [keyDraft, setKeyDraft] = useState("");
+  const { settings, updateGiphyApiKey } = useSettings();
+  const apiKey = settings.giphyApiKey || BUILD_API_KEY;
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -58,11 +63,14 @@ export function GiphyPicker({ onSelect, onClose }: GiphyPickerProps) {
     setLoading(true);
     try {
       const url = searchQuery.trim()
-        ? `${GIPHY_SEARCH_URL}?api_key=${GIPHY_API_KEY}&q=${encodeURIComponent(searchQuery)}&limit=${RESULTS_LIMIT}&rating=g`
-        : `${GIPHY_TRENDING_URL}?api_key=${GIPHY_API_KEY}&limit=${RESULTS_LIMIT}&rating=g`;
+        ? `${GIPHY_SEARCH_URL}?api_key=${apiKey}&q=${encodeURIComponent(searchQuery)}&limit=${RESULTS_LIMIT}&rating=g`
+        : `${GIPHY_TRENDING_URL}?api_key=${apiKey}&limit=${RESULTS_LIMIT}&rating=g`;
 
       const res = await fetch(url);
       const json = await res.json();
+      // Giphy answers 401/403 ("BANNED") for the key old builds shipped with.
+      const status = json.meta?.status ?? res.status;
+      setKeyRejected(status === 401 || status === 403);
       setGifs(json.data ?? []);
     } catch (err) {
       console.error("[giphy] fetch error:", err);
@@ -70,7 +78,7 @@ export function GiphyPicker({ onSelect, onClose }: GiphyPickerProps) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [apiKey]);
 
   useEffect(() => {
     fetchGifs("");
@@ -119,6 +127,33 @@ export function GiphyPicker({ onSelect, onClose }: GiphyPickerProps) {
           <div className="flex items-center justify-center h-full">
             <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
           </div>
+        ) : keyRejected ? (
+          <form
+            className="flex flex-col justify-center h-full gap-2 px-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (keyDraft.trim()) updateGiphyApiKey(keyDraft);
+            }}
+          >
+            <p className="text-text-primary text-sm font-medium">GIFs need a Giphy API key</p>
+            <p className="text-text-muted text-xs leading-snug">
+              Giphy retired the shared key Ghostly used. Create a free one at developers.giphy.com (an "API" key, not
+              "SDK") and paste it here. It is stored on this device only.
+            </p>
+            <input
+              value={keyDraft}
+              onChange={(e) => setKeyDraft(e.target.value)}
+              placeholder="Giphy API key"
+              className="bg-input-bg border-none rounded-lg px-3 py-2 text-sm font-mono text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+            />
+            <button
+              disabled={!keyDraft.trim()}
+              className="px-3 py-2 bg-accent text-[#111b21] rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Save key
+            </button>
+            {settings.giphyApiKey && <p className="text-danger text-xs">Giphy rejected this key.</p>}
+          </form>
         ) : gifs.length === 0 ? (
           <div className="flex items-center justify-center h-full text-text-muted text-sm">
             No GIFs found
@@ -146,11 +181,7 @@ export function GiphyPicker({ onSelect, onClose }: GiphyPickerProps) {
       </div>
 
       <div className="px-2.5 py-1.5 border-t border-border flex items-center justify-end">
-        <img
-          src="https://giphy.com/static/img/poweredby_giphy.png"
-          alt="Powered by GIPHY"
-          className="h-3 opacity-50"
-        />
+        <span className="text-text-muted text-[10px] font-bold tracking-wider">POWERED BY GIPHY</span>
       </div>
     </div>
   );

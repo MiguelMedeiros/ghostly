@@ -28,6 +28,7 @@ interface SettingsContextValue {
   updateLockScreen: (lockScreen: Partial<LockScreenSettings>) => void;
   updateNotifications: (notifications: Partial<NotificationSettings>) => void;
   updateDefaultNickname: (nickname: string) => void;
+  updateGiphyApiKey: (key: string) => void;
   randomizeNickname: () => void;
   resetSettings: () => void;
 }
@@ -81,6 +82,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setSettings((prev) => ({ ...prev, defaultNickname: nickname }));
   }, []);
 
+  const updateGiphyApiKey = useCallback((key: string) => {
+    setSettings((prev) => ({ ...prev, giphyApiKey: key.trim() }));
+  }, []);
+
   const randomizeNickname = useCallback(() => {
     const randomName = getRandomGhostName();
     setSettings((prev) => ({ ...prev, defaultNickname: randomName }));
@@ -103,6 +108,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         updateLockScreen,
         updateNotifications,
         updateDefaultNickname,
+        updateGiphyApiKey,
         randomizeNickname,
         resetSettings,
       }}
