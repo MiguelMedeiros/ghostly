@@ -1,17 +1,13 @@
+import type { CallEventType } from "@ghostly/core";
+
+export type { CallEventType, CallSignal, CallState } from "@ghostly/core";
+
 export interface MessageMeta {
   dhtKey: string;
   encryptedPayloadLength: number;
   dnsRecords: string[];
   packetTimestamp?: number;
 }
-
-export type CallEventType =
-  | "call_started"
-  | "call_received"
-  | "call_connected"
-  | "call_ended"
-  | "call_missed"
-  | "call_rejected";
 
 export type SystemEventType =
   | "join"
@@ -56,16 +52,6 @@ export interface ChatParams {
 
 export type ConnectionStatus = "connecting" | "online" | "offline" | "error";
 
-export type CallState =
-  | "idle"
-  | "offering"
-  | "incoming"
-  | "answering"
-  | "connecting"
-  | "connected"
-  | "ended";
-
-export type { CallSignal } from "@ghostly/core";
 
 export interface ChatTechInfo {
   sessionId: string;

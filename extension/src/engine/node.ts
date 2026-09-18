@@ -163,7 +163,7 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   setCallSignal({ linkId, signal }: { linkId: string; signal: string | null }): void {
-    void this.links.get(linkId)?.link?.session.setCallSignal(signal);
+    void this.links.get(linkId)?.link?.setCallSignal(signal);
   }
 
   setFastPoll({ linkId, fast }: { linkId: string; fast: boolean }): void {

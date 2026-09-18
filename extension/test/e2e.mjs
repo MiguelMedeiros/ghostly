@@ -37,6 +37,8 @@ async function launchPeer(name) {
       `--load-extension=${extensionDir}`,
       // Both peers share one machine: let ICE use plain host addresses.
       "--disable-features=WebRtcHideLocalIpsWithMdns",
+      "--use-fake-device-for-media-stream",
+      "--use-fake-ui-for-media-stream",
     ],
   });
   const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
@@ -117,6 +119,16 @@ try {
   await a.page.getByTestId("message-send").click();
   await b.page.getByTestId("message").filter({ hasText: "boo back over WebRTC" }).filter({ hasText: "WebRTC" }).waitFor({ timeout: 15_000 });
   ok("B received A's message over WebRTC");
+
+  step("Video call with the signaling Ghostly Desktop uses (_call)");
+  await a.page.bringToFront();
+  await a.page.getByTestId("call-video").click();
+  await b.page.getByRole("button", { name: "Answer with video" }).click({ timeout: 90_000 });
+  await Promise.all([a, b].map((peer) => peer.page.getByTestId("call-state").filter({ hasText: "Connected" }).waitFor({ timeout: 90_000 })));
+  ok("both sides connected with audio and video");
+  await a.page.getByTestId("call-hangup").click();
+  await b.page.getByTestId("call-video").waitFor({ timeout: 60_000 });
+  ok("hang up reaches the peer");
 
   step("A stops sharing: the service id no longer resolves");
   await a.page.getByTestId("service-item").getByRole("button", { name: "Stop" }).click();

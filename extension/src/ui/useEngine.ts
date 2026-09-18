@@ -46,6 +46,7 @@ export function useEngine(): Engine {
         }
       });
       port.onDisconnect.addListener(() => {
+        void chrome.runtime.lastError;
         portRef.current = null;
         for (const pending of pendingRef.current.values()) pending.reject(new Error("Lost the Ghostly peer"));
         pendingRef.current.clear();

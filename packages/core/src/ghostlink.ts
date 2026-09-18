@@ -163,6 +163,18 @@ export class GhostLink {
     return this.session.sendMessage(trimmed, timestamp);
   }
 
+  /** Publishes a `_call` signal; a connected peer also gets it right away over the data link. */
+  async setCallSignal(signal: string | null): Promise<void> {
+    if (signal && this.channel) {
+      try {
+        this.channel.send(encodeControl({ t: "call", s: signal }));
+      } catch {
+        // Pkarr still carries it
+      }
+    }
+    await this.session.setCallSignal(signal);
+  }
+
   /** Issues an HTTP request to a service the peer advertises. */
   async request(serviceId: string, request: ClientRequest): Promise<ClientResponse> {
     await this.connect();
@@ -242,6 +254,9 @@ export class GhostLink {
       }
       case "m":
         this.options.events?.onMessage?.({ text: frame.m, timestamp: frame.ts, via: "datalink" });
+        break;
+      case "call":
+        this.options.events?.onCallSignal?.(frame.s);
         break;
       case "req":
         this.httpHost?.handleRequest(frame);

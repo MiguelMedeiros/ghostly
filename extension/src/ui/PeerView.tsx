@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { RuntimeMessage } from "../shared/rpc";
 import type { LinkView } from "../shared/types";
+import { CallPanel } from "./CallPanel";
 import { CopyButton, Dot, ghostName } from "./bits";
 import type { Engine } from "./useEngine";
 
@@ -89,6 +90,7 @@ export function PeerView({ engine, link, onRemoved }: { engine: Engine; link: Li
               Connect
             </button>
           )}
+          <CallPanel engine={engine} link={link} />
         </div>
 
         {link.inviteCode && (

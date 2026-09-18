@@ -59,6 +59,12 @@ export interface ChatFrame {
   m: string;
 }
 
+/** A `_call` signal, sent here as well so a connected peer rings without waiting for its next poll. */
+export interface CallFrame {
+  t: "call";
+  s: string;
+}
+
 /** Updated service list while connected. */
 export interface ServicesFrame {
   t: "svc";
@@ -104,6 +110,7 @@ export interface PingFrame {
 export type ControlFrame =
   | HelloFrame
   | ChatFrame
+  | CallFrame
   | ServicesFrame
   | HttpRequestFrame
   | HttpResponseFrame
@@ -160,6 +167,9 @@ export function decodeControl(text: string): ControlFrame | null {
       if (typeof f.ts !== "number" || typeof f.m !== "string") return null;
       if (f.m.length > LIMITS.maxChatMessageBytes) return null;
       return { t: "m", ts: f.ts, m: f.m };
+    case "call":
+      if (typeof f.s !== "string" || f.s.length > LIMITS.maxChatMessageBytes) return null;
+      return { t: "call", s: f.s };
     case "svc":
       return { t: "svc", svc: f.svc };
     case "req":

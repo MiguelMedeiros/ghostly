@@ -19,8 +19,21 @@ async function ensureEngine(): Promise<void> {
       reasons: [chrome.offscreen.Reason.WEB_RTC],
       justification: "Ghostly keeps WebRTC connections to your peers while the browser is open.",
     })
+    .then(waitForEngine)
     .finally(() => (creatingOffscreen = null));
   await creatingOffscreen;
+}
+
+/** The document exists before its script listens; wait until the peer answers. */
+async function waitForEngine(): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    try {
+      if (await chrome.runtime.sendMessage({ target: "engine", type: "ping" } satisfies RuntimeMessage)) return;
+    } catch {
+      // nobody is listening yet
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
 }
 
 chrome.runtime.onStartup.addListener(() => void ensureEngine());

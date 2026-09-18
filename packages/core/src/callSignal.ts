@@ -15,6 +15,16 @@ export interface CallSignal {
   ss?: number[];
 }
 
+export type CallState = "idle" | "offering" | "incoming" | "answering" | "connecting" | "connected" | "ended";
+
+export type CallEventType =
+  | "call_started"
+  | "call_received"
+  | "call_connected"
+  | "call_ended"
+  | "call_missed"
+  | "call_rejected";
+
 export function compressSdp(sdp: string): string {
   return btoa(sdp);
 }
@@ -178,7 +188,9 @@ export function buildSdpFromSignal(
         `a=fingerprint:${fingerprint}`,
         `a=setup:${signal.s}`,
         `a=mid:${mid}`,
-        "a=extmap:2 urn:ietf:params:rtp-hdrext:toffset",
+        // No header extensions here: their ids differ between engines, and an
+        // answer that maps an id differently from the real offer is rejected
+        // by Chromium ("Failed to set recv parameters").
         "a=sendrecv",
         `a=msid:stream video0`,
         "a=rtcp-mux",
