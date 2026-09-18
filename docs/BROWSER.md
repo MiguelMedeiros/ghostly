@@ -26,12 +26,12 @@ The extension asks for three permissions up front: `offscreen` (the peer runs th
 
 Use two Chrome profiles (or two machines), each with the extension loaded.
 
-1. **A:** *New peer invite*, copy the invite.
-2. **B:** paste it, *Join*. Send a message; it arrives at A through the DHT within a few seconds.
-3. **A:** *Share local service* → name `Atlas`, target `localhost:3400`. Chrome asks whether Ghostly may access `localhost`.
-4. **B:** Atlas appears under the peer's *Services*. Click **Open**. A tab opens on `https://atlas.<A's key>.ghostly.invalid/`, the peers connect over WebRTC, and the app loads from A's machine.
-5. Both now show *Connected peer to peer*; chat messages are labelled `WebRTC` instead of `DHT`.
-6. **A:** *Stop*, go offline, or close Chrome. Reload the tab on B: the service is not reachable.
+1. **A:** *New* → *Create New Chat*, copy the invite code.
+2. **B:** *New*, paste the code. Send a message; it arrives at A through the DHT within a few seconds, and the two connect peer to peer on their own shortly after.
+3. **A:** *Share a local service* (bottom of the sidebar) → name `Atlas`, target `localhost:3400`. Chrome asks whether Ghostly may access `localhost`.
+4. **B:** an **Atlas** button appears under the chat header. Click it. A tab opens on `https://atlas.<A's key>.ghostly.invalid/`, the peers connect over WebRTC, and the app loads from A's machine.
+5. Both show *Peer to peer* under the chat header; messages, call signaling and the app now travel over WebRTC.
+6. **A:** *Stop*, switch to *Offline*, or close Chrome. Reload the tab on B: the service is not reachable.
 
 ### Browser ↔ Desktop
 
@@ -65,7 +65,7 @@ launches two Chromium profiles with the extension and walks through the whole mi
 
 ```
 ┌─ app.html (tab) ──────────┐      ┌─ service worker ────────────────┐
-│ React UI                  │      │ keeps the offscreen page alive  │
+│ Desktop's React UI (src/) │      │ keeps the offscreen page alive  │
 │ calls: camera, microphone │      │ opens the UI                    │
 └──────────┬────────────────┘      │ viewer: DevTools Fetch domain   │
            │ port "ui"             └──────────────┬──────────────────┘
@@ -79,6 +79,16 @@ launches two Chromium profiles with the extension and walks through the whole mi
 │ IndexedDB: links, messages, services, settings                     │
 └────────────────────────────────────────────────────────────────────┘
 ```
+
+**One UI.** The extension does not have a UI of its own: it builds Desktop's `src/` as is, so chats, themes, languages, the lock screen, emoji and GIF pickers, QR invites and the call overlay are the same code and look the same. `extension/vite.config.ts` swaps the five Desktop modules that touch the platform for stand-ins in `extension/src/platform` with identical exports:
+
+| Desktop module | In the browser |
+|---|---|
+| `lib/pkarr.ts`, `lib/crypto.ts` (Rust through Tauri) | `@ghostly/core` in TypeScript |
+| `hooks/useChat.ts`, `hooks/useBackgroundPoller.ts` (the Pkarr loop, in the page) | thin hooks over the peer, which runs that loop (`LinkSession`) in the background for every chat |
+| `lib/platform.ts` (services: not available yet) | services, presence and network settings backed by the peer |
+
+Sessions stay in `localStorage` exactly as on Desktop; `platform/sync.ts` keeps them in step with the links the peer runs. GIFs need `VITE_GIPHY_API_KEY` in the repository's `.env`, as on Desktop (Giphy retired the public fallback key).
 
 **Why an offscreen document.** Manifest V3 service workers have no `RTCPeerConnection` and are terminated when idle. The offscreen document (reason `WEB_RTC`) has WebRTC and lives as long as the browser runs the extension, which is exactly the lifetime of the peer.
 
@@ -145,7 +155,7 @@ Does not work yet:
 
 ## Desktop
 
-Desktop already shares the protocol code: call signaling and the `useWebRTC` hook moved into `@ghostly/core` and `@ghostly/react` and are re-exported from their old paths. To advertise and open services, Desktop needs three adapters around the same `GhostLink`:
+Desktop already shares the protocol code (call signaling and the `useWebRTC` hook live in `@ghostly/core` and `@ghostly/react`) and the UI for services: the sidebar's *Services* section, the strip under the chat header and the *Network* settings are Desktop components that stay hidden while `src/lib/platform.ts` exports `null`. To light them up, Desktop needs an implementation of that module on top of the same `GhostLink`, with three adapters:
 
 | Core interface | Browser | Desktop |
 |---|---|---|

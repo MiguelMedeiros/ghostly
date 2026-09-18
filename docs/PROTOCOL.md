@@ -122,7 +122,7 @@ A DataChannel message is at most 16 KiB (16378 bytes of payload per chunk), a co
 |---|---|
 | `{ "t": "hello", "v": 1, "svc": <§3 object>, "nick"? }` | first frame in each direction; `svc` is the authoritative service list |
 | `{ "t": "svc", "svc": … }` | the service list changed |
-| `{ "t": "m", "ts", "m" }` | chat message; used instead of `_msgs` while the channel is open |
+| `{ "t": "m", "ts", "m" }` | chat message; used instead of `_msgs` while the channel is open. On open, each side first sends the messages the peer had not acknowledged through Pkarr yet. Receivers deduplicate by `ts`. |
 | `{ "t": "call", "s": "<_call signal JSON>" }` | call signaling, in addition to `_call` |
 | `{ "t": "ping" \| "pong", "ts" }` | liveness |
 

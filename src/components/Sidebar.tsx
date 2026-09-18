@@ -4,6 +4,7 @@ import { usePkarr } from "../hooks/usePkarr";
 import { useBackgroundPoller } from "../hooks/useBackgroundPoller";
 import { useI18n } from "../contexts/I18nContext";
 import { useSettings } from "../contexts/SettingsContext";
+import { MyServices } from "./MyServices";
 import {
   listSessions,
   deleteSession,
@@ -634,6 +635,8 @@ export function Sidebar() {
           );
         })}
       </div>
+
+      <MyServices />
 
       {/* Footer */}
       <div className="border-t border-border bg-sidebar-bg">

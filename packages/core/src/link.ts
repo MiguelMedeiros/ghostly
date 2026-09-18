@@ -76,6 +76,8 @@ export interface LinkSessionEvents {
   onCallSignal?(signal: string): void;
   onRtcSignal?(signal: string): void;
   onStatus?(status: LinkStatus): void;
+  /** A poll started, or finished with the next one due in `nextInMs`. */
+  onPoll?(poll: { polling: boolean; nextInMs: number }): void;
 }
 
 export interface LinkSessionOptions {
@@ -203,6 +205,19 @@ export class LinkSession {
     if (signal) this.pollNow();
   }
 
+  /**
+   * Hands over the messages the peer has not acknowledged, for delivery over
+   * the data link. That channel is reliable, so they leave the Pkarr buffer.
+   */
+  takeUnacknowledged(): CompactMessage[] {
+    const pending = this.sentBuffer;
+    if (pending.length === 0) return [];
+    this.sentBuffer = [];
+    this.events.onPeerAck?.(Math.max(...pending.map((m) => m.t)));
+    void this.publish().catch(() => {});
+    return pending;
+  }
+
   /** Call after the list of shared services changed. */
   async refreshAdvertisement(): Promise<void> {
     await this.publish().catch(() => {});
@@ -301,6 +316,7 @@ export class LinkSession {
   private async poll(): Promise<void> {
     if (!this.running || this.polling) return;
     this.polling = true;
+    this.events.onPoll?.({ polling: true, nextInMs: 0 });
     try {
       const packet = await this.transport.resolve(this.peerPubKeyZ32);
       if (!this.running) return;
@@ -349,10 +365,12 @@ export class LinkSession {
     } finally {
       this.polling = false;
       if (this.running && !this.pollTimer) {
+        const interval = this.nextInterval();
+        this.events.onPoll?.({ polling: false, nextInMs: interval });
         this.pollTimer = setTimeout(() => {
           this.pollTimer = null;
           void this.poll();
-        }, this.nextInterval());
+        }, interval);
       }
     }
   }

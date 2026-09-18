@@ -46,6 +46,7 @@ export interface GhostLinkEvents {
   onCallSignal?(signal: string): void;
   onStatus?(status: LinkStatus): void;
   onDataLinkState?(state: DataLinkState): void;
+  onPoll?(poll: { polling: boolean; nextInMs: number }): void;
 }
 
 export interface GhostLinkOptions {
@@ -103,6 +104,7 @@ export class GhostLink {
         onCallSignal: (signal) => events.onCallSignal?.(signal),
         onRtcSignal: (signal) => void this.dataLink.handleSignal(signal),
         onStatus: (status) => events.onStatus?.(status),
+        onPoll: (poll) => events.onPoll?.(poll),
       },
     });
 
@@ -237,6 +239,10 @@ export class GhostLink {
         nick: this.options.nick,
       }),
     );
+    // Whatever was still waiting in Pkarr for the peer's next poll goes now.
+    for (const message of this.session.takeUnacknowledged()) {
+      channel.send(encodeControl({ t: "m", ts: message.t, m: message.m }));
+    }
     this.options.events?.onPresence?.(this.presence);
     for (const waiter of this.openWaiters.splice(0)) waiter.resolve();
   }

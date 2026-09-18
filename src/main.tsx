@@ -1,18 +1,8 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { HashRouter, Routes, Route } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
-import { App } from "./App";
-import { Home } from "./pages/Home";
-import { Chat } from "./pages/Chat";
-import { Settings } from "./pages/Settings";
+import { Root } from "./Root";
 import { setStorageProfile } from "./lib/storage";
-import { SettingsProvider } from "./contexts/SettingsContext";
-import { ThemeProvider } from "./contexts/ThemeContext";
-import { I18nProvider } from "./contexts/I18nContext";
-import { LockScreenProvider } from "./contexts/LockScreenContext";
-import { LockScreen } from "./components/LockScreen";
-import "./index.css";
 
 async function boot() {
   try {
@@ -26,24 +16,7 @@ async function boot() {
 
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <SettingsProvider>
-        <ThemeProvider>
-          <I18nProvider>
-            <LockScreenProvider>
-              <LockScreen />
-              <HashRouter>
-                <Routes>
-                  <Route element={<App />}>
-                    <Route path="/" element={<Home />} />
-                    <Route path="/chat/*" element={<Chat />} />
-                    <Route path="/settings" element={<Settings />} />
-                  </Route>
-                </Routes>
-              </HashRouter>
-            </LockScreenProvider>
-          </I18nProvider>
-        </ThemeProvider>
-      </SettingsProvider>
+      <Root />
     </StrictMode>,
   );
 }

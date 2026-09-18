@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Ghostly Browser builds this UI from another package root; name the sources explicitly. */
+@source "./";
+
 @theme {
   --color-app-bg: var(--theme-app-bg);
   --color-sidebar-bg: var(--theme-sidebar-bg);

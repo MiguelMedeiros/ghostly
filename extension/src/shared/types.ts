@@ -62,6 +62,10 @@ export interface LinkView {
   /** `null` when the peer does not advertise (offline, or a legacy client). */
   peerServices: ServiceAd[] | null;
   lastMessageAt: number;
+  /** Newest of my messages the peer acknowledged through Pkarr. */
+  peerAck: number;
+  lastSyncAt: number;
+  poll: { polling: boolean; nextAt: number; interval: number };
 }
 
 export interface ServiceView extends StoredService {

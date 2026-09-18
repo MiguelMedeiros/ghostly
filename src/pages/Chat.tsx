@@ -8,6 +8,7 @@ import { MessageInput } from "../components/MessageInput";
 import { CallOverlay } from "../components/CallOverlay";
 import { IncomingCallNotification } from "../components/IncomingCallNotification";
 import { PollCountdown } from "../components/PollCountdown";
+import { PeerServices } from "../components/PeerServices";
 import {
   markSessionAsRead,
   generateSessionId,
@@ -479,6 +480,8 @@ export function Chat() {
           </div>
         </div>
       </div>
+
+      <PeerServices peerPubKey={params.peerPubKeyB64} />
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto chat-wallpaper">

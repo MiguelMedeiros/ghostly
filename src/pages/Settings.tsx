@@ -4,6 +4,7 @@ import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
 import { useLockScreen } from "../contexts/LockScreenContext";
 import { getVersion } from "@tauri-apps/api/app";
+import { NetworkSettings } from "../components/NetworkSettings";
 import {
   hashPassword,
   verifyPassword,
@@ -565,6 +566,8 @@ export function Settings() {
               </div>
             </div>
           </section>
+
+          <NetworkSettings />
 
           {/* Data & Storage Section */}
           <section className="space-y-4">

@@ -38,6 +38,9 @@ interface LiveLink {
   dataLink: DataLinkState;
   presence: PeerPresence;
   lastMessageAt: number;
+  peerAck: number;
+  lastSyncAt: number;
+  poll: LinkView["poll"];
 }
 
 function newLiveLink(stored: StoredLink, lastMessageAt: number): LiveLink {
@@ -49,6 +52,9 @@ function newLiveLink(stored: StoredLink, lastMessageAt: number): LiveLink {
     dataLink: "idle",
     presence: { online: false, lastPacketAt: 0, services: null },
     lastMessageAt,
+    peerAck: 0,
+    lastSyncAt: 0,
+    poll: { polling: false, nextAt: 0, interval: 0 },
   };
 }
 
@@ -122,6 +128,14 @@ export class GhostlyNode implements EngineImplementation {
     return { linkId: this.addLink(params) };
   }
 
+  ensureLink(params: LinkParams): { linkId: string } {
+    return this.joinLink({ inviteCode: encodeInviteCode(params) });
+  }
+
+  pollNow({ linkId }: { linkId: string }): void {
+    this.links.get(linkId)?.link?.session.pollNow();
+  }
+
   removeLink({ linkId }: { linkId: string }): void {
     const live = this.links.get(linkId);
     if (!live) return;
@@ -143,16 +157,34 @@ export class GhostlyNode implements EngineImplementation {
     for (const [id, live] of this.links) live.link?.session.setActive(id === linkId);
   }
 
-  async sendMessage({ linkId, text }: { linkId: string; text: string }): Promise<{ error: string | null }> {
+  exportLinks() {
+    return [...this.links.values()].map(({ stored }) => ({
+      seedB64: stored.seedB64,
+      peerPubKeyZ32: stored.peerPubKeyZ32,
+      encKeyB64: stored.encKeyB64,
+      createdAt: stored.createdAt,
+      inviteCode: stored.inviteCode,
+      label: stored.label,
+    }));
+  }
+
+  async sendMessage(params: { linkId: string; text: string; timestamp?: number }): Promise<{ error: string | null }> {
+    const { linkId, text } = params;
     const live = this.links.get(linkId);
     if (!live?.link) return { error: "You are offline" };
     const trimmed = text.trim();
     if (!trimmed) return { error: null };
 
-    const timestamp = Date.now();
+    const timestamp = params.timestamp ?? Date.now();
     const via = live.link.isDataLinkOpen ? "datalink" : "pkarr";
     await this.storeMessage({ linkId, id: `me_${timestamp}`, text: trimmed, sender: "me", timestamp, via });
-    return { error: await live.link.sendMessage(trimmed, timestamp) };
+    const error = await live.link.sendMessage(trimmed, timestamp);
+    // The data link is reliable and ordered: sent means delivered.
+    if (!error && via === "datalink" && timestamp > live.peerAck) {
+      live.peerAck = timestamp;
+      this.emitState();
+    }
+    return { error };
   }
 
   connect({ linkId }: { linkId: string }): void {
@@ -308,6 +340,16 @@ export class GhostlyNode implements EngineImplementation {
       events: {
         onStatus: (status) => {
           live.status = status;
+          if (status === "online") live.lastSyncAt = Date.now();
+          this.emitState();
+        },
+        onPoll: ({ polling, nextInMs }) => {
+          live.poll = { polling, nextAt: Date.now() + nextInMs, interval: nextInMs || live.poll.interval };
+          this.emitState();
+        },
+        onPeerAck: (ack) => {
+          if (ack === live.peerAck) return;
+          live.peerAck = ack;
           this.emitState();
         },
         onDataLinkState: (state) => {
@@ -372,6 +414,9 @@ export class GhostlyNode implements EngineImplementation {
       peerLastSeenAt: presence.lastPacketAt,
       peerServices: presence.services,
       lastMessageAt: live.lastMessageAt,
+      peerAck: live.peerAck,
+      lastSyncAt: live.lastSyncAt,
+      poll: live.poll,
     };
   }
 

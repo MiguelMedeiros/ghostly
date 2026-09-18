@@ -4,10 +4,15 @@ import type { EngineState, Settings, StoredMessage } from "./types";
 export interface EngineApi {
   createLink(): { linkId: string; inviteCode: string };
   joinLink(params: { inviteCode: string }): { linkId: string };
+  /** Makes sure a link with these parameters runs; used by UIs that keep their own session list. */
+  ensureLink(params: { seedB64: string; peerPubKeyZ32: string; encKeyB64: string }): { linkId: string };
+  pollNow(params: { linkId: string }): void;
   removeLink(params: { linkId: string }): void;
   renameLink(params: { linkId: string; label: string }): void;
   setActiveLink(params: { linkId: string | null }): void;
-  sendMessage(params: { linkId: string; text: string }): { error: string | null };
+  sendMessage(params: { linkId: string; text: string; timestamp?: number }): { error: string | null };
+  /** Link secrets, for a UI that keeps its own session list in the same profile. */
+  exportLinks(): { seedB64: string; peerPubKeyZ32: string; encKeyB64: string; createdAt: number; inviteCode?: string; label?: string }[];
   connect(params: { linkId: string }): void;
   disconnect(params: { linkId: string }): void;
   addService(params: { name: string; target: string }): { serviceId: string };

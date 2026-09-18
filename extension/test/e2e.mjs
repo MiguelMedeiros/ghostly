@@ -46,7 +46,7 @@ async function launchPeer(name) {
   const page = await context.newPage();
   page.on("console", (m) => m.type() === "error" && console.log(`  [${name}] ${m.text()}`));
   await page.goto(`chrome-extension://${extensionId}/app.html`);
-  await page.getByTestId("create-link").waitFor();
+  await page.getByTitle("New Chat").waitFor();
   return { name, context, page };
 }
 
@@ -58,33 +58,39 @@ try {
   [a, b] = await Promise.all([launchPeer("chrome-a"), launchPeer("chrome-b")]);
   ok("both peers are up");
 
-  step("A creates a link, B joins with the invite");
-  await a.page.getByTestId("create-link").click();
-  const invite = (await a.page.getByTestId("invite-code").textContent()).trim();
-  await b.page.getByTestId("invite-input").fill(invite);
-  await b.page.getByTestId("join-link").click();
-  await b.page.getByTestId("message-input").waitFor();
+  step("A creates a chat, B joins with the invite code");
+  await a.page.getByTitle("New Chat").click();
+  await a.page.getByRole("button", { name: "Create New Chat" }).first().click();
+  const invite = (await a.page.locator("code").first().textContent()).trim();
+  await b.page.getByTitle("New Chat").click();
+  await b.page.getByPlaceholder("Invite code...").fill(invite);
+  await b.page.getByPlaceholder("Invite code...").press("Enter");
+  await b.page.getByPlaceholder("Type a message").waitFor();
   ok("linked");
 
+  const say = async (peer, text) => {
+    await peer.page.getByPlaceholder("Type a message").fill(text);
+    await peer.page.getByPlaceholder("Type a message").press("Enter");
+  };
+
   step("Text through Pkarr (the path Ghostly Desktop uses)");
-  await b.page.getByTestId("message-input").fill("boo from B");
-  await b.page.getByTestId("message-send").click();
-  await a.page.getByTestId("message").filter({ hasText: "boo from B" }).waitFor({ timeout: 90_000 });
+  await say(b, "boo from B");
+  await a.page.getByText("boo from B").first().waitFor({ timeout: 120_000 });
   ok("A received B's message via the DHT");
-  await a.page.getByTestId("peer-presence").filter({ hasText: "Online" }).waitFor({ timeout: 60_000 });
-  ok("A sees B online");
+  await a.page.getByText("joined").first().waitFor({ timeout: 60_000 });
+  ok("the join announcement Desktop sends arrived too");
 
   step(`A shares Atlas → http://localhost:${atlas.port}`);
   await a.page.getByTestId("add-service").click();
   await a.page.getByTestId("service-name").fill("Atlas");
   await a.page.getByTestId("service-target").fill(`localhost:${atlas.port}`);
   await a.page.getByTestId("service-save").click();
-  await a.page.getByTestId("service-item").filter({ hasText: "Shared with your peers" }).waitFor();
+  await a.page.getByTestId("service-item").filter({ hasText: "Shared with your contacts" }).waitFor();
   ok("A advertises the service");
 
   step("B discovers Atlas and opens it");
-  await b.page.getByTestId("peer-service").filter({ hasText: "Atlas" }).waitFor({ timeout: 90_000 });
-  ok("B sees Atlas in A's services (from the signed, encrypted _svc record)");
+  await b.page.getByTestId("open-service").filter({ hasText: "Atlas" }).waitFor({ timeout: 120_000 });
+  ok("B sees Atlas among A's services");
   const viewerPromise = b.context.waitForEvent("page");
   await b.page.getByTestId("open-service").click();
   const viewer = await viewerPromise;
@@ -116,20 +122,19 @@ try {
 
   step("Chat now flows over the data link");
   await b.page.bringToFront();
-  await b.page.getByTestId("datalink-state").filter({ hasText: "Connected peer to peer" }).waitFor();
-  await a.page.getByTestId("message-input").fill("boo back over WebRTC");
-  await a.page.getByTestId("message-send").click();
-  await b.page.getByTestId("message").filter({ hasText: "boo back over WebRTC" }).filter({ hasText: "WebRTC" }).waitFor({ timeout: 15_000 });
+  await b.page.getByTestId("datalink-state").filter({ hasText: "Peer to peer" }).waitFor();
+  await say(a, "boo back over WebRTC");
+  await b.page.getByText("boo back over WebRTC").first().waitFor({ timeout: 10_000 });
   ok("B received A's message over WebRTC");
 
   step("Video call with the signaling Ghostly Desktop uses (_call)");
   await a.page.bringToFront();
-  await a.page.getByTestId("call-video").click();
-  await b.page.getByRole("button", { name: "Answer with video" }).click({ timeout: 90_000 });
-  await Promise.all([a, b].map((peer) => peer.page.getByTestId("call-state").filter({ hasText: "Connected" }).waitFor({ timeout: 90_000 })));
+  await a.page.getByTitle("Video call").click();
+  await b.page.getByTitle("Accept video call").click({ timeout: 90_000 });
+  await Promise.all([a, b].map((peer) => peer.page.getByText(/^\d{1,2}:\d{2}$/).first().waitFor({ timeout: 90_000 })));
   ok("both sides connected with audio and video");
-  await a.page.getByTestId("call-hangup").click();
-  await b.page.getByTestId("call-video").waitFor({ timeout: 60_000 });
+  await a.page.getByTitle("End call").click();
+  await b.page.getByTitle("End call").waitFor({ state: "detached", timeout: 60_000 });
   ok("hang up reaches the peer");
 
   step("A stops sharing: the service id no longer resolves");
@@ -137,7 +142,7 @@ try {
   await viewer.goto(viewer.url().replace("/page2", "/"));
   await viewer.waitForSelector("text=This peer does not share that service");
   ok("requests are refused by A");
-  await a.page.getByTestId("service-item").getByRole("button", { name: "Share" }).click();
+  await a.page.getByTestId("service-item").getByRole("button", { name: "Share", exact: true }).click();
   await viewer.reload();
   await viewer.waitForSelector("body[data-ready='1']");
   ok("and served again once shared");
