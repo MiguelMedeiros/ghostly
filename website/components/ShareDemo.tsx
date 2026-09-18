@@ -56,20 +56,22 @@ function BrowserFrame({ address, tone, children, dim }: { address: React.ReactNo
 /** Packets running along the door between the two machines. */
 function Beam({ active }: { active: boolean }) {
   return (
-    <div className="relative h-10 md:h-auto md:w-28 flex md:flex-col items-center justify-center">
-      <div className={`absolute md:static h-px w-full md:w-full transition-colors duration-500 ${active ? "bg-linear-to-r from-cyan to-green" : "bg-border/40"}`} />
-      {active &&
-        [0, 1, 2].map((i) => (
-          <motion.span
-            key={i}
-            className="absolute top-1/2 -mt-1 w-2 h-2 rounded-full bg-cyan shadow-[0_0_8px] shadow-cyan"
-            initial={{ left: "0%", opacity: 0 }}
-            animate={{ left: ["0%", "100%"], opacity: [0, 1, 1, 0] }}
-            transition={{ duration: 1.4, delay: i * 0.45, repeat: Infinity, ease: "linear" }}
-          />
-        ))}
-      <span className={`relative md:mt-3 px-2 text-[10px] font-mono uppercase tracking-wider bg-background transition-colors duration-500 ${active ? "text-green" : "text-gray-600"}`}>
-        {active ? "peer to peer" : "no connection"}
+    <div className="flex flex-col items-center justify-center gap-2 md:w-32 md:pt-24">
+      <div className="relative w-full h-4 flex items-center">
+        <div className={`h-0.5 w-full rounded-full transition-colors duration-500 ${active ? "bg-linear-to-r from-cyan to-green" : "bg-border/40"}`} />
+        {active &&
+          [0, 1, 2].map((i) => (
+            <motion.span
+              key={i}
+              className="absolute top-1/2 -mt-1 -ml-1 w-2 h-2 rounded-full bg-white shadow-[0_0_10px_2px] shadow-cyan"
+              initial={{ left: "0%", opacity: 0 }}
+              animate={{ left: ["0%", "100%"], opacity: [0, 1, 1, 0] }}
+              transition={{ duration: 1.4, delay: i * 0.45, repeat: Infinity, ease: "linear" }}
+            />
+          ))}
+      </div>
+      <span className={`text-[10px] font-mono uppercase tracking-wider text-center transition-colors duration-500 ${active ? "text-green" : "text-gray-600"}`}>
+        {active ? "encrypted, peer to peer" : "door closed"}
       </span>
     </div>
   );
@@ -108,7 +110,7 @@ export function ShareDemo() {
         </motion.div>
 
         <div
-          className="grid md:grid-cols-[1fr_auto_1fr] gap-4 md:gap-2 items-center"
+          className="grid md:grid-cols-[1fr_auto_1fr] gap-4 md:gap-3 items-start"
           onMouseEnter={() => setPaused(true)}
           onMouseLeave={() => setPaused(false)}
         >

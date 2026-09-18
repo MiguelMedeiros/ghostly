@@ -86,7 +86,12 @@ async function frame(png, file, chrome) {
   console.log("✓", file);
 }
 const APP = { kind: "app", title: "Ghostly" };
-const shoot = async (peer, file) => frame(await peer.page.screenshot(), file, APP);
+const shoot = async (peer, file) => {
+  // Images load after the chat scrolled; make sure the newest message is what shows.
+  await peer.page.evaluate(() => document.querySelector(".chat-wallpaper")?.scrollTo(0, 1e9));
+  await peer.page.waitForTimeout(300);
+  await frame(await peer.page.screenshot(), file, APP);
+};
 const say = async (peer, text) => {
   await peer.page.getByPlaceholder("Type a message").fill(text);
   await peer.page.getByPlaceholder("Type a message").press("Enter");
