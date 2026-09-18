@@ -18,7 +18,11 @@
     "service_worker": "background.js",
     "type": "module"
   },
-  "permissions": ["offscreen", "storage", "debugger"],
+  "permissions": [
+    "offscreen",
+    "storage",
+    "debugger"
+  ],
   "optional_host_permissions": [
     "http://localhost/*",
     "http://127.0.0.1/*",
@@ -28,6 +32,6 @@
     "https://[::1]/*"
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+    "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; img-src 'self' data: blob: https://media.giphy.com https://media0.giphy.com https://media1.giphy.com https://media2.giphy.com https://media3.giphy.com https://media4.giphy.com https://giphy.com https://web.archive.org"
   }
 }

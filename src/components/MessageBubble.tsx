@@ -9,6 +9,8 @@ interface MessageBubbleProps {
 const IMAGE_URL_RE =
   /^https?:\/\/\S+\.(gif|png|jpe?g|webp)(\?\S*)?$/i;
 const GIPHY_RE = /^https?:\/\/media\d*\.giphy\.com\//i;
+/** GeoCities GIFs from the Wayback Machine (the picker's "Retro" source): tiny pixel art. */
+const WAYBACK_GIF_RE = /^https:\/\/web\.archive\.org\/web\/\d+\/\S+\.gif$/i;
 const DATA_IMAGE_SAFE_RE = /^data:image\/(png|jpe?g|gif|webp);/i;
 const URL_RE = /https?:\/\/\S+/g;
 
@@ -298,6 +300,7 @@ export function MessageBubble({ message, peerAck = 0 }: MessageBubbleProps) {
               src={message.text.trim()}
               alt=""
               className="rounded-[4px] max-w-[330px] min-w-[120px] max-h-[330px] object-contain block"
+              style={WAYBACK_GIF_RE.test(message.text.trim()) ? { imageRendering: "pixelated" } : undefined}
               loading="lazy"
               onError={() => setImgError(true)}
             />

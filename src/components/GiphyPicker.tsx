@@ -16,20 +16,80 @@ interface GiphyGif {
   };
 }
 
+interface GifCitiesGif {
+  gif: string;
+  url_text: string;
+  checksum: string;
+}
+
+/** What the grid shows, whichever source it came from. */
+interface PickerGif {
+  id: string;
+  title: string;
+  previewUrl: string;
+  url: string;
+}
+
+/**
+ * `giphy` needs an API key. `retro` is GifCities, the Internet Archive's index
+ * of GeoCities GIFs: no key, no account, and rather on theme for a ghost.
+ */
+type Source = "giphy" | "retro";
+
 /** Set at build time for releases; the user's own key from Settings takes precedence. */
 const BUILD_API_KEY: string = import.meta.env.VITE_GIPHY_API_KEY ?? "";
 const GIPHY_SEARCH_URL = "https://api.giphy.com/v1/gifs/search";
 const GIPHY_TRENDING_URL = "https://api.giphy.com/v1/gifs/trending";
+const GIFCITIES_SEARCH_URL = "https://gifcities.archive.org/api/v1/gifsearch";
+const WAYBACK_URL = "https://web.archive.org/web/";
+/** GifCities has no "trending"; this is what an empty search shows. */
+const RETRO_DEFAULT_QUERY = "ghost";
 const RESULTS_LIMIT = 20;
+
+async function searchGiphy(query: string, apiKey: string): Promise<PickerGif[] | "rejected"> {
+  const url = query
+    ? `${GIPHY_SEARCH_URL}?api_key=${apiKey}&q=${encodeURIComponent(query)}&limit=${RESULTS_LIMIT}&rating=g`
+    : `${GIPHY_TRENDING_URL}?api_key=${apiKey}&limit=${RESULTS_LIMIT}&rating=g`;
+  const res = await fetch(url);
+  const json = await res.json();
+  // Giphy answers 401/403 ("BANNED") for retired keys, such as the one old builds shipped with.
+  const status = json.meta?.status ?? res.status;
+  if (status === 401 || status === 403) return "rejected";
+  return ((json.data ?? []) as GiphyGif[]).map((gif) => ({
+    id: gif.id,
+    title: gif.title,
+    previewUrl: gif.images.fixed_width_small.url,
+    url: gif.images.fixed_width.url,
+  }));
+}
+
+async function searchGifCities(query: string): Promise<PickerGif[]> {
+  const q = encodeURIComponent(query || RETRO_DEFAULT_QUERY);
+  const res = await fetch(`${GIFCITIES_SEARCH_URL}?q=${q}&limit=${RESULTS_LIMIT}`);
+  const json = (await res.json()) as GifCitiesGif[];
+  return json
+    .filter((gif) => /\.gif$/i.test(gif.gif))
+    .map((gif) => ({
+      id: gif.checksum,
+      title: gif.url_text,
+      previewUrl: `${WAYBACK_URL}${gif.gif}`,
+      url: `${WAYBACK_URL}${gif.gif}`,
+    }));
+}
 
 export function GiphyPicker({ onSelect, onClose }: GiphyPickerProps) {
   const [query, setQuery] = useState("");
-  const [gifs, setGifs] = useState<GiphyGif[]>([]);
+  const [gifs, setGifs] = useState<PickerGif[]>([]);
   const [loading, setLoading] = useState(false);
   const [keyRejected, setKeyRejected] = useState(false);
   const [keyDraft, setKeyDraft] = useState("");
   const { settings, updateGiphyApiKey } = useSettings();
   const apiKey = settings.giphyApiKey || BUILD_API_KEY;
+  // Without a usable Giphy key the picker still has GIFs to offer.
+  const [source, setSource] = useState<Source>(apiKey ? "giphy" : "retro");
+  const queryRef = useRef("");
+  // The Wayback Machine lost some of these files; drop the tiles that do not load.
+  const [broken, setBroken] = useState<Set<string>>(new Set());
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -59,46 +119,40 @@ export function GiphyPicker({ onSelect, onClose }: GiphyPickerProps) {
     return () => document.removeEventListener("keydown", handleEsc);
   }, [onClose]);
 
-  const fetchGifs = useCallback(async (searchQuery: string) => {
-    setLoading(true);
-    try {
-      const url = searchQuery.trim()
-        ? `${GIPHY_SEARCH_URL}?api_key=${apiKey}&q=${encodeURIComponent(searchQuery)}&limit=${RESULTS_LIMIT}&rating=g`
-        : `${GIPHY_TRENDING_URL}?api_key=${apiKey}&limit=${RESULTS_LIMIT}&rating=g`;
-
-      if (!apiKey) {
-        setKeyRejected(true);
+  const fetchGifs = useCallback(
+    async (searchQuery: string) => {
+      const q = searchQuery.trim();
+      setLoading(true);
+      try {
+        if (source === "retro") {
+          setGifs(await searchGifCities(q));
+          return;
+        }
+        const result = apiKey ? await searchGiphy(q, apiKey) : "rejected";
+        setKeyRejected(result === "rejected");
+        setGifs(result === "rejected" ? [] : result);
+      } catch (err) {
+        console.error("[gifs] fetch error:", err);
         setGifs([]);
-        return;
+      } finally {
+        setLoading(false);
       }
-      const res = await fetch(url);
-      const json = await res.json();
-      // Giphy answers 401/403 ("BANNED") for the key old builds shipped with.
-      const status = json.meta?.status ?? res.status;
-      setKeyRejected(status === 401 || status === 403);
-      setGifs(json.data ?? []);
-    } catch (err) {
-      console.error("[giphy] fetch error:", err);
-      setGifs([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [apiKey]);
+    },
+    [apiKey, source],
+  );
 
   useEffect(() => {
-    fetchGifs("");
+    fetchGifs(queryRef.current);
   }, [fetchGifs]);
 
   const handleSearchChange = (value: string) => {
     setQuery(value);
+    queryRef.current = value;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => fetchGifs(value), 400);
   };
 
-  const handleSelect = (gif: GiphyGif) => {
-    const url = gif.images.fixed_width.url;
-    onSelect(url);
-  };
+  const handleSelect = (gif: PickerGif) => onSelect(gif.url);
 
   return (
     <div
@@ -112,7 +166,7 @@ export function GiphyPicker({ onSelect, onClose }: GiphyPickerProps) {
             type="text"
             value={query}
             onChange={(e) => handleSearchChange(e.target.value)}
-            placeholder="Search GIFs..."
+            placeholder={source === "retro" ? "Search retro GIFs..." : "Search GIFs..."}
             className="flex-1 bg-input-bg border-none rounded-lg px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none"
             onKeyDown={(e) => e.key === "Escape" && onClose()}
           />
@@ -125,6 +179,21 @@ export function GiphyPicker({ onSelect, onClose }: GiphyPickerProps) {
             </svg>
           </button>
         </div>
+        <div className="flex gap-1 mt-2">
+          {(["giphy", "retro"] as const).map((option) => (
+            <button
+              key={option}
+              onClick={() => setSource(option)}
+              className={`flex-1 px-2 py-1 rounded-md text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer border-none ${
+                source === option
+                  ? "bg-accent text-[#111b21]"
+                  : "bg-surface-hover text-text-muted hover:text-text-primary"
+              }`}
+            >
+              {option === "giphy" ? "Giphy" : "Retro"}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="h-[280px] overflow-y-auto p-2">
@@ -132,7 +201,7 @@ export function GiphyPicker({ onSelect, onClose }: GiphyPickerProps) {
           <div className="flex items-center justify-center h-full">
             <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
           </div>
-        ) : keyRejected ? (
+        ) : source === "giphy" && keyRejected ? (
           <form
             className="flex flex-col justify-center h-full gap-2 px-2"
             onSubmit={(e) => {
@@ -140,10 +209,10 @@ export function GiphyPicker({ onSelect, onClose }: GiphyPickerProps) {
               if (keyDraft.trim()) updateGiphyApiKey(keyDraft);
             }}
           >
-            <p className="text-text-primary text-sm font-medium">GIFs need a Giphy API key</p>
+            <p className="text-text-primary text-sm font-medium">Giphy needs an API key</p>
             <p className="text-text-muted text-xs leading-snug">
               Create a free one at developers.giphy.com (an "API" key, not "SDK") and paste it here. It is stored on
-              this device only, and you can change it in Settings.
+              this device only, and you can change it in Settings. Retro GIFs work without one.
             </p>
             <input
               value={keyDraft}
@@ -165,7 +234,7 @@ export function GiphyPicker({ onSelect, onClose }: GiphyPickerProps) {
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-1.5">
-            {gifs.map((gif) => (
+            {gifs.filter((gif) => !broken.has(gif.id)).map((gif) => (
               <button
                 key={gif.id}
                 onClick={() => handleSelect(gif)}
@@ -173,10 +242,12 @@ export function GiphyPicker({ onSelect, onClose }: GiphyPickerProps) {
                 title={gif.title}
               >
                 <img
-                  src={gif.images.fixed_width_small.url}
+                  src={gif.previewUrl}
                   alt={gif.title}
-                  className="w-full h-auto block"
+                  className={source === "retro" ? "w-full h-24 object-contain block" : "w-full h-auto block"}
+                  style={source === "retro" ? { imageRendering: "pixelated" } : undefined}
                   loading="lazy"
+                  onError={() => setBroken((prev) => new Set(prev).add(gif.id))}
                 />
                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
               </button>
@@ -186,7 +257,9 @@ export function GiphyPicker({ onSelect, onClose }: GiphyPickerProps) {
       </div>
 
       <div className="px-2.5 py-1.5 border-t border-border flex items-center justify-end">
-        <span className="text-text-muted text-[10px] font-bold tracking-wider">POWERED BY GIPHY</span>
+        <span className="text-text-muted text-[10px] font-bold tracking-wider">
+          {source === "retro" ? "GIFCITIES · INTERNET ARCHIVE" : "POWERED BY GIPHY"}
+        </span>
       </div>
     </div>
   );
