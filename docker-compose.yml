@@ -2,6 +2,9 @@
 #   docker compose up --build -d
 services:
   web:
+    # Releases publish this image; `docker compose pull && docker compose up -d` uses it as is.
+    # `docker compose up --build` builds it from this checkout instead.
+    image: ghcr.io/miguelmedeiros/ghostly-web:${GHOSTLY_WEB_TAG:-latest}
     build:
       context: .
       dockerfile: web/Dockerfile
