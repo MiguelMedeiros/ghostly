@@ -19,6 +19,7 @@ import {
   type LocalFetch,
 } from "./http";
 import type { LinkParams } from "./invite";
+import type { Payment, PaymentRequest, PaymentResult } from "./payments";
 import { LinkSession, type LinkStatus, type PeerPresence, type PollIntervals } from "./link";
 import type { ResolvedLink } from "./records";
 import { servicesFromWire, servicesToWire, type ServiceAd } from "./services";
@@ -53,6 +54,9 @@ export interface GhostLinkEvents {
   onFileProgress?(fileId: string, transferred: number, direction: "in" | "out"): void;
   onFileComplete?(fileId: string, direction: "in" | "out"): void;
   onFileFailed?(fileId: string, reason: string, direction: "in" | "out"): void;
+  onPaymentRequest?(request: PaymentRequest): void;
+  onPayment?(payment: Payment): void;
+  onPaymentResult?(result: PaymentResult): void;
 }
 
 export interface GhostLinkOptions {
@@ -205,6 +209,47 @@ export class GhostLink {
     return this.httpClient.request(serviceId, request);
   }
 
+  /** Payments only travel over the data link: tokens and invoices do not fit in Pkarr, and should not sit there. */
+  async sendPaymentRequest(request: PaymentRequest): Promise<void> {
+    await this.connect();
+    this.channel?.send(
+      encodeControl({
+        t: "pay-req",
+        id: request.id,
+        ts: request.timestamp,
+        v: request.amount.value,
+        u: request.amount.asset,
+        memo: request.memo,
+        e: request.endpoints,
+      }),
+    );
+  }
+
+  async sendPayment(payment: Payment): Promise<void> {
+    await this.connect();
+    if (!this.channel) throw new GhostlyHttpError("closed", "Data link is closed");
+    this.channel.send(
+      encodeControl({
+        t: "pay",
+        id: payment.id,
+        ts: payment.timestamp,
+        rid: payment.requestId,
+        v: payment.amount.value,
+        u: payment.amount.asset,
+        memo: payment.memo,
+        e: payment.endpoint,
+      }),
+    );
+  }
+
+  sendPaymentResult(result: PaymentResult): void {
+    try {
+      this.channel?.send(encodeControl({ t: "pay-res", id: result.id, ok: result.ok, v: result.credited, err: result.error }));
+    } catch {
+      // the peer learns on reconnect that nothing came back
+    }
+  }
+
   /** Sends a file over the data link, opening it first if needed. Files never travel through Pkarr. */
   async sendFile(file: FileInfo, source: AsyncIterable<Uint8Array>): Promise<void> {
     await this.connect();
@@ -318,6 +363,28 @@ export class GhostLink {
         break;
       case "file":
         this.files?.handleFile(frame);
+        break;
+      case "pay-req":
+        this.options.events?.onPaymentRequest?.({
+          id: frame.id,
+          timestamp: frame.ts,
+          amount: { value: frame.v, asset: frame.u },
+          memo: frame.memo,
+          endpoints: frame.e,
+        });
+        break;
+      case "pay":
+        this.options.events?.onPayment?.({
+          id: frame.id,
+          timestamp: frame.ts,
+          requestId: frame.rid,
+          amount: { value: frame.v, asset: frame.u },
+          memo: frame.memo,
+          endpoint: frame.e,
+        });
+        break;
+      case "pay-res":
+        this.options.events?.onPaymentResult?.({ id: frame.id, ok: frame.ok, credited: frame.v, error: frame.err });
         break;
       case "rst":
         if (frame.d === "q") this.httpHost?.handleReset(frame);

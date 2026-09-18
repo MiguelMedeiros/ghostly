@@ -28,6 +28,70 @@ export interface FileTransferView {
   error?: string;
 }
 
+/** Ecash held by this peer. One row per proof; `reserved` while an operation is using it. */
+export interface StoredProof {
+  mint: string;
+  id: string;
+  amount: number;
+  secret: string;
+  C: string;
+  dleq?: unknown;
+  reserved?: boolean;
+}
+
+/** A Lightning invoice the mint issued for us; paid invoices turn into ecash. */
+export interface StoredQuote {
+  quote: string;
+  mint: string;
+  amount: number;
+  invoice: string;
+  createdAt: number;
+  expiresAt: number | null;
+  /** Set when the invoice belongs to a payment request sent to a peer. */
+  paymentId?: string;
+}
+
+export type PaymentState =
+  | "pending" // sent, no word from the peer yet / request waiting to be paid
+  | "settled"
+  | "failed"
+  | "reclaimed"; // the peer never took the ecash and it is back in the wallet
+
+/** A payment or payment request in a chat, by id. */
+export interface StoredPayment {
+  id: string;
+  linkId: string;
+  kind: "payment" | "request";
+  direction: "in" | "out";
+  amount: number;
+  unit: string;
+  memo?: string;
+  state: PaymentState;
+  error?: string;
+  createdAt: number;
+  mint?: string;
+  /** Outgoing ecash, kept until the peer confirms so it can be reclaimed. */
+  token?: string;
+  /** Requests: how the payer can pay. */
+  invoice?: string;
+  mints?: string[];
+  requestId?: string;
+}
+
+/** What pages see of a payment: everything but the token. */
+export type PaymentView = Omit<StoredPayment, "token">;
+
+export interface MintView {
+  url: string;
+  name: string;
+  balance: number;
+}
+
+export interface WalletView {
+  mints: MintView[];
+  balance: number;
+}
+
 export interface StoredMessage {
   linkId: string;
   id: string;
@@ -37,6 +101,7 @@ export interface StoredMessage {
   via: "pkarr" | "datalink";
   nick?: string;
   file?: MessageFile;
+  paymentId?: string;
 }
 
 /** A local web application the user chose to share. */
@@ -61,6 +126,10 @@ export interface Settings {
   relays: string[];
   /** Extra ICE servers (typically TURN) on top of the built-in STUN set. */
   iceServers: IceServerSetting[];
+  /** Cashu mints this peer holds ecash at and accepts ecash from. The first is where invoices are created. */
+  mints: string[];
+  /** False until the default mints were put in place once; after that the list is the user's. */
+  mintsInitialized: boolean;
 }
 
 export interface LinkView {
@@ -96,4 +165,6 @@ export interface EngineState {
   services: ServiceView[];
   /** Transfers since the peer started, by file id. */
   transfers: Record<string, FileTransferView>;
+  wallet: WalletView;
+  payments: Record<string, PaymentView>;
 }

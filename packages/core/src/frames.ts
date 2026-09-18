@@ -109,6 +109,51 @@ export interface FileFrame {
   m: string;
 }
 
+/**
+ * A way to get paid, in Paykit's terms: a Payment Endpoint Identifier
+ * (`btc-lightning-bolt11`, `cashu`, …) and its payload (an invoice, the mints
+ * accepted, …). See `payments.ts`.
+ */
+export type WireEndpoint = [identifier: string, payload: string];
+
+/** Payment Request: the sender asks to be paid. */
+export interface PayRequestFrame {
+  t: "pay-req";
+  /** Request id, chosen by the payee. */
+  id: string;
+  ts: number;
+  /** Decimal amount as text, and its asset (`sat`). */
+  v: string;
+  u: string;
+  memo?: string;
+  e: WireEndpoint[];
+}
+
+/** A payment that travels in band, such as an ecash token. */
+export interface PayFrame {
+  t: "pay";
+  id: string;
+  ts: number;
+  /** The request this settles, if any. */
+  rid?: string;
+  v: string;
+  u: string;
+  memo?: string;
+  /** The endpoint used and the payment itself. */
+  e: WireEndpoint;
+}
+
+/** What became of a payment or a request: the payee's receipt, or a refusal. */
+export interface PayResultFrame {
+  t: "pay-res";
+  /** Id of the `pay` or `pay-req` frame this answers. */
+  id: string;
+  ok: boolean;
+  /** Amount credited, when it differs from what was sent (fees). */
+  v?: string;
+  err?: string;
+}
+
 /** Aborts a stream in either direction. */
 export interface ResetFrame {
   t: "rst";
@@ -131,6 +176,9 @@ export type ControlFrame =
   | HttpRequestFrame
   | HttpResponseFrame
   | FileFrame
+  | PayRequestFrame
+  | PayFrame
+  | PayResultFrame
   | ResetFrame
   | PingFrame;
 
@@ -162,6 +210,30 @@ function isHeaderList(value: unknown): value is HeaderList {
 
 function isStreamId(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 0xffffffff;
+}
+
+function isPayId(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(value);
+}
+
+/** Decimal text, as in Paykit's Payment Amount: no floats on the wire. */
+function isAmount(value: unknown): value is string {
+  return typeof value === "string" && /^(0|[1-9]\d{0,15})(\.\d{1,8})?$/.test(value);
+}
+
+function isUnit(value: unknown): value is string {
+  return typeof value === "string" && /^[a-z0-9]{1,12}$/.test(value);
+}
+
+function isEndpoint(value: unknown): value is WireEndpoint {
+  return (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    typeof value[0] === "string" &&
+    /^[a-z0-9][a-z0-9-]{0,63}$/.test(value[0]) &&
+    typeof value[1] === "string" &&
+    value[1].length <= 32 * 1024
+  );
 }
 
 /** Returns null for anything malformed; callers drop the frame. */
@@ -202,6 +274,21 @@ export function decodeControl(text: string): ControlFrame | null {
       if (typeof f.n !== "string" || typeof f.m !== "string") return null;
       if (typeof f.s !== "number" || !Number.isSafeInteger(f.s) || f.s < 0) return null;
       return { t: "file", id: f.id, f: f.f, ts: f.ts, n: f.n, s: f.s, m: f.m };
+    case "pay-req":
+    case "pay": {
+      if (!isPayId(f.id) || typeof f.ts !== "number" || !isAmount(f.v) || !isUnit(f.u)) return null;
+      const memo = typeof f.memo === "string" ? f.memo.slice(0, 140) : undefined;
+      if (f.t === "pay-req") {
+        if (!Array.isArray(f.e) || f.e.length === 0 || f.e.length > 8 || !f.e.every(isEndpoint)) return null;
+        return { t: "pay-req", id: f.id, ts: f.ts, v: f.v, u: f.u, memo, e: f.e };
+      }
+      if (!isEndpoint(f.e) || (f.rid !== undefined && !isPayId(f.rid))) return null;
+      return { t: "pay", id: f.id, ts: f.ts, rid: f.rid, v: f.v, u: f.u, memo, e: f.e };
+    }
+    case "pay-res":
+      if (!isPayId(f.id) || typeof f.ok !== "boolean") return null;
+      if (f.v !== undefined && !isAmount(f.v)) return null;
+      return { t: "pay-res", id: f.id, ok: f.ok, v: f.v, err: typeof f.err === "string" ? f.err.slice(0, 200) : undefined };
     case "rst":
       if (!isStreamId(f.id) || (f.d !== "q" && f.d !== "s" && f.d !== "f")) return null;
       return { t: "rst", id: f.id, d: f.d, e: typeof f.e === "string" ? f.e.slice(0, 256) : "" };

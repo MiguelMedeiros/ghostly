@@ -140,7 +140,30 @@ A DataChannel message is at most 16 KiB (16378 bytes of payload per chunk), a co
 - Limits: 100 MiB per file, 3 incoming files per peer at a time.
 - The name is display text and a download suggestion, never a path: path separators, control characters and leading dots are removed, 200 characters at most. An unparseable media type becomes `application/octet-stream`. Receivers store files under their own ids, never the sender's, and must not open or execute what they received on their own.
 
-### 6.3 `ghostly-http/1`
+### 6.3 Payments
+
+Ghostly does not move money. It carries payment requests, payments that fit in a message (ecash) and receipts between two linked peers, and a wallet on each side does the rest. The vocabulary is [Paykit](https://github.com/pubky/paykit-rs)'s, so that publishing the same endpoints through Paykit later is a change of transport rather than of model: a *payment endpoint* is an identifier plus a payload, an *amount* is decimal text plus an asset.
+
+```
+← { "t": "pay-req", "id": "Qm3…", "ts": 1789712672369, "v": "1000", "u": "sat", "memo": "coffee",
+    "e": [["btc-lightning-bolt11", "lnbc10u1…"], ["cashu", "{\"mints\":[\"https://mint.example\"]}"]] }
+→ { "t": "pay", "id": "p8Kx…", "ts": 1789712680000, "rid": "Qm3…", "v": "1000", "u": "sat", "e": ["cashu", "cashuB…"] }
+← { "t": "pay-res", "id": "p8Kx…", "ok": true, "v": "1000" }
+```
+
+| Frame | Meaning |
+|---|---|
+| `pay-req` | Payment Request. `e` lists every way the payee can be paid, best first: `btc-lightning-bolt11` with an invoice anyone can pay from any wallet, `cashu` with the mints the payee accepts ecash from. |
+| `pay` | A payment carried in band: `e` is `["cashu", <token>]`. `rid` names the request it settles. Without `rid` it is a plain transfer. |
+| `pay-res` | The payee's word on a `pay` (redeemed, with the amount credited, or refused and why) or on its own `pay-req` (paid some other way, e.g. the invoice). Only the payee of a request may declare it paid. |
+
+- Ids are `[A-Za-z0-9_-]{8,64}`; `v` is decimal text, never a float; `u` is the asset (`sat`). Payloads are at most 32 KiB and requests list at most 8 endpoints.
+- Payments only travel over the data link. Tokens and invoices do not fit in a Pkarr packet and should not sit in one.
+- An ecash token is a bearer instrument: until the payee redeems it at the mint, the payer can still spend it. Payees redeem on receipt, before answering. Payers keep the token until `pay-res` arrives, and take it back themselves if the payment is refused or never confirmed.
+- A payee accepts ecash only from mints it chose. Anything else is refused with `pay-res`, and the payer falls back to the Lightning endpoint, which works across mints.
+- A repeated `pay` id is answered with the earlier result and redeemed once.
+
+### 6.4 `ghostly-http/1`
 
 ```
 → { "t": "req", "id": 7, "s": "atlas", "m": "POST", "p": "/api/items?x=1", "h": [["content-type","application/json"]], "b": true }

@@ -27,6 +27,7 @@ import {
 } from "@ghostly/core";
 import type { EngineImplementation } from "../shared/rpc";
 import { fileStore } from "../shared/idb";
+import { DEFAULT_MINTS } from "../shared/mints";
 import type {
   EngineState,
   FileTransferView,
@@ -36,10 +37,20 @@ import type {
   StoredLink,
   StoredMessage,
   StoredService,
+  WalletView,
 } from "../shared/types";
 import { db } from "./db";
+import { PaymentDesk } from "./payments";
+import { CashuWallet } from "./wallet";
 
-const DEFAULT_SETTINGS: Settings = { online: true, nick: "", relays: DEFAULT_RELAYS, iceServers: [] };
+const DEFAULT_SETTINGS: Settings = {
+  online: true,
+  nick: "",
+  relays: DEFAULT_RELAYS,
+  iceServers: [],
+  mints: [],
+  mintsInitialized: false,
+};
 
 interface LiveLink {
   stored: StoredLink;
@@ -88,13 +99,36 @@ export class GhostlyNode implements EngineImplementation {
   private readonly requestCounts = new Map<string, number>();
   private readonly transfers = new Map<string, FileTransferView>();
   private stateTimer: ReturnType<typeof setTimeout> | null = null;
+  private walletView: WalletView = { mints: [], balance: 0 };
+
+  private readonly wallet = new CashuWallet(() => this.settings.mints, {
+    onChange: () => void this.refreshWallet(),
+    onQuotePaid: (quote) => void this.desk.onQuotePaid(quote),
+  });
+  private readonly desk = new PaymentDesk(this.wallet, {
+    getLink: (linkId) => this.links.get(linkId)?.link ?? null,
+    storeMessage: (message) => this.storeMessage(message),
+    onChange: () => this.emitState(),
+  });
 
   constructor(private readonly events: NodeEvents) {}
 
+  private async refreshWallet(): Promise<void> {
+    this.walletView = await this.wallet.view();
+    this.emitState();
+  }
+
   async start(): Promise<void> {
     this.settings = { ...DEFAULT_SETTINGS, ...(await db.getSettings()) };
+    if (!this.settings.mintsInitialized) {
+      this.settings = { ...this.settings, mints: [...new Set([...this.settings.mints, ...DEFAULT_MINTS])], mintsInitialized: true };
+      await db.putSettings(this.settings);
+    }
     this.transport.setRelays(this.settings.relays);
     this.services = await db.getServices();
+    await this.desk.start();
+    await this.refreshWallet();
+    this.wallet.start();
 
     for (const stored of await db.getLinks()) {
       const messages = await db.getMessages(stored.id);
@@ -118,6 +152,8 @@ export class GhostlyNode implements EngineImplementation {
         .map((s) => ({ ...s, requests: this.requestCounts.get(s.id) ?? 0 }))
         .sort((a, b) => a.createdAt - b.createdAt),
       transfers: Object.fromEntries(this.transfers),
+      wallet: this.walletView,
+      payments: this.desk.views(),
     };
   }
 
@@ -155,6 +191,7 @@ export class GhostlyNode implements EngineImplementation {
     void live.link?.stop(true);
     this.links.delete(linkId);
     void db.deleteLink(linkId);
+    void this.desk.forgetLink(linkId);
     this.emitState();
   }
 
@@ -301,6 +338,68 @@ export class GhostlyNode implements EngineImplementation {
     if (!live) throw new GhostlyHttpError("unknown-peer", "You have no link to this peer");
     if (!live.link) throw new GhostlyHttpError("offline", "Ghostly is offline");
     return live.link.request(serviceId, request);
+  }
+
+  // -- wallet and payments --------------------------------------------------
+
+  async walletAddMint({ url, primary }: { url: string; primary?: boolean }): Promise<{ url: string; name: string }> {
+    const mint = await this.wallet.checkMint(url);
+    const others = this.settings.mints.filter((m) => m !== mint.url);
+    const known = others.length !== this.settings.mints.length;
+    if (primary) await this.updateSettings({ settings: { mints: [mint.url, ...others] } });
+    else if (!known) await this.updateSettings({ settings: { mints: [...others, mint.url] } });
+    await this.refreshWallet();
+    return mint;
+  }
+
+  async walletSetPrimaryMint({ url }: { url: string }): Promise<void> {
+    if (!this.settings.mints.includes(url)) return;
+    await this.updateSettings({ settings: { mints: [url, ...this.settings.mints.filter((m) => m !== url)] } });
+    await this.refreshWallet();
+  }
+
+  async walletRemoveMint({ url }: { url: string }): Promise<void> {
+    if ((await this.wallet.balanceAt(url)) > 0) throw new Error("Move your sats out of this mint before removing it");
+    await this.updateSettings({ settings: { mints: this.settings.mints.filter((m) => m !== url) } });
+    await this.refreshWallet();
+  }
+
+  async walletReceiveLightning({ amount }: { amount: number }) {
+    const quote = await this.wallet.receiveLightning(amount);
+    return { quote: quote.quote, invoice: quote.invoice, expiresAt: quote.expiresAt };
+  }
+
+  walletQuoteInvoice({ invoice }: { invoice: string }) {
+    return this.wallet.quoteInvoice(invoice);
+  }
+
+  async walletPayQuote({ quote, mint }: { quote: string; mint: string }) {
+    return { paid: await this.wallet.payQuote(quote, mint) };
+  }
+
+  async walletReceiveToken({ token }: { token: string }) {
+    const { amount } = await this.wallet.receiveToken(token.trim());
+    return { amount };
+  }
+
+  walletExport() {
+    return this.wallet.exportTokens();
+  }
+
+  sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number }) {
+    return this.desk.send(params);
+  }
+
+  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number }) {
+    return this.desk.request(params);
+  }
+
+  payRequest(params: { linkId: string; paymentId: string }) {
+    return this.desk.payRequest(params);
+  }
+
+  reclaimPayment({ paymentId }: { paymentId: string }) {
+    return this.desk.reclaim(paymentId);
   }
 
   // -- services ------------------------------------------------------------
@@ -472,6 +571,9 @@ export class GhostlyNode implements EngineImplementation {
           });
         },
         onCallSignal: (signal) => this.events.onCallSignal(linkId, signal),
+        onPaymentRequest: (request) => void this.desk.onPaymentRequest(linkId, request),
+        onPayment: (payment) => void this.desk.onPayment(linkId, payment),
+        onPaymentResult: (result) => void this.desk.onPaymentResult(linkId, result),
         onFileIncoming: (file) => this.receiveFile(linkId, file),
         onFileProgress: (id, transferred) => this.fileProgress(GhostlyNode.localFileId(linkId, id), transferred),
         onFileComplete: (id) => this.fileSettled(GhostlyNode.localFileId(linkId, id)),

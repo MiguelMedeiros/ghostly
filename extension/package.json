@@ -11,16 +11,17 @@
     "test:e2e": "node test/e2e.mjs"
   },
   "dependencies": {
-    "@ghostly/core": "*",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
-    "@ghostly/react": "*",
+    "@cashu/cashu-ts": "^4.10.2",
     "@emoji-mart/data": "^1.2.1",
     "@emoji-mart/react": "^1.1.1",
+    "@ghostly/core": "*",
+    "@ghostly/react": "*",
+    "@tauri-apps/api": "^2.10.1",
     "emoji-mart": "^5.6.0",
     "qrcode.react": "^4.2.0",
-    "react-router-dom": "^7.13.0",
-    "@tauri-apps/api": "^2.10.1"
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-router-dom": "^7.13.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.0",

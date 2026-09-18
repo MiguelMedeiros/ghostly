@@ -16,6 +16,22 @@ export interface EngineApi {
   /** Sends a file whose bytes the caller already put in the `files` store. Progress shows up in `transfers`. */
   sendFile(params: { linkId: string; file: MessageFile; timestamp: number }): void;
   connect(params: { linkId: string }): void;
+  walletAddMint(params: { url: string; primary?: boolean }): { url: string; name: string };
+  /** The primary mint is where Lightning invoices are created. */
+  walletSetPrimaryMint(params: { url: string }): void;
+  walletRemoveMint(params: { url: string }): void;
+  /** A Lightning invoice that, once paid by anyone, lands in the wallet as ecash. */
+  walletReceiveLightning(params: { amount: number }): { quote: string; invoice: string; expiresAt: number | null };
+  walletQuoteInvoice(params: { invoice: string }): { quote: string; mint: string; amount: number; feeReserve: number };
+  walletPayQuote(params: { quote: string; mint: string }): { paid: boolean };
+  /** Redeems a token pasted by the user. Only mints the user added are accepted. */
+  walletReceiveToken(params: { token: string }): { amount: number };
+  /** Everything held, as tokens: the only backup there is for now. */
+  walletExport(): { mint: string; token: string; amount: number }[];
+  sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number }): { paymentId: string };
+  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number }): { paymentId: string };
+  payRequest(params: { linkId: string; paymentId: string }): void;
+  reclaimPayment(params: { paymentId: string }): void;
   disconnect(params: { linkId: string }): void;
   addService(params: { name: string; target: string }): { serviceId: string };
   removeService(params: { serviceId: string }): void;

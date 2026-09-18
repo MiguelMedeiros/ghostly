@@ -144,6 +144,41 @@ try {
   await a.page.getByTestId("file-bubble").getByTestId("file-status").filter({ hasText: "3.0 MB" }).waitFor();
   ok("A shows the file as sent");
 
+  step("Sats: Lightning in, ecash between the peers (public test mint, worthless test sats)");
+  // Wallets start with real mints; the test never touches them. The test mint becomes primary.
+  for (const peer of [a, b]) {
+    await peer.page.getByTestId("wallet-settings").click();
+    await peer.page.getByTestId("wallet-test-mint").click();
+    await peer.page.getByTestId("wallet-test-balance").waitFor({ timeout: 30_000 });
+    await peer.page.getByTestId("wallet-settings").click();
+  }
+  await a.page.getByTestId("wallet-receive").click({ timeout: 30_000 });
+  await a.page.getByTestId("wallet-receive-amount").fill("100");
+  await a.page.getByTestId("wallet-create-invoice").click();
+  const invoice = (await a.page.getByTestId("wallet-invoice").textContent({ timeout: 30_000 })).trim();
+  expect("the mint issued a Lightning invoice", invoice.startsWith("lnbc"), true);
+  // The test mint marks its invoices as paid by itself.
+  await a.page.getByTestId("wallet-test-balance").filter({ hasText: /^100 test sats/ }).waitFor({ timeout: 60_000 });
+  ok("paid invoice became 100 sats of ecash in A's wallet");
+
+  await a.page.getByTestId("payment-button").click();
+  await a.page.getByTestId("payment-amount").fill("21");
+  await a.page.getByTestId("payment-send").click();
+  await b.page.getByTestId("payment-bubble").filter({ hasText: "21" }).locator("[data-testid=payment-state]").filter({ hasText: "Received" }).waitFor({ timeout: 60_000 });
+  await a.page.getByTestId("payment-bubble").filter({ hasText: "21" }).locator("[data-testid=payment-state]").filter({ hasText: "Received" }).waitFor({ timeout: 30_000 });
+  await b.page.getByTestId("wallet-test-balance").filter({ hasText: /^21 test sats/ }).waitFor({ timeout: 30_000 });
+  ok("A sent 21 sats, B redeemed them and A got the receipt");
+
+  await b.page.getByTestId("payment-button").click();
+  await b.page.getByTestId("payment-amount").fill("10");
+  await b.page.getByTestId("payment-request").click();
+  await a.page.getByTestId("payment-pay").click({ timeout: 60_000 });
+  for (const peer of [a, b]) {
+    await peer.page.getByTestId("payment-bubble").filter({ hasText: "equest" }).locator("[data-testid=payment-state]").filter({ hasText: "Paid" }).waitFor({ timeout: 60_000 });
+  }
+  await b.page.getByTestId("wallet-test-balance").filter({ hasText: /^31 test sats/ }).waitFor({ timeout: 30_000 });
+  ok("B requested 10 sats, A paid the request, both see it paid");
+
   step("Video call with the signaling Ghostly Desktop uses (_call)");
   await a.page.bringToFront();
   await a.page.getByTitle("Video call").click();

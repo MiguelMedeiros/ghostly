@@ -29,6 +29,8 @@ export interface ChatMessage {
   nick?: string;
   meta?: MessageMeta;
   file?: ChatFile;
+  /** A payment or payment request; its live state is kept by the platform under this id. */
+  paymentId?: string;
   systemEvent?: {
     type: SystemEventType;
     pubKey?: string;

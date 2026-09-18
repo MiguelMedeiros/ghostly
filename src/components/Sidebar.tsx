@@ -5,6 +5,7 @@ import { useBackgroundPoller } from "../hooks/useBackgroundPoller";
 import { useI18n } from "../contexts/I18nContext";
 import { useSettings } from "../contexts/SettingsContext";
 import { MyServices } from "./MyServices";
+import { WalletPanel } from "./WalletPanel";
 import {
   listSessions,
   deleteSession,
@@ -636,6 +637,7 @@ export function Sidebar() {
         })}
       </div>
 
+      <WalletPanel />
       <MyServices />
 
       {/* Footer */}

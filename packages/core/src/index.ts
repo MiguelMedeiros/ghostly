@@ -16,3 +16,4 @@ export * from "./link";
 export * from "./datalink";
 export * from "./ghostlink";
 export * from "./files";
+export * from "./payments";

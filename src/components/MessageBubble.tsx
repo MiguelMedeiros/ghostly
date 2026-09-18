@@ -1,10 +1,13 @@
 import React, { useState } from "react";
 import { FileBubble } from "./FileBubble";
+import { PaymentBubble } from "./PaymentBubble";
 import type { ChatMessage } from "../lib/types";
 
 interface MessageBubbleProps {
   message: ChatMessage;
   peerAck?: number;
+  /** Needed by payment bubbles, which can act on a request. */
+  peerPubKey?: string;
 }
 
 const IMAGE_URL_RE =
@@ -185,7 +188,7 @@ function formatDuration(ms: number): string {
   return `${minutes}m ${seconds}s`;
 }
 
-export function MessageBubble({ message, peerAck = 0 }: MessageBubbleProps) {
+export function MessageBubble({ message, peerAck = 0, peerPubKey = "" }: MessageBubbleProps) {
   const [showTech, setShowTech] = useState(false);
   const [imgError, setImgError] = useState(false);
   const isMe = message.sender === "me";
@@ -295,7 +298,12 @@ export function MessageBubble({ message, peerAck = 0 }: MessageBubbleProps) {
           </div>
         )}
 
-        {message.file ? (
+        {message.paymentId ? (
+          <div className="clearfix">
+            <PaymentBubble paymentId={message.paymentId} peerPubKey={peerPubKey} fallbackText={message.text} />
+            {timestampEl}
+          </div>
+        ) : message.file ? (
           <div className="clearfix">
             <FileBubble file={message.file} />
             {timestampEl}

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { EmojiPicker } from "./EmojiPicker";
 import { GiphyPicker } from "./GiphyPicker";
+import { PaymentComposer } from "./PaymentComposer";
 
 interface MessageInputProps {
   onSend: (text: string) => Promise<string | null>;
@@ -8,6 +9,12 @@ interface MessageInputProps {
   maxLength?: number;
   /** Present when the platform can send files; returns an error message or null. */
   onSendFile?: (file: File) => Promise<string | null>;
+  /** Present when the platform has a wallet. */
+  payments?: {
+    balance: number;
+    onSend: (amount: number, memo: string) => Promise<string | null>;
+    onRequest: (amount: number, memo: string) => Promise<string | null>;
+  };
 }
 
 const DEFAULT_MAX = 500;
@@ -18,7 +25,9 @@ export function MessageInput({
   disabled,
   maxLength = DEFAULT_MAX,
   onSendFile,
+  payments,
 }: MessageInputProps) {
+  const [showPayment, setShowPayment] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState("");
   const [showEmoji, setShowEmoji] = useState(false);
@@ -183,6 +192,24 @@ export function MessageInput({
             </svg>
           </button>
 
+          {payments && (
+            <button
+              onClick={() => setShowPayment((v) => !v)}
+              disabled={disabled}
+              data-testid="payment-button"
+              className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors cursor-pointer border-none ${
+                showPayment
+                  ? "bg-accent/20 text-accent"
+                  : "bg-transparent text-text-secondary hover:text-text-primary hover:bg-surface-hover"
+              } disabled:opacity-30 disabled:cursor-not-allowed`}
+              title="Send or request sats"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+              </svg>
+            </button>
+          )}
+
           {onSendFile && (
             <>
               <input
@@ -255,6 +282,15 @@ export function MessageInput({
             />
           </div>
         )}
+        {showPayment && payments && (
+          <PaymentComposer
+            balance={payments.balance}
+            onSend={payments.onSend}
+            onRequest={payments.onRequest}
+            onClose={() => setShowPayment(false)}
+          />
+        )}
+
         {showGiphy && (
           <GiphyPicker
             onSelect={handleGiphySelect}

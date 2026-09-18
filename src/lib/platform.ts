@@ -38,6 +38,45 @@ export interface FileTransferState {
   error?: string;
 }
 
+export interface WalletState {
+  mints: { url: string; name: string; balance: number }[];
+  balance: number;
+}
+
+export interface ChatPayment {
+  id: string;
+  kind: "payment" | "request";
+  direction: "in" | "out";
+  amount: number;
+  unit: string;
+  memo?: string;
+  state: "pending" | "settled" | "failed" | "reclaimed";
+  error?: string;
+  /** Requests: a Lightning invoice anyone can pay. */
+  invoice?: string;
+}
+
+/** An ecash (Cashu) wallet with Lightning in and out through the user's mints. */
+export interface WalletPlatform {
+  /** A public mint with worthless test sats, for trying things out. */
+  testMintUrl: string;
+  getState(): WalletState | null;
+  addMint(url: string): Promise<void>;
+  removeMint(url: string): Promise<void>;
+  /** The primary mint (first in the list) is where Lightning invoices are created. */
+  setPrimaryMint(url: string): Promise<void>;
+  receiveLightning(amount: number): Promise<{ invoice: string; expiresAt: number | null }>;
+  quoteInvoice(invoice: string): Promise<{ quote: string; mint: string; amount: number; feeReserve: number }>;
+  payQuote(quote: string, mint: string): Promise<boolean>;
+  receiveToken(token: string): Promise<number>;
+  exportTokens(): Promise<{ mint: string; token: string; amount: number }[]>;
+  send(peerPubKeyZ32: string, amount: number, memo?: string): Promise<{ timestamp: number; paymentId: string }>;
+  request(peerPubKeyZ32: string, amount: number, memo?: string): Promise<{ timestamp: number; paymentId: string }>;
+  payRequest(peerPubKeyZ32: string, paymentId: string): Promise<void>;
+  reclaim(paymentId: string): Promise<void>;
+  getPayment(paymentId: string): ChatPayment | null;
+}
+
 export interface ServicesPlatform {
   subscribe(listener: () => void): () => void;
   /** Whether this peer is reachable at all right now. */
@@ -58,6 +97,7 @@ export interface ServicesPlatform {
   /** Null when nothing is known about the transfer, e.g. after a restart. */
   getTransfer(fileId: string): FileTransferState | null;
   getFile(fileId: string): Promise<Blob | null>;
+  wallet: WalletPlatform;
   getNetwork(): NetworkSettings | null;
   setNetwork(settings: Pick<NetworkSettings, "relays" | "turn">): Promise<void>;
 }

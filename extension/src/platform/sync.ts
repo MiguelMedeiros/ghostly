@@ -39,6 +39,7 @@ export function toChatMessage(message: StoredMessage, peerPubKeyZ32: string): Ch
     timestamp: message.timestamp,
     nick: message.nick,
     file: message.file,
+    paymentId: message.paymentId,
     meta: {
       dhtKey: peerPubKeyZ32,
       encryptedPayloadLength: 0,

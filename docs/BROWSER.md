@@ -102,11 +102,24 @@ Sessions stay in `localStorage` exactly as on Desktop; `platform/sync.ts` keeps 
 
 The paperclip next to the GIF button sends a file of up to 100 MiB straight to your contact over WebRTC; both of you have to be online. Images (PNG, JPEG, GIF, WebP) are previewed in the chat, everything else shows as a file with a save button, and nothing is ever opened automatically. File contents are kept in IndexedDB until the chat is deleted. Pages and the peer share that database, so the bytes never pass through extension messaging.
 
+## Sats
+
+Ghostly Browser has an ecash ([Cashu](https://cashu.space)) wallet, in the sidebar.
+
+- **Receive over Lightning:** *Receive* asks the mint for an invoice; pay it from any Lightning wallet and the sats arrive as ecash. **Send over Lightning:** paste an invoice under *Send*; the mint pays it from your balance, after showing the fee.
+- **In a chat**, the ⚡ button sends sats to the contact or requests them. Ecash travels straight over the WebRTC link. A request also carries a Lightning invoice, so a contact on another mint (or with another wallet entirely) can still pay it; Ghostly does that on its own when you press *Pay* and share no mint.
+- **Mints.** A new wallet starts with a short list of public mints (`extension/src/shared/mints.ts`); the first one that answers issues your invoices. The gear icon lists them, lets you add your own, pick the primary, or add a public *test mint* with worthless sats to try things out. Test sats are shown apart and never added to real ones.
+- **Custody.** Ecash is custodial: the mints hold the sats and can lose them or vanish. This is pocket money. There is no seed yet, so there is nothing to restore from; *Copy backup tokens* under the gear is the only backup, and whoever has those tokens has the sats.
+- **If a contact never picks up a payment** (they went offline mid-way, or do not use your mint), the ecash is still yours: refused payments come back by themselves, unconfirmed ones have a *Take it back* button.
+- Both peers have to be online for a payment or a request to go through.
+
+The automated test uses the public test mint only.
+
 ## Sharing a service
 
 - Nothing is exposed until you add it: a name and a target. Targets must be `localhost`, `127.0.0.1` or `[::1]`.
 - Chrome's own prompt grants the extension access to that host. Without it the extension cannot reach your machine at all.
-- Peers see the name and an id. They never see the address, and they cannot ask for one: a request names a service id and a path, and the peer maps the id to the target you configured. See [what the host guarantees](PROTOCOL.md#63-ghostly-http1).
+- Peers see the name and an id. They never see the address, and they cannot ask for one: a request names a service id and a path, and the peer maps the id to the target you configured. See [what the host guarantees](PROTOCOL.md#64-ghostly-http1).
 - A shared service is marked *Shared with your peers* and counts the requests it served. *Stop* makes its id stop resolving immediately.
 - Every peer you are linked with can use every service you share. There is no per-peer selection yet.
 
@@ -151,7 +164,7 @@ Does not work yet:
 ## Security notes
 
 - **Reachability.** Only linked peers, authenticated by the link key and their Pkarr signature; the WebRTC session is bound to that identity through the signed DTLS fingerprint.
-- **The proxy boundary.** Loopback-only targets, service ids instead of URLs, path confinement, no redirects off the target, no host credentials, header hygiene, and limits on body size, concurrency and time. The rules are in the [protocol](PROTOCOL.md#63-ghostly-http1) and covered by tests in `packages/core/test/http.test.ts`.
+- **The proxy boundary.** Loopback-only targets, service ids instead of URLs, path confinement, no redirects off the target, no host credentials, header hygiene, and limits on body size, concurrency and time. The rules are in the [protocol](PROTOCOL.md#64-ghostly-http1) and covered by tests in `packages/core/test/http.test.ts`.
 - **Remote code** runs in its own web origin, never in the extension's.
 - **Camera and microphone** are requested by the page when you place or answer a call, never in the background.
 - **Relays, STUN, TURN** see ciphertext only and hold no state about you.

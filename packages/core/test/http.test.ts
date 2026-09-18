@@ -338,3 +338,39 @@ describe("http over the data link", () => {
     await expect(client.request("atlas", { method: "GET", path: "/" })).rejects.toThrow("closed");
   });
 });
+
+describe("payment frames", () => {
+  const request = {
+    t: "pay-req" as const,
+    id: "req-00000001",
+    ts: 1,
+    v: "1000",
+    u: "sat",
+    memo: "coffee",
+    e: [
+      ["btc-lightning-bolt11", "lnbc10u1…"],
+      ["cashu", '{"mints":["https://mint.example"]}'],
+    ] as [string, string][],
+  };
+
+  it("round-trips requests, payments and results", () => {
+    expect(decodeControl(encodeControl(request))).toEqual(request);
+    const pay = { t: "pay" as const, id: "pay-00000001", ts: 2, rid: request.id, v: "1000", u: "sat", memo: undefined, e: ["cashu", "cashuBtoken"] as [string, string] };
+    expect(decodeControl(encodeControl(pay))).toEqual(pay);
+    expect(decodeControl(encodeControl({ t: "pay-res", id: pay.id, ok: true, v: "999" }))).toEqual({ t: "pay-res", id: pay.id, ok: true, v: "999", err: undefined });
+  });
+
+  it("rejects malformed amounts, ids and endpoints", () => {
+    const bad = (patch: object) => decodeControl(JSON.stringify({ ...request, ...patch }));
+    expect(bad({ v: "1e3" })).toBeNull();
+    expect(bad({ v: "-5" })).toBeNull();
+    expect(bad({ v: 1000 })).toBeNull();
+    expect(bad({ v: "007" })).toBeNull();
+    expect(bad({ u: "SAT!" })).toBeNull();
+    expect(bad({ id: "x" })).toBeNull();
+    expect(bad({ e: [] })).toBeNull();
+    expect(bad({ e: [["Not An Identifier", "x"]] })).toBeNull();
+    expect(bad({ e: [["cashu"]] })).toBeNull();
+    expect(bad({ v: "0.00000001" })).not.toBeNull();
+  });
+});

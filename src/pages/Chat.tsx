@@ -129,6 +129,26 @@ export function Chat() {
     [platform, peerKey, addSystemMessage],
   );
 
+  const wallet = platform?.wallet;
+  const walletState = wallet?.getState() ?? null;
+  const pay = useCallback(
+    async (kind: "send" | "request", amount: number, memo: string): Promise<string | null> => {
+      if (!wallet || !peerKey) return null;
+      try {
+        const { timestamp, paymentId } = await wallet[kind](peerKey, amount, memo || undefined);
+        const text = kind === "send" ? `⚡ ${amount.toLocaleString()} sats` : `⚡ Requested ${amount.toLocaleString()} sats`;
+        addSystemMessage({ id: `me_${timestamp}`, text, sender: "me", timestamp, paymentId });
+        window.dispatchEvent(new Event("session-updated"));
+        return null;
+      } catch (e) {
+        return e instanceof Error ? e.message : String(e);
+      }
+    },
+    [wallet, peerKey, addSystemMessage],
+  );
+  const paySend = useCallback((amount: number, memo: string) => pay("send", amount, memo), [pay]);
+  const payRequest = useCallback((amount: number, memo: string) => pay("request", amount, memo), [pay]);
+
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
   const [chatLabel, setChatLabel] = useState<string>("");
@@ -538,14 +558,24 @@ export function Chat() {
             </div>
           )}
           {messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} peerAck={peerAck} />
+            <MessageBubble key={msg.id} message={msg} peerAck={peerAck} peerPubKey={params.peerPubKeyB64} />
           ))}
           <div ref={bottomRef} />
         </div>
       </div>
 
       {/* Input */}
-      <MessageInput key={splat} onSend={sendMessage} disabled={isSending} onSendFile={platform ? sendFile : undefined} />
+      <MessageInput
+        key={splat}
+        onSend={sendMessage}
+        disabled={isSending}
+        onSendFile={platform ? sendFile : undefined}
+        payments={
+          walletState && walletState.mints.length > 0
+            ? { balance: walletState.balance, onSend: paySend, onRequest: payRequest }
+            : undefined
+        }
+      />
 
       {/* Incoming call notification */}
       {webrtc.callState === "incoming" && (

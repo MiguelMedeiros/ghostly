@@ -1,6 +1,7 @@
 import { DEFAULT_RELAYS, LIMITS, parseLocalTarget, sanitizeFileName, sanitizeMime, toBase64Url, randomBytes } from "@ghostly/core";
 import type { ServicesPlatform } from "../../../src/lib/platform";
 import { fileStore } from "../shared/idb";
+import { TEST_MINT } from "../shared/mints";
 import type { RuntimeMessage } from "../shared/rpc";
 import { engine } from "./engine";
 
@@ -63,6 +64,41 @@ export const servicesPlatform: ServicesPlatform | null = {
   },
   getTransfer: (fileId) => engine.state?.transfers[fileId] ?? null,
   getFile: async (fileId) => (await fileStore.get(fileId))?.blob ?? null,
+
+  wallet: {
+    testMintUrl: TEST_MINT,
+    getState: () => engine.state?.wallet ?? null,
+    // The test mint is for trying things out right away, so it takes over as primary.
+    addMint: async (url) => void (await engine.call("walletAddMint", { url, primary: url === TEST_MINT })),
+    setPrimaryMint: (url) => engine.call("walletSetPrimaryMint", { url }),
+    removeMint: (url) => engine.call("walletRemoveMint", { url }),
+    receiveLightning: (amount) => engine.call("walletReceiveLightning", { amount }),
+    quoteInvoice: (invoice) => engine.call("walletQuoteInvoice", { invoice }),
+    payQuote: async (quote, mint) => (await engine.call("walletPayQuote", { quote, mint })).paid,
+    receiveToken: async (token) => (await engine.call("walletReceiveToken", { token })).amount,
+    exportTokens: () => engine.call("walletExport"),
+    async send(peerPubKeyZ32, amount, memo) {
+      const link = engine.linkByPeer(peerPubKeyZ32);
+      if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
+      const timestamp = Date.now();
+      const { paymentId } = await engine.call("sendPayment", { linkId: link.id, amount, memo, timestamp });
+      return { timestamp, paymentId };
+    },
+    async request(peerPubKeyZ32, amount, memo) {
+      const link = engine.linkByPeer(peerPubKeyZ32);
+      if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
+      const timestamp = Date.now();
+      const { paymentId } = await engine.call("requestPayment", { linkId: link.id, amount, memo, timestamp });
+      return { timestamp, paymentId };
+    },
+    async payRequest(peerPubKeyZ32, paymentId) {
+      const link = engine.linkByPeer(peerPubKeyZ32);
+      if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
+      await engine.call("payRequest", { linkId: link.id, paymentId });
+    },
+    reclaim: (paymentId) => engine.call("reclaimPayment", { paymentId }),
+    getPayment: (paymentId) => engine.state?.payments[paymentId] ?? null,
+  },
 
   getNetwork() {
     const state = engine.state;
