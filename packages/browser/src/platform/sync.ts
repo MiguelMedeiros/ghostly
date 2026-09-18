@@ -6,8 +6,8 @@ import {
   saveInviteCode,
   saveSession,
   updateSessionLabel,
-} from "../../../src/lib/storage";
-import type { ChatMessage, ChatSession } from "../../../src/lib/types";
+} from "../../../../src/lib/storage";
+import type { ChatMessage, ChatSession } from "../../../../src/lib/types";
 import type { StoredMessage } from "../shared/types";
 import { engine } from "./engine";
 
@@ -119,6 +119,7 @@ let started = false;
 export function startSessionSync(): void {
   if (started) return;
   started = true;
+  void engine.connect().catch(() => {});
   engine.onMessages(mirrorMessages);
   engine.subscribe(() => {
     void reconcile();

@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import type * as Desktop from "../../../src/hooks/useChat";
+import type * as Desktop from "../../../../src/hooks/useChat";
 import {
   addMessage,
   generateSessionId,
   getInviteCode,
   loadSession,
   saveSession,
-} from "../../../src/lib/storage";
-import type { ChatMessage, ChatTechInfo, ConnectionStatus } from "../../../src/lib/types";
+} from "../../../../src/lib/storage";
+import type { ChatMessage, ChatTechInfo, ConnectionStatus } from "../../../../src/lib/types";
 import { engine } from "./engine";
 import { notifySessionsChanged, startSessionSync } from "./sync";
 

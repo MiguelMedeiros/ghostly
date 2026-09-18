@@ -1,0 +1,12 @@
+# Ghostly on the web, served as static files on http://localhost:8080
+#   docker compose up --build -d
+services:
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+      args:
+        VITE_GIPHY_API_KEY: ${VITE_GIPHY_API_KEY:-}
+    ports:
+      - "127.0.0.1:8080:80"
+    restart: unless-stopped

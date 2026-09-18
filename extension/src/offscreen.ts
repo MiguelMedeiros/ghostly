@@ -1,6 +1,7 @@
-import { fromBase64, toBase64, GhostlyHttpError } from "@ghostly/core";
-import { GhostlyNode } from "./engine/node";
-import { UI_PORT, type EngineEvent, type HttpRequestReply, type RpcRequest, type RpcResponse, type RuntimeMessage } from "./shared/rpc";
+import { GhostlyHttpError, fromBase64, toBase64 } from "@ghostly/core";
+import { EngineServer, type EngineClientSink } from "@ghostly/browser/engine/server";
+import type { RpcRequest } from "@ghostly/browser/shared/rpc";
+import { UI_PORT, type HttpRequestReply, type RuntimeMessage } from "./messages";
 
 /**
  * The offscreen document is the Ghostly peer. Service workers have no
@@ -9,62 +10,20 @@ import { UI_PORT, type EngineEvent, type HttpRequestReply, type RpcRequest, type
  */
 const VIEWER_MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
 
-const ports = new Set<chrome.runtime.Port>();
-const broadcast = (event: EngineEvent) => {
-  for (const port of ports) {
-    try {
-      port.postMessage(event);
-    } catch {
-      ports.delete(port);
-    }
-  }
-};
-
-const node = new GhostlyNode({
-  onState: (state) => broadcast({ kind: "state", state }),
-  onMessages: (linkId, messages) => broadcast({ kind: "messages", linkId, messages }),
-  onCallSignal: (linkId, signal) => broadcast({ kind: "call-signal", linkId, signal }),
-});
-const ready = node.start();
+const server = new EngineServer();
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== UI_PORT) return;
-  ports.add(port);
-  port.onDisconnect.addListener(() => {
-    ports.delete(port);
-    if (ports.size === 0) node.setActiveLink({ linkId: null });
-  });
-
-  port.onMessage.addListener(async (request: RpcRequest) => {
-    if (request?.kind !== "request") return;
-    const response: RpcResponse = { kind: "response", id: request.id };
-    try {
-      await ready;
-      const method = node[request.method] as (params: unknown) => unknown;
-      if (typeof method !== "function") throw new Error(`Unknown method: ${request.method}`);
-      response.result = await method.call(node, request.params);
-    } catch (error) {
-      response.error = error instanceof Error ? error.message : String(error);
-    }
-    try {
-      port.postMessage(response);
-    } catch {
-      // UI went away
-    }
-  });
-
-  void ready.then(async () => {
-    port.postMessage({ kind: "state", state: node.getState() } satisfies EngineEvent);
-    for (const link of node.getState().links) {
-      port.postMessage({ kind: "messages", linkId: link.id, messages: await node.getMessages(link.id) } satisfies EngineEvent);
-    }
-  });
+  const client: EngineClientSink = { post: (message) => port.postMessage(message) };
+  server.attach(client);
+  port.onDisconnect.addListener(() => server.detach(client));
+  port.onMessage.addListener((request: RpcRequest) => void server.handle(client, request));
 });
 
 async function handleHttpRequest(message: Extract<RuntimeMessage, { type: "http-request" }>): Promise<HttpRequestReply> {
   try {
-    await ready;
-    const response = await node.request(message.peerPubKeyZ32, message.serviceId, {
+    await server.ready;
+    const response = await server.node.request(message.peerPubKeyZ32, message.serviceId, {
       method: message.method,
       path: message.path,
       headers: message.headers,
@@ -81,7 +40,7 @@ async function handleHttpRequest(message: Extract<RuntimeMessage, { type: "http-
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResponse) => {
   if (message?.target !== "engine") return false;
   if (message.type === "ping") {
-    void ready.then(() => sendResponse(true));
+    void server.ready.then(() => sendResponse(true));
     return true;
   }
   if (message.type === "http-request") {
@@ -92,4 +51,4 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
 });
 
 // Closing the browser tears this page down; say goodbye if there is time.
-addEventListener("pagehide", () => void node.shutdown());
+addEventListener("pagehide", () => void server.node.shutdown());

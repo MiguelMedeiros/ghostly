@@ -1,27 +1,24 @@
-import { UI_PORT, type EngineApi, type EngineEvent, type EngineMethod, type RpcResponse, type RuntimeMessage } from "../shared/rpc";
+import { getBrowserHost, type EngineConnection } from "../host";
+import type { EngineApi, EngineEvent, EngineMethod, RpcResponse } from "../shared/rpc";
 import type { EngineState, LinkView, StoredMessage } from "../shared/types";
 
 type Result<M extends EngineMethod> = Awaited<ReturnType<EngineApi[M]>>;
 
 /**
- * This page's connection to the Ghostly peer in the offscreen document. The
- * peer owns the network; pages come and go and only ask it to do things.
+ * This page's connection to the Ghostly peer, wherever the host keeps it. The
+ * peer owns the network; pages only ask it to do things.
  */
 class EngineClient {
   state: EngineState | null = null;
   readonly messages = new Map<string, StoredMessage[]>();
 
-  private port: chrome.runtime.Port | null = null;
+  private connection: EngineConnection | null = null;
   private connecting: Promise<void> | null = null;
   private nextId = 1;
   private readonly pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
   private readonly stateListeners = new Set<() => void>();
   private readonly messageListeners = new Set<(linkId: string, messages: StoredMessage[]) => void>();
   private readonly callListeners = new Set<(linkId: string, signal: string) => void>();
-
-  constructor() {
-    void this.connect();
-  }
 
   subscribe(listener: () => void): () => void {
     this.stateListeners.add(listener);
@@ -44,30 +41,32 @@ class EngineClient {
 
   async call<M extends EngineMethod>(method: M, ...params: Parameters<EngineApi[M]>): Promise<Result<M>> {
     await this.connect();
-    const port = this.port;
-    if (!port) throw new Error("Ghostly is starting…");
+    const connection = this.connection;
+    if (!connection) throw new Error("Ghostly is starting…");
     const id = this.nextId++;
     return new Promise<Result<M>>((resolve, reject) => {
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
-      port.postMessage({ kind: "request", id, method, params: params[0] });
+      connection.send({ kind: "request", id, method, params: params[0] } as Parameters<EngineConnection["send"]>[0]);
     });
   }
 
-  private connect(): Promise<void> {
-    if (this.port) return Promise.resolve();
-    this.connecting ??= (async () => {
-      await chrome.runtime.sendMessage({ target: "background", type: "ensure-engine" } satisfies RuntimeMessage);
-      const port = chrome.runtime.connect({ name: UI_PORT });
-      port.onMessage.addListener((message: EngineEvent | RpcResponse) => this.handle(message));
-      port.onDisconnect.addListener(() => {
-        void chrome.runtime.lastError;
-        this.port = null;
-        for (const pending of this.pending.values()) pending.reject(new Error("Lost the Ghostly peer"));
-        this.pending.clear();
-        setTimeout(() => void this.connect().catch(() => {}), 500);
-      });
-      this.port = port;
-    })().finally(() => (this.connecting = null));
+  /** Pages call this once at startup; calls made earlier wait for it. */
+  connect(): Promise<void> {
+    if (this.connection) return Promise.resolve();
+    this.connecting ??= getBrowserHost()
+      .connect(
+        (message) => this.handle(message),
+        () => {
+          this.connection = null;
+          for (const pending of this.pending.values()) pending.reject(new Error("Lost the Ghostly peer"));
+          this.pending.clear();
+          setTimeout(() => void this.connect().catch(() => {}), 500);
+        },
+      )
+      .then((connection) => {
+        this.connection = connection;
+      })
+      .finally(() => (this.connecting = null));
     return this.connecting;
   }
 

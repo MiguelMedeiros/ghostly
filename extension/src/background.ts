@@ -1,5 +1,5 @@
 import { concatBytes, fromBase64, isValidServiceId, toBase64, utf8Encode } from "@ghostly/core";
-import type { HttpRequestReply, RuntimeMessage } from "./shared/rpc";
+import type { HttpRequestReply, RuntimeMessage } from "./messages";
 import { parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
 
 /**

@@ -125,6 +125,13 @@ export function MyServices() {
               </button>
             </div>
           </form>
+        ) : !platform.features.shareLocalServices ? (
+          services.length === 0 && (
+            <p className="text-text-muted text-[11px] leading-snug px-1 m-0">
+              Sharing a local web app needs the Ghostly browser extension or desktop app: a web page is not allowed
+              to reach your machine.
+            </p>
+          )
         ) : (
           <button
             data-testid="add-service"

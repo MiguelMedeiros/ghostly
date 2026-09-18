@@ -1,11 +1,11 @@
 import { DEFAULT_RELAYS, LIMITS, parseLocalTarget, sanitizeFileName, sanitizeMime, toBase64Url, randomBytes } from "@ghostly/core";
-import type { ServicesPlatform } from "../../../src/lib/platform";
+import type { ServicesPlatform } from "../../../../src/lib/platform";
 import { fileStore } from "../shared/idb";
 import { TEST_MINT } from "../shared/mints";
-import type { RuntimeMessage } from "../shared/rpc";
+import { getBrowserHost } from "../host";
 import { engine } from "./engine";
 
-/** Ephemeral services for the shared UI, backed by the peer in the offscreen document. */
+/** Ephemeral services for the shared UI, backed by the browser peer. */
 export const servicesPlatform: ServicesPlatform | null = {
   subscribe: (listener) => engine.subscribe(listener),
 
@@ -17,8 +17,8 @@ export const servicesPlatform: ServicesPlatform | null = {
   async shareService(name, target) {
     const { origin } = parseLocalTarget(target);
     const url = new URL(origin);
-    // Chrome only prompts from a user gesture, so this has to come first.
-    const granted = await chrome.permissions.request({ origins: [`${url.protocol}//${url.hostname}/*`] });
+    // Where the platform asks the user, it only does so from a user gesture: this has to come first.
+    const granted = await getBrowserHost().requestLocalAccess(`${url.protocol}//${url.hostname}/*`);
     if (!granted) throw new Error("Ghostly needs your permission to reach that local address");
     await engine.call("addService", { name, target });
   },
@@ -33,14 +33,9 @@ export const servicesPlatform: ServicesPlatform | null = {
     const link = engine.linkByPeer(peerPubKeyZ32);
     if (link) void engine.call("connect", { linkId: link.id }).catch(() => {});
   },
-  async openService(peerPubKeyZ32, serviceId) {
-    const reply = await chrome.runtime.sendMessage({
-      target: "background",
-      type: "open-service",
-      peerPubKeyZ32,
-      serviceId,
-    } satisfies RuntimeMessage);
-    if (!reply?.ok) throw new Error(reply?.error ?? "Could not open the service");
+  openService: (peerPubKeyZ32, serviceId) => getBrowserHost().openService(peerPubKeyZ32, serviceId),
+  get features() {
+    return getBrowserHost().features;
   },
 
   maxFileBytes: LIMITS.maxFileBytes,

@@ -9,6 +9,8 @@
 | [`packages/core`](../packages/core) | The Ghost protocol in platform-neutral TypeScript: identities, crypto, Pkarr records, service advertisements, WebRTC signaling, DataChannel framing, HTTP over the data link. Shared by every client. |
 | [`packages/react`](../packages/react) | React hooks shared by the clients (`useWebRTC`). |
 | [`src`](../src), [`src-tauri`](../src-tauri) | Ghostly Desktop (Tauri). Reaches the Mainline DHT directly through the Rust Pkarr client. |
+| [`packages/browser`](../packages/browser) | The Ghostly peer for browsers: engine, ecash wallet, IndexedDB, and the platform layer under the shared UI. |
+| [`web`](../web) | Ghostly on the web: that peer in a tab, nothing to install. `docker compose up` serves it. See [WEB.md](WEB.md). |
 | [`extension`](../extension) | Ghostly Browser (Chromium, Manifest V3). Builds the same UI as Desktop (`src/`) on top of a background peer, and reaches the DHT through Pkarr relays. See [BROWSER.md](BROWSER.md). |
 | [`cli`](../cli) | Rust CLI and library for bots. |
 | [`website`](../website) | ghostly.tools |

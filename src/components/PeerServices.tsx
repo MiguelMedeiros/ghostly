@@ -40,6 +40,10 @@ export function PeerServices({ peerPubKey }: { peerPubKey: string }) {
           data-testid="open-service"
           onClick={() => {
             setError("");
+            if (!platform.features.openServices) {
+              setError("Opening a contact's web app needs the Ghostly browser extension or desktop app.");
+              return;
+            }
             platform.openService(peerPubKey, service.id).catch((e) => setError(e instanceof Error ? e.message : String(e)));
           }}
           className="flex items-center gap-1.5 px-3 py-1 bg-accent text-[#111b21] rounded-full text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer shrink-0"

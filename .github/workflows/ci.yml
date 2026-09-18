@@ -49,6 +49,9 @@ jobs:
       - name: Build browser extension
         run: npm run build:extension
 
+      - name: Build web app
+        run: npm run build:web
+
   # ============================================
   # Tauri Backend (src-tauri) - Rust
   # ============================================

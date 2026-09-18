@@ -1,10 +1,13 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { setBrowserHost } from "@ghostly/browser/host";
+import { startSessionSync } from "@ghostly/browser/platform/sync";
 import { Root } from "../../../src/Root";
-import { startSessionSync } from "../platform/sync";
+import { extensionHost } from "../host";
 
 // Ghostly Browser renders the Desktop UI as is. What differs is below it: the
-// modules listed in vite.config.ts are swapped for the ones in ../platform.
+// platform modules come from @ghostly/browser, on top of the extension host.
+setBrowserHost(extensionHost);
 startSessionSync();
 
 createRoot(document.getElementById("root")!).render(

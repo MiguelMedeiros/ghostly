@@ -1,6 +1,6 @@
 import type { EngineState, MessageFile, Settings, StoredMessage } from "./types";
 
-/** UI → engine calls, carried over a `chrome.runtime` port named `ui`. */
+/** UI → engine calls. The extension carries them over a runtime port, the web app calls the peer in the same page. */
 export interface EngineApi {
   createLink(): { linkId: string; inviteCode: string };
   joinLink(params: { inviteCode: string }): { linkId: string };
@@ -67,25 +67,3 @@ export type EngineEvent =
   | { kind: "state"; state: EngineState }
   | { kind: "messages"; linkId: string; messages: StoredMessage[] }
   | { kind: "call-signal"; linkId: string; signal: string };
-
-export const UI_PORT = "ui";
-
-/** One-shot messages, addressed by `target` because every context hears them. */
-export type RuntimeMessage =
-  | { target: "background"; type: "ensure-engine" }
-  | { target: "background"; type: "open-service"; peerPubKeyZ32: string; serviceId: string }
-  | { target: "engine"; type: "ping" }
-  | {
-      target: "engine";
-      type: "http-request";
-      peerPubKeyZ32: string;
-      serviceId: string;
-      method: string;
-      path: string;
-      headers: [string, string][];
-      bodyB64: string | null;
-    };
-
-export type HttpRequestReply =
-  | { ok: true; status: number; headers: [string, string][]; bodyB64: string }
-  | { ok: false; code: string; message: string };

@@ -117,6 +117,7 @@ This works today in **[Ghostly Browser](docs/BROWSER.md)**, a Chromium extension
 - [Architecture](docs/ARCHITECTURE.md) — How it works, tech stack, security model
 - [Protocol](docs/PROTOCOL.md) — Records, service advertisements, WebRTC data link, HTTP over WebRTC
 - [Ghostly Browser](docs/BROWSER.md) — Run the extension, share a local app, limitations
+- [Ghostly on the web](docs/WEB.md) — The same client in a tab: `docker compose up`
 - [CLI Guide](docs/CLI.md) — Command reference and usage examples
 - [AI Agents](docs/AI-AGENTS.md) — Integration with OpenClaw, Cursor, bot examples
 - [Contributing](CONTRIBUTING.md) — How to contribute to the project

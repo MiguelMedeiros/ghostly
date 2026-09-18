@@ -103,6 +103,12 @@ export interface WalletPlatform {
 }
 
 export interface ServicesPlatform {
+  features: {
+    /** Whether this client can reach web apps on the user's machine to share them. */
+    shareLocalServices: boolean;
+    /** Whether this client can display a contact's web app. */
+    openServices: boolean;
+  };
   subscribe(listener: () => void): () => void;
   /** Whether this peer is reachable at all right now. */
   isOnline(): boolean;

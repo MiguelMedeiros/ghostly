@@ -1,5 +1,5 @@
 import { createIdentity, identityFromSeedB64 } from "@ghostly/core";
-import type * as Desktop from "../../../src/lib/pkarr";
+import type * as Desktop from "../../../../src/lib/pkarr";
 
 /**
  * Stands in for Desktop's `src/lib/pkarr.ts`, which calls into Rust. Keys are

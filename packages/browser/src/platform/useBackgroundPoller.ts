@@ -1,5 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
-import type * as Desktop from "../../../src/hooks/useBackgroundPoller";
+import type * as Desktop from "../../../../src/hooks/useBackgroundPoller";
 import { engine } from "./engine";
 import { sessionForPeer, startSessionSync } from "./sync";
 

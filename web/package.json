@@ -1,18 +1,19 @@
 {
-  "name": "@ghostly/extension",
+  "name": "@ghostly/web",
   "private": true,
   "version": "0.1.4",
   "type": "module",
-  "description": "Ghostly Browser: an ephemeral Ghostly peer as a Chromium extension",
+  "description": "Ghostly on the web: the same peer and UI as the extension, running in a tab. Nothing to install.",
   "scripts": {
-    "dev": "vite build --watch --mode development",
+    "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test:e2e": "node test/e2e.mjs"
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@emoji-mart/data": "^1.2.1",
     "@emoji-mart/react": "^1.1.1",
+    "@ghostly/browser": "*",
     "@ghostly/core": "*",
     "@ghostly/react": "*",
     "@tauri-apps/api": "^2.10.1",
@@ -20,16 +21,13 @@
     "qrcode.react": "^4.2.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "react-router-dom": "^7.13.0",
-    "@ghostly/browser": "*"
+    "react-router-dom": "^7.13.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.0",
-    "@types/chrome": "^0.3.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.4",
-    "playwright": "^1.58.2",
     "tailwindcss": "^4.2.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.1"

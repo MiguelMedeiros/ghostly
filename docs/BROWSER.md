@@ -80,7 +80,7 @@ launches two Chromium profiles with the extension and walks through the whole mi
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-**One UI.** The extension does not have a UI of its own: it builds Desktop's `src/` as is, so chats, themes, languages, the lock screen, emoji and GIF pickers, QR invites and the call overlay are the same code and look the same. `extension/vite.config.ts` swaps the five Desktop modules that touch the platform for stand-ins in `extension/src/platform` with identical exports:
+**One UI.** The extension does not have a UI of its own: it builds Desktop's `src/` as is, so chats, themes, languages, the lock screen, emoji and GIF pickers, QR invites and the call overlay are the same code and look the same. A Vite plugin shared with the [web app](WEB.md) (`packages/browser/vite-plugin.ts`) swaps the five Desktop modules that touch the platform for stand-ins in `packages/browser/src/platform` with identical exports:
 
 | Desktop module | In the browser |
 |---|---|
@@ -108,7 +108,7 @@ Ghostly Browser has an ecash ([Cashu](https://cashu.space)) wallet, in the sideb
 
 - **Receive over Lightning:** *Receive* asks the mint for an invoice; pay it from any Lightning wallet and the sats arrive as ecash. **Send over Lightning:** paste an invoice under *Send*; the mint pays it from your balance, after showing the fee.
 - **In a chat**, the ⚡ button sends sats to the contact or requests them. Ecash travels straight over the WebRTC link. A request also carries a Lightning invoice, so a contact on another mint (or with another wallet entirely) can still pay it; Ghostly does that on its own when you press *Pay* and share no mint.
-- **Mints.** A new wallet starts with a short list of public mints (`extension/src/shared/mints.ts`); the first one that answers issues your invoices. The gear icon lists them, lets you add your own, pick the primary, or add a public *test mint* with worthless sats to try things out. Test sats are shown apart and never added to real ones.
+- **Mints.** A new wallet starts with a short list of public mints (`packages/browser/src/shared/mints.ts`); the first one that answers issues your invoices. The gear icon lists them, lets you add your own, pick the primary, or add a public *test mint* with worthless sats to try things out. Test sats are shown apart and never added to real ones.
 - **History and fees.** The clock icon lists every movement with what it cost, to the sat, and the total paid in fees. Fees are measured, not estimated: the difference in balance around each operation. Under the gear, each mint shows what it charges: the fee for spending ecash (`input_fee_ppk`, often zero), its Lightning limits, and its message of the day. Lightning routing fees depend on the invoice and are quoted before you pay.
 - **Custody.** Ecash is custodial: the mints hold the sats and can lose them or vanish. This is pocket money. There is no seed yet, so there is nothing to restore from; *Copy backup tokens* under the gear is the only backup, and whoever has those tokens has the sats.
 - **If a contact never picks up a payment** (they went offline mid-way, or do not use your mint), the ecash is still yours: refused payments come back by themselves, unconfirmed ones have a *Take it back* button.
