@@ -149,5 +149,10 @@
     "connectionFailed": "Connection failed",
     "messageFailed": "Failed to send message",
     "generic": "Something went wrong"
+  },
+  "tabs": {
+    "chats": "Chats",
+    "wallet": "Wallet",
+    "share": "Share"
   }
 }

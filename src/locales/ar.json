@@ -149,5 +149,10 @@
     "connectionFailed": "فشل الاتصال",
     "messageFailed": "فشل إرسال الرسالة",
     "generic": "حدث خطأ ما"
+  },
+  "tabs": {
+    "chats": "الدردشات",
+    "wallet": "المحفظة",
+    "share": "مشاركة"
   }
 }

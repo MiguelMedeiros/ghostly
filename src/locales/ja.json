@@ -149,5 +149,10 @@
     "connectionFailed": "接続に失敗しました",
     "messageFailed": "メッセージの送信に失敗しました",
     "generic": "エラーが発生しました"
+  },
+  "tabs": {
+    "chats": "チャット",
+    "wallet": "ウォレット",
+    "share": "共有"
   }
 }

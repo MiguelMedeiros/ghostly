@@ -7,11 +7,11 @@ import { useServicesPlatform } from "../hooks/useServicesPlatform";
 type View = "closed" | "receive" | "send" | "mints" | "history";
 
 const field =
-  "w-full bg-input-bg rounded-lg px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent";
+  "w-full max-md:min-h-11 bg-input-bg rounded-lg px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent";
 const primary =
-  "px-3 py-2 bg-accent text-[#111b21] rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
+  "px-3 py-2 max-md:min-h-11 bg-accent text-[#111b21] rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
 const secondary =
-  "px-3 py-2 text-xs font-bold text-text-muted bg-surface-hover rounded-lg hover:text-text-secondary transition-colors cursor-pointer";
+  "px-3 py-2 max-md:min-h-11 text-xs font-bold text-text-muted bg-surface-hover rounded-lg hover:text-text-secondary transition-colors cursor-pointer";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -39,7 +39,8 @@ function describeBounds(bounds: { min: number | null; max: number | null } | nul
  * Sidebar section: an ecash wallet. Sats are held by the mints the user picks,
  * come in over Lightning or from contacts, and go out the same ways.
  */
-export function WalletPanel() {
+/** `screen`: the wallet is a page of its own (phones) instead of a sidebar section. */
+export function WalletPanel({ screen = false }: { screen?: boolean }) {
   const platform = useServicesPlatform();
   const wallet = platform?.wallet;
   const [view, setView] = useState<View>("closed");
@@ -96,18 +97,18 @@ export function WalletPanel() {
   const usesTestMint = testMint !== undefined;
 
   return (
-    <div className="border-t border-border bg-sidebar-bg" data-testid="wallet">
+    <div className={`bg-sidebar-bg ${screen ? "wallet-screen" : "border-t border-border"}`} data-testid="wallet">
       {platform?.notice && (
         <p className="mx-3 mt-3 mb-0 px-3 py-2 rounded-lg bg-yellow-500/10 text-yellow-500 text-[11px] leading-snug" data-testid="platform-notice">
           {platform.notice}
         </p>
       )}
       <div className="flex items-center justify-between px-4 pt-3 pb-1">
-        <span className="text-text-secondary text-xs font-bold uppercase tracking-wider">Wallet</span>
+        <span className={`text-text-secondary text-xs font-bold uppercase tracking-wider ${screen ? "invisible" : ""}`}>Wallet</span>
         <button
           data-testid="wallet-settings"
           onClick={() => open("mints")}
-          className={`p-1 rounded-full transition-colors cursor-pointer ${view === "mints" ? "text-accent" : "text-text-muted hover:text-text-primary"}`}
+          className={`p-1 max-md:p-3 rounded-full transition-colors cursor-pointer ${view === "mints" ? "text-accent" : "text-text-muted hover:text-text-primary"}`}
           title="Mints"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -117,7 +118,7 @@ export function WalletPanel() {
         </button>
       </div>
 
-      <div className="px-3 pb-3 space-y-2 max-h-[55vh] overflow-y-auto">
+      <div className={`px-3 pb-3 space-y-2 ${screen ? "" : "max-h-[55vh] overflow-y-auto"}`}>
         {state.mints.length > 0 && (
           <div className="bg-surface-alt rounded-lg px-3 py-2 flex items-center justify-between gap-2">
             <p className="m-0 text-text-primary leading-tight">

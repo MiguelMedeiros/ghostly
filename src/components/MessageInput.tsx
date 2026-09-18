@@ -31,6 +31,7 @@ export function MessageInput({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState("");
   const [showEmoji, setShowEmoji] = useState(false);
+  const [showMore, setShowMore] = useState(false);
   const [showGiphy, setShowGiphy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -121,7 +122,7 @@ export function MessageInput({
   const remaining = maxLength - text.length;
 
   return (
-    <div className="bg-panel-header px-4 py-2.5 shrink-0 relative">
+    <div className="bg-panel-header px-4 max-md:px-2 py-2.5 composer-safe shrink-0 relative">
       {toast && (
         <div className="absolute bottom-full left-4 right-4 mb-2 z-50 animate-fade-in">
           <div className="bg-[#3b2020] border border-danger/30 rounded-lg px-4 py-2.5 flex items-start gap-2 shadow-lg">
@@ -155,11 +156,26 @@ export function MessageInput({
       )}
       <div className="flex items-end gap-2 relative">
         {/* Left action buttons */}
-        <div className="flex items-center gap-0.5 shrink-0 h-10">
+        <div className="flex items-center gap-0.5 max-md:gap-0 shrink-0 h-10 max-md:h-11">
+          {/* Phones keep the input wide: GIFs, sats and files wait behind a plus. */}
+          <button
+            onClick={() => setShowMore((v) => !v)}
+            disabled={disabled}
+            className={`md:hidden w-10 h-11 flex items-center justify-center rounded-full cursor-pointer border-none bg-transparent transition-transform disabled:opacity-30 ${
+              showMore ? "rotate-45 text-accent" : "text-text-secondary"
+            }`}
+            title="More"
+            data-testid="composer-more"
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+          </button>
           <button
             onClick={toggleEmoji}
             disabled={disabled}
-            className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors cursor-pointer border-none ${
+            className={`w-9 h-9 max-md:w-10 max-md:h-11 flex items-center justify-center rounded-full transition-colors cursor-pointer border-none ${
               showEmoji
                 ? "bg-accent/20 text-accent"
                 : "bg-transparent text-text-secondary hover:text-text-primary hover:bg-surface-hover"
@@ -174,10 +190,11 @@ export function MessageInput({
             </svg>
           </button>
 
+          <div className={`composer-more ${showMore ? "composer-more-open" : ""}`} onClick={() => setShowMore(false)}>
           <button
             onClick={toggleGiphy}
             disabled={disabled}
-            className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors cursor-pointer border-none ${
+            className={`w-9 h-9 max-md:w-10 max-md:h-11 flex items-center justify-center rounded-full transition-colors cursor-pointer border-none ${
               showGiphy
                 ? "bg-accent/20 text-accent"
                 : "bg-transparent text-text-secondary hover:text-text-primary hover:bg-surface-hover"
@@ -197,7 +214,7 @@ export function MessageInput({
               onClick={() => setShowPayment((v) => !v)}
               disabled={disabled}
               data-testid="payment-button"
-              className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors cursor-pointer border-none ${
+              className={`w-9 h-9 max-md:w-10 max-md:h-11 flex items-center justify-center rounded-full transition-colors cursor-pointer border-none ${
                 showPayment
                   ? "bg-accent/20 text-accent"
                   : "bg-transparent text-text-secondary hover:text-text-primary hover:bg-surface-hover"
@@ -228,7 +245,7 @@ export function MessageInput({
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={disabled}
-                className="w-9 h-9 flex items-center justify-center rounded-full transition-colors cursor-pointer border-none bg-transparent text-text-secondary hover:text-text-primary hover:bg-surface-hover disabled:opacity-30 disabled:cursor-not-allowed"
+                className="w-9 h-9 max-md:w-10 max-md:h-11 flex items-center justify-center rounded-full transition-colors cursor-pointer border-none bg-transparent text-text-secondary hover:text-text-primary hover:bg-surface-hover disabled:opacity-30 disabled:cursor-not-allowed"
                 title="Send a file"
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -237,6 +254,7 @@ export function MessageInput({
               </button>
             </>
           )}
+          </div>
 
         </div>
 
@@ -251,7 +269,7 @@ export function MessageInput({
             placeholder={disabled ? "Chat burned" : "Type a message"}
             disabled={disabled}
             rows={1}
-            className="w-full bg-input-bg border-none rounded-lg px-3 py-2 text-[15px] text-text-primary placeholder-text-muted resize-none focus:outline-none disabled:opacity-50 min-h-10"
+            className="w-full bg-input-bg border-none rounded-lg px-3 py-2 max-md:py-2.5 text-[15px] text-text-primary placeholder-text-muted resize-none focus:outline-none disabled:opacity-50 min-h-10 max-md:min-h-11 max-md:rounded-3xl"
           />
           {remaining < 100 && (
             <span
@@ -266,7 +284,7 @@ export function MessageInput({
         <button
           onClick={handleSubmit}
           disabled={disabled || !text.trim()}
-          className="w-10 h-10 flex items-center justify-center bg-accent rounded-full text-[#111b21] hover:bg-accent-hover transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shrink-0"
+          className="w-10 h-10 max-md:w-11 max-md:h-11 flex items-center justify-center bg-accent rounded-full text-[#111b21] hover:bg-accent-hover transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shrink-0"
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
             <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
@@ -275,7 +293,7 @@ export function MessageInput({
 
         {/* Pickers */}
         {showEmoji && (
-          <div className="absolute bottom-full left-0 mb-2 z-50">
+          <div className="absolute bottom-full left-0 mb-2 z-50 max-md:static max-md:m-0">
             <EmojiPicker
               onSelect={handleEmojiSelect}
               onClose={() => setShowEmoji(false)}

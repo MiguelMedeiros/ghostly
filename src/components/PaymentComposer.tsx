@@ -37,10 +37,12 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose }: Payment
   const value = Number(amount);
 
   return (
+    <>
+    <div className="sheet-backdrop" />
     <div
       ref={containerRef}
       data-testid="payment-composer"
-      className="absolute bottom-full left-0 mb-2 z-50 animate-fade-in w-[300px] bg-panel-header border border-border rounded-xl shadow-2xl p-3 space-y-2"
+      className="sheet sheet-padded absolute bottom-full left-0 mb-2 z-50 animate-fade-in w-[300px] bg-panel-header border border-border rounded-xl shadow-2xl p-3 space-y-2"
       onKeyDown={(e) => e.key === "Escape" && onClose()}
     >
       <div className="flex items-center justify-between">
@@ -73,5 +75,6 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose }: Payment
       </p>
       {error && <p className="text-danger text-xs m-0">{error}</p>}
     </div>
+    </>
   );
 }

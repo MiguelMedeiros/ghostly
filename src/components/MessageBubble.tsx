@@ -213,7 +213,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "" }: Message
       : "";
     
     return (
-      <div className={`flex justify-center mb-3.5 px-[63px] ${enter}`}>
+      <div className={`flex justify-center mb-3.5 px-[63px] max-md:px-2.5 ${enter}`}>
         <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-blue-500/10 text-blue-400">
           <svg
             width="14"
@@ -244,7 +244,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "" }: Message
     const isMissed = type === "call_missed" || type === "call_rejected";
     
     return (
-      <div className={`flex justify-center mb-3.5 px-[63px] ${enter}`}>
+      <div className={`flex justify-center mb-3.5 px-[63px] max-md:px-2.5 ${enter}`}>
         <div
           className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs ${
             isMissed
@@ -277,7 +277,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "" }: Message
 
   return (
     <div
-      className={`flex ${isMe ? "justify-end" : "justify-start"} mb-3.5 px-[63px] ${enter}`}
+      className={`flex ${isMe ? "justify-end" : "justify-start"} mb-3.5 px-[63px] max-md:px-2.5 ${enter}`}
       onDoubleClick={() => message.meta && setShowTech((v) => !v)}
     >
       <div
@@ -321,7 +321,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "" }: Message
             <img
               src={message.text.trim()}
               alt=""
-              className="rounded-[4px] max-w-[330px] min-w-[120px] max-h-[330px] object-contain block"
+              className="rounded-[4px] max-w-[min(330px,72vw)] min-w-[120px] max-h-[330px] object-contain block"
               style={WAYBACK_GIF_RE.test(message.text.trim()) ? { imageRendering: "pixelated" } : undefined}
               loading="lazy"
               onError={() => setImgError(true)}

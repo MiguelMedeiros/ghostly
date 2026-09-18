@@ -149,5 +149,10 @@
     "connectionFailed": "Échec de connexion",
     "messageFailed": "Échec d'envoi du message",
     "generic": "Une erreur s'est produite"
+  },
+  "tabs": {
+    "chats": "Discussions",
+    "wallet": "Portefeuille",
+    "share": "Partager"
   }
 }

@@ -149,5 +149,10 @@
     "connectionFailed": "连接失败",
     "messageFailed": "消息发送失败",
     "generic": "出错了"
+  },
+  "tabs": {
+    "chats": "聊天",
+    "wallet": "钱包",
+    "share": "分享"
   }
 }
