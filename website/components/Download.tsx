@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "motion/react";
+import { Icon, IconTile } from "./icons";
 import { useEffect, useState } from "react";
 
 function FloatingGhost({ 
@@ -240,16 +241,16 @@ export function Download() {
           className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8 max-w-2xl mx-auto text-left scroll-mt-24"
         >
           <div className="rounded-xl border border-cyan/30 bg-surface/50 p-5">
-            <div className="flex items-center gap-3 mb-2">
-              <span className="text-2xl">🕸️</span>
+            <div className="flex items-center gap-3 mb-3">
+              <IconTile name="globe" />
               <span className="font-semibold text-gray-100">In your browser</span>
               <span className="ml-auto text-[10px] font-mono uppercase tracking-wider text-yellow-500 border border-yellow-500/40 rounded-full px-2 py-0.5">beta</span>
             </div>
             <p className="text-sm text-gray-500 mb-4">Nothing to install. Chat, calls, files and sats, for as long as the tab is open.</p>
-            <ul className="mb-4 text-xs text-gray-500 space-y-1">
-              <li>👻 Talks to the extension and the desktop app</li>
-              <li>🔑 Keys and sats stay in this browser</li>
-              <li>🚪 Close the tab and you are gone</li>
+            <ul className="mb-4 text-xs text-gray-500 space-y-1.5">
+              <li className="flex items-center gap-2"><Icon name="chat" className="w-4 h-4 text-cyan/70 shrink-0" />Talks to the extension and the desktop app</li>
+              <li className="flex items-center gap-2"><Icon name="key" className="w-4 h-4 text-cyan/70 shrink-0" />Keys and sats stay in this browser</li>
+              <li className="flex items-center gap-2"><Icon name="leave" className="w-4 h-4 text-cyan/70 shrink-0" />Close the tab and you are gone</li>
             </ul>
             <a
               href="https://app.ghostly.tools"
@@ -262,8 +263,8 @@ export function Download() {
           </div>
 
           <div className="rounded-xl border border-border/50 bg-surface/50 p-5">
-            <div className="flex items-center gap-3 mb-2">
-              <span className="text-2xl">🧩</span>
+            <div className="flex items-center gap-3 mb-3">
+              <IconTile name="puzzle" tone="green" />
               <span className="font-semibold text-gray-100">Browser extension</span>
               <span className="ml-auto text-[10px] font-mono uppercase tracking-wider text-gray-500 border border-border/50 rounded-full px-2 py-0.5 shrink-0">Chromium</span>
             </div>

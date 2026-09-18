@@ -1,32 +1,33 @@
 "use client";
 
 import { motion } from "motion/react";
+import { IconTile, type IconName } from "./icons";
 
-const clients = [
+const clients: { name: string; icon: IconName; pitch: string; cta: { label: string; href: string }; note: string }[] = [
   {
     name: "Web",
-    emoji: "🕸️",
+    icon: "globe",
     pitch: "Nothing to install. Open a tab and you are a ghost until you close it.",
     cta: { label: "Open app.ghostly.tools", href: "https://app.ghostly.tools" },
     note: "Beta",
   },
   {
     name: "Browser extension",
-    emoji: "🧩",
+    icon: "puzzle",
     pitch: "Lives in Chrome and keeps haunting while the browser is open. Shares your localhost.",
     cta: { label: "Get the extension", href: "#extension" },
     note: "Chromium",
   },
   {
     name: "Desktop",
-    emoji: "🖥️",
+    icon: "desktop",
     pitch: "The full ghost. Talks to the DHT directly, shares local apps with cookies and all.",
     cta: { label: "Download", href: "#download" },
-    note: "macOS · Windows · Linux",
+    note: "Mac · Win · Linux",
   },
   {
     name: "CLI",
-    emoji: "⌨️",
+    icon: "terminal",
     pitch: "For bots and scripts that want to whisper through the DHT.",
     cta: { label: "cargo install ghostly-cli", href: "/cli" },
     note: "Rust",
@@ -72,8 +73,8 @@ export function Clients() {
               transition={{ duration: 0.4, delay: index * 0.08 }}
               className="rounded-xl border border-border/50 bg-surface p-5 flex flex-col hover:border-cyan/40 transition-colors"
             >
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-3xl">{client.emoji}</span>
+              <div className="flex items-center justify-between gap-2 mb-4">
+                <IconTile name={client.icon} />
                 <span className="text-[10px] font-mono uppercase tracking-wider text-gray-500 border border-border/50 rounded-full px-2 py-0.5">
                   {client.note}
                 </span>

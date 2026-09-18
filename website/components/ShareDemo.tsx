@@ -2,6 +2,7 @@
 
 import { motion, AnimatePresence } from "motion/react";
 import { useEffect, useState } from "react";
+import { GhostGlyph, Icon } from "./icons";
 
 /** The one thing no other messenger does, acted out: a localhost app, shared and opened. */
 const STEPS = [
@@ -80,7 +81,7 @@ export function ShareDemo() {
             )}
             {step.host === "gone" && (
               <motion.div initial={{ opacity: 1 }} animate={{ opacity: 0.25 }} transition={{ duration: 1.2 }} className="text-center text-gray-500 pt-10">
-                <div className="text-4xl mb-2">👻</div>
+                <GhostGlyph className="w-10 h-10 mx-auto mb-2" />
                 offline
               </motion.div>
             )}
@@ -101,7 +102,7 @@ export function ShareDemo() {
             {guest === "sees" && (
               <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}>
                 <p className="text-gray-500 text-xs mb-3">● Peer to peer</p>
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-green text-black font-semibold text-xs px-3 py-1.5">🌐 Atlas</span>
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-green text-black font-semibold text-xs px-3 py-1.5"><Icon name="globe" className="w-3.5 h-3.5" />Atlas</span>
               </motion.div>
             )}
             {guest === "open" && (
@@ -119,7 +120,7 @@ export function ShareDemo() {
             )}
             {guest === "gone" && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center text-gray-500 pt-8">
-                <div className="text-4xl mb-2">👻</div>
+                <GhostGlyph className="w-10 h-10 mx-auto mb-2" />
                 <p className="text-xs">This service is not reachable.<br />Services exist while their ghost is online.</p>
               </motion.div>
             )}
