@@ -20,8 +20,7 @@ export function CLISection() {
             <span className="text-gradient">Ghostly</span> CLI
           </h2>
           <p className="text-gray-400 max-w-xl mx-auto">
-            Ghost protocol for bots, scripts, and automation.
-            Send and receive encrypted ephemeral messages from the terminal.
+            Encrypted, ephemeral messages from your terminal. For bots and scripts.
           </p>
         </motion.div>
 

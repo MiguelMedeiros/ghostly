@@ -56,7 +56,7 @@ const stats = [
     value: 10,
     suffix: "M+",
     label: "Haunted Nodes",
-    description: "Your ghost messages float through the Mainline BitTorrent DHT — the largest haunted network on the planet.",
+    description: "The Mainline BitTorrent DHT carries your whispers.",
     icon: (
       <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5a17.92 17.92 0 01-8.716-2.247m0 0A9.015 9.015 0 003 12c0-1.605.42-3.113 1.157-4.418" />
@@ -67,14 +67,14 @@ const stats = [
     value: 0,
     suffix: "",
     label: "Servers to Exorcise",
-    description: "No servers to possess, no infrastructure to haunt, no single point of failure. Your ghost roams free.",
+    description: "No infrastructure, no single point of failure.",
     icon: <GhostIcon />,
   },
   {
     value: 256,
     suffix: "-bit",
     label: "Ghost Shield",
-    description: "Cloaked with NaCl secretbox encryption. Even other ghosts can't read your messages.",
+    description: "NaCl secretbox. Only you and your contact can read it.",
     icon: (
       <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
@@ -111,9 +111,7 @@ export function WhatIs() {
             <span className="text-gradient">Ghostly</span>?
           </h2>
           <p className="text-lg text-gray-400 max-w-2xl mx-auto leading-relaxed">
-            A messenger from the spirit realm. Your messages are encrypted on your device,
-            float through the DHT as ghostly whispers, and fade away when you close the app
-            — leaving no trace behind, just like a proper ghost.
+            Encrypted on your device, carried by the DHT, gone when you close the app.
           </p>
         </motion.div>
 

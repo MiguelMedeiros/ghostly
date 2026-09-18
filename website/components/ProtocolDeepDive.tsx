@@ -22,8 +22,7 @@ export function ProtocolDeepDive() {
             Protocol <span className="text-gradient">Deep Dive</span>
           </h2>
           <p className="text-lg text-gray-400 max-w-2xl mx-auto">
-            For the curious and the cryptographers. Here&apos;s exactly what happens
-            when you send a message.
+            For the curious: what happens when you send a message.
           </p>
         </motion.div>
 

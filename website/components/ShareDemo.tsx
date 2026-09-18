@@ -10,10 +10,10 @@ import { GhostGlyph } from "./icons";
  * is gone. The mini site is drawn identically on both sides on purpose.
  */
 const STEPS = [
-  { title: "It runs on your computer", text: "A site you are building, a dashboard, a photo gallery. Only you can see it, at localhost." },
-  { title: "You flip one switch", text: "Ghostly tells the friends you chose that it exists. They see its name, never your address." },
-  { title: "They open it in their browser", text: "The same page, live from your machine, through an encrypted peer to peer connection. Nothing is uploaded anywhere." },
-  { title: "Close Ghostly and the door is gone", text: "No server kept a copy, because there was no server. It only existed while you were online." },
+  { title: "It runs on your computer", text: "Only you can see it." },
+  { title: "You flip one switch", text: "Your friends see its name, never your address." },
+  { title: "They open it in their browser", text: "Live from your machine, encrypted. Nothing is uploaded." },
+  { title: "Close Ghostly, door gone", text: "No server kept a copy. There was no server." },
 ] as const;
 
 const TILES = ["from-cyan/70 to-cyan/20", "from-green/70 to-green/20", "from-purple-400/70 to-purple-400/20", "from-yellow-400/70 to-yellow-400/20", "from-pink-400/70 to-pink-400/20", "from-sky-400/70 to-sky-400/20"];
@@ -71,7 +71,7 @@ function Beam({ active }: { active: boolean }) {
           ))}
       </div>
       <span className={`text-[10px] font-mono uppercase tracking-wider text-center transition-colors duration-500 ${active ? "text-green" : "text-gray-600"}`}>
-        {active ? "encrypted, peer to peer" : "door closed"}
+        {active ? "peer to peer" : "door closed"}
       </span>
     </div>
   );
@@ -104,8 +104,8 @@ export function ShareDemo() {
             Open a door to your <span className="text-gradient">localhost</span>
           </h2>
           <p className="text-lg text-gray-400 max-w-2xl mx-auto">
-            Got something running on your computer? Flip one switch and the friends you chose can open it in their
-            browser, straight from your machine. It stays open <span className="text-cyan">only while Ghostly is open</span>.
+            Flip one switch and your friends open it in their browser, straight from your machine.{" "}
+            <span className="text-cyan">Only while Ghostly is open</span>.
           </p>
         </motion.div>
 
@@ -206,9 +206,9 @@ export function ShareDemo() {
         </div>
 
         <div className="flex flex-wrap justify-center gap-3 mt-8 text-xs text-gray-600">
-          <span className="px-3 py-1 rounded-full border border-border/30">Only the app you picked, nothing else on your machine</span>
-          <span className="px-3 py-1 rounded-full border border-border/30">Only the friends you linked with</span>
-          <span className="px-3 py-1 rounded-full border border-border/30">No upload, no deploy, no tunnel company</span>
+          <span className="px-3 py-1 rounded-full border border-border/30">Only the app you picked</span>
+          <span className="px-3 py-1 rounded-full border border-border/30">Only the friends you chose</span>
+          <span className="px-3 py-1 rounded-full border border-border/30">No upload, no deploy, no tunnel</span>
         </div>
       </div>
     </section>

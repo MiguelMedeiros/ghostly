@@ -531,9 +531,8 @@ export function Hero() {
           transition={{ delay: 1.2, duration: 0.6 }}
           className="text-lg text-gray-500 max-w-xl mb-10"
         >
-          Chat, calls, files, sats and the web apps on your localhost, shared
-          peer to peer with the ghosts you choose. Close Ghostly and it all
-          vanishes. No servers. No accounts. Just pure, spooky privacy.
+          Chat, calls, files, sats and your localhost apps, peer to peer.
+          Close Ghostly and it all vanishes. No servers. No accounts.
         </motion.p>
 
         <motion.div

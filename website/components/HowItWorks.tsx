@@ -7,7 +7,7 @@ const steps = [
     number: "01",
     title: "Create a Chat",
     description:
-      "The app generates two Ed25519 keypairs and one 256-bit symmetric encryption key. One keypair is yours to write, the other is for your peer. No server involved.",
+      "Two Ed25519 keypairs and one 256-bit key, generated on your device.",
     visual: (
       <div className="font-mono text-xs space-y-2">
         <div className="flex items-center gap-2">
@@ -35,7 +35,7 @@ const steps = [
     number: "02",
     title: "Share the Link",
     description:
-      "The invite URL contains everything your peer needs: their writing seed, your public key, and the shared encryption key — all in the URL fragment, which never leaves the app.",
+      "The invite carries everything your peer needs. It never touches a server.",
     visual: (
       <div className="font-mono text-xs">
         <div className="text-gray-500 mb-2">Invite URL:</div>
@@ -61,7 +61,7 @@ const steps = [
     number: "03",
     title: "Messages Travel the DHT",
     description:
-      "Each message is encrypted with NaCl secretbox, packed into a DNS TXT record, Ed25519-signed, and published to the Mainline DHT via Pkarr. Your peer polls the DHT to receive.",
+      "Encrypted, signed and published to the Mainline DHT as a DNS record. Your peer polls for it.",
     visual: (
       <div className="font-mono text-xs space-y-3">
         <div className="flex items-center gap-2 flex-wrap">
@@ -96,7 +96,7 @@ const steps = [
     number: "04",
     title: "Messages Expire",
     description:
-      "Messages are kept alive by periodic republishing. Stop republishing (close the app or delete the chat) and they naturally expire from the DHT in approximately 5 hours.",
+      "Messages live only while you republish them. Close the app and they expire in about 5 hours.",
     visual: (
       <div className="font-mono text-xs space-y-2">
         <div className="flex items-center gap-2">
@@ -124,7 +124,7 @@ const steps = [
     number: "05",
     title: "Ghosts Connect Directly",
     description:
-      "When both of you are online, the DHT is only used to swap a WebRTC offer and answer, signed and encrypted like everything else. From then on messages, calls, files, sats and web apps travel straight between the two of you. The DHT never carries them.",
+      "When both are online, the DHT only swaps a WebRTC handshake. Everything else travels straight between you.",
     visual: (
       <div className="font-mono text-xs space-y-2">
         <div className="flex items-center gap-2">
@@ -147,7 +147,7 @@ const steps = [
     number: "06",
     title: "You Are the Server, Briefly",
     description:
-      "Share a web app from your localhost and your contacts can open it. They ask for it by name; your Ghostly maps the name to the address you chose and nothing else. Close the app and your presence, your chat endpoint and everything you shared are gone.",
+      "Contacts ask for a shared app by name. Your Ghostly maps it to the address you chose, and nothing else.",
     visual: (
       <div className="font-mono text-xs space-y-2">
         <div className="flex items-center gap-2">
@@ -202,7 +202,7 @@ export function HowItWorks() {
             How It <span className="text-gradient">Works</span>
           </h2>
           <p className="text-lg text-gray-400 max-w-xl mx-auto">
-            Four steps. No middlemen. Pure cryptography and the decentralized web.
+            Six steps. No middlemen.
           </p>
         </motion.div>
 

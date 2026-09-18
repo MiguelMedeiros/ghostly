@@ -7,28 +7,28 @@ const clients: { name: string; icon: IconName; pitch: string; cta: { label: stri
   {
     name: "Web",
     icon: "globe",
-    pitch: "Nothing to install. Open a tab and you are a ghost until you close it.",
+    pitch: "Nothing to install. A ghost until you close the tab.",
     cta: { label: "Open app.ghostly.tools", href: "https://app.ghostly.tools" },
     note: "Beta",
   },
   {
     name: "Browser extension",
     icon: "puzzle",
-    pitch: "Lives in Chrome and keeps haunting while the browser is open. Shares your localhost.",
+    pitch: "Haunts while the browser is open. Shares your localhost.",
     cta: { label: "Get the extension", href: "#extension" },
     note: "Chromium",
   },
   {
     name: "Desktop",
     icon: "desktop",
-    pitch: "The full ghost. Talks to the DHT directly, shares local apps with cookies and all.",
+    pitch: "The full ghost. Talks to the DHT directly.",
     cta: { label: "Download", href: "#download" },
     note: "Mac · Win · Linux",
   },
   {
     name: "CLI",
     icon: "terminal",
-    pitch: "For bots and scripts that want to whisper through the DHT.",
+    pitch: "For bots and scripts.",
     cta: { label: "cargo install ghostly-cli", href: "/cli" },
     note: "Rust",
   },
@@ -59,7 +59,7 @@ export function Clients() {
             Pick your <span className="text-gradient">ghost</span>
           </h2>
           <p className="text-lg text-gray-400 max-w-2xl mx-auto">
-            Four bodies, one spirit. They speak the same protocol and an invite from one works in any other.
+            Four bodies, one protocol. An invite from one works in any other.
           </p>
         </motion.div>
 
@@ -116,8 +116,7 @@ export function Clients() {
           </table>
         </motion.div>
         <p className="text-xs text-gray-600 text-center mt-4">
-          A web page cannot reach your machine or give a contact&apos;s app a home of its own. Browsers forbid it, and they are right.
-          That is what the extension and the desktop app are for.
+          Browsers do not let a web page reach your localhost. The extension and the desktop app can.
         </p>
       </div>
     </section>

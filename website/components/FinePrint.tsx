@@ -5,27 +5,27 @@ import { motion } from "motion/react";
 const items = [
   {
     title: "Who sees what",
-    body: "Pkarr relays, STUN and TURN only ever see signed, encrypted packets. They help ghosts find and reach each other. They hold no state about you and never carry your messages, files or apps.",
+    body: "Relays, STUN and TURN only see signed, encrypted packets. They never carry your messages, files or apps.",
   },
   {
     title: "Your sats are pocket money",
-    body: "The wallet holds ecash. A mint keeps the sats and could lose them or vanish. There is no seed backup yet. Treat it like the coins in your coat, not like your savings.",
+    body: "Ecash is custodial: the mint holds the sats and could lose them. No seed backup yet.",
   },
   {
     title: "Sharing localhost is sharing",
-    body: "A contact can use the app you share exactly as you can on localhost. Only what you list is reachable, only by the people you linked with, only while you are online. Share apps you would let them use.",
+    body: "A contact can use a shared app exactly as you can. Share only what you would let them use.",
   },
   {
     title: "The web app trusts its server",
-    body: "A page is code a server hands you on every visit. Whoever runs that server could change it. Host it yourself, or use the extension or the desktop app, which you install once.",
+    body: "Whoever serves a web page can change it. Host it yourself, or install the extension or desktop app.",
   },
   {
     title: "Still rough",
-    body: "No WebSockets or streaming through shared apps yet. Linux desktops often lack WebRTC in their WebView. Both peers must be online for files, sats and apps. It is a 0.2.",
+    body: "No WebSockets through shared apps yet. Both peers must be online for files, sats and apps. It is a 0.2.",
   },
   {
     title: "Verify, don't trust",
-    body: "Everything is open source, the protocol is documented, and releases ship with signed checksums. If a ghost tells you to trust it, check its sheet.",
+    body: "Open source, documented protocol, signed checksums.",
   },
 ];
 
@@ -44,7 +44,7 @@ export function FinePrint() {
             The fine print, <span className="text-gradient">no tricks</span>
           </h2>
           <p className="text-lg text-gray-400 max-w-2xl mx-auto">
-            Ghosts are honest about what they are. Here is what Ghostly does not do, and what you are trusting when you use it.
+            What Ghostly does not do, and what you are trusting.
           </p>
         </motion.div>
 

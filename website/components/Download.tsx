@@ -122,8 +122,7 @@ export function Download() {
             Become a <span className="text-gradient-animated">Ghost</span>
           </h2>
           <p className="text-lg text-gray-400 max-w-lg mx-auto mb-12">
-            Open it in a tab, add it to your browser, or download the app.
-            No sign-up. No traces. Just you and your ghostly friends.
+            Open a tab, add the extension, or download the app. No sign-up.
           </p>
         </motion.div>
 
@@ -246,7 +245,7 @@ export function Download() {
               <span className="font-semibold text-gray-100">In your browser</span>
               <span className="ml-auto text-[10px] font-mono uppercase tracking-wider text-yellow-500 border border-yellow-500/40 rounded-full px-2 py-0.5">beta</span>
             </div>
-            <p className="text-sm text-gray-500 mb-4">Nothing to install. Chat, calls, files and sats, for as long as the tab is open.</p>
+            <p className="text-sm text-gray-500 mb-4">Nothing to install. Lives while the tab is open.</p>
             <ul className="mb-4 text-xs text-gray-500 space-y-1.5">
               <li className="flex items-center gap-2"><Icon name="chat" className="w-4 h-4 text-cyan/70 shrink-0" />Talks to the extension and the desktop app</li>
               <li className="flex items-center gap-2"><Icon name="key" className="w-4 h-4 text-cyan/70 shrink-0" />Keys and sats stay in this browser</li>
@@ -268,7 +267,7 @@ export function Download() {
               <span className="font-semibold text-gray-100">Browser extension</span>
               <span className="ml-auto text-[10px] font-mono uppercase tracking-wider text-gray-500 border border-border/50 rounded-full px-2 py-0.5 shrink-0">Chromium</span>
             </div>
-            <p className="text-sm text-gray-500 mb-3">Keeps haunting while the browser is open, and shares your localhost.</p>
+            <p className="text-sm text-gray-500 mb-3">Haunts while the browser is open. Shares your localhost.</p>
             <a
               href="https://github.com/MiguelMedeiros/ghostly/releases/download/v0.2.0/ghostly-browser-extension-0.2.0.zip"
               className="inline-flex w-full justify-center px-4 py-2.5 rounded-lg border border-cyan/40 text-cyan text-sm font-semibold hover:bg-cyan/10 transition-all"
@@ -280,7 +279,7 @@ export function Download() {
               <li>Open <code className="text-gray-400">chrome://extensions</code> and turn on <span className="text-gray-400">Developer mode</span>.</li>
               <li>Click <span className="text-gray-400">Load unpacked</span> and pick the folder.</li>
             </ol>
-            <p className="mt-2 text-[11px] text-gray-600">Chrome, Brave, Edge. Not in the Chrome Web Store yet. It will ask to &quot;debug&quot; only the tabs it opens to show a contact&apos;s app.</p>
+            <p className="mt-2 text-[11px] text-gray-600">Chrome, Brave, Edge. It asks to &quot;debug&quot; only the tabs it opens for a contact&apos;s app.</p>
           </div>
         </motion.div>
 
