@@ -193,8 +193,8 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "" }: Message
   const [enter] = useState(() =>
     Date.now() - message.timestamp < 5000
       ? message.sender === "me"
-        ? " animate-bubble-in-right"
-        : " animate-bubble-in-left"
+        ? "animate-bubble-in-right"
+        : "animate-bubble-in-left"
       : "",
   );
   const [showTech, setShowTech] = useState(false);
@@ -213,7 +213,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "" }: Message
       : "";
     
     return (
-      <div className={`flex justify-center mb-3.5 px-[63px]${enter}`}>
+      <div className={`flex justify-center mb-3.5 px-[63px] ${enter}`}>
         <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-blue-500/10 text-blue-400">
           <svg
             width="14"
@@ -244,7 +244,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "" }: Message
     const isMissed = type === "call_missed" || type === "call_rejected";
     
     return (
-      <div className={`flex justify-center mb-3.5 px-[63px]${enter}`}>
+      <div className={`flex justify-center mb-3.5 px-[63px] ${enter}`}>
         <div
           className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs ${
             isMissed
@@ -277,7 +277,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "" }: Message
 
   return (
     <div
-      className={`flex ${isMe ? "justify-end" : "justify-start"} mb-3.5 px-[63px]${enter}`}
+      className={`flex ${isMe ? "justify-end" : "justify-start"} mb-3.5 px-[63px] ${enter}`}
       onDoubleClick={() => message.meta && setShowTech((v) => !v)}
     >
       <div
