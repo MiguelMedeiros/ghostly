@@ -99,7 +99,7 @@ export class GhostlyNode implements EngineImplementation {
   private readonly requestCounts = new Map<string, number>();
   private readonly transfers = new Map<string, FileTransferView>();
   private stateTimer: ReturnType<typeof setTimeout> | null = null;
-  private walletView: WalletView = { mints: [], balance: 0 };
+  private walletView: WalletView = { mints: [], balance: 0, history: [], feesPaid: 0 };
 
   private readonly wallet = new CashuWallet(() => this.settings.mints, {
     onChange: () => void this.refreshWallet(),

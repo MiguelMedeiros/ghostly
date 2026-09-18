@@ -135,8 +135,9 @@ try {
   const bubble = b.page.getByTestId("file-bubble").filter({ hasText: "haunted house.bin" });
   await bubble.waitFor({ timeout: 30_000 });
   ok("B sees the file arriving");
+  await bubble.getByTestId("file-save").waitFor({ timeout: 120_000 });
   const downloadPromise = b.page.waitForEvent("download");
-  await bubble.getByTestId("file-save").click({ timeout: 60_000 });
+  await bubble.getByTestId("file-save").click();
   const download = await downloadPromise;
   const saved = readFileSync(await download.path());
   expect("3 MiB file intact after the transfer", createHash("sha256").update(saved).digest("hex"), BIG_SHA256);
@@ -178,6 +179,20 @@ try {
   }
   await b.page.getByTestId("wallet-test-balance").filter({ hasText: /^31 test sats/ }).waitFor({ timeout: 30_000 });
   ok("B requested 10 sats, A paid the request, both see it paid");
+
+  await a.page.getByTestId("wallet-history").click();
+  const txs = await a.page.getByTestId("wallet-tx").allTextContents();
+  expect("A's history lists the invoice and both payments", txs.length, 3);
+  // The test mint charges 100 ppk: each ecash payment costs A a sat or two, the Lightning receive nothing.
+  expect("every movement shows what it cost", [txs[2].includes("no fee"), /fee \d/.test(txs[1]), /fee \d/.test(txs[0])], [true, true, true]);
+  const feesPaid = Number((await a.page.getByTestId("wallet-fees-paid").textContent()).match(/(\d+) sats/)[1]);
+  const left = Number((await a.page.getByTestId("wallet-test-balance").textContent()).match(/^([\d,]+)/)[1].replace(",", ""));
+  expect("balance = received - sent - fees, to the sat", left, 100 - 21 - 10 - feesPaid);
+  await a.page.getByTestId("wallet-history").click();
+  await a.page.getByTestId("wallet-settings").click();
+  await a.page.getByTestId("mint-fees").filter({ hasText: "0.1 sat per proof" }).waitFor({ timeout: 30_000 });
+  ok("the mint's own fee schedule is shown");
+  await a.page.getByTestId("wallet-settings").click();
 
   step("Video call with the signaling Ghostly Desktop uses (_call)");
   await a.page.bringToFront();

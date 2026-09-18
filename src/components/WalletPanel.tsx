@@ -2,7 +2,7 @@ import { useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 
-type View = "closed" | "receive" | "send" | "mints";
+type View = "closed" | "receive" | "send" | "mints" | "history";
 
 const field =
   "w-full bg-input-bg rounded-lg px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent";
@@ -12,6 +12,26 @@ const secondary =
   "px-3 py-2 text-xs font-bold text-text-muted bg-surface-hover rounded-lg hover:text-text-secondary transition-colors cursor-pointer";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+const TX_LABEL = {
+  "lightning-in": "Received over Lightning",
+  "lightning-out": "Paid over Lightning",
+  "ecash-in": "Received ecash",
+  "ecash-out": "Sent ecash",
+  reclaimed: "Took a payment back",
+} as const;
+
+/** `input_fee_ppk` in words: a payment usually spends two to five proofs. */
+function describeInputFee(ppk: number): string {
+  if (ppk === 0) return "Spending ecash is free";
+  return `Spending ecash: ${ppk / 1000} sat per proof, rounded up (about 1 sat per payment)`;
+}
+
+function describeBounds(bounds: { min: number | null; max: number | null } | null): string {
+  if (!bounds) return "not offered";
+  const min = Math.max(1, bounds.min ?? 1).toLocaleString();
+  return bounds.max === null ? `from ${min} sat, no upper limit` : `${min} to ${bounds.max.toLocaleString()} sats`;
+}
 
 /**
  * Sidebar section: an ecash wallet. Sats are held by the mints the user picks,
@@ -83,7 +103,7 @@ export function WalletPanel() {
         </button>
       </div>
 
-      <div className="px-3 pb-3 space-y-2">
+      <div className="px-3 pb-3 space-y-2 max-h-[55vh] overflow-y-auto">
         {state.mints.length > 0 && (
           <div className="bg-surface-alt rounded-lg px-3 py-2 flex items-center justify-between gap-2">
             <p className="m-0 text-text-primary leading-tight">
@@ -98,6 +118,12 @@ export function WalletPanel() {
               )}
             </p>
             <div className="flex gap-1">
+              <button data-testid="wallet-history" className={view === "history" ? primary : secondary} onClick={() => open("history")} title="History and fees">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <polyline points="12 6 12 12 16 14" />
+                </svg>
+              </button>
               <button data-testid="wallet-receive" className={view === "receive" ? primary : secondary} onClick={() => open("receive")}>
                 Receive
               </button>
@@ -216,6 +242,41 @@ export function WalletPanel() {
           </div>
         )}
 
+        {view === "history" && (
+          <div className="bg-surface-alt rounded-lg p-3 space-y-2 animate-fade-in" data-testid="wallet-history-list">
+            <div className="flex items-center justify-between text-[11px] text-text-muted">
+              <span>{state.history.length === 0 ? "Nothing yet" : `Last ${state.history.length} movements`}</span>
+              <span data-testid="wallet-fees-paid">Fees paid so far: {state.feesPaid.toLocaleString()} sats</span>
+            </div>
+            <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1">
+              {state.history.map((tx) => {
+                const incoming = tx.kind === "lightning-in" || tx.kind === "ecash-in" || tx.kind === "reclaimed";
+                const mint = state.mints.find((m) => m.url === tx.mint);
+                return (
+                  <div key={tx.id} className="text-xs border-b border-border/60 pb-1.5 last:border-0" data-testid="wallet-tx">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-text-primary truncate">{TX_LABEL[tx.kind]}</span>
+                      <span className={`font-semibold shrink-0 ${incoming ? "text-accent" : "text-text-primary"}`}>
+                        {incoming ? "+" : "−"}
+                        {tx.amount.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex items-baseline justify-between gap-2 text-[11px] text-text-muted">
+                      <span className="truncate">
+                        {new Date(tx.timestamp).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                        {" · "}
+                        {mint?.name ?? new URL(tx.mint).hostname}
+                        {tx.note ? ` · ${tx.note}` : ""}
+                      </span>
+                      <span className={`shrink-0 ${tx.fee > 0 ? "text-yellow-500" : ""}`}>{tx.fee > 0 ? `fee ${tx.fee.toLocaleString()}` : "no fee"}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {(view === "mints" || state.mints.length === 0) && (
           <div className="bg-surface-alt rounded-lg p-3 space-y-2 animate-fade-in">
             <p className="text-text-muted text-[11px] leading-snug m-0">
@@ -224,7 +285,7 @@ export function WalletPanel() {
               the first mint.
             </p>
             {state.mints.map((mint, index) => (
-              <div key={mint.url} className="flex items-center justify-between gap-2 text-xs">
+              <div key={mint.url} className="flex items-start justify-between gap-2 text-xs">
                 <span className="min-w-0 flex-1">
                   <span className="text-text-primary block truncate">
                     {mint.name}
@@ -237,6 +298,15 @@ export function WalletPanel() {
                     )}
                   </span>
                   <span className="text-text-muted font-mono block truncate">{mint.url.replace(/^https?:\/\//, "")}</span>
+                  {mint.info ? (
+                    <span className="text-text-muted block text-[10px] leading-snug mt-0.5" data-testid="mint-fees">
+                      {describeInputFee(mint.info.inputFeePpk)}. Lightning in: {describeBounds(mint.info.receive)}, no mint
+                      fee. Lightning out: {describeBounds(mint.info.send)}, routing fee quoted before you pay.
+                      {mint.info.motd ? ` “${mint.info.motd}”` : ""}
+                    </span>
+                  ) : (
+                    <span className="text-text-muted block text-[10px] mt-0.5">Not reachable right now</span>
+                  )}
                 </span>
                 <span className="text-text-secondary shrink-0">{mint.balance.toLocaleString()} sats</span>
                 <button className="text-text-muted hover:text-danger cursor-pointer text-base leading-none" title="Remove mint" onClick={() => run(() => wallet.removeMint(mint.url))}>

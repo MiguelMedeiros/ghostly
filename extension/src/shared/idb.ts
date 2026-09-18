@@ -4,7 +4,7 @@
  * move between them without squeezing through runtime messages.
  */
 const DB_NAME = "ghostly";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 export const STORES = {
   links: "links",
@@ -15,6 +15,7 @@ export const STORES = {
   proofs: "proofs",
   payments: "payments",
   quotes: "quotes",
+  walletTx: "walletTx",
 } as const;
 
 /** A file's contents. Metadata travels with the chat message; this is only the bytes. */
@@ -42,6 +43,7 @@ export function openDb(): Promise<IDBDatabase> {
       if (!has(STORES.proofs)) db.createObjectStore(STORES.proofs, { keyPath: "secret" });
       if (!has(STORES.payments)) db.createObjectStore(STORES.payments, { keyPath: "id" });
       if (!has(STORES.quotes)) db.createObjectStore(STORES.quotes, { keyPath: "quote" });
+      if (!has(STORES.walletTx)) db.createObjectStore(STORES.walletTx, { keyPath: "id" });
       if (!has(STORES.files)) {
         db.createObjectStore(STORES.files, { keyPath: "id" }).createIndex("byLink", "linkId");
       }

@@ -38,9 +38,34 @@ export interface FileTransferState {
   error?: string;
 }
 
+export interface MintInfo {
+  version?: string;
+  motd?: string;
+  /** Fee for spending ecash, in sats per thousand proofs; 0 means free. */
+  inputFeePpk: number;
+  /** Lightning in / out: allowed amounts in sats. */
+  receive: { min: number | null; max: number | null } | null;
+  send: { min: number | null; max: number | null } | null;
+}
+
+export interface WalletTransaction {
+  id: string;
+  timestamp: number;
+  mint: string;
+  kind: "lightning-in" | "lightning-out" | "ecash-in" | "ecash-out" | "reclaimed";
+  /** Always positive; the kind gives the direction. */
+  amount: number;
+  /** What this movement cost, exactly. */
+  fee: number;
+  note?: string;
+}
+
 export interface WalletState {
-  mints: { url: string; name: string; balance: number }[];
+  mints: { url: string; name: string; balance: number; info: MintInfo | null }[];
   balance: number;
+  /** Newest first. */
+  history: WalletTransaction[];
+  feesPaid: number;
 }
 
 export interface ChatPayment {

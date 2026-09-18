@@ -148,7 +148,7 @@ export class PaymentDesk {
     if (quote.amount !== request.amount) throw new Error("The invoice does not match the requested amount");
     const feeLimit = Math.max(10, Math.ceil(request.amount * 0.03));
     if (quote.feeReserve > feeLimit) throw new Error(`The Lightning fee (${quote.feeReserve} sats) is too high`);
-    if (!(await this.wallet.payQuote(quote.quote, quote.mint))) throw new Error("The Lightning payment did not go through");
+    if (!(await this.wallet.payQuote(quote.quote, quote.mint, request.memo ?? "Paid a contact's request"))) throw new Error("The Lightning payment did not go through");
     await this.save({ ...request, state: "settled", mint: quote.mint });
   }
 
@@ -157,7 +157,7 @@ export class PaymentDesk {
     const payment = this.payments.get(paymentId);
     if (!payment?.token || payment.direction !== "out") throw new Error("Nothing to reclaim");
     try {
-      await this.wallet.receiveToken(payment.token);
+      await this.wallet.receiveToken(payment.token, "reclaimed", payment.memo);
       await this.save({ ...payment, state: "reclaimed", token: undefined });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -213,7 +213,7 @@ export class PaymentDesk {
     try {
       if (identifier !== ENDPOINT.cashu) throw new Error("Unsupported payment method");
       if (parseSats(payment.amount.value, payment.amount.asset) === null) throw new Error("Unsupported amount");
-      const { amount, mint } = await this.wallet.receiveToken(token);
+      const { amount, mint } = await this.wallet.receiveToken(token, "ecash-in", payment.memo);
 
       await this.save({
         id: payment.id,
@@ -287,7 +287,7 @@ export class PaymentDesk {
   ): Promise<string> {
     const id = newId();
     const memo = params.memo?.trim().slice(0, 140) || undefined;
-    const { token, mint } = await this.wallet.createToken(params.amount, params.mints);
+    const { token, mint } = await this.wallet.createToken(params.amount, params.mints, memo);
 
     // Written down before it leaves: from here on the token is the only copy of that money.
     await this.save({

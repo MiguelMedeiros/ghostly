@@ -85,11 +85,50 @@ export interface MintView {
   url: string;
   name: string;
   balance: number;
+  /** Null until the mint answered once. */
+  info: MintInfoView | null;
+}
+
+/** What a mint says about itself and what it charges. */
+export interface MintInfoView {
+  version?: string;
+  motd?: string;
+  /**
+   * Fee for spending ecash, in sats per thousand proofs (NUT-02). A swap,
+   * a redeem or a Lightning payment spends a handful of proofs and is charged
+   * the sum, rounded up. 0 means spending ecash is free.
+   */
+  inputFeePpk: number;
+  /** Lightning in and out: allowed amounts in sats, null when the mint sets no bound. */
+  receive: { min: number | null; max: number | null } | null;
+  send: { min: number | null; max: number | null } | null;
+}
+
+export type WalletTxKind =
+  | "lightning-in"
+  | "lightning-out"
+  | "ecash-in" // from a contact, or a pasted token
+  | "ecash-out"
+  | "reclaimed";
+
+/** One movement of the wallet. `fee` is exact: what left the balance beyond `amount`, or what a redeem cost. */
+export interface WalletTx {
+  id: string;
+  timestamp: number;
+  mint: string;
+  kind: WalletTxKind;
+  /** Sats that moved, always positive; the kind gives the direction. */
+  amount: number;
+  fee: number;
+  note?: string;
 }
 
 export interface WalletView {
   mints: MintView[];
   balance: number;
+  /** Newest first. */
+  history: WalletTx[];
+  feesPaid: number;
 }
 
 export interface StoredMessage {
