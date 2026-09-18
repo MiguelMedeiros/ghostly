@@ -65,17 +65,7 @@ export type CallState =
   | "connected"
   | "ended";
 
-export interface CallSignal {
-  t: "o" | "a" | "h";
-  ts: number;
-  u?: string;
-  p?: string;
-  f?: string;
-  s?: string;
-  m?: string[];
-  c?: string[];
-  ss?: number[];
-}
+export type { CallSignal } from "@ghostly/core";
 
 export interface ChatTechInfo {
   sessionId: string;
