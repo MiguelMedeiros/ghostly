@@ -199,7 +199,7 @@ export function MessageBubble({ message, peerAck = 0 }: MessageBubbleProps) {
       : "";
     
     return (
-      <div className="flex justify-center mb-[2px] px-[63px]">
+      <div className="flex justify-center mb-2 px-[63px]">
         <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-blue-500/10 text-blue-400">
           <svg
             width="14"
@@ -230,7 +230,7 @@ export function MessageBubble({ message, peerAck = 0 }: MessageBubbleProps) {
     const isMissed = type === "call_missed" || type === "call_rejected";
     
     return (
-      <div className="flex justify-center mb-[2px] px-[63px]">
+      <div className="flex justify-center mb-2 px-[63px]">
         <div
           className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs ${
             isMissed
@@ -263,7 +263,7 @@ export function MessageBubble({ message, peerAck = 0 }: MessageBubbleProps) {
 
   return (
     <div
-      className={`flex ${isMe ? "justify-end" : "justify-start"} mb-[2px] px-[63px]`}
+      className={`flex ${isMe ? "justify-end" : "justify-start"} mb-2 px-[63px]`}
       onDoubleClick={() => message.meta && setShowTech((v) => !v)}
     >
       <div
