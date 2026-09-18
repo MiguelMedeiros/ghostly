@@ -25,6 +25,9 @@ export const LIMITS = {
   /** Requests a client keeps in flight; the rest wait in a queue. */
   maxClientInFlight: 16,
   maxChatMessageBytes: 16 * 1024,
+  maxFileBytes: 100 * 1024 * 1024,
+  /** Files a peer may be sending us at once. */
+  maxIncomingFilesPerPeer: 3,
   requestTimeoutMs: 60_000,
   bodyIdleTimeoutMs: 30_000,
   /** Stop writing to the channel above this many buffered bytes. */
@@ -34,7 +37,7 @@ export const LIMITS = {
 
 export const PROTOCOL_VERSION = 1;
 
-export const CHUNK_KIND = { requestBody: 1, responseBody: 2 } as const;
+export const CHUNK_KIND = { requestBody: 1, responseBody: 2, fileBody: 3 } as const;
 export type ChunkKind = (typeof CHUNK_KIND)[keyof typeof CHUNK_KIND];
 
 export const CHUNK_FLAG_END = 1;
@@ -93,12 +96,25 @@ export interface HttpResponseFrame {
   b: boolean;
 }
 
+/** Announces a file; its bytes follow as `fileBody` chunks on stream `id`. */
+export interface FileFrame {
+  t: "file";
+  id: number;
+  /** File id chosen by the sender, unique within the link. */
+  f: string;
+  ts: number;
+  n: string;
+  /** Size in bytes. The transfer fails unless exactly this many arrive. */
+  s: number;
+  m: string;
+}
+
 /** Aborts a stream in either direction. */
 export interface ResetFrame {
   t: "rst";
   id: number;
-  /** Which side's stream: `q` a request I sent, `s` a response I am sending. */
-  d: "q" | "s";
+  /** Which stream: `q` a request I sent, `s` a response I am sending, `f` a file (either side). */
+  d: "q" | "s" | "f";
   e: string;
 }
 
@@ -114,6 +130,7 @@ export type ControlFrame =
   | ServicesFrame
   | HttpRequestFrame
   | HttpResponseFrame
+  | FileFrame
   | ResetFrame
   | PingFrame;
 
@@ -180,8 +197,13 @@ export function decodeControl(text: string): ControlFrame | null {
       if (!isStreamId(f.id) || typeof f.st !== "number" || !Number.isInteger(f.st)) return null;
       if (f.st < 100 || f.st > 599 || !isHeaderList(f.h)) return null;
       return { t: "res", id: f.id, st: f.st, h: f.h, b: f.b === true };
+    case "file":
+      if (!isStreamId(f.id) || typeof f.f !== "string" || typeof f.ts !== "number") return null;
+      if (typeof f.n !== "string" || typeof f.m !== "string") return null;
+      if (typeof f.s !== "number" || !Number.isSafeInteger(f.s) || f.s < 0) return null;
+      return { t: "file", id: f.id, f: f.f, ts: f.ts, n: f.n, s: f.s, m: f.m };
     case "rst":
-      if (!isStreamId(f.id) || (f.d !== "q" && f.d !== "s")) return null;
+      if (!isStreamId(f.id) || (f.d !== "q" && f.d !== "s" && f.d !== "f")) return null;
       return { t: "rst", id: f.id, d: f.d, e: typeof f.e === "string" ? f.e.slice(0, 256) : "" };
     case "ping":
     case "pong":
@@ -207,7 +229,7 @@ export function decodeChunk(data: Uint8Array): ChunkFrame | null {
   if (data.length < CHUNK_HEADER_BYTES || data.length > LIMITS.maxChunkMessageBytes) return null;
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const kind = view.getUint8(0);
-  if (kind !== CHUNK_KIND.requestBody && kind !== CHUNK_KIND.responseBody) return null;
+  if (kind !== CHUNK_KIND.requestBody && kind !== CHUNK_KIND.responseBody && kind !== CHUNK_KIND.fileBody) return null;
   return {
     kind,
     id: view.getUint32(1),

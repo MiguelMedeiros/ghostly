@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { FileBubble } from "./FileBubble";
 import type { ChatMessage } from "../lib/types";
 
 interface MessageBubbleProps {
@@ -294,7 +295,12 @@ export function MessageBubble({ message, peerAck = 0 }: MessageBubbleProps) {
           </div>
         )}
 
-        {contentType === "image" ? (
+        {message.file ? (
+          <div className="clearfix">
+            <FileBubble file={message.file} />
+            {timestampEl}
+          </div>
+        ) : contentType === "image" ? (
           <div className="relative">
             <img
               src={message.text.trim()}

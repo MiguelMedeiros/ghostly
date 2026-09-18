@@ -13,6 +13,21 @@ export interface StoredLink {
   inviteCode?: string;
 }
 
+/** A file attached to a message. The bytes live in the `files` store under `id`. */
+export interface MessageFile {
+  id: string;
+  name: string;
+  size: number;
+  mime: string;
+}
+
+export interface FileTransferView {
+  state: "transferring" | "done" | "failed";
+  transferred: number;
+  size: number;
+  error?: string;
+}
+
 export interface StoredMessage {
   linkId: string;
   id: string;
@@ -21,6 +36,7 @@ export interface StoredMessage {
   timestamp: number;
   via: "pkarr" | "datalink";
   nick?: string;
+  file?: MessageFile;
 }
 
 /** A local web application the user chose to share. */
@@ -78,4 +94,6 @@ export interface EngineState {
   transport: { protocol: string; relays: string[] };
   links: LinkView[];
   services: ServiceView[];
+  /** Transfers since the peer started, by file id. */
+  transfers: Record<string, FileTransferView>;
 }

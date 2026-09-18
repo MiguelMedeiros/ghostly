@@ -98,11 +98,15 @@ Sessions stay in `localStorage` exactly as on Desktop; `platform/sync.ts` keeps 
 
 **Relays.** Configurable in *Settings*. Every relay is published to, they are read in turn, and the newest packet with a valid signature wins, so no single relay is a dependency. Public relays allow about 120 requests a minute per IP address; Ghostly polls accordingly and connects peers over WebRTC as soon as both are online, after which Pkarr is only touched once a minute.
 
+## Sending files
+
+The paperclip next to the GIF button sends a file of up to 100 MiB straight to your contact over WebRTC; both of you have to be online. Images (PNG, JPEG, GIF, WebP) are previewed in the chat, everything else shows as a file with a save button, and nothing is ever opened automatically. File contents are kept in IndexedDB until the chat is deleted. Pages and the peer share that database, so the bytes never pass through extension messaging.
+
 ## Sharing a service
 
 - Nothing is exposed until you add it: a name and a target. Targets must be `localhost`, `127.0.0.1` or `[::1]`.
 - Chrome's own prompt grants the extension access to that host. Without it the extension cannot reach your machine at all.
-- Peers see the name and an id. They never see the address, and they cannot ask for one: a request names a service id and a path, and the peer maps the id to the target you configured. See [what the host guarantees](PROTOCOL.md#62-ghostly-http1).
+- Peers see the name and an id. They never see the address, and they cannot ask for one: a request names a service id and a path, and the peer maps the id to the target you configured. See [what the host guarantees](PROTOCOL.md#63-ghostly-http1).
 - A shared service is marked *Shared with your peers* and counts the requests it served. *Stop* makes its id stop resolving immediately.
 - Every peer you are linked with can use every service you share. There is no per-peer selection yet.
 
@@ -147,7 +151,7 @@ Does not work yet:
 ## Security notes
 
 - **Reachability.** Only linked peers, authenticated by the link key and their Pkarr signature; the WebRTC session is bound to that identity through the signed DTLS fingerprint.
-- **The proxy boundary.** Loopback-only targets, service ids instead of URLs, path confinement, no redirects off the target, no host credentials, header hygiene, and limits on body size, concurrency and time. The rules are in the [protocol](PROTOCOL.md#62-ghostly-http1) and covered by tests in `packages/core/test/http.test.ts`.
+- **The proxy boundary.** Loopback-only targets, service ids instead of URLs, path confinement, no redirects off the target, no host credentials, header hygiene, and limits on body size, concurrency and time. The rules are in the [protocol](PROTOCOL.md#63-ghostly-http1) and covered by tests in `packages/core/test/http.test.ts`.
 - **Remote code** runs in its own web origin, never in the extension's.
 - **Camera and microphone** are requested by the page when you place or answer a call, never in the background.
 - **Relays, STUN, TURN** see ciphertext only and hold no state about you.

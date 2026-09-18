@@ -18,6 +18,7 @@ import {
   type ClientRequest,
   type ClientResponse,
   type DataLinkState,
+  type FileSink,
   type HostedHttpService,
   type LinkParams,
   type LinkStatus,
@@ -25,7 +26,17 @@ import {
   type ServiceAd,
 } from "@ghostly/core";
 import type { EngineImplementation } from "../shared/rpc";
-import type { EngineState, LinkView, Settings, StoredLink, StoredMessage, StoredService } from "../shared/types";
+import { fileStore } from "../shared/idb";
+import type {
+  EngineState,
+  FileTransferView,
+  LinkView,
+  MessageFile,
+  Settings,
+  StoredLink,
+  StoredMessage,
+  StoredService,
+} from "../shared/types";
 import { db } from "./db";
 
 const DEFAULT_SETTINGS: Settings = { online: true, nick: "", relays: DEFAULT_RELAYS, iceServers: [] };
@@ -75,6 +86,7 @@ export class GhostlyNode implements EngineImplementation {
   private readonly links = new Map<string, LiveLink>();
   private services: StoredService[] = [];
   private readonly requestCounts = new Map<string, number>();
+  private readonly transfers = new Map<string, FileTransferView>();
   private stateTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly events: NodeEvents) {}
@@ -105,6 +117,7 @@ export class GhostlyNode implements EngineImplementation {
       services: this.services
         .map((s) => ({ ...s, requests: this.requestCounts.get(s.id) ?? 0 }))
         .sort((a, b) => a.createdAt - b.createdAt),
+      transfers: Object.fromEntries(this.transfers),
     };
   }
 
@@ -185,6 +198,85 @@ export class GhostlyNode implements EngineImplementation {
       this.emitState();
     }
     return { error };
+  }
+
+  /** Files are stored under `<link id>-<id on the wire>`, so one peer cannot overwrite another's. */
+  private static localFileId(linkId: string, wireId: string): string {
+    return `${linkId}-${wireId}`;
+  }
+
+  sendFile({ linkId, file, timestamp }: { linkId: string; file: MessageFile; timestamp: number }): void {
+    const live = this.links.get(linkId);
+    const fail = (error: string) => {
+      this.transfers.set(file.id, { state: "failed", transferred: 0, size: file.size, error });
+      this.emitState();
+    };
+    if (!live?.link) return fail("You are offline");
+    if (!file.id.startsWith(`${linkId}-`)) return fail("Invalid file id");
+    const { link } = live;
+
+    this.transfers.set(file.id, { state: "transferring", transferred: 0, size: file.size });
+    void this.storeMessage({
+      linkId,
+      id: `me_${timestamp}`,
+      text: `📎 ${file.name}`,
+      sender: "me",
+      timestamp,
+      via: "datalink",
+      file,
+    });
+
+    void (async () => {
+      const stored = await fileStore.get(file.id);
+      if (!stored) return fail("The file is gone");
+      const reader = stored.blob.stream().getReader();
+      const source = (async function* () {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) return;
+          yield value;
+        }
+      })();
+      await link.sendFile(
+        { id: file.id.slice(linkId.length + 1), name: file.name, size: file.size, mime: file.mime, timestamp },
+        source,
+      );
+    })().catch((error) => fail(error instanceof Error ? error.message : String(error)));
+  }
+
+  private receiveFile(linkId: string, wire: { id: string; name: string; size: number; mime: string; timestamp: number }): FileSink {
+    const file: MessageFile = { ...wire, id: GhostlyNode.localFileId(linkId, wire.id) };
+    const chunks: Uint8Array[] = [];
+    this.transfers.set(file.id, { state: "transferring", transferred: 0, size: file.size });
+    void this.storeMessage({
+      linkId,
+      id: `peer_${wire.timestamp}`,
+      text: `📎 ${file.name}`,
+      sender: "peer",
+      timestamp: wire.timestamp,
+      via: "datalink",
+      file: { id: file.id, name: file.name, size: file.size, mime: file.mime },
+    });
+    return {
+      write: (chunk) => void chunks.push(chunk),
+      close: () =>
+        fileStore.put({ id: file.id, linkId, blob: new Blob(chunks as BlobPart[], { type: file.mime }), createdAt: Date.now() }),
+      abort: () => void (chunks.length = 0),
+    };
+  }
+
+  private fileProgress(fileId: string, transferred: number): void {
+    const transfer = this.transfers.get(fileId);
+    if (!transfer || transfer.state !== "transferring") return;
+    transfer.transferred = transferred;
+    this.emitState(250);
+  }
+
+  private fileSettled(fileId: string, error?: string): void {
+    const transfer = this.transfers.get(fileId);
+    if (!transfer) return;
+    this.transfers.set(fileId, error ? { ...transfer, state: "failed", error } : { ...transfer, state: "done", transferred: transfer.size });
+    this.emitState();
   }
 
   connect({ linkId }: { linkId: string }): void {
@@ -380,6 +472,10 @@ export class GhostlyNode implements EngineImplementation {
           });
         },
         onCallSignal: (signal) => this.events.onCallSignal(linkId, signal),
+        onFileIncoming: (file) => this.receiveFile(linkId, file),
+        onFileProgress: (id, transferred) => this.fileProgress(GhostlyNode.localFileId(linkId, id), transferred),
+        onFileComplete: (id) => this.fileSettled(GhostlyNode.localFileId(linkId, id)),
+        onFileFailed: (id, reason) => this.fileSettled(GhostlyNode.localFileId(linkId, id), reason),
       },
     });
     live.link.start();
@@ -421,11 +517,11 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** State changes arrive in bursts; the UI gets one snapshot per tick. */
-  private emitState(): void {
+  private emitState(delayMs = 50): void {
     if (this.stateTimer) return;
     this.stateTimer = setTimeout(() => {
       this.stateTimer = null;
       this.events.onState(this.getState());
-    }, 50);
+    }, delayMs);
   }
 }

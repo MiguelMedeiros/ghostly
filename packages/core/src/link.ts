@@ -238,8 +238,9 @@ export class LinkSession {
       // The message stays in the buffer; keep trying instead of losing it.
       if (this.publishRetryTimer) clearTimeout(this.publishRetryTimer);
       this.publishRetryTimer = setTimeout(() => void this.publish().catch(() => {}), PUBLISH_RETRY_MS);
+      // Not an error for the sender: it is queued, and the connection status shows the trouble.
       this.events.onStatus?.("error");
-      return "Could not reach the network. Ghostly keeps trying to deliver the message.";
+      return null;
     }
     this.pollNow();
     return null;

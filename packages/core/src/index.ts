@@ -15,3 +15,4 @@ export * from "./http";
 export * from "./link";
 export * from "./datalink";
 export * from "./ghostlink";
+export * from "./files";

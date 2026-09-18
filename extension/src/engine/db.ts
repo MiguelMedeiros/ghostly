@@ -1,3 +1,4 @@
+import { STORES, fileStore, store, wrap } from "../shared/idb";
 import type { Settings, StoredLink, StoredMessage, StoredService } from "../shared/types";
 
 /**
@@ -5,40 +6,6 @@ import type { Settings, StoredLink, StoredMessage, StoredService } from "../shar
  * way Desktop keeps them in its WebView storage: local to this profile, never
  * published. Network presence is not stored; it only exists while the engine runs.
  */
-const DB_NAME = "ghostly";
-const DB_VERSION = 1;
-const STORES = { links: "links", messages: "messages", services: "services", settings: "settings" } as const;
-
-let dbPromise: Promise<IDBDatabase> | null = null;
-
-function openDb(): Promise<IDBDatabase> {
-  dbPromise ??= new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      db.createObjectStore(STORES.links, { keyPath: "id" });
-      db.createObjectStore(STORES.services, { keyPath: "id" });
-      db.createObjectStore(STORES.settings);
-      const messages = db.createObjectStore(STORES.messages, { keyPath: ["linkId", "id"] });
-      messages.createIndex("byLink", "linkId");
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-  return dbPromise;
-}
-
-function wrap<T>(request: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-async function store(name: string, mode: IDBTransactionMode): Promise<IDBObjectStore> {
-  return (await openDb()).transaction(name, mode).objectStore(name);
-}
-
 export const db = {
   async getLinks(): Promise<StoredLink[]> {
     return wrap((await store(STORES.links, "readonly")).getAll());
@@ -51,6 +18,7 @@ export const db = {
     const messages = await store(STORES.messages, "readwrite");
     const keys = await wrap(messages.index("byLink").getAllKeys(linkId));
     await Promise.all(keys.map((key) => wrap(messages.delete(key))));
+    await fileStore.deleteForLink(linkId);
   },
 
   async getMessages(linkId: string): Promise<StoredMessage[]> {

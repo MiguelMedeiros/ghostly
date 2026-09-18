@@ -38,6 +38,7 @@ export function toChatMessage(message: StoredMessage, peerPubKeyZ32: string): Ch
     sender: isJoin ? "system" : message.sender,
     timestamp: message.timestamp,
     nick: message.nick,
+    file: message.file,
     meta: {
       dhtKey: peerPubKeyZ32,
       encryptedPayloadLength: 0,

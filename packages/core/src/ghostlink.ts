@@ -8,6 +8,7 @@ import {
   encodeControl,
   type FrameChannel,
 } from "./frames";
+import { FileTransfers, type FileInfo, type FileSink } from "./files";
 import {
   HttpClient,
   HttpHost,
@@ -47,6 +48,11 @@ export interface GhostLinkEvents {
   onStatus?(status: LinkStatus): void;
   onDataLinkState?(state: DataLinkState): void;
   onPoll?(poll: { polling: boolean; nextInMs: number }): void;
+  /** The peer is sending a file. Return where to put it, or null to refuse. */
+  onFileIncoming?(file: FileInfo): FileSink | null;
+  onFileProgress?(fileId: string, transferred: number, direction: "in" | "out"): void;
+  onFileComplete?(fileId: string, direction: "in" | "out"): void;
+  onFileFailed?(fileId: string, reason: string, direction: "in" | "out"): void;
 }
 
 export interface GhostLinkOptions {
@@ -77,6 +83,7 @@ export class GhostLink {
   private channel: FrameChannel | null = null;
   private httpHost: HttpHost | null = null;
   private httpClient: HttpClient | null = null;
+  private files: FileTransfers | null = null;
   private peerServicesOverride: ServiceAd[] | null = null;
   private openWaiters: { resolve: () => void; reject: (e: Error) => void }[] = [];
   private lastAutoConnectAt = 0;
@@ -198,6 +205,13 @@ export class GhostLink {
     return this.httpClient.request(serviceId, request);
   }
 
+  /** Sends a file over the data link, opening it first if needed. Files never travel through Pkarr. */
+  async sendFile(file: FileInfo, source: AsyncIterable<Uint8Array>): Promise<void> {
+    await this.connect();
+    if (!this.files) throw new GhostlyHttpError("closed", "Data link is closed");
+    await this.files.send(file, source);
+  }
+
   /** Call after the set of shared services changed. */
   async refreshServices(): Promise<void> {
     if (this.channel) {
@@ -228,6 +242,13 @@ export class GhostLink {
     this.channel = channel;
     this.httpClient = new HttpClient(channel);
     this.httpHost = new HttpHost(channel, this.options.getHostedHttpService, this.options.localFetch);
+    const events = this.options.events ?? {};
+    this.files = new FileTransfers(channel, {
+      onIncoming: (file) => events.onFileIncoming?.(file) ?? null,
+      onProgress: (id, transferred, direction) => events.onFileProgress?.(id, transferred, direction),
+      onComplete: (id, direction) => events.onFileComplete?.(id, direction),
+      onFailed: (id, reason, direction) => events.onFileFailed?.(id, reason, direction),
+    });
     this.session.setDataLinkOpen(true);
 
     channel.onMessage = (data) => this.handleFrame(data);
@@ -250,7 +271,8 @@ export class GhostLink {
   private detach(): void {
     this.httpHost?.closeAll();
     this.httpClient?.close();
-    this.channel = this.httpHost = this.httpClient = null;
+    this.files?.closeAll();
+    this.channel = this.httpHost = this.httpClient = this.files = null;
     this.peerServicesOverride = null;
     this.session.setDataLinkOpen(false);
     this.options.events?.onPresence?.(this.presence);
@@ -265,7 +287,8 @@ export class GhostLink {
       const chunk = decodeChunk(data);
       if (!chunk) return;
       if (chunk.kind === CHUNK_KIND.requestBody) this.httpHost?.handleChunk(chunk);
-      else this.httpClient?.handleChunk(chunk);
+      else if (chunk.kind === CHUNK_KIND.responseBody) this.httpClient?.handleChunk(chunk);
+      else this.files?.handleChunk(chunk);
       return;
     }
 
@@ -293,9 +316,13 @@ export class GhostLink {
       case "res":
         this.httpClient?.handleResponse(frame);
         break;
+      case "file":
+        this.files?.handleFile(frame);
+        break;
       case "rst":
         if (frame.d === "q") this.httpHost?.handleReset(frame);
-        else this.httpClient?.handleReset(frame);
+        else if (frame.d === "s") this.httpClient?.handleReset(frame);
+        else this.files?.handleReset(frame);
         break;
       case "ping":
         try {

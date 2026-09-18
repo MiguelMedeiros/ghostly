@@ -1,4 +1,4 @@
-import type { EngineState, Settings, StoredMessage } from "./types";
+import type { EngineState, MessageFile, Settings, StoredMessage } from "./types";
 
 /** UI → engine calls, carried over a `chrome.runtime` port named `ui`. */
 export interface EngineApi {
@@ -13,6 +13,8 @@ export interface EngineApi {
   sendMessage(params: { linkId: string; text: string; timestamp?: number }): { error: string | null };
   /** Link secrets, for a UI that keeps its own session list in the same profile. */
   exportLinks(): { seedB64: string; peerPubKeyZ32: string; encKeyB64: string; createdAt: number; inviteCode?: string; label?: string }[];
+  /** Sends a file whose bytes the caller already put in the `files` store. Progress shows up in `transfers`. */
+  sendFile(params: { linkId: string; file: MessageFile; timestamp: number }): void;
   connect(params: { linkId: string }): void;
   disconnect(params: { linkId: string }): void;
   addService(params: { name: string; target: string }): { serviceId: string };

@@ -1,5 +1,6 @@
-import { DEFAULT_RELAYS, parseLocalTarget } from "@ghostly/core";
+import { DEFAULT_RELAYS, LIMITS, parseLocalTarget, sanitizeFileName, sanitizeMime, toBase64Url, randomBytes } from "@ghostly/core";
 import type { ServicesPlatform } from "../../../src/lib/platform";
+import { fileStore } from "../shared/idb";
 import type { RuntimeMessage } from "../shared/rpc";
 import { engine } from "./engine";
 
@@ -40,6 +41,28 @@ export const servicesPlatform: ServicesPlatform | null = {
     } satisfies RuntimeMessage);
     if (!reply?.ok) throw new Error(reply?.error ?? "Could not open the service");
   },
+
+  maxFileBytes: LIMITS.maxFileBytes,
+
+  async sendFile(peerPubKeyZ32, source) {
+    const link = engine.linkByPeer(peerPubKeyZ32);
+    if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
+    if (source.size > LIMITS.maxFileBytes) throw new Error("That file is too large to send");
+
+    const file = {
+      id: `${link.id}-${toBase64Url(randomBytes(12))}`,
+      name: sanitizeFileName(source.name),
+      size: source.size,
+      mime: sanitizeMime(source.type),
+    };
+    // The page and the peer share this database; the bytes never go through a message.
+    await fileStore.put({ id: file.id, linkId: link.id, blob: source, createdAt: Date.now() });
+    const timestamp = Date.now();
+    await engine.call("sendFile", { linkId: link.id, file, timestamp });
+    return { timestamp, file };
+  },
+  getTransfer: (fileId) => engine.state?.transfers[fileId] ?? null,
+  getFile: async (fileId) => (await fileStore.get(fileId))?.blob ?? null,
 
   getNetwork() {
     const state = engine.state;

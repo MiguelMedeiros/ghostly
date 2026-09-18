@@ -9,6 +9,8 @@ import { CallOverlay } from "../components/CallOverlay";
 import { IncomingCallNotification } from "../components/IncomingCallNotification";
 import { PollCountdown } from "../components/PollCountdown";
 import { PeerServices } from "../components/PeerServices";
+import { formatFileSize } from "../lib/format";
+import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import {
   markSessionAsRead,
   generateSessionId,
@@ -106,6 +108,26 @@ export function Chat() {
       return false;
     }
   })();
+
+  const platform = useServicesPlatform();
+  const peerKey = params?.peerPubKeyB64;
+  const sendFile = useCallback(
+    async (source: File): Promise<string | null> => {
+      if (!platform || !peerKey) return null;
+      if (source.size > platform.maxFileBytes) {
+        return `That file is too large (max ${formatFileSize(platform.maxFileBytes)}).`;
+      }
+      try {
+        const { timestamp, file } = await platform.sendFile(peerKey, source);
+        addSystemMessage({ id: `me_${timestamp}`, text: `📎 ${file.name}`, sender: "me", timestamp, file });
+        window.dispatchEvent(new Event("session-updated"));
+        return null;
+      } catch (e) {
+        return e instanceof Error ? e.message : String(e);
+      }
+    },
+    [platform, peerKey, addSystemMessage],
+  );
 
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
@@ -523,7 +545,7 @@ export function Chat() {
       </div>
 
       {/* Input */}
-      <MessageInput key={splat} onSend={sendMessage} disabled={isSending} />
+      <MessageInput key={splat} onSend={sendMessage} disabled={isSending} onSendFile={platform ? sendFile : undefined} />
 
       {/* Incoming call notification */}
       {webrtc.callState === "incoming" && (

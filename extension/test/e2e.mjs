@@ -5,12 +5,13 @@
  *
  *   npm run build -w @ghostly/extension && npm run test:e2e -w @ghostly/extension
  */
+import { createHash } from "node:crypto";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { BIG_SHA256, startAtlas } from "./atlas.mjs";
+import { BIG, BIG_SHA256, startAtlas } from "./atlas.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const work = mkdtempSync(join(tmpdir(), "ghostly-e2e-"));
@@ -126,6 +127,22 @@ try {
   await say(a, "boo back over WebRTC");
   await b.page.getByText("boo back over WebRTC").first().waitFor({ timeout: 10_000 });
   ok("B received A's message over WebRTC");
+
+  step("A file, peer to peer");
+  const filePath = join(work, "haunted house.bin");
+  writeFileSync(filePath, BIG);
+  await a.page.getByTestId("file-input").setInputFiles(filePath);
+  const bubble = b.page.getByTestId("file-bubble").filter({ hasText: "haunted house.bin" });
+  await bubble.waitFor({ timeout: 30_000 });
+  ok("B sees the file arriving");
+  const downloadPromise = b.page.waitForEvent("download");
+  await bubble.getByTestId("file-save").click({ timeout: 60_000 });
+  const download = await downloadPromise;
+  const saved = readFileSync(await download.path());
+  expect("3 MiB file intact after the transfer", createHash("sha256").update(saved).digest("hex"), BIG_SHA256);
+  expect("suggested name", download.suggestedFilename(), "haunted house.bin");
+  await a.page.getByTestId("file-bubble").getByTestId("file-status").filter({ hasText: "3.0 MB" }).waitFor();
+  ok("A shows the file as sent");
 
   step("Video call with the signaling Ghostly Desktop uses (_call)");
   await a.page.bringToFront();

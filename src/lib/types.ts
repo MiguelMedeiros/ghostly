@@ -13,6 +13,14 @@ export type SystemEventType =
   | "join"
   | "call";
 
+/** A file sent over the peer-to-peer link. The bytes are kept by the platform under `id`. */
+export interface ChatFile {
+  id: string;
+  name: string;
+  size: number;
+  mime: string;
+}
+
 export interface ChatMessage {
   id: string;
   text: string;
@@ -20,6 +28,7 @@ export interface ChatMessage {
   timestamp: number;
   nick?: string;
   meta?: MessageMeta;
+  file?: ChatFile;
   systemEvent?: {
     type: SystemEventType;
     pubKey?: string;

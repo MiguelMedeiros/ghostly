@@ -110,7 +110,7 @@ Text messages are **control frames**, compact JSON with a `t` discriminator. Bin
 
 ```
 <kind u8> <stream id u32 BE> <flags u8> <payload>
-kind   1 = request body, 2 = response body
+kind   1 = request body, 2 = response body, 3 = file
 flags  bit 0 = END
 ```
 
@@ -126,7 +126,21 @@ A DataChannel message is at most 16 KiB (16378 bytes of payload per chunk), a co
 | `{ "t": "call", "s": "<_call signal JSON>" }` | call signaling, in addition to `_call` |
 | `{ "t": "ping" \| "pong", "ts" }` | liveness |
 
-### 6.2 `ghostly-http/1`
+### 6.2 Files
+
+```
+→ { "t": "file", "id": 3, "f": "Zk3v…", "ts": 1789712672369, "n": "floor plan.pdf", "s": 482113, "m": "application/pdf" }
+→ chunk(kind 3, id 3) … chunk(kind 3, id 3, END)
+```
+
+`f` is the sender's id for the file (`[A-Za-z0-9_-]{8,64}`), `n` its name, `s` its size in bytes, `m` its media type. The bytes follow as chunks of kind 3. Files only travel over the data link, never through Pkarr, so both peers have to be online.
+
+- The receiver keeps the file only if exactly `s` bytes arrived before END. More, fewer, or 30 s of silence discard it.
+- `{ "t": "rst", "id", "d": "f", "e" }` cancels a transfer from either side; a receiver that does not want the file answers the `file` frame with it.
+- Limits: 100 MiB per file, 3 incoming files per peer at a time.
+- The name is display text and a download suggestion, never a path: path separators, control characters and leading dots are removed, 200 characters at most. An unparseable media type becomes `application/octet-stream`. Receivers store files under their own ids, never the sender's, and must not open or execute what they received on their own.
+
+### 6.3 `ghostly-http/1`
 
 ```
 → { "t": "req", "id": 7, "s": "atlas", "m": "POST", "p": "/api/items?x=1", "h": [["content-type","application/json"]], "b": true }
