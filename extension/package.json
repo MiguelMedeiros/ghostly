@@ -1,0 +1,37 @@
+{
+  "name": "@ghostly/extension",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "description": "Ghostly Browser: an ephemeral Ghostly peer as a Chromium extension",
+  "scripts": {
+    "dev": "vite build --watch --mode development",
+    "build": "tsc --noEmit -p tsconfig.json && vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:e2e": "node test/e2e.mjs"
+  },
+  "dependencies": {
+    "@emoji-mart/data": "^1.2.1",
+    "@emoji-mart/react": "^1.1.1",
+    "@ghostly/core": "*",
+    "@ghostly/react": "*",
+    "@tauri-apps/api": "^2.11.1",
+    "emoji-mart": "^5.6.0",
+    "qrcode.react": "^4.2.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-router-dom": "^7.13.0",
+    "@ghostly/browser": "*"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.2.0",
+    "@types/chrome": "^0.3.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.4",
+    "playwright": "^1.58.2",
+    "tailwindcss": "^4.2.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
+  }
+}

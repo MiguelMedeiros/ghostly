@@ -8,6 +8,10 @@ import { MessageInput } from "../components/MessageInput";
 import { CallOverlay } from "../components/CallOverlay";
 import { IncomingCallNotification } from "../components/IncomingCallNotification";
 import { PollCountdown } from "../components/PollCountdown";
+import { PeerServices } from "../components/PeerServices";
+import { formatFileSize } from "../lib/format";
+import { playSound, startRinging } from "../lib/sounds";
+import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import {
   markSessionAsRead,
   generateSessionId,
@@ -96,6 +100,16 @@ export function Chat() {
     addCallEventMessage,
   });
 
+  const callState = webrtc.callState;
+  const previousCallState = useRef(callState);
+  useEffect(() => {
+    const before = previousCallState.current;
+    previousCallState.current = callState;
+    if (callState === "incoming") return startRinging("ring");
+    if (callState === "offering") return startRinging("ringback");
+    if (callState === "idle" && before !== "idle") playSound("hangup");
+  }, [callState]);
+
   const incomingHasVideo = (() => {
     if (!incomingCallSignal) return false;
     try {
@@ -105,6 +119,46 @@ export function Chat() {
       return false;
     }
   })();
+
+  const platform = useServicesPlatform();
+  const peerKey = params?.peerPubKeyB64;
+  const sendFile = useCallback(
+    async (source: File): Promise<string | null> => {
+      if (!platform || !peerKey) return null;
+      if (source.size > platform.maxFileBytes) {
+        return `That file is too large (max ${formatFileSize(platform.maxFileBytes)}).`;
+      }
+      try {
+        const { timestamp, file } = await platform.sendFile(peerKey, source);
+        addSystemMessage({ id: `me_${timestamp}`, text: `📎 ${file.name}`, sender: "me", timestamp, file });
+        window.dispatchEvent(new Event("session-updated"));
+        return null;
+      } catch (e) {
+        return e instanceof Error ? e.message : String(e);
+      }
+    },
+    [platform, peerKey, addSystemMessage],
+  );
+
+  const wallet = platform?.wallet;
+  const walletState = wallet?.getState() ?? null;
+  const pay = useCallback(
+    async (kind: "send" | "request", amount: number, memo: string): Promise<string | null> => {
+      if (!wallet || !peerKey) return null;
+      try {
+        const { timestamp, paymentId } = await wallet[kind](peerKey, amount, memo || undefined);
+        const text = kind === "send" ? `⚡ ${amount.toLocaleString()} sats` : `⚡ Requested ${amount.toLocaleString()} sats`;
+        addSystemMessage({ id: `me_${timestamp}`, text, sender: "me", timestamp, paymentId });
+        window.dispatchEvent(new Event("session-updated"));
+        return null;
+      } catch (e) {
+        return e instanceof Error ? e.message : String(e);
+      }
+    },
+    [wallet, peerKey, addSystemMessage],
+  );
+  const paySend = useCallback((amount: number, memo: string) => pay("send", amount, memo), [pay]);
+  const payRequest = useCallback((amount: number, memo: string) => pay("request", amount, memo), [pay]);
 
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
@@ -480,6 +534,8 @@ export function Chat() {
         </div>
       </div>
 
+      <PeerServices peerPubKey={params.peerPubKeyB64} />
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto chat-wallpaper">
         <div className="max-w-3xl mx-auto py-3">
@@ -513,14 +569,24 @@ export function Chat() {
             </div>
           )}
           {messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} peerAck={peerAck} />
+            <MessageBubble key={msg.id} message={msg} peerAck={peerAck} peerPubKey={params.peerPubKeyB64} />
           ))}
           <div ref={bottomRef} />
         </div>
       </div>
 
       {/* Input */}
-      <MessageInput key={splat} onSend={sendMessage} disabled={isSending} />
+      <MessageInput
+        key={splat}
+        onSend={sendMessage}
+        disabled={isSending}
+        onSendFile={platform ? sendFile : undefined}
+        payments={
+          walletState && walletState.mints.length > 0
+            ? { balance: walletState.balance, onSend: paySend, onRequest: payRequest }
+            : undefined
+        }
+      />
 
       {/* Incoming call notification */}
       {webrtc.callState === "incoming" && (

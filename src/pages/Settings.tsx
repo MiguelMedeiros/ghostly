@@ -4,6 +4,7 @@ import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
 import { useLockScreen } from "../contexts/LockScreenContext";
 import { getVersion } from "@tauri-apps/api/app";
+import { NetworkSettings } from "../components/NetworkSettings";
 import {
   hashPassword,
   verifyPassword,
@@ -22,7 +23,9 @@ import {
 
 export function Settings() {
   const navigate = useNavigate();
-  const { settings, updateColorScheme, updateColorTheme, updateLanguage, updateLockScreen, updateNotifications, updateDefaultNickname, randomizeNickname } =
+  const { settings, updateColorScheme, updateColorTheme, updateLanguage, updateLockScreen, updateNotifications, updateDefaultNickname,
+    updateGiphyApiKey,
+    updateReduceMotion, randomizeNickname } =
     useSettings();
   const { t } = useI18n();
   const { lock } = useLockScreen();
@@ -233,6 +236,22 @@ export function Settings() {
                     </svg>
                   </button>
                 </div>
+              </div>
+
+              <div className="space-y-2 border-t border-border pt-4">
+                <label className="text-text-primary block font-medium">Giphy API key (optional)</label>
+                <p className="text-text-muted text-xs">
+                  GIFs work with the key built into Ghostly. Use your own if you prefer, or if you built the app
+                  yourself: create a free "API" key at developers.giphy.com. It is stored on this device only.
+                </p>
+                <input
+                  type="text"
+                  value={settings.giphyApiKey}
+                  onChange={(e) => updateGiphyApiKey(e.target.value)}
+                  placeholder="Using the built-in key"
+                  spellCheck={false}
+                  className="w-full px-3 py-2 bg-input-bg border border-border rounded-lg text-text-primary placeholder-text-muted font-mono text-sm focus:outline-none focus:border-accent transition-colors"
+                />
               </div>
             </div>
           </section>
@@ -563,8 +582,31 @@ export function Settings() {
                   />
                 </button>
               </div>
+
+              <div className="flex items-center justify-between border-t border-border pt-4">
+                <div>
+                  <label className="text-text-primary block">Reduce motion</label>
+                  <p className="text-sm text-text-muted">
+                    Turn off animations for messages, payments and calls. Your system's setting is respected either way.
+                  </p>
+                </div>
+                <button
+                  onClick={() => updateReduceMotion(!settings.reduceMotion)}
+                  className={`relative w-12 h-6 rounded-full transition-colors shrink-0 ${
+                    settings.reduceMotion ? "bg-accent" : "bg-surface-alt"
+                  }`}
+                >
+                  <span
+                    className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${
+                      settings.reduceMotion ? "translate-x-6" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
             </div>
           </section>
+
+          <NetworkSettings />
 
           {/* Data & Storage Section */}
           <section className="space-y-4">

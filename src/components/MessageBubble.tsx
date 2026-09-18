@@ -1,14 +1,20 @@
 import React, { useState } from "react";
+import { FileBubble } from "./FileBubble";
+import { PaymentBubble } from "./PaymentBubble";
 import type { ChatMessage } from "../lib/types";
 
 interface MessageBubbleProps {
   message: ChatMessage;
   peerAck?: number;
+  /** Needed by payment bubbles, which can act on a request. */
+  peerPubKey?: string;
 }
 
 const IMAGE_URL_RE =
   /^https?:\/\/\S+\.(gif|png|jpe?g|webp)(\?\S*)?$/i;
 const GIPHY_RE = /^https?:\/\/media\d*\.giphy\.com\//i;
+/** GeoCities GIFs from the Wayback Machine (the picker's "Retro" source): tiny pixel art. */
+const WAYBACK_GIF_RE = /^https:\/\/web\.archive\.org\/web\/\d+\/\S+\.gif$/i;
 const DATA_IMAGE_SAFE_RE = /^data:image\/(png|jpe?g|gif|webp);/i;
 const URL_RE = /https?:\/\/\S+/g;
 
@@ -182,7 +188,15 @@ function formatDuration(ms: number): string {
   return `${minutes}m ${seconds}s`;
 }
 
-export function MessageBubble({ message, peerAck = 0 }: MessageBubbleProps) {
+export function MessageBubble({ message, peerAck = 0, peerPubKey = "" }: MessageBubbleProps) {
+  // Only what arrives while you watch moves; history is just there.
+  const [enter] = useState(() =>
+    Date.now() - message.timestamp < 5000
+      ? message.sender === "me"
+        ? " animate-bubble-in-right"
+        : " animate-bubble-in-left"
+      : "",
+  );
   const [showTech, setShowTech] = useState(false);
   const [imgError, setImgError] = useState(false);
   const isMe = message.sender === "me";
@@ -199,7 +213,7 @@ export function MessageBubble({ message, peerAck = 0 }: MessageBubbleProps) {
       : "";
     
     return (
-      <div className="flex justify-center mb-[2px] px-[63px]">
+      <div className={`flex justify-center mb-3.5 px-[63px]${enter}`}>
         <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-blue-500/10 text-blue-400">
           <svg
             width="14"
@@ -230,7 +244,7 @@ export function MessageBubble({ message, peerAck = 0 }: MessageBubbleProps) {
     const isMissed = type === "call_missed" || type === "call_rejected";
     
     return (
-      <div className="flex justify-center mb-[2px] px-[63px]">
+      <div className={`flex justify-center mb-3.5 px-[63px]${enter}`}>
         <div
           className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs ${
             isMissed
@@ -263,7 +277,7 @@ export function MessageBubble({ message, peerAck = 0 }: MessageBubbleProps) {
 
   return (
     <div
-      className={`flex ${isMe ? "justify-end" : "justify-start"} mb-[2px] px-[63px]`}
+      className={`flex ${isMe ? "justify-end" : "justify-start"} mb-3.5 px-[63px]${enter}`}
       onDoubleClick={() => message.meta && setShowTech((v) => !v)}
     >
       <div
@@ -292,12 +306,23 @@ export function MessageBubble({ message, peerAck = 0 }: MessageBubbleProps) {
           </div>
         )}
 
-        {contentType === "image" ? (
+        {message.paymentId ? (
+          <div className="clearfix">
+            <PaymentBubble paymentId={message.paymentId} peerPubKey={peerPubKey} fallbackText={message.text} />
+            {timestampEl}
+          </div>
+        ) : message.file ? (
+          <div className="clearfix">
+            <FileBubble file={message.file} />
+            {timestampEl}
+          </div>
+        ) : contentType === "image" ? (
           <div className="relative">
             <img
               src={message.text.trim()}
               alt=""
               className="rounded-[4px] max-w-[330px] min-w-[120px] max-h-[330px] object-contain block"
+              style={WAYBACK_GIF_RE.test(message.text.trim()) ? { imageRendering: "pixelated" } : undefined}
               loading="lazy"
               onError={() => setImgError(true)}
             />

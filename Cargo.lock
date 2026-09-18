@@ -1447,22 +1447,25 @@ dependencies = [
 
 [[package]]
 name = "ghostly"
-version = "0.1.4"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "crypto_secretbox",
  "pkarr",
  "rand 0.8.7",
+ "reqwest",
  "serde",
  "serde_json",
  "simple-dns",
  "tauri",
  "tauri-build",
+ "tokio",
+ "url",
 ]
 
 [[package]]
 name = "ghostly-cli"
-version = "0.1.4"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "clap",

@@ -95,6 +95,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Baked into the frontend by Vite; GIFs work out of the box. Users can still set their own in Settings.
+          VITE_GIPHY_API_KEY: ${{ secrets.VITE_GIPHY_API_KEY }}
         with:
           args: ${{ matrix.args }}
 
@@ -180,8 +182,83 @@ jobs:
   # ============================================
   # Create GitHub Release
   # ============================================
+  # ============================================
+  # Ghostly Browser (Chromium extension)
+  # ============================================
+  build-extension:
+    runs-on: ubuntu-latest
+    name: Build browser extension
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        env:
+          VITE_GIPHY_API_KEY: ${{ secrets.VITE_GIPHY_API_KEY }}
+        run: npm run build:extension
+
+      - name: Package
+        run: |
+          VERSION=$(node -p "require('./extension/public/manifest.json').version")
+          cd extension/dist
+          zip -r "../../ghostly-browser-extension-${VERSION}.zip" .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension
+          path: ghostly-browser-extension-*.zip
+
+  # ============================================
+  # Ghostly on the web (container image)
+  # ============================================
+  build-web:
+    runs-on: ubuntu-latest
+    name: Build web image
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to the GitHub container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ghostly-web" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: web/Dockerfile
+          push: true
+          build-args: |
+            VITE_GIPHY_API_KEY=${{ secrets.VITE_GIPHY_API_KEY }}
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ github.ref_name }}
+            ${{ steps.image.outputs.name }}:latest
+
   release:
-    needs: [build-tauri, build-cli]
+    needs: [build-tauri, build-cli, build-extension]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
@@ -206,6 +283,9 @@ jobs:
           # Tauri apps
           find artifacts/tauri-* -type f \( -name "*.dmg" -o -name "*.deb" -o -name "*.AppImage" -o -name "*.msi" -o -name "*.exe" \) -exec cp {} release-assets/ \;
           
+          # Browser extension (load unpacked, or upload to a store)
+          cp artifacts/extension/*.zip release-assets/ 2>/dev/null || true
+
           # CLI binaries (rename with platform suffix)
           if [ -f "artifacts/cli-macOS-arm64/ghostly-cli" ]; then
             cp "artifacts/cli-macOS-arm64/ghostly-cli" "release-assets/ghostly-cli-macos-arm64"

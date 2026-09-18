@@ -1,3 +1,7 @@
+import type { CallEventType } from "@ghostly/core";
+
+export type { CallEventType, CallSignal, CallState } from "@ghostly/core";
+
 export interface MessageMeta {
   dhtKey: string;
   encryptedPayloadLength: number;
@@ -5,17 +9,17 @@ export interface MessageMeta {
   packetTimestamp?: number;
 }
 
-export type CallEventType =
-  | "call_started"
-  | "call_received"
-  | "call_connected"
-  | "call_ended"
-  | "call_missed"
-  | "call_rejected";
-
 export type SystemEventType =
   | "join"
   | "call";
+
+/** A file sent over the peer-to-peer link. The bytes are kept by the platform under `id`. */
+export interface ChatFile {
+  id: string;
+  name: string;
+  size: number;
+  mime: string;
+}
 
 export interface ChatMessage {
   id: string;
@@ -24,6 +28,9 @@ export interface ChatMessage {
   timestamp: number;
   nick?: string;
   meta?: MessageMeta;
+  file?: ChatFile;
+  /** A payment or payment request; its live state is kept by the platform under this id. */
+  paymentId?: string;
   systemEvent?: {
     type: SystemEventType;
     pubKey?: string;
@@ -56,26 +63,6 @@ export interface ChatParams {
 
 export type ConnectionStatus = "connecting" | "online" | "offline" | "error";
 
-export type CallState =
-  | "idle"
-  | "offering"
-  | "incoming"
-  | "answering"
-  | "connecting"
-  | "connected"
-  | "ended";
-
-export interface CallSignal {
-  t: "o" | "a" | "h";
-  ts: number;
-  u?: string;
-  p?: string;
-  f?: string;
-  s?: string;
-  m?: string[];
-  c?: string[];
-  ss?: number[];
-}
 
 export interface ChatTechInfo {
   sessionId: string;

@@ -66,6 +66,16 @@ The generated hash should match exactly with the one published in the release no
 
 **Ghostly** is a messenger from the spirit realm. Your messages are encrypted on your device, float through the DHT as ghostly whispers, and fade away when you close the app — leaving no trace behind, just like a proper ghost.
 
+## Your services exist while you are online
+
+Ghostly started as a messenger and is growing into an ephemeral peer-to-peer service layer: a peer advertises what it offers right now (chat, voice, video, a local web app) under its Ghostly identity, and linked peers reach it over WebRTC. Close Ghostly and it is all gone. No server, by design.
+
+```
+expose localhost:3400   →   your peer clicks "Open"   →   HTTP over WebRTC   →   your localhost
+```
+
+This works today in **[Ghostly Browser](docs/BROWSER.md)**, a Chromium extension that speaks the same protocol as the desktop app.
+
 ## Features
 
 - **E2E Encrypted** — 256-bit NaCl secretbox encryption
@@ -105,6 +115,9 @@ The generated hash should match exactly with the one published in the release no
 
 - [Installation](docs/INSTALLATION.md) — Download links, CLI install, build from source
 - [Architecture](docs/ARCHITECTURE.md) — How it works, tech stack, security model
+- [Protocol](docs/PROTOCOL.md) — Records, service advertisements, WebRTC data link, HTTP over WebRTC
+- [Ghostly Browser](docs/BROWSER.md) — Run the extension, share a local app, limitations
+- [Ghostly on the web](docs/WEB.md) — The same client in a tab: `docker compose up`
 - [CLI Guide](docs/CLI.md) — Command reference and usage examples
 - [AI Agents](docs/AI-AGENTS.md) — Integration with OpenClaw, Cursor, bot examples
 - [Contributing](CONTRIBUTING.md) — How to contribute to the project

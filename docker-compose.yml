@@ -1,0 +1,17 @@
+# Ghostly on the web, served as static files on http://localhost:8080
+#   docker compose up --build -d
+services:
+  web:
+    # Releases publish this image; `docker compose pull && docker compose up -d` uses it as is.
+    # `docker compose up --build` builds it from this checkout instead.
+    image: ghcr.io/miguelmedeiros/ghostly-web:${GHOSTLY_WEB_TAG:-latest}
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+      args:
+        VITE_GIPHY_API_KEY: ${VITE_GIPHY_API_KEY:-}
+    ports:
+      # Only this machine by default. Behind a reverse proxy or a tunnel on another
+      # address, set e.g. GHOSTLY_WEB_BIND=0.0.0.0:8090 (the app itself needs HTTPS there).
+      - "${GHOSTLY_WEB_BIND:-127.0.0.1:8080}:80"
+    restart: unless-stopped

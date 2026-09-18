@@ -1,5 +1,33 @@
 # Architecture
 
+> Ghostly is not a chat application. It is an ephemeral, identity-addressed peer-to-peer service layer. Chat, voice, video and local web applications are services on top of it, and they exist while you are online.
+
+## Repository
+
+| Path | What |
+|---|---|
+| [`packages/core`](../packages/core) | The Ghost protocol in platform-neutral TypeScript: identities, crypto, Pkarr records, service advertisements, WebRTC signaling, DataChannel framing, HTTP over the data link. Shared by every client. |
+| [`packages/react`](../packages/react) | React hooks shared by the clients (`useWebRTC`). |
+| [`src`](../src), [`src-tauri`](../src-tauri) | The UI every client builds, and Ghostly Desktop (Tauri): the same peer in a WebView, with Rust reaching the Mainline DHT directly, fetching shared local apps and hosting viewer windows. |
+| [`packages/browser`](../packages/browser) | The Ghostly peer, in TypeScript, for anything with a WebView or a browser: engine, ecash wallet, IndexedDB, and the platform layer under the shared UI. |
+| [`web`](../web) | Ghostly on the web: that peer in a tab, nothing to install. `docker compose up` serves it. See [WEB.md](WEB.md). |
+| [`extension`](../extension) | Ghostly Browser (Chromium, Manifest V3). Builds the same UI as Desktop (`src/`) on top of a background peer, and reaches the DHT through Pkarr relays. See [BROWSER.md](BROWSER.md). |
+| [`cli`](../cli) | Rust CLI and library for bots. |
+| [`website`](../website) | ghostly.tools |
+
+The wire format is specified in [PROTOCOL.md](PROTOCOL.md).
+
+## Layers
+
+```
+ services      chat · voice · video · http · …
+ data link     WebRTC DataChannel "ghostly/1", peer to peer, DTLS
+ discovery     Pkarr signed packets in the Mainline DHT (directly, or through relays)
+ identity      one Ed25519 keypair per link + a shared secretbox key
+```
+
+Discovery only helps peers find each other and exchange a WebRTC offer and answer. Application traffic goes over WebRTC. Relays, STUN and TURN are generic connectivity infrastructure: they see ciphertext and hold no Ghostly state. There is no Ghostly server.
+
 ## How It Works
 
 Ghostly uses a clever combination of cryptography and the decentralized web:
