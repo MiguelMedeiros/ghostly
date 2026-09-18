@@ -1,0 +1,156 @@
+# Ghostly Browser
+
+Ghostly Browser is a Chromium extension that runs a full Ghostly peer: links, chat, voice and video calls, and ephemeral HTTP services. It speaks the same [protocol](PROTOCOL.md) as Ghostly Desktop through the shared [`@ghostly/core`](../packages/core) package, and an invite created in one works in the other.
+
+## Run it locally
+
+```bash
+npm install
+```
+
+```bash
+npm run build:extension
+```
+
+1. Open `chrome://extensions`, enable **Developer mode**.
+2. **Load unpacked** and pick `extension/dist`.
+3. Click the Ghostly icon in the toolbar. Ghostly opens in a tab.
+
+During development, `npm run dev -w @ghostly/extension` rebuilds on change; press the reload button on `chrome://extensions` afterwards.
+
+The extension asks for three permissions up front: `offscreen` (the peer runs there), `storage`, and `debugger` (used only on the tabs Ghostly opens to show a peer's service, see [Opening a service](#opening-a-service)). Access to `localhost` is optional and requested the first time you share a service.
+
+## Try it
+
+### Browser ↔ Browser
+
+Use two Chrome profiles (or two machines), each with the extension loaded.
+
+1. **A:** *New peer invite*, copy the invite.
+2. **B:** paste it, *Join*. Send a message; it arrives at A through the DHT within a few seconds.
+3. **A:** *Share local service* → name `Atlas`, target `localhost:3400`. Chrome asks whether Ghostly may access `localhost`.
+4. **B:** Atlas appears under the peer's *Services*. Click **Open**. A tab opens on `https://atlas.<A's key>.ghostly.invalid/`, the peers connect over WebRTC, and the app loads from A's machine.
+5. Both now show *Connected peer to peer*; chat messages are labelled `WebRTC` instead of `DHT`.
+6. **A:** *Stop*, go offline, or close Chrome. Reload the tab on B: the service is not reachable.
+
+### Browser ↔ Desktop
+
+1. Create a chat in Ghostly Desktop and copy its invite code (or create the invite in the browser and use *Join* on Desktop).
+2. Paste it in the browser. `_msgs`, `_ack`, `_nick` and `_call` are unchanged, so released Desktop builds interoperate. Text is verified against the Rust implementation by `npm run test:interop`. Calls run the same hook and signaling on both sides, but have so far only been exercised Browser ↔ Browser.
+3. Services need a peer that understands `_svc` and `_rtc`. Desktop ignores them today and shows up in the browser as a peer without advertised services. See [Desktop](#desktop).
+
+Desktop reaches the DHT directly, the browser goes through relays; both are views of the same DHT. `pkarr.pubky.org` is in the default relay set of both, which makes the common case fast.
+
+### Automated
+
+```bash
+npm test
+```
+
+runs the protocol tests, including a packet produced by the Rust implementation.
+
+```bash
+cargo build -p ghostly-cli && GHOSTLY_CLI=target/debug/ghostly-cli npm run test:interop
+```
+
+exchanges messages between the Rust CLI and the TypeScript core over the real network, in both directions.
+
+```bash
+npm run test:e2e
+```
+
+launches two Chromium profiles with the extension and walks through the whole milestone against real relays: link, chat over the DHT, advertise, discover, open, proxy (ES modules, CSS, images, JSON `POST`, a 3 MiB download, redirects, navigation), chat and a video call over WebRTC, stop sharing, close, gone. `HEADED=1` shows the windows. The test grants the `localhost` permission in a copy of the manifest, because Chrome's permission prompt cannot be clicked by automation.
+
+## How it is built
+
+```
+┌─ app.html (tab) ──────────┐      ┌─ service worker ────────────────┐
+│ React UI                  │      │ keeps the offscreen page alive  │
+│ calls: camera, microphone │      │ opens the UI                    │
+└──────────┬────────────────┘      │ viewer: DevTools Fetch domain   │
+           │ port "ui"             └──────────────┬──────────────────┘
+           ▼                                      │ runtime messages
+┌─ offscreen.html: the peer ──────────────────────▼──────────────────┐
+│ GhostlyNode → one GhostLink per peer (@ghostly/core)               │
+│   LinkSession   Pkarr records through relays                       │
+│   DataLink      RTCPeerConnection + "ghostly/1" DataChannel        │
+│   HttpHost      service id → fetch(localhost)                      │
+│   HttpClient    requests to the peer's services                    │
+│ IndexedDB: links, messages, services, settings                     │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+**Why an offscreen document.** Manifest V3 service workers have no `RTCPeerConnection` and are terminated when idle. The offscreen document (reason `WEB_RTC`) has WebRTC and lives as long as the browser runs the extension, which is exactly the lifetime of the peer.
+
+**State.** Links (including their seeds), messages, shared services and settings are in IndexedDB and survive restarts. Presence does not: it exists while the offscreen document runs. Seeds are stored the way Desktop stores them, unencrypted in the profile.
+
+**Identity.** Unchanged from Desktop: one identity per link, created with the link. There is no Pubky Ring integration and no long-lived key.
+
+**Relays.** Configurable in *Settings*. Every relay is used for both publishing and resolving, and the newest packet with a valid signature wins, so no single relay is a dependency.
+
+## Sharing a service
+
+- Nothing is exposed until you add it: a name and a target. Targets must be `localhost`, `127.0.0.1` or `[::1]`.
+- Chrome's own prompt grants the extension access to that host. Without it the extension cannot reach your machine at all.
+- Peers see the name and an id. They never see the address, and they cannot ask for one: a request names a service id and a path, and the peer maps the id to the target you configured. See [what the host guarantees](PROTOCOL.md#62-ghostly-http1).
+- A shared service is marked *Shared with your peers* and counts the requests it served. *Stop* makes its id stop resolving immediately.
+- Every peer you are linked with can use every service you share. There is no per-peer selection yet.
+
+Requests reach your application from the extension, without your cookies, with `Host: localhost:<port>` and, for non-`GET` requests, `Origin: chrome-extension://<id>`.
+
+## Opening a service
+
+A remote application needs a real origin. Relative URLs, ES modules, `fetch`, history and storage all hang off it, and that origin must not be the extension's. The options Manifest V3 offers were weighed like this:
+
+| Approach | Verdict |
+|---|---|
+| Serve the app from `chrome-extension://…` with the extension's service worker | Rejected. Remote code would run in the extension origin, with its privileges and its CSP (no inline scripts). It is also what MV3's remote code policy forbids. |
+| Same, inside a `sandbox` page or with a `sandbox` CSP | Opaque origins are not controlled by service workers, so subresources cannot be served. |
+| Fetch, rewrite and inject into a sandboxed iframe | Relative ES module imports, `history.pushState` and anything not rewritten break. Too fragile for real apps. |
+| `declarativeNetRequest` / `webRequest` | Cannot supply response bodies in MV3. |
+| A service worker on a real web origin | Needs a Ghostly-operated website in the path. |
+| **`chrome.debugger` Fetch domain on a virtual origin** | **Chosen.** |
+
+Ghostly opens a tab, attaches the debugger to **that tab only**, and intercepts requests matching `https://*.ghostly.invalid/*`. Each one is answered with the response the peer sent over WebRTC. The application runs on `https://<service>.<peer key>.ghostly.invalid`:
+
+- a normal, secure-context web origin, isolated from the extension and from every other peer and service;
+- `.invalid` can never resolve, so a request that is not intercepted goes nowhere;
+- requests to any other origin (CDNs, APIs) are not touched;
+- the debugger detaches when the tab leaves the virtual origin or closes.
+
+The cost is Chrome's "Ghostly started debugging this browser" banner while such a tab is open.
+
+### What works, what does not
+
+Works: HTML, CSS, scripts (inline, classic, ES modules, dynamic `import()`), images, fonts, `fetch`/XHR with any method and binary bodies, redirects, in-app navigation and history, `localStorage`/IndexedDB per peer and service, large downloads (up to 32 MiB per response).
+
+Does not work yet:
+
+- **WebSockets**, including dev-server hot reload. The Fetch domain does not see them.
+- **Streaming responses** (server-sent events, progressive downloads). The wire protocol streams, but a response is handed to the page once it is complete.
+- **HTTP cookies with a browser host.** `fetch` can neither send `Cookie` nor read `Set-Cookie`, so cookie sessions do not survive a browser host. Token headers (`Authorization`) do. The protocol carries cookies; a Desktop host will forward them.
+- **Service workers** of the remote application: their requests do not belong to the tab.
+- Applications that hard-code `http://localhost:…` URLs. Those resolve on the visitor's machine. Relative URLs are fine.
+- Applications that reject the `chrome-extension://` `Origin` on non-`GET` requests (strict CSRF checks).
+- Incoming calls ring only while a Ghostly tab is open.
+
+## Security notes
+
+- **Reachability.** Only linked peers, authenticated by the link key and their Pkarr signature; the WebRTC session is bound to that identity through the signed DTLS fingerprint.
+- **The proxy boundary.** Loopback-only targets, service ids instead of URLs, path confinement, no redirects off the target, no host credentials, header hygiene, and limits on body size, concurrency and time. The rules are in the [protocol](PROTOCOL.md#62-ghostly-http1) and covered by tests in `packages/core/test/http.test.ts`.
+- **Remote code** runs in its own web origin, never in the extension's.
+- **Camera and microphone** are requested by the page when you place or answer a call, never in the background.
+- **Relays, STUN, TURN** see ciphertext only and hold no state about you.
+- A service you share is as exposed to your peers as it is to you on `localhost`. Share applications you would let those peers use.
+
+## Desktop
+
+Desktop already shares the protocol code: call signaling and the `useWebRTC` hook moved into `@ghostly/core` and `@ghostly/react` and are re-exported from their old paths. To advertise and open services, Desktop needs three adapters around the same `GhostLink`:
+
+| Core interface | Browser | Desktop |
+|---|---|---|
+| `PkarrTransport` | `RelayTransport` (HTTP relays) | two generic Tauri commands, `publish_records` and `resolve_records`, on the existing Rust client (DHT + relays) |
+| `LocalFetch` | `fetch` with a host permission | a Rust command using an HTTP client; it can forward cookies |
+| viewer | `chrome.debugger` on a virtual origin | a Tauri custom URI scheme in a second WebView window, answered from the data link |
+
+The WebView has `RTCPeerConnection`, so `DataLink` runs as is.

@@ -12,7 +12,7 @@ env:
 
 jobs:
   # ============================================
-  # Frontend (src) - React + Vite + TypeScript
+  # Frontend (src, packages, extension) - React + Vite + TypeScript
   # ============================================
   frontend:
     name: Frontend (src)
@@ -40,8 +40,14 @@ jobs:
       - name: TypeScript check
         run: npm run typecheck
 
+      - name: Protocol tests (packages/core)
+        run: npm test
+
       - name: Build
         run: npm run build
+
+      - name: Build browser extension
+        run: npm run build:extension
 
   # ============================================
   # Tauri Backend (src-tauri) - Rust

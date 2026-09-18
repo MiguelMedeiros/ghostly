@@ -44,13 +44,26 @@ npm run lint:fix
 
 # Type checking
 npm run typecheck
+
+# Protocol tests (packages/core)
+npm test
+
+# Browser extension → extension/dist (load it unpacked in chrome://extensions)
+npm run build:extension
+
+# Two browsers, real relays, the whole flow
+npm run test:e2e
 ```
 
 ## Project Structure
 
 ```
 ghostly/
-├── src/                    # React frontend
+├── packages/
+│   ├── core/               # The Ghost protocol, shared by every client (TypeScript)
+│   └── react/              # React hooks shared by Desktop and Browser
+├── extension/              # Ghostly Browser (Chromium extension, Manifest V3)
+├── src/                    # Desktop React frontend
 │   ├── components/         # UI components
 │   ├── hooks/              # React hooks (useChat, etc.)
 │   └── pages/              # App pages

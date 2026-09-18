@@ -11,7 +11,8 @@
   },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:interop": "vitest run interop-rust"
   },
   "dependencies": {
     "@noble/ciphers": "^2.4.0",

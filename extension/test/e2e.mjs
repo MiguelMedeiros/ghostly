@@ -106,6 +106,8 @@ try {
   expect("image decoded", out.image, 1);
   expect("requests reached A's localhost", atlas.requests.some((r) => r.path === "/lib/hash.js"), true);
   expect("the local app never received cookies", atlas.requests.every((r) => !r.headers.cookie), true);
+  const post = atlas.requests.find((r) => r.method === "POST");
+  console.log(`  local app saw: origin=${post.headers.origin} referer=${post.headers.referer} host=${post.headers.host}`);
 
   step("Navigation and redirects stay inside the virtual origin");
   await viewer.locator("#next").click();
