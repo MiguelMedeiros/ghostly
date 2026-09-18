@@ -78,9 +78,9 @@ try {
   await say(b, "boo from B");
   await a.page.getByText("boo from B").first().waitFor({ timeout: 120_000 });
   ok("A received B's message via the DHT");
-  const bubble = await a.page.getByText("boo from B").first().boundingBox();
-  const pane = await a.page.locator(".chat-wallpaper").boundingBox();
-  if (bubble.x - pane.x < 40) throw new Error(`chat bubbles lost their side padding (${bubble.x - pane.x}px from the edge)`);
+  const textBox = await a.page.getByText("boo from B").first().boundingBox();
+  const chatPane = await a.page.locator(".chat-wallpaper").boundingBox();
+  if (textBox.x - chatPane.x < 40) throw new Error(`chat bubbles lost their side padding (${textBox.x - chatPane.x}px from the edge)`);
   ok("bubbles keep their distance from the edge of the chat");
   await a.page.getByText("joined").first().waitFor({ timeout: 60_000 });
   ok("the join announcement Desktop sends arrived too");
