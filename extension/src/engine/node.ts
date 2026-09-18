@@ -1,0 +1,383 @@
+import {
+  DEFAULT_RELAYS,
+  GhostLink,
+  GhostlyHttpError,
+  HTTP_SERVICE_PROTO,
+  LEGACY_SERVICES,
+  RTC_CONFIG,
+  RelayTransport,
+  createLink,
+  decodeInviteCode,
+  encodeInviteCode,
+  formatLocalTarget,
+  identityFromSeedB64,
+  parseLocalTarget,
+  serviceIdFromName,
+  webLocalFetch,
+  type ClientRequest,
+  type ClientResponse,
+  type DataLinkState,
+  type HostedHttpService,
+  type LinkParams,
+  type LinkStatus,
+  type PeerPresence,
+  type ServiceAd,
+} from "@ghostly/core";
+import type { EngineImplementation } from "../shared/rpc";
+import type { EngineState, LinkView, Settings, StoredLink, StoredMessage, StoredService } from "../shared/types";
+import { db } from "./db";
+
+const DEFAULT_SETTINGS: Settings = { online: true, nick: "", relays: DEFAULT_RELAYS, iceServers: [] };
+
+interface LiveLink {
+  stored: StoredLink;
+  myPubKeyZ32: string;
+  link: GhostLink | null;
+  status: LinkStatus;
+  dataLink: DataLinkState;
+  presence: PeerPresence;
+  lastMessageAt: number;
+}
+
+function newLiveLink(stored: StoredLink, lastMessageAt: number): LiveLink {
+  return {
+    stored,
+    myPubKeyZ32: identityFromSeedB64(stored.seedB64).pubKeyZ32,
+    link: null,
+    status: "offline",
+    dataLink: "idle",
+    presence: { online: false, lastPacketAt: 0, services: null },
+    lastMessageAt,
+  };
+}
+
+export interface NodeEvents {
+  onState(state: EngineState): void;
+  onMessages(linkId: string, messages: StoredMessage[]): void;
+  onCallSignal(linkId: string, signal: string): void;
+}
+
+/**
+ * The Ghostly peer running in this browser: every link, the services it
+ * shares, and the glue to IndexedDB. It owns nothing durable on the network;
+ * when it stops, the peer is gone.
+ */
+export class GhostlyNode implements EngineImplementation {
+  private settings: Settings = DEFAULT_SETTINGS;
+  private readonly transport = new RelayTransport();
+  private readonly links = new Map<string, LiveLink>();
+  private services: StoredService[] = [];
+  private readonly requestCounts = new Map<string, number>();
+  private stateTimer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(private readonly events: NodeEvents) {}
+
+  async start(): Promise<void> {
+    this.settings = { ...DEFAULT_SETTINGS, ...(await db.getSettings()) };
+    this.transport.setRelays(this.settings.relays);
+    this.services = await db.getServices();
+
+    for (const stored of await db.getLinks()) {
+      const messages = await db.getMessages(stored.id);
+      this.links.set(stored.id, newLiveLink(stored, messages.at(-1)?.timestamp ?? 0));
+      if (this.settings.online) this.startLink(stored.id, messages);
+    }
+    this.emitState();
+  }
+
+  /** Tells every peer we are leaving. Best effort: the browser may already be closing. */
+  async shutdown(): Promise<void> {
+    await Promise.allSettled([...this.links.values()].map((live) => live.link?.stop(true)));
+  }
+
+  getState(): EngineState {
+    return {
+      settings: this.settings,
+      transport: this.transport.describe(),
+      links: [...this.links.values()].map((live) => this.viewOf(live)).sort((a, b) => b.createdAt - a.createdAt),
+      services: this.services
+        .map((s) => ({ ...s, requests: this.requestCounts.get(s.id) ?? 0 }))
+        .sort((a, b) => a.createdAt - b.createdAt),
+    };
+  }
+
+  getMessages(linkId: string): Promise<StoredMessage[]> {
+    return db.getMessages(linkId);
+  }
+
+  // -- links ---------------------------------------------------------------
+
+  createLink(): { linkId: string; inviteCode: string } {
+    const { mine, invite } = createLink();
+    const inviteCode = encodeInviteCode(invite);
+    return { linkId: this.addLink(mine, inviteCode), inviteCode };
+  }
+
+  joinLink({ inviteCode }: { inviteCode: string }): { linkId: string } {
+    const params = decodeInviteCode(inviteCode);
+    if (!params) throw new Error("That does not look like a Ghostly invite");
+    const existing = [...this.links.values()].find((l) => l.stored.seedB64 === params.seedB64);
+    if (existing) return { linkId: existing.stored.id };
+    return { linkId: this.addLink(params) };
+  }
+
+  removeLink({ linkId }: { linkId: string }): void {
+    const live = this.links.get(linkId);
+    if (!live) return;
+    void live.link?.stop(true);
+    this.links.delete(linkId);
+    void db.deleteLink(linkId);
+    this.emitState();
+  }
+
+  renameLink({ linkId, label }: { linkId: string; label: string }): void {
+    const live = this.links.get(linkId);
+    if (!live) return;
+    live.stored = { ...live.stored, label: label.trim().slice(0, 48) || undefined };
+    void db.putLink(live.stored);
+    this.emitState();
+  }
+
+  setActiveLink({ linkId }: { linkId: string | null }): void {
+    for (const [id, live] of this.links) live.link?.session.setActive(id === linkId);
+  }
+
+  async sendMessage({ linkId, text }: { linkId: string; text: string }): Promise<{ error: string | null }> {
+    const live = this.links.get(linkId);
+    if (!live?.link) return { error: "You are offline" };
+    const trimmed = text.trim();
+    if (!trimmed) return { error: null };
+
+    const timestamp = Date.now();
+    const via = live.link.isDataLinkOpen ? "datalink" : "pkarr";
+    await this.storeMessage({ linkId, id: `me_${timestamp}`, text: trimmed, sender: "me", timestamp, via });
+    return { error: await live.link.sendMessage(trimmed, timestamp) };
+  }
+
+  connect({ linkId }: { linkId: string }): void {
+    this.links.get(linkId)?.link?.connect().catch(() => {});
+  }
+
+  disconnect({ linkId }: { linkId: string }): void {
+    this.links.get(linkId)?.link?.disconnect();
+  }
+
+  setCallSignal({ linkId, signal }: { linkId: string; signal: string | null }): void {
+    void this.links.get(linkId)?.link?.session.setCallSignal(signal);
+  }
+
+  setFastPoll({ linkId, fast }: { linkId: string; fast: boolean }): void {
+    this.links.get(linkId)?.link?.session.setFastPoll(fast);
+  }
+
+  /** Used by the viewer: a request to a service some peer shares with us. */
+  async request(peerPubKeyZ32: string, serviceId: string, request: ClientRequest): Promise<ClientResponse> {
+    const live = [...this.links.values()].find((l) => l.stored.peerPubKeyZ32 === peerPubKeyZ32);
+    if (!live) throw new GhostlyHttpError("unknown-peer", "You have no link to this peer");
+    if (!live.link) throw new GhostlyHttpError("offline", "Ghostly is offline");
+    return live.link.request(serviceId, request);
+  }
+
+  // -- services ------------------------------------------------------------
+
+  addService({ name, target }: { name: string; target: string }): { serviceId: string } {
+    const cleanName = name.trim().slice(0, 48);
+    if (!cleanName) throw new Error("Give the service a name");
+    const normalized = formatLocalTarget(parseLocalTarget(target));
+    const service: StoredService = {
+      id: serviceIdFromName(
+        cleanName,
+        this.services.map((s) => s.id),
+      ),
+      name: cleanName,
+      target: normalized,
+      enabled: true,
+      createdAt: Date.now(),
+    };
+    this.services.push(service);
+    void db.putService(service);
+    this.servicesChanged();
+    return { serviceId: service.id };
+  }
+
+  removeService({ serviceId }: { serviceId: string }): void {
+    this.services = this.services.filter((s) => s.id !== serviceId);
+    void db.deleteService(serviceId);
+    this.servicesChanged();
+  }
+
+  setServiceEnabled({ serviceId, enabled }: { serviceId: string; enabled: boolean }): void {
+    const service = this.services.find((s) => s.id === serviceId);
+    if (!service || service.enabled === enabled) return;
+    service.enabled = enabled;
+    void db.putService(service);
+    this.servicesChanged();
+  }
+
+  // -- settings ------------------------------------------------------------
+
+  async updateSettings({ settings }: { settings: Partial<Settings> }): Promise<void> {
+    const wasOnline = this.settings.online;
+    this.settings = { ...this.settings, ...settings };
+    if (settings.relays) {
+      this.transport.setRelays(settings.relays);
+      this.settings.relays = this.transport.describe().relays;
+    }
+    await db.putSettings(this.settings);
+
+    if (settings.nick !== undefined) {
+      for (const live of this.links.values()) live.link?.session.setNick(this.settings.nick || undefined);
+    }
+    if (wasOnline && !this.settings.online) {
+      await Promise.allSettled(
+        [...this.links.values()].map(async (live) => {
+          await live.link?.stop(true);
+          live.link = null;
+          live.status = "offline";
+          live.dataLink = "idle";
+        }),
+      );
+    } else if (!wasOnline && this.settings.online) {
+      for (const live of this.links.values()) this.startLink(live.stored.id, await db.getMessages(live.stored.id));
+    }
+    this.emitState();
+  }
+
+  // -- internals -----------------------------------------------------------
+
+  private addLink(params: LinkParams, inviteCode?: string): string {
+    const stored: StoredLink = {
+      id: identityFromSeedB64(params.seedB64).pubKeyZ32.slice(0, 16),
+      ...params,
+      createdAt: Date.now(),
+      inviteCode,
+    };
+    this.links.set(stored.id, newLiveLink(stored, 0));
+    void db.putLink(stored);
+    if (this.settings.online) this.startLink(stored.id, []);
+    this.emitState();
+    return stored.id;
+  }
+
+  /** What this peer advertises. Chat, voice and video are what Ghostly always offered. */
+  private advertisedServices(): ServiceAd[] {
+    return [
+      ...LEGACY_SERVICES,
+      ...this.services
+        .filter((s) => s.enabled)
+        .map((s): ServiceAd => ({ id: s.id, type: "http", name: s.name, proto: HTTP_SERVICE_PROTO })),
+    ];
+  }
+
+  /** The only place a service id turns into a URL. Disabled or unknown ids do not resolve. */
+  private hostedService(id: string): HostedHttpService | undefined {
+    const service = this.services.find((s) => s.id === id && s.enabled);
+    if (!service) return undefined;
+    try {
+      const target = parseLocalTarget(service.target);
+      this.requestCounts.set(id, (this.requestCounts.get(id) ?? 0) + 1);
+      this.emitState();
+      return { id, target };
+    } catch {
+      return undefined;
+    }
+  }
+
+  private startLink(linkId: string, messages: StoredMessage[]): void {
+    const live = this.links.get(linkId);
+    if (!live || live.link) return;
+    const { stored } = live;
+    const lastSeenTimestamp = messages.reduce(
+      (max, m) => (m.sender === "peer" && m.via === "pkarr" ? Math.max(max, m.timestamp) : max),
+      0,
+    );
+
+    live.link = new GhostLink({
+      params: stored,
+      transport: this.transport,
+      nick: this.settings.nick || undefined,
+      lastSeenTimestamp,
+      createPeerConnection: () =>
+        new RTCPeerConnection({ iceServers: [...(RTC_CONFIG.iceServers ?? []), ...this.settings.iceServers] }),
+      localFetch: webLocalFetch,
+      getServices: () => this.advertisedServices(),
+      getHostedHttpService: (id) => this.hostedService(id),
+      events: {
+        onStatus: (status) => {
+          live.status = status;
+          this.emitState();
+        },
+        onDataLinkState: (state) => {
+          live.dataLink = state;
+          this.emitState();
+        },
+        onPresence: (presence) => {
+          live.presence = presence;
+          if (presence.nick && presence.nick !== live.stored.peerNick) {
+            live.stored = { ...live.stored, peerNick: presence.nick };
+            void db.putLink(live.stored);
+          }
+          this.emitState();
+        },
+        onMessage: (message) => {
+          if (live.stored.inviteCode) {
+            live.stored = { ...live.stored, inviteCode: undefined };
+            void db.putLink(live.stored);
+          }
+          void this.storeMessage({
+            linkId,
+            id: `peer_${message.timestamp}`,
+            text: message.text,
+            sender: "peer",
+            timestamp: message.timestamp,
+            via: message.via,
+            nick: message.nick,
+          });
+        },
+        onCallSignal: (signal) => this.events.onCallSignal(linkId, signal),
+      },
+    });
+    live.link.start();
+  }
+
+  private async storeMessage(message: StoredMessage): Promise<void> {
+    if (!(await db.addMessage(message))) return;
+    const live = this.links.get(message.linkId);
+    if (live) live.lastMessageAt = Math.max(live.lastMessageAt, message.timestamp);
+    this.events.onMessages(message.linkId, await db.getMessages(message.linkId));
+    this.emitState();
+  }
+
+  private servicesChanged(): void {
+    for (const live of this.links.values()) void live.link?.refreshServices();
+    this.emitState();
+  }
+
+  private viewOf(live: LiveLink): LinkView {
+    const { stored, presence } = live;
+    return {
+      id: stored.id,
+      myPubKeyZ32: live.myPubKeyZ32,
+      peerPubKeyZ32: stored.peerPubKeyZ32,
+      label: stored.label,
+      peerNick: stored.peerNick,
+      inviteCode: stored.inviteCode,
+      createdAt: stored.createdAt,
+      status: live.status,
+      dataLink: live.dataLink,
+      peerOnline: presence.online,
+      peerLastSeenAt: presence.lastPacketAt,
+      peerServices: presence.services,
+      lastMessageAt: live.lastMessageAt,
+    };
+  }
+
+  /** State changes arrive in bursts; the UI gets one snapshot per tick. */
+  private emitState(): void {
+    if (this.stateTimer) return;
+    this.stateTimer = setTimeout(() => {
+      this.stateTimer = null;
+      this.events.onState(this.getState());
+    }, 50);
+  }
+}

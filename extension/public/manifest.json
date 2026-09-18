@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Ghostly",
+  "short_name": "Ghostly",
+  "version": "0.1.4",
+  "description": "Your services exist while you are online. Ephemeral, identity-addressed peer-to-peer chat and local web apps over WebRTC.",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "16": "icons/16.png",
+    "32": "icons/32.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "action": {
+    "default_title": "Ghostly"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": ["offscreen", "storage", "debugger"],
+  "optional_host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "http://[::1]/*",
+    "https://localhost/*",
+    "https://127.0.0.1/*",
+    "https://[::1]/*"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+  }
+}

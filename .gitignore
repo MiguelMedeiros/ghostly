@@ -11,3 +11,5 @@ src-tauri/target
 .env
 .env.local
 .env.*.local
+# Ghostly Browser e2e artifacts
+extension/test/failure-*.png

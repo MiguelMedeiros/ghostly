@@ -8,10 +8,11 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "lint": "eslint src",
-    "lint:fix": "eslint src --fix",
-    "typecheck": "tsc --noEmit && npm run typecheck -w @ghostly/core",
-    "test": "npm run test -w @ghostly/core"
+    "lint": "eslint src packages/core extension/src",
+    "lint:fix": "eslint src packages/core extension/src --fix",
+    "typecheck": "tsc --noEmit && npm run typecheck -w @ghostly/core -w @ghostly/extension",
+    "test": "npm run test -w @ghostly/core",
+    "build:extension": "npm run build -w @ghostly/extension"
   },
   "dependencies": {
     "@emoji-mart/data": "^1.2.1",
@@ -42,6 +43,7 @@
     "vite": "^7.3.1"
   },
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "extension"
   ]
 }
