@@ -6,11 +6,11 @@ import { useEffect, useState } from "react";
 const title = "Ghostly";
 
 const taglines = [
-  "Ephemeral by design",
-  "Your messages, your rules",
+  "Your services exist while you are online",
   "No servers. No traces.",
-  "Privacy without compromise",
-  "Truly decentralized chat",
+  "Share localhost, not your data",
+  "Close the app and it's gone",
+  "You are the server. Briefly.",
 ];
 
 function GhostIcon({ className = "w-8 h-8" }: { className?: string }) {
@@ -359,10 +359,12 @@ function GhostCharacter({
 const conversation = [
   { side: "left" as const, text: "Boo! 👻", booExpr: "happy" as const, casperExpr: "happy" as const, booScaring: true },
   { side: "right" as const, text: "Encrypted! 🔒", booExpr: "happy" as const, casperExpr: "happy" as const },
+  { side: "left" as const, text: "Wanna see my app?", booExpr: "happy" as const, casperExpr: "surprised" as const },
+  { side: "right" as const, text: "It's on your localhost…", booExpr: "happy" as const, casperExpr: "surprised" as const },
+  { side: "left" as const, text: "Not anymore! ✨", booExpr: "wink" as const, casperExpr: "happy" as const },
+  { side: "right" as const, text: "Here, 21 sats ⚡", booExpr: "happy" as const, casperExpr: "wink" as const },
   { side: "left" as const, text: "No servers!", booExpr: "happy" as const, casperExpr: "surprised" as const },
-  { side: "right" as const, text: "So private! 🎃", booExpr: "happy" as const, casperExpr: "surprised" as const },
-  { side: "left" as const, text: "Messages vanish! ✨", booExpr: "wink" as const, casperExpr: "happy" as const },
-  { side: "right" as const, text: "Like ghosts! 👻", booExpr: "happy" as const, casperExpr: "wink" as const },
+  { side: "right" as const, text: "Then *poof* 👻", booExpr: "wink" as const, casperExpr: "wink" as const },
 ];
 
 function GhostConversation() {
@@ -443,14 +445,14 @@ function PlatformDownloadButton() {
   return (
     <motion.a
       href="#download"
-      className="group inline-flex items-center gap-2.5 px-8 py-4 rounded-xl bg-linear-to-r from-cyan to-green text-black font-semibold text-lg transition-all hover:scale-105 hover:shadow-lg hover:shadow-cyan/20"
-      whileHover={{ scale: 1.05 }}
+      className="group inline-flex items-center gap-2.5 px-8 py-4 rounded-xl border border-cyan/40 text-cyan font-semibold text-lg transition-all hover:bg-cyan/10"
+      whileHover={{ scale: 1.03 }}
       whileTap={{ scale: 0.97 }}
     >
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
       </svg>
-      Download Now!
+      Download
     </motion.a>
   );
 }
@@ -520,7 +522,7 @@ export function Hero() {
           transition={{ delay: 1.0, duration: 0.6 }}
           className="text-xl sm:text-2xl md:text-3xl text-gray-400 font-light max-w-2xl mb-4"
         >
-          Your messages. <span className="text-cyan">Invisible</span> to everyone else.
+          Your services exist <span className="text-cyan">while you are online</span>.
         </motion.p>
 
         <motion.p
@@ -529,16 +531,28 @@ export function Hero() {
           transition={{ delay: 1.2, duration: 0.6 }}
           className="text-lg text-gray-500 max-w-xl mb-10"
         >
-          Your chats float through 10M+ nodes and vanish without a trace.
-          No servers. No accounts. Just pure, spooky privacy.
+          Chat, calls, files, sats and the web apps on your localhost, shared
+          peer to peer with the ghosts you choose. Close Ghostly and it all
+          vanishes. No servers. No accounts. Just pure, spooky privacy.
         </motion.p>
 
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 1.4, duration: 0.6 }}
-          className="flex flex-col sm:flex-row gap-4"
+          className="flex flex-col sm:flex-row flex-wrap justify-center gap-4"
         >
+          <motion.a
+            href="https://app.ghostly.tools"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group inline-flex items-center gap-2.5 px-8 py-4 rounded-xl bg-linear-to-r from-cyan to-green text-black font-semibold text-lg transition-all hover:shadow-lg hover:shadow-cyan/20"
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.97 }}
+          >
+            <GhostIcon className="w-5 h-5" />
+            Open in your browser
+          </motion.a>
           <PlatformDownloadButton />
           <motion.a
             href="https://github.com/MiguelMedeiros/ghostly"

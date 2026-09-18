@@ -7,7 +7,22 @@ const faqs = [
   {
     question: "What is Ghostly?",
     answer:
-      "Ghostly is an ephemeral, end-to-end encrypted messaging app that uses the Mainline DHT (BitTorrent's distributed hash table) instead of central servers. Messages are encrypted locally and published as DNS records to a network of 10+ million nodes.",
+      "Ghostly is an ephemeral, peer-to-peer service layer that started as a messenger. You and your contacts find each other through the Mainline DHT (BitTorrent's distributed hash table, 10+ million nodes), connect directly over WebRTC, and then chat, call, send files and sats, or open each other's local web apps. Whatever you offer exists while you are online. There are no servers and no accounts.",
+  },
+  {
+    question: "How does sharing a localhost app work? Is it safe?",
+    answer:
+      "You give the app a name and its localhost address. Your contacts see the name, never the address. When one opens it, their requests travel over the encrypted WebRTC connection to your Ghostly, which forwards them only to the address you configured: loopback only, no redirects elsewhere, without your cookies, with size and rate limits. Only people you linked with can reach it, only while you are online. Still: a contact can use that app exactly as you can on localhost, so share apps you would let them use.",
+  },
+  {
+    question: "How do the sats work? Where is my money?",
+    answer:
+      "Ghostly has an ecash (Cashu) wallet. You receive over Lightning through a mint, pay Lightning invoices from your balance, and send or request sats in a chat. Ecash is custodial: the mint holds the sats and could lose them. There is no seed backup yet. Keep pocket money only. The history shows the exact fee of every movement, and the wallet shows what each mint charges.",
+  },
+  {
+    question: "Web, extension or desktop: which one?",
+    answer:
+      "They are the same client on the same protocol, and an invite from one works in the others. The web app needs no install but only lives while the tab is open, and a web page is not allowed to share your localhost or host a contact's app. The extension and the desktop app can do both. The desktop app also talks to the DHT directly instead of through relays.",
   },
   {
     question: "How does encryption work?",

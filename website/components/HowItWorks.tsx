@@ -120,6 +120,54 @@ const steps = [
       </div>
     ),
   },
+  {
+    number: "05",
+    title: "Ghosts Connect Directly",
+    description:
+      "When both of you are online, the DHT is only used to swap a WebRTC offer and answer, signed and encrypted like everything else. From then on messages, calls, files, sats and web apps travel straight between the two of you. The DHT never carries them.",
+    visual: (
+      <div className="font-mono text-xs space-y-2">
+        <div className="flex items-center gap-2">
+          <span className="text-cyan">_rtc</span>
+          <span className="text-gray-600">→</span>
+          <span className="text-gray-400">offer / answer, via the DHT</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-green">● WebRTC</span>
+          <span className="text-gray-600">→</span>
+          <span className="text-gray-400">peer to peer, DTLS encrypted</span>
+        </div>
+        <div className="mt-2 pt-2 border-t border-border/50 text-gray-500">
+          chat · calls · files · sats · http
+        </div>
+      </div>
+    ),
+  },
+  {
+    number: "06",
+    title: "You Are the Server, Briefly",
+    description:
+      "Share a web app from your localhost and your contacts can open it. They ask for it by name; your Ghostly maps the name to the address you chose and nothing else. Close the app and your presence, your chat endpoint and everything you shared are gone.",
+    visual: (
+      <div className="font-mono text-xs space-y-2">
+        <div className="flex items-center gap-2">
+          <span className="text-cyan">_svc</span>
+          <span className="text-gray-600">=</span>
+          <span className="text-green">[chat, voice, video, atlas]</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-yellow-400">GET atlas /</span>
+          <span className="text-gray-600">→</span>
+          <span className="text-gray-400">localhost:3400</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-gray-500">● Offline</span>
+          <span className="text-gray-600">→</span>
+          <span className="text-gray-500 line-through">everything</span>
+        </div>
+      </div>
+    ),
+  },
 ];
 
 const containerVariants = {

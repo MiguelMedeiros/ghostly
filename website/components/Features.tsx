@@ -12,31 +12,17 @@ const GhostIcon = () => (
 
 const features = [
   {
-    title: "Encrypted",
-    tagline: "256-bit encrypt.",
+    title: "Chat",
+    tagline: "Encrypted, through the DHT or straight over WebRTC. GIFs, emoji, read receipts.",
     icon: (
       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM21 12c0 4.556-4.03 8.25-9 8.25a9.76 9.76 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
       </svg>
     ),
   },
   {
-    title: "Ephemeral",
-    tagline: "Messages vanish",
-    icon: <GhostIcon />,
-  },
-  {
-    title: "Serverless",
-    tagline: "No middlemen",
-    icon: (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-      </svg>
-    ),
-  },
-  {
-    title: "Video Calls",
-    tagline: "Face-to-face",
+    title: "Voice & video",
+    tagline: "Peer to peer calls. Nobody in the middle to listen in.",
     icon: (
       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
@@ -44,29 +30,43 @@ const features = [
     ),
   },
   {
-    title: "Voice Calls",
-    tagline: "Crystal clear",
+    title: "Share localhost",
+    tagline: "Type localhost:3400, press Share. Your ghost friends open the app as if they were on your machine. No deploy, no tunnel service.",
     icon: (
       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
       </svg>
     ),
   },
   {
-    title: "Open Source",
-    tagline: "Trust, verified",
+    title: "Files",
+    tagline: "Up to 100 MiB, straight to your contact. Never parked on a server.",
     icon: (
       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
       </svg>
     ),
+  },
+  {
+    title: "Sats",
+    tagline: "An ecash wallet with Lightning in and out. Send, request and pay right in the chat.",
+    icon: (
+      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
+      </svg>
+    ),
+  },
+  {
+    title: "Ephemeral",
+    tagline: "Close Ghostly and your presence, your chats' endpoint and everything you share are gone. On purpose.",
+    icon: <GhostIcon />,
   },
 ];
 
 export function Features() {
   return (
     <section id="features" className="relative py-24 px-6">
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-5xl mx-auto">
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           whileInView={{ opacity: 1, y: 0 }}
@@ -75,14 +75,14 @@ export function Features() {
           className="text-center mb-12"
         >
           <h2 className="text-3xl sm:text-4xl font-mono font-bold mb-4">
-            Everything a <span className="text-gradient">ghost</span> needs
+            Everything a <span className="text-gradient">ghost</span> can do
           </h2>
           <p className="text-gray-500">
-            Private. Secure. Vanishing.
+            Chat was only the beginning. Whatever you offer exists while you are online, and nowhere else.
           </p>
         </motion.div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {features.map((feature, index) => (
             <motion.div
               key={feature.title}
@@ -91,15 +91,15 @@ export function Features() {
               viewport={{ once: true, margin: "-50px" }}
               transition={{ duration: 0.4, delay: index * 0.05 }}
               whileHover={{ scale: 1.05, transition: { duration: 0.2 } }}
-              className="group relative rounded-xl border border-border/50 bg-surface p-4 hover:border-cyan/40 transition-all duration-300 text-center"
+              className="group relative rounded-xl border border-border/50 bg-surface p-5 hover:border-cyan/40 transition-all duration-300"
             >
-              <div className="w-10 h-10 rounded-lg bg-cyan/10 text-cyan flex items-center justify-center mx-auto mb-2 group-hover:bg-cyan/20 group-hover:scale-110 transition-all">
+              <div className="w-10 h-10 rounded-lg bg-cyan/10 text-cyan flex items-center justify-center mb-3 group-hover:bg-cyan/20 group-hover:scale-110 transition-all">
                 {feature.icon}
               </div>
-              <h3 className="text-sm font-semibold text-gray-100 mb-0.5">
+              <h3 className="text-base font-semibold text-gray-100 mb-1">
                 {feature.title}
               </h3>
-              <p className="text-xs text-gray-500">
+              <p className="text-sm text-gray-500 leading-relaxed">
                 {feature.tagline}
               </p>
             </motion.div>
@@ -113,10 +113,11 @@ export function Features() {
           transition={{ delay: 0.4 }}
           className="flex flex-wrap justify-center gap-3 mt-8 text-xs text-gray-600"
         >
-          <span className="px-3 py-1 rounded-full border border-border/30">+ GIFs</span>
-          <span className="px-3 py-1 rounded-full border border-border/30">+ Emojis</span>
-          <span className="px-3 py-1 rounded-full border border-border/30">+ Read Receipts</span>
-          <span className="px-3 py-1 rounded-full border border-border/30">+ Desktop App</span>
+          <span className="px-3 py-1 rounded-full border border-border/30">End-to-end encrypted</span>
+          <span className="px-3 py-1 rounded-full border border-border/30">No servers</span>
+          <span className="px-3 py-1 rounded-full border border-border/30">No accounts</span>
+          <span className="px-3 py-1 rounded-full border border-border/30">Open source</span>
+          <span className="px-3 py-1 rounded-full border border-border/30">Desktop · Browser · Web · CLI</span>
         </motion.div>
       </div>
     </section>
