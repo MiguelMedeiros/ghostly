@@ -149,5 +149,10 @@
     "connectionFailed": "Connessione fallita",
     "messageFailed": "Invio messaggio fallito",
     "generic": "Qualcosa è andato storto"
+  },
+  "tabs": {
+    "chats": "Chat",
+    "wallet": "Portafoglio",
+    "share": "Condividi"
   }
 }

@@ -5,7 +5,8 @@ import { useServicesPlatform } from "../hooks/useServicesPlatform";
  * Sidebar section: whether this peer is online, and the local web apps it
  * shares. Nothing is reachable unless it is listed here.
  */
-export function MyServices() {
+/** `screen`: the services are a page of their own (phones) instead of a sidebar section. */
+export function MyServices({ screen = false }: { screen?: boolean }) {
   const platform = useServicesPlatform();
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
@@ -29,9 +30,9 @@ export function MyServices() {
   };
 
   return (
-    <div className="border-t border-border bg-sidebar-bg" data-testid="my-services">
+    <div className={`bg-sidebar-bg ${screen ? "" : "border-t border-border"}`} data-testid="my-services">
       <div className="flex items-center justify-between px-4 pt-3 pb-1">
-        <span className="text-text-secondary text-xs font-bold uppercase tracking-wider">Services</span>
+        <span className="text-text-secondary text-xs font-bold uppercase tracking-wider">{screen ? "Your local apps" : "Services"}</span>
         <button
           data-testid="online-toggle"
           onClick={() => void platform.setOnline(!online)}

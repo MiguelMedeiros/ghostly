@@ -149,5 +149,10 @@
     "connectionFailed": "Falha na conexão",
     "messageFailed": "Falha ao enviar mensagem",
     "generic": "Algo deu errado"
+  },
+  "tabs": {
+    "chats": "Conversas",
+    "wallet": "Carteira",
+    "share": "Compartilhar"
   }
 }

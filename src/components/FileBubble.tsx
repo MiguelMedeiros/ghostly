@@ -46,7 +46,7 @@ export function FileBubble({ file }: { file: ChatFile }) {
   }
 
   return (
-    <div className="min-w-[220px] max-w-[330px]" data-testid="file-bubble">
+    <div className="min-w-[220px] max-md:min-w-[min(220px,68vw)] max-w-[min(330px,72vw)]" data-testid="file-bubble">
       {blobUrl && PREVIEWABLE.test(file.mime) && (
         <img src={blobUrl} alt={file.name} className="rounded-[4px] max-w-full max-h-[330px] object-contain block mb-1" />
       )}

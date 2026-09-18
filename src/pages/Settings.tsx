@@ -155,10 +155,10 @@ export function Settings() {
 
   return (
     <div className="flex-1 flex flex-col bg-chat-bg overflow-hidden">
-      <header className="h-14 bg-panel-header flex items-center px-4 border-b border-border">
+      <header className="h-14 header-safe shrink-0 bg-panel-header flex items-center px-4 border-b border-border">
         <button
           onClick={() => navigate(-1)}
-          className="p-2 hover:bg-surface-hover rounded-full transition-colors mr-3"
+          className="max-md:hidden p-2 hover:bg-surface-hover rounded-full transition-colors mr-3"
         >
           <svg
             className="w-5 h-5 text-text-secondary"
@@ -179,7 +179,7 @@ export function Settings() {
         </h1>
       </header>
 
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-6 max-md:p-4">
         <div className="max-w-2xl mx-auto space-y-8">
           {message && (
             <div

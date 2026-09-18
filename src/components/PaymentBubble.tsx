@@ -61,7 +61,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
 
   return (
     <div
-      className={`min-w-[210px] max-w-[300px] px-1 py-0.5 rounded-md ${celebrate ? "animate-sats-shine" : ""} ${
+      className={`min-w-[210px] max-md:min-w-[min(210px,68vw)] max-w-[min(300px,72vw)] px-1 py-0.5 rounded-md ${celebrate ? "animate-sats-shine" : ""} ${
         fresh && isRequest && !outgoing && payment.state === "pending" ? "animate-nudge" : ""
       }`}
       data-testid="payment-bubble"

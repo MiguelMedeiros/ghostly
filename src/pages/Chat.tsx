@@ -303,8 +303,18 @@ export function Chat() {
   return (
     <div className="flex-1 flex flex-col h-full bg-chat-bg">
       {/* Chat Header */}
-      <div className="h-14 flex items-center justify-between px-4 bg-panel-header border-b border-border shrink-0">
-        <div className="flex items-center gap-3 min-w-0">
+      <div className="h-14 header-safe flex items-center justify-between px-4 max-md:pl-1 max-md:pr-1 bg-panel-header border-b border-border shrink-0">
+        <div className="flex items-center gap-3 max-md:gap-1.5 min-w-0">
+          <button
+            onClick={() => navigate("/")}
+            className="md:hidden w-11 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0"
+            title="Back"
+            data-testid="chat-back"
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
           <div className="relative w-10 h-10 rounded-full bg-surface-hover flex items-center justify-center shrink-0">
             <span className={`text-sm ${isAnonymous ? "text-text-muted/50" : "text-text-muted"}`}>
               {(displayName || "A").charAt(0).toUpperCase()}
@@ -384,7 +394,7 @@ export function Chat() {
           <button
             onClick={() => webrtc.startCall(false)}
             disabled={webrtc.callState !== "idle"}
-            className="p-2 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+            className="p-2 max-md:p-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
             title="Audio call"
           >
             <svg
@@ -404,7 +414,7 @@ export function Chat() {
           <button
             onClick={() => webrtc.startCall(true)}
             disabled={webrtc.callState !== "idle"}
-            className="p-2 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+            className="p-2 max-md:p-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
             title="Video call"
           >
             <svg
@@ -425,7 +435,7 @@ export function Chat() {
           <div className="relative" ref={menuRef}>
             <button
               onClick={() => setMenuOpen(!menuOpen)}
-              className="p-2 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer"
+              className="p-2 max-md:p-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer"
               title="Options"
             >
               <svg
@@ -451,7 +461,7 @@ export function Chat() {
                       handleCopyCode(inviteCode);
                       setMenuOpen(false);
                     }}
-                    className="w-full px-3 py-2 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors"
+                    className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors"
                   >
                     {codeCopied ? (
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent">
@@ -471,7 +481,7 @@ export function Chat() {
                     forceRefresh();
                     setMenuOpen(false);
                   }}
-                  className="w-full px-3 py-2 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors"
+                  className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="23 4 23 10 17 10" />
@@ -486,7 +496,7 @@ export function Chat() {
                     setShowTechInfo(true);
                     setMenuOpen(false);
                   }}
-                  className="w-full px-3 py-2 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors"
+                  className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="12" r="10" />
@@ -518,7 +528,7 @@ export function Chat() {
                 ) : (
                   <button
                     onClick={handleDelete}
-                    className="w-full px-3 py-2 text-left text-sm text-danger hover:bg-surface-hover flex items-center gap-2 transition-colors"
+                    className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-danger hover:bg-surface-hover flex items-center gap-2 transition-colors"
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M3 6h18" />

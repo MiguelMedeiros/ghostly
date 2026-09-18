@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useIsMobile } from "../hooks/useIsMobile";
 import { useNavigate, useLocation } from "react-router-dom";
 import { usePkarr } from "../hooks/usePkarr";
 import { useBackgroundPoller } from "../hooks/useBackgroundPoller";
@@ -50,6 +51,7 @@ export function Sidebar() {
   const { createDrop } = usePkarr();
   const { t } = useI18n();
   const { settings } = useSettings();
+  const isMobile = useIsMobile();
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [search, setSearch] = useState("");
   const [showNewChat, setShowNewChat] = useState(false);
@@ -290,11 +292,11 @@ export function Sidebar() {
 
   return (
     <div
-      className="relative flex flex-col border-r border-border bg-sidebar-bg shrink-0"
-      style={{ width: sidebarWidth, minWidth: MIN_WIDTH, maxWidth: MAX_WIDTH }}
+      className={`relative flex flex-col bg-sidebar-bg ${isMobile ? "flex-1 min-w-0" : "border-r border-border shrink-0"}`}
+      style={isMobile ? undefined : { width: sidebarWidth, minWidth: MIN_WIDTH, maxWidth: MAX_WIDTH }}
     >
       {/* Header */}
-      <div className="h-14 flex items-center justify-between px-4 bg-panel-header">
+      <div className="h-14 header-safe shrink-0 flex items-center justify-between px-4 bg-panel-header">
         <div className="flex items-center gap-2">
           <svg width="28" height="28" viewBox="0 0 64 64" className="shrink-0">
             <g transform="translate(12, 8)">
@@ -313,7 +315,7 @@ export function Sidebar() {
             setJoinError("");
             setInviteInput("");
           }}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-accent text-[#111b21] rounded-lg hover:bg-accent-hover transition-colors cursor-pointer font-semibold text-sm"
+          className="flex items-center gap-1.5 px-3 py-1.5 max-md:min-h-11 max-md:px-4 bg-accent text-[#111b21] rounded-lg hover:bg-accent-hover transition-colors cursor-pointer font-semibold text-sm"
           title={t("sidebar.newChat")}
         >
           <svg
@@ -610,7 +612,7 @@ export function Sidebar() {
                     {!isConfirming && (
                       <button
                         onClick={(e) => handleDelete(session.id, e)}
-                        className="opacity-0 group-hover:opacity-100 p-1 text-text-muted hover:text-danger transition-all cursor-pointer"
+                        className="max-md:hidden opacity-0 group-hover:opacity-100 p-1 text-text-muted hover:text-danger transition-all cursor-pointer"
                         title={t("sidebar.deleteChat")}
                       >
                         <svg
@@ -637,8 +639,8 @@ export function Sidebar() {
         })}
       </div>
 
-      <WalletPanel />
-      <MyServices />
+      {!isMobile && <WalletPanel />}
+      {!isMobile && <MyServices />}
 
       {/* Footer */}
       <div className="border-t border-border bg-sidebar-bg">
@@ -690,7 +692,7 @@ export function Sidebar() {
         {/* Settings Link */}
         <button
           onClick={() => navigate("/settings")}
-          className="w-full flex items-center justify-center gap-2 py-3 text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors cursor-pointer"
+          className="max-md:hidden w-full flex items-center justify-center gap-2 py-3 text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors cursor-pointer"
           title={t("sidebar.settings")}
         >
           <svg
@@ -713,7 +715,7 @@ export function Sidebar() {
       {/* Resize Handle */}
       <div
         onMouseDown={handleResizeStart}
-        className="absolute top-0 right-0 w-1 h-full cursor-col-resize z-10 hover:bg-accent/40 active:bg-accent/60 transition-colors"
+        className="max-md:hidden absolute top-0 right-0 w-1 h-full cursor-col-resize z-10 hover:bg-accent/40 active:bg-accent/60 transition-colors"
       />
     </div>
   );

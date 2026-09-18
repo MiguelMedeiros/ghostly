@@ -155,9 +155,11 @@ export function GiphyPicker({ onSelect, onClose }: GiphyPickerProps) {
   const handleSelect = (gif: PickerGif) => onSelect(gif.url);
 
   return (
+    <>
+    <div className="sheet-backdrop" />
     <div
       ref={containerRef}
-      className="absolute bottom-full left-0 mb-2 z-50 animate-fade-in w-[340px] bg-panel-header border border-border rounded-xl shadow-2xl overflow-hidden"
+      className="sheet absolute bottom-full left-0 mb-2 z-50 animate-fade-in w-[340px] bg-panel-header border border-border rounded-xl shadow-2xl overflow-hidden"
     >
       <div className="p-2.5 border-b border-border">
         <div className="flex items-center gap-2">
@@ -196,7 +198,7 @@ export function GiphyPicker({ onSelect, onClose }: GiphyPickerProps) {
         </div>
       </div>
 
-      <div className="h-[280px] overflow-y-auto p-2">
+      <div className="h-[280px] max-md:h-[46dvh] overflow-y-auto p-2">
         {loading ? (
           <div className="flex items-center justify-center h-full">
             <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
@@ -262,5 +264,6 @@ export function GiphyPicker({ onSelect, onClose }: GiphyPickerProps) {
         </span>
       </div>
     </div>
+    </>
   );
 }

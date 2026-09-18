@@ -3,6 +3,7 @@ import { App } from "./App";
 import { Home } from "./pages/Home";
 import { Chat } from "./pages/Chat";
 import { Settings } from "./pages/Settings";
+import { ShareTab, WalletTab } from "./pages/MobileTabs";
 import { SettingsProvider } from "./contexts/SettingsContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { I18nProvider } from "./contexts/I18nContext";
@@ -24,6 +25,8 @@ export function Root() {
                   <Route path="/" element={<Home />} />
                   <Route path="/chat/*" element={<Chat />} />
                   <Route path="/settings" element={<Settings />} />
+                  <Route path="/wallet" element={<WalletTab />} />
+                  <Route path="/share" element={<ShareTab />} />
                 </Route>
               </Routes>
             </HashRouter>

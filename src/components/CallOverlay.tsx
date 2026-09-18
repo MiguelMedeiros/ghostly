@@ -85,7 +85,7 @@ export function CallOverlay({
   const showRemoteVideo = hasVideo && remoteStream && callState === "connected";
   
   return (
-    <div className="fixed inset-0 z-50 bg-chat-bg/95 flex flex-col items-center justify-center">
+    <div className="fixed inset-0 z-50 bg-chat-bg/95 max-md:bg-chat-bg flex flex-col items-center justify-center">
       {/* Remote audio (always present for audio playback) */}
       <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
       
@@ -110,7 +110,7 @@ export function CallOverlay({
       )}
 
       {/* Status */}
-      <div className="absolute top-8 left-0 right-0 text-center z-10">
+      <div className="call-top absolute top-8 left-0 right-0 text-center z-10">
         <p className="text-text-muted text-sm">
           {!hasVideo && callState === "connected" && (
             <span className="text-accent">Audio call</span>
@@ -125,7 +125,7 @@ export function CallOverlay({
 
       {/* Local video (picture-in-picture) */}
       {hasVideo && localStream && (
-        <div className="absolute top-4 right-4 w-36 h-28 rounded-lg overflow-hidden border border-border/50 shadow-lg z-10">
+        <div className="call-preview absolute top-4 right-4 w-36 h-28 max-md:w-28 max-md:h-40 rounded-lg max-md:rounded-xl overflow-hidden border border-border/50 shadow-lg z-10">
           {isVideoOff ? (
             <div className="w-full h-full bg-surface-hover flex items-center justify-center">
               <svg
@@ -157,11 +157,11 @@ export function CallOverlay({
       )}
 
       {/* Controls */}
-      <div className="absolute bottom-12 left-0 right-0 flex items-center justify-center gap-6 z-10">
+      <div className="call-controls absolute bottom-12 left-0 right-0 flex items-center justify-center gap-6 max-md:gap-8 z-10">
         {/* Mute */}
         <button
           onClick={onToggleMute}
-          className={`w-14 h-14 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
+          className={`w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
             isMuted
               ? "bg-danger/30 text-danger"
               : "bg-white/10 text-white hover:bg-white/20"
@@ -208,7 +208,7 @@ export function CallOverlay({
         {hasVideo && (
           <button
             onClick={onToggleVideo}
-            className={`w-14 h-14 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
+            className={`w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
               isVideoOff
                 ? "bg-danger/30 text-danger"
                 : "bg-white/10 text-white hover:bg-white/20"
@@ -250,7 +250,7 @@ export function CallOverlay({
         {/* Hang up */}
         <button
           onClick={onHangUp}
-          className="w-16 h-16 rounded-full bg-danger flex items-center justify-center text-white hover:bg-danger/80 transition-colors cursor-pointer"
+          className="w-16 h-16 max-md:w-[72px] max-md:h-[72px] rounded-full bg-danger flex items-center justify-center text-white hover:bg-danger/80 transition-colors cursor-pointer"
           title="End call"
         >
           <svg

@@ -14,8 +14,8 @@ export function IncomingCallNotification({
   onReject,
 }: IncomingCallNotificationProps) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in">
-      <div className="bg-surface-alt rounded-2xl p-8 shadow-2xl max-w-sm w-full mx-4 text-center space-y-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 max-md:bg-chat-bg backdrop-blur-sm animate-fade-in">
+      <div className="incoming-call bg-surface-alt rounded-2xl p-8 shadow-2xl max-w-sm w-full mx-4 text-center space-y-6">
         {/* Avatar */}
         <div className="flex flex-col items-center gap-3">
           <div className="w-20 h-20 rounded-full bg-surface-hover flex items-center justify-center animate-pulse-dot">
@@ -32,11 +32,11 @@ export function IncomingCallNotification({
         </div>
 
         {/* Actions */}
-        <div className="flex items-center justify-center gap-4">
+        <div className="flex items-center justify-center gap-4 max-md:gap-12">
           {/* Reject */}
           <button
             onClick={onReject}
-            className="w-14 h-14 rounded-full bg-danger flex items-center justify-center text-white hover:bg-danger/80 transition-colors cursor-pointer"
+            className="w-14 h-14 max-md:w-[72px] max-md:h-[72px] rounded-full bg-danger flex items-center justify-center text-white hover:bg-danger/80 transition-colors cursor-pointer"
             title="Decline"
           >
             <svg
@@ -57,7 +57,7 @@ export function IncomingCallNotification({
           {/* Accept audio */}
           <button
             onClick={onAcceptAudio}
-            className="w-14 h-14 rounded-full bg-accent flex items-center justify-center text-[#111b21] hover:bg-accent-hover transition-colors cursor-pointer"
+            className="w-14 h-14 max-md:w-[72px] max-md:h-[72px] rounded-full bg-accent flex items-center justify-center text-[#111b21] hover:bg-accent-hover transition-colors cursor-pointer"
             title="Accept audio call"
           >
             <svg
@@ -78,7 +78,7 @@ export function IncomingCallNotification({
           {hasVideo && (
             <button
               onClick={onAcceptVideo}
-              className="w-14 h-14 rounded-full bg-accent flex items-center justify-center text-[#111b21] hover:bg-accent-hover transition-colors cursor-pointer"
+              className="w-14 h-14 max-md:w-[72px] max-md:h-[72px] rounded-full bg-accent flex items-center justify-center text-[#111b21] hover:bg-accent-hover transition-colors cursor-pointer"
               title="Accept video call"
             >
               <svg

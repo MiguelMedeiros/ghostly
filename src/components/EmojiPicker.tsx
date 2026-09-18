@@ -1,3 +1,4 @@
+import { useIsMobile } from "../hooks/useIsMobile";
 import { useEffect, useRef } from "react";
 import data from "@emoji-mart/data";
 import Picker from "@emoji-mart/react";
@@ -8,6 +9,7 @@ interface EmojiPickerProps {
 }
 
 export function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
+  const isMobile = useIsMobile();
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -32,11 +34,15 @@ export function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
   }, [onClose]);
 
   return (
+    <>
+    <div className="sheet-backdrop" />
     <div
       ref={containerRef}
-      className="absolute bottom-full right-0 mb-2 z-50 animate-fade-in"
+      className="sheet sheet-emoji absolute bottom-full right-0 mb-2 z-50 animate-fade-in"
     >
       <Picker
+        key={isMobile ? "sheet" : "popover"}
+        dynamicWidth={isMobile}
         data={data}
         onEmojiSelect={(emoji: { native: string }) => onSelect(emoji.native)}
         theme="dark"
@@ -46,5 +52,6 @@ export function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
         perLine={8}
       />
     </div>
+    </>
   );
 }
