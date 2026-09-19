@@ -96,7 +96,13 @@ export function addMessage(
 }
 
 export function deleteSession(sessionId: string): void {
-  for (const key of [getKey(sessionId), `${getPrefix()}read_${sessionId}`, `${getPrefix()}invite_${sessionId}`]) {
+  for (const key of [
+    getKey(sessionId),
+    `${getPrefix()}read_${sessionId}`,
+    `${getPrefix()}invite_${sessionId}`,
+    joinKey(sessionId),
+    LEGACY_JOIN_PREFIX + sessionId,
+  ]) {
     try {
       localStorage.removeItem(key);
     } catch {
@@ -169,6 +175,37 @@ export function updateSessionLabel(sessionId: string, label: string): void {
   if (!session) return;
   session.label = label || undefined;
   saveSession(session);
+}
+
+/**
+ * Whether this side already announced itself on a chat. Written outside the
+ * `ghostly` namespace once, which meant deleting a chat and "Clear all data"
+ * both left one key per chat behind, each carrying its session id.
+ */
+export const LEGACY_JOIN_PREFIX = "joinSent_";
+
+function joinKey(sessionId: string): string {
+  return `${getPrefix()}join_${sessionId}`;
+}
+
+export function hasAnnouncedJoin(sessionId: string): boolean {
+  try {
+    return (
+      localStorage.getItem(joinKey(sessionId)) === "true" ||
+      localStorage.getItem(LEGACY_JOIN_PREFIX + sessionId) === "true"
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function markJoinAnnounced(sessionId: string): void {
+  try {
+    localStorage.setItem(joinKey(sessionId), "true");
+    localStorage.removeItem(LEGACY_JOIN_PREFIX + sessionId);
+  } catch {
+    // storage full or unavailable
+  }
 }
 
 export function saveInviteCode(sessionId: string, code: string): void {

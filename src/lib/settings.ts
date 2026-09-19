@@ -1,4 +1,5 @@
 import { clearChatData } from "@ghostly/browser/shared/idb";
+import { LEGACY_JOIN_PREFIX } from "./storage";
 
 export type ColorScheme = "dark" | "light" | "system";
 export type ColorTheme = "classic" | "monochrome" | "cyan" | "purple";
@@ -117,7 +118,9 @@ export async function clearAllData(): Promise<void> {
   const keysToRemove: string[] = [];
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
-    if (key?.startsWith("ghostly")) {
+    // The join flags of older versions are not in the namespace, and each one
+    // carries the session id of a chat that existed.
+    if (key?.startsWith("ghostly") || key?.startsWith(LEGACY_JOIN_PREFIX)) {
       keysToRemove.push(key);
     }
   }

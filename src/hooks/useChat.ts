@@ -16,6 +16,8 @@ import {
   saveSession,
   addMessage,
   getInviteCode,
+  hasAnnouncedJoin,
+  markJoinAnnounced,
 } from "../lib/storage";
 
 const POLL_INTERVAL_ACTIVE = 2_000;
@@ -127,8 +129,7 @@ export function useChat(params: ChatParams | null) {
         welcomeMessageSentRef.current = false;
         
         if (!isCreator) {
-          const joinKey = `joinSent_${sessionId}`;
-          joinMessageSentRef.current = localStorage.getItem(joinKey) === "true";
+          joinMessageSentRef.current = hasAnnouncedJoin(sessionId);
         }
       }
 
@@ -164,7 +165,7 @@ export function useChat(params: ChatParams | null) {
         if (isCreator) return;
         
         joinMessageSentRef.current = true;
-        localStorage.setItem(`joinSent_${sessionId}`, "true");
+        markJoinAnnounced(sessionId);
         
         const timestamp = Date.now();
         const nick = nickRef.current;

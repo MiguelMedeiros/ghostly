@@ -3,7 +3,9 @@ import type * as Desktop from "../../../../src/hooks/useChat";
 import {
   addMessage,
   getInviteCode,
+  hasAnnouncedJoin,
   loadSession,
+  markJoinAnnounced,
   saveSession,
 } from "../../../../src/lib/storage";
 import type { ChatMessage, ChatTechInfo, ConnectionStatus } from "../../../../src/lib/types";
@@ -107,7 +109,6 @@ export const useChat: typeof Desktop.useChat = (params) => {
   );
 
   // "👋 joined": the joiner announces itself once, the creator answers once.
-  const joinKey = `joinSent_${sessionId}`;
   const announce = useCallback(() => {
     const timestamp = Date.now();
     const nick = nickRef.current;
@@ -124,10 +125,10 @@ export const useChat: typeof Desktop.useChat = (params) => {
 
   useEffect(() => {
     if (!linkId || !sessionId || getInviteCode(sessionId)) return;
-    if (localStorage.getItem(joinKey) === "true") return;
-    localStorage.setItem(joinKey, "true");
+    if (hasAnnouncedJoin(sessionId)) return;
+    markJoinAnnounced(sessionId);
     announce();
-  }, [linkId, sessionId, joinKey, announce]);
+  }, [linkId, sessionId, announce]);
 
   useEffect(() => {
     if (!linkId || !sessionId || !getInviteCode(sessionId)) return;
