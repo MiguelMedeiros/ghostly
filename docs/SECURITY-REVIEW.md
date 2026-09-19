@@ -30,16 +30,16 @@ Status: **open**, **fixed** (merged, with the proof), **accepted** (with why).
 
 | ID | Sev. | Area | Finding | Status |
 |---|---|---|---|---|
-| S1 | High | Desktop | A contact's web app in a `ghostly-svc://` window could call every Tauri command (`local_fetch` to any loopback port): no ACL manifest, and Tauri treats app schemes as local | fixed: ACL manifest + capability for `main` only + `only_main` invoke guard |
-| S2 | High | Extension | Viewer intercepted every `*.ghostly.invalid` and all peers were one site: cross-peer requests as the user, cookie planting | fixed: `<svc>.<peer>.invalid` (peer = site), tab bound to its peer/service, `Domain` stripped from `Set-Cookie` |
-| S3 | High | Payments | Any `pay` with `rid` settled a request regardless of amount; test-mint ecash auto-added the test mint | fixed: full amount from a mint the request named; peers never add mints |
+| S1 | High | Desktop | A contact's web app in a `ghostly-svc://` window could call every Tauri command (`local_fetch` to any loopback port): no ACL manifest, and Tauri treats app schemes as local | fixed: ACL manifest + capability for `main` only + `only_main` invoke guard. Proof: `cargo test` in src-tauri (`a_contacts_app_cannot_call_commands` fails on the old code) |
+| S2 | High | Extension | Viewer intercepted every `*.ghostly.invalid` and all peers were one site: cross-peer requests as the user, cookie planting | fixed: `<svc>.<peer>.invalid` (peer = site), tab bound to its peer/service, `Domain` stripped from `Set-Cookie`. Proof: `npm run test:attacks -w @ghostly/extension` (3 of its attacks work on v0.3.1, none now) |
+| S3 | High | Payments | Any `pay` with `rid` settled a request regardless of amount; test-mint ecash auto-added the test mint | fixed: full amount from a mint the request named; peers never add mints. Proof: `test:attacks` forges `pay` frames with test sats and with 5 sats claimed as 50 |
 | S4 | High | Website | next 16.2.12 (RCE advisories), sharp 0.35.3 | fixed: next 16.3.3, sharp 0.35.4 |
-| S5 | Med | App | Chat route `#/chat/<seed>/<peer>/<key>` put link secrets in history and Chrome Sync | fix in progress |
-| S6 | Med | App | Lock screen started unlocked after reload, app focusable under it, weak hash | fix in progress (encryption at rest: open) |
+| S5 | Med | App | Chat route `#/chat/<seed>/<peer>/<key>` put link secrets in history and Chrome Sync | fixed: `#/chat/<sessionId>`, secrets looked up from storage, invite URLs replaced on arrival |
+| S6 | Med | App | Lock screen started unlocked after reload, app focusable under it, weak hash | fixed: starts locked, app not rendered or `inert` while locked, backoff, PBKDF2 600k with migration. Encryption at rest: see S18 |
 | S7 | Med | Calls | `_call` fields went into the SDP unvalidated (line injection), no max age | fixed: `parseCallSignal`, 120 s window |
-| S8 | Med | Files | Sent and received files shared a key space (peer could overwrite your file); no quota; peer MIME kept in blob; bidi names | fixed: `in`/`out` keys, 500 MiB per link, octet-stream unless raster preview, `\p{Cf}` stripped |
-| S9 | Med | HTTP host | Redirects left the target; override headers (`X-HTTP-Method-Override`, …) passed; `%2f` escaped base path; req+rst bypassed the 32 limit | fixed |
-| S10 | Med | Wallet | PENDING melt lost proofs; expired paid quotes deleted; in-flight proofs only in memory; reclaim race | fix in progress |
+| S8 | Med | Files | Sent and received files shared a key space (peer could overwrite your file); no quota; peer MIME kept in blob; bidi names | fixed: `in`/`out` keys with local ids, 500 MiB per link, octet-stream unless raster preview, `\p{Cf}` stripped |
+| S9 | Med | HTTP host | Redirects left the target; override headers (`X-HTTP-Method-Override`, …) passed; `%2f` escaped base path; req+rst bypassed the 32 limit | fixed. Left open: a browser host must follow redirects (it cannot see a manual one), so an open redirect in the shared app can still cause one blind local request (S20) |
+| S10 | Med | Wallet | PENDING melt lost proofs; expired paid quotes deleted; in-flight proofs only in memory; reclaim race | fixed: in-flight proofs and melts persisted and reconciled with the mint, quotes checked before deletion, reclaims serialized (20 unit tests with a fake mint) |
 | S11 | Med | Payments | Paying a request twice while the first ecash awaited an answer | fixed |
 | S12 | Med | CI | Actions on movable tags, no dependency scanning, broad default token | fixed: SHA pins, Security workflow, Dependabot, read-only default |
 | S13 | Med | Images | website on node 20 (EOL), web on nginx 1.27 | fixed: node 22, nginx 1.30 |
@@ -48,7 +48,13 @@ Status: **open**, **fixed** (merged, with the proof), **accepted** (with why).
 | S16 | Low | Invite | Invite is a long-lived bearer secret, creator keeps the peer's seed, no forward secrecy | open |
 | S17 | Low | CLI | `--seed`/`--key` on the command line (visible in `ps`, shell history) | open |
 | S18 | Low | Storage | Seeds, messages and proofs are plaintext in localStorage/IndexedDB | open |
+| S20 | Low | HTTP host | Browser hosts follow redirects and check the final URL afterwards: one blind request elsewhere on the machine via an open redirect in the shared app | open |
+| S21 | Low | App | "Clear all data" keeps the wallet on purpose (ecash is money); a browser's global history may still list an invite URL opened once | accepted |
 | S19 | Low | Deps | `lru` (via pkarr/mainline), `glib`/`unic-*`/`proc-macro-error` (via Tauri) | accepted until the dates in the allowlist |
+
+### Verified on 2026-09-19
+
+Unit and protocol tests (86), extension e2e, `test:attacks`, web e2e against the Docker image (nginx 1.30), delete-chats, Tauri IPC tests, CLI interop over the real network, website image (Next 16.3.3, node 22). Before/after: `test:attacks` against v0.3.1 has 3 attacks succeed; the Tauri viewer test fails on v0.3.1.
 
 ## How to prove a fix
 
@@ -57,10 +63,10 @@ Every fix is verified in the client it affects, not only in unit tests.
 | Client | Command / method |
 |---|---|
 | Protocol | `npm test` (packages/core), `npm run test:interop` for Rust ↔ TS |
-| Extension | `npm run test:e2e` (two browsers, data link, HTTP service, viewer) |
+| Extension | `npm run test:e2e` (two browsers, data link, HTTP service, viewer, sats, calls); `npm run test:attacks -w @ghostly/extension` (a malicious contact) |
 | Web | `node web/test/e2e.mjs`; headers: `curl -sI https://app.ghostly.tools` |
-| Desktop | `npm run tauri dev` with a web or extension peer; a shared app that tries `__TAURI_INTERNALS__.invoke` must be refused |
-| CLI | `cargo test --manifest-path cli/Cargo.toml`, then a real message to a web peer |
+| Desktop | `cargo test --manifest-path src-tauri/Cargo.toml` (IPC against the real capabilities); end to end: `npm run tauri dev` + `node extension/test/desktop-attacks.mjs` |
+| CLI | `cargo build -p ghostly-cli && GHOSTLY_CLI=target/debug/ghostly-cli npm run test:interop` (Rust ↔ TS over the real network) |
 | Website | `cd website && npx next build`; after deploy, `curl -sI https://ghostly.tools` |
 | Dependencies | `node scripts/security-scan.mjs` |
 
