@@ -15,6 +15,21 @@ const storedChats = (page: Page) =>
       }).length,
   );
 
+/**
+ * The rows of the chat list. The sidebar keeps its own copy of the sessions and
+ * refreshes it on a timer, so storage and list can disagree for a moment.
+ */
+const chatRows = (page: Page) => page.getByTitle("Delete chat");
+
+/**
+ * The list itself has settled on `count` chats. Clicking a row before that can hit the
+ * row of a chat that is about to disappear, whose confirm button then never comes back.
+ */
+async function expectChatRows(page: Page, count: number): Promise<void> {
+  await expect(chatRows(page)).toHaveCount(count);
+  if (count === 0) await expect(page.getByText("It's quiet here...")).toBeVisible();
+}
+
 async function createChat(page: Page): Promise<string> {
   const before = await storedChats(page);
   await page.getByTitle("New Chat").click();
@@ -80,6 +95,7 @@ test("chats can be named and found", async ({ peer }) => {
   await page.goto("/#/");
   await createChat(page);
   await page.goto("/#/");
+  await expectChatRows(page, 2);
 
   const search = page.getByPlaceholder("Search chats...");
   await search.fill("haunted");
@@ -108,13 +124,15 @@ test("one chat can be deleted, from the chat or from the list", async ({ peer })
   await page.getByRole("button", { name: "Yes" }).click();
   await expect(page).toHaveURL(/#\/$/);
   await expect.poll(() => storedChats(page)).toBe(0);
+  await expectChatRows(page, 0);
 
   await createChat(page);
+  await expectChatRows(page, 1);
   const row = page.getByText("Anonymous").first();
   await row.hover();
-  await page.getByTitle("Delete chat").click();
+  await chatRows(page).click();
   await page.getByRole("button", { name: "Delete", exact: true }).click();
-  await expect(page.getByText("It's quiet here...")).toBeVisible();
+  await expectChatRows(page, 0);
   await expect.poll(() => storedChats(page)).toBe(0);
 });
 
@@ -131,6 +149,7 @@ test("deleted chats stay deleted, settings stay", async ({ peer }) => {
   await page.waitForTimeout(16_000);
 
   await page.goto("/#/");
+  await expectChatRows(page, 2);
   await page.getByTitle("Delete all chats").click();
   await expect(page.getByText("Delete all 2 chats?")).toBeVisible();
   await page.getByRole("button", { name: "Delete all chats" }).last().click();
