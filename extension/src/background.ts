@@ -1,4 +1,4 @@
-import { concatBytes, fromBase64, isValidServiceId, toBase64, utf8Encode } from "@ghostly/core";
+import { concatBytes, fromBase64, toBase64, utf8Encode } from "@ghostly/core";
 import type { HttpRequestReply, RuntimeMessage } from "./messages";
 import { parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
 
@@ -75,10 +75,14 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
 // A remote web application needs a real origin: relative URLs, ES modules,
 // fetch/XHR, cookies and history all hang off it, and it must not share an
 // origin with the extension. No such origin exists on the network, so the tab
-// is pointed at a virtual one (`https://<service>.<peer>.ghostly.invalid`) and
-// every request to it is answered through the DevTools protocol with the
-// response the peer sent over WebRTC. Nothing else in the tab is intercepted,
-// and no other tab is touched.
+// is pointed at a virtual one (`https://<service>.<peer>.invalid`) and every
+// request to it is answered through the DevTools protocol with the response the
+// peer sent over WebRTC. Nothing else in the tab is intercepted, and no other
+// tab is touched.
+//
+// A tab serves the one service it was opened for. The app in it is a
+// contact's code: if it could reach another virtual origin, it would talk to
+// another contact's app as the user.
 
 const PROTOCOL_VERSION = "1.3";
 
@@ -93,13 +97,31 @@ interface PausedRequest {
   };
 }
 
+interface ViewerBinding {
+  peerPubKeyZ32: string;
+  serviceId: string;
+}
+
+// Session storage outlives the service worker, which the browser stops whenever it is idle.
+const bindingKey = (tabId: number) => `viewer:${tabId}`;
+
+async function bindingOf(tabId: number): Promise<ViewerBinding | null> {
+  const key = bindingKey(tabId);
+  return ((await chrome.storage.session.get(key))[key] as ViewerBinding | undefined) ?? null;
+}
+
+chrome.tabs.onRemoved.addListener((tabId) => void chrome.storage.session.remove(bindingKey(tabId)));
+
 async function openViewer(peerPubKeyZ32: string, serviceId: string): Promise<void> {
-  if (!isValidServiceId(serviceId)) throw new Error("Invalid service id");
+  const url = viewerUrl(peerPubKeyZ32, serviceId);
+  const parsed = parseViewerUrl(url);
+  if (!parsed || parsed.serviceId !== serviceId || parsed.peerPubKeyZ32 !== peerPubKeyZ32) throw new Error("Invalid service");
   await ensureEngine();
 
   const tab = await chrome.tabs.create({ url: "about:blank" });
   if (tab.id === undefined) throw new Error("Could not open a tab");
   const target = { tabId: tab.id };
+  await chrome.storage.session.set({ [bindingKey(tab.id)]: { peerPubKeyZ32, serviceId } satisfies ViewerBinding });
   try {
     await chrome.debugger.attach(target, PROTOCOL_VERSION);
     await chrome.debugger.sendCommand(target, "Fetch.enable", {
@@ -110,7 +132,16 @@ async function openViewer(peerPubKeyZ32: string, serviceId: string): Promise<voi
     await chrome.tabs.remove(tab.id).catch(() => {});
     throw error;
   }
-  await chrome.tabs.update(tab.id, { url: viewerUrl(peerPubKeyZ32, serviceId) });
+  await chrome.tabs.update(tab.id, { url });
+}
+
+/** A peer's `Set-Cookie` may not widen a cookie beyond the exact origin it came from. */
+function withoutCookieDomain(name: string, value: string): string {
+  if (name.toLowerCase() !== "set-cookie") return value;
+  return value
+    .split("\n")
+    .map((cookie) => cookie.replace(/;\s*domain\s*=[^;]*/gi, ""))
+    .join("\n");
 }
 
 function errorPage(title: string, detail: string): string {
@@ -126,8 +157,9 @@ const UNREACHABLE_CODES = new Set(["unreachable", "timeout", "closed", "offline"
 
 async function fulfill(target: chrome.debugger.Debuggee, paused: PausedRequest): Promise<void> {
   const parsed = parseViewerUrl(paused.request.url);
-  if (!parsed) {
-    await chrome.debugger.sendCommand(target, "Fetch.failRequest", { requestId: paused.requestId, errorReason: "Failed" });
+  const binding = target.tabId === undefined ? null : await bindingOf(target.tabId);
+  if (!parsed || !binding || parsed.peerPubKeyZ32 !== binding.peerPubKeyZ32 || parsed.serviceId !== binding.serviceId) {
+    await chrome.debugger.sendCommand(target, "Fetch.failRequest", { requestId: paused.requestId, errorReason: "BlockedByClient" });
     return;
   }
 
@@ -161,7 +193,7 @@ async function fulfill(target: chrome.debugger.Debuggee, paused: PausedRequest):
     await chrome.debugger.sendCommand(target, "Fetch.fulfillRequest", {
       requestId: paused.requestId,
       responseCode: reply.status,
-      responseHeaders: reply.headers.map(([name, value]) => ({ name, value })),
+      responseHeaders: reply.headers.map(([name, value]) => ({ name, value: withoutCookieDomain(name, value) })),
       body: reply.bodyB64,
     });
     return;

@@ -110,7 +110,7 @@ try {
     if (JSON.stringify(actual) !== JSON.stringify(wanted)) throw new Error(`${label}: expected ${JSON.stringify(wanted)}, got ${JSON.stringify(actual)}`);
     ok(label);
   };
-  expect("virtual origin", new URL(viewer.url()).hostname.endsWith(".ghostly.invalid"), true);
+  expect("virtual origin", new URL(viewer.url()).hostname.endsWith(".invalid"), true);
   expect("inline script ran", out.inline, true);
   expect("secure context", out.secure, true);
   expect("stylesheet applied", out.css, "rgb(1, 2, 3)");

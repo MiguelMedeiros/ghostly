@@ -29,7 +29,7 @@ Use two Chrome profiles (or two machines), each with the extension loaded.
 1. **A:** *New* → *Create New Chat*, copy the invite code.
 2. **B:** *New*, paste the code. Send a message; it arrives at A through the DHT within a few seconds, and the two connect peer to peer on their own shortly after.
 3. **A:** *Share a local service* (bottom of the sidebar) → name `Atlas`, target `localhost:3400`. Chrome asks whether Ghostly may access `localhost`.
-4. **B:** an **Atlas** button appears under the chat header. Click it. A tab opens on `https://atlas.<A's key>.ghostly.invalid/`, the peers connect over WebRTC, and the app loads from A's machine.
+4. **B:** an **Atlas** button appears under the chat header. Click it. A tab opens on `https://atlas.<A's key>.invalid/`, the peers connect over WebRTC, and the app loads from A's machine.
 5. Both show *Peer to peer* under the chat header; messages, call signaling and the app now travel over WebRTC.
 6. **A:** *Stop*, switch to *Offline*, or close Chrome. Reload the tab on B: the service is not reachable.
 
@@ -139,9 +139,11 @@ A remote application needs a real origin. Relative URLs, ES modules, `fetch`, hi
 | A service worker on a real web origin | Needs a Ghostly-operated website in the path. |
 | **`chrome.debugger` Fetch domain on a virtual origin** | **Chosen.** |
 
-Ghostly opens a tab, attaches the debugger to **that tab only**, and intercepts requests matching `https://*.ghostly.invalid/*`. Each one is answered with the response the peer sent over WebRTC. The application runs on `https://<service>.<peer key>.ghostly.invalid`:
+Ghostly opens a tab, attaches the debugger to **that tab only**, and intercepts requests matching `https://*.invalid/*`. Each one is answered with the response the peer sent over WebRTC. The application runs on `https://<service>.<peer key>.invalid`:
 
 - a normal, secure-context web origin, isolated from the extension and from every other peer and service;
+- each peer is a site of its own (`.invalid` is a top-level domain to the browser), so one peer's app cannot set cookies for another's, and is cross-site to it;
+- the tab serves only the service it was opened for: requests from it to any other peer or service are refused;
 - `.invalid` can never resolve, so a request that is not intercepted goes nowhere;
 - requests to any other origin (CDNs, APIs) are not touched;
 - the debugger detaches when the tab leaves the virtual origin or closes.

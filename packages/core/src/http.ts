@@ -148,7 +148,7 @@ export function sanitizeResponseHeaders(headers: HeaderList, target: LocalTarget
       out.push([name, relativizeLocation(value, target)]);
     } else if (lower === "set-cookie") {
       // The cookie belongs to the virtual origin on the client, not to localhost.
-      out.push([name, value.replace(/;\s*domain=[^;]*/gi, "")]);
+      out.push([name, value.replace(/;\s*domain\s*=[^;]*/gi, "")]);
     } else {
       out.push([name, value]);
     }
