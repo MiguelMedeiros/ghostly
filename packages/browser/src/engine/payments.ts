@@ -11,7 +11,7 @@ import {
   type PaymentResult,
 } from "@ghostly/core";
 import { STORES, store, wrap } from "../shared/idb";
-import type { PaymentView, StoredMessage, StoredPayment, StoredQuote } from "../shared/types";
+import type { PaymentView, PendingMelt, StoredMessage, StoredPayment, StoredQuote } from "../shared/types";
 import { assertAmount, type CashuWallet } from "./wallet";
 
 /**
@@ -36,8 +36,12 @@ function parseSats(value: string, asset: string): number | null {
   return Number(value);
 }
 
+/** Paying in ecash failed before any token existed, so nothing reached the contact and Lightning is safe to try. */
+class NoEcashError extends Error {}
+
 export class PaymentDesk {
   private readonly payments = new Map<string, StoredPayment>();
+  private readonly reclaims = new Map<string, Promise<void>>();
 
   constructor(
     private readonly wallet: CashuWallet,
@@ -128,6 +132,12 @@ export class PaymentDesk {
       throw new Error("Unknown payment request");
     }
     if (request.state !== "pending") throw new Error("This request is no longer open");
+    if (request.lightningPending) throw new Error("A Lightning payment for this request is still pending");
+    // Ecash already sent for it is waiting on the contact's answer; paying again would pay twice.
+    const inFlight = [...this.payments.values()].some(
+      (p) => p.kind === "payment" && p.direction === "out" && p.requestId === request.id && p.state !== "reclaimed" && p.state !== "failed",
+    );
+    if (inFlight) throw new Error("You already paid this request");
     const link = this.requireLink(params.linkId);
     await link.connect();
 
@@ -141,28 +151,51 @@ export class PaymentDesk {
       });
       return;
     } catch (error) {
-      if (!request.invoice) throw error;
+      // Lightning only when no ecash left the wallet: a token that exists may already be the contact's.
+      if (!request.invoice || !(error instanceof NoEcashError)) throw error;
     }
 
     const quote = await this.wallet.quoteInvoice(request.invoice);
     if (quote.amount !== request.amount) throw new Error("The invoice does not match the requested amount");
     const feeLimit = Math.max(10, Math.ceil(request.amount * 0.03));
     if (quote.feeReserve > feeLimit) throw new Error(`The Lightning fee (${quote.feeReserve} sats) is too high`);
-    if (!(await this.wallet.payQuote(quote.quote, quote.mint, request.memo ?? "Paid a contact's request"))) throw new Error("The Lightning payment did not go through");
-    await this.save({ ...request, state: "settled", mint: quote.mint });
+    // Marked before the mint is asked to pay, so a pending payment is never paid a second time.
+    await this.save({ ...this.current(request), lightningPending: true, error: undefined });
+    let paid: boolean;
+    try {
+      paid = await this.wallet.payQuote(quote.quote, quote.mint, request.memo ?? "Paid a contact's request", request.id);
+    } catch (error) {
+      // The wallet throws only when the sats did not go out.
+      await this.save({ ...this.current(request), lightningPending: undefined });
+      throw error;
+    }
+    // Still pending at the mint: the wallet settles it later, through onMeltResolved.
+    if (paid) await this.save({ ...this.current(request), state: "settled", mint: quote.mint, lightningPending: undefined });
   }
 
   /** Takes back ecash the peer never redeemed. If they did redeem it, the mint says so and the payment is settled. */
-  async reclaim(paymentId: string): Promise<void> {
+  reclaim(paymentId: string): Promise<void> {
+    // One at a time per payment: a second redeem of the same token fails "spent" and would call it settled.
+    let running = this.reclaims.get(paymentId);
+    if (!running) {
+      running = this.reclaimOnce(paymentId).finally(() => this.reclaims.delete(paymentId));
+      this.reclaims.set(paymentId, running);
+    }
+    return running;
+  }
+
+  private async reclaimOnce(paymentId: string): Promise<void> {
     const payment = this.payments.get(paymentId);
     if (!payment?.token || payment.direction !== "out") throw new Error("Nothing to reclaim");
     try {
       await this.wallet.receiveToken(payment.token, "reclaimed", payment.memo);
-      await this.save({ ...payment, state: "reclaimed", token: undefined });
+      await this.save({ ...this.current(payment), state: "reclaimed", token: undefined });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (!/spent/i.test(message)) throw error;
-      await this.save({ ...payment, state: "settled", token: undefined });
+      // Spent by someone else: the contact took it. Only a payment still waiting on them becomes settled.
+      const current = this.current(payment);
+      if (current.state === "pending") await this.save({ ...current, state: "settled", token: undefined });
     }
   }
 
@@ -203,6 +236,11 @@ export class PaymentDesk {
   async onPayment(linkId: string, payment: Payment): Promise<void> {
     const link = this.host.getLink(linkId);
     const known = this.payments.get(payment.id);
+    if (known && known.linkId !== linkId) {
+      // Another link's id. Answering from its record would tell this contact about that one.
+      link?.sendPaymentResult({ id: payment.id, ok: false, error: "Unknown payment" });
+      return;
+    }
     if (known) {
       // A retransmission: say again what happened, redeem nothing twice.
       link?.sendPaymentResult({ id: payment.id, ok: known.state === "settled", credited: String(known.amount), error: known.error });
@@ -213,7 +251,7 @@ export class PaymentDesk {
     try {
       if (identifier !== ENDPOINT.cashu) throw new Error("Unsupported payment method");
       if (parseSats(payment.amount.value, payment.amount.asset) === null) throw new Error("Unsupported amount");
-      const { amount, mint } = await this.wallet.receiveToken(token, "ecash-in", payment.memo);
+      const { amount, mint } = await this.wallet.receiveToken(token, "ecash-in", payment.memo, { addTestMint: false });
 
       await this.save({
         id: payment.id,
@@ -228,9 +266,18 @@ export class PaymentDesk {
         mint,
         requestId: payment.requestId,
       });
+      // It settles our request only in full and in ecash from a mint the request named. Anything less is
+      // received, and the request stays open.
       const request = payment.requestId ? this.payments.get(payment.requestId) : undefined;
-      if (request?.kind === "request" && request.direction === "out" && request.linkId === linkId) {
-        await this.save({ ...request, state: "settled" });
+      if (
+        request?.kind === "request" &&
+        request.direction === "out" &&
+        request.linkId === linkId &&
+        request.state === "pending" &&
+        amount >= request.amount &&
+        (request.mints ?? []).includes(mint)
+      ) {
+        await this.save({ ...request, state: "settled", mint });
       }
       await this.host.storeMessage({
         linkId,
@@ -279,6 +326,15 @@ export class PaymentDesk {
     this.host.getLink(request.linkId)?.sendPaymentResult({ id: request.id, ok: true });
   }
 
+  /** A Lightning payment of a contact's request that the mint had left pending settled. */
+  async onMeltResolved(melt: PendingMelt, paid: boolean): Promise<void> {
+    const found = melt.paymentId ? this.payments.get(melt.paymentId) : undefined;
+    if (found?.kind !== "request" || found.direction !== "in") return;
+    const request = { ...found, lightningPending: undefined };
+    if (paid) await this.save(request.state === "pending" ? { ...request, state: "settled", mint: melt.mint } : request);
+    else await this.save({ ...request, error: "The Lightning payment did not go through" });
+  }
+
   // -- internals -------------------------------------------------------------------
 
   private async sendEcash(
@@ -287,10 +343,7 @@ export class PaymentDesk {
   ): Promise<string> {
     const id = newId();
     const memo = params.memo?.trim().slice(0, 140) || undefined;
-    const { token, mint } = await this.wallet.createToken(params.amount, params.mints, memo);
-
-    // Written down before it leaves: from here on the token is the only copy of that money.
-    await this.save({
+    const record = (token: string, mint: string): StoredPayment => ({
       id,
       linkId: params.linkId,
       kind: "payment",
@@ -304,6 +357,17 @@ export class PaymentDesk {
       token,
       requestId: params.requestId,
     });
+    let token: string;
+    try {
+      // Written down in the same transaction that takes the ecash out of the wallet: from here on the
+      // token is the only copy of that money.
+      const created = await this.wallet.createToken(params.amount, params.mints, memo, record);
+      token = created.token;
+      this.payments.set(id, record(created.token, created.mint));
+    } catch (error) {
+      throw new NoEcashError(error instanceof Error ? error.message : String(error));
+    }
+    this.host.onChange();
     await this.host.storeMessage({
       linkId: params.linkId,
       id: `me_${params.timestamp}`,
@@ -334,6 +398,11 @@ export class PaymentDesk {
     const link = this.host.getLink(linkId);
     if (!link) throw new Error("You are offline");
     return link;
+  }
+
+  /** The latest copy: anything awaited in between may have changed the record. */
+  private current(payment: StoredPayment): StoredPayment {
+    return this.payments.get(payment.id) ?? payment;
   }
 
   private async save(payment: StoredPayment): Promise<void> {

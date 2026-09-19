@@ -32,8 +32,8 @@ export interface FileSink {
 }
 
 export interface FileTransferEvents {
-  /** Return a sink to accept the file, or null to refuse it. */
-  onIncoming(file: FileInfo): FileSink | null;
+  /** Return a sink to accept the file, null to refuse it, or the reason for refusing it. */
+  onIncoming(file: FileInfo): FileSink | string | null;
   onProgress?(fileId: string, transferred: number, direction: "in" | "out"): void;
   onComplete?(fileId: string, direction: "in" | "out"): void;
   onFailed?(fileId: string, reason: string, direction: "in" | "out"): void;
@@ -43,20 +43,36 @@ const FILE_ID = /^[A-Za-z0-9_-]{8,64}$/;
 const MIME = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$/i;
 const MAX_NAME_LENGTH = 200;
 
+/**
+ * Invisible and direction-changing characters: bidi overrides turn
+ * "invoice\u202Efdp.exe" into what reads as "invoiceexe.pdf", zero-width ones hide
+ * text. Cf covers both; line and paragraph separators break the layout.
+ */
+const INVISIBLE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
+
 /** A file name is display text and a download suggestion, never a path. */
 export function sanitizeFileName(name: string): string {
-  let clean = "";
-  for (const char of name) {
-    const code = char.codePointAt(0) ?? 0;
-    if (code < 32 || code === 127 || char === "/" || char === "\\" || char === ":") continue;
-    clean += char;
-  }
-  clean = clean.replace(/^\.+/, "").trim().slice(0, MAX_NAME_LENGTH);
+  const visible = name.replace(INVISIBLE, "").replace(/[/\\:]/g, "");
+  // Whitespace before the dots must not hide them: " .bashrc" is a dotfile too.
+  const clean = [...visible.replace(/^[\s.]+/, "")].slice(0, MAX_NAME_LENGTH).join("").trim();
   return clean || "file";
 }
 
 export function sanitizeMime(mime: string): string {
   return MIME.test(mime) ? mime.toLowerCase() : "application/octet-stream";
+}
+
+/** Raster images a UI may show inline. SVG is left out on purpose: it can carry scripts. */
+export const PREVIEWABLE_IMAGE = /^image\/(png|jpe?g|gif|webp)$/;
+
+/**
+ * The type received bytes are served with. The peer picks the announced type,
+ * and a blob: URL typed text/html or image/svg+xml would run in the app's
+ * origin, so anything but a previewable image is opaque bytes.
+ */
+export function safeBlobType(mime: string): string {
+  const clean = sanitizeMime(mime);
+  return PREVIEWABLE_IMAGE.test(clean) ? clean : "application/octet-stream";
 }
 
 interface Incoming {
@@ -145,7 +161,7 @@ export class FileTransfers {
       timestamp: frame.ts,
     };
     const sink = this.events.onIncoming(file);
-    if (!sink) return refuse("refused");
+    if (!sink || typeof sink === "string") return refuse(sink || "refused");
 
     const entry: Incoming = { file, sink, received: 0, queue: Promise.resolve() };
     this.incoming.set(frame.id, entry);

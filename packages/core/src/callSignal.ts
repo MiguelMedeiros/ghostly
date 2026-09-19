@@ -120,6 +120,119 @@ export function extractParamsFromSdp(sdp: string): Partial<CallSignal> {
   };
 }
 
+/** Offers, answers and hang-ups older (or further in the future) than this are ignored. */
+export const CALL_SIGNAL_MAX_AGE_MS = 120_000;
+
+/** RFC 8839: ice-char is ALPHA / DIGIT / "+" / "/"; ufrag is 4-256 of them, pwd 22-256. */
+const ICE_UFRAG = /^[A-Za-z0-9+/]{4,256}$/;
+const ICE_PWD = /^[A-Za-z0-9+/]{22,256}$/;
+const ICE_FOUNDATION = /^[A-Za-z0-9+/]{1,32}$/;
+const CANDIDATE_ADDRESS = /^[A-Za-z0-9.:-]{1,64}$/;
+const CANDIDATE_TYPES = new Set(["host", "srflx", "prflx", "relay"]);
+const EXTENSION_TOKEN = /^[A-Za-z0-9+/._-]{1,64}$/;
+const DIGITS = /^\d{1,10}$/;
+const MAX_CANDIDATES = 8;
+
+function uint(value: string, max: number): number | null {
+  if (!DIGITS.test(value)) return null;
+  const n = Number(value);
+  return n <= max ? n : null;
+}
+
+/**
+ * Parses the part of an `a=candidate:` line that the signal carries
+ * (`foundation component transport priority address port typ type [raddr a rport p] [ext value]...`)
+ * and serializes it again from the validated parts. Returns `undefined` for a
+ * well-formed candidate that is not UDP (skipped) and `null` for anything malformed.
+ */
+function normalizeCandidate(candidate: unknown): string | null | undefined {
+  if (typeof candidate !== "string" || candidate.length > 512) return null;
+  const parts = candidate.split(" ");
+  if (parts.length < 8 || parts[6] !== "typ") return null;
+  const [foundation, componentStr, transport, priorityStr, address, portStr, , type] = parts;
+  const component = uint(componentStr, 256);
+  const priority = uint(priorityStr, 0xffffffff);
+  const port = uint(portStr, 65535);
+  if (!ICE_FOUNDATION.test(foundation) || component === null || component < 1) return null;
+  if (!/^[A-Za-z]{1,8}$/.test(transport) || priority === null || port === null) return null;
+  if (!CANDIDATE_ADDRESS.test(address) || !CANDIDATE_TYPES.has(type)) return null;
+
+  let raddr: string | null = null;
+  let rport: number | null = null;
+  const rest = parts.slice(8);
+  if (rest.length % 2 !== 0) return null;
+  for (let i = 0; i < rest.length; i += 2) {
+    const [name, value] = [rest[i], rest[i + 1]];
+    if (!EXTENSION_TOKEN.test(name) || !EXTENSION_TOKEN.test(value)) return null;
+    if (name === "raddr") {
+      if (!CANDIDATE_ADDRESS.test(value)) return null;
+      raddr = value;
+    } else if (name === "rport") {
+      rport = uint(value, 65535);
+      if (rport === null) return null;
+    }
+    // Other extension attributes (generation, network-id, ufrag...) are dropped.
+  }
+
+  if (transport.toLowerCase() !== "udp") return undefined;
+  let line = `${foundation} ${component} udp ${priority} ${address} ${port} typ ${type}`;
+  if (raddr !== null && rport !== null) line += ` raddr ${raddr} rport ${rport}`;
+  return line;
+}
+
+/**
+ * Validates an untrusted `_call` signal (from the Pkarr record or a `call`
+ * frame). Every value that ends up in the rebuilt SDP is checked against an
+ * anchored pattern and candidates are re-serialized from their parts, so a peer
+ * cannot inject SDP lines. Signals outside {@link CALL_SIGNAL_MAX_AGE_MS} of
+ * `now` are rejected so that a stale packet does not ring.
+ */
+export function parseCallSignal(json: string, now = Date.now()): CallSignal | null {
+  let raw: Record<string, unknown>;
+  try {
+    raw = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  if (raw.t !== "o" && raw.t !== "a" && raw.t !== "h") return null;
+  if (typeof raw.ts !== "number" || !Number.isFinite(raw.ts)) return null;
+  if (Math.abs(now - raw.ts) > CALL_SIGNAL_MAX_AGE_MS) return null;
+  if (raw.t === "h") return { t: "h", ts: raw.ts };
+
+  if (typeof raw.u !== "string" || !ICE_UFRAG.test(raw.u)) return null;
+  if (typeof raw.p !== "string" || !ICE_PWD.test(raw.p)) return null;
+  if (typeof raw.f !== "string" || !/^[0-9a-fA-F]{64}$/.test(raw.f)) return null;
+  if (raw.s !== "actpass" && raw.s !== "active" && raw.s !== "passive") return null;
+
+  let media: string[] | undefined;
+  if (raw.m !== undefined) {
+    if (!Array.isArray(raw.m) || raw.m.length < 1 || raw.m.length > 2) return null;
+    if (!raw.m.every((m) => m === "a" || m === "v") || new Set(raw.m).size !== raw.m.length) return null;
+    media = [...raw.m];
+  }
+
+  let ssrcs: number[] | undefined;
+  if (raw.ss !== undefined) {
+    if (!Array.isArray(raw.ss) || raw.ss.length > 2) return null;
+    if (!raw.ss.every((n) => Number.isInteger(n) && n >= 0 && n <= 0xffffffff)) return null;
+    ssrcs = [...raw.ss];
+  }
+
+  const candidates: string[] = [];
+  if (raw.c !== undefined) {
+    if (!Array.isArray(raw.c) || raw.c.length > MAX_CANDIDATES) return null;
+    for (const c of raw.c) {
+      const normalized = normalizeCandidate(c);
+      if (normalized === null) return null;
+      if (normalized !== undefined) candidates.push(normalized);
+    }
+  }
+
+  return { t: raw.t, ts: raw.ts, u: raw.u, p: raw.p, f: raw.f, s: raw.s, m: media, c: candidates, ss: ssrcs };
+}
+
+/** Rebuilds an SDP around a signal. Only pass signals returned by {@link parseCallSignal}. */
 export function buildSdpFromSignal(
   signal: CallSignal,
   type: "offer" | "answer",

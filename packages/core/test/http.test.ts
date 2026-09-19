@@ -66,13 +66,28 @@ describe("local targets", () => {
     expect(resolveTargetUrl(scoped, "/x")).toBe("http://localhost:3400/app/x");
     expect(resolveTargetUrl(scoped, "/../admin")).toBeNull();
     expect(resolveTargetUrl(scoped, "/%2e%2e/admin")).toBeNull();
+    // a server that decodes separators before routing would land outside the base path
+    for (const bad of ["/..%2fadmin", "/..%2Fadmin", "/..%5cadmin", "/%2E%2E/admin", "/x%2e"]) {
+      expect(resolveTargetUrl(scoped, bad), bad).toBeNull();
+    }
+    expect(resolveTargetUrl(scoped, "/x?next=%2Fa%2e%5c")).toBe("http://localhost:3400/app/x?next=%2Fa%2e%5c");
   });
 
   it("rewrites locations relative to the target", () => {
     const target = parseLocalTarget("localhost:3400/app");
     expect(relativizeLocation("http://localhost:3400/app/login?next=1", target)).toBe("/login?next=1");
     expect(relativizeLocation("/app/x", target)).toBe("/x");
-    expect(relativizeLocation("https://example.com/x", target)).toBe("https://example.com/x");
+    for (const off of [
+      "https://example.com/x",
+      "//example.com/x",
+      "http://localhost:22/",
+      "http://localhost:3400/admin",
+      "/apple",
+      "http://user@localhost:3400/app/x",
+    ]) {
+      expect(relativizeLocation(off, target), off).toBeNull();
+    }
+    expect(relativizeLocation("http://localhost:3400//evil.com/x", parseLocalTarget("localhost:3400"))).toBeNull();
   });
 });
 
@@ -88,6 +103,19 @@ describe("header hygiene", () => {
         ["Authorization", "Bearer x"],
         ["Bad Name", "x"],
         ["X-Inject", "a\r\nb"],
+        ["X-HTTP-Method-Override", "DELETE"],
+        ["X-Method-Override", "DELETE"],
+        ["X-HTTP-Method", "DELETE"],
+        ["X-Original-URL", "/admin"],
+        ["X-Rewrite-URL", "/admin"],
+        ["X-Forwarded-Prefix", "/admin"],
+        ["X-Forwarded-Port", "443"],
+        ["X-Forwarded-Server", "evil"],
+        ["Forwarded", "for=1.2.3.4"],
+        ["True-Client-IP", "127.0.0.1"],
+        ["CF-Connecting-IP", "127.0.0.1"],
+        ["X-Real-IP", "127.0.0.1"],
+        ["X-Client-IP", "127.0.0.1"],
       ]),
     ).toEqual([
       ["Accept", "text/html"],
@@ -102,7 +130,9 @@ describe("header hygiene", () => {
           ["content-length", "12"],
           ["transfer-encoding", "chunked"],
           ["location", "http://localhost:3400/next"],
+          ["content-location", "http://localhost:9000/secret"],
           ["set-cookie", "sid=1; Domain=localhost; Path=/; HttpOnly"],
+          ["set-cookie", "fix=1; Domain =invalid; Path=/"],
         ],
         parseLocalTarget("localhost:3400"),
       ),
@@ -110,6 +140,7 @@ describe("header hygiene", () => {
       ["content-type", "text/html"],
       ["location", "/next"],
       ["set-cookie", "sid=1; Path=/; HttpOnly"],
+      ["set-cookie", "fix=1; Path=/"],
     ]);
   });
 });
@@ -249,17 +280,100 @@ describe("http over the data link", () => {
     expect(calls).toBe(0);
   });
 
-  it("hands same-origin redirects back to the client and blocks the rest", async () => {
+  it("hands on-target redirects back to the client and blocks the rest", async () => {
+    const locations: Record<string, string> = {
+      "/docs": "http://localhost:3400/docs/",
+      "/relative": "next",
+      "/out": "http://localhost:22/",
+      "/far": "https://example.com/",
+      "/sneaky": "//example.com/",
+    };
+    const { client } = setup(async (request) => ({
+      status: 307,
+      headers: [["location", locations[new URL(request.url).pathname]]],
+      body: null,
+    }));
+    const redirect = await client.request("atlas", { method: "POST", path: "/docs", body: utf8Encode("x") });
+    expect(redirect.status).toBe(307);
+    expect(redirect.headers).toEqual([["location", "/docs/"]]);
+    expect((await client.request("atlas", { method: "GET", path: "/relative" })).headers).toEqual([["location", "/next"]]);
+    for (const path of ["/out", "/far", "/sneaky"]) {
+      const blocked = await client.request("atlas", { method: "GET", path });
+      expect(blocked.status, path).toBe(502);
+      expect(blocked.headers).toContainEqual(["x-ghostly-error", "redirect-blocked"]);
+      expect(utf8Decode(await blocked.bytes())).not.toContain("localhost");
+    }
+  });
+
+  it("hands a redirect a browser followed back to the client, never off the target", async () => {
+    const finals: Record<string, string> = {
+      "/docs": "http://localhost:3400/docs/",
+      "/out": "http://localhost:22/admin",
+      "/far": "https://example.com/",
+    };
     const { client } = setup(async (request) => ({
       status: 200,
-      headers: [],
-      body: bodyOf(utf8Encode("final")),
-      finalUrl: request.url.endsWith("/out") ? "http://localhost:22/" : "http://localhost:3400/docs/",
+      headers: [["content-type", "text/html"]],
+      body: null,
+      finalUrl: finals[new URL(request.url).pathname],
     }));
-    const redirect = await client.request("atlas", { method: "GET", path: "/docs" });
-    expect(redirect.status).toBe(302);
-    expect(redirect.headers).toEqual([["location", "/docs/"]]);
-    expect((await client.request("atlas", { method: "GET", path: "/out" })).status).toBe(502);
+    const followed = await client.request("atlas", { method: "GET", path: "/docs" });
+    expect(followed.status).toBe(302);
+    expect(followed.headers).toEqual([["location", "/docs/"]]);
+    for (const path of ["/out", "/far"]) {
+      const blocked = await client.request("atlas", { method: "GET", path });
+      expect(blocked.status, path).toBe(502);
+      expect(blocked.headers).toContainEqual(["x-ghostly-error", "redirect-blocked"]);
+      expect(utf8Decode(await blocked.bytes())).not.toContain("localhost");
+    }
+  });
+
+  it("keeps counting a reset request until its local fetch settles", async () => {
+    // Desktop's local fetch ignores the abort signal, like this one.
+    const release: (() => void)[] = [];
+    const { host, clientSide } = setup(
+      () =>
+        new Promise((resolve) =>
+          release.push(() => resolve({ status: 200, headers: [], body: bodyOf(utf8Encode("stale")) })),
+        ),
+    );
+    const responses: { id: number; st: number }[] = [];
+    clientSide.onMessage = (data) => {
+      const frame = typeof data === "string" ? decodeControl(data) : null;
+      if (frame?.t === "res") responses.push({ id: frame.id, st: frame.st });
+    };
+    const tick = () => new Promise((r) => setTimeout(r, 10));
+
+    for (let i = 0; i < LIMITS.maxConcurrentRequestsPerPeer; i++) {
+      clientSide.send(encodeControl({ t: "req", id: i, s: "atlas", m: "GET", p: "/", h: [], b: false }));
+      clientSide.send(encodeControl({ t: "rst", id: i, d: "q", e: "" }));
+    }
+    await tick();
+    expect(host.activeRequests).toBe(LIMITS.maxConcurrentRequestsPerPeer);
+    clientSide.send(encodeControl({ t: "req", id: 1000, s: "atlas", m: "GET", p: "/", h: [], b: false }));
+    await tick();
+    expect(responses).toEqual([{ id: 1000, st: 503 }]);
+
+    // settling one fetch frees a slot; id 0 is reused while its old fetch still runs
+    release.splice(1, 1)[0]();
+    await tick();
+    clientSide.send(encodeControl({ t: "req", id: 0, s: "atlas", m: "GET", p: "/", h: [], b: false }));
+    await tick();
+    expect(host.activeRequests).toBe(LIMITS.maxConcurrentRequestsPerPeer);
+
+    // the stale runs for the same id settle and must neither answer for nor end the new stream
+    release.splice(0, LIMITS.maxConcurrentRequestsPerPeer - 1).forEach((r) => r());
+    await tick();
+    expect(responses).toEqual([{ id: 1000, st: 503 }]);
+    expect(host.activeRequests).toBe(1);
+
+    release.shift()!();
+    await tick();
+    expect(responses).toEqual([
+      { id: 1000, st: 503 },
+      { id: 0, st: 200 },
+    ]);
+    expect(host.activeRequests).toBe(0);
   });
 
   it("reports an unreachable service as 502", async () => {

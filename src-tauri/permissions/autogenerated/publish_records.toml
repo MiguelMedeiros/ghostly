@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-publish-records"
+description = "Enables the publish_records command without any pre-configured scope."
+commands.allow = ["publish_records"]
+
+[[permission]]
+identifier = "deny-publish-records"
+description = "Denies the publish_records command without any pre-configured scope."
+commands.deny = ["publish_records"]

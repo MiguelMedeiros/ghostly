@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-resolve-records"
+description = "Enables the resolve_records command without any pre-configured scope."
+commands.allow = ["resolve_records"]
+
+[[permission]]
+identifier = "deny-resolve-records"
+description = "Denies the resolve_records command without any pre-configured scope."
+commands.deny = ["resolve_records"]

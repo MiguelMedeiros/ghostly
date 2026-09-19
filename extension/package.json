@@ -8,7 +8,8 @@
     "dev": "vite build --watch --mode development",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test:e2e": "node test/e2e.mjs"
+    "test:e2e": "node test/e2e.mjs",
+    "test:attacks": "vite build --mode e2e --outDir dist-e2e && node test/attacks.mjs"
   },
   "dependencies": {
     "@emoji-mart/data": "^1.2.1",

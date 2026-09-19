@@ -36,7 +36,29 @@ export interface StoredProof {
   secret: string;
   C: string;
   dleq?: unknown;
+  /** Handed to the mint for a Lightning payment that has not settled: not spendable, not yet gone. */
   reserved?: boolean;
+}
+
+/** A Lightning payment the mint has not settled yet. Its proofs stay in the wallet, reserved, until it does. */
+export interface PendingMelt {
+  /** The melt quote id. */
+  quote: string;
+  mint: string;
+  /** The invoice, so it is not paid a second time while this one is in flight. */
+  request: string;
+  /** What the invoice pays. */
+  amount: number;
+  /** The reserved proofs handed to the mint. */
+  secrets: string[];
+  /** Everything that left the balance for this payment: the proofs above plus any swap fee. */
+  outlay: number;
+  /** NUT-08 blank outputs (`OutputData.serialize`), to unblind the fee change once the mint returns it. */
+  outputs: unknown[];
+  note?: string;
+  /** Set when the invoice pays a contact's payment request. */
+  paymentId?: string;
+  createdAt: number;
 }
 
 /** A Lightning invoice the mint issued for us; paid invoices turn into ecash. */
@@ -49,6 +71,11 @@ export interface StoredQuote {
   expiresAt: number | null;
   /** Set when the invoice belongs to a payment request sent to a peer. */
   paymentId?: string;
+  /**
+   * The mint says it issued this quote's ecash, but the wallet never stored it. Kept, not polled: it is the
+   * only record of sats the user paid for.
+   */
+  issuedUnclaimed?: boolean;
 }
 
 export type PaymentState =
@@ -76,6 +103,8 @@ export interface StoredPayment {
   invoice?: string;
   mints?: string[];
   requestId?: string;
+  /** Requests we pay: a Lightning payment is in flight at the mint, so paying again would pay twice. */
+  lightningPending?: boolean;
 }
 
 /** What pages see of a payment: everything but the token. */

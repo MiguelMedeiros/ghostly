@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { usePkarr } from "../hooks/usePkarr";
 import { useI18n } from "../contexts/I18nContext";
-import { generateSessionId, saveInviteCode } from "../lib/storage";
+import { ensureSession } from "../lib/storage";
+import { chatPath } from "../lib/url";
 
 export function Home() {
   const navigate = useNavigate();
@@ -14,9 +15,12 @@ export function Home() {
     setIsCreating(true);
     try {
       const drop = await createDrop();
-      const sessionId = generateSessionId(drop.seedA, drop.pubKeyB);
-      saveInviteCode(sessionId, drop.inviteCode);
-      navigate(`/chat/${drop.seedA}/${drop.pubKeyB}/${drop.encKey}`);
+      const sessionId = ensureSession(
+        { seedB64: drop.seedA, peerPubKeyB64: drop.pubKeyB, encKeyB64: drop.encKey },
+        { inviteCode: drop.inviteCode },
+      );
+      window.dispatchEvent(new Event("session-updated"));
+      navigate(chatPath(sessionId));
     } finally {
       setIsCreating(false);
     }

@@ -1,0 +1,33 @@
+name: Security
+
+# Known vulnerabilities in dependencies, on every change and every morning:
+# new advisories appear without anyone touching the lock files.
+on:
+  push:
+    branches: [main, "claude/security-auto-**"]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dependencies:
+    name: Dependency advisories (OSV)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      # package-lock.json, website/package-lock.json and Cargo.lock against osv.dev.
+      # Accepted advisories live in .github/security-allowlist.json, each with an expiry.
+      - name: Scan lock files
+        run: node scripts/security-scan.mjs

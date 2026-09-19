@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+A security release: everything a contact can send you is now held to what the protocol allows. Update every client. Nothing changes on the wire, and older clients keep working.
+
+### Security
+
+- **Desktop:** a web app a contact shares could call Ghostly's own commands from its window, including requests to any service on your machine. Those windows now reach no command at all.
+- **Ghostly Browser:** a contact's web app could reach other contacts' apps as you and plant cookies in them. Each contact's apps now live on a site of their own, and a tab only ever talks to the app it was opened for. Shared apps now open on `https://<app>.<contact>.invalid`, so apps you had open start with fresh storage.
+- **Payments:** a request was marked paid by any ecash that referenced it, whatever the amount, and a contact's test sats added the test mint to your wallet. A request is now paid only in full, from a mint it named, and only you add mints.
+- **Wallet:** a Lightning payment still pending at the mint, an invoice paid after it expired, or a crash while ecash was on its way could lose sats. Payments in flight are now written down first and settled with the mint afterwards, and you can no longer pay the same request twice.
+- **Chats:** the address of an open chat carried its private keys, so they ended up in your browser history. Chats are now addressed by an id, and invite links are cleared from the address bar as soon as they are read.
+- **Lock screen:** reloading the app skipped it. Ghostly now starts locked, keeps the app out of reach while locked, slows down repeated wrong passwords, and stores the password with a much stronger hash. It still does not encrypt what is stored on the device, and now says so.
+- **Calls:** call signaling from a contact is checked field by field before it is used, and old signals no longer ring.
+- **Files:** a contact could replace a file you had sent, fill your disk, or send a file whose name hides its real extension. Received files are stored apart from sent ones, each contact gets 500 MiB, names lose invisible and direction characters, and files that are not pictures are stored as plain downloads.
+- **Shared apps:** redirects never leave the app you share, headers that let a caller pretend to be a proxy are dropped, encoded slashes cannot escape the app's path, and a contact can no longer get around the limit on parallel requests.
+- **Clear all data** removes chats, files and settings but keeps your wallet: ecash is money, and nothing else holds a copy of it.
+- The website runs on Next.js 16.3.3 and Node 22; the web app on nginx 1.30, without advertising its version.
+
+### Added
+
+- [SECURITY.md](SECURITY.md): how to report a vulnerability (ghostly-sec@miguelmedeiros.com.br), and [docs/SECURITY-REVIEW.md](docs/SECURITY-REVIEW.md), what was found, fixed and proven.
+- Dependencies are checked against known advisories on every change and every day, and security fixes can ship as patch releases on their own.
+
 ## 0.3.1
 
 Two fixes. Nothing changes on the wire.

@@ -55,6 +55,8 @@ export interface ChatSession {
 }
 
 export interface ChatParams {
+  /** The stored session these keys belong to. */
+  sessionId: string;
   seedB64: string;
   peerPubKeyB64: string;
   encKeyB64: string;

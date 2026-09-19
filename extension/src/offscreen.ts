@@ -12,6 +12,9 @@ const VIEWER_MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
 
 const server = new EngineServer();
 
+// Only in `vite build --mode e2e` (test/attacks.mjs plays a malicious peer through it); gone from real builds.
+if (import.meta.env.MODE === "e2e") Object.assign(globalThis, { __ghostly: server });
+
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== UI_PORT) return;
   const client: EngineClientSink = { post: (message) => port.postMessage(message) };

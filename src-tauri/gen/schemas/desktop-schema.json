@@ -177,6 +177,162 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the create_keypair command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-create-keypair",
+          "markdownDescription": "Enables the create_keypair command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the decrypt_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-decrypt-text",
+          "markdownDescription": "Enables the decrypt_text command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the encrypt_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-encrypt-text",
+          "markdownDescription": "Enables the encrypt_text command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the generate_enc_key command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-generate-enc-key",
+          "markdownDescription": "Enables the generate_enc_key command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_profile command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-profile",
+          "markdownDescription": "Enables the get_profile command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_public_key command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-public-key",
+          "markdownDescription": "Enables the get_public_key command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the local_fetch command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-local-fetch",
+          "markdownDescription": "Enables the local_fetch command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_service_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-service-window",
+          "markdownDescription": "Enables the open_service_window command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the publish_messages command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-publish-messages",
+          "markdownDescription": "Enables the publish_messages command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the publish_records command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-publish-records",
+          "markdownDescription": "Enables the publish_records command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the resolve_messages command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-resolve-messages",
+          "markdownDescription": "Enables the resolve_messages command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the resolve_records command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-resolve-records",
+          "markdownDescription": "Enables the resolve_records command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the service_respond command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-service-respond",
+          "markdownDescription": "Enables the service_respond command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the create_keypair command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-create-keypair",
+          "markdownDescription": "Denies the create_keypair command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the decrypt_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-decrypt-text",
+          "markdownDescription": "Denies the decrypt_text command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the encrypt_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-encrypt-text",
+          "markdownDescription": "Denies the encrypt_text command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the generate_enc_key command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-generate-enc-key",
+          "markdownDescription": "Denies the generate_enc_key command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_profile command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-profile",
+          "markdownDescription": "Denies the get_profile command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_public_key command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-public-key",
+          "markdownDescription": "Denies the get_public_key command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the local_fetch command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-local-fetch",
+          "markdownDescription": "Denies the local_fetch command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_service_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-service-window",
+          "markdownDescription": "Denies the open_service_window command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the publish_messages command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-publish-messages",
+          "markdownDescription": "Denies the publish_messages command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the publish_records command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-publish-records",
+          "markdownDescription": "Denies the publish_records command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the resolve_messages command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-resolve-messages",
+          "markdownDescription": "Denies the resolve_messages command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the resolve_records command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-resolve-records",
+          "markdownDescription": "Denies the resolve_records command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the service_respond command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-service-respond",
+          "markdownDescription": "Denies the service_respond command without any pre-configured scope."
+        },
+        {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",
           "type": "string",
           "const": "core:default",

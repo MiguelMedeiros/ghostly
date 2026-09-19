@@ -74,6 +74,8 @@ The advertisement is authenticated twice: by the secretbox (only the link peer c
 
 Unchanged. `_call` carries `{ "t": "o" | "a" | "h", "ts", "u", "p", "f", "s", "m", "c", "ss" }`: ICE credentials, DTLS fingerprint, setup role, media order, at most two candidates and the SSRCs. Each side rebuilds a full SDP around these values, because a real SDP does not fit in a packet.
 
+Receivers validate a signal before any of it reaches an SDP, whether it came from `_call` or a `call` frame: ICE ufrag/pwd are RFC 8839 ice-chars (4-256 and 22-256 long), `f` is 64 hex digits, `s` is `actpass`, `active` or `passive`, `m` holds one or two distinct `a`/`v`, `ss` holds at most two uint32s, and each of at most eight candidates is parsed and re-serialized from its parts (non-UDP ones are dropped, malformed ones reject the signal). Offers, answers and hang-ups whose `ts` is more than 120 s away from the receiver's clock are ignored, so a stale packet does not ring.
+
 v1 changes two things, both compatible with v0 peers:
 
 - The rebuilt video section no longer declares the `toffset` header extension. Extension ids differ between WebRTC engines, and Chromium rejects an answer that maps an id differently from the real offer.
@@ -137,8 +139,8 @@ A DataChannel message is at most 16 KiB (16378 bytes of payload per chunk), a co
 
 - The receiver keeps the file only if exactly `s` bytes arrived before END. More, fewer, or 30 s of silence discard it.
 - `{ "t": "rst", "id", "d": "f", "e" }` cancels a transfer from either side; a receiver that does not want the file answers the `file` frame with it.
-- Limits: 100 MiB per file, 3 incoming files per peer at a time.
-- The name is display text and a download suggestion, never a path: path separators, control characters and leading dots are removed, 200 characters at most. An unparseable media type becomes `application/octet-stream`. Receivers store files under their own ids, never the sender's, and must not open or execute what they received on their own.
+- Limits: 100 MiB per file, 3 incoming files per peer at a time, 500 MiB of received files kept per peer. A file that would go past a limit, or that reuses an `f` already seen on the link, is refused with `rst`.
+- The name is display text and a download suggestion, never a path: path separators, control and other invisible characters (Unicode Cc, Cf, Zl, Zp, so bidi overrides and zero-width characters too), leading whitespace and leading dots are removed, 200 characters at most. An unparseable media type becomes `application/octet-stream`. Receivers store files under their own ids, never the sender's, serve the bytes as `application/octet-stream` unless they are an image they preview, and must not open or execute what they received on their own.
 
 ### 6.3 Payments
 
@@ -188,17 +190,17 @@ Host errors are ordinary responses with an `x-ghostly-error` header, so a browse
 | 408 | `request-timeout` | request body stalled for 30 s |
 | 413 | `request-too-large` | request body above 8 MiB |
 | 502 | `unreachable`, `redirect-blocked` | local service down, or it redirected off the target |
-| 503 | `busy` | more than 32 concurrent requests from this peer |
+| 503 | `busy` | more than 32 concurrent requests from this peer (a reset request counts until the local service has answered it) |
 | 504 | `timeout` | local service did not answer within 60 s |
 
 **What the host guarantees**
 
 1. A service id resolves only through the list the user configured, and only while the service is enabled. The mapping lives on the host; nothing in a frame can alter it.
 2. Targets are loopback only (`localhost`, `127.0.0.1`, `[::1]`), `http` or `https`, without credentials, query or fragment.
-3. The request URL is `target origin + base path + p`. `p` must start with a single `/` and contain no whitespace, control characters or backslashes. After URL normalization the result must still have the target's origin and sit under its base path, otherwise the request is refused without touching the network.
-4. Hop-by-hop headers, `Host`, `Origin`, `Referer`, `Content-Length`, `Accept-Encoding`, forwarding headers and `Sec-*`/`Proxy-*` are removed from requests. Header names and values are validated.
+3. The request URL is `target origin + base path + p`. `p` must start with a single `/` and contain no whitespace, control characters or backslashes, and its path part (before `?`) no encoded `/`, `\` or `.` (`%2f`, `%5c`, `%2e`), which some servers decode before routing. After URL normalization the result must still have the target's origin and sit under its base path, otherwise the request is refused without touching the network.
+4. Hop-by-hop headers, `Host`, `Origin`, `Referer`, `Content-Length`, `Accept-Encoding`, `Sec-*`/`Proxy-*`, forwarding and client-address headers (`Forwarded`, `Via`, `X-Forwarded-*`, `X-Real-IP`, `True-Client-IP`, …), and URL and method overrides (`X-Original-URL`, `X-Rewrite-URL`, `X-HTTP-Method-Override`, …) are removed from requests. Header names and values are validated.
 5. Requests are made without the host user's cookies or HTTP credentials, so a peer never inherits the session the host has with its own application.
-6. Redirects never leave the target: a same-origin redirect is handed to the client as a relative `Location`, anything else is refused. `Location` headers are made relative so the local address is not disclosed or followed.
+6. Redirects never leave the target for the client. A redirect whose `Location` is on the target origin and under its base path is handed to the client with that `Location` made relative; any other is answered with 502 `redirect-blocked` and its `Location` is not disclosed. Off-target `Location`/`Content-Location` headers on other responses are dropped. A Desktop host never follows redirects. A browser host has to (its fetch hides where a manual redirect goes) and checks where it ended afterwards, so an open redirect in the shared application can still make the host send one request elsewhere on the machine, whose response is discarded.
 7. From responses, hop-by-hop headers, `Content-Encoding`, `Content-Length`, HSTS, `Alt-Svc` are removed (the body is forwarded decoded), and `Domain` is stripped from `Set-Cookie`.
 8. Limits: 8 MiB request bodies, 32 concurrent requests per peer, 60 s for the local service to answer, 30 s body idle time. Clients cap responses at 64 MiB (the browser viewer at 32 MiB) and keep at most 16 requests in flight.
 

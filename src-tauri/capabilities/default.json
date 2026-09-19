@@ -1,10 +1,23 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capabilities for the main window",
+  "description": "The Ghostly window. Windows showing a contact's web app get nothing.",
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "core:app:default"
+    "core:app:default",
+    "allow-get-profile",
+    "allow-create-keypair",
+    "allow-get-public-key",
+    "allow-generate-enc-key",
+    "allow-encrypt-text",
+    "allow-decrypt-text",
+    "allow-publish-messages",
+    "allow-resolve-messages",
+    "allow-publish-records",
+    "allow-resolve-records",
+    "allow-local-fetch",
+    "allow-open-service-window",
+    "allow-service-respond"
   ]
 }

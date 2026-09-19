@@ -5,6 +5,7 @@
 //! refuses anything that is not loopback and never follows a redirect, so a
 //! request can only ever reach this machine.
 
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use base64::engine::general_purpose::STANDARD;
@@ -30,6 +31,23 @@ fn is_loopback(url: &reqwest::Url) -> bool {
     }
 }
 
+/// One client for every request: a client per request means a connection pool
+/// and TLS setup per request, which a peer can make the host pay for at will.
+fn client() -> Result<&'static reqwest::Client, String> {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    if let Some(client) = CLIENT.get() {
+        return Ok(client);
+    }
+    let client = reqwest::Client::builder()
+        // Never follow: a redirect could point anywhere, and the peer side
+        // decides what to do with an on-target one.
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(TIMEOUT)
+        .build()
+        .map_err(|e| format!("HTTP client: {}", e))?;
+    Ok(CLIENT.get_or_init(|| client))
+}
+
 pub async fn fetch(
     url: String,
     method: String,
@@ -42,13 +60,7 @@ pub async fn fetch(
     }
     let method = reqwest::Method::from_bytes(method.as_bytes()).map_err(|_| "Invalid method")?;
 
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(TIMEOUT)
-        .build()
-        .map_err(|e| format!("HTTP client: {}", e))?;
-
-    let mut request = client.request(method, url);
+    let mut request = client()?.request(method, url);
     for (name, value) in headers {
         request = request.header(name, value);
     }

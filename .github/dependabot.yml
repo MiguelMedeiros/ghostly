@@ -1,0 +1,35 @@
+# Security updates open on their own (they need "Dependabot security updates"
+# on in the repository settings). The weekly version updates below are grouped
+# so they arrive as a few pull requests, not dozens.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule: { interval: weekly, day: monday }
+    groups:
+      npm:
+        patterns: ["*"]
+        update-types: [minor, patch]
+  - package-ecosystem: npm
+    directory: /website
+    schedule: { interval: weekly, day: monday }
+    groups:
+      website:
+        patterns: ["*"]
+        update-types: [minor, patch]
+  - package-ecosystem: cargo
+    directory: /
+    schedule: { interval: weekly, day: monday }
+    groups:
+      cargo:
+        patterns: ["*"]
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly, day: monday }
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directories: [/web, /website]
+    schedule: { interval: weekly, day: monday }

@@ -13,7 +13,8 @@
   <a href="#features">Features</a> •
   <a href="#documentation">Docs</a> •
   <a href="#troubleshooting">Troubleshooting</a> •
-  <a href="CONTRIBUTING.md">Contributing</a>
+  <a href="CONTRIBUTING.md">Contributing</a> •
+  <a href="SECURITY.md">Security</a>
 </p>
 
 <p align="center">

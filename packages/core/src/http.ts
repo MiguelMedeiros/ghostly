@@ -66,6 +66,10 @@ export function resolveTargetUrl(target: LocalTarget, path: string): string | nu
     const code = char.codePointAt(0) ?? 0;
     if (code <= 32 || code === 127 || char === "\\") return null;
   }
+  // Encoded separators survive URL normalization here but not in every server:
+  // one that decodes `%2f` before routing would take `/app/..%2fadmin` to `/admin`.
+  const queryAt = path.indexOf("?");
+  if (/%(2f|5c|2e)/i.test(queryAt === -1 ? path : path.slice(0, queryAt))) return null;
   let url: URL;
   try {
     url = new URL(`${target.origin}${target.basePath}${path}`);
@@ -104,11 +108,27 @@ const DROPPED_REQUEST_HEADERS = new Set([
   "accept-encoding",
   "forwarded",
   "via",
-  "x-forwarded-for",
-  "x-forwarded-host",
-  "x-forwarded-proto",
+  // Frameworks trust these from a proxy in front of them: they rewrite the
+  // client address, the routed URL or the method the app sees.
   "x-real-ip",
+  "x-client-ip",
+  "x-cluster-client-ip",
+  "true-client-ip",
+  "cf-connecting-ip",
+  "fastly-client-ip",
+  "x-original-url",
+  "x-original-uri",
+  "x-original-host",
+  "x-original-method",
+  "x-rewrite-url",
+  "x-host",
+  "x-http-method-override",
+  "x-http-method",
+  "x-method-override",
 ]);
+
+/** `X-Forwarded-For/Host/Proto/Port/Prefix/Server/…`: all of them describe a proxy we are not. */
+const DROPPED_REQUEST_HEADER_PREFIXES = ["sec-", "proxy-", "x-forwarded-"];
 
 /** The local fetch decodes the body, so the encoding headers no longer apply. */
 const DROPPED_RESPONSE_HEADERS = new Set([
@@ -134,7 +154,7 @@ export function sanitizeRequestHeaders(headers: HeaderList): HeaderList {
     const lower = name.toLowerCase();
     if (!HEADER_NAME.test(name) || !isCleanHeaderValue(value)) return false;
     if (HOP_BY_HOP.has(lower) || DROPPED_REQUEST_HEADERS.has(lower)) return false;
-    return !lower.startsWith("sec-") && !lower.startsWith("proxy-");
+    return !DROPPED_REQUEST_HEADER_PREFIXES.some((prefix) => lower.startsWith(prefix));
   });
 }
 
@@ -145,10 +165,12 @@ export function sanitizeResponseHeaders(headers: HeaderList, target: LocalTarget
     if (!HEADER_NAME.test(name) || !isCleanHeaderValue(value)) continue;
     if (HOP_BY_HOP.has(lower) || DROPPED_RESPONSE_HEADERS.has(lower)) continue;
     if (lower === "location" || lower === "content-location") {
-      out.push([name, relativizeLocation(value, target)]);
+      // Off-target locations are dropped, never disclosed.
+      const location = relativizeLocation(value, target);
+      if (location !== null) out.push([name, location]);
     } else if (lower === "set-cookie") {
       // The cookie belongs to the virtual origin on the client, not to localhost.
-      out.push([name, value.replace(/;\s*domain=[^;]*/gi, "")]);
+      out.push([name, value.replace(/;\s*domain\s*=[^;]*/gi, "")]);
     } else {
       out.push([name, value]);
     }
@@ -156,20 +178,33 @@ export function sanitizeResponseHeaders(headers: HeaderList, target: LocalTarget
   return out;
 }
 
-/** Turns `http://localhost:3400/base/x` into `/x` so the client never learns or follows the local address. */
-export function relativizeLocation(location: string, target: LocalTarget): string {
+/**
+ * Turns `http://localhost:3400/base/x` into `/x` so the client never learns or
+ * follows the local address. Null when the location is not on the target origin
+ * and under its base path.
+ */
+export function relativizeLocation(location: string, target: LocalTarget): string | null {
   let url: URL;
   try {
     url = new URL(location, `${target.origin}${target.basePath}/`);
   } catch {
-    return location;
+    return null;
   }
-  if (url.origin !== target.origin) return location;
+  if (url.origin !== target.origin || url.username || url.password) return null;
   let path = url.pathname;
-  if (target.basePath && (path === target.basePath || path.startsWith(`${target.basePath}/`))) {
+  if (target.basePath) {
+    if (path !== target.basePath && !path.startsWith(`${target.basePath}/`)) return null;
     path = path.slice(target.basePath.length) || "/";
   }
+  // `//host/x` would read as another origin on the client.
+  if (!path.startsWith("/") || path.startsWith("//")) return null;
   return `${path}${url.search}${url.hash}`;
+}
+
+function isRedirectBlocked(response: LocalResponse, target: LocalTarget): boolean {
+  if (response.status < 300 || response.status > 399) return false;
+  const location = response.headers.find(([name]) => name.toLowerCase() === "location");
+  return location !== undefined && relativizeLocation(location[1], target) === null;
 }
 
 // ---------------------------------------------------------------------------
@@ -193,7 +228,11 @@ export interface LocalResponse {
   status: number;
   headers: HeaderList;
   body: AsyncIterable<Uint8Array> | Iterable<Uint8Array> | null;
-  /** Final URL when the local stack followed redirects on its own. */
+  /**
+   * Final URL when the local stack followed redirects itself (a browser's
+   * fetch: its manual mode hides where a redirect goes). Desktop never follows
+   * and returns the 3xx as it is.
+   */
   finalUrl?: string;
 }
 
@@ -216,6 +255,12 @@ interface HostStream {
 
 export class HttpHost {
   private readonly streams = new Map<number, HostStream>();
+  /**
+   * Streams in the map plus those reset while their local fetch still runs. A
+   * local stack may not honour the abort signal (Desktop's Rust fetch doesn't),
+   * so a stream counts toward the limit until its fetch has settled.
+   */
+  private readonly live = new Set<HostStream>();
 
   constructor(
     private readonly channel: FrameChannel,
@@ -224,7 +269,7 @@ export class HttpHost {
   ) {}
 
   get activeRequests(): number {
-    return this.streams.size;
+    return this.live.size;
   }
 
   handleRequest(frame: HttpRequestFrame): void {
@@ -234,7 +279,7 @@ export class HttpHost {
     const service = this.getService(frame.s);
     if (!service) return this.fail(frame.id, 404, "unknown-service", "This peer does not share that service.");
     if (!ALLOWED_METHODS.has(method)) return this.fail(frame.id, 405, "method-not-allowed", "Method not allowed.");
-    if (this.streams.size >= LIMITS.maxConcurrentRequestsPerPeer) {
+    if (this.live.size >= LIMITS.maxConcurrentRequestsPerPeer) {
       return this.fail(frame.id, 503, "busy", "Too many concurrent requests.");
     }
     const url = resolveTargetUrl(service.target, frame.p);
@@ -250,6 +295,7 @@ export class HttpHost {
       started: false,
     };
     this.streams.set(frame.id, stream);
+    this.live.add(stream);
 
     if (frame.b && !BODYLESS_METHODS.has(method)) this.armIdleTimer(stream);
     else void this.run(stream);
@@ -286,10 +332,16 @@ export class HttpHost {
     }, LIMITS.bodyIdleTimeoutMs);
   }
 
+  /** Ids are reused after a reset, so a stream is current only if it is the one in the map. */
+  private isCurrent(stream: HostStream): boolean {
+    return this.streams.get(stream.frame.id) === stream;
+  }
+
   private end(stream: HostStream): void {
     clearTimeout(stream.idleTimer);
     stream.abort.abort();
-    this.streams.delete(stream.frame.id);
+    if (this.isCurrent(stream)) this.streams.delete(stream.frame.id);
+    if (!stream.started) this.live.delete(stream);
   }
 
   private fail(id: number, status: number, code: string, message: string): void {
@@ -330,27 +382,26 @@ export class HttpHost {
       });
       stream.body = [];
       clearTimeout(timeout);
-      if (!this.streams.has(frame.id)) return;
+      if (!this.isCurrent(stream)) return;
 
       if (response.finalUrl && response.finalUrl !== stream.url) {
-        // The local stack followed a redirect. Hand it back to the client so its
+        // A browser followed a redirect. Hand it back to the client so its
         // address bar and relative URLs stay right, but never off the target.
         const location = relativizeLocation(response.finalUrl, service.target);
-        if (!location.startsWith("/")) {
-          this.end(stream);
-          return this.fail(frame.id, 502, "redirect-blocked", "The service redirected outside of the shared target.");
-        }
-        this.channel.send(
-          encodeControl({
-            t: "res",
-            id: frame.id,
-            st: BODYLESS_METHODS.has(frame.m) ? 302 : 303,
-            h: [["location", location]],
-            b: false,
-          }),
-        );
         this.end(stream);
+        if (location === null) return this.fail(frame.id, 502, "redirect-blocked", "The service redirected outside of the shared target.");
+        this.channel.send(
+          encodeControl({ t: "res", id: frame.id, st: BODYLESS_METHODS.has(frame.m) ? 302 : 303, h: [["location", location]], b: false }),
+        );
         return;
+      }
+
+      // Redirects reach the client as they are, with a relative Location, and
+      // only when they stay on the target. Anything else is neither followed
+      // nor disclosed.
+      if (isRedirectBlocked(response, service.target)) {
+        this.end(stream);
+        return this.fail(frame.id, 502, "redirect-blocked", "The service redirected outside of the shared target.");
       }
 
       const hasBody = response.body !== null && frame.m !== "HEAD";
@@ -364,12 +415,12 @@ export class HttpHost {
       this.channel.send(encodeControl(res));
       headersSent = true;
       if (hasBody && response.body) {
-        await sendBody(this.channel, CHUNK_KIND.responseBody, frame.id, response.body, () => !this.streams.has(frame.id));
+        await sendBody(this.channel, CHUNK_KIND.responseBody, frame.id, response.body, () => !this.isCurrent(stream));
       }
       this.end(stream);
     } catch (error) {
       clearTimeout(timeout);
-      if (!this.streams.has(frame.id)) return;
+      if (!this.isCurrent(stream)) return;
       this.end(stream);
       if (headersSent) {
         try {
@@ -382,6 +433,8 @@ export class HttpHost {
       } else {
         this.fail(frame.id, 502, "unreachable", "The local service is not reachable.");
       }
+    } finally {
+      this.live.delete(stream);
     }
   }
 }
@@ -405,6 +458,10 @@ export const webLocalFetch: LocalFetch = async (request) => {
     // inherit the session the host has with its local application.
     credentials: "omit",
     cache: "no-store",
+    // Browsers hide where a manual redirect goes, so a same-app redirect
+    // (`/docs` → `/docs/`, a login's 303) could only be refused. Followed
+    // redirects are checked afterwards and never leave the target for the
+    // client; the local request itself has happened by then (docs/SECURITY-REVIEW.md).
     redirect: "follow",
     referrerPolicy: "no-referrer",
   });
