@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.2
 
 A security release: everything a contact can send you is now held to what the protocol allows. Update every client. Nothing changes on the wire, and older clients keep working.
 
