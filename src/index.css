@@ -278,47 +278,60 @@ body {
   display: none;
 }
 
-/* ── A call shrunk into a floating window: drag it anywhere, resize it from its corner ── */
-.call-mini {
-  resize: both;
-  overflow: hidden;
-  min-width: 200px;
-  min-height: 128px;
-  max-width: 92vw;
-  max-height: 80vh;
-  touch-action: none;
+/* ── Floating boxes (the small call window, your own picture): drag to move, corners to resize ── */
+.floating {
   cursor: grab;
   user-select: none;
-}
-
-/* Your own picture in a full-screen call: movable, resizable from its corner. */
-.call-preview-free {
-  resize: both;
-  overflow: hidden;
-  min-width: 96px;
-  min-height: 72px;
-  max-width: 80vw;
-  max-height: 80vh;
   touch-action: none;
-  cursor: grab;
 }
 
-.call-preview-free::after {
+.floating:active {
+  cursor: grabbing;
+}
+
+.float-grip {
+  position: absolute;
+  /* Under the window's own buttons, which share a corner with one of them. */
+  z-index: 15;
+  width: 26px;
+  height: 26px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  touch-action: none;
+}
+
+.floating:hover > .float-grip,
+.float-grip:active {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .float-grip {
+    opacity: 0.85;
+  }
+}
+
+/* An L drawn in the corner it sits in. */
+.float-grip::after {
   content: "";
   position: absolute;
-  right: 3px;
-  bottom: 3px;
-  width: 12px;
-  height: 12px;
-  border-right: 2px solid rgb(255 255 255 / 0.8);
-  border-bottom: 2px solid rgb(255 255 255 / 0.8);
-  border-bottom-right-radius: 3px;
-  pointer-events: none;
-  filter: drop-shadow(0 0 2px rgb(0 0 0 / 0.8));
+  width: 11px;
+  height: 11px;
+  border: 0 solid rgb(255 255 255 / 0.9);
+  filter: drop-shadow(0 0 2px rgb(0 0 0 / 0.9));
 }
 
-.call-mini:active {
-  cursor: grabbing;
+.float-grip-nw { top: 0; left: 0; cursor: nwse-resize; }
+.float-grip-nw::after { top: 5px; left: 5px; border-top-width: 3px; border-left-width: 3px; border-top-left-radius: 4px; }
+.float-grip-ne { top: 0; right: 0; cursor: nesw-resize; }
+.float-grip-ne::after { top: 5px; right: 5px; border-top-width: 3px; border-right-width: 3px; border-top-right-radius: 4px; }
+.float-grip-sw { bottom: 0; left: 0; cursor: nesw-resize; }
+.float-grip-sw::after { bottom: 5px; left: 5px; border-bottom-width: 3px; border-left-width: 3px; border-bottom-left-radius: 4px; }
+.float-grip-se { bottom: 0; right: 0; cursor: nwse-resize; }
+.float-grip-se::after { bottom: 5px; right: 5px; border-bottom-width: 3px; border-right-width: 3px; border-bottom-right-radius: 4px; }
+
+.call-mini {
+  overflow: hidden;
 }
 
 .call-mini .call-resize {

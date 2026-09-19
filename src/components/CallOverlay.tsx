@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { CallState } from "../lib/types";
-import { useFloatingBox } from "../hooks/useFloatingBox";
+import { CORNERS, useFloatingBox, type Corner } from "../hooks/useFloatingBox";
 
 interface CallOverlayProps {
   callState: CallState;
@@ -21,30 +21,17 @@ interface CallOverlayProps {
   onToggleScreenShare?: () => void;
 }
 
-const WINDOW_KEY = "ghostly_call_window";
-const MINI_DEFAULT = { w: 340, h: 220 };
-const MINI_PHONE = { w: 190, h: 136 };
+const MINI_KEY = "ghostly_call_mini";
 
-interface CallWindow {
-  mini: boolean;
-  x: number | null;
-  y: number | null;
-  w: number;
-  h: number;
-}
-
-/** How the person left the call window last time: full screen or floating, where and how big. */
-function loadWindow(): CallWindow {
-  const size = window.innerWidth < 768 ? MINI_PHONE : MINI_DEFAULT;
-  try {
-    const saved = JSON.parse(localStorage.getItem(WINDOW_KEY) ?? "null") as Partial<CallWindow> | null;
-    if (saved && typeof saved.mini === "boolean") {
-      return { mini: saved.mini, x: saved.x ?? null, y: saved.y ?? null, w: saved.w ?? size.w, h: saved.h ?? size.h };
-    }
-  } catch {
-    // start fresh
-  }
-  return { mini: false, x: null, y: null, ...size };
+/** Corner grips of a floating box; they show when the pointer is over it. */
+function Grips({ handleProps }: { handleProps: (corner: Corner) => Record<string, unknown> }) {
+  return (
+    <>
+      {CORNERS.map((corner) => (
+        <div key={corner} className={`float-grip float-grip-${corner}`} {...handleProps(corner)} />
+      ))}
+    </>
+  );
 }
 
 function formatDuration(seconds: number): string {
@@ -77,66 +64,29 @@ export function CallOverlay({
   const [duration, setDuration] = useState(0);
 
   // The call can shrink into a floating window, so the chat underneath stays usable.
-  const rootRef = useRef<HTMLDivElement>(null);
-  const [view, setView] = useState<CallWindow>(loadWindow);
-  const saveView = (next: CallWindow) => {
-    setView(next);
+  const [mini, setMiniState] = useState(() => localStorage.getItem(MINI_KEY) === "1");
+  const setMini = (next: boolean) => {
+    setMiniState(next);
     try {
-      localStorage.setItem(WINDOW_KEY, JSON.stringify(next));
+      localStorage.setItem(MINI_KEY, next ? "1" : "0");
     } catch {
       // only a preference
     }
   };
-  const clamp = (x: number, y: number, w: number, h: number) => ({
-    x: Math.max(8, Math.min(x, window.innerWidth - w - 8)),
-    y: Math.max(8, Math.min(y, window.innerHeight - h - 8)),
-  });
-  const place = view.mini
-    ? clamp(view.x ?? window.innerWidth - view.w - 24, view.y ?? window.innerHeight - view.h - 96, view.w, view.h)
-    : null;
-
-  // Resizing is the browser's doing (CSS `resize`); remember the result or the next render undoes it.
-  useEffect(() => {
-    const root = rootRef.current;
-    if (!view.mini || !root) return;
-    const observer = new ResizeObserver(() => {
-      const box = root.getBoundingClientRect();
-      if (Math.abs(box.width - view.w) > 1 || Math.abs(box.height - view.h) > 1) {
-        saveView({ ...view, x: box.left, y: box.top, w: box.width, h: box.height });
-      }
-    });
-    observer.observe(root);
-    return () => observer.disconnect();
-  }, [view]);
-
-  // Your own picture: drag it out of the way, make it as big as you like. In the small window it stays put.
-  const selfView = useFloatingBox(
-    "ghostly_call_self_view",
-    () => (window.innerWidth < 768 ? { x: window.innerWidth - 128, y: 64, w: 112, h: 160 } : { x: window.innerWidth - 232, y: 16, w: 216, h: 162 }),
-    !view.mini,
+  const phone = window.innerWidth < 768;
+  const miniWindow = useFloatingBox(
+    "ghostly_call_window_box",
+    () => (phone ? { x: window.innerWidth - 206, y: window.innerHeight - 240, w: 190, h: 136 } : { x: window.innerWidth - 364, y: window.innerHeight - 316, w: 340, h: 220 }),
+    { enabled: mini, minWidth: 190, minHeight: 128 },
   );
 
-  const startDrag = (event: React.PointerEvent<HTMLDivElement>) => {
-    const root = rootRef.current;
-    if (!view.mini || !root || (event.target as HTMLElement).closest("button")) return;
-    const box = root.getBoundingClientRect();
-    // The bottom right corner belongs to the browser's resize handle.
-    if (event.clientX > box.right - 20 && event.clientY > box.bottom - 20) return;
-    const offset = { x: event.clientX - box.left, y: event.clientY - box.top };
-    const move = (e: PointerEvent) => {
-      const next = clamp(e.clientX - offset.x, e.clientY - offset.y, box.width, box.height);
-      root.style.left = `${next.x}px`;
-      root.style.top = `${next.y}px`;
-    };
-    const stop = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", stop);
-      const now = root.getBoundingClientRect();
-      saveView({ mini: true, x: now.left, y: now.top, w: now.width, h: now.height });
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", stop);
-  };
+  // Your own picture keeps the shape of what it shows (camera or screen), so there are never bars around it.
+  const [selfAspect, setSelfAspect] = useState(4 / 3);
+  const selfView = useFloatingBox(
+    "ghostly_call_self_view_box",
+    () => (phone ? { x: window.innerWidth - 136, y: 64, w: 120, h: 90 } : { x: window.innerWidth - 256, y: 16, w: 240, h: 180 }),
+    { enabled: !mini, aspect: selfAspect, minWidth: phone ? 96 : 140 },
+  );
 
   useEffect(() => {
     if (localVideoRef.current && localStream) {
@@ -186,29 +136,25 @@ export function CallOverlay({
   
   return (
     <div
-      ref={rootRef}
+      {...miniWindow.boxProps}
       data-testid="call-window"
-      data-mini={view.mini}
-      onPointerDown={startDrag}
+      data-mini={mini}
       className={
-        view.mini
-          ? "call-mini fixed z-50 bg-chat-bg flex flex-col items-center justify-center rounded-xl border border-border shadow-2xl"
+        mini
+          ? "call-mini floating fixed z-50 bg-chat-bg flex flex-col items-center justify-center rounded-xl border border-border shadow-2xl"
           : "fixed inset-0 z-50 bg-chat-bg/95 max-md:bg-chat-bg flex flex-col items-center justify-center"
       }
-      style={place ? { left: place.x, top: place.y, width: view.w, height: view.h } : undefined}
     >
+      {mini && <Grips handleProps={miniWindow.handleProps} />}
       {/* Shrink to a floating window, or back to the whole screen */}
       <button
-        onClick={() => {
-          const box = rootRef.current?.getBoundingClientRect();
-          saveView(view.mini && box ? { mini: false, x: box.left, y: box.top, w: box.width, h: box.height } : { ...view, mini: !view.mini });
-        }}
+        onClick={() => setMini(!mini)}
         className="call-resize absolute top-4 left-4 z-20 w-11 h-11 rounded-full bg-white/10 text-white hover:bg-white/20 flex items-center justify-center cursor-pointer transition-colors"
-        title={view.mini ? "Back to full screen" : "Keep the call in a small window"}
+        title={mini ? "Back to full screen" : "Keep the call in a small window"}
         data-testid="call-minimize"
       >
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          {view.mini ? <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /> : <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" />}
+          {mini ? <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /> : <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" />}
         </svg>
       </button>
 
@@ -253,15 +199,15 @@ export function CallOverlay({
       {/* Local video (picture-in-picture) */}
       {hasVideo && localStream && (
         <div
-          ref={selfView.ref}
-          onPointerDown={selfView.onPointerDown}
-          style={selfView.style}
+          {...selfView.boxProps}
+          onDoubleClick={selfView.reset}
           data-testid="call-self-view"
-          title={view.mini ? undefined : "Drag to move, pull the corner to resize"}
+          title={mini ? undefined : "Drag to move, pull a corner to resize, double-click to reset"}
           className={`call-preview absolute rounded-lg overflow-hidden border border-border/50 shadow-lg z-10 bg-black ${
-            view.mini ? "top-4 right-4 w-36 h-28" : "call-preview-free"
+            mini ? "top-4 right-4 w-36 h-28" : "floating"
           }`}
         >
+          {!mini && <Grips handleProps={selfView.handleProps} />}
           {isVideoOff ? (
             <div className="w-full h-full bg-surface-hover flex items-center justify-center">
               <svg
@@ -285,7 +231,9 @@ export function CallOverlay({
               autoPlay
               playsInline
               muted
-              className={`w-full h-full ${isScreenSharing ? "object-contain bg-black" : "object-cover mirror"}`}
+              onLoadedMetadata={(e) => e.currentTarget.videoWidth > 0 && setSelfAspect(e.currentTarget.videoWidth / e.currentTarget.videoHeight)}
+              onResize={(e) => e.currentTarget.videoWidth > 0 && setSelfAspect(e.currentTarget.videoWidth / e.currentTarget.videoHeight)}
+              className={`w-full h-full object-cover pointer-events-none ${isScreenSharing ? "" : "mirror"}`}
               style={isScreenSharing ? undefined : { transform: "scaleX(-1)" }}
             />
           )}
