@@ -9,6 +9,7 @@ import { SettingsProvider } from "./contexts/SettingsContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { I18nProvider } from "./contexts/I18nContext";
 import { LockScreenProvider, useLockScreen } from "./contexts/LockScreenContext";
+import { UpdateProvider } from "./contexts/UpdateContext";
 import { LockScreen } from "./components/LockScreen";
 import { ensureSession } from "./lib/storage";
 import { chatPath, parseChatRoute } from "./lib/url";
@@ -58,20 +59,22 @@ export function Root() {
         <I18nProvider>
           <LockScreenProvider>
             <LockScreen />
-            <HashRouter>
-              <ChatLinkIntake />
-              <LockGate>
-                <Routes>
-                  <Route element={<App />}>
-                    <Route path="/" element={<Home />} />
-                    <Route path="/chat/*" element={<Chat />} />
-                    <Route path="/settings" element={<Settings />} />
-                    <Route path="/wallet" element={<WalletTab />} />
-                    <Route path="/share" element={<ShareTab />} />
-                  </Route>
-                </Routes>
-              </LockGate>
-            </HashRouter>
+            <UpdateProvider>
+              <HashRouter>
+                <ChatLinkIntake />
+                <LockGate>
+                  <Routes>
+                    <Route element={<App />}>
+                      <Route path="/" element={<Home />} />
+                      <Route path="/chat/*" element={<Chat />} />
+                      <Route path="/settings" element={<Settings />} />
+                      <Route path="/wallet" element={<WalletTab />} />
+                      <Route path="/share" element={<ShareTab />} />
+                    </Route>
+                  </Routes>
+                </LockGate>
+              </HashRouter>
+            </UpdateProvider>
           </LockScreenProvider>
         </I18nProvider>
       </ThemeProvider>

@@ -30,6 +30,12 @@ export interface AppSettings {
   giphyApiKey: string;
   /** Turns animations off, on top of the system's own preference. */
   reduceMotion: boolean;
+  /**
+   * Whether this client may ask, now and then, whether a newer version was
+   * published. The question is a request that says this device runs Ghostly,
+   * so it is the user's to allow; off, updates are only looked for on demand.
+   */
+  checkForUpdates: boolean;
 }
 
 const SETTINGS_KEY = "ghostly_app_settings";
@@ -50,6 +56,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   defaultNickname: "",
   giphyApiKey: "",
   reduceMotion: false,
+  checkForUpdates: true,
 };
 
 export function loadSettings(getRandomName?: () => string): AppSettings {
@@ -129,6 +136,8 @@ export async function clearAllData(): Promise<void> {
 }
 
 export const APP_WEBSITE = "https://github.com/MiguelMedeiros/ghostly";
+/** Where every client sends someone who installs a new version by hand. */
+export const RELEASES_URL = `${APP_WEBSITE}/releases/latest`;
 export const APP_LICENSE = "MIT";
 
 export function saveSettings(settings: AppSettings): void {

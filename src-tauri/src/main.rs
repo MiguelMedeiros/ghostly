@@ -36,6 +36,10 @@ fn main() {
     let pkarr_client = builder.build().expect("Failed to create pkarr client");
 
     tauri::Builder::default()
+        // Updating is always the user's doing: the plugin only looks and downloads
+        // when the UI asks, and the release it takes has to carry our signature.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(AppState { pkarr_client })
         .manage(ViewerState::default())
         .register_asynchronous_uri_scheme_protocol(viewer::SCHEME, |ctx, request, responder| {
@@ -64,6 +68,7 @@ fn main() {
             commands::local_fetch,
             commands::open_service_window,
             commands::service_respond,
+            commands::updater_can_install,
         ]))
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

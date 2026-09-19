@@ -19,3 +19,4 @@ export * from "./ghostlink";
 export * from "./files";
 export * from "./payments";
 export * from "./bolt11";
+export * from "./version";

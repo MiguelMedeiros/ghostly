@@ -1,10 +1,12 @@
 import type { BrowserHost } from "@ghostly/browser/host";
 import { UI_PORT, type RuntimeMessage } from "./messages";
+import { extensionUpdates } from "./updates";
 
 /** Ghostly Browser: the peer lives in the offscreen document, reached through extension messaging. */
 export const extensionHost: BrowserHost = {
   version: chrome.runtime.getManifest().version,
   features: { shareLocalServices: true, openServices: true },
+  updates: extensionUpdates,
 
   async connect(onMessage, onDisconnect) {
     await chrome.runtime.sendMessage({ target: "background", type: "ensure-engine" } satisfies RuntimeMessage);

@@ -173,6 +173,14 @@ Does not work yet:
 - **Relays, STUN, TURN** see ciphertext only and hold no state about you.
 - A service you share is as exposed to your peers as it is to you on `localhost`. Share applications you would let those peers use.
 
+## Updates
+
+Chrome updates an extension it installed — from the Web Store, or from a hosted `.crx` — and nothing else. An unpacked folder is never updated by anything: no extension API can replace it, so Ghostly asks `ghostly.tools/latest.json` what the newest release is and, when it is newer than `chrome.runtime.getManifest().version`, points at the download. Replacing the folder and pressing reload stays the user's job.
+
+Installed from a store, the same UI does the real thing. Chrome downloads the new version and holds it back while Ghostly runs, telling the service worker through `runtime.onUpdateAvailable`; the button then calls `chrome.runtime.reload()` to swap it in. That ends the offscreen document and every connection with it, which is why it is a button and not something that happens while you are talking. Left alone, Chrome applies it once nothing is running.
+
+The check only ever runs while **Settings → Updates** allows it.
+
 ## Desktop
 
 Ghostly Desktop runs this same peer in its WebView, as a third host (`src/desktop/host.ts`), with Rust doing what a WebView cannot:

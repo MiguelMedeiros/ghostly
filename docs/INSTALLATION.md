@@ -10,9 +10,11 @@ Open **https://app.ghostly.tools** in any browser. On a phone, add it to the hom
 2. Open `chrome://extensions` and turn on **Developer mode**.
 3. Click **Load unpacked** and pick the folder.
 
-To update, replace the folder's contents with the new zip and press the reload arrow on the extension's card. It is not in the Chrome Web Store yet. More in [BROWSER.md](BROWSER.md).
+Ghostly tells you when a new version is out, but an unpacked extension is the one thing Chrome never updates by itself: replace the folder's contents with the new zip and press the reload arrow on the extension's card. It is not in the Chrome Web Store yet. More in [BROWSER.md](BROWSER.md).
 
 ## Desktop Apps
+
+The app updates itself: when a release is out it offers it, downloads it, checks it carries Ghostly's signature and restarts into the new version. On Linux that is the AppImage; the `.deb` is updated by the package manager it came from. The check runs while **Settings → Updates** allows it, and never installs anything without being asked.
 
 | Platform | Architecture | Download |
 |----------|--------------|----------|

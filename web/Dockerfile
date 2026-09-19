@@ -19,6 +19,10 @@ COPY web web
 # Optional: GIFs from Giphy need a key (the Retro source works without).
 ARG VITE_GIPHY_API_KEY=""
 ENV VITE_GIPHY_API_KEY=$VITE_GIPHY_API_KEY
+# Which commit this image serves: `/version.json` carries it, and a running
+# tab compares it to know a deploy happened. There is no git in this stage.
+ARG GHOSTLY_BUILD=""
+ENV GHOSTLY_BUILD=$GHOSTLY_BUILD
 RUN npm run build -w @ghostly/web
 
 FROM nginx:1.30-alpine

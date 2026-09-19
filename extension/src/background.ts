@@ -1,6 +1,7 @@
 import { concatBytes, fromBase64, toBase64, utf8Encode } from "@ghostly/core";
 import type { HttpRequestReply, RuntimeMessage } from "./messages";
 import { parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
+import { rememberPendingUpdate } from "./updates";
 
 /**
  * The service worker does what only it can: keep the peer (the offscreen
@@ -38,6 +39,15 @@ async function waitForEngine(): Promise<void> {
 
 chrome.runtime.onStartup.addListener(() => void ensureEngine());
 chrome.runtime.onInstalled.addListener(() => void ensureEngine());
+
+/**
+ * Chrome has a newer version but will not swap it in while Ghostly is running,
+ * and doing so would end every connection the peer holds. Remember it so the
+ * UI can offer it; Chrome applies it by itself once nothing is left running.
+ */
+chrome.runtime.onUpdateAvailable.addListener((details) => {
+  void rememberPendingUpdate(details.version);
+});
 
 chrome.action.onClicked.addListener(async () => {
   await ensureEngine();

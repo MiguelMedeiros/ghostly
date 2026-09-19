@@ -15,6 +15,7 @@ const PLATFORM_MODULES = new Map([
   [desktop("lib/pkarr.ts"), platform("pkarr.ts")],
   [desktop("lib/crypto.ts"), platform("crypto.ts")],
   [desktop("lib/platform.ts"), platform("services.ts")],
+  [desktop("lib/updates.ts"), platform("updates.ts")],
   [desktop("hooks/useChat.ts"), platform("useChat.ts")],
   [desktop("hooks/useBackgroundPoller.ts"), platform("useBackgroundPoller.ts")],
 ]);

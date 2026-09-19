@@ -115,6 +115,25 @@
     "sourceCode": "ソースコード",
     "license": "ライセンス"
   },
+  "updates": {
+    "available": "Ghostly {{version}} が公開されました",
+    "applyHint": "更新すると通話と接続が終了します。",
+    "manualHint": "ダウンロードして、このインストールを置き換えてください。",
+    "restart": "更新して再起動",
+    "reload": "再読み込み",
+    "download": "ダウンロード",
+    "later": "後で",
+    "installing": "更新中...",
+    "downloading": "ダウンロード中... {{percent}}%",
+    "title": "更新",
+    "auto": "更新を自動的に確認する",
+    "autoDescription": "新しいバージョンが公開されたか、ときどき確認します。オフのときは、ボタンを押したときだけ確認します。",
+    "checkNow": "今すぐ確認",
+    "checking": "確認中...",
+    "upToDate": "Ghostly は最新です",
+    "lastChecked": "最終確認 {{when}}",
+    "failed": "更新を確認できませんでした"
+  },
   "lockScreen": {
     "title": "Ghostlyはロックされています",
     "enterPassword": "パスワードを入力してロック解除",

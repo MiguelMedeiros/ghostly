@@ -27,6 +27,8 @@
     "@ghostly/core": "*",
     "@ghostly/react": "*",
     "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.11.0",
     "emoji-mart": "^5.6.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.3.0",

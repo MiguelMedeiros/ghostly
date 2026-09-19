@@ -7,6 +7,9 @@ import { test as base } from "./fixtures";
 
 const dist = join(import.meta.dirname, "..", "..", "extension", "dist");
 
+/** Where the extension asks what the newest release is (extension/src/updates.ts). */
+export const LATEST_URL = "https://ghostly.tools/latest.json";
+
 /**
  * The built extension, with the localhost permission granted up front: Chrome's
  * permission prompt cannot be clicked by automation. Everything else is the shipped code.
@@ -49,6 +52,17 @@ export const test = base.extend<Fixtures>({
           "--auto-select-desktop-capture-source=Entire screen",
         ],
       });
+      // The update check is the one request that would leave this machine. Answer
+      // it with the version that is running, so a test only sees one when it says so.
+      const running = JSON.parse(readFileSync(join(dist, "manifest.json"), "utf8")).version;
+      await context.route(LATEST_URL, (route) =>
+        route.fulfill({
+          contentType: "application/json",
+          headers: { "access-control-allow-origin": "*" },
+          body: JSON.stringify({ version: running }),
+        }),
+      );
+
       const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
       const extensionId = new URL(worker.url()).host;
       const page = await context.newPage();

@@ -1,3 +1,4 @@
+import type { FoundUpdate } from "../../../src/lib/updates";
 import type { EngineEvent, RpcRequest, RpcResponse } from "./shared/rpc";
 
 /**
@@ -9,10 +10,27 @@ export interface EngineConnection {
   send(request: RpcRequest): void;
 }
 
+/**
+ * How a client finds a new version of itself and puts it in place. The web
+ * app reloads the tab; an extension from the store reloads itself; an unpacked
+ * extension can only point at the download. A host that leaves this out has no
+ * updater, and the UI never mentions one.
+ */
+export interface UpdateSource {
+  /** Where someone installing by hand should go. */
+  downloadUrl: string;
+  /** The newest published version, or null when this client already runs it. */
+  check(): Promise<FoundUpdate | null>;
+  /** Never called for `apply: "manual"`. */
+  install(update: FoundUpdate): Promise<void>;
+}
+
 export interface BrowserHost {
   version: string;
   /** Something the user should know about this client, shown in the sidebar. */
   notice?: string;
+  /** Left out where this client has no way to learn about new versions. */
+  updates?: UpdateSource;
   features: {
     /** Can this host reach web apps on the user's machine? A web page only can if they allow it with CORS. */
     shareLocalServices: boolean;

@@ -7,6 +7,7 @@ import { useBackgroundPoller } from "../hooks/useBackgroundPoller";
 import { useI18n } from "../contexts/I18nContext";
 import { useSettings } from "../contexts/SettingsContext";
 import { MyServices } from "./MyServices";
+import { UpdateBanner } from "./UpdateBanner";
 import { WalletPanel } from "./WalletPanel";
 import {
   listSessions,
@@ -320,6 +321,8 @@ export function Sidebar() {
           <span>{t("sidebar.newChat").split(" ")[0]}</span>
         </button>
       </div>
+
+      <UpdateBanner />
 
       {/* New Chat Panel */}
       {showNewChat && (
