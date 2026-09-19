@@ -91,29 +91,21 @@ export function addMessage(
 }
 
 export function deleteSession(sessionId: string): void {
-  try {
-    localStorage.removeItem(getKey(sessionId));
-  } catch {
-    // ignore
-  }
-}
-
-export function deleteAllSessions(): void {
-  const prefix = getPrefix();
-  const keysToRemove: string[] = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (key?.startsWith(prefix)) {
-      keysToRemove.push(key);
-    }
-  }
-  for (const key of keysToRemove) {
+  for (const key of [getKey(sessionId), `${getPrefix()}read_${sessionId}`, `${getPrefix()}invite_${sessionId}`]) {
     try {
       localStorage.removeItem(key);
     } catch {
       // ignore
     }
   }
+}
+
+/**
+ * Only the chats. Settings, call window preferences and the record of settled
+ * payments share the `ghostly_` prefix and must survive this.
+ */
+export function deleteAllSessions(): void {
+  for (const session of listSessions()) deleteSession(session.id);
 }
 
 export function listSessions(): ChatSession[] {
