@@ -202,7 +202,6 @@ export function relativizeLocation(location: string, target: LocalTarget): strin
 }
 
 function isRedirectBlocked(response: LocalResponse, target: LocalTarget): boolean {
-  if (response.opaqueRedirect) return true;
   if (response.status < 300 || response.status > 399) return false;
   const location = response.headers.find(([name]) => name.toLowerCase() === "location");
   return location !== undefined && relativizeLocation(location[1], target) === null;
@@ -230,10 +229,11 @@ export interface LocalResponse {
   headers: HeaderList;
   body: AsyncIterable<Uint8Array> | Iterable<Uint8Array> | null;
   /**
-   * The service redirected and the stack cannot say where (a browser's
-   * `redirect: "manual"`). A local fetch must never follow redirects itself.
+   * Final URL when the local stack followed redirects itself (a browser's
+   * fetch: its manual mode hides where a redirect goes). Desktop never follows
+   * and returns the 3xx as it is.
    */
-  opaqueRedirect?: boolean;
+  finalUrl?: string;
 }
 
 /** Performs the request against the local service. Browser: `fetch`. Desktop: the Rust side. */
@@ -384,6 +384,18 @@ export class HttpHost {
       clearTimeout(timeout);
       if (!this.isCurrent(stream)) return;
 
+      if (response.finalUrl && response.finalUrl !== stream.url) {
+        // A browser followed a redirect. Hand it back to the client so its
+        // address bar and relative URLs stay right, but never off the target.
+        const location = relativizeLocation(response.finalUrl, service.target);
+        this.end(stream);
+        if (location === null) return this.fail(frame.id, 502, "redirect-blocked", "The service redirected outside of the shared target.");
+        this.channel.send(
+          encodeControl({ t: "res", id: frame.id, st: BODYLESS_METHODS.has(frame.m) ? 302 : 303, h: [["location", location]], b: false }),
+        );
+        return;
+      }
+
       // Redirects reach the client as they are, with a relative Location, and
       // only when they stay on the target. Anything else is neither followed
       // nor disclosed.
@@ -446,10 +458,11 @@ export const webLocalFetch: LocalFetch = async (request) => {
     // inherit the session the host has with its local application.
     credentials: "omit",
     cache: "no-store",
-    // Following would let an open redirect in the shared app reach any other
-    // port on this machine. Browsers hide the target of a manual redirect, so
-    // those are refused; hosts whose fetch exposes it pass it on when on target.
-    redirect: "manual",
+    // Browsers hide where a manual redirect goes, so a same-app redirect
+    // (`/docs` → `/docs/`, a login's 303) could only be refused. Followed
+    // redirects are checked afterwards and never leave the target for the
+    // client; the local request itself has happened by then (docs/SECURITY-REVIEW.md).
+    redirect: "follow",
     referrerPolicy: "no-referrer",
   });
 
@@ -460,7 +473,7 @@ export const webLocalFetch: LocalFetch = async (request) => {
     status: response.status,
     headers: responseHeaders,
     body: response.body ? readStream(response.body) : null,
-    opaqueRedirect: response.type === "opaqueredirect",
+    finalUrl: response.redirected ? response.url : undefined,
   };
 };
 

@@ -303,11 +303,27 @@ describe("http over the data link", () => {
     }
   });
 
-  it("refuses a redirect whose target the local stack hides", async () => {
-    const { client } = setup(async () => ({ status: 0, headers: [], body: null, opaqueRedirect: true }));
-    const response = await client.request("atlas", { method: "GET", path: "/" });
-    expect(response.status).toBe(502);
-    expect(response.headers).toContainEqual(["x-ghostly-error", "redirect-blocked"]);
+  it("hands a redirect a browser followed back to the client, never off the target", async () => {
+    const finals: Record<string, string> = {
+      "/docs": "http://localhost:3400/docs/",
+      "/out": "http://localhost:22/admin",
+      "/far": "https://example.com/",
+    };
+    const { client } = setup(async (request) => ({
+      status: 200,
+      headers: [["content-type", "text/html"]],
+      body: null,
+      finalUrl: finals[new URL(request.url).pathname],
+    }));
+    const followed = await client.request("atlas", { method: "GET", path: "/docs" });
+    expect(followed.status).toBe(302);
+    expect(followed.headers).toEqual([["location", "/docs/"]]);
+    for (const path of ["/out", "/far"]) {
+      const blocked = await client.request("atlas", { method: "GET", path });
+      expect(blocked.status, path).toBe(502);
+      expect(blocked.headers).toContainEqual(["x-ghostly-error", "redirect-blocked"]);
+      expect(utf8Decode(await blocked.bytes())).not.toContain("localhost");
+    }
   });
 
   it("keeps counting a reset request until its local fetch settles", async () => {
