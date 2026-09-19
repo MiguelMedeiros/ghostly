@@ -71,3 +71,85 @@ fn main() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+/// The IPC path a page takes, run against the real capabilities: a window
+/// showing a contact's app must not reach a single command.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tauri::ipc::{CallbackFn, InvokeBody};
+    use tauri::test::{get_ipc_response, mock_builder, MockRuntime, INVOKE_KEY};
+    use tauri::webview::InvokeRequest;
+    use tauri::{WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+
+    fn app() -> tauri::App<MockRuntime> {
+        mock_builder()
+            // Registered like the real one: Tauri treats app schemes as local pages.
+            .register_uri_scheme_protocol(viewer::SCHEME, |_, _| {
+                tauri::http::Response::new(Vec::new())
+            })
+            .invoke_handler(only_main(tauri::generate_handler![
+                commands::get_profile,
+                commands::generate_enc_key,
+                commands::local_fetch,
+            ]))
+            .build(tauri::generate_context!(test = true))
+            .expect("app")
+    }
+
+    fn invoke(
+        window: &WebviewWindow<MockRuntime>,
+        url: &str,
+        cmd: &str,
+        body: serde_json::Value,
+    ) -> Result<(), serde_json::Value> {
+        get_ipc_response(
+            window,
+            InvokeRequest {
+                cmd: cmd.into(),
+                callback: CallbackFn(0),
+                error: CallbackFn(1),
+                url: url.parse().unwrap(),
+                body: InvokeBody::Json(body),
+                headers: Default::default(),
+                invoke_key: INVOKE_KEY.to_string(),
+            },
+        )
+        .map(|_| ())
+    }
+
+    #[test]
+    fn a_contacts_app_cannot_call_commands() {
+        let app = app();
+        let url = format!("{}://atlas.peer/", viewer::SCHEME);
+        let viewer = WebviewWindowBuilder::new(
+            &app,
+            "svc-1",
+            WebviewUrl::CustomProtocol(url.parse().unwrap()),
+        )
+        .build()
+        .unwrap();
+
+        assert!(invoke(&viewer, &url, "get_profile", serde_json::json!({})).is_err());
+        assert!(invoke(&viewer, &url, "generate_enc_key", serde_json::json!({})).is_err());
+        let fetch = serde_json::json!({
+            "url": "http://127.0.0.1:9/secret", "method": "GET", "headers": [], "bodyB64": null
+        });
+        assert!(invoke(&viewer, &url, "local_fetch", fetch).is_err());
+    }
+
+    #[test]
+    fn the_ghostly_window_can() {
+        let app = app();
+        let main = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        assert!(invoke(
+            &main,
+            "tauri://localhost",
+            "generate_enc_key",
+            serde_json::json!({})
+        )
+        .is_ok());
+    }
+}
