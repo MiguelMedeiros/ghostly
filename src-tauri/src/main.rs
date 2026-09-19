@@ -36,10 +36,7 @@ fn main() {
     let pkarr_client = builder.build().expect("Failed to create pkarr client");
 
     tauri::Builder::default()
-        .manage(AppState {
-            pkarr_client,
-            publish_log: Default::default(),
-        })
+        .manage(AppState { pkarr_client })
         .manage(ViewerState::default())
         .register_asynchronous_uri_scheme_protocol(viewer::SCHEME, |ctx, request, responder| {
             let app = ctx.app_handle().clone();
