@@ -229,6 +229,26 @@ try {
   await a.page.getByTestId("share-screen").click();
   await until(async () => (await remoteSize()) === cameraSize, "the camera to come back");
   ok("and the camera again when A stops sharing");
+
+  // The call can shrink into a floating window so the chat stays usable.
+  await a.page.getByTestId("call-minimize").click();
+  const mini = await a.page.getByTestId("call-window").boundingBox();
+  expect("the call fits in a small window", mini.width < 500 && mini.height < 400, true);
+  await a.page.getByPlaceholder("Type a message").fill("still here, on the call");
+  await a.page.getByPlaceholder("Type a message").press("Enter");
+  await b.page.getByTestId("call-minimize").click();
+  await b.page.getByText("still here, on the call").first().waitFor({ timeout: 60_000 });
+  ok("A chats while the call goes on, and B reads it");
+  await a.page.mouse.move(mini.x + mini.width / 2, mini.y + mini.height / 2);
+  await a.page.mouse.down();
+  await a.page.mouse.move(200, 200, { steps: 8 });
+  await a.page.mouse.up();
+  const moved = await a.page.getByTestId("call-window").boundingBox();
+  if (process.env.SHOTS) await b.page.screenshot({ path: `${process.env.SHOTS}/call-mini.png` });
+  expect("the window can be dragged", Math.abs(moved.x - mini.x) > 50 || Math.abs(moved.y - mini.y) > 50, true);
+  expect("the call is still up", /^\d{1,2}:\d{2}$/.test((await a.page.getByText(/^\d{1,2}:\d{2}$/).first().textContent()).trim()), true);
+  await a.page.getByTestId("call-minimize").click();
+  await b.page.getByTestId("call-minimize").click();
   await a.page.getByTitle("End call").click();
   await b.page.getByTitle("End call").waitFor({ state: "detached", timeout: 60_000 });
   ok("hang up reaches the peer");

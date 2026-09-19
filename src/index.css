@@ -278,6 +278,86 @@ body {
   display: none;
 }
 
+/* ── A call shrunk into a floating window: drag it anywhere, resize it from its corner ── */
+.call-mini {
+  resize: both;
+  overflow: hidden;
+  min-width: 200px;
+  min-height: 128px;
+  max-width: 92vw;
+  max-height: 80vh;
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+}
+
+.call-mini:active {
+  cursor: grabbing;
+}
+
+.call-mini .call-resize {
+  top: 8px;
+  left: 8px;
+  width: 30px;
+  height: 30px;
+}
+
+.call-mini .call-resize svg {
+  width: 15px;
+  height: 15px;
+}
+
+.call-mini .call-top {
+  top: 12px;
+}
+
+.call-mini .call-top p {
+  font-size: 12px;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.8);
+}
+
+.call-mini .call-controls {
+  bottom: 10px;
+  gap: 10px;
+}
+
+.call-mini .call-controls button {
+  width: 38px;
+  height: 38px;
+  backdrop-filter: blur(6px);
+}
+
+.call-mini .call-controls svg {
+  width: 17px;
+  height: 17px;
+}
+
+.call-mini .call-preview {
+  top: 8px;
+  right: 8px;
+  width: 64px;
+  height: 48px;
+  border-radius: 6px;
+}
+
+.call-mini .call-peer {
+  gap: 4px;
+  margin-top: -18px;
+}
+
+.call-mini .call-avatar {
+  width: 44px;
+  height: 44px;
+}
+
+.call-mini .call-avatar span {
+  font-size: 18px;
+}
+
+.call-mini .call-name {
+  font-size: 13px;
+}
+
 /* Extra composer actions sit inline on a wide screen and behind a plus on a phone. */
 .composer-more {
   display: contents;
