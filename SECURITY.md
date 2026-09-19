@@ -4,9 +4,12 @@ Ghostly carries private conversations, calls, files and money between people. If
 
 ## Reporting a vulnerability
 
-Email **[ghostly-sec@miguelmedeiros.com.br](mailto:ghostly-sec@miguelmedeiros.com.br)**.
+Use either one:
 
-This address is only for security reports about Ghostly. Please **do not** open a public issue, pull request or discussion for a vulnerability.
+- **[Report a vulnerability](https://github.com/MiguelMedeiros/ghostly/security/advisories/new)** on GitHub — private, and the fix is prepared in a private fork attached to the same advisory.
+- Email **[ghostly-sec@miguelmedeiros.com.br](mailto:ghostly-sec@miguelmedeiros.com.br)**, which is only for security reports about Ghostly.
+
+Please **do not** open a public issue, pull request or discussion for a vulnerability. We hold ourselves to the same rule: nothing we have not fixed and released is described in public either.
 
 A useful report says:
 

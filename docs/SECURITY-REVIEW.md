@@ -26,6 +26,15 @@ What we know about Ghostly's security, what was fixed, how it was proven, and wh
 
 Status: **open**, **fixed** (merged, with the proof), **accepted** (with why).
 
+### Disclosure: nothing unfixed is described in public
+
+This repository is public, so anything written here or in an issue or pull request is readable by an attacker the moment it lands. A finding that is **open**, or **fixed but not yet released**, is a working recipe against every user running the current version.
+
+- **Never** open a public issue or pull request that describes an unfixed or unreleased flaw, and never leave a security issue open. `SECURITY.md` asks reporters not to; the repository's own practice has to match.
+- The private channel is GitHub **private vulnerability reporting** (enabled) and a **draft security advisory**: the advisory carries the detail, its **private fork** carries the fix, and the advisory is published only after the release is out and people have had a chance to update.
+- Findings recorded here while still **open** are written as the shape of the problem and the invariant it touches — not as steps to reproduce it, and not with the code path that makes it work. The reproduction lives in the private advisory.
+- A finding that can be fixed and proven ships straight through the autorelease gate; that is the preferred path, because a released fix is also the shortest disclosure window.
+
 ### 2026-09-19: first full review (v0.3.1)
 
 | ID | Sev. | Area | Finding | Status |
@@ -50,7 +59,7 @@ Status: **open**, **fixed** (merged, with the proof), **accepted** (with why).
 | S18 | Low | Storage | Seeds, messages and proofs are plaintext in localStorage/IndexedDB | open |
 | S20 | Low | HTTP host | Browser hosts follow redirects and check the final URL afterwards: one blind request elsewhere on the machine via an open redirect in the shared app | open |
 | S21 | Low | App | "Clear all data" keeps the wallet on purpose (ecash is money); a browser's global history may still list an invite URL opened once | accepted |
-| S19 | Low | Deps | `lru` (via pkarr/mainline), `glib`/`unic-*`/`proc-macro-error` (via Tauri) | accepted until the dates in the allowlist |
+| S19 | Low | Deps | `lru` (via pkarr/mainline), `glib`/`unic-*`/`proc-macro-error` (via Tauri) | accepted until the dates in the allowlist. Upstream-blocked, verified: `glib 0.18.5` (`RUSTSEC-2024-0429`) is fixed in `>=0.20.0`, but the Tauri 2 Linux stack needs the GTK3 `0.18` generation — remove when Tauri/Wry ships a Linux path on `glib >=0.20`. `lru 0.16.4` (`RUSTSEC-2026-0253`) comes through `mainline`, which still declares `lru ^0.16.2` even on 8.0.0, so a `pkarr 8` migration would not close it — remove when `mainline` moves to a fixed `lru`. Neither is vendored or forked to silence the alert |
 
 ### Routine run 2026-09-19 (area 3: UI and local storage)
 
@@ -109,6 +118,8 @@ A scheduled Claude Code agent reviews the repository a few times a week. Each ru
 1. reads this file, runs `node scripts/security-scan.mjs`, and reviews what changed since the last run plus one area in depth (rotating);
 2. fixes what it can prove, with a test, on a `claude/security-auto-<date>` branch that also bumps the patch version and adds a changelog entry;
 3. `security-autorelease.yml` then checks the branch (`scripts/autorelease-gate.mjs`: no CI or release changes, no new dependencies, size cap, one patch bump, one release per 20 h, CI and Security green), fast-forwards main to it (no pull request), tags it and publishes the release;
-4. anything it cannot fix safely is added here as **open**.
+4. anything it cannot fix safely is added here as **open**, in the shape described under [Disclosure](#disclosure-nothing-unfixed-is-described-in-public), and the reproduction goes into a **draft security advisory**, never into an issue or pull request.
+
+When the gate refuses a run (the 20 h window, a change outside its limits, a red check), the fix does **not** become a public pull request describing the flaw. It waits for the next window, or goes through a draft advisory and its private fork and is released from there. A run that opens a public branch or pull request must not say what the flaw lets an attacker do until the release carrying the fix is out.
 
 The repository variable `SECURITY_AUTORELEASE` turns this down to `deps` (only dependency updates ship on their own) or `off`.
