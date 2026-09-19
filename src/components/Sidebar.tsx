@@ -158,6 +158,8 @@ export function Sidebar() {
     }
 
     setSessions(updated);
+    // A chat deleted elsewhere takes its pending "Delete?" with it.
+    setConfirmDeleteId((id) => (id && !updated.some((s) => s.id === id) ? null : id));
   }, [settings.notifications.soundEnabled]);
 
   useEffect(() => {

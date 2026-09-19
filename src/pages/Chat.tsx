@@ -270,6 +270,8 @@ export function Chat() {
   const handleDelete = () => {
     if (confirmDelete) {
       deleteSession(params.sessionId);
+      // The chat list keeps its own copy: without this it shows the deleted chat until its next refresh.
+      window.dispatchEvent(new Event("session-updated"));
       navigate("/");
     } else {
       setConfirmDelete(true);
