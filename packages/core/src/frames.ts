@@ -28,6 +28,8 @@ export const LIMITS = {
   maxFileBytes: 100 * 1024 * 1024,
   /** Files a peer may be sending us at once. */
   maxIncomingFilesPerPeer: 3,
+  /** Received bytes kept for one peer, in flight included. Past it new files are refused. */
+  maxStoredIncomingBytesPerPeer: 500 * 1024 * 1024,
   requestTimeoutMs: 60_000,
   bodyIdleTimeoutMs: 30_000,
   /** Stop writing to the channel above this many buffered bytes. */

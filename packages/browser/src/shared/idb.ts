@@ -23,12 +23,20 @@ export const STORES = {
   walletTx: "walletTx",
 } as const;
 
-/** A file's contents. Metadata travels with the chat message; this is only the bytes. */
+/**
+ * A file's contents. Metadata travels with the chat message; this is only the bytes.
+ * Ids are `<link id>-out-<random>` for files we send and `<link id>-in-<random>` for
+ * files we receive, both chosen here. Files stored before that are `<link id>-<wire id>`
+ * without `direction` and are still read under their old id.
+ */
 export interface StoredFile {
   id: string;
   linkId: string;
   blob: Blob;
   createdAt: number;
+  direction?: "in" | "out";
+  /** The id the file had on the data link. */
+  wireId?: string;
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -83,6 +91,9 @@ export const fileStore = {
   },
   async get(id: string): Promise<StoredFile | undefined> {
     return wrap((await store(STORES.files, "readonly")).get(id));
+  },
+  async listForLink(linkId: string): Promise<StoredFile[]> {
+    return wrap((await store(STORES.files, "readonly")).index("byLink").getAll(linkId));
   },
   async delete(id: string): Promise<void> {
     await wrap((await store(STORES.files, "readwrite")).delete(id));

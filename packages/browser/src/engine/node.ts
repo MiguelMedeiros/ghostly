@@ -4,6 +4,7 @@ import {
   GhostlyHttpError,
   HTTP_SERVICE_PROTO,
   LEGACY_SERVICES,
+  LIMITS,
   RELAY_POLL_INTERVALS,
   RTC_CONFIG,
   RelayTransport,
@@ -13,7 +14,10 @@ import {
   formatLocalTarget,
   identityFromSeedB64,
   parseLocalTarget,
+  randomBytes,
+  safeBlobType,
   serviceIdFromName,
+  toBase64Url,
   webLocalFetch,
   type ClientRequest,
   type ClientResponse,
@@ -29,7 +33,7 @@ import {
   type ServiceAd,
 } from "@ghostly/core";
 import type { EngineImplementation } from "../shared/rpc";
-import { fileStore } from "../shared/idb";
+import { fileStore, type StoredFile } from "../shared/idb";
 import { DEFAULT_MINTS, TEST_MINT } from "../shared/mints";
 import type {
   EngineState,
@@ -66,9 +70,37 @@ interface LiveLink {
   peerAck: number;
   lastSyncAt: number;
   poll: LinkView["poll"];
+  files: LinkFiles;
 }
 
-function newLiveLink(stored: StoredLink, lastMessageAt: number): LiveLink {
+/** What one peer has sent us, so it can neither fill the disk nor reuse an id. */
+interface LinkFiles {
+  /** Received bytes stored, plus those announced by transfers still in flight. */
+  receivedBytes: number;
+  /** Wire ids already used on this link, in either direction. */
+  wireIds: Set<string>;
+  /** Transfers in flight from the peer, by wire id. */
+  incoming: Map<string, { localId: string; size: number }>;
+}
+
+function emptyLinkFiles(): LinkFiles {
+  return { receivedBytes: 0, wireIds: new Set(), incoming: new Map() };
+}
+
+/** Rebuilds the per-link file bookkeeping from what is stored. */
+function linkFilesFrom(linkId: string, files: StoredFile[], messages: StoredMessage[]): LinkFiles {
+  const result = emptyLinkFiles();
+  // Files stored before ids had a direction: the chat message says who sent them.
+  const fromPeer = new Set(messages.flatMap((m) => (m.sender === "peer" && m.file ? [m.file.id] : [])));
+  for (const file of files) {
+    const legacy = !file.direction;
+    result.wireIds.add(file.wireId ?? file.id.slice(linkId.length + 1));
+    if (file.direction === "in" || (legacy && fromPeer.has(file.id))) result.receivedBytes += file.blob.size;
+  }
+  return result;
+}
+
+function newLiveLink(stored: StoredLink, lastMessageAt: number, files = emptyLinkFiles()): LiveLink {
   return {
     stored,
     myPubKeyZ32: identityFromSeedB64(stored.seedB64).pubKeyZ32,
@@ -80,6 +112,7 @@ function newLiveLink(stored: StoredLink, lastMessageAt: number): LiveLink {
     peerAck: 0,
     lastSyncAt: 0,
     poll: { polling: false, nextAt: 0, interval: 0 },
+    files,
   };
 }
 
@@ -157,7 +190,8 @@ export class GhostlyNode implements EngineImplementation {
 
     for (const stored of await db.getLinks()) {
       const messages = await db.getMessages(stored.id);
-      this.links.set(stored.id, newLiveLink(stored, messages[messages.length - 1]?.timestamp ?? 0));
+      const files = linkFilesFrom(stored.id, await fileStore.listForLink(stored.id), messages);
+      this.links.set(stored.id, newLiveLink(stored, messages[messages.length - 1]?.timestamp ?? 0, files));
       if (this.settings.online) this.startLink(stored.id, messages);
     }
     this.emitState();
@@ -262,9 +296,9 @@ export class GhostlyNode implements EngineImplementation {
     return { error };
   }
 
-  /** Files are stored under `<link id>-<id on the wire>`, so one peer cannot overwrite another's. */
-  private static localFileId(linkId: string, wireId: string): string {
-    return `${linkId}-${wireId}`;
+  /** Local id of a file we send: the id on the wire is ours too, but lives in its own key space. */
+  private static outgoingFileId(linkId: string, wireId: string): string {
+    return `${linkId}-out-${wireId}`;
   }
 
   sendFile({ linkId, file, timestamp }: { linkId: string; file: MessageFile; timestamp: number }): void {
@@ -274,8 +308,10 @@ export class GhostlyNode implements EngineImplementation {
       this.emitState();
     };
     if (!live?.link) return fail("You are offline");
-    if (!file.id.startsWith(`${linkId}-`)) return fail("Invalid file id");
+    const wireId = file.id.slice(`${linkId}-out-`.length);
+    if (file.id !== GhostlyNode.outgoingFileId(linkId, wireId)) return fail("Invalid file id");
     const { link } = live;
+    live.files.wireIds.add(wireId);
 
     this.transfers.set(file.id, { state: "transferring", transferred: 0, size: file.size });
     void this.storeMessage({
@@ -300,14 +336,27 @@ export class GhostlyNode implements EngineImplementation {
         }
       })();
       await link.sendFile(
-        { id: file.id.slice(linkId.length + 1), name: file.name, size: file.size, mime: file.mime, timestamp },
+        { id: wireId, name: file.name, size: file.size, mime: file.mime, timestamp },
         source,
       );
     })().catch((error) => fail(error instanceof Error ? error.message : String(error)));
   }
 
-  private receiveFile(linkId: string, wire: { id: string; name: string; size: number; mime: string; timestamp: number }): FileSink {
-    const file: MessageFile = { ...wire, id: GhostlyNode.localFileId(linkId, wire.id) };
+  private receiveFile(
+    linkId: string,
+    wire: { id: string; name: string; size: number; mime: string; timestamp: number },
+  ): FileSink | string {
+    const files = this.links.get(linkId)?.files;
+    if (!files) return "refused";
+    // A known id could only be a replay or an attempt to pass for a file we already have.
+    if (files.wireIds.has(wire.id)) return "duplicate file id";
+    if (files.receivedBytes + wire.size > LIMITS.maxStoredIncomingBytesPerPeer) return "no room for more files";
+
+    // The local id is ours, never the peer's: whatever it announces cannot replace a stored file.
+    const file: MessageFile = { ...wire, id: `${linkId}-in-${toBase64Url(randomBytes(12))}` };
+    files.wireIds.add(wire.id);
+    files.receivedBytes += wire.size;
+    files.incoming.set(wire.id, { localId: file.id, size: wire.size });
     const chunks: Uint8Array[] = [];
     this.transfers.set(file.id, { state: "transferring", transferred: 0, size: file.size });
     void this.storeMessage({
@@ -321,20 +370,44 @@ export class GhostlyNode implements EngineImplementation {
     });
     return {
       write: (chunk) => void chunks.push(chunk),
+      // The message keeps the announced type for display; the bytes are served as something inert.
       close: () =>
-        fileStore.put({ id: file.id, linkId, blob: new Blob(chunks as BlobPart[], { type: file.mime }), createdAt: Date.now() }),
+        fileStore.put({
+          id: file.id,
+          linkId,
+          blob: new Blob(chunks as BlobPart[], { type: safeBlobType(file.mime) }),
+          createdAt: Date.now(),
+          direction: "in",
+          wireId: wire.id,
+        }),
       abort: () => void (chunks.length = 0),
     };
   }
 
-  private fileProgress(fileId: string, transferred: number): void {
+  /** Maps a wire id from the data link to the local id; an incoming file that ended is settled here. */
+  private localFileId(linkId: string, wireId: string, direction: "in" | "out", settled?: { failed: boolean }): string | undefined {
+    if (direction === "out") return GhostlyNode.outgoingFileId(linkId, wireId);
+    const files = this.links.get(linkId)?.files;
+    const entry = files?.incoming.get(wireId);
+    if (!files || !entry) return undefined;
+    if (settled) {
+      files.incoming.delete(wireId);
+      // Only what was not kept gives its room back.
+      if (settled.failed) files.receivedBytes -= entry.size;
+    }
+    return entry.localId;
+  }
+
+  private fileProgress(fileId: string | undefined, transferred: number): void {
+    if (!fileId) return;
     const transfer = this.transfers.get(fileId);
     if (!transfer || transfer.state !== "transferring") return;
     transfer.transferred = transferred;
     this.emitState(250);
   }
 
-  private fileSettled(fileId: string, error?: string): void {
+  private fileSettled(fileId: string | undefined, error?: string): void {
+    if (!fileId) return;
     const transfer = this.transfers.get(fileId);
     if (!transfer) return;
     this.transfers.set(fileId, error ? { ...transfer, state: "failed", error } : { ...transfer, state: "done", transferred: transfer.size });
@@ -604,9 +677,12 @@ export class GhostlyNode implements EngineImplementation {
         onPayment: (payment) => void this.desk.onPayment(linkId, payment),
         onPaymentResult: (result) => void this.desk.onPaymentResult(linkId, result),
         onFileIncoming: (file) => this.receiveFile(linkId, file),
-        onFileProgress: (id, transferred) => this.fileProgress(GhostlyNode.localFileId(linkId, id), transferred),
-        onFileComplete: (id) => this.fileSettled(GhostlyNode.localFileId(linkId, id)),
-        onFileFailed: (id, reason) => this.fileSettled(GhostlyNode.localFileId(linkId, id), reason),
+        onFileProgress: (id, transferred, direction) =>
+          this.fileProgress(this.localFileId(linkId, id, direction), transferred),
+        onFileComplete: (id, direction) =>
+          this.fileSettled(this.localFileId(linkId, id, direction, { failed: false })),
+        onFileFailed: (id, reason, direction) =>
+          this.fileSettled(this.localFileId(linkId, id, direction, { failed: true }), reason),
       },
     });
     live.link.start();
