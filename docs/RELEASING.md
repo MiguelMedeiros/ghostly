@@ -1,6 +1,6 @@
 # Releasing
 
-A release is a tag. The `Release` workflow builds everything from it and leaves a **draft** on GitHub; nothing is public until the draft is published.
+A release is a tag. The `Release` workflow builds everything from it and leaves a **draft** on GitHub; nothing is public until the draft is published, and every verified release is published (step 3).
 
 ## 1. Version
 
@@ -33,7 +33,21 @@ If a build fails, fix it on `main`, move the tag (`git tag -f v0.3.0 && git push
 
 ## 3. Publish
 
-Check that the draft has all thirteen assets, give it the changelog section as notes, and publish it. The site's download buttons point at `releases/download/v0.3.0/…`, so they only work from this moment on.
+A release is not finished while it is a draft: GitHub keeps showing the previous version as **Latest**. Once it checks out, publish it, always.
+
+1. The Release workflow is green and the draft has all thirteen assets.
+2. Download a few and check them: `shasum -a 256 -c SHA256SUMS.txt --ignore-missing` and `gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt`.
+3. Publish it as the latest release, with the changelog section as notes:
+
+   ```bash
+   gh release edit v0.3.0 --draft=false --latest --notes-file notes.md
+   ```
+
+4. A download URL (`releases/download/v0.3.0/Ghostly_0.3.0_aarch64.dmg`) answers 200.
+
+The site's download buttons point at `releases/download/v0.3.0/…`, so they only work from this moment on.
+
+Security patch releases made by the security routine go through `security-autorelease.yml` instead, which publishes them itself (see [SECURITY-REVIEW.md](SECURITY-REVIEW.md)).
 
 ## 4. Deploy
 

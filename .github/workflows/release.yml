@@ -4,6 +4,19 @@ on:
   push:
     tags:
       - "v*"
+  # Security patch releases: security-autorelease.yml calls this with the tag
+  # it created (a tag pushed with a workflow token triggers nothing by itself).
+  workflow_call:
+    inputs:
+      tag:
+        description: "Tag to build, e.g. v0.3.2"
+        required: true
+        type: string
+      publish:
+        description: "Publish the release instead of leaving a draft"
+        required: false
+        default: false
+        type: boolean
   workflow_dispatch:
     inputs:
       version:
@@ -17,6 +30,8 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # The tag being released, pushed or handed over by a caller.
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   # ============================================
@@ -50,6 +65,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -154,6 +171,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
@@ -196,6 +215,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -229,7 +250,7 @@ jobs:
   build-web:
     runs-on: ubuntu-latest
     name: Build web image
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
     permissions:
       contents: read
       packages: write
@@ -237,6 +258,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Log in to the GitHub container registry
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
@@ -261,19 +284,21 @@ jobs:
           build-args: |
             VITE_GIPHY_API_KEY=${{ secrets.VITE_GIPHY_API_KEY }}
           tags: |
-            ${{ steps.image.outputs.name }}:${{ github.ref_name }}
+            ${{ steps.image.outputs.name }}:${{ env.RELEASE_TAG }}
             ${{ steps.image.outputs.name }}:latest
 
   release:
     needs: [build-tauri, build-cli, build-extension]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
     permissions:
       contents: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       # Only ours: the Docker build also uploads a build record that is not an archive
       # and makes an unfiltered download fail.
@@ -351,9 +376,9 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
-          draft: true
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Release ${{ env.RELEASE_TAG }}
+          draft: ${{ !inputs.publish }}
           generate_release_notes: true
           files: release-assets/*
           fail_on_unmatched_files: false
@@ -366,9 +391,9 @@ jobs:
         if: steps.release.outcome == 'failure'
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
-          draft: true
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Release ${{ env.RELEASE_TAG }}
+          draft: ${{ !inputs.publish }}
           generate_release_notes: true
           files: release-assets/*
           fail_on_unmatched_files: false

@@ -2,7 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    # claude/security-auto-*: the security routine's fixes; see security-autorelease.yml.
+    branches: [main, master, "claude/security-auto-**"]
   pull_request:
     branches: [main, master]
 
