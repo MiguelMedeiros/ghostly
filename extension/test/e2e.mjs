@@ -288,6 +288,34 @@ try {
   await until(async () => (await remoteSize()) === cameraSize, "the camera to come back");
   ok("and the camera again when A stops sharing");
 
+  // Your own picture can be moved out of the way and resized from any corner, and never leaves the window.
+  const selfView = a.page.getByTestId("call-self-view");
+  const inside = (box) => box.x >= 0 && box.y >= 0 && box.x + box.width <= 1280 && box.y + box.height <= 720;
+  const selfBefore = await selfView.boundingBox();
+  await selfView.hover();
+  await a.page.mouse.move(selfBefore.x + 5, selfBefore.y + selfBefore.height - 5);
+  await a.page.mouse.down();
+  await a.page.mouse.move(selfBefore.x - 200, selfBefore.y + selfBefore.height + 150, { steps: 8 });
+  await a.page.mouse.up();
+  const bigger = await selfView.boundingBox();
+  expect("pulling the bottom left corner makes it bigger, the opposite corner stays put", [bigger.width > selfBefore.width + 150, Math.abs(bigger.x + bigger.width - (selfBefore.x + selfBefore.width)) < 2, Math.abs(bigger.y - selfBefore.y) < 2], [true, true, true]);
+  expect("it keeps the shape of the camera picture", Math.abs(bigger.width / bigger.height - 4 / 3) < 0.02, true);
+  await a.page.mouse.move(bigger.x + bigger.width - 5, bigger.y + bigger.height - 5);
+  await a.page.mouse.down();
+  await a.page.mouse.move(2000, 1500, { steps: 8 });
+  await a.page.mouse.up();
+  expect("pulled past the edge, it stops at the edge", inside(await selfView.boundingBox()), true);
+  const wide = await selfView.boundingBox();
+  await a.page.mouse.move(wide.x + wide.width / 2, wide.y + wide.height / 2);
+  await a.page.mouse.down();
+  await a.page.mouse.move(-500, 2000, { steps: 8 });
+  await a.page.mouse.up();
+  const placed = await selfView.boundingBox();
+  expect("dragged away, it moves, keeps its size and stays inside", [placed.x < wide.x - 100 || placed.y > wide.y + 100, Math.abs(placed.width - wide.width) < 2, inside(placed)], [true, true, true]);
+  await selfView.dblclick();
+  const reset = await selfView.boundingBox();
+  expect("a double click puts it back", [Math.round(reset.width), Math.round(reset.x)], [240, 1280 - 256]);
+
   // The call can shrink into a floating window so the chat stays usable.
   await a.page.getByTestId("call-minimize").click();
   const mini = await a.page.getByTestId("call-window").boundingBox();
