@@ -188,17 +188,17 @@ Host errors are ordinary responses with an `x-ghostly-error` header, so a browse
 | 408 | `request-timeout` | request body stalled for 30 s |
 | 413 | `request-too-large` | request body above 8 MiB |
 | 502 | `unreachable`, `redirect-blocked` | local service down, or it redirected off the target |
-| 503 | `busy` | more than 32 concurrent requests from this peer |
+| 503 | `busy` | more than 32 concurrent requests from this peer (a reset request counts until the local service has answered it) |
 | 504 | `timeout` | local service did not answer within 60 s |
 
 **What the host guarantees**
 
 1. A service id resolves only through the list the user configured, and only while the service is enabled. The mapping lives on the host; nothing in a frame can alter it.
 2. Targets are loopback only (`localhost`, `127.0.0.1`, `[::1]`), `http` or `https`, without credentials, query or fragment.
-3. The request URL is `target origin + base path + p`. `p` must start with a single `/` and contain no whitespace, control characters or backslashes. After URL normalization the result must still have the target's origin and sit under its base path, otherwise the request is refused without touching the network.
-4. Hop-by-hop headers, `Host`, `Origin`, `Referer`, `Content-Length`, `Accept-Encoding`, forwarding headers and `Sec-*`/`Proxy-*` are removed from requests. Header names and values are validated.
+3. The request URL is `target origin + base path + p`. `p` must start with a single `/` and contain no whitespace, control characters or backslashes, and its path part (before `?`) no encoded `/`, `\` or `.` (`%2f`, `%5c`, `%2e`), which some servers decode before routing. After URL normalization the result must still have the target's origin and sit under its base path, otherwise the request is refused without touching the network.
+4. Hop-by-hop headers, `Host`, `Origin`, `Referer`, `Content-Length`, `Accept-Encoding`, `Sec-*`/`Proxy-*`, forwarding and client-address headers (`Forwarded`, `Via`, `X-Forwarded-*`, `X-Real-IP`, `True-Client-IP`, …), and URL and method overrides (`X-Original-URL`, `X-Rewrite-URL`, `X-HTTP-Method-Override`, …) are removed from requests. Header names and values are validated.
 5. Requests are made without the host user's cookies or HTTP credentials, so a peer never inherits the session the host has with its own application.
-6. Redirects never leave the target: a same-origin redirect is handed to the client as a relative `Location`, anything else is refused. `Location` headers are made relative so the local address is not disclosed or followed.
+6. The host never follows redirects. A redirect whose `Location` is on the target origin and under its base path is handed to the client with that `Location` made relative; any other redirect, or one whose target the local stack cannot see (a browser's manual redirect), is answered with 502 `redirect-blocked` and its `Location` is not disclosed. Off-target `Location`/`Content-Location` headers on other responses are dropped.
 7. From responses, hop-by-hop headers, `Content-Encoding`, `Content-Length`, HSTS, `Alt-Svc` are removed (the body is forwarded decoded), and `Domain` is stripped from `Set-Cookie`.
 8. Limits: 8 MiB request bodies, 32 concurrent requests per peer, 60 s for the local service to answer, 30 s body idle time. Clients cap responses at 64 MiB (the browser viewer at 32 MiB) and keep at most 16 requests in flight.
 
