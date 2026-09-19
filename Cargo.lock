@@ -1447,7 +1447,7 @@ dependencies = [
 
 [[package]]
 name = "ghostly"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "base64 0.23.1",
  "crypto_secretbox",
@@ -1465,7 +1465,7 @@ dependencies = [
 
 [[package]]
 name = "ghostly-cli"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "base64 0.23.1",
  "clap",

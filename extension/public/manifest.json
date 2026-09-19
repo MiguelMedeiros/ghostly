@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Ghostly",
   "short_name": "Ghostly",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Your services exist while you are online. Ephemeral, identity-addressed peer-to-peer chat and local web apps over WebRTC.",
   "minimum_chrome_version": "116",
   "icons": {
