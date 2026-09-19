@@ -590,6 +590,8 @@ export function Chat() {
         key={splat}
         onSend={sendMessage}
         disabled={isSending}
+        // The DHT carries a few hundred characters; the direct link has room for long invoices and ecash tokens.
+        maxLength={platform?.getPeer(params.peerPubKeyB64)?.dataLink === "open" ? 4000 : undefined}
         onSendFile={platform ? sendFile : undefined}
         payments={
           walletState && walletState.mints.length > 0

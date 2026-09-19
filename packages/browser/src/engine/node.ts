@@ -402,6 +402,10 @@ export class GhostlyNode implements EngineImplementation {
     return { paid: await this.wallet.payQuote(quote, mint) };
   }
 
+  walletInspectCashu({ text }: { text: string }) {
+    return { inspection: this.wallet.inspect(text) };
+  }
+
   async walletReceiveToken({ token }: { token: string }) {
     const { amount } = await this.wallet.receiveToken(token.trim());
     return { amount };

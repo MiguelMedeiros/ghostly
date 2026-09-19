@@ -1,7 +1,7 @@
-import { Wallet, getEncodedToken, getTokenMetadata, type Proof, type ProofLike } from "@cashu/cashu-ts";
+import { Wallet, decodePaymentRequest, getEncodedToken, getTokenMetadata, type Proof, type ProofLike } from "@cashu/cashu-ts";
 import { STORES, store, wrap } from "../shared/idb";
 import { TEST_MINT } from "../shared/mints";
-import type { MintInfoView, MintView, StoredProof, StoredQuote, WalletTx, WalletTxKind, WalletView } from "../shared/types";
+import type { CashuInspection, MintInfoView, MintView, StoredProof, StoredQuote, WalletTx, WalletTxKind, WalletView } from "../shared/types";
 
 /**
  * The peer's Cashu wallet. Ecash is custodial: the mint holds the sats and the
@@ -207,6 +207,38 @@ export class CashuWallet {
     throw new Error(
       candidates.length === 0 && preferred ? "You share no mint with this contact" : "Not enough sats in your wallet",
     );
+  }
+
+  /** Reads a token or a payment request without contacting a mint. Nothing here moves money. */
+  inspect(text: string): CashuInspection | null {
+    const value = text.trim();
+    try {
+      if (/^cashu[AB]/i.test(value)) {
+        const metadata = getTokenMetadata(value);
+        const mint = metadata.mint.replace(/\/+$/, "");
+        return {
+          kind: "token",
+          amount: Number(metadata.amount),
+          unit: metadata.unit,
+          mint,
+          memo: metadata.memo || undefined,
+          accepted: this.getMints().includes(mint) || mint === TEST_MINT,
+        };
+      }
+      if (/^creq[AB]/i.test(value)) {
+        const request = decodePaymentRequest(value);
+        return {
+          kind: "request",
+          amount: request.amount === undefined ? null : Number(request.amount),
+          unit: request.unit ?? UNIT,
+          mints: request.mints ?? [],
+          description: request.description || undefined,
+        };
+      }
+    } catch {
+      // not ecash after all
+    }
+    return null;
   }
 
   /** Redeems a token into fresh proofs of our own. Until this succeeds the sender could still spend it. */

@@ -74,6 +74,12 @@ export function MessageInput({
     const value = e.target.value;
     if (value.length <= maxLength) {
       setText(value);
+    } else if (value.length - text.length > 1) {
+      showToast(
+        maxLength > DEFAULT_MAX
+          ? `That is too long to send (${value.length.toLocaleString()} characters, the limit is ${maxLength.toLocaleString()}).`
+          : "That is too long for the DHT. Once you are connected peer to peer, long invoices and ecash tokens fit.",
+      );
     }
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
