@@ -5,7 +5,7 @@ use std::io::{self, Write};
 #[derive(Parser)]
 #[command(name = "ghostly-cli")]
 #[command(author = "Ghost Protocol")]
-#[command(version = "0.1.0")]
+#[command(version)]
 #[command(about = "CLI for Ghost protocol - encrypted ephemeral messaging for bots", long_about = None)]
 struct Cli {
     #[command(subcommand)]

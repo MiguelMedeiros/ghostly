@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **CLI:** `ghostly-cli --version` reported `0.1.0` whatever version you had installed. It now says which version it actually is.
+
 ## 0.3.4
 
 A security release for Ghostly Desktop. Update it. Nothing changes on the wire, and older clients keep working.
