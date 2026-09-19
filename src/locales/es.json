@@ -106,7 +106,7 @@
     "data": "Datos y Almacenamiento",
     "storageUsed": "Almacenamiento usado",
     "clearAllData": "Borrar todos los datos",
-    "clearAllDataDescription": "Eliminar todos los chats, archivos, ecash de la billetera y configuración de este dispositivo",
+    "clearAllDataDescription": "Eliminar todos los chats, archivos y configuración de este dispositivo. Tu billetera se queda: gasta o respalda tus sats antes si quieres borrarlos.",
     "clearAllDataConfirm": "¿Estás seguro? Esto no se puede deshacer.",
     "dataCleared": "Todos los datos fueron borrados",
     "about": "Acerca de",

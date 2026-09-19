@@ -106,7 +106,7 @@
     "data": "Données et Stockage",
     "storageUsed": "Stockage utilisé",
     "clearAllData": "Effacer toutes les données",
-    "clearAllDataDescription": "Supprimer toutes les discussions, fichiers, ecash du portefeuille et paramètres de cet appareil",
+    "clearAllDataDescription": "Supprimer toutes les discussions, fichiers et paramètres de cet appareil. Votre portefeuille reste : dépensez ou sauvegardez vos sats avant si vous voulez les effacer.",
     "clearAllDataConfirm": "Êtes-vous sûr ? Cette action est irréversible.",
     "dataCleared": "Toutes les données ont été effacées",
     "about": "À propos",

@@ -106,7 +106,7 @@
     "data": "Dati e Archiviazione",
     "storageUsed": "Spazio utilizzato",
     "clearAllData": "Cancella tutti i dati",
-    "clearAllDataDescription": "Elimina tutte le chat, i file, l'ecash del portafoglio e le impostazioni da questo dispositivo",
+    "clearAllDataDescription": "Elimina tutte le chat, i file e le impostazioni da questo dispositivo. Il portafoglio resta: spendi o salva i tuoi sats prima se vuoi eliminarli.",
     "clearAllDataConfirm": "Sei sicuro? Questa azione non può essere annullata.",
     "dataCleared": "Tutti i dati sono stati cancellati",
     "about": "Informazioni",

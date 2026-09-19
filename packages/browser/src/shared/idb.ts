@@ -67,21 +67,18 @@ export function openDb(): Promise<IDBDatabase> {
 }
 
 /**
- * Deletes the database ("Clear all data"). Open connections close themselves on
- * `versionchange`; if one does not, this gives up waiting rather than hang.
+ * "Clear all data": chats, messages, files and shared services. The wallet
+ * (proofs, payments, quotes, history) and the mint list stay: ecash is money,
+ * and nothing else holds a copy of it.
  */
-export async function deleteDatabase(): Promise<void> {
+export async function clearChatData(): Promise<void> {
   if (typeof indexedDB === "undefined") return;
-  const open = dbPromise;
-  dbPromise = null;
-  await open?.then((db) => db.close()).catch(() => {});
-  await new Promise<void>((resolve) => {
-    const request = indexedDB.deleteDatabase(dbName);
-    const timer = setTimeout(resolve, 5_000);
-    request.onsuccess = request.onerror = () => {
-      clearTimeout(timer);
-      resolve();
-    };
+  const names = [STORES.links, STORES.messages, STORES.files, STORES.services];
+  const tx = (await openDb()).transaction(names, "readwrite");
+  for (const name of names) tx.objectStore(name).clear();
+  await new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = tx.onabort = () => reject(tx.error);
   });
 }
 

@@ -106,7 +106,7 @@
     "data": "Dados e Armazenamento",
     "storageUsed": "Armazenamento usado",
     "clearAllData": "Limpar todos os dados",
-    "clearAllDataDescription": "Excluir todas as conversas, arquivos, ecash da carteira e configurações deste dispositivo",
+    "clearAllDataDescription": "Excluir todas as conversas, arquivos e configurações deste dispositivo. Sua carteira fica: gaste ou faça backup dos sats antes se quiser apagá-los.",
     "clearAllDataConfirm": "Tem certeza? Isso não pode ser desfeito.",
     "dataCleared": "Todos os dados foram limpos",
     "about": "Sobre",

@@ -106,7 +106,7 @@
     "data": "Data & Storage",
     "storageUsed": "Storage used",
     "clearAllData": "Clear all data",
-    "clearAllDataDescription": "Delete all chats, files, wallet ecash and settings from this device",
+    "clearAllDataDescription": "Delete all chats, files and settings from this device. Your wallet stays: spend or back up your sats first if you want them gone.",
     "clearAllDataConfirm": "Are you sure? This cannot be undone.",
     "dataCleared": "All data cleared",
     "about": "About",

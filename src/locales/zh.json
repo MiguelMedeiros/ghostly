@@ -106,7 +106,7 @@
     "data": "数据与存储",
     "storageUsed": "已用存储空间",
     "clearAllData": "清除所有数据",
-    "clearAllDataDescription": "从此设备删除所有聊天、文件、钱包 ecash 和设置",
+    "clearAllDataDescription": "从此设备删除所有聊天、文件和设置。钱包会保留：如需删除，请先花掉或备份你的 sats。",
     "clearAllDataConfirm": "确定吗？此操作无法撤销。",
     "dataCleared": "所有数据已清除",
     "about": "关于",

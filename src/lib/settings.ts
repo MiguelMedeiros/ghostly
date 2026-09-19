@@ -1,4 +1,4 @@
-import { deleteDatabase } from "@ghostly/browser/shared/idb";
+import { clearChatData } from "@ghostly/browser/shared/idb";
 
 export type ColorScheme = "dark" | "light" | "system";
 export type ColorTheme = "classic" | "monochrome" | "cyan" | "purple";
@@ -109,9 +109,9 @@ export function formatBytes(bytes: number): string {
 }
 
 /**
- * Everything this client keeps on the device: the localStorage keys and the
- * peer's IndexedDB database (links, messages, files, wallet). The caller
- * reloads afterwards so the running peer starts from nothing.
+ * Everything this client keeps on the device except the wallet: the
+ * localStorage keys and the chats, files and services in the peer's database.
+ * The peer forgets the links on its next reconcile; the caller reloads.
  */
 export async function clearAllData(): Promise<void> {
   const keysToRemove: string[] = [];
@@ -122,7 +122,7 @@ export async function clearAllData(): Promise<void> {
     }
   }
   keysToRemove.forEach((key) => localStorage.removeItem(key));
-  await deleteDatabase();
+  await clearChatData();
 }
 
 export const APP_WEBSITE = "https://github.com/MiguelMedeiros/ghostly";

@@ -106,7 +106,7 @@
     "data": "データとストレージ",
     "storageUsed": "使用中のストレージ",
     "clearAllData": "すべてのデータを消去",
-    "clearAllDataDescription": "この端末からすべてのチャット、ファイル、ウォレットのecash、設定を削除",
+    "clearAllDataDescription": "この端末からすべてのチャット、ファイル、設定を削除します。ウォレットは残ります。削除したい場合は先にsatsを使うかバックアップしてください。",
     "clearAllDataConfirm": "本当によろしいですか？この操作は元に戻せません。",
     "dataCleared": "すべてのデータが消去されました",
     "about": "アプリについて",
