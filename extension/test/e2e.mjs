@@ -288,6 +288,22 @@ try {
   await until(async () => (await remoteSize()) === cameraSize, "the camera to come back");
   ok("and the camera again when A stops sharing");
 
+  // Your own picture can be moved out of the way and resized from its corner.
+  const selfView = a.page.getByTestId("call-self-view");
+  const selfBefore = await selfView.boundingBox();
+  await a.page.mouse.move(selfBefore.x + selfBefore.width - 4, selfBefore.y + selfBefore.height - 4);
+  await a.page.mouse.down();
+  await a.page.mouse.move(selfBefore.x + selfBefore.width + 116, selfBefore.y + selfBefore.height + 86, { steps: 6 });
+  await a.page.mouse.up();
+  const bigger = await selfView.boundingBox();
+  expect("the self view grows when its corner is pulled", bigger.width > selfBefore.width + 80 && bigger.height > selfBefore.height + 50, true);
+  await a.page.mouse.move(bigger.x + 30, bigger.y + 30);
+  await a.page.mouse.down();
+  await a.page.mouse.move(bigger.x - 370, bigger.y + 230, { steps: 6 });
+  await a.page.mouse.up();
+  const placed = await selfView.boundingBox();
+  expect("and goes where it is dragged, keeping its size", [placed.x < bigger.x - 300, Math.abs(placed.width - bigger.width) < 3], [true, true]);
+
   // The call can shrink into a floating window so the chat stays usable.
   await a.page.getByTestId("call-minimize").click();
   const mini = await a.page.getByTestId("call-window").boundingBox();

@@ -291,6 +291,32 @@ body {
   user-select: none;
 }
 
+/* Your own picture in a full-screen call: movable, resizable from its corner. */
+.call-preview-free {
+  resize: both;
+  overflow: hidden;
+  min-width: 96px;
+  min-height: 72px;
+  max-width: 80vw;
+  max-height: 80vh;
+  touch-action: none;
+  cursor: grab;
+}
+
+.call-preview-free::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 12px;
+  height: 12px;
+  border-right: 2px solid rgb(255 255 255 / 0.8);
+  border-bottom: 2px solid rgb(255 255 255 / 0.8);
+  border-bottom-right-radius: 3px;
+  pointer-events: none;
+  filter: drop-shadow(0 0 2px rgb(0 0 0 / 0.8));
+}
+
 .call-mini:active {
   cursor: grabbing;
 }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { CallState } from "../lib/types";
+import { useFloatingBox } from "../hooks/useFloatingBox";
 
 interface CallOverlayProps {
   callState: CallState;
@@ -108,6 +109,13 @@ export function CallOverlay({
     return () => observer.disconnect();
   }, [view]);
 
+  // Your own picture: drag it out of the way, make it as big as you like. In the small window it stays put.
+  const selfView = useFloatingBox(
+    "ghostly_call_self_view",
+    () => (window.innerWidth < 768 ? { x: window.innerWidth - 128, y: 64, w: 112, h: 160 } : { x: window.innerWidth - 232, y: 16, w: 216, h: 162 }),
+    !view.mini,
+  );
+
   const startDrag = (event: React.PointerEvent<HTMLDivElement>) => {
     const root = rootRef.current;
     if (!view.mini || !root || (event.target as HTMLElement).closest("button")) return;
@@ -134,7 +142,8 @@ export function CallOverlay({
     if (localVideoRef.current && localStream) {
       localVideoRef.current.srcObject = localStream;
     }
-  }, [localStream]);
+    // The element is recreated when the camera is turned back on, so it needs its stream again.
+  }, [localStream, isVideoOff]);
 
   useEffect(() => {
     if (!remoteStream || !remoteVideoRef.current) return;
@@ -243,7 +252,16 @@ export function CallOverlay({
 
       {/* Local video (picture-in-picture) */}
       {hasVideo && localStream && (
-        <div className="call-preview absolute top-4 right-4 w-36 h-28 max-md:w-28 max-md:h-40 rounded-lg max-md:rounded-xl overflow-hidden border border-border/50 shadow-lg z-10">
+        <div
+          ref={selfView.ref}
+          onPointerDown={selfView.onPointerDown}
+          style={selfView.style}
+          data-testid="call-self-view"
+          title={view.mini ? undefined : "Drag to move, pull the corner to resize"}
+          className={`call-preview absolute rounded-lg overflow-hidden border border-border/50 shadow-lg z-10 bg-black ${
+            view.mini ? "top-4 right-4 w-36 h-28" : "call-preview-free"
+          }`}
+        >
           {isVideoOff ? (
             <div className="w-full h-full bg-surface-hover flex items-center justify-center">
               <svg
