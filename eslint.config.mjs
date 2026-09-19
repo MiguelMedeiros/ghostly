@@ -28,5 +28,14 @@ export default tseslint.config(
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
     },
+  },
+  {
+    // Playwright fixtures call `use()` and take `{}` when they need nothing; neither is React.
+    files: ["e2e/**/*.ts"],
+    languageOptions: { globals: globals.node },
+    rules: {
+      "react-hooks/rules-of-hooks": "off",
+      "no-empty-pattern": "off",
+    },
   }
 );

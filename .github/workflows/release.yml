@@ -16,6 +16,13 @@ env:
 
 jobs:
   # ============================================
+  # Everything a person can do still works, or nothing ships
+  # ============================================
+  e2e:
+    name: End-to-end
+    uses: ./.github/workflows/e2e.yml
+
+  # ============================================
   # Build Tauri App for all platforms
   # ============================================
   build-tauri:
@@ -225,6 +232,7 @@ jobs:
   build-web:
     runs-on: ubuntu-latest
     name: Build web image
+    needs: [e2e]
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: read
@@ -261,7 +269,7 @@ jobs:
             ${{ steps.image.outputs.name }}:latest
 
   release:
-    needs: [build-tauri, build-cli, build-extension]
+    needs: [e2e, build-tauri, build-cli, build-extension]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     permissions:

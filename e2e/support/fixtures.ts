@@ -1,0 +1,106 @@
+import { test as base, expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { LocalRelay } from "./relay";
+
+export { expect };
+
+export interface Peer {
+  name: string;
+  context: BrowserContext;
+  page: Page;
+}
+
+export interface PeerOptions {
+  viewport?: { width: number; height: number };
+  /** Emulates a phone: touch, mobile user agent, narrow viewport. */
+  mobile?: boolean;
+}
+
+type Fixtures = {
+  relay: LocalRelay;
+  /** Opens Ghostly on the web as a new person: its own browser storage, the same relay as everyone else in the test. */
+  peer: (name: string, options?: PeerOptions) => Promise<Peer>;
+};
+
+export async function openPeer(browser: Browser, relay: LocalRelay, baseURL: string, name: string, options: PeerOptions = {}): Promise<Peer> {
+  const context = await browser.newContext({
+    baseURL,
+    permissions: ["camera", "microphone", "clipboard-read", "clipboard-write"],
+    viewport: options.viewport ?? (options.mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 }),
+    ...(options.mobile ? { isMobile: true, hasTouch: true } : {}),
+  });
+  await relay.attach(context);
+  await stubGifServices(context);
+  const page = await context.newPage();
+  page.on("pageerror", (error) => console.log(`  [${name}] ${error.message}`));
+  await page.goto("/");
+  await expect(page.getByTitle("New Chat")).toBeVisible();
+  return { name, context, page };
+}
+
+/** A 1×1 GIF. */
+export const GIF = Buffer.from("R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==", "base64");
+
+/** Giphy and GifCities answer from here: the same shape, one ghost each, no network. */
+async function stubGifServices(context: BrowserContext): Promise<void> {
+  const json = (body: unknown) => ({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(body) });
+  await context.route("https://api.giphy.com/**", (route) =>
+    route.fulfill(
+      json({
+        meta: { status: 200 },
+        data: [{ id: "g1", title: "giphy ghost", images: { fixed_width_small: { url: "https://media.giphy.com/media/g1/ghost.gif" }, fixed_width: { url: "https://media.giphy.com/media/g1/ghost.gif" } } }],
+      }),
+    ),
+  );
+  await context.route("https://gifcities.archive.org/**", (route) =>
+    route.fulfill(json([{ gif: "http://geocities.com/haunted/ghost.gif", checksum: "c1", url_text: "retro ghost" }])),
+  );
+  for (const host of ["https://media.giphy.com/**", "https://web.archive.org/**"]) {
+    await context.route(host, (route) => route.fulfill({ status: 200, contentType: "image/gif", body: GIF }));
+  }
+}
+
+export const test = base.extend<Fixtures>({
+  relay: async ({}, use) => {
+    const relay = new LocalRelay();
+    await use(relay);
+    relay.close();
+  },
+  peer: async ({ browser, relay, baseURL }, use) => {
+    const opened: Peer[] = [];
+    await use(async (name, options) => {
+      const peer = await openPeer(browser, relay, baseURL!, name, options);
+      opened.push(peer);
+      return peer;
+    });
+    for (const peer of opened) await peer.context.close().catch(() => {});
+  },
+});
+
+/** `host` creates a chat, `guest` joins it with the invite code. Resolves once both have the chat open. */
+export async function link(host: Peer, guest: Peer): Promise<void> {
+  await host.page.getByTitle("New Chat").click();
+  await host.page.getByRole("button", { name: "Create New Chat" }).first().click();
+  const invite = (await host.page.locator("code").first().textContent())!.trim();
+  await guest.page.getByTitle("New Chat").click();
+  await guest.page.getByPlaceholder("Invite code...").fill(invite);
+  await guest.page.getByPlaceholder("Invite code...").press("Enter");
+  await expect(guest.page.getByPlaceholder("Type a message")).toBeVisible();
+}
+
+/** The open conversation, without the chat list (which previews the last message too). */
+export const chat = (peer: Peer) => peer.page.locator(".chat-wallpaper");
+
+export async function say(peer: Peer, text: string): Promise<void> {
+  const box = peer.page.getByPlaceholder("Type a message");
+  await box.fill(text);
+  await box.press("Enter");
+}
+
+/** Both sides have seen each other's message and the WebRTC data link is up. */
+export async function connect(a: Peer, b: Peer): Promise<void> {
+  await say(b, `hello from ${b.name}`);
+  await expect(chat(a).getByText(`hello from ${b.name}`)).toBeVisible();
+  await say(a, `hello from ${a.name}`);
+  await expect(chat(b).getByText(`hello from ${a.name}`)).toBeVisible();
+  for (const peer of [a, b]) await expect(peer.page.getByTestId("datalink-state").filter({ hasText: "Peer to peer" })).toBeVisible();
+}

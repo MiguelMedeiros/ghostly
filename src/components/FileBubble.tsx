@@ -19,6 +19,7 @@ export function FileBubble({ file }: { file: ChatFile }) {
     if (transfer?.state === "transferring") setWatched(true);
   }, [transfer?.state]);
 
+  // A small file can be announced before its transfer shows up: look again once it has.
   useEffect(() => {
     if (!platform || !settled) return;
     let url: string | null = null;
@@ -34,7 +35,7 @@ export function FileBubble({ file }: { file: ChatFile }) {
       cancelled = true;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [platform, file.id, settled]);
+  }, [platform, file.id, settled, transfer?.state]);
 
   let status = formatFileSize(file.size);
   if (transfer?.state === "transferring") {

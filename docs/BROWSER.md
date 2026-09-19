@@ -59,7 +59,7 @@ exchanges messages between the Rust CLI and the TypeScript core over the real ne
 npm run test:e2e
 ```
 
-launches two Chromium profiles with the extension and walks through the whole milestone against real relays: link, chat over the DHT, advertise, discover, open, proxy (ES modules, CSS, images, JSON `POST`, a 3 MiB download, redirects, navigation), chat and a video call over WebRTC, stop sharing, close, gone. `HEADED=1` shows the windows. The test grants the `localhost` permission in a copy of the manifest, because Chrome's permission prompt cannot be clicked by automation.
+runs the end-to-end suite ([e2e/README.md](../e2e/README.md)). For the extension, it launches Chromium profiles with it loaded and walks through the whole milestone: link, chat through a relay, advertise, discover, open, proxy (ES modules, CSS, images, JSON `POST`, a 3 MiB download, redirects, navigation), stop sharing, go offline, close, gone; and chat, a file and a video call with the web app. `HEADED=1` shows the windows. The test grants the `localhost` permission in a copy of the manifest, because Chrome's permission prompt cannot be clicked by automation.
 
 ## How it is built
 

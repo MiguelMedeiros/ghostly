@@ -22,7 +22,7 @@ To put it behind a tunnel or a reverse proxy, choose where it listens with `GHOS
 
 What is served is static files (nginx, `web/nginx.conf`). There is no Ghostly backend: the peer runs in the visitor's tab, reaches Pkarr through relays, talks to contacts over WebRTC, and keeps its state in that browser's IndexedDB and localStorage. It needs a secure context, which `http://localhost` is; anywhere else, serve it over HTTPS.
 
-`node web/test/e2e.mjs` checks a web page against the extension: chat, WebRTC link, a file, sats on the test mint, a video call.
+`npm run test:e2e` checks every feature of the web app in real browsers, and the web app against the extension ([e2e/README.md](../e2e/README.md)). `E2E_WEB_URL=https://app.ghostly.tools npx playwright test -c e2e/playwright.config.ts --project=web` runs the same tests against a deployed copy.
 
 ## How it shares code
 
