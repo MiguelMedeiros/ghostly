@@ -121,6 +121,13 @@ jobs:
         with:
           args: ${{ matrix.args }}
 
+      # Without this the AppImage shows a blank window on Wayland desktops (issue #1).
+      - name: Drop bundled libwayland from AppImage
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get install -y squashfs-tools
+          scripts/appimage-drop-wayland-libs.sh target/release/bundle/appimage/*.AppImage
+
       - name: Upload artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
