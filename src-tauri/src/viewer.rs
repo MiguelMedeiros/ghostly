@@ -22,7 +22,12 @@ use tokio::sync::oneshot;
 
 pub const SCHEME: &str = "ghostly-svc";
 const REQUEST_EVENT: &str = "ghostly-svc-request";
+#[cfg(not(test))]
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+/// Short here so a test that expects a request to be refused fails at once when
+/// the refusal is missing, instead of waiting out the real timeout.
+#[cfg(test)]
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Default)]
 pub struct ViewerState {
@@ -54,6 +59,22 @@ fn is_label_safe(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 64
         && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+/// Whether a request is for the one origin its window was opened for.
+///
+/// Windows and Android cannot register a non-standard scheme, so wry navigates
+/// to `http://<scheme>.<host>` there and turns it back before the handler sees
+/// it; both spellings name the same origin, so both are accepted.
+fn is_own_origin(host: Option<&str>, peer: &str, service: &str) -> bool {
+    let own = format!("{}.{}", service, peer);
+    match host {
+        Some(host) => {
+            host.eq_ignore_ascii_case(&own)
+                || host.eq_ignore_ascii_case(&format!("{}.{}", SCHEME, own))
+        }
+        None => false,
+    }
 }
 
 pub fn open(app: &AppHandle, peer: String, service: String, title: String) -> Result<(), String> {
@@ -96,7 +117,11 @@ fn plain(status: StatusCode, message: &str) -> Response<Vec<u8>> {
         .expect("static response")
 }
 
-pub async fn handle(app: AppHandle, label: String, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
+pub async fn handle<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    label: String,
+    request: Request<Vec<u8>>,
+) -> Response<Vec<u8>> {
     let state = app.state::<ViewerState>();
     let Some((peer, service)) = state
         .windows
@@ -109,6 +134,18 @@ pub async fn handle(app: AppHandle, label: String, request: Request<Vec<u8>>) ->
             "This window does not show a Ghostly service.",
         );
     };
+
+    // The window is bound to one contact and service, and requests are routed by
+    // that binding rather than by the URL. So an app that navigates or frames
+    // another contact's host would still be served by its own contact, while the
+    // document it gets runs in that other contact's origin, with that app's
+    // storage and cookies. Refuse before anything of theirs is served there.
+    if !is_own_origin(request.uri().host(), &peer, &service) {
+        return plain(
+            StatusCode::FORBIDDEN,
+            "This window only shows the service it was opened for.",
+        );
+    }
 
     let id = state.next_id.fetch_add(1, Ordering::Relaxed);
     let (sender, receiver) = oneshot::channel();
@@ -166,5 +203,78 @@ pub async fn handle(app: AppHandle, label: String, request: Request<Vec<u8>>) ->
 pub fn forget_window(app: &AppHandle, label: &str) {
     if let Ok(mut windows) = app.state::<ViewerState>().windows.lock() {
         windows.remove(label);
+    }
+}
+
+/// A viewer window is one contact's app in one origin. What it asks for has to
+/// be that origin, or its contact would be serving code into another one.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tauri::test::{mock_builder, MockRuntime};
+
+    const PEER: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const OTHER: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+    fn app() -> tauri::App<MockRuntime> {
+        mock_builder()
+            .manage(ViewerState::default())
+            .build(tauri::generate_context!(test = true))
+            .expect("app")
+    }
+
+    /// The window shows `atlas` from PEER; every other host is another origin.
+    fn status_for(url: &str) -> StatusCode {
+        let app = app();
+        app.state::<ViewerState>()
+            .windows
+            .lock()
+            .unwrap()
+            .insert("svc-1".into(), (PEER.into(), "atlas".into()));
+        let request = Request::builder()
+            .uri(url)
+            .body(Vec::new())
+            .expect("request");
+        tauri::async_runtime::block_on(handle(app.handle().clone(), "svc-1".into(), request))
+            .status()
+    }
+
+    #[test]
+    fn another_contacts_origin_is_refused() {
+        // Navigated or framed by the app this window shows: served by PEER, but
+        // running as OTHER's app, which is where that app keeps its data.
+        assert_eq!(
+            status_for(&format!("{}://atlas.{}/", SCHEME, OTHER)),
+            StatusCode::FORBIDDEN
+        );
+        // The same contact, a service the window was not opened for.
+        assert_eq!(
+            status_for(&format!("{}://notes.{}/", SCHEME, PEER)),
+            StatusCode::FORBIDDEN
+        );
+    }
+
+    #[test]
+    fn its_own_origin_is_recognised() {
+        let own = format!("atlas.{}", PEER);
+        assert!(is_own_origin(Some(&own), PEER, "atlas"));
+        // How Windows and Android spell the same origin.
+        assert!(is_own_origin(
+            Some(&format!("{}.{}", SCHEME, own)),
+            PEER,
+            "atlas"
+        ));
+        assert!(!is_own_origin(
+            Some(&format!("atlas.{}", OTHER)),
+            PEER,
+            "atlas"
+        ));
+        assert!(!is_own_origin(Some(&format!("evil{}", own)), PEER, "atlas"));
+        assert!(!is_own_origin(
+            Some(&format!("{}.evil.test", own)),
+            PEER,
+            "atlas"
+        ));
+        assert!(!is_own_origin(None, PEER, "atlas"));
     }
 }
