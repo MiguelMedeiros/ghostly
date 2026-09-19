@@ -7,12 +7,43 @@ interface CallOverlayProps {
   remoteStream: MediaStream | null;
   isMuted: boolean;
   isVideoOff: boolean;
+  /** We are sending our screen instead of the camera. */
+  isScreenSharing?: boolean;
+  /** Offer the share button: a video call in a browser that can capture the screen. */
+  canShareScreen?: boolean;
   hasVideo: boolean;
   callStartedAt: number | null;
   peerName: string;
   onHangUp: () => void;
   onToggleMute: () => void;
   onToggleVideo: () => void;
+  onToggleScreenShare?: () => void;
+}
+
+const WINDOW_KEY = "ghostly_call_window";
+const MINI_DEFAULT = { w: 340, h: 220 };
+const MINI_PHONE = { w: 190, h: 136 };
+
+interface CallWindow {
+  mini: boolean;
+  x: number | null;
+  y: number | null;
+  w: number;
+  h: number;
+}
+
+/** How the person left the call window last time: full screen or floating, where and how big. */
+function loadWindow(): CallWindow {
+  const size = window.innerWidth < 768 ? MINI_PHONE : MINI_DEFAULT;
+  try {
+    const saved = JSON.parse(localStorage.getItem(WINDOW_KEY) ?? "null") as Partial<CallWindow> | null;
+    if (saved && typeof saved.mini === "boolean") {
+      return { mini: saved.mini, x: saved.x ?? null, y: saved.y ?? null, w: saved.w ?? size.w, h: saved.h ?? size.h };
+    }
+  } catch {
+    // start fresh
+  }
+  return { mini: false, x: null, y: null, ...size };
 }
 
 function formatDuration(seconds: number): string {
@@ -27,17 +58,77 @@ export function CallOverlay({
   remoteStream,
   isMuted,
   isVideoOff,
+  isScreenSharing = false,
+  canShareScreen = false,
   hasVideo,
   callStartedAt,
   peerName,
   onHangUp,
   onToggleMute,
   onToggleVideo,
+  onToggleScreenShare,
 }: CallOverlayProps) {
+  // A shared screen has to be seen whole; a face can be cropped to fill the window.
+  const [remoteIsWide, setRemoteIsWide] = useState(false);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const [duration, setDuration] = useState(0);
+
+  // The call can shrink into a floating window, so the chat underneath stays usable.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [view, setView] = useState<CallWindow>(loadWindow);
+  const saveView = (next: CallWindow) => {
+    setView(next);
+    try {
+      localStorage.setItem(WINDOW_KEY, JSON.stringify(next));
+    } catch {
+      // only a preference
+    }
+  };
+  const clamp = (x: number, y: number, w: number, h: number) => ({
+    x: Math.max(8, Math.min(x, window.innerWidth - w - 8)),
+    y: Math.max(8, Math.min(y, window.innerHeight - h - 8)),
+  });
+  const place = view.mini
+    ? clamp(view.x ?? window.innerWidth - view.w - 24, view.y ?? window.innerHeight - view.h - 96, view.w, view.h)
+    : null;
+
+  // Resizing is the browser's doing (CSS `resize`); remember the result or the next render undoes it.
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!view.mini || !root) return;
+    const observer = new ResizeObserver(() => {
+      const box = root.getBoundingClientRect();
+      if (Math.abs(box.width - view.w) > 1 || Math.abs(box.height - view.h) > 1) {
+        saveView({ ...view, x: box.left, y: box.top, w: box.width, h: box.height });
+      }
+    });
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, [view]);
+
+  const startDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    const root = rootRef.current;
+    if (!view.mini || !root || (event.target as HTMLElement).closest("button")) return;
+    const box = root.getBoundingClientRect();
+    // The bottom right corner belongs to the browser's resize handle.
+    if (event.clientX > box.right - 20 && event.clientY > box.bottom - 20) return;
+    const offset = { x: event.clientX - box.left, y: event.clientY - box.top };
+    const move = (e: PointerEvent) => {
+      const next = clamp(e.clientX - offset.x, e.clientY - offset.y, box.width, box.height);
+      root.style.left = `${next.x}px`;
+      root.style.top = `${next.y}px`;
+    };
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      const now = root.getBoundingClientRect();
+      saveView({ mini: true, x: now.left, y: now.top, w: now.width, h: now.height });
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop);
+  };
 
   useEffect(() => {
     if (localVideoRef.current && localStream) {
@@ -85,7 +176,33 @@ export function CallOverlay({
   const showRemoteVideo = hasVideo && remoteStream && callState === "connected";
   
   return (
-    <div className="fixed inset-0 z-50 bg-chat-bg/95 max-md:bg-chat-bg flex flex-col items-center justify-center">
+    <div
+      ref={rootRef}
+      data-testid="call-window"
+      data-mini={view.mini}
+      onPointerDown={startDrag}
+      className={
+        view.mini
+          ? "call-mini fixed z-50 bg-chat-bg flex flex-col items-center justify-center rounded-xl border border-border shadow-2xl"
+          : "fixed inset-0 z-50 bg-chat-bg/95 max-md:bg-chat-bg flex flex-col items-center justify-center"
+      }
+      style={place ? { left: place.x, top: place.y, width: view.w, height: view.h } : undefined}
+    >
+      {/* Shrink to a floating window, or back to the whole screen */}
+      <button
+        onClick={() => {
+          const box = rootRef.current?.getBoundingClientRect();
+          saveView(view.mini && box ? { mini: false, x: box.left, y: box.top, w: box.width, h: box.height } : { ...view, mini: !view.mini });
+        }}
+        className="call-resize absolute top-4 left-4 z-20 w-11 h-11 rounded-full bg-white/10 text-white hover:bg-white/20 flex items-center justify-center cursor-pointer transition-colors"
+        title={view.mini ? "Back to full screen" : "Keep the call in a small window"}
+        data-testid="call-minimize"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          {view.mini ? <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /> : <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" />}
+        </svg>
+      </button>
+
       {/* Remote audio (always present for audio playback) */}
       <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
       
@@ -94,18 +211,19 @@ export function CallOverlay({
         ref={remoteVideoRef}
         autoPlay
         playsInline
-        className={`absolute inset-0 w-full h-full object-cover ${showRemoteVideo ? "" : "hidden"}`}
+        onResize={(e) => setRemoteIsWide(e.currentTarget.videoWidth >= 1000)}
+        className={`absolute inset-0 w-full h-full bg-black ${remoteIsWide ? "object-contain" : "object-cover"} ${showRemoteVideo ? "" : "hidden"}`}
       />
       
       {/* Placeholder when no remote video */}
       {!showRemoteVideo && (
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-24 h-24 rounded-full bg-surface-hover flex items-center justify-center">
+        <div className="call-peer flex flex-col items-center gap-4">
+          <div className="call-avatar w-24 h-24 rounded-full bg-surface-hover flex items-center justify-center">
             <span className="text-text-muted text-3xl">
               {peerName.charAt(0).toUpperCase()}
             </span>
           </div>
-          <p className="text-text-primary text-lg font-medium">{peerName}</p>
+          <p className="call-name text-text-primary text-lg font-medium">{peerName}</p>
         </div>
       )}
 
@@ -149,8 +267,8 @@ export function CallOverlay({
               autoPlay
               playsInline
               muted
-              className="w-full h-full object-cover mirror"
-              style={{ transform: "scaleX(-1)" }}
+              className={`w-full h-full ${isScreenSharing ? "object-contain bg-black" : "object-cover mirror"}`}
+              style={isScreenSharing ? undefined : { transform: "scaleX(-1)" }}
             />
           )}
         </div>
@@ -244,6 +362,23 @@ export function CallOverlay({
                 <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
               </svg>
             )}
+          </button>
+        )}
+
+        {/* Screen share */}
+        {canShareScreen && onToggleScreenShare && (
+          <button
+            onClick={onToggleScreenShare}
+            data-testid="share-screen"
+            className={`w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
+              isScreenSharing ? "bg-accent text-[#111b21]" : "bg-white/10 text-white hover:bg-white/20"
+            }`}
+            title={isScreenSharing ? "Stop sharing your screen" : "Share your screen"}
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="4" width="20" height="13" rx="2" />
+              <path d="M8 21h8M12 17v4M12 13V8m0 0l-2.5 2.5M12 8l2.5 2.5" />
+            </svg>
           </button>
         )}
 

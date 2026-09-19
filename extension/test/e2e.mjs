@@ -41,6 +41,8 @@ async function launchPeer(name) {
       "--disable-features=WebRtcHideLocalIpsWithMdns",
       "--use-fake-device-for-media-stream",
       "--use-fake-ui-for-media-stream",
+      // getDisplayMedia without a person to pick the source.
+      "--auto-select-desktop-capture-source=Entire screen",
     ],
   });
   const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
@@ -262,9 +264,62 @@ try {
   await b.page.getByTitle("Accept video call").click({ timeout: 90_000 });
   await Promise.all([a, b].map((peer) => peer.page.getByText(/^\d{1,2}:\d{2}$/).first().waitFor({ timeout: 90_000 })));
   ok("both sides connected with audio and video");
+
+  // Screen sharing swaps the track the video sender carries: no new signaling, so any peer in a video call gets it.
+  const remoteSize = () =>
+    b.page.evaluate(() => {
+      const video = [...document.querySelectorAll("video")].find((v) => !v.muted);
+      return video ? `${video.videoWidth}x${video.videoHeight}` : "none";
+    });
+  const until = async (check, what) => {
+    for (let i = 0; i < 60; i++) {
+      if (await check()) return;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    throw new Error(`timed out waiting for ${what}`);
+  };
+  await until(async () => (await remoteSize()) !== "0x0" && (await remoteSize()) !== "none", "B to see A's camera");
+  const cameraSize = await remoteSize();
+  await a.page.getByTestId("share-screen").click();
+  await a.page.getByTitle("Stop sharing your screen").waitFor({ timeout: 30_000 });
+  await until(async () => (await remoteSize()) !== cameraSize, "B to see A's screen");
+  ok(`B sees A's screen instead of the camera (${cameraSize} → ${await remoteSize()})`);
+  await a.page.getByTestId("share-screen").click();
+  await until(async () => (await remoteSize()) === cameraSize, "the camera to come back");
+  ok("and the camera again when A stops sharing");
+
+  // The call can shrink into a floating window so the chat stays usable.
+  await a.page.getByTestId("call-minimize").click();
+  const mini = await a.page.getByTestId("call-window").boundingBox();
+  expect("the call fits in a small window", mini.width < 500 && mini.height < 400, true);
+  await a.page.getByPlaceholder("Type a message").fill("still here, on the call");
+  await a.page.getByPlaceholder("Type a message").press("Enter");
+  await b.page.getByTestId("call-minimize").click();
+  await b.page.getByText("still here, on the call").first().waitFor({ timeout: 60_000 });
+  ok("A chats while the call goes on, and B reads it");
+  await a.page.mouse.move(mini.x + mini.width / 2, mini.y + mini.height / 2);
+  await a.page.mouse.down();
+  await a.page.mouse.move(200, 200, { steps: 8 });
+  await a.page.mouse.up();
+  const moved = await a.page.getByTestId("call-window").boundingBox();
+  if (process.env.SHOTS) await b.page.screenshot({ path: `${process.env.SHOTS}/call-mini.png` });
+  expect("the window can be dragged", Math.abs(moved.x - mini.x) > 50 || Math.abs(moved.y - mini.y) > 50, true);
+  expect("the call is still up", /^\d{1,2}:\d{2}$/.test((await a.page.getByText(/^\d{1,2}:\d{2}$/).first().textContent()).trim()), true);
+  await a.page.getByTestId("call-minimize").click();
+  await b.page.getByTestId("call-minimize").click();
   await a.page.getByTitle("End call").click();
   await b.page.getByTitle("End call").waitFor({ state: "detached", timeout: 60_000 });
   ok("hang up reaches the peer");
+
+  // A call can also start as a screen share; to B it is a video call like any other.
+  await new Promise((resolve) => setTimeout(resolve, 6500));
+  await a.page.getByTestId("call-screen").click();
+  await b.page.getByTitle("Accept video call").click({ timeout: 90_000 });
+  await b.page.getByText(/^\d{1,2}:\d{2}$/).first().waitFor({ timeout: 90_000 });
+  await until(async () => (await remoteSize()) !== "none" && (await remoteSize()) !== "0x0" && (await remoteSize()) !== cameraSize, "B to see the shared screen");
+  ok(`a call started from "Share your screen" shows the screen (${await remoteSize()})`);
+  await a.page.getByTitle("End call").click();
+  await b.page.getByTitle("End call").waitFor({ state: "detached", timeout: 60_000 });
 
   step("A stops sharing: the service id no longer resolves");
   await a.page.getByTestId("service-item").getByRole("button", { name: "Stop" }).click();
