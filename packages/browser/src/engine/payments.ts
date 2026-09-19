@@ -128,6 +128,11 @@ export class PaymentDesk {
       throw new Error("Unknown payment request");
     }
     if (request.state !== "pending") throw new Error("This request is no longer open");
+    // Ecash already sent for it is waiting on the contact's answer; paying again would pay twice.
+    const inFlight = [...this.payments.values()].some(
+      (p) => p.kind === "payment" && p.direction === "out" && p.requestId === request.id && p.state !== "reclaimed" && p.state !== "failed",
+    );
+    if (inFlight) throw new Error("You already paid this request");
     const link = this.requireLink(params.linkId);
     await link.connect();
 
@@ -203,6 +208,11 @@ export class PaymentDesk {
   async onPayment(linkId: string, payment: Payment): Promise<void> {
     const link = this.host.getLink(linkId);
     const known = this.payments.get(payment.id);
+    if (known && known.linkId !== linkId) {
+      // Another link's id. Answering from its record would tell this contact about that one.
+      link?.sendPaymentResult({ id: payment.id, ok: false, error: "Unknown payment" });
+      return;
+    }
     if (known) {
       // A retransmission: say again what happened, redeem nothing twice.
       link?.sendPaymentResult({ id: payment.id, ok: known.state === "settled", credited: String(known.amount), error: known.error });
@@ -213,7 +223,7 @@ export class PaymentDesk {
     try {
       if (identifier !== ENDPOINT.cashu) throw new Error("Unsupported payment method");
       if (parseSats(payment.amount.value, payment.amount.asset) === null) throw new Error("Unsupported amount");
-      const { amount, mint } = await this.wallet.receiveToken(token, "ecash-in", payment.memo);
+      const { amount, mint } = await this.wallet.receiveToken(token, "ecash-in", payment.memo, { addTestMint: false });
 
       await this.save({
         id: payment.id,
@@ -228,9 +238,18 @@ export class PaymentDesk {
         mint,
         requestId: payment.requestId,
       });
+      // It settles our request only in full and in ecash from a mint the request named. Anything less is
+      // received, and the request stays open.
       const request = payment.requestId ? this.payments.get(payment.requestId) : undefined;
-      if (request?.kind === "request" && request.direction === "out" && request.linkId === linkId) {
-        await this.save({ ...request, state: "settled" });
+      if (
+        request?.kind === "request" &&
+        request.direction === "out" &&
+        request.linkId === linkId &&
+        request.state === "pending" &&
+        amount >= request.amount &&
+        (request.mints ?? []).includes(mint)
+      ) {
+        await this.save({ ...request, state: "settled", mint });
       }
       await this.host.storeMessage({
         linkId,

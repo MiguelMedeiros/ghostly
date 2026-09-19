@@ -241,8 +241,16 @@ export class CashuWallet {
     return null;
   }
 
-  /** Redeems a token into fresh proofs of our own. Until this succeeds the sender could still spend it. */
-  async receiveToken(token: string, kind: WalletTxKind = "ecash-in", note?: string): Promise<{ amount: number; mint: string }> {
+  /**
+   * Redeems a token into fresh proofs of our own. Until this succeeds the sender could still spend it.
+   * Test-mint ecash the user pastes adds the test mint; ecash a contact sends in a payment never adds a mint.
+   */
+  async receiveToken(
+    token: string,
+    kind: WalletTxKind = "ecash-in",
+    note?: string,
+    { addTestMint = true }: { addTestMint?: boolean } = {},
+  ): Promise<{ amount: number; mint: string }> {
     let mint: string;
     let faceValue: number;
     try {
@@ -254,7 +262,7 @@ export class CashuWallet {
       throw new Error("That is not a valid ecash token");
     }
     // A mint is a custodian and only the user picks those. The test mint holds nothing of value.
-    if (!this.getMints().includes(mint) && mint === TEST_MINT) await this.events.onTestMintNeeded();
+    if (addTestMint && !this.getMints().includes(mint) && mint === TEST_MINT) await this.events.onTestMintNeeded();
     if (!this.getMints().includes(mint)) throw new Error(`Ecash from ${new URL(mint).hostname} is not accepted`);
 
     return this.locked(mint, async () => {
