@@ -39,6 +39,14 @@ src/desktop + src-tauri   host: peer in the WebView, Rust for the DHT, local app
 
 A host (`packages/browser/src/host.ts`) is the small part that differs: how a page reaches the peer, whether the user can grant access to local addresses, how a contact's web app is opened. Both clients build `src/` with the same Vite plugin (`packages/browser/vite-plugin.ts`).
 
+## On a phone
+
+Below 768px the app shows one screen at a time, like a messenger: the chat list, then the conversation with a back arrow, and a bottom bar for Chats, Wallet, Share and Settings. Emoji, GIFs and payments open as bottom sheets, calls take the whole screen, and the layout follows the visible viewport so the message input stays above the keyboard.
+
+It installs to the home screen (`manifest.json`, `display: standalone`, Apple metas). There is deliberately no service worker: a cached copy of the app would keep running after the server's copy changed, and the app is small.
+
+Screen sharing needs `getDisplayMedia`, which phone browsers do not have; the buttons do not show there.
+
 ## What a web page cannot do
 
 | | Web | Extension | Desktop |

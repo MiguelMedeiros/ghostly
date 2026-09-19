@@ -207,6 +207,8 @@ flags  bit 0 = END`}</Pre>
             <>A relay is an HTTP bridge to the DHT: <C>PUT</C> and <C>GET /&lt;key&gt;</C> with <C>signature(64) · timestamp(8) · DNS packet</C>. It sees signed, encrypted packets and never carries application traffic.</>,
             "Public relays allow about 120 requests a minute per IP. Relay clients spend one request per poll (relays in turn, newest signed packet wins), back off on 429 and on network errors, and keep to 30 requests a minute per relay.",
             <>Publishes carry <C>If-Match: &lt;timestamp of the packet being replaced&gt;</C>; without it a relay refuses with 428 while the previous put is still in flight.</>,
+            <>Screen sharing changes nothing on the wire: the screen replaces the camera track on the video sender the call already has (<C>replaceTrack</C>), so any client in a video call receives it.</>,
+            "Chat messages over the data link may be up to 4000 characters, which lets a long Lightning invoice or an ecash token through; clients show those as cards with a QR code and a Pay or Redeem button.",
             "Relay poll timings: 4 s while a chat is open, 2 s while signaling (for at most 45 s), 30 s in the background, 60 s while the data link is up. DHT clients keep the timings below.",
           ]}
         />
