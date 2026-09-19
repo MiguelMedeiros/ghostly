@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-encrypt-text"
+description = "Enables the encrypt_text command without any pre-configured scope."
+commands.allow = ["encrypt_text"]
+
+[[permission]]
+identifier = "deny-encrypt-text"
+description = "Denies the encrypt_text command without any pre-configured scope."
+commands.deny = ["encrypt_text"]

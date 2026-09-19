@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-publish-messages"
+description = "Enables the publish_messages command without any pre-configured scope."
+commands.allow = ["publish_messages"]
+
+[[permission]]
+identifier = "deny-publish-messages"
+description = "Denies the publish_messages command without any pre-configured scope."
+commands.deny = ["publish_messages"]
