@@ -1,6 +1,6 @@
 # Build context is the repository root: the web app is one workspace among several.
 #   docker compose up --build
-FROM node:22-alpine AS build
+FROM node:25-alpine AS build
 WORKDIR /app
 
 COPY package.json package-lock.json .npmrc ./
