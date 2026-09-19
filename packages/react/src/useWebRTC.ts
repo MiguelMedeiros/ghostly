@@ -3,6 +3,7 @@ import {
   RTC_CONFIG,
   extractParamsFromSdp,
   buildSdpFromSignal,
+  parseCallSignal,
   waitForIceGathering,
   type CallState,
   type CallSignal,
@@ -426,12 +427,9 @@ export function useWebRTC({
   useEffect(() => {
     if (!incomingCallSignal) return;
 
-    let signal: CallSignal;
-    try {
-      signal = JSON.parse(incomingCallSignal);
-    } catch {
-      return;
-    }
+    // Validated and age-checked before any of it reaches an SDP.
+    const signal = parseCallSignal(incomingCallSignal);
+    if (!signal) return;
 
     if (signal.ts <= lastProcessedSignalRef.current) {
       return;

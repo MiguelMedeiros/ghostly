@@ -74,6 +74,8 @@ The advertisement is authenticated twice: by the secretbox (only the link peer c
 
 Unchanged. `_call` carries `{ "t": "o" | "a" | "h", "ts", "u", "p", "f", "s", "m", "c", "ss" }`: ICE credentials, DTLS fingerprint, setup role, media order, at most two candidates and the SSRCs. Each side rebuilds a full SDP around these values, because a real SDP does not fit in a packet.
 
+Receivers validate a signal before any of it reaches an SDP, whether it came from `_call` or a `call` frame: ICE ufrag/pwd are RFC 8839 ice-chars (4-256 and 22-256 long), `f` is 64 hex digits, `s` is `actpass`, `active` or `passive`, `m` holds one or two distinct `a`/`v`, `ss` holds at most two uint32s, and each of at most eight candidates is parsed and re-serialized from its parts (non-UDP ones are dropped, malformed ones reject the signal). Offers, answers and hang-ups whose `ts` is more than 120 s away from the receiver's clock are ignored, so a stale packet does not ring.
+
 v1 changes two things, both compatible with v0 peers:
 
 - The rebuilt video section no longer declares the `toffset` header extension. Extension ids differ between WebRTC engines, and Chromium rejects an answer that maps an id differently from the real offer.
