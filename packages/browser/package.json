@@ -1,7 +1,7 @@
 {
   "name": "@ghostly/browser",
   "private": true,
-  "version": "0.3.1",
+  "version": "0.3.2",
   "type": "module",
   "description": "The Ghostly peer for browsers: engine, wallet and the platform layer under the shared UI. Used by the extension and the web app.",
   "exports": {

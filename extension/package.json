@@ -1,7 +1,7 @@
 {
   "name": "@ghostly/extension",
   "private": true,
-  "version": "0.3.1",
+  "version": "0.3.2",
   "type": "module",
   "description": "Ghostly Browser: an ephemeral Ghostly peer as a Chromium extension",
   "scripts": {
