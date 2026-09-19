@@ -74,6 +74,7 @@ export const servicesPlatform: ServicesPlatform | null = {
     quoteInvoice: (invoice) => engine.call("walletQuoteInvoice", { invoice }),
     payQuote: async (quote, mint) => (await engine.call("walletPayQuote", { quote, mint })).paid,
     receiveToken: async (token) => (await engine.call("walletReceiveToken", { token })).amount,
+    inspectCashu: async (text) => (await engine.call("walletInspectCashu", { text })).inspection,
     exportTokens: () => engine.call("walletExport"),
     async send(peerPubKeyZ32, amount, memo) {
       const link = engine.linkByPeer(peerPubKeyZ32);

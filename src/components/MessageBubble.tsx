@@ -1,5 +1,7 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { FileBubble } from "./FileBubble";
+import { InvoiceBubble } from "./InvoiceBubble";
+import { findMoney } from "../lib/money";
 import { PaymentBubble } from "./PaymentBubble";
 import type { ChatMessage } from "../lib/types";
 
@@ -197,6 +199,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "" }: Message
         : "animate-bubble-in-left"
       : "",
   );
+  const money = useMemo(() => (message.paymentId || message.file ? null : findMoney(message.text)), [message.paymentId, message.file, message.text]);
   const [showTech, setShowTech] = useState(false);
   const [imgError, setImgError] = useState(false);
   const isMe = message.sender === "me";
@@ -314,6 +317,11 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "" }: Message
         ) : message.file ? (
           <div className="clearfix">
             <FileBubble file={message.file} />
+            {timestampEl}
+          </div>
+        ) : money ? (
+          <div className="clearfix">
+            <InvoiceBubble money={money} mine={isMe} />
             {timestampEl}
           </div>
         ) : contentType === "image" ? (

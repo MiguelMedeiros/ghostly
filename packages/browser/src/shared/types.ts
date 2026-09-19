@@ -90,6 +90,11 @@ export interface MintView {
 }
 
 /** What a mint says about itself and what it charges. */
+/** What a pasted piece of ecash says about itself. Mirrors `CashuInspection` in the UI's platform contract. */
+export type CashuInspection =
+  | { kind: "token"; amount: number; unit: string; mint: string; memo?: string; accepted: boolean }
+  | { kind: "request"; amount: number | null; unit: string; mints: string[]; description?: string };
+
 export interface MintInfoView {
   version?: string;
   motd?: string;
