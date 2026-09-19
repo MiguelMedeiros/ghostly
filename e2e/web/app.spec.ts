@@ -49,7 +49,9 @@ test("creating a chat shows an invite code, the options menu copies it", async (
   const { page } = await peer("alice");
   const invite = await createChat(page);
   expect(invite.split("/")).toHaveLength(3);
-  await expect(page).toHaveURL(/#\/chat\/[^/]+\/[^/]+\/[^/]+$/);
+  // The chat's keys stay out of the address bar and the history.
+  await expect(page).toHaveURL(/#\/chat\/[^/]+$/);
+  expect(page.url()).not.toContain(invite.split("/")[0]);
 
   await page.getByRole("button", { name: "Copy", exact: true }).click();
   await expect(page.getByRole("button", { name: "Copied!" })).toBeVisible();

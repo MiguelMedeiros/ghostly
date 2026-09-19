@@ -1,0 +1,118 @@
+name: Security autorelease
+
+# The security routine (a scheduled Claude Code agent) pushes its fixes to a
+# `claude/security-auto-*` branch, version already bumped by one patch. Once
+# CI passes on that push, this workflow, which always runs from `main`, checks
+# the branch against scripts/autorelease-gate.mjs, merges it, tags it and
+# publishes the release.
+#
+# Repository variable SECURITY_AUTORELEASE: "all" (default: dependency and
+# code fixes), "deps" (dependency updates only; code fixes wait for a person)
+# or "off".
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: ["claude/security-auto-**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-autorelease
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Gate
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      version: ${{ steps.gate.outputs.version }}
+      notes: ${{ steps.gate.outputs.notes }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: Check the branch
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          MODE: ${{ vars.SECURITY_AUTORELEASE || 'all' }}
+        run: node scripts/autorelease-gate.mjs
+
+  merge:
+    name: Merge and tag
+    needs: gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          VERSION: ${{ needs.gate.outputs.version }}
+          NOTES: ${{ needs.gate.outputs.notes }}
+        run: |
+          set -euo pipefail
+          PR=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --state open --json number -q '.[0].number')
+          if [ -z "$PR" ]; then
+            printf '%s\n\n%s\n' "$NOTES" "Merged and released automatically by the Security autorelease workflow." > body.md
+            gh pr create --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base main \
+              --title "fix(security): $VERSION" --body-file body.md
+            PR=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --state open --json number -q '.[0].number')
+          fi
+          gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --squash --delete-branch \
+            --match-head-commit "$HEAD_SHA" --subject "chore(release): $VERSION [security] (#$PR)"
+          MERGED=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json mergeCommit -q .mergeCommit.oid)
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/v$VERSION" -f sha="$MERGED"
+          echo "Merged #$PR as $MERGED, tagged v$VERSION" >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    name: Release
+    needs: [gate, merge]
+    permissions:
+      contents: write
+      packages: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: v${{ needs.gate.outputs.version }}
+      publish: true
+    secrets: inherit
+
+  notes:
+    name: Release notes
+    needs: [gate, release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Name and notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.gate.outputs.version }}
+          NOTES: ${{ needs.gate.outputs.notes }}
+        run: |
+          set -euo pipefail
+          # The marker is how the gate finds the previous automatic release.
+          printf '%s\n\n%s\n\n%s\n' "$NOTES" "Security patch, released automatically. Checksums: SHA256SUMS.txt." "<!-- security-autorelease -->" > notes.md
+          gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --title "Ghostly $VERSION" --notes-file notes.md --latest

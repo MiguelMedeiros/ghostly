@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-open-service-window"
+description = "Enables the open_service_window command without any pre-configured scope."
+commands.allow = ["open_service_window"]
+
+[[permission]]
+identifier = "deny-open-service-window"
+description = "Denies the open_service_window command without any pre-configured scope."
+commands.deny = ["open_service_window"]

@@ -141,6 +141,7 @@ test("network: relays can be changed and reset", async ({ peer }) => {
   await expect(relays).toHaveValue("https://relay.example.org");
   await page.getByRole("button", { name: "Reset to defaults" }).click();
   await page.getByTestId("network-save").click();
+  await expect(page.getByText("Saved", { exact: true })).toBeVisible();
   await page.reload();
   await expect(relays).toHaveValue("https://pkarr.pubky.org\nhttps://pkarr.pubky.app");
 });

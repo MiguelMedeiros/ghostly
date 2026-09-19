@@ -100,6 +100,8 @@ function LightningCard({ invoice, mine }: { invoice: Bolt11Invoice; mine: boolea
   const wallet = useServicesPlatform()?.wallet;
   const id = invoice.paymentHash ?? invoice.invoice.slice(-32);
   const [paid, setPaid] = useState(() => isSettled(id));
+  // Handed to the mint, which has not settled it yet: paying again could pay twice.
+  const [pending, setPending] = useState(false);
   const [quote, setQuote] = useState<{ quote: string; mint: string; amount: number; feeReserve: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -134,6 +136,8 @@ function LightningCard({ invoice, mine }: { invoice: Bolt11Invoice; mine: boolea
     >
       {paid ? (
         <span className="text-accent text-xs font-bold self-center" data-testid="invoice-paid">Paid ✓</span>
+      ) : pending ? (
+        <span className="text-xs self-center text-[hsla(0,0%,100%,0.75)]" data-testid="invoice-pending">Payment pending at the mint…</span>
       ) : quote ? (
         <>
           <button
@@ -143,7 +147,12 @@ function LightningCard({ invoice, mine }: { invoice: Bolt11Invoice; mine: boolea
             onClick={() =>
               run(async () => {
                 try {
-                  if (!(await wallet!.payQuote(quote.quote, quote.mint))) throw new Error("The mint could not pay this invoice");
+                  if (!(await wallet!.payQuote(quote.quote, quote.mint))) {
+                    // Pending at the mint: the wallet settles it, or gives the sats back, on its own.
+                    setQuote(null);
+                    setPending(true);
+                    return;
+                  }
                   playSound("confirmed");
                 } catch (e) {
                   // Someone else got there first. The mint refused, so it is not paid twice, and there is nothing left to pay.

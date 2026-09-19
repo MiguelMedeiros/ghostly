@@ -1,12 +1,17 @@
 import { isValidServiceId } from "@ghostly/core";
 
 /**
- * Virtual origin of a remote service: `https://<service id>.<peer key>.ghostly.invalid`.
+ * Virtual origin of a remote service: `https://<service id>.<peer key>.invalid`.
  * `.invalid` is reserved (RFC 2606) and can never resolve, so nothing leaks to
  * the network if a request is ever not intercepted. One origin per peer and
  * service keeps the storage of different peers' applications apart.
+ *
+ * The peer key sits right under `.invalid` so that each peer is a site of its
+ * own: `.invalid` is a top-level domain to the browser, so a page can scope a
+ * cookie to its own peer (`Domain=<peer key>.invalid`) but never to another
+ * peer, and one peer's app is cross-site to every other peer's.
  */
-const VIEWER_SUFFIX = ".ghostly.invalid";
+const VIEWER_SUFFIX = ".invalid";
 export const VIEWER_URL_PATTERN = `https://*${VIEWER_SUFFIX}/*`;
 const PEER_KEY = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;
 

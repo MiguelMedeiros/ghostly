@@ -3,12 +3,21 @@ import { useLockScreen } from "../contexts/LockScreenContext";
 import { useI18n } from "../contexts/I18nContext";
 
 export function LockScreen() {
-  const { isLocked, unlock } = useLockScreen();
+  const { isLocked, unlock, retryAt } = useLockScreen();
   const { t } = useI18n();
   const [password, setPassword] = useState("");
   const [error, setError] = useState(false);
   const [isUnlocking, setIsUnlocking] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
   const inputRef = useRef<HTMLInputElement>(null);
+  const waitSeconds = retryAt ? Math.max(0, Math.ceil((retryAt - now) / 1000)) : 0;
+
+  // Counts the wait down after too many wrong passwords.
+  useEffect(() => {
+    if (!retryAt) return;
+    const timer = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(timer);
+  }, [retryAt]);
 
   useEffect(() => {
     if (isLocked && inputRef.current) {
@@ -25,7 +34,7 @@ export function LockScreen() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!password || isUnlocking) return;
+    if (!password || isUnlocking || waitSeconds > 0) return;
 
     setIsUnlocking(true);
     setError(false);
@@ -44,7 +53,12 @@ export function LockScreen() {
   if (!isLocked) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-app-bg flex items-center justify-center">
+    <div
+      className="fixed inset-0 z-50 bg-app-bg flex items-center justify-center"
+      role="dialog"
+      aria-modal="true"
+      aria-label={t("lockScreen.title")}
+    >
       <div className="w-full max-w-sm mx-4">
         <div className="text-center mb-8">
           <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-surface flex items-center justify-center">
@@ -88,15 +102,21 @@ export function LockScreen() {
             />
           </div>
 
-          {error && (
-            <p className="text-danger text-sm text-center animate-fade-in">
-              {t("lockScreen.incorrectPassword")}
+          {waitSeconds > 0 ? (
+            <p className="text-danger text-sm text-center animate-fade-in" role="alert">
+              {t("lockScreen.tooManyAttempts", { seconds: waitSeconds })}
             </p>
+          ) : (
+            error && (
+              <p className="text-danger text-sm text-center animate-fade-in" role="alert">
+                {t("lockScreen.incorrectPassword")}
+              </p>
+            )
           )}
 
           <button
             type="submit"
-            disabled={!password || isUnlocking}
+            disabled={!password || isUnlocking || waitSeconds > 0}
             className="w-full bg-accent hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed text-white py-3 px-4 rounded-xl font-medium transition-colors"
           >
             {isUnlocking ? (

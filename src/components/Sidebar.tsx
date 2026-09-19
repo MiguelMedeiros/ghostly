@@ -14,10 +14,10 @@ import {
   deleteAllSessions,
   getUnreadCount,
   markSessionAsRead,
-  generateSessionId,
-  saveInviteCode,
+  ensureSession,
   getInviteCode,
 } from "../lib/storage";
+import { chatPath, parseInvite } from "../lib/url";
 import type { ChatSession } from "../lib/types";
 
 function playNotificationSound() {
@@ -105,14 +105,10 @@ export function Sidebar() {
     ? location.pathname
     : null;
 
-  const getSessionPath = (s: ChatSession) =>
-    `/chat/${s.mySeedB64}/${s.peerPubKeyB64}/${s.encKeyB64}`;
-
   const activeSessionId = (() => {
     if (!currentChatPath) return null;
-    const parts = currentChatPath.replace("/chat/", "").split("/");
-    if (parts.length >= 2) return generateSessionId(parts[0], parts[1]);
-    return null;
+    const id = decodeURIComponent(currentChatPath.replace("/chat/", ""));
+    return id && !id.includes("/") ? id : null;
   })();
 
   activeSessionIdRef.current = activeSessionId;
@@ -201,10 +197,12 @@ export function Sidebar() {
 
   const handleCreate = async () => {
     const drop = await createDrop();
-    const sessionId = generateSessionId(drop.seedA, drop.pubKeyB);
-    saveInviteCode(sessionId, drop.inviteCode);
+    const sessionId = ensureSession(
+      { seedB64: drop.seedA, peerPubKeyB64: drop.pubKeyB, encKeyB64: drop.encKey },
+      { inviteCode: drop.inviteCode },
+    );
     setShowNewChat(false);
-    navigate(`/chat/${drop.seedA}/${drop.pubKeyB}/${drop.encKey}`);
+    navigate(chatPath(sessionId));
     setTimeout(refreshSessions, 500);
   };
 
@@ -213,35 +211,11 @@ export function Sidebar() {
     const trimmed = input.trim();
     if (!trimmed) return;
 
-    let chatPath: string | null = null;
-
-    try {
-      const url = new URL(trimmed);
-      const hash = url.hash;
-      if (hash && hash.includes("/chat/")) {
-        chatPath = hash.replace(/^#/, "");
-      }
-    } catch {
-      // not a valid URL — try other formats
-    }
-
-    if (!chatPath && trimmed.includes("/chat/")) {
-      const idx = trimmed.indexOf("/chat/");
-      chatPath = trimmed.slice(idx);
-    }
-
-    if (!chatPath) {
-      const cleaned = trimmed.replace(/^\/+/, "").replace(/\/+$/, "");
-      const segments = cleaned.split("/");
-      if (segments.length === 3 && segments.every((s) => s.length > 0)) {
-        chatPath = `/chat/${cleaned}`;
-      }
-    }
-
-    if (chatPath) {
+    const keys = parseInvite(trimmed);
+    if (keys) {
       setShowNewChat(false);
       setInviteInput("");
-      navigate(chatPath);
+      navigate(chatPath(ensureSession(keys)));
       setTimeout(refreshSessions, 500);
     } else {
       setJoinError("Invalid invite code");
@@ -479,8 +453,8 @@ export function Sidebar() {
 
         {filtered.map((session) => {
           const lastMsg = session.messages[session.messages.length - 1];
-          const path = getSessionPath(session);
-          const isActive = currentChatPath === path;
+          const path = chatPath(session.id);
+          const isActive = activeSessionId === session.id;
           const isConfirming = confirmDeleteId === session.id;
           const peerName = session.label || session.nick;
           const peerKey = session.peerPubKeyB64.slice(0, 12) + "...";

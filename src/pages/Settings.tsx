@@ -650,15 +650,16 @@ export function Settings() {
                       {t("settings.clearAllDataConfirm")}
                     </span>
                     <button
-                      onClick={() => {
-                        clearAllData();
-                        setStorageInfo(getStorageUsage());
+                      onClick={async () => {
                         setConfirmClearData(false);
                         setMessage({
                           type: "success",
                           text: t("settings.dataCleared"),
                         });
-                        setTimeout(() => setMessage(null), 3000);
+                        await clearAllData();
+                        setStorageInfo(getStorageUsage());
+                        // The running peer still holds what was just deleted; start it over.
+                        window.location.replace(window.location.pathname);
                       }}
                       className="px-4 py-2 bg-danger/10 hover:bg-danger/20 text-danger rounded-lg text-sm font-medium transition-colors"
                     >

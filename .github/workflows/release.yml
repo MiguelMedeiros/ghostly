@@ -4,6 +4,19 @@ on:
   push:
     tags:
       - "v*"
+  # Security patch releases: security-autorelease.yml calls this with the tag
+  # it created (a tag pushed with a workflow token triggers nothing by itself).
+  workflow_call:
+    inputs:
+      tag:
+        description: "Tag to build, e.g. v0.3.2"
+        required: true
+        type: string
+      publish:
+        description: "Publish the release instead of leaving a draft"
+        required: false
+        default: false
+        type: boolean
   workflow_dispatch:
     inputs:
       version:
@@ -11,8 +24,14 @@ on:
         required: false
         type: string
 
+# Jobs that publish ask for more themselves.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
+  # The tag being released, pushed or handed over by a caller.
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   # ============================================
@@ -21,6 +40,8 @@ jobs:
   e2e:
     name: End-to-end
     uses: ./.github/workflows/e2e.yml
+    with:
+      ref: ${{ inputs.tag || github.ref }}
 
   # ============================================
   # Build Tauri App for all platforms
@@ -52,16 +73,18 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: "npm"
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           targets: ${{ matrix.target }}
 
@@ -83,7 +106,7 @@ jobs:
           brew install create-dmg
 
       - name: Cache Cargo
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/bin/
@@ -99,7 +122,7 @@ jobs:
         run: npm ci
 
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Baked into the frontend by Vite; GIFs work out of the box. Users can still set their own in Settings.
@@ -108,7 +131,7 @@ jobs:
           args: ${{ matrix.args }}
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: tauri-${{ matrix.name }}
           path: |
@@ -156,15 +179,17 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           targets: ${{ matrix.target }}
 
       - name: Cache Cargo
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/bin/
@@ -180,7 +205,7 @@ jobs:
         run: cargo build --manifest-path cli/Cargo.toml --release --target ${{ matrix.target }}
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cli-${{ matrix.name }}
           path: target/${{ matrix.target }}/release/${{ matrix.binary }}
@@ -198,10 +223,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: "npm"
@@ -221,7 +248,7 @@ jobs:
           zip -r "../../ghostly-browser-extension-${VERSION}.zip" .
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: extension
           path: ghostly-browser-extension-*.zip
@@ -233,17 +260,19 @@ jobs:
     runs-on: ubuntu-latest
     name: Build web image
     needs: [e2e]
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
     permissions:
       contents: read
       packages: write
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Log in to the GitHub container registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -254,7 +283,7 @@ jobs:
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ghostly-web" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         env:
           DOCKER_BUILD_RECORD_UPLOAD: false
           DOCKER_BUILD_SUMMARY: false
@@ -265,30 +294,32 @@ jobs:
           build-args: |
             VITE_GIPHY_API_KEY=${{ secrets.VITE_GIPHY_API_KEY }}
           tags: |
-            ${{ steps.image.outputs.name }}:${{ github.ref_name }}
+            ${{ steps.image.outputs.name }}:${{ env.RELEASE_TAG }}
             ${{ steps.image.outputs.name }}:latest
 
   release:
     needs: [e2e, build-tauri, build-cli, build-extension]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
     permissions:
       contents: write
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       # Only ours: the Docker build also uploads a build record that is not an archive
       # and makes an unfiltered download fail.
       - name: Download app and CLI artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: artifacts
           pattern: "{tauri,cli}-*"
 
       - name: Download extension artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: extension
           path: artifacts/extension
@@ -353,11 +384,11 @@ jobs:
           fi
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
-          tag_name: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
-          draft: true
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Release ${{ env.RELEASE_TAG }}
+          draft: ${{ !inputs.publish }}
           generate_release_notes: true
           files: release-assets/*
           fail_on_unmatched_files: false
@@ -368,11 +399,11 @@ jobs:
 
       - name: Retry Release on failure
         if: steps.release.outcome == 'failure'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
-          tag_name: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
-          draft: true
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Release ${{ env.RELEASE_TAG }}
+          draft: ${{ !inputs.publish }}
           generate_release_notes: true
           files: release-assets/*
           fail_on_unmatched_files: false

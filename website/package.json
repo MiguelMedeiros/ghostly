@@ -9,26 +9,26 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "motion": "^12.34.3",
-    "next": "16.2.12",
-    "react": "19.2.3",
-    "react-dom": "19.2.3",
+    "motion": "^13.4.0",
+    "next": "16.3.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
     "react-syntax-highlighter": "^16.1.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
+    "@types/node": "^26.6.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/react-syntax-highlighter": "^15.5.13",
     "eslint": "^9",
-    "eslint-config-next": "16.2.12",
-    "puppeteer": "^25.8.0",
+    "eslint-config-next": "16.3.5",
+    "puppeteer": "^25.11.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   },
   "overrides": {
-    "sharp": "0.35.3",
+    "sharp": "0.35.4",
     "postcss": "8.5.24"
   }
 }

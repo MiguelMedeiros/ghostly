@@ -1,14 +1,15 @@
 {
   "name": "@ghostly/browser",
   "private": true,
-  "version": "0.3.1",
+  "version": "0.3.2",
   "type": "module",
   "description": "The Ghostly peer for browsers: engine, wallet and the platform layer under the shared UI. Used by the extension and the web app.",
   "exports": {
     "./*": "./src/*.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
   },
   "dependencies": {
     "@cashu/cashu-ts": "^4.10.2",
@@ -18,8 +19,9 @@
     "react": "^19.2.4"
   },
   "devDependencies": {
-    "@types/react": "^19.2.14",
+    "@types/react": "^19.3.0",
     "typescript": "^5.9.3",
-    "vite": "^7.3.1"
+    "vite": "^8.3.0",
+    "vitest": "^5.0.1"
   }
 }

@@ -8,6 +8,7 @@ import {
   decodeControl,
   encodeChunk,
   encodeControl,
+  safeBlobType,
   sanitizeFileName,
   sanitizeMime,
   type FileInfo,
@@ -15,13 +16,14 @@ import {
 } from "../src";
 import { createChannelPair } from "./helpers";
 
-function setup(accept = true) {
+function setup(accept: boolean | string = true) {
   const [senderSide, receiverSide] = createChannelPair();
   const received = new Map<string, { info: FileInfo; parts: Uint8Array[]; closed: boolean; aborted: boolean }>();
   const log: string[] = [];
 
   const receiver = new FileTransfers(receiverSide, {
     onIncoming(info) {
+      if (typeof accept === "string") return accept;
       if (!accept) return null;
       const entry = { info, parts: [] as Uint8Array[], closed: false, aborted: false };
       received.set(info.id, entry);
@@ -95,6 +97,20 @@ describe("file transfer", () => {
     expect(log).toEqual(["out:failed:file-0001:The peer refused the file"]);
   });
 
+  it("passes the receiver's reason for refusing on to the sender", async () => {
+    const { senderSide, received } = setup("no room for more files");
+    const resets: unknown[] = [];
+    const onMessage = senderSide.onMessage;
+    senderSide.onMessage = (data) => {
+      if (typeof data === "string") resets.push(decodeControl(data));
+      onMessage?.(data);
+    };
+    senderSide.send(encodeControl({ t: "file", id: 7, f: "full-disk", ts: 1, n: "x", s: 10, m: "text/plain" }));
+    await settle();
+    expect(received.size).toBe(0);
+    expect(resets).toEqual([{ t: "rst", id: 7, d: "f", e: "no room for more files" }]);
+  });
+
   it("discards a file that does not match the announced size", async () => {
     const { senderSide, received, log } = setup();
     const announce = (id: number, f: string, s: number) =>
@@ -140,6 +156,37 @@ describe("file transfer", () => {
     expect(sanitizeFileName("a\nb.txt")).toBe("ab.txt");
     expect(sanitizeFileName("")).toBe("file");
     expect(sanitizeFileName("x".repeat(500))).toHaveLength(200);
+    expect(sanitizeFileName("😀".repeat(300))).toBe("😀".repeat(200));
+  });
+
+  it("does not let whitespace hide a leading dot", () => {
+    expect(sanitizeFileName(" .bashrc")).toBe("bashrc");
+    expect(sanitizeFileName(" . .profile ")).toBe("profile");
+    expect(sanitizeFileName("\t..ssh")).toBe("ssh");
+    expect(sanitizeFileName("  report.pdf  ")).toBe("report.pdf");
+  });
+
+  it("removes invisible and direction-changing characters", () => {
+    // Would read as "invoiceexe.pdf".
+    expect(sanitizeFileName("invoice\u202Efdp.exe")).toBe("invoicefdp.exe");
+    expect(sanitizeFileName("a\u2066b\u2067c\u2068d\u2069e\u202Af\u202Bg\u202Ch\u202Di\u200Ej\u200Fk.txt")).toBe("abcdefghijk.txt");
+    expect(sanitizeFileName("ze\u200Bro\u200C\u200Dwidth\uFEFF\u2060.txt")).toBe("zerowidth.txt");
+    expect(sanitizeFileName("line\u2028break\u2029.txt")).toBe("linebreak.txt");
+    expect(sanitizeFileName("c1\u0085\u009B.txt")).toBe("c1.txt");
+    expect(sanitizeFileName("\u200B.hidden")).toBe("hidden");
+    expect(sanitizeFileName("\u202E")).toBe("file");
+    expect(sanitizeFileName("naïve café 日本.txt")).toBe("naïve café 日本.txt");
+  });
+
+  it("serves received bytes as inert unless they are a previewable image", () => {
+    expect(safeBlobType("image/png")).toBe("image/png");
+    expect(safeBlobType("image/JPEG")).toBe("image/jpeg");
+    expect(safeBlobType("image/webp")).toBe("image/webp");
+    expect(safeBlobType("image/svg+xml")).toBe("application/octet-stream");
+    expect(safeBlobType("text/html")).toBe("application/octet-stream");
+    expect(safeBlobType("application/xhtml+xml")).toBe("application/octet-stream");
+    expect(safeBlobType("application/pdf")).toBe("application/octet-stream");
+    expect(safeBlobType("")).toBe("application/octet-stream");
     expect(sanitizeMime("image/PNG")).toBe("image/png");
     expect(sanitizeMime("text/html; charset=utf-8")).toBe("application/octet-stream");
     expect(sanitizeMime("nonsense")).toBe("application/octet-stream");

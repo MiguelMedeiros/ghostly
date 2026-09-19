@@ -29,7 +29,7 @@ test("a local web app, shared with a contact and opened over WebRTC", async ({ e
     await viewer.waitForSelector("body[data-ready='1']", { timeout: 150_000 });
     const out = JSON.parse((await viewer.locator("#out").textContent())!);
 
-    expect(new URL(viewer.url()).hostname.endsWith(".ghostly.invalid"), "a virtual origin").toBe(true);
+    expect(new URL(viewer.url()).hostname.endsWith(".invalid"), "a virtual origin").toBe(true);
     expect(out.inline, "inline script ran").toBe(true);
     expect(out.secure, "secure context").toBe(true);
     expect(out.css, "stylesheet applied").toBe("rgb(1, 2, 3)");

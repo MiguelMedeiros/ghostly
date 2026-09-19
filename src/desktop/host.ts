@@ -36,8 +36,14 @@ const tauriTransport: PkarrTransport = {
   describe: () => ({ protocol: "Mainline DHT (BEP44) — Direct UDP", relays: [] }),
 };
 
-/** The WebView may not talk to localhost (CSP, CORS); Rust may, and only to loopback. */
+/**
+ * The WebView may not talk to localhost (CSP, CORS); Rust may, and only to
+ * loopback, without following redirects. The Rust request cannot be aborted, so
+ * this settles only when it does: the host counts it toward the peer's limit
+ * until then.
+ */
 const tauriLocalFetch: LocalFetch = async (request) => {
+  request.signal.throwIfAborted();
   const response = await invoke<{ status: number; headers: [string, string][]; body_b64: string }>("local_fetch", {
     url: request.url,
     method: request.method,

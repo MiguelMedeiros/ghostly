@@ -2,13 +2,16 @@ use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use base64::Engine;
 use crypto_secretbox::aead::{Aead, KeyInit};
 use crypto_secretbox::XSalsa20Poly1305;
-use rand::RngCore;
+use rand::rngs::SysRng;
+use rand::TryRng;
 
 const NONCE_LENGTH: usize = 24;
 
 pub fn generate_key() -> [u8; 32] {
     let mut key = [0u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut key);
+    SysRng
+        .try_fill_bytes(&mut key)
+        .expect("OS random number generator failed");
     key
 }
 
@@ -20,7 +23,9 @@ pub fn encrypt(plaintext: &str, key: &[u8]) -> Result<String, String> {
     let cipher = XSalsa20Poly1305::new(key_arr.into());
 
     let mut nonce_bytes = [0u8; NONCE_LENGTH];
-    rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
+    SysRng
+        .try_fill_bytes(&mut nonce_bytes)
+        .map_err(|e| format!("Random nonce failed: {}", e))?;
 
     let ciphertext = cipher
         .encrypt((&nonce_bytes).into(), plaintext.as_bytes().as_ref())

@@ -1,0 +1,14 @@
+{
+  "$comment": "Advisories we cannot fix yet, each with why and until when. Past `until`, the scan fails again and the entry must be re-checked.",
+  "accepted": [
+    { "package": "lru", "id": "RUSTSEC-2026-0253", "until": "2026-11-30", "why": "Comes in through pkarr -> mainline, which pins lru 0.16. Needs an upstream release; we never call LruCache::pop ourselves." },
+    { "package": "glib", "id": "RUSTSEC-2024-0429", "until": "2026-12-31", "why": "Linux GTK stack pulled in by Tauri (webkit2gtk 4.1). Unsoundness in VariantStrIter, which we do not use. Goes away when Tauri moves to glib 0.20." },
+    { "package": "glib", "id": "GHSA-wrw7-89jp-8q8g", "until": "2026-12-31", "why": "Same advisory as RUSTSEC-2024-0429." },
+    { "package": "proc-macro-error", "id": "RUSTSEC-2024-0370", "until": "2026-12-31", "why": "Unmaintained, build-time only (via Tauri's GTK bindings)." },
+    { "package": "unic-char-property", "id": "RUSTSEC-2025-0081", "until": "2026-12-31", "why": "Unmaintained, via Tauri's urlpattern. No known vulnerability." },
+    { "package": "unic-char-range", "id": "RUSTSEC-2025-0075", "until": "2026-12-31", "why": "Unmaintained, via Tauri's urlpattern. No known vulnerability." },
+    { "package": "unic-common", "id": "RUSTSEC-2025-0080", "until": "2026-12-31", "why": "Unmaintained, via Tauri's urlpattern. No known vulnerability." },
+    { "package": "unic-ucd-ident", "id": "RUSTSEC-2025-0100", "until": "2026-12-31", "why": "Unmaintained, via Tauri's urlpattern. No known vulnerability." },
+    { "package": "unic-ucd-version", "id": "RUSTSEC-2025-0098", "until": "2026-12-31", "why": "Unmaintained, via Tauri's urlpattern. No known vulnerability." }
+  ]
+}

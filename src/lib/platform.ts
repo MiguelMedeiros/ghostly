@@ -80,6 +80,8 @@ export interface ChatPayment {
   error?: string;
   /** Requests: a Lightning invoice anyone can pay. */
   invoice?: string;
+  /** Requests we pay: our Lightning payment is still pending at the mint. */
+  lightningPending?: boolean;
 }
 
 /** What a pasted piece of ecash says about itself, read without contacting any mint. */
@@ -98,6 +100,7 @@ export interface WalletPlatform {
   setPrimaryMint(url: string): Promise<void>;
   receiveLightning(amount: number): Promise<{ invoice: string; expiresAt: number | null }>;
   quoteInvoice(invoice: string): Promise<{ quote: string; mint: string; amount: number; feeReserve: number }>;
+  /** True when paid, false while the mint holds the payment pending. Throws when the sats did not leave. */
   payQuote(quote: string, mint: string): Promise<boolean>;
   receiveToken(token: string): Promise<number>;
   /** Null when the text is neither an ecash token nor a Cashu payment request. */

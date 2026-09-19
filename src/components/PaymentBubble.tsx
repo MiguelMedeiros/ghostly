@@ -80,11 +80,11 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
         className={`text-[11px] m-0 mt-1 ${payment.state === "failed" ? "text-danger" : payment.state === "settled" ? "text-accent" : "text-[hsla(0,0%,100%,0.6)]"}`}
         data-testid="payment-state"
       >
-        {STATE_LABEL[payment.kind][payment.state]}
+        {payment.lightningPending && payment.state === "pending" ? "Lightning payment pending at the mint…" : STATE_LABEL[payment.kind][payment.state]}
         {payment.error && payment.state !== "settled" ? ` · ${payment.error}` : ""}
       </p>
 
-      {isRequest && !outgoing && payment.state === "pending" && (
+      {isRequest && !outgoing && payment.state === "pending" && !payment.lightningPending && (
         <div className="flex gap-2 mt-2">
           <button data-testid="payment-pay" className={button} disabled={busy} onClick={() => run(() => wallet.payRequest(peerPubKey, payment.id))}>
             {busy ? "Paying…" : "Pay"}
