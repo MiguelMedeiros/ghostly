@@ -15,7 +15,6 @@ import {
   loadSession,
   saveSession,
   addMessage,
-  generateSessionId,
   getInviteCode,
 } from "../lib/storage";
 
@@ -87,10 +86,7 @@ export function useChat(params: ChatParams | null) {
       if (cancelled) return;
       myPubKeyRef.current = myPubKey;
 
-      const sessionId = generateSessionId(
-        params.seedB64,
-        params.peerPubKeyB64,
-      );
+      const sessionId = params.sessionId;
       sessionIdRef.current = sessionId;
 
       const existing = loadSession(sessionId);
@@ -415,7 +411,7 @@ export function useChat(params: ChatParams | null) {
         countdownTimerRef.current = null;
       }
     };
-  }, [params?.seedB64, params?.peerPubKeyB64, params?.encKeyB64, params?.nick]);
+  }, [params?.sessionId, params?.seedB64, params?.peerPubKeyB64, params?.encKeyB64, params?.nick]);
 
   const sendMessage = useCallback(
     async (text: string): Promise<string | null> => {

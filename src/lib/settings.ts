@@ -1,3 +1,5 @@
+import { deleteDatabase } from "@ghostly/browser/shared/idb";
+
 export type ColorScheme = "dark" | "light" | "system";
 export type ColorTheme = "classic" | "monochrome" | "cyan" | "purple";
 export type Language = "en" | "pt" | "es" | "fr" | "it" | "zh" | "ja" | "ar";
@@ -106,7 +108,12 @@ export function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
 }
 
-export function clearAllData(): void {
+/**
+ * Everything this client keeps on the device: the localStorage keys and the
+ * peer's IndexedDB database (links, messages, files, wallet). The caller
+ * reloads afterwards so the running peer starts from nothing.
+ */
+export async function clearAllData(): Promise<void> {
   const keysToRemove: string[] = [];
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
@@ -115,6 +122,7 @@ export function clearAllData(): void {
     }
   }
   keysToRemove.forEach((key) => localStorage.removeItem(key));
+  await deleteDatabase();
 }
 
 export const APP_WEBSITE = "https://github.com/MiguelMedeiros/ghostly";
@@ -128,85 +136,90 @@ export function saveSettings(settings: AppSettings): void {
   }
 }
 
-const PBKDF2_ITERATIONS = 100000;
+/** OWASP's 2023 figure for PBKDF2-HMAC-SHA256. */
+const PBKDF2_ITERATIONS = 600_000;
+/** Hashes stored as `salt:hash` before the iteration count was part of the format. */
+const LEGACY_PBKDF2_ITERATIONS = 100_000;
 const SALT_LENGTH = 16;
 
-export async function hashPassword(password: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const salt = crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
-  
+const toHex = (bytes: Uint8Array): string =>
+  Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+
+function fromHex(hex: string): Uint8Array<ArrayBuffer> | null {
+  if (hex.length % 2 !== 0 || !/^[0-9a-f]*$/i.test(hex)) return null;
+  return new Uint8Array(hex.match(/.{2}/g)?.map((byte) => parseInt(byte, 16)) ?? []);
+}
+
+async function pbkdf2(password: string, salt: Uint8Array<ArrayBuffer>, iterations: number): Promise<Uint8Array> {
   const keyMaterial = await crypto.subtle.importKey(
     "raw",
-    encoder.encode(password),
+    new TextEncoder().encode(password),
     "PBKDF2",
     false,
     ["deriveBits"]
   );
-  
-  const hashBuffer = await crypto.subtle.deriveBits(
-    {
-      name: "PBKDF2",
-      salt,
-      iterations: PBKDF2_ITERATIONS,
-      hash: "SHA-256",
-    },
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
     keyMaterial,
     256
   );
-  
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const saltHex = Array.from(salt).map((b) => b.toString(16).padStart(2, "0")).join("");
-  const hashHex = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-  
-  return `${saltHex}:${hashHex}`;
+  return new Uint8Array(bits);
+}
+
+/** Compares every byte, so how long it takes says nothing about where they differ. */
+function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    diff |= (a[i] ?? 0) ^ (b[i] ?? 0);
+  }
+  return diff === 0;
+}
+
+const SCHEME = "pbkdf2-sha256";
+
+/** `pbkdf2-sha256$<iterations>$<salt hex>$<hash hex>` */
+export async function hashPassword(password: string): Promise<string> {
+  const salt = crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
+  const hash = await pbkdf2(password, salt, PBKDF2_ITERATIONS);
+  return [SCHEME, PBKDF2_ITERATIONS, toHex(salt), toHex(hash)].join("$");
+}
+
+/** Whether a stored hash predates the current format and should be replaced once the password is known. */
+export function needsRehash(storedHash: string): boolean {
+  const [scheme, iterations] = storedHash.split("$");
+  return scheme !== SCHEME || Number(iterations) < PBKDF2_ITERATIONS;
 }
 
 export async function verifyPassword(
   password: string,
   storedHash: string
 ): Promise<boolean> {
-  const [saltHex, hashHex] = storedHash.split(":");
-  
-  if (!saltHex || !hashHex) {
-    const legacyHash = await legacyHashPassword(password);
-    return legacyHash === storedHash;
-  }
-  
-  const encoder = new TextEncoder();
-  const salt = new Uint8Array(saltHex.match(/.{2}/g)!.map((byte) => parseInt(byte, 16)));
-  
-  const keyMaterial = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(password),
-    "PBKDF2",
-    false,
-    ["deriveBits"]
-  );
-  
-  const hashBuffer = await crypto.subtle.deriveBits(
-    {
-      name: "PBKDF2",
-      salt,
-      iterations: PBKDF2_ITERATIONS,
-      hash: "SHA-256",
-    },
-    keyMaterial,
-    256
-  );
-  
-  const computedHash = Array.from(new Uint8Array(hashBuffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-  
-  return computedHash === hashHex;
-}
+  let salt: Uint8Array<ArrayBuffer> | null;
+  let expected: Uint8Array | null;
+  let iterations: number;
 
-async function legacyHashPassword(password: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+  if (storedHash.startsWith(`${SCHEME}$`)) {
+    const [, count, saltHex, hashHex] = storedHash.split("$");
+    iterations = Number(count);
+    salt = fromHex(saltHex ?? "");
+    expected = fromHex(hashHex ?? "");
+    if (!Number.isInteger(iterations) || iterations < 1) return false;
+  } else if (storedHash.includes(":")) {
+    // `salt:hash` at 100k iterations.
+    const [saltHex, hashHex] = storedHash.split(":");
+    iterations = LEGACY_PBKDF2_ITERATIONS;
+    salt = fromHex(saltHex ?? "");
+    expected = fromHex(hashHex ?? "");
+  } else {
+    // The oldest format: unsalted SHA-256.
+    expected = fromHex(storedHash);
+    if (!expected) return false;
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(password));
+    return constantTimeEqual(new Uint8Array(digest), expected);
+  }
+
+  if (!salt || !expected || salt.length === 0 || expected.length === 0) return false;
+  return constantTimeEqual(await pbkdf2(password, salt, iterations), expected);
 }
 
 export const TIMEOUT_OPTIONS = [

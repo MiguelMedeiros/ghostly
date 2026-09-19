@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate, Navigate } from "react-router-dom";
 import { useChat } from "../hooks/useChat";
 import { useWebRTC } from "../hooks/useWebRTC";
@@ -14,7 +14,6 @@ import { playSound, startRinging } from "../lib/sounds";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import {
   markSessionAsRead,
-  generateSessionId,
   getInviteCode,
   deleteSession,
   loadSession,
@@ -30,17 +29,24 @@ export function Chat() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const params: ChatParams | null = (() => {
-    if (!splat) return null;
-    const parts = splat.split("/");
-    if (parts.length !== 3) return null;
-    return {
-      seedB64: parts[0],
-      peerPubKeyB64: parts[1],
-      encKeyB64: parts[2],
-      nick: settings.defaultNickname || undefined,
-    };
-  })();
+  // `/chat/<session id>`. A route that still carries the keys (an invite link,
+  // an old bookmark) is turned into this one by `ChatLinkIntake` first.
+  const sessionId = splat && !splat.includes("/") ? splat : null;
+  const isKeyRoute = !!splat?.includes("/");
+  const session = useMemo(() => (sessionId ? loadSession(sessionId) : null), [sessionId]);
+  const params: ChatParams | null = useMemo(
+    () =>
+      session
+        ? {
+            sessionId: session.id,
+            seedB64: session.mySeedB64,
+            peerPubKeyB64: session.peerPubKeyB64,
+            encKeyB64: session.encKeyB64,
+            nick: settings.defaultNickname || undefined,
+          }
+        : null,
+    [session, settings.defaultNickname],
+  );
 
   const {
     messages,
@@ -172,15 +178,13 @@ export function Chat() {
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (params) {
-      const sessionId = generateSessionId(params.seedB64, params.peerPubKeyB64);
-      const code = getInviteCode(sessionId);
-      setInviteCode(code);
-      const session = loadSession(sessionId);
-      setChatLabel(session?.label || "");
-      setPeerNick(session?.nick || "");
+    if (sessionId) {
+      setInviteCode(getInviteCode(sessionId));
+      const stored = loadSession(sessionId);
+      setChatLabel(stored?.label || "");
+      setPeerNick(stored?.nick || "");
     }
-  }, [params?.seedB64, params?.peerPubKeyB64]);
+  }, [sessionId]);
 
   useEffect(() => {
     const peerMessages = [...messages].reverse().filter(m => 
@@ -213,9 +217,8 @@ export function Chat() {
   };
 
   const saveLabel = () => {
-    if (!params) return;
+    if (!sessionId) return;
     const trimmed = labelDraft.trim();
-    const sessionId = generateSessionId(params.seedB64, params.peerPubKeyB64);
     updateSessionLabel(sessionId, trimmed);
     setChatLabel(trimmed);
     setIsEditingLabel(false);
@@ -260,20 +263,16 @@ export function Chat() {
   }, [messages]);
 
   useEffect(() => {
-    if (params) {
-      const sessionId = generateSessionId(params.seedB64, params.peerPubKeyB64);
-      markSessionAsRead(sessionId);
-    }
-  }, [params, messages.length]);
+    if (sessionId) markSessionAsRead(sessionId);
+  }, [sessionId, messages.length]);
 
   if (!params) {
-    return <Navigate to="/" replace />;
+    return isKeyRoute ? null : <Navigate to="/" replace />;
   }
 
   const handleDelete = () => {
     if (confirmDelete) {
-      const sessionId = generateSessionId(params.seedB64, params.peerPubKeyB64);
-      deleteSession(sessionId);
+      deleteSession(params.sessionId);
       navigate("/");
     } else {
       setConfirmDelete(true);

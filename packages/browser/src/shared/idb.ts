@@ -66,6 +66,25 @@ export function openDb(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
+/**
+ * Deletes the database ("Clear all data"). Open connections close themselves on
+ * `versionchange`; if one does not, this gives up waiting rather than hang.
+ */
+export async function deleteDatabase(): Promise<void> {
+  if (typeof indexedDB === "undefined") return;
+  const open = dbPromise;
+  dbPromise = null;
+  await open?.then((db) => db.close()).catch(() => {});
+  await new Promise<void>((resolve) => {
+    const request = indexedDB.deleteDatabase(dbName);
+    const timer = setTimeout(resolve, 5_000);
+    request.onsuccess = request.onerror = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+  });
+}
+
 export function wrap<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);

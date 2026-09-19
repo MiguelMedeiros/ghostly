@@ -77,7 +77,7 @@
     "language": "言語",
     "security": "セキュリティ",
     "lockScreen": "ロック画面",
-    "lockScreenDescription": "非アクティブ後にパスワードを要求",
+    "lockScreenDescription": "非アクティブ後にアプリをパスワードで隠します。この端末に保存されたチャットは暗号化されません。",
     "password": "パスワード",
     "newPassword": "新しいパスワード",
     "confirmPassword": "パスワードを確認",
@@ -106,7 +106,7 @@
     "data": "データとストレージ",
     "storageUsed": "使用中のストレージ",
     "clearAllData": "すべてのデータを消去",
-    "clearAllDataDescription": "すべてのチャットを削除し、設定をリセット",
+    "clearAllDataDescription": "この端末からすべてのチャット、ファイル、ウォレットのecash、設定を削除",
     "clearAllDataConfirm": "本当によろしいですか？この操作は元に戻せません。",
     "dataCleared": "すべてのデータが消去されました",
     "about": "アプリについて",
@@ -119,7 +119,8 @@
     "title": "Ghostlyはロックされています",
     "enterPassword": "パスワードを入力してロック解除",
     "unlock": "ロック解除",
-    "incorrectPassword": "パスワードが正しくありません。もう一度お試しください"
+    "incorrectPassword": "パスワードが正しくありません。もう一度お試しください",
+    "tooManyAttempts": "試行回数が多すぎます。{{seconds}} 秒後に再試行してください"
   },
   "calls": {
     "audio": "音声通話",
