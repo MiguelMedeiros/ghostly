@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Security
+
+- **Desktop:** a web app a contact shares could put itself on another contact's app's address, and from there read and change what that app had stored on your machine. A window now only ever shows the app it was opened for.
+
 ## 0.3.3
 
 Small security fixes from the scheduled review. Nothing changes on the wire, and older clients keep working.

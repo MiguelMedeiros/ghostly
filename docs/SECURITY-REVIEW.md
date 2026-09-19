@@ -68,6 +68,22 @@ Then, in depth, the shared UI and what it keeps on the device: `src/` (lock scre
 
 Checks run: `npm run lint` (0 errors), `npm run typecheck`, `npm test` (98 tests), `npm run build`, `npm run build:extension`, `npm run build:web`, `cargo fmt --check` for both crates, `cargo clippy --all-targets -- -D warnings` and `cargo test` for `cli`. Not run here: `clippy`/`test` for `src-tauri` (no GTK/WebKit in the runner) and the Playwright suites (`cdn.playwright.dev` is blocked, and with the runner's own Chromium both `test:attacks` and `test:e2e` stop at the first step that needs the DHT or a relay — unmodified `main` stops at exactly the same step). CI runs all of them.
 
+### Routine run 2026-09-19, second (Desktop, following S24)
+
+A second run the same day, on a runner where `src-tauri` does build: the GTK and WebKit packages install here, so `cargo clippy` and `cargo test` for `src-tauri` ran for the first time since the routine started, and S24 could finally be looked at.
+
+The dependency picture is the one above and has not moved: `api.osv.dev` is still refused by this runner's egress policy, `npm audit` is clean in both trees, and `Cargo.lock` against `rustsec/advisory-db` gives exactly the eight accepted advisories, none expired. Nothing to update. The commits since that run are its own release (0.3.3) and #53.
+
+Looking at S24 from the window rather than from the link turned up a real one, S25 below: the Tauri viewer decides where a request goes from the window's label, which was written down as the thing that keeps contacts apart, but nothing checked that the request was still *for* that window's address, and an origin is the address, not the label. S24 itself stays open: it is about the `main` window being replaced by a link, which is a different question and needs a real desktop build on each platform to judge, plus somewhere for an external link to go once it is refused.
+
+| ID | Sev. | Area | Finding | Status |
+|---|---|---|---|---|
+| S25 | High | Desktop | A viewer window is bound to one contact and service by its label, and `viewer::handle` read only that label: nothing checked that the URL asked for was the one the window was opened for. A contact's app could navigate or frame `ghostly-svc://<service>.<other contact>/`, still be served by its own contact — the routing goes by label — and so run its own code in the other contact's origin, where that app keeps its storage, cookies and any session it holds. Invariant 2 ("no other peer's origin") and the Desktop counterpart of S2 | fixed: `handle` refuses any host that is not the window's own `<service>.<peer>` (and the `<scheme>.<service>.<peer>` spelling Windows and Android use) before anything is served there. Proof: `cargo test --manifest-path src-tauri/Cargo.toml` (`viewer::tests::another_contacts_origin_is_refused`; on the old code it gets 504 instead of 403, because the request is routed to the contact and only the timeout ends it) |
+
+Checks run: `npm run lint`, `npm run typecheck`, `npm test` (98), `npm run build`, `npm run build:extension`, `npm run build:web`, and for both crates `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` — `src-tauri` included this time, 4 tests. Still not run: the Playwright suites; the browsers here do start, and the two peers do link up over the relays, but there is no UDP out of this runner, so the data link never opens and the suites stop at the first step that needs it.
+
+This is a review branch, not an automatic release: 0.3.3 went out minutes earlier and the gate allows one automatic release per 20 hours, so the fix is left for a person to ship.
+
 ### Verified on 2026-09-19
 
 Unit and protocol tests (86), extension e2e, `test:attacks`, web e2e against the Docker image (nginx 1.30), delete-chats, Tauri IPC tests, CLI interop over the real network, website image (Next 16.3.3, node 22). Before/after: `test:attacks` against v0.3.1 has 3 attacks succeed; the Tauri viewer test fails on v0.3.1.
