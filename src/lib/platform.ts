@@ -82,6 +82,11 @@ export interface ChatPayment {
   invoice?: string;
 }
 
+/** What a pasted piece of ecash says about itself, read without contacting any mint. */
+export type CashuInspection =
+  | { kind: "token"; amount: number; unit: string; mint: string; memo?: string; accepted: boolean }
+  | { kind: "request"; amount: number | null; unit: string; mints: string[]; description?: string };
+
 /** An ecash (Cashu) wallet with Lightning in and out through the user's mints. */
 export interface WalletPlatform {
   /** A public mint with worthless test sats, for trying things out. */
@@ -95,6 +100,8 @@ export interface WalletPlatform {
   quoteInvoice(invoice: string): Promise<{ quote: string; mint: string; amount: number; feeReserve: number }>;
   payQuote(quote: string, mint: string): Promise<boolean>;
   receiveToken(token: string): Promise<number>;
+  /** Null when the text is neither an ecash token nor a Cashu payment request. */
+  inspectCashu(text: string): Promise<CashuInspection | null>;
   exportTokens(): Promise<{ mint: string; token: string; amount: number }[]>;
   send(peerPubKeyZ32: string, amount: number, memo?: string): Promise<{ timestamp: number; paymentId: string }>;
   request(peerPubKeyZ32: string, amount: number, memo?: string): Promise<{ timestamp: number; paymentId: string }>;

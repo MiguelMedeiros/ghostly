@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { Wallet, getEncodedToken } from "@cashu/cashu-ts";
 import { BIG, BIG_SHA256, startAtlas } from "./atlas.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -199,6 +200,63 @@ try {
   await a.page.getByTestId("mint-fees").filter({ hasText: "0.1 sat per proof" }).waitFor({ timeout: 30_000 });
   ok("the mint's own fee schedule is shown");
   await a.page.getByTestId("wallet-settings").click();
+
+  step("Money pasted into the chat is shown as a card (still the test mint)");
+  // B asks its mint for an invoice and pastes it, the way people share invoices everywhere else.
+  await b.page.getByTestId("wallet-receive").click();
+  await b.page.getByTestId("wallet-receive-amount").fill("12");
+  await b.page.getByTestId("wallet-create-invoice").click();
+  const pasted = (await b.page.getByTestId("wallet-invoice").textContent({ timeout: 30_000 })).trim();
+  await b.page.getByTestId("wallet-receive").click();
+  await b.page.getByPlaceholder("Type a message").fill(`coffee? ${pasted}`);
+  await b.page.getByPlaceholder("Type a message").press("Enter");
+  const card = a.page.getByTestId("invoice-bubble").last();
+  await card.waitFor({ timeout: 60_000 });
+  expect("A sees the amount instead of a wall of characters", (await card.getByTestId("money-amount").textContent()).trim(), "12");
+  expect("the rest of the message is kept", await a.page.getByText("coffee?", { exact: true }).count(), 1);
+  expect("the card carries a QR code", await card.locator("svg").count() > 0, true);
+  expect("B cannot pay its own invoice", await b.page.getByTestId("invoice-bubble").last().getByTestId("invoice-pay").count(), 0);
+  await card.getByTestId("invoice-pay").click();
+  await card.getByTestId("invoice-confirm").waitFor({ timeout: 30_000 });
+  ok("the wallet quotes the invoice, fee reserve included, before anything is paid");
+  // The test mint settles its own invoices by itself, so by now this one is already paid. The card
+  // has to end up saying so without spending anything; a real payment takes the same path minus the refusal.
+  await card.getByTestId("invoice-confirm").click();
+  await card.getByTestId("invoice-paid").waitFor({ timeout: 60_000 }).catch(async (error) => {
+    console.log("    card says:", (await card.textContent()).slice(0, 400));
+    throw error;
+  });
+  ok("the card ends up paid");
+
+  // An ecash token minted outside Ghostly (worthless test sats), pasted like any other text.
+  const outside = new Wallet("https://testnut.cashu.space", { unit: "sat" });
+  await outside.loadMint();
+  const minted = await outside.createMintQuoteBolt11(7);
+  let proofs;
+  for (let attempt = 0; !proofs; attempt++) {
+    try {
+      proofs = await outside.mintProofsBolt11(7, minted.quote);
+    } catch (error) {
+      if (attempt > 10) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+  }
+  const token = getEncodedToken({ mint: "https://testnut.cashu.space", proofs, unit: "sat", memo: "lunch" });
+  const before = Number((await a.page.getByTestId("wallet-test-balance").textContent()).match(/^([\d,]+)/)[1].replace(",", ""));
+  await b.page.getByPlaceholder("Type a message").fill(token);
+  await b.page.getByPlaceholder("Type a message").press("Enter");
+  const tokenCard = a.page.getByTestId("cashu-token-bubble").last();
+  await tokenCard.waitFor({ timeout: 60_000 });
+  expect("an ecash token shows its amount, mint and memo", [(await tokenCard.getByTestId("money-amount").textContent()).trim(), /testnut\.cashu\.space/.test(await tokenCard.textContent()), /lunch/.test(await tokenCard.textContent())], ["7", true, true]);
+  await tokenCard.getByTestId("token-redeem").click();
+  await tokenCard.getByTestId("token-redeemed").waitFor({ timeout: 60_000 });
+  const after = Number((await a.page.getByTestId("wallet-test-balance").textContent()).match(/^([\d,]+)/)[1].replace(",", ""));
+  expect("redeeming it adds the sats, minus the mint's fee", after > before && after <= before + 7, true);
+
+  if (process.env.SHOTS) {
+    await a.page.screenshot({ path: `${process.env.SHOTS}/invoice-card-payer.png` });
+    await b.page.screenshot({ path: `${process.env.SHOTS}/invoice-card-owner.png` });
+  }
 
   step("Video call with the signaling Ghostly Desktop uses (_call)");
   await a.page.bringToFront();

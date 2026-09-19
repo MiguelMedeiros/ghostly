@@ -1,3 +1,4 @@
+import { findMoney } from "../lib/money";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -39,6 +40,14 @@ function playNotificationSound() {
   } catch {
     // audio not available
   }
+}
+
+/** A pasted invoice or token reads as what it is, not as its first characters. */
+function previewText(text: string): string {
+  const money = findMoney(text);
+  if (!money) return text;
+  if (money.type === "cashu") return "⚡ Ecash";
+  return money.invoice.amountSat === null ? "⚡ Lightning invoice" : `⚡ Lightning invoice · ${money.invoice.amountSat.toLocaleString()} sats`;
 }
 
 const MIN_WIDTH = 280;
@@ -598,7 +607,7 @@ export function Sidebar() {
                               </svg>
                             </span>
                           )}
-                          {lastMsg.text}
+                          {previewText(lastMsg.text)}
                         </>
                       ) : (
                         <span className="italic">No messages</span>

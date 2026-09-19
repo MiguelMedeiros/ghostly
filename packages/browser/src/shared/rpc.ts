@@ -1,4 +1,4 @@
-import type { EngineState, MessageFile, Settings, StoredMessage } from "./types";
+import type { CashuInspection, EngineState, MessageFile, Settings, StoredMessage } from "./types";
 
 /** UI → engine calls. The extension carries them over a runtime port, the web app calls the peer in the same page. */
 export interface EngineApi {
@@ -26,6 +26,7 @@ export interface EngineApi {
   walletPayQuote(params: { quote: string; mint: string }): { paid: boolean };
   /** Redeems a token pasted by the user. Only mints the user added are accepted. */
   walletReceiveToken(params: { token: string }): { amount: number };
+  walletInspectCashu(params: { text: string }): { inspection: CashuInspection | null };
   /** Everything held, as tokens: the only backup there is for now. */
   walletExport(): { mint: string; token: string; amount: number }[];
   sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number }): { paymentId: string };
