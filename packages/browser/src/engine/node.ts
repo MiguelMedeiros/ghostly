@@ -119,6 +119,7 @@ export class GhostlyNode implements EngineImplementation {
   private readonly wallet = new CashuWallet(() => this.settings.mints, {
     onChange: () => void this.refreshWallet(),
     onQuotePaid: (quote) => void this.desk.onQuotePaid(quote),
+    onMeltResolved: (melt, paid) => void this.desk.onMeltResolved(melt, paid),
     onTestMintNeeded: async () => void (await this.walletAddMint({ url: TEST_MINT })),
   });
   private readonly desk = new PaymentDesk(this.wallet, {
