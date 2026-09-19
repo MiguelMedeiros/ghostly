@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useCountUp } from "../hooks/useCountUp";
 import { playSound } from "../lib/sounds";
 import { QRCodeSVG } from "qrcode.react";
+import { decodeBolt11 } from "@ghostly/core";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 
 type View = "closed" | "receive" | "send" | "mints" | "history";
@@ -14,6 +15,8 @@ const secondary =
   "px-3 py-2 max-md:min-h-11 text-xs font-bold text-text-muted bg-surface-hover rounded-lg hover:text-text-secondary transition-colors cursor-pointer";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const iconButton = (active: boolean) =>
+  `p-1.5 max-md:p-3 rounded-full transition-colors cursor-pointer ${active ? "text-accent" : "text-text-muted hover:text-text-primary"}`;
 
 const TX_LABEL = {
   "lightning-in": "Received over Lightning",
@@ -23,16 +26,15 @@ const TX_LABEL = {
   reclaimed: "Took a payment back",
 } as const;
 
-/** `input_fee_ppk` in words: a payment usually spends two to five proofs. */
-function describeInputFee(ppk: number): string {
-  if (ppk === 0) return "Spending ecash is free";
-  return `Spending ecash: ${ppk / 1000} sat per proof, rounded up (about 1 sat per payment)`;
+/** `input_fee_ppk` in a few words: a payment usually spends two to five proofs. */
+function shortFee(ppk: number): string {
+  return ppk === 0 ? "No fee to spend" : `${ppk / 1000} sat per proof (about 1 sat a payment)`;
 }
 
 function describeBounds(bounds: { min: number | null; max: number | null } | null): string {
   if (!bounds) return "not offered";
   const min = Math.max(1, bounds.min ?? 1).toLocaleString();
-  return bounds.max === null ? `from ${min} sat, no upper limit` : `${min} to ${bounds.max.toLocaleString()} sats`;
+  return bounds.max === null ? `from ${min} sat` : `${min} to ${bounds.max.toLocaleString()} sats`;
 }
 
 /**
@@ -55,6 +57,8 @@ export function WalletPanel({ screen = false }: { screen?: boolean }) {
   const [quote, setQuote] = useState<{ quote: string; mint: string; amount: number; feeReserve: number } | null>(null);
   const [notice, setNotice] = useState("");
   const [mintUrl, setMintUrl] = useState("");
+  const [moreAboutMints, setMoreAboutMints] = useState(false);
+  const [openMint, setOpenMint] = useState<string | null>(null);
 
   const state = wallet?.getState();
   const testBalance = state?.mints.find((m) => m.url === wallet?.testMintUrl)?.balance ?? 0;
@@ -92,6 +96,7 @@ export function WalletPanel({ screen = false }: { screen?: boolean }) {
     });
 
   const isToken = /^cashu[AB]/i.test(payInput.trim());
+  const pasted = isToken ? null : decodeBolt11(payInput);
   // Test sats are worth nothing and must never be added to real ones.
   const testMint = state.mints.find((m) => m.url === wallet.testMintUrl);
   const usesTestMint = testMint !== undefined;
@@ -105,45 +110,44 @@ export function WalletPanel({ screen = false }: { screen?: boolean }) {
       )}
       <div className="flex items-center justify-between px-4 pt-3 pb-1">
         <span className={`text-text-secondary text-xs font-bold uppercase tracking-wider ${screen ? "invisible" : ""}`}>Wallet</span>
-        <button
-          data-testid="wallet-settings"
-          onClick={() => open("mints")}
-          className={`p-1 max-md:p-3 rounded-full transition-colors cursor-pointer ${view === "mints" ? "text-accent" : "text-text-muted hover:text-text-primary"}`}
-          title="Mints"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-          </svg>
-        </button>
+        <div className="flex items-center gap-0.5">
+          <button data-testid="wallet-history" onClick={() => open("history")} className={iconButton(view === "history")} title="History and fees">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
+            </svg>
+          </button>
+          <button data-testid="wallet-settings" onClick={() => open("mints")} className={iconButton(view === "mints")} title="Mints">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       <div className={`px-3 pb-3 space-y-2 ${screen ? "" : "max-h-[55vh] overflow-y-auto"}`}>
         {state.mints.length > 0 && (
-          <div className="bg-surface-alt rounded-lg px-3 py-2 flex items-center justify-between gap-2">
+          <div className="bg-surface-alt rounded-lg p-3">
             <p className="m-0 text-text-primary leading-tight">
               <span data-testid="wallet-balance">
-                <span className="text-lg font-semibold">{realShown.toLocaleString()}</span>
-                <span className="text-text-muted text-xs ml-1">sats</span>
+                <span className="text-2xl font-semibold">{realShown.toLocaleString()}</span>
+                <span className="text-text-muted text-xs ml-1.5">sats</span>
               </span>
               {testMint && (
-                <span className="block text-[11px] text-yellow-500" data-testid="wallet-test-balance">
+                <span className="block text-[11px] text-yellow-500 mt-0.5" data-testid="wallet-test-balance">
                   {testShown.toLocaleString()} test sats (worthless)
                 </span>
               )}
             </p>
-            <div className="flex gap-1">
-              <button data-testid="wallet-history" className={view === "history" ? primary : secondary} onClick={() => open("history")} title="History and fees">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10" />
-                  <polyline points="12 6 12 12 16 14" />
-                </svg>
-              </button>
-              <button data-testid="wallet-receive" className={view === "receive" ? primary : secondary} onClick={() => open("receive")}>
+            <div className="grid grid-cols-2 gap-2 mt-2.5">
+              <button data-testid="wallet-receive" className={`${view === "receive" ? primary : secondary} flex items-center justify-center gap-1.5`} onClick={() => open("receive")}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12l7 7 7-7" /></svg>
                 Receive
               </button>
-              <button data-testid="wallet-send" className={view === "send" ? primary : secondary} onClick={() => open("send")}>
-                Send
+              <button data-testid="wallet-send" className={`${view === "send" ? primary : secondary} flex items-center justify-center gap-1.5`} onClick={() => open("send")}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
+                Pay
               </button>
             </div>
           </div>
@@ -182,10 +186,7 @@ export function WalletPanel({ screen = false }: { screen?: boolean }) {
                 >
                   {copied ? "Copied!" : "Copy Lightning invoice"}
                 </button>
-                <p className="text-text-muted text-[11px] leading-snug m-0">
-                  Pay it from any Lightning wallet. The sats show up here as soon as {state.mints[0]?.name ?? "the mint"},
-                  which holds them for you, sees the payment.
-                </p>
+                <p className="text-text-muted text-[11px] leading-snug m-0 text-center">Waiting for the payment…</p>
               </>
             ) : (
               <form
@@ -202,6 +203,7 @@ export function WalletPanel({ screen = false }: { screen?: boolean }) {
                 <button data-testid="wallet-create-invoice" className={`${primary} w-full`} disabled={busy || !amount}>
                   {busy ? "Asking the mint…" : "Create Lightning invoice"}
                 </button>
+                <p className="text-text-muted text-[11px] leading-snug m-0 text-center">Got an ecash token instead? Paste it under Pay.</p>
               </form>
             )}
           </div>
@@ -251,11 +253,31 @@ export function WalletPanel({ screen = false }: { screen?: boolean }) {
                   });
                 }}
               >
-                <textarea className={`${field} font-mono text-xs resize-none`} rows={3} placeholder="Lightning invoice to pay, or an ecash token to redeem" value={payInput} onChange={(e) => setPayInput(e.target.value)} />
-                <button className={`${primary} w-full`} disabled={busy || !payInput.trim()}>
-                  {busy ? "Working…" : isToken ? "Redeem token" : "Check invoice"}
+                <textarea
+                  data-testid="wallet-pay-input"
+                  className={`${field} font-mono text-xs resize-none`}
+                  rows={2}
+                  placeholder="Paste a Lightning invoice"
+                  value={payInput}
+                  onChange={(e) => setPayInput(e.target.value)}
+                  autoFocus
+                />
+                {pasted && (
+                  <p className="text-text-primary text-sm m-0" data-testid="wallet-pay-preview">
+                    <span className="text-accent">⚡</span>{" "}
+                    <b>{pasted.amountSat === null ? "Any amount" : `${pasted.amountSat.toLocaleString()} sats`}</b>
+                    {pasted.description && <span className="text-text-muted"> · {pasted.description}</span>}
+                    {pasted.expiresAt * 1000 < Date.now() && <span className="text-danger"> · expired</span>}
+                  </p>
+                )}
+                <button className={`${primary} w-full`} disabled={busy || !payInput.trim() || (!isToken && !pasted)}>
+                  {busy ? "Working…" : isToken ? "Redeem ecash token" : pasted?.amountSat ? `Pay ${pasted.amountSat.toLocaleString()} sats` : "Pay"}
                 </button>
-                <p className="text-text-muted text-[11px] leading-snug m-0">To pay a contact, use the ⚡ button in the chat.</p>
+                {payInput.trim() && !isToken && !pasted ? (
+                  <p className="text-danger text-[11px] m-0">That is not a Lightning invoice.</p>
+                ) : (
+                  <p className="text-text-muted text-[11px] leading-snug m-0 text-center">Paying a contact? Use ⚡ in the chat.</p>
+                )}
               </form>
             )}
           </div>
@@ -264,8 +286,8 @@ export function WalletPanel({ screen = false }: { screen?: boolean }) {
         {view === "history" && (
           <div className="bg-surface-alt rounded-lg p-3 space-y-2 animate-fade-in" data-testid="wallet-history-list">
             <div className="flex items-center justify-between text-[11px] text-text-muted">
-              <span>{state.history.length === 0 ? "Nothing yet" : `Last ${state.history.length} movements`}</span>
-              <span data-testid="wallet-fees-paid">Fees paid so far: {state.feesPaid.toLocaleString()} sats</span>
+              <span>{state.history.length === 0 ? "Nothing yet" : `${state.history.length} movement${state.history.length === 1 ? "" : "s"}`}</span>
+              <span data-testid="wallet-fees-paid">Fees paid: {state.feesPaid.toLocaleString()} sats</span>
             </div>
             <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1">
               {state.history.map((tx) => {
@@ -299,40 +321,57 @@ export function WalletPanel({ screen = false }: { screen?: boolean }) {
         {(view === "mints" || state.mints.length === 0) && (
           <div className="bg-surface-alt rounded-lg p-3 space-y-2 animate-fade-in">
             <p className="text-text-muted text-[11px] leading-snug m-0">
-              Your sats are ecash, <b className="text-text-secondary">held by these mints</b>. A mint could lose them
-              or disappear, so keep pocket money only. There is no seed backup yet. New Lightning invoices come from
-              the first mint.
+              Mints hold your sats. Keep pocket money only.{" "}
+              <button className="underline cursor-pointer hover:text-text-secondary" onClick={() => setMoreAboutMints((v) => !v)}>
+                {moreAboutMints ? "Less" : "Why?"}
+              </button>
             </p>
-            {state.mints.map((mint, index) => (
-              <div key={mint.url} className="flex items-start justify-between gap-2 text-xs">
-                <span className="min-w-0 flex-1">
-                  <span className="text-text-primary block truncate">
-                    {mint.name}
-                    {index === 0 ? (
-                      <span className="text-accent ml-1.5 text-[10px] uppercase tracking-wider">primary</span>
-                    ) : (
-                      <button className="text-text-muted hover:text-accent ml-1.5 text-[10px] uppercase tracking-wider cursor-pointer" onClick={() => run(() => wallet.setPrimaryMint(mint.url))}>
-                        make primary
-                      </button>
-                    )}
-                  </span>
-                  <span className="text-text-muted font-mono block truncate">{mint.url.replace(/^https?:\/\//, "")}</span>
-                  {mint.info ? (
-                    <span className="text-text-muted block text-[10px] leading-snug mt-0.5" data-testid="mint-fees">
-                      {describeInputFee(mint.info.inputFeePpk)}. Lightning in: {describeBounds(mint.info.receive)}, no mint
-                      fee. Lightning out: {describeBounds(mint.info.send)}, routing fee quoted before you pay.
-                      {mint.info.motd ? ` “${mint.info.motd}”` : ""}
+            {moreAboutMints && (
+              <p className="text-text-muted text-[11px] leading-snug m-0 animate-fade-in">
+                Ecash is custodial: a mint could lose your sats or disappear, and there is no seed backup yet. New
+                Lightning invoices come from the primary mint.
+              </p>
+            )}
+            {state.mints.map((mint, index) => {
+              const opened = openMint === mint.url;
+              return (
+                <div key={mint.url} className="text-xs border-t border-border/60 pt-2 first:border-0">
+                  <button className="w-full flex items-center justify-between gap-2 cursor-pointer text-left" onClick={() => setOpenMint(opened ? null : mint.url)}>
+                    <span className="min-w-0">
+                      <span className="text-text-primary truncate block">
+                        {mint.name}
+                        {index === 0 && <span className="text-accent ml-1.5 text-[10px] uppercase tracking-wider">primary</span>}
+                      </span>
+                      <span className="text-text-muted text-[10px] block truncate" data-testid="mint-fees">
+                        {mint.info ? shortFee(mint.info.inputFeePpk) : "Not reachable right now"}
+                      </span>
                     </span>
-                  ) : (
-                    <span className="text-text-muted block text-[10px] mt-0.5">Not reachable right now</span>
+                    <span className="text-text-secondary shrink-0">{mint.balance.toLocaleString()} sats</span>
+                  </button>
+                  {opened && (
+                    <div className="mt-1.5 space-y-1.5 animate-fade-in">
+                      <p className="text-text-muted font-mono text-[10px] m-0 truncate">{mint.url.replace(/^https?:\/\//, "")}</p>
+                      {mint.info && (
+                        <p className="text-text-muted text-[10px] leading-snug m-0">
+                          Lightning in: {describeBounds(mint.info.receive)}. Lightning out: {describeBounds(mint.info.send)}, fee shown before you pay.
+                          {mint.info.motd ? ` “${mint.info.motd}”` : ""}
+                        </p>
+                      )}
+                      <div className="flex gap-3 text-[11px]">
+                        {index !== 0 && (
+                          <button className="text-accent hover:underline cursor-pointer" onClick={() => run(() => wallet.setPrimaryMint(mint.url))}>
+                            Make primary
+                          </button>
+                        )}
+                        <button className="text-danger hover:underline cursor-pointer" onClick={() => run(() => wallet.removeMint(mint.url))}>
+                          Remove
+                        </button>
+                      </div>
+                    </div>
                   )}
-                </span>
-                <span className="text-text-secondary shrink-0">{mint.balance.toLocaleString()} sats</span>
-                <button className="text-text-muted hover:text-danger cursor-pointer text-base leading-none" title="Remove mint" onClick={() => run(() => wallet.removeMint(mint.url))}>
-                  &times;
-                </button>
-              </div>
-            ))}
+                </div>
+              );
+            })}
             <form
               className="flex gap-2"
               onSubmit={(e) => {
@@ -340,30 +379,32 @@ export function WalletPanel({ screen = false }: { screen?: boolean }) {
                 void addMint(mintUrl);
               }}
             >
-              <input data-testid="wallet-mint-url" className={`${field} font-mono text-xs`} placeholder="https://your.mint" value={mintUrl} onChange={(e) => setMintUrl(e.target.value)} />
+              <input data-testid="wallet-mint-url" className={`${field} font-mono text-xs`} placeholder="Add a mint: https://…" value={mintUrl} onChange={(e) => setMintUrl(e.target.value)} />
               <button data-testid="wallet-add-mint" className={primary} disabled={busy || !mintUrl.trim()}>
                 Add
               </button>
             </form>
-            {!usesTestMint && (
-              <button data-testid="wallet-test-mint" className={`${secondary} w-full`} disabled={busy} onClick={() => addMint(wallet.testMintUrl)}>
-                Try with worthless test sats
-              </button>
-            )}
-            {state.balance > 0 && (
-              <button
-                className={`${secondary} w-full`}
-                onClick={() =>
-                  run(async () => {
-                    const tokens = await wallet.exportTokens();
-                    await navigator.clipboard.writeText(tokens.map((t) => t.token).join("\n"));
-                    setNotice("Backup copied. Whoever has these tokens has the sats; redeeming them elsewhere empties this wallet.");
-                  })
-                }
-              >
-                Copy backup tokens
-              </button>
-            )}
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] pt-0.5">
+              {!usesTestMint && (
+                <button data-testid="wallet-test-mint" className="text-accent hover:underline cursor-pointer disabled:opacity-40" disabled={busy} onClick={() => addMint(wallet.testMintUrl)}>
+                  Try with test sats
+                </button>
+              )}
+              {state.balance > 0 && (
+                <button
+                  className="text-text-muted hover:text-text-secondary hover:underline cursor-pointer"
+                  onClick={() =>
+                    run(async () => {
+                      const tokens = await wallet.exportTokens();
+                      await navigator.clipboard.writeText(tokens.map((t) => t.token).join("\n"));
+                      setNotice("Backup copied. Whoever has these tokens has the sats.");
+                    })
+                  }
+                >
+                  Copy backup
+                </button>
+              )}
+            </div>
           </div>
         )}
 
