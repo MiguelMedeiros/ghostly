@@ -32,10 +32,10 @@ Only the tests tagged `@network` go out: the wallet, against the public Cashu te
 
 ## When they run
 
-- On every pull request and push to `main`, as the `End-to-end` job of CI (`ci.yml` calls `e2e.yml`); "CI Success" needs it.
-- Every night, so a new Chromium or a change at the test mint shows up before a release does.
 - Before every release: the `Release` workflow runs them first, and neither the draft release nor the web image is made unless they pass.
-- By hand: Actions → E2E → Run workflow, optionally with the URL of a deployed web app.
+- By hand: Actions → E2E → Run workflow, optionally with the URL of a deployed web app, or `npm run test:e2e` locally.
+
+Not on pull requests: at about four minutes it would hold up every merge.
 
 ## Writing one
 

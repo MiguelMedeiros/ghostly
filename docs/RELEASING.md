@@ -16,7 +16,7 @@ Then, by hand:
 - **What else mentions features**: `README.md` (Features), `docs/*.md`, and on the site `Features.tsx`, `Clients.tsx`, `FAQ.tsx`, `MockupApp.tsx` (screenshots) and `ProtocolV1.tsx` when the protocol changed. `node extension/test/site-screenshots.mjs` regenerates the screenshots.
 - **Protocol changes** go in `docs/PROTOCOL.md` first. Additive only: older clients must keep working.
 
-Check: `npm run typecheck && npm test && npm run test:e2e`, and `npx next build` in `website/`. The `Release` workflow runs the end-to-end tests again from the tag and makes neither the draft nor the web image if they fail; the `E2E` workflow also runs them every night on `main`, so its latest run says whether `main` is ready.
+Check: `npm run typecheck && npm test && npm run test:e2e`, and `npx next build` in `website/`. The `Release` workflow runs the end-to-end tests again from the tag and makes neither the draft nor the web image if they fail. To know earlier whether `main` is ready, run the `E2E` workflow by hand from the Actions tab.
 
 Open a pull request with all of that (`chore(release): 0.3.0`) and merge it.
 

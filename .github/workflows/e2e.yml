@@ -3,11 +3,9 @@ name: E2E
 # Real browsers against the shipped build of the web app and the extension.
 # Peers meet through a relay inside the test process, so nothing here depends
 # on outside services except the tests tagged @network (the public Cashu test mint).
-# Pull requests and pushes run it as part of CI (ci.yml); releases run it first (release.yml).
+# Too slow to hold up every pull request: it runs before each release (release.yml
+# calls it and ships nothing unless it passes), and by hand from the Actions tab.
 on:
-  schedule:
-    # Every night, so a change in a browser or in the test mint shows up before a release does.
-    - cron: "17 5 * * *"
   workflow_dispatch:
     inputs:
       web_url:
