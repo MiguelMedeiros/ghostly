@@ -9,6 +9,10 @@ Small security fixes from the scheduled review. Nothing changes on the wire, and
 - **Clear all data** and deleting a single chat left one bookkeeping key per chat behind, carrying the id of a conversation that existed. Both now take it with them, and keys left by older versions are cleared as well.
 - **Names a contact chooses** — its nickname and the names of the apps it shares — are now shown as what they are. Invisible and direction-changing characters are removed, as they already were from file names, so a contact cannot make the name it is known by read as someone else's, and a nickname has a length again.
 
+### Fixed
+
+- **Linux:** the AppImage opens on Wayland desktops with a newer Mesa (openSUSE Leap 16, Fedora), where the window used to stay blank.
+
 ## 0.3.2
 
 A security release: everything a contact can send you is now held to what the protocol allows. Update every client. Nothing changes on the wire, and older clients keep working.
