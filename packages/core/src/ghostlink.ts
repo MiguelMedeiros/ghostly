@@ -51,8 +51,8 @@ export interface GhostLinkEvents {
   onStatus?(status: LinkStatus): void;
   onDataLinkState?(state: DataLinkState): void;
   onPoll?(poll: { polling: boolean; nextInMs: number }): void;
-  /** The peer is sending a file. Return where to put it, or null to refuse. */
-  onFileIncoming?(file: FileInfo): FileSink | null;
+  /** The peer is sending a file. Return where to put it, or null (or a reason) to refuse. */
+  onFileIncoming?(file: FileInfo): FileSink | string | null;
   onFileProgress?(fileId: string, transferred: number, direction: "in" | "out"): void;
   onFileComplete?(fileId: string, direction: "in" | "out"): void;
   onFileFailed?(fileId: string, reason: string, direction: "in" | "out"): void;

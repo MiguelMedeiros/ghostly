@@ -1,10 +1,8 @@
 import { useEffect, useState } from "react";
+import { PREVIEWABLE_IMAGE } from "@ghostly/core";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { formatFileSize } from "../lib/format";
 import type { ChatFile } from "../lib/types";
-
-/** Shown inline. SVG is left out on purpose: it can carry scripts. */
-const PREVIEWABLE = /^image\/(png|jpe?g|gif|webp)$/;
 
 /** A file in the chat: progress while it travels, then a preview (images) and a way to save it. */
 export function FileBubble({ file }: { file: ChatFile }) {
@@ -47,7 +45,7 @@ export function FileBubble({ file }: { file: ChatFile }) {
 
   return (
     <div className="min-w-[220px] max-md:min-w-[min(220px,68vw)] max-w-[min(330px,72vw)]" data-testid="file-bubble">
-      {blobUrl && PREVIEWABLE.test(file.mime) && (
+      {blobUrl && PREVIEWABLE_IMAGE.test(file.mime) && (
         <img src={blobUrl} alt={file.name} className="rounded-[4px] max-w-full max-h-[330px] object-contain block mb-1" />
       )}
       <div className="flex items-center gap-3 px-2 py-1.5">

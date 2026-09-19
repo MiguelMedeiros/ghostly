@@ -1,4 +1,13 @@
-import { DEFAULT_RELAYS, LIMITS, parseLocalTarget, sanitizeFileName, sanitizeMime, toBase64Url, randomBytes } from "@ghostly/core";
+import {
+  DEFAULT_RELAYS,
+  LIMITS,
+  parseLocalTarget,
+  safeBlobType,
+  sanitizeFileName,
+  sanitizeMime,
+  toBase64Url,
+  randomBytes,
+} from "@ghostly/core";
 import type { ServicesPlatform } from "../../../../src/lib/platform";
 import { fileStore } from "../shared/idb";
 import { TEST_MINT } from "../shared/mints";
@@ -48,20 +57,26 @@ export const servicesPlatform: ServicesPlatform | null = {
     if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
     if (source.size > LIMITS.maxFileBytes) throw new Error("That file is too large to send");
 
+    const wireId = toBase64Url(randomBytes(12));
     const file = {
-      id: `${link.id}-${toBase64Url(randomBytes(12))}`,
+      // Its own key space: nothing a peer sends can land on this id.
+      id: `${link.id}-out-${wireId}`,
       name: sanitizeFileName(source.name),
       size: source.size,
       mime: sanitizeMime(source.type),
     };
     // The page and the peer share this database; the bytes never go through a message.
-    await fileStore.put({ id: file.id, linkId: link.id, blob: source, createdAt: Date.now() });
+    await fileStore.put({ id: file.id, linkId: link.id, blob: source, createdAt: Date.now(), direction: "out", wireId });
     const timestamp = Date.now();
     await engine.call("sendFile", { linkId: link.id, file, timestamp });
     return { timestamp, file };
   },
   getTransfer: (fileId) => engine.state?.transfers[fileId] ?? null,
-  getFile: async (fileId) => (await fileStore.get(fileId))?.blob ?? null,
+  async getFile(fileId) {
+    const blob = (await fileStore.get(fileId))?.blob;
+    // Files stored before received types were cleaned up may still carry the peer's type.
+    return blob ? blob.slice(0, blob.size, safeBlobType(blob.type)) : null;
+  },
 
   wallet: {
     testMintUrl: TEST_MINT,
