@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1
+
+Two fixes. Nothing changes on the wire.
+
+### Fixed
+
+- The GitHub link in Settings → About went to a repository that does not exist. It now opens github.com/MiguelMedeiros/ghostly.
+- In the web app and the extension, chats removed with **Delete all chats** came back a few seconds later as empty "Anonymous" chats, and the same button also reset your settings. Deleting chats now deletes only the chats, and they stay deleted; **Clear all data** no longer brings them back either.
+
 ## 0.3.0
 
 Ghostly on your phone, and calls that do more. Nothing changes on the wire: 0.3.0 talks to 0.2.x and 0.1.x exactly as before.
