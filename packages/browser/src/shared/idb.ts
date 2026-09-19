@@ -9,7 +9,7 @@ let dbName = "ghostly";
 export function setDatabaseName(name: string): void {
   dbName = name;
 }
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 export const STORES = {
   links: "links",
@@ -21,6 +21,7 @@ export const STORES = {
   payments: "payments",
   quotes: "quotes",
   walletTx: "walletTx",
+  melts: "melts",
 } as const;
 
 /**
@@ -57,6 +58,8 @@ export function openDb(): Promise<IDBDatabase> {
       if (!has(STORES.payments)) db.createObjectStore(STORES.payments, { keyPath: "id" });
       if (!has(STORES.quotes)) db.createObjectStore(STORES.quotes, { keyPath: "quote" });
       if (!has(STORES.walletTx)) db.createObjectStore(STORES.walletTx, { keyPath: "id" });
+      // v5: Lightning payments the mint has not settled yet, and the proofs they hold.
+      if (!has(STORES.melts)) db.createObjectStore(STORES.melts, { keyPath: "quote" });
       if (!has(STORES.files)) {
         db.createObjectStore(STORES.files, { keyPath: "id" }).createIndex("byLink", "linkId");
       }
@@ -99,6 +102,27 @@ export function wrap<T>(request: IDBRequest<T>): Promise<T> {
 
 export async function store(name: string, mode: IDBTransactionMode): Promise<IDBObjectStore> {
   return (await openDb()).transaction(name, mode).objectStore(name);
+}
+
+/**
+ * Several writes across stores in one transaction: they all land, or none does.
+ * `work` only queues requests; the promise settles when the transaction does.
+ */
+export async function transact(names: string[], work: (stores: Record<string, IDBObjectStore>) => void): Promise<void> {
+  const tx = (await openDb()).transaction(names, "readwrite");
+  const done = new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onabort = () => reject(tx.error ?? new Error("The wallet could not save"));
+    tx.onerror = () => reject(tx.error ?? new Error("The wallet could not save"));
+  });
+  try {
+    work(Object.fromEntries(names.map((name) => [name, tx.objectStore(name)])));
+  } catch (error) {
+    tx.abort();
+    await done.catch(() => {});
+    throw error;
+  }
+  return done;
 }
 
 export const fileStore = {

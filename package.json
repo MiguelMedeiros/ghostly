@@ -11,7 +11,7 @@
     "lint": "eslint src packages extension/src web/src",
     "lint:fix": "eslint src packages extension/src web/src --fix",
     "typecheck": "tsc --noEmit && npm run typecheck -w @ghostly/core -w @ghostly/browser -w @ghostly/extension -w @ghostly/web",
-    "test": "npm run test -w @ghostly/core",
+    "test": "npm run test -w @ghostly/core -w @ghostly/browser",
     "build:extension": "npm run build -w @ghostly/extension",
     "test:interop": "npm run test:interop -w @ghostly/core",
     "test:e2e": "npm run build -w @ghostly/extension && npm run test:e2e -w @ghostly/extension",
