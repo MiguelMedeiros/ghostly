@@ -268,6 +268,7 @@ export function Sidebar() {
   const filtered = sessions.filter((s) => {
     if (!search) return true;
     const q = search.toLowerCase();
+    if (s.label?.toLowerCase().includes(q)) return true;
     if (s.nick?.toLowerCase().includes(q)) return true;
     if (s.peerPubKeyB64.toLowerCase().includes(q)) return true;
     return s.messages.some((m) => m.text.toLowerCase().includes(q));

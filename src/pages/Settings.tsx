@@ -395,6 +395,9 @@ export function Settings() {
                 </div>
                 <button
                   onClick={handleLockToggle}
+                  role="switch"
+                  aria-checked={lockEnabled && hasPassword}
+                  aria-label={t("settings.lockScreen")}
                   className={`relative w-12 h-6 rounded-full transition-colors ${
                     lockEnabled && hasPassword ? "bg-accent" : "bg-surface-alt"
                   }`}
@@ -562,6 +565,9 @@ export function Settings() {
                   </p>
                 </div>
                 <button
+                  role="switch"
+                  aria-checked={settings.notifications.soundEnabled}
+                  aria-label={t("settings.notificationSounds")}
                   onClick={() =>
                     updateNotifications({
                       soundEnabled: !settings.notifications.soundEnabled,
@@ -592,6 +598,9 @@ export function Settings() {
                 </div>
                 <button
                   onClick={() => updateReduceMotion(!settings.reduceMotion)}
+                  role="switch"
+                  aria-checked={settings.reduceMotion}
+                  aria-label="Reduce motion"
                   className={`relative w-12 h-6 rounded-full transition-colors shrink-0 ${
                     settings.reduceMotion ? "bg-accent" : "bg-surface-alt"
                   }`}

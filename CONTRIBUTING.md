@@ -51,7 +51,7 @@ npm test
 # Browser extension → extension/dist (load it unpacked in chrome://extensions)
 npm run build:extension
 
-# Two browsers, real relays, the whole flow
+# End-to-end: real browsers, the web app and the extension, every feature (see e2e/README.md)
 npm run test:e2e
 ```
 
@@ -105,6 +105,7 @@ Open an issue with the `enhancement` label describing:
    ```bash
    npm run lint
    npm run typecheck
+   npm run test:e2e
    npm run tauri dev
    ```
 5. **Commit** with a clear message

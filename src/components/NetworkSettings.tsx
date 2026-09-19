@@ -47,6 +47,7 @@ export function NetworkSettings() {
             value={relays}
             onChange={(e) => setRelays(e.target.value)}
             rows={3}
+            data-testid="network-relays"
             className={`${field} font-mono text-sm resize-y`}
           />
           <button
@@ -89,6 +90,7 @@ export function NetworkSettings() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => void save()}
+            data-testid="network-save"
             className="px-4 py-2 bg-accent text-[#111b21] rounded-lg text-sm font-bold hover:bg-accent-hover transition-colors cursor-pointer"
           >
             Save
