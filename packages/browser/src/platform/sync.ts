@@ -18,7 +18,11 @@ import { engine } from "./engine";
  * links the UI forgot are dropped, and what the peer receives lands in the
  * session the way `useChat` stores it on Desktop.
  */
-const MIGRATED_KEY = "ghostly_browser_sessions_imported";
+// Outside the `ghostly` prefix on purpose: "Clear all data" removes every key
+// under it, and without this marker the links the user just let go would be
+// imported again as chats. The old name still counts as imported.
+const MIGRATED_KEY = "gb-sessions-imported";
+const OLD_MIGRATED_KEY = "ghostly_browser_sessions_imported";
 const FORGET_AFTER_MS = 15_000;
 const JOIN_PATTERN = /^👋 (?:.+ )?joined$/;
 
@@ -72,6 +76,7 @@ async function reconcile(): Promise<void> {
   const state = engine.state;
   if (!state) return;
 
+  if (!localStorage.getItem(MIGRATED_KEY) && localStorage.getItem(OLD_MIGRATED_KEY)) localStorage.setItem(MIGRATED_KEY, "1");
   if (!localStorage.getItem(MIGRATED_KEY)) {
     // Links made before the UI kept sessions (or by another Ghostly page).
     for (const link of await engine.call("exportLinks")) {
