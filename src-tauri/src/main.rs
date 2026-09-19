@@ -13,6 +13,21 @@ use pkarr::Client;
 use tauri::Manager;
 use viewer::ViewerState;
 
+/// Only the Ghostly window may call commands. The capabilities already say so;
+/// this holds even if they are ever loosened, because the other windows run a
+/// contact's code.
+fn only_main<R: tauri::Runtime>(
+    handler: impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static,
+) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
+    move |invoke| {
+        if invoke.message.webview_ref().label() != "main" {
+            invoke.resolver.reject("Not allowed from this window");
+            return true;
+        }
+        handler(invoke)
+    }
+}
+
 fn main() {
     let mut builder = Client::builder();
 
@@ -38,7 +53,7 @@ fn main() {
                 viewer::forget_window(window.app_handle(), window.label());
             }
         })
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(only_main(tauri::generate_handler![
             commands::get_profile,
             commands::create_keypair,
             commands::get_public_key,
@@ -52,7 +67,7 @@ fn main() {
             commands::local_fetch,
             commands::open_service_window,
             commands::service_respond,
-        ])
+        ]))
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

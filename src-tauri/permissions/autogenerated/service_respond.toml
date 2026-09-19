@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-service-respond"
+description = "Enables the service_respond command without any pre-configured scope."
+commands.allow = ["service_respond"]
+
+[[permission]]
+identifier = "deny-service-respond"
+description = "Denies the service_respond command without any pre-configured scope."
+commands.deny = ["service_respond"]

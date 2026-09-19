@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-profile"
+description = "Enables the get_profile command without any pre-configured scope."
+commands.allow = ["get_profile"]
+
+[[permission]]
+identifier = "deny-get-profile"
+description = "Denies the get_profile command without any pre-configured scope."
+commands.deny = ["get_profile"]
