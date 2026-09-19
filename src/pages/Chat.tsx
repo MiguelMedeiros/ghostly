@@ -21,7 +21,8 @@ import {
   updateSessionLabel,
   addMessage,
 } from "../lib/storage";
-import type { ChatParams, CallSignal, CallEventType, ChatMessage } from "../lib/types";
+import { parseCallSignal } from "@ghostly/core";
+import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
 
 export function Chat() {
   const { "*": splat } = useParams();
@@ -112,12 +113,7 @@ export function Chat() {
 
   const incomingHasVideo = (() => {
     if (!incomingCallSignal) return false;
-    try {
-      const sig: CallSignal = JSON.parse(incomingCallSignal);
-      return sig.m?.includes("v") ?? false;
-    } catch {
-      return false;
-    }
+    return parseCallSignal(incomingCallSignal)?.m?.includes("v") ?? false;
   })();
 
   const platform = useServicesPlatform();
