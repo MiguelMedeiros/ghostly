@@ -21,6 +21,10 @@ updates:
     ignore:
       - dependency-name: typescript
         update-types: ["version-update:semver-major"]
+      # eslint-config-next pulls eslint-plugin-react, which breaks on ESLint 10
+      # (context.getFilename was removed); drop once it supports 10.
+      - dependency-name: eslint
+        update-types: ["version-update:semver-major"]
     groups:
       website:
         patterns: ["*"]
