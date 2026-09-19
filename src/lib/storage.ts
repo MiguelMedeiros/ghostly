@@ -1,4 +1,14 @@
+import { MAX_NICK_LENGTH, sanitizeDisplayText } from "@ghostly/core";
 import type { ChatMessage, ChatSession } from "./types";
+
+/**
+ * The name a peer goes by in the sidebar and the chat header. It comes from
+ * the peer, either as `_nick` or read back out of its "joined" message, so it
+ * is cut and stripped of what could make it read as another contact.
+ */
+export function peerDisplayName(name: string | undefined): string | undefined {
+  return name ? sanitizeDisplayText(name, MAX_NICK_LENGTH) : undefined;
+}
 
 export const GHOST_NAMES = [
   "Casper", "Phantom", "Specter", "Shadow", "Wraith",
@@ -76,14 +86,9 @@ export function addMessage(
   session.lastSyncAt = Date.now();
   
   if ((message.sender === "peer" || message.sender === "system") && message.id.startsWith("peer_")) {
-    if (message.nick) {
-      session.nick = message.nick;
-    } else {
-      const joinMatch = message.text.match(/^👋 (.+) joined$/);
-      if (joinMatch && joinMatch[1]) {
-        session.nick = joinMatch[1];
-      }
-    }
+    const joinMatch = message.nick ? null : message.text.match(/^👋 (.+) joined$/);
+    const nick = peerDisplayName(message.nick ?? joinMatch?.[1]);
+    if (nick) session.nick = nick;
   }
   
   saveSession(session);

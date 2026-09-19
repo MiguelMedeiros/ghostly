@@ -1,4 +1,5 @@
 import { utf8Encode } from "./bytes";
+import { sanitizeNick } from "./text";
 
 /**
  * Framing on the `ghostly/1` DataChannel (ordered, reliable).
@@ -253,7 +254,7 @@ export function decodeControl(text: string): ControlFrame | null {
   switch (f.t) {
     case "hello":
       if (typeof f.v !== "number") return null;
-      return { t: "hello", v: f.v, svc: f.svc, nick: typeof f.nick === "string" ? f.nick.slice(0, 64) : undefined };
+      return { t: "hello", v: f.v, svc: f.svc, nick: sanitizeNick(f.nick) };
     case "m":
       if (typeof f.ts !== "number" || typeof f.m !== "string") return null;
       if (f.m.length > LIMITS.maxChatMessageBytes) return null;

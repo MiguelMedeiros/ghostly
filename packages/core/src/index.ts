@@ -1,4 +1,5 @@
 export * from "./bytes";
+export * from "./text";
 export * from "./crypto";
 export * from "./identity";
 export * from "./dns";

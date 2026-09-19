@@ -3,6 +3,8 @@
  * are the services Ghostly always had; `http` exposes a local web application.
  * Unknown types are preserved so future services do not need a new protocol.
  */
+import { sanitizeDisplayText } from "./text";
+
 export type BuiltinServiceType = "chat" | "voice" | "video" | "http";
 
 export interface ServiceAd {
@@ -81,14 +83,9 @@ export function encodeServices(services: ServiceAd[]): string {
 }
 
 function cleanString(value: unknown, max: number): string | undefined {
-  if (typeof value !== "string") return undefined;
-  let clean = "";
-  for (const char of value) {
-    const code = char.codePointAt(0) ?? 0;
-    if (code >= 32 && code !== 127) clean += char;
-  }
-  clean = clean.trim();
-  return clean ? clean.slice(0, max) : undefined;
+  // A service name is a button the user presses to run a contact's app, so it
+  // must not be able to read as another service's.
+  return typeof value === "string" ? sanitizeDisplayText(value, max) : undefined;
 }
 
 /** Parses an untrusted advertisement. Invalid entries are dropped, never thrown. */

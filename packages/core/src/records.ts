@@ -1,6 +1,7 @@
 import { encrypt, tryDecrypt } from "./crypto";
 import { MAX_DNS_PACKET_BYTES, measureRecords, type GhostRecord, type SignedPacket } from "./pkarr";
 import { decodeServices, encodeServices, type ServiceAd } from "./services";
+import { sanitizeNick } from "./text";
 
 /**
  * TXT labels a peer publishes under its own key. Every value except `_ts` and
@@ -151,7 +152,9 @@ export function parseLinkRecords(packet: SignedPacket, encKey: Uint8Array): Reso
         resolved.peerAck = Number.parseInt(value, 10) || 0;
         break;
       case LABEL.nick:
-        resolved.nick = tryDecrypt(value, encKey) ?? undefined;
+        // A nickname is shown beside every message and is copied onto each of
+        // them, so it is cut and stripped before anything keeps it.
+        resolved.nick = sanitizeNick(tryDecrypt(value, encKey));
         break;
       case LABEL.call:
         resolved.callSignal = tryDecrypt(value, encKey);

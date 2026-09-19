@@ -17,8 +17,8 @@ import {
   getInviteCode,
   deleteSession,
   loadSession,
+  peerDisplayName,
   updateSessionLabel,
-  addMessage,
 } from "../lib/storage";
 import { parseCallSignal } from "@ghostly/core";
 import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
@@ -189,16 +189,17 @@ export function Chat() {
     
     for (const msg of peerMessages) {
       if (msg.nick) {
-        if (msg.nick !== peerNick) {
-          setPeerNick(msg.nick);
+        const nick = peerDisplayName(msg.nick);
+        if (nick && nick !== peerNick) {
+          setPeerNick(nick);
         }
         return;
       }
-      
+
       const joinMatch = msg.text.match(/^👋 (.+) joined$/);
       if (joinMatch && joinMatch[1]) {
-        const extractedNick = joinMatch[1];
-        if (extractedNick !== peerNick) {
+        const extractedNick = peerDisplayName(joinMatch[1]);
+        if (extractedNick && extractedNick !== peerNick) {
           setPeerNick(extractedNick);
         }
         return;
