@@ -74,6 +74,22 @@ export function openDb(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
+/**
+ * "Clear all data": chats, messages, files and shared services. The wallet
+ * (proofs, payments, quotes, history) and the mint list stay: ecash is money,
+ * and nothing else holds a copy of it.
+ */
+export async function clearChatData(): Promise<void> {
+  if (typeof indexedDB === "undefined") return;
+  const names = [STORES.links, STORES.messages, STORES.files, STORES.services];
+  const tx = (await openDb()).transaction(names, "readwrite");
+  for (const name of names) tx.objectStore(name).clear();
+  await new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = tx.onabort = () => reject(tx.error);
+  });
+}
+
 export function wrap<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import type * as Desktop from "../../../../src/hooks/useChat";
 import {
   addMessage,
-  generateSessionId,
   getInviteCode,
   loadSession,
   saveSession,
@@ -31,7 +30,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
   const seedB64 = params?.seedB64;
   const peerPubKey = params?.peerPubKeyB64;
   const encKeyB64 = params?.encKeyB64;
-  const sessionId = seedB64 && peerPubKey ? generateSessionId(seedB64, peerPubKey) : "";
+  const sessionId = params?.sessionId ?? "";
   const link = peerPubKey ? state?.links.find((l) => l.peerPubKeyZ32 === peerPubKey) : undefined;
   const linkId = link?.id;
 

@@ -182,10 +182,11 @@ export function getInviteCode(sessionId: string): string | null {
   }
 }
 
-export function generateSessionId(
-  mySeedB64: string,
-  peerPubKeyB64: string,
-): string {
+/**
+ * The id sessions were stored under before ids became random: a 32-bit hash of
+ * the first characters of the keys. Only used to find those sessions again.
+ */
+function legacySessionId(mySeedB64: string, peerPubKeyB64: string): string {
   const combined = mySeedB64.slice(0, 8) + peerPubKeyB64.slice(0, 8);
   let hash = 0;
   for (let i = 0; i < combined.length; i++) {
@@ -194,4 +195,52 @@ export function generateSessionId(
     hash |= 0;
   }
   return Math.abs(hash).toString(36);
+}
+
+/** 128 random bits. Opaque: the id is what goes in the URL, never the keys. */
+function newSessionId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** The stored session for this pair of keys, whatever id it was stored under. */
+export function findSession(
+  mySeedB64: string,
+  peerPubKeyB64: string,
+): ChatSession | null {
+  const matches = (s: ChatSession | null): s is ChatSession =>
+    !!s && s.mySeedB64 === mySeedB64 && s.peerPubKeyB64 === peerPubKeyB64;
+  const legacy = loadSession(legacySessionId(mySeedB64, peerPubKeyB64));
+  if (matches(legacy)) return legacy;
+  return listSessions().find(matches) ?? null;
+}
+
+export interface SessionKeys {
+  seedB64: string;
+  peerPubKeyB64: string;
+  encKeyB64: string;
+}
+
+/**
+ * The id of the session for these keys, stored first if it is new. Chats are
+ * routed by this id so the keys never reach the address bar or the history.
+ */
+export function ensureSession(
+  keys: SessionKeys,
+  options: { inviteCode?: string; createdAt?: number } = {},
+): string {
+  const existing = findSession(keys.seedB64, keys.peerPubKeyB64);
+  const id = existing?.id ?? newSessionId();
+  if (!existing) {
+    saveSession({
+      id,
+      mySeedB64: keys.seedB64,
+      peerPubKeyB64: keys.peerPubKeyB64,
+      encKeyB64: keys.encKeyB64,
+      messages: [],
+      createdAt: options.createdAt ?? Date.now(),
+    });
+  }
+  if (options.inviteCode) saveInviteCode(id, options.inviteCode);
+  return id;
 }

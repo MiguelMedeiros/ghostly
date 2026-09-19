@@ -1,10 +1,8 @@
 import {
   addMessage,
-  generateSessionId,
+  ensureSession,
+  findSession,
   listSessions,
-  loadSession,
-  saveInviteCode,
-  saveSession,
   updateSessionLabel,
 } from "../../../../src/lib/storage";
 import type { ChatMessage, ChatSession } from "../../../../src/lib/types";
@@ -80,17 +78,11 @@ async function reconcile(): Promise<void> {
   if (!localStorage.getItem(MIGRATED_KEY)) {
     // Links made before the UI kept sessions (or by another Ghostly page).
     for (const link of await engine.call("exportLinks")) {
-      const id = generateSessionId(link.seedB64, link.peerPubKeyZ32);
-      if (loadSession(id)) continue;
-      saveSession({
-        id,
-        mySeedB64: link.seedB64,
-        peerPubKeyB64: link.peerPubKeyZ32,
-        encKeyB64: link.encKeyB64,
-        messages: [],
-        createdAt: link.createdAt,
-      });
-      if (link.inviteCode) saveInviteCode(id, link.inviteCode);
+      if (findSession(link.seedB64, link.peerPubKeyZ32)) continue;
+      const id = ensureSession(
+        { seedB64: link.seedB64, peerPubKeyB64: link.peerPubKeyZ32, encKeyB64: link.encKeyB64 },
+        { inviteCode: link.inviteCode, createdAt: link.createdAt },
+      );
       if (link.label) updateSessionLabel(id, link.label);
     }
     localStorage.setItem(MIGRATED_KEY, "1");
