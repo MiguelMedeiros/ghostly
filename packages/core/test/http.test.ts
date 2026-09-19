@@ -103,6 +103,7 @@ describe("header hygiene", () => {
           ["transfer-encoding", "chunked"],
           ["location", "http://localhost:3400/next"],
           ["set-cookie", "sid=1; Domain=localhost; Path=/; HttpOnly"],
+          ["set-cookie", "fix=1; Domain =invalid; Path=/"],
         ],
         parseLocalTarget("localhost:3400"),
       ),
@@ -110,6 +111,7 @@ describe("header hygiene", () => {
       ["content-type", "text/html"],
       ["location", "/next"],
       ["set-cookie", "sid=1; Path=/; HttpOnly"],
+      ["set-cookie", "fix=1; Path=/"],
     ]);
   });
 });
