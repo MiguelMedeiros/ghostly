@@ -29,7 +29,7 @@
 
 [![Latest Release](https://img.shields.io/github/v/release/MiguelMedeiros/ghostly?style=for-the-badge&label=Download&color=22d3ee)](https://github.com/MiguelMedeiros/ghostly/releases)
 
-Available for macOS, Windows and Linux. See [Installation Guide](docs/INSTALLATION.md) for all options.
+Nothing to install: **[app.ghostly.tools](https://app.ghostly.tools)**, on a computer or a phone. Or the desktop app for macOS, Windows and Linux, or the browser extension: see the [Installation Guide](docs/INSTALLATION.md).
 
 **CLI:**
 
@@ -79,9 +79,13 @@ This works today in **[Ghostly Browser](docs/BROWSER.md)**, a Chromium extension
 ## Features
 
 - **E2E Encrypted** — 256-bit NaCl secretbox encryption
-- **Ephemeral** — Messages vanish from the DHT in ~5 hours
-- **Serverless** — No servers, no infrastructure
-- **Video & Voice Calls** — WebRTC peer-to-peer communication
+- **Ephemeral** — Messages vanish from the DHT in ~5 hours; everything else exists only while you are online
+- **Serverless** — No servers, no accounts
+- **Calls** — Voice, video and screen sharing, peer to peer, in a window you can put aside
+- **Share localhost** — A contact opens a web app running on your machine, while you are online
+- **Files** — Up to 100 MiB, straight to your contact
+- **Sats** — An ecash wallet with Lightning in and out; pasted invoices and tokens become cards you can pay or redeem
+- **Everywhere** — Desktop, browser extension and [a web app](https://app.ghostly.tools) that installs on a phone like a native one
 - **Open Source** — All code is open for audit
 
 ## Screenshots
@@ -113,11 +117,12 @@ This works today in **[Ghostly Browser](docs/BROWSER.md)**, a Chromium extension
 
 ## Documentation
 
-- [Installation](docs/INSTALLATION.md) — Download links, CLI install, build from source
+- [Installation](docs/INSTALLATION.md) — Web app, extension, desktop downloads, CLI, build from source
 - [Architecture](docs/ARCHITECTURE.md) — How it works, tech stack, security model
 - [Protocol](docs/PROTOCOL.md) — Records, service advertisements, WebRTC data link, HTTP over WebRTC
 - [Ghostly Browser](docs/BROWSER.md) — Run the extension, share a local app, limitations
-- [Ghostly on the web](docs/WEB.md) — The same client in a tab: `docker compose up`
+- [Ghostly on the web](docs/WEB.md) — The same client in a tab or on a phone: `docker compose up`
+- [Releasing](docs/RELEASING.md) — Version, tag, publish, deploy
 - [CLI Guide](docs/CLI.md) — Command reference and usage examples
 - [AI Agents](docs/AI-AGENTS.md) — Integration with OpenClaw, Cursor, bot examples
 - [Contributing](CONTRIBUTING.md) — How to contribute to the project

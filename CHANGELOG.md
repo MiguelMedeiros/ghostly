@@ -1,13 +1,22 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
-- **Your own picture in a call moves and resizes.** Drag it anywhere, pull any corner to resize it. It keeps the shape of what it shows, camera or screen, never leaves the window, and a double click puts it back. The small call window resizes the same way.
-- **A simpler wallet.** A bigger balance with two plain actions, Receive and Pay. Pay reads a pasted Lightning invoice on the spot (amount, description, expired or not) before anything is asked of the mint. The mints list is one line per mint, with limits, the message of the day and the remove and make-primary actions a click away, and one sentence of context instead of a paragraph.
-- **A call you can put aside.** The call screen shrinks into a floating window that can be dragged anywhere and resized from its corner, so you can keep chatting, send files or sats while you talk. It remembers how you left it.
-- **Screen sharing.** In a video call, swap your camera for your screen and back; or start a call straight from "Share your screen" in the chat header. The screen rides on the video stream the call already has, so there is no new signaling and older clients receive it as ordinary video. A shared screen is shown whole instead of cropped. Needs a browser that can capture the screen, so not on phones.
-- **Money pasted into a chat reads as money.** A Lightning invoice shows its amount, description and expiry, with a QR code, a copy button, a link that opens a Lightning wallet on the device, and a Pay button that quotes the fee before anything is spent. Ecash tokens show their amount, mint and memo and can be redeemed from the card; Cashu payment requests are shown too. Long invoices and tokens fit once the peer to peer connection is open.
+Ghostly on your phone, and calls that do more. Nothing changes on the wire: 0.3.0 talks to 0.2.x and 0.1.x exactly as before.
+
+### New
+
 - **A phone layout that feels like a messenger.** Below 768px the app shows one screen at a time: the chat list, then the conversation with a back arrow. Wallet, Share and Settings are screens of their own behind a bottom tab bar; emoji, GIFs and payments open as bottom sheets; calls take the whole screen. The layout follows the visible viewport, so the message input stays above the keyboard, and respects the safe areas. The web app can be installed to the home screen. Wide screens are unchanged.
+- **Screen sharing.** In a video call, swap your camera for your screen and back; or start a call straight from "Share your screen" in the chat header. The screen rides on the video stream the call already has, so there is no new signaling and older clients receive it as ordinary video. A shared screen is shown whole instead of cropped. Needs a browser that can capture the screen, so not on phones.
+- **A call you can put aside.** The call screen shrinks into a floating window that can be dragged anywhere and resized from its corner, so you can keep chatting, send files or sats while you talk. It remembers how you left it.
+- **Your own picture in a call moves and resizes.** Drag it anywhere, pull any corner to resize it. It keeps the shape of what it shows, camera or screen, never leaves the window, and a double click puts it back. The small call window resizes the same way.
+- **Money pasted into a chat reads as money.** A Lightning invoice shows its amount, description and expiry, with a QR code, a copy button, a link that opens a Lightning wallet on the device, and a Pay button that quotes the fee before anything is spent. Ecash tokens show their amount, mint and memo and can be redeemed from the card; Cashu payment requests are shown too. Long invoices and tokens fit once the peer to peer connection is open.
+- **A simpler wallet.** A bigger balance with two plain actions, Receive and Pay. Pay reads a pasted Lightning invoice on the spot (amount, description, expired or not) before anything is asked of the mint. The mints list is one line per mint, with limits, the message of the day and the remove and make-primary actions a click away, and one sentence of context instead of a paragraph.
+
+### Fixed
+
+- In a call, your own picture stayed black after turning the camera off and on again.
+- The history said "1 movements".
 
 ## 0.2.0
 

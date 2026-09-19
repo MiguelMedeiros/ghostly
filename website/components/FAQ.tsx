@@ -25,6 +25,11 @@ const faqs = [
       "Same client, same protocol. The web app needs no install but cannot share localhost or open a contact's app. The extension and desktop can. Desktop also reaches the DHT without relays.",
   },
   {
+    question: "Does it work on my phone?",
+    answer:
+      "Yes. Open app.ghostly.tools and add it to your home screen: it looks and behaves like a messenger app. Chat, calls, files and sats work; sharing your screen or a localhost app needs a computer.",
+  },
+  {
     question: "How is it encrypted?",
     answer:
       "NaCl secretbox (XSalsa20-Poly1305) with a 256-bit key per chat, shared in the invite. Keys never leave your device.",

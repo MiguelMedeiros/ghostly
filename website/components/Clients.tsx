@@ -7,7 +7,7 @@ const clients: { name: string; icon: IconName; pitch: string; cta: { label: stri
   {
     name: "Web",
     icon: "globe",
-    pitch: "Nothing to install. A ghost until you close the tab.",
+    pitch: "Nothing to install. On a phone it adds to the home screen like an app.",
     cta: { label: "Open app.ghostly.tools", href: "https://app.ghostly.tools" },
     note: "Beta",
   },
@@ -35,7 +35,7 @@ const clients: { name: string; icon: IconName; pitch: string; cta: { label: stri
 ];
 
 const rows: [string, boolean[]][] = [
-  ["Chat, voice & video", [true, true, true, false]],
+  ["Chat, voice, video & screen sharing", [true, true, true, false]],
   ["Text chat from scripts", [false, false, false, true]],
   ["Files and sats", [true, true, true, false]],
   ["Open a contact's web app", [false, true, true, false]],

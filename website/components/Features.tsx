@@ -21,8 +21,8 @@ const features = [
     ),
   },
   {
-    title: "Voice & video",
-    tagline: "Peer to peer. Nobody in the middle.",
+    title: "Calls & screen sharing",
+    tagline: "Voice, video or your screen, peer to peer. Keep chatting while you talk.",
     icon: (
       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
@@ -49,7 +49,7 @@ const features = [
   },
   {
     title: "Sats",
-    tagline: "Ecash wallet with Lightning. Send and request in the chat.",
+    tagline: "Ecash wallet with Lightning. Paste an invoice, it becomes a Pay button.",
     icon: (
       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
