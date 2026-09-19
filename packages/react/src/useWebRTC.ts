@@ -33,6 +33,14 @@ export function useWebRTC({
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
+  const [isScreenSharing, setIsScreenSharingState] = useState(false);
+  const isScreenSharingRef = useRef(false);
+  const setIsScreenSharing = useCallback((sharing: boolean) => {
+    isScreenSharingRef.current = sharing;
+    setIsScreenSharingState(sharing);
+  }, []);
+  /** Whether this call negotiated a video stream we send on, which is what a screen can ride on. */
+  const [sendsVideo, setSendsVideo] = useState(false);
   const [hasVideo, setHasVideo] = useState(false);
   const [callStartedAt, setCallStartedAt] = useState<number | null>(null);
 
@@ -66,9 +74,11 @@ export function useWebRTC({
     setRemoteStream(null);
     setIsMuted(false);
     setIsVideoOff(false);
+    setIsScreenSharing(false);
+    setSendsVideo(false);
     setHasVideo(false);
     setCallStartedAt(null);
-  }, []);
+  }, [setIsScreenSharing]);
 
   const createPeerConnection = useCallback(() => {
     const pc = new RTCPeerConnection(RTC_CONFIG);
@@ -95,6 +105,7 @@ export function useWebRTC({
       
       if (state === "connected" || state === "completed") {
         updateCallState("connected");
+        setSendsVideo(pc.getTransceivers().some((t) => t.receiver.track.kind === "video" && !!t.currentDirection?.includes("send")));
         setCallStartedAt(Date.now());
         setFastPoll(false);
         if (!callConnectedEventFiredRef.current) {
@@ -136,8 +147,44 @@ export function useWebRTC({
     return pc;
   }, [updateCallState, setFastPoll, cleanupConnection, publishCallSignal, addCallEventMessage]);
 
+  /**
+   * Swaps what the video sender carries, camera or screen. `replaceTrack` needs no
+   * renegotiation, so this works with any peer that is in a video call with us.
+   */
+  const swapVideoTrack = useCallback(async (next: MediaStreamTrack | null) => {
+    const pc = pcRef.current;
+    const current = localStreamRef.current;
+    const sender = pc?.getTransceivers().find((t) => t.receiver.track.kind === "video" && t.currentDirection?.includes("send"))?.sender;
+    if (!pc || !current || !sender) throw new Error("This call has no video to replace");
+    await sender.replaceTrack(next);
+    current.getVideoTracks().forEach((track) => {
+      track.onended = null;
+      track.stop();
+    });
+    const stream = new MediaStream([...current.getAudioTracks(), ...(next ? [next] : [])]);
+    localStreamRef.current = stream;
+    setLocalStream(stream);
+    setIsVideoOff(next === null);
+  }, []);
+
+  const stopScreenShare = useCallback(async () => {
+    setIsScreenSharing(false);
+    if (callStateRef.current === "idle") return;
+    const camera = await navigator.mediaDevices.getUserMedia({ video: true }).then((s) => s.getVideoTracks()[0], () => null);
+    await swapVideoTrack(camera).catch(() => camera?.stop());
+  }, [swapVideoTrack, setIsScreenSharing]);
+
+  // The browser's own "Stop sharing" button ends the track without telling anyone else.
+  const watchScreenTrack = useCallback(
+    (track: MediaStreamTrack) => {
+      track.contentHint = "detail";
+      track.onended = () => void stopScreenShare();
+    },
+    [stopScreenShare],
+  );
+
   const startCall = useCallback(
-    async (withVideo: boolean) => {
+    async (withVideo: boolean, source: "camera" | "screen" = "camera") => {
       if (callStateRef.current !== "idle") return;
 
       // A hang-up schedules clearing `_call` a few seconds later; that must not
@@ -155,10 +202,20 @@ export function useWebRTC({
         updateCallState("offering");
         addCallEventMessage?.("call_started", withVideo);
 
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: withVideo,
-        });
+        let stream: MediaStream;
+        if (withVideo && source === "screen") {
+          // To the peer this is an ordinary video call; the picture just happens to be the screen.
+          const display = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+          const mic = await navigator.mediaDevices.getUserMedia({ audio: true }).catch((error) => {
+            display.getTracks().forEach((track) => track.stop());
+            throw error;
+          });
+          stream = new MediaStream([...mic.getAudioTracks(), ...display.getVideoTracks()]);
+          watchScreenTrack(display.getVideoTracks()[0]);
+          setIsScreenSharing(true);
+        } else {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: withVideo });
+        }
         localStreamRef.current = stream;
         setLocalStream(stream);
 
@@ -192,6 +249,8 @@ export function useWebRTC({
     },
     [
       createPeerConnection,
+      setIsScreenSharing,
+      watchScreenTrack,
       publishCallSignal,
       setFastPoll,
       updateCallState,
@@ -347,6 +406,23 @@ export function useWebRTC({
     }
   }, []);
 
+  const toggleScreenShare = useCallback(async () => {
+    if (isScreenSharingRef.current) return stopScreenShare();
+    try {
+      const display = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      const track = display.getVideoTracks()[0];
+      await swapVideoTrack(track).catch((error) => {
+        track.stop();
+        throw error;
+      });
+      watchScreenTrack(track);
+      setIsScreenSharing(true);
+    } catch (error) {
+      // Closing the picker is not an error worth showing.
+      if ((error as DOMException)?.name !== "NotAllowedError") onErrorRef.current?.(error);
+    }
+  }, [stopScreenShare, swapVideoTrack, watchScreenTrack, setIsScreenSharing]);
+
   useEffect(() => {
     if (!incomingCallSignal) return;
 
@@ -407,12 +483,16 @@ export function useWebRTC({
     };
   }, []);
 
+  const canShareScreen = callState === "connected" && sendsVideo && typeof navigator.mediaDevices?.getDisplayMedia === "function";
+
   return {
     callState,
     localStream,
     remoteStream,
     isMuted,
     isVideoOff,
+    isScreenSharing,
+    canShareScreen,
     hasVideo,
     callStartedAt,
     startCall,
@@ -421,5 +501,6 @@ export function useWebRTC({
     rejectCall,
     toggleMute,
     toggleVideo,
+    toggleScreenShare,
   };
 }

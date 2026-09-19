@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Screen sharing.** In a video call, swap your camera for your screen and back; or start a call straight from "Share your screen" in the chat header. The screen rides on the video stream the call already has, so there is no new signaling and older clients receive it as ordinary video. A shared screen is shown whole instead of cropped. Needs a browser that can capture the screen, so not on phones.
 - **A phone layout that feels like a messenger.** Below 768px the app shows one screen at a time: the chat list, then the conversation with a back arrow. Wallet, Share and Settings are screens of their own behind a bottom tab bar; emoji, GIFs and payments open as bottom sheets; calls take the whole screen. The layout follows the visible viewport, so the message input stays above the keyboard, and respects the safe areas. The web app can be installed to the home screen. Wide screens are unchanged.
 
 ## 0.2.0
