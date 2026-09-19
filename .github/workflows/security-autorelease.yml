@@ -3,8 +3,8 @@ name: Security autorelease
 # The security routine (a scheduled Claude Code agent) pushes its fixes to a
 # `claude/security-auto-*` branch, version already bumped by one patch. Once
 # CI passes on that push, this workflow, which always runs from `main`, checks
-# the branch against scripts/autorelease-gate.mjs, merges it, tags it and
-# publishes the release.
+# the branch against scripts/autorelease-gate.mjs, fast-forwards main to it,
+# tags it and publishes the release.
 #
 # Repository variable SECURITY_AUTORELEASE: "all" (default: dependency and
 # code fixes), "deps" (dependency updates only; code fixes wait for a person)
@@ -63,29 +63,24 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      pull-requests: write
     steps:
-      - name: Merge
+      # The gate made sure the branch sits right on top of main, so main moves
+      # to it as a fast-forward: the routine's commits land as they are, with
+      # no pull request (workflows may not open one in this repository). If
+      # main moved meanwhile, the update is refused and nothing ships.
+      - name: Fast-forward main and tag
         env:
           GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ github.event.workflow_run.head_branch }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           VERSION: ${{ needs.gate.outputs.version }}
-          NOTES: ${{ needs.gate.outputs.notes }}
         run: |
           set -euo pipefail
-          PR=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --state open --json number -q '.[0].number')
-          if [ -z "$PR" ]; then
-            printf '%s\n\n%s\n' "$NOTES" "Merged and released automatically by the Security autorelease workflow." > body.md
-            gh pr create --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base main \
-              --title "fix(security): $VERSION" --body-file body.md
-            PR=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --state open --json number -q '.[0].number')
-          fi
-          gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --squash --delete-branch \
-            --match-head-commit "$HEAD_SHA" --subject "chore(release): $VERSION [security] (#$PR)"
-          MERGED=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json mergeCommit -q .mergeCommit.oid)
-          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/v$VERSION" -f sha="$MERGED"
-          echo "Merged #$PR as $MERGED, tagged v$VERSION" >> "$GITHUB_STEP_SUMMARY"
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/main" -f sha="$HEAD_SHA" -F force=false >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/v$VERSION" -f sha="$HEAD_SHA" >/dev/null
+          # A pull request someone opened for the branch now shows as merged.
+          gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$BRANCH" || true
+          echo "main fast-forwarded to $HEAD_SHA, tagged v$VERSION" >> "$GITHUB_STEP_SUMMARY"
 
   release:
     name: Release
