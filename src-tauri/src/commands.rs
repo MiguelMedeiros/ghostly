@@ -5,13 +5,12 @@ use tauri::State;
 use crate::crypto;
 use crate::local_fetch::{self, LocalResponse};
 use crate::pkarr_client;
-use crate::records::{self, PublishLog, RecordInput, ResolvedPacket};
+use crate::records::{self, RecordInput, ResolvedPacket};
 use crate::types::{CompactMessage, KeypairResult, ResolvedBatch};
 use crate::viewer::{self, ServiceResponse};
 
 pub struct AppState {
     pub pkarr_client: Client,
-    pub publish_log: PublishLog,
 }
 
 #[tauri::command]
@@ -114,7 +113,7 @@ pub async fn publish_records(
         .try_into()
         .map_err(|_| "Seed must be exactly 32 bytes")?;
     let keypair = Keypair::from_secret_key(&seed);
-    records::publish(&state.pkarr_client, &state.publish_log, &keypair, &records).await
+    records::publish(&state.pkarr_client, &keypair, &records).await
 }
 
 #[tauri::command]

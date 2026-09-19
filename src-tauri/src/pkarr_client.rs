@@ -1,4 +1,4 @@
-use pkarr::{Client, Keypair, PublicKey, SignedPacket};
+use pkarr::{Client, Keypair, PublicKey, ResolvePolicy, SignedPacket};
 use simple_dns::rdata::RData;
 
 use crate::crypto;
@@ -131,7 +131,7 @@ pub async fn publish_messages(
         .map_err(|e| format!("Sign error: {}", e))?;
 
     client
-        .publish(&signed_packet, None)
+        .publish(&signed_packet)
         .await
         .map_err(|e| format!("Publish error: {}", e))?;
 
@@ -147,11 +147,13 @@ pub async fn resolve_messages(
         .try_into()
         .map_err(|e| format!("Invalid public key: {}", e))?;
 
-    let resolved = client.resolve_most_recent(&public_key).await;
+    let resolved = client
+        .resolve(&public_key, ResolvePolicy::NetworkOnly)
+        .await;
 
     let signed_packet = match resolved {
-        Some(p) => p,
-        None => return Ok(None),
+        Ok(p) => p,
+        Err(_) => return Ok(None),
     };
 
     let packet_timestamp = signed_packet.timestamp().as_u64() as i64 / 1000;
