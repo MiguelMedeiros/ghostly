@@ -2,7 +2,7 @@
  * The release the site offers for download. `scripts/bump-version.mjs` sets it;
  * every download link on the site is built from here.
  */
-export const VERSION = "0.3.3";
+export const VERSION = "0.3.4";
 
 const BASE = "https://github.com/MiguelMedeiros/ghostly/releases";
 

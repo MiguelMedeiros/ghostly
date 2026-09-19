@@ -6,7 +6,7 @@ Open **https://app.ghostly.tools** in any browser. On a phone, add it to the hom
 
 ## Browser extension (Chrome, Brave, Edge)
 
-1. Download [ghostly-browser-extension-0.3.3.zip](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.3.3/ghostly-browser-extension-0.3.3.zip) and unzip it somewhere you will keep.
+1. Download [ghostly-browser-extension-0.3.4.zip](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.3.4/ghostly-browser-extension-0.3.4.zip) and unzip it somewhere you will keep.
 2. Open `chrome://extensions` and turn on **Developer mode**.
 3. Click **Load unpacked** and pick the folder.
 
@@ -16,21 +16,21 @@ To update, replace the folder's contents with the new zip and press the reload a
 
 | Platform | Architecture | Download |
 |----------|--------------|----------|
-| **macOS** | Apple Silicon (M1/M2/M3) | [Ghostly_aarch64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.3.3/Ghostly_0.3.3_aarch64.dmg) |
-| **macOS** | Intel (x64) | [Ghostly_x64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.3.3/Ghostly_0.3.3_x64.dmg) |
-| **Windows** | x64 (Installer) | [Ghostly_x64-setup.exe](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.3.3/Ghostly_0.3.3_x64-setup.exe) |
-| **Windows** | x64 (MSI) | [Ghostly_x64.msi](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.3.3/Ghostly_0.3.3_x64_en-US.msi) |
-| **Linux** | x64 (AppImage) | [Ghostly_amd64.AppImage](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.3.3/Ghostly_0.3.3_amd64.AppImage) |
-| **Linux** | x64 (Debian/Ubuntu) | [Ghostly_amd64.deb](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.3.3/Ghostly_0.3.3_amd64.deb) |
+| **macOS** | Apple Silicon (M1/M2/M3) | [Ghostly_aarch64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.3.4/Ghostly_0.3.4_aarch64.dmg) |
+| **macOS** | Intel (x64) | [Ghostly_x64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.3.4/Ghostly_0.3.4_x64.dmg) |
+| **Windows** | x64 (Installer) | [Ghostly_x64-setup.exe](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.3.4/Ghostly_0.3.4_x64-setup.exe) |
+| **Windows** | x64 (MSI) | [Ghostly_x64.msi](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.3.4/Ghostly_0.3.4_x64_en-US.msi) |
+| **Linux** | x64 (AppImage) | [Ghostly_amd64.AppImage](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.3.4/Ghostly_0.3.4_amd64.AppImage) |
+| **Linux** | x64 (Debian/Ubuntu) | [Ghostly_amd64.deb](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.3.4/Ghostly_0.3.4_amd64.deb) |
 
 ## CLI (Command Line)
 
 | Platform | Download |
 |----------|----------|
-| **macOS** (Apple Silicon) | [ghostly-cli-macos-arm64](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.3.3/ghostly-cli-macos-arm64) |
-| **macOS** (Intel) | [ghostly-cli-macos-x64](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.3.3/ghostly-cli-macos-x64) |
-| **Linux** (x64) | [ghostly-cli-linux-x64](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.3.3/ghostly-cli-linux-x64) |
-| **Windows** (x64) | [ghostly-cli-windows-x64.exe](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.3.3/ghostly-cli-windows-x64.exe) |
+| **macOS** (Apple Silicon) | [ghostly-cli-macos-arm64](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.3.4/ghostly-cli-macos-arm64) |
+| **macOS** (Intel) | [ghostly-cli-macos-x64](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.3.4/ghostly-cli-macos-x64) |
+| **Linux** (x64) | [ghostly-cli-linux-x64](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.3.4/ghostly-cli-linux-x64) |
+| **Windows** (x64) | [ghostly-cli-windows-x64.exe](https://github.com/MiguelMedeiros/ghostly/releases/download/v0.3.4/ghostly-cli-windows-x64.exe) |
 
 Or install via Cargo:
 

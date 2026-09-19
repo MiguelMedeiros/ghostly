@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.4
+
+A security release for Ghostly Desktop. Update it. Nothing changes on the wire, and older clients keep working.
 
 ### Security
 
