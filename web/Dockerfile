@@ -1,3 +1,7 @@
+# check=skip=SecretsUsedInArgOrEnv
+# VITE_GIPHY_API_KEY is not a secret here, whatever the linter's list of names
+# says: Vite inlines it into the bundle every browser downloads, which is what a
+# Giphy browser key is for. Nothing that must stay out of the image is passed this way.
 # Build context is the repository root: the web app is one workspace among several.
 #   docker compose up --build
 FROM node:24-alpine AS build

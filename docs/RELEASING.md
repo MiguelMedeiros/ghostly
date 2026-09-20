@@ -52,7 +52,7 @@ If a build fails, fix it on `main`, move the tag (`git tag -f v0.3.0 && git push
 
 A release is not finished while it is a draft: GitHub keeps showing the previous version as **Latest**. Once it checks out, publish it, always.
 
-1. The Release workflow is green and the draft has all eighteen assets, `latest.json` among them.
+1. The Release workflow is green and the draft has all sixteen assets, `latest.json` among them.
 2. Download a few and check them: `shasum -a 256 -c SHA256SUMS.txt --ignore-missing` and `gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt`.
 3. Publish it as the latest release, with the changelog section as notes:
 

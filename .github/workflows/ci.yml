@@ -20,7 +20,7 @@ jobs:
   # ============================================
   frontend:
     name: Frontend (src)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: .
@@ -66,7 +66,7 @@ jobs:
   # ============================================
   tauri:
     name: Tauri Backend (src-tauri)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: .
@@ -121,7 +121,7 @@ jobs:
   # ============================================
   cli:
     name: CLI
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: .
@@ -165,7 +165,7 @@ jobs:
   # ============================================
   website:
     name: Website
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: website
@@ -198,7 +198,7 @@ jobs:
   # ============================================
   ci-success:
     name: CI Success
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [frontend, tauri, cli, website]
     if: always()
     steps:

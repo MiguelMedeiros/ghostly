@@ -190,7 +190,10 @@ test("a screen share that starts as one goes back to voice when it stops", async
   await expect(bob.page.getByTestId("remote-video")).toBeVisible();
 
   await alice.page.getByTitle("Stop sharing your screen").click();
-  await expect(alice.page.getByTitle("Share your screen")).toBeVisible();
+  // By test id, not by title: the composer has a "Share your screen" button too,
+  // disabled during a call, and matching both is a strict-mode violation the
+  // moment this one's title flips back.
+  await expect(alice.page.getByTestId("share-screen")).toHaveAttribute("title", "Share your screen");
   await expect(bob.page.getByTestId("remote-video")).toBeHidden();
   await alice.page.getByTitle("End call").click();
   await expect(bob.page.getByTitle("End call")).toHaveCount(0);
