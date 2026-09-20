@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
 import { useLockScreen } from "../contexts/LockScreenContext";
+import { useUpdate } from "../contexts/UpdateContext";
 import { getVersion } from "@tauri-apps/api/app";
 import { NetworkSettings } from "../components/NetworkSettings";
 import {
@@ -25,10 +26,11 @@ export function Settings() {
   const navigate = useNavigate();
   const { settings, updateColorScheme, updateColorTheme, updateLanguage, updateLockScreen, updateNotifications, updateDefaultNickname,
     updateGiphyApiKey,
-    updateReduceMotion, randomizeNickname } =
+    updateReduceMotion, updateCheckForUpdates, randomizeNickname } =
     useSettings();
   const { t } = useI18n();
   const { lock } = useLockScreen();
+  const update = useUpdate();
 
   const [lockEnabled, setLockEnabled] = useState(settings.lockScreen.enabled);
   const [newPassword, setNewPassword] = useState("");
@@ -683,6 +685,89 @@ export function Settings() {
               </div>
             </div>
           </section>
+
+          {/* Updates Section */}
+          {update.supported && (
+            <section className="space-y-4">
+              <h2 className="text-sm font-semibold text-accent uppercase tracking-wide">
+                {t("updates.title")}
+              </h2>
+
+              <div className="bg-surface rounded-xl p-4 space-y-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <label className="text-text-primary block">{t("updates.auto")}</label>
+                    <p className="text-sm text-text-muted">{t("updates.autoDescription")}</p>
+                  </div>
+                  <button
+                    role="switch"
+                    aria-checked={settings.checkForUpdates}
+                    aria-label={t("updates.auto")}
+                    onClick={() => updateCheckForUpdates(!settings.checkForUpdates)}
+                    className={`shrink-0 relative w-12 h-6 rounded-full transition-colors cursor-pointer ${
+                      settings.checkForUpdates ? "bg-accent" : "bg-surface-alt"
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${
+                        settings.checkForUpdates ? "translate-x-6" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between gap-4 border-t border-border pt-4">
+                  <div className="min-w-0">
+                    <p className="text-text-primary m-0" data-testid="update-status">
+                      {update.update
+                        ? t("updates.available", { version: update.update.version })
+                        : update.error
+                          ? t("updates.failed")
+                          : update.lastCheckedAt
+                            ? t("updates.upToDate")
+                            : `${t("settings.version")} ${appVersion}`}
+                    </p>
+                    {update.lastCheckedAt && (
+                      <p className="text-sm text-text-muted m-0">
+                        {t("updates.lastChecked", {
+                          when: new Date(update.lastCheckedAt).toLocaleTimeString(),
+                        })}
+                      </p>
+                    )}
+                  </div>
+
+                  {update.update && update.update.apply === "manual" ? (
+                    <a
+                      href={update.downloadUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="shrink-0 px-4 py-2 bg-accent hover:bg-accent-hover text-[#111b21] rounded-lg text-sm font-semibold transition-colors"
+                    >
+                      {t("updates.download")}
+                    </a>
+                  ) : update.update ? (
+                    <button
+                      onClick={() => void update.install()}
+                      disabled={update.stage === "installing"}
+                      className="shrink-0 px-4 py-2 bg-accent hover:bg-accent-hover text-[#111b21] rounded-lg text-sm font-semibold transition-colors disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+                    >
+                      {update.stage === "installing"
+                        ? t("updates.installing")
+                        : t(update.update.apply === "restart" ? "updates.restart" : "updates.reload")}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => void update.check()}
+                      disabled={update.stage === "checking"}
+                      className="shrink-0 px-4 py-2 bg-surface-alt hover:bg-surface-hover text-text-primary rounded-lg text-sm font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+                    >
+                      {update.stage === "checking" ? t("updates.checking") : t("updates.checkNow")}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </section>
+          )}
 
           {/* About Section */}
           <section className="space-y-4">

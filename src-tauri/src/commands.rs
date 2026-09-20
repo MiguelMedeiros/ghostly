@@ -148,3 +148,16 @@ pub fn open_service_window(
 pub fn service_respond(app: tauri::AppHandle, id: u64, response: ServiceResponse) {
     viewer::respond(&app, id, response);
 }
+
+/// Whether the updater can replace this install in place. It can on macOS and
+/// Windows, and on Linux only for the AppImage: a `.deb` or `.rpm` belongs to
+/// the package manager that put it there, so those are sent to the download
+/// instead of a button that would fail.
+#[tauri::command]
+pub fn updater_can_install() -> bool {
+    if cfg!(target_os = "linux") {
+        env::var_os("APPIMAGE").is_some()
+    } else {
+        true
+    }
+}

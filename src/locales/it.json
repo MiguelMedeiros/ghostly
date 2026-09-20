@@ -115,6 +115,25 @@
     "sourceCode": "Codice sorgente",
     "license": "Licenza"
   },
+  "updates": {
+    "available": "Ghostly {{version}} è disponibile",
+    "applyHint": "Aggiornare termina le chiamate e le connessioni.",
+    "manualHint": "Scaricalo e sostituisci questa installazione.",
+    "restart": "Aggiorna e riavvia",
+    "reload": "Ricarica",
+    "download": "Scarica",
+    "later": "Più tardi",
+    "installing": "Aggiornamento...",
+    "downloading": "Download... {{percent}}%",
+    "title": "Aggiornamenti",
+    "auto": "Controlla automaticamente gli aggiornamenti",
+    "autoDescription": "Chiedere ogni tanto se è uscita una versione più recente. Disattivato, non viene chiesto nulla finché non premi il pulsante.",
+    "checkNow": "Controlla ora",
+    "checking": "Controllo...",
+    "upToDate": "Ghostly è aggiornato",
+    "lastChecked": "Ultimo controllo alle {{when}}",
+    "failed": "Impossibile controllare gli aggiornamenti"
+  },
   "lockScreen": {
     "title": "Ghostly è bloccato",
     "enterPassword": "Inserisci la password per sbloccare",

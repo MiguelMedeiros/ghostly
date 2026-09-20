@@ -8,7 +8,7 @@ import type { BrowserHost } from "./host";
  * its pages.)
  */
 export interface InPageHostOptions
-  extends Pick<BrowserHost, "version" | "notice" | "features" | "requestLocalAccess" | "openService"> {
+  extends Pick<BrowserHost, "version" | "notice" | "updates" | "features" | "requestLocalAccess" | "openService"> {
   node?: NodeOptions;
   /** Called once the peer exists, e.g. to let something outside the page reach it. */
   onServer?: (server: EngineServer) => void;
@@ -19,6 +19,7 @@ export function createInPageHost(options: InPageHostOptions): BrowserHost & { an
   return {
     version: options.version,
     notice: options.notice,
+    updates: options.updates,
     features: options.features,
     requestLocalAccess: options.requestLocalAccess,
     openService: options.openService,

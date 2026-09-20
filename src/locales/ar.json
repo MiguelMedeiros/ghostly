@@ -115,6 +115,25 @@
     "sourceCode": "الكود المصدري",
     "license": "الترخيص"
   },
+  "updates": {
+    "available": "الإصدار {{version}} من Ghostly متاح",
+    "applyHint": "التحديث ينهي مكالماتك واتصالاتك.",
+    "manualHint": "نزّله واستبدل هذا التثبيت.",
+    "restart": "التحديث وإعادة التشغيل",
+    "reload": "إعادة التحميل",
+    "download": "تنزيل",
+    "later": "لاحقًا",
+    "installing": "جارٍ التحديث...",
+    "downloading": "جارٍ التنزيل... {{percent}}%",
+    "title": "التحديثات",
+    "auto": "البحث عن التحديثات تلقائيًا",
+    "autoDescription": "السؤال من حين لآخر عمّا إذا كان قد صدر إصدار أحدث. عند الإيقاف، لا يُسأل شيء حتى تضغط الزر.",
+    "checkNow": "ابحث الآن",
+    "checking": "جارٍ البحث...",
+    "upToDate": "Ghostly محدَّث",
+    "lastChecked": "آخر فحص في {{when}}",
+    "failed": "تعذّر البحث عن التحديثات"
+  },
   "lockScreen": {
     "title": "Ghostly مقفل",
     "enterPassword": "أدخل كلمة المرور لإلغاء القفل",

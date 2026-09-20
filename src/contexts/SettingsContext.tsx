@@ -30,6 +30,7 @@ interface SettingsContextValue {
   updateDefaultNickname: (nickname: string) => void;
   updateGiphyApiKey: (key: string) => void;
   updateReduceMotion: (reduce: boolean) => void;
+  updateCheckForUpdates: (check: boolean) => void;
   randomizeNickname: () => void;
   resetSettings: () => void;
 }
@@ -91,6 +92,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setSettings((prev) => ({ ...prev, reduceMotion: reduce }));
   }, []);
 
+  const updateCheckForUpdates = useCallback((check: boolean) => {
+    setSettings((prev) => ({ ...prev, checkForUpdates: check }));
+  }, []);
+
   useEffect(() => {
     document.documentElement.dataset.reduceMotion = String(settings.reduceMotion);
   }, [settings.reduceMotion]);
@@ -119,6 +124,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         updateDefaultNickname,
         updateGiphyApiKey,
         updateReduceMotion,
+        updateCheckForUpdates,
         randomizeNickname,
         resetSettings,
       }}

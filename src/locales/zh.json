@@ -115,6 +115,25 @@
     "sourceCode": "源代码",
     "license": "许可证"
   },
+  "updates": {
+    "available": "Ghostly {{version}} 已发布",
+    "applyHint": "更新会结束当前的通话和连接。",
+    "manualHint": "下载后替换当前安装。",
+    "restart": "更新并重启",
+    "reload": "重新加载",
+    "download": "下载",
+    "later": "稍后",
+    "installing": "正在更新...",
+    "downloading": "正在下载... {{percent}}%",
+    "title": "更新",
+    "auto": "自动检查更新",
+    "autoDescription": "偶尔询问是否有更新版本。关闭后，只有你点击按钮时才会询问。",
+    "checkNow": "立即检查",
+    "checking": "正在检查...",
+    "upToDate": "Ghostly 已是最新版本",
+    "lastChecked": "上次检查于 {{when}}",
+    "failed": "无法检查更新"
+  },
   "lockScreen": {
     "title": "Ghostly 已锁定",
     "enterPassword": "输入密码解锁",

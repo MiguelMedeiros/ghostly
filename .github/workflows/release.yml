@@ -127,8 +127,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Baked into the frontend by Vite; GIFs work out of the box. Users can still set their own in Settings.
           VITE_GIPHY_API_KEY: ${{ secrets.VITE_GIPHY_API_KEY }}
+          # Signs the bundles the app updates itself with. The app installs
+          # nothing that does not verify against the public key it was built with.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          args: ${{ matrix.args }}
+          # Updater bundles are made for releases only: an ordinary `tauri build`
+          # needs no signing key (src-tauri/tauri.release.conf.json).
+          args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json
 
       # Without this the AppImage shows a blank window on Wayland desktops (issue #1).
       - name: Drop bundled libwayland from AppImage
@@ -148,12 +154,18 @@ jobs:
             target/*/release/bundle/**/*.AppImage
             target/*/release/bundle/**/*.msi
             target/*/release/bundle/**/*.exe
+            target/*/release/bundle/**/*.tar.gz
+            target/*/release/bundle/**/*.zip
+            target/*/release/bundle/**/*.sig
             target/release/bundle/**/*.dmg
             target/release/bundle/**/*.app
             target/release/bundle/**/*.deb
             target/release/bundle/**/*.AppImage
             target/release/bundle/**/*.msi
             target/release/bundle/**/*.exe
+            target/release/bundle/**/*.tar.gz
+            target/release/bundle/**/*.zip
+            target/release/bundle/**/*.sig
           if-no-files-found: error
 
   # ============================================
@@ -300,6 +312,7 @@ jobs:
           push: true
           build-args: |
             VITE_GIPHY_API_KEY=${{ secrets.VITE_GIPHY_API_KEY }}
+            GHOSTLY_BUILD=${{ github.sha }}
           tags: |
             ${{ steps.image.outputs.name }}:${{ env.RELEASE_TAG }}
             ${{ steps.image.outputs.name }}:latest
@@ -359,6 +372,11 @@ jobs:
           fi
           
           ls -la release-assets/
+
+      # What the desktop app reads to update itself. It also copies in the
+      # bundles it points at; nothing unsigned ends up in the manifest.
+      - name: Build the updater manifest
+        run: node scripts/updater-manifest.mjs artifacts release-assets "${RELEASE_TAG}"
 
       - name: Generate SHA256 checksums
         run: |

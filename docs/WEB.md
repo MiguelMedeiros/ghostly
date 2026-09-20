@@ -60,3 +60,9 @@ Screen sharing needs `getDisplayMedia`, which phone browsers do not have; the bu
 - **Opening a contact's app** needs an origin for it that is not Ghostly's own, or the app could read your keys and ecash. The extension makes one up per service; on the web that takes a wildcard subdomain with a service worker on each, bridged to the peer in the app's tab. It is static hosting, no backend, and not built yet. The button explains itself meanwhile.
 - **One tab.** Two tabs would publish under the same keys and spend from the same wallet at once, so the peer takes a Web Lock and a second tab waits for the first to close.
 - **Trust.** An extension is a package you installed once. A web page is code a server hands you on every visit; whoever controls that server controls your keys and your wallet. Host it yourself, or use one you trust.
+
+## Keeping up to date
+
+The build writes `/version.json` next to the app, and a tab asks for it on load, every four hours and whenever it comes back to the foreground. Different version, or the same version from a different commit, and the sidebar offers a reload — never on its own, because reloading ends the peer and every call it holds. The question goes to the origin serving the app and to nobody else, and **Settings → Updates** turns it off.
+
+Self-hosting works the same way: `/version.json` is whatever you built, so your visitors are told about your deploys, not about ours.
