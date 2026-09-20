@@ -60,3 +60,12 @@ export function buildInviteUrl(
 ): string {
   return `${origin}/#/chat/${seedB}/${pubKeyA}/${encKey}`;
 }
+
+/**
+ * The chat a `/chat/…` address points at, or null when the address is not a
+ * chat or still carries the keys (`ChatLinkIntake` turns that one into this).
+ */
+export function chatRouteSession(pathname: string): string | null {
+  const match = pathname.match(/^\/chat\/([^/]+)\/?$/);
+  return match ? decodeURIComponent(match[1]) : null;
+}

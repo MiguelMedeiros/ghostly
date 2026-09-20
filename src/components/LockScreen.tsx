@@ -54,7 +54,8 @@ export function LockScreen() {
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-app-bg flex items-center justify-center"
+      // Over everything the lock hides, the call window included.
+      className="fixed inset-0 z-[60] bg-app-bg flex items-center justify-center"
       role="dialog"
       aria-modal="true"
       aria-label={t("lockScreen.title")}

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { CallState } from "../lib/types";
 import { CORNERS, useFloatingBox, type Corner } from "../hooks/useFloatingBox";
 
@@ -23,6 +24,11 @@ interface CallOverlayProps {
   onToggleMute: () => void;
   onToggleVideo: () => void;
   onToggleScreenShare?: () => void;
+  /** The chat is off screen. The call rides along in its small window until you go back to it. */
+  pinned?: boolean;
+  onReturnToChat?: () => void;
+  /** Where to hang the call window, so it does not go off screen with its chat. */
+  layer?: HTMLElement | null;
 }
 
 const MINI_KEY = "ghostly_call_mini";
@@ -60,6 +66,9 @@ export function CallOverlay({
   onToggleMute,
   onToggleVideo,
   onToggleScreenShare,
+  pinned = false,
+  onReturnToChat,
+  layer,
 }: CallOverlayProps) {
   // A shared screen has to be seen whole; a face can be cropped to fill the window.
   const [remoteIsWide, setRemoteIsWide] = useState(false);
@@ -69,7 +78,9 @@ export function CallOverlay({
   const [duration, setDuration] = useState(0);
 
   // The call can shrink into a floating window, so the chat underneath stays usable.
-  const [mini, setMiniState] = useState(() => localStorage.getItem(MINI_KEY) === "1");
+  // Away from its own chat it has no choice: the small window is all there is.
+  const [miniPreference, setMiniState] = useState(() => localStorage.getItem(MINI_KEY) === "1");
+  const mini = pinned || miniPreference;
   const setMini = (next: boolean) => {
     setMiniState(next);
     try {
@@ -138,8 +149,9 @@ export function CallOverlay({
   }[callState];
 
   const showRemoteVideo = remoteHasVideo && remoteStream && callState === "connected";
-  
-  return (
+
+  // Hung outside the chat, which may be off screen; the call is not.
+  return createPortal(
     <div
       {...miniWindow.boxProps}
       data-testid="call-window"
@@ -153,9 +165,9 @@ export function CallOverlay({
       {mini && <Grips handleProps={miniWindow.handleProps} />}
       {/* Shrink to a floating window, or back to the whole screen */}
       <button
-        onClick={() => setMini(!mini)}
+        onClick={() => (pinned ? onReturnToChat?.() : setMini(!mini))}
         className="call-resize absolute top-4 left-4 z-20 w-11 h-11 rounded-full bg-white/10 text-white hover:bg-white/20 flex items-center justify-center cursor-pointer transition-colors"
-        title={mini ? "Back to full screen" : "Keep the call in a small window"}
+        title={pinned ? "Back to the chat" : mini ? "Back to full screen" : "Keep the call in a small window"}
         data-testid="call-minimize"
       >
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -356,6 +368,7 @@ export function CallOverlay({
           </svg>
         </button>
       </div>
-    </div>
+    </div>,
+    layer ?? document.body,
   );
 }
