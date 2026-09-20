@@ -10,6 +10,9 @@ services:
       dockerfile: web/Dockerfile
       args:
         VITE_GIPHY_API_KEY: ${VITE_GIPHY_API_KEY:-}
+        # Which commit this build serves, for `/version.json`. There is no git
+        # in the image: pass it in, or open tabs cannot tell one deploy from the next.
+        GHOSTLY_BUILD: ${GHOSTLY_BUILD:-}
     ports:
       # Only this machine by default. Behind a reverse proxy or a tunnel on another
       # address, set e.g. GHOSTLY_WEB_BIND=0.0.0.0:8090 (the app itself needs HTTPS there).

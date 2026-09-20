@@ -59,10 +59,11 @@ export function Root() {
         <I18nProvider>
           <LockScreenProvider>
             <LockScreen />
-            <UpdateProvider>
-              <HashRouter>
-                <ChatLinkIntake />
-                <LockGate>
+            <HashRouter>
+              <ChatLinkIntake />
+              <LockGate>
+                {/* Asking for updates says this device runs Ghostly: not before the password. */}
+                <UpdateProvider>
                   <Routes>
                     <Route element={<App />}>
                       <Route path="/" element={<Home />} />
@@ -72,9 +73,9 @@ export function Root() {
                       <Route path="/share" element={<ShareTab />} />
                     </Route>
                   </Routes>
-                </LockGate>
-              </HashRouter>
-            </UpdateProvider>
+                </UpdateProvider>
+              </LockGate>
+            </HashRouter>
           </LockScreenProvider>
         </I18nProvider>
       </ThemeProvider>

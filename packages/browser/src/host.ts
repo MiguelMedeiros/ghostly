@@ -21,8 +21,8 @@ export interface UpdateSource {
   downloadUrl: string;
   /** The newest published version, or null when this client already runs it. */
   check(): Promise<FoundUpdate | null>;
-  /** Never called for `apply: "manual"`. */
-  install(update: FoundUpdate): Promise<void>;
+  /** Never called for `apply: "manual"`. `onProgress` is used where the platform reports it. */
+  install(update: FoundUpdate, onProgress?: (fraction: number) => void): Promise<void>;
 }
 
 export interface BrowserHost {

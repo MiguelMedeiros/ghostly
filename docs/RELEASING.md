@@ -70,7 +70,7 @@ Security patch releases made by the security routine go through `security-autore
 
 Only after publishing, or the site offers downloads that do not exist yet.
 
-- **app.ghostly.tools** serves `main`, so it usually has the features already. To move it to the release: `docker compose pull && docker compose up -d`, or build from the checkout with `docker compose up -d --build`.
+- **app.ghostly.tools** serves `main`, so it usually has the features already. To move it to the release: `docker compose pull && docker compose up -d`, or build from the checkout with `GHOSTLY_BUILD=$(git rev-parse --short HEAD) docker compose up -d --build`. Without `GHOSTLY_BUILD` the image cannot say which commit it serves, and tabs already open are not told about the deploy.
 - **ghostly.tools**: rebuild the `website/` container.
 
 How each client picks it up:

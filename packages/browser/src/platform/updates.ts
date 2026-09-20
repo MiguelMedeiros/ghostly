@@ -13,9 +13,9 @@ export const updatePlatform: UpdatePlatform | null = {
     return getBrowserHost().updates?.downloadUrl ?? RELEASES_URL;
   },
   check: () => getBrowserHost().updates?.check() ?? Promise.resolve(null),
-  install: (update) => {
+  install: (update, onProgress) => {
     const updates = getBrowserHost().updates;
     if (!updates) throw new Error("This client cannot install updates");
-    return updates.install(update);
+    return updates.install(update, onProgress);
   },
 };

@@ -13,6 +13,7 @@ import {
 } from "@ghostly/core";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { createInPageHost } from "@ghostly/browser/inPageHost";
+import { desktopUpdates } from "./updates";
 import { engine } from "@ghostly/browser/platform/engine";
 
 /**
@@ -103,6 +104,7 @@ export function createDesktopHost(version: string) {
   return createInPageHost({
     version,
     features: { shareLocalServices: true, openServices: true },
+    updates: desktopUpdates,
     node: { transport: tauriTransport, pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch },
     onServer: serveServiceWindows,
     // There is nothing to ask: the user typed the address, and Rust only ever reaches loopback.
