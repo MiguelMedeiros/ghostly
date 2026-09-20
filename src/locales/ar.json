@@ -34,7 +34,9 @@
     "connecting": "جاري الاتصال",
     "lastSeen": "آخر ظهور {{time}}",
     "today": "اليوم",
-    "yesterday": "أمس"
+    "yesterday": "أمس",
+    "deleteMessage": "حذف الرسالة",
+    "deleteMessageHint": "يُحذف من هذا الجهاز فقط. تبقى النسخة لدى جهة اتصالك."
   },
   "home": {
     "welcome": "مرحباً بك في Ghostly",

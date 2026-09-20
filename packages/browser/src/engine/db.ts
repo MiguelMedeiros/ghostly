@@ -32,6 +32,9 @@ export const db = {
     await wrap(messages.put(message));
     return true;
   },
+  async deleteMessage(linkId: string, messageId: string): Promise<void> {
+    await wrap((await store(STORES.messages, "readwrite")).delete([linkId, messageId]));
+  },
 
   async getServices(): Promise<StoredService[]> {
     return wrap((await store(STORES.services, "readonly")).getAll());

@@ -11,6 +11,8 @@ export interface StoredLink {
   peerNick?: string;
   /** Present on the side that created the link, until the peer shows up. */
   inviteCode?: string;
+  /** Messages deleted on this device, by id, so a republished one is not stored again. */
+  deletedIds?: string[];
 }
 
 /** A file attached to a message. The bytes live in the `files` store under `id`. */

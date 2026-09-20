@@ -62,6 +62,7 @@ export function Chat() {
     setCallSignal,
     setChatFastPoll,
     addSystemMessage,
+    deleteMessage,
     setNick,
     pollCountdown,
   } = useChat(params);
@@ -140,6 +141,19 @@ export function Chat() {
       }
     },
     [platform, peerKey, addSystemMessage],
+  );
+
+  /**
+   * Forgets a message here: the chat history first, so the bubble goes at
+   * once, then the peer's own copy of it and the bytes of any file it carried.
+   * Nothing is sent — the contact keeps what it has.
+   */
+  const forgetMessage = useCallback(
+    (messageId: string) => {
+      deleteMessage(messageId);
+      if (peerKey) void platform?.deleteMessage(peerKey, messageId).catch(() => {});
+    },
+    [deleteMessage, platform, peerKey],
   );
 
   const wallet = platform?.wallet;
@@ -592,7 +606,13 @@ export function Chat() {
             </div>
           )}
           {messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} peerAck={peerAck} peerPubKey={params.peerPubKeyB64} />
+            <MessageBubble
+              key={msg.id}
+              message={msg}
+              peerAck={peerAck}
+              peerPubKey={params.peerPubKeyB64}
+              onDelete={() => forgetMessage(msg.id)}
+            />
           ))}
           <div ref={bottomRef} />
         </div>

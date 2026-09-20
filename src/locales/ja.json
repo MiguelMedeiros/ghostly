@@ -34,7 +34,9 @@
     "connecting": "接続中",
     "lastSeen": "最終オンライン {{time}}",
     "today": "今日",
-    "yesterday": "昨日"
+    "yesterday": "昨日",
+    "deleteMessage": "メッセージを削除",
+    "deleteMessageHint": "この端末からのみ削除されます。相手の端末には残ります。"
   },
   "home": {
     "welcome": "Ghostlyへようこそ",

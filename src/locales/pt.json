@@ -34,7 +34,9 @@
     "connecting": "conectando",
     "lastSeen": "Visto por último {{time}}",
     "today": "Hoje",
-    "yesterday": "Ontem"
+    "yesterday": "Ontem",
+    "deleteMessage": "Apagar mensagem",
+    "deleteMessageHint": "Apagada só aqui. Seu contato continua com a cópia dele."
   },
   "home": {
     "welcome": "Bem-vindo ao Ghostly",

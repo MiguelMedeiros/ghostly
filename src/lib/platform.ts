@@ -141,6 +141,8 @@ export interface ServicesPlatform {
   /** Null when nothing is known about the transfer, e.g. after a restart. */
   getTransfer(fileId: string): FileTransferState | null;
   getFile(fileId: string): Promise<Blob | null>;
+  /** Forgets a message this device deleted: the peer's copy of it and the bytes of any file it carried. */
+  deleteMessage(peerPubKeyZ32: string, messageId: string): Promise<void>;
   wallet: WalletPlatform;
   getNetwork(): NetworkSettings | null;
   setNetwork(settings: Pick<NetworkSettings, "relays" | "turn">): Promise<void>;

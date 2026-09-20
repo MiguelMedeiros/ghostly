@@ -103,3 +103,55 @@ test("files, peer to peer, arrive intact", async ({ peer }, testInfo) => {
   await bob.page.getByTestId("file-input").setInputFiles({ name: "ghost.gif", mimeType: "image/gif", buffer: GIF });
   await expect(alice.page.getByTestId("file-bubble").filter({ hasText: "ghost.gif" }).getByRole("img", { name: "ghost.gif" })).toBeVisible();
 });
+
+/** How many files this peer still holds the bytes of, straight out of its IndexedDB. */
+function storedFiles(peer: Peer): Promise<number> {
+  return peer.page.evaluate(
+    () =>
+      new Promise<number>((resolve, reject) => {
+        const open = indexedDB.open("ghostly");
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const count = open.result.transaction("files").objectStore("files").count();
+          count.onsuccess = () => resolve(count.result);
+          count.onerror = () => reject(count.error);
+        };
+      }),
+  );
+}
+
+/** The row one message is in, delete button and all. */
+const message = (peer: Peer, text: string) => chat(peer).locator(".group").filter({ hasText: text });
+
+test("a deleted message is gone for good, and gone only here", async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
+  await link(alice, bob);
+  await connect(alice, bob);
+
+  await say(bob, "forget this one");
+  await expect(chat(alice).getByText("forget this one")).toBeVisible();
+  await bob.page.getByTestId("file-input").setInputFiles({ name: "ghost.gif", mimeType: "image/gif", buffer: GIF });
+  await expect(chat(alice).getByTestId("file-bubble").filter({ hasText: "ghost.gif" })).toBeVisible();
+  expect(await storedFiles(alice)).toBe(1);
+
+  for (const text of ["forget this one", "ghost.gif"]) {
+    await message(alice, text).getByTestId("message-delete").click();
+    await expect(message(alice, text).getByTestId("message-delete-menu")).toBeVisible();
+    await message(alice, text).getByTestId("message-delete-confirm").click();
+  }
+  await expect(chat(alice).getByText("forget this one")).toHaveCount(0);
+  await expect(chat(alice).getByTestId("file-bubble")).toHaveCount(0);
+  // The bytes go with the message.
+  await expect.poll(() => storedFiles(alice)).toBe(0);
+
+  // Nothing was asked of the peer: it keeps what it sent.
+  await expect(chat(bob).getByText("forget this one")).toBeVisible();
+  await expect(chat(bob).getByTestId("file-bubble").filter({ hasText: "ghost.gif" })).toBeVisible();
+
+  // The peer republishes what it sent for minutes after: none of it comes back.
+  await alice.page.reload();
+  await expect(chat(alice).getByText("hello from bob")).toBeVisible();
+  await expect(chat(alice).getByText("forget this one")).toHaveCount(0);
+  await expect(chat(alice).getByTestId("file-bubble")).toHaveCount(0);
+  expect(await storedFiles(alice)).toBe(0);
+});

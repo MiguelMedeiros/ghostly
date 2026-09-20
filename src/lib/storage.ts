@@ -71,6 +71,12 @@ export function loadSession(sessionId: string): ChatSession | null {
   }
 }
 
+/**
+ * How many deleted ids a chat remembers. They only keep what the peer is still
+ * republishing from coming back, so the oldest ones can go.
+ */
+const MAX_DELETED_IDS = 500;
+
 export function addMessage(
   sessionId: string,
   message: ChatMessage,
@@ -80,6 +86,7 @@ export function addMessage(
 
   const exists = session.messages.some((m) => m.id === message.id);
   if (exists) return session;
+  if (session.deletedIds?.includes(message.id)) return session;
 
   session.messages.push(message);
   session.messages.sort((a, b) => a.timestamp - b.timestamp);
@@ -92,6 +99,31 @@ export function addMessage(
   }
   
   saveSession(session);
+  return session;
+}
+
+/**
+ * Forgets one message on this device. The contact keeps their copy: nothing is
+ * sent, and what the peer already published stays published until it expires.
+ */
+export function deleteMessage(
+  sessionId: string,
+  messageId: string,
+): ChatSession | null {
+  const session = loadSession(sessionId);
+  if (!session) return null;
+
+  const index = session.messages.findIndex((m) => m.id === messageId);
+  if (index === -1) return null;
+
+  session.messages.splice(index, 1);
+  session.deletedIds = [...(session.deletedIds ?? []), messageId].slice(-MAX_DELETED_IDS);
+  saveSession(session);
+
+  // Unread is "messages since the last read one": a read message that goes
+  // takes its place in that count with it, or every later one reads as unread.
+  const lastRead = getLastReadCount(sessionId);
+  setReadCount(sessionId, Math.min(index < lastRead ? lastRead - 1 : lastRead, session.messages.length));
   return session;
 }
 
@@ -152,17 +184,18 @@ export function getLastReadCount(sessionId: string): number {
   }
 }
 
-export function markSessionAsRead(sessionId: string): void {
-  const session = loadSession(sessionId);
-  if (!session) return;
+function setReadCount(sessionId: string, count: number): void {
   try {
-    localStorage.setItem(
-      `${getPrefix()}read_${sessionId}`,
-      String(session.messages.length),
-    );
+    localStorage.setItem(`${getPrefix()}read_${sessionId}`, String(count));
   } catch {
     // storage full or unavailable
   }
+}
+
+export function markSessionAsRead(sessionId: string): void {
+  const session = loadSession(sessionId);
+  if (!session) return;
+  setReadCount(sessionId, session.messages.length);
 }
 
 export function getUnreadCount(session: ChatSession): number {

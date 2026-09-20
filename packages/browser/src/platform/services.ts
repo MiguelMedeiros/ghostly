@@ -71,6 +71,10 @@ export const servicesPlatform: ServicesPlatform | null = {
     await engine.call("sendFile", { linkId: link.id, file, timestamp });
     return { timestamp, file };
   },
+  async deleteMessage(peerPubKeyZ32, messageId) {
+    const link = engine.linkByPeer(peerPubKeyZ32);
+    if (link) await engine.call("deleteMessage", { linkId: link.id, messageId });
+  },
   getTransfer: (fileId) => engine.state?.transfers[fileId] ?? null,
   async getFile(fileId) {
     const blob = (await fileStore.get(fileId))?.blob;

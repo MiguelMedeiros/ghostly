@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useI18n } from "../contexts/I18nContext";
 import { FileBubble } from "./FileBubble";
 import { InvoiceBubble } from "./InvoiceBubble";
 import { findMoney } from "../lib/money";
@@ -10,6 +11,8 @@ interface MessageBubbleProps {
   peerAck?: number;
   /** Needed by payment bubbles, which can act on a request. */
   peerPubKey?: string;
+  /** Forgets this message on this device. Left out where a chat cannot be edited. */
+  onDelete?: () => void;
 }
 
 const IMAGE_URL_RE =
@@ -190,7 +193,87 @@ function formatDuration(ms: number): string {
   return `${minutes}m ${seconds}s`;
 }
 
-export function MessageBubble({ message, peerAck = 0, peerPubKey = "" }: MessageBubbleProps) {
+/**
+ * The one thing you can do to a message: forget it here. It is a local
+ * deletion, so the menu says so before it happens — nothing is sent, and the
+ * contact keeps their copy.
+ */
+function MessageActions({ onDelete, align }: { onDelete: () => void; align: "left" | "right" }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative self-center shrink-0">
+      <button
+        type="button"
+        data-testid="message-delete"
+        title={t("chat.deleteMessage")}
+        aria-label={t("chat.deleteMessage")}
+        onClick={() => setOpen((v) => !v)}
+        // Faint but always reachable by touch; on a pointer it waits for the message to be hovered.
+        className={`p-1 rounded-full transition-all cursor-pointer hover:text-danger md:group-hover:opacity-100 md:focus-visible:opacity-100 ${
+          open ? "text-danger opacity-100" : "text-text-muted max-md:opacity-40 md:opacity-0"
+        }`}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 6h18" />
+          <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+          <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          data-testid="message-delete-menu"
+          // No `translate` of its own: the fade-in animation sets `transform`.
+          className={`absolute z-20 bottom-full mb-1 w-[210px] p-3 rounded-lg bg-surface border border-border shadow-lg animate-fade-in ${
+            align === "left" ? "left-0" : "right-0"
+          }`}
+        >
+          <p className="m-0 mb-2 text-[11px] leading-snug text-text-muted">{t("chat.deleteMessageHint")}</p>
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="px-2 py-0.5 rounded border border-border bg-surface-hover text-text-muted text-xs font-bold hover:text-text-secondary transition-colors cursor-pointer"
+            >
+              {t("common.cancel")}
+            </button>
+            <button
+              type="button"
+              data-testid="message-delete-confirm"
+              onClick={() => {
+                setOpen(false);
+                onDelete();
+              }}
+              className="px-2 py-0.5 rounded border border-danger/30 bg-danger/20 text-danger text-xs font-bold hover:bg-danger/30 transition-colors cursor-pointer"
+            >
+              {t("common.delete")}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function MessageBubble({ message, peerAck = 0, peerPubKey = "", onDelete }: MessageBubbleProps) {
   // Only what arrives while you watch moves; history is just there.
   const [enter] = useState(() =>
     Date.now() - message.timestamp < 5000
@@ -216,7 +299,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "" }: Message
       : "";
     
     return (
-      <div className={`flex justify-center mb-3.5 px-[63px] max-md:px-2.5 ${enter}`}>
+      <div className={`group flex items-center justify-center gap-1 mb-3.5 px-[63px] max-md:px-2.5 ${enter}`}>
         <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-blue-500/10 text-blue-400">
           <svg
             width="14"
@@ -238,6 +321,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "" }: Message
           </span>
           <span className="text-text-muted text-[10px]">{time}</span>
         </div>
+        {onDelete && <MessageActions onDelete={onDelete} align="right" />}
       </div>
     );
   }
@@ -247,7 +331,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "" }: Message
     const isMissed = type === "call_missed" || type === "call_rejected";
     
     return (
-      <div className={`flex justify-center mb-3.5 px-[63px] max-md:px-2.5 ${enter}`}>
+      <div className={`group flex items-center justify-center gap-1 mb-3.5 px-[63px] max-md:px-2.5 ${enter}`}>
         <div
           className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs ${
             isMissed
@@ -262,6 +346,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "" }: Message
           )}
           <span className="text-text-muted text-[10px]">{time}</span>
         </div>
+        {onDelete && <MessageActions onDelete={onDelete} align="right" />}
       </div>
     );
   }
@@ -280,9 +365,10 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "" }: Message
 
   return (
     <div
-      className={`flex ${isMe ? "justify-end" : "justify-start"} mb-3.5 px-[63px] max-md:px-2.5 ${enter}`}
+      className={`group flex items-start gap-1 ${isMe ? "justify-end" : "justify-start"} mb-3.5 px-[63px] max-md:px-2.5 ${enter}`}
       onDoubleClick={() => message.meta && setShowTech((v) => !v)}
     >
+      {isMe && onDelete && <MessageActions onDelete={onDelete} align="left" />}
       <div
         className={`relative max-w-[85%] min-w-[80px] ${
           isMe
@@ -394,6 +480,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "" }: Message
           </div>
         )}
       </div>
+      {!isMe && onDelete && <MessageActions onDelete={onDelete} align="right" />}
     </div>
   );
 }
