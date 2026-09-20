@@ -35,6 +35,13 @@ export default tseslint.config(
     },
   },
   {
+    // A context file is a provider and the hook that reads it, together on
+    // purpose. Fast refresh cannot hot-reload that, and splitting every context
+    // in two to please it costs more than it is worth.
+    files: ["src/contexts/**/*.tsx"],
+    rules: { "react-refresh/only-export-components": "off" },
+  },
+  {
     // Playwright fixtures call `use()` and take `{}` when they need nothing; neither is React.
     files: ["e2e/**/*.ts"],
     languageOptions: { globals: globals.node },

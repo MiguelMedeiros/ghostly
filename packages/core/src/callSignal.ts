@@ -269,11 +269,13 @@ export function signalHasVideo(signal: CallSignal | null): boolean {
   return (signal.m?.includes("v") ?? false) && (signal.ss?.length ?? 0) > 1;
 }
 
-/** Rebuilds an SDP around a signal. Only pass signals returned by {@link parseCallSignal}. */
-export function buildSdpFromSignal(
-  signal: CallSignal,
-  type: "offer" | "answer",
-): string {
+/**
+ * Rebuilds an SDP around a signal. Only pass signals returned by {@link parseCallSignal}.
+ *
+ * Offer and answer are built the same way: which of the two this is comes from
+ * the signal itself, as `a=setup:`, not from the caller.
+ */
+export function buildSdpFromSignal(signal: CallSignal): string {
   const hexPairs = signal.f!.match(/.{2}/g)!;
   const fingerprint = `sha-256 ${hexPairs.join(":")}`;
   
