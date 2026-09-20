@@ -59,6 +59,9 @@ const DEFAULT_SETTINGS: Settings = {
   mintsInitialized: false,
 };
 
+/** How many deleted ids a link remembers: enough to outlast what a peer republishes. */
+const MAX_DELETED_IDS = 500;
+
 interface LiveLink {
   stored: StoredLink;
   myPubKeyZ32: string;
@@ -297,6 +300,39 @@ export class GhostlyNode implements EngineImplementation {
     return { error };
   }
 
+  /**
+   * Forgets one message here: its row, the bytes of the file it carried, and
+   * its id, so the peer republishing it does not bring it back. Nothing goes
+   * out on the wire — the peer keeps its own copy.
+   */
+  deleteMessage({ linkId, messageId }: { linkId: string; messageId: string }): void {
+    const live = this.links.get(linkId);
+    if (!live) return;
+    live.stored = {
+      ...live.stored,
+      deletedIds: [...(live.stored.deletedIds ?? []), messageId].slice(-MAX_DELETED_IDS),
+    };
+    void db.putLink(live.stored);
+
+    void (async () => {
+      const message = (await db.getMessages(linkId)).find((m) => m.id === messageId);
+      if (message?.file) {
+        const stored = await fileStore.get(message.file.id);
+        // Only what the peer sent counts against the room it has here.
+        if (stored && (stored.direction === "in" || (!stored.direction && message.sender === "peer"))) {
+          live.files.receivedBytes = Math.max(0, live.files.receivedBytes - stored.blob.size);
+        }
+        await fileStore.delete(message.file.id);
+        this.transfers.delete(message.file.id);
+      }
+      await db.deleteMessage(linkId, messageId);
+      const messages = await db.getMessages(linkId);
+      live.lastMessageAt = messages[messages.length - 1]?.timestamp ?? 0;
+      this.events.onMessages(linkId, messages);
+      this.emitState();
+    })();
+  }
+
   /** Local id of a file we send: the id on the wire is ours too, but lives in its own key space. */
   private static outgoingFileId(linkId: string, wireId: string): string {
     return `${linkId}-out-${wireId}`;
@@ -372,15 +408,22 @@ export class GhostlyNode implements EngineImplementation {
     return {
       write: (chunk) => void chunks.push(chunk),
       // The message keeps the announced type for display; the bytes are served as something inert.
-      close: () =>
-        fileStore.put({
+      close: () => {
+        const live = this.links.get(linkId);
+        // Deleted while it was still arriving: the bytes have nowhere to land, and give their room back.
+        if (live?.stored.deletedIds?.includes(`peer_${wire.timestamp}`)) {
+          live.files.receivedBytes = Math.max(0, live.files.receivedBytes - wire.size);
+          return;
+        }
+        return fileStore.put({
           id: file.id,
           linkId,
           blob: new Blob(chunks as BlobPart[], { type: safeBlobType(file.mime) }),
           createdAt: Date.now(),
           direction: "in",
           wireId: wire.id,
-        }),
+        });
+      },
       abort: () => void (chunks.length = 0),
     };
   }
@@ -690,8 +733,10 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   private async storeMessage(message: StoredMessage): Promise<void> {
-    if (!(await db.addMessage(message))) return;
     const live = this.links.get(message.linkId);
+    // The peer republishes what it sent for a few minutes: what was deleted here stays deleted.
+    if (live?.stored.deletedIds?.includes(message.id)) return;
+    if (!(await db.addMessage(message))) return;
     if (live) live.lastMessageAt = Math.max(live.lastMessageAt, message.timestamp);
     this.events.onMessages(message.linkId, await db.getMessages(message.linkId));
     this.emitState();

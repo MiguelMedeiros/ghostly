@@ -34,7 +34,9 @@
     "connecting": "连接中",
     "lastSeen": "最后上线 {{time}}",
     "today": "今天",
-    "yesterday": "昨天"
+    "yesterday": "昨天",
+    "deleteMessage": "删除消息",
+    "deleteMessageHint": "仅在此设备上删除，对方仍保留副本。"
   },
   "home": {
     "welcome": "欢迎使用 Ghostly",

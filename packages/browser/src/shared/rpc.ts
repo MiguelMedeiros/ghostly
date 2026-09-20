@@ -11,6 +11,8 @@ export interface EngineApi {
   renameLink(params: { linkId: string; label: string }): void;
   setActiveLink(params: { linkId: string | null }): void;
   sendMessage(params: { linkId: string; text: string; timestamp?: number }): { error: string | null };
+  /** Forgets one message and the bytes of the file it carried. Nothing is sent: the peer keeps its copy. */
+  deleteMessage(params: { linkId: string; messageId: string }): void;
   /** Link secrets, for a UI that keeps its own session list in the same profile. */
   exportLinks(): { seedB64: string; peerPubKeyZ32: string; encKeyB64: string; createdAt: number; inviteCode?: string; label?: string }[];
   /** Sends a file whose bytes the caller already put in the `files` store. Progress shows up in `transfers`. */

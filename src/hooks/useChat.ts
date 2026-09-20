@@ -15,6 +15,7 @@ import {
   loadSession,
   saveSession,
   addMessage,
+  deleteMessage as deleteStoredMessage,
   getInviteCode,
   hasAnnouncedJoin,
   markJoinAnnounced,
@@ -555,6 +556,14 @@ export function useChat(params: ChatParams | null) {
     }
   }, []);
 
+  const deleteMessage = useCallback((messageId: string) => {
+    const updated = deleteStoredMessage(sessionIdRef.current, messageId);
+    if (!updated) return;
+    setMessages([...updated.messages]);
+    // The chat list keeps its own copy of the last message.
+    window.dispatchEvent(new Event("session-updated"));
+  }, []);
+
   const techInfo: ChatTechInfo = {
     sessionId: sessionIdRef.current,
     myPubKey: myPubKeyRef.current,
@@ -594,6 +603,7 @@ export function useChat(params: ChatParams | null) {
     setCallSignal,
     setChatFastPoll,
     addSystemMessage,
+    deleteMessage,
     pollCountdown,
   };
 }

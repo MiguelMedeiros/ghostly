@@ -52,6 +52,12 @@ export interface ChatSession {
   lastSyncAt?: number;
   nick?: string;
   label?: string;
+  /**
+   * Messages deleted here, by id. The peer keeps republishing what it sent for
+   * a few minutes and the peer engine mirrors its own store into this session,
+   * so without this the message would simply come back.
+   */
+  deletedIds?: string[];
 }
 
 export interface ChatParams {

@@ -1,13 +1,19 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   LEGACY_JOIN_PREFIX,
+  addMessage,
+  deleteMessage,
   deleteSession,
   ensureSession,
+  getUnreadCount,
   hasAnnouncedJoin,
   listSessions,
+  loadSession,
   markJoinAnnounced,
+  markSessionAsRead,
   peerDisplayName,
 } from "../../../src/lib/storage";
+import type { ChatMessage } from "../../../src/lib/types";
 import { clearAllData } from "../../../src/lib/settings";
 
 /** Enough of the Web Storage API for the session store; node has none. */
@@ -94,5 +100,63 @@ describe("the name a peer goes by", () => {
     expect(peerDisplayName("n".repeat(200))).toBe("n".repeat(64));
     expect(peerDisplayName("\u202e\u200b")).toBeUndefined();
     expect(peerDisplayName(undefined)).toBeUndefined();
+  });
+});
+
+function peerMessage(n: number): ChatMessage {
+  return { id: `peer_${n}`, text: `boo ${n}`, sender: "peer", timestamp: n * 1000 };
+}
+
+describe("deleting one message", () => {
+  it("takes it out of the chat and leaves the rest in order", () => {
+    const id = ensureSession(keys);
+    for (const n of [1, 2, 3]) addMessage(id, peerMessage(n));
+
+    const session = deleteMessage(id, "peer_2");
+
+    expect(session?.messages.map((m) => m.id)).toEqual(["peer_1", "peer_3"]);
+    expect(loadSession(id)?.messages.map((m) => m.id)).toEqual(["peer_1", "peer_3"]);
+  });
+
+  it("keeps it gone when the peer republishes it", () => {
+    const id = ensureSession(keys);
+    addMessage(id, peerMessage(1));
+    deleteMessage(id, "peer_1");
+
+    // What a poll or the peer engine's own store would hand back for minutes after.
+    addMessage(id, peerMessage(1));
+
+    expect(loadSession(id)?.messages).toEqual([]);
+  });
+
+  it("does not turn read messages into unread ones", () => {
+    const id = ensureSession(keys);
+    for (const n of [1, 2]) addMessage(id, peerMessage(n));
+    markSessionAsRead(id);
+    addMessage(id, peerMessage(3));
+    expect(getUnreadCount(loadSession(id)!)).toBe(1);
+
+    deleteMessage(id, "peer_1");
+
+    expect(getUnreadCount(loadSession(id)!)).toBe(1);
+  });
+
+  it("says nothing happened when there is no such message or chat", () => {
+    const id = ensureSession(keys);
+    addMessage(id, peerMessage(1));
+
+    expect(deleteMessage(id, "peer_9")).toBeNull();
+    expect(deleteMessage("nosuchsession", "peer_1")).toBeNull();
+    expect(loadSession(id)?.messages).toHaveLength(1);
+  });
+
+  it("is forgotten with the chat it was in", () => {
+    const id = ensureSession(keys);
+    addMessage(id, peerMessage(1));
+    deleteMessage(id, "peer_1");
+
+    deleteSession(id);
+
+    expect(storage.keys().filter((key) => key.includes(id))).toEqual([]);
   });
 });

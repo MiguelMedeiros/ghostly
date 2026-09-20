@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import type * as Desktop from "../../../../src/hooks/useChat";
 import {
   addMessage,
+  deleteMessage as deleteStoredMessage,
   getInviteCode,
   hasAnnouncedJoin,
   loadSession,
@@ -197,6 +198,16 @@ export const useChat: typeof Desktop.useChat = (params) => {
     [sessionId],
   );
 
+  const deleteMessage = useCallback(
+    (messageId: string) => {
+      const updated = deleteStoredMessage(sessionId, messageId);
+      if (!updated) return;
+      setMessages([...updated.messages]);
+      notifySessionsChanged();
+    },
+    [sessionId],
+  );
+
   // The countdown ring next to the peer's key.
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 200);
@@ -251,6 +262,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
     setCallSignal,
     setChatFastPoll,
     addSystemMessage,
+    deleteMessage,
     pollCountdown,
   };
 };

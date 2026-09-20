@@ -34,7 +34,9 @@
     "connecting": "connexion",
     "lastSeen": "Vu {{time}}",
     "today": "Aujourd'hui",
-    "yesterday": "Hier"
+    "yesterday": "Hier",
+    "deleteMessage": "Supprimer le message",
+    "deleteMessageHint": "Supprimé uniquement ici. Votre contact garde sa copie."
   },
   "home": {
     "welcome": "Bienvenue sur Ghostly",
