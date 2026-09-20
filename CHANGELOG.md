@@ -9,6 +9,7 @@
 
 ### Fixed
 
+- **Calls** ended the moment you left the chat: opening Settings, the wallet or another chat hung up on whoever you were talking to. A call now comes along in its small window wherever you go, and takes you back to its chat when you shrink it back. Locking Ghostly no longer shows the call over the lock screen either — the call keeps going, out of sight, until you unlock.
 - **CLI:** `ghostly-cli --version` reported `0.1.0` whatever version you had installed. It now says which version it actually is.
 
 ## 0.3.4

@@ -24,7 +24,7 @@ Only the tests tagged `@network` go out: the wallet, against the public Cashu te
 | `web/app.spec.ts` | home, one tab per peer, create/join/name/search/delete chats, "Delete all chats" stays deleted, clear all data, tech info |
 | `web/settings.spec.ts` | nickname, color theme and mode, language, switches, lock screen (password, lock now, idle timeout), relays |
 | `web/chat.spec.ts` | two people: relay then peer to peer, nicknames, read ticks, long messages, offline delivery, emoji, GIFs, files (3 MiB, checksum), images |
-| `web/calls.spec.ts` | video and audio calls, mute, camera, screen share, decline, the movable self view, the small call window |
+| `web/calls.spec.ts` | video and audio calls, mute, camera, screen share, decline, the movable self view, the small call window, a call that outlives its chat, the lock over one |
 | `web/mobile.spec.ts` | the phone layout: tabs, chat screen, composer |
 | `web/wallet.spec.ts` | `@network`: Lightning in, ecash out, requests, history and fees, invoice and token cards |
 | `extension/interop.spec.ts` | the extension and the web app: chat, file, video call |

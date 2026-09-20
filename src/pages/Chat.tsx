@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { useParams, useNavigate, Navigate } from "react-router-dom";
+import { useNavigate, Navigate } from "react-router-dom";
 import { useChat } from "../hooks/useChat";
 import { useWebRTC } from "../hooks/useWebRTC";
 import { useSettings } from "../contexts/SettingsContext";
@@ -20,20 +20,27 @@ import {
   peerDisplayName,
   updateSessionLabel,
 } from "../lib/storage";
+import { chatPath } from "../lib/url";
 import { parseCallSignal, signalHasVideo } from "@ghostly/core";
 import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
 
-export function Chat() {
-  const { "*": splat } = useParams();
+interface ChatProps {
+  /** The stored session this chat is. `App` reads it off the address. */
+  sessionId: string;
+  /** False while the chat is off screen: it stays loaded, only for the call it holds. */
+  visible: boolean;
+  /** Tells `App` whether this chat is on a call, so it stays loaded wherever you go. */
+  onCallChange: (sessionId: string, onCall: boolean) => void;
+  /** Where the call window hangs, outside this chat. `App` owns it. */
+  callLayer: HTMLElement | null;
+}
+
+export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps) {
   const navigate = useNavigate();
   const { settings } = useSettings();
   const bottomRef = useRef<HTMLDivElement>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  // `/chat/<session id>`. A route that still carries the keys (an invite link,
-  // an old bookmark) is turned into this one by `ChatLinkIntake` first.
-  const sessionId = splat && !splat.includes("/") ? splat : null;
-  const isKeyRoute = !!splat?.includes("/");
   const session = useMemo(() => (sessionId ? loadSession(sessionId) : null), [sessionId]);
   const params: ChatParams | null = useMemo(
     () =>
@@ -116,6 +123,13 @@ export function Chat() {
     if (callState === "offering") return startRinging("ringback");
     if (callState === "idle" && before !== "idle") playSound("hangup");
   }, [callState]);
+
+  // A chat on a call is kept loaded by `App` wherever the person goes next,
+  // so the call itself — and the signaling that ends it — survives the trip.
+  useEffect(() => {
+    onCallChange(sessionId, callState !== "idle");
+  }, [onCallChange, sessionId, callState]);
+  useEffect(() => () => onCallChange(sessionId, false), [onCallChange, sessionId]);
 
   const incomingHasVideo = (() => {
     if (!incomingCallSignal) return false;
@@ -241,7 +255,7 @@ export function Chat() {
     setConfirmDelete(false);
     setCodeCopied(false);
     setMenuOpen(false);
-  }, [splat]);
+  }, [sessionId]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -259,12 +273,14 @@ export function Chat() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Only what is on screen has been read; a chat kept alive by a call has not.
   useEffect(() => {
-    if (sessionId) markSessionAsRead(sessionId);
-  }, [sessionId, messages.length]);
+    if (visible) markSessionAsRead(sessionId);
+  }, [visible, sessionId, messages.length]);
 
   if (!params) {
-    return isKeyRoute ? null : <Navigate to="/" replace />;
+    // A chat still on a call has nowhere better to be; only the one on screen leaves.
+    return visible ? <Navigate to="/" replace /> : null;
   }
 
   const handleDelete = () => {
@@ -600,7 +616,7 @@ export function Chat() {
 
       {/* Input */}
       <MessageInput
-        key={splat}
+        key={sessionId}
         onSend={sendMessage}
         disabled={isSending}
         // The DHT carries a few hundred characters; the direct link has room for long invoices and ecash tokens.
@@ -630,6 +646,9 @@ export function Chat() {
         webrtc.callState === "connecting" ||
         webrtc.callState === "connected") && (
         <CallOverlay
+          layer={callLayer}
+          pinned={!visible}
+          onReturnToChat={() => navigate(chatPath(sessionId))}
           callState={webrtc.callState}
           localStream={webrtc.localStream}
           remoteStream={webrtc.remoteStream}

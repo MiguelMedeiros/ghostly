@@ -195,3 +195,77 @@ test("a screen share that starts as one goes back to voice when it stops", async
   await alice.page.getByTitle("End call").click();
   await expect(bob.page.getByTitle("End call")).toHaveCount(0);
 });
+
+test("a call follows you out of the chat and into Settings", async ({ peer }) => {
+  const [alice, bob] = await linked(peer);
+  await alice.page.getByTitle("Video call").click();
+  await bob.page.getByTitle("Accept video call").click();
+  for (const p of [alice, bob]) await expect(p.page.getByText(clock).first()).toBeVisible();
+  await expect.poll(() => remoteSize(bob)).toMatch(/^[1-9]\d*x[1-9]\d*$/);
+
+  // The small window is what leaves the rest of the app reachable.
+  await alice.page.getByTitle("Keep the call in a small window").click();
+  const callWindow = alice.page.getByTestId("call-window");
+  await expect(callWindow).toHaveAttribute("data-mini", "true");
+
+  // Leaving the chat used to hang up on the other person.
+  await alice.page.getByTitle("Settings").click();
+  await expect(alice.page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  await expect(callWindow, "the call comes along").toBeVisible();
+  await expect(alice.page.getByText(clock).first(), "and is still running").toBeVisible();
+  await expect(bob.page.getByTitle("End call"), "the other side is still on the call").toBeVisible();
+  await expect.poll(() => remoteSize(bob), "and still has the picture").toMatch(/^[1-9]\d*x[1-9]\d*$/);
+
+  await alice.page.getByTitle("Back to the chat").click();
+  await expect(alice.page.getByPlaceholder("Type a message")).toBeVisible();
+  await say(alice, "back from settings, still on the call");
+  await expect(chat(bob).getByText("back from settings, still on the call")).toBeVisible();
+
+  // Another chat is no different: the call comes along, the new chat is its own.
+  await alice.page.getByTitle("New Chat").click();
+  await alice.page.getByRole("button", { name: "Create New Chat" }).first().click();
+  await expect(alice.page.locator("code").first()).toBeVisible();
+  await expect(callWindow, "the call comes along here too").toBeVisible();
+  await expect(alice.page.getByTitle("Back to the chat")).toBeVisible();
+
+  // A hang-up from the other side still reaches a call that is away from its chat.
+  await bob.page.getByTitle("End call").click();
+  await expect(callWindow).toHaveCount(0);
+  await expect(alice.page.locator("code").first(), "and leaves you where you were").toBeVisible();
+});
+
+test("the lock screen covers a call it keeps going", async ({ peer }) => {
+  const [alice, bob] = await linked(peer);
+  await alice.page.getByTitle("Video call").click();
+  await bob.page.getByTitle("Accept video call").click();
+  for (const p of [alice, bob]) await expect(p.page.getByText(clock).first()).toBeVisible();
+  await alice.page.getByTitle("Keep the call in a small window").click();
+
+  await alice.page.getByTitle("Settings").click();
+  await alice.page.getByRole("switch", { name: "Lock Screen" }).click();
+  const passwords = alice.page.locator("input[type=password]");
+  await passwords.nth(0).fill("spooky");
+  await passwords.nth(1).fill("spooky");
+  await alice.page.getByRole("button", { name: "Set password" }).click();
+  await alice.page.getByRole("button", { name: "Lock Now" }).click();
+  await expect(alice.page.getByText("Ghostly is locked")).toBeVisible();
+
+  // The call goes on — nobody is hung up on — but nothing of it shows or answers.
+  await expect(bob.page.getByTitle("End call")).toBeVisible();
+  const call = alice.page.getByTestId("call-window");
+  expect(
+    await call.evaluate((el) => {
+      const { x, y, width, height } = el.getBoundingClientRect();
+      return el.contains(document.elementFromPoint(x + width / 2, y + height / 2));
+    }),
+    "the lock is in front of the call window",
+  ).toBe(false);
+  expect(await call.evaluate((el) => !!el.closest("[inert]")), "and the call is out of reach").toBe(true);
+
+  await alice.page.getByPlaceholder("Password").fill("spooky");
+  await alice.page.getByRole("button", { name: "Unlock" }).click();
+  await expect(alice.page.getByText("Ghostly is locked")).toHaveCount(0);
+  await expect(alice.page.getByText(clock).first(), "and it is still running after").toBeVisible();
+  await alice.page.getByTitle("End call").click();
+  await expect(bob.page.getByTitle("End call")).toHaveCount(0);
+});

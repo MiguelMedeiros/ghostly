@@ -2,7 +2,6 @@ import { useLayoutEffect, type ReactNode } from "react";
 import { HashRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import { App } from "./App";
 import { Home } from "./pages/Home";
-import { Chat } from "./pages/Chat";
 import { Settings } from "./pages/Settings";
 import { ShareTab, WalletTab } from "./pages/MobileTabs";
 import { SettingsProvider } from "./contexts/SettingsContext";
@@ -37,6 +36,12 @@ function ChatLinkIntake() {
 }
 
 /**
+ * A chat has no route element of its own: `App` keeps it loaded across a trip
+ * to Settings, so a call it holds is not hung up on the way.
+ */
+const ChatRoute = () => null;
+
+/**
  * Nothing of the app exists until the password has been entered once. When it
  * locks again later the app stays mounted (a call keeps going) but can be
  * neither reached nor read by assistive technology under the lock screen.
@@ -67,7 +72,7 @@ export function Root() {
                   <Routes>
                     <Route element={<App />}>
                       <Route path="/" element={<Home />} />
-                      <Route path="/chat/*" element={<Chat />} />
+                      <Route path="/chat/*" element={<ChatRoute />} />
                       <Route path="/settings" element={<Settings />} />
                       <Route path="/wallet" element={<WalletTab />} />
                       <Route path="/share" element={<ShareTab />} />
