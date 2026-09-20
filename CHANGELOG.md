@@ -1,12 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
+
+From here on Ghostly tells you when there is a new version, and installs it where it can — so this is the last one you have to go and fetch yourself. Calls gained video and screen sharing without calling again, and any single message can now be deleted from this device. Nothing changes on the wire: older clients keep working, they just cannot turn their camera on mid-call until they update.
 
 ### Added
 
+- **Updates.** Every client now says when a new version is out, and puts it in place where it can. The desktop app downloads it, checks our signature and restarts into it; on the web it is a reload; the extension points you at the download until it is in a store. Nothing happens by itself — updating ends your calls, so it waits for you. The check can be turned off in **Settings → Updates**.
 - **Calls.** A voice call can turn into a video call, and share a screen, without calling again. The camera and screen buttons are there during any call now: press one and the other side sees it, with nothing to accept and no second ring. Stopping a screen share goes back to what you had before it, your camera or just your voice. Every call carries an empty video section for this, so a peer on an older version still rings, still talks and still sees your picture when you turn it on — it just cannot turn its own on until it updates.
 - **Deleting a message.** Any message in a chat — a picture, a file, a text, a call or a payment — can now be deleted on its own, from the bin next to it. It is gone from this device: the message, and the bytes of whatever file it carried. Nothing is asked of your contact, who keeps their copy, and a message deleted here does not come back when they republish it.
-- **Updates.** Every client now says when a new version is out, and puts it in place where it can. The desktop app downloads it, checks our signature and restarts into it; on the web it is a reload; the extension points you at the download until it is in a store. Nothing happens by itself — updating ends your calls, so it waits for you. The check can be turned off in **Settings → Updates**.
 
 ### Fixed
 
