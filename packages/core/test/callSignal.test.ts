@@ -82,7 +82,7 @@ describe("call signals", () => {
       "3345412921 1 udp 1686052607 203.0.113.7 61000 typ srflx raddr 0.0.0.0 rport 0",
     ]);
 
-    const rebuilt = buildSdpFromSignal(signal, "offer");
+    const rebuilt = buildSdpFromSignal(signal);
     for (const c of signal.c!) expect(rebuilt).toContain(`\r\na=candidate:${c}\r\n`);
     const again = extractParamsFromSdp(rebuilt);
     expect({ ...again, c: undefined }).toEqual({ u: signal.u, p: signal.p, f: signal.f, s: signal.s, m: signal.m, ss: signal.ss });
@@ -96,7 +96,7 @@ describe("call signals", () => {
     expect(signal.s).toBe("active");
     expect(signal.m).toEqual(["a"]);
     expect(signal.c).toEqual(["1 1 udp 1686052863 198.51.100.4 50001 typ srflx raddr 0.0.0.0 rport 0"]);
-    expect(buildSdpFromSignal(signal, "answer")).toContain("a=candidate:1 1 udp 1686052863 198.51.100.4 50001 typ srflx");
+    expect(buildSdpFromSignal(signal)).toContain("a=candidate:1 1 udp 1686052863 198.51.100.4 50001 typ srflx");
   });
 
   it("accepts hang-ups and keeps only their type and time", () => {

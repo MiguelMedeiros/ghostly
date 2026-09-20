@@ -314,14 +314,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     offline: { color: "bg-gray-500", label: "offline" },
     error: { color: "bg-danger", label: "error" },
   };
-  const { color: statusColor, label: statusLabel } = statusConfig[status];
-
-  const syncText = lastSync
-    ? new Date(lastSync).toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      })
-    : "";
+  const { label: statusLabel } = statusConfig[status];
 
   const truncatedPeerKey = params.peerPubKeyB64.slice(0, 12) + "...";
   const displayName = chatLabel || peerNick;

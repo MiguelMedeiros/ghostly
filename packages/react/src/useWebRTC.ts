@@ -348,7 +348,7 @@ export function useWebRTC({
         stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
         stream.getVideoTracks().forEach((track) => pc.addTrack(track, stream));
 
-        const offerSdp = buildSdpFromSignal(offer, "offer");
+        const offerSdp = buildSdpFromSignal(offer);
 
         await pc.setRemoteDescription({
           type: "offer",
@@ -407,7 +407,7 @@ export function useWebRTC({
       try {
         applyRemotePicture(signal);
 
-        const answerSdp = buildSdpFromSignal(signal, "answer");
+        const answerSdp = buildSdpFromSignal(signal);
         await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
         refreshVideoLane();
 

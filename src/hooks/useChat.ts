@@ -235,7 +235,7 @@ export function useChat(params: ChatParams | null) {
         isPollingRef.current = true;
         setPollCountdown(prev => ({ ...prev, remaining: 0, isPolling: true }));
 
-        const n = ++pollCountRef.current;
+        pollCountRef.current++;
         try {
           const batch = await resolveMessages(
             peerPubKeyZ32Ref.current,
@@ -413,6 +413,9 @@ export function useChat(params: ChatParams | null) {
         countdownTimerRef.current = null;
       }
     };
+  // The fields, not the object: `params` is rebuilt on every render, and
+  // restarting the poll each time would never let it finish.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params?.sessionId, params?.seedB64, params?.peerPubKeyB64, params?.encKeyB64, params?.nick]);
 
   const sendMessage = useCallback(

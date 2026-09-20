@@ -55,7 +55,6 @@ export default function GhostPet() {
 
       const dx = targetX - currentPos.current.x;
       const dy = targetY - currentPos.current.y;
-      const distanceToTarget = Math.sqrt(dx * dx + dy * dy);
 
       // Check if mouse is close to ghost (using absolute coordinates including scroll)
       const ghostCenterX = currentPos.current.x + 18;
