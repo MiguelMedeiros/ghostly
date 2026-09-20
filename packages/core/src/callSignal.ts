@@ -4,7 +4,8 @@
  * travel and each side rebuilds the SDP around them.
  */
 export interface CallSignal {
-  t: "o" | "a" | "h";
+  /** offer, answer, hang-up, or "my picture changed" while the call is up. */
+  t: "o" | "a" | "h" | "v";
   ts: number;
   u?: string;
   p?: string;
@@ -13,6 +14,10 @@ export interface CallSignal {
   m?: string[];
   c?: string[];
   ss?: number[];
+  /** 1 while this peer is sending a picture, 0 while it is not. */
+  v?: number;
+  /** What the picture is: the camera or a screen. Only meaningful with `v: 1`. */
+  k?: "c" | "s";
 }
 
 export type CallState = "idle" | "offering" | "incoming" | "answering" | "connecting" | "connected" | "ended";
@@ -195,10 +200,15 @@ export function parseCallSignal(json: string, now = Date.now()): CallSignal | nu
     return null;
   }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-  if (raw.t !== "o" && raw.t !== "a" && raw.t !== "h") return null;
+  if (raw.t !== "o" && raw.t !== "a" && raw.t !== "h" && raw.t !== "v") return null;
   if (typeof raw.ts !== "number" || !Number.isFinite(raw.ts)) return null;
   if (Math.abs(now - raw.ts) > CALL_SIGNAL_MAX_AGE_MS) return null;
   if (raw.t === "h") return { t: "h", ts: raw.ts };
+
+  const picture = parsePicture(raw);
+  if (picture === null) return null;
+  // A media state carries no ICE: it only says whether a picture is on, and which.
+  if (raw.t === "v") return { t: "v", ts: raw.ts, ...picture };
 
   if (typeof raw.u !== "string" || !ICE_UFRAG.test(raw.u)) return null;
   if (typeof raw.p !== "string" || !ICE_PWD.test(raw.p)) return null;
@@ -229,7 +239,34 @@ export function parseCallSignal(json: string, now = Date.now()): CallSignal | nu
     }
   }
 
-  return { t: raw.t, ts: raw.ts, u: raw.u, p: raw.p, f: raw.f, s: raw.s, m: media, c: candidates, ss: ssrcs };
+  return { t: raw.t, ts: raw.ts, u: raw.u, p: raw.p, f: raw.f, s: raw.s, m: media, c: candidates, ss: ssrcs, ...picture };
+}
+
+/** The `v`/`k` pair of any signal. Returns null for a malformed one, `{}` when it says nothing. */
+function parsePicture(raw: Record<string, unknown>): Pick<CallSignal, "v" | "k"> | null {
+  const picture: Pick<CallSignal, "v" | "k"> = {};
+  if (raw.v !== undefined) {
+    if (raw.v !== 0 && raw.v !== 1) return null;
+    picture.v = raw.v;
+  }
+  if (raw.k !== undefined) {
+    if (raw.k !== "c" && raw.k !== "s") return null;
+    picture.k = raw.k;
+  }
+  return picture;
+}
+
+/**
+ * Whether the peer that sent this offer or answer is sending a picture.
+ *
+ * Since v2 every call negotiates a video section, on or off, so the media list
+ * no longer answers this: `v` does. A v1 peer sends no `v`, and there the video
+ * section only carries an SSRC when it is really sending on it.
+ */
+export function signalHasVideo(signal: CallSignal | null): boolean {
+  if (!signal) return false;
+  if (signal.v !== undefined) return signal.v === 1;
+  return (signal.m?.includes("v") ?? false) && (signal.ss?.length ?? 0) > 1;
 }
 
 /** Rebuilds an SDP around a signal. Only pass signals returned by {@link parseCallSignal}. */

@@ -4,6 +4,7 @@ import {
   buildSdpFromSignal,
   extractParamsFromSdp,
   parseCallSignal,
+  signalHasVideo,
   type CallSignal,
 } from "../src";
 
@@ -147,6 +148,40 @@ describe("call signals", () => {
     const good = JSON.parse(signalFrom(CHROME_OFFER, "o")) as CallSignal;
     const signal = parseCallSignal(JSON.stringify({ ...good, c: ["1 1 tcp 1 1.2.3.4 9 typ host tcptype active"] }), NOW);
     expect(signal?.c).toEqual([]);
+  });
+
+  it("accepts a media state, which carries a picture and nothing else", () => {
+    expect(parseCallSignal(JSON.stringify({ t: "v", ts: NOW, v: 1, k: "s" }), NOW)).toEqual({ t: "v", ts: NOW, v: 1, k: "s" });
+    expect(parseCallSignal(JSON.stringify({ t: "v", ts: NOW, v: 0 }), NOW)).toEqual({ t: "v", ts: NOW, v: 0 });
+    // No ICE is needed for one, and none of it is kept.
+    expect(parseCallSignal(JSON.stringify({ t: "v", ts: NOW, v: 1, u: "x\r\na=setup:active" }), NOW)).toEqual({ t: "v", ts: NOW, v: 1 });
+    expect(parseCallSignal(JSON.stringify({ t: "v", ts: NOW, v: 2 }), NOW)).toBeNull();
+    expect(parseCallSignal(JSON.stringify({ t: "v", ts: NOW, v: "1" }), NOW)).toBeNull();
+    expect(parseCallSignal(JSON.stringify({ t: "v", ts: NOW, v: 1, k: "screen" }), NOW)).toBeNull();
+    expect(parseCallSignal(JSON.stringify({ t: "v", ts: NOW - CALL_SIGNAL_MAX_AGE_MS - 1, v: 1 }), NOW)).toBeNull();
+  });
+
+  it("carries the picture on an offer, and rejects a malformed one", () => {
+    const good = JSON.parse(signalFrom(CHROME_OFFER, "o")) as CallSignal;
+    const offer = (patch: Record<string, unknown>) => parseCallSignal(JSON.stringify({ ...good, ...patch }), NOW);
+    expect(offer({ v: 0 })?.v).toBe(0);
+    expect(offer({ v: 1, k: "s" })?.k).toBe("s");
+    expect(offer({ v: 3 })).toBeNull();
+    expect(offer({ k: "x" })).toBeNull();
+  });
+
+  it("says who is sending a picture, and reads a v1 peer without asking it", () => {
+    const video = JSON.parse(signalFrom(CHROME_OFFER, "o")) as CallSignal;
+    // v2 answers with `v`: the video section is always there, on or off.
+    expect(signalHasVideo({ ...video, v: 0 })).toBe(false);
+    expect(signalHasVideo({ ...video, v: 1 })).toBe(true);
+    expect(signalHasVideo({ t: "v", ts: NOW, v: 1 })).toBe(true);
+    expect(signalHasVideo({ t: "v", ts: NOW, v: 0 })).toBe(false);
+    expect(signalHasVideo(null)).toBe(false);
+    // A v1 peer sends no `v`: it only puts an SSRC on the video section it sends on.
+    expect(signalHasVideo(video)).toBe(true);
+    expect(signalHasVideo({ ...video, ss: [video.ss![0]] })).toBe(false);
+    expect(signalHasVideo(parseCallSignal(signalFrom(FIREFOX_ANSWER, "a"), NOW))).toBe(false);
   });
 
   it("rejects signals that are too old or too far in the future", () => {

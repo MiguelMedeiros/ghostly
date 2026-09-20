@@ -303,6 +303,12 @@ const callSignalTypes = [
     description: "Terminate or reject the call",
     direction: "Either → Either",
   },
+  {
+    type: "v",
+    name: "Media state",
+    description: "My picture went on, off, or changed between camera and screen",
+    direction: "Either → Either",
+  },
 ];
 
 export function ProtocolDocs() {
@@ -710,7 +716,7 @@ Both:  encrypt/decrypt with shared encKey (256-bit)`}</code>
                 <div className="p-6">
                   <pre className="bg-[#060a10] rounded-lg p-6 font-mono text-sm overflow-x-auto">
                     <code className="text-gray-300">{`interface CallSignal {
-  t: "o" | "a" | "h";   // offer / answer / hangup
+  t: "o" | "a" | "h" | "v"; // offer / answer / hangup / media state
   ts: number;           // timestamp for glare resolution
 
   // ICE credentials (offer/answer only)
@@ -729,6 +735,10 @@ Both:  encrypt/decrypt with shared encKey (256-bit)`}</code>
 
   // SSRC values
   ss?: number[];        // synchronization source IDs
+
+  // What picture this peer is sending
+  v?: 0 | 1;            // 1 while a picture is on
+  k?: "c" | "s";        // camera or screen
 }`}</code>
                   </pre>
                 </div>
