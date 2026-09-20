@@ -96,7 +96,7 @@ export function NetworkSettings() {
             Save
           </button>
           {saved && <span className="text-accent text-sm">Saved</span>}
-          <span className="text-text-muted text-xs ml-auto">{network.protocol}</span>
+          <span data-testid="network-protocol" className="text-text-muted text-xs ml-auto">{network.protocol}</span>
         </div>
       </div>
     </section>

@@ -50,6 +50,11 @@ jobs:
       - name: Build
         run: npm run build
 
+      # Seconds, and it is the one thing no other job would notice: see
+      # scripts/check-desktop-bundle.mjs. The real Desktop test is in e2e.yml.
+      - name: Desktop build carries its Desktop wiring
+        run: npm run check:desktop-bundle
+
       - name: Build browser extension
         run: npm run build:extension
 

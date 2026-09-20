@@ -1,6 +1,7 @@
 name: E2E
 
-# Real browsers against the shipped build of the web app and the extension.
+# Real browsers against the shipped build of the web app and the extension, and
+# the real Desktop app driven through WebDriver.
 # Peers meet through a relay inside the test process, so nothing here depends
 # on outside services except the tests tagged @network (the public Cashu test mint).
 # Too slow to hold up every pull request: it runs before each release (release.yml
@@ -47,14 +48,38 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
+      # The wallet tests need a mint whose sats are worthless and whose invoices
+      # settle themselves. The public one (testnut.cashu.space) is a single
+      # volunteer's server that these runners cannot reach, which was stopping
+      # every release, so the same mint software runs here instead. Nothing
+      # else in the suite talks to it; see e2e/support/mint.ts.
+      - name: Start a Cashu test mint
+        run: |
+          docker run -d --name ghostly-testmint -p 3338:3338 \
+            -e CDK_MINTD_LN_BACKEND=fakewallet \
+            -e CDK_MINTD_LISTEN_HOST=0.0.0.0 \
+            -e CDK_MINTD_LISTEN_PORT=3338 \
+            -e CDK_MINTD_MNEMONIC="abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" \
+            -e CDK_MINTD_MINT_NAME="Ghostly test mint" \
+            -e CDK_MINTD_INPUT_FEE_PPK=100 \
+            cashubtc/mintd:0.17.7
+          for _ in $(seq 1 60); do
+            [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3338/v1/info)" = "200" ] && echo "mint up" && exit 0
+            sleep 2
+          done
+          echo "The test mint never came up:"; docker logs ghostly-testmint; exit 1
+
       - name: Run end-to-end tests
         if: ${{ !inputs.web_url }}
+        env:
+          E2E_MINT_URL: http://127.0.0.1:3338
         run: npm run test:e2e
 
       - name: Run end-to-end tests against ${{ inputs.web_url }}
         if: ${{ inputs.web_url }}
         env:
           E2E_WEB_URL: ${{ inputs.web_url }}
+          E2E_MINT_URL: http://127.0.0.1:3338
         run: npx playwright test -c e2e/playwright.config.ts --project=web
 
       - name: Upload report
@@ -64,5 +89,88 @@ jobs:
           name: playwright-report
           path: |
             playwright-report
+            test-results
+          retention-days: 14
+
+  # Ghostly Desktop, driven through WebDriver by tauri-driver: the bundled app,
+  # nothing added to it to make it testable. Linux only — macOS has no WebDriver
+  # for WKWebView — so this is where Desktop is covered at all. Its own job, so
+  # a Rust build never holds up the browser tests.
+  desktop:
+    name: Desktop (Tauri)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    # The deployed-web-app run has no Desktop app to speak of.
+    if: ${{ !inputs.web_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            webkit2gtk-driver \
+            xvfb
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+      # Crates and tauri-driver, but deliberately not target/. The repository is
+      # already past GitHub's 10 GB of cache, and build artefacts are most of the
+      # weight for the least benefit here: this job runs on releases, not on every
+      # push. Sharing ci.yml's cache instead is not an option either — that job
+      # runs on ubuntu-latest and this one pins the release's 22.04, and its
+      # target/ does not link here ("can't find crate for tauri_runtime").
+      - name: Cache Cargo
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-desktop-e2e-${{ github.repository }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-desktop-e2e-${{ github.repository }}-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install tauri-driver
+        run: command -v tauri-driver || cargo install tauri-driver --locked
+
+      # `tauri build` and not `cargo build`: a plain cargo debug build points the
+      # WebView at the dev server. `--debug` keeps the compile short; `--no-bundle`
+      # skips the installers, since the test runs the binary itself.
+      - name: Build the Desktop app
+        run: npm run tauri -- build --debug --no-bundle
+
+      - name: Run Desktop end-to-end tests
+        run: xvfb-run -a npm run test:e2e:desktop
+
+      - name: Upload report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report-desktop
+          path: |
+            playwright-report-desktop
             test-results
           retention-days: 14

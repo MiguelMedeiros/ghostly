@@ -1,10 +1,11 @@
 import { chat, connect, expect, link, test, type Peer } from "../support/fixtures";
-
-const TEST_MINT = "https://testnut.cashu.space";
+import { TEST_MINT, mintEndpoint } from "../support/mint";
 
 /**
- * Sats move through a real Cashu mint: the public test mint, whose sats are
- * worthless and whose invoices pay themselves. These tests need the internet.
+ * Sats move through a real Cashu mint: the test mint, whose sats are worthless
+ * and whose invoices pay themselves. That is the public one unless
+ * `E2E_MINT_URL` names another — CI runs its own, see support/mint.ts — so
+ * these tests need the internet only when nobody gave them a mint.
  * Wallets start with real mints too; the tests never touch them.
  */
 test.describe("wallet", { tag: "@network" }, () => {
@@ -99,7 +100,8 @@ test.describe("wallet", { tag: "@network" }, () => {
 
     // Minted outside Ghostly, pasted like any other text.
     const { Wallet, getEncodedToken } = await import("@cashu/cashu-ts");
-    const outside = new Wallet(TEST_MINT, { unit: "sat" });
+    // The bytes go wherever the mint actually is; the token still says testnut, as the app's does.
+    const outside = new Wallet(mintEndpoint(), { unit: "sat" });
     await outside.loadMint();
     const quote = await outside.createMintQuoteBolt11(7);
     let proofs: Awaited<ReturnType<typeof outside.mintProofsBolt11>> | null = null;

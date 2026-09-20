@@ -53,6 +53,12 @@ npm run build:extension
 
 # End-to-end: real browsers, the web app and the extension, every feature (see e2e/README.md)
 npm run test:e2e
+
+# End-to-end: the bundled Desktop app, through WebDriver (Linux and Windows only)
+npm run tauri -- build --debug --no-bundle && npm run test:e2e:desktop
+
+# Desktop got its Desktop wiring and not a browser stand-in — runs anywhere, takes a second
+npm run build && npm run check:desktop-bundle
 ```
 
 ## Project Structure
@@ -106,6 +112,7 @@ Open an issue with the `enhancement` label describing:
    npm run lint
    npm run typecheck
    npm run test:e2e
+   npm run check:desktop-bundle
    npm run tauri dev
    ```
 5. **Commit** with a clear message
