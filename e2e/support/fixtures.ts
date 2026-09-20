@@ -1,4 +1,5 @@
 import { test as base, expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { attachMint } from "./mint";
 import { LocalRelay } from "./relay";
 
 export { expect };
@@ -29,6 +30,7 @@ export async function openPeer(browser: Browser, relay: LocalRelay, baseURL: str
     ...(options.mobile ? { isMobile: true, hasTouch: true } : {}),
   });
   await relay.attach(context);
+  await attachMint(context);
   await stubGifServices(context);
   const page = await context.newPage();
   page.on("pageerror", (error) => console.log(`  [${name}] ${error.message}`));

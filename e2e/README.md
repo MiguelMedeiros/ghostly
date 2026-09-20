@@ -17,7 +17,17 @@ npm run tauri -- build --debug --no-bundle && npm run test:e2e:desktop   # the D
 
 Peers find each other through Pkarr relays. Here the relay is `support/relay.ts`, inside the test process: requests to the public relays are answered from memory, and the extension, whose peer runs where requests cannot be intercepted, is pointed at its local address in Settings → Network. So tests do not wait on the public relays, are never rate limited, and never see each other's packets. WebRTC connects the browsers directly on this machine. Giphy and GifCities are stubbed the same way.
 
-Only the tests tagged `@network` go out: the wallet, against the public Cashu test mint (`testnut.cashu.space`, worthless sats whose invoices pay themselves).
+Only the tests tagged `@network` go out: the wallet, against the public Cashu test mint (`testnut.cashu.space`, worthless sats whose invoices pay themselves). CI does not even do that — it runs a mint of its own and answers the public one's requests from it, the way the relay answers Pkarr's:
+
+```bash
+docker run -d --name ghostly-testmint -p 3338:3338 \
+  -e CDK_MINTD_LN_BACKEND=fakewallet -e CDK_MINTD_LISTEN_HOST=0.0.0.0 -e CDK_MINTD_LISTEN_PORT=3338 \
+  -e CDK_MINTD_MNEMONIC="abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" \
+  -e CDK_MINTD_INPUT_FEE_PPK=100 cashubtc/mintd:0.17.7
+E2E_MINT_URL=http://127.0.0.1:3338 npm run test:e2e
+```
+
+`E2E_MINT_URL` is all it takes: the app is never told, so it goes on adding and spending `testnut.cashu.space` and the tests assert exactly what they asserted before — they just stop depending on one volunteer's server, which GitHub's runners cannot reach and which was blocking every release. Use the same mint software (`cashubtc/mintd`, which is what the public test mint runs); Nutshell refuses to quote an invoice whose mint quote was already issued, and the tests need that to work. Without `E2E_MINT_URL` the public mint answers for itself, as before.
 
 ## What runs where
 
@@ -28,7 +38,7 @@ Only the tests tagged `@network` go out: the wallet, against the public Cashu te
 | `web/chat.spec.ts` | two people: relay then peer to peer, nicknames, read ticks, long messages, offline delivery, emoji, GIFs, files (3 MiB, checksum), images |
 | `web/calls.spec.ts` | video and audio calls, mute, camera, screen share, decline, the movable self view, the small call window |
 | `web/mobile.spec.ts` | the phone layout: tabs, chat screen, composer |
-| `web/wallet.spec.ts` | `@network`: Lightning in, ecash out, requests, history and fees, invoice and token cards |
+| `web/wallet.spec.ts` | `@network`: Lightning in, ecash out, requests, history and fees, invoice and token cards — against a real mint, ours in CI |
 | `extension/interop.spec.ts` | the extension and the web app: chat, file, video call |
 | `extension/services.spec.ts` | a local web app shared by one extension and opened by another over WebRTC, stopped, offline, gone |
 | `desktop/smoke.spec.ts` | the bundled Tauri app opens, and the peer behind it is the one Rust backs |

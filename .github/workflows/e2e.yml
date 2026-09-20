@@ -48,14 +48,38 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
+      # The wallet tests need a mint whose sats are worthless and whose invoices
+      # settle themselves. The public one (testnut.cashu.space) is a single
+      # volunteer's server that these runners cannot reach, which was stopping
+      # every release, so the same mint software runs here instead. Nothing
+      # else in the suite talks to it; see e2e/support/mint.ts.
+      - name: Start a Cashu test mint
+        run: |
+          docker run -d --name ghostly-testmint -p 3338:3338 \
+            -e CDK_MINTD_LN_BACKEND=fakewallet \
+            -e CDK_MINTD_LISTEN_HOST=0.0.0.0 \
+            -e CDK_MINTD_LISTEN_PORT=3338 \
+            -e CDK_MINTD_MNEMONIC="abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" \
+            -e CDK_MINTD_MINT_NAME="Ghostly test mint" \
+            -e CDK_MINTD_INPUT_FEE_PPK=100 \
+            cashubtc/mintd:0.17.7
+          for _ in $(seq 1 60); do
+            [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3338/v1/info)" = "200" ] && echo "mint up" && exit 0
+            sleep 2
+          done
+          echo "The test mint never came up:"; docker logs ghostly-testmint; exit 1
+
       - name: Run end-to-end tests
         if: ${{ !inputs.web_url }}
+        env:
+          E2E_MINT_URL: http://127.0.0.1:3338
         run: npm run test:e2e
 
       - name: Run end-to-end tests against ${{ inputs.web_url }}
         if: ${{ inputs.web_url }}
         env:
           E2E_WEB_URL: ${{ inputs.web_url }}
+          E2E_MINT_URL: http://127.0.0.1:3338
         run: npx playwright test -c e2e/playwright.config.ts --project=web
 
       - name: Upload report
@@ -108,6 +132,12 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
 
+      # Crates and tauri-driver, but deliberately not target/. The repository is
+      # already past GitHub's 10 GB of cache, and build artefacts are most of the
+      # weight for the least benefit here: this job runs on releases, not on every
+      # push. Sharing ci.yml's cache instead is not an option either — that job
+      # runs on ubuntu-latest and this one pins the release's 22.04, and its
+      # target/ does not link here ("can't find crate for tauri_runtime").
       - name: Cache Cargo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -116,7 +146,6 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            target/
           key: ${{ runner.os }}-cargo-desktop-e2e-${{ github.repository }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-desktop-e2e-${{ github.repository }}-
