@@ -26,7 +26,7 @@ permissions:
 jobs:
   e2e:
     name: End-to-end
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     steps:
@@ -136,7 +136,7 @@ jobs:
       # already past GitHub's 10 GB of cache, and build artefacts are most of the
       # weight for the least benefit here: this job runs on releases, not on every
       # push. Sharing ci.yml's cache instead is not an option either — that job
-      # runs on ubuntu-latest and this one pins the release's 22.04, and its
+      # runs on 24.04 and this one pins the release's 22.04, and its
       # target/ does not link here ("can't find crate for tauri_runtime").
       - name: Cache Cargo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
