@@ -2,7 +2,7 @@
 
 Ghostly is an ephemeral, identity-addressed peer-to-peer service layer. Chat, voice, video and web applications are services on top of it. A peer's services exist while the peer is online, and nowhere else.
 
-This document describes the protocol as implemented in [`packages/core`](../packages/core), which Ghostly Desktop, Ghostly Browser and the CLI share. Sections marked **v1** are additions; everything else is the protocol Ghostly has always spoken, unchanged.
+This document describes the protocol as implemented in [`packages/core`](../packages/core), which Ghostly Desktop, Ghostly Browser and the CLI share. Sections marked **v1** or **v2** are additions; everything else is the protocol Ghostly has always spoken, unchanged.
 
 ## 1. Identities and links
 
@@ -72,14 +72,33 @@ The advertisement is authenticated twice: by the secretbox (only the link peer c
 
 ## 4. Calls
 
-Unchanged. `_call` carries `{ "t": "o" | "a" | "h", "ts", "u", "p", "f", "s", "m", "c", "ss" }`: ICE credentials, DTLS fingerprint, setup role, media order, at most two candidates and the SSRCs. Each side rebuilds a full SDP around these values, because a real SDP does not fit in a packet.
+`_call` carries `{ "t": "o" | "a" | "h" | "v", "ts", "u", "p", "f", "s", "m", "c", "ss", "v", "k" }`: ICE credentials, DTLS fingerprint, setup role, media order, at most two candidates, the SSRCs, and what picture the sender has on. Each side rebuilds a full SDP around these values, because a real SDP does not fit in a packet.
 
-Receivers validate a signal before any of it reaches an SDP, whether it came from `_call` or a `call` frame: ICE ufrag/pwd are RFC 8839 ice-chars (4-256 and 22-256 long), `f` is 64 hex digits, `s` is `actpass`, `active` or `passive`, `m` holds one or two distinct `a`/`v`, `ss` holds at most two uint32s, and each of at most eight candidates is parsed and re-serialized from its parts (non-UDP ones are dropped, malformed ones reject the signal). Offers, answers and hang-ups whose `ts` is more than 120 s away from the receiver's clock are ignored, so a stale packet does not ring.
+Receivers validate a signal before any of it reaches an SDP, whether it came from `_call` or a `call` frame: ICE ufrag/pwd are RFC 8839 ice-chars (4-256 and 22-256 long), `f` is 64 hex digits, `s` is `actpass`, `active` or `passive`, `m` holds one or two distinct `a`/`v`, `ss` holds at most two uint32s, `v` is 0 or 1, `k` is `c` or `s`, and each of at most eight candidates is parsed and re-serialized from its parts (non-UDP ones are dropped, malformed ones reject the signal). Signals whose `ts` is more than 120 s away from the receiver's clock are ignored, so a stale packet does not ring.
 
-v1 changes two things, both compatible with v0 peers:
+v1 changed two things, both compatible with v0 peers:
 
 - The rebuilt video section no longer declares the `toffset` header extension. Extension ids differ between WebRTC engines, and Chromium rejects an answer that maps an id differently from the real offer.
 - While the data link is open, the same signal is also sent as a `call` frame (§6.1), so a connected peer rings immediately instead of on its next poll.
+
+### 4.1 Turning a voice call into a video one (v2)
+
+Renegotiating a call would mean a second offer through the DHT, which is slow and which a v0 peer cannot answer. So a v2 offer always describes a video section, even for a voice call: `m` is `["a", "v"]` either way, the section is `sendrecv`, and nobody sends on it until somebody turns a camera or a screen on. Switching one on is then a `replaceTrack` on a section both sides already agreed on — no signaling, no ringing, nothing the peer has to accept. A peer answering a v2 offer without a camera of its own opens its half of that section before answering, so it can turn one on later too.
+
+Because the media list no longer says who is sending a picture, two fields do:
+
+| Key | Meaning |
+|---|---|
+| `v` | `1` while the sender has a picture on, `0` while it does not |
+| `k` | what the picture is: `c` for a camera, `s` for a screen. Only with `v: 1` |
+
+A `"t": "v"` signal carries nothing else: it is how a peer says mid-call that its picture went on, off, or changed from a camera to a screen. It has no ICE, and a receiver keeps only `ts`, `v` and `k` from it.
+
+Compatible with v0 and v1 peers in both directions, with one cosmetic loss:
+
+- A v1 peer sends no `v`. It only puts an SSRC on a video section it really sends on, so its SSRC count says whether its picture is on, and that is what a v2 peer reads it by.
+- A v1 peer rings a v2 voice call as an incoming *video* call, since all it has to go by is the media list. Answering it with audio works as it always did; the v1 side simply cannot turn a camera on later, because it does not know its half of the section is open.
+- A v1 peer drops a `"t": "v"` signal as an unknown type, which is what it should do with one.
 
 ## 5. The data link (v1)
 

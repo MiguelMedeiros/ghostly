@@ -121,7 +121,7 @@ test("audio call, and a call that is declined", async ({ peer }) => {
   await expect(alice.page.getByTitle("Accept video call")).toHaveCount(0);
   await alice.page.getByTitle("Accept audio call").click();
   for (const p of [alice, bob]) await expect(p.page.getByText(clock).first()).toBeVisible();
-  await expect(bob.page.getByTitle("Turn camera off")).toHaveCount(0);
+  await expect(bob.page.getByTestId("remote-video")).toBeHidden();
   await bob.page.getByTitle("End call").click();
   await expect(alice.page.getByTitle("End call")).toHaveCount(0);
 
@@ -140,6 +140,58 @@ test("a call can start as a screen share", async ({ peer }) => {
   await expect(bob.page.getByText(clock).first()).toBeVisible();
   await expect.poll(() => remoteSize(bob)).toMatch(/^[1-9]\d*x[1-9]\d*$/);
   await expect(alice.page.getByTitle("Stop sharing your screen")).toBeVisible();
+  await alice.page.getByTitle("End call").click();
+  await expect(bob.page.getByTitle("End call")).toHaveCount(0);
+});
+
+test("an audio call grows a camera and a screen, without calling again", async ({ peer }) => {
+  const [alice, bob] = await linked(peer);
+  await alice.page.getByTitle("Audio call").click();
+  await expect(bob.page.getByText("Incoming audio call...")).toBeVisible();
+  await bob.page.getByTitle("Accept audio call").click();
+  for (const p of [alice, bob]) await expect(p.page.getByText(clock).first()).toBeVisible();
+  // Voice only: neither side is showing the other a picture.
+  for (const p of [alice, bob]) await expect(p.page.getByTestId("remote-video")).toBeHidden();
+
+  // The camera goes on the video section this call negotiated empty: no second offer, no ringing.
+  await alice.page.getByTitle("Turn camera on").click();
+  await expect(alice.page.getByTitle("Turn camera off")).toBeVisible();
+  await expect(bob.page.getByTestId("remote-video")).toBeVisible();
+  await expect.poll(() => remoteSize(bob)).toMatch(/^[1-9]\d*x[1-9]\d*$/);
+  const camera = await remoteSize(bob);
+  // It only goes one way until Bob turns his own on.
+  await expect(alice.page.getByTestId("remote-video")).toBeHidden();
+
+  // A screen rides the same section, and stopping goes back to the camera it replaced.
+  await alice.page.getByTestId("share-screen").click();
+  await expect(alice.page.getByTitle("Stop sharing your screen")).toBeVisible();
+  await expect.poll(() => remoteSize(bob)).not.toBe(camera);
+  await alice.page.getByTitle("Stop sharing your screen").click();
+  await expect.poll(() => remoteSize(bob)).toBe(camera);
+
+  // The side that answered kept its half of the section open too.
+  await bob.page.getByTitle("Turn camera on").click();
+  await expect(alice.page.getByTestId("remote-video")).toBeVisible();
+  await expect.poll(() => remoteSize(alice)).toMatch(/^[1-9]\d*x[1-9]\d*$/);
+
+  // And back to voice: the picture goes away on the other side as well.
+  await alice.page.getByTitle("Turn camera off").click();
+  await expect(bob.page.getByTestId("remote-video")).toBeHidden();
+  await expect(alice.page.getByTitle("End call").first()).toBeVisible();
+  await alice.page.getByTitle("End call").click();
+  await expect(bob.page.getByTitle("End call")).toHaveCount(0);
+});
+
+test("a screen share that starts as one goes back to voice when it stops", async ({ peer }) => {
+  const [alice, bob] = await linked(peer);
+  await alice.page.getByTestId("call-screen").click();
+  await bob.page.getByTitle("Accept video call").click();
+  await expect(bob.page.getByText(clock).first()).toBeVisible();
+  await expect(bob.page.getByTestId("remote-video")).toBeVisible();
+
+  await alice.page.getByTitle("Stop sharing your screen").click();
+  await expect(alice.page.getByTitle("Share your screen")).toBeVisible();
+  await expect(bob.page.getByTestId("remote-video")).toBeHidden();
   await alice.page.getByTitle("End call").click();
   await expect(bob.page.getByTitle("End call")).toHaveCount(0);
 });

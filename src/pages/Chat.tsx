@@ -20,7 +20,7 @@ import {
   peerDisplayName,
   updateSessionLabel,
 } from "../lib/storage";
-import { parseCallSignal } from "@ghostly/core";
+import { parseCallSignal, signalHasVideo } from "@ghostly/core";
 import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
 
 export function Chat() {
@@ -119,7 +119,7 @@ export function Chat() {
 
   const incomingHasVideo = (() => {
     if (!incomingCallSignal) return false;
-    return parseCallSignal(incomingCallSignal)?.m?.includes("v") ?? false;
+    return signalHasVideo(parseCallSignal(incomingCallSignal));
   })();
 
   const platform = useServicesPlatform();
@@ -636,8 +636,9 @@ export function Chat() {
           isMuted={webrtc.isMuted}
           isVideoOff={webrtc.isVideoOff}
           isScreenSharing={webrtc.isScreenSharing}
+          canSendVideo={webrtc.canSendVideo}
           canShareScreen={webrtc.canShareScreen}
-          hasVideo={webrtc.hasVideo}
+          remoteHasVideo={webrtc.remoteHasVideo}
           callStartedAt={webrtc.callStartedAt}
           peerName={displayName || "Anonymous"}
           onHangUp={() => webrtc.hangUp()}

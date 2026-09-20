@@ -7,12 +7,16 @@ interface CallOverlayProps {
   localStream: MediaStream | null;
   remoteStream: MediaStream | null;
   isMuted: boolean;
+  /** We are sending no picture at all: an audio call, or a camera turned off. */
   isVideoOff: boolean;
   /** We are sending our screen instead of the camera. */
   isScreenSharing?: boolean;
-  /** Offer the share button: a video call in a browser that can capture the screen. */
+  /** Offer the camera button: the call has a video lane our side may send on. */
+  canSendVideo?: boolean;
+  /** Offer the share button: that lane, in a browser that can capture the screen. */
   canShareScreen?: boolean;
-  hasVideo: boolean;
+  /** The peer is sending a picture. */
+  remoteHasVideo: boolean;
   callStartedAt: number | null;
   peerName: string;
   onHangUp: () => void;
@@ -47,8 +51,9 @@ export function CallOverlay({
   isMuted,
   isVideoOff,
   isScreenSharing = false,
+  canSendVideo = false,
   canShareScreen = false,
-  hasVideo,
+  remoteHasVideo,
   callStartedAt,
   peerName,
   onHangUp,
@@ -132,7 +137,7 @@ export function CallOverlay({
     ended: "Call ended",
   }[callState];
 
-  const showRemoteVideo = hasVideo && remoteStream && callState === "connected";
+  const showRemoteVideo = remoteHasVideo && remoteStream && callState === "connected";
   
   return (
     <div
@@ -166,6 +171,7 @@ export function CallOverlay({
         ref={remoteVideoRef}
         autoPlay
         playsInline
+        data-testid="remote-video"
         onResize={(e) => setRemoteIsWide(e.currentTarget.videoWidth >= 1000)}
         className={`absolute inset-0 w-full h-full bg-black ${remoteIsWide ? "object-contain" : "object-cover"} ${showRemoteVideo ? "" : "hidden"}`}
       />
@@ -185,7 +191,7 @@ export function CallOverlay({
       {/* Status */}
       <div className="call-top absolute top-8 left-0 right-0 text-center z-10">
         <p className="text-text-muted text-sm">
-          {!hasVideo && callState === "connected" && (
+          {!remoteHasVideo && isVideoOff && callState === "connected" && (
             <span className="text-accent">Audio call</span>
           )}
           {statusText && (
@@ -197,7 +203,7 @@ export function CallOverlay({
       </div>
 
       {/* Local video (picture-in-picture) */}
-      {hasVideo && localStream && (
+      {!isVideoOff && localStream && (
         <div
           {...selfView.boxProps}
           onDoubleClick={selfView.reset}
@@ -208,35 +214,16 @@ export function CallOverlay({
           }`}
         >
           {!mini && <Grips handleProps={selfView.handleProps} />}
-          {isVideoOff ? (
-            <div className="w-full h-full bg-surface-hover flex items-center justify-center">
-              <svg
-                width="24"
-                height="24"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="text-text-muted"
-              >
-                <line x1="1" y1="1" x2="23" y2="23" />
-                <path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h4a2 2 0 0 1 2 2v9.34m-7.72-2.06a4 4 0 1 1-5.56-5.56" />
-              </svg>
-            </div>
-          ) : (
-            <video
-              ref={localVideoRef}
-              autoPlay
-              playsInline
-              muted
-              onLoadedMetadata={(e) => e.currentTarget.videoWidth > 0 && setSelfAspect(e.currentTarget.videoWidth / e.currentTarget.videoHeight)}
-              onResize={(e) => e.currentTarget.videoWidth > 0 && setSelfAspect(e.currentTarget.videoWidth / e.currentTarget.videoHeight)}
-              className={`w-full h-full object-cover pointer-events-none ${isScreenSharing ? "" : "mirror"}`}
-              style={isScreenSharing ? undefined : { transform: "scaleX(-1)" }}
-            />
-          )}
+          <video
+            ref={localVideoRef}
+            autoPlay
+            playsInline
+            muted
+            onLoadedMetadata={(e) => e.currentTarget.videoWidth > 0 && setSelfAspect(e.currentTarget.videoWidth / e.currentTarget.videoHeight)}
+            onResize={(e) => e.currentTarget.videoWidth > 0 && setSelfAspect(e.currentTarget.videoWidth / e.currentTarget.videoHeight)}
+            className={`w-full h-full object-cover pointer-events-none ${isScreenSharing ? "" : "mirror"}`}
+            style={isScreenSharing ? undefined : { transform: "scaleX(-1)" }}
+          />
         </div>
       )}
 
@@ -288,8 +275,8 @@ export function CallOverlay({
           )}
         </button>
 
-        {/* Video toggle */}
-        {hasVideo && (
+        {/* Camera: an audio call can turn into a video one right here. */}
+        {canSendVideo && (
           <button
             onClick={onToggleVideo}
             className={`w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
