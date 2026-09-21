@@ -29,7 +29,7 @@ ARG GHOSTLY_BUILD=""
 ENV GHOSTLY_BUILD=$GHOSTLY_BUILD
 RUN npm run build -w @ghostly/web
 
-FROM nginx:1.30-alpine
+FROM nginx:1.31-alpine
 COPY web/nginx-headers.conf /etc/nginx/ghostly-headers.conf
 COPY web/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/web/dist /usr/share/nginx/html
