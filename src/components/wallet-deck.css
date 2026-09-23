@@ -1,50 +1,58 @@
-/* The wallet deck (components/WalletDeck.tsx). The deck wears the chosen card's colour class (wallet-cards.css
-   sets --card-rgb per wallet), so the glow behind it and the dots below it take that card's ink. */
-/* The deck takes the whole column (the page's container), wider than the panel below it, up to 960px. */
+/* The wallet deck (components/WalletDeck.tsx), the website's deck in the app. The deck wears the chosen card's
+   colour class (wallet-cards.css sets --card-rgb per wallet), so the glow behind it and the dots below it take
+   that card's ink. The deck takes the whole column (the page's container), wider than the panel below it. */
 .wallet-deck{--deck-ease:cubic-bezier(.22,1,.36,1);--bleed:min(100cqw,960px);position:relative;display:grid;gap:14px;isolation:isolate;width:var(--bleed);margin-inline:calc((var(--bleed) - 100%) / -2)}
 .wallet-deck-glow{position:absolute;left:0;right:0;top:-12%;height:124%;z-index:-1;pointer-events:none;background:rgb(var(--card-rgb));opacity:.13;-webkit-mask-image:radial-gradient(ellipse closest-side at 50% 50%,#000 0%,rgba(0,0,0,.55) 40%,transparent 100%);mask-image:radial-gradient(ellipse closest-side at 50% 50%,#000 0%,rgba(0,0,0,.55) 40%,transparent 100%);transition:background-color .6s var(--deck-ease)}
-
-/* Every card, in either layout. Its own gradient and ink; the balance scales with the card. */
 .wallet-deck-track{position:relative;outline:none}
-.wallet-deck-card{--from:#0f3b44;--to:#0b1f2a;position:absolute;left:50%;top:50%;width:var(--card-w);height:var(--card-h);margin:calc(var(--card-h) / -2) 0 0 calc(var(--card-w) / -2);box-sizing:border-box;border-radius:clamp(14px,calc(var(--card-w) * .06),18px);padding:clamp(12px,calc(var(--card-w) * .065),18px);display:grid;grid-template-rows:auto 1fr auto;align-items:start;text-align:left;color:#f2f8fb;cursor:pointer;-webkit-tap-highlight-color:transparent;
- background:radial-gradient(circle at 85% 10%,rgba(var(--card-rgb),.3),transparent 55%),linear-gradient(135deg,var(--from),var(--to));border:1px solid rgba(var(--card-rgb),.32);box-shadow:0 22px 44px -26px rgba(0,0,0,.9);
- transform:translate3d(var(--x),var(--y),0) rotateY(var(--ry)) scale(var(--s));filter:brightness(var(--b));
- transition:transform .55s var(--deck-ease),filter .55s var(--deck-ease),border-color .4s;will-change:transform}
-.wallet-deck-card::after{content:"";position:absolute;inset:-1px;border-radius:inherit;pointer-events:none;opacity:0;box-shadow:0 0 56px -10px rgba(var(--card-rgb),.7),0 36px 70px -30px rgba(0,0,0,.95);transition:opacity .5s var(--deck-ease)}
-.wallet-deck-card[data-active=true]{border-color:rgba(var(--card-rgb),.85)}
-.wallet-deck-card[data-active=true]::after{opacity:1}
-.wallet-deck-card:focus-visible{outline:2px solid #f2ffff;outline-offset:4px}
+
+/* A card's button carries no look of its own: the face does. */
+.wallet-deck-card{--from:#0f3b44;--to:#0b1f2a;--ghost-eye:#141630;display:block;padding:0;border:0;background:none;color:#fff;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.wallet-deck-face{position:relative;display:grid;grid-template-rows:auto 1fr auto;grid-template-columns:1fr auto;justify-items:start;box-sizing:border-box;width:100%;height:100%;border-radius:clamp(14px,calc(var(--card-w) * .056),20px);padding:clamp(12px,calc(var(--card-w) * .056),20px) clamp(14px,calc(var(--card-w) * .061),22px);overflow:hidden;
+ background:radial-gradient(circle at 85% 10%,rgba(var(--card-rgb),.3),transparent 55%),linear-gradient(135deg,var(--from),var(--to));border:1px solid rgba(var(--card-rgb),.35);box-shadow:0 30px 60px -30px rgba(0,0,0,.9);transition:border-color .4s}
+.wallet-deck-face::after{content:"";position:absolute;inset:-1px;border-radius:inherit;pointer-events:none;opacity:0;box-shadow:0 0 60px -14px rgba(var(--card-rgb),.65),0 50px 80px -30px rgba(0,0,0,.9);transition:opacity .6s var(--deck-ease)}
+.wallet-deck-card[data-active=true] .wallet-deck-face{border-color:rgba(var(--card-rgb),.75)}
+.wallet-deck-card[data-active=true] .wallet-deck-face::after{opacity:1}
+.wallet-deck-card:focus-visible{outline:none}
+.wallet-deck-card:focus-visible .wallet-deck-face{outline:2px solid #fff;outline-offset:4px}
 .wallet-deck .wallet-card-cashu{--from:#0f3b44;--to:#0b1f2a}
 .wallet-deck .wallet-card-lightning{--from:#4a3510;--to:#1f1a0e}
 .wallet-deck .wallet-card-arkade{--from:#2a2d5c;--to:#141630}
 .wallet-deck .wallet-card-bark{--from:#4d2519;--to:#20120e}
 .wallet-deck .wallet-card-usdt{--from:#0f4034;--to:#0a1f1a}
 .wallet-deck .wallet-card-bitcoin{--from:#43250c;--to:#1d140b}
-.wallet-deck-card-top{display:flex;align-items:center;justify-content:space-between;gap:9px;min-width:0}
-.wallet-deck-card-glyph{display:grid;place-items:center;width:34px;height:34px;border-radius:9px;color:rgb(var(--card-rgb));background:rgba(var(--card-rgb),.13);border:1px solid rgba(var(--card-rgb),.22)}
-.wallet-deck-card-glyph>svg{width:22px;height:22px}
-.wallet-deck-card-name{font-size:clamp(12px,calc(var(--card-w) * .06),14px);font-weight:650;letter-spacing:-.005em;white-space:nowrap}
-.wallet-deck-card-balance{align-self:end;font-size:clamp(16px,calc(var(--card-w) * .085),24px);font-weight:600;letter-spacing:-.025em;line-height:1.2;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;padding-bottom:6px}
-.wallet-deck-card-foot{display:flex;align-items:baseline;justify-content:space-between;gap:8px;min-width:0}
-.wallet-deck-card-detail{font-size:11px;line-height:1.35;color:rgba(255,255,255,.68);min-width:0}
-.wallet-deck-card-status{font-size:10px;line-height:1.4;letter-spacing:.03em;color:rgb(var(--card-rgb));white-space:nowrap;flex-shrink:0}
+.wallet-deck-card-glyph{grid-row:1;grid-column:1;color:rgb(var(--card-rgb));display:grid}
+.wallet-deck-card-glyph>svg{width:clamp(20px,calc(var(--card-w) * .075),27px);height:auto}
+.wallet-deck-card-status{grid-row:1;grid-column:2;justify-self:end;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(9px,calc(var(--card-w) * .031),11px);letter-spacing:.04em;color:rgb(var(--card-rgb));white-space:nowrap;padding-top:2px;transition:opacity .4s}
+/* A card under its neighbours shows its mark and name, not a sliver of its status. */
+.wallet-deck[data-mode=fan] .wallet-deck-card:not([data-active=true]) .wallet-deck-card-status{opacity:0}
+.wallet-deck-card-ghost{position:absolute;right:16%;top:36%;width:clamp(30px,calc(var(--card-w) * .18),64px);color:var(--theme-accent);opacity:.3;pointer-events:none}
+.wallet-deck-card-text{grid-row:3;grid-column:1;display:grid;gap:2px;min-width:0;max-width:100%}
+.wallet-deck-card-name{font-size:clamp(17px,calc(var(--card-w) * .066),24px);font-weight:700;letter-spacing:-.01em;line-height:1.15}
+.wallet-deck-card-balance{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(11px,calc(var(--card-w) * .036),13px);letter-spacing:.04em;color:rgba(255,255,255,.88);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.wallet-deck-card-detail{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(10px,calc(var(--card-w) * .031),11px);letter-spacing:.04em;color:rgba(255,255,255,.6);overflow-wrap:anywhere}
+.wallet-deck-card-chip{grid-row:3;grid-column:2;align-self:end;justify-self:end;width:clamp(26px,calc(var(--card-w) * .1),36px);height:clamp(19px,calc(var(--card-w) * .075),27px);border-radius:6px;background:linear-gradient(135deg,rgba(255,255,255,.35),rgba(255,255,255,.08))}
 
-/* Wide column: the fan. The cards sit on one spot and spread by the offsets WalletDeck computes; the chosen one lifts. */
-.wallet-deck[data-mode=fan] .wallet-deck-track{height:calc(var(--card-h) + 48px);perspective:1600px;overflow:visible}
-@media(hover:hover){.wallet-deck[data-mode=fan] .wallet-deck-card:hover:not([data-active=true]){filter:brightness(1)}}
+/* Wide column: the fan. Each button is the strip of its card that shows (WalletDeck computes them); the face is drawn
+   from the deck's centre and moved by its own transform, with the perspective the website uses. */
+.wallet-deck[data-mode=fan] .wallet-deck-track{height:var(--track-h)}
+.wallet-deck[data-mode=fan] .wallet-deck-card{position:absolute;left:var(--bl);top:var(--bt);width:var(--bw);height:var(--bh)}
+.wallet-deck[data-mode=fan] .wallet-deck-face{position:absolute;left:var(--fl);top:var(--ft);width:var(--card-w);height:var(--card-h);pointer-events:none;
+ transform:perspective(1400px) translate3d(var(--x),var(--y),0) rotateY(var(--ry)) scale(var(--s));filter:brightness(var(--b));
+ transition:transform .6s var(--deck-ease),filter .6s var(--deck-ease),border-color .4s;will-change:transform}
+@media(hover:hover){.wallet-deck[data-mode=fan] .wallet-deck-card:hover:not([data-active=true]) .wallet-deck-face{filter:brightness(1)}}
 
 /* Narrow column: a snapping track. The chosen card is the one at rest in the centre. */
 .wallet-deck[data-mode=track] .wallet-deck-track{display:flex;gap:12px;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;padding:10px calc(var(--deck-w) * .12);scrollbar-width:none;-webkit-overflow-scrolling:touch;cursor:grab}
 .wallet-deck[data-mode=track] .wallet-deck-track::-webkit-scrollbar{display:none}
 .wallet-deck[data-mode=track] .wallet-deck-track[data-dragging=true]{scroll-snap-type:none;cursor:grabbing;user-select:none}
-.wallet-deck[data-mode=track] .wallet-deck-card{position:static;flex:0 0 var(--card-w);width:auto;height:auto;aspect-ratio:1.586;margin:0;scroll-snap-align:center;transform:none;scale:.94;filter:brightness(.85);transition:scale .4s var(--deck-ease),filter .4s var(--deck-ease),border-color .4s}
+.wallet-deck[data-mode=track] .wallet-deck-card{flex:0 0 var(--card-w);aspect-ratio:1.586;scroll-snap-align:center;scale:.94;filter:brightness(.85);transition:scale .4s var(--deck-ease),filter .4s var(--deck-ease)}
 .wallet-deck[data-mode=track] .wallet-deck-card[data-active=true]{scale:1;filter:none}
-.wallet-deck[data-mode=track] .wallet-deck-card::after{box-shadow:0 0 40px -10px rgba(var(--card-rgb),.6),0 20px 40px -24px rgba(0,0,0,.9)}
+.wallet-deck[data-mode=track] .wallet-deck-face::after{box-shadow:0 0 40px -10px rgba(var(--card-rgb),.6),0 20px 40px -24px rgba(0,0,0,.9)}
 .wallet-deck-dots{display:none;justify-content:center;gap:8px}
 .wallet-deck[data-mode=track] .wallet-deck-dots{display:flex}
 .wallet-deck-dots span{width:8px;height:8px;border-radius:999px;background:var(--theme-border-bright);transition:width .3s var(--deck-ease),background-color .3s}
 .wallet-deck-dots span[data-on=true]{width:22px;background:rgb(var(--card-rgb))}
 
 /* Reduced motion: the final frame, at once. Everything still fans, snaps and selects. */
-@media(prefers-reduced-motion:reduce){.wallet-deck-card,.wallet-deck-card::after,.wallet-deck-glow,.wallet-deck-dots span{transition:none!important}.wallet-deck-track{scroll-behavior:auto}}
-[data-reduce-motion=true] .wallet-deck-card,[data-reduce-motion=true] .wallet-deck-card::after,[data-reduce-motion=true] .wallet-deck-glow,[data-reduce-motion=true] .wallet-deck-dots span{transition:none!important}
+@media(prefers-reduced-motion:reduce){.wallet-deck-card,.wallet-deck-face,.wallet-deck-face::after,.wallet-deck-glow,.wallet-deck-dots span{transition:none!important}.wallet-deck-track{scroll-behavior:auto}}
+[data-reduce-motion=true] .wallet-deck-card,[data-reduce-motion=true] .wallet-deck-face,[data-reduce-motion=true] .wallet-deck-face::after,[data-reduce-motion=true] .wallet-deck-glow,[data-reduce-motion=true] .wallet-deck-dots span{transition:none!important}
