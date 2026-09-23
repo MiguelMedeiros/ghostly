@@ -6,6 +6,7 @@ import numbering from "@/lib/wisp-numbering.json";
 import candidates from "@/lib/roadmap-candidates.json";
 import { GROUPS, wisps, wispCount } from "@/lib/wisps";
 import { Catalog, type CatalogRow } from "./Catalog";
+import { WispMap } from "./WispMap";
 import "@/app/catalog.css";
 
 export function CatalogPage({ locale }: { locale: Locale }) {
@@ -40,12 +41,16 @@ export function CatalogPage({ locale }: { locale: Locale }) {
           <span className="eyebrow">{t.eyebrow}</span>
           <h1 className="h-section">{t.title}</h1>
           <p className="lead">{t.lead.replace("{n}", String(wispCount))}</p>
-          <p className="catalog-axes">
-            <span className="chip">Draft</span> {t.axes}
-          </p>
         </div>
       </section>
       <div className="wrap">
+        <WispMap t={t} locale={locale} />
+        <h2 className="h-card catalog-list-title" id="list">
+          {t.listTitle}
+        </h2>
+        <p className="catalog-axes">
+          <span className="chip">Draft</span> {t.axes}
+        </p>
         <Catalog rows={rows} groups={groups} t={t} locale={locale} />
 
         <section className="catalog-inventory" id="inventory" aria-labelledby="inventory-title">

@@ -216,3 +216,249 @@
     display: none;
   }
 }
+
+.rm-block {
+  display: grid;
+  gap: 12px;
+  padding-block: 28px 56px;
+}
+.rm-block > .h-card {
+  font-size: clamp(26px, 3vw, 38px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.rm-details {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 4px 20px;
+  margin-bottom: 20px;
+}
+.rm-details > summary {
+  cursor: pointer;
+  padding: 16px 0;
+  font-weight: 650;
+  color: var(--cyan);
+}
+
+/* Timeline: stages across, areas down */
+.tl-wide {
+  overflow-x: auto;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+}
+.tl-grid {
+  display: grid;
+  grid-template-columns: 170px repeat(5, minmax(185px, 1fr));
+  min-width: 1100px;
+}
+.tl-row {
+  display: contents;
+}
+.tl-corner {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+}
+.tl-phase {
+  --l: var(--lvl-research);
+  position: relative;
+  padding: 18px 16px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.tl-phase[data-level="released"] {
+  --l: var(--lvl-released);
+}
+.tl-phase[data-level="development"] {
+  --l: var(--lvl-development);
+}
+.tl-phase[data-level="building"] {
+  --l: var(--lvl-building);
+}
+.tl-phase[data-level="planned"] {
+  --l: var(--lvl-planned);
+}
+.tl-phase[data-phase="later"] {
+  --l: var(--lvl-research);
+}
+.tl-node-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.tl-node {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--l);
+  background: var(--l);
+  flex: none;
+}
+.tl-phase:not([data-phase="now"]) .tl-node,
+.tl-stage:not([data-phase="now"]) .tl-node {
+  background: var(--bg);
+}
+.tl-line {
+  flex: 1;
+  height: 2px;
+  margin-right: -16px;
+  background: var(--l);
+  opacity: 0.6;
+}
+.tl-line[data-future="true"] {
+  background: repeating-linear-gradient(90deg, var(--line-2) 0 6px, transparent 6px 11px);
+  opacity: 1;
+}
+.tl-here {
+  position: absolute;
+  top: 6px;
+  left: 42px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--lvl-released);
+}
+.tl-here svg {
+  filter: none;
+}
+.tl-phase h3 {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+}
+.tl-phase p {
+  font-size: 12.5px;
+  color: var(--dim);
+  margin-top: 2px;
+}
+.tl-lane {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 16px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text);
+  background: var(--bg-2);
+  border-top: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+}
+.tl-lane-dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 4px;
+  border-radius: 3px;
+  background: var(--lane);
+  flex: none;
+}
+.tl-cell {
+  padding: 12px 10px;
+  border-top: 1px solid var(--line);
+}
+.tl-cell[data-phase="now"] {
+  background: rgba(74, 222, 128, 0.035);
+}
+.tl-cell ul,
+.tl-stage ul {
+  display: grid;
+  gap: 6px;
+}
+.tl-chip {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--lane) 30%, transparent);
+  border-left: 3px solid var(--lane);
+  background: color-mix(in srgb, var(--lane) 8%, var(--surface));
+  font-size: 13.5px;
+  line-height: 1.4;
+  color: var(--text);
+}
+.tl-cell[data-phase="later"] .tl-chip,
+.tl-cell[data-phase="planned"] .tl-chip {
+  background: transparent;
+  border-style: dashed;
+  border-left-style: solid;
+  color: var(--muted);
+}
+.tl-chip-lane {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--lane);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.tl-empty {
+  display: block;
+  height: 100%;
+  min-height: 20px;
+}
+.tl-narrow {
+  display: none;
+}
+@media (max-width: 860px) {
+  .tl-wide {
+    display: none;
+  }
+  .tl-narrow {
+    display: grid;
+    gap: 28px;
+    position: relative;
+    padding-left: 34px;
+  }
+  .tl-narrow::before {
+    content: "";
+    position: absolute;
+    left: 8px;
+    top: 10px;
+    bottom: 10px;
+    width: 2px;
+    background: linear-gradient(var(--lvl-released), var(--lvl-development), var(--lvl-building), var(--lvl-planned), var(--line-2));
+    opacity: 0.6;
+  }
+  .tl-stage {
+    --l: var(--lvl-research);
+    position: relative;
+    display: grid;
+    gap: 6px;
+  }
+  .tl-stage[data-level="released"] {
+    --l: var(--lvl-released);
+  }
+  .tl-stage[data-level="development"] {
+    --l: var(--lvl-development);
+  }
+  .tl-stage[data-level="building"] {
+    --l: var(--lvl-building);
+  }
+  .tl-stage[data-level="planned"]:not([data-phase="later"]) {
+    --l: var(--lvl-planned);
+  }
+  .tl-stage > .tl-node {
+    position: absolute;
+    left: -34px;
+    top: 3px;
+  }
+  .tl-stage > .tl-here {
+    position: static;
+  }
+  .tl-stage h3 {
+    font-size: 19px;
+    font-weight: 700;
+  }
+  .tl-stage > p {
+    color: var(--dim);
+    font-size: 13px;
+    margin-bottom: 6px;
+  }
+}

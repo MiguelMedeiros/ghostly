@@ -7,7 +7,7 @@ const en = {
   },
   eyebrow: "WISP catalog",
   title: "Every contract, in one place.",
-  lead: "{n} drafts, read in the order the story tells them: meet, connect, talk, share, pay — then identity, storage and groups. Numbers stay what they are; the order here is editorial.",
+  lead: "Each WISP is an open contract that any app can implement. Here are all of them, by family. Tap one to read it.",
   axes: "Two separate questions: every document is a Draft specification; the badge says whether what it describes runs in the app.",
   search: "Search by number, name or what it does",
   searchLabel: "Search the catalog",
@@ -31,6 +31,13 @@ const en = {
     cta: "See the roadmap",
   },
   sources: "Catalog sources",
+  map: {
+    drafts: "drafts",
+    contract: "Big tile: the contract, the shared rule of a family",
+    adapter: "Small tile: an adapter or profile, one concrete way to follow it",
+    color: "Color: whether it already works in the app",
+  },
+  listTitle: "Search and full list",
 };
 
 export type CatalogCopy = typeof en;
@@ -42,7 +49,7 @@ const ptBr: CatalogCopy = {
   },
   eyebrow: "Catálogo de WISPs",
   title: "Todos os contratos, num só lugar.",
-  lead: "{n} rascunhos, lidos na ordem em que a história os conta: encontrar, conectar, conversar, compartilhar, pagar — depois identidade, armazenamento e grupos. Os números continuam os mesmos; a ordem aqui é editorial.",
+  lead: "Cada WISP é um contrato aberto que qualquer app pode implementar. Aqui estão todos, por família. Toque num para ler.",
   axes: "Duas perguntas separadas: todo documento é uma especificação em Draft; o selo diz se o que ele descreve roda no app.",
   search: "Busque por número, nome ou função",
   searchLabel: "Buscar no catálogo",
@@ -66,6 +73,13 @@ const ptBr: CatalogCopy = {
     cta: "Ver o roadmap",
   },
   sources: "Fontes do catálogo",
+  map: {
+    drafts: "rascunhos",
+    contract: "Bloco grande: o contrato, a regra comum da família",
+    adapter: "Bloco pequeno: um adapter ou perfil, uma forma concreta de cumprir",
+    color: "Cor: se já funciona no app",
+  },
+  listTitle: "Busca e lista completa",
 };
 
 export const catalog: Localized<CatalogCopy> = { en, "pt-br": ptBr };

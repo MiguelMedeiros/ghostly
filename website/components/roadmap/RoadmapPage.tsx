@@ -7,12 +7,19 @@ import { ReferenceMarkdown } from "@/components/reader/Markdown";
 import { candidateLevel, roadmap } from "@/content/roadmap";
 import { href, type Locale } from "@/lib/i18n";
 import candidates from "@/lib/roadmap-candidates.json";
+import { timeline } from "@/content/roadmap-timeline";
+import { wisps } from "@/lib/wisps";
+import { BlockGrid } from "@/components/dev/BlockGrid";
+import { Timeline } from "./Timeline";
+import "@/app/developers.css";
 import "@/app/roadmap.css";
 
 export function RoadmapPage({ locale }: { locale: Locale }) {
   const t = roadmap[locale];
   const sections = [...new Set(candidates.map((c) => c.section))];
   const titleOf = (id: string) => t.tracks.find((x) => x.id === id);
+  const tl = timeline[locale];
+  const wispRefs = wisps.map((w) => ({ slug: w.slug, number: w.number, name: w.name }));
   return (
     <Shell locale={locale}>
       <section className="rm-hero">
@@ -37,7 +44,25 @@ export function RoadmapPage({ locale }: { locale: Locale }) {
         </div>
       </section>
 
+      <section className="wrap rm-block" id="map" aria-labelledby="map-title">
+        <h2 id="map-title" className="h-card">
+          {tl.mapTitle}
+        </h2>
+        <p className="muted">{tl.mapLead}</p>
+        <BlockGrid mode="stages" t={tl.grid} locale={locale} wisps={wispRefs} />
+      </section>
+
+      <section className="wrap rm-block" id="timeline" aria-labelledby="timeline-title">
+        <h2 id="timeline-title" className="h-card">
+          {tl.timelineTitle}
+        </h2>
+        <p className="muted">{tl.timelineLead}</p>
+        <Timeline locale={locale} />
+      </section>
+
       <section className="wrap rm-tracks" aria-label={t.eyebrow}>
+        <details className="rm-details">
+          <summary>{tl.detailsTitle}</summary>
         <ol>
           {t.tracks.map((track) => (
             <Reveal as="article" key={track.id} className="rm-track" id={track.id}>
@@ -89,6 +114,7 @@ export function RoadmapPage({ locale }: { locale: Locale }) {
             </Reveal>
           ))}
         </ol>
+        </details>
       </section>
 
       <section className="wrap rm-inventory" aria-labelledby="inventory-title">

@@ -8,7 +8,7 @@ import { href, type Locale } from "@/lib/i18n";
 import { wisps, wispCount } from "@/lib/wisps";
 import snippets from "@/lib/code-snippets.json";
 import { REPO_URL } from "@/content/shell";
-import { Composer } from "./Composer";
+import { BlockGrid } from "./BlockGrid";
 import { Negotiation } from "./Negotiation";
 import { DevHeroArt } from "./DevHeroArt";
 import "@/app/developers.css";
@@ -83,7 +83,7 @@ export function DevelopersPage({ locale }: { locale: Locale }) {
             <h2 className="h-section">{t.compose.title}</h2>
             <p className="lead">{t.compose.lead}</p>
           </Reveal>
-          <Composer t={t.compose} locale={locale} wisps={wispRefs} />
+          <BlockGrid mode="compose" t={t.compose} locale={locale} wisps={wispRefs} />
         </div>
       </section>
 
