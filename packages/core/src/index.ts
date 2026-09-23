@@ -42,3 +42,4 @@ export * from "./identityProofs";
 export * from "./bitcoinScript";
 export * from "./bip322";
 export * from "./bitcoinMessage";
+export * from './sshsig';
