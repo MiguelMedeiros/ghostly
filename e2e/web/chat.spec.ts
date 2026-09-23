@@ -31,7 +31,7 @@ test("two people chat: relay discovery, then peer-to-peer messages", async ({ pe
   // A paired chat states the direct connection in the pairing banner, not in the strip.
   for (const peer of [alice, bob]) await expect(
     peer.page.getByTestId("datalink-state").filter({ hasText: "Peer to peer" })
-      .or(peer.page.getByTestId("connection-options").filter({ hasText: "WebRTC" })),
+      .or(peer.page.locator("[data-testid=connection-options][aria-label*=\"Connected · WebRTC\"]")),
   ).toBeVisible();
   const relayed = relay.puts;
   await say(bob, "boo over WebRTC");

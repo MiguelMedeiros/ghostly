@@ -1,13 +1,27 @@
 import { useOutsideDismiss } from "../hooks/useDismiss";
 import { Link } from "react-router-dom";
 import type { PairedTransport } from "@ghostly/core";
-import { useId, useRef, useState, useSyncExternalStore } from "react";
+import { useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
 const name = (transport?: PairedTransport) => transport === "iroh/1" ? "Iroh" : transport === "hyperdht/1" ? "HyperDHT" : "WebRTC";
 const focus = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
+
+/** What the header icon says at a glance; the label says the rest. */
+export type ConnectionKind = "connected" | "dht" | "waiting" | "failure" | "offline";
+const icons: Record<ConnectionKind, ReactNode> = {
+  connected: <><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></>,
+  dht: <><path d="m3 7 9-4 9 4-9 4Z"/><path d="m3 12 9 4 9-4M3 17l9 4 9-4"/></>,
+  waiting: <><circle cx="12" cy="12" r="8"/><path d="M12 8v4l2.5 1.5"/></>,
+  failure: <><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4m0 4h.01"/></>,
+  offline: <><path d="m18.8 12.3 1.7-1.8a5 5 0 0 0-7-7l-1.7 1.7"/><path d="m5.2 11.7-1.7 1.8a5 5 0 0 0 7 7l1.7-1.7"/><path d="M8 2v3M2 8h3m11 11v3m3-6h3"/></>,
+};
+function StateIcon({ kind, size, weight }: { kind: ConnectionKind; size: number; weight: number }) {
+  return <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={weight} strokeLinecap="round" strokeLinejoin="round">{icons[kind]}</svg>;
+}
+const dots: Partial<Record<ConnectionKind, string>> = { connected: "bg-accent", waiting: "bg-text-muted", failure: "bg-danger" };
 
 /** A compact header control; all delivery choices live inside its popover. */
 export function PairingBanner({ peerKey }: { peerKey: string }) {
@@ -26,6 +40,9 @@ export function PairingBanner({ peerKey }: { peerKey: string }) {
   const pinned = !!link?.peerParticipationKey, canCompare = !!pair?.code && !!pair.peerKey && (pair.status === "ready" || pair.status === "waiting");
   const awaitingJoin = !pinned && !pair?.peerKey && link?.dataLink === "idle";
   const label = !online ? "Offline" : connectionFailure ? "Connection issue" : discoveryFailure ? (discoveryFailure.startsWith("Could not publish discovery:") && !discoveryFailure.includes("Could not read discovery:") ? "Publication unavailable" : "Discovery unavailable") : dht ? "DHT only" : textDht ? "DHT · offline text" : pair?.transitionTarget ? `Switching · ${name(pair.transitionTarget)}` : ready ? `Connected · ${name(pair?.transport)}` : pair?.status === "confirm" ? "Confirm peer" : awaitingJoin ? "No contact yet" : !link?.peerOnline && link?.dataLink === "idle" ? "Waiting for contact" : "Connecting…";
+  const kind: ConnectionKind = !online ? "offline" : failure ? "failure" : dht || textDht ? "dht" : ready && !pair?.transitionTarget ? "connected" : "waiting";
+  const connecting = kind === "waiting" && (label === "Connecting…" || !!pair?.transitionTarget);
+  const [tip, setTip] = useState(false);
   const close = () => { if (root.current?.open) { root.current.open = false; trigger.current?.focus(); } };
   useOutsideDismiss(root, menuOpen, close);
   async function run(action: () => Promise<unknown>) {
@@ -33,18 +50,23 @@ export function PairingBanner({ peerKey }: { peerKey: string }) {
     try { await action(); } catch (e) { setError(e instanceof Error ? e.message : "Could not update delivery."); }
     finally { setBusy(false); }
   }
+  // The header shows only the icon: the label is in its tooltip, its accessible name and the popover.
   // `toggle` is queued, and React can take a while to handle it: the click and Escape act at once instead.
-  return <details ref={root} onToggle={e => setMenuOpen(e.currentTarget.open)} onKeyDown={e => { if (e.key === "Escape" && root.current?.open) { e.stopPropagation(); close(); } }} className="relative shrink-0" data-testid="connection-menu">
-    <summary ref={trigger} onClick={() => setMenuOpen(!root.current?.open)} data-testid="connection-options" aria-label={`Connection options: ${label}`} title={failure || label}
-      className={`flex h-9 max-w-40 cursor-pointer list-none items-center gap-1.5 rounded-lg px-2 text-[11px] hover:bg-surface-hover [&::-webkit-details-marker]:hidden ${focus} ${failure ? "text-danger" : ready && !dht ? "text-accent" : "text-text-secondary"}`}>
-      <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-        {failure ? <><path d="m12 3 10 18H2Z"/><path d="M12 9v5m0 3h.01"/></> : dht || textDht ? <><path d="m3 7 9-4 9 4-9 4Z"/><path d="m3 12 9 4 9-4M3 17l9 4 9-4"/></> : ready ? <><circle cx="6" cy="12" r="3"/><circle cx="18" cy="12" r="3"/><path d="M9 12h6"/></> : <><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></>}
-      </svg>
-      <span className="max-sm:sr-only truncate" aria-live="polite">{dht || textDht || failure || !ready || pair?.transitionTarget ? label : name(pair?.transport)}</span>
+  return <div className="relative shrink-0">
+  <details ref={root} onToggle={e => setMenuOpen(e.currentTarget.open)} onKeyDown={e => {
+    if (e.key !== "Escape") return;
+    if (root.current?.open) { e.stopPropagation(); close(); } else if (tip) { e.stopPropagation(); setTip(false); }
+  }} className="relative" data-testid="connection-menu">
+    <summary ref={trigger} onClick={() => { setTip(false); setMenuOpen(!root.current?.open); }} data-testid="connection-options" data-state={kind} aria-label={`Connection options: ${label}`} aria-describedby={`${id}-tip`}
+      onPointerEnter={e => { if (e.pointerType !== "touch") setTip(true); }} onPointerLeave={() => setTip(false)}
+      onFocus={e => { if (e.currentTarget.matches(":focus-visible")) setTip(true); }} onBlur={() => setTip(false)}
+      className={`relative flex cursor-pointer list-none items-center justify-center rounded-full p-2 transition-colors max-md:p-2.5 hover:bg-surface-hover [&::-webkit-details-marker]:hidden ${focus} ${kind === "failure" ? "text-danger" : kind === "offline" ? "text-text-muted hover:text-accent" : "text-text-secondary hover:text-accent"}`}>
+      <StateIcon kind={kind} size={18} weight={2} />
+      {dots[kind] && <span aria-hidden="true" data-testid="connection-dot" className={`pointer-events-none absolute right-1 top-1 h-2 w-2 rounded-full ring-2 ring-panel-header max-md:right-1.5 max-md:top-1.5 ${dots[kind]} ${connecting ? "motion-safe:animate-pulse" : ""}`} />}
     </summary>
     <div role="dialog" aria-label="Connection options" className="absolute right-0 top-full max-md:fixed max-md:inset-x-2 max-md:top-[calc(3.5rem_+_env(safe-area-inset-top))] max-md:w-auto z-40 mt-2 w-[min(20rem,calc(100vw-1rem))] max-h-[70dvh] overflow-y-auto rounded-xl border border-border bg-panel-header p-4 text-xs leading-5 text-text-muted shadow-xl">
-      <div className="flex items-center gap-2 font-medium text-text-primary" aria-live="polite">
-        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">{failure ? <><path d="m12 3 10 18H2Z M12 9v5m0 3h.01"/></> : dht || textDht ? <path d="m3 7 9-4 9 4-9 4Z M3 12l9 4 9-4 M3 17l9 4 9-4"/> : <><circle cx="6" cy="12" r="3"/><circle cx="18" cy="12" r="3"/><path d="M9 12h6"/></>}</svg>
+      <div className="flex items-center gap-2 font-medium text-text-primary" data-testid="connection-state">
+        <StateIcon kind={kind} size={16} weight={1.7} />
         <span>{label}</span>
       </div>
       {failure && <p role="alert" className="mt-2 break-words text-danger">{failure}</p>}
@@ -109,5 +131,10 @@ export function PairingBanner({ peerKey }: { peerKey: string }) {
           onClick={() => void run(() => engine.call("connect", {linkId:link.id}))}>Reconnect</button>}
       </div>
     </div>
-  </details>;
+  </details>
+  <span role="tooltip" id={`${id}-tip`} data-testid="connection-tooltip" className={`pointer-events-none absolute right-0 top-full z-50 mt-1.5 w-max max-w-[min(16rem,55vw)] rounded-md border border-border bg-surface-alt px-2 py-1 text-[11px] leading-4 text-text-primary shadow-lg motion-safe:transition-opacity ${tip && !menuOpen ? "opacity-100" : "invisible opacity-0"}`}>
+    {label}{failure && failure !== label && <span className="mt-0.5 block break-words text-danger">{failure}</span>}
+  </span>
+  <span className="sr-only" aria-live="polite">{label}</span>
+  </div>;
 }
