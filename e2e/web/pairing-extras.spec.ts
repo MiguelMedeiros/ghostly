@@ -65,6 +65,43 @@ test("the connection popover opens and closes by click, Escape and a click outsi
   await expect(alice.page.getByPlaceholder("Message…")).toBeEnabled();
 });
 
+test("the header shows only an icon, as big as the call buttons; a tooltip names the state", async ({ peer }) => {
+  const [alice] = await linked(peer, ["icon-alice", "icon-bob"]);
+  const tip = alice.page.getByRole("tooltip");
+  await expect(trigger(alice)).toHaveText("");
+  await expect(trigger(alice)).toHaveAttribute("data-state", "connected");
+  await expect(trigger(alice).getByTestId("connection-dot")).toBeVisible();
+  const icon = (await trigger(alice).boundingBox())!, call = (await alice.page.getByTitle("Video calls are not supported in this chat").boundingBox())!;
+  expect(Math.abs(icon.width - call.width)).toBeLessThanOrEqual(1);
+  expect(Math.abs(icon.height - call.height)).toBeLessThanOrEqual(1);
+
+  // Hover names the state; nothing is said until then.
+  await expect(tip).toBeHidden();
+  await trigger(alice).hover();
+  await expect(tip).toBeVisible();
+  await expect(tip).toHaveText("Connected · WebRTC");
+  await expect(trigger(alice)).toHaveAccessibleDescription("Connected · WebRTC");
+
+  // Opening the popover hides the tooltip; the popover has the full picture.
+  await trigger(alice).click();
+  await expect(popover(alice)).toBeVisible();
+  await expect(tip).toBeHidden();
+  await expect(popover(alice).getByTestId("connection-state")).toHaveText("Connected · WebRTC");
+
+  // Reached from the keyboard, the tooltip shows; Escape dismisses it and keeps focus.
+  await alice.page.keyboard.press("Escape");
+  await expect(popover(alice)).toBeHidden();
+  await alice.page.mouse.move(0, 0);
+  await expect(tip).toBeHidden();
+  await alice.page.getByRole("button", { name: "Connection details" }).focus();
+  await alice.page.keyboard.press("Tab");
+  await expect(trigger(alice)).toBeFocused();
+  await expect(tip).toBeVisible();
+  await alice.page.keyboard.press("Escape");
+  await expect(tip).toBeHidden();
+  await expect(trigger(alice)).toBeFocused();
+});
+
 test("verifying shows one code on both sides, and each side confirms for itself", async ({ peer }) => {
   const [alice, bob] = await linked(peer, ["code-alice", "code-bob"]);
   for (const p of [alice, bob]) {
@@ -103,6 +140,10 @@ test("offline, the popover says so; the contact is offered Reconnect, and the ch
 
   await setOnline(alice, false);
   await expect(trigger(alice)).toHaveAccessibleName("Connection options: Offline");
+  await expect(trigger(alice)).toHaveAttribute("data-state", "offline");
+  await expect(trigger(alice)).toHaveText("");
+  await trigger(alice).hover();
+  await expect(alice.page.getByRole("tooltip")).toHaveText("Offline");
   await trigger(alice).click();
   await expect(popover(alice)).toContainText("Offline");
   // Nothing to choose or retry while offline.

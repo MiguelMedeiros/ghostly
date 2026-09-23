@@ -139,6 +139,6 @@ export async function connect(a: Peer, b: Peer): Promise<void> {
   // A legacy chat says it in the strip, a paired one in the pairing banner.
   for (const peer of [a, b]) await expect(
     peer.page.getByTestId("datalink-state").filter({ hasText: "Peer to peer" })
-      .or(peer.page.getByTestId("connection-options").filter({ hasText: "WebRTC" })),
+      .or(peer.page.locator("[data-testid=connection-options][aria-label*=\"Connected · WebRTC\"]")),
   ).toBeVisible();
 }
