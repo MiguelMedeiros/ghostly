@@ -51,5 +51,10 @@ export default defineConfig({
   envDir: repositoryRoot,
   resolve: { alias: tauriAliases },
   server: { port: 5180, strictPort: true },
-  build: { outDir: "dist", emptyOutDir: true },
+  build: {
+    outDir: "dist",
+    emptyOutDir: true,
+    // The static page a provider returns to after an identity-proof sign-in (proofs/oidc/popup.ts).
+    rollupOptions: { input: { main: "index.html", oidcCallback: "oidc-callback.html" } },
+  },
 });

@@ -1,5 +1,7 @@
 import type { FoundUpdate } from "../../../src/lib/updates";
 import type { EngineEvent, RpcRequest, RpcResponse } from "./shared/rpc";
+import type { OidcPlatform } from "./proofs/oidc/providers";
+import type { OidcWindow } from "./proofs/oidc/flow";
 
 /**
  * What differs between the places this peer runs. The extension keeps the
@@ -44,6 +46,18 @@ export interface BrowserHost {
   /** Asks the user for access to a local origin, where the platform has such a thing. */
   requestLocalAccess(originPattern: string): Promise<boolean>;
   openService(peerPubKeyZ32: string, serviceId: string): Promise<void>;
+  /** Signing in with an OpenID Connect provider for an identity proof. Left out where the platform cannot. */
+  oidc?: OidcHost;
+}
+
+export interface OidcHost {
+  platform: OidcPlatform;
+  /**
+   * Call it straight from the click: the web app opens its popup and the
+   * extension asks for the `identity` permission before anything is awaited,
+   * or the browser blocks them.
+   */
+  open(): Promise<OidcWindow>;
 }
 
 let current: BrowserHost | null = null;

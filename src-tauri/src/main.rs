@@ -7,6 +7,7 @@ mod hyperdht;
 mod lnd;
 mod local_fetch;
 mod notifications;
+mod oidc;
 mod paired_transport;
 mod pkarr_client;
 mod records;
@@ -50,6 +51,7 @@ fn main() {
         .manage(ViewerState::default())
         .manage(paired_transport::TransportState::default())
         .manage(hyperdht::HyperState::default())
+        .manage(oidc::OidcState::default())
         .register_asynchronous_uri_scheme_protocol(viewer::SCHEME, |ctx, request, responder| {
             let app = ctx.app_handle().clone();
             let label = ctx.webview_label().to_string();
@@ -94,6 +96,9 @@ fn main() {
             commands::service_respond,
             commands::updater_can_install,
             commands::open_project_link,
+            oidc::oidc_loopback_start,
+            oidc::oidc_loopback_wait,
+            oidc::oidc_loopback_cancel,
         ]))
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

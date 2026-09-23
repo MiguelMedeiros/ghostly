@@ -4,6 +4,7 @@ import { nostr } from "./providers/nostr";
 import { domain } from "./providers/domain";
 import { openpgp } from "./providers/openpgp";
 import { ssh, sshGithub, sshGitlab } from "./providers/ssh";
+import { oidc } from "./providers/oidc";
 import { FAKE_IDENTITY_PROVIDERS, testIdentitiesEnabled } from "./testing";
 
 /**
@@ -16,6 +17,7 @@ export const IDENTITY_PROVIDERS: readonly IdentityProofProvider[] = [
   openpgp,
   bitcoin,
   ssh, sshGithub, sshGitlab,
+  oidc,
 ];
 
 /** The registered providers, plus the fakes when this browser asked for them (e2e). */

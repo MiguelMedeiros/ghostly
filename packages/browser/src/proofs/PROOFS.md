@@ -218,3 +218,4 @@ storing the outcome are one transaction.
 | `ssh` | self-custodied | `ssh-keygen -Y sign -n ghostly` (external tool) | nothing | experimental |
 | `ssh-github` | self-custodied | same | `api.github.com/users/<login>/keys`; re-checked after 10 min | experimental |
 | `ssh-gitlab` | self-custodied | same | `gitlab.com/api/v4/users?username=` then `/users/<id>/keys`; re-checked after 10 min | experimental |
+| `oidc` | provider-attested | redirect: sign in with Google, Microsoft, Apple, GitLab, Twitch (account only / + email / + email and name) | the provider's JWKS (pinned URL) | in development; no client ID registered yet ([checklist](../../../../docs/OIDC-PROVIDERS.md), [draft](../../../../docs/wisps/3xx-oidc-proofs.md)) |

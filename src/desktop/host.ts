@@ -15,6 +15,7 @@ import type { EngineServer } from "@ghostly/browser/engine/server";
 import { createInPageHost } from "@ghostly/browser/inPageHost";
 import { createIrohEndpoint, createHyperEndpoint } from "./nativeTransports";
 import { desktopUpdates } from "./updates";
+import { desktopOidc } from "./oidc";
 import { engine } from "@ghostly/browser/platform/engine";
 
 /**
@@ -108,6 +109,7 @@ export function createDesktopHost(version: string) {
     updates: desktopUpdates,
     node: { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, transport: tauriTransport, pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke },
     onServer: serveServiceWindows,
+    oidc: desktopOidc,
     // There is nothing to ask: the user typed the address, and Rust only ever reaches loopback.
     requestLocalAccess: async () => true,
     async openService(peerPubKeyZ32, serviceId) {

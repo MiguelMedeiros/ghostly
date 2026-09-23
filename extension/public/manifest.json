@@ -23,7 +23,7 @@
     "storage",
     "debugger"
   ],
-  "optional_permissions": ["notifications"],
+  "optional_permissions": ["notifications", "identity"],
   "optional_host_permissions": [
     "http://localhost/*",
     "http://127.0.0.1/*",
