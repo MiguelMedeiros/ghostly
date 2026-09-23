@@ -35,7 +35,7 @@ function normalizeAddress(input: string): string {
   const value = input.trim();
   let info;
   try { info = decodeAnyBitcoinAddress(value); } catch (e) {
-    throw new Error(e instanceof BitcoinAddressError ? e.message : "Enter a Bitcoin address", { cause: e });
+    throw Object.assign(new Error(e instanceof BitcoinAddressError ? e.message : "Enter a Bitcoin address"), { cause: e });
   }
   if (info.type === "p2wsh" || info.type === "witness-unknown")
     throw new Error("Ghostly can check proofs for single-key addresses only (bc1q…, bc1p…, 3…, 1…), not multisig or script addresses");
