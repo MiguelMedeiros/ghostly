@@ -35,3 +35,5 @@ export * from './ringLink';
 export { DhtDelivery, DHT_TEXT_BYTES, DHT_MESSAGE_TTL, emptyDhtDeliveryState, type DeliveryMode, type DhtDeliveryState, type DhtDeliveryView } from "./dhtDelivery";
 export * from "./paymentIntent";
 export * from "./bitcoinAddress";
+
+export * from "./identityProofs";

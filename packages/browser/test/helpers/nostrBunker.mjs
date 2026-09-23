@@ -46,7 +46,7 @@ export async function startTestBunker(port = 0) {
         else if(request.method==='get_public_key') result=userPub;
         else if(request.method==='sign_event') {
           const template=JSON.parse(request.params[0]);
-          if(template.kind!==30078 || !template.content.startsWith('["ghostly-peer-proof",1,')) error='Only Ghostly proof fixtures are allowed';
+          if(template.kind!==30078 || !(template.content.startsWith('["ghostly-peer-proof",1,') || template.content.startsWith('Ghostly identity proof v1: '))) error='Only Ghostly proof fixtures are allowed';
           else result=JSON.stringify(finalizeEvent(template,userKey));
         } else error='Unsupported method';
         publish(finalizeEvent({kind:24133,created_at:Math.floor(Date.now()/1000),tags:[['p',event.pubkey]],content:encrypt(JSON.stringify({id:request.id,result,error}),ck)},signerKey));
