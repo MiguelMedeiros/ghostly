@@ -3,6 +3,20 @@
 /// for any page it considers local, and that includes the `ghostly-svc://`
 /// windows that show a contact's web app.
 const COMMANDS: &[&str] = &[
+    "native_notification_permission",
+    "native_private_notification",
+    "paired_iroh_start",
+    "paired_iroh_address",
+    "paired_iroh_connect",
+    "paired_native_send",
+    "paired_native_close",
+    "paired_iroh_stop",
+    "paired_hyperdht_start",
+    "paired_hyperdht_address",
+    "paired_hyperdht_connect",
+    "paired_hyperdht_send",
+    "paired_hyperdht_close",
+    "paired_hyperdht_stop",
     "get_profile",
     "create_keypair",
     "get_public_key",
@@ -17,6 +31,7 @@ const COMMANDS: &[&str] = &[
     "open_service_window",
     "service_respond",
     "updater_can_install",
+    "open_project_link",
 ];
 
 fn main() {

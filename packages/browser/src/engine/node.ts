@@ -1,6 +1,21 @@
+import { UsdtWallet } from "./paymentAdapters/usdtWallet";
+import { iceServerProblem } from "../shared/ice";
+import type { UsdtPrepared } from "./paymentAdapters/usdt";
+import { ArkWallet } from "./paymentAdapters/arkWallet";
+import { PaymentCoordinator } from "./paymentAdapters/coordinator";
+import { intentRepository } from "./paymentAdapters/persistence";
+import type { ArkPrepared } from "./paymentAdapters/arkade";
+import { CashuAdapter } from "./paymentAdapters/cashu";
+import type { CashuPrepared } from "./wallet";
+import type { EngineApi } from "../shared/rpc";
+import { EXTERNAL_IDENTITIES_ENABLED } from '../shared/features';
+import { readPubkyProof } from '../proofs/storage';
+import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
+import { MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
 import {
   DEFAULT_RELAYS,
   GhostLink,
+  DHT_TEXT_BYTES, DHT_MESSAGE_TTL, type DeliveryMode,
   GhostlyHttpError,
   HTTP_SERVICE_PROTO,
   LEGACY_SERVICES,
@@ -9,6 +24,7 @@ import {
   RTC_CONFIG,
   RelayTransport,
   createLink,
+  createIdentity,
   decodeInviteCode,
   encodeInviteCode,
   formatLocalTarget,
@@ -31,10 +47,14 @@ import {
   type PollIntervals,
   type PeerPresence,
   type ServiceAd,
+  type PairingState,
+  type NativeEndpoint,
+  type NativeTransport,
+  type PairedTransport,
 } from "@ghostly/core";
-import type { EngineImplementation } from "../shared/rpc";
+import type { AttentionEvent, EngineImplementation } from "../shared/rpc";
 import { fileStore, type StoredFile } from "../shared/idb";
-import { DEFAULT_MINTS, TEST_MINT } from "../shared/mints";
+import { DEFAULT_MINTS, TEST_MINT, isWorthlessMint, type WalletMode } from "../shared/mints";
 import type {
   EngineState,
   FileTransferView,
@@ -47,6 +67,8 @@ import type {
   WalletView,
 } from "../shared/types";
 import { db } from "./db";
+import { mayReach } from "./serviceAccess";
+import { Outbox } from "./outbox";
 import { PaymentDesk } from "./payments";
 import { CashuWallet } from "./wallet";
 
@@ -63,6 +85,11 @@ const DEFAULT_SETTINGS: Settings = {
 const MAX_DELETED_IDS = 500;
 
 interface LiveLink {
+  transportErrors?: Partial<Record<PairedTransport, string>>;
+  discoveryError?: string;
+  proofs?: PeerProofs;
+  proofError?: string;
+  pairing?: PairingState;
   stored: StoredLink;
   myPubKeyZ32: string;
   link: GhostLink | null;
@@ -120,15 +147,21 @@ function newLiveLink(stored: StoredLink, lastMessageAt: number, files = emptyLin
 }
 
 /** What a host may replace. The defaults are what a browser can do on its own. */
+const PAYMENT_METHODS: PaymentMethodName[] = ["cashu", "lightning", "arkade", "usdt"];
+
 export interface NodeOptions {
+  nativeTransports?: Partial<Record<NativeTransport, (seedB64: string) => Promise<NativeEndpoint>>>;
   /** How to reach Pkarr. Default: HTTP relays, the only way out of a browser. */
   transport?: PkarrTransport;
   pollIntervals?: PollIntervals;
   /** How to reach a shared local web app. Default: `fetch`, which needs the app's or the browser's consent. */
   localFetch?: LocalFetch;
+  /** Create and connect the Ark and USDT wallets at start. Default: on; tests without a network turn it off. */
+  automaticWallets?: boolean;
 }
 
 export interface NodeEvents {
+  onAttention?(event: AttentionEvent): void;
   onState(state: EngineState): void;
   onMessages(linkId: string, messages: StoredMessage[]): void;
   onCallSignal(linkId: string, signal: string): void;
@@ -147,26 +180,84 @@ export class GhostlyNode implements EngineImplementation {
   private readonly localFetch: LocalFetch;
   private readonly links = new Map<string, LiveLink>();
   private services: StoredService[] = [];
+  private activeLinkId: string | null = null;
+  private nativeQueue: Promise<void> = Promise.resolve();
+  private shuttingDown = false;
+  private readonly feedbackStartedAt = Date.now();
+  private readonly feedbackIds = new Set<string>();
+  private walletFeedbackReady = false;
+  private readonly walletFeedbackIds = new Set<string>();
+  private feedback(type: AttentionEvent["type"], id: string) {
+    const key = type + ":" + id;
+    if (this.feedbackIds.has(key)) return;
+    this.feedbackIds.add(key);
+    this.events.onAttention?.({type, id:key, at:Date.now()});
+  }
+  private messageFeedback(type: "message" | "sent", message: StoredMessage) {
+    if (message.timestamp < this.feedbackStartedAt || message.file || message.paymentId || /^👋 (?:.+ )?joined$/.test(message.text)) return;
+    this.feedback(type, message.linkId + ":" + message.id);
+  }
+  private readonly outboxes = new Map<string, Outbox>();
   private readonly requestCounts = new Map<string, number>();
   private readonly transfers = new Map<string, FileTransferView>();
   private stateTimer: ReturnType<typeof setTimeout> | null = null;
+  private paymentTimer:ReturnType<typeof setTimeout>|null=null;
   private walletView: WalletView = { mints: [], balance: 0, history: [], feesPaid: 0 };
 
-  private readonly wallet = new CashuWallet(() => this.settings.mints, {
+  private readonly usdtWallet = new UsdtWallet(() => { void this.refreshWallet(); void this.desk.reconcileUsdtReceipts().catch(()=>{}); });
+  private readonly arkWallet = new ArkWallet(() => { void this.refreshWallet(); void this.desk.reconcileArkReceipts().catch(()=>{}); });
+  private readonly paymentCoordinator = new PaymentCoordinator(intentRepository, [{
+    method:"usdt",
+    prepare:(target,amount,feeCap)=>this.usdtWallet.require().prepare(target,amount,feeCap),
+    execute:(review,prepared,persist)=>this.usdtWallet.require().execute(review,prepared as UsdtPrepared,persist),
+    reconcile:(review,prepared)=>this.usdtWallet.require().reconcile(review,prepared as UsdtPrepared),
+  }, {
+    method: "arkade",
+    prepare: (target, amount, feeCap) => this.arkWallet.require().prepare(target, amount, feeCap),
+    execute: (review, prepared, persist) => this.arkWallet.require().execute(review, prepared as ArkPrepared, persist),
+    reconcile: (review, prepared,persist) => this.arkWallet.require().reconcile(review, prepared as ArkPrepared,persist),
+  }, {
+    method:"cashu",
+    prepare:(target,amount,feeCap)=>new CashuAdapter(this.wallet,(r,t)=>this.desk.recordCashu(r,t)).prepare(target,amount,feeCap),
+    execute:(review,prepared,persist)=>new CashuAdapter(this.wallet,(r,t)=>this.desk.recordCashu(r,t)).execute(review,prepared as CashuPrepared,persist),
+    reconcile:(review,prepared)=>new CashuAdapter(this.wallet,(r,t)=>this.desk.recordCashu(r,t)).reconcile(review,prepared as CashuPrepared),
+  }], (review) => {
+    if (review.state === "settled") this.feedback("confirmed", review.id);
+    void this.refreshWallet();
+  });
+  /** The mints of the wallet mode in use, primary first; the others stay, for the other mode. */
+  private modeMints(): string[] {
+    const testnet = this.settings.walletMode === "testnet";
+    return this.settings.mints.filter((mint) => isWorthlessMint(mint) === testnet);
+  }
+  private readonly wallet = new CashuWallet(() => this.modeMints(), {
     onChange: () => void this.refreshWallet(),
     onQuotePaid: (quote) => void this.desk.onQuotePaid(quote),
     onMeltResolved: (melt, paid) => void this.desk.onMeltResolved(melt, paid),
-    onTestMintNeeded: async () => void (await this.walletAddMint({ url: TEST_MINT })),
-  });
+    onTestMintNeeded: async (mint) => void (await this.walletAddMint({ url: mint })),
+  }, () => this.settings.mints);
   private readonly desk = new PaymentDesk(this.wallet, {
+    onReviewedPaymentResult:async(id)=>{await this.reconcilePayment({id});},
+    onReviewedPaymentRefused:async(id,reason)=>{
+      const intent=await intentRepository.get(id);
+      if(intent && ["submitted","unknown"].includes(intent.review.state))await intentRepository.put({...intent,review:{...intent.review,state:"failed",error:`Refused: ${reason}. The sats came back.`}});
+      this.emitState();
+    },
     getLink: (linkId) => this.links.get(linkId)?.link ?? null,
     storeMessage: (message) => this.storeMessage(message),
-    onChange: () => this.emitState(),
-  });
+    onChange: () => {
+      for (const payment of Object.values(this.desk.views())) {
+        if (payment.kind === "payment" && payment.direction === "out" && payment.state === "settled" && payment.createdAt >= this.feedbackStartedAt) {
+          this.feedback("confirmed", payment.id);
+        }
+      }
+      this.emitState();
+    },
+  }, this.arkWallet, this.usdtWallet);
 
   constructor(
     private readonly events: NodeEvents,
-    options: NodeOptions = {},
+    private readonly options: NodeOptions = {},
   ) {
     // Relays are a setting only where relays are the transport.
     this.relays = options.transport ? null : new RelayTransport();
@@ -176,8 +267,31 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   private async refreshWallet(): Promise<void> {
-    this.walletView = await this.wallet.view();
+    const mode = this.settings.walletMode ?? "mainnet", view = await this.wallet.view();
+    // The history of the mode in use: test ecash is not mixed into the story of real money, nor the reverse.
+    const history = view.history.filter((tx) => !tx.mint || isWorthlessMint(tx.mint) === (mode === "testnet"));
+    let waitingTestSats = 0;
+    if (mode === "mainnet") for (const mint of this.settings.mints.filter(isWorthlessMint)) waitingTestSats += await this.wallet.balanceAt(mint);
+    this.walletView = { ...view, mode, waitingTestSats, history, feesPaid: history.reduce((sum, tx) => sum + tx.fee, 0), ark: this.arkWallet.view, usdt: this.usdtWallet.view, intents: (await intentRepository.list()).map((saved) => saved.review) };
+    for (const tx of this.walletView.history) {
+      const fresh = !this.walletFeedbackIds.has(tx.id);
+      this.walletFeedbackIds.add(tx.id);
+      if (this.walletFeedbackReady && fresh && tx.amount > 0 && tx.timestamp >= this.feedbackStartedAt) {
+        if (tx.kind === "lightning-in" || tx.kind === "ecash-in") this.feedback("coin", tx.id);
+        if (tx.kind === "lightning-out") this.feedback("confirmed", tx.id);
+      }
+    }
+    this.walletFeedbackReady = true;
     this.emitState();
+  }
+  private async pollPaymentStatus():Promise<void> {
+    if(this.shuttingDown)return;
+    try {
+      for(const {review} of await intentRepository.list()){
+        if(!["submitted","unknown"].includes(review.state) || (review.method==="arkade" && !this.arkWallet.adapter) || (review.method==="usdt" && !this.usdtWallet.adapter))continue;
+        await this.reconcilePayment({id:review.id}).catch(()=>{});
+      }
+    } finally {if(!this.shuttingDown)this.paymentTimer=setTimeout(()=>void this.pollPaymentStatus(),10000);}
   }
 
   async start(): Promise<void> {
@@ -188,21 +302,41 @@ export class GhostlyNode implements EngineImplementation {
     }
     this.relays?.setRelays(this.settings.relays);
     this.services = await db.getServices();
+    await this.arkWallet.start();
+    await this.usdtWallet.start();
+    await this.arkWallet.setMode(this.settings.walletMode ?? "mainnet");
+    await this.usdtWallet.setMode(this.settings.walletMode ?? "mainnet");
     await this.desk.start();
     await this.refreshWallet();
     this.wallet.start();
 
     for (const stored of await db.getLinks()) {
       const messages = await db.getMessages(stored.id);
-      const files = linkFilesFrom(stored.id, await fileStore.listForLink(stored.id), messages);
+      const storedFiles = await fileStore.listForLink(stored.id);
+      for (const file of storedFiles) if (file.transfer) this.transfers.set(file.id,
+        file.transfer.state === "transferring" ? { ...file.transfer, state: "failed", error: "Transfer interrupted. Retry when connected." } : file.transfer);
+      const files = linkFilesFrom(stored.id, storedFiles, messages);
       this.links.set(stored.id, newLiveLink(stored, messages[messages.length - 1]?.timestamp ?? 0, files));
-      if (this.settings.online) this.startLink(stored.id, messages);
+      if (stored.profile) await this.outboxFor(stored.id).recover();
+      if (this.settings.online) { this.startLink(stored.id, messages); void this.refreshPublicProfiles({ linkId: stored.id }).catch(() => {}); }
     }
     this.emitState();
+    void this.pollPaymentStatus().catch(()=>{});
+    // Every profile has its wallets ready to receive without any setup; they connect in the background.
+    if (this.options.automaticWallets !== false) {
+      void this.arkWallet.ensureReady();
+      void this.usdtWallet.ensureReady();
+    }
   }
 
   /** Tells every peer we are leaving. Best effort: the browser may already be closing. */
   async shutdown(): Promise<void> {
+    this.shuttingDown = true;
+    if(this.paymentTimer)clearTimeout(this.paymentTimer);
+    await this.arkWallet.stop();
+    await this.usdtWallet.stop();
+    await this.nativeQueue;
+    await Promise.allSettled([...this.outboxes.values()].map(outbox => outbox.stop()));
     await Promise.allSettled([...this.links.values()].map((live) => live.link?.stop(true)));
   }
 
@@ -226,22 +360,120 @@ export class GhostlyNode implements EngineImplementation {
 
   // -- links ---------------------------------------------------------------
 
-  createLink(): { linkId: string; inviteCode: string } {
+  async createLink(): Promise<{ linkId: string; inviteCode: string }> {
     const { mine, invite } = createLink();
-    const inviteCode = encodeInviteCode(invite);
-    return { linkId: this.addLink(mine, inviteCode), inviteCode };
+    const modernInvite = encodeInviteCode({ ...invite, profile: "paired-chat/1" });
+    return { linkId: await this.addLink({ ...mine, profile: "paired-chat/1" }, modernInvite), inviteCode: modernInvite };
   }
 
-  joinLink({ inviteCode }: { inviteCode: string }): { linkId: string } {
+  async joinLink({ inviteCode }: { inviteCode: string }): Promise<{ linkId: string }> {
     const params = decodeInviteCode(inviteCode);
     if (!params) throw new Error("That does not look like a Ghostly invite");
     const existing = [...this.links.values()].find((l) => l.stored.seedB64 === params.seedB64);
-    if (existing) return { linkId: existing.stored.id };
-    return { linkId: this.addLink(params) };
+    if (existing) {
+      if (existing.stored.profile !== params.profile) throw new Error("Invitation profile does not match the stored link");
+      return { linkId: existing.stored.id };
+    }
+    return { linkId: await this.addLink(params) };
   }
 
-  ensureLink(params: LinkParams): { linkId: string } {
+  ensureLink(params: LinkParams): Promise<{ linkId: string }> {
     return this.joinLink({ inviteCode: encodeInviteCode(params) });
+  }
+
+  private profileRequests = new Map<string, Promise<void>>();
+  async choosePublicProfile({ linkId, choice }: { linkId: string; choice: ProfileChoice }): Promise<void> {
+    if (!EXTERNAL_IDENTITIES_ENABLED) throw new Error('External identities are unavailable in this release');
+    if (!['auto','ghostly','nostr','pubky-import','keet-import','pubky-storage'].includes(choice)) throw new Error('Unknown profile choice');
+    const live = this.links.get(linkId); if (!live) return;
+    await db.patchLink(linkId,{profileChoice:choice}); live.stored={...live.stored,profileChoice:choice};this.emitState();
+    if(choice!=='ghostly') void this.refreshPublicProfiles({linkId}).catch(()=>{});
+  }
+  async refreshPublicProfiles({ linkId, force = false }: { linkId: string; force?: boolean }): Promise<void> {
+    if (!EXTERNAL_IDENTITIES_ENABLED) return;
+    const existing=this.profileRequests.get(linkId); if(existing)return existing;
+    const task=this.loadPublicProfiles(linkId,force).finally(()=>this.profileRequests.delete(linkId));
+    this.profileRequests.set(linkId,task); return task;
+  }
+  private async loadPublicProfiles(linkId: string, force: boolean): Promise<void> {
+    if (!EXTERNAL_IDENTITIES_ENABLED) return;
+    const live=this.links.get(linkId);if(!live || !this.settings.online || live.stored.profileChoice==='ghostly')return;
+    const mine=live.myPubKeyZ32;
+    // Participation, not rendezvous, is the proof audience.
+    const audience=live.stored.participationSeed ? identityFromSeedB64(live.stored.participationSeed).pubKeyZ32 : mine;
+    for(const proof of live.stored.peerProofs?.remote ?? []) {
+      if(!currentProfileProof(proof,live.stored.pairedPeerKey,audience))continue;
+      const {adapter,externalKey:key}=proof.challenge;
+      const old=live.stored.publicProfiles?.find(p=>p.adapter===adapter && p.key===key);
+      if(old && Date.now()-(old.checkedAt ?? old.fetchedAt) < (!force && (old.name || old.avatar) ? PROFILE_TTL : PROFILE_RETRY))continue;
+      const result=await lookupPublicProfile(adapter,key);
+      if(this.links.get(linkId)!==live || live.stored.profileChoice==='ghostly' || !(live.stored.peerProofs?.remote ?? []).some(r=>r.challenge.adapter===adapter && r.challenge.externalKey===key && currentProfileProof(r,live.stored.pairedPeerKey,audience)))continue;
+      // Keep a successful local copy during outages; never replace it with a miss.
+      const saved=result.source==='unavailable' && old ? {...old,checkedAt:result.fetchedAt} : result;
+      const publicProfiles=[...(live.stored.publicProfiles??[]).filter(p=>p.adapter!==adapter),saved].slice(-4);
+      await db.patchLink(linkId,{publicProfiles});live.stored={...live.stored,publicProfiles};this.emitState();
+    }
+  }
+
+  private async proofsFor(linkId: string): Promise<PeerProofs> {
+    if (!EXTERNAL_IDENTITIES_ENABLED) throw new Error("External identities are unavailable in this release");
+    const live = this.links.get(linkId);
+    if (!live?.link) throw new Error("Peer is offline");
+    const scope = await live.link.peerProofScope();
+    if (!live.proofs) this.createProofManager(live, scope);
+    return live.proofs!;
+  }
+
+  private createProofManager(live: LiveLink, initial: ProofScope): void {
+    live.proofs = new PeerProofs({
+      readStorage: readPubkyProof,
+      scope: () => {
+        const session = live.link?.proofSession;
+        if (!session || live.stored.pairedPeerKey !== initial.audience) throw new Error("Authenticated proof channel unavailable");
+        return { ...initial, session };
+      },
+      supports: adapter => live.link?.peerProofAdapters.includes(adapter) ?? false,
+      send: frame => {
+        if (!live.link) throw new Error("Peer is offline");
+        live.link.sendPeerProof(frame);
+      },
+      storage: {
+        read: () => live.stored.peerProofs ?? emptyProofLedger(),
+        update: async change => {
+          const peerProofs = await db.updatePeerProofs(live.stored.id, change);
+          live.stored = { ...live.stored, peerProofs }; this.emitState();
+          void this.refreshPublicProfiles({ linkId: live.stored.id }).catch(() => {});
+        },
+      },
+      onError: error => { live.proofError = error; this.emitState(); },
+    });
+  }
+
+  async preparePeerProof({ linkId, externalKey, adapter }: { linkId: string; externalKey: string; adapter?: ProofAdapter }): Promise<ProofChallenge> {
+    return (await this.proofsFor(linkId)).prepare(externalKey, adapter);
+  }
+  async submitPeerProof({ linkId, challenge, event }: { linkId: string; challenge: ProofChallenge; event: ProofEvidence }): Promise<void> {
+    await (await this.proofsFor(linkId)).submit(challenge, event);
+    if (challenge.adapter === 'pubky-storage') {
+      const deadline = Date.now() + 25_000;
+      while (Date.now() < deadline) {
+        const record = this.links.get(linkId)?.stored.peerProofs?.local.find(r => r.event.id === event.id);
+        if (record?.status === 'accepted') return;
+        if (!record || record.status !== 'pending') throw new Error('Pubky proof was cancelled');
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      await (await this.proofsFor(linkId)).withdraw('pubky-storage');
+      throw new Error('Contact did not confirm the Pubky file. Reconnect and try again.');
+    }
+  }
+  async withdrawPeerProof({ linkId, adapter }: { linkId: string; adapter?: ProofAdapter }): Promise<void> {
+    await (await this.proofsFor(linkId)).withdraw(adapter);
+  }
+
+  async confirmPair({ linkId, code }: { linkId: string; code: string }): Promise<void> {
+    const link = this.links.get(linkId)?.link;
+    if (!link) throw new Error("Peer is offline");
+    await link.confirmPair(code);
   }
 
   pollNow({ linkId }: { linkId: string }): void {
@@ -251,6 +483,8 @@ export class GhostlyNode implements EngineImplementation {
   removeLink({ linkId }: { linkId: string }): void {
     const live = this.links.get(linkId);
     if (!live) return;
+    void this.outboxes.get(linkId)?.stop();
+    this.outboxes.delete(linkId);
     void live.link?.stop(true);
     this.links.delete(linkId);
     void db.deleteLink(linkId);
@@ -262,16 +496,27 @@ export class GhostlyNode implements EngineImplementation {
     const live = this.links.get(linkId);
     if (!live) return;
     live.stored = { ...live.stored, label: label.trim().slice(0, 48) || undefined };
-    void db.putLink(live.stored);
+    void db.patchLink(linkId, { label: live.stored.label });
     this.emitState();
   }
 
   setActiveLink({ linkId }: { linkId: string | null }): void {
+    this.activeLinkId = linkId;
+    if (linkId) void this.ensureNativeEndpoints(linkId);
     for (const [id, live] of this.links) live.link?.session.setActive(id === linkId);
+    // Opening a chat is someone wanting to talk: reconnect now, not after the wait between attempts.
+    if (linkId) this.links.get(linkId)?.link?.wake();
+  }
+
+  /** The window or tab is back in front: every chat looks now, and dropped ones reconnect at once. */
+  wake(): void {
+    for (const live of this.links.values()) live.link?.wake();
   }
 
   exportLinks() {
     return [...this.links.values()].map(({ stored }) => ({
+      profile: stored.profile,
+      deliveryMode: stored.deliveryMode,
       seedB64: stored.seedB64,
       peerPubKeyZ32: stored.peerPubKeyZ32,
       encKeyB64: stored.encKeyB64,
@@ -281,23 +526,70 @@ export class GhostlyNode implements EngineImplementation {
     }));
   }
 
-  async sendMessage(params: { linkId: string; text: string; timestamp?: number }): Promise<{ error: string | null }> {
+  async sendMessage(params: { linkId: string; text: string; timestamp?: number }): Promise<{ error: string | null; refused?: boolean }> {
     const { linkId, text } = params;
     const live = this.links.get(linkId);
     if (!live?.link) return { error: "You are offline" };
+    if (live.stored.profile && !live.link.canSendText) return { error: "Choose compatible delivery methods with your contact before sending." };
     const trimmed = text.trim();
     if (!trimmed) return { error: null };
 
     const timestamp = params.timestamp ?? Date.now();
+    if (live.stored.profile) {
+      const limit = live.link.textDelivery === "dht" ? DHT_TEXT_BYTES : LIMITS.maxChatMessageBytes;
+      if (new TextEncoder().encode(trimmed).length > limit) return { error: `Message exceeds ${limit} UTF-8 bytes for this delivery method.` };
+      const wireId = toBase64Url(randomBytes(16));
+      const validationError = live.link.validateText(trimmed, timestamp, wireId);
+      if (validationError) return { error: validationError };
+      const id = `me_${wireId}`;
+      await this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp, via: live.link.textDelivery === "dht" ? "pkarr" : "datalink", delivery: "sending" });
+      await this.outboxFor(linkId).transmit(id);
+      // The durable row carries delivery errors and an explicit retry action.
+      return { error: null };
+    }
     const via = live.link.isDataLinkOpen ? "datalink" : "pkarr";
+    // What the DHT cannot carry is refused before it is kept: it must not show as sent.
+    const bytes = new TextEncoder().encode(trimmed).length;
+    if (!(live.link.isDataLinkOpen && trimmed.length <= LIMITS.maxChatMessageBytes / 4) && bytes > MAX_DHT_TEXT_BYTES)
+      return { error: `Message too large for DHT (${bytes} bytes, max ${MAX_DHT_TEXT_BYTES}). Try a shorter message or share a link instead.`, refused: true };
     await this.storeMessage({ linkId, id: `me_${timestamp}`, text: trimmed, sender: "me", timestamp, via });
     const error = await live.link.sendMessage(trimmed, timestamp);
+    if (!error) this.messageFeedback("sent", {linkId, id:`me_${timestamp}`, text:trimmed, sender:"me", timestamp, via});
     // The data link is reliable and ordered: sent means delivered.
-    if (!error && via === "datalink" && timestamp > live.peerAck) {
+    if (!live.stored.profile && !error && via === "datalink" && timestamp > live.peerAck) {
       live.peerAck = timestamp;
       this.emitState();
     }
     return { error };
+  }
+
+  async retryMessage({ linkId, messageId }: { linkId: string; messageId: string }): Promise<void> {
+    if (!this.links.get(linkId)?.stored.profile) throw new Error("Retry is only available for paired chat messages");
+    await this.outboxFor(linkId).transmit(messageId);
+  }
+
+  private outboxFor(linkId: string): Outbox {
+    let outbox = this.outboxes.get(linkId);
+    if (!outbox) {
+      outbox = new Outbox({
+        read: () => db.getMessages(linkId),
+        update: async (id, delivery, error) => {
+          await db.updateDelivery(linkId, id, delivery, error);
+          const messages = await db.getMessages(linkId);
+          if (delivery === "sent" || delivery === "delivered") {
+            const message = messages.find(item => item.id === id);
+            if (message) this.messageFeedback("sent", message);
+          }
+          this.events.onMessages(linkId, messages);
+        },
+      }, message => this.links.get(linkId)?.link?.sendMessage(message.text, message.timestamp, message.wireId)
+        ?? Promise.resolve("You are offline. Reconnect and retry."), message => message.via === "pkarr" ? DHT_MESSAGE_TTL : 20_000, message => {
+        const pending = this.links.get(linkId)?.stored.dhtDeliveryState?.pending;
+        return message.via === "pkarr" && pending && pending.message[0] === message.wireId ? pending.expires : undefined;
+      });
+      this.outboxes.set(linkId, outbox);
+    }
+    return outbox;
   }
 
   /**
@@ -312,7 +604,7 @@ export class GhostlyNode implements EngineImplementation {
       ...live.stored,
       deletedIds: [...(live.stored.deletedIds ?? []), messageId].slice(-MAX_DELETED_IDS),
     };
-    void db.putLink(live.stored);
+    void db.patchLink(linkId, { deletedIds: live.stored.deletedIds });
 
     void (async () => {
       const message = (await db.getMessages(linkId)).find((m) => m.id === messageId);
@@ -341,10 +633,14 @@ export class GhostlyNode implements EngineImplementation {
   sendFile({ linkId, file, timestamp }: { linkId: string; file: MessageFile; timestamp: number }): void {
     const live = this.links.get(linkId);
     const fail = (error: string) => {
-      this.transfers.set(file.id, { state: "failed", transferred: 0, size: file.size, error });
+      const transfer = { state: "failed" as const, transferred: 0, size: file.size, error };
+      this.transfers.set(file.id, transfer);
+      void fileStore.updateTransfer(file.id, transfer).catch(() => {});
       this.emitState();
     };
     if (!live?.link) return fail("You are offline");
+    if (this.transfers.get(file.id)?.state === "transferring") return;
+    if (!live.link.supportsFiles) return fail("Connect to an updated peer to send files");
     const wireId = file.id.slice(`${linkId}-out-`.length);
     if (file.id !== GhostlyNode.outgoingFileId(linkId, wireId)) return fail("Invalid file id");
     const { link } = live;
@@ -364,13 +660,17 @@ export class GhostlyNode implements EngineImplementation {
     void (async () => {
       const stored = await fileStore.get(file.id);
       if (!stored) return fail("The file is gone");
-      const reader = stored.blob.stream().getReader();
+      await fileStore.updateTransfer(file.id, { state: "transferring", transferred: 0, size: file.size });
+      const blob = stored.blob;
       const source = (async function* () {
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) return;
-          yield value;
-        }
+        const reader = blob.stream().getReader();
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) return;
+            yield value;
+          }
+        } finally { await reader.cancel(); reader.releaseLock(); }
       })();
       await link.sendFile(
         { id: wireId, name: file.name, size: file.size, mime: file.mime, timestamp },
@@ -395,8 +695,9 @@ export class GhostlyNode implements EngineImplementation {
     files.receivedBytes += wire.size;
     files.incoming.set(wire.id, { localId: file.id, size: wire.size });
     const chunks: Uint8Array[] = [];
+    let cancelled = false;
     this.transfers.set(file.id, { state: "transferring", transferred: 0, size: file.size });
-    void this.storeMessage({
+    const messageStored = this.storeMessage({
       linkId,
       id: `peer_${wire.timestamp}`,
       text: `📎 ${file.name}`,
@@ -405,26 +706,32 @@ export class GhostlyNode implements EngineImplementation {
       via: "datalink",
       file: { id: file.id, name: file.name, size: file.size, mime: file.mime },
     });
+    void messageStored.catch(() => {});
     return {
       write: (chunk) => void chunks.push(chunk),
       // The message keeps the announced type for display; the bytes are served as something inert.
-      close: () => {
+      close: async (digest?: string) => {
+        await messageStored;
+        if (cancelled) throw new Error("Transfer cancelled");
         const live = this.links.get(linkId);
         // Deleted while it was still arriving: the bytes have nowhere to land, and give their room back.
         if (live?.stored.deletedIds?.includes(`peer_${wire.timestamp}`)) {
-          live.files.receivedBytes = Math.max(0, live.files.receivedBytes - wire.size);
-          return;
+          throw new Error("The receiving message was deleted");
         }
-        return fileStore.put({
+        await fileStore.put({
           id: file.id,
           linkId,
           blob: new Blob(chunks as BlobPart[], { type: safeBlobType(file.mime) }),
           createdAt: Date.now(),
           direction: "in",
           wireId: wire.id,
+          digest,
+          metadata: { name: wire.name, size: wire.size, mime: wire.mime, timestamp: wire.timestamp },
         });
+        chunks.length = 0;
+        if (cancelled) { await fileStore.delete(file.id); throw new Error("Transfer cancelled"); }
       },
-      abort: () => void (chunks.length = 0),
+      abort: () => { cancelled = true; chunks.length = 0; },
     };
   }
 
@@ -437,7 +744,7 @@ export class GhostlyNode implements EngineImplementation {
     if (settled) {
       files.incoming.delete(wireId);
       // Only what was not kept gives its room back.
-      if (settled.failed) files.receivedBytes -= entry.size;
+      if (settled.failed) { files.receivedBytes -= entry.size; files.wireIds.delete(wireId); }
     }
     return entry.localId;
   }
@@ -455,11 +762,47 @@ export class GhostlyNode implements EngineImplementation {
     const transfer = this.transfers.get(fileId);
     if (!transfer) return;
     this.transfers.set(fileId, error ? { ...transfer, state: "failed", error } : { ...transfer, state: "done", transferred: transfer.size });
+    const state = this.transfers.get(fileId)!;
+    void fileStore.updateTransfer(fileId, state).catch(() => {});
     this.emitState();
   }
 
-  connect({ linkId }: { linkId: string }): void {
-    this.links.get(linkId)?.link?.connect().catch(() => {});
+  async setDeliveryMode({ linkId, mode }: { linkId: string; mode: DeliveryMode }): Promise<void> {
+    const live = this.links.get(linkId);
+    if (!live?.stored.profile || !live.link || (mode !== "stream" && mode !== "dht")) throw new Error("Delivery method unavailable.");
+    await db.patchLink(linkId, { deliveryMode: mode });
+    live.stored = { ...live.stored, deliveryMode: mode };
+    await live.link.setDeliveryMode(mode);
+    if (mode === "stream") await this.ensureNativeEndpoints(linkId);
+    this.emitState();
+  }
+
+  async setTransportPreference({ linkId, preferred, fallback }: { linkId: string; preferred: PairedTransport; fallback: boolean }): Promise<void> {
+    const live = this.links.get(linkId);
+    if (!live?.stored.profile || !live.link?.availableTransports.includes(preferred) || typeof fallback !== "boolean") throw new Error("Transport unavailable");
+    const patch = { preferredTransport: preferred, transportFallback: fallback };
+    await db.patchLink(linkId, patch);
+    live.stored = { ...live.stored, ...patch }; this.emitState();
+    await live.link.setTransportPreference(preferred, fallback);
+  }
+
+  /** Which ways of paying one chat allows. */
+  async setChatPaymentMethods({ linkId, methods }: { linkId: string; methods: Partial<Record<PaymentMethodName, boolean>> }): Promise<void> {
+    const live = this.links.get(linkId);
+    if (!live || !methods || Object.entries(methods).some(([m, on]) => !PAYMENT_METHODS.includes(m as PaymentMethodName) || typeof on !== "boolean")) throw new Error("Chat not found");
+    const paymentMethods = { ...live.stored.paymentMethods, ...methods };
+    await db.patchLink(linkId, { paymentMethods });
+    live.stored = { ...live.stored, paymentMethods };
+    // A connected contact is told on the open session; nothing reconnects.
+    live.link?.setPaymentMethods(paymentMethods);
+    this.emitState();
+  }
+
+  async connect({ linkId }: { linkId: string }): Promise<void> {
+    const link = this.links.get(linkId)?.link;
+    if (!link) throw new Error("You are offline. Go online before reconnecting.");
+    await this.ensureNativeEndpoints(linkId);
+    await link.connect();
   }
 
   disconnect({ linkId }: { linkId: string }): void {
@@ -492,6 +835,23 @@ export class GhostlyNode implements EngineImplementation {
     else if (!known) await this.updateSettings({ settings: { mints: [...others, mint.url] } });
     await this.refreshWallet();
     return mint;
+  }
+
+  /**
+   * Every wallet switches together: Cashu shows the mints of the mode (Testnet brings the public test
+   * mint), Ark and USDT open this mode's wallet and park the other one. Nothing is replaced or lost.
+   */
+  async walletSetMode({ mode }: { mode: WalletMode }): Promise<void> {
+    if (mode !== "mainnet" && mode !== "testnet") throw new Error("Unknown wallet mode");
+    const mints = mode === "testnet" && !this.settings.mints.some(isWorthlessMint) ? [...this.settings.mints, TEST_MINT] : this.settings.mints;
+    await this.updateSettings({ settings: { walletMode: mode, mints } });
+    // Queued behind whatever the wallets are doing (a new wallet on a slow network): the switch answers at
+    // once, and each wallet follows in order, so switching back and forth ends on the last choice.
+    const followed = Promise.all([this.arkWallet.setMode(mode), this.usdtWallet.setMode(mode)]).then(() => this.refreshWallet());
+    if (this.options.automaticWallets !== false) void followed.then(() => { void this.arkWallet.ensureReady(); void this.usdtWallet.ensureReady(); }, () => {});
+    // Names, fees and limits of this mode's mints (a mint just added has none yet).
+    for (const mint of this.modeMints()) void this.wallet.checkMint(mint).then(() => this.refreshWallet(), () => {});
+    await this.refreshWallet();
   }
 
   async walletSetPrimaryMint({ url }: { url: string }): Promise<void> {
@@ -532,12 +892,81 @@ export class GhostlyNode implements EngineImplementation {
     return this.wallet.exportTokens();
   }
 
+  usdtCreate(params:Parameters<EngineApi["usdtCreate"]>[0]) {return this.usdtWallet.create(params);}
+  usdtUnlock(params:{password:string}) {return this.usdtWallet.unlock(params.password);}
+  usdtReveal(params:{password?:string}) {return this.usdtWallet.reveal(params.password);}
+  usdtLock() {return this.usdtWallet.lock();}
+  usdtRefresh() {return this.usdtWallet.refresh();}
+  usdtGetTestTokens() {return this.usdtWallet.getTestTokens();}
+  usdtExportBackup(params:{password:string}) {return this.usdtWallet.exportBackup(params.password);}
+  async usdtRestoreBackup(params:{text:string;password:string}) {await this.usdtWallet.restoreBackup(params.text,params.password);await this.usdtWallet.ensureReady();}
+  arkCreate(params: Parameters<EngineApi["arkCreate"]>[0]) { return this.arkWallet.create(params); }
+  arkUnlock(params: { password: string }) { return this.arkWallet.unlock(params.password); }
+  arkLock() { return this.arkWallet.lock(); }
+  arkBackup(params: { password?: string }) { return this.arkWallet.backup(params.password); }
+  arkExportBackup(params:{password:string}) { return this.arkWallet.exportBackup(params.password); }
+  async arkRestoreBackup(params:{text:string;password:string}) { await this.arkWallet.restoreBackup(params.text,params.password); await this.arkWallet.ensureReady(); }
+  arkRefresh() { return this.arkWallet.refresh(); }
+  arkRecover() { return this.arkWallet.recover(); }
+  async preparePayment(params: Parameters<EngineApi["preparePayment"]>[0]) {
+    if (params.linkId) {
+      const live=this.links.get(params.linkId); if(!live?.link)throw new Error("The peer is offline");
+      await live.link.requirePaymentSupport();
+      if(params.target.method==="cashu" && !live.link.allowsPayment("cashu"))throw new Error("Cashu is off in this chat");
+      if(params.target.method==="usdt" && !live.link.supportsUsdtPayments)throw new Error("This peer does not support USDT payments");
+      if(params.target.method==="arkade" && !live.link.supportsArkPayments)throw new Error("This peer does not support Ark payments");
+      const request=params.requestId ? this.desk.payment(params.requestId) : undefined;
+      if(params.requestId){
+        if(!request || request.linkId!==params.linkId || request.direction!=="in" || request.state!=="pending" || request.amount!==params.amount)throw new Error("Payment review does not match the authenticated request");
+        if(params.target.method!=="cashu" ? JSON.stringify(request.target)!==JSON.stringify(params.target) : !!request.target || params.target.address!==request.id || !request.mints?.includes(params.target.provider))throw new Error("Selected method or mint does not match the authenticated request");
+        if(request.lightningPending || Object.values(this.desk.views()).some(p=>p.kind==="payment" && p.requestId===request.id && p.linkId===params.linkId && !["failed","reclaimed"].includes(p.state)))throw new Error("This request already has a payment; reconcile it instead");
+      } else if(params.target.method!=="cashu" || params.target.address!==live.stored.peerPubKeyZ32)throw new Error("Destination does not match the authenticated peer");
+      params={...params,payee:live.stored.peerPubKeyZ32};
+    }
+    if(params.target.method==="cashu" && !params.linkId)throw new Error("Select a Cashu chat request first");
+    const memo=typeof params.memo==="string" ? params.memo.trim().slice(0,140) || undefined : undefined;
+    return this.paymentCoordinator.prepare(params.target,params.amount,params.feeCap,{payee:params.payee,linkId:params.linkId,requestId:params.requestId,memo});
+  }
+  async approvePayment(params: {id:string}) {
+    const intent=await intentRepository.get(params.id);
+    if(intent?.review.linkId) {
+      const link=this.links.get(intent.review.linkId)?.link;
+      if(!link || (intent.review.method==="arkade" && !link.supportsArkPayments))throw new Error("Reconnect the data link before approving. Your review was saved.");
+      if(intent.review.method==="usdt" && !link.supportsUsdtPayments)throw new Error("Reconnect a peer supporting USDT before approving");
+      if(intent.review.method==="cashu" && !link.allowsPayment("cashu"))throw new Error("Cashu is off in this chat");
+      await link.requirePaymentSupport();
+      if (intent.review.requestId) {
+        const request = this.desk.payment(intent.review.requestId);
+        if (!request || request.state !== "pending" || request.lightningPending) throw new Error("This request is no longer awaiting payment. Check its status before spending.");
+      }
+    }
+    const review=await this.paymentCoordinator.approve(params.id);
+    await this.desk.confirmReviewedCashu(review);
+    if(review.state==="settled")await this.desk.recordArk(review).catch(()=>{});
+    await this.desk.recordUsdt(review).catch(()=>{});
+    await this.arkWallet.refresh();await this.usdtWallet.refresh();return review;
+  }
+  async reconcilePayment(params: {id:string}) {
+    const review=await this.paymentCoordinator.reconcile(params.id);
+    await this.desk.confirmReviewedCashu(review);
+    if(review.state==="settled")await this.desk.recordArk(review).catch(()=>{});
+    await this.desk.recordUsdt(review).catch(()=>{});
+    await this.arkWallet.refresh();await this.usdtWallet.refresh();return review;
+  }
+  cancelPayment(params: {id:string}) { return this.paymentCoordinator.cancel(params.id); }
+
   sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number }) {
     return this.desk.send(params);
   }
 
-  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number }) {
-    return this.desk.request(params);
+  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" }) {
+    return this.desk.request({ linkId: params.linkId, amount: params.amount, memo: params.memo, timestamp: params.timestamp, method: params.method });
+  }
+
+  /** Paying on a card without a request (Ark, USDT): the contact's app answers with one. */
+  askToPay(params: { linkId: string; amount: number; method: "arkade" | "usdt"; memo?: string; timestamp: number }) {
+    if (params.method !== "arkade" && params.method !== "usdt") throw new Error("Only Ark and USDT are paid this way");
+    return this.desk.ask(params);
   }
 
   payRequest(params: { linkId: string; paymentId: string }) {
@@ -576,6 +1005,17 @@ export class GhostlyNode implements EngineImplementation {
     this.servicesChanged();
   }
 
+  setServiceShared({ serviceId, peerPubKeyZ32, shared }: { serviceId: string; peerPubKeyZ32: string; shared: boolean }): void {
+    const service = this.services.find((s) => s.id === serviceId);
+    if (!service) return;
+    const granted = new Set(service.sharedWith ?? []);
+    if (shared) granted.add(peerPubKeyZ32); else granted.delete(peerPubKeyZ32);
+    if (granted.size === (service.sharedWith?.length ?? 0) && [...granted].every(k => service.sharedWith?.includes(k))) return;
+    service.sharedWith = [...granted];
+    void db.putService(service);
+    this.servicesChanged();
+  }
+
   setServiceEnabled({ serviceId, enabled }: { serviceId: string; enabled: boolean }): void {
     const service = this.services.find((s) => s.id === serviceId);
     if (!service || service.enabled === enabled) return;
@@ -588,6 +1028,11 @@ export class GhostlyNode implements EngineImplementation {
 
   async updateSettings({ settings }: { settings: Partial<Settings> }): Promise<void> {
     const wasOnline = this.settings.online;
+    // Checked before anything changes: a relay list with no relay, or a TURN server a browser rejects,
+    // would leave this peer unreachable or without WebRTC.
+    for (const server of settings.iceServers ?? []) { const problem = iceServerProblem(server); if (problem) throw new Error(problem); }
+    if (settings.avatar !== undefined && settings.avatar !== "" && typeof sanitizeAvatar(settings.avatar) !== "string") throw new Error("Use a small JPEG picture");
+    if (settings.relays && this.relays && !settings.relays.some((relay) => normalizeRelayUrl(relay))) throw new Error("Enter at least one relay address (https://…)");
     this.settings = { ...this.settings, ...settings };
     if (settings.relays) {
       this.relays?.setRelays(settings.relays);
@@ -595,8 +1040,14 @@ export class GhostlyNode implements EngineImplementation {
     }
     await db.putSettings(this.settings);
 
+    if (settings.avatar !== undefined) {
+      if (!this.settings.avatar) delete this.settings.avatar;
+      await db.putSettings(this.settings);
+      for (const live of this.links.values()) live.link?.setAvatar(this.settings.avatar);
+    }
     if (settings.nick !== undefined) {
-      for (const live of this.links.values()) live.link?.session.setNick(this.settings.nick || undefined);
+      // GhostLink tells a paired peer directly; a legacy one still reads the record.
+      for (const live of this.links.values()) live.link?.setNick(this.settings.nick || undefined);
     }
     if (wasOnline && !this.settings.online) {
       await Promise.allSettled(
@@ -615,34 +1066,42 @@ export class GhostlyNode implements EngineImplementation {
 
   // -- internals -----------------------------------------------------------
 
-  private addLink(params: LinkParams, inviteCode?: string): string {
+  private async addLink(params: LinkParams, inviteCode?: string): Promise<string> {
     const stored: StoredLink = {
       id: identityFromSeedB64(params.seedB64).pubKeyZ32.slice(0, 16),
       ...params,
+      ...(params.profile ? { participationSeed: createIdentity().seedB64 } : {}),
       createdAt: Date.now(),
       inviteCode,
     };
     this.links.set(stored.id, newLiveLink(stored, 0));
-    void db.putLink(stored);
+    try { await db.putLink(stored); }
+    catch (error) { this.links.delete(stored.id); throw error; }
     if (this.settings.online) this.startLink(stored.id, []);
     this.emitState();
     return stored.id;
   }
 
   /** What this peer advertises. Chat, voice and video are what Ghostly always offered. */
-  private advertisedServices(): ServiceAd[] {
+  /** A contact is only told about the services it was granted. */
+  private advertisedServices(peerPubKeyZ32: string): ServiceAd[] {
     return [
       ...LEGACY_SERVICES,
       ...this.services
-        .filter((s) => s.enabled)
+        .filter((s) => mayReach(s, peerPubKeyZ32))
         .map((s): ServiceAd => ({ id: s.id, type: "http", name: s.name, proto: HTTP_SERVICE_PROTO })),
     ];
   }
 
   /** The only place a service id turns into a URL. Disabled or unknown ids do not resolve. */
-  private hostedService(id: string): HostedHttpService | undefined {
-    const service = this.services.find((s) => s.id === id && s.enabled);
-    if (!service) return undefined;
+  /**
+   * The authorization, on the side that serves. Filtering the advertisement is
+   * not enough: a contact that saw an id once, or guessed one, would still be
+   * served. This is the check that decides.
+   */
+  private hostedService(id: string, peerPubKeyZ32: string): HostedHttpService | undefined {
+    const service = this.services.find((s) => s.id === id);
+    if (!service || !mayReach(service, peerPubKeyZ32)) return undefined;
     try {
       const target = parseLocalTarget(service.target);
       this.requestCounts.set(id, (this.requestCounts.get(id) ?? 0) + 1);
@@ -657,24 +1116,69 @@ export class GhostlyNode implements EngineImplementation {
     const live = this.links.get(linkId);
     if (!live || live.link) return;
     const { stored } = live;
+    if (stored.profile) live.pairing = { status: "connecting" };
     const lastSeenTimestamp = messages.reduce(
       (max, m) => (m.sender === "peer" && m.via === "pkarr" ? Math.max(max, m.timestamp) : max),
       0,
     );
 
     live.link = new GhostLink({
+      paymentMethods: stored.paymentMethods,
+      arkPaymentsSupport: true,
+      usdtPaymentsSupport: true,
       params: stored,
+      rtcAvailable: typeof RTCPeerConnection !== "undefined",
+      dht: stored.profile ? { state: stored.dhtDeliveryState, save: async state => {
+        await db.patchLink(linkId, { dhtDeliveryState: state });
+        live.stored = { ...live.stored, dhtDeliveryState: state };
+      } } : undefined,
+      native: { peerDescriptors: stored.peerDescriptors, peerTransports: stored.peerTransports,
+        peerFallback: stored.peerFallback, preferred: stored.preferredTransport, fallback: stored.transportFallback },
+      pairing: stored.profile && stored.participationSeed ? {
+        credentials: { seedB64: stored.participationSeed, peerKey: stored.pairedPeerKey, requireSignedSignals: stored.requireSignedSignals,
+          verifiedPeerKey: stored.peerTrust ? stored.peerTrust.verifiedKey : stored.pairedPeerKey },
+        verifyPeer: async key => {
+          await db.verifyPeer(stored.id, key);
+          live.stored = { ...live.stored, peerTrust: { version: 1, verifiedKey: key, verifiedAt: Date.now() } };
+          this.emitState();
+        },
+        pinPeer: async (key, signedSignals) => {
+          if (live.stored.pairedPeerKey && live.stored.pairedPeerKey !== key) throw new Error("Already paired");
+          const previous = live.stored;
+          live.stored = { ...live.stored, peerTrust: live.stored.peerTrust ?? { version: 1, verifiedKey: live.stored.pairedPeerKey }, pairedPeerKey: key, requireSignedSignals: live.stored.requireSignedSignals || signedSignals, inviteCode: undefined };
+          try { await db.pinPeer(stored.id, key, signedSignals); }
+          catch (error) { live.stored = previous; throw error; }
+        },
+      } : undefined,
       transport: this.transport,
       nick: this.settings.nick || undefined,
+      avatar: this.settings.avatar || undefined,
       lastSeenTimestamp,
       pollIntervals: this.pollIntervals,
       autoConnect: true,
       createPeerConnection: () =>
-        new RTCPeerConnection({ iceServers: [...(RTC_CONFIG.iceServers ?? []), ...this.settings.iceServers] }),
+        new RTCPeerConnection({ iceServers: [...(RTC_CONFIG.iceServers ?? []), ...this.settings.iceServers.filter((server) => !iceServerProblem(server))] }),
       localFetch: this.localFetch,
-      getServices: () => this.advertisedServices(),
-      getHostedHttpService: (id) => this.hostedService(id),
+      getServices: () => stored.profile ? [{ id: "chat", type: "chat" }] : this.advertisedServices(stored.peerPubKeyZ32),
+      // A paired contact learns only the apps granted to it, on the open session; nothing is published.
+      getPairedServices: () => this.advertisedServices(stored.peerPubKeyZ32).filter((service) => service.type === "http"),
+      getHostedHttpService: (id) => this.hostedService(id, stored.peerPubKeyZ32),
       events: {
+        onDhtDelivery: () => this.emitState(),
+        onPeerProof: EXTERNAL_IDENTITIES_ENABLED ? async frame => { await (await this.proofsFor(linkId)).receive(frame); } : undefined,
+        onTransportsChanged: () => this.emitState(),
+        onDiscoveryError: error => { live.discoveryError = error ?? undefined; this.emitState(); },
+        onTransportDiscovery: async (peerDescriptors, peerTransports, peerFallback) => {
+          const patch = { peerDescriptors, peerTransports, peerFallback };
+          await db.patchLink(linkId, patch);
+          live.stored = { ...live.stored, ...patch }; this.emitState();
+        },
+        onPairingState: state => {
+          live.pairing = state;
+          if (EXTERNAL_IDENTITIES_ENABLED && state.status === "ready") void this.proofsFor(linkId).then(p => p.resendWithdrawals()).catch(() => {});
+          else live.proofs?.stop();
+          this.emitState();
+        },
         onStatus: (status) => {
           live.status = status;
           if (status === "online") live.lastSyncAt = Date.now();
@@ -684,31 +1188,43 @@ export class GhostlyNode implements EngineImplementation {
           live.poll = { polling, nextAt: Date.now() + nextInMs, interval: nextInMs || live.poll.interval };
           this.emitState();
         },
+        onMessageReceipt: id => this.outboxFor(linkId).received(id),
         onPeerAck: (ack) => {
+          if (stored.profile) return;
           if (ack === live.peerAck) return;
           live.peerAck = ack;
           this.emitState();
         },
         onDataLinkState: (state) => {
           live.dataLink = state;
+          if (state === "open") void this.desk.replay(linkId).catch(() => {});
+          if (state !== "open") live.proofs?.stop();
+          if (stored.profile && live.stored.deliveryMode !== "dht" && state !== "open") void this.outboxFor(linkId).disconnected().catch(() => {});
+          if (stored.profile && state !== "open" && live.pairing?.status !== "error") live.pairing = { status: "connecting" };
+          this.emitState();
+        },
+        onPeerAvatar: (avatar) => {
+          if ((avatar ?? undefined) === live.stored.peerAvatar) return;
+          live.stored = { ...live.stored, peerAvatar: avatar ?? undefined };
+          void db.patchLink(linkId, { peerAvatar: avatar ?? undefined });
           this.emitState();
         },
         onPresence: (presence) => {
           live.presence = presence;
           if (presence.nick && presence.nick !== live.stored.peerNick) {
             live.stored = { ...live.stored, peerNick: presence.nick };
-            void db.putLink(live.stored);
+            void db.patchLink(linkId, { peerNick: presence.nick });
           }
           this.emitState();
         },
         onMessage: (message) => {
           if (live.stored.inviteCode) {
             live.stored = { ...live.stored, inviteCode: undefined };
-            void db.putLink(live.stored);
+            void db.patchLink(linkId, { inviteCode: undefined });
           }
-          void this.storeMessage({
+          return this.storeMessage({
             linkId,
-            id: `peer_${message.timestamp}`,
+            id: `peer_${message.id ?? message.timestamp}`,
             text: message.text,
             sender: "peer",
             timestamp: message.timestamp,
@@ -717,9 +1233,17 @@ export class GhostlyNode implements EngineImplementation {
           });
         },
         onCallSignal: (signal) => this.events.onCallSignal(linkId, signal),
-        onPaymentRequest: (request) => void this.desk.onPaymentRequest(linkId, request),
-        onPayment: (payment) => void this.desk.onPayment(linkId, payment),
-        onPaymentResult: (result) => void this.desk.onPaymentResult(linkId, result),
+        // Each way of paying is checked where it is used: what this chat does not allow is dropped or refused.
+        onPaymentRequest: (request) => this.desk.onPaymentRequest(linkId, request),
+        onPaymentAsk: (ask) => this.desk.onPaymentAsk(linkId, ask),
+        onPayment: (payment) => this.desk.onPayment(linkId, payment),
+        onPaymentResult: (result) => this.desk.onPaymentResult(linkId, result),
+        onFileStored: async wire => {
+          const stored = (await fileStore.listForLink(linkId)).find(file => file.direction === "in" && file.wireId === wire.id);
+          if (!stored?.digest || !stored.metadata) return undefined;
+          if (stored.metadata.name !== wire.name || stored.metadata.size !== wire.size || stored.metadata.mime !== wire.mime || stored.metadata.timestamp !== wire.timestamp) return undefined;
+          return stored.digest;
+        },
         onFileIncoming: (file) => this.receiveFile(linkId, file),
         onFileProgress: (id, transferred, direction) =>
           this.fileProgress(this.localFileId(linkId, id, direction), transferred),
@@ -729,7 +1253,55 @@ export class GhostlyNode implements EngineImplementation {
           this.fileSettled(this.localFileId(linkId, id, direction, { failed: true }), reason),
       },
     });
-    live.link.start();
+    const link = live.link;
+    link.start(); this.emitState();
+    // Unused invites need discovery, not two native listeners. Saved contacts
+    // retain background listeners within the real native capacity.
+    if (stored.deliveryMode !== "dht" && (stored.pairedPeerKey || this.activeLinkId === linkId)) void this.ensureNativeEndpoints(linkId).then(() => {
+      if (live.link === link && stored.peerTransports && stored.preferredTransport !== "webrtc/1" && live.myPubKeyZ32 < stored.peerPubKeyZ32)
+        void link.connect().catch(() => {});
+    });
+  }
+
+  private ensureNativeEndpoints(linkId: string): Promise<void> {
+    const expected = this.links.get(linkId)?.link;
+    const operation = this.nativeQueue.then(async () => {
+      const live = this.links.get(linkId), link = live?.link;
+      if (this.shuttingDown || !live?.stored.profile || live.stored.deliveryMode === "dht" || !link || link !== expected) return;
+      for (const [transport, factory] of Object.entries(this.options.nativeTransports ?? {})) {
+        const key = transport as NativeTransport;
+        if (!factory || link.availableTransports.includes(key)) continue;
+        live.transportErrors ??= {};
+        try {
+          // The native SDKs each allow eight listeners. Reclaim an idle listener
+          // only for the selected chat, never an established native connection.
+          const owners = [...this.links.values()].filter(other => other.link?.availableTransports.includes(key));
+          if (owners.length >= 8) {
+            const victim = this.activeLinkId === linkId ? owners
+              .filter(other => other !== live && other.stored.id !== this.activeLinkId && other.link?.canReleaseEndpoint(key))
+              .sort((a, b) => a.lastMessageAt - b.lastMessageAt)[0] : undefined;
+            if (!victim) throw new Error("All eight native connection slots are in use. Disconnect a native connection in another chat, then reopen this chat or press Reconnect.");
+            await victim.link!.releaseEndpoint(key);
+            victim.transportErrors ??= {};
+            victim.transportErrors[key] = "Listener released for another chat. Open this chat to restore it; your messages and transport identity are saved.";
+          }
+          if (this.shuttingDown || live.link !== link) return;
+          const seed = live.stored.transportSeeds?.[key] ?? createIdentity().seedB64;
+          const transportSeeds = { ...live.stored.transportSeeds, [key]: seed };
+          await db.patchLink(linkId, { transportSeeds });
+          live.stored = { ...live.stored, transportSeeds };
+          const endpoint = await factory(seed);
+          if (this.shuttingDown || live.stored.deliveryMode === "dht" || live.link !== link || !this.links.has(linkId)) { await endpoint.close(); return; }
+          link.registerEndpoint(endpoint);
+          delete live.transportErrors[key];
+        } catch (error) {
+          live.transportErrors[key] = error instanceof Error ? error.message : "Native adapter could not start. Reopen this chat to retry.";
+        }
+      }
+      this.emitState();
+    });
+    this.nativeQueue = operation.catch(() => {});
+    return operation;
   }
 
   private async storeMessage(message: StoredMessage): Promise<void> {
@@ -737,6 +1309,7 @@ export class GhostlyNode implements EngineImplementation {
     // The peer republishes what it sent for a few minutes: what was deleted here stays deleted.
     if (live?.stored.deletedIds?.includes(message.id)) return;
     if (!(await db.addMessage(message))) return;
+    if (message.sender === "peer") this.messageFeedback("message", message);
     if (live) live.lastMessageAt = Math.max(live.lastMessageAt, message.timestamp);
     this.events.onMessages(message.linkId, await db.getMessages(message.linkId));
     this.emitState();
@@ -751,10 +1324,34 @@ export class GhostlyNode implements EngineImplementation {
     const { stored, presence } = live;
     return {
       id: stored.id,
+      profile: stored.profile,
+      pairing: live.pairing,
+      discoveryError: live.discoveryError,
+      peerVerified: !!stored.pairedPeerKey && (stored.peerTrust ? stored.peerTrust.verifiedKey === stored.pairedPeerKey : true),
+      capabilities: { files: live.link?.supportsFiles ?? false, payments: live.link?.supportsPayments ?? false,
+        methods: Object.fromEntries(PAYMENT_METHODS.map(m => [m, live.link?.allowsPayment(m) ?? false])) as Record<PaymentMethodName, boolean> },
+      paymentMethods: Object.fromEntries(PAYMENT_METHODS.map(m => [m, stored.paymentMethods?.[m] !== false])) as Record<PaymentMethodName, boolean>,
+      participationKey: stored.participationSeed ? identityFromSeedB64(stored.participationSeed).pubKeyZ32 : undefined,
+      peerParticipationKey: stored.pairedPeerKey,
+      publicProfiles: EXTERNAL_IDENTITIES_ENABLED ? stored.publicProfiles : undefined,
+      profileChoice: EXTERNAL_IDENTITIES_ENABLED ? stored.profileChoice : undefined,
+      peerProofSupport: EXTERNAL_IDENTITIES_ENABLED && (live.link?.peerProofSupport ?? false),
+      peerProofAdapters: EXTERNAL_IDENTITIES_ENABLED ? live.link?.peerProofAdapters ?? [] : [],
+      peerProofs: EXTERNAL_IDENTITIES_ENABLED && stored.peerProofs ? { local: stored.peerProofs.local, remote: stored.peerProofs.remote } : undefined,
+      proofError: EXTERNAL_IDENTITIES_ENABLED ? live.proofError : undefined,
+      availableTransports: live.link?.availableTransports,
+      deliveryMode: live.stored.deliveryMode ?? "stream",
+      dhtDelivery: live.link?.dhtDelivery,
+      canSendText: live.link?.canSendText ?? false,
+      textDelivery: live.link?.textDelivery ?? "unavailable",
+      transportErrors: live.transportErrors,
+      preferredTransport: live.stored.preferredTransport ?? "webrtc/1",
+      transportFallback: live.stored.transportFallback ?? true,
       myPubKeyZ32: live.myPubKeyZ32,
       peerPubKeyZ32: stored.peerPubKeyZ32,
       label: stored.label,
       peerNick: stored.peerNick,
+      peerAvatar: stored.peerAvatar,
       inviteCode: stored.inviteCode,
       createdAt: stored.createdAt,
       status: live.status,

@@ -1,5 +1,9 @@
 {
   "common": {
+    "chatCreated": "Chat created {{date}}",
+    "deleteChatTitle": "Delete chat?",
+    "deleteChatLocal": "This deletes the chat and its history from this device. Your contact’s copy is not deleted.",
+    "anonymous": "Anonymous",
     "save": "Save",
     "cancel": "Cancel",
     "delete": "Delete",
@@ -24,7 +28,13 @@
     "deleteChat": "Delete chat",
     "deleteAllChats": "Delete all chats",
     "copyInvite": "Copy invite code",
-    "settings": "Settings"
+    "settings": "Settings",
+    "new": "New",
+    "join": "Join",
+    "joinChat": "Join chat",
+    "quiet": "It's quiet here...",
+    "quietHint": "Time to haunt someone! 👻",
+    "startChat": "New chat"
   },
   "chat": {
     "typeMessage": "Type a message...",
@@ -38,9 +48,38 @@
     "deleteMessage": "Delete message",
     "deleteMessageHint": "Deleted only here. Your contact keeps their copy."
   },
+  "invite": {
+    "live": "Live chat",
+    "text": "Text only",
+    "details": "Delivery details",
+    "textDetails": "Text only publishes short encrypted messages to the DHT, even when your contact is offline. Up to 256 UTF-8 bytes, valid for 5 minutes. Delivery is not guaranteed.",
+    "copy": "Copy invite",
+    "copyFailed": "Could not copy. Try again or share the invite.",
+    "shareFailed": "Could not share. Copy the invite instead."
+  },
+  "join": {
+    "title": "Join a chat",
+    "close": "Close join",
+    "cameraPreview": "QR camera preview",
+    "paste": "Paste from clipboard",
+    "scan": "Scan QR",
+    "image": "Open image",
+    "invite": "Invite code",
+    "submit": "Join chat",
+    "invalid": "Invalid invite. Ask for a new one.",
+    "empty": "Clipboard is empty. Paste an invite below.",
+    "clipboardUnavailable": "Clipboard unavailable. Paste an invite below.",
+    "cameraUnavailable": "Camera unavailable. Paste an invite or open an image.",
+    "imageSize": "Choose an image smaller than 12 MB.",
+    "noQr": "No QR found. Try a clearer image.",
+    "imageFailed": "Could not read the image. Try PNG or JPEG."
+  },
   "home": {
+    "linkFailed": "Could not open the link.",
+    "viewRelease": "View this release",
+    "unpublishedVersion": "Local version — view published releases",
     "welcome": "Welcome to Ghostly",
-    "description": "Secure, ephemeral messaging that respects your privacy",
+    "description": "Private, ephemeral messaging.",
     "createChat": "Create New Chat",
     "features": {
       "encrypted": "End-to-end encrypted",
@@ -49,6 +88,11 @@
     }
   },
   "settings": {
+    "systemNotifications": "System notifications",
+    "noticesRunning": "While a Ghostly window is open.",
+    "noticesDenied": "Notifications are blocked. Check device or browser settings.",
+    "noticesUnavailable": "Notifications are unavailable here.",
+    "privateNotice": "New message",
     "title": "Settings",
     "profile": "Profile",
     "defaultNickname": "Default Nickname",
@@ -104,7 +148,7 @@
     "incorrectPassword": "Incorrect password",
     "notifications": "Notifications",
     "notificationSounds": "Notification sounds",
-    "notificationSoundsDescription": "Play sound when new messages arrive",
+    "notificationSoundsDescription": "Play sounds for messages, calls and confirmed payments",
     "data": "Data & Storage",
     "storageUsed": "Storage used",
     "clearAllData": "Clear all data",
@@ -175,6 +219,8 @@
   "tabs": {
     "chats": "Chats",
     "wallet": "Wallet",
-    "share": "Share"
+    "share": "Share",
+    "profile": "Profile",
+    "services": "Services"
   }
 }

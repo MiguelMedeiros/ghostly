@@ -1,0 +1,48 @@
+{
+  "provider": "ElevenLabs",
+  "model": "eleven_text_to_sound_v2",
+  "generatedAt": "2026-09-22T17:29:50.338Z",
+  "family": "Original minimal interface sound for a calm private messaging app. Soft rounded glass and airy felt mallet texture, warm, clean, understated, no harsh frequencies, no hiss, no voice, no music, no recognizable brand melody. Low-intensity intimate sound, clean silence around the effect.",
+  "effects": [
+    {
+      "name": "message",
+      "duration": 0.5,
+      "prompt": "One soft rising two-note droplet, incoming message. Fast gentle attack and very short decay."
+    },
+    {
+      "name": "sent",
+      "duration": 0.5,
+      "prompt": "One soft tiny upward pluck and airy flick, message sent, shorter and quieter than an incoming alert."
+    },
+    {
+      "name": "coin",
+      "duration": 0.7,
+      "prompt": "Two warm rounded glass notes, quietly positive, wallet funds received and confirmed. No metallic cash register."
+    },
+    {
+      "name": "confirmed",
+      "duration": 0.6,
+      "prompt": "One warm low pluck resolving into a softer high note, wallet payment completed. Calm confirmation."
+    },
+    {
+      "name": "request",
+      "duration": 0.5,
+      "prompt": "Two small muted taps, gentle request, unobtrusive."
+    },
+    {
+      "name": "ring",
+      "duration": 2.5,
+      "prompt": "A gentle three-note invitation to an incoming call, followed by generous silence, suitable for repeating. Soft marimba-like glass, not alarming."
+    },
+    {
+      "name": "ringback",
+      "duration": 2.5,
+      "prompt": "One low soft resonant pulse followed by generous silence, waiting for a call to be answered."
+    },
+    {
+      "name": "hangup",
+      "duration": 0.5,
+      "prompt": "Two very soft descending rounded plucks, a call has ended, calm and brief."
+    }
+  ]
+}

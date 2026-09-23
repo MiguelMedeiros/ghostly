@@ -1,6 +1,5 @@
+import { decodeInviteCode } from "@ghostly/core";
 import type { SessionKeys } from "./storage";
-
-const SEPARATOR = "/";
 
 /**
  * Where a chat lives in the app: by the id of its stored session. The keys
@@ -13,10 +12,8 @@ export function chatPath(sessionId: string): string {
 
 /** `<seed>/<peer public key>/<encryption key>` */
 function parseKeys(code: string): SessionKeys | null {
-  const parts = code.replace(/^\/+/, "").replace(/\/+$/, "").split(SEPARATOR);
-  if (parts.length !== 3 || !parts.every((part) => /^[A-Za-z0-9_\-+=]+$/.test(part))) return null;
-  const [seedB64, peerPubKeyB64, encKeyB64] = parts;
-  return { seedB64, peerPubKeyB64, encKeyB64 };
+  const parsed = decodeInviteCode(code);
+  return parsed ? { seedB64: parsed.seedB64, peerPubKeyB64: parsed.peerPubKeyZ32, encKeyB64: parsed.encKeyB64, profile: parsed.profile, deliveryMode: parsed.deliveryMode } : null;
 }
 
 /**

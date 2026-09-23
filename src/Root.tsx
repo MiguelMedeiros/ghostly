@@ -1,16 +1,21 @@
-import { useLayoutEffect, type ReactNode } from "react";
-import { HashRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useState, type ReactNode } from "react";
+import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { AttentionFeedback } from "./components/AttentionFeedback";
 import { App } from "./App";
 import { Home } from "./pages/Home";
 import { Settings } from "./pages/Settings";
-import { ShareTab, WalletTab } from "./pages/MobileTabs";
+import { Services } from "./pages/Services";
+import { Profile } from "./pages/Profile";
+import { Wallet } from "./pages/Wallet";
 import { SettingsProvider } from "./contexts/SettingsContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { I18nProvider } from "./contexts/I18nContext";
 import { LockScreenProvider, useLockScreen } from "./contexts/LockScreenContext";
 import { UpdateProvider } from "./contexts/UpdateContext";
 import { LockScreen } from "./components/LockScreen";
-import { ensureSession } from "./lib/storage";
+import { ensureSession, loadSession } from "./lib/storage";
+import { useI18n } from "./contexts/I18nContext";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { chatPath, parseChatRoute } from "./lib/url";
 import "./index.css";
 
@@ -23,16 +28,41 @@ import "./index.css";
 function ChatLinkIntake() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  const { t } = useI18n();
+  const [invalid, setInvalid] = useState(false);
 
-  useLayoutEffect(() => {
+  // An effect, not a layout effect: the router starts listening in its own layout effect, after this
+  // one's, and would miss a navigation made before it (an invite link opened in a new tab).
+  useEffect(() => {
+    const rest = pathname.match(/^\/chat\/(.+)$/)?.[1];
+    if (!rest) return;
     const keys = parseChatRoute(pathname);
-    if (!keys) return;
-    const sessionId = ensureSession(keys);
+    let sessionId: string | null = null;
+    if (keys) {
+      try { sessionId = ensureSession(keys); } catch { sessionId = null; }
+    } else if (!rest.includes("/") && loadSession(decodeURIComponent(rest))) return; // an ordinary chat address
+    if (!sessionId) {
+      // Whatever it was, it leaves the address bar and the history: it may hold a key.
+      setInvalid(true);
+      navigate("/", { replace: true });
+      return;
+    }
     window.dispatchEvent(new Event("session-updated"));
     navigate(chatPath(sessionId), { replace: true });
   }, [pathname, navigate]);
 
-  return null;
+  useEffect(() => {
+    if (!invalid) return;
+    const timer = setTimeout(() => setInvalid(false), 6000);
+    return () => clearTimeout(timer);
+  }, [invalid]);
+
+  return invalid ? (
+    <div role="alert" data-testid="invite-link-invalid" onClick={() => setInvalid(false)}
+      className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-danger shadow-xl cursor-pointer">
+      {t("join.invalid")}
+    </div>
+  ) : null;
 }
 
 /**
@@ -65,21 +95,26 @@ export function Root() {
           <LockScreenProvider>
             <LockScreen />
             <HashRouter>
+              <ErrorBoundary>
               <ChatLinkIntake />
               <LockGate>
                 {/* Asking for updates says this device runs Ghostly: not before the password. */}
                 <UpdateProvider>
+                  <AttentionFeedback />
                   <Routes>
                     <Route element={<App />}>
                       <Route path="/" element={<Home />} />
                       <Route path="/chat/*" element={<ChatRoute />} />
                       <Route path="/settings" element={<Settings />} />
-                      <Route path="/wallet" element={<WalletTab />} />
-                      <Route path="/share" element={<ShareTab />} />
+                      <Route path="/wallet" element={<Wallet />} />
+                      <Route path="/services" element={<Services />} />
+                      <Route path="/profile" element={<Profile />} />
+                      <Route path="/share" element={<Navigate to="/services" replace />} />
                     </Route>
                   </Routes>
                 </UpdateProvider>
               </LockGate>
+              </ErrorBoundary>
             </HashRouter>
           </LockScreenProvider>
         </I18nProvider>

@@ -1,0 +1,326 @@
+[
+  {
+    "oldId": "01",
+    "id": "00",
+    "oldFile": "01-process.md",
+    "file": "00-process.md",
+    "kind": "Process",
+    "displayNumber": "00",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "02",
+    "id": "01",
+    "oldFile": "02-ghost-core.md",
+    "file": "01-ghost-core.md",
+    "kind": "Contract",
+    "displayNumber": "01",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "03",
+    "id": "02",
+    "oldFile": "03-peer-keys.md",
+    "file": "02-peer-keys.md",
+    "kind": "Contract",
+    "displayNumber": "02",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "04",
+    "id": "03",
+    "oldFile": "04-capabilities.md",
+    "file": "03-capabilities.md",
+    "kind": "Contract",
+    "displayNumber": "03",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "— 04",
+    "id": "04",
+    "oldFile": "04-profiles.md",
+    "file": "04-profiles.md",
+    "kind": "Contract",
+    "displayNumber": "04",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "— 05",
+    "id": "05",
+    "oldFile": "05-backups.md",
+    "file": "05-backups.md",
+    "kind": "Contract",
+    "displayNumber": "05",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "05",
+    "id": "100",
+    "oldFile": "05-transports.md",
+    "file": "100-transports.md",
+    "kind": "Contract",
+    "displayNumber": "100",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "06",
+    "id": "101",
+    "oldFile": "06-webrtc.md",
+    "file": "101-webrtc.md",
+    "kind": "Adapter",
+    "displayNumber": "101",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "07",
+    "id": "102",
+    "oldFile": "07-iroh.md",
+    "file": "102-iroh.md",
+    "kind": "Adapter",
+    "displayNumber": "102",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "08",
+    "id": "103",
+    "oldFile": "08-hyperdht.md",
+    "file": "103-hyperdht.md",
+    "kind": "Adapter",
+    "displayNumber": "103",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "17",
+    "id": "200",
+    "oldFile": "17-payments.md",
+    "file": "200-payments.md",
+    "kind": "Contract",
+    "displayNumber": "200",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "18",
+    "id": "201",
+    "oldFile": "18-cashu.md",
+    "file": "201-cashu.md",
+    "kind": "Adapter",
+    "displayNumber": "201",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "202",
+    "id": "202",
+    "oldFile": "202-arkade.md",
+    "file": "202-arkade.md",
+    "kind": "Adapter",
+    "displayNumber": "202",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "19",
+    "id": "203",
+    "oldFile": "19-lightning.md",
+    "file": "203-lightning.md",
+    "kind": "Adapter",
+    "displayNumber": "203",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "09",
+    "id": "300",
+    "oldFile": "09-peer-proofs.md",
+    "file": "300-peer-proofs.md",
+    "kind": "Contract",
+    "displayNumber": "300",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "10",
+    "id": "301",
+    "oldFile": "10-nostr.md",
+    "file": "301-nostr.md",
+    "kind": "Adapter",
+    "displayNumber": "301",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "11",
+    "id": "302",
+    "oldFile": "11-pubky.md",
+    "file": "302-pubky.md",
+    "kind": "Adapter",
+    "displayNumber": "3xx",
+    "numberAssignment": "unassigned"
+  },
+  {
+    "oldId": "12",
+    "id": "303",
+    "oldFile": "12-keet.md",
+    "file": "303-keet.md",
+    "kind": "Adapter",
+    "displayNumber": "3xx",
+    "numberAssignment": "unassigned"
+  },
+  {
+    "oldId": "13",
+    "id": "400",
+    "oldFile": "13-chat.md",
+    "file": "400-chat.md",
+    "kind": "Contract",
+    "displayNumber": "400",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "401",
+    "id": "401",
+    "oldFile": "401-paired-chat.md",
+    "file": "401-paired-chat.md",
+    "kind": "Profile",
+    "displayNumber": "401",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "402",
+    "id": "402",
+    "oldFile": "402-legacy-chat.md",
+    "file": "402-legacy-chat.md",
+    "kind": "Profile",
+    "displayNumber": "402",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "403",
+    "id": "403",
+    "oldFile": "403-dht-text.md",
+    "file": "403-dht-text.md",
+    "kind": "Profile",
+    "displayNumber": "403",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "14",
+    "id": "500",
+    "oldFile": "14-files.md",
+    "file": "500-files.md",
+    "kind": "Contract",
+    "displayNumber": "500",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "501",
+    "id": "501",
+    "oldFile": "501-paired-files.md",
+    "file": "501-paired-files.md",
+    "kind": "Profile",
+    "displayNumber": "501",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "502",
+    "id": "502",
+    "oldFile": "502-legacy-files.md",
+    "file": "502-legacy-files.md",
+    "kind": "Profile",
+    "displayNumber": "502",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "15",
+    "id": "600",
+    "oldFile": "15-media.md",
+    "file": "600-media.md",
+    "kind": "Contract",
+    "displayNumber": "600",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "601",
+    "id": "601",
+    "oldFile": "601-webrtc-media.md",
+    "file": "601-webrtc-media.md",
+    "kind": "Profile",
+    "displayNumber": "601",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "16",
+    "id": "700",
+    "oldFile": "16-local-services.md",
+    "file": "700-local-services.md",
+    "kind": "Contract",
+    "displayNumber": "700",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "701",
+    "id": "701",
+    "oldFile": "701-http-services.md",
+    "file": "701-http-services.md",
+    "kind": "Profile",
+    "displayNumber": "701",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "20",
+    "id": "800",
+    "oldFile": "20-invite-join.md",
+    "file": "800-invite-join.md",
+    "kind": "Contract",
+    "displayNumber": "800",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "801",
+    "id": "801",
+    "oldFile": "801-invitation-profiles.md",
+    "file": "801-invitation-profiles.md",
+    "kind": "Profile",
+    "displayNumber": "801",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "21",
+    "id": "900",
+    "oldFile": "21-group-sessions.md",
+    "file": "900-group-sessions.md",
+    "kind": "Contract",
+    "displayNumber": "900",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "22",
+    "id": "901",
+    "oldFile": "22-gossipsub.md",
+    "file": "901-gossipsub.md",
+    "kind": "Adapter",
+    "displayNumber": "9xx",
+    "numberAssignment": "unassigned"
+  },
+  {
+    "oldId": "— 1000",
+    "id": "1000",
+    "oldFile": "1000-storage.md",
+    "file": "1000-storage.md",
+    "kind": "Contract",
+    "displayNumber": "1000",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "— 1001",
+    "id": "1001",
+    "oldFile": "1001-local-storage.md",
+    "file": "1001-local-storage.md",
+    "kind": "Adapter",
+    "displayNumber": "1001",
+    "numberAssignment": "defined"
+  },
+  {
+    "oldId": "— 1002",
+    "id": "1002",
+    "oldFile": "1002-s3-storage.md",
+    "file": "1002-s3-storage.md",
+    "kind": "Adapter",
+    "displayNumber": "1002",
+    "numberAssignment": "defined"
+  }
+]

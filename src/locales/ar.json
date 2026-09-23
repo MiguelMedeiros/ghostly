@@ -1,5 +1,9 @@
 {
   "common": {
+    "chatCreated": "تم إنشاء المحادثة في {{date}}",
+    "deleteChatTitle": "حذف المحادثة؟",
+    "deleteChatLocal": "سيتم حذف المحادثة وسجلها من هذا الجهاز فقط، وليس نسخة جهة الاتصال.",
+    "anonymous": "مجهول",
     "save": "حفظ",
     "cancel": "إلغاء",
     "delete": "حذف",
@@ -24,7 +28,13 @@
     "deleteChat": "حذف المحادثة",
     "deleteAllChats": "حذف جميع المحادثات",
     "copyInvite": "نسخ رمز الدعوة",
-    "settings": "الإعدادات"
+    "settings": "الإعدادات",
+    "new": "جديد",
+    "join": "انضمام",
+    "joinChat": "الانضمام إلى محادثة",
+    "quiet": "الهدوء يعم هنا...",
+    "quietHint": "حان وقت إخافة أحدهم! 👻",
+    "startChat": "محادثة جديدة"
   },
   "chat": {
     "typeMessage": "اكتب رسالة...",
@@ -38,9 +48,38 @@
     "deleteMessage": "حذف الرسالة",
     "deleteMessageHint": "يُحذف من هذا الجهاز فقط. تبقى النسخة لدى جهة اتصالك."
   },
+  "invite": {
+    "live": "دردشة مباشرة",
+    "text": "نص فقط",
+    "details": "تفاصيل الإرسال",
+    "textDetails": "ينشر وضع النص فقط رسائل قصيرة مشفرة على DHT حتى عندما تكون جهة الاتصال غير متصلة. حتى 256 بايت UTF-8، صالحة لمدة 5 دقائق. التسليم غير مضمون.",
+    "copy": "نسخ الدعوة",
+    "copyFailed": "تعذر النسخ. حاول مجددًا أو شارك الدعوة.",
+    "shareFailed": "تعذرت المشاركة. انسخ الدعوة."
+  },
+  "join": {
+    "title": "الانضمام إلى محادثة",
+    "close": "إغلاق",
+    "cameraPreview": "معاينة كاميرا QR",
+    "paste": "لصق من الحافظة",
+    "scan": "مسح QR",
+    "image": "فتح صورة",
+    "invite": "رمز الدعوة",
+    "submit": "انضمام",
+    "invalid": "دعوة غير صالحة. اطلب دعوة جديدة.",
+    "empty": "الحافظة فارغة. الصق دعوة أدناه.",
+    "clipboardUnavailable": "الحافظة غير متاحة. الصق دعوة أدناه.",
+    "cameraUnavailable": "الكاميرا غير متاحة. الصق دعوة أو افتح صورة.",
+    "imageSize": "اختر صورة أصغر من 12 MB.",
+    "noQr": "لم يتم العثور على QR. جرب صورة أوضح.",
+    "imageFailed": "تعذر قراءة الصورة. جرب PNG أو JPEG."
+  },
   "home": {
+    "linkFailed": "تعذر فتح الرابط.",
+    "viewRelease": "عرض هذا الإصدار",
+    "unpublishedVersion": "إصدار محلي — عرض الإصدارات المنشورة",
     "welcome": "مرحباً بك في Ghostly",
-    "description": "رسائل آمنة ومؤقتة تحترم خصوصيتك",
+    "description": "رسائل خاصة ومؤقتة.",
     "createChat": "إنشاء محادثة جديدة",
     "features": {
       "encrypted": "تشفير من طرف إلى طرف",
@@ -49,6 +88,11 @@
     }
   },
   "settings": {
+    "systemNotifications": "إشعارات النظام",
+    "noticesRunning": "أثناء تشغيل Ghostly.",
+    "noticesDenied": "الإشعارات محظورة. تحقق من إعدادات الجهاز أو المتصفح.",
+    "noticesUnavailable": "الإشعارات غير متاحة هنا.",
+    "privateNotice": "رسالة جديدة",
     "title": "الإعدادات",
     "profile": "الملف الشخصي",
     "defaultNickname": "الاسم المستعار الافتراضي",
@@ -104,7 +148,7 @@
     "lockNow": "قفل الآن",
     "notifications": "الإشعارات",
     "notificationSounds": "أصوات الإشعارات",
-    "notificationSoundsDescription": "تشغيل صوت عند وصول رسائل جديدة",
+    "notificationSoundsDescription": "أصوات للرسائل والمكالمات والمدفوعات المؤكدة",
     "data": "البيانات والتخزين",
     "storageUsed": "المساحة المستخدمة",
     "clearAllData": "مسح جميع البيانات",
@@ -175,6 +219,8 @@
   "tabs": {
     "chats": "الدردشات",
     "wallet": "المحفظة",
-    "share": "مشاركة"
+    "share": "مشاركة",
+    "profile": "الملف الشخصي",
+    "services": "الخدمات"
   }
 }

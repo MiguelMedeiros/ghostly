@@ -42,7 +42,7 @@ git checkout main && git pull
 git tag v0.3.0 && git push origin v0.3.0
 ```
 
-The workflow builds the desktop apps (macOS arm64 and x64, Windows, Linux), the CLI binaries, the extension zip and the web image (`ghcr.io/miguelmedeiros/ghostly-web`), and creates the draft with checksums. It takes about twenty minutes. The Giphy key comes from the `VITE_GIPHY_API_KEY` repository secret.
+The workflow builds the desktop apps (macOS arm64 and x64, Windows, Linux), the CLI binaries, the extension zip and the web image (`ghcr.io/miguelmedeiros/ghostly-web`), and creates the draft with checksums. It takes about twenty minutes.
 
 It also signs one bundle per desktop platform and writes `latest.json`, which is the whole of what the app's updater reads. That step needs `TAURI_SIGNING_PRIVATE_KEY` and its password, and it fails the release rather than publishing a version nobody can update to.
 

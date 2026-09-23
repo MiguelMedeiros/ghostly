@@ -1,7 +1,9 @@
 import {
   addMessage,
+  saveSession,
   ensureSession,
   findSession,
+  forgetInviteCode,
   listSessions,
   updateSessionLabel,
 } from "../../../../src/lib/storage";
@@ -32,23 +34,25 @@ export function sessionForPeer(peerPubKeyZ32: string): ChatSession | undefined {
   return listSessions().find((s) => s.peerPubKeyB64 === peerPubKeyZ32);
 }
 
-export function toChatMessage(message: StoredMessage, peerPubKeyZ32: string): ChatMessage {
+export function toChatMessage(message: StoredMessage, peerPubKeyZ32: string, myPubKeyZ32: string, modern = false): ChatMessage {
   const isJoin = JOIN_PATTERN.test(message.text);
   return {
     id: message.id,
+    delivery: message.delivery,
+    deliveryError: message.deliveryError,
     text: message.text,
     sender: isJoin ? "system" : message.sender,
     timestamp: message.timestamp,
     nick: message.nick,
     file: message.file,
     paymentId: message.paymentId,
-    meta: {
+    meta: modern ? undefined : {
       dhtKey: peerPubKeyZ32,
       encryptedPayloadLength: 0,
       dnsRecords: message.via === "datalink" ? ["webrtc"] : ["_msgs", "_ts", "_ack"],
       packetTimestamp: message.timestamp,
     },
-    ...(isJoin && { systemEvent: { type: "join" as const, pubKey: peerPubKeyZ32 } }),
+    ...(isJoin && { systemEvent: { type: "join" as const, pubKey: message.sender === "me" ? myPubKeyZ32 : peerPubKeyZ32 } }),
   };
 }
 
@@ -58,11 +62,31 @@ function mirrorMessages(linkId: string, messages: StoredMessage[]): void {
   if (!link || !session) return;
 
   let changed = false;
-  const known = new Set(session.messages.map((m) => m.id));
   for (const message of messages) {
-    // What I sent is stored by the UI when I send it, like on Desktop.
-    if (message.sender !== "peer" || known.has(message.id)) continue;
-    addMessage(session.id, toChatMessage(message, link.peerPubKeyZ32));
+    // Reviewed payments originate in the engine (including recovery), without
+    // the chat composer's optimistic message or text-delivery status.
+    if (message.sender !== "peer" && !message.delivery && !message.paymentId) continue;
+    const mapped = toChatMessage(message, link.peerPubKeyZ32, link.myPubKeyZ32, !!link.profile);
+    const previous = session.messages.find(m => m.id === message.id);
+    if (previous) {
+      let updated = false;
+      if (message.delivery && (previous.delivery !== message.delivery || previous.deliveryError !== message.deliveryError)) {
+        previous.delivery = message.delivery;
+        previous.deliveryError = message.deliveryError;
+        updated = true;
+      }
+      if (mapped.systemEvent && previous.systemEvent?.pubKey !== mapped.systemEvent.pubKey) {
+        previous.systemEvent = mapped.systemEvent;
+        updated = true;
+      }
+      if (updated) {
+        saveSession(session);
+        changed = true;
+      }
+      continue;
+    }
+    const updated = addMessage(session.id, mapped);
+    if (updated) session.messages = updated.messages;
     changed = true;
   }
   if (changed) notifySessionsChanged();
@@ -80,7 +104,7 @@ async function reconcile(): Promise<void> {
     for (const link of await engine.call("exportLinks")) {
       if (findSession(link.seedB64, link.peerPubKeyZ32)) continue;
       const id = ensureSession(
-        { seedB64: link.seedB64, peerPubKeyB64: link.peerPubKeyZ32, encKeyB64: link.encKeyB64 },
+        { profile: link.profile, deliveryMode: link.deliveryMode, seedB64: link.seedB64, peerPubKeyB64: link.peerPubKeyZ32, encKeyB64: link.encKeyB64 },
         { inviteCode: link.inviteCode, createdAt: link.createdAt },
       );
       if (link.label) updateSessionLabel(id, link.label);
@@ -93,10 +117,15 @@ async function reconcile(): Promise<void> {
   const peers = new Set(sessions.map((s) => s.peerPubKeyB64));
 
   for (const session of sessions) {
+    const live = engine.linkByPeer(session.peerPubKeyB64);
+    if (live && session.deliveryMode !== live.deliveryMode) { session.deliveryMode = live.deliveryMode; saveSession(session); }
+    if (session.profile && live?.pairing?.peerKey && ["ready", "waiting"].includes(live.pairing.status)) forgetInviteCode(session.id);
     if (engine.linkByPeer(session.peerPubKeyB64) || ensuring.has(session.id)) continue;
     ensuring.add(session.id);
     engine
       .call("ensureLink", {
+        profile: session.profile,
+        deliveryMode: session.deliveryMode,
         seedB64: session.mySeedB64,
         peerPubKeyZ32: session.peerPubKeyB64,
         encKeyB64: session.encKeyB64,

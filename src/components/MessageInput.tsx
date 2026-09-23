@@ -1,19 +1,26 @@
+import { getSessionDraft, setSessionDraft } from "../lib/storage";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { EmojiPicker } from "./EmojiPicker";
-import { GiphyPicker } from "./GiphyPicker";
+import { GifPicker } from "./GifPicker";
 import { PaymentComposer } from "./PaymentComposer";
 
 interface MessageInputProps {
+  draftId?: string;
   onSend: (text: string) => Promise<string | null>;
   disabled?: boolean;
+  disabledPlaceholder?: string;
   maxLength?: number;
+  maxBytes?: number;
   /** Present when the platform can send files; returns an error message or null. */
+  fileUnavailable?: string;
+  paymentsUnavailable?: string;
   onSendFile?: (file: File) => Promise<string | null>;
   /** Present when the platform has a wallet. */
   payments?: {
+    reviewContext?: {wallet:import("../lib/platform").WalletPlatform;peer:string;linkId:string};
     balance: number;
     onSend: (amount: number, memo: string) => Promise<string | null>;
-    onRequest: (amount: number, memo: string) => Promise<string | null>;
+    onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt") => Promise<string | null>;
   };
 }
 
@@ -21,18 +28,24 @@ const DEFAULT_MAX = 500;
 const TOAST_DURATION = 5_000;
 
 export function MessageInput({
+  draftId,
   onSend,
   disabled,
+  disabledPlaceholder = "Message…",
   maxLength = DEFAULT_MAX,
+  maxBytes,
   onSendFile,
   payments,
+  fileUnavailable,
+  paymentsUnavailable,
 }: MessageInputProps) {
   const [showPayment, setShowPayment] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [text, setText] = useState("");
+  const [text, setText] = useState(() => draftId ? getSessionDraft(draftId) : "");
+  const emojiButtonRef = useRef<HTMLButtonElement>(null);
   const [showEmoji, setShowEmoji] = useState(false);
   const [showMore, setShowMore] = useState(false);
-  const [showGiphy, setShowGiphy] = useState(false);
+  const [showGif, setShowGif] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -40,6 +53,12 @@ export function MessageInput({
   useEffect(() => {
     textareaRef.current?.focus();
   }, []);
+
+  useEffect(() => {
+    if (draftId) setSessionDraft(draftId, text);
+    const input=textareaRef.current;
+    if(input && text) { input.style.height="auto"; input.style.height=`${Math.min(input.scrollHeight,120)}px`; }
+  }, [draftId,text]);
 
   const showToast = useCallback((msg: string) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -52,11 +71,14 @@ export function MessageInput({
 
   const handleSubmit = async () => {
     if (!text.trim() || disabled) return;
+    const bytes = new TextEncoder().encode(text.trim()).length;
+    if (maxBytes && bytes > maxBytes) { showToast(`This text is ${bytes} UTF-8 bytes. DHT allows up to ${maxBytes}; shorten it or use a live connection. Your draft is kept.`); return; }
     const err = await onSend(text);
     if (err) {
       showToast(err);
     } else {
       setText("");
+      if(draftId) setSessionDraft(draftId, "");
       if (textareaRef.current) {
         textareaRef.current.style.height = "auto";
       }
@@ -72,7 +94,7 @@ export function MessageInput({
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
-    if (value.length <= maxLength) {
+    if (value.length <= Math.max(maxLength, 16_384)) {
       setText(value);
     } else if (value.length - text.length > 1) {
       showToast(
@@ -90,7 +112,7 @@ export function MessageInput({
   const handleEmojiSelect = useCallback(
     (emoji: string) => {
       const newText = text + emoji;
-      if (newText.length <= maxLength) {
+      if (newText.length <= Math.max(maxLength, 16_384)) {
         setText(newText);
       }
       textareaRef.current?.focus();
@@ -98,13 +120,13 @@ export function MessageInput({
     [text, maxLength],
   );
 
-  const handleGiphySelect = useCallback(
+  const handleGifSelect = useCallback(
     async (url: string) => {
       const err = await onSend(url);
       if (err) {
         showToast(err);
       }
-      setShowGiphy(false);
+      setShowGif(false);
       textareaRef.current?.focus();
     },
     [onSend, showToast],
@@ -112,25 +134,25 @@ export function MessageInput({
 
   const closeAll = () => {
     setShowEmoji(false);
-    setShowGiphy(false);
+    setShowGif(false);
   };
 
   const toggleEmoji = () => {
-    setShowGiphy(false);
+    setShowGif(false);
     setShowEmoji((v) => !v);
   };
 
-  const toggleGiphy = () => {
+  const toggleGif = () => {
     setShowEmoji(false);
-    setShowGiphy((v) => !v);
+    setShowGif((v) => !v);
   };
 
-  const remaining = maxLength - text.length;
+  const remaining = maxBytes ? maxBytes - new TextEncoder().encode(text.trim()).length : maxLength - text.length;
 
   return (
     <div className="bg-panel-header px-4 max-md:px-2 py-2.5 composer-safe shrink-0 relative">
       {toast && (
-        <div className="absolute bottom-full left-4 right-4 mb-2 z-50 animate-fade-in">
+        <div role="alert" className="absolute bottom-full left-4 right-4 mb-2 z-50 animate-fade-in">
           <div className="bg-[#3b2020] border border-danger/30 rounded-lg px-4 py-2.5 flex items-start gap-2 shadow-lg">
             <svg
               width="16"
@@ -179,6 +201,9 @@ export function MessageInput({
             </svg>
           </button>
           <button
+            ref={emojiButtonRef}
+            aria-expanded={showEmoji}
+            aria-haspopup="dialog"
             onClick={toggleEmoji}
             disabled={disabled}
             className={`w-9 h-9 max-md:w-10 max-md:h-11 flex items-center justify-center rounded-full transition-colors cursor-pointer border-none ${
@@ -198,10 +223,10 @@ export function MessageInput({
 
           <div className={`composer-more ${showMore ? "composer-more-open" : ""}`} onClick={() => setShowMore(false)}>
           <button
-            onClick={toggleGiphy}
+            onClick={toggleGif}
             disabled={disabled}
             className={`w-9 h-9 max-md:w-10 max-md:h-11 flex items-center justify-center rounded-full transition-colors cursor-pointer border-none ${
-              showGiphy
+              showGif
                 ? "bg-accent/20 text-accent"
                 : "bg-transparent text-text-secondary hover:text-text-primary hover:bg-surface-hover"
             } disabled:opacity-30 disabled:cursor-not-allowed`}
@@ -218,14 +243,15 @@ export function MessageInput({
           {payments && (
             <button
               onClick={() => setShowPayment((v) => !v)}
-              disabled={disabled}
+              disabled={disabled || !!paymentsUnavailable}
               data-testid="payment-button"
               className={`w-9 h-9 max-md:w-10 max-md:h-11 flex items-center justify-center rounded-full transition-colors cursor-pointer border-none ${
                 showPayment
                   ? "bg-accent/20 text-accent"
                   : "bg-transparent text-text-secondary hover:text-text-primary hover:bg-surface-hover"
               } disabled:opacity-30 disabled:cursor-not-allowed`}
-              title="Send or request sats"
+              aria-label="Send or request sats"
+              title={paymentsUnavailable ?? "Send or request sats"}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
@@ -240,19 +266,21 @@ export function MessageInput({
                 type="file"
                 className="hidden"
                 data-testid="file-input"
+                disabled={disabled || !!fileUnavailable}
                 onChange={async (e) => {
                   const file = e.target.files?.[0];
                   e.target.value = "";
-                  if (!file) return;
+                  if (!file || disabled || fileUnavailable) return;
                   const err = await onSendFile(file);
                   if (err) showToast(err);
                 }}
               />
               <button
                 onClick={() => fileInputRef.current?.click()}
-                disabled={disabled}
+                disabled={disabled || !!fileUnavailable}
                 className="w-9 h-9 max-md:w-10 max-md:h-11 flex items-center justify-center rounded-full transition-colors cursor-pointer border-none bg-transparent text-text-secondary hover:text-text-primary hover:bg-surface-hover disabled:opacity-30 disabled:cursor-not-allowed"
-                title="Send a file"
+                aria-label="Send a file"
+                title={fileUnavailable ?? "Send a file"}
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
@@ -272,7 +300,7 @@ export function MessageInput({
             onChange={handleInput}
             onKeyDown={handleKeyDown}
             onFocus={closeAll}
-            placeholder={disabled ? "Chat burned" : "Type a message"}
+            placeholder={disabled ? disabledPlaceholder : "Message…"}
             disabled={disabled}
             rows={1}
             className="w-full bg-input-bg border-none rounded-lg px-3 py-2 max-md:py-2.5 text-[15px] text-text-primary placeholder-text-muted resize-none focus:outline-none disabled:opacity-50 min-h-10 max-md:min-h-11 max-md:rounded-3xl"
@@ -281,13 +309,14 @@ export function MessageInput({
             <span
               className={`absolute right-2.5 bottom-1.5 text-[10px] ${remaining < 50 ? "text-danger" : "text-text-muted"}`}
             >
-              {remaining}
+              {remaining}{maxBytes ? " B" : ""}
             </span>
           )}
         </div>
 
         {/* Send button */}
         <button
+          aria-label="Send message"
           onClick={handleSubmit}
           disabled={disabled || !text.trim()}
           className="w-10 h-10 max-md:w-11 max-md:h-11 flex items-center justify-center bg-accent rounded-full text-[#111b21] hover:bg-accent-hover transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shrink-0"
@@ -299,15 +328,15 @@ export function MessageInput({
 
         {/* Pickers */}
         {showEmoji && (
-          <div className="absolute bottom-full left-0 mb-2 z-50 max-md:static max-md:m-0">
             <EmojiPicker
+              anchorRef={emojiButtonRef}
               onSelect={handleEmojiSelect}
-              onClose={() => setShowEmoji(false)}
+              onClose={() => { setShowEmoji(false); textareaRef.current?.focus(); }}
             />
-          </div>
         )}
-        {showPayment && payments && (
+        {showPayment && payments && !paymentsUnavailable && !disabled && (
           <PaymentComposer
+            reviewContext={payments.reviewContext}
             balance={payments.balance}
             onSend={payments.onSend}
             onRequest={payments.onRequest}
@@ -315,10 +344,10 @@ export function MessageInput({
           />
         )}
 
-        {showGiphy && (
-          <GiphyPicker
-            onSelect={handleGiphySelect}
-            onClose={() => setShowGiphy(false)}
+        {showGif && (
+          <GifPicker
+            onSelect={handleGifSelect}
+            onClose={() => setShowGif(false)}
           />
         )}
       </div>

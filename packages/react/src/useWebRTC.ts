@@ -74,7 +74,15 @@ export function useWebRTC({
     setCallState(state);
   }, []);
 
+  /**
+   * Which call attempt is current. Hanging up (or any cleanup) moves it on, so a start or an answer
+   * still waiting for the camera or for ICE finds out it was cancelled: it lets go of what it got and
+   * sends nothing, instead of ringing someone for a call that no longer exists.
+   */
+  const attemptRef = useRef(0);
+
   const cleanupConnection = useCallback(() => {
+    attemptRef.current++;
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((t) => {
         t.onended = null;
@@ -247,6 +255,8 @@ export function useWebRTC({
         hangupTimerRef.current = null;
       }
 
+      const attempt = ++attemptRef.current;
+      const cancelled = () => attemptRef.current !== attempt;
       try {
         setFastPoll(true);
         callHadVideoRef.current = withVideo;
@@ -271,6 +281,7 @@ export function useWebRTC({
         } else {
           stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: withVideo });
         }
+        if (cancelled()) { stream.getTracks().forEach((track) => track.stop()); return; }
         localStreamRef.current = stream;
         setLocalStream(stream);
         setPicture(withVideo ? source : null);
@@ -285,6 +296,7 @@ export function useWebRTC({
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         await waitForIceGathering(pc);
+        if (cancelled()) return;
 
         const sdp = pc.localDescription!.sdp;
         const params = extractParamsFromSdp(sdp);
@@ -303,6 +315,8 @@ export function useWebRTC({
         const signalStr = JSON.stringify(signal);
         publishCallSignal(signalStr);
       } catch (error) {
+        // A newer attempt (or none) owns the call now: its state is not ours to reset.
+        if (cancelled()) return;
         onErrorRef.current?.(error);
         cleanupConnection();
         updateCallState("idle");
@@ -330,6 +344,8 @@ export function useWebRTC({
         hangupTimerRef.current = null;
       }
 
+      const attempt = ++attemptRef.current;
+      const cancelled = () => attemptRef.current !== attempt;
       try {
         updateCallState("answering");
         applyRemotePicture(offer);
@@ -340,6 +356,7 @@ export function useWebRTC({
           audio: true,
           video: withVideo,
         });
+        if (cancelled()) { stream.getTracks().forEach((track) => track.stop()); return; }
         localStreamRef.current = stream;
         setLocalStream(stream);
         setPicture(withVideo ? "camera" : null);
@@ -363,6 +380,7 @@ export function useWebRTC({
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         await waitForIceGathering(pc);
+        if (cancelled()) return;
 
         const sdp = pc.localDescription!.sdp;
         const params = extractParamsFromSdp(sdp);
@@ -381,6 +399,7 @@ export function useWebRTC({
         updateCallState("connecting");
         pendingOfferRef.current = null;
       } catch (error) {
+        if (cancelled()) return;
         onErrorRef.current?.(error);
         cleanupConnection();
         updateCallState("idle");

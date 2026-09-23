@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <strong>Boo! Your chats float through 10M+ nodes and vanish without a trace.</strong><br>
-  <em>No servers. No accounts. Just pure, spooky privacy.</em>
+  <strong>Boo! Find each other through the DHT. Connect peer to peer.</strong><br>
+  <em>No central Ghostly message server. No account required.</em>
 </p>
 
 <p align="center">
@@ -65,11 +65,11 @@ The generated hash should match exactly with the one published in the release no
 
 ## What is Ghostly?
 
-**Ghostly** is a messenger from the spirit realm. Your messages are encrypted on your device, float through the DHT as ghostly whispers, and fade away when you close the app — leaving no trace behind, just like a proper ghost.
+**Ghostly** is the reference app for Ghost, a small Pkarr/DHT rendezvous and record-exchange primitive. Peers exchange encrypted small messages and signaling, then move live conversations, files and services onto WebRTC. History stays local; network expiry does not guarantee deletion of retained copies.
 
 ## Your services exist while you are online
 
-Ghostly started as a messenger and is growing into an ephemeral peer-to-peer service layer: a peer advertises what it offers right now (chat, voice, video, a local web app) under its Ghostly identity, and linked peers reach it over WebRTC. Close Ghostly and it is all gone. No server, by design.
+Ghostly started as a messenger and is growing into an ephemeral peer-to-peer service layer: a peer advertises what it offers right now (chat, voice, video, a local web app) under its Ghostly identity, and linked peers reach it over WebRTC. Close Ghostly and live access ends; local history and keys remain. No central Ghostly message server is required.
 
 ```
 expose localhost:3400   →   your peer clicks "Open"   →   HTTP over WebRTC   →   your localhost
@@ -80,8 +80,8 @@ This works today in **[Ghostly Browser](docs/BROWSER.md)**, a Chromium extension
 ## Features
 
 - **E2E Encrypted** — 256-bit NaCl secretbox encryption
-- **Ephemeral** — Messages vanish from the DHT in ~5 hours; everything else exists only while you are online
-- **Serverless** — No servers, no accounts
+- **Ephemeral presence** — Records stop being refreshed when offline; local history and retained network copies can remain
+- **No account required** — Optional connectivity infrastructure has explicit privacy and availability tradeoffs
 - **Calls** — Voice, video and screen sharing, peer to peer, in a window you can put aside
 - **Share localhost** — A contact opens a web app running on your machine, while you are online
 - **Files** — Up to 100 MiB, straight to your contact
@@ -120,6 +120,8 @@ This works today in **[Ghostly Browser](docs/BROWSER.md)**, a Chromium extension
 
 - [Installation](docs/INSTALLATION.md) — Web app, extension, desktop downloads, CLI, build from source
 - [Architecture](docs/ARCHITECTURE.md) — How it works, tech stack, security model
+- [Experimental native transports](docs/wisps/TRANSPORT-INCREMENT.md) — Paired chat over Iroh and HyperDHT, exact scope and validation
+- [WISP drafts](docs/wisps/README.md) — Proposed modular protocol catalogue, group architecture, evidence and conformance plan
 - [Protocol](docs/PROTOCOL.md) — Records, service advertisements, WebRTC data link, HTTP over WebRTC
 - [Ghostly Browser](docs/BROWSER.md) — Run the extension, share a local app, limitations
 - [Ghostly on the web](docs/WEB.md) — The same client in a tab or on a phone: `docker compose up`

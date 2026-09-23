@@ -1,7 +1,32 @@
-import type { DataLinkState, LinkStatus, ServiceAd } from "@ghostly/core";
+import type { WalletMode } from "./mints";
+import type { PaymentMethodName } from "@ghostly/core";
+import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
+import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
+import type { PaymentReview, PaymentTarget } from "@ghostly/core";
+import type { DeliveryMode, DhtDeliveryState, DhtDeliveryView } from "@ghostly/core";
+import type { PublicProfile, ProfileChoice } from '../profiles/public';
+import type { ProofLedger, ProofAdapter } from "@ghostly/core";
+import type { DataLinkState, LinkStatus, ServiceAd, PairingState, NativeTransport, PairedTransport, TransportDescriptors } from "@ghostly/core";
 
 /** A link as stored in IndexedDB. Same fields Desktop keeps in its ChatSession. */
 export interface StoredLink {
+  deliveryMode?: DeliveryMode;
+  dhtDeliveryState?: DhtDeliveryState;
+  publicProfiles?: PublicProfile[];
+  profileChoice?: ProfileChoice;
+  peerProofs?: ProofLedger;
+  profile?: "paired-chat/1";
+  participationSeed?: string;
+  transportSeeds?: Partial<Record<NativeTransport, string>>;
+  peerDescriptors?: TransportDescriptors;
+  peerTransports?: PairedTransport[];
+  peerFallback?: boolean;
+  preferredTransport?: PairedTransport;
+  transportFallback?: boolean;
+  pairedPeerKey?: string;
+  /** Absent only in old releases, where first pin required an explicit code comparison. */
+  peerTrust?: { version: 1; verifiedKey?: string; verifiedAt?: number };
+  requireSignedSignals?: boolean;
   id: string;
   seedB64: string;
   peerPubKeyZ32: string;
@@ -9,10 +34,14 @@ export interface StoredLink {
   createdAt: number;
   label?: string;
   peerNick?: string;
+  /** The contact's profile picture, as they last sent it (checked, small JPEG data URL). */
+  peerAvatar?: string;
   /** Present on the side that created the link, until the peer shows up. */
   inviteCode?: string;
   /** Messages deleted on this device, by id, so a republished one is not stored again. */
   deletedIds?: string[];
+  /** Ways of paying this device allows in this chat. Absent or true: allowed. */
+  paymentMethods?: Partial<Record<PaymentMethodName, boolean>>;
 }
 
 /** A file attached to a message. The bytes live in the `files` store under `id`. */
@@ -88,6 +117,10 @@ export type PaymentState =
 
 /** A payment or payment request in a chat, by id. */
 export interface StoredPayment {
+  /** A request made because the contact asked to pay (its `pay-ask` id), or, on the payer's side, the ask it answers. */
+  ask?: string;
+  target?: PaymentTarget;
+  txid?: string;
   id: string;
   linkId: string;
   kind: "payment" | "request";
@@ -160,6 +193,13 @@ export interface WalletTx {
 }
 
 export interface WalletView {
+  /** Which wallets are in use: real money, or test networks. Absent means mainnet. */
+  mode?: WalletMode;
+  /** On Mainnet: test sats held at test mints (a contact may have sent some), shown once in Testnet. */
+  waitingTestSats?: number;
+  ark?: ArkWalletView;
+  usdt?: UsdtWalletView;
+  intents?: PaymentReview[];
   mints: MintView[];
   balance: number;
   /** Newest first. */
@@ -168,6 +208,9 @@ export interface WalletView {
 }
 
 export interface StoredMessage {
+  wireId?: string;
+  delivery?: "sending" | "sent" | "delivered" | "failed";
+  deliveryError?: string;
   linkId: string;
   id: string;
   text: string;
@@ -187,6 +230,13 @@ export interface StoredService {
   target: string;
   enabled: boolean;
   createdAt: number;
+  /**
+   * The contacts allowed to reach this service, by participation key. Absent or
+   * empty means nobody: a service is granted per contact, never to everyone at
+   * once, and a service from before this existed starts closed rather than
+   * keeping an exposure its owner never chose.
+   */
+  sharedWith?: string[];
 }
 
 export interface IceServerSetting {
@@ -198,6 +248,8 @@ export interface IceServerSetting {
 export interface Settings {
   online: boolean;
   nick: string;
+  /** This profile's picture, shown to paired contacts: a small square JPEG data URL. */
+  avatar?: string;
   relays: string[];
   /** Extra ICE servers (typically TURN) on top of the built-in STUN set. */
   iceServers: IceServerSetting[];
@@ -205,14 +257,42 @@ export interface Settings {
   mints: string[];
   /** False until the default mints were put in place once; after that the list is the user's. */
   mintsInitialized: boolean;
+  /** Real money, or test networks: every wallet follows it. Absent means mainnet. */
+  walletMode?: WalletMode;
 }
 
 export interface LinkView {
+  discoveryError?: string;
+  publicProfiles?: PublicProfile[];
+  profileChoice?: ProfileChoice;
+  peerProofs?: Pick<ProofLedger, "local" | "remote">;
+  peerProofSupport?: boolean;
+  peerProofAdapters?: ProofAdapter[];
+  participationKey?: string;
+  peerParticipationKey?: string;
+  proofError?: string;
+  profile?: "paired-chat/1";
+  pairing?: PairingState;
+  peerVerified?: boolean;
+  /** `methods`: ways of paying both sides allow in this chat right now. */
+  capabilities?: { files: boolean; payments: boolean; methods?: Record<PaymentMethodName, boolean> };
+  /** Ways of paying this device allows in this chat. */
+  paymentMethods?: Record<PaymentMethodName, boolean>;
+  availableTransports?: PairedTransport[];
+  deliveryMode?: DeliveryMode;
+  dhtDelivery?: DhtDeliveryView;
+  canSendText?: boolean;
+  textDelivery?: "stream" | "dht" | "unavailable";
+  transportErrors?: Partial<Record<PairedTransport, string>>;
+  preferredTransport?: PairedTransport;
+  transportFallback?: boolean;
   id: string;
   myPubKeyZ32: string;
   peerPubKeyZ32: string;
   label?: string;
   peerNick?: string;
+  /** The contact's profile picture, as they last sent it (checked, small JPEG data URL). */
+  peerAvatar?: string;
   inviteCode?: string;
   createdAt: number;
   status: LinkStatus;

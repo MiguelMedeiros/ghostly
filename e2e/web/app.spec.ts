@@ -1,3 +1,5 @@
+import { copyInvite } from "../support/clipboard";
+import { manualFallback } from "../support/clipboard";
 import type { Page } from "@playwright/test";
 import { expect, test } from "../support/fixtures";
 
@@ -33,21 +35,22 @@ async function expectChatRows(page: Page, count: number): Promise<void> {
 async function createChat(page: Page): Promise<string> {
   const before = await storedChats(page);
   await page.getByTitle("New Chat").click();
-  await page.getByRole("button", { name: "Create New Chat" }).first().click();
-  await expect(page.getByText("Share this invite code with your contact to start chatting:")).toBeVisible();
+  await expect(page.getByText("Invite your contact", { exact: true })).toBeVisible();
   await expect.poll(() => storedChats(page)).toBe(before + 1);
-  return (await page.locator("code").first().textContent())!.trim();
+  return await copyInvite(page);
 }
 
 test("opens on the home screen", async ({ peer }) => {
   const { page } = await peer("alice");
-  await expect(page.getByText("Ephemeral encrypted messaging over the DHT")).toBeVisible();
+  await expect(page.getByText("Private, ephemeral messaging.")).toBeVisible();
   await expect(page.getByText("It's quiet here...")).toBeVisible();
+  await page.getByTestId("wallet-chip").click();
   await expect(page.getByTestId("platform-notice")).toContainText("Pocket money only");
 });
 
 test("a web page says plainly what it cannot do", async ({ peer }) => {
   const { page } = await peer("alice");
+  await page.getByTestId("account-services").click();
   await expect(page.getByTestId("add-service")).toHaveCount(0);
   await expect(page.getByText("needs the Ghostly browser extension or desktop app").first()).toBeVisible();
 });
@@ -63,12 +66,16 @@ test("a second tab stays out of the way: one peer per browser", async ({ peer })
 test("creating a chat shows an invite code, the options menu copies it", async ({ peer }) => {
   const { page } = await peer("alice");
   const invite = await createChat(page);
-  expect(invite.split("/")).toHaveLength(3);
-  // The chat's keys stay out of the address bar and the history.
+  // A new chat is a paired one: `pair1/<seed>/<peer public key>/<encryption key>`.
+  const parts = invite.split("/");
+  expect(parts).toHaveLength(4);
+  expect(parts[0]).toBe("pair1");
+  // The chat's keys stay out of the address bar and the history. The seed is
+  // the secret half of the invite, so it is the one that must not be there.
   await expect(page).toHaveURL(/#\/chat\/[^/]+$/);
-  expect(page.url()).not.toContain(invite.split("/")[0]);
+  expect(page.url()).not.toContain(parts[1]);
 
-  await page.getByRole("button", { name: "Copy", exact: true }).click();
+  await page.getByRole("button", { name: /^(Copy invite|Copied!)$/ }).click();
   await expect(page.getByRole("button", { name: "Copied!" })).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(invite);
 
@@ -79,10 +86,11 @@ test("creating a chat shows an invite code, the options menu copies it", async (
 
 test("a bad invite code is refused", async ({ peer }) => {
   const { page } = await peer("alice");
-  await page.getByTitle("New Chat").click();
-  await page.getByPlaceholder("Invite code...").fill("not an invite");
-  await page.getByPlaceholder("Invite code...").press("Enter");
-  await expect(page.getByText("Invalid invite code")).toBeVisible();
+  await page.getByRole("button", { name: "Join chat", exact: true }).first().click();
+  await manualFallback(page);
+  await page.getByPlaceholder("Paste invite…").fill("not an invite");
+  await page.getByRole("dialog").getByRole("button",{ name: "Join chat", exact: true }).click();
+  await expect(page.getByText("Invalid invite. Ask for a new one.")).toBeVisible();
 });
 
 test("chats can be named and found", async ({ peer }) => {
@@ -120,8 +128,8 @@ test("one chat can be deleted, from the chat or from the list", async ({ peer })
   const { page } = await peer("alice");
   await createChat(page);
   await page.getByTitle("Options").click();
-  await page.getByText("Delete chat").click();
-  await page.getByRole("button", { name: "Yes" }).click();
+  await page.getByTestId("chat-options-menu").getByRole("button", { name: "Delete chat" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Delete chat" }).click();
   await expect(page).toHaveURL(/#\/$/);
   await expect.poll(() => storedChats(page)).toBe(0);
   await expectChatRows(page, 0);
@@ -131,7 +139,7 @@ test("one chat can be deleted, from the chat or from the list", async ({ peer })
   const row = page.getByText("Anonymous").first();
   await row.hover();
   await chatRows(page).click();
-  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Delete chat" }).click();
   await expectChatRows(page, 0);
   await expect.poll(() => storedChats(page)).toBe(0);
 });
@@ -150,9 +158,10 @@ test("deleted chats stay deleted, settings stay", async ({ peer }) => {
 
   await page.goto("/#/");
   await expectChatRows(page, 2);
-  await page.getByTitle("Delete all chats").click();
+  await page.getByTitle("Settings").click();
+  await page.getByTestId("delete-all-chats").click();
   await expect(page.getByText("Delete all 2 chats?")).toBeVisible();
-  await page.getByRole("button", { name: "Delete all chats" }).last().click();
+  await page.getByTestId("delete-all-chats-confirm").click();
   // reconcile runs every 5 s; a chat that comes back does so within two rounds
   await page.waitForTimeout(12_000);
   expect(await storedChats(page)).toBe(0);
@@ -173,7 +182,10 @@ test("clear all data leaves nothing behind", async ({ peer }) => {
   await page.getByRole("button", { name: "Clear all data" }).click();
   await expect(page.getByText("Are you sure? This cannot be undone.")).toBeVisible();
   await page.getByRole("button", { name: "Confirm" }).click();
-  await expect(page.getByText("All data cleared")).toBeVisible();
+  // The app starts over at once (the running peer held what was deleted), so the short "All data
+  // cleared" note may be gone before anyone reads it: the restart is what to wait for.
+  await expect(page).not.toHaveURL(/#\/settings/);
+  await expect(page.getByTitle("New Chat")).toBeVisible();
   await page.goto("/#/");
   await page.waitForTimeout(12_000);
   expect(await storedChats(page)).toBe(0);

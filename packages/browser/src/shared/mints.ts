@@ -16,3 +16,26 @@ export const DEFAULT_MINTS = [
 
 /** Public test mint: worthless sats, invoices settle by themselves. */
 export const TEST_MINT = "https://testnut.cashu.space";
+
+/**
+ * Mints whose sats are worth nothing: never counted as money, never mixed with real sats.
+ * Mutinynet's mint (cashu.mutinynet.com) would belong here, but on 2026-09-22 it answered with a
+ * duplicated Access-Control-Allow-Origin header that every browser and WebView rejects.
+ */
+export const TEST_MINTS: readonly string[] = [TEST_MINT];
+export const isTestMint = (url: string) => TEST_MINTS.includes(url.replace(/\/+$/, ""));
+
+/** A mint on this very machine (a local test server): whatever it issues is not money anyone else holds. */
+export function isLocalMint(url: string): boolean {
+  try { return ["localhost", "127.0.0.1", "[::1]"].includes(new URL(url).hostname); } catch { return false; }
+}
+
+/**
+ * Mints whose sats are worth nothing: the public test mints and mints on this machine. They belong to
+ * the Testnet mode, and their ecash never settles a request for real sats. Only the public test mints
+ * are ever added by themselves (a contact must not make this app contact a port on this machine).
+ */
+export const isWorthlessMint = (url: string) => isTestMint(url) || isLocalMint(url);
+
+/** Real money, or test networks: every wallet follows it together. */
+export type WalletMode = "mainnet" | "testnet";

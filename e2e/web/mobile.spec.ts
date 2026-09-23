@@ -11,7 +11,7 @@ test("on a phone: tabs for chats, wallet, sharing and settings", async ({ peer }
   await expect(page.getByRole("heading", { name: "Wallet" })).toBeVisible();
   await expect(page.getByTestId("wallet")).toBeVisible();
 
-  await tabs.getByRole("button", { name: "Share" }).click();
+  await tabs.getByRole("button", { name: "Services" }).click();
   await expect(page.getByTestId("my-services")).toBeVisible();
 
   await tabs.getByRole("button", { name: "Settings" }).click();
@@ -43,9 +43,16 @@ test("on a phone: a chat is a screen of its own", async ({ peer }) => {
   await expect(alice.page.getByText("boo on the small screen")).toBeVisible();
 });
 
-test("wide screens have no phone routes", async ({ peer }) => {
+test("on a wide screen the wallet and services are pages beside the list", async ({ peer }) => {
   const { page } = await peer("alice");
-  await page.goto("/#/wallet");
-  await expect(page).toHaveURL(/#\/$/);
   await expect(page.getByTestId("mobile-tabs")).toHaveCount(0);
+  await page.getByTestId("wallet-chip").click();
+  await expect(page).toHaveURL(/#\/wallet$/);
+  await expect(page.getByRole("heading", { name: "Wallet" })).toBeVisible();
+  await page.getByTestId("account-services").click();
+  await expect(page).toHaveURL(/#\/services$/);
+  await expect(page.getByRole("heading", { name: "Services" })).toBeVisible();
+  // The old phone route still lands on the page.
+  await page.goto("/#/share");
+  await expect(page).toHaveURL(/#\/services$/);
 });

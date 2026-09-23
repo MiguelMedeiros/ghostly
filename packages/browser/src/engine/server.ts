@@ -18,6 +18,7 @@ export class EngineServer {
   constructor(options: NodeOptions = {}) {
     this.node = new GhostlyNode(
       {
+        onAttention: (event) => this.broadcast({kind:"attention", event}),
         onState: (state) => this.broadcast({ kind: "state", state }),
         onMessages: (linkId, messages) => this.broadcast({ kind: "messages", linkId, messages }),
         onCallSignal: (linkId, signal) => this.broadcast({ kind: "call-signal", linkId, signal }),

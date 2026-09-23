@@ -60,6 +60,8 @@ export const idbModule = {
 
 /** What the fake mint does; each test scripts the calls it cares about. */
 export const mint = {
+  /** Gets the mint's URL first, so a test can make one mint of several misbehave. */
+  createMintQuoteBolt11: vi.fn(),
   checkMintQuoteBolt11: vi.fn(),
   mintProofsBolt11: vi.fn(),
   checkMeltQuoteBolt11: vi.fn(),
@@ -73,6 +75,7 @@ export class FakeWallet {
   constructor(readonly url: string) {}
   async loadMint(): Promise<void> {}
   checkMintQuoteBolt11 = (...args: unknown[]) => mint.checkMintQuoteBolt11(...args);
+  createMintQuoteBolt11 = (...args: unknown[]) => mint.createMintQuoteBolt11(this.url, ...args);
   mintProofsBolt11 = (...args: unknown[]) => mint.mintProofsBolt11(...args);
   checkMeltQuoteBolt11 = (...args: unknown[]) => mint.checkMeltQuoteBolt11(...args);
   send = (...args: unknown[]) => mint.send(...args);

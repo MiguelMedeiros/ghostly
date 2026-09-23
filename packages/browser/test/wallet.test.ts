@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Amount, MintOperationError, type Proof } from "@cashu/cashu-ts";
-import { CashuWallet } from "../src/engine/wallet";
+import { CashuWallet, MINT_TIMEOUT_MS } from "../src/engine/wallet";
 import type { PendingMelt, StoredPayment, StoredProof, StoredQuote, WalletTx } from "../src/shared/types";
 import { failures, mint, resetDb, rows, seed } from "./fakes";
 
@@ -88,6 +88,35 @@ describe("Lightning in: mint quotes", () => {
     await setup().wallet["pollQuotes"]();
     expect(rows("quotes")).toHaveLength(1);
     expect(balance()).toBe(0);
+  });
+});
+
+describe("Lightning in: which mint issues the invoice", () => {
+  it("skips a mint that does not answer, and the next one issues the invoice", async () => {
+    vi.useFakeTimers();
+    try {
+      mint.createMintQuoteBolt11.mockImplementation((url: string) => url === "https://down.example" ? new Promise(() => {}) : Promise.resolve({ quote: "q", request: "lnbc100", expiry: null }));
+      const wallet = new CashuWallet(() => ["https://down.example", MINT], { onChange: vi.fn(), onTestMintNeeded: vi.fn(), onQuotePaid: vi.fn(), onMeltResolved: vi.fn() });
+      const receiving = wallet.receiveLightning(100);
+      await vi.advanceTimersByTimeAsync(MINT_TIMEOUT_MS + 1);
+      await expect(receiving).resolves.toMatchObject({ mint: MINT, invoice: "lnbc100" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("says which mint failed when none answers", async () => {
+    vi.useFakeTimers();
+    try {
+      mint.createMintQuoteBolt11.mockImplementation(() => new Promise(() => {}));
+      const { wallet } = setup();
+      const receiving = wallet.receiveLightning(100);
+      const settled = expect(receiving).rejects.toThrow("No mint could create an invoice: mint.example did not answer");
+      await vi.advanceTimersByTimeAsync(MINT_TIMEOUT_MS + 1);
+      await settled;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

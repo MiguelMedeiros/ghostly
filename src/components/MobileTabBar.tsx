@@ -23,8 +23,8 @@ const TABS = [
     ),
   },
   {
-    path: "/share",
-    label: "tabs.share",
+    path: "/services",
+    label: "tabs.services",
     icon: (
       <svg {...icon}>
         <circle cx="12" cy="12" r="9" />

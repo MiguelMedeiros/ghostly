@@ -105,6 +105,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-tauri-${{ github.repository }}-
 
+      # tauri-build wants every bundled resource to exist. `tauri build` fills this one
+      # (scripts/prepare-native-runtime.mjs); plain cargo only needs the folder.
+      - name: Native runtime folder
+        run: mkdir -p src-tauri/native-runtime
+
       - name: Check formatting (src-tauri)
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 

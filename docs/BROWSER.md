@@ -88,7 +88,7 @@ runs the end-to-end suite ([e2e/README.md](../e2e/README.md)). For the extension
 | `hooks/useChat.ts`, `hooks/useBackgroundPoller.ts` (the Pkarr loop, in the page) | thin hooks over the peer, which runs that loop (`LinkSession`) in the background for every chat |
 | `lib/platform.ts` (services: not available yet) | services, presence and network settings backed by the peer |
 
-Sessions stay in `localStorage` exactly as on Desktop; `platform/sync.ts` keeps them in step with the links the peer runs. GIFs need `VITE_GIPHY_API_KEY` in the repository's `.env`, as on Desktop (Giphy retired the public fallback key).
+Sessions stay in `localStorage` exactly as on Desktop; `platform/sync.ts` keeps them in step with the links the peer runs. GIF search uses GIFCities without an API key.
 
 **Why an offscreen document.** Manifest V3 service workers have no `RTCPeerConnection` and are terminated when idle. The offscreen document (reason `WEB_RTC`) has WebRTC and lives as long as the browser runs the extension, which is exactly the lifetime of the peer.
 

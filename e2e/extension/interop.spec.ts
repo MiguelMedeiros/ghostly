@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { BIG, BIG_SHA256 } from "../../extension/test/atlas.mjs";
-import { chat, connect, link, say } from "../support/fixtures";
+import { chat, connect, linkLegacy, say } from "../support/fixtures";
 import { expect, test } from "../support/extension";
 
 /** Same protocol, same UI, different hosts: the extension and a plain web page. */
 test("the extension and the web app chat, share files and call", async ({ extensionPeer, webPeer }, testInfo) => {
   const [ext, web] = await Promise.all([extensionPeer("extension"), webPeer("web")]);
-  await link(web, ext);
+  await linkLegacy(web, ext);
   await connect(web, ext);
   await say(ext, "boo from the extension");
   await expect(chat(web).getByText("boo from the extension")).toBeVisible();

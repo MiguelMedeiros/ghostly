@@ -1,0 +1,410 @@
+[
+  {
+    "file": "00-process.md",
+    "sourcePath": "docs/wisps/00-process.md",
+    "aliases": [
+      "01-process"
+    ],
+    "slug": "00-process",
+    "title": "WISP 00 — WISP process and document format"
+  },
+  {
+    "file": "01-ghost-core.md",
+    "sourcePath": "docs/wisps/01-ghost-core.md",
+    "aliases": [
+      "02-ghost-core"
+    ],
+    "slug": "01-ghost-core",
+    "title": "WISP 01 — Ghost Core Protocol"
+  },
+  {
+    "file": "02-peer-keys.md",
+    "sourcePath": "docs/wisps/02-peer-keys.md",
+    "aliases": [
+      "03-peer-keys"
+    ],
+    "slug": "02-peer-keys",
+    "title": "WISP 02 — Peer Keys"
+  },
+  {
+    "file": "03-capabilities.md",
+    "sourcePath": "docs/wisps/03-capabilities.md",
+    "aliases": [
+      "04-capabilities"
+    ],
+    "slug": "03-capabilities",
+    "title": "WISP 03 — Capability Negotiation"
+  },
+  {
+    "file": "04-profiles.md",
+    "sourcePath": "docs/wisps/04-profiles.md",
+    "aliases": [],
+    "slug": "04-profiles",
+    "title": "WISP 04 — Local Profiles"
+  },
+  {
+    "file": "05-backups.md",
+    "sourcePath": "docs/wisps/05-backups.md",
+    "aliases": [],
+    "slug": "05-backups",
+    "title": "WISP 05 — Profile Backups"
+  },
+  {
+    "file": "100-transports.md",
+    "sourcePath": "docs/wisps/100-transports.md",
+    "aliases": [
+      "05-transports"
+    ],
+    "slug": "100-transports",
+    "title": "WISP 100 — Transport Negotiation"
+  },
+  {
+    "file": "1000-storage.md",
+    "sourcePath": "docs/wisps/1000-storage.md",
+    "aliases": [],
+    "slug": "1000-storage",
+    "title": "WISP 1000 — Storage Contract"
+  },
+  {
+    "file": "1001-local-storage.md",
+    "sourcePath": "docs/wisps/1001-local-storage.md",
+    "aliases": [],
+    "slug": "1001-local-storage",
+    "title": "WISP 1001 — Local File Storage"
+  },
+  {
+    "file": "1002-s3-storage.md",
+    "sourcePath": "docs/wisps/1002-s3-storage.md",
+    "aliases": [],
+    "slug": "1002-s3-storage",
+    "title": "WISP 1002 — S3-Compatible Storage"
+  },
+  {
+    "file": "101-webrtc.md",
+    "sourcePath": "docs/wisps/101-webrtc.md",
+    "aliases": [
+      "06-webrtc"
+    ],
+    "slug": "101-webrtc",
+    "title": "WISP 101 — WebRTC"
+  },
+  {
+    "file": "102-iroh.md",
+    "sourcePath": "docs/wisps/102-iroh.md",
+    "aliases": [
+      "07-iroh"
+    ],
+    "slug": "102-iroh",
+    "title": "WISP 102 — Iroh"
+  },
+  {
+    "file": "103-hyperdht.md",
+    "sourcePath": "docs/wisps/103-hyperdht.md",
+    "aliases": [
+      "08-hyperdht"
+    ],
+    "slug": "103-hyperdht",
+    "title": "WISP 103 — HyperDHT"
+  },
+  {
+    "file": "200-payments.md",
+    "sourcePath": "docs/wisps/200-payments.md",
+    "aliases": [
+      "17-payments"
+    ],
+    "slug": "200-payments",
+    "title": "WISP 200 — Payment Negotiation"
+  },
+  {
+    "file": "201-cashu.md",
+    "sourcePath": "docs/wisps/201-cashu.md",
+    "aliases": [
+      "18-cashu"
+    ],
+    "slug": "201-cashu",
+    "title": "WISP 201 — Cashu"
+  },
+  {
+    "file": "202-arkade.md",
+    "sourcePath": "docs/wisps/202-arkade.md",
+    "aliases": [],
+    "slug": "202-arkade",
+    "title": "WISP 202 — Ark payments via Arkade"
+  },
+  {
+    "file": "203-lightning.md",
+    "sourcePath": "docs/wisps/203-lightning.md",
+    "aliases": [
+      "19-lightning"
+    ],
+    "slug": "203-lightning",
+    "title": "WISP 203 — Lightning"
+  },
+  {
+    "file": "300-peer-proofs.md",
+    "sourcePath": "docs/wisps/300-peer-proofs.md",
+    "aliases": [
+      "09-peer-proofs"
+    ],
+    "slug": "300-peer-proofs",
+    "title": "WISP 300 — Identity Proofs"
+  },
+  {
+    "file": "301-nostr.md",
+    "sourcePath": "docs/wisps/301-nostr.md",
+    "aliases": [
+      "10-nostr"
+    ],
+    "slug": "301-nostr",
+    "title": "WISP 301 — Nostr"
+  },
+  {
+    "file": "302-pubky.md",
+    "sourcePath": "docs/wisps/302-pubky.md",
+    "aliases": [
+      "11-pubky"
+    ],
+    "slug": "302-pubky",
+    "title": "WISP 3xx — Pubky"
+  },
+  {
+    "file": "303-keet.md",
+    "sourcePath": "docs/wisps/303-keet.md",
+    "aliases": [
+      "12-keet"
+    ],
+    "slug": "303-keet",
+    "title": "WISP 3xx — Keet"
+  },
+  {
+    "file": "400-chat.md",
+    "sourcePath": "docs/wisps/400-chat.md",
+    "aliases": [
+      "13-chat"
+    ],
+    "slug": "400-chat",
+    "title": "WISP 400 — Chat Messaging"
+  },
+  {
+    "file": "401-paired-chat.md",
+    "sourcePath": "docs/wisps/401-paired-chat.md",
+    "aliases": [],
+    "slug": "401-paired-chat",
+    "title": "WISP 401 — Paired Chat"
+  },
+  {
+    "file": "402-legacy-chat.md",
+    "sourcePath": "docs/wisps/402-legacy-chat.md",
+    "aliases": [],
+    "slug": "402-legacy-chat",
+    "title": "WISP 402 — Legacy Timestamp Chat"
+  },
+  {
+    "file": "403-dht-text.md",
+    "sourcePath": "docs/wisps/403-dht-text.md",
+    "aliases": [],
+    "slug": "403-dht-text",
+    "title": "WISP 403 — Bounded DHT Text"
+  },
+  {
+    "file": "500-files.md",
+    "sourcePath": "docs/wisps/500-files.md",
+    "aliases": [
+      "14-files"
+    ],
+    "slug": "500-files",
+    "title": "WISP 500 — File Transfer"
+  },
+  {
+    "file": "501-paired-files.md",
+    "sourcePath": "docs/wisps/501-paired-files.md",
+    "aliases": [],
+    "slug": "501-paired-files",
+    "title": "WISP 501 — Paired Files"
+  },
+  {
+    "file": "502-legacy-files.md",
+    "sourcePath": "docs/wisps/502-legacy-files.md",
+    "aliases": [],
+    "slug": "502-legacy-files",
+    "title": "WISP 502 — Legacy File Frames"
+  },
+  {
+    "file": "600-media.md",
+    "sourcePath": "docs/wisps/600-media.md",
+    "aliases": [
+      "15-media"
+    ],
+    "slug": "600-media",
+    "title": "WISP 600 — Voice and Video"
+  },
+  {
+    "file": "601-webrtc-media.md",
+    "sourcePath": "docs/wisps/601-webrtc-media.md",
+    "aliases": [],
+    "slug": "601-webrtc-media",
+    "title": "WISP 601 — WebRTC Media"
+  },
+  {
+    "file": "700-local-services.md",
+    "sourcePath": "docs/wisps/700-local-services.md",
+    "aliases": [
+      "16-local-services"
+    ],
+    "slug": "700-local-services",
+    "title": "WISP 700 — Local Services"
+  },
+  {
+    "file": "701-http-services.md",
+    "sourcePath": "docs/wisps/701-http-services.md",
+    "aliases": [],
+    "slug": "701-http-services",
+    "title": "WISP 701 — HTTP Local Service Profile"
+  },
+  {
+    "file": "800-invite-join.md",
+    "sourcePath": "docs/wisps/800-invite-join.md",
+    "aliases": [
+      "20-invite-join"
+    ],
+    "slug": "800-invite-join",
+    "title": "WISP 800 — Invite and Join"
+  },
+  {
+    "file": "801-invitation-profiles.md",
+    "sourcePath": "docs/wisps/801-invitation-profiles.md",
+    "aliases": [],
+    "slug": "801-invitation-profiles",
+    "title": "WISP 801 — Implemented Invitation Profiles"
+  },
+  {
+    "file": "900-group-sessions.md",
+    "sourcePath": "docs/wisps/900-group-sessions.md",
+    "aliases": [
+      "21-group-sessions"
+    ],
+    "slug": "900-group-sessions",
+    "title": "WISP 900 — Group Session Negotiation"
+  },
+  {
+    "file": "901-gossipsub.md",
+    "sourcePath": "docs/wisps/901-gossipsub.md",
+    "aliases": [
+      "22-gossipsub"
+    ],
+    "slug": "901-gossipsub",
+    "title": "WISP 9xx — GossipSub Transport"
+  },
+  {
+    "file": "ADAPTER-ROADMAP.md",
+    "sourcePath": "docs/wisps/ADAPTER-ROADMAP.md",
+    "aliases": [],
+    "slug": "adapter-roadmap",
+    "title": "Ghostly adapter and ecosystem roadmap"
+  },
+  {
+    "file": "IMPLEMENTATION.md",
+    "sourcePath": "docs/wisps/IMPLEMENTATION.md",
+    "aliases": [],
+    "slug": "implementation",
+    "title": "Implementation evidence and security limits"
+  },
+  {
+    "file": "INTEROP.md",
+    "sourcePath": "docs/wisps/INTEROP.md",
+    "aliases": [],
+    "slug": "interop",
+    "title": "Interoperability and conformance plan"
+  },
+  {
+    "file": "MAP.md",
+    "sourcePath": "docs/wisps/MAP.md",
+    "aliases": [],
+    "slug": "map",
+    "title": "Composable Ghost architecture"
+  },
+  {
+    "file": "NUMBERING.md",
+    "sourcePath": "docs/wisps/NUMBERING.md",
+    "aliases": [],
+    "slug": "numbering",
+    "title": "WISP numbering and compatibility"
+  },
+  {
+    "file": "PAIRED-CAPABILITIES.md",
+    "sourcePath": "docs/wisps/PAIRED-CAPABILITIES.md",
+    "aliases": [],
+    "slug": "paired-capabilities",
+    "title": "Files and sats in paired chat"
+  },
+  {
+    "file": "PAIRED-CHAT-INCREMENT.md",
+    "sourcePath": "docs/wisps/PAIRED-CHAT-INCREMENT.md",
+    "aliases": [],
+    "slug": "paired-chat-increment",
+    "title": "Experimental paired chat increment"
+  },
+  {
+    "file": "PROOF-INCREMENT.md",
+    "sourcePath": "docs/wisps/PROOF-INCREMENT.md",
+    "aliases": [],
+    "slug": "proof-increment",
+    "title": "Optional peer proofs — implementation increment"
+  },
+  {
+    "file": "PUBLIC-PROFILES.md",
+    "sourcePath": "docs/wisps/PUBLIC-PROFILES.md",
+    "aliases": [],
+    "slug": "public-profiles",
+    "title": "Identity presentation and local public profiles"
+  },
+  {
+    "file": "README.md",
+    "sourcePath": "docs/wisps/README.md",
+    "aliases": [],
+    "slug": "readme",
+    "title": "WISP working catalogue"
+  },
+  {
+    "file": "TRANSPORT-INCREMENT.md",
+    "sourcePath": "docs/wisps/TRANSPORT-INCREMENT.md",
+    "aliases": [],
+    "slug": "transport-increment",
+    "title": "Experimental native transport increment"
+  },
+  {
+    "file": "PROTOCOL.md",
+    "sourcePath": "docs/PROTOCOL.md",
+    "aliases": [],
+    "slug": "protocol",
+    "title": "The Ghost Protocol"
+  },
+  {
+    "file": "USDT-INTEGRATION.md",
+    "sourcePath": "docs/USDT-INTEGRATION.md",
+    "aliases": [],
+    "slug": "usdt-integration",
+    "title": "USDT via Tether WDK — experimental implementation"
+  },
+  {
+    "file": "DHT-DELIVERY.md",
+    "sourcePath": "docs/DHT-DELIVERY.md",
+    "aliases": [],
+    "slug": "dht-delivery",
+    "title": "DHT delivery for modern conversations"
+  },
+  {
+    "file": "CONTRIBUTING.md",
+    "sourcePath": "CONTRIBUTING.md",
+    "aliases": [],
+    "slug": "contributing",
+    "title": "Contributing to Ghostly 👻"
+  },
+  {
+    "file": "SECURITY.md",
+    "sourcePath": "SECURITY.md",
+    "aliases": [],
+    "slug": "security",
+    "title": "Security Policy"
+  }
+]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-paired-iroh-stop"
+description = "Enables the paired_iroh_stop command without any pre-configured scope."
+commands.allow = ["paired_iroh_stop"]
+
+[[permission]]
+identifier = "deny-paired-iroh-stop"
+description = "Denies the paired_iroh_stop command without any pre-configured scope."
+commands.deny = ["paired_iroh_stop"]

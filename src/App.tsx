@@ -4,6 +4,9 @@ import { Sidebar } from "./components/Sidebar";
 import { MobileTabBar } from "./components/MobileTabBar";
 import { Chat } from "./pages/Chat";
 import { chatRouteSession } from "./lib/url";
+import { listSessions } from "./lib/storage";
+import { parseCallSignal } from "@ghostly/core";
+import { engine } from "@ghostly/browser/platform/engine";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { useViewportHeight } from "./hooks/useViewportHeight";
 
@@ -30,6 +33,25 @@ function useThemeColor() {
  * page that holds it, and so does the polling that would carry the hang-up.
  * The one on a call follows you to Settings as a small window instead.
  */
+/**
+ * Coming back to the window or tab after a while: a laptop that slept, an app left in the background.
+ * Chats look for their contacts now, and a connection that dropped meanwhile is dialled again at once.
+ */
+function useWakeOnReturn() {
+  useEffect(() => {
+    let last = 0;
+    const wake = () => {
+      if (document.visibilityState !== "visible" || Date.now() - last < 5_000) return;
+      last = Date.now();
+      void engine.call("wake").catch(() => {});
+    };
+    document.addEventListener("visibilitychange", wake);
+    window.addEventListener("focus", wake);
+    window.addEventListener("online", wake);
+    return () => { document.removeEventListener("visibilitychange", wake); window.removeEventListener("focus", wake); window.removeEventListener("online", wake); };
+  }, []);
+}
+
 function useLoadedChats() {
   const routeSession = chatRouteSession(useLocation().pathname);
   const [callSession, setCallSession] = useState<string | null>(null);
@@ -37,16 +59,27 @@ function useLoadedChats() {
   // screen. Still within `LockGate`, so the lock reaches it like the rest.
   const [callLayer, setCallLayer] = useState<HTMLElement | null>(null);
 
-  const onCallChange = useCallback(
-    (sessionId: string, onCall: boolean) =>
-      setCallSession((current) => (onCall ? sessionId : current === sessionId ? null : current)),
-    [],
-  );
+  // A call can come in for a chat that is not open: that chat is loaded, off screen, so it rings.
+  const [ringSession, setRingSession] = useState<string | null>(null);
+  useEffect(() => engine.onCallSignal((linkId, signal) => {
+    if (parseCallSignal(signal)?.t !== "o") return;
+    const peer = engine.state?.links.find((link) => link.id === linkId)?.peerPubKeyZ32;
+    const session = peer ? listSessions().find((s) => s.peerPubKeyB64 === peer) : undefined;
+    if (!session) return;
+    setRingSession(session.id);
+    // It holds itself once it rings (a call keeps its chat loaded); one that never does is let go.
+    setTimeout(() => setRingSession((current) => (current === session.id ? null : current)), 15_000);
+  }), []);
+
+  const onCallChange = useCallback((sessionId: string, onCall: boolean) => {
+    setCallSession((current) => (onCall ? sessionId : current === sessionId ? null : current));
+    if (onCall) setRingSession((current) => (current === sessionId ? null : current));
+  }, []);
 
   // Keyed by session id, so a chat that changes places here keeps its call.
   const loaded = useMemo(
-    () => [...new Set([routeSession, callSession].filter((id): id is string => !!id))],
-    [routeSession, callSession],
+    () => [...new Set([routeSession, callSession, ringSession].filter((id): id is string => !!id))],
+    [routeSession, callSession, ringSession],
   );
 
   const render = (visibleClassName: string) => (
@@ -73,6 +106,7 @@ export function App() {
   const { pathname } = useLocation();
   useViewportHeight();
   useThemeColor();
+  useWakeOnReturn();
   const chats = useLoadedChats();
 
   const inChat = pathname.startsWith("/chat");

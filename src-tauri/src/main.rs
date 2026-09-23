@@ -2,7 +2,10 @@
 
 mod commands;
 mod crypto;
+mod hyperdht;
 mod local_fetch;
+mod notifications;
+mod paired_transport;
 mod pkarr_client;
 mod records;
 mod types;
@@ -40,8 +43,11 @@ fn main() {
         // when the UI asks, and the release it takes has to carry our signature.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(AppState { pkarr_client })
         .manage(ViewerState::default())
+        .manage(paired_transport::TransportState::default())
+        .manage(hyperdht::HyperState::default())
         .register_asynchronous_uri_scheme_protocol(viewer::SCHEME, |ctx, request, responder| {
             let app = ctx.app_handle().clone();
             let label = ctx.webview_label().to_string();
@@ -55,6 +61,20 @@ fn main() {
             }
         })
         .invoke_handler(only_main(tauri::generate_handler![
+            notifications::native_notification_permission,
+            notifications::native_private_notification,
+            paired_transport::paired_iroh_start,
+            paired_transport::paired_iroh_address,
+            paired_transport::paired_iroh_connect,
+            paired_transport::paired_native_send,
+            paired_transport::paired_native_close,
+            paired_transport::paired_iroh_stop,
+            hyperdht::paired_hyperdht_start,
+            hyperdht::paired_hyperdht_address,
+            hyperdht::paired_hyperdht_connect,
+            hyperdht::paired_hyperdht_send,
+            hyperdht::paired_hyperdht_close,
+            hyperdht::paired_hyperdht_stop,
             commands::get_profile,
             commands::create_keypair,
             commands::get_public_key,
@@ -69,6 +89,7 @@ fn main() {
             commands::open_service_window,
             commands::service_respond,
             commands::updater_can_install,
+            commands::open_project_link,
         ]))
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -90,7 +111,11 @@ mod tests {
             .register_uri_scheme_protocol(viewer::SCHEME, |_, _| {
                 tauri::http::Response::new(Vec::new())
             })
+            .manage(paired_transport::TransportState::default())
             .invoke_handler(only_main(tauri::generate_handler![
+                notifications::native_notification_permission,
+                notifications::native_private_notification,
+                paired_transport::paired_native_close,
                 commands::get_profile,
                 commands::generate_enc_key,
                 commands::local_fetch,
@@ -132,6 +157,26 @@ mod tests {
         .build()
         .unwrap();
 
+        for command in [
+            "native_notification_permission",
+            "native_private_notification",
+            "paired_iroh_start",
+            "paired_iroh_connect",
+            "paired_native_send",
+            "paired_native_close",
+            "paired_hyperdht_start",
+            "paired_hyperdht_connect",
+            "paired_hyperdht_send",
+            "paired_hyperdht_stop",
+        ] {
+            assert!(invoke(
+                &viewer,
+                &url,
+                command,
+                serde_json::json!({"connectionId":0})
+            )
+            .is_err());
+        }
         assert!(invoke(&viewer, &url, "get_profile", serde_json::json!({})).is_err());
         assert!(invoke(&viewer, &url, "generate_enc_key", serde_json::json!({})).is_err());
         let fetch = serde_json::json!({
@@ -146,6 +191,13 @@ mod tests {
         let main = WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .unwrap();
+        assert!(invoke(
+            &main,
+            "tauri://localhost",
+            "paired_native_close",
+            serde_json::json!({"connectionId":0})
+        )
+        .is_ok());
         assert!(invoke(
             &main,
             "tauri://localhost",

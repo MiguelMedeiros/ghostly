@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-paired-hyperdht-start"
+description = "Enables the paired_hyperdht_start command without any pre-configured scope."
+commands.allow = ["paired_hyperdht_start"]
+
+[[permission]]
+identifier = "deny-paired-hyperdht-start"
+description = "Denies the paired_hyperdht_start command without any pre-configured scope."
+commands.deny = ["paired_hyperdht_start"]

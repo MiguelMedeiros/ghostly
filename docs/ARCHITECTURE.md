@@ -1,6 +1,8 @@
 # Architecture
 
-> Ghostly is not a chat application. It is an ephemeral, identity-addressed peer-to-peer service layer. Chat, voice, video and local web applications are services on top of it, and they exist while you are online.
+> Ghost is the small rendezvous and record-exchange primitive; Ghostly is its reference application. Chat, voice, video and local web applications compose on top. Live endpoints depend on online peers, while local history and keys can persist.
+
+The [WISP catalogue](wisps/README.md) and [composable map](wisps/MAP.md) describe proposed modular boundaries and groups. Draft status alone does not establish implementation. The subsequent [native transport increment](wisps/TRANSPORT-INCREMENT.md) implements bounded paired text chat over Iroh and HyperDHT; group security remains proposed.
 
 ## Repository
 
@@ -26,7 +28,7 @@ The wire format is specified in [PROTOCOL.md](PROTOCOL.md).
  identity      one Ed25519 keypair per link + a shared secretbox key
 ```
 
-Discovery only helps peers find each other and exchange a WebRTC offer and answer. Application traffic goes over WebRTC. Relays, STUN and TURN are generic connectivity infrastructure: they see ciphertext and hold no Ghostly state. There is no Ghostly server.
+Pkarr records carry discovery, signaling and small encrypted messages. Once available, WebRTC carries live chat and heavy application traffic. Pkarr relays bridge records to the DHT; STUN assists connectivity and optional TURN relays encrypted traffic. These systems can observe metadata. There is no required central Ghostly message server, and the DHT is not a durable history store.
 
 ## How It Works
 
@@ -36,24 +38,24 @@ Ghostly uses a clever combination of cryptography and the decentralized web:
 |------|--------------|
 | **1. Create Chat** | Generate Ed25519 keypairs + 256-bit symmetric key. No server involved! |
 | **2. Share Invite** | URL contains seed + peer pubkey + encryption key. Fragment never leaves the app! |
-| **3. Messages Travel** | Plaintext → Encrypt → DNS TXT → Sign → DHT (XSalsa20-Poly1305 + Ed25519 + BEP44) |
-| **4. Messages Expire** | Stop republishing → TTL countdown (~5h) → Gone forever. No trace remains. |
+| **3. Messages Travel** | Small records: encrypt → sign → Pkarr/DHT. Live/bulk traffic: authenticated WebRTC data link |
+| **4. Messages Expire** | Stop republishing → availability eventually expires; retained copies and local history may remain. |
 
 ## Tech Stack
 
 - **[Pkarr](https://github.com/pubky/pkarr)** - Public Key Addressable Resource Records
-- **[Mainline DHT](https://en.wikipedia.org/wiki/Mainline_DHT)** - 10M+ nodes, largest P2P network on Earth
+- **[Mainline DHT](https://www.bittorrent.org/beps/bep_0005.html)** - Distributed lookup used for Pkarr rendezvous
 - **NaCl Secretbox** - XSalsa20-Poly1305 authenticated encryption
 - **Ed25519** - Digital signatures for message authenticity
 - **BEP44** - BitTorrent DHT mutable items specification
 
-## Message Flow
+## Small-record message flow (live/bulk traffic uses WebRTC)
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
 │   Sender    │     │  Mainline   │     │  Receiver   │
 │   Device    │────▶│     DHT     │────▶│   Device    │
-└─────────────┘     │  (10M+ nodes)│     └─────────────┘
+└─────────────┘     │  (rendezvous)│     └─────────────┘
                     └─────────────┘
 ```
 
@@ -67,6 +69,9 @@ Ghostly uses a clever combination of cryptography and the decentralized web:
 ## Security Model
 
 - **End-to-End Encryption**: Only participants with the shared key can read messages
-- **No Central Server**: No single point of failure or surveillance
-- **Ephemeral by Design**: Messages expire after ~5 hours if not republished
-- **Forward Secrecy**: Each chat session uses unique keys
+- **No required central Ghost message server**: network infrastructure still has availability and metadata tradeoffs.
+- **Ephemeral network presence**: record TTL is not proof of deletion; local history persists.
+- **Scoped keys, not automatic forward secrecy**: a compromised link secret can decrypt retained records encrypted under it.
+- **No anonymity guarantee**: keys are per link, but timing, addresses and external proofs may correlate activity.
+
+See the [source evidence and platform matrix](wisps/IMPLEMENTATION.md) for current limitations.

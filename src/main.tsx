@@ -9,6 +9,7 @@ import { setDatabaseName } from "@ghostly/browser/shared/idb";
 import { Root } from "./Root";
 import { createDesktopHost } from "./desktop/host";
 import { setStorageProfile } from "./lib/storage";
+import { activeProfileId, namespaceOf, setProfileBase } from "./lib/profiles";
 
 async function boot() {
   let profile = "";
@@ -17,6 +18,9 @@ async function boot() {
   } catch {
     // running outside Tauri (browser dev) — no profile
   }
+  // GHOSTLY_PROFILE gives this process a space of its own; inside it, the profile chosen in the app (WISP 04).
+  setProfileBase(profile);
+  profile = namespaceOf(activeProfileId());
   // Profiles share the WebView's storage area; each gets its own sessions, database and peer.
   if (profile) {
     setStorageProfile(profile);

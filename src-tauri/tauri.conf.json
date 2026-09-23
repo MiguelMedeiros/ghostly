@@ -5,14 +5,14 @@
   "identifier": "app.ghostly.chat",
   "build": {
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "node scripts/prepare-native-runtime.mjs && npm run build",
     "devUrl": "http://localhost:5173",
     "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
-        "title": "Ghostly — Ephemeral Encrypted Chat",
+        "title": "Ghostly \u2014 Ephemeral Encrypted Chat",
         "width": 900,
         "height": 700,
         "minWidth": 400,
@@ -20,7 +20,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://media.giphy.com https://media0.giphy.com https://media1.giphy.com https://media2.giphy.com https://media3.giphy.com https://media4.giphy.com https://giphy.com https://web.archive.org blob:; connect-src 'self' ipc: http://ipc.localhost https: wss: ws:; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://media.giphy.com https://media0.giphy.com https://media1.giphy.com https://media2.giphy.com https://media3.giphy.com https://media4.giphy.com https://giphy.com https://web.archive.org blob:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* http://localhost:* https: wss: ws:; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
     }
   },
   "plugins": {
@@ -40,6 +40,9 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": {
+      "native-runtime/": "native-runtime/"
+    }
   }
 }

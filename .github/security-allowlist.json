@@ -9,6 +9,7 @@
     { "package": "unic-char-range", "id": "RUSTSEC-2025-0075", "until": "2026-12-31", "why": "Unmaintained, via Tauri's urlpattern. No known vulnerability." },
     { "package": "unic-common", "id": "RUSTSEC-2025-0080", "until": "2026-12-31", "why": "Unmaintained, via Tauri's urlpattern. No known vulnerability." },
     { "package": "unic-ucd-ident", "id": "RUSTSEC-2025-0100", "until": "2026-12-31", "why": "Unmaintained, via Tauri's urlpattern. No known vulnerability." },
-    { "package": "unic-ucd-version", "id": "RUSTSEC-2025-0098", "until": "2026-12-31", "why": "Unmaintained, via Tauri's urlpattern. No known vulnerability." }
+    { "package": "unic-ucd-version", "id": "RUSTSEC-2025-0098", "until": "2026-12-31", "why": "Unmaintained, via Tauri's urlpattern. No known vulnerability." },
+    { "package": "paste", "id": "RUSTSEC-2024-0436", "until": "2026-12-31", "why": "Unmaintained proc-macro, build-time only, via iroh -> netwatch -> netlink-packet-core. No known vulnerability." }
   ]
 }

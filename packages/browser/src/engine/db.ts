@@ -1,4 +1,5 @@
-import { STORES, fileStore, store, wrap } from "../shared/idb";
+import { emptyProofLedger, type ProofLedger } from "@ghostly/core";
+import { STORES, fileStore, store, wrap, openDb } from "../shared/idb";
 import type { Settings, StoredLink, StoredMessage, StoredService } from "../shared/types";
 
 /**
@@ -11,7 +12,70 @@ export const db = {
     return wrap((await store(STORES.links, "readonly")).getAll());
   },
   async putLink(link: StoredLink): Promise<void> {
-    await wrap((await store(STORES.links, "readwrite")).put(link));
+    const tx = (await openDb()).transaction(STORES.links, "readwrite");
+    tx.objectStore(STORES.links).put(link);
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("Link storage failed"));
+    });
+  },
+  async patchLink(linkId: string, patch: Partial<StoredLink>): Promise<void> {
+    const tx = (await openDb()).transaction(STORES.links, "readwrite");
+    const links = tx.objectStore(STORES.links);
+    const request = links.get(linkId);
+    request.onsuccess = () => { if (!request.result) { tx.abort(); return; } links.put({ ...request.result, ...patch, id: linkId }); };
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("Link unavailable"));
+    });
+  },
+  async updatePeerProofs(linkId: string, change: (ledger: ProofLedger) => ProofLedger): Promise<ProofLedger> {
+    const tx = (await openDb()).transaction(STORES.links, "readwrite");
+    const links = tx.objectStore(STORES.links);
+    let result: ProofLedger;
+    let failure: unknown;
+    const request = links.get(linkId);
+    request.onsuccess = () => {
+      try {
+        const link = request.result as StoredLink | undefined;
+        if (!link?.pairedPeerKey) throw new Error("Confirmed conversation unavailable");
+        result = change(link.peerProofs ?? emptyProofLedger());
+        links.put({ ...link, peerProofs: result });
+      } catch (e) { failure = e; tx.abort(); }
+    };
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = tx.onabort = () => reject(failure ?? tx.error ?? new Error("Proof storage failed"));
+    });
+    return result!;
+  },
+  async pinPeer(linkId: string, key: string, signedSignals = false): Promise<void> {
+    const tx = (await openDb()).transaction(STORES.links, "readwrite");
+    const links = tx.objectStore(STORES.links);
+    const request = links.get(linkId);
+    request.onsuccess = () => {
+      const link = request.result as StoredLink | undefined;
+      if (!link?.participationSeed || (link.pairedPeerKey && link.pairedPeerKey !== key)) { tx.abort(); return; }
+      links.put({ ...link, peerTrust: link.peerTrust ?? { version: 1, verifiedKey: link.pairedPeerKey }, pairedPeerKey: key, requireSignedSignals: link.requireSignedSignals || signedSignals, inviteCode: undefined });
+    };
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("Invitation already consumed or unavailable"));
+    });
+  },
+  async verifyPeer(linkId: string, key: string): Promise<void> {
+    const tx = (await openDb()).transaction(STORES.links, "readwrite");
+    const links = tx.objectStore(STORES.links);
+    const request = links.get(linkId);
+    request.onsuccess = () => {
+      const link = request.result as StoredLink | undefined;
+      if (!link?.pairedPeerKey || link.pairedPeerKey !== key) { tx.abort(); return; }
+      links.put({ ...link, peerTrust: { version: 1, verifiedKey: key, verifiedAt: Date.now() } });
+    };
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("Contact changed or verification could not be saved"));
+    });
   },
   async deleteLink(linkId: string): Promise<void> {
     await wrap((await store(STORES.links, "readwrite")).delete(linkId));
@@ -27,10 +91,36 @@ export const db = {
   },
   /** Returns false when the message was already stored. */
   async addMessage(message: StoredMessage): Promise<boolean> {
-    const messages = await store(STORES.messages, "readwrite");
-    if (await wrap(messages.getKey([message.linkId, message.id]))) return false;
-    await wrap(messages.put(message));
-    return true;
+    const tx = (await openDb()).transaction(STORES.messages, "readwrite");
+    const messages = tx.objectStore(STORES.messages);
+    let added = false;
+    const request = messages.getKey([message.linkId, message.id]);
+    request.onsuccess = () => {
+      if (request.result !== undefined) return;
+      messages.put(message);
+      added = true;
+    };
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("Message storage failed"));
+    });
+    return added;
+  },
+  async updateDelivery(linkId: string, id: string, delivery: NonNullable<StoredMessage["delivery"]>, deliveryError?: string): Promise<void> {
+    const tx = (await openDb()).transaction(STORES.messages, "readwrite");
+    const messages = tx.objectStore(STORES.messages);
+    const request = messages.get([linkId, id]);
+    request.onsuccess = () => {
+      const message = request.result as StoredMessage | undefined;
+      // Receipts are terminal; timeout/disconnect/send races cannot undo them.
+      // Do not resurrect deleted messages or attach new states to old history.
+      if (!message?.delivery || message.delivery === "delivered") return;
+      messages.put({ ...message, delivery, deliveryError });
+    };
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("Receipt storage failed"));
+    });
   },
   async deleteMessage(linkId: string, messageId: string): Promise<void> {
     await wrap((await store(STORES.messages, "readwrite")).delete([linkId, messageId]));

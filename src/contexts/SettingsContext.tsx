@@ -1,3 +1,4 @@
+import { getStorageProfile } from "../lib/storage";
 import {
   createContext,
   useContext,
@@ -28,17 +29,18 @@ interface SettingsContextValue {
   updateLockScreen: (lockScreen: Partial<LockScreenSettings>) => void;
   updateNotifications: (notifications: Partial<NotificationSettings>) => void;
   updateDefaultNickname: (nickname: string) => void;
-  updateGiphyApiKey: (key: string) => void;
   updateReduceMotion: (reduce: boolean) => void;
   updateCheckForUpdates: (check: boolean) => void;
   randomizeNickname: () => void;
   resetSettings: () => void;
+  /** Where this profile's backups go (WISP 1000). */
+  updateBackupStorage: (patch: Pick<Partial<AppSettings>, "backupSpace" | "backupS3">) => void;
 }
 
 const SettingsContext = createContext<SettingsContextValue | null>(null);
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
-  const [settings, setSettings] = useState<AppSettings>(() => loadSettings(getRandomGhostName));
+  const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
 
   useEffect(() => {
     saveSettings(settings);
@@ -84,10 +86,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setSettings((prev) => ({ ...prev, defaultNickname: nickname }));
   }, []);
 
-  const updateGiphyApiKey = useCallback((key: string) => {
-    setSettings((prev) => ({ ...prev, giphyApiKey: key.trim() }));
-  }, []);
-
   const updateReduceMotion = useCallback((reduce: boolean) => {
     setSettings((prev) => ({ ...prev, reduceMotion: reduce }));
   }, []);
@@ -105,9 +103,13 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setSettings((prev) => ({ ...prev, defaultNickname: randomName }));
   }, []);
 
+  const updateBackupStorage = useCallback((patch: Pick<Partial<AppSettings>, "backupSpace" | "backupS3">) => {
+    setSettings((prev) => ({ ...prev, ...patch }));
+  }, []);
+
   const resetSettings = useCallback(() => {
-    const defaultSettings = loadSettings(getRandomGhostName);
-    localStorage.removeItem("ghostly_app_settings");
+    const defaultSettings = loadSettings();
+    localStorage.removeItem(getStorageProfile() ? `ghostly_${getStorageProfile()}_app_settings` : "ghostly_app_settings");
     setSettings(defaultSettings);
   }, []);
 
@@ -122,11 +124,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         updateLockScreen,
         updateNotifications,
         updateDefaultNickname,
-        updateGiphyApiKey,
         updateReduceMotion,
         updateCheckForUpdates,
         randomizeNickname,
         resetSettings,
+        updateBackupStorage,
       }}
     >
       {children}

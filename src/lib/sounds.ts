@@ -1,8 +1,8 @@
 import { loadSettings } from "./settings";
 
 /**
- * Every sound is synthesized: no audio files, nothing to download, and it
- * works the same in the desktop app, the extension and the web app.
+ * Original ElevenLabs effects are bundled locally. Synthesis is only a fallback
+ * for a missing/undecodable asset; no runtime generation or external service.
  */
 type Note = { frequency: number; at: number; duration: number; gain?: number; type?: OscillatorType };
 
@@ -46,38 +46,87 @@ const SOUNDS = {
 
 export type SoundName = keyof typeof SOUNDS;
 
+const assets = import.meta.glob<string>("../assets/sounds/*.mp3", {eager:true, query:"?url", import:"default"});
+const decoded = new Map<SoundName, Promise<AudioBuffer>>();
 let context: AudioContext | null = null;
+const playing = new Set<() => void>();
+let listening = false;
 
-function play(notes: Note[]): void {
-  try {
-    context ??= new AudioContext();
-    // Browsers keep audio suspended until the user interacted with the page once.
-    if (context.state === "suspended") void context.resume();
-    const start = context.currentTime + 0.01;
-    for (const note of notes) {
-      const oscillator = context.createOscillator();
-      const gain = context.createGain();
-      oscillator.type = note.type ?? "sine";
-      oscillator.frequency.setValueAtTime(note.frequency, start + note.at);
-      gain.gain.setValueAtTime(0.0001, start + note.at);
-      gain.gain.exponentialRampToValueAtTime(note.gain ?? 0.12, start + note.at + 0.015);
-      gain.gain.exponentialRampToValueAtTime(0.0001, start + note.at + note.duration);
-      oscillator.connect(gain).connect(context.destination);
-      oscillator.start(start + note.at);
-      oscillator.stop(start + note.at + note.duration + 0.02);
-    }
-  } catch {
-    // no audio device, or audio not allowed yet
+function load(name: SoundName): Promise<AudioBuffer> | undefined {
+  const url = assets[`../assets/sounds/${name}.mp3`];
+  if (!context || !url) return;
+  if (!decoded.has(name)) {
+    const ctx=context;
+    decoded.set(name,fetch(url).then(response => {
+      if (!response.ok) throw new Error("Sound unavailable");
+      return response.arrayBuffer();
+    }).then(bytes=>ctx.decodeAudioData(bytes)));
   }
+  return decoded.get(name);
 }
 
-export function playSound(name: SoundName): void {
-  if (loadSettings().notifications.soundEnabled) play(SOUNDS[name]);
+/** Autoplay unlock is attempted only on an actual user gesture. */
+export function installAudioGestures(): () => void {
+  if (listening) return () => {};
+  listening = true;
+  const unlock = () => {
+    try {
+      context ??= new AudioContext();
+      if (context.state === "suspended") void context.resume().catch(()=>{});
+      for (const name of Object.keys(SOUNDS) as SoundName[]) void load(name)?.catch(()=>{});
+    } catch { /* no audio device */ }
+  };
+  const mute = () => { if (!loadSettings().notifications.soundEnabled) for (const stop of [...playing]) stop(); };
+  document.addEventListener("pointerdown",unlock,true);
+  document.addEventListener("keydown",unlock,true);
+  window.addEventListener("settings-updated",mute);
+  window.addEventListener("storage",mute);
+  return () => {
+    listening = false;
+    document.removeEventListener("pointerdown",unlock,true);
+    document.removeEventListener("keydown",unlock,true);
+    window.removeEventListener("settings-updated",mute);
+    window.removeEventListener("storage",mute);
+    for (const stop of [...playing]) stop();
+  };
 }
 
-/** Rings until the returned function is called. */
+export function playSound(name: SoundName): () => void {
+  if (!loadSettings().notifications.soundEnabled || !context || context.state !== "running") return () => {};
+  const ctx=context, started=Date.now();
+  let cancelled=false;
+  const sources: (AudioBufferSourceNode | OscillatorNode)[]=[];
+  let expiry: ReturnType<typeof setTimeout> | undefined;
+  const stop=()=>{cancelled=true;clearTimeout(expiry);for(const source of sources){try{source.stop();}catch{/* already ended */}}playing.delete(stop);};
+  playing.add(stop);
+  void (async()=>{
+    let buffer: AudioBuffer | undefined;
+    try { buffer=await load(name); } catch { /* local synthesized fallback */ }
+    if(cancelled || !loadSettings().notifications.soundEnabled || ctx.state!=="running" || Date.now()-started>1000){stop();return;}
+    const start=ctx.currentTime+0.01;
+    if(buffer){
+      const source=ctx.createBufferSource(),gain=ctx.createGain();
+      source.buffer=buffer;gain.gain.value=0.2;
+      source.connect(gain).connect(ctx.destination);sources.push(source);source.start(start);
+      expiry=setTimeout(()=>{playing.delete(stop);},buffer.duration*1000+100);
+    }else{
+      for(const note of SOUNDS[name] as Note[]){
+        const oscillator=ctx.createOscillator(),gain=ctx.createGain();
+        oscillator.type=note.type??"sine";oscillator.frequency.setValueAtTime(note.frequency,start+note.at);
+        gain.gain.setValueAtTime(0.0001,start+note.at);
+        gain.gain.exponentialRampToValueAtTime(note.gain??0.1,start+note.at+0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001,start+note.at+note.duration);
+        oscillator.connect(gain).connect(ctx.destination);sources.push(oscillator);
+        oscillator.start(start+note.at);oscillator.stop(start+note.at+note.duration+0.02);
+      }
+      expiry=setTimeout(()=>playing.delete(stop),2000);
+    }
+  })();
+  return stop;
+}
+
 export function startRinging(kind: "ring" | "ringback"): () => void {
-  playSound(kind);
-  const timer = setInterval(() => playSound(kind), kind === "ring" ? 2000 : 3000);
-  return () => clearInterval(timer);
+  let stop=playSound(kind);
+  const timer=setInterval(()=>{stop();stop=playSound(kind);},3500);
+  return ()=>{clearInterval(timer);stop();};
 }

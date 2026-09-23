@@ -94,6 +94,14 @@ export class DataLink {
     }
   }
 
+  get fingerprints(): [string, string] | null {
+    const local = this.pc?.localDescription?.sdp;
+    const remote = this.pc?.remoteDescription?.sdp;
+    if (!local || !remote) return null;
+    try { return [extractRtcParams(local).f.toLowerCase(), extractRtcParams(remote).f.toLowerCase()]; }
+    catch { return null; }
+  }
+
   close(): void {
     this.reset();
   }

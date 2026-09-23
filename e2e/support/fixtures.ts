@@ -1,3 +1,6 @@
+import { copyInvite } from "./clipboard";
+import { pasteInvite } from "./clipboard";
+import { createLink, encodeInviteCode } from "@ghostly/core";
 import { test as base, expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
 import { attachMint } from "./mint";
 import { LocalRelay } from "./relay";
@@ -42,21 +45,13 @@ export async function openPeer(browser: Browser, relay: LocalRelay, baseURL: str
 /** A 1×1 GIF. */
 export const GIF = Buffer.from("R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==", "base64");
 
-/** Giphy and GifCities answer from here: the same shape, one ghost each, no network. */
+/** GIFCities answers from here: one ghost, no network. */
 async function stubGifServices(context: BrowserContext): Promise<void> {
   const json = (body: unknown) => ({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(body) });
-  await context.route("https://api.giphy.com/**", (route) =>
-    route.fulfill(
-      json({
-        meta: { status: 200 },
-        data: [{ id: "g1", title: "giphy ghost", images: { fixed_width_small: { url: "https://media.giphy.com/media/g1/ghost.gif" }, fixed_width: { url: "https://media.giphy.com/media/g1/ghost.gif" } } }],
-      }),
-    ),
-  );
   await context.route("https://gifcities.archive.org/**", (route) =>
     route.fulfill(json([{ gif: "http://geocities.com/haunted/ghost.gif", checksum: "c1", url_text: "retro ghost" }])),
   );
-  for (const host of ["https://media.giphy.com/**", "https://web.archive.org/**"]) {
+  for (const host of ["https://web.archive.org/**"]) {
     await context.route(host, (route) => route.fulfill({ status: 200, contentType: "image/gif", body: GIF }));
   }
 }
@@ -81,19 +76,56 @@ export const test = base.extend<Fixtures>({
 /** `host` creates a chat, `guest` joins it with the invite code. Resolves once both have the chat open. */
 export async function link(host: Peer, guest: Peer): Promise<void> {
   await host.page.getByTitle("New Chat").click();
-  await host.page.getByRole("button", { name: "Create New Chat" }).first().click();
-  const invite = (await host.page.locator("code").first().textContent())!.trim();
-  await guest.page.getByTitle("New Chat").click();
-  await guest.page.getByPlaceholder("Invite code...").fill(invite);
-  await guest.page.getByPlaceholder("Invite code...").press("Enter");
-  await expect(guest.page.getByPlaceholder("Type a message")).toBeVisible();
+  const invite = await copyInvite(host.page);
+  await guest.page.getByRole("button", { name: "Join chat", exact: true }).first().click();
+  await pasteInvite(guest.page, invite);
+  await expect(guest.page.getByPlaceholder("Message…")).toBeVisible();
+}
+
+/**
+ * Same, but the chat a legacy client can join. Sharing a local web app lives
+ * only here for now: a paired link advertises `chat` and nothing else.
+ */
+export async function linkLegacy(host: Peer, guest: Peer): Promise<void> {
+  // Historical session fixture: legacy creation is intentionally absent from the UI.
+  const keys = createLink();
+  const invite = encodeInviteCode(keys.invite);
+  await host.page.evaluate(({ mine, invite }) => {
+    const id = crypto.randomUUID().replaceAll("-", "");
+    localStorage.setItem(`ghostly_${id}`, JSON.stringify({ id, mySeedB64: mine.seedB64, peerPubKeyB64: mine.peerPubKeyZ32, encKeyB64: mine.encKeyB64, messages: [], createdAt: Date.now() }));
+    localStorage.setItem(`ghostly_invite_${id}`, invite);
+    window.dispatchEvent(new Event("session-updated"));
+    location.hash = `/chat/${id}`;
+  }, { mine: keys.mine, invite });
+  await guest.page.getByRole("button", { name: "Join chat", exact: true }).first().click();
+  await pasteInvite(guest.page, invite);
+  await expect(guest.page.getByPlaceholder("Message…")).toBeVisible();
 }
 
 /** The open conversation, without the chat list (which previews the last message too). */
 export const chat = (peer: Peer) => peer.page.locator(".chat-wallpaper");
 
+/** The wallet is a page beside the chat list, like Settings: opening it puts the chat away. */
+export async function openWallet(peer: Peer, card?: "cashu" | "lightning" | "arkade" | "usdt"): Promise<void> {
+  if (!await peer.page.getByTestId("wallet").isVisible()) await peer.page.getByTestId("wallet-chip").click();
+  if (card) await peer.page.getByTestId(`wallet-card-${card}`).click();
+}
+
+/** Every wallet on test networks (the Testnet mode): test sats only, and the app says so everywhere. */
+export async function useTestnet(peer: Peer): Promise<void> {
+  await openWallet(peer);
+  await peer.page.getByTestId("wallet-mode").getByRole("radio", { name: "Testnet" }).click();
+  await expect(peer.page.getByTestId("testnet-notice")).toBeVisible();
+}
+
+/** Back from the wallet to the chat it was opened from. */
+export async function openChat(peer: Peer): Promise<void> {
+  if (await peer.page.getByTestId("wallet").isVisible()) await peer.page.goBack();
+  await expect(chat(peer)).toBeVisible();
+}
+
 export async function say(peer: Peer, text: string): Promise<void> {
-  const box = peer.page.getByPlaceholder("Type a message");
+  const box = peer.page.getByPlaceholder("Message…");
   await box.fill(text);
   await box.press("Enter");
 }
@@ -104,5 +136,9 @@ export async function connect(a: Peer, b: Peer): Promise<void> {
   await expect(chat(a).getByText(`hello from ${b.name}`)).toBeVisible();
   await say(a, `hello from ${a.name}`);
   await expect(chat(b).getByText(`hello from ${a.name}`)).toBeVisible();
-  for (const peer of [a, b]) await expect(peer.page.getByTestId("datalink-state").filter({ hasText: "Peer to peer" })).toBeVisible();
+  // A legacy chat says it in the strip, a paired one in the pairing banner.
+  for (const peer of [a, b]) await expect(
+    peer.page.getByTestId("datalink-state").filter({ hasText: "Peer to peer" })
+      .or(peer.page.getByTestId("connection-options").filter({ hasText: "WebRTC" })),
+  ).toBeVisible();
 }

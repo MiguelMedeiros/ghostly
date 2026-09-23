@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { BIG, BIG_SHA256 } from "../../extension/test/atlas.mjs";
-import { chat, connect, expect, GIF, link, say, test, type Peer } from "../support/fixtures";
+import { chat, connect, expect, GIF, link, linkLegacy, say, test, type Peer } from "../support/fixtures";
 
 async function setNickname(peer: Peer, nick: string): Promise<void> {
   await peer.page.goto("/#/settings");
@@ -9,7 +9,7 @@ async function setNickname(peer: Peer, nick: string): Promise<void> {
   await peer.page.goto("/#/");
 }
 
-test("two people chat: through the relay first, then peer to peer", async ({ peer, relay }) => {
+test("two people chat: relay discovery, then peer-to-peer messages", async ({ peer, relay }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await setNickname(alice, "Casper");
   await setNickname(bob, "Slimer");
@@ -28,7 +28,11 @@ test("two people chat: through the relay first, then peer to peer", async ({ pee
   await say(alice, "boo from alice");
   await expect(chat(bob).getByText("boo from alice")).toBeVisible();
 
-  for (const peer of [alice, bob]) await expect(peer.page.getByTestId("datalink-state").filter({ hasText: "Peer to peer" })).toBeVisible();
+  // A paired chat states the direct connection in the pairing banner, not in the strip.
+  for (const peer of [alice, bob]) await expect(
+    peer.page.getByTestId("datalink-state").filter({ hasText: "Peer to peer" })
+      .or(peer.page.getByTestId("connection-options").filter({ hasText: "WebRTC" })),
+  ).toBeVisible();
   const relayed = relay.puts;
   await say(bob, "boo over WebRTC");
   await expect(chat(alice).getByText("boo over WebRTC")).toBeVisible({ timeout: 10_000 });
@@ -48,12 +52,15 @@ test("two people chat: through the relay first, then peer to peer", async ({ pee
   await expect(bob.page.getByText("Casper")).toBeVisible();
 });
 
-test("messages sent while the other side is away arrive later", async ({ peer }) => {
+test("compatibility chat delivers through the relay while the other side is away", async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
-  await link(alice, bob);
+  await linkLegacy(alice, bob);
   await connect(alice, bob);
   const url = bob.page.url();
   await bob.page.close();
+  // Once Alice's side sees the direct link gone, text goes through the relay. (A legacy chat sends
+  // over the data link while it looks open; what goes out in the moment before it closes is lost.)
+  await expect(alice.page.getByTestId("datalink-state").filter({ hasText: "Peer to peer" })).toHaveCount(0, { timeout: 30_000 });
   await say(alice, "are you there?");
   await say(alice, "still here");
   bob.page = await bob.context.newPage();
@@ -70,16 +77,33 @@ test("emoji and GIFs", async ({ peer }) => {
   await alice.page.getByTitle("Emoji").click();
   await alice.page.locator("em-emoji-picker").getByRole("searchbox").fill("ghost");
   await alice.page.locator("em-emoji-picker").getByRole("button", { name: "👻" }).first().click();
-  await expect(alice.page.getByPlaceholder("Type a message")).toHaveValue("👻");
-  await alice.page.getByPlaceholder("Type a message").press("Enter");
+  await expect(alice.page.getByPlaceholder("Message…")).toHaveValue("👻");
+  await alice.page.getByPlaceholder("Message…").press("Enter");
   await expect(chat(bob).getByText("👻", { exact: true })).toBeVisible();
 
   await alice.page.getByTitle("GIF").click();
-  await alice.page.getByRole("button", { name: "Retro", exact: true }).click();
+  await expect(alice.page.getByRole("button", { name: "Giphy", exact: true })).toHaveCount(0);
   await alice.page.getByTitle("retro ghost").click();
   const gif = bob.page.locator('img[src*="ghost.gif"]');
   await expect(gif).toBeVisible();
   expect(await gif.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1);
+  await alice.page.setViewportSize({width:390,height:844});
+  await alice.page.getByTestId("composer-more").click();
+  await alice.page.getByTitle("GIF").click();
+  await expect(alice.page.getByText("GIFCITIES · INTERNET ARCHIVE")).toBeVisible();
+  await alice.page.getByPlaceholder("Search GIFs...").fill("ghost");
+  await expect(alice.page.getByTitle("retro ghost")).toBeVisible();
+  await alice.page.keyboard.press("Escape");
+  await expect(alice.page.getByPlaceholder("Search GIFs...")).toHaveCount(0);
+  await alice.page.getByTestId("composer-more").click();
+  await alice.page.getByTitle("GIF").click();
+  await alice.page.locator(".sheet-backdrop").click({position:{x:10,y:10}});
+  await expect(alice.page.getByPlaceholder("Search GIFs...")).toHaveCount(0);
+  await alice.context.route("https://gifcities.archive.org/**",route=>route.fulfill({status:503,body:"Unavailable"}));
+  await alice.page.getByTestId("composer-more").click();
+  await alice.page.getByTitle("GIF").click();
+  await expect(alice.page.getByText("GIF search is unavailable. Try again.")).toBeVisible();
+  await alice.page.getByRole("button",{name:"Close GIF picker"}).click();
 });
 
 test("files, peer to peer, arrive intact", async ({ peer }, testInfo) => {

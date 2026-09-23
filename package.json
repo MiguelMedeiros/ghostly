@@ -20,7 +20,8 @@
     "test:e2e:report": "playwright show-report",
     "test:e2e:desktop": "playwright test -c e2e/playwright.desktop.config.ts",
     "build:web": "npm run build -w @ghostly/web",
-    "check:desktop-bundle": "node scripts/check-desktop-bundle.mjs"
+    "check:desktop-bundle": "node scripts/check-desktop-bundle.mjs",
+    "postinstall": "patch-package"
   },
   "dependencies": {
     "@emoji-mart/data": "^1.2.1",
@@ -29,9 +30,11 @@
     "@ghostly/core": "*",
     "@ghostly/react": "*",
     "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-notification": "^2.4.0",
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.11.0",
     "emoji-mart": "^5.6.0",
+    "jsqr": "^1.4.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
@@ -49,7 +52,9 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.7",
     "globals": "^17.12.0",
+    "patch-package": "8.0.1",
     "playwright": "^1.63.0",
+    "solc": "0.8.37",
     "tailwindcss": "^4.2.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.70.0",
@@ -59,5 +64,10 @@
     "packages/*",
     "extension",
     "web"
-  ]
+  ],
+  "overrides": {
+    "solc": {
+      "tmp": "0.2.7"
+    }
+  }
 }

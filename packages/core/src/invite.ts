@@ -8,13 +8,15 @@ import { toBase64Url } from "./bytes";
  * (`<seed>/<peer public key>/<encryption key>`), unchanged.
  */
 export interface LinkParams {
+  profile?: "paired-chat/1";
+  deliveryMode?: "stream" | "dht";
   seedB64: string;
   peerPubKeyZ32: string;
   encKeyB64: string;
 }
 
 export function encodeInviteCode(params: LinkParams): string {
-  return `${params.seedB64}/${params.peerPubKeyZ32}/${params.encKeyB64}`;
+  return `${params.profile ? (params.deliveryMode === "dht" ? "pair2d/" : "pair1/") : ""}${params.seedB64}/${params.peerPubKeyZ32}/${params.encKeyB64}`;
 }
 
 export function decodeInviteCode(input: string): LinkParams | null {
@@ -22,13 +24,15 @@ export function decodeInviteCode(input: string): LinkParams | null {
     .trim()
     .replace(/^.*#/, "")
     .replace(/^\/?chat\//, "");
-  const parts = clean.split("/");
+  const dht = clean.startsWith("pair2d/");
+  const profile = (dht || clean.startsWith("pair1/")) ? "paired-chat/1" as const : undefined;
+  const parts = (profile ? clean.slice(dht ? 7 : 6) : clean).split("/");
   if (parts.length !== 3) return null;
   const [seedB64, peerPubKeyZ32, encKeyB64] = parts;
   if (!/^[A-Za-z0-9_-]{43}$/.test(seedB64)) return null;
   if (!/^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/.test(peerPubKeyZ32)) return null;
   if (!/^[A-Za-z0-9_-]{43}$/.test(encKeyB64)) return null;
-  return { seedB64, peerPubKeyZ32, encKeyB64 };
+  return { seedB64, peerPubKeyZ32, encKeyB64, ...(profile ? { profile, ...(dht ? { deliveryMode: "dht" as const } : {}) } : {}) };
 }
 
 /** Creates both ends of a link: keep `mine`, hand `invite` to the peer. */

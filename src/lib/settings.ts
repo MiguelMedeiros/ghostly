@@ -1,5 +1,6 @@
 import { clearChatData } from "@ghostly/browser/shared/idb";
-import { LEGACY_JOIN_PREFIX } from "./storage";
+import { LEGACY_JOIN_PREFIX, getStorageProfile, ownsKey } from "./storage";
+import { registryKey } from "./profiles";
 
 export type ColorScheme = "dark" | "light" | "system";
 export type ColorTheme = "classic" | "monochrome" | "cyan" | "purple";
@@ -16,6 +17,7 @@ export interface LockScreenSettings {
 
 export interface NotificationSettings {
   soundEnabled: boolean;
+  systemEnabled: boolean;
 }
 
 export interface AppSettings {
@@ -26,8 +28,6 @@ export interface AppSettings {
   lockScreen: LockScreenSettings;
   notifications: NotificationSettings;
   defaultNickname: string;
-  /** The user's own Giphy API key; the key shipped with old builds was retired by Giphy. */
-  giphyApiKey: string;
   /** Turns animations off, on top of the system's own preference. */
   reduceMotion: boolean;
   /**
@@ -36,9 +36,14 @@ export interface AppSettings {
    * so it is the user's to allow; off, updates are only looked for on demand.
    */
   checkForUpdates: boolean;
+  /** WISP 1000: this profile's random storage space, chosen on first backup. */
+  backupSpace?: string;
+  /** WISP 1002: where backups go, if S3-compatible storage is set up. Never copied into a backup. */
+  backupS3?: import("@ghostly/browser/backup/s3").S3Config | null;
 }
 
-const SETTINGS_KEY = "ghostly_app_settings";
+/** Each local profile keeps its own settings (WISP 04); the default profile keeps the original key. */
+const settingsKey = () => (getStorageProfile() ? `ghostly_${getStorageProfile()}_app_settings` : "ghostly_app_settings");
 
 const DEFAULT_SETTINGS: AppSettings = {
   theme: "dark", // Legacy
@@ -52,20 +57,19 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   notifications: {
     soundEnabled: true,
+    systemEnabled: false,
   },
   defaultNickname: "",
-  giphyApiKey: "",
   reduceMotion: false,
   checkForUpdates: true,
 };
 
-export function loadSettings(getRandomName?: () => string): AppSettings {
+export function loadSettings(): AppSettings {
   try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
+    const raw = localStorage.getItem(settingsKey());
     if (!raw) {
-      const randomNickname = getRandomName ? getRandomName() : "";
-      const initialSettings = { ...DEFAULT_SETTINGS, defaultNickname: randomNickname };
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify(initialSettings));
+      const initialSettings = { ...DEFAULT_SETTINGS };
+      localStorage.setItem(settingsKey(), JSON.stringify(initialSettings));
       return initialSettings;
     }
     const parsed = JSON.parse(raw) as Partial<AppSettings>;
@@ -117,17 +121,19 @@ export function formatBytes(bytes: number): string {
 }
 
 /**
- * Everything this client keeps on the device except the wallet: the
- * localStorage keys and the chats, files and services in the peer's database.
- * The peer forgets the links on its next reconcile; the caller reloads.
+ * Everything this profile keeps on the device except the wallet: its
+ * localStorage keys and the chats, files and services in its peer's database.
+ * Other profiles and the list of profiles stay. The peer forgets the links on
+ * its next reconcile; the caller reloads.
  */
 export async function clearAllData(): Promise<void> {
   const keysToRemove: string[] = [];
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
+    if (!key || key === registryKey()) continue;
     // The join flags of older versions are not in the namespace, and each one
-    // carries the session id of a chat that existed.
-    if (key?.startsWith("ghostly") || key?.startsWith(LEGACY_JOIN_PREFIX)) {
+    // carries the session id of a chat that existed; they are the default profile's.
+    if (ownsKey(key) || (!getStorageProfile() && key.startsWith(LEGACY_JOIN_PREFIX))) {
       keysToRemove.push(key);
     }
   }
@@ -142,7 +148,8 @@ export const APP_LICENSE = "MIT";
 
 export function saveSettings(settings: AppSettings): void {
   try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    localStorage.setItem(settingsKey(), JSON.stringify(settings));
+    window.dispatchEvent(new Event("settings-updated"));
   } catch {
     // Storage full or unavailable
   }

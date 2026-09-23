@@ -18,6 +18,8 @@ export const ENDPOINT = {
    * payee accepts ecash from. Payload in a payment: a `cashuB…` token.
    */
   cashu: "cashu",
+  arkade: "btc-arkade/1",
+  usdt: "usdt-erc20/1",
 } as const;
 
 export interface PaymentAmount {
@@ -32,6 +34,21 @@ export interface PaymentRequest {
   amount: PaymentAmount;
   memo?: string;
   endpoints: WireEndpoint[];
+  /** The ask this request answers, when the contact asked to pay (see {@link PaymentAsk}). */
+  ask?: string;
+}
+
+/**
+ * "I want to pay you this much this way": sent by a payer who has no address to pay to (Ark, USDT).
+ * The payee's app answers with an ordinary payment request carrying `ask`, which the payer
+ * then reviews and approves like any other.
+ */
+export interface PaymentAsk {
+  id: string;
+  timestamp: number;
+  amount: PaymentAmount;
+  method: "arkade" | "usdt";
+  memo?: string;
 }
 
 export interface Payment {

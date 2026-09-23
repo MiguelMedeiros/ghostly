@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import type { Bolt11Invoice } from "@ghostly/core";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
-import { playSound } from "../lib/sounds";
 import type { CashuInspection } from "../lib/platform";
 import type { MoneyInText } from "../lib/money";
 
@@ -96,7 +95,7 @@ function relativeExpiry(expiresAt: number, now: number): string {
   return `Expires in ${Math.round(left / 86400)} days`;
 }
 
-function LightningCard({ invoice, mine }: { invoice: Bolt11Invoice; mine: boolean }) {
+function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: boolean; off: boolean }) {
   const wallet = useServicesPlatform()?.wallet;
   const id = invoice.paymentHash ?? invoice.invoice.slice(-32);
   const [paid, setPaid] = useState(() => isSettled(id));
@@ -153,7 +152,6 @@ function LightningCard({ invoice, mine }: { invoice: Bolt11Invoice; mine: boolea
                     setPending(true);
                     return;
                   }
-                  playSound("confirmed");
                 } catch (e) {
                   // Someone else got there first. The mint refused, so it is not paid twice, and there is nothing left to pay.
                   if (!/already paid/i.test(e instanceof Error ? e.message : String(e))) throw e;
@@ -169,7 +167,7 @@ function LightningCard({ invoice, mine }: { invoice: Bolt11Invoice; mine: boolea
         </>
       ) : (
         <>
-          {wallet && !mine && !expired && invoice.amountSat !== null && (
+          {wallet && !mine && !off && !expired && invoice.amountSat !== null && (
             <button className={button} disabled={busy} data-testid="invoice-pay" onClick={() => run(async () => setQuote(await wallet.quoteInvoice(invoice.invoice)))}>
               {busy ? "Checking…" : "Pay"}
             </button>
@@ -187,7 +185,7 @@ function LightningCard({ invoice, mine }: { invoice: Bolt11Invoice; mine: boolea
   );
 }
 
-function CashuCard({ value, mine }: { value: string; mine: boolean }) {
+function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: boolean }) {
   const wallet = useServicesPlatform()?.wallet;
   const [inspection, setInspection] = useState<CashuInspection | null | undefined>(undefined);
   const id = value.slice(-40);
@@ -241,7 +239,7 @@ function CashuCard({ value, mine }: { value: string; mine: boolean }) {
       {redeemed ? (
         <span className="text-accent text-xs font-bold self-center" data-testid="token-redeemed">Redeemed ✓</span>
       ) : (
-        wallet && !mine && inspection.accepted && (
+        wallet && !mine && !off && inspection.accepted && (
           <button
             className={button}
             disabled={busy}
@@ -253,7 +251,6 @@ function CashuCard({ value, mine }: { value: string; mine: boolean }) {
                 await wallet.receiveToken(value);
                 markSettled(id);
                 setRedeemed(true);
-                playSound("coin");
               } catch (e) {
                 setError(e instanceof Error ? e.message : String(e));
               } finally {
@@ -272,11 +269,15 @@ function CashuCard({ value, mine }: { value: string; mine: boolean }) {
 }
 
 /** Money pasted into the chat, shown as something a person can read and act on. */
-export function InvoiceBubble({ money, mine }: { money: MoneyInText; mine: boolean }) {
+/** `peerPubKey`: the chat it is in, whose choice of ways of paying decides whether it can be paid or redeemed here. */
+export function InvoiceBubble({ money, mine, peerPubKey }: { money: MoneyInText; mine: boolean; peerPubKey?: string }) {
+  const allowed = useServicesPlatform()?.getPeer(peerPubKey ?? "")?.paymentMethods;
+  const off = !!allowed && !(money.type === "lightning" ? allowed.lightning : allowed.cashu);
   return (
     <>
       {money.rest && <p className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap m-0 mb-1.5">{money.rest}</p>}
-      {money.type === "lightning" ? <LightningCard invoice={money.invoice} mine={mine} /> : <CashuCard value={money.value} mine={mine} />}
+      {money.type === "lightning" ? <LightningCard invoice={money.invoice} mine={mine} off={off} /> : <CashuCard value={money.value} mine={mine} off={off} />}
+      {off && !mine && <p className="text-[11px] text-text-muted mt-1" data-testid="money-off">{money.type === "lightning" ? "Lightning" : "Cashu"} is off in this chat.</p>}
     </>
   );
 }

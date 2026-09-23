@@ -487,4 +487,14 @@ describe("payment frames", () => {
     expect(bad({ e: [["cashu"]] })).toBeNull();
     expect(bad({ v: "0.00000001" })).not.toBeNull();
   });
+
+  it("carries versioned Ark requests and receipts without accepting arbitrary paths", () => {
+    const ark = { ...request, e: [["btc-arkade/1", '{"method":"arkade"}']] as [string, string][] };
+    expect(decodeControl(encodeControl(ark))).toEqual(ark);
+    const receipt = { t: "pay" as const, id: "pay-00000001", ts: 2, rid: request.id, v: "1000", u: "sat", memo: undefined, e: ["btc-arkade/1", '{"txid":"example"}'] as [string, string] };
+    expect(decodeControl(encodeControl(receipt))).toEqual(receipt);
+    for (const id of ["btc-arkade/0", "btc-arkade/01", "btc-arkade/1/2", "btc-arkade/", "https://provider", "a".repeat(65)]) {
+      expect(decodeControl(JSON.stringify({ ...ark, e: [[id, "payload"]] }))).toBeNull();
+    }
+  });
 });

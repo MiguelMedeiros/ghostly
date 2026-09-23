@@ -22,6 +22,8 @@ export interface ChatFile {
 }
 
 export interface ChatMessage {
+  delivery?: "sending" | "sent" | "delivered" | "failed";
+  deliveryError?: string;
   id: string;
   text: string;
   sender: "me" | "peer" | "system";
@@ -43,6 +45,8 @@ export interface ChatMessage {
 }
 
 export interface ChatSession {
+  profile?: "paired-chat/1";
+  deliveryMode?: "stream" | "dht";
   id: string;
   mySeedB64: string;
   peerPubKeyB64: string;
@@ -61,6 +65,8 @@ export interface ChatSession {
 }
 
 export interface ChatParams {
+  profile?: "paired-chat/1";
+  deliveryMode?: "stream" | "dht";
   /** The stored session these keys belong to. */
   sessionId: string;
   seedB64: string;

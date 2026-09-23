@@ -6,6 +6,18 @@
   "permissions": [
     "core:default",
     "core:app:default",
+    "allow-paired-iroh-start",
+    "allow-paired-iroh-address",
+    "allow-paired-iroh-connect",
+    "allow-paired-native-send",
+    "allow-paired-native-close",
+    "allow-paired-iroh-stop",
+    "allow-paired-hyperdht-start",
+    "allow-paired-hyperdht-address",
+    "allow-paired-hyperdht-connect",
+    "allow-paired-hyperdht-send",
+    "allow-paired-hyperdht-close",
+    "allow-paired-hyperdht-stop",
     "allow-get-profile",
     "allow-create-keypair",
     "allow-get-public-key",
@@ -20,7 +32,11 @@
     "allow-open-service-window",
     "allow-service-respond",
     "allow-updater-can-install",
+    "allow-open-project-link",
     "updater:default",
-    "process:allow-restart"
+    "process:allow-restart",
+    "notification:default",
+    "allow-native-notification-permission",
+    "allow-native-private-notification"
   ]
 }

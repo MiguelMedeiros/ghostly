@@ -10,7 +10,7 @@ import {
 } from "@ghostly/core";
 import type { ServicesPlatform } from "../../../../src/lib/platform";
 import { fileStore } from "../shared/idb";
-import { TEST_MINT } from "../shared/mints";
+import { TEST_MINT, TEST_MINTS } from "../shared/mints";
 import { getBrowserHost } from "../host";
 import { engine } from "./engine";
 
@@ -33,10 +33,16 @@ export const servicesPlatform: ServicesPlatform | null = {
   },
   removeService: (serviceId) => engine.call("removeService", { serviceId }),
   setServiceEnabled: (serviceId, enabled) => engine.call("setServiceEnabled", { serviceId, enabled }),
+  setServiceShared: (serviceId, peerPubKeyZ32, shared) => engine.call("setServiceShared", { serviceId, peerPubKeyZ32, shared }),
 
   getPeer(peerPubKeyZ32) {
     const link = engine.linkByPeer(peerPubKeyZ32);
-    return link ? { dataLink: link.dataLink, online: link.peerOnline, services: link.peerServices } : null;
+    return link ? { id: link.id, deliveryMode: link.deliveryMode, textDelivery: link.textDelivery, canSendText: link.canSendText, dhtDelivery: link.dhtDelivery, capabilities: link.capabilities, paymentMethods: link.paymentMethods, pairing: link.pairing, dataLink: link.dataLink, online: link.peerOnline, services: link.peerServices } : null;
+  },
+  async setChatPaymentMethods(peerPubKeyZ32, methods) {
+    const link = engine.linkByPeer(peerPubKeyZ32);
+    if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
+    await engine.call("setChatPaymentMethods", { linkId: link.id, methods });
   },
   connect(peerPubKeyZ32) {
     const link = engine.linkByPeer(peerPubKeyZ32);
@@ -55,6 +61,7 @@ export const servicesPlatform: ServicesPlatform | null = {
   async sendFile(peerPubKeyZ32, source) {
     const link = engine.linkByPeer(peerPubKeyZ32);
     if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
+    if (link.profile && !link.capabilities?.files) throw new Error("Connect to an updated peer to send files");
     if (source.size > LIMITS.maxFileBytes) throw new Error("That file is too large to send");
 
     const wireId = toBase64Url(randomBytes(12));
@@ -66,10 +73,19 @@ export const servicesPlatform: ServicesPlatform | null = {
       mime: sanitizeMime(source.type),
     };
     // The page and the peer share this database; the bytes never go through a message.
-    await fileStore.put({ id: file.id, linkId: link.id, blob: source, createdAt: Date.now(), direction: "out", wireId });
     const timestamp = Date.now();
+    await fileStore.put({ id: file.id, linkId: link.id, blob: source, createdAt: timestamp, direction: "out", wireId,
+      metadata: { name: file.name, size: file.size, mime: file.mime, timestamp },
+      transfer: { state: "transferring", transferred: 0, size: file.size } });
     await engine.call("sendFile", { linkId: link.id, file, timestamp });
     return { timestamp, file };
+  },
+  async retryFile(fileId) {
+    const stored = await fileStore.get(fileId);
+    if (!stored?.metadata || stored.direction !== "out") throw new Error("This file cannot be retried");
+    const link = engine.state?.links.find(link => link.id === stored.linkId);
+    if (!link || (link.profile && !link.capabilities?.files)) throw new Error("Connect to an updated peer first");
+    await engine.call("sendFile", { linkId: stored.linkId, file: { id: fileId, ...stored.metadata }, timestamp: stored.metadata.timestamp });
   },
   async deleteMessage(peerPubKeyZ32, messageId) {
     const link = engine.linkByPeer(peerPubKeyZ32);
@@ -83,11 +99,34 @@ export const servicesPlatform: ServicesPlatform | null = {
   },
 
   wallet: {
+    usdtCreate:params=>engine.call("usdtCreate",params),
+    usdtUnlock:password=>engine.call("usdtUnlock",{password}),
+    usdtReveal:password=>engine.call("usdtReveal",{password}),
+    usdtLock:()=>engine.call("usdtLock"),
+    usdtRefresh:()=>engine.call("usdtRefresh"),
+    usdtGetTestTokens:()=>engine.call("usdtGetTestTokens"),
+    usdtExportBackup:password=>engine.call("usdtExportBackup",{password}),
+    usdtRestoreBackup:(text,password)=>engine.call("usdtRestoreBackup",{text,password}),
+    arkCreate: (params) => engine.call("arkCreate",params),
+    arkUnlock: (password) => engine.call("arkUnlock",{password}),
+    arkLock: () => engine.call("arkLock"),
+    arkBackup: (password) => engine.call("arkBackup",{password}),
+    arkExportBackup:(password)=>engine.call("arkExportBackup",{password}),
+    arkRestoreBackup:(text,password)=>engine.call("arkRestoreBackup",{text,password}),
+    arkRefresh: () => engine.call("arkRefresh"),
+    arkRecover: () => engine.call("arkRecover"),
+    preparePayment: (params) => engine.call("preparePayment",params),
+    approvePayment: (id) => engine.call("approvePayment",{id}),
+    reconcilePayment: (id) => engine.call("reconcilePayment",{id}),
+    cancelPayment: (id) => engine.call("cancelPayment",{id}),
+
     testMintUrl: TEST_MINT,
+    testMintUrls: TEST_MINTS,
     getState: () => engine.state?.wallet ?? null,
     // The test mint is for trying things out right away, so it takes over as primary.
-    addMint: async (url) => void (await engine.call("walletAddMint", { url, primary: url === TEST_MINT })),
+    addMint: async (url) => void (await engine.call("walletAddMint", { url, primary: TEST_MINTS.includes(url) })),
     setPrimaryMint: (url) => engine.call("walletSetPrimaryMint", { url }),
+    setMode: (mode) => engine.call("walletSetMode", { mode }),
     removeMint: (url) => engine.call("walletRemoveMint", { url }),
     receiveLightning: (amount) => engine.call("walletReceiveLightning", { amount }),
     quoteInvoice: (invoice) => engine.call("walletQuoteInvoice", { invoice }),
@@ -102,11 +141,11 @@ export const servicesPlatform: ServicesPlatform | null = {
       const { paymentId } = await engine.call("sendPayment", { linkId: link.id, amount, memo, timestamp });
       return { timestamp, paymentId };
     },
-    async request(peerPubKeyZ32, amount, memo) {
+    async request(peerPubKeyZ32, amount, memo, method) {
       const link = engine.linkByPeer(peerPubKeyZ32);
       if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
       const timestamp = Date.now();
-      const { paymentId } = await engine.call("requestPayment", { linkId: link.id, amount, memo, timestamp });
+      const { paymentId } = await engine.call("requestPayment", { linkId: link.id, amount, memo, timestamp, method });
       return { timestamp, paymentId };
     },
     async payRequest(peerPubKeyZ32, paymentId) {
@@ -116,6 +155,12 @@ export const servicesPlatform: ServicesPlatform | null = {
     },
     reclaim: (paymentId) => engine.call("reclaimPayment", { paymentId }),
     getPayment: (paymentId) => engine.state?.payments[paymentId] ?? null,
+    async askToPay(peerPubKeyZ32, amount, method, memo) {
+      const link = engine.linkByPeer(peerPubKeyZ32);
+      if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
+      return engine.call("askToPay", { linkId: link.id, amount, method, memo, timestamp: Date.now() });
+    },
+    answerTo: (askId) => Object.values(engine.state?.payments ?? {}).find((p) => p.ask === askId && p.kind === "request" && p.direction === "in") ?? null,
   },
 
   getNetwork() {
