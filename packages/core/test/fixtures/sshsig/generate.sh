@@ -12,7 +12,7 @@ set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-message='["ghostly-peer-proof",1,"control-of-external-key","ssh","test-vector","subject","audience","context","session","nonce",1800000000,1800086400]'
+message='Ghostly identity proof v1: I control ssh:SHA256:test-vector and authorize the Ghostly key ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1uwi to present it to contacts I choose, from 2027-01-15T08:00:00Z until 2027-04-15T08:00:00Z. Nonce: AAAAAAAAAAAAAAAAAAAAAA'
 printf '%s' "$message" > "$work/message"
 printf '%s' 'a different statement' > "$work/other"
 

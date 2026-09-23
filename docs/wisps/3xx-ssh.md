@@ -14,11 +14,11 @@
 
 ## Scope
 
-An optional identity proof, under [300](300-peer-proofs.md), that a person controls an SSH key: the key signs the WISP 300 statement with OpenSSH's own tool, and a contact's app verifies the signature locally. Optionally, the proof names a GitHub or GitLab account; the contact's app then checks that the account publishes that key. Nothing here uses the key for SSH authentication, and a signature never grants a server login.
+An optional identity proof, under [300](300-peer-proofs.md), that a person controls an SSH key. The key signs, once, the WISP 300 **binding statement**, which authorizes the profile's own proof key for a validity period; each chat the proof is shared with then gets a presentation signed by that proof key (shared WISP 300 machinery, no SSH involved). A contact's app verifies both locally. Optionally, the proof names a GitHub or GitLab account; the contact's app then checks that the account publishes that key. Nothing here uses the key for SSH authentication, and a signature never grants a server login.
 
 ## Producing the evidence
 
-The person runs `ssh-keygen -Y sign` (OpenSSH 8.1 or later) with namespace **`ghostly`** on the exact statement bytes, without a trailing newline, and pastes the armored output:
+When adding the identity to their profile, the person runs `ssh-keygen -Y sign` (OpenSSH 8.1 or later) with namespace **`ghostly`** on the exact binding statement bytes, without a trailing newline, and pastes the armored output:
 
 ```
 printf '%s' '<statement>' | ssh-keygen -Y sign -n ghostly -f ~/.ssh/id_ed25519
@@ -26,7 +26,7 @@ printf '%s' '<statement>' | ssh-keygen -Y sign -n ghostly -f ~/.ssh/id_ed25519
 
 The app shows this command with the statement filled in and a copy button, refusing to build it if the statement would need shell escaping. `-f` may name a public key whose private half lives in `ssh-agent` (a hardware token, a password manager's agent). Windows users without a POSIX shell can save the statement to a file and run `ssh-keygen -Y sign -n ghostly -f <key> <file>`, then paste `<file>.sig`; a single trailing newline added by an editor is accepted, nothing else is.
 
-The private key never enters Ghostly. The namespace keeps these signatures from being valid anywhere else: a `git` commit signature or a `file` signature over the same bytes is refused, and a `ghostly` signature is useless to Git or `ssh-keygen -Y verify -n file`.
+This happens once per binding, not per chat or contact. The private key never enters Ghostly. The namespace keeps these signatures from being valid anywhere else: a `git` commit signature or a `file` signature over the same bytes is refused, and a `ghostly` signature is useless to Git or `ssh-keygen -Y verify -n file`.
 
 ## Evidence and verification
 
