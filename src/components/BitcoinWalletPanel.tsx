@@ -55,8 +55,8 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
             <div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
               <input aria-label="Bitcoin recipient address" placeholder="Recipient Bitcoin address" spellCheck={false} className={`${input} font-mono text-xs`} value={address} onChange={(e) => setAddress(e.target.value.trim())} />
               <Amount value={amount} onChange={setAmount} unit={unit} testId="bitcoin-amount" />
-              <label className="flex items-center gap-2 text-xs text-text-secondary">Most you accept in fees
-                <input aria-label="Maximum fee in sats" inputMode="numeric" className={`${input} w-28`} value={feeCap} onChange={(e) => setFeeCap(e.target.value.replace(/\D/g, ""))} /> sats
+              <label className="flex flex-wrap items-center gap-2 text-xs text-text-secondary"><span className="min-w-0">Most you accept in fees</span>
+                <input aria-label="Maximum fee in sats" inputMode="numeric" className={`${input} !w-28 shrink-0`} value={feeCap} onChange={(e) => setFeeCap(e.target.value.replace(/\D/g, ""))} /> sats
               </label>
               <Button variant="primary" className="w-full" disabled={busy || !!review || !address || !Number(amount)} onClick={() => void run(async () => {
                 setReview(await wallet.preparePayment({ target: { method: "bitcoin", network: bt.network!, provider: "onchain", asset: "BTC", unit: "sat", address, expiresAt: Date.now() + 15 * 60 * 1000 }, amount: Number(amount), feeCap: Number(feeCap), payee: address }));
@@ -67,8 +67,8 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
           {action === "history" && (
             <div className="bg-surface rounded-xl p-4 space-y-2 animate-fade-in" data-testid="bitcoin-history">
               {bt.history.length === 0 ? <Notice>Nothing yet</Notice> : bt.history.map((tx) => (
-                <div key={tx.txid} className="text-sm py-1 flex justify-between gap-2" data-testid="bitcoin-tx">
-                  <span className="font-mono text-xs text-text-muted truncate">{tx.txid}</span>
+                <div key={tx.txid} className="text-sm py-1 flex flex-wrap justify-between gap-x-2" data-testid="bitcoin-tx">
+                  <span className="min-w-0 flex-1 font-mono text-xs text-text-muted truncate">{tx.txid}</span>
                   <span className={`tabular-nums shrink-0 ${tx.amount > 0 ? "text-accent" : "text-text-primary"}`}>{tx.amount > 0 ? "+" : "−"}{Math.abs(tx.amount).toLocaleString()} · {tx.confirmations ? `${tx.confirmations} conf.` : "unconfirmed"}</span>
                 </div>
               ))}
