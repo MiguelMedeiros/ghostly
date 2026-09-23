@@ -81,6 +81,25 @@ describe("relay transport under pressure", () => {
 });
 
 describe("relay transport publishing in bursts", () => {
+  it("does not hammer a relay with publish retries after a CORS/network failure", async () => {
+    let requests = 0;
+    const relay = new RelayTransport({ relays: ["https://a.test"], fetch: (async () => {
+      requests++; throw new TypeError("Failed to fetch");
+    }) as typeof fetch });
+    const id = createIdentity();
+    for (let i = 0; i < 10; i++) await expect(relay.publish(id, [{ label: "_ts", value: "1" }])).rejects.toThrow();
+    expect(requests).toBe(1);
+  });
+  it("budgets writes as well as polls", async () => {
+    let requests = 0;
+    const relay = new RelayTransport({ relays: ["https://a.test"], fetch: (async () => {
+      requests++; return new Response(null, { status: 204 });
+    }) as typeof fetch });
+    const id = createIdentity();
+    for (let i = 0; i < 30; i++) await relay.publish(id, [{ label: "_ts", value: "1" }]);
+    await expect(relay.publish(id, [{ label: "_ts", value: "1" }])).rejects.toThrow("budget");
+    expect(requests).toBe(30);
+  });
   it("tells the relay which packet it replaces, and insists when the relay never saw it", async () => {
     const id = createIdentity();
     const seen: (string | null)[] = [];
@@ -108,5 +127,36 @@ describe("relay transport publishing in bursts", () => {
     stored = null;
     await relay.publish(id, [{ label: "_ts", value: "4" }]);
     expect(seen.slice(3)).toEqual([seen[2] === null ? null : expect.any(String), null]);
+  });
+});
+
+describe("relay operation backoff", () => {
+  it("keeps healthy reads available while backing off failed publications", async () => {
+    const calls: string[] = [];
+    const relay = new RelayTransport({ relays: ["https://a.test"], fetch: (async (_url, init) => {
+      calls.push(init?.method ?? "GET");
+      if (init?.method === "PUT") throw new TypeError("Failed to fetch");
+      return new Response(null, {status:404});
+    }) as typeof fetch });
+    const id = createIdentity();
+    for (let i = 0; i < 3; i++) {
+      await expect(relay.publish(id, [])).rejects.toThrow();
+      expect(await relay.resolve(id.pubKeyZ32)).toBeNull();
+    }
+    expect(calls).toEqual(["PUT", "GET", "GET", "GET"]);
+  });
+
+  it.each(["GET", "PUT"])("keeps observed %s rate limits global across operations", async method => {
+    let requests = 0;
+    const relay = new RelayTransport({ relays: ["https://a.test"], fetch: (async () => {
+      requests++;
+      return new Response(null, {status:429, headers:{"retry-after":"30"}});
+    }) as typeof fetch });
+    const id = createIdentity();
+    if (method === "GET") await expect(relay.resolve(id.pubKeyZ32)).rejects.toThrow();
+    else await expect(relay.publish(id, [])).rejects.toThrow();
+    await expect(relay.publish(id, [])).rejects.toThrow();
+    await expect(relay.resolve(id.pubKeyZ32)).rejects.toThrow();
+    expect(requests).toBe(1);
   });
 });

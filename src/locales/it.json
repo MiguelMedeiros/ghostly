@@ -1,5 +1,9 @@
 {
   "common": {
+    "chatCreated": "Chat creata il {{date}}",
+    "deleteChatTitle": "Eliminare la chat?",
+    "deleteChatLocal": "La chat e la cronologia saranno eliminate da questo dispositivo, non da quello del contatto.",
+    "anonymous": "Anonimo",
     "save": "Salva",
     "cancel": "Annulla",
     "delete": "Elimina",
@@ -24,7 +28,13 @@
     "deleteChat": "Elimina chat",
     "deleteAllChats": "Elimina tutte le chat",
     "copyInvite": "Copia codice invito",
-    "settings": "Impostazioni"
+    "settings": "Impostazioni",
+    "new": "Nuova",
+    "join": "Entra",
+    "joinChat": "Entra in una chat",
+    "quiet": "C'è silenzio qui...",
+    "quietHint": "È ora di infestare qualcuno! 👻",
+    "startChat": "Nuova chat"
   },
   "chat": {
     "typeMessage": "Scrivi un messaggio...",
@@ -38,9 +48,38 @@
     "deleteMessage": "Elimina messaggio",
     "deleteMessageHint": "Eliminato solo qui. Il tuo contatto conserva la sua copia."
   },
+  "invite": {
+    "live": "Chat dal vivo",
+    "text": "Solo testo",
+    "details": "Dettagli invio",
+    "textDetails": "Solo testo pubblica brevi messaggi cifrati sulla DHT, anche quando il contatto è offline. Fino a 256 byte UTF-8, validi per 5 minuti. La consegna non è garantita.",
+    "copy": "Copia invito",
+    "copyFailed": "Impossibile copiare. Riprova o condividi l’invito.",
+    "shareFailed": "Impossibile condividere. Copia l’invito."
+  },
+  "join": {
+    "title": "Unisciti a una chat",
+    "close": "Chiudi",
+    "cameraPreview": "Anteprima fotocamera QR",
+    "paste": "Incolla dagli appunti",
+    "scan": "Scansiona QR",
+    "image": "Apri immagine",
+    "invite": "Codice invito",
+    "submit": "Unisciti",
+    "invalid": "Invito non valido. Richiedine uno nuovo.",
+    "empty": "Appunti vuoti. Incolla un invito qui sotto.",
+    "clipboardUnavailable": "Appunti non disponibili. Incolla un invito qui sotto.",
+    "cameraUnavailable": "Fotocamera non disponibile. Incolla un invito o apri un’immagine.",
+    "imageSize": "Scegli un’immagine inferiore a 12 MB.",
+    "noQr": "QR non trovato. Prova un’immagine più nitida.",
+    "imageFailed": "Impossibile leggere l’immagine. Prova PNG o JPEG."
+  },
   "home": {
+    "linkFailed": "Impossibile aprire il link.",
+    "viewRelease": "Visualizza questa versione",
+    "unpublishedVersion": "Versione locale — vedi le versioni pubblicate",
     "welcome": "Benvenuto su Ghostly",
-    "description": "Messaggistica sicura ed effimera che rispetta la tua privacy",
+    "description": "Messaggi privati ed effimeri.",
     "createChat": "Crea Nuova Chat",
     "features": {
       "encrypted": "Crittografia end-to-end",
@@ -49,6 +88,11 @@
     }
   },
   "settings": {
+    "systemNotifications": "Notifiche di sistema",
+    "noticesRunning": "Mentre Ghostly è aperto.",
+    "noticesDenied": "Notifiche bloccate. Controlla le impostazioni del dispositivo o browser.",
+    "noticesUnavailable": "Notifiche non disponibili qui.",
+    "privateNotice": "Nuovo messaggio",
     "title": "Impostazioni",
     "profile": "Profilo",
     "defaultNickname": "Nickname Predefinito",
@@ -104,7 +148,7 @@
     "lockNow": "Blocca Ora",
     "notifications": "Notifiche",
     "notificationSounds": "Suoni di notifica",
-    "notificationSoundsDescription": "Riproduci un suono all'arrivo di nuovi messaggi",
+    "notificationSoundsDescription": "Suoni per messaggi, chiamate e pagamenti confermati",
     "data": "Dati e Archiviazione",
     "storageUsed": "Spazio utilizzato",
     "clearAllData": "Cancella tutti i dati",
@@ -175,6 +219,8 @@
   "tabs": {
     "chats": "Chat",
     "wallet": "Portafoglio",
-    "share": "Condividi"
+    "share": "Condividi",
+    "profile": "Profilo",
+    "services": "Servizi"
   }
 }

@@ -34,9 +34,10 @@ export function ghostlyPlatformModules(): Plugin {
 
 /** There is no Tauri in a browser. */
 export const tauriAliases: NonNullable<UserConfig["resolve"]>["alias"] = {
+  "@tauri-apps/plugin-notification": platform("nativeNotifications.ts"),
   "@tauri-apps/api/core": platform("tauri.ts"),
   "@tauri-apps/api/app": platform("tauri.ts"),
 };
 
-/** One `.env` for every client (VITE_GIPHY_API_KEY). */
+/** One `.env` for every client. */
 export const repositoryRoot = resolve(here, "../..");

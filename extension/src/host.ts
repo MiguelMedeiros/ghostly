@@ -9,7 +9,8 @@ export const extensionHost: BrowserHost = {
   updates: extensionUpdates,
 
   async connect(onMessage, onDisconnect) {
-    await chrome.runtime.sendMessage({ target: "background", type: "ensure-engine" } satisfies RuntimeMessage);
+    const ready = await chrome.runtime.sendMessage({ target: "background", type: "ensure-engine" } satisfies RuntimeMessage);
+    if (!ready?.ok) throw new Error(ready?.error ?? "The Ghostly peer is unavailable. Reopen the extension to retry.");
     const port = chrome.runtime.connect({ name: UI_PORT });
     port.onMessage.addListener(onMessage);
     port.onDisconnect.addListener(() => {

@@ -42,6 +42,7 @@ export class RelayTransport implements PkarrTransport {
   private readonly lastTimestamp = new Map<string, bigint>();
   private readonly newest = new Map<string, SignedPacket>();
   private readonly coolingDown = new Map<string, number>();
+  private readonly networkCooldown = new Map<string, number>();
   private cursor = 0;
   private readonly spent = new Map<string, number[]>();
   /** Timestamp of the last packet sent to each relay, per key: the compare-and-swap value for the next one. */
@@ -115,7 +116,7 @@ export class RelayTransport implements PkarrTransport {
     let reachable = false;
     for (let i = 0; i < this.relays.length; i++) {
       const relay = this.relays[(start + i) % this.relays.length];
-      if ((this.coolingDown.get(relay) ?? 0) > Date.now() || !this.take(relay)) continue;
+      if (this.isCoolingDown(relay, "GET") || !this.take(relay)) continue;
       try {
         const response = await this.request(`${relay}/${pubKeyZ32}`, { method: "GET" });
         if (response.status === 429) {
@@ -132,12 +133,13 @@ export class RelayTransport implements PkarrTransport {
         break;
       } catch {
         // In a browser a rate-limited answer often arrives without CORS headers and
-        // surfaces as a network error, so this is treated like a 429: try the next relay.
-        this.coolingDown.set(relay, Date.now() + NETWORK_ERROR_COOLDOWN_MS);
+        // surfaces as a network error. Back off this operation and try the next relay.
+        // Unlike an observable 429, this does not establish a relay-wide limit.
+        this.networkCooldown.set(`GET ${relay}`, Date.now() + NETWORK_ERROR_COOLDOWN_MS);
       }
     }
     if (!reachable) {
-      const resting = this.relays.every((r) => (this.coolingDown.get(r) ?? 0) > Date.now() || (this.spent.get(r)?.length ?? 0) >= REQUESTS_PER_MINUTE);
+      const resting = this.relays.every((r) => this.isCoolingDown(r, "GET") || (this.spent.get(r)?.length ?? 0) >= REQUESTS_PER_MINUTE);
       // Holding back is not an outage: report what is already known.
       if (resting && this.newest.has(pubKeyZ32)) return this.newest.get(pubKeyZ32)!;
       throw new Error("No Pkarr relay reachable");
@@ -145,15 +147,20 @@ export class RelayTransport implements PkarrTransport {
     return this.newest.get(pubKeyZ32) ?? null;
   }
 
-  private put(relay: string, pubKeyZ32: string, payload: Uint8Array, replaces?: bigint): Promise<Response> {
-    return this.request(`${relay}/${pubKeyZ32}`, {
+  private async put(relay: string, pubKeyZ32: string, payload: Uint8Array, replaces?: bigint): Promise<Response> {
+    if (this.isCoolingDown(relay, "PUT")) throw new Error("Discovery relay is cooling down; retry shortly");
+    if (!this.take(relay)) throw new Error("Discovery request budget reached; retry shortly");
+    try { return await this.request(`${relay}/${pubKeyZ32}`, {
       method: "PUT",
       body: payload as BodyInit,
       headers: replaces === undefined ? undefined : { "If-Match": replaces.toString() },
-    });
+    }); } catch (error) {
+      this.networkCooldown.set(`PUT ${relay}`, Date.now() + NETWORK_ERROR_COOLDOWN_MS);
+      throw error;
+    }
   }
 
-  /** Polls wait their turn; publishes are rare and always go out. */
+  /** Discovery reads and writes share a bounded per-relay request budget. */
   private take(relay: string): boolean {
     const now = Date.now();
     const recent = (this.spent.get(relay) ?? []).filter((at) => now - at < 60_000);
@@ -164,6 +171,10 @@ export class RelayTransport implements PkarrTransport {
     recent.push(now);
     this.spent.set(relay, recent);
     return true;
+  }
+
+  private isCoolingDown(relay: string, method: "GET" | "PUT"): boolean {
+    return Math.max(this.coolingDown.get(relay) ?? 0, this.networkCooldown.get(`${method} ${relay}`) ?? 0) > Date.now();
   }
 
   private coolDown(relay: string, response: Response): void {

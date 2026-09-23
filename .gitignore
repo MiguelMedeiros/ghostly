@@ -16,3 +16,6 @@ test-results
 playwright-report
 playwright-report-desktop
 dist-e2e
+
+# Generated native HyperDHT runtime
+/src-tauri/native-runtime/

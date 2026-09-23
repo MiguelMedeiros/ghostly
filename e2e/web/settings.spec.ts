@@ -16,11 +16,12 @@ test("the nickname is kept, and can be made up", async ({ peer }) => {
   const { page } = await peer("alice");
   await page.goto("/#/settings");
   const nick = page.getByPlaceholder("Enter your nickname...");
-  await nick.fill("Casper");
+  // Use a custom name outside the generator's vocabulary (which includes Casper).
+  await nick.fill("QA custom nickname");
   await page.reload();
-  await expect(nick).toHaveValue("Casper");
+  await expect(nick).toHaveValue("QA custom nickname");
   await page.getByTitle("Generate random name").click();
-  await expect(nick).not.toHaveValue("Casper");
+  await expect(nick).not.toHaveValue("QA custom nickname");
   await expect(nick).not.toHaveValue("");
 });
 

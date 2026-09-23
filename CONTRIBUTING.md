@@ -92,6 +92,10 @@ ghostly/
    - Screenshots if applicable
    - Your OS and app version
 
+### Protocol proposals
+
+See the [WISP working catalogue](docs/wisps/README.md) and [process draft](docs/wisps/00-process.md). Clearly separate implemented behavior from proposed wire formats, include security and compatibility analysis, and provide an interoperability plan. Draft status does not mean an integration is shipped.
+
 ### Suggesting Features
 
 Open an issue with the `enhancement` label describing:

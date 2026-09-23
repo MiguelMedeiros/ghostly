@@ -13,6 +13,7 @@ import {
 } from "@ghostly/core";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { createInPageHost } from "@ghostly/browser/inPageHost";
+import { createIrohEndpoint, createHyperEndpoint } from "./nativeTransports";
 import { desktopUpdates } from "./updates";
 import { engine } from "@ghostly/browser/platform/engine";
 
@@ -103,9 +104,9 @@ function serveServiceWindows(server: EngineServer): void {
 export function createDesktopHost(version: string) {
   return createInPageHost({
     version,
-    features: { shareLocalServices: true, openServices: true },
+    features: { shareLocalServices: true, openServices: true, profiles: true },
     updates: desktopUpdates,
-    node: { transport: tauriTransport, pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch },
+    node: { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, transport: tauriTransport, pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch },
     onServer: serveServiceWindows,
     // There is nothing to ask: the user typed the address, and Rust only ever reaches loopback.
     requestLocalAccess: async () => true,

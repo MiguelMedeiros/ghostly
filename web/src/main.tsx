@@ -5,11 +5,19 @@ import { startSessionSync } from "@ghostly/browser/platform/sync";
 import { Root } from "../../src/Root";
 import { becomeThePeer } from "@ghostly/browser/inPageHost";
 import { webHost } from "./host";
+import { setDatabaseName } from "@ghostly/browser/shared/idb";
+import { setStorageProfile } from "../../src/lib/storage";
+import { activeProfileId, namespaceOf } from "../../src/lib/profiles";
 
 // The same UI and the same peer as the extension; only the host differs.
 const root = createRoot(document.getElementById("root")!);
 
-await becomeThePeer("ghostly-peer", () =>
+// The chosen local profile (WISP 04): its own chats, database, settings and single-peer lock. The
+// default profile keeps the original names, so nothing existing moves.
+const profile = namespaceOf(activeProfileId());
+if (profile) { setStorageProfile(profile); setDatabaseName(`ghostly_${profile}`); }
+
+await becomeThePeer(profile ? `ghostly-peer-${profile}` : "ghostly-peer", () =>
   root.render(
     <div style={{ height: "100vh", display: "grid", placeItems: "center", background: "#0b141a", color: "#8696a0", font: "15px system-ui", textAlign: "center", padding: 24 }}>
       <div>

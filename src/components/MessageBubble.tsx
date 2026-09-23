@@ -1,9 +1,12 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useOutsideDismiss } from "../hooks/useDismiss";
+import { publicKeyLabel } from "../lib/publicKeyLabel";
+import React, { useMemo, useRef, useState } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { FileBubble } from "./FileBubble";
 import { InvoiceBubble } from "./InvoiceBubble";
 import { findMoney } from "../lib/money";
 import { PaymentBubble } from "./PaymentBubble";
+import { engine } from "@ghostly/browser/platform/engine";
 import type { ChatMessage } from "../lib/types";
 
 interface MessageBubbleProps {
@@ -11,15 +14,17 @@ interface MessageBubbleProps {
   peerAck?: number;
   /** Needed by payment bubbles, which can act on a request. */
   peerPubKey?: string;
+  /** The contact's current name, for messages that do not carry one of their own. */
+  peerNick?: string;
   /** Forgets this message on this device. Left out where a chat cannot be edited. */
   onDelete?: () => void;
 }
 
 const IMAGE_URL_RE =
-  /^https?:\/\/\S+\.(gif|png|jpe?g|webp)(\?\S*)?$/i;
-const GIPHY_RE = /^https?:\/\/media\d*\.giphy\.com\//i;
+  /^https:\/\/\S+\.(gif|png|jpe?g|webp)(\?\S*)?$/i;
+const GIPHY_RE = /^https:\/\/media\d*\.giphy\.com\//i;
 /** GeoCities GIFs from the Wayback Machine (the picker's "Retro" source): tiny pixel art. */
-const WAYBACK_GIF_RE = /^https:\/\/web\.archive\.org\/web\/\d+\/\S+\.gif$/i;
+const WAYBACK_GIF_RE = /^https:\/\/web\.archive\.org\/web\/(\d+[a-z_]*\/)?\S+\.gif$/i;
 const DATA_IMAGE_SAFE_RE = /^data:image\/(png|jpe?g|gif|webp);/i;
 const URL_RE = /https?:\/\/\S+/g;
 
@@ -32,6 +37,10 @@ function detectContentType(text: string): ContentType {
   if (IMAGE_URL_RE.test(trimmed)) return "image";
   return "text";
 }
+
+/** Pictures that show by themselves: inline data, and the GIF sources the picker uses. */
+const autoLoads = (url: string) => DATA_IMAGE_SAFE_RE.test(url) || GIPHY_RE.test(url) || WAYBACK_GIF_RE.test(url);
+const hostOf = (url: string) => { try { return new URL(url).host; } catch { return "picture"; } };
 
 function isOnlyEmojis(text: string): boolean {
   const emojiPattern =
@@ -203,21 +212,7 @@ function MessageActions({ onDelete, align }: { onDelete: () => void; align: "lef
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: MouseEvent) => {
-      if (!ref.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
+  useOutsideDismiss(ref, open, () => setOpen(false));
 
   return (
     <div ref={ref} className="relative self-center shrink-0">
@@ -273,7 +268,7 @@ function MessageActions({ onDelete, align }: { onDelete: () => void; align: "lef
   );
 }
 
-export function MessageBubble({ message, peerAck = 0, peerPubKey = "", onDelete }: MessageBubbleProps) {
+export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick = "", onDelete }: MessageBubbleProps) {
   // Only what arrives while you watch moves; history is just there.
   const [enter] = useState(() =>
     Date.now() - message.timestamp < 5000
@@ -285,9 +280,10 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", onDelete 
   const money = useMemo(() => (message.paymentId || message.file ? null : findMoney(message.text)), [message.paymentId, message.file, message.text]);
   const [showTech, setShowTech] = useState(false);
   const [imgError, setImgError] = useState(false);
+  const [revealed, setRevealed] = useState(false);
   const isMe = message.sender === "me";
   const isSystem = message.sender === "system";
-  const isAcked = isMe && peerAck >= message.timestamp;
+  const isAcked = isMe && (message.delivery ? message.delivery === "delivered" : peerAck >= message.timestamp);
   const time = new Date(message.timestamp).toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
@@ -295,7 +291,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", onDelete 
 
   if (isSystem && message.systemEvent?.type === "join") {
     const pubKeyShort = message.systemEvent.pubKey
-      ? message.systemEvent.pubKey.slice(0, 8) + "..."
+      ? publicKeyLabel(message.systemEvent.pubKey)
       : "";
     
     return (
@@ -389,9 +385,10 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", onDelete 
       >
         <TailSvg side={isMe ? "right" : "left"} />
 
-        {message.nick && !isMe && (
+        {/* A paired message carries no name of its own: the contact has one name, known from the link. */}
+        {(message.nick || peerNick) && !isMe && (
           <div className="text-accent-hover text-[12.8px] font-medium mb-[2px] leading-[22px]">
-            ~{message.nick}
+            ~{message.nick || peerNick}
           </div>
         )}
 
@@ -407,7 +404,17 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", onDelete 
           </div>
         ) : money ? (
           <div className="clearfix">
-            <InvoiceBubble money={money} mine={isMe} />
+            <InvoiceBubble money={money} mine={isMe} peerPubKey={peerPubKey} />
+            {timestampEl}
+          </div>
+        ) : contentType === "image" && !isMe && !revealed && !autoLoads(message.text.trim()) ? (
+          // Loading a picture tells its server this device's address: from anywhere but the GIF sources,
+          // a contact's picture waits for a click.
+          <div className="clearfix">
+            <button type="button" data-testid="image-reveal" onClick={() => setRevealed(true)}
+              className="text-sm text-accent underline decoration-dotted cursor-pointer break-all text-left">
+              Show picture · {hostOf(message.text.trim())}
+            </button>
             {timestampEl}
           </div>
         ) : contentType === "image" ? (
@@ -442,6 +449,17 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", onDelete 
             {timestampEl}
           </div>
         )}
+
+        {isMe && message.delivery && <div className="clear-both pt-1 text-xs text-text-secondary" role="status">
+          {message.delivery === "delivered" ? "Received by peer" : message.delivery === "sent" ? "Sent · waiting for receipt" : message.delivery === "sending" ? "Sending…" : "Delivery unconfirmed"}
+          {message.delivery === "failed" && <>
+            <span className="block">{message.deliveryError}</span>
+            <button className="underline text-accent cursor-pointer" onClick={() => {
+              const link = engine.linkByPeer(peerPubKey);
+              if (link) void engine.call("retryMessage", { linkId: link.id, messageId: message.id }).catch(() => {});
+            }}>Retry message</button>
+          </>}
+        </div>}
 
         {showTech && message.meta && (
           <div className="mt-[6px] pt-[6px] border-t border-[hsla(0,0%,100%,0.08)] text-[9px] text-text-secondary space-y-[2px] animate-fade-in font-mono clear-both">

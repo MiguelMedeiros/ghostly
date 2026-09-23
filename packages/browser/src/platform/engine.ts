@@ -1,5 +1,5 @@
 import { getBrowserHost, type EngineConnection } from "../host";
-import type { EngineApi, EngineEvent, EngineMethod, RpcResponse } from "../shared/rpc";
+import type { AttentionEvent, EngineApi, EngineEvent, EngineMethod, RpcResponse } from "../shared/rpc";
 import type { EngineState, LinkView, StoredMessage } from "../shared/types";
 
 type Result<M extends EngineMethod> = Awaited<ReturnType<EngineApi[M]>>;
@@ -18,7 +18,14 @@ class EngineClient {
   private readonly pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
   private readonly stateListeners = new Set<() => void>();
   private readonly messageListeners = new Set<(linkId: string, messages: StoredMessage[]) => void>();
+  private readonly attentionListeners = new Set<(event: AttentionEvent) => void>();
   private readonly callListeners = new Set<(linkId: string, signal: string) => void>();
+  /**
+   * The latest call offer per link, until something answers or ends it: a chat that is not open
+   * when the call comes in is loaded because of it, and then reads the offer it would have missed.
+   * Offers expire by themselves (`parseCallSignal` refuses old ones).
+   */
+  private readonly offers = new Map<string, string>();
 
   subscribe(listener: () => void): () => void {
     this.stateListeners.add(listener);
@@ -28,6 +35,18 @@ class EngineClient {
   onMessages(listener: (linkId: string, messages: StoredMessage[]) => void): () => void {
     this.messageListeners.add(listener);
     return () => this.messageListeners.delete(listener);
+  }
+
+  onAttention(listener: (event: AttentionEvent) => void): () => void {
+    this.attentionListeners.add(listener);
+    return () => this.attentionListeners.delete(listener);
+  }
+
+  /** The pending offer for this link, taken: it is handed out once. */
+  takeCallOffer(linkId: string): string | undefined {
+    const offer = this.offers.get(linkId);
+    this.offers.delete(linkId);
+    return offer;
   }
 
   onCallSignal(listener: (linkId: string, signal: string) => void): () => void {
@@ -72,6 +91,9 @@ class EngineClient {
 
   private handle(message: EngineEvent | RpcResponse): void {
     switch (message.kind) {
+      case "attention":
+        for (const listener of this.attentionListeners) listener(message.event);
+        break;
       case "state":
         this.state = message.state;
         for (const listener of this.stateListeners) listener();
@@ -80,9 +102,14 @@ class EngineClient {
         this.messages.set(message.linkId, message.messages);
         for (const listener of this.messageListeners) listener(message.linkId, message.messages);
         break;
-      case "call-signal":
+      case "call-signal": {
+        let kind: unknown;
+        try { kind = (JSON.parse(message.signal) as { t?: unknown })?.t; } catch { kind = undefined; }
+        if (kind === "o") this.offers.set(message.linkId, message.signal);
+        else this.offers.delete(message.linkId);
         for (const listener of this.callListeners) listener(message.linkId, message.signal);
         break;
+      }
       case "response": {
         const pending = this.pending.get(message.id);
         this.pending.delete(message.id);

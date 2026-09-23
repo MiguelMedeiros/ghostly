@@ -161,3 +161,37 @@ pub fn updater_can_install() -> bool {
         true
     }
 }
+
+/// Open only Ghostly's repository/release pages, in the system browser.
+#[tauri::command]
+pub fn open_project_link(url: String) -> Result<(), String> {
+    let root = "https://github.com/MiguelMedeiros/ghostly";
+    if url != root && url != format!("{root}/releases")
+        && !url.strip_prefix(&format!("{root}/releases/tag/"))
+            .is_some_and(|tag| !tag.is_empty() && tag.bytes().all(|c| c.is_ascii_alphanumeric() || b".-_".contains(&c))) {
+        return Err("Not a Ghostly project link".into());
+    }
+    #[cfg(target_os = "macos")]
+    let result = std::process::Command::new("open").arg(&url).spawn();
+    #[cfg(target_os = "linux")]
+    let result = std::process::Command::new("xdg-open").arg(&url).spawn();
+    #[cfg(target_os = "windows")]
+    let result = std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url]).spawn();
+    result.map(|_| ()).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod project_link_tests {
+    #[test]
+    fn rejects_links_outside_the_project_before_launching_anything() {
+        for url in [
+            "https://example.com",
+            "file:///etc/passwd",
+            "https://github.com/MiguelMedeiros/ghostly.evil/releases",
+            "https://github.com/MiguelMedeiros/ghostly/releases/tag/../../other",
+            "https://github.com/MiguelMedeiros/ghostly/releases/tag/v1?redirect=evil",
+        ] {
+            assert!(super::open_project_link(url.into()).is_err());
+        }
+    }
+}

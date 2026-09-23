@@ -1,8 +1,10 @@
 # The Ghost Protocol
 
-Ghostly is an ephemeral, identity-addressed peer-to-peer service layer. Chat, voice, video and web applications are services on top of it. A peer's services exist while the peer is online, and nowhere else.
+Ghostly is an ephemeral, identity-addressed peer-to-peer service layer. Chat, voice, video and web applications are services on top of it. A peer's live endpoints are reachable while the peer is online; local history and other retained state can remain afterwards.
 
-This document describes the protocol as implemented in [`packages/core`](../packages/core), which Ghostly Desktop, Ghostly Browser and the CLI share. Sections marked **v1** or **v2** are additions; everything else is the protocol Ghostly has always spoken, unchanged.
+This document describes the protocol as implemented in [`packages/core`](../packages/core), which Ghostly Desktop, Ghostly Browser and the CLI share. The [WISP working catalogue](wisps/README.md) separates this implemented profile from proposed modular extensions and groups. Sections marked **v1** or **v2** are additions; everything else is the protocol Ghostly has always spoken, unchanged.
+
+An opt-in [experimental paired-chat profile](wisps/PAIRED-CHAT-INCREMENT.md) adds version agreement and participation-key confirmation. The [native transport increment](wisps/TRANSPORT-INCREMENT.md) extends that experiment to Iroh and HyperDHT on desktop. The sections below continue to describe the legacy profile; the experiment is not full WISP conformance.
 
 ## 1. Identities and links
 
@@ -22,7 +24,7 @@ The peer that creates a link generates both keypairs and the key, keeps one side
 <seed, base64url>/<peer public key, z-base-32>/<encryption key, base64url>
 ```
 
-Every link has its own identities. Two of your peers cannot tell they are talking to the same person, and there is no long-lived key to correlate. Holding the invite is what authenticates a peer: only the two holders can decrypt the link's records, and only they can sign for its two keys.
+Every link has its own identities, persisted locally for reconnection. This avoids reusing one identity across links, but network addresses, timing or application data can still correlate peers. The creator initially knows both seeds. Any holder of a copied invite has the joining seed and shared encryption key; the legacy format is not cryptographically consumed after joining. Removing its display does not revoke a copy. See the proposed [key lifecycle](wisps/02-peer-keys.md) and [admission protocol](wisps/800-invite-join.md).
 
 The invite is a bearer secret and must travel over a private channel.
 
@@ -30,7 +32,7 @@ The invite is a bearer secret and must travel over a private channel.
 
 Each peer publishes one Pkarr signed packet under its link identity and polls the peer's. A packet is a DNS message with TXT records, signed per BEP44 and stored in the Mainline DHT. The DNS message is at most **1000 bytes**.
 
-All values except `_ts` and `_ack` are `base64(nonce(24) || secretbox(plaintext))` with XSalsa20-Poly1305 under the link key. TTL is 300.
+All values except `_ts` and `_ack` are `base64(nonce(24) || secretbox(plaintext))` with XSalsa20-Poly1305 under the link key. TTL is 300 seconds. This is not guaranteed erasure: observers, contacts and infrastructure can retain copies. A later leak of the symmetric link key can expose previously recorded values encrypted under that key; per-link identities alone do not provide forward secrecy.
 
 | Label | Content | Since |
 |---|---|---|
@@ -48,7 +50,7 @@ Clients ignore labels they do not know. A v0 client therefore keeps working with
 
 **Presence.** A peer that advertises services publishes on start and republishes every 4 minutes. It is considered online while its packet carries `_svc` and is younger than 10 minutes. When it goes offline it publishes once more without `_svc` and `_rtc`. If it cannot (the machine lost power), the packet goes stale on its own. Presence is a hint; the real test is whether the data link comes up.
 
-**Transports.** Desktop and the CLI talk to the DHT directly and to Pkarr relays (the Rust client's defaults). Browsers cannot open UDP sockets and use relays only: `PUT /<key>` and `GET /<key>` with `<signature(64)><timestamp µs, u64 BE><DNS packet>`. A relay is an HTTP bridge to the DHT. It sees signed, encrypted packets, cannot forge or read them, and never carries application traffic. Browser peers publish to every configured relay and read from them in turn, one request per poll, keeping the newest validly signed packet seen; the relay list is user-configurable. Public relays rate limit by IP (120 requests a minute when this was written), so relay clients poll slower than DHT clients (4 s active, 2 s while signaling for at most 45 s, 30 s in the background, 60 s while the data link is up), back off from a relay that answers 429 (or fails at the network level, which is how a browser sees a 429 without CORS headers), keep to a budget of 30 requests a minute per relay, send `If-Match: <timestamp of the packet being replaced>` so that a burst of publishes is not refused with 428 while the previous put is still in flight, and open the data link on their own when the peer is online so that chat and call signaling leave Pkarr alone.
+**Transports.** Desktop and the CLI talk to the DHT directly and to Pkarr relays (the Rust client's defaults). Browsers cannot open UDP sockets and use relays only: `PUT /<key>` and `GET /<key>` with `<signature(64)><timestamp µs, u64 BE><DNS packet>`. A relay is an HTTP bridge to the DHT. It sees public keys, signed packets, plaintext `_ts`/`_ack`, sizes and activity. Without link secrets it cannot decrypt protected values or forge the expected signature. It carries the small application messages present in records, but not bulk data-link traffic. Browser peers publish to every configured relay and read from them in turn, one request per poll, keeping the newest validly signed packet seen; the relay list is user-configurable. Public relays rate limit by IP (120 requests a minute when this was written), so relay clients poll slower than DHT clients (4 s active, 2 s while signaling for at most 45 s, 30 s in the background, 60 s while the data link is up), back off from a relay that answers 429 (or fails at the network level, which is how a browser sees a 429 without CORS headers), keep to a budget of 30 requests a minute per relay, send `If-Match: <timestamp of the packet being replaced>` so that a burst of publishes is not refused with 428 while the previous put is still in flight, and open the data link on their own when the peer is online so that chat and call signaling leave Pkarr alone.
 
 ## 3. Services (v1)
 
@@ -225,7 +227,7 @@ Host errors are ordinary responses with an `x-ghostly-error` header, so a browse
 
 ## 7. What is not in the protocol
 
-- **A server.** The host is the server while it is online. Close Ghostly and presence, chat endpoint and services are gone. Relays, STUN and TURN only help peers find and reach each other.
+- **A central Ghost message server.** The host serves its enabled services while online. Closing Ghostly ends live connectivity; published presence may remain stale and local history persists. Pkarr relays can carry encrypted small-message records; STUN assists discovery and TURN can relay encrypted live traffic.
 - **Public services.** A service is reachable by the peers you are linked with. Serving strangers needs a rendezvous that Pkarr, being pull-only, does not provide out of the box. One possible design is a published one-time mailbox key that strangers write their offer to; it is deliberately left for later.
 - **Per-peer service selection.** Every enabled service is advertised on every link.
 - **WebSockets and server-sent events** over `ghostly-http/1`. The framing streams; the mapping for upgrades is not defined yet.

@@ -16,7 +16,12 @@
   },
   "dependencies": {
     "@noble/ciphers": "^2.4.0",
-    "@noble/curves": "^2.4.0"
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "2.4.0",
+    "@scure/base": "2.0.0",
+    "b4a": "1.9.0",
+    "keet-identity-key": "3.2.0",
+    "sodium-javascript": "0.8.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.1",

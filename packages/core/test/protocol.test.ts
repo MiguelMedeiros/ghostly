@@ -222,3 +222,17 @@ describe("link records", () => {
     expect(link.services).toBeNull();
   });
 });
+
+describe("asking to pay", () => {
+  it("round-trips a pay-ask and a request answering it, and refuses what is not one", async () => {
+    const { encodeControl, decodeControl } = await import("../src/frames");
+    const ask = { t: "pay-ask", id: "ask_123456", ts: 1, v: "1000", u: "sat", m: "arkade", memo: "lunch" } as const;
+    expect(decodeControl(encodeControl(ask))).toEqual(ask);
+    const req = decodeControl(JSON.stringify({ t: "pay-req", id: "req_123456", ts: 2, v: "1000", u: "sat", e: [["arkade", "{}"]], a: "ask_123456" }));
+    expect(req).toMatchObject({ t: "pay-req", a: "ask_123456" });
+    expect(decodeControl(JSON.stringify({ t: "pay-req", id: "req_123456", ts: 2, v: "1000", u: "sat", e: [["arkade", "{}"]], a: "<script>" }))).toMatchObject({ a: undefined });
+    for (const bad of [{ ...ask, m: "cashu" }, { ...ask, m: "lightning" }, { ...ask, v: "-1" }, { ...ask, v: "1e9" }, { ...ask, id: "x" }, { ...ask, u: "SAT!" }, { ...ask, ts: "1" }])
+      expect(decodeControl(JSON.stringify(bad)), JSON.stringify(bad)).toBeNull();
+    expect((decodeControl(JSON.stringify({ ...ask, memo: "m".repeat(500) })) as { memo: string }).memo).toHaveLength(140);
+  });
+});

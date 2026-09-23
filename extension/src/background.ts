@@ -13,7 +13,8 @@ import { rememberPendingUpdate } from "./updates";
 let creatingOffscreen: Promise<void> | null = null;
 
 async function ensureEngine(): Promise<void> {
-  if (await chrome.offscreen.hasDocument()) return;
+  if (creatingOffscreen) return creatingOffscreen;
+  if (await chrome.offscreen.hasDocument()) return waitForEngine();
   creatingOffscreen ??= chrome.offscreen
     .createDocument({
       url: "offscreen.html",
@@ -35,6 +36,7 @@ async function waitForEngine(): Promise<void> {
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
+  throw new Error("The Ghostly peer did not start. Reopen the extension to retry.");
 }
 
 chrome.runtime.onStartup.addListener(() => void ensureEngine());

@@ -26,5 +26,6 @@ test("Desktop opens, with the peer Rust backs behind it", async ({ app }) => {
 
   // And the host is installed, not only its transport: sharing a local web app
   // is offered, which no web page is allowed to do.
+  await app.click('[data-testid="account-services"]');
   await expect.poll(() => app.text('[data-testid="add-service"]')).toContain("Share a local service");
 });

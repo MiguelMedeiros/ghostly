@@ -1,3 +1,14 @@
+import { publicKeyLabel } from "../lib/publicKeyLabel";
+import { PeerAvatar } from "../components/Avatar";
+import { useOutsideDismiss, useBackdropDismiss } from "../hooks/useDismiss";
+import { DeleteChatDialog } from "../components/DeleteChatDialog";
+import { createPortal } from "react-dom";
+import { ChatPaymentsDialog } from "../components/ChatPaymentsDialog";
+import { ChatServicesDialog } from "../components/ChatServicesDialog";
+import { PinIcon } from "../components/PinIcon";
+import { useI18n } from "../contexts/I18nContext";
+import { InviteCard } from "../components/InviteCard";
+import { PairingBanner } from "../components/PairingBanner";
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useNavigate, Navigate } from "react-router-dom";
 import { useChat } from "../hooks/useChat";
@@ -7,12 +18,14 @@ import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
 import { CallOverlay } from "../components/CallOverlay";
 import { IncomingCallNotification } from "../components/IncomingCallNotification";
-import { PollCountdown } from "../components/PollCountdown";
+import { contactStatus } from "../lib/contactStatus";
 import { PeerServices } from "../components/PeerServices";
 import { formatFileSize } from "../lib/format";
 import { playSound, startRinging } from "../lib/sounds";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import {
+  isSessionPinned,
+  setSessionPinned,
   markSessionAsRead,
   getInviteCode,
   deleteSession,
@@ -37,6 +50,7 @@ interface ChatProps {
 
 export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps) {
   const navigate = useNavigate();
+  const { t, language } = useI18n();
   const { settings } = useSettings();
   const bottomRef = useRef<HTMLDivElement>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -46,6 +60,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     () =>
       session
         ? {
+            profile: session.profile,
+            deliveryMode: session.deliveryMode,
             sessionId: session.id,
             seedB64: session.mySeedB64,
             peerPubKeyB64: session.peerPubKeyB64,
@@ -70,14 +86,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     setChatFastPoll,
     addSystemMessage,
     deleteMessage,
-    setNick,
     pollCountdown,
+    setNick,
   } = useChat(params);
 
   useEffect(() => {
-    if (settings.defaultNickname) {
-      setNick(settings.defaultNickname);
-    }
+    setNick(settings.defaultNickname);
   }, [settings.defaultNickname, setNick]);
 
   const addCallEventMessage = useCallback(
@@ -138,6 +152,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   })();
 
   const platform = useServicesPlatform();
+  const paired = session?.profile === "paired-chat/1";
+  const deliveryPeer = platform?.getPeer(session?.peerPubKeyB64 ?? "");
+  const dhtOnly = deliveryPeer?.deliveryMode === "dht" || deliveryPeer?.textDelivery === "dht";
+  const pairedReady = deliveryPeer?.pairing?.status === "ready";
+  const textReady = deliveryPeer?.canSendText ?? pairedReady;
   const peerKey = params?.peerPubKeyB64;
   const sendFile = useCallback(
     async (source: File): Promise<string | null> => {
@@ -173,11 +192,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const wallet = platform?.wallet;
   const walletState = wallet?.getState() ?? null;
   const pay = useCallback(
-    async (kind: "send" | "request", amount: number, memo: string): Promise<string | null> => {
+    async (kind: "send" | "request", amount: number, memo: string, method?: "cashu" | "arkade" | "usdt"): Promise<string | null> => {
       if (!wallet || !peerKey) return null;
       try {
-        const { timestamp, paymentId } = await wallet[kind](peerKey, amount, memo || undefined);
-        const text = kind === "send" ? `⚡ ${amount.toLocaleString()} sats` : `⚡ Requested ${amount.toLocaleString()} sats`;
+        const { timestamp, paymentId } = await (kind === "request" ? wallet.request(peerKey, amount, memo || undefined, method) : wallet.send(peerKey, amount, memo || undefined));
+        const text = method === "usdt" ? "Token payment request" : kind === "send" ? `⚡ ${amount.toLocaleString()} sats` : `⚡ Requested ${amount.toLocaleString()} sats`;
         addSystemMessage({ id: `me_${timestamp}`, text, sender: "me", timestamp, paymentId });
         window.dispatchEvent(new Event("session-updated"));
         return null;
@@ -188,7 +207,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     [wallet, peerKey, addSystemMessage],
   );
   const paySend = useCallback((amount: number, memo: string) => pay("send", amount, memo), [pay]);
-  const payRequest = useCallback((amount: number, memo: string) => pay("request", amount, memo), [pay]);
+  const payRequest = useCallback((amount: number, memo: string, method?: "cashu" | "arkade" | "usdt") => pay("request", amount, memo, method), [pay]);
 
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
@@ -196,7 +215,15 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const [peerNick, setPeerNick] = useState<string>("");
   const [isEditingLabel, setIsEditingLabel] = useState(false);
   const [labelDraft, setLabelDraft] = useState("");
+  /** Ways of paying are chosen per chat; the ⚡ works while this device allows at least one. */
+  const chatPeer = platform?.getPeer(params?.peerPubKeyB64 ?? "");
+  const paymentsOn = !chatPeer?.paymentMethods || Object.values(chatPeer.paymentMethods).some(Boolean);
+  const [showPayments, setShowPayments] = useState(false);
+  const [showServices, setShowServices] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [connectionOpen, setConnectionOpen] = useState(false);
+  const connectionRef = useRef<HTMLDivElement>(null);
+  const connectionButtonRef = useRef<HTMLButtonElement>(null);
   const [showTechInfo, setShowTechInfo] = useState(false);
   const labelInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -269,19 +296,15 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     setConfirmDelete(false);
     setCodeCopied(false);
     setMenuOpen(false);
+    setConnectionOpen(false);
   }, [sessionId]);
 
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-    if (menuOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [menuOpen]);
+  useOutsideDismiss(menuRef, menuOpen, () => setMenuOpen(false));
+  useOutsideDismiss(connectionRef, connectionOpen, () => {
+    if (connectionRef.current?.contains(document.activeElement)) connectionButtonRef.current?.focus();
+    setConnectionOpen(false);
+  });
+  const techBackdrop = useBackdropDismiss(() => setShowTechInfo(false));
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -308,15 +331,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     }
   };
 
-  const statusConfig = {
-    connecting: { color: "bg-yellow-500", label: "connecting" },
-    online: { color: "bg-accent", label: "online" },
-    offline: { color: "bg-gray-500", label: "offline" },
-    error: { color: "bg-danger", label: "error" },
-  };
-  const { label: statusLabel } = statusConfig[status];
+  const statusLabel = contactStatus(deliveryPeer, paired, status);
 
-  const truncatedPeerKey = params.peerPubKeyB64.slice(0, 12) + "...";
+  const truncatedPeerKey = publicKeyLabel(params.peerPubKeyB64);
   const displayName = chatLabel || peerNick;
   const isAnonymous = !displayName;
   const showKeySubtitle = true;
@@ -337,10 +354,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
             </svg>
           </button>
           <div className="relative w-10 h-10 rounded-full bg-surface-hover flex items-center justify-center shrink-0">
-            <span className={`text-sm ${isAnonymous ? "text-text-muted/50" : "text-text-muted"}`}>
-              {(displayName || "A").charAt(0).toUpperCase()}
-            </span>
-            {inviteCode && (
+            <PeerAvatar peerPubKey={params?.peerPubKeyB64} label={displayName || t("common.anonymous")} testId="chat-avatar" />
+            {inviteCode && !pairedReady && (
               <span className="absolute -bottom-0.5 -right-0.5 w-[16px] h-[16px] flex items-center justify-center rounded-full text-[8px] bg-accent text-[#111b21] z-10 group/star">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
@@ -373,7 +388,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 className={`text-[15px] font-normal m-0 leading-tight truncate cursor-pointer hover:text-accent transition-colors ${isAnonymous ? "text-text-muted/60 italic" : "text-text-primary"}`}
                 title="Click to set a name"
               >
-                {displayName || "Anonymous"}
+                {displayName || t("common.anonymous")}
                 {!chatLabel && (
                   <svg
                     width="12"
@@ -392,31 +407,43 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 )}
               </p>
             )}
-            <div 
-              className="flex items-center gap-1.5 cursor-help"
-              title={techInfo ? `Status: ${statusLabel}\nYou: ${techInfo.myPubKey}\nPeer: ${techInfo.peerPubKey}` : `Status: ${statusLabel}`}
-            >
-              <PollCountdown
-                remaining={pollCountdown.remaining}
-                total={pollCountdown.total}
-                isPolling={pollCountdown.isPolling}
-                size={14}
-              />
-              {showKeySubtitle && (
-                <span className="text-text-muted/60 text-xs font-mono truncate">
-                  {truncatedPeerKey}
-                </span>
+            <div ref={connectionRef} className="relative">
+              <button
+                ref={connectionButtonRef}
+                type="button"
+                aria-label="Connection details"
+                aria-expanded={connectionOpen}
+                aria-controls={`connection-details-${sessionId}`}
+                onClick={() => setConnectionOpen(open => !open)}
+                className="flex items-center gap-1.5 rounded cursor-pointer hover:text-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+              >
+                <span role="img" aria-label={statusLabel} data-testid="contact-status"
+                  className={`h-2 w-2 shrink-0 rounded-full ${statusLabel === "Connected" ? `bg-green-500 ${pollCountdown.isPolling ? "contact-fetch-pulse" : ""}` : /issue|unavailable|mismatch/.test(statusLabel) ? "bg-danger" : "bg-text-muted"}`} />
+                {showKeySubtitle && (
+                  <span className="text-text-muted/60 text-xs max-md:text-[10px] font-mono whitespace-nowrap">
+                    {truncatedPeerKey}
+                  </span>
+                )}
+              </button>
+              {connectionOpen && (
+                <div id={`connection-details-${sessionId}`} role="region" aria-label="Connection details"
+                  className="absolute left-0 top-full z-50 mt-2 w-80 max-w-[75vw] rounded-lg border border-border bg-surface-alt p-4 shadow-xl space-y-3">
+                  <TechInfoRow label="Connection" value={statusLabel} />
+                  {techInfo?.myPubKey && <TechInfoRow label="You" value={techInfo.myPubKey} mono copyable />}
+                  <TechInfoRow label="Peer" value={params.peerPubKeyB64} mono copyable />
+                </div>
               )}
             </div>
           </div>
         </div>
         <div className="flex items-center gap-1">
           {/* Audio call button */}
+          {paired && <PairingBanner peerKey={params.peerPubKeyB64} />}
           <button
             onClick={() => webrtc.startCall(false)}
-            disabled={webrtc.callState !== "idle"}
+            disabled={paired || webrtc.callState !== "idle"}
             className="p-2 max-md:p-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-            title="Audio call"
+            title={paired ? "Audio calls are not supported in this chat" : "Audio call"}
           >
             <svg
               width="18"
@@ -435,9 +462,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           {typeof navigator.mediaDevices?.getDisplayMedia === "function" && (
             <button
               onClick={() => webrtc.startCall(true, "screen")}
-              disabled={webrtc.callState !== "idle"}
+              disabled={paired || webrtc.callState !== "idle"}
               className="max-md:hidden p-2 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-              title="Share your screen"
+              title={paired ? "Screen sharing is not supported in this chat" : "Share your screen"}
               data-testid="call-screen"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -449,9 +476,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           {/* Video call button */}
           <button
             onClick={() => webrtc.startCall(true)}
-            disabled={webrtc.callState !== "idle"}
+            disabled={paired || webrtc.callState !== "idle"}
             className="p-2 max-md:p-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-            title="Video call"
+            title={paired ? "Video calls are not supported in this chat" : "Video call"}
           >
             <svg
               width="18"
@@ -490,8 +517,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               </svg>
             </button>
             {menuOpen && (
-              <div className="absolute right-0 top-full mt-1 bg-surface-alt border border-border rounded-lg shadow-lg py-1 min-w-[160px] z-50 animate-fade-in">
-                {inviteCode && (
+              <div data-testid="chat-options-menu" className="absolute right-0 top-full mt-1 bg-surface-alt border border-border rounded-lg shadow-lg py-1 min-w-[160px] z-50 animate-fade-in">
+                <button onClick={() => { setSessionPinned(sessionId, !isSessionPinned(sessionId)); setMenuOpen(false); }}
+                  className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors">
+                  <PinIcon active={isSessionPinned(sessionId)} />{isSessionPinned(sessionId) ? "Unpin chat" : "Pin chat"}
+                </button>
+                {inviteCode && !pairedReady && (
                   <button
                     onClick={() => {
                       handleCopyCode(inviteCode);
@@ -510,6 +541,20 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                       </svg>
                     )}
                     {codeCopied ? "Copied!" : "Copy invite code"}
+                  </button>
+                )}
+                {platform?.wallet && platform.getPeer(params.peerPubKeyB64) && (
+                  <button data-testid="chat-payments-open" onClick={() => { setShowPayments(true); setMenuOpen(false); }}
+                    className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>
+                    Payments…
+                  </button>
+                )}
+                {platform && platform.getPeer(params.peerPubKeyB64) && (
+                  <button data-testid="chat-services-open" onClick={() => { setShowServices(true); setMenuOpen(false); }}
+                    className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>
+                    Services…
                   </button>
                 )}
                 <button
@@ -542,28 +587,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                   Tech Info
                 </button>
                 <div className="border-t border-border my-1" />
-                {confirmDelete ? (
-                  <div className="px-3 py-2 flex items-center gap-2">
-                    <span className="text-danger text-xs">Delete?</span>
-                    <button
-                      onClick={() => {
-                        handleDelete();
-                        setMenuOpen(false);
-                      }}
-                      className="px-2 py-0.5 bg-danger/20 text-danger border border-danger/30 rounded text-xs font-bold hover:bg-danger/30 transition-colors cursor-pointer"
-                    >
-                      Yes
-                    </button>
-                    <button
-                      onClick={() => setConfirmDelete(false)}
-                      className="px-2 py-0.5 bg-surface-hover text-text-muted border border-border rounded text-xs font-bold hover:text-text-secondary transition-colors cursor-pointer"
-                    >
-                      No
-                    </button>
-                  </div>
-                ) : (
                   <button
-                    onClick={handleDelete}
+                    onClick={() => {setConfirmDelete(true); setMenuOpen(false);}}
                     className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-danger hover:bg-surface-hover flex items-center gap-2 transition-colors"
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -571,39 +596,28 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                       <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
                       <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
                     </svg>
-                    Delete chat
+                    {t("sidebar.deleteChat")}
                   </button>
-                )}
               </div>
             )}
           </div>
         </div>
       </div>
 
-      <PeerServices peerPubKey={params.peerPubKeyB64} />
+      <PeerServices peerPubKey={params.peerPubKeyB64} showLink={!paired} onManage={() => setShowServices(true)} />
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto chat-wallpaper">
         <div className="max-w-3xl mx-auto py-3">
-          {inviteCode && messages.length === 0 && (
-            <div className="flex items-center justify-center min-h-[120px]">
-              <div className="bg-surface-alt/90 rounded-xl px-5 py-4 text-center max-w-sm space-y-3">
-                <p className="text-text-secondary text-xs">
-                  Share this invite code with your contact to start chatting:
-                </p>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 bg-input-bg rounded-lg px-3 py-2 text-[10px] text-text-muted font-mono truncate text-left select-all">
-                    {inviteCode}
-                  </code>
-                  <button
-                    onClick={() => handleCopyCode(inviteCode)}
-                    className="px-3 py-2 bg-accent text-[#111b21] rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer shrink-0"
-                  >
-                    {codeCopied ? "Copied!" : "Copy"}
-                  </button>
-                </div>
-              </div>
-            </div>
+          {session?.createdAt && Number.isFinite(session.createdAt) && session.createdAt > 0 && (
+            <p data-testid="chat-created" className="mb-3 px-4 text-center text-[11px] text-text-muted">
+              <time dateTime={new Date(session.createdAt).toISOString()}>
+                {t("common.chatCreated", {date: new Intl.DateTimeFormat(language, {dateStyle:"medium", timeStyle:"short"}).format(session.createdAt)})}
+              </time>
+            </p>
+          )}
+          {inviteCode && !pairedReady && messages.length === 0 && (
+            <InviteCard code={inviteCode} sessionId={sessionId} linkId={deliveryPeer?.id} mode={deliveryPeer?.deliveryMode ?? session?.deliveryMode ?? "stream"} onChange={setInviteCode} />
           )}
           {!inviteCode && messages.length === 0 && (
             <div className="flex items-center justify-center min-h-[200px]">
@@ -620,6 +634,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               message={msg}
               peerAck={peerAck}
               peerPubKey={params.peerPubKeyB64}
+              peerNick={peerNick}
               onDelete={() => forgetMessage(msg.id)}
             />
           ))}
@@ -628,29 +643,35 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
       </div>
 
       {/* Input */}
-      <MessageInput
+      <MessageInput draftId={sessionId}
         key={sessionId}
         onSend={sendMessage}
-        disabled={isSending}
+        disabled={isSending || (paired && !textReady)}
+        disabledPlaceholder="Message…"
         // The DHT carries a few hundred characters; the direct link has room for long invoices and ecash tokens.
-        maxLength={platform?.getPeer(params.peerPubKeyB64)?.dataLink === "open" ? 4000 : undefined}
+        maxBytes={dhtOnly ? deliveryPeer?.dhtDelivery?.maxTextBytes ?? 256 : undefined}
+        maxLength={paired ? 16_384 : platform?.getPeer(params.peerPubKeyB64)?.dataLink === "open" ? 4000 : undefined}
         onSendFile={platform ? sendFile : undefined}
+        fileUnavailable={dhtOnly ? "DHT carries text only. Choose a live connection for files." : paired && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.files ? (pairedReady ? "Update both peers to send files" : "Connect and confirm your peer to send files") : undefined}
+        paymentsUnavailable={!paymentsOn ? "Payments are off in this chat. Choose them under ⋮ → Payments." : dhtOnly ? "DHT carries text only. Choose a live connection for sats." : paired && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.payments ? (pairedReady ? "Your contact has payments off in this chat, or needs an updated Ghostly" : "Connect and confirm your peer to send sats") : undefined}
         payments={
-          walletState && walletState.mints.length > 0
-            ? { balance: walletState.balance, onSend: paySend, onRequest: payRequest }
+          walletState && wallet && peerKey
+            ? { balance: walletState.balance, onSend: paySend, onRequest: payRequest,reviewContext:platform?.getPeer(peerKey)?.id ? {wallet,peer:peerKey,linkId:platform.getPeer(peerKey)!.id!}:undefined }
             : undefined
         }
       />
 
       {/* Incoming call notification */}
-      {webrtc.callState === "incoming" && (
+      {/* Incoming call notification: over whatever is on screen, since this chat may not be. */}
+      {webrtc.callState === "incoming" && createPortal(
         <IncomingCallNotification
-          peerName={displayName || "Anonymous"}
+          peerName={displayName || t("common.anonymous")}
           hasVideo={incomingHasVideo}
-          onAcceptAudio={() => webrtc.acceptCall(false)}
-          onAcceptVideo={() => webrtc.acceptCall(true)}
+          onAcceptAudio={() => { webrtc.acceptCall(false); if (!visible) navigate(chatPath(sessionId)); }}
+          onAcceptVideo={() => { webrtc.acceptCall(true); if (!visible) navigate(chatPath(sessionId)); }}
           onReject={webrtc.rejectCall}
-        />
+        />,
+        callLayer ?? document.body,
       )}
 
       {/* Active call overlay */}
@@ -672,7 +693,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           canShareScreen={webrtc.canShareScreen}
           remoteHasVideo={webrtc.remoteHasVideo}
           callStartedAt={webrtc.callStartedAt}
-          peerName={displayName || "Anonymous"}
+          peerName={displayName || t("common.anonymous")}
           onHangUp={() => webrtc.hangUp()}
           onToggleMute={webrtc.toggleMute}
           onToggleVideo={webrtc.toggleVideo}
@@ -680,11 +701,19 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         />
       )}
 
+      {showServices && params && (
+        <ChatServicesDialog peerPubKey={params.peerPubKeyB64} name={displayName || t("common.anonymous")} onClose={() => setShowServices(false)} />
+      )}
+      {showPayments && chatPeer && params && platform && (
+        <ChatPaymentsDialog peer={chatPeer} name={displayName || t("common.anonymous")} onClose={() => setShowPayments(false)}
+          onSave={(methods) => platform.setChatPaymentMethods(params.peerPubKeyB64, methods)} />
+      )}
+      {confirmDelete && <DeleteChatDialog name={`${displayName || t("common.anonymous")} · ${truncatedPeerKey}`} onClose={()=>setConfirmDelete(false)} onConfirm={handleDelete} />}
       {/* Tech Info Modal */}
       {showTechInfo && techInfo && (
         <div 
           className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in"
-          onClick={() => setShowTechInfo(false)}
+          {...techBackdrop}
         >
           <div 
             className="bg-surface-alt rounded-xl max-w-md w-full max-h-[80vh] overflow-y-auto shadow-2xl animate-fade-in"

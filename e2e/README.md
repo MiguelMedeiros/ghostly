@@ -15,7 +15,7 @@ npm run tauri -- build --debug --no-bundle && npm run test:e2e:desktop   # the D
 
 ## No servers
 
-Peers find each other through Pkarr relays. Here the relay is `support/relay.ts`, inside the test process: requests to the public relays are answered from memory, and the extension, whose peer runs where requests cannot be intercepted, is pointed at its local address in Settings → Network. So tests do not wait on the public relays, are never rate limited, and never see each other's packets. WebRTC connects the browsers directly on this machine. Giphy and GifCities are stubbed the same way.
+Peers find each other through Pkarr relays. Here the relay is `support/relay.ts`, inside the test process: requests to the public relays are answered from memory, and the extension, whose peer runs where requests cannot be intercepted, is pointed at its local address in Settings → Network. So tests do not wait on the public relays, are never rate limited, and never see each other's packets. WebRTC connects the browsers directly on this machine. GIFCities is stubbed the same way.
 
 Only the tests tagged `@network` go out: the wallet, against the public Cashu test mint (`testnut.cashu.space`, worthless sats whose invoices pay themselves). CI does not even do that — it runs a mint of its own and answers the public one's requests from it, the way the relay answers Pkarr's:
 
@@ -39,8 +39,21 @@ E2E_MINT_URL=http://127.0.0.1:3338 npm run test:e2e
 | `web/calls.spec.ts` | video and audio calls, mute, camera, screen share, decline, the movable self view, the small call window, a call that outlives its chat, the lock over one |
 | `web/mobile.spec.ts` | the phone layout: tabs, chat screen, composer |
 | `web/wallet.spec.ts` | `@network`: Lightning in, ecash out, requests, history and fees, invoice and token cards — against a real mint, ours in CI |
+| `web/chat-extras.spec.ts` | unread count, naming a chat, links (new tab, no opener/referrer), hostile text never becomes a link, contact pictures only on click and only https, per-message details, overlong text refused (and not kept), file size limit, Tech Info copy |
+| `web/invite-link.spec.ts` | an invite link opens its chat (fresh tab or running app) and leaves no key in the address or history; broken, damaged or conflicting links say so and never crash |
+| `web/network-settings.spec.ts` | TURN server saved, kept, cleared; relays sanitized; a relay list with none, or a TURN address WebRTC refuses, is refused with the reason |
+| `web/call-edges.spec.ts` | hanging up while it rings, a call that rings while you are elsewhere in the app, declining, a call nobody answers (camera and microphone released) |
+| `web/pairing-extras.spec.ts` | the connection popover (click, Escape, outside), the verification code on both sides, offline and Reconnect |
+| `web/services-web.spec.ts` | a web page says sharing needs the extension or desktop, in the Services page and in a chat's Services… dialog |
+| `web/profiles.spec.ts` · `profile-lock.spec.ts` | profiles keep chats and settings apart, switching, deleting; the lock screen (change, remove, at startup) goes with new profiles and guards deleting a locked one |
+| `web/profile-backup-file.spec.ts` · `profile-backup.spec.ts` | a whole profile backed up to a file (and to S3 with `GHOSTLY_S3_*`), restored as a new profile; passphrase rules |
+| `web/chat-payments.spec.ts` | each chat allows its own ways of paying, both sides' choices shown |
+| `web/wallet-cashu.spec.ts` · `wallets-ready.spec.ts` · `wallet-backups.spec.ts` | wallets ready with no setup, Cashu send/mint errors, the Lightning card, test sats; Ark and USDT recovery phrase and encrypted backup files (`@network`) |
+| `web/wallet-providers.spec.ts` | every wallet provider sending and receiving, in the Testnet mode: Cashu (in over Lightning, Send and Request in the chat), Lightning (in through an invoice, out paying an invoice the test mint does not own, `@network`), Ark and USDT (in, Send from the wallet, Send and Request in the chat; gated, see below) |
+| `web/payment-extras.spec.ts` | with `E2E_MINT_URL`: memo and "test sats" in both bubbles, a refused payment is taken back, ecash nobody picks up can be taken back, invoice cards |
 | `extension/interop.spec.ts` | the extension and the web app: chat, file, video call |
 | `extension/services.spec.ts` | a local web app shared by one extension and opened by another over WebRTC, stopped, offline, gone |
+| `extension/paired-services.spec.ts` · `services-extras.spec.ts` | sharing from the chat itself; the contact opens it from Services; removed, it is gone everywhere |
 | `desktop/smoke.spec.ts` | the bundled Tauri app opens, and the peer behind it is the one Rust backs |
 
 ## Desktop
@@ -81,3 +94,35 @@ Not on pull requests: at about four minutes it would hold up every merge. `npm r
 ## Writing one
 
 For Desktop, use `test` and `app` from `support/desktop.ts`: `app.text(selector)` returns null until something matches, so wait with `expect.poll`. For the browser clients, use `test` and `peer` from `support/fixtures.ts` (or `extensionPeer` / `webPeer` from `support/extension.ts`), `link(a, b)` to put two people in a chat and `connect(a, b)` to wait for the peer-to-peer link. Look for text in the conversation with `chat(peer)`, since the chat list previews the last message too. Prefer what a person sees (titles, labels, text); add a `data-testid` to the app when there is nothing else to hold on to.
+
+### Experimental Ark payments
+
+With the disposable local Ark regtest stack already running at `127.0.0.1:43010`
+(operator) and `127.0.0.1:43000/api` (Esplora):
+
+```bash
+GHOSTLY_ARK_REGTEST=1 npx playwright test e2e/web/ark-wallet.spec.ts -c e2e/playwright.config.ts --project=web
+```
+
+The faucet CLI defaults to `/tmp/ghostly-ark-regtest-20260922/regtest.mjs`;
+set `GHOSTLY_ARK_REGTEST_SCRIPT` to another local checkout's script if needed.
+The test does not start or stop infrastructure. It creates isolated browser
+profiles, funds a disposable seed with worthless regtest credit, restores through
+the actual wallet UI, and checks request/review/approval plus receipt reconciliation
+after recipient unlock. SDK funding uses a native ESM child process to preserve
+conditional exports; the seed is returned through its private pipe, not logged.
+This does not validate mainnet, unilateral exits or native/mobile payments.
+
+### Every provider, sending and receiving
+
+With the Ark regtest stack above and the local EVM chain (`/tmp/ghostly-usdt-local.json`) running:
+
+```bash
+GHOSTLY_ARK_REGTEST=1 GHOSTLY_USDT_LOCAL=1 NODE_OPTIONS=--experimental-eventsource npx playwright test e2e/web/wallet-providers.spec.ts -c e2e/playwright.config.ts --project=web
+```
+
+Without the two variables only Cashu and Lightning run. A test mint marks its own invoices paid, so the
+Lightning send pays an invoice from `support/bolt11.ts` instead: signed by a key made for the test, it is
+a payment the mint has to make, not one it already knows. On regtest an Ark batch expires within minutes,
+and coins in it become recoverable: the test takes the Recover action when it shows, and allows for the
+few sats that batch costs.

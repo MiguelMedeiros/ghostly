@@ -1,4 +1,4 @@
-import { chat, connect, expect, link, test, type Peer } from "../support/fixtures";
+import { chat, connect, expect, link, openChat, openWallet, test, type Peer } from "../support/fixtures";
 import { TEST_MINT, mintEndpoint } from "../support/mint";
 
 /**
@@ -11,23 +11,31 @@ import { TEST_MINT, mintEndpoint } from "../support/mint";
 test.describe("wallet", { tag: "@network" }, () => {
   test.describe.configure({ retries: 2 });
 
-  const balance = async (peer: Peer) => Number(((await peer.page.getByTestId("wallet-test-balance").textContent()) ?? "").match(/^([\d,]+)/)![1].replace(",", ""));
+  const balance = async (peer: Peer) => {
+    await showCashu(peer);
+    return Number(((await peer.page.getByTestId("wallet-test-balance").textContent()) ?? "").match(/^([\d,]+)/)![1].replace(",", ""));
+  };
+  async function showCashu(peer: Peer): Promise<void> {
+    if (await peer.page.getByTestId("wallet-test-balance").isVisible()) return;
+    await openWallet(peer, "cashu");
+  }
 
   async function switchToTestMint(peer: Peer): Promise<void> {
-    await peer.page.getByTestId("wallet-settings").click();
-    await peer.page.getByTestId("wallet-test-mint").click();
+    await openWallet(peer, "cashu");
+    await peer.page.getByTestId("wallet-mode").getByRole("radio", { name: "Testnet" }).click();
     await expect(peer.page.getByTestId("wallet-test-balance")).toBeVisible();
-    await peer.page.getByTestId("wallet-settings").click();
+    await openChat(peer);
   }
 
   async function receive(peer: Peer, sats: number): Promise<string> {
+    await openWallet(peer, "cashu");
     await peer.page.getByTestId("wallet-receive").click();
     await peer.page.getByTestId("wallet-receive-amount").fill(String(sats));
     await peer.page.getByTestId("wallet-create-invoice").click();
     return (await peer.page.getByTestId("wallet-invoice").textContent())!.trim();
   }
 
-  test("Lightning in, ecash between two people, requests, history and fees", async ({ peer }) => {
+  test("Lightning in, ecash between two people, requests, history and fees", async ({ peer }, testInfo) => {
     const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
     await link(alice, bob);
     await connect(alice, bob);
@@ -38,21 +46,41 @@ test.describe("wallet", { tag: "@network" }, () => {
     await expect(alice.page.getByTestId("wallet-test-balance")).toHaveText(/^100 test sats/);
     await expect(alice.page.getByTestId("wallet-paid")).toBeVisible();
 
+    await openChat(alice);
     await alice.page.getByTestId("payment-button").click();
     await alice.page.getByTestId("payment-amount").fill("21");
+    // The Cashu card is chosen already, and the mint that holds the sats pays: nothing to pick.
     await alice.page.getByTestId("payment-send").click();
+    const directReview = alice.page.getByTestId("payment-composer").getByTestId("payment-review");
+    await expect(directReview).toContainText("cashu-test");
+    await showCashu(bob);
+    await expect(bob.page.getByTestId("wallet-test-balance")).toHaveText(/^0 test sats/);
+    await directReview.getByRole("button", { name: "Approve payment" }).click();
     const sent = (p: Peer) => chat(p).getByTestId("payment-bubble").filter({ hasText: "21" }).getByTestId("payment-state");
+    await expect(bob.page.getByTestId("wallet-test-balance")).toHaveText(/^21 test sats/);
+    await openChat(bob);
     await expect(sent(bob)).toHaveText(/Received/);
     await expect(sent(alice)).toHaveText(/Received/);
-    await expect(bob.page.getByTestId("wallet-test-balance")).toHaveText(/^21 test sats/);
+    await directReview.getByRole("button", { name: "Close", exact: true }).click();
 
+    // Bob asks for ecash only: with Lightning on, the test mint would pay the request's own invoice by
+    // itself, racing Alice (it is a faucet), and the request could be paid before she gets to it.
+    await bob.page.getByTitle("Options").click();
+    await bob.page.getByTestId("chat-payments-open").click();
+    await bob.page.getByTestId("chat-payments").getByTestId("chat-payments-lightning").click();
+    await bob.page.getByTestId("chat-payments-save").click();
     await bob.page.getByTestId("payment-button").click();
     await bob.page.getByTestId("payment-amount").fill("10");
     await bob.page.getByTestId("payment-request").click();
     await alice.page.getByTestId("payment-pay").click();
+    const requestReview = chat(alice).getByTestId("payment-review");
+    await expect(requestReview).toContainText("cashu-test");
+    await requestReview.getByRole("button", { name: "Approve payment" }).click();
     for (const p of [alice, bob]) await expect(chat(p).getByTestId("payment-bubble").filter({ hasText: "equest" }).getByTestId("payment-state")).toHaveText(/Paid/);
+    await showCashu(bob);
     await expect(bob.page.getByTestId("wallet-test-balance")).toHaveText(/^31 test sats/);
 
+    await showCashu(alice);
     await alice.page.getByTestId("wallet-history").click();
     const txs = await alice.page.getByTestId("wallet-tx").allTextContents();
     expect(txs).toHaveLength(3);
@@ -62,9 +90,33 @@ test.describe("wallet", { tag: "@network" }, () => {
     expect(txs[0]).toMatch(/fee \d/);
     const fees = Number((await alice.page.getByTestId("wallet-fees-paid").textContent())!.match(/(\d+) sats/)![1]);
     expect(await balance(alice), "balance = received - sent - fees, to the sat").toBe(100 - 21 - 10 - fees);
-    await alice.page.getByTestId("wallet-history").click();
-    await alice.page.getByTestId("wallet-settings").click();
+    await alice.page.screenshot({ path: testInfo.outputPath("cashu-chat-history.png"), fullPage: true });
     await expect(alice.page.getByTestId("mint-fees").filter({ hasText: "0.1 sat per proof" })).toBeVisible();
+  });
+
+  test("test-mint ecash reaches a contact who never turned test sats on", async ({ peer }) => {
+    const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
+    await link(alice, bob);
+    await connect(alice, bob);
+    await switchToTestMint(alice);
+    await receive(alice, 50);
+    await expect(alice.page.getByTestId("wallet-test-balance")).toHaveText(/^50 test sats/);
+    await openChat(alice);
+    await alice.page.getByTestId("payment-button").click();
+    await alice.page.getByTestId("payment-amount").fill("10");
+    await alice.page.getByTestId("payment-send").click();
+    const review = alice.page.getByTestId("payment-composer").getByTestId("payment-review");
+    await review.getByRole("button", { name: "Approve payment" }).click();
+    const sent = (p: Peer) => chat(p).getByTestId("payment-bubble").filter({ hasText: "10" }).getByTestId("payment-state");
+    await expect(sent(bob)).toHaveText(/Received/, { timeout: 60000 });
+    await expect(sent(alice)).toHaveText(/Received/);
+    // Bob is on Mainnet: the test sats wait in Testnet, and the wallet says where they are.
+    await openWallet(bob, "cashu");
+    await expect(bob.page.getByTestId("wallet-balance")).toContainText(/^0\s*sats/);
+    await expect(bob.page.getByTestId("wallet-waiting-test-sats")).toContainText("10 test sats are waiting in Testnet");
+    await bob.page.getByTestId("wallet-waiting-test-sats").getByRole("button", { name: "Switch to Testnet" }).click();
+    await expect(bob.page.getByTestId("testnet-badge")).toBeVisible();
+    await expect(bob.page.getByTestId("wallet-test-balance")).toHaveText(/^10 test sats/);
   });
 
   test("an invoice pasted into the chat is a card that can be paid", async ({ peer }) => {
@@ -76,9 +128,10 @@ test.describe("wallet", { tag: "@network" }, () => {
     await expect(alice.page.getByTestId("wallet-test-balance")).toHaveText(/^50 test sats/);
 
     const pasted = await receive(bob, 12);
-    await bob.page.getByTestId("wallet-receive").click();
-    await bob.page.getByPlaceholder("Type a message").fill(`coffee? ${pasted}`);
-    await bob.page.getByPlaceholder("Type a message").press("Enter");
+    await openChat(bob);
+    await openChat(alice);
+    await bob.page.getByPlaceholder("Message…").fill(`coffee? ${pasted}`);
+    await bob.page.getByPlaceholder("Message…").press("Enter");
     const card = chat(alice).getByTestId("invoice-bubble").last();
     await expect(card.getByTestId("money-amount")).toHaveText("12");
     await expect(chat(alice).getByText("coffee?", { exact: true })).toBeVisible();
@@ -109,13 +162,14 @@ test.describe("wallet", { tag: "@network" }, () => {
     await expect.poll(async () => (proofs = await outside.mintProofsBolt11(7, quote.quote).catch(() => null)), { intervals: [1500] }).not.toBeNull();
     const token = getEncodedToken({ mint: TEST_MINT, proofs: proofs!, unit: "sat", memo: "lunch" });
 
-    await bob.page.getByPlaceholder("Type a message").fill(token);
-    await bob.page.getByPlaceholder("Type a message").press("Enter");
+    await bob.page.getByPlaceholder("Message…").fill(token);
+    await bob.page.getByPlaceholder("Message…").press("Enter");
     const card = chat(alice).getByTestId("cashu-token-bubble").last();
     await expect(card.getByTestId("money-amount")).toHaveText("7");
     await expect(card).toContainText("testnut.cashu.space");
     await expect(card).toContainText("lunch");
     const before = await balance(alice);
+    await openChat(alice);
     await card.getByTestId("token-redeem").click();
     await expect(card.getByTestId("token-redeemed")).toBeVisible();
     await expect.poll(() => balance(alice), "redeeming adds the sats, minus the mint's fee").toBeGreaterThan(before);

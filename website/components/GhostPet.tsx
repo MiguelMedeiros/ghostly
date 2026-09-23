@@ -1,16 +1,26 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useHaunting } from "./HauntedPage";
 
 type GhostMood = "sleeping" | "bored" | "happy" | "tired";
 
 export default function GhostPet() {
+  const { enabled } = useHaunting();
+  const [hasPointer, setHasPointer] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia("(hover: hover) and (pointer: fine)");
+    const update = () => setHasPointer(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
   const [position, setPosition] = useState({ x: 100, y: 100 });
   const [mood, setMood] = useState<GhostMood>("sleeping");
   const [direction, setDirection] = useState<"left" | "right">("right");
   const [isVisible, setIsVisible] = useState(true);
   const [isHiding, setIsHiding] = useState(false);
-  
+
   const mousePos = useRef({ x: 200, y: 200 });
   const lastMouseMove = useRef(Date.now());
   const mouseSpeed = useRef(0);
@@ -19,6 +29,7 @@ export default function GhostPet() {
   const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    if (!enabled || !hasPointer || !isVisible) return;
     const handleMouseMove = (e: MouseEvent) => {
       const now = Date.now();
       const timeDelta = now - lastMouseMove.current;
@@ -32,18 +43,19 @@ export default function GhostPet() {
 
       lastMousePos.current = { x: e.clientX, y: e.clientY };
       // Store absolute position (including scroll offset)
-      mousePos.current = { 
-        x: e.clientX + window.scrollX, 
-        y: e.clientY + window.scrollY 
+      mousePos.current = {
+        x: e.clientX + window.scrollX,
+        y: e.clientY + window.scrollY,
       };
       lastMouseMove.current = now;
     };
 
     window.addEventListener("mousemove", handleMouseMove);
     return () => window.removeEventListener("mousemove", handleMouseMove);
-  }, []);
+  }, [enabled, hasPointer, isVisible]);
 
   useEffect(() => {
+    if (!enabled || !hasPointer || !isVisible) return;
     let animationId: number;
 
     const animate = () => {
@@ -61,7 +73,7 @@ export default function GhostPet() {
       const ghostCenterY = currentPos.current.y + 22;
       const mouseToGhostDistance = Math.sqrt(
         Math.pow(mousePos.current.x - ghostCenterX, 2) +
-        Math.pow(mousePos.current.y - ghostCenterY, 2)
+          Math.pow(mousePos.current.y - ghostCenterY, 2),
       );
 
       if (mouseToGhostDistance < 60 && !isHiding) {
@@ -86,19 +98,29 @@ export default function GhostPet() {
       setMood(newMood);
 
       // Calculate speed based on mood
-      const speed = newMood === "tired" ? 0.004 : newMood === "sleeping" ? 0.002 : 0.008;
+      const speed =
+        newMood === "tired" ? 0.004 : newMood === "sleeping" ? 0.002 : 0.008;
 
       // Update position (clamped to document to prevent overflow)
       const ghostWidth = 36;
       const ghostHeight = 45;
       const docWidth = Math.max(document.body.scrollWidth, window.innerWidth);
-      const docHeight = Math.max(document.body.scrollHeight, window.innerHeight);
+      const docHeight = Math.max(
+        document.body.scrollHeight,
+        window.innerHeight,
+      );
       const maxX = docWidth - ghostWidth - 10;
       const maxY = docHeight - ghostHeight - 10;
-      
-      const newX = Math.max(0, Math.min(maxX, currentPos.current.x + dx * speed));
-      const newY = Math.max(0, Math.min(maxY, currentPos.current.y + dy * speed));
-      
+
+      const newX = Math.max(
+        0,
+        Math.min(maxX, currentPos.current.x + dx * speed),
+      );
+      const newY = Math.max(
+        0,
+        Math.min(maxY, currentPos.current.y + dy * speed),
+      );
+
       currentPos.current = { x: newX, y: newY };
       setPosition({ x: newX, y: newY });
 
@@ -110,14 +132,23 @@ export default function GhostPet() {
     };
 
     animationId = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(animationId);
-  }, [isHiding]);
+    return () => {
+      cancelAnimationFrame(animationId);
+    };
+  }, [isHiding, enabled, hasPointer, isVisible]);
 
-  if (!isVisible) return null;
+  useEffect(
+    () => () => {
+      if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
+    },
+    [],
+  );
+
+  if (!isVisible || !enabled || !hasPointer) return null;
 
   return (
     <div
-      className="absolute pointer-events-none z-50"
+      className="ghost-pet absolute pointer-events-none z-50"
       style={{
         left: position.x,
         top: position.y,
@@ -132,11 +163,12 @@ export default function GhostPet() {
           height="45"
           viewBox="0 0 80 100"
           style={{
-            animation: mood === "sleeping" 
-              ? "ghostFloat 6s ease-in-out infinite" 
-              : mood === "happy"
-              ? "ghostFloat 3s ease-in-out infinite"
-              : "ghostFloat 4s ease-in-out infinite"
+            animation:
+              mood === "sleeping"
+                ? "ghostFloat 6s ease-in-out infinite"
+                : mood === "happy"
+                  ? "ghostFloat 3s ease-in-out infinite"
+                  : "ghostFloat 4s ease-in-out infinite",
           }}
         >
           <defs>
@@ -157,11 +189,47 @@ export default function GhostPet() {
 
           {mood === "sleeping" && (
             <g>
-              <path d="M24 36 Q29 34 34 36" stroke="#0f172a" strokeWidth="3" fill="none" strokeLinecap="round" />
-              <path d="M46 36 Q51 34 56 36" stroke="#0f172a" strokeWidth="3" fill="none" strokeLinecap="round" />
-              <text x="62" y="24" fontSize="12" fill="rgba(34, 211, 238, 0.8)" style={{ animation: "zzzFloat 2s ease-in-out infinite" }}>z</text>
-              <text x="68" y="16" fontSize="10" fill="rgba(34, 211, 238, 0.6)" style={{ animation: "zzzFloat 2s ease-in-out infinite 0.3s" }}>z</text>
-              <text x="72" y="10" fontSize="8" fill="rgba(34, 211, 238, 0.4)" style={{ animation: "zzzFloat 2s ease-in-out infinite 0.6s" }}>z</text>
+              <path
+                d="M24 36 Q29 34 34 36"
+                stroke="#0f172a"
+                strokeWidth="3"
+                fill="none"
+                strokeLinecap="round"
+              />
+              <path
+                d="M46 36 Q51 34 56 36"
+                stroke="#0f172a"
+                strokeWidth="3"
+                fill="none"
+                strokeLinecap="round"
+              />
+              <text
+                x="62"
+                y="24"
+                fontSize="12"
+                fill="rgba(34, 211, 238, 0.8)"
+                style={{ animation: "zzzFloat 2s ease-in-out infinite" }}
+              >
+                z
+              </text>
+              <text
+                x="68"
+                y="16"
+                fontSize="10"
+                fill="rgba(34, 211, 238, 0.6)"
+                style={{ animation: "zzzFloat 2s ease-in-out infinite 0.3s" }}
+              >
+                z
+              </text>
+              <text
+                x="72"
+                y="10"
+                fontSize="8"
+                fill="rgba(34, 211, 238, 0.4)"
+                style={{ animation: "zzzFloat 2s ease-in-out infinite 0.6s" }}
+              >
+                z
+              </text>
             </g>
           )}
 
@@ -185,8 +253,18 @@ export default function GhostPet() {
 
           {mood === "tired" && (
             <g>
-              <path d="M22 32 L36 36" stroke="#0f172a" strokeWidth="2" strokeLinecap="round" />
-              <path d="M44 36 L58 32" stroke="#0f172a" strokeWidth="2" strokeLinecap="round" />
+              <path
+                d="M22 32 L36 36"
+                stroke="#0f172a"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
+              <path
+                d="M44 36 L58 32"
+                stroke="#0f172a"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
               <circle cx="29" cy="40" r="4" fill="#0f172a" />
               <circle cx="51" cy="40" r="4" fill="#0f172a" />
               <circle cx="30" cy="38" r="1.5" fill="white" />
@@ -208,13 +286,25 @@ export default function GhostPet() {
 
       <style jsx global>{`
         @keyframes ghostFloat {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-6px); }
+          0%,
+          100% {
+            transform: translateY(0);
+          }
+          50% {
+            transform: translateY(-6px);
+          }
         }
 
         @keyframes zzzFloat {
-          0%, 100% { opacity: 0.3; transform: translateY(0); }
-          50% { opacity: 1; transform: translateY(-4px); }
+          0%,
+          100% {
+            opacity: 0.3;
+            transform: translateY(0);
+          }
+          50% {
+            opacity: 1;
+            transform: translateY(-4px);
+          }
         }
       `}</style>
     </div>

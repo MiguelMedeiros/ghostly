@@ -130,6 +130,19 @@ export interface PayRequestFrame {
   u: string;
   memo?: string;
   e: WireEndpoint[];
+  /** The `pay-ask` this answers, if any. */
+  a?: string;
+}
+
+/** A payer asking to pay: the payee answers with a `pay-req` whose `a` is this id. */
+export interface PayAskFrame {
+  t: "pay-ask";
+  id: string;
+  ts: number;
+  v: string;
+  u: string;
+  m: "arkade" | "usdt";
+  memo?: string;
 }
 
 /** A payment that travels in band, such as an ecash token. */
@@ -172,6 +185,7 @@ export interface PingFrame {
 }
 
 export type ControlFrame =
+  | PayAskFrame
   | HelloFrame
   | ChatFrame
   | CallFrame
@@ -233,7 +247,8 @@ function isEndpoint(value: unknown): value is WireEndpoint {
     Array.isArray(value) &&
     value.length === 2 &&
     typeof value[0] === "string" &&
-    /^[a-z0-9][a-z0-9-]{0,63}$/.test(value[0]) &&
+    value[0].length <= 64 &&
+    /^[a-z0-9][a-z0-9-]*(?:\/[1-9][0-9]*)?$/.test(value[0]) &&
     typeof value[1] === "string" &&
     value[1].length <= 32 * 1024
   );
@@ -283,10 +298,15 @@ export function decodeControl(text: string): ControlFrame | null {
       const memo = typeof f.memo === "string" ? f.memo.slice(0, 140) : undefined;
       if (f.t === "pay-req") {
         if (!Array.isArray(f.e) || f.e.length === 0 || f.e.length > 8 || !f.e.every(isEndpoint)) return null;
-        return { t: "pay-req", id: f.id, ts: f.ts, v: f.v, u: f.u, memo, e: f.e };
+        return { t: "pay-req", id: f.id, ts: f.ts, v: f.v, u: f.u, memo, e: f.e, a: isPayId(f.a) ? f.a : undefined };
       }
       if (!isEndpoint(f.e) || (f.rid !== undefined && !isPayId(f.rid))) return null;
       return { t: "pay", id: f.id, ts: f.ts, rid: f.rid, v: f.v, u: f.u, memo, e: f.e };
+    }
+    case "pay-ask": {
+      if (!isPayId(f.id) || typeof f.ts !== "number" || !isAmount(f.v) || !isUnit(f.u)) return null;
+      if (f.m !== "arkade" && f.m !== "usdt") return null;
+      return { t: "pay-ask", id: f.id, ts: f.ts, v: f.v, u: f.u, m: f.m, memo: typeof f.memo === "string" ? f.memo.slice(0, 140) : undefined };
     }
     case "pay-res":
       if (!isPayId(f.id) || typeof f.ok !== "boolean") return null;

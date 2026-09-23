@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { iceServerProblem } from "@ghostly/browser/shared/ice";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 
 /** Settings section for clients that reach Pkarr through relays: which relays, and an optional TURN server. */
@@ -8,6 +9,7 @@ export function NetworkSettings() {
   const [relays, setRelays] = useState("");
   const [turn, setTurn] = useState({ urls: "", username: "", credential: "" });
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
   const loaded = network !== null;
 
   useEffect(() => {
@@ -21,10 +23,14 @@ export function NetworkSettings() {
   if (!platform || !network) return null;
 
   const save = async () => {
-    await platform.setNetwork({
-      relays: relays.split(/\s+/).filter(Boolean),
-      turn: turn.urls.trim() ? { ...turn, urls: turn.urls.trim() } : null,
-    });
+    setError("");
+    const server = turn.urls.trim() ? { ...turn, urls: turn.urls.trim() } : null;
+    // Checked here as well as in the engine, so the person sees why before anything changes.
+    const problem = server ? iceServerProblem(server) : null;
+    if (problem) { setError(problem); return; }
+    try {
+      await platform.setNetwork({ relays: relays.split(/\s+/).filter(Boolean), turn: server });
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); return; }
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
   };
@@ -96,6 +102,7 @@ export function NetworkSettings() {
             Save
           </button>
           {saved && <span className="text-accent text-sm">Saved</span>}
+          {error && <span role="alert" data-testid="network-error" className="text-danger text-sm">{error}</span>}
           <span data-testid="network-protocol" className="text-text-muted text-xs ml-auto">{network.protocol}</span>
         </div>
       </div>

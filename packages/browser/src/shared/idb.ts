@@ -9,7 +9,11 @@ let dbName = "ghostly";
 export function setDatabaseName(name: string): void {
   dbName = name;
 }
-const DB_VERSION = 5;
+/** The peer database this page uses: its profile's (WISP 04). */
+export function databaseName(): string {
+  return dbName;
+}
+const DB_VERSION = 6;
 
 export const STORES = {
   links: "links",
@@ -22,6 +26,7 @@ export const STORES = {
   quotes: "quotes",
   walletTx: "walletTx",
   melts: "melts",
+  intents: "paymentIntents",
 } as const;
 
 /**
@@ -38,6 +43,9 @@ export interface StoredFile {
   direction?: "in" | "out";
   /** The id the file had on the data link. */
   wireId?: string;
+  digest?: string;
+  metadata?: { name: string; size: number; mime: string; timestamp: number };
+  transfer?: { state: "transferring" | "done" | "failed"; transferred: number; size: number; error?: string };
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -60,6 +68,7 @@ export function openDb(): Promise<IDBDatabase> {
       if (!has(STORES.walletTx)) db.createObjectStore(STORES.walletTx, { keyPath: "id" });
       // v5: Lightning payments the mint has not settled yet, and the proofs they hold.
       if (!has(STORES.melts)) db.createObjectStore(STORES.melts, { keyPath: "quote" });
+      if (!has(STORES.intents)) db.createObjectStore(STORES.intents, { keyPath: "review.id" });
       if (!has(STORES.files)) {
         db.createObjectStore(STORES.files, { keyPath: "id" }).createIndex("byLink", "linkId");
       }
@@ -127,7 +136,14 @@ export async function transact(names: string[], work: (stores: Record<string, ID
 
 export const fileStore = {
   async put(file: StoredFile): Promise<void> {
-    await wrap((await store(STORES.files, "readwrite")).put(file));
+    await transact([STORES.files], stores => { stores[STORES.files].put(file); });
+  },
+  async updateTransfer(id: string, transfer: NonNullable<StoredFile["transfer"]>): Promise<void> {
+    await transact([STORES.files], stores => {
+      const files = stores[STORES.files];
+      const request = files.get(id);
+      request.onsuccess = () => { if (request.result) files.put({ ...request.result, transfer }); };
+    });
   },
   async get(id: string): Promise<StoredFile | undefined> {
     return wrap((await store(STORES.files, "readonly")).get(id));

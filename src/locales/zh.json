@@ -1,5 +1,9 @@
 {
   "common": {
+    "chatCreated": "聊天创建于{{date}}",
+    "deleteChatTitle": "删除聊天？",
+    "deleteChatLocal": "这将删除此设备上的聊天及其记录，不会删除联系人的副本。",
+    "anonymous": "匿名",
     "save": "保存",
     "cancel": "取消",
     "delete": "删除",
@@ -24,7 +28,13 @@
     "deleteChat": "删除聊天",
     "deleteAllChats": "删除所有聊天",
     "copyInvite": "复制邀请码",
-    "settings": "设置"
+    "settings": "设置",
+    "new": "新建",
+    "join": "加入",
+    "joinChat": "加入聊天",
+    "quiet": "这里很安静...",
+    "quietHint": "该去吓唬谁了！👻",
+    "startChat": "新聊天"
   },
   "chat": {
     "typeMessage": "输入消息...",
@@ -38,9 +48,38 @@
     "deleteMessage": "删除消息",
     "deleteMessageHint": "仅在此设备上删除，对方仍保留副本。"
   },
+  "invite": {
+    "live": "实时聊天",
+    "text": "仅文本",
+    "details": "发送详情",
+    "textDetails": "仅文本模式将简短的加密消息发布到DHT，即使联系人处于离线状态。最多256个UTF-8字节，有效期为5分钟。不保证送达。",
+    "copy": "复制邀请",
+    "copyFailed": "无法复制。请重试或分享邀请。",
+    "shareFailed": "无法分享。请复制邀请。"
+  },
+  "join": {
+    "title": "加入聊天",
+    "close": "关闭",
+    "cameraPreview": "二维码相机预览",
+    "paste": "从剪贴板粘贴",
+    "scan": "扫描二维码",
+    "image": "打开图片",
+    "invite": "邀请码",
+    "submit": "加入",
+    "invalid": "邀请无效。请索取新的邀请。",
+    "empty": "剪贴板为空。请在下方粘贴邀请。",
+    "clipboardUnavailable": "无法访问剪贴板。请在下方粘贴邀请。",
+    "cameraUnavailable": "相机不可用。请粘贴邀请或打开图片。",
+    "imageSize": "请选择小于12 MB的图片。",
+    "noQr": "未找到二维码。请尝试更清晰的图片。",
+    "imageFailed": "无法读取图片。请尝试PNG或JPEG。"
+  },
   "home": {
+    "linkFailed": "无法打开链接。",
+    "viewRelease": "查看此版本",
+    "unpublishedVersion": "本地版本 — 查看已发布版本",
     "welcome": "欢迎使用 Ghostly",
-    "description": "尊重隐私的安全临时通讯",
+    "description": "私密、短暂的消息。",
     "createChat": "创建新聊天",
     "features": {
       "encrypted": "端到端加密",
@@ -49,6 +88,11 @@
     }
   },
   "settings": {
+    "systemNotifications": "系统通知",
+    "noticesRunning": "Ghostly运行期间。",
+    "noticesDenied": "通知已被阻止。请检查设备或浏览器设置。",
+    "noticesUnavailable": "此处无法使用通知。",
+    "privateNotice": "新消息",
     "title": "设置",
     "profile": "个人资料",
     "defaultNickname": "默认昵称",
@@ -104,7 +148,7 @@
     "lockNow": "立即锁定",
     "notifications": "通知",
     "notificationSounds": "通知声音",
-    "notificationSoundsDescription": "收到新消息时播放声音",
+    "notificationSoundsDescription": "消息、通话和已确认付款的声音",
     "data": "数据与存储",
     "storageUsed": "已用存储空间",
     "clearAllData": "清除所有数据",
@@ -175,6 +219,8 @@
   "tabs": {
     "chats": "聊天",
     "wallet": "钱包",
-    "share": "分享"
+    "share": "分享",
+    "profile": "个人资料",
+    "services": "服务"
   }
 }

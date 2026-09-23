@@ -49,6 +49,8 @@ export const RELAY_POLL_INTERVALS: PollIntervals = {
 
 /** Signaling that has not finished by then is not going to; stop polling fast. */
 const FAST_POLL_MAX_MS = 45_000;
+/** A chat whose contact was never seen (an invite just sent) keeps looking at the active pace this long. */
+export const AWAITING_PEER_MS = 10 * 60_000;
 const PUBLISH_RETRY_MS = 4_000;
 export const IDLE_THRESHOLD = 60_000;
 export const MAX_DHT_TEXT_BYTES = 500;
@@ -70,6 +72,7 @@ export interface PeerPresence {
 }
 
 export interface LinkSessionEvents {
+  onDiscoveryError?(error: string | null): void;
   onMessages?(messages: ResolvedMessage[], batch: ResolvedLink): void;
   onPresence?(presence: PeerPresence): void;
   onPeerAck?(ackTimestamp: number): void;
@@ -116,11 +119,13 @@ export class LinkSession {
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
   private lastActivity = Date.now();
+  private readonly startedAt = Date.now();
   private readonly intervals: PollIntervals;
   private fastPollUntil = 0;
   private publishRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private active = false;
   private connected = false;
+  private discoveryErrors: Partial<Record<"publish" | "read", string>> = {};
   private presence: PeerPresence = { online: false, lastPacketAt: 0, services: null };
 
   constructor(options: LinkSessionOptions) {
@@ -198,10 +203,20 @@ export class LinkSession {
     this.pollNow();
   }
 
-  async setRtcSignal(signal: string | null): Promise<void> {
+  /** Includes encryption, DNS encoding and the actual concurrent record budget. */
+  fitsRtcSignal(signal: string): boolean {
+    try {
+      buildLinkRecords(this.identity.pubKeyZ32, { messages: this.sentBuffer, ackTimestamp: this.myAck,
+        nick: this.nick, callSignal: this.callSignal, rtcSignal: signal, services: this.getServices() }, this.encKey);
+      return true;
+    } catch { return false; }
+  }
+
+  async setRtcSignal(signal: string | null, reportFailure = false): Promise<void> {
     if (this.rtcSignal === signal) return;
     this.rtcSignal = signal;
-    await this.publish().catch(() => {});
+    if (reportFailure) await this.publish();
+    else await this.publish().catch(() => {});
     if (signal) this.pollNow();
   }
 
@@ -257,6 +272,8 @@ export class LinkSession {
     // Connected peers signal over the data link; no reason to hurry Pkarr.
     if (this.connected) return this.intervals.connected;
     if (Date.now() < this.fastPollUntil) return this.intervals.fast;
+    // Someone who just sent an invite may look elsewhere while waiting: the join still comes in quickly.
+    if (!this.active && this.presence.lastPacketAt === 0 && Date.now() - this.startedAt < AWAITING_PEER_MS) return this.intervals.active;
     if (!this.active) return this.intervals.background;
     return Date.now() - this.lastActivity > IDLE_THRESHOLD ? this.intervals.idle : this.intervals.active;
   }
@@ -287,6 +304,7 @@ export class LinkSession {
       } catch (error) {
         // A signal that is not published is a call that never rings: try again.
         if (this.running) {
+          this.discoveryResult("publish", error);
           this.publishRetryTimer = setTimeout(() => void this.publish().catch(() => {}), PUBLISH_RETRY_MS);
         }
         throw error;
@@ -311,7 +329,14 @@ export class LinkSession {
       this.encKey,
     );
     await this.transport.publish(this.identity, built.records);
+    this.discoveryResult("publish");
     return built.keptMessages;
+  }
+
+  private discoveryResult(operation: "publish" | "read", error?: unknown): void {
+    if (error !== undefined) this.discoveryErrors[operation] = `Could not ${operation} discovery: ${error instanceof Error ? error.message : String(error)}`;
+    else delete this.discoveryErrors[operation];
+    this.events.onDiscoveryError?.(Object.values(this.discoveryErrors).join(". ") || null);
   }
 
   private async poll(): Promise<void> {
@@ -321,6 +346,7 @@ export class LinkSession {
     try {
       const packet = await this.transport.resolve(this.peerPubKeyZ32);
       if (!this.running) return;
+      this.discoveryResult("read");
 
       let receivedNew = false;
       if (packet) {
@@ -361,8 +387,11 @@ export class LinkSession {
 
       if (receivedNew) await this.publish().catch(() => {});
       this.events.onStatus?.("online");
-    } catch {
-      if (this.running) this.events.onStatus?.("error");
+    } catch (error) {
+      if (this.running) {
+        this.discoveryResult("read", error);
+        this.events.onStatus?.("error");
+      }
     } finally {
       this.polling = false;
       if (this.running && !this.pollTimer) {

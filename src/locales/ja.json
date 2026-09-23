@@ -1,5 +1,9 @@
 {
   "common": {
+    "chatCreated": "チャット作成日時：{{date}}",
+    "deleteChatTitle": "チャットを削除しますか？",
+    "deleteChatLocal": "この端末のチャットと履歴を削除します。相手側のコピーは削除されません。",
+    "anonymous": "匿名",
     "save": "保存",
     "cancel": "キャンセル",
     "delete": "削除",
@@ -24,7 +28,13 @@
     "deleteChat": "チャットを削除",
     "deleteAllChats": "すべてのチャットを削除",
     "copyInvite": "招待コードをコピー",
-    "settings": "設定"
+    "settings": "設定",
+    "new": "新規",
+    "join": "参加",
+    "joinChat": "チャットに参加",
+    "quiet": "ここは静かです...",
+    "quietHint": "誰かを驚かせよう！👻",
+    "startChat": "新しいチャット"
   },
   "chat": {
     "typeMessage": "メッセージを入力...",
@@ -38,9 +48,38 @@
     "deleteMessage": "メッセージを削除",
     "deleteMessageHint": "この端末からのみ削除されます。相手の端末には残ります。"
   },
+  "invite": {
+    "live": "ライブチャット",
+    "text": "テキストのみ",
+    "details": "送信の詳細",
+    "textDetails": "テキストのみでは、相手がオフラインでも短い暗号化メッセージをDHTに公開します。最大256 UTF-8バイト、有効期間は5分です。配信は保証されません。",
+    "copy": "招待をコピー",
+    "copyFailed": "コピーできませんでした。再試行するか招待を共有してください。",
+    "shareFailed": "共有できませんでした。招待をコピーしてください。"
+  },
+  "join": {
+    "title": "チャットに参加",
+    "close": "閉じる",
+    "cameraPreview": "QRカメラのプレビュー",
+    "paste": "クリップボードから貼り付け",
+    "scan": "QRをスキャン",
+    "image": "画像を開く",
+    "invite": "招待コード",
+    "submit": "参加",
+    "invalid": "無効な招待です。新しい招待を依頼してください。",
+    "empty": "クリップボードが空です。下に招待を貼り付けてください。",
+    "clipboardUnavailable": "クリップボードを利用できません。下に招待を貼り付けてください。",
+    "cameraUnavailable": "カメラを利用できません。招待を貼り付けるか画像を開いてください。",
+    "imageSize": "12 MB未満の画像を選んでください。",
+    "noQr": "QRが見つかりません。鮮明な画像を試してください。",
+    "imageFailed": "画像を読み込めません。PNGかJPEGを試してください。"
+  },
   "home": {
+    "linkFailed": "リンクを開けませんでした。",
+    "viewRelease": "このリリースを見る",
+    "unpublishedVersion": "ローカルバージョン — 公開リリースを見る",
     "welcome": "Ghostlyへようこそ",
-    "description": "プライバシーを尊重する安全で一時的なメッセージング",
+    "description": "プライベートで、一時的なメッセージ。",
     "createChat": "新規チャットを作成",
     "features": {
       "encrypted": "エンドツーエンド暗号化",
@@ -49,6 +88,11 @@
     }
   },
   "settings": {
+    "systemNotifications": "システム通知",
+    "noticesRunning": "Ghostlyの起動中に通知します。",
+    "noticesDenied": "通知がブロックされています。端末やブラウザの設定を確認してください。",
+    "noticesUnavailable": "ここでは通知を利用できません。",
+    "privateNotice": "新しいメッセージ",
     "title": "設定",
     "profile": "プロフィール",
     "defaultNickname": "デフォルトニックネーム",
@@ -104,7 +148,7 @@
     "lockNow": "今すぐロック",
     "notifications": "通知",
     "notificationSounds": "通知音",
-    "notificationSoundsDescription": "新しいメッセージが届いたときに音を再生",
+    "notificationSoundsDescription": "メッセージ、通話、確定した支払いのサウンド",
     "data": "データとストレージ",
     "storageUsed": "使用中のストレージ",
     "clearAllData": "すべてのデータを消去",
@@ -175,6 +219,8 @@
   "tabs": {
     "chats": "チャット",
     "wallet": "ウォレット",
-    "share": "共有"
+    "share": "共有",
+    "profile": "プロフィール",
+    "services": "サービス"
   }
 }

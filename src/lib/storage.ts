@@ -45,9 +45,39 @@ export function setStorageProfile(profile: string): void {
   _profile = profile;
 }
 
-function getPrefix(): string {
+/** The local profile this app runs as (WISP 04). Empty: the default profile, the original namespace. */
+export function getStorageProfile(): string {
+  return _profile;
+}
+
+export function getPrefix(): string {
   return _profile ? `ghostly_${_profile}_` : "ghostly_";
 }
+
+/**
+ * Whether a key with this app's prefix belongs to this profile. The default profile's prefix is also the
+ * start of every other profile's, whose keys carry `<profile>_` after it; a chat's own id never has `_`.
+ */
+export function ownsKey(key: string): boolean {
+  if (!key.startsWith(getPrefix())) return false;
+  if (_profile) return true;
+  const rest = key.slice(getPrefix().length);
+  return !PROFILE_KEY.test(rest) && !otherSpaces().some((ns) => rest.startsWith(`${ns}_`));
+}
+/**
+ * Other storage spaces in this storage area (Desktop's GHOSTLY_PROFILE, and their profiles): each keeps
+ * its settings under `ghostly_<space>_app_settings`, so its keys are not the default profile's.
+ */
+function otherSpaces(): string[] {
+  const spaces: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const match = /^ghostly_(.+)_app_settings$/.exec(localStorage.key(i) ?? "");
+    if (match) spaces.push(match[1]);
+  }
+  return spaces;
+}
+/** What follows `ghostly_` in another profile's keys: its 10-character id and `_`. */
+const PROFILE_KEY = /^[a-z0-9]{10}_/;
 
 function getKey(sessionId: string): string {
   return `${getPrefix()}${sessionId}`;
@@ -132,6 +162,8 @@ export function deleteSession(sessionId: string): void {
     getKey(sessionId),
     `${getPrefix()}read_${sessionId}`,
     `${getPrefix()}invite_${sessionId}`,
+    `${getPrefix()}pin_${sessionId}`,
+    `${getPrefix()}draft_${sessionId}`,
     joinKey(sessionId),
     LEGACY_JOIN_PREFIX + sessionId,
   ]) {
@@ -151,12 +183,32 @@ export function deleteAllSessions(): void {
   for (const session of listSessions()) deleteSession(session.id);
 }
 
+export function getSessionDraft(id: string): string {
+  try { return localStorage.getItem(`${getPrefix()}draft_${id}`) ?? ""; } catch { return ""; }
+}
+export function setSessionDraft(id: string, text: string): void {
+  try { const key=`${getPrefix()}draft_${id}`; if(text) localStorage.setItem(key,text); else localStorage.removeItem(key); } catch { /* Keep the in-memory draft if storage is unavailable. */ }
+}
+
+export function isSessionPinned(sessionId: string): boolean {
+  return localStorage.getItem(`${getPrefix()}pin_${sessionId}`) === "1";
+}
+
+export function setSessionPinned(sessionId: string, pinned: boolean): void {
+  if (!loadSession(sessionId)) return;
+  const key = `${getPrefix()}pin_${sessionId}`;
+  if (pinned) localStorage.setItem(key, "1");
+  else localStorage.removeItem(key);
+  window.dispatchEvent(new Event("session-updated"));
+}
+
 export function listSessions(): ChatSession[] {
   const sessions: ChatSession[] = [];
   for (let i = 0; i < localStorage.length; i++) {
     try {
       const key = localStorage.key(i);
-      if (!key?.startsWith(getPrefix())) continue;
+      // A chat's key is the prefix and its id; a longer key is another profile's, or not a chat.
+      if (!key?.startsWith(getPrefix()) || key.slice(getPrefix().length).includes("_")) continue;
       const raw = localStorage.getItem(key);
       if (!raw) continue;
       const session = JSON.parse(raw) as ChatSession;
@@ -168,6 +220,8 @@ export function listSessions(): ChatSession[] {
     }
   }
   sessions.sort((a, b) => {
+    const pinOrder = Number(isSessionPinned(b.id)) - Number(isSessionPinned(a.id));
+    if (pinOrder) return pinOrder;
     const aTime = a.lastSyncAt ?? a.createdAt;
     const bTime = b.lastSyncAt ?? b.createdAt;
     return bTime - aTime;
@@ -249,6 +303,10 @@ export function saveInviteCode(sessionId: string, code: string): void {
   }
 }
 
+export function forgetInviteCode(sessionId: string): void {
+  localStorage.removeItem(`${getPrefix()}invite_${sessionId}`);
+}
+
 export function getInviteCode(sessionId: string): string | null {
   try {
     return localStorage.getItem(`${getPrefix()}invite_${sessionId}`);
@@ -291,6 +349,8 @@ export function findSession(
 }
 
 export interface SessionKeys {
+  profile?: "paired-chat/1";
+  deliveryMode?: "stream" | "dht";
   seedB64: string;
   peerPubKeyB64: string;
   encKeyB64: string;
@@ -305,10 +365,13 @@ export function ensureSession(
   options: { inviteCode?: string; createdAt?: number } = {},
 ): string {
   const existing = findSession(keys.seedB64, keys.peerPubKeyB64);
+  if (existing && existing.profile !== keys.profile) throw new Error("Invitation profile does not match this stored conversation");
   const id = existing?.id ?? newSessionId();
   if (!existing) {
     saveSession({
       id,
+      profile: keys.profile,
+      deliveryMode: keys.deliveryMode,
       mySeedB64: keys.seedB64,
       peerPubKeyB64: keys.peerPubKeyB64,
       encKeyB64: keys.encKeyB64,

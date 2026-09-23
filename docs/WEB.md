@@ -8,7 +8,7 @@ The same peer and the same UI as [Ghostly Browser](BROWSER.md), running in a tab
 docker compose up --build -d
 ```
 
-Then open <http://localhost:8080>. `docker compose down` stops it. For GIFs from Giphy, put `VITE_GIPHY_API_KEY` in `.env` before building (the Retro source needs no key).
+Then open <http://localhost:8080>. `docker compose down` stops it. GIF search uses GIFCities without an API key.
 
 Without Docker:
 

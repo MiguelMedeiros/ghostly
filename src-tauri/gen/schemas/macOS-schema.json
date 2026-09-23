@@ -219,10 +219,100 @@
           "markdownDescription": "Enables the local_fetch command without any pre-configured scope."
         },
         {
+          "description": "Enables the native_notification_permission command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-native-notification-permission",
+          "markdownDescription": "Enables the native_notification_permission command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the native_private_notification command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-native-private-notification",
+          "markdownDescription": "Enables the native_private_notification command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_project_link command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-project-link",
+          "markdownDescription": "Enables the open_project_link command without any pre-configured scope."
+        },
+        {
           "description": "Enables the open_service_window command without any pre-configured scope.",
           "type": "string",
           "const": "allow-open-service-window",
           "markdownDescription": "Enables the open_service_window command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the paired_hyperdht_address command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-paired-hyperdht-address",
+          "markdownDescription": "Enables the paired_hyperdht_address command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the paired_hyperdht_close command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-paired-hyperdht-close",
+          "markdownDescription": "Enables the paired_hyperdht_close command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the paired_hyperdht_connect command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-paired-hyperdht-connect",
+          "markdownDescription": "Enables the paired_hyperdht_connect command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the paired_hyperdht_send command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-paired-hyperdht-send",
+          "markdownDescription": "Enables the paired_hyperdht_send command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the paired_hyperdht_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-paired-hyperdht-start",
+          "markdownDescription": "Enables the paired_hyperdht_start command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the paired_hyperdht_stop command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-paired-hyperdht-stop",
+          "markdownDescription": "Enables the paired_hyperdht_stop command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the paired_iroh_address command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-paired-iroh-address",
+          "markdownDescription": "Enables the paired_iroh_address command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the paired_iroh_connect command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-paired-iroh-connect",
+          "markdownDescription": "Enables the paired_iroh_connect command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the paired_iroh_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-paired-iroh-start",
+          "markdownDescription": "Enables the paired_iroh_start command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the paired_iroh_stop command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-paired-iroh-stop",
+          "markdownDescription": "Enables the paired_iroh_stop command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the paired_native_close command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-paired-native-close",
+          "markdownDescription": "Enables the paired_native_close command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the paired_native_send command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-paired-native-send",
+          "markdownDescription": "Enables the paired_native_send command without any pre-configured scope."
         },
         {
           "description": "Enables the publish_messages command without any pre-configured scope.",
@@ -303,10 +393,100 @@
           "markdownDescription": "Denies the local_fetch command without any pre-configured scope."
         },
         {
+          "description": "Denies the native_notification_permission command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-native-notification-permission",
+          "markdownDescription": "Denies the native_notification_permission command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the native_private_notification command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-native-private-notification",
+          "markdownDescription": "Denies the native_private_notification command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_project_link command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-project-link",
+          "markdownDescription": "Denies the open_project_link command without any pre-configured scope."
+        },
+        {
           "description": "Denies the open_service_window command without any pre-configured scope.",
           "type": "string",
           "const": "deny-open-service-window",
           "markdownDescription": "Denies the open_service_window command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the paired_hyperdht_address command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-paired-hyperdht-address",
+          "markdownDescription": "Denies the paired_hyperdht_address command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the paired_hyperdht_close command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-paired-hyperdht-close",
+          "markdownDescription": "Denies the paired_hyperdht_close command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the paired_hyperdht_connect command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-paired-hyperdht-connect",
+          "markdownDescription": "Denies the paired_hyperdht_connect command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the paired_hyperdht_send command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-paired-hyperdht-send",
+          "markdownDescription": "Denies the paired_hyperdht_send command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the paired_hyperdht_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-paired-hyperdht-start",
+          "markdownDescription": "Denies the paired_hyperdht_start command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the paired_hyperdht_stop command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-paired-hyperdht-stop",
+          "markdownDescription": "Denies the paired_hyperdht_stop command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the paired_iroh_address command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-paired-iroh-address",
+          "markdownDescription": "Denies the paired_iroh_address command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the paired_iroh_connect command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-paired-iroh-connect",
+          "markdownDescription": "Denies the paired_iroh_connect command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the paired_iroh_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-paired-iroh-start",
+          "markdownDescription": "Denies the paired_iroh_start command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the paired_iroh_stop command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-paired-iroh-stop",
+          "markdownDescription": "Denies the paired_iroh_stop command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the paired_native_close command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-paired-native-close",
+          "markdownDescription": "Denies the paired_native_close command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the paired_native_send command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-paired-native-send",
+          "markdownDescription": "Denies the paired_native_send command without any pre-configured scope."
         },
         {
           "description": "Denies the publish_messages command without any pre-configured scope.",
@@ -2359,6 +2539,204 @@
           "type": "string",
           "const": "core:window:deny-unminimize",
           "markdownDescription": "Denies the unminimize command without any pre-configured scope."
+        },
+        {
+          "description": "This permission set configures which\nnotification features are by default exposed.\n\n#### Granted Permissions\n\nIt allows all notification related features.\n\n\n#### This default permission set includes:\n\n- `allow-is-permission-granted`\n- `allow-request-permission`\n- `allow-notify`\n- `allow-register-action-types`\n- `allow-register-listener`\n- `allow-cancel`\n- `allow-get-pending`\n- `allow-remove-active`\n- `allow-get-active`\n- `allow-check-permissions`\n- `allow-show`\n- `allow-batch`\n- `allow-list-channels`\n- `allow-delete-channel`\n- `allow-create-channel`\n- `allow-permission-state`",
+          "type": "string",
+          "const": "notification:default",
+          "markdownDescription": "This permission set configures which\nnotification features are by default exposed.\n\n#### Granted Permissions\n\nIt allows all notification related features.\n\n\n#### This default permission set includes:\n\n- `allow-is-permission-granted`\n- `allow-request-permission`\n- `allow-notify`\n- `allow-register-action-types`\n- `allow-register-listener`\n- `allow-cancel`\n- `allow-get-pending`\n- `allow-remove-active`\n- `allow-get-active`\n- `allow-check-permissions`\n- `allow-show`\n- `allow-batch`\n- `allow-list-channels`\n- `allow-delete-channel`\n- `allow-create-channel`\n- `allow-permission-state`"
+        },
+        {
+          "description": "Enables the batch command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-batch",
+          "markdownDescription": "Enables the batch command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cancel command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-cancel",
+          "markdownDescription": "Enables the cancel command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the check_permissions command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-check-permissions",
+          "markdownDescription": "Enables the check_permissions command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the create_channel command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-create-channel",
+          "markdownDescription": "Enables the create_channel command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the delete_channel command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-delete-channel",
+          "markdownDescription": "Enables the delete_channel command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_active command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-get-active",
+          "markdownDescription": "Enables the get_active command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_pending command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-get-pending",
+          "markdownDescription": "Enables the get_pending command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the is_permission_granted command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-is-permission-granted",
+          "markdownDescription": "Enables the is_permission_granted command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_channels command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-list-channels",
+          "markdownDescription": "Enables the list_channels command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the notify command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-notify",
+          "markdownDescription": "Enables the notify command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the permission_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-permission-state",
+          "markdownDescription": "Enables the permission_state command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the register_action_types command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-register-action-types",
+          "markdownDescription": "Enables the register_action_types command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the register_listener command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-register-listener",
+          "markdownDescription": "Enables the register_listener command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the remove_active command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-remove-active",
+          "markdownDescription": "Enables the remove_active command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the request_permission command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-request-permission",
+          "markdownDescription": "Enables the request_permission command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the show command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-show",
+          "markdownDescription": "Enables the show command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the batch command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-batch",
+          "markdownDescription": "Denies the batch command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cancel command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-cancel",
+          "markdownDescription": "Denies the cancel command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the check_permissions command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-check-permissions",
+          "markdownDescription": "Denies the check_permissions command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the create_channel command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-create-channel",
+          "markdownDescription": "Denies the create_channel command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the delete_channel command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-delete-channel",
+          "markdownDescription": "Denies the delete_channel command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_active command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-get-active",
+          "markdownDescription": "Denies the get_active command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_pending command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-get-pending",
+          "markdownDescription": "Denies the get_pending command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the is_permission_granted command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-is-permission-granted",
+          "markdownDescription": "Denies the is_permission_granted command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_channels command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-list-channels",
+          "markdownDescription": "Denies the list_channels command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the notify command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-notify",
+          "markdownDescription": "Denies the notify command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the permission_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-permission-state",
+          "markdownDescription": "Denies the permission_state command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the register_action_types command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-register-action-types",
+          "markdownDescription": "Denies the register_action_types command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the register_listener command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-register-listener",
+          "markdownDescription": "Denies the register_listener command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the remove_active command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-remove-active",
+          "markdownDescription": "Denies the remove_active command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the request_permission command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-request-permission",
+          "markdownDescription": "Denies the request_permission command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the show command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-show",
+          "markdownDescription": "Denies the show command without any pre-configured scope."
         },
         {
           "description": "This permission set configures which\nprocess features are by default exposed.\n\n#### Granted Permissions\n\nThis enables to quit via `allow-exit` and restart via `allow-restart`\nthe application.\n\n#### This default permission set includes:\n\n- `allow-exit`\n- `allow-restart`",

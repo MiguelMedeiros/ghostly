@@ -1,5 +1,6 @@
 export * from "./bytes";
 export * from "./text";
+export * from "./avatar";
 export * from "./crypto";
 export * from "./identity";
 export * from "./dns";
@@ -20,3 +21,16 @@ export * from "./files";
 export * from "./payments";
 export * from "./bolt11";
 export * from "./version";
+
+export * from "./pairedSession";
+
+export * from "./pairedTransports";
+
+export * from "./peerProofs";
+
+export * from './pubkyRing';
+
+export * from './ringLink';
+
+export { DhtDelivery, DHT_TEXT_BYTES, DHT_MESSAGE_TTL, emptyDhtDeliveryState, type DeliveryMode, type DhtDeliveryState, type DhtDeliveryView } from "./dhtDelivery";
+export * from "./paymentIntent";

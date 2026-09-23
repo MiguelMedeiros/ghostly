@@ -4,6 +4,7 @@ import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
 import { useLockScreen } from "../contexts/LockScreenContext";
 import { useUpdate } from "../contexts/UpdateContext";
+import { notificationPermission, requestNotifications, type NoticePermission } from "../lib/notifications";
 import { getVersion } from "@tauri-apps/api/app";
 import { NetworkSettings } from "../components/NetworkSettings";
 import {
@@ -21,11 +22,11 @@ import {
   type ColorTheme,
   type Language,
 } from "../lib/settings";
+import { deleteAllSessions, listSessions } from "../lib/storage";
 
 export function Settings() {
   const navigate = useNavigate();
   const { settings, updateColorScheme, updateColorTheme, updateLanguage, updateLockScreen, updateNotifications, updateDefaultNickname,
-    updateGiphyApiKey,
     updateReduceMotion, updateCheckForUpdates, randomizeNickname } =
     useSettings();
   const { t } = useI18n();
@@ -46,12 +47,30 @@ export function Settings() {
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const [storageInfo, setStorageInfo] = useState({ used: 0, keys: 0 });
   const [confirmClearData, setConfirmClearData] = useState(false);
+  const [confirmDeleteChats, setConfirmDeleteChats] = useState(false);
+  const [chatCount, setChatCount] = useState(0);
+  const [noticePermission, setNoticePermission] = useState<NoticePermission>("default");
+  const [requestingNotice, setRequestingNotice] = useState(false);
+  useEffect(() => {
+    const refresh = () => { void notificationPermission().then(setNoticePermission); };
+    refresh(); window.addEventListener("focus",refresh);
+    return () => window.removeEventListener("focus",refresh);
+  }, []);
+  const toggleNotices = async () => {
+    if (settings.notifications.systemEnabled) { updateNotifications({systemEnabled:false}); return; }
+    setRequestingNotice(true);
+    const permission = await requestNotifications();
+    setNoticePermission(permission);
+    updateNotifications({systemEnabled:permission==="granted"});
+    setRequestingNotice(false);
+  };
   const [appVersion, setAppVersion] = useState("0.0.0");
 
   const hasPassword = !!settings.lockScreen.passwordHash;
 
   useEffect(() => {
     setStorageInfo(getStorageUsage());
+    setChatCount(listSessions().length);
     getVersion().then(setAppVersion).catch(() => setAppVersion("0.0.0"));
   }, []);
 
@@ -240,21 +259,7 @@ export function Settings() {
                 </div>
               </div>
 
-              <div className="space-y-2 border-t border-border pt-4">
-                <label className="text-text-primary block font-medium">Giphy API key (optional)</label>
-                <p className="text-text-muted text-xs">
-                  GIFs work with the key built into Ghostly. Use your own if you prefer, or if you built the app
-                  yourself: create a free "API" key at developers.giphy.com. It is stored on this device only.
-                </p>
-                <input
-                  type="text"
-                  value={settings.giphyApiKey}
-                  onChange={(e) => updateGiphyApiKey(e.target.value)}
-                  placeholder="Using the built-in key"
-                  spellCheck={false}
-                  className="w-full px-3 py-2 bg-input-bg border border-border rounded-lg text-text-primary placeholder-text-muted font-mono text-sm focus:outline-none focus:border-accent transition-colors"
-                />
-              </div>
+
             </div>
           </section>
 
@@ -591,6 +596,20 @@ export function Settings() {
                 </button>
               </div>
 
+              <div className="flex items-center justify-between gap-4 border-t border-border pt-4">
+                <div>
+                  <label className="text-text-primary block">{t("settings.systemNotifications")}</label>
+                  <p className="text-sm text-text-muted" role="status">
+                    {noticePermission === "denied" ? t("settings.noticesDenied") : noticePermission === "unavailable" ? t("settings.noticesUnavailable") : t("settings.noticesRunning")}
+                  </p>
+                </div>
+                <button role="switch" aria-label={t("settings.systemNotifications")} aria-checked={settings.notifications.systemEnabled && noticePermission === "granted"}
+                  disabled={requestingNotice} onClick={() => void toggleNotices()}
+                  className={`relative h-6 w-12 shrink-0 rounded-full cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${settings.notifications.systemEnabled && noticePermission === "granted" ? "bg-accent" : "bg-surface-alt"}`}>
+                  <span className={`absolute left-1 top-1 h-4 w-4 rounded-full bg-white transition-transform ${settings.notifications.systemEnabled && noticePermission === "granted" ? "translate-x-6" : "translate-x-0"}`} />
+                </button>
+              </div>
+
               <div className="flex items-center justify-between border-t border-border pt-4">
                 <div>
                   <label className="text-text-primary block">Reduce motion</label>
@@ -633,6 +652,56 @@ export function Settings() {
                 <span className="text-text-secondary">
                   {formatBytes(storageInfo.used)} ({storageInfo.keys} items)
                 </span>
+              </div>
+
+              <div className="border-t border-border pt-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <label className="text-text-primary block">
+                      {t("sidebar.deleteAllChats")}
+                    </label>
+                    <p className="text-sm text-text-muted">
+                      Every conversation on this device goes, along with its messages and files. Your
+                      settings and your wallet stay.
+                    </p>
+                  </div>
+                </div>
+                {confirmDeleteChats ? (
+                  <div className="flex items-center gap-3 animate-fade-in">
+                    <span className="text-text-muted text-sm flex-1">
+                      Delete all {chatCount} chats?
+                    </span>
+                    <button
+                      data-testid="delete-all-chats-confirm"
+                      onClick={() => {
+                        deleteAllSessions();
+                        setConfirmDeleteChats(false);
+                        setChatCount(0);
+                        setStorageInfo(getStorageUsage());
+                        window.dispatchEvent(new Event("session-updated"));
+                        setMessage({ type: "success", text: t("sidebar.deleteAllChats") });
+                      }}
+                      className="px-4 py-2 bg-danger/10 hover:bg-danger/20 text-danger rounded-lg text-sm font-medium transition-colors"
+                    >
+                      {t("common.confirm")}
+                    </button>
+                    <button
+                      onClick={() => setConfirmDeleteChats(false)}
+                      className="px-4 py-2 bg-surface-alt hover:bg-surface-hover text-text-secondary rounded-lg text-sm font-medium transition-colors"
+                    >
+                      {t("common.cancel")}
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    data-testid="delete-all-chats"
+                    disabled={chatCount === 0}
+                    onClick={() => setConfirmDeleteChats(true)}
+                    className="w-full bg-danger/10 hover:bg-danger/20 text-danger py-2 px-4 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {t("sidebar.deleteAllChats")}
+                  </button>
+                )}
               </div>
 
               <div className="border-t border-border pt-4">

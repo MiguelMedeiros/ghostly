@@ -9,6 +9,7 @@ export function FileBubble({ file }: { file: ChatFile }) {
   const platform = useServicesPlatform();
   const transfer = platform?.getTransfer(file.id) ?? null;
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [retryError, setRetryError] = useState("");
   const [missing, setMissing] = useState(false);
   const settled = transfer === null || transfer.state === "done";
   // A transfer seen in progress ends with a little pop; files from history just show up.
@@ -83,6 +84,10 @@ export function FileBubble({ file }: { file: ChatFile }) {
           </a>
         )}
       </div>
+      {transfer?.state === "failed" && file.id.includes("-out-") && platform?.retryFile && (
+        <button className="text-xs underline px-2 py-1" onClick={() => { setRetryError(""); void platform.retryFile!(file.id).catch(error => setRetryError(String(error.message ?? error))); }}>Retry sending</button>
+      )}
+      {retryError && <p className="text-xs text-danger px-2" role="alert">{retryError}</p>}
       {transfer?.state === "transferring" && (
         <div className="h-1 mx-2 mb-1 rounded-full bg-black/20 overflow-hidden">
           <div

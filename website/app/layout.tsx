@@ -15,9 +15,9 @@ const jetbrains = JetBrains_Mono({
 
 const siteConfig = {
   name: "Ghostly",
-  title: "Ghostly — Your services exist while you are online",
+  title: "Ghostly — Private chat and sharing, peer to peer",
   description:
-    "Ephemeral, peer-to-peer and serverless: chat, calls, files, sats and the web apps on your localhost, shared with the contacts you choose over the DHT and WebRTC. Close Ghostly and it all vanishes.",
+    "Private conversations, files and sats through supported peer-to-peer connections. Explore the Ghostly app, its open contracts and the possibilities ahead. Free and open source.",
   url: "https://ghostly.tools",
   ogImage: "https://ghostly.tools/og-image.png",
   keywords: [
@@ -31,8 +31,9 @@ const siteConfig = {
     "pkarr",
     "mainline DHT",
     "secure messaging",
-    "no servers",
-    "anonymous chat",
+    "localhost sharing",
+    "peer-to-peer file transfer",
+    "Cashu wallet",
   ],
 };
 
@@ -82,7 +83,7 @@ export const metadata: Metadata = {
         url: siteConfig.ogImage,
         width: 1200,
         height: 630,
-        alt: "Ghostly - Encrypted Ephemeral Chat over the DHT",
+        alt: "Ghostly — private chat, calls, files, sats and local app sharing",
         type: "image/png",
       },
     ],
@@ -107,7 +108,7 @@ const jsonLd = {
   description: siteConfig.description,
   url: siteConfig.url,
   applicationCategory: "CommunicationApplication",
-  operatingSystem: "macOS, Windows, Linux",
+  operatingSystem: "macOS, Windows, Linux, Web, Android (Web), iOS (Web)",
   offers: {
     "@type": "Offer",
     price: "0",
@@ -120,10 +121,14 @@ const jsonLd = {
   },
   featureList: [
     "End-to-end encryption",
-    "Ephemeral messaging",
+    "Voice and video in supported legacy chats",
+    "Screen sharing in compatible legacy chats on supported computers",
+    "Peer-to-peer file transfers up to 100 MiB",
+    "Cashu ecash wallet with Lightning payments",
+    "Local web app sharing through compatible legacy desktop and extension chats",
     "Decentralized DHT network",
-    "No servers required",
     "No account needed",
+    "Command-line text messaging for scripts and bots",
   ],
 };
 
@@ -133,7 +138,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark scroll-smooth">
+    <html lang="en" className="dark scroll-smooth" data-scroll-behavior="smooth">
       <head>
         <Script
           src="https://www.googletagmanager.com/gtag/js?id=G-KXK4ESQ5DZ"

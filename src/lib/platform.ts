@@ -1,4 +1,9 @@
-import type { DataLinkState, ServiceAd } from "@ghostly/core";
+import type { PaymentMethodName } from "@ghostly/core";
+import type { UsdtWalletView, UsdtCreate } from "@ghostly/browser/engine/paymentAdapters/usdtWallet";
+import type { PaymentReview, PaymentTarget } from "@ghostly/core";
+import type { ArkCreate, ArkWalletView } from "@ghostly/browser/engine/paymentAdapters/arkWallet";
+import type { ArkConfig } from "@ghostly/browser/engine/paymentAdapters/arkade";
+import type { DataLinkState, ServiceAd, PairingState } from "@ghostly/core";
 import type { ChatFile } from "./types";
 
 /**
@@ -13,9 +18,21 @@ export interface SharedService {
   target: string;
   enabled: boolean;
   requests: number;
+  /** Contacts granted access, by participation key. Absent or empty means nobody. */
+  sharedWith?: string[];
 }
 
 export interface PeerLinkState {
+  id?: string;
+  deliveryMode?: "stream" | "dht";
+  textDelivery?: "stream" | "dht" | "unavailable";
+  canSendText?: boolean;
+  dhtDelivery?: { mode: "stream" | "dht"; peerMode?: "stream" | "dht"; authenticated: boolean; error?: string; pendingUntil?: number; maxTextBytes: number };
+  pairing?: PairingState;
+  /** `methods`: ways of paying both sides allow in this chat right now. */
+  capabilities?: { files: boolean; payments: boolean; methods?: Record<PaymentMethodName, boolean> };
+  /** Ways of paying this device allows in this chat. */
+  paymentMethods?: Record<PaymentMethodName, boolean>;
   dataLink: DataLinkState;
   online: boolean;
   /** `null` while the peer advertises nothing (offline, or an older client). */
@@ -61,6 +78,13 @@ export interface WalletTransaction {
 }
 
 export interface WalletState {
+  /** Which wallets are in use: real money, or test networks. Absent means mainnet. */
+  mode?: "mainnet" | "testnet";
+  /** On Mainnet: test sats held at test mints (a contact may have sent some), shown once in Testnet. */
+  waitingTestSats?: number;
+  ark?: ArkWalletView;
+  usdt?: UsdtWalletView;
+  intents?: PaymentReview[];
   mints: { url: string; name: string; balance: number; info: MintInfo | null }[];
   balance: number;
   /** Newest first. */
@@ -69,6 +93,12 @@ export interface WalletState {
 }
 
 export interface ChatPayment {
+  mints?: string[];
+  /** Cashu: the mint the ecash came from, or went out on. */
+  mint?: string;
+  linkId?: string;
+  target?: PaymentTarget;
+  txid?: string;
   id: string;
   kind: "payment" | "request";
   direction: "in" | "out";
@@ -91,13 +121,41 @@ export type CashuInspection =
 
 /** An ecash (Cashu) wallet with Lightning in and out through the user's mints. */
 export interface WalletPlatform {
+  usdtCreate(params:UsdtCreate):Promise<void>;
+  usdtUnlock(password:string):Promise<void>;
+  /** The recovery phrase; a wallet that opens by itself needs no password. */
+  usdtReveal(password?:string):Promise<string>;
+  usdtLock():Promise<void>;
+  usdtRefresh():Promise<void>;
+  /** Sepolia only: test USDT from a public faucet; returns the transaction hash. */
+  usdtGetTestTokens():Promise<string>;
+  usdtExportBackup(password:string):Promise<string>;
+  usdtRestoreBackup(text:string,password:string):Promise<void>;
+  arkCreate(params: ArkCreate):Promise<void>;
+  arkUnlock(password:string):Promise<void>;
+  arkLock():Promise<void>;
+  arkBackup(password?:string):Promise<{mnemonic:string;config:ArkConfig}>;
+  arkExportBackup(password:string):Promise<string>;
+  arkRestoreBackup(text:string,password:string):Promise<void>;
+  arkRefresh():Promise<void>;
+  /** Expired Ark outputs back into the balance; returns the settlement txid. */
+  arkRecover():Promise<string>;
+  preparePayment(params:{target:PaymentTarget;amount:number;feeCap:number;payee:string;linkId?:string;requestId?:string;memo?:string}):Promise<PaymentReview>;
+  approvePayment(id:string):Promise<PaymentReview>;
+  reconcilePayment(id:string):Promise<PaymentReview>;
+  cancelPayment(id:string):Promise<PaymentReview>;
+
   /** A public mint with worthless test sats, for trying things out. */
   testMintUrl: string;
+  /** Every mint whose sats are worthless; their balance is never shown as money. */
+  testMintUrls: readonly string[];
   getState(): WalletState | null;
   addMint(url: string): Promise<void>;
   removeMint(url: string): Promise<void>;
   /** The primary mint (first in the list) is where Lightning invoices are created. */
   setPrimaryMint(url: string): Promise<void>;
+  /** Real money or test networks, for every wallet at once. */
+  setMode(mode: "mainnet" | "testnet"): Promise<void>;
   receiveLightning(amount: number): Promise<{ invoice: string; expiresAt: number | null }>;
   quoteInvoice(invoice: string): Promise<{ quote: string; mint: string; amount: number; feeReserve: number }>;
   /** True when paid, false while the mint holds the payment pending. Throws when the sats did not leave. */
@@ -107,7 +165,11 @@ export interface WalletPlatform {
   inspectCashu(text: string): Promise<CashuInspection | null>;
   exportTokens(): Promise<{ mint: string; token: string; amount: number }[]>;
   send(peerPubKeyZ32: string, amount: number, memo?: string): Promise<{ timestamp: number; paymentId: string }>;
-  request(peerPubKeyZ32: string, amount: number, memo?: string): Promise<{ timestamp: number; paymentId: string }>;
+  request(peerPubKeyZ32: string, amount: number, memo?: string, method?: "cashu" | "arkade" | "usdt"): Promise<{ timestamp: number; paymentId: string }>;
+  /** Paying on Ark or USDT without a request: asks the contact's app for one. */
+  askToPay(peerPubKeyZ32: string, amount: number, method: "arkade" | "usdt", memo?: string): Promise<{ askId: string }>;
+  /** The contact's request answering an ask, once it arrived. */
+  answerTo(askId: string): ChatPayment | null;
   payRequest(peerPubKeyZ32: string, paymentId: string): Promise<void>;
   reclaim(paymentId: string): Promise<void>;
   getPayment(paymentId: string): ChatPayment | null;
@@ -121,6 +183,8 @@ export interface ServicesPlatform {
     shareLocalServices: boolean;
     /** Whether this client can display a contact's web app. */
     openServices: boolean;
+    /** Whether this client can switch between local profiles (WISP 04). */
+    profiles?: boolean;
   };
   subscribe(listener: () => void): () => void;
   /** Whether this peer is reachable at all right now. */
@@ -131,7 +195,11 @@ export interface ServicesPlatform {
   shareService(name: string, target: string): Promise<void>;
   removeService(id: string): Promise<void>;
   setServiceEnabled(id: string, enabled: boolean): Promise<void>;
+  /** Grants or withdraws one contact's access to one service. Nobody is granted by default. */
+  setServiceShared(id: string, peerPubKeyZ32: string, shared: boolean): Promise<void>;
   getPeer(peerPubKeyZ32: string): PeerLinkState | null;
+  /** Which ways of paying the chat with this peer allows. */
+  setChatPaymentMethods(peerPubKeyZ32: string, methods: Partial<Record<PaymentMethodName, boolean>>): Promise<void>;
   connect(peerPubKeyZ32: string): void;
   openService(peerPubKeyZ32: string, serviceId: string): Promise<void>;
   /** Largest file that can be sent, in bytes. */
@@ -139,6 +207,7 @@ export interface ServicesPlatform {
   /** Starts sending and returns what to show in the chat. Progress comes through `getTransfer`. */
   sendFile(peerPubKeyZ32: string, file: File): Promise<{ timestamp: number; file: ChatFile }>;
   /** Null when nothing is known about the transfer, e.g. after a restart. */
+  retryFile?(fileId: string): Promise<void>;
   getTransfer(fileId: string): FileTransferState | null;
   getFile(fileId: string): Promise<Blob | null>;
   /** Forgets a message this device deleted: the peer's copy of it and the bytes of any file it carried. */

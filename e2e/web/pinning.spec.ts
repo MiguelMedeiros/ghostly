@@ -1,0 +1,31 @@
+import {test,expect} from "../support/fixtures";
+test("pin from list does not switch chat, survives reload, and unpins from Options",async({peer})=>{
+  const {page}=await peer("pinning");
+  await page.getByRole("button",{name:"New chat",exact:true}).click();
+  const older=page.url();
+  await page.getByRole("button",{name:"New chat",exact:true}).click();
+  await expect(page).not.toHaveURL(older);
+  const current=page.url();
+  const pins=page.getByRole("button",{name:"Pin chat",exact:true});
+  await pins.nth(1).hover();
+  const target = (await pins.nth(1).boundingBox())!;
+  await page.mouse.click(target.x + target.width / 2, target.y + target.height / 2);
+  await page.mouse.move(900,700);
+  const activePin = page.getByRole("button",{name:"Unpin chat",exact:true});
+  await expect(activePin).toHaveCSS("opacity","1");
+  await expect(activePin.locator("svg path").first()).toHaveAttribute("fill","currentColor");
+  // Discovery/history refreshes must not revert a pin while the pointer is elsewhere.
+  await page.getByRole("button",{name:"Options",exact:true}).click();
+  await page.getByRole("button",{name:"Refresh",exact:true}).click();
+  await expect(activePin).toHaveAttribute("aria-pressed","true");
+  await expect(page).toHaveURL(current);
+  await expect(page.locator('[data-testid="sidebar"] button[aria-pressed]').first()).toHaveAttribute("aria-pressed","true");
+  await page.reload();
+  await expect(page.getByRole("button",{name:"Unpin chat",exact:true})).toHaveCount(1);
+  await page.goto(older);
+  await page.getByRole("button",{name:"Options",exact:true}).click();
+  await page.getByRole("button",{name:"Unpin chat",exact:true}).last().click();
+  await expect(page.getByRole("button",{name:"Unpin chat",exact:true})).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByRole("button",{name:"Unpin chat",exact:true})).toHaveCount(0);
+});

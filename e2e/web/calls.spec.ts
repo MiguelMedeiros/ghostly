@@ -1,4 +1,4 @@
-import { chat, connect, expect, link, say, test, type Peer } from "../support/fixtures";
+import { chat, connect, expect, linkLegacy, say, test, type Peer } from "../support/fixtures";
 
 const clock = /^\d{1,2}:\d{2}$/;
 
@@ -11,7 +11,8 @@ const remoteSize = (peer: Peer) =>
 
 async function linked(peer: (name: string) => Promise<Peer>): Promise<[Peer, Peer]> {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
-  await link(alice, bob);
+  // Calls belong to the compatibility profile, not paired-chat/1.
+  await linkLegacy(alice, bob);
   await connect(alice, bob);
   return [alice, bob];
 }
@@ -220,21 +221,20 @@ test("a call follows you out of the chat and into Settings", async ({ peer }) =>
   await expect.poll(() => remoteSize(bob), "and still has the picture").toMatch(/^[1-9]\d*x[1-9]\d*$/);
 
   await alice.page.getByTitle("Back to the chat").click();
-  await expect(alice.page.getByPlaceholder("Type a message")).toBeVisible();
+  await expect(alice.page.getByPlaceholder("Message…")).toBeVisible();
   await say(alice, "back from settings, still on the call");
   await expect(chat(bob).getByText("back from settings, still on the call")).toBeVisible();
 
   // Another chat is no different: the call comes along, the new chat is its own.
   await alice.page.getByTitle("New Chat").click();
-  await alice.page.getByRole("button", { name: "Create New Chat" }).first().click();
-  await expect(alice.page.locator("code").first()).toBeVisible();
+  await expect(alice.page.getByTestId("invite-card")).toBeVisible();
   await expect(callWindow, "the call comes along here too").toBeVisible();
   await expect(alice.page.getByTitle("Back to the chat")).toBeVisible();
 
   // A hang-up from the other side still reaches a call that is away from its chat.
   await bob.page.getByTitle("End call").click();
   await expect(callWindow).toHaveCount(0);
-  await expect(alice.page.locator("code").first(), "and leaves you where you were").toBeVisible();
+  await expect(alice.page.getByTestId("invite-card"), "and leaves you where you were").toBeVisible();
 });
 
 test("the lock screen covers a call it keeps going", async ({ peer }) => {

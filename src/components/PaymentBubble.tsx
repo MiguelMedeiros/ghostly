@@ -1,7 +1,10 @@
+import { formatPaymentAmount, parsePaymentAmount } from "@ghostly/core";
+import type { PaymentReview as Review } from "@ghostly/core";
+import { PaymentReview } from "./PaymentReview";
 import { useEffect, useRef, useState } from "react";
 import { useCountUp } from "../hooks/useCountUp";
-import { playSound } from "../lib/sounds";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { isWorthlessMint } from "@ghostly/browser/shared/mints";
 
 const STATE_LABEL = {
   payment: { pending: "Waiting for your contact…", settled: "Received", failed: "Failed", reclaimed: "Taken back" },
@@ -10,8 +13,15 @@ const STATE_LABEL = {
 
 /** A payment or a payment request in the chat. The amounts are live: they follow what the wallet knows. */
 export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { paymentId: string; peerPubKey: string; fallbackText: string }) {
-  const wallet = useServicesPlatform()?.wallet;
+  const platform = useServicesPlatform();
+  const wallet = platform?.wallet;
   const payment = wallet?.getPayment(paymentId) ?? null;
+  /** Its way of paying is off in this chat: the request stays readable, but nothing here can pay it. */
+  const allowed = platform?.getPeer(peerPubKey)?.paymentMethods;
+  const paymentsOff = !!allowed && !!payment && (payment.target ? !allowed[payment.target.method] : !(allowed.cashu || allowed.lightning));
+  const [review,setReview] = useState<Review|null>(null);
+  const [mint,setMint] = useState("");
+  const [feeCap,setFeeCap] = useState<string|null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
@@ -28,9 +38,6 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
     const settledNow = state === "settled" && (first ? fresh : previous.current === "pending");
     if (settledNow) {
       setCelebrate(incomingMoney);
-      playSound(incomingMoney ? "coin" : "confirmed");
-    } else if (first && fresh && state === "pending") {
-      playSound(payment.kind === "request" && payment.direction === "in" ? "request" : "sent");
     }
     previous.current = state;
     // `payment` only matters through the fields above.
@@ -52,9 +59,17 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
     }
   };
 
+  const tokenPayment=payment.target?.method==='usdt';
+  const feeInput=feeCap??(tokenPayment?'0.001':'10');
   const outgoing = payment.direction === "out";
   const isRequest = payment.kind === "request";
+  const sharedMints=(wallet.getState()?.mints??[]).filter(m=>payment.mints?.includes(m.url));
+  const selectedMint=sharedMints.find(m=>m.url===mint)?.url ?? sharedMints[0]?.url;
   const title = isRequest ? (outgoing ? "You requested" : "Requests") : outgoing ? "You sent" : "Sent you";
+  // Test sats are worth nothing, and the bubble says so: a contact must not pass them off as money.
+  const testSats = payment.target?.method === "arkade" ? payment.target.network !== "bitcoin"
+    : payment.target?.method === "cashu" ? payment.target.network === "cashu-test"
+    : !tokenPayment && (payment.mint ? isWorthlessMint(payment.mint) : !!payment.mints?.length && payment.mints.every(isWorthlessMint));
   const button =
     "px-3 py-1.5 bg-accent text-[#111b21] rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
   const quiet = "px-3 py-1.5 bg-black/20 hover:bg-black/30 rounded-lg text-xs font-bold transition-colors cursor-pointer";
@@ -70,11 +85,13 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
       <p className="text-[11px] uppercase tracking-wider text-[hsla(0,0%,100%,0.6)] m-0">{title}</p>
       <p className="m-0 leading-tight">
         <span className="text-[22px] font-semibold">
-          <span className={celebrate ? "animate-bolt-pop" : ""}>⚡</span>{" "}
-          {(celebrate ? amountShown : payment.amount).toLocaleString()}
+
+          {tokenPayment?formatPaymentAmount(payment.amount,payment.target?.decimals):(celebrate ? amountShown : payment.amount).toLocaleString()}
         </span>
-        <span className="text-xs ml-1 text-[hsla(0,0%,100%,0.7)]">sats</span>
+        {" "}<span className="text-xs ml-1 text-[hsla(0,0%,100%,0.7)]">{tokenPayment?payment.target?.asset:testSats?'test sats':'sats'}</span>
       </p>
+      {payment.target && <p className="text-xs text-text-muted">{payment.target.method==="usdt"?"USDT":payment.target.method==="arkade"?"Ark":"Cashu"} · {payment.target.network}</p>}
+      {review && <PaymentReview review={review} wallet={wallet} onClose={()=>setReview(null)}/>}
       {payment.memo && <p className="text-[13px] m-0 mt-0.5 wrap-break-word">{payment.memo}</p>}
       <p
         className={`text-[11px] m-0 mt-1 ${payment.state === "failed" ? "text-danger" : payment.state === "settled" ? "text-accent" : "text-[hsla(0,0%,100%,0.6)]"}`}
@@ -84,10 +101,18 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
         {payment.error && payment.state !== "settled" ? ` · ${payment.error}` : ""}
       </p>
 
-      {isRequest && !outgoing && payment.state === "pending" && !payment.lightningPending && (
-        <div className="flex gap-2 mt-2">
-          <button data-testid="payment-pay" className={button} disabled={busy} onClick={() => run(() => wallet.payRequest(peerPubKey, payment.id))}>
-            {busy ? "Paying…" : "Pay"}
+      {isRequest && !outgoing && paymentsOff && (payment.state === "pending" || payment.state === "failed") && (
+        <p className="text-xs text-text-muted mt-2" data-testid="payment-off">This way of paying is off in this chat.</p>
+      )}
+      {isRequest && !outgoing && !paymentsOff && (payment.state === "pending" || payment.state === "failed") && !payment.lightningPending && (
+        <div className="flex flex-col gap-2 mt-2">
+          {!payment.target && <label className="text-xs">Cashu mint<select aria-label="Cashu mint" className="block max-w-full bg-input-bg rounded p-1" value={selectedMint??""} onChange={e=>setMint(e.target.value)}>{!sharedMints.length&&<option value="">No shared configured mint</option>}{sharedMints.map(m=><option key={m.url} value={m.url}>{m.url} · {m.balance} sats</option>)}</select></label>}
+          <label className="text-xs">{tokenPayment?'Maximum gas (ETH)':'Maximum fee (sats)'}<input aria-label={tokenPayment?'Maximum gas (ETH)':'Maximum fee (sats)'} className="block w-20 bg-input-bg rounded p-1" inputMode="numeric" value={feeInput} onChange={e=>setFeeCap(e.target.value.replace(tokenPayment?/[^0-9.]/g:/\D/g,""))}/></label>
+          <button data-testid="payment-pay" className={button} disabled={busy || (!payment.target && !selectedMint) || !!review} onClick={() => run(async () => {
+            const target=payment.target ?? {method:"cashu" as const,network:wallet.testMintUrls.includes(selectedMint!) ? "cashu-test" as const : "bitcoin" as const,provider:selectedMint!,asset:"BTC" as const,unit:"sat" as const,address:payment.id,expiresAt:Date.now()+15*60*1000};
+            setReview(await wallet.preparePayment({target,amount:payment.amount,feeCap:tokenPayment?parsePaymentAmount(feeInput,18):Number(feeInput),payee:peerPubKey,linkId:payment.linkId,requestId:payment.id}));
+          })}>
+            {busy ? "Preparing…" : "Review payment"}
           </button>
           {payment.invoice && (
             <button
@@ -104,7 +129,8 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
           )}
         </div>
       )}
-      {!isRequest && outgoing && payment.state === "pending" && (
+      {/* Ecash nobody picked up is still ours, whether it went out through a review or not. */}
+      {(!payment.target || payment.target.method === "cashu") && !isRequest && outgoing && (payment.state === "pending" || payment.state === "failed") && (
         <button className={`${quiet} mt-2`} disabled={busy} onClick={() => run(() => wallet.reclaim(payment.id))} title="If your contact never picks it up, the ecash is still yours">
           Take it back
         </button>

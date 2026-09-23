@@ -506,7 +506,7 @@ body {
 
   .sheet-emoji em-emoji-picker {
     width: 100%;
-    height: 52dvh;
+    height: var(--emoji-picker-height, 52dvh);
     --border-radius: 0;
     --shadow: none;
   }
@@ -721,4 +721,78 @@ em-emoji-picker {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* AccountBar is desktop-only. Container rules follow the resizable sidebar. */
+.account-footer { container-type: inline-size; }
+.account-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 7px 8px; height: 64px; }
+.account-action { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-width: 0; border-radius: 8px; cursor: pointer; color: var(--theme-text-secondary); }
+.account-action:hover, .account-action[aria-expanded="true"], .account-action[aria-current="page"] { background: var(--theme-surface-hover); color: var(--theme-accent); }
+.account-action:focus-visible { outline: 2px solid var(--theme-accent); outline-offset: -2px; }
+.account-label { font-size: 10px; line-height: 12px; }
+.account-wallet-label { display: block; white-space: nowrap; line-height: 12px; }
+/* Sats that came in while the wallet was closed: a count on the wallet icon, ringed in the bar's color. */
+.wallet-new { position: absolute; top: -7px; left: 14px; min-width: 18px; height: 16px; padding: 0 5px; border-radius: 999px; display: grid; place-items: center;
+  font-size: 10px; font-weight: 700; line-height: 1; white-space: nowrap; font-variant-numeric: tabular-nums;
+  background: var(--theme-accent); color: #111b21; box-shadow: 0 0 0 2px var(--theme-sidebar-bg); animation: wallet-new-in 0.45s cubic-bezier(.2,1.6,.4,1) both; }
+.wallet-new-test { background: var(--theme-sidebar-bg); color: var(--theme-accent); box-shadow: inset 0 0 0 1.5px var(--theme-accent), 0 0 0 2px var(--theme-sidebar-bg); }
+@keyframes wallet-new-in { from { transform: scale(0.3); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .wallet-new { animation: none; } }
+.account-balance { font-variant-numeric: tabular-nums; }
+.account-action > svg, .account-action > span:first-child { flex-shrink: 0; }
+
+/* Action affordances, without changing text inputs or disabled controls. */
+button:not(:disabled):not([aria-disabled="true"]), summary,
+a[href]:not([aria-disabled="true"]),
+input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled), select:not(:disabled),
+[role="button"]:not(:disabled):not([aria-disabled="true"]), [role="switch"]:not(:disabled):not([aria-disabled="true"]) { cursor: pointer; }
+button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, input[type="radio"]:disabled, select:disabled,
+[role="button"][aria-disabled="true"], [role="switch"][aria-disabled="true"] { cursor: not-allowed; }
+
+/* Shared desktop baseline; the composer can still grow with multiline text. */
+@media (min-width: 768px) {
+  :root { --conversation-footer-height: 60px; --conversation-control-height: 40px; }
+  .account-actions { height: calc(var(--conversation-footer-height) - 1px); }
+  .composer-safe {
+    min-height: var(--conversation-footer-height);
+    border-top: 1px solid var(--theme-border);
+    padding-block: calc((var(--conversation-footer-height) - var(--conversation-control-height) - 1px) / 2);
+  }
+}
+
+.conversation-pin { transform-origin: center; transition: transform 180ms ease-out; }
+
+@keyframes contact-fetch-pulse {
+  0% { box-shadow: 0 0 0 0 rgb(34 197 94 / 0.45); }
+  100% { box-shadow: 0 0 0 5px rgb(34 197 94 / 0); }
+}
+.contact-fetch-pulse { animation: contact-fetch-pulse 400ms ease-out 1; }
+
+/* The anchored desktop picker fits its measured viewport space; its own grid scrolls. */
+.emoji-popover em-emoji-picker {
+  width: 100%;
+  height: var(--emoji-picker-height);
+  min-height: 0;
+}
+
+/* The desktop header follows the resizable column, not the window width. */
+.sidebar-desktop .sidebar-header { container: chat-sidebar / inline-size; gap: 16px; }
+.sidebar-desktop .sidebar-home { min-width: 40px; min-height: 40px; flex-shrink: 0; }
+/* Connection controls keep native checkbox behavior with an explicit WebKit-safe visual. */
+.connection-switch-row { cursor: pointer; }
+.connection-switch-row:has(input:disabled) { cursor: not-allowed; }
+.connection-switch { position: relative; display: inline-flex; flex-shrink: 0; align-items: center; width: 40px; height: 28px; }
+.connection-switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; z-index: 1; }
+.connection-switch-track { width: 40px; height: 24px; border: 1px solid var(--theme-text-secondary); border-radius: 999px; background: var(--theme-surface-hover); transition: background-color 160ms ease, border-color 160ms ease; }
+.connection-switch-track::after { content: ""; display: block; width: 16px; height: 16px; margin: 3px; border-radius: 50%; background: var(--theme-text-primary); transition: transform 160ms ease; }
+.connection-switch input:checked + .connection-switch-track { background: var(--theme-accent); border-color: var(--theme-accent); }
+.connection-switch input:checked + .connection-switch-track::after { transform: translateX(16px); background: var(--theme-panel-header); }
+.connection-switch input:focus-visible + .connection-switch-track { outline: 2px solid var(--theme-accent); outline-offset: 3px; }
+.connection-switch input:disabled + .connection-switch-track { opacity: 0.55; }
+@media (prefers-reduced-motion: reduce) {
+  .connection-switch-track, .connection-switch-track::after { transition: none; }
+}
+@container chat-sidebar (max-width: 340px) {
+  .sidebar-action-label { display: none; }
+  .sidebar-header-action { width: 40px; gap: 0; }
 }

@@ -7,6 +7,8 @@ edition = "2021"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+ghostly-transports = { path = "../native-transports" }
+iroh = "=1.2.0"
 tauri = { version = "2", features = [] }
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
@@ -19,7 +21,14 @@ base64 = "0.23"
 crypto_secretbox = "0.1"
 reqwest = { version = "0.13", default-features = false }
 url = "2"
-tokio = { version = "1", features = ["sync", "time"] }
+tokio = { version = "1", features = ["sync", "time", "process", "io-util"] }
+tauri-plugin-notification = "2"
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-user-notifications = "0.3"
+block2 = "0.6"

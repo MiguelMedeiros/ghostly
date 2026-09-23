@@ -27,7 +27,7 @@ export interface FileInfo {
 /** Where a platform puts incoming bytes: memory, IndexedDB, disk. */
 export interface FileSink {
   write(chunk: Uint8Array): void | Promise<void>;
-  close(): void | Promise<void>;
+  close(digest?: string): void | Promise<void>;
   abort(): void;
 }
 

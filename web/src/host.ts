@@ -10,8 +10,8 @@ import { RELEASES_URL } from "../../src/lib/settings";
  */
 export const webHost = createInPageHost({
   version: __APP_VERSION__,
-  notice: "Beta. Keys and sats live in this browser. Pocket money only.",
-  features: { shareLocalServices: false, openServices: false },
+  notice: "Beta. Keys and wallet data live in this browser. Pocket money only.",
+  features: { shareLocalServices: false, openServices: false, profiles: true },
 
   /**
    * The deployed build says what it is in `/version.json`, on this origin and

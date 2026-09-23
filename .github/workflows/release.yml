@@ -125,8 +125,6 @@ jobs:
         uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Baked into the frontend by Vite; GIFs work out of the box. Users can still set their own in Settings.
-          VITE_GIPHY_API_KEY: ${{ secrets.VITE_GIPHY_API_KEY }}
           # Signs the bundles the app updates itself with. The app installs
           # nothing that does not verify against the public key it was built with.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -256,8 +254,6 @@ jobs:
         run: npm ci
 
       - name: Build
-        env:
-          VITE_GIPHY_API_KEY: ${{ secrets.VITE_GIPHY_API_KEY }}
         run: npm run build:extension
 
       - name: Package
@@ -311,7 +307,6 @@ jobs:
           file: web/Dockerfile
           push: true
           build-args: |
-            VITE_GIPHY_API_KEY=${{ secrets.VITE_GIPHY_API_KEY }}
             GHOSTLY_BUILD=${{ github.sha }}
           tags: |
             ${{ steps.image.outputs.name }}:${{ env.RELEASE_TAG }}

@@ -1,5 +1,12 @@
 /** Flat line icons (Heroicons outline, MIT), the same family the feature grid uses. */
 const PATHS = {
+  lock: "M7 10V7a5 5 0 0110 0v3M6 10h12a2 2 0 012 2v7a2 2 0 01-2 2H6a2 2 0 01-2-2v-7a2 2 0 012-2zm6 4v3",
+  video:
+    "M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9A2.25 2.25 0 0015.75 16.5v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z",
+  file: "M13.5 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9m-6.5-6L20 9h-6.5V3zM8 13h8m-8 4h5",
+  bolt: "M13.5 2.25L3.75 13.5H12l-1.5 8.25L20.25 10.5H12l1.5-8.25z",
+  check: "m5 12 4 4L19 6",
+  mic: "M12 15a3 3 0 003-3V6a3 3 0 00-6 0v6a3 3 0 003 3zm-6-4v1a6 6 0 0012 0v-1m-6 7v3m-3 0h6",
   globe:
     "M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418",
   puzzle:
@@ -10,32 +17,71 @@ const PATHS = {
     "M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z",
   key: "M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z",
   chat: "M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a2.126 2.126 0 00-.476-.095 48.64 48.64 0 00-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0011.25 3c-1.584 0-3.144.092-4.68.27C4.963 3.477 3.75 4.885 3.75 6.507v6.018c0 1.621 1.213 3.03 2.82 3.236.53.068 1.064.123 1.598.167V19.5l3.32-3.32",
-  leave: "M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9",
+  leave:
+    "M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9",
 } as const;
 
 export type IconName = keyof typeof PATHS;
 
-export function Icon({ name, className = "w-6 h-6" }: { name: IconName; className?: string }) {
+export function Icon({
+  name,
+  className = "w-6 h-6",
+}: {
+  name: IconName;
+  className?: string;
+}) {
   return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5} aria-hidden="true">
+    <svg
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+      strokeWidth={1.5}
+      aria-hidden="true"
+    >
       <path strokeLinecap="round" strokeLinejoin="round" d={PATHS[name]} />
     </svg>
   );
 }
 
-/** The house ghost, flat like everything else. */
+/** Original Ghostly mark, shared by the logo and the story characters. */
+export function GhostShape({ lookX = 0, lookY = 0 }: { lookX?: number; lookY?: number }) {
+  return (
+    <>
+      <path d="M12 2C7.582 2 4 5.582 4 10v8c0 .75.6 1 1 .6l2-1.6 2 1.6c.4.3.8.3 1.2 0L12 17l1.8 1.6c.4.3.8.3 1.2 0l2-1.6 2 1.6c.4.4 1 .15 1-.6v-8c0-4.418-3.582-8-8-8z" />
+      <g transform={`translate(${lookX} ${lookY})`}>
+        <g className="ghost-gaze">
+          <g className="ghost-eyelids" fill="#070e10">
+            <circle cx="9" cy="9" r="1.5" />
+            <circle cx="15" cy="9" r="1.5" />
+          </g>
+        </g>
+      </g>
+    </>
+  );
+}
+
 export function GhostGlyph({ className = "w-6 h-6" }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d="M12 2C7.582 2 4 5.582 4 10v8c0 .75.6 1 1 .6l2-1.6 2 1.6c.4.3.8.3 1.2 0L12 17l1.8 1.6c.4.3.8.3 1.2 0l2-1.6 2 1.6c.4.4 1 .15 1-.6v-8c0-4.418-3.582-8-8-8z" />
-      <circle cx="9" cy="9" r="1.5" className="fill-background" />
-      <circle cx="15" cy="9" r="1.5" className="fill-background" />
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <GhostShape />
     </svg>
   );
 }
 
 /** An icon in the rounded tile the feature cards use. */
-export function IconTile({ name, tone = "cyan" }: { name: IconName; tone?: "cyan" | "green" }) {
+export function IconTile({
+  name,
+  tone = "cyan",
+}: {
+  name: IconName;
+  tone?: "cyan" | "green";
+}) {
   return (
     <span
       className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${

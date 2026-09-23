@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-native-notification-permission"
+description = "Enables the native_notification_permission command without any pre-configured scope."
+commands.allow = ["native_notification_permission"]
+
+[[permission]]
+identifier = "deny-native-notification-permission"
+description = "Denies the native_notification_permission command without any pre-configured scope."
+commands.deny = ["native_notification_permission"]
