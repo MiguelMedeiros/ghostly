@@ -192,7 +192,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const wallet = platform?.wallet;
   const walletState = wallet?.getState() ?? null;
   const pay = useCallback(
-    async (kind: "send" | "request", amount: number, memo: string, method?: "cashu" | "arkade" | "usdt"): Promise<string | null> => {
+    async (kind: "send" | "request", amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark"): Promise<string | null> => {
       if (!wallet || !peerKey) return null;
       try {
         const { timestamp, paymentId } = await (kind === "request" ? wallet.request(peerKey, amount, memo || undefined, method) : wallet.send(peerKey, amount, memo || undefined));
@@ -207,7 +207,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     [wallet, peerKey, addSystemMessage],
   );
   const paySend = useCallback((amount: number, memo: string) => pay("send", amount, memo), [pay]);
-  const payRequest = useCallback((amount: number, memo: string, method?: "cashu" | "arkade" | "usdt") => pay("request", amount, memo, method), [pay]);
+  const payRequest = useCallback((amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark") => pay("request", amount, memo, method), [pay]);
 
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);

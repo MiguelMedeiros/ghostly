@@ -37,6 +37,7 @@ The implementation column is independent of document status. Existing features c
 | [201](201-cashu.md) | Cashu | Draft | Existing application integration |
 | [202](202-arkade.md) | Ark via Arkade | Draft | Experimental test-network adapter; regtest verified; encrypted restore tested; exits pending |
 | [203](203-lightning.md) | Lightning | Draft | Existing invoice integration |
+| [204](204-bark.md) | Ark via Bark | Draft | Experimental, Testnet only; regtest verified; not compatible with Arkade; exits pending |
 | [300](300-peer-proofs.md) | Identity Proofs | Draft | Experimental Nostr subset |
 | [301](301-nostr.md) | Nostr | Draft | Implemented experimental proof; signer/runtime limits below |
 | [Pubky · 3xx planned](302-pubky.md) | Pubky | Draft | Local import experimental; Ring bridge blocked |

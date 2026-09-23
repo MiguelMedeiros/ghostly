@@ -4,6 +4,7 @@
 .wallet-card::before{content:"";position:absolute;pointer-events:none;width:155px;height:155px;right:-80px;top:-54px;border:1px solid rgba(var(--card-rgb),.26);border-radius:50%;box-shadow:0 0 0 18px rgba(var(--card-rgb),.035),0 0 0 38px rgba(var(--card-rgb),.025);transform:translate(0,0);transition:transform 220ms ease}
 .wallet-card-lightning{--card-rgb:243,195,87;background-color:#282315}
 .wallet-card-arkade{--card-rgb:146,167,255;background-color:#1b233b}
+.wallet-card-bark{--card-rgb:255,150,110;background-color:#33201a}
 .wallet-card-usdt{--card-rgb:62,220,161;background-color:#112e28}
 .wallet-card-top{display:flex;align-items:center;justify-content:space-between;color:rgb(var(--card-rgb));margin-bottom:8px;position:relative}
 .wallet-card-selected{width:19px;height:19px;display:grid;place-items:center;border-radius:50%;border:1px solid rgba(var(--card-rgb),.25);color:transparent;transition:background 180ms ease,color 180ms ease}

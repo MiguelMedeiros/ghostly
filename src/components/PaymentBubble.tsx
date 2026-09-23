@@ -67,7 +67,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
   const selectedMint=sharedMints.find(m=>m.url===mint)?.url ?? sharedMints[0]?.url;
   const title = isRequest ? (outgoing ? "You requested" : "Requests") : outgoing ? "You sent" : "Sent you";
   // Test sats are worth nothing, and the bubble says so: a contact must not pass them off as money.
-  const testSats = payment.target?.method === "arkade" ? payment.target.network !== "bitcoin"
+  const testSats = payment.target?.method === "arkade" || payment.target?.method === "bark" ? payment.target.network !== "bitcoin"
     : payment.target?.method === "cashu" ? payment.target.network === "cashu-test"
     : !tokenPayment && (payment.mint ? isWorthlessMint(payment.mint) : !!payment.mints?.length && payment.mints.every(isWorthlessMint));
   const button =
@@ -90,7 +90,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
         </span>
         {" "}<span className="text-xs ml-1 text-[hsla(0,0%,100%,0.7)]">{tokenPayment?payment.target?.asset:testSats?'test sats':'sats'}</span>
       </p>
-      {payment.target && <p className="text-xs text-text-muted">{payment.target.method==="usdt"?"USDT":payment.target.method==="arkade"?"Ark":"Cashu"} · {payment.target.network}</p>}
+      {payment.target && <p className="text-xs text-text-muted">{payment.target.method==="usdt"?"USDT":payment.target.method==="arkade"?"Ark":payment.target.method==="bark"?"Bark":"Cashu"} · {payment.target.network}</p>}
       {review && <PaymentReview review={review} wallet={wallet} onClose={()=>setReview(null)}/>}
       {payment.memo && <p className="text-[13px] m-0 mt-0.5 wrap-break-word">{payment.memo}</p>}
       <p

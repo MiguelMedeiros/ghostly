@@ -2,6 +2,8 @@ import { UsdtWallet } from "./paymentAdapters/usdtWallet";
 import { iceServerProblem } from "../shared/ice";
 import type { UsdtPrepared } from "./paymentAdapters/usdt";
 import { ArkWallet } from "./paymentAdapters/arkWallet";
+import { BarkWallet } from "./paymentAdapters/barkWallet";
+import type { BarkPrepared } from "./paymentAdapters/bark";
 import { PaymentCoordinator } from "./paymentAdapters/coordinator";
 import { intentRepository } from "./paymentAdapters/persistence";
 import type { ArkPrepared } from "./paymentAdapters/arkade";
@@ -147,7 +149,7 @@ function newLiveLink(stored: StoredLink, lastMessageAt: number, files = emptyLin
 }
 
 /** What a host may replace. The defaults are what a browser can do on its own. */
-const PAYMENT_METHODS: PaymentMethodName[] = ["cashu", "lightning", "arkade", "usdt"];
+const PAYMENT_METHODS: PaymentMethodName[] = ["cashu", "lightning", "arkade", "usdt", "bark"];
 
 export interface NodeOptions {
   nativeTransports?: Partial<Record<NativeTransport, (seedB64: string) => Promise<NativeEndpoint>>>;
@@ -156,7 +158,7 @@ export interface NodeOptions {
   pollIntervals?: PollIntervals;
   /** How to reach a shared local web app. Default: `fetch`, which needs the app's or the browser's consent. */
   localFetch?: LocalFetch;
-  /** Create and connect the Ark and USDT wallets at start. Default: on; tests without a network turn it off. */
+  /** Create and connect the Ark, Bark and USDT wallets at start. Default: on; tests without a network turn it off. */
   automaticWallets?: boolean;
 }
 
@@ -206,6 +208,7 @@ export class GhostlyNode implements EngineImplementation {
 
   private readonly usdtWallet = new UsdtWallet(() => { void this.refreshWallet(); void this.desk.reconcileUsdtReceipts().catch(()=>{}); });
   private readonly arkWallet = new ArkWallet(() => { void this.refreshWallet(); void this.desk.reconcileArkReceipts().catch(()=>{}); });
+  private readonly barkWallet = new BarkWallet(() => { void this.refreshWallet(); void this.desk.reconcileBarkReceipts().catch(()=>{}); });
   private readonly paymentCoordinator = new PaymentCoordinator(intentRepository, [{
     method:"usdt",
     prepare:(target,amount,feeCap)=>this.usdtWallet.require().prepare(target,amount,feeCap),
@@ -216,6 +219,11 @@ export class GhostlyNode implements EngineImplementation {
     prepare: (target, amount, feeCap) => this.arkWallet.require().prepare(target, amount, feeCap),
     execute: (review, prepared, persist) => this.arkWallet.require().execute(review, prepared as ArkPrepared, persist),
     reconcile: (review, prepared,persist) => this.arkWallet.require().reconcile(review, prepared as ArkPrepared,persist),
+  }, {
+    method: "bark",
+    prepare: (target, amount, feeCap) => this.barkWallet.require().prepare(target, amount, feeCap),
+    execute: (review, prepared, persist) => this.barkWallet.require().execute(review, prepared as BarkPrepared, persist),
+    reconcile: (review, prepared) => this.barkWallet.require().reconcile(review, prepared as BarkPrepared),
   }, {
     method:"cashu",
     prepare:(target,amount,feeCap)=>new CashuAdapter(this.wallet,(r,t)=>this.desk.recordCashu(r,t)).prepare(target,amount,feeCap),
@@ -253,7 +261,7 @@ export class GhostlyNode implements EngineImplementation {
       }
       this.emitState();
     },
-  }, this.arkWallet, this.usdtWallet);
+  }, this.arkWallet, this.usdtWallet, this.barkWallet);
 
   constructor(
     private readonly events: NodeEvents,
@@ -272,7 +280,7 @@ export class GhostlyNode implements EngineImplementation {
     const history = view.history.filter((tx) => !tx.mint || isWorthlessMint(tx.mint) === (mode === "testnet"));
     let waitingTestSats = 0;
     if (mode === "mainnet") for (const mint of this.settings.mints.filter(isWorthlessMint)) waitingTestSats += await this.wallet.balanceAt(mint);
-    this.walletView = { ...view, mode, waitingTestSats, history, feesPaid: history.reduce((sum, tx) => sum + tx.fee, 0), ark: this.arkWallet.view, usdt: this.usdtWallet.view, intents: (await intentRepository.list()).map((saved) => saved.review) };
+    this.walletView = { ...view, mode, waitingTestSats, history, feesPaid: history.reduce((sum, tx) => sum + tx.fee, 0), ark: this.arkWallet.view, bark: this.barkWallet.view, usdt: this.usdtWallet.view, intents: (await intentRepository.list()).map((saved) => saved.review) };
     for (const tx of this.walletView.history) {
       const fresh = !this.walletFeedbackIds.has(tx.id);
       this.walletFeedbackIds.add(tx.id);
@@ -288,7 +296,7 @@ export class GhostlyNode implements EngineImplementation {
     if(this.shuttingDown)return;
     try {
       for(const {review} of await intentRepository.list()){
-        if(!["submitted","unknown"].includes(review.state) || (review.method==="arkade" && !this.arkWallet.adapter) || (review.method==="usdt" && !this.usdtWallet.adapter))continue;
+        if(!["submitted","unknown"].includes(review.state) || (review.method==="arkade" && !this.arkWallet.adapter) || (review.method==="bark" && !this.barkWallet.adapter) || (review.method==="usdt" && !this.usdtWallet.adapter))continue;
         await this.reconcilePayment({id:review.id}).catch(()=>{});
       }
     } finally {if(!this.shuttingDown)this.paymentTimer=setTimeout(()=>void this.pollPaymentStatus(),10000);}
@@ -303,8 +311,10 @@ export class GhostlyNode implements EngineImplementation {
     this.relays?.setRelays(this.settings.relays);
     this.services = await db.getServices();
     await this.arkWallet.start();
+    await this.barkWallet.start();
     await this.usdtWallet.start();
     await this.arkWallet.setMode(this.settings.walletMode ?? "mainnet");
+    await this.barkWallet.setMode(this.settings.walletMode ?? "mainnet");
     await this.usdtWallet.setMode(this.settings.walletMode ?? "mainnet");
     await this.desk.start();
     await this.refreshWallet();
@@ -325,6 +335,7 @@ export class GhostlyNode implements EngineImplementation {
     // Every profile has its wallets ready to receive without any setup; they connect in the background.
     if (this.options.automaticWallets !== false) {
       void this.arkWallet.ensureReady();
+      void this.barkWallet.ensureReady();
       void this.usdtWallet.ensureReady();
     }
   }
@@ -334,6 +345,7 @@ export class GhostlyNode implements EngineImplementation {
     this.shuttingDown = true;
     if(this.paymentTimer)clearTimeout(this.paymentTimer);
     await this.arkWallet.stop();
+    await this.barkWallet.stop();
     await this.usdtWallet.stop();
     await this.nativeQueue;
     await Promise.allSettled([...this.outboxes.values()].map(outbox => outbox.stop()));
@@ -847,8 +859,8 @@ export class GhostlyNode implements EngineImplementation {
     await this.updateSettings({ settings: { walletMode: mode, mints } });
     // Queued behind whatever the wallets are doing (a new wallet on a slow network): the switch answers at
     // once, and each wallet follows in order, so switching back and forth ends on the last choice.
-    const followed = Promise.all([this.arkWallet.setMode(mode), this.usdtWallet.setMode(mode)]).then(() => this.refreshWallet());
-    if (this.options.automaticWallets !== false) void followed.then(() => { void this.arkWallet.ensureReady(); void this.usdtWallet.ensureReady(); }, () => {});
+    const followed = Promise.all([this.arkWallet.setMode(mode), this.barkWallet.setMode(mode), this.usdtWallet.setMode(mode)]).then(() => this.refreshWallet());
+    if (this.options.automaticWallets !== false) void followed.then(() => { void this.arkWallet.ensureReady(); void this.barkWallet.ensureReady(); void this.usdtWallet.ensureReady(); }, () => {});
     // Names, fees and limits of this mode's mints (a mint just added has none yet).
     for (const mint of this.modeMints()) void this.wallet.checkMint(mint).then(() => this.refreshWallet(), () => {});
     await this.refreshWallet();
@@ -908,6 +920,12 @@ export class GhostlyNode implements EngineImplementation {
   async arkRestoreBackup(params:{text:string;password:string}) { await this.arkWallet.restoreBackup(params.text,params.password); await this.arkWallet.ensureReady(); }
   arkRefresh() { return this.arkWallet.refresh(); }
   arkRecover() { return this.arkWallet.recover(); }
+  barkCreate(params: Parameters<EngineApi["barkCreate"]>[0]) { return this.barkWallet.create(params); }
+  barkBackup() { return this.barkWallet.backup(); }
+  barkExportBackup(params: { password: string }) { return this.barkWallet.exportBackup(params.password); }
+  async barkRestoreBackup(params: { text: string; password: string }) { await this.barkWallet.restoreBackup(params.text, params.password); await this.barkWallet.ensureReady(); }
+  barkRefresh() { return this.barkWallet.refresh(); }
+  barkBoard() { return this.barkWallet.board(); }
   async preparePayment(params: Parameters<EngineApi["preparePayment"]>[0]) {
     if (params.linkId) {
       const live=this.links.get(params.linkId); if(!live?.link)throw new Error("The peer is offline");
@@ -915,6 +933,7 @@ export class GhostlyNode implements EngineImplementation {
       if(params.target.method==="cashu" && !live.link.allowsPayment("cashu"))throw new Error("Cashu is off in this chat");
       if(params.target.method==="usdt" && !live.link.supportsUsdtPayments)throw new Error("This peer does not support USDT payments");
       if(params.target.method==="arkade" && !live.link.supportsArkPayments)throw new Error("This peer does not support Ark payments");
+      if(params.target.method==="bark" && !live.link.supportsBarkPayments)throw new Error("This peer does not support Bark payments");
       const request=params.requestId ? this.desk.payment(params.requestId) : undefined;
       if(params.requestId){
         if(!request || request.linkId!==params.linkId || request.direction!=="in" || request.state!=="pending" || request.amount!==params.amount)throw new Error("Payment review does not match the authenticated request");
@@ -933,6 +952,7 @@ export class GhostlyNode implements EngineImplementation {
       const link=this.links.get(intent.review.linkId)?.link;
       if(!link || (intent.review.method==="arkade" && !link.supportsArkPayments))throw new Error("Reconnect the data link before approving. Your review was saved.");
       if(intent.review.method==="usdt" && !link.supportsUsdtPayments)throw new Error("Reconnect a peer supporting USDT before approving");
+      if(intent.review.method==="bark" && !link.supportsBarkPayments)throw new Error("Reconnect a peer supporting Bark before approving");
       if(intent.review.method==="cashu" && !link.allowsPayment("cashu"))throw new Error("Cashu is off in this chat");
       await link.requirePaymentSupport();
       if (intent.review.requestId) {
@@ -943,15 +963,17 @@ export class GhostlyNode implements EngineImplementation {
     const review=await this.paymentCoordinator.approve(params.id);
     await this.desk.confirmReviewedCashu(review);
     if(review.state==="settled")await this.desk.recordArk(review).catch(()=>{});
+    await this.desk.recordBark(review).catch(()=>{});
     await this.desk.recordUsdt(review).catch(()=>{});
-    await this.arkWallet.refresh();await this.usdtWallet.refresh();return review;
+    await this.arkWallet.refresh();await this.barkWallet.refresh();await this.usdtWallet.refresh();return review;
   }
   async reconcilePayment(params: {id:string}) {
     const review=await this.paymentCoordinator.reconcile(params.id);
     await this.desk.confirmReviewedCashu(review);
     if(review.state==="settled")await this.desk.recordArk(review).catch(()=>{});
+    await this.desk.recordBark(review).catch(()=>{});
     await this.desk.recordUsdt(review).catch(()=>{});
-    await this.arkWallet.refresh();await this.usdtWallet.refresh();return review;
+    await this.arkWallet.refresh();await this.barkWallet.refresh();await this.usdtWallet.refresh();return review;
   }
   cancelPayment(params: {id:string}) { return this.paymentCoordinator.cancel(params.id); }
 
@@ -959,13 +981,13 @@ export class GhostlyNode implements EngineImplementation {
     return this.desk.send(params);
   }
 
-  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" }) {
+  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" }) {
     return this.desk.request({ linkId: params.linkId, amount: params.amount, memo: params.memo, timestamp: params.timestamp, method: params.method });
   }
 
-  /** Paying on a card without a request (Ark, USDT): the contact's app answers with one. */
-  askToPay(params: { linkId: string; amount: number; method: "arkade" | "usdt"; memo?: string; timestamp: number }) {
-    if (params.method !== "arkade" && params.method !== "usdt") throw new Error("Only Ark and USDT are paid this way");
+  /** Paying on a card without a request (Ark, Bark, USDT): the contact's app answers with one. */
+  askToPay(params: { linkId: string; amount: number; method: "arkade" | "usdt" | "bark"; memo?: string; timestamp: number }) {
+    if (params.method !== "arkade" && params.method !== "usdt" && params.method !== "bark") throw new Error("Only Ark, Bark and USDT are paid this way");
     return this.desk.ask(params);
   }
 
@@ -1126,6 +1148,7 @@ export class GhostlyNode implements EngineImplementation {
       paymentMethods: stored.paymentMethods,
       arkPaymentsSupport: true,
       usdtPaymentsSupport: true,
+      barkPaymentsSupport: true,
       params: stored,
       rtcAvailable: typeof RTCPeerConnection !== "undefined",
       dht: stored.profile ? { state: stored.dhtDeliveryState, save: async state => {

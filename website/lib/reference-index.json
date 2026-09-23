@@ -141,6 +141,13 @@
     "title": "WISP 203 — Lightning"
   },
   {
+    "file": "204-bark.md",
+    "sourcePath": "docs/wisps/204-bark.md",
+    "aliases": [],
+    "slug": "204-bark",
+    "title": "WISP 204 — Ark payments via Bark"
+  },
+  {
     "file": "300-peer-proofs.md",
     "sourcePath": "docs/wisps/300-peer-proofs.md",
     "aliases": [

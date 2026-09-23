@@ -20,7 +20,7 @@ interface MessageInputProps {
     reviewContext?: {wallet:import("../lib/platform").WalletPlatform;peer:string;linkId:string};
     balance: number;
     onSend: (amount: number, memo: string) => Promise<string | null>;
-    onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt") => Promise<string | null>;
+    onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark") => Promise<string | null>;
   };
 }
 

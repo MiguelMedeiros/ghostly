@@ -2,6 +2,8 @@ import type { UsdtCreate } from "../engine/paymentAdapters/usdtWallet";
 import type { PaymentReview, PaymentTarget } from "@ghostly/core";
 import type { ArkConfig } from "../engine/paymentAdapters/arkade";
 import type { ArkCreate } from "../engine/paymentAdapters/arkWallet";
+import type { BarkCreate } from "../engine/paymentAdapters/barkWallet";
+import type { BarkConfig } from "../engine/paymentAdapters/bark";
 import type { ProfileChoice } from '../profiles/public';
 import type { ProofChallenge, ProofEvidence, ProofAdapter } from "@ghostly/core";
 import type { LinkParams, PairedTransport, DeliveryMode } from "@ghostly/core";
@@ -27,6 +29,13 @@ export interface EngineApi {
   arkRefresh(): void;
   /** Expired Ark outputs back into the balance; returns the settlement txid. */
   arkRecover(): string;
+  barkCreate(params: BarkCreate): void;
+  barkBackup(): {mnemonic:string;config:BarkConfig};
+  barkExportBackup(params:{password:string}):string;
+  barkRestoreBackup(params:{text:string;password:string}):void;
+  barkRefresh(): void;
+  /** On-chain coins of the Bark wallet into Ark; returns the board txid. */
+  barkBoard(): string;
   preparePayment(params: {target:PaymentTarget;amount:number;feeCap:number;payee:string;linkId?:string;requestId?:string;memo?:string}): PaymentReview;
   approvePayment(params: {id:string}): PaymentReview;
   reconcilePayment(params: {id:string}): PaymentReview;
@@ -77,9 +86,9 @@ export interface EngineApi {
   /** Everything held, as tokens: the only backup there is for now. */
   walletExport(): { mint: string; token: string; amount: number }[];
   sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number }): { paymentId: string };
-  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" }): { paymentId: string };
+  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" }): { paymentId: string };
   /** Asks the contact for a way to pay it (Ark, USDT); its answer is a request carrying `askId`. */
-  askToPay(params: { linkId: string; amount: number; method: "arkade" | "usdt"; memo?: string; timestamp: number }): { askId: string };
+  askToPay(params: { linkId: string; amount: number; method: "arkade" | "usdt" | "bark"; memo?: string; timestamp: number }): { askId: string };
   payRequest(params: { linkId: string; paymentId: string }): void;
   reclaimPayment(params: { paymentId: string }): void;
   disconnect(params: { linkId: string }): void;

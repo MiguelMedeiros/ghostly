@@ -51,6 +51,7 @@ export interface PairedSessionOptions {
   lightningPaymentsSupport?: boolean;
   arkPaymentsSupport?: boolean;
   usdtPaymentsSupport?: boolean;
+  barkPaymentsSupport?: boolean;
   transportSwitchSupport?: boolean;
   /** TOFU admission is distinct from an optional human comparison. */
   trustOnFirstUse?: boolean;
@@ -64,7 +65,7 @@ export interface PairedSessionOptions {
 }
 
 /** The ways of paying a chat can allow one by one. */
-export type PaymentMethodName = "cashu" | "lightning" | "arkade" | "usdt";
+export type PaymentMethodName = "cashu" | "lightning" | "arkade" | "usdt" | "bark";
 
 const MAX_HANDSHAKE_BYTES = 4096;
 const KEY = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;
@@ -77,7 +78,7 @@ const isList = (v: unknown, maximum = 8): v is string[] => Array.isArray(v) && v
 function parseOffer(v: Record<string, unknown>): Offer | null {
   if (!Array.isArray(v.versions) || v.versions.length === 0 || v.versions.length > 8 ||
     !v.versions.every(n => Number.isSafeInteger(n) && n > 0) || new Set(v.versions).size !== v.versions.length ||
-    !isList(v.transports) || !isList(v.capabilities, 16) || typeof v.key !== "string" || !KEY.test(v.key) ||
+    !isList(v.transports) || !isList(v.capabilities, 32) || typeof v.key !== "string" || !KEY.test(v.key) ||
     typeof v.nonce !== "string" || !NONCE.test(v.nonce)) return null;
   return { t: "pair-offer", versions: v.versions, transports: v.transports, capabilities: v.capabilities, key: v.key, nonce: v.nonce };
 }
@@ -105,11 +106,11 @@ export class PairedSession {
   constructor(private channel: FrameChannel, private options: PairedSessionOptions) {
     this.identity = identityFromSeedB64(options.credentials.seedB64);
     this.transport = options.binding?.transport ?? "webrtc/1";
-    this.offer = { t: "pair-offer", versions: [1], transports: options.transports ?? [this.transport], capabilities: ["chat/1", "signed-signal/1", ...(options.trustOnFirstUse ? ["tofu/1"] : []), ...(options.filesSupport ? ["files/2"] : []), ...(options.paymentsSupport && (options.cashuPaymentsSupport !== false || options.lightningPaymentsSupport !== false) ? ["payments/1"] : []), ...(options.paymentsSupport && options.cashuPaymentsSupport !== false ? ["payments-cashu/1"] : []), ...(options.paymentsSupport && options.lightningPaymentsSupport !== false ? ["payments-lightning/1"] : []), ...(options.arkPaymentsSupport && options.paymentsSupport ? ["payments-arkade/1"] : []), ...(options.usdtPaymentsSupport && options.paymentsSupport ? ["payments-usdt/1"] : []), ...(options.transportSwitchSupport ? ["transport-switch/1"] : []), ...(options.proofSupport ? PROOF_ADAPTERS.map(proofCapability) : []), ...(options.allowFallback ? ["transport-fallback/1"] : [])],
+    this.offer = { t: "pair-offer", versions: [1], transports: options.transports ?? [this.transport], capabilities: ["chat/1", "signed-signal/1", ...(options.trustOnFirstUse ? ["tofu/1"] : []), ...(options.filesSupport ? ["files/2"] : []), ...(options.paymentsSupport && (options.cashuPaymentsSupport !== false || options.lightningPaymentsSupport !== false) ? ["payments/1"] : []), ...(options.paymentsSupport && options.cashuPaymentsSupport !== false ? ["payments-cashu/1"] : []), ...(options.paymentsSupport && options.lightningPaymentsSupport !== false ? ["payments-lightning/1"] : []), ...(options.arkPaymentsSupport && options.paymentsSupport ? ["payments-arkade/1"] : []), ...(options.usdtPaymentsSupport && options.paymentsSupport ? ["payments-usdt/1"] : []), ...(options.barkPaymentsSupport && options.paymentsSupport ? ["payments-bark/1"] : []), ...(options.transportSwitchSupport ? ["transport-switch/1"] : []), ...(options.proofSupport ? PROOF_ADAPTERS.map(proofCapability) : []), ...(options.allowFallback ? ["transport-fallback/1"] : [])],
       key: this.identity.pubKeyZ32, nonce: toBase64Url(randomBytes(32)) };
   }
 
-  supports(capability: "files/2" | "payments/1" | "payments-arkade/1" | "payments-usdt/1"): boolean { return this.state.status === "ready" && this.offer.capabilities.includes(capability) && !!this.peer?.capabilities.includes(capability); }
+  supports(capability: "files/2" | "payments/1" | "payments-arkade/1" | "payments-usdt/1" | "payments-bark/1"): boolean { return this.state.status === "ready" && this.offer.capabilities.includes(capability) && !!this.peer?.capabilities.includes(capability); }
   /**
    * Both sides allow this way of paying. A peer that offers payments/1 without naming Cashu or
    * Lightning predates choosing them per chat, and allows both.
@@ -121,7 +122,7 @@ export class PairedSession {
   peerAllowsPayment(method: PaymentMethodName): boolean {
     if (this.state.status !== "ready" || !this.peer) return false;
     const theirs = this.peer.capabilities, capability = `payments-${method}/1`;
-    if (method === "arkade" || method === "usdt") return theirs.includes(capability);
+    if (method === "arkade" || method === "usdt" || method === "bark") return theirs.includes(capability);
     const other = method === "cashu" ? "payments-lightning/1" : "payments-cashu/1";
     return theirs.includes("payments/1") && (theirs.includes(capability) || !theirs.includes(other));
   }

@@ -2,6 +2,7 @@ import type { WalletMode } from "./mints";
 import type { PaymentMethodName } from "@ghostly/core";
 import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
+import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
 import type { PaymentReview, PaymentTarget } from "@ghostly/core";
 import type { DeliveryMode, DhtDeliveryState, DhtDeliveryView } from "@ghostly/core";
 import type { PublicProfile, ProfileChoice } from '../profiles/public';
@@ -198,6 +199,8 @@ export interface WalletView {
   /** On Mainnet: test sats held at test mints (a contact may have sent some), shown once in Testnet. */
   waitingTestSats?: number;
   ark?: ArkWalletView;
+  /** Second's Ark (Bark): a different Ark server from `ark`, not interchangeable with it. */
+  bark?: BarkWalletView;
   usdt?: UsdtWalletView;
   intents?: PaymentReview[];
   mints: MintView[];

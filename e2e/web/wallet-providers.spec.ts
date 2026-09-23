@@ -8,6 +8,7 @@ import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, ty
  * Every wallet provider receiving and sending, on test networks only (the Testnet mode):
  *  - Cashu and Lightning: the public test mint, or the local one E2E_MINT_URL answers for (@network).
  *  - Ark: a local regtest server (GHOSTLY_ARK_REGTEST=1).
+ *  - Bark (Second's Ark): a local regtest server, e2e/support/bark-regtest (GHOSTLY_BARK_REGTEST=1).
  *  - USDT: a local EVM chain with a test token (GHOSTLY_USDT_LOCAL=1).
  * For each: money in, a Send in the chat (reviewed, approved), a Request paid in the chat, and a Send
  * from the wallet page where the provider has one. Balances are checked on both sides.
@@ -159,6 +160,82 @@ test("Ark: in, a Send from the wallet, a Send in the chat and a Request paid in 
   const sats = async () => Number((await balance(bob).innerText()).trim().match(/^[\d,]*/)![0].replace(/,/g, "") || NaN);
   await expect.poll(sats, { timeout: 60_000 }).toBeGreaterThanOrEqual(recovered ? 390 : 400);
   expect(await sats()).toBeLessThanOrEqual(400);
+});
+
+test("Bark: in over Ark and on-chain, a Send from the wallet, a Send in the chat and a Request paid in the chat", async ({ peer }) => {
+  test.skip(process.env.GHOSTLY_BARK_REGTEST !== "1", "Requires the local Bark regtest stack (e2e/support/bark-regtest)");
+  test.setTimeout(6 * 60_000);
+  const regtest = (...args: string[]) => execFileSync(process.execPath, ["e2e/support/bark-regtest/regtest.mjs", ...args], { encoding: "utf8", stdio: "pipe" }).trim();
+  regtest("ready");
+  const [alice, bob] = await twoInTestnet(peer, ["bark-p-alice", "bark-p-bob"]);
+  const panel = (p: Peer) => p.page.getByTestId("bark-wallet");
+  const balance = (p: Peer) => panel(p).getByTestId("bark-balance");
+  const address: Record<string, string> = {};
+  for (const p of [alice, bob]) {
+    await openWallet(p, "bark");
+    // Testnet starts on signet; an empty wallet makes way for the local regtest server.
+    await panel(p).getByRole("radio", { name: "Regtest", exact: true }).click({ timeout: 90_000 });
+    await expect(balance(p)).toContainText("Regtest", { timeout: 90_000 });
+    address[p.name] = (await panel(p).getByTestId("bark-address").innerText()).trim();
+    expect(address[p.name]).toMatch(/^tark1p/);
+  }
+  // In over Ark: a Bark wallet of the same server (the funder) pays Alice's address.
+  const funded = JSON.parse(regtest("pay", address[alice.name], "20000"));
+  expect(funded).toMatchObject({ status: "successful", kind: "send", sat: -20000 });
+  await expect(balance(alice)).toHaveText(/^20,000\s*test sats/, { timeout: 60_000 });
+
+  // In on-chain: coins to Bob's on-chain address, then moved into Ark (a board, confirmed on regtest).
+  await panel(bob).getByRole("radio", { name: "Bitcoin on-chain" }).click();
+  const onchain = (await panel(bob).getByTestId("bark-onchain-address").innerText()).trim();
+  const onchainTxid = regtest("send-onchain", onchain, "30000");
+  await expect(panel(bob).getByTestId("bark-onchain")).toContainText("30,000", { timeout: 60_000 });
+  await panel(bob).getByTestId("bark-board").click();
+  const sats = async (p: Peer) => Number((await balance(p).innerText()).trim().match(/^[\d,]*/)![0].replace(/,/g, "") || NaN);
+  // The board is an on-chain transaction: its fee comes off, the rest lands in Ark once it confirms.
+  await expect.poll(async () => { regtest("mine", "1"); return sats(bob); }, { timeout: 120_000, intervals: [3_000] }).toBeGreaterThan(29_000);
+  const boarded = await sats(bob);
+  expect(boarded).toBeLessThan(30_000);
+  await panel(bob).getByRole("radio", { name: "Bark (instant)" }).click();
+
+  // A Send from the wallet page, to Bob's address.
+  await alice.page.getByTestId("wallet-send").click();
+  await panel(alice).getByLabel("Bark recipient address").fill(address[bob.name]);
+  await panel(alice).getByLabel(/^Amount in/).fill("5000");
+  await panel(alice).getByRole("button", { name: "Review payment" }).click();
+  await panel(alice).getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
+  await expect(panel(alice).getByTestId("review-status")).toHaveText("settled", { timeout: 60_000 });
+  await panel(alice).getByTestId("payment-review").getByText("Payment details").click();
+  const walletSend = (await panel(alice).getByTestId("payment-review").locator("dt:text-is('Transaction') + dd").innerText()).trim();
+  expect(walletSend, "the Ark transaction of the send").toMatch(/^[a-f0-9]{64}$/);
+  await expect.poll(() => sats(bob), { timeout: 60_000 }).toBe(boarded + 5_000);
+
+  // A Send in the chat: Bob's app asks Alice's for a fresh Bark address, Bob approves.
+  for (const p of [alice, bob]) await openChat(p);
+  await composer(bob, "bark", "2000");
+  await bob.page.getByTestId("payment-send").click();
+  const direct = bob.page.getByTestId("payment-composer").getByTestId("payment-review");
+  await direct.getByRole("button", { name: "Approve payment" }).click({ timeout: 60_000 });
+  await expect(direct.getByTestId("review-status")).toHaveText("settled", { timeout: 60_000 });
+  await bob.page.getByTestId("payment-composer").getByRole("button", { name: "Close", exact: true }).click();
+  // Alice's app settles the request it made for that from her own wallet, not from Bob's word.
+  await expect(chat(alice).getByTestId("payment-bubble").filter({ hasText: "You requested" }).last().getByTestId("payment-state")).toHaveText("Paid", { timeout: 60_000 });
+
+  // A Request paid in the chat.
+  await composer(bob, "bark", "1000");
+  await bob.page.getByTestId("payment-request").click();
+  const request = chat(alice).getByTestId("payment-bubble").filter({ hasText: "Requests" }).last();
+  await request.getByTestId("payment-pay").click();
+  await request.getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
+  await expect(request.getByTestId("payment-state")).toHaveText("Paid", { timeout: 60_000 });
+  await expect(chat(bob).getByTestId("payment-bubble").filter({ hasText: "You requested" }).last().getByTestId("payment-state")).toHaveText("Paid", { timeout: 60_000 });
+
+  // Payments between Bark wallets cost nothing on this server: 20,000 in, 5,000 out, 2,000 in, 1,000 out;
+  // what was boarded, 5,000 in, 2,000 out, 1,000 in.
+  await openWallet(alice, "bark");
+  await expect(balance(alice)).toHaveText(/^16,000\s*test sats/, { timeout: 60_000 });
+  await openWallet(bob, "bark");
+  await expect.poll(() => sats(bob), { timeout: 60_000 }).toBe(boarded + 4_000);
+  console.log("Bark regtest evidence:", JSON.stringify({ funded, onchainTxid, boarded, walletSend, alice: await sats(alice), bob: await sats(bob), funder: JSON.parse(regtest("balance")).spendable_sat }));
 });
 
 test("USDT: in, a Send from the wallet, a Send in the chat and a Request paid in the chat", async ({ peer }) => {
