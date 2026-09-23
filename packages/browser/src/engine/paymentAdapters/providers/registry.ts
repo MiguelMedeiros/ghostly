@@ -1,3 +1,4 @@
+import { bitcoindRpc } from "./bitcoind";
 import { cashuMint } from "./cashuMint";
 import type { LightningProviderDescriptor } from "./lightning";
 import type { OnchainProviderDescriptor } from "./onchain";
@@ -14,6 +15,7 @@ export const LIGHTNING_PROVIDERS: readonly LightningProviderDescriptor[] = [
 ];
 
 export const ONCHAIN_PROVIDERS: readonly OnchainProviderDescriptor[] = [
+  bitcoindRpc,
 ];
 
 export interface ProviderRegistry {

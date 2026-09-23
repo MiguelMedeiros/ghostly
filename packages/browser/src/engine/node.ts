@@ -13,7 +13,7 @@ import { LightningService } from "./paymentAdapters/providers/lightningService";
 import { BitcoinService, type BitcoinPrepared } from "./paymentAdapters/providers/bitcoinService";
 import { CASHU_MINT_SOURCE } from "./paymentAdapters/providers/cashuMint";
 import { defaultRegistry, type ProviderRegistry } from "./paymentAdapters/providers/registry";
-import type { ProviderPlatform } from "./paymentAdapters/providers/types";
+import type { ProviderHost, ProviderPlatform } from "./paymentAdapters/providers/types";
 import type { EngineApi } from "../shared/rpc";
 import { EXTERNAL_IDENTITIES_ENABLED } from '../shared/features';
 import { readPubkyProof } from '../proofs/storage';
@@ -169,6 +169,8 @@ export interface NodeOptions {
   platform?: ProviderPlatform;
   /** The Lightning and on-chain providers on offer. Default: the registry (tests pass their own). */
   providers?: ProviderRegistry;
+  /** Desktop: the Tauri commands the providers that need them call (see `ProviderHost.invoke`). */
+  invoke?: ProviderHost["invoke"];
 }
 
 export interface NodeEvents {
@@ -263,7 +265,7 @@ export class GhostlyNode implements EngineImplementation {
   private registry?: ProviderRegistry;
   private providers() { return this.registry ??= this.options.providers ?? defaultRegistry(); }
   /** Read when a source connects, once the constructor has run. */
-  private readonly providerHost = () => ({ platform: this.options.platform ?? "web" as const, cashu: this.wallet });
+  private readonly providerHost = () => ({ platform: this.options.platform ?? "web" as const, cashu: this.wallet, invoke: this.options.invoke });
   /** Lightning through the active source of the mode: the Cashu mints unless the person chose another. */
   private readonly lightning: LightningService = new LightningService(() => this.providers().lightning, this.providerHost, {
     changed: () => void this.refreshWallet(),

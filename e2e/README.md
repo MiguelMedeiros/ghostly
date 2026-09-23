@@ -132,6 +132,32 @@ GHOSTLY_LND_REGTEST=1 npx playwright test e2e/web/wallet-lnd.spec.ts -c e2e/play
 The test does not start or stop infrastructure, uses worthless regtest coins only, and never prints a
 secret (macaroons, runes, URIs). See `packages/browser/src/engine/paymentAdapters/PROVIDERS.md`.
 
+### Bitcoin Core on regtest
+
+The Bitcoin Core source (`providers/bitcoind.ts`) is Desktop only: bitcoind's RPC answers no CORS, so the
+app reaches it through the `bitcoind_rpc` Tauri command (`src-tauri/src/bitcoind_rpc.rs`, which has Rust
+tests for its method allowlist, URL and wallet-name checks, size limits and redirects). The Desktop e2e
+harness runs on Linux only, so the engine side is covered by a gated vitest against a real node instead,
+reaching it with `fetch` the way the command does. One bitcoind 31 in a container named
+`ghostly-bitcoind-*`, RPC on `127.0.0.1:44301`, worthless regtest coins:
+
+```bash
+export GHOSTLY_BITCOIND_RPC_PASSWORD=$(openssl rand -hex 16)
+docker run -d --name ghostly-bitcoind-regtest -p 127.0.0.1:44301:18443 bitcoin/bitcoin:31.0 \
+  bitcoind -regtest -server -printtoconsole -rpcbind=0.0.0.0 -rpcallowip=0.0.0.0/0 \
+  -rpcuser=ghostly -rpcpassword="$GHOSTLY_BITCOIND_RPC_PASSWORD"
+cd packages/browser && GHOSTLY_BITCOIND_REGTEST=1 npx vitest run test/bitcoind.regtest.test.ts --silent=false
+docker rm -f ghostly-bitcoind-regtest   # when done
+```
+
+`GHOSTLY_BITCOIND_RPC_URL` and `GHOSTLY_BITCOIND_RPC_USER` override `http://127.0.0.1:44301` and `ghostly`.
+Each run creates wallets of its own and mines to one of them (it never stops or unloads anything): the
+shared on-chain contract suite runs against a fresh wallet, then Alice's wallet is funded by mining, pays
+Bob through the `PaymentCoordinator` (review signed and locked, nothing in the mempool until approval),
+is reconciled by txid until it confirms, and both balances and the history are checked; a cancelled review
+unlocks its coins, a transaction the node rejects is `NothingSpentError` with its coins unlocked, a wrong
+password never runs, and a regtest node is refused in the Mainnet mode. It prints the txids and balances.
+
 ### Every provider, sending and receiving
 
 With the Ark regtest stack above and the local EVM chain (`/tmp/ghostly-usdt-local.json`) running:

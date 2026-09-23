@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod bitcoind_rpc;
 mod commands;
 mod crypto;
 mod hyperdht;
@@ -86,6 +87,7 @@ fn main() {
             commands::publish_records,
             commands::resolve_records,
             commands::local_fetch,
+            commands::bitcoind_rpc,
             commands::open_service_window,
             commands::service_respond,
             commands::updater_can_install,
@@ -119,6 +121,7 @@ mod tests {
                 commands::get_profile,
                 commands::generate_enc_key,
                 commands::local_fetch,
+                commands::bitcoind_rpc,
             ]))
             .build(tauri::generate_context!(test = true))
             .expect("app")

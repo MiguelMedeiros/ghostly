@@ -177,6 +177,12 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the bitcoind_rpc command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-bitcoind-rpc",
+          "markdownDescription": "Enables the bitcoind_rpc command without any pre-configured scope."
+        },
+        {
           "description": "Enables the create_keypair command without any pre-configured scope.",
           "type": "string",
           "const": "allow-create-keypair",
@@ -349,6 +355,12 @@
           "type": "string",
           "const": "allow-updater-can-install",
           "markdownDescription": "Enables the updater_can_install command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the bitcoind_rpc command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-bitcoind-rpc",
+          "markdownDescription": "Denies the bitcoind_rpc command without any pre-configured scope."
         },
         {
           "description": "Denies the create_keypair command without any pre-configured scope.",
