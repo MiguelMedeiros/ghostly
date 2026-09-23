@@ -78,7 +78,7 @@ If the evidence names an account and that account's published keys include the s
 
 ## Conformance
 
-Test vectors made with a real `ssh-keygen` (OpenSSH 9.2p1, Debian, and 9.9p2, macOS), including security-key signatures from OpenSSH's software authenticator, are in [`packages/core/test/fixtures/sshsig/`](../../packages/core/test/fixtures/sshsig/), with the script that regenerates them. A verifier accepts every vector over the fixture's statement and refuses: another statement, the `git` namespace, a tampered signature, a swapped key, a non-empty reserved field, another version or hash, trailing bytes, an `ssh-rsa` (SHA-1) signature, an RSA key under 2048 bits, and a security-key signature without user presence.
+Test vectors made with a real `ssh-keygen` (OpenSSH 9.2p1, Debian; the generator also runs on macOS's 9.9p2), including security-key signatures from OpenSSH's software authenticator, are in [`packages/core/test/fixtures/sshsig/`](../../packages/core/test/fixtures/sshsig/), with the script that regenerates them. A verifier accepts every vector over the fixture's statement and refuses: another statement, the `git` namespace, a tampered signature, a swapped key, a non-empty reserved field, another version or hash, trailing bytes, an `ssh-rsa` (SHA-1) signature, an RSA key under 2048 bits, and a security-key signature without user presence.
 
 ## References
 
