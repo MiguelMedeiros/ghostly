@@ -8,13 +8,13 @@
 | Updated | 2026-09-23 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [300](300-peer-proofs.md) |
-| Implementation | Experimental provider `ssh`; see below |
+| Implementation | Experimental providers `ssh`, `ssh-github`, `ssh-gitlab`; see below |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 
 ## Scope
 
-An optional identity proof, under [300](300-peer-proofs.md), that a person controls an SSH key. The key signs, once, the WISP 300 **binding statement**, which authorizes the profile's own proof key for a validity period; each chat the proof is shared with then gets a presentation signed by that proof key (shared WISP 300 machinery, no SSH involved). A contact's app verifies both locally. Optionally, the proof names a GitHub or GitLab account; the contact's app then checks that the account publishes that key. Nothing here uses the key for SSH authentication, and a signature never grants a server login.
+An optional identity proof, under [300](300-peer-proofs.md), that a person controls an SSH key. The key signs, once, the WISP 300 **binding statement**, which authorizes the profile's own proof key for a validity period; each chat the proof is shared with then gets a presentation signed by that proof key (shared WISP 300 machinery, no SSH involved). A contact's app verifies both locally. Variants prove a GitHub or GitLab account instead of a bare key: the contact's app checks that the account publishes the signing key. Nothing here uses the key for SSH authentication, and a signature never grants a server login.
 
 ## Producing the evidence
 
@@ -30,21 +30,22 @@ This happens once per binding, not per chat or contact. The private key never en
 
 ## Evidence and verification
 
-Provider id `ssh`. Subject: the key's SHA-256 fingerprint exactly as `ssh-keygen -l` prints it (`SHA256:` and 43 unpadded base64 characters). The person enters their public key (a `.pub` line); the fingerprint is computed from it.
+Three providers share the signer and the signature check; they differ in the subject:
 
-Evidence, strict JSON with no other members:
+| Provider id | Subject (in the statement) | Verified by |
+|---|---|---|
+| `ssh` | the key's SHA-256 fingerprint exactly as `ssh-keygen -l` prints it (`SHA256:` and 43 unpadded base64 characters); the person enters their `.pub` line or the fingerprint | the signature alone, on the device |
+| `ssh-github` | a GitHub username, lowercase | the signature, and the signing key being one of that account's published keys |
+| `ssh-gitlab` | a gitlab.com username, lowercase, at most 64 characters | the same, on GitLab |
 
-```
-{ "signature": "-----BEGIN SSH SIGNATURE-----\n…\n-----END SSH SIGNATURE-----\n",
-  "accounts": { "github": "<login>", "gitlab": "<username>" } }   // accounts and each member optional
-```
+Evidence, strict JSON with no other members: `{ "signature": "-----BEGIN SSH SIGNATURE-----\n…\n-----END SSH SIGNATURE-----\n" }`, the armor re-wrapped canonically when pasted.
 
 The verifier, per [PROTOCOL.sshsig](https://github.com/openssh/openssh-portable/blob/master/PROTOCOL.sshsig):
 
 1. Armor: the exact `BEGIN`/`END SSH SIGNATURE` lines around canonical base64 (surrounding whitespace and CRLF tolerated); at most 6144 characters.
 2. Envelope: magic `SSHSIG`, version 1, the public key, namespace, an **empty** reserved field, hash algorithm `sha512` or `sha256`, the signature; every length bounded, no trailing bytes.
 3. Namespace equals `ghostly`.
-4. The embedded public key parses strictly and its fingerprint equals the proof's subject.
+4. The embedded public key parses strictly; for `ssh`, its fingerprint equals the subject.
 5. The key signed `"SSHSIG" ‖ string(namespace) ‖ string("") ‖ string(hash) ‖ string(H(statement))`, where `H(statement)` is over exactly the statement bytes (or the statement followed by one newline, see above).
 
 Key types and signature algorithms:
@@ -63,22 +64,22 @@ Security-key signatures must carry the user-presence flag: a key created with `-
 
 Both forges publish every account's SSH authentication keys: `https://api.github.com/users/<login>/keys` and, on GitLab, `https://gitlab.com/api/v4/users?username=<username>` then `/api/v4/users/<id>/keys`. Both answer cross-origin requests (`Access-Control-Allow-Origin: *`); `github.com/<login>.keys` and `gitlab.com/<username>.keys` do not, so browsers cannot use them.
 
-If the evidence names an account and that account's published keys include the signing key, the contact's app shows "GitHub: <login> (via published SSH key)". Only the account holder can add a key to their account, so this links the account to the key, and the proof links the key to the Ghostly profile. The claim is otherwise worth nothing: an account that does not list the key shows "does not list this key", and the proof of the key itself is unaffected.
+Only the account holder can add a key to their account, so "this account lists the key that signed" links the account to the key, and the signature links the key to the Ghostly proof key. The contact's app shows "GitHub: <login> (via published SSH key)". The same key can also be proven on its own with `ssh`.
 
-- The lookup is the verifier's, through the engine's bounded fetch: HTTPS only, no credentials or referrer, a 10-second time-out, 256 KiB and 200 keys at most per response, key types Ghostly cannot verify ignored.
-- It reveals to GitHub or GitLab, and to the network, that this device asked about that account. The provider's privacy line says so before the person shares or checks.
-- The result is re-checked: a listing is cached for ten minutes, and the contact's app offers "Check again" after that; a key removed from the account stops showing the link on the next check. Unauthenticated GitHub requests are rate limited (60 per hour per IP address); a failed lookup shows "could not be checked", never a link.
+- The lookup is the verifier's, through the engine's bounded fetch: HTTPS only, no credentials or referrer, redirects refused, a 10-second time-out, 256 KiB and 200 keys at most per response, key types Ghostly cannot verify ignored. Concurrent identical lookups share one request.
+- It reveals to GitHub or GitLab, and to the network, that this device asked about that account: when the person adds the proof (their own app verifies before saving), when a contact receives it, and on each re-check. The provider's privacy line says so before the person shares.
+- What stays checked is the contact's stored result. The providers declare a ten-minute re-check: after that the contact's app offers "Check again", and a key removed from the account turns the proof into "could not be confirmed" rather than verified. Unauthenticated GitHub requests are rate limited (60 per hour per IP address); a lookup that fails is reported as such, never as a link.
 - Deploy keys, signing keys and GitHub Enterprise or self-hosted GitLab instances are out of scope.
 
 ## Security considerations
 
-- An SSH key proves control at signing time, not a civil identity. The same key across contacts links those conversations, and a forge account links them publicly.
+- An SSH key proves control at signing time, not a civil identity. The same key across contacts links those conversations, and a forge account links them to a public profile.
 - SSH keys are often long-lived and shared across machines; a stolen key can make a valid proof. Security keys with user presence narrow this.
 - Parsing is bounded before any cryptography runs; malformed input fails closed and never affects the chat.
 
 ## Conformance
 
-Test vectors made with a real `ssh-keygen` (OpenSSH 9.2p1, Debian; the generator also runs on macOS's 9.9p2), including security-key signatures from OpenSSH's software authenticator, are in [`packages/core/test/fixtures/sshsig/`](../../packages/core/test/fixtures/sshsig/), with the script that regenerates them. A verifier accepts every vector over the fixture's statement and refuses: another statement, the `git` namespace, a tampered signature, a swapped key, a non-empty reserved field, another version or hash, trailing bytes, an `ssh-rsa` (SHA-1) signature, an RSA key under 2048 bits, and a security-key signature without user presence.
+Test vectors made with a real `ssh-keygen` (OpenSSH 9.2p1, Debian; the generator also runs on macOS's 9.9p2), including security-key signatures from OpenSSH's software authenticator, are in [`packages/core/test/fixtures/sshsig/`](../../packages/core/test/fixtures/sshsig/), with the script that regenerates them. The providers additionally pass the shared identity-proof contract suite, signing with a live `ssh-keygen`, and forge answers are stubbed in tests. A verifier accepts every vector over the fixture's statement and refuses: another statement, the `git` namespace, a tampered signature, a swapped key, a non-empty reserved field, another version or hash, trailing bytes, an `ssh-rsa` (SHA-1) signature, an RSA key under 2048 bits, and a security-key signature without user presence.
 
 ## References
 
