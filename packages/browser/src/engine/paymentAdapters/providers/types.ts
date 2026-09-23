@@ -49,6 +49,11 @@ export interface ProviderHost {
   cashu: CashuWallet;
   /** Ends when the source is replaced, the mode switches or the engine stops: abort long waits on it. */
   signal: AbortSignal;
+  /**
+   * Desktop only: calls a command of the Tauri app (src-tauri), for what a WebView cannot do (a pinned
+   * certificate, no CORS, a raw socket). Absent on the web and in the extension.
+   */
+  invoke?: <T>(command: string, args: Record<string, unknown>) => Promise<T>;
 }
 
 /**

@@ -106,7 +106,7 @@ export function createDesktopHost(version: string) {
     version,
     features: { shareLocalServices: true, openServices: true, profiles: true },
     updates: desktopUpdates,
-    node: { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, transport: tauriTransport, pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop" },
+    node: { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, transport: tauriTransport, pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke },
     onServer: serveServiceWindows,
     // There is nothing to ask: the user typed the address, and Rust only ever reaches loopback.
     requestLocalAccess: async () => true,

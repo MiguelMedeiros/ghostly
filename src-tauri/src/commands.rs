@@ -2,6 +2,7 @@ use pkarr::{Client, Keypair};
 use std::env;
 use tauri::State;
 
+use crate::bitcoind_rpc::{self, RpcError};
 use crate::crypto;
 use crate::local_fetch::{self, LocalResponse};
 use crate::pkarr_client;
@@ -132,6 +133,20 @@ pub async fn local_fetch(
     body_b64: Option<String>,
 ) -> Result<LocalResponse, String> {
     local_fetch::fetch(url, method, headers, body_b64).await
+}
+
+/// One call to the wallet RPC of the user's Bitcoin Core node: only the methods
+/// the on-chain source needs, see `bitcoind_rpc`.
+#[tauri::command]
+pub async fn bitcoind_rpc(
+    url: String,
+    wallet: String,
+    user: String,
+    password: String,
+    method: String,
+    params: Vec<serde_json::Value>,
+) -> Result<serde_json::Value, RpcError> {
+    bitcoind_rpc::call(url, wallet, user, password, method, params).await
 }
 
 #[tauri::command]

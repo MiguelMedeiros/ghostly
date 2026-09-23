@@ -144,8 +144,8 @@ export class ProviderSources<P extends Connectable> {
   }
 
   /** Creates a provider and checks it is on a network of this mode before anything uses it. */
-  private async open(descriptor: ProviderDescriptor<P>, settings: ProviderSettings) {
-    const signal = this.controller.signal;
+  private async open(descriptor: ProviderDescriptor<P>, settings: ProviderSettings, controller = this.controller) {
+    const signal = controller.signal;
     const provider = await this.gate.within(descriptor.create(settings, { ...this.options.host(), mode: this.mode, signal }), (p) => p.close());
     try {
       const { network, alias } = await this.gate.within(provider.info());
@@ -173,7 +173,9 @@ export class ProviderSources<P extends Connectable> {
       descriptor.validate?.(settings, this.mode);
       await this.guard();
       let opened: Awaited<ReturnType<typeof this.open>>;
-      try { opened = await this.open(descriptor, settings); }
+      // Its own signal: closing the source it replaces aborts that one's, not this one's.
+      const controller = new AbortController();
+      try { opened = await this.open(descriptor, settings, controller); }
       catch (error) { throw error instanceof ModeChanged ? error : new Error(`Could not connect to ${descriptor.label}: ${redact(error, settings.secrets)}`); }
       const deviceKey = newDeviceKey();
       const stored: StoredSource = { providerId, config: settings.config, savedAt: Date.now(),
@@ -183,6 +185,7 @@ export class ProviderSources<P extends Connectable> {
       try { await transact([STORES.settings], (s) => { if (plain) s[STORES.settings].delete(storageKey(this.options.kind, this.mode)); else s[STORES.settings].put(stored, storageKey(this.options.kind, this.mode)); }); }
       catch (error) { await opened.provider.close().catch(() => {}); throw error; }
       await this.disconnect();
+      this.controller = controller;
       this.stored = plain ? undefined : stored; this.descriptor = descriptor; this.provider = opened.provider; this.secrets = settings.secrets;
       this.view = { ...this.idle(), status: "ready", network: opened.network, alias: opened.alias };
       this.options.changed();

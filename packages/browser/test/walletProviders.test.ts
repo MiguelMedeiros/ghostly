@@ -295,6 +295,19 @@ describe("on-chain Bitcoin through the payment coordinator", () => {
     expect(new Set(fake.broadcasts).size).toBe(1);
   });
 
+  it("keeps the signal of a source it just set; replacing it aborts only the old one's", async () => {
+    const signals: AbortSignal[] = [];
+    const descriptor: OnchainProviderDescriptor = { ...fakeOnchain, create: async (_settings, host) => { signals.push(host.signal); return new FakeOnchainProvider(); } };
+    const service = new BitcoinService(() => [descriptor], () => ({ platform: "web", cashu: {} as CashuWallet }), vi.fn());
+    await service.start("testnet");
+    await service.sources.set("fake-onchain", { token: "a" });
+    expect(signals[0].aborted).toBe(false);
+    await service.sources.set("fake-onchain", { token: "b" });
+    expect([signals[0].aborted, signals[1].aborted]).toEqual([true, false]);
+    await service.stop();
+    expect(signals[1].aborted).toBe(true);
+  });
+
   it("gives back the coins a cancelled review reserved, and refuses another network's address", async () => {
     const { fake, service, coordinator } = await bitcoin();
     await service.sources.set("fake-onchain", { token: "t" });
