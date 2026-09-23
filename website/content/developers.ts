@@ -180,7 +180,7 @@ const en = {
     notes: [
       "Calls are available in chats over the legacy WebRTC profile; paired chats don't have calls yet. Screen sharing needs a computer.",
       "The extension shows the backup screen but runs a single profile; restoring there can't switch to the new profile.",
-      "Infrastructure you may touch: public Pkarr relays (browsers), Google STUN servers, Cashu mints, Iroh's n0 relays, Ark operators, Ethereum RPCs. No TURN server by default.",
+      "Infrastructure you may touch: public Pkarr relays (browsers), Google STUN servers, Cashu mints, Iroh's n0 relays, HyperDHT's public bootstrap nodes, Ark operators, Ethereum RPCs. No TURN server by default.",
     ],
   },
   next: {
@@ -371,7 +371,7 @@ const ptBr: DevCopy = {
     notes: [
       "Chamadas existem nos chats do perfil WebRTC legado; os chats pareados ainda não têm chamadas. Compartilhar a tela exige um computador.",
       "A extensão mostra a tela de backup, mas roda um único perfil; restaurar ali não troca para o perfil novo.",
-      "Infraestrutura que você pode tocar: relays públicos do Pkarr (navegadores), servidores STUN do Google, mints Cashu, relays n0 do Iroh, operadores Ark, RPCs Ethereum. Sem servidor TURN por padrão.",
+      "Infraestrutura que você pode tocar: relays públicos do Pkarr (navegadores), servidores STUN do Google, mints Cashu, relays n0 do Iroh, nós públicos de bootstrap da HyperDHT, operadores Ark, RPCs Ethereum. Sem servidor TURN por padrão.",
     ],
   },
   next: {
