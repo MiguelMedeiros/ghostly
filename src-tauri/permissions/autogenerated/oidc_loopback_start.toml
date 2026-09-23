@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-oidc-loopback-start"
+description = "Enables the oidc_loopback_start command without any pre-configured scope."
+commands.allow = ["oidc_loopback_start"]
+
+[[permission]]
+identifier = "deny-oidc-loopback-start"
+description = "Denies the oidc_loopback_start command without any pre-configured scope."
+commands.deny = ["oidc_loopback_start"]

@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { OIDC_TEST_ISSUER } from "./support/oidcIssuer";
 
 /**
  * End-to-end tests for Ghostly: real browsers, the shipped build, no servers.
@@ -65,5 +66,7 @@ export default defineConfig({
         url: `http://localhost:${port}`,
         reuseExistingServer: !process.env.CI,
         timeout: 5 * 60_000,
+        // The suite's build knows the local OIDC issuer (support/oidcIssuer.ts); a release build does not.
+        env: { VITE_OIDC_TEST_ISSUER: OIDC_TEST_ISSUER },
       },
 });

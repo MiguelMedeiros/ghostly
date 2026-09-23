@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-oidc-loopback-cancel"
+description = "Enables the oidc_loopback_cancel command without any pre-configured scope."
+commands.allow = ["oidc_loopback_cancel"]
+
+[[permission]]
+identifier = "deny-oidc-loopback-cancel"
+description = "Denies the oidc_loopback_cancel command without any pre-configured scope."
+commands.deny = ["oidc_loopback_cancel"]

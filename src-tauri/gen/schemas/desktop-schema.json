@@ -243,6 +243,24 @@
           "markdownDescription": "Enables the native_private_notification command without any pre-configured scope."
         },
         {
+          "description": "Enables the oidc_loopback_cancel command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-oidc-loopback-cancel",
+          "markdownDescription": "Enables the oidc_loopback_cancel command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the oidc_loopback_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-oidc-loopback-start",
+          "markdownDescription": "Enables the oidc_loopback_start command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the oidc_loopback_wait command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-oidc-loopback-wait",
+          "markdownDescription": "Enables the oidc_loopback_wait command without any pre-configured scope."
+        },
+        {
           "description": "Enables the open_project_link command without any pre-configured scope.",
           "type": "string",
           "const": "allow-open-project-link",
@@ -427,6 +445,24 @@
           "type": "string",
           "const": "deny-native-private-notification",
           "markdownDescription": "Denies the native_private_notification command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the oidc_loopback_cancel command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-oidc-loopback-cancel",
+          "markdownDescription": "Denies the oidc_loopback_cancel command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the oidc_loopback_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-oidc-loopback-start",
+          "markdownDescription": "Denies the oidc_loopback_start command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the oidc_loopback_wait command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-oidc-loopback-wait",
+          "markdownDescription": "Denies the oidc_loopback_wait command without any pre-configured scope."
         },
         {
           "description": "Denies the open_project_link command without any pre-configured scope.",

@@ -1,6 +1,7 @@
 import { createInPageHost } from "@ghostly/browser/inPageHost";
 import { checkVersionFeed } from "@ghostly/browser/updateFeed";
 import { RELEASES_URL } from "../../src/lib/settings";
+import { popupWindow } from "@ghostly/browser/proofs/oidc/popup";
 
 /**
  * Ghostly on the web: the peer runs in this page and lives as long as the tab.
@@ -31,6 +32,8 @@ export const webHost = createInPageHost({
     install: async () => window.location.reload(),
   },
   requestLocalAccess: async () => false,
+  // A popup on this origin; the provider returns to /oidc-callback.html.
+  oidc: { platform: "web", open: async () => popupWindow() },
   openService: async () => {
     throw new Error("Opening a contact's web app needs the Ghostly browser extension or desktop app.");
   },
