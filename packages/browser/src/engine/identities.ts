@@ -47,6 +47,8 @@ export class IdentityProofs {
   private drafts = new Map<string, { binding: IdentityBinding; seed: Uint8Array; at: number }>();
   private exchanges = new Map<string, IdentityExchange>();
   private errors = new Map<string, string>();
+  /** Chats whose current connection already got the hello: "ready" is reported more than once per connection. */
+  private greeted = new Set<string>();
   private readonly fetch: ReturnType<typeof boundedIdentityFetch>;
 
   constructor(private host: IdentityLinkHost, private providers: () => readonly IdentityProofProvider[] = identityProviders) {
@@ -181,12 +183,15 @@ export class IdentityProofs {
     return this.exchange(linkId)?.receive(frame) ?? Promise.resolve();
   }
   ready(linkId: string): void {
-    try { this.exchange(linkId)?.ready(); } catch { /* the channel closed again */ }
+    if (this.greeted.has(linkId) || !this.host.channel(linkId)) return;
+    try { this.exchange(linkId)?.ready(); this.greeted.add(linkId); } catch { /* the channel closed again */ }
   }
   closed(linkId: string): void {
+    this.greeted.delete(linkId);
     this.exchanges.get(linkId)?.stop();
   }
   forget(linkId: string): void {
+    this.greeted.delete(linkId);
     this.exchanges.get(linkId)?.stop();
     this.exchanges.delete(linkId);
     this.errors.delete(linkId);

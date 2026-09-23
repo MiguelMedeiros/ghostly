@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { describe, expect, it, vi } from "vitest";
-import { createIdentity, emptyIdentityLedger, identityStatement, type IdentityLedger } from "@ghostly/core";
+import { createIdentity, emptyIdentityLedger, identityStatement, IdentityExchange, type IdentityLedger } from "@ghostly/core";
 import { IdentityProofs, type IdentityLinkHost } from "../src/engine/identities";
 import { fakeKey, fakeKeySign, fakeKeySubject, fakeRecord } from "../src/proofs/testing";
 import type { IdentityProofProvider } from "../src/proofs/contract";
@@ -78,5 +78,22 @@ describe("identity proofs in the engine", () => {
     vi.useFakeTimers({ now: Date.now() + 2 * 86_400_000 });
     try { await expect(engines.a.share({ linkId: "chat", id })).rejects.toThrow(/expired/); }
     finally { vi.useRealTimers(); }
+  });
+
+  it("greets once per connection however often the channel reports ready, and again after a reconnect", async () => {
+    const { engines, connected } = pair();
+    const sent: string[] = [];
+    const spy = vi.spyOn(IdentityExchange.prototype, "ready").mockImplementation(function () { sent.push("hello"); });
+    try {
+      engines.a.ready("chat"); engines.a.ready("chat"); engines.a.ready("chat");
+      expect(sent).toHaveLength(1);
+      engines.a.closed("chat");
+      connected.value = false;
+      engines.a.ready("chat");
+      expect(sent).toHaveLength(1);
+      connected.value = true;
+      engines.a.ready("chat");
+      expect(sent).toHaveLength(2);
+    } finally { spy.mockRestore(); }
   });
 });
