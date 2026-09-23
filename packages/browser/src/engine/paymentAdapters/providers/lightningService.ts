@@ -71,7 +71,7 @@ export class LightningService {
   private readonly quotes = new Map<string, { providerId: string; provider: LightningProvider; invoice: string; amount: number; maxFee: number; paymentHash: string }>();
   private mode: WalletMode = "mainnet";
   private timer?: ReturnType<typeof setTimeout>;
-  private polling = false;
+  private passes: Promise<void> = Promise.resolve();
   private stopped = false;
   private recent: LightningOpView[] = [];
 
@@ -177,28 +177,39 @@ export class LightningService {
 
   // -- reconciling ---------------------------------------------------------------
 
-  /** Asks the active source about everything of its that is open, pending or unknown. */
-  async reconcile(): Promise<void> {
-    if (this.polling || this.stopped) return;
-    this.polling = true;
+  /** Asks the active source about everything of its that is open, pending or unknown. One pass at a time. */
+  reconcile(): Promise<void> {
+    const pass = this.passes.then(() => this.reconcileOnce());
+    this.passes = pass.catch(() => {});
+    return pass;
+  }
+
+  private async reconcileOnce(): Promise<void> {
+    if (this.stopped) return;
     let again = 0;
     try {
       const provider = this.sources.active, providerId = this.sources.activeId;
       for (const op of await this.list()) {
         if (op.selfSettled || op.mode !== this.mode) continue;
-        const waiting = op.direction === "in" ? op.state === "open" : ["sending", "pending", "unknown"].includes(op.state);
+        // `sending` is a spend under way in this process: its own answer decides. One left by a crash is
+        // made `unknown` by `recover` at the next start, and only then asked about.
+        const waiting = op.direction === "in" ? op.state === "open" : ["pending", "unknown"].includes(op.state);
         if (!waiting) continue;
         // Another source's operation waits until that source is active again: only it can answer.
         if (!provider || op.providerId !== providerId || !provider.capabilities.lookup) continue;
         try {
+          const unchanged = async () => (await this.get(op.direction, op.paymentHash))?.state === op.state;
           if (op.direction === "in") {
             const status = await provider.invoiceStatus({ invoice: op.invoice, paymentHash: op.paymentHash, amount: op.amount, expiresAt: op.expiresAt, ref: op.ref });
+            if (!(await unchanged())) continue;
             if (status.state === "paid") { await this.put({ ...op, state: "paid", settledAt: Date.now() }); this.events.received(op); }
             else if (status.state === "expired" || op.expiresAt + 60_000 < Date.now()) await this.put({ ...op, state: "expired" });
             else again = again ? Math.min(again, IN_POLL_MS) : IN_POLL_MS;
           } else {
             const status = await provider.paymentStatus({ invoice: op.invoice, paymentHash: op.paymentHash, ref: op.ref });
             if (status.state === "pending") { again = again || OUT_POLL_MS; continue; }
+            // Written only over the state that was asked about: anything newer wins.
+            if (!(await unchanged())) continue;
             await this.put({ ...op, state: status.state, fee: status.fee ?? op.fee, error: status.state === "failed" ? "The payment did not go through" : undefined, settledAt: Date.now() });
             this.events.resolved(op, status.state === "paid");
           }
@@ -208,7 +219,6 @@ export class LightningService {
         }
       }
     } finally {
-      this.polling = false;
       await this.loadRecent();
       this.events.changed();
       if (again) this.schedule(again);

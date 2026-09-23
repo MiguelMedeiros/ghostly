@@ -72,7 +72,7 @@ for (const width of WIDTHS) {
     const header = await page.getByTestId("wallet").locator("header").boundingBox();
     const mode = await page.getByTestId("wallet-mode").boundingBox();
     expect(mode!.x + mode!.width).toBeLessThanOrEqual(header!.x + header!.width + 1);
-    for (const card of ["cashu", "lightning", "arkade", "usdt"] as const) {
+    for (const card of ["cashu", "lightning", "arkade", "usdt", "bitcoin"] as const) {
       await page.getByTestId(`wallet-card-${card}`).click();
       await expectTidy(page, "[data-testid=wallet]", `the ${card} wallet`);
     }

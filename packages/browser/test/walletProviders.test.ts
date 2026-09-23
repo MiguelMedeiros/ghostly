@@ -178,6 +178,22 @@ describe("Lightning through the active source", () => {
     await lightning.stop();
   });
 
+  it("never reconciles a spend still under way: a source that does not know it yet cannot fail it", async () => {
+    const { fake, lightning, events } = await fakeSource();
+    let finish!: () => void;
+    const paying = fake.payInvoice.bind(fake);
+    fake.payInvoice = async (invoice, maxFee) => { await new Promise<void>((resolve) => (finish = resolve)); return paying(invoice, maxFee); };
+    const invoice = fakeInvoice(30, crypto.getRandomValues(new Uint8Array(32)));
+    const paid = lightning.pay((await lightning.quote(invoice)).quote, { paymentId: "r3" });
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    await lightning.reconcile(); // The fake does not know this payment yet: it would say "failed".
+    expect((await lightning.list())[0]).toMatchObject({ state: "sending" });
+    finish();
+    expect(await paid).toBe(true);
+    expect(events.resolved).not.toHaveBeenCalled();
+    await lightning.stop();
+  });
+
   it("an interrupted spend is unknown after a restart, not retried", async () => {
     const { lightning } = await fakeSource();
     await transact([STORES.settings], (s) => { s[STORES.settings].put({ direction: "out", providerId: "fake-lightning", mode: "testnet", paymentHash: "ab", invoice: "x", amount: 1, expiresAt: 0, createdAt: 1, state: "sending" }, "lightningOp-out-ab"); });
