@@ -42,7 +42,7 @@ Valid proof plus participation possession succeeds; wrong audience/key/channel, 
 
 ## References
 
-[Peer keys](02-peer-keys.md), [Nostr](301-nostr.md), [Pubky](302-pubky.md), [Keet](303-keet.md), [Domain](3xx-domain.md).
+[Peer keys](02-peer-keys.md), [Nostr](301-nostr.md), [Pubky](302-pubky.md), [Keet](303-keet.md), [Domain](3xx-domain.md), [OpenPGP](3xx-openpgp.md).
 
 ## Implementation follow-up — 2026-09-20
 
@@ -77,3 +77,8 @@ One line of UTF-8, no trailing newline, space-free fields in a fixed order (inje
 Providers under the [provider contract](../../packages/browser/src/proofs/PROOFS.md), one line each:
 
 - **Domain** (`domain`, experimental, [draft 3xx](3xx-domain.md)): a DNS TXT record at `_ghostly.<domain>` or `/.well-known/ghostly.json` names the proof key and the statement id, published once; NIP-05 users can instead sign with the Nostr key their `nostr.json` names for `_`. Looked up through a DNS-over-HTTPS resolver the contact chooses; web servers on private addresses are never contacted; re-checked after a day, so removing the record withdraws the proof.
+- **OpenPGP** (`openpgp`, [draft 3xx](3xx-openpgp.md)): the person clearsigns the statement once with their own gpg (a YubiKey or OpenPGP card works unchanged) and pastes it with their public key; the contact verifies locally, with expiry and revocation checked at signing and at verification. The key's user ID is shown with the warning that its holder wrote it; keys.openpgp.org is asked, on request only, which emails it confirmed.
+
+## Implementation follow-up — 2026-09-23: OpenPGP
+
+An [OpenPGP proof](3xx-openpgp.md) is drafted: the participant signs, once, the binding by which their OpenPGP key authorizes a Ghostly proof key, with their own gpg (a YubiKey or OpenPGP card works unchanged) and the contact verifies locally. It is the `openpgp` provider of the identity-proof registry; per-chat presentations are signed by the app with the proof key. It fixes this WISP's open choices for that adapter: the signed bytes (the statement, or the statement plus one line ending), the algorithm and hash allowlists, and that expiry and revocation are checked both at signing time and at verification time. Showing a key's user IDs always comes with the warning that holding a key does not prove a user ID's name or email; the only email check shown is keys.openpgp.org's, labelled as such, and only from a lookup the viewing app made on request.

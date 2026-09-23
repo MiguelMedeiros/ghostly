@@ -1,0 +1,101 @@
+import { expect, test, type Peer } from "../support/fixtures";
+import { pair } from "../support/paired";
+import { fingerprints as fpr, TestGpg, vector } from "../../packages/browser/test/helpers/gpg";
+
+/**
+ * An OpenPGP key proven with a real GnuPG, in the test process, holding committed TEST keys
+ * (packages/browser/test/vectors/openpgp). gpg runs the commands the app shows, on the statement
+ * the app built in this run; the page only ever sees what gpg printed.
+ */
+let gpg: TestGpg;
+test.beforeAll(() => { gpg = new TestGpg(["alice", "bob", "expired", "revoked"]); });
+test.afterAll(() => gpg?.close());
+
+const chatId = (peer: Peer) => peer.page.evaluate(() => location.hash);
+const go = (peer: Peer, hash: string) => peer.page.evaluate(h => { location.hash = h; }, hash);
+async function identities(peer: Peer) {
+  await peer.page.getByTitle("Options").click();
+  await peer.page.getByTestId("chat-identities-open").click();
+  return peer.page.getByTestId("chat-identities");
+}
+const close = (peer: Peer) => peer.page.getByTestId("chat-identities").getByRole("button", { name: "Close" }).click();
+
+/** Profile → Identities → OpenPGP with the plain gpg signer, up to the paste; returns the dialog and the statement. */
+async function startPgp(peer: Peer, fingerprint: string) {
+  await peer.page.getByTestId("identity-add").click();
+  const add = peer.page.getByTestId("add-identity");
+  await add.getByTestId("add-identity-openpgp").click();
+  await expect(add.getByTestId("add-identity-signer")).toHaveValue("gpg");
+  await add.getByTestId("add-identity-subject").fill(fingerprint.replace(/(.{4})/g, "$1 ")); // as gpg --fingerprint prints it
+  await add.getByTestId("add-identity-start").click();
+  const statement = (await add.getByTestId("add-identity-copy-2").textContent())!;
+  expect(statement).toMatch(new RegExp(`^Ghostly identity proof v1: I control openpgp:${fingerprint} and authorize the Ghostly key `));
+  await expect(add.getByTestId("add-identity-copy-0")).toHaveText(`printf '%s' '${statement}' > ghostly-identity.txt`);
+  await expect(add.getByTestId("add-identity-copy-1")).toContainText(`gpg --local-user ${fingerprint} --clearsign --output - ghostly-identity.txt`);
+  return { add, statement };
+}
+async function refused(peer: Peer, fingerprint: string, paste: (statement: string) => string, reason: RegExp) {
+  const { add, statement } = await startPgp(peer, fingerprint);
+  await add.getByTestId("add-identity-paste").fill(paste(statement));
+  await add.getByTestId("add-identity-finish").click();
+  await expect(add.getByTestId("add-identity-error")).toHaveText(reason);
+  await add.getByRole("button", { name: "Cancel" }).click();
+  await expect(add).toHaveCount(0);
+}
+
+test("an OpenPGP key signed with gpg: refused when it should be, then shared with one contact only", async ({ peer }) => {
+  const [alice, bob, carol] = await Promise.all([peer("pgp-alice"), peer("pgp-bob"), peer("pgp-carol")]);
+  await pair(alice, bob);
+  const withBob = await chatId(alice);
+  await pair(alice, carol);
+  await go(alice, "#/profile");
+
+  // Each refused before anything is saved.
+  await refused(alice, fpr.alice, () => `${gpg.clearsign(fpr.alice, "Some other statement")}\n${gpg.exportKey(fpr.alice)}`, /signs different text/);
+  await refused(alice, fpr.alice, s => `${gpg.clearsign(fpr.bob, s)}\n${gpg.exportKey(fpr.alice)}`, /made by another key/);
+  await refused(alice, fpr.alice, s => `${gpg.clearsign(fpr.bob, s)}\n${gpg.exportKey(fpr.bob)}`, /not the one the statement names/);
+  // gpg will not sign with an expired key, so it signs while it was valid (its clock set back): the key has expired since.
+  await refused(alice, fpr.expired, s => `${gpg.clearsign(fpr.expired, s, "20260201T000000")}\n${vector("expired.pub.asc")}`, /expired on 2026-06-01/);
+  // Signed with the key, pasted with the public key as it is now: carrying its revocation.
+  await refused(alice, fpr.revoked, s => `${gpg.clearsign(fpr.revoked, s)}\n${vector("revoked.pub.asc")}`, /revoked/);
+  await expect(alice.page.getByTestId("identity-proof")).toHaveCount(0);
+
+  // The real one: exactly what the two commands print, pasted at once.
+  const { add, statement } = await startPgp(alice, fpr.alice);
+  await add.getByTestId("add-identity-paste").fill(`${gpg.clearsign(fpr.alice, statement)}\n${gpg.exportKey(fpr.alice)}`);
+  await add.getByTestId("add-identity-finish").click();
+  await expect(add).toHaveCount(0);
+  await expect(alice.page.getByTestId("identity-proof")).toHaveCount(1);
+  await expect(alice.page.getByTestId("identity-proof")).toContainText("Not shared");
+
+  // Shared with Bob only.
+  await go(alice, withBob);
+  const mine = await identities(alice);
+  await mine.getByTestId("chat-identity-share").click();
+  await expect(mine.getByTestId("chat-identity-mine-status")).toHaveText("Shared · verified by your contact");
+  await close(alice);
+
+  // Bob's app verified it on its own: fingerprint, how, and the user ID with its caveat.
+  await expect(bob.page.getByTestId("chat-identity-badges")).toBeVisible();
+  const dialog = await identities(bob);
+  const received = dialog.getByTestId("chat-identity-received");
+  await expect(received).toHaveCount(1);
+  await expect(received).toHaveAttribute("data-provider", "openpgp");
+  await expect(received).toHaveAttribute("data-status", "verified");
+  await expect(received).toContainText("Alice Test <alice@example.org>");
+  // Said plainly, next to the user ID, without opening anything.
+  await expect(received.getByTestId("chat-identity-received-name-source")).toBeVisible();
+  await expect(received.getByTestId("chat-identity-received-name-source")).toContainText("written by its holder: not proof that the name or email is theirs");
+  await received.getByText("Details").click();
+  await expect(received.getByTestId("chat-identity-received-subject")).toHaveText(fpr.alice);
+  await expect(received).toContainText("OpenPGP signature (Ed25519 signing subkey, v4 key)");
+  // keys.openpgp.org is only ever asked from this button, which says so.
+  await expect(received.getByTestId("chat-identity-lookup")).toHaveText("Check emails with keys.openpgp.org");
+  await close(bob);
+
+  // Carol was never shown it.
+  const none = await identities(carol);
+  await expect(none.getByTestId("chat-identity-received")).toHaveCount(0);
+  await close(carol);
+  await expect(carol.page.getByTestId("chat-identity-badges")).toHaveCount(0);
+});

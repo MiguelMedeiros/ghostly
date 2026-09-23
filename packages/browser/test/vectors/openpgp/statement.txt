@@ -1,0 +1,1 @@
+Ghostly OpenPGP proof test vector. Not a real proof: the statement Ghostly asks for is built per contact.
