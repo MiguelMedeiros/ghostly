@@ -11,6 +11,8 @@ type Node = "alice" | "bob";
 
 test.skip(process.env.GHOSTLY_CLN_REGTEST !== "1", "Requires the local Core Lightning regtest stack (e2e/support/cln-regtest)");
 test.setTimeout(3 * 60_000);
+// Both tests move sats on the same two nodes: one at a time, or each sees the other's payments.
+test.describe.configure({ mode: "serial" });
 
 /** Makes the node this peer's Lightning source in Testnet, through the source picker's form. */
 async function useNode(p: Peer, node: Node) {
@@ -87,8 +89,10 @@ test("a chat request paid over Lightning, from one person's node to the other's"
 
   const request = chat(alice).getByTestId("payment-bubble").filter({ hasText: "Requests" }).last();
   await request.getByTestId("payment-pay").click();
+  // Reviewed as a Lightning payment through alice's node, then approved.
   const review = request.getByTestId("payment-review");
-  if (await review.isVisible().catch(() => false)) await review.getByRole("button", { name: "Approve payment" }).click();
+  await expect(review).toContainText("over Lightning");
+  await review.getByRole("button", { name: "Approve payment" }).click();
   await expect(request.getByTestId("payment-state")).toHaveText("Paid", { timeout: 60_000 });
   // Bob's node saw its invoice paid, and told bob's chat.
   await expect(chat(bob).getByTestId("payment-bubble").last().getByTestId("payment-state")).toHaveText(/Paid|Received/, { timeout: 60_000 });
