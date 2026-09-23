@@ -6,8 +6,9 @@ import { bech32 } from "@scure/base";
  * A signed BOLT11 invoice from a node that does not exist: something for a test mint to pay that is
  * not one of its own invoices. A test mint marks its own invoices paid by itself, so paying one of those
  * proves nothing about a Lightning send; paying this one goes through the mint's melt for real.
+ * `prefix`: `lnbcrt` for regtest, where a node has no route to it either.
  */
-export function strangerInvoice(sats: number, description = "ghostly e2e"): string {
+export function strangerInvoice(sats: number, description = "ghostly e2e", prefix = "lnbc"): string {
   const words: number[] = [...uint(Math.floor(Date.now() / 1000), 7)];
   const field = (tag: number, data: number[]) => words.push(tag, data.length >> 5, data.length & 31, ...data);
   field(1, bech32.toWords(crypto.getRandomValues(new Uint8Array(32)))); // p: payment hash
@@ -16,7 +17,7 @@ export function strangerInvoice(sats: number, description = "ghostly e2e"): stri
   field(6, uint(3600)); // x: expiry, seconds
   field(24, uint(18)); // c: final CLTV delta
   field(5, [16, 8, 0]); // 9: features, var_onion_optin and payment_secret (bits 8 and 14)
-  const hrp = `lnbc${sats * 10}n`;
+  const hrp = `${prefix}${sats * 10}n`;
   const signed = secp256k1.sign(sha256(new Uint8Array([...new TextEncoder().encode(hrp), ...toBytes(words)])), secp256k1.utils.randomSecretKey(), { prehash: false, format: "recovered" });
   // noble puts the recovery id first; BOLT11 wants it last.
   const signature = new Uint8Array([...signed.slice(1), signed[0]]);

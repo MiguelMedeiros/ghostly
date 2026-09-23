@@ -1,6 +1,7 @@
 import { bitcoindRpc } from "./bitcoind";
 import { breez } from "./breez";
 import { cashuMint } from "./cashuMint";
+import { coreLightning } from "./coreLightning";
 import { nwc } from "./nwc";
 import type { LightningProviderDescriptor } from "./lightning";
 import type { OnchainProviderDescriptor } from "./onchain";
@@ -16,6 +17,7 @@ export const LIGHTNING_PROVIDERS: readonly LightningProviderDescriptor[] = [
   cashuMint,
   breez,
   nwc,
+  coreLightning,
 ];
 
 export const ONCHAIN_PROVIDERS: readonly OnchainProviderDescriptor[] = [

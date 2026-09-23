@@ -1,0 +1,34 @@
+# A disposable Core Lightning regtest stack for the gated CLN tests: worthless coins, nothing public.
+#   docker compose -p ghostly-cln -f e2e/support/cln-regtest/docker-compose.yml up -d
+#   node e2e/support/cln-regtest/regtest.mjs ready
+# Two nodes: alice (the node a Ghostly profile connects to) and bob (the counterpart, and the second
+# person's node in the chat test). Each listens for Commando over a websocket; host ports stay in
+# 44800-44899 and everything binds to 127.0.0.1.
+name: ghostly-cln
+x-lightningd: &lightningd
+  image: elementsproject/lightningd:v26.06.8
+  environment: { LIGHTNINGD_NETWORK: regtest }
+  depends_on: { bitcoind: { condition: service_healthy } }
+services:
+  bitcoind:
+    image: bitcoin/bitcoin:31.0
+    container_name: ghostly-cln-bitcoind
+    command: ["bitcoind", "-regtest", "-printtoconsole", "-server", "-fallbackfee=0.0001",
+      "-rpcbind=0.0.0.0", "-rpcallowip=0.0.0.0/0", "-rpcuser=ghostly", "-rpcpassword=regtest"]
+    ports: ["127.0.0.1:44801:18443"]
+    healthcheck:
+      test: ["CMD-SHELL", "bitcoin-cli -regtest -rpcuser=ghostly -rpcpassword=regtest getblockchaininfo || exit 1"]
+      interval: 3s
+      retries: 20
+  alice:
+    <<: *lightningd
+    container_name: ghostly-cln-alice
+    command: &args ["--bitcoin-rpcconnect=bitcoind", "--bitcoin-rpcport=18443",
+      "--bitcoin-rpcuser=ghostly", "--bitcoin-rpcpassword=regtest", "--bind-addr=0.0.0.0:9735",
+      "--bind-addr=ws:0.0.0.0:9740", "--dev-bitcoind-poll=1", "--developer", "--dev-fast-gossip", "--disable-plugin=cln-grpc"]
+    ports: ["127.0.0.1:44810:9740"]
+  bob:
+    <<: *lightningd
+    container_name: ghostly-cln-bob
+    command: *args
+    ports: ["127.0.0.1:44811:9740"]

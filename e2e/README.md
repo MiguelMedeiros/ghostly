@@ -53,6 +53,7 @@ E2E_MINT_URL=http://127.0.0.1:3338 npm run test:e2e
 | `web/bark-wallet.spec.ts` | Bark (Second's Ark) is not on Mainnet yet; `@network`: a Testnet wallet on Second's signet server by itself, and a chat offers Bark only when both sides allow it (Arkade stays separate) |
 | `web/wallet-sources.spec.ts` | where Lightning and on-chain Bitcoin come from: the Lightning card on the Cashu mints by default, a source picked per mode (invoices through it, Mainnet keeping its own), the Bitcoin card's "no source" state and an on-chain send through a source — with the fake providers, no network |
 | `web/wallet-nwc.spec.ts` | Lightning through Nostr Wallet Connect: a wallet connected by its URI receives and pays over its relay, and a bad URI or a Mainnet wallet in Testnet is refused — against a fake NWC wallet service on a relay in the test process, no network; gated (`GHOSTLY_NWC_REGTEST=1`, see below): two people on their own Alby Hub, a chat request paid over a regtest channel |
+| `web/wallet-cln.spec.ts` | Core Lightning as the Lightning source (gated, `GHOSTLY_CLN_REGTEST=1`): the form with a restricted rune (never back in the page), an invoice of the node paid by the other node, an invoice of the other node paid from the card, a chat request paid from one person's node to the other's, balances on both nodes and both cards |
 | `web/payment-extras.spec.ts` | with `E2E_MINT_URL`: memo and "test sats" in both bubbles, a refused payment is taken back, ecash nobody picks up can be taken back, invoice cards |
 | `extension/interop.spec.ts` | the extension and the web app: chat, file, video call |
 | `extension/services.spec.ts` | a local web app shared by one extension and opened by another over WebRTC, stopped, offline, gone |
@@ -249,3 +250,25 @@ coins on-chain to Bob and moves them into Ark (a board: its on-chain fee comes o
 wallet page, Bob sends in the chat (his app asks hers for an address) and pays his request; balances are checked
 in both apps and the identifiers are printed. captaind is published for amd64 only; on Apple silicon Docker runs
 it emulated. Funded signet runs are not automated: Second's faucet (https://signet.2nd.dev) needs a GitHub login.
+
+### Core Lightning on regtest
+
+Two Core Lightning nodes (v26.06) on a regtest bitcoind 31, with a channel from `alice` to `bob` that both sides
+can spend from, in containers named `ghostly-cln-*`. Each node listens for Commando over a websocket
+(`bind-addr=ws:…`), published on `127.0.0.1:44810` (alice) and `127.0.0.1:44811` (bob); bitcoind's RPC on `44801`:
+
+```bash
+docker compose -p ghostly-cln -f e2e/support/cln-regtest/docker-compose.yml up -d
+node e2e/support/cln-regtest/regtest.mjs ready     # mines, funds both nodes, opens the channel (once)
+GHOSTLY_CLN_REGTEST=1 npm test -w @ghostly/browser -- coreLightning.regtest
+npm run build:web && npx vite preview web --port 44820 --strictPort &
+E2E_WEB_URL=http://localhost:44820 GHOSTLY_CLN_REGTEST=1 npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/wallet-cln.spec.ts
+docker compose -p ghostly-cln -f e2e/support/cln-regtest/docker-compose.yml down -v   # when done
+```
+
+The unit-level test runs the provider contract against alice with bob as the counterpart, plus a rune refused a
+method, a wrong node id refused at the handshake, balances on both nodes, and an unroutable invoice refused as
+`NothingSpentError`. The e2e test drives the source picker's form in the web app. Runes are made fresh by
+`regtest.mjs` (restricted to the methods Ghostly calls) and handed to the test, never printed. Node's built-in
+`WebSocket` sends lower-case header names, which Core Lightning's listener refuses; browsers send them as it
+expects, and the Node tests use the `ws` package.
