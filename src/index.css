@@ -402,6 +402,14 @@ body {
   display: contents;
 }
 
+/* The header of a right-column page (components/layout/Page.tsx): one 3.5rem line, or two when its
+   controls wrap under the title in a narrow column. The inset is 0 everywhere but under a phone's notch. */
+.page-header {
+  min-height: calc(3.5rem + env(safe-area-inset-top));
+  padding-top: calc(0.5rem + env(safe-area-inset-top));
+  padding-bottom: 0.5rem;
+}
+
 @keyframes sheet-up {
   from { transform: translateY(100%); }
   to { transform: translateY(0); }

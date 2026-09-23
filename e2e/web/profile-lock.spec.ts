@@ -6,7 +6,7 @@ import { expect, test } from "../support/fixtures";
 // data is only deleted with its own lock password.
 
 const locked = (page: Page) => page.getByText("Ghostly is locked");
-const field = (page: Page, label: string) => page.getByText(label, { exact: true }).locator("xpath=following-sibling::input");
+const field = (page: Page, label: string) => page.getByLabel(label, { exact: true });
 
 async function setLock(page: Page, password: string): Promise<void> {
   await page.goto("/#/settings");

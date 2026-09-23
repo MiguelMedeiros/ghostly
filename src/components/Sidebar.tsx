@@ -37,6 +37,8 @@ function previewText(text: string): string {
 const MIN_WIDTH = 280;
 const MAX_WIDTH = 600;
 const DEFAULT_WIDTH = 420;
+/** What the page beside the list always keeps, however wide the list is dragged: a phone's width, about. */
+const MIN_PAGE_WIDTH = 320;
 
 export function Sidebar() {
   const navigate = useNavigate();
@@ -60,7 +62,7 @@ export function Sidebar() {
 
     const onMouseMove = (ev: MouseEvent) => {
       if (!isResizingRef.current) return;
-      const newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, ev.clientX));
+      const newWidth = Math.min(MAX_WIDTH, window.innerWidth - MIN_PAGE_WIDTH, Math.max(MIN_WIDTH, ev.clientX));
       setSidebarWidth(newWidth);
     };
 
@@ -150,7 +152,7 @@ export function Sidebar() {
     <div
       data-testid="sidebar"
       className={`relative flex flex-col bg-sidebar-bg ${isMobile ? "flex-1 min-w-0" : "sidebar-desktop border-r border-border shrink-0"}`}
-      style={isMobile ? undefined : { width: sidebarWidth, minWidth: MIN_WIDTH, maxWidth: MAX_WIDTH }}
+      style={isMobile ? undefined : { width: sidebarWidth, minWidth: MIN_WIDTH, maxWidth: `min(${MAX_WIDTH}px, 100vw - ${MIN_PAGE_WIDTH}px)` }}
     >
       {/* Header */}
       <div className="sidebar-header h-14 header-safe shrink-0 flex items-center justify-between px-4 bg-panel-header">

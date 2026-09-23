@@ -5,6 +5,7 @@ import { PaymentReview } from "./PaymentReview";
 import { BackupRows } from "./wallet/BackupRows";
 import { Actions, Address, Amount, Block, Button, Notice, Row, Section, Segmented, input, type Action } from "./wallet/ui";
 import { useRun } from "./wallet/run";
+import { InputGroup, Truncate } from "./layout";
 
 type Network = "bitcoin" | "mutinynet" | "signet" | "regtest";
 /** Where each network's wallet connects unless someone types another provider. */
@@ -36,7 +37,7 @@ export function ArkWalletPanel({ wallet, state }: { wallet: WalletPlatform; stat
 
  return <div className="space-y-6" data-testid="ark-wallet">
   {!ark?.configured || (ark.locked && ark.automatic) ? <div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="ark-connecting"><p className="text-text-primary">Connecting your Ark wallet…</p><Notice>{ark?.error ?? "This takes a few seconds the first time."}</Notice></div>
-  : !ready ? <Section title="Unlock"><Row label="This wallet was created with a password"><input aria-label="Ark wallet password" type="password" autoComplete="current-password" className={input} value={password} onChange={e => setPassword(e.target.value)} /><Button variant="primary" disabled={busy} onClick={() => void run(async () => { await wallet.arkUnlock(password); setPassword(""); })}>Unlock Ark</Button></Row></Section>
+  : !ready ? <Section title="Unlock"><Row label="This wallet was created with a password" /><Block><InputGroup><input aria-label="Ark wallet password" type="password" autoComplete="current-password" className={input} value={password} onChange={e => setPassword(e.target.value)} /><Button variant="primary" disabled={busy} onClick={() => void run(async () => { await wallet.arkUnlock(password); setPassword(""); })}>Unlock Ark</Button></InputGroup></Block></Section>
   : <div className="space-y-4">
    <p className="text-text-primary" data-testid="ark-balance"><span className="text-4xl font-semibold tabular-nums">{ark.balance.toLocaleString()}</span><span className="text-text-muted text-sm ml-2">{unit}</span>{test && <span className="block text-xs text-yellow-500 mt-1">{NETWORKS[network].label} · test coins, worthless</span>}</p>
    <Actions value={action} onChange={setAction} />
@@ -46,8 +47,8 @@ export function ArkWalletPanel({ wallet, state }: { wallet: WalletPlatform; stat
      : <Address value={ark.boardingAddress} qr={ark.boardingAddress ? `bitcoin:${ark.boardingAddress}` : undefined} testId="ark-boarding-address" note={network === "regtest" ? "On a local regtest server, deposits are settled into Ark manually." : "Send from any Bitcoin wallet. Once confirmed it moves into Ark by itself; that needs Ghostly open."} />}
    </div>}
    {/* Outputs whose batch expired before renewal are still this wallet's: say so, and bring them back. */}
-   {!!ark.recoverable && <div className="flex items-center gap-3 rounded-xl bg-yellow-500/10 px-3 py-2" data-testid="ark-recoverable">
-    <p className="flex-1 text-xs text-yellow-500">{ark.recoverable.toLocaleString()} {unit} expired before they were renewed. They are still yours: recover them to use them again.</p>
+   {!!ark.recoverable && <div className="flex flex-wrap items-center gap-3 rounded-xl bg-yellow-500/10 px-3 py-2" data-testid="ark-recoverable">
+    <p className="flex-[1_1_12rem] min-w-0 text-xs text-yellow-500">{ark.recoverable.toLocaleString()} {unit} expired before they were renewed. They are still yours: recover them to use them again.</p>
     <Button data-testid="ark-recover" disabled={busy} onClick={() => void run(() => wallet.arkRecover())}>{busy ? "Recovering…" : "Recover"}</Button>
    </div>}
    {!!ark.incoming && <Notice tone="warning" testId="ark-incoming">{ark.incoming.toLocaleString()} {unit} on the way from an on-chain deposit</Notice>}
@@ -68,13 +69,13 @@ export function ArkWalletPanel({ wallet, state }: { wallet: WalletPlatform; stat
    {state.mode === "testnet" && <Row label="Network" hint={stuck ? "This network is not answering. You can switch to another one." : canReplace ? "Test networks use worthless coins." : "Only while this wallet is empty and has no payments."}>
     <Segmented label="Ark network" value={network} disabled={busy || !canReplace} options={(Object.keys(NETWORKS) as Network[]).filter(value => value !== "bitcoin").map(value => ({ value, label: NETWORKS[value].label }))} onChange={next => void run(() => use(next))} />
    </Row>}
-   {ready && <><Row label="Provider" hint={ark.provider}><Button disabled={!canReplace} onClick={() => { setCustom(!custom); setProvider(ark.provider ?? ""); setExplorer(NETWORKS[network].explorer); }}>{custom ? "Cancel" : "Change"}</Button></Row>
+   {ready && <><Row label="Provider" hint={ark.provider && <Truncate className="font-mono">{ark.provider}</Truncate>}><Button disabled={!canReplace} onClick={() => { setCustom(!custom); setProvider(ark.provider ?? ""); setExplorer(NETWORKS[network].explorer); }}>{custom ? "Cancel" : "Change"}</Button></Row>
    {custom && <Block>
     <input aria-label="Ark provider" className={`${input} font-mono text-xs`} value={provider} onChange={e => setProvider(e.target.value)} spellCheck={false} />
     <input aria-label="Bitcoin explorer API" className={`${input} font-mono text-xs`} value={explorer} onChange={e => setExplorer(e.target.value)} spellCheck={false} />
     <Button variant="primary" disabled={busy} onClick={() => void run(async () => { await use(network, { provider, explorer }); setCustom(false); })}>Use this provider</Button>
    </Block>}
-   <Row label="Automatic renewal" hint={network === "regtest" ? "Off on regtest" : "While Ghostly is open"}><span className="text-sm text-text-secondary">{network === "regtest" ? "Off" : "On"}</span></Row>
+   <Row label="Automatic renewal" hint={network === "regtest" ? "Off on regtest" : "While Ghostly is open"} value={network === "regtest" ? "Off" : "On"} />
    <BackupRows name="Ark" busy={busy} run={run} canReplace={canReplace}
     reveal={async () => (await wallet.arkBackup()).mnemonic} exportBackup={pw => wallet.arkExportBackup(pw)}
     restorePhrase={mnemonic => use(network, { provider: ark.provider, explorer: NETWORKS[network].explorer, mnemonic })} restoreFile={(text, pw) => wallet.arkRestoreBackup(text, pw)} /></>}
