@@ -9,7 +9,9 @@ export function NetworkSettings() {
   const network = platform?.getNetwork() ?? null;
   const [relays, setRelays] = useState("");
   const [turn, setTurn] = useState({ urls: "", username: "", credential: "" });
-  const [saved, setSaved] = useState(false);
+  // What was last saved: "Saved" stays up while the form still shows it, instead of flashing past while
+  // the engine is busy (a save can take seconds while the wallets start).
+  const [savedAs, setSavedAs] = useState<string | null>(null);
   const [error, setError] = useState("");
   const loaded = network !== null;
 
@@ -22,9 +24,12 @@ export function NetworkSettings() {
   }, [loaded]);
 
   if (!platform || !network) return null;
+  const current = JSON.stringify({ relays, turn });
+  const saved = savedAs === current;
 
   const save = async () => {
     setError("");
+    setSavedAs(null);
     const server = turn.urls.trim() ? { ...turn, urls: turn.urls.trim() } : null;
     // Checked here as well as in the engine, so the person sees why before anything changes.
     const problem = server ? iceServerProblem(server) : null;
@@ -32,8 +37,7 @@ export function NetworkSettings() {
     try {
       await platform.setNetwork({ relays: relays.split(/\s+/).filter(Boolean), turn: server });
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); return; }
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1500);
+    setSavedAs(current);
   };
 
   const field =
@@ -110,7 +114,7 @@ export function NetworkSettings() {
           >
             Save
           </button>
-          {saved && <span className="text-accent text-sm">Saved</span>}
+          {saved && <span role="status" data-testid="network-saved" className="text-accent text-sm">Saved</span>}
           {error && <span role="alert" data-testid="network-error" className="text-danger text-sm min-w-0 break-words">{error}</span>}
           <span data-testid="network-protocol" className="text-text-muted text-xs ml-auto min-w-0">{network.protocol}</span>
         </div>
