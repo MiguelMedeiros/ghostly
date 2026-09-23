@@ -25,8 +25,8 @@ function normalizeKeySubject(input: string): string {
   try { return parseSshPublicKey(value).fingerprint; }
   catch (e) {
     // Say why a real key is refused (a DSA key, a small RSA key); anything else gets the instruction.
-    if (e instanceof SshSigError && /^(Unsupported SSH key type|RSA keys must)/.test(e.message)) throw new Error(e.message, { cause: e });
-    throw new Error("Paste your public key (the one line in ~/.ssh/id_ed25519.pub) or its SHA256: fingerprint", { cause: e });
+    if (e instanceof SshSigError && /^(Unsupported SSH key type|RSA keys must)/.test(e.message)) throw Object.assign(new Error(e.message), { cause: e });
+    throw Object.assign(new Error("Paste your public key (the one line in ~/.ssh/id_ed25519.pub) or its SHA256: fingerprint"), { cause: e });
   }
 }
 
@@ -51,7 +51,7 @@ async function verifyStatementSignature(statement: IdentityStatement, evidence: 
   catch (e) {
     if (!(e instanceof SshSigError) || !/does not match this statement/.test(e.message)) throw e;
     try { return await verifySshSignature(evidence.signature, utf8Encode(`${statement.text}\n`)); }
-    catch (again) { throw new Error("The signature is not over this statement: copy the command again and sign exactly what it shows", { cause: again }); }
+    catch (again) { throw Object.assign(new Error("The signature is not over this statement: copy the command again and sign exactly what it shows"), { cause: again }); }
   }
 }
 
