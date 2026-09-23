@@ -1,6 +1,8 @@
 # Optional peer proofs — implementation increment
 
 > Release decision (2026-09-21): external identity proofs and external profile lookup are deferred. This release exposes only Ghostly participation identity. Nostr, Pubky, Keet, imports and Ring UI are disabled; previous experiments and stored data are preserved for future work. Descriptions below are historical/research, not available release features.
+>
+> 2026-09-23: new Nostr proofs use the rebuilt [identity proofs](300-peer-proofs.md#implementation--2026-09-23-identity-proofs) instead; this `proof-*` protocol stays disabled.
 
 2026-09-20. Experimental implementation of Nostr and authorized local-import profiles for WISP 300–303; all WISPs remain Draft. This is not an independent interoperability certification or a security audit.
 

@@ -9,6 +9,7 @@ import { COLOR_THEME_OPTIONS, type ColorScheme } from "../lib/settings";
 import { createProfile, currentProfile, listProfiles, renameProfile, switchProfile, THEME_COLOR, type ProfileEntry } from "../lib/profiles";
 import { Block, Button, Notice, Row, Section, Segmented, input } from "../components/wallet/ui";
 import { ProfileBackups } from "../components/ProfileBackups";
+import { IdentityProofsSection } from "../components/identities/IdentityProofsSection";
 import { DeleteProfileDialog } from "../components/DeleteProfileDialog";
 import { ProfileBadge } from "../components/ProfileBadge";
 import { setMyAvatar, useMyAvatar } from "../hooks/useAvatars";
@@ -96,6 +97,8 @@ export function Profile() {
           <button type="button" onClick={randomizeNickname} title={t("settings.randomizeName")} aria-label={t("settings.randomizeName")} className="grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt cursor-pointer">↻</button>
         </Row>
       </Section>
+
+      <IdentityProofsSection />
 
       <Section title="In this profile" testId="profile-links">
         <LinkRow label="Chats" value={`${chats} ${chats === 1 ? "chat" : "chats"}`} onClick={() => navigate("/")} />

@@ -1,6 +1,8 @@
 # WISP working catalogue
 
-> Release decision (2026-09-21): external identity proofs and external profile lookup are deferred. This release exposes only Ghostly participation identity. Nostr, Pubky, Keet, imports and Ring UI are disabled; previous experiments and stored data are preserved for future work. Descriptions below are historical/research, not available release features.
+> Release decision (2026-09-21): external identity proofs and external profile lookup were deferred; Pubky, Keet, local imports and Ring UI remain disabled, their experiments and stored data preserved.
+>
+> Update (2026-09-23): **identity proofs are back, rebuilt** ([WISP 300 implementation](300-peer-proofs.md#implementation--2026-09-23-identity-proofs)): made once per profile, shared per contact only by choice, with a provider contract ([PROOFS.md](../../packages/browser/src/proofs/PROOFS.md)). Nostr (NIP-07, NIP-46) is the first provider; domain, Bitcoin, SSH, PGP and OpenID Connect providers plug into the same contract. A public profile is looked up only on the person's request.
 
 **All 31 entries remain Drafts.** The maintainer approved family-based numbering on 2026-09-22. This editorial migration does not assign new wire identifiers or claim new implementation support. See [numbering and compatibility](NUMBERING.md) for the old-to-new map and independent families. Future adapters need substantive contracts, not empty numbered placeholders.
 

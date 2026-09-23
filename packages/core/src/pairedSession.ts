@@ -1,4 +1,5 @@
 import { PROOF_ADAPTERS, proofCapability, type ProofAdapter } from "./peerProofs";
+import { IDENTITY_PROOF_CAPABILITY } from "./identityProofs";
 import { fromBase64Url, randomBytes, toBase64Url, utf8Encode } from "./bytes";
 import { identityFromSeedB64, publicKeyFromZ32, sign, verify } from "./identity";
 import type { FrameChannel } from "./frames";
@@ -43,6 +44,8 @@ export interface PairedSessionOptions {
   transports?: PairedTransport[];
   allowFallback?: boolean;
   proofSupport?: boolean;
+  /** Identity proofs (WISP 300): `identity-proof/1`. */
+  identitySupport?: boolean;
   filesSupport?: boolean;
   paymentsSupport?: boolean;
   /** Ecash straight in the chat. Absent means allowed, as before ways of paying could be chosen per chat. */
@@ -106,7 +109,7 @@ export class PairedSession {
   constructor(private channel: FrameChannel, private options: PairedSessionOptions) {
     this.identity = identityFromSeedB64(options.credentials.seedB64);
     this.transport = options.binding?.transport ?? "webrtc/1";
-    this.offer = { t: "pair-offer", versions: [1], transports: options.transports ?? [this.transport], capabilities: ["chat/1", "signed-signal/1", ...(options.trustOnFirstUse ? ["tofu/1"] : []), ...(options.filesSupport ? ["files/2"] : []), ...(options.paymentsSupport && (options.cashuPaymentsSupport !== false || options.lightningPaymentsSupport !== false) ? ["payments/1"] : []), ...(options.paymentsSupport && options.cashuPaymentsSupport !== false ? ["payments-cashu/1"] : []), ...(options.paymentsSupport && options.lightningPaymentsSupport !== false ? ["payments-lightning/1"] : []), ...(options.arkPaymentsSupport && options.paymentsSupport ? ["payments-arkade/1"] : []), ...(options.usdtPaymentsSupport && options.paymentsSupport ? ["payments-usdt/1"] : []), ...(options.barkPaymentsSupport && options.paymentsSupport ? ["payments-bark/1"] : []), ...(options.transportSwitchSupport ? ["transport-switch/1"] : []), ...(options.proofSupport ? PROOF_ADAPTERS.map(proofCapability) : []), ...(options.allowFallback ? ["transport-fallback/1"] : [])],
+    this.offer = { t: "pair-offer", versions: [1], transports: options.transports ?? [this.transport], capabilities: ["chat/1", "signed-signal/1", ...(options.trustOnFirstUse ? ["tofu/1"] : []), ...(options.filesSupport ? ["files/2"] : []), ...(options.paymentsSupport && (options.cashuPaymentsSupport !== false || options.lightningPaymentsSupport !== false) ? ["payments/1"] : []), ...(options.paymentsSupport && options.cashuPaymentsSupport !== false ? ["payments-cashu/1"] : []), ...(options.paymentsSupport && options.lightningPaymentsSupport !== false ? ["payments-lightning/1"] : []), ...(options.arkPaymentsSupport && options.paymentsSupport ? ["payments-arkade/1"] : []), ...(options.usdtPaymentsSupport && options.paymentsSupport ? ["payments-usdt/1"] : []), ...(options.barkPaymentsSupport && options.paymentsSupport ? ["payments-bark/1"] : []), ...(options.transportSwitchSupport ? ["transport-switch/1"] : []), ...(options.proofSupport ? PROOF_ADAPTERS.map(proofCapability) : []), ...(options.identitySupport ? [IDENTITY_PROOF_CAPABILITY] : []), ...(options.allowFallback ? ["transport-fallback/1"] : [])],
       key: this.identity.pubKeyZ32, nonce: toBase64Url(randomBytes(32)) };
   }
 
@@ -131,6 +134,8 @@ export class PairedSession {
   get proofSession(): string { return this.digest; }
   get peerProofAdapters(): ProofAdapter[] { return PROOF_ADAPTERS.filter(a => this.offer.capabilities.includes(proofCapability(a)) && this.peer?.capabilities.includes(proofCapability(a))); }
   get peerProofSupport(): boolean { return this.peerProofAdapters.length > 0; }
+  /** Both offers carry `identity-proof/1`. */
+  get identitySupport(): boolean { return this.state.status === "ready" && this.offer.capabilities.includes(IDENTITY_PROOF_CAPABILITY) && !!this.peer?.capabilities.includes(IDENTITY_PROOF_CAPABILITY); }
   get peerTransports(): readonly string[] { return this.peer?.transports ?? []; }
   get peerAllowsFallback(): boolean { return this.peer?.capabilities.includes("transport-fallback/1") ?? false; }
 

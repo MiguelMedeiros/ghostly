@@ -1,6 +1,8 @@
 # Identity presentation and local public profiles
 
 > Release decision (2026-09-21): external identity proofs and external profile lookup are deferred. This release exposes only Ghostly participation identity. Nostr, Pubky, Keet, imports and Ring UI are disabled; previous experiments and stored data are preserved for future work. Descriptions below are historical/research, not available release features.
+>
+> 2026-09-23: new Nostr proofs use the rebuilt [identity proofs](300-peer-proofs.md#implementation--2026-09-23-identity-proofs) instead; this `proof-*` protocol stays disabled.
 
 2026-09-20. Experimental paired-chat UI increment; WISPs remain Draft. No proof format, participation pin or transport negotiation changed.
 

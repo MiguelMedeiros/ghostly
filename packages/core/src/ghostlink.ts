@@ -2,6 +2,8 @@ import { DhtDelivery, type DeliveryMode, type DhtDeliveryState, type DhtDelivery
 import { PairedFiles } from "./pairedFiles";
 import { TransportSwitch, allowedTransports, type SwitchPlan } from "./transportSwitch";
 import { proofHash, type ProofAdapter, type ProofScope } from "./peerProofs";
+import { IDENTITY_MAX_FRAME, type IdentityScope } from "./identityProofs";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { identityFromSeedB64 } from "./identity";
 import { rankTransports, transportOrder, type NativeEndpoint, type NativeBinding, type PairedTransport, type TransportDescriptors } from "./pairedTransports";
 import { sanitizeNick } from "./text";
@@ -69,6 +71,8 @@ export interface GhostLinkEvents {
   onDhtDelivery?(view: DhtDeliveryView): void;
   onDiscoveryError?(error: string | null): void;
   onPeerProof?(frame: Record<string, unknown>): Promise<void>;
+  /** An `idp-*` identity-proof frame from the paired contact (only when both sides offer `identity-proof/1`). */
+  onIdentityProof?(frame: Record<string, unknown>): Promise<void>;
   onTransportsChanged?(): void;
   onTransportDiscovery?(descriptors: TransportDescriptors, transports: PairedTransport[], fallback: boolean): Promise<void>;
   onPairingState?(state: PairingState): void;
@@ -700,6 +704,25 @@ export class GhostLink {
 
   get proofSession(): string | undefined { return this.peerProofSupport ? this.paired?.proofSession : undefined; }
 
+  /** Identity proofs can be exchanged now: both offers carry `identity-proof/1` and the channel is open. */
+  get identitySupport(): boolean { return !!this.options.events?.onIdentityProof && !!this.paired?.identitySupport && this.isDataLinkOpen; }
+
+  /** This side's view of the authenticated channel, for identity presentations. */
+  identityScope(): IdentityScope {
+    const credentials = this.options.pairing?.credentials;
+    if (!credentials?.peerKey || !this.paired || !this.identitySupport) throw new Error("Connect to this contact first");
+    const conversation = [this.myPubKeyZ32, this.options.params.peerPubKeyZ32].sort();
+    const context = Array.from(sha256(utf8Encode(JSON.stringify(["ghostly-conversation", 1, conversation]))), b => b.toString(16).padStart(2, "0")).join("");
+    return { subject: identityFromSeedB64(credentials.seedB64).pubKeyZ32, audience: credentials.peerKey, context, session: this.paired.proofSession };
+  }
+
+  sendIdentityProof(frame: object): void {
+    if (!this.identitySupport || !this.channel) throw new Error("Identity proofs are unavailable on this connection");
+    const data = JSON.stringify(frame);
+    if (data.length > IDENTITY_MAX_FRAME) throw new Error("Identity proof too large");
+    this.channel.send(data);
+  }
+
   sendPeerProof(frame: object): void {
     if (!this.peerProofSupport || !this.channel) throw new Error("Peer proof channel unavailable");
     const data = JSON.stringify(frame);
@@ -835,6 +858,7 @@ export class GhostLink {
         binding, transports: migration?.plan.choices ?? this.transportOffer(), allowFallback: migration?.plan.local.fallback ?? this.fallback,
         transportSwitchSupport: true,
         proofSupport: !!this.options.events?.onPeerProof,
+        identitySupport: !!this.options.events?.onIdentityProof,
         filesSupport: !!this.options.events?.onFileIncoming,
         arkPaymentsSupport: this.options.arkPaymentsSupport && this.paymentEnabled("arkade"),
         usdtPaymentsSupport: this.options.usdtPaymentsSupport && this.paymentEnabled("usdt"),
@@ -924,6 +948,9 @@ export class GhostLink {
               else if (payment?.t === "pay-res") await this.options.events?.onPaymentResult?.({ id: payment.id, ok: payment.ok, credited: payment.v, error: payment.err });
             }
             return;
+          }
+          if (typeof frame?.t === "string" && frame.t.startsWith("idp-") && this.identitySupport) {
+            await this.options.events?.onIdentityProof?.(frame); return;
           }
           if (typeof frame?.t === "string" && frame.t.startsWith("proof-") && this.peerProofSupport) {
             await this.options.events?.onPeerProof?.(frame); return;

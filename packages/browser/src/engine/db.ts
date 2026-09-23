@@ -1,4 +1,4 @@
-import { emptyProofLedger, type ProofLedger } from "@ghostly/core";
+import { emptyIdentityLedger, emptyProofLedger, type IdentityLedger, type ProofLedger } from "@ghostly/core";
 import { STORES, fileStore, store, wrap, openDb } from "../shared/idb";
 import type { Settings, StoredLink, StoredMessage, StoredService } from "../shared/types";
 
@@ -46,6 +46,27 @@ export const db = {
     await new Promise<void>((resolve, reject) => {
       tx.oncomplete = () => resolve();
       tx.onerror = tx.onabort = () => reject(failure ?? tx.error ?? new Error("Proof storage failed"));
+    });
+    return result!;
+  },
+  /** Read-transform-write of a chat's identity ledger in one transaction, keeping every other field. */
+  async updateIdentities(linkId: string, change: (ledger: IdentityLedger) => IdentityLedger): Promise<IdentityLedger> {
+    const tx = (await openDb()).transaction(STORES.links, "readwrite");
+    const links = tx.objectStore(STORES.links);
+    let result: IdentityLedger;
+    let failure: unknown;
+    const request = links.get(linkId);
+    request.onsuccess = () => {
+      try {
+        const link = request.result as StoredLink | undefined;
+        if (!link?.profile) throw new Error("Paired chat unavailable");
+        result = change(link.identities ?? emptyIdentityLedger());
+        links.put({ ...link, identities: result });
+      } catch (e) { failure = e; tx.abort(); }
+    };
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = tx.onabort = () => reject(failure ?? tx.error ?? new Error("Identity storage failed"));
     });
     return result!;
   },

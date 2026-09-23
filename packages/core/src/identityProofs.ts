@@ -89,6 +89,18 @@ export interface IdentityDisplay {
 
 export interface IdentityScope { subject: string; audience: string; context: string; session: string }
 
+/**
+ * Early revocation: the proof key publishes, under its own Pkarr key, a TXT record naming the proof it
+ * revokes. Anyone holding a copy can look it up by the key in the binding; nothing else is published,
+ * and the key is random, so the record says nothing about the identity or its contacts.
+ */
+export const IDENTITY_REVOCATION_LABEL = "_ghostly-revoked";
+export const identityRevocationValue = (id: string, at: number) => `v=1;id=${id};at=${at}`;
+/** True when these records (resolved and signature-checked under the proof key) revoke proof `id`. */
+export function revokesIdentity(records: { label: string; value: string }[], id: string): boolean {
+  return records.some(r => r.label === IDENTITY_REVOCATION_LABEL && new RegExp(`^v=1;id=${id};at=\\d{1,12}$`).test(r.value));
+}
+
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 const hex = (bytes: Uint8Array) => Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
 const iso = (seconds: number) => new Date(seconds * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -201,8 +213,11 @@ export interface ReceivedIdentity {
   context: string;
   verifiedAt: number;
   checkedAt: number;
-  /** unconfirmed: a re-check failed (the domain record is gone, the account cannot be confirmed). */
-  status: "verified" | "withdrawn" | "unconfirmed";
+  /**
+   * unconfirmed: a re-check failed (the domain record is gone, the account cannot be confirmed).
+   * revoked: its proof key published a revocation (the person removed it from their profile).
+   */
+  status: "verified" | "withdrawn" | "unconfirmed" | "revoked";
   error?: string;
   /** A name/picture looked up on the person's request (Nostr kind-0), with its source. */
   display?: IdentityDisplay;
@@ -230,16 +245,19 @@ export interface IdentityExchangeOptions {
   localProof(id: string): LocalIdentityProof | undefined | Promise<LocalIdentityProof | undefined>;
   /** Parses and checks untrusted evidence for a statement (the registry's `verifyIdentity`). */
   verify(statement: IdentityStatement, evidence: unknown): Promise<VerifiedIdentity>;
+  /** Looks up the proof key's revocation record. Resolves false when there is none or it cannot be read. */
+  revoked?(statement: IdentityStatement): Promise<boolean>;
   now?(): number;
   onError?(error: string): void;
 }
 
-export type IdentityStatus = "verified" | "expired" | "withdrawn" | "unconfirmed" | "previous-key";
+export type IdentityStatus = "verified" | "expired" | "withdrawn" | "revoked" | "unconfirmed" | "previous-key";
 
 /** What the verifier should show for a received proof right now. */
 export function receivedIdentityStatus(r: ReceivedIdentity, presenter: string | undefined, audience: string | undefined, now = nowSeconds()): IdentityStatus {
   if (r.presenter !== presenter || r.audience !== audience) return "previous-key";
   if (r.status === "withdrawn") return "withdrawn";
+  if (r.status === "revoked") return "revoked";
   if (Math.min(r.binding.expiresAt, r.verified.expiresAt ?? Infinity) <= now) return "expired";
   return r.status === "unconfirmed" ? "unconfirmed" : "verified";
 }
@@ -310,17 +328,28 @@ export class IdentityExchange {
     if (connected) this.send({ t: "idp-withdraw", id });
   }
 
-  /** Run the provider's check again on a received proof (a domain record may be gone). */
-  async recheck(id: string): Promise<ReceivedIdentity> {
+  /**
+   * Run the checks again on a received proof: its revocation record, then (unless `revocationOnly`) the
+   * provider's check (a domain record may be gone).
+   */
+  async recheck(id: string, { revocationOnly = false } = {}): Promise<ReceivedIdentity> {
     const r = this.options.storage.read().received.find(x => x.id === id);
     if (!r) throw new Error("Unknown identity");
+    if (r.status === "revoked") return r;
     let next: ReceivedIdentity;
+    const settled = r.status === "withdrawn";
+    if (await this.options.revoked?.(identityStatement(r.binding)).catch(() => false)) {
+      next = { ...r, status: "revoked", checkedAt: this.now(), error: undefined };
+      await this.options.storage.update(l => ({ ...l, received: l.received.map(x => x.id === id ? next : x) }));
+      return next;
+    }
+    if (revocationOnly) return r;
     try {
       const verified = boundVerifiedIdentity(await this.options.verify(identityStatement(r.binding), r.evidence));
       if (verified.subject !== r.verified.subject) throw new Error("The identity changed");
-      next = { ...r, verified: { ...verified, display: verified.display ?? r.verified.display }, checkedAt: this.now(), status: r.status === "withdrawn" ? "withdrawn" : "verified", error: undefined };
+      next = { ...r, verified: { ...verified, display: verified.display ?? r.verified.display }, checkedAt: this.now(), status: settled ? "withdrawn" : "verified", error: undefined };
     } catch (e) {
-      next = { ...r, checkedAt: this.now(), status: r.status === "withdrawn" ? "withdrawn" : "unconfirmed", error: shortError(e) };
+      next = { ...r, checkedAt: this.now(), status: settled ? "withdrawn" : "unconfirmed", error: shortError(e) };
     }
     await this.options.storage.update(l => ({ ...l, received: l.received.map(x => x.id === id ? next : x) }));
     return next;
@@ -406,6 +435,9 @@ export class IdentityExchange {
       if (binding.issuedAt > now + IDENTITY_CLOCK_SKEW) throw new Error("The proof is dated in the future");
       const result = boundVerifiedIdentity(await this.options.verify(statement, evidence));
       if (Math.min(binding.expiresAt, result.expiresAt ?? Infinity) <= now) throw new Error("The proof has expired");
+      // A presentation needs the proof key, so this only matters when its seed leaked: a lookup that
+      // fails is not a refusal, a revocation found is.
+      if (await this.options.revoked?.(statement).catch(() => false)) throw new Error("Its owner revoked this proof");
       verified = result;
     } catch (e) { error = shortError(e); }
     // Consuming the nonce and recording the outcome are one transaction.

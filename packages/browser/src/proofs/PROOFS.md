@@ -6,10 +6,6 @@ A **provider** is one kind of identity: how the person produces evidence, and ho
 it. Everything else is shared and already written: the statement bytes, the proof key, sharing and
 withdrawing per contact, replay protection, storage, expiry, re-checks and the UI.
 
-> Status, 2026-09-23: the contract, the statement, the exchange, the Nostr provider, the fakes and the
-> contract suite are in. The engine wiring (capability, storage, RPCs) and the UI (Profile → Identities, the
-> chat control, badges) land in the follow-up PR; nothing in this contract changes for them.
-
 | Category | Who vouches | Examples | Shown as |
 |---|---|---|---|
 | `self-custodied` | the person: they hold the key, or control the domain | Nostr, SSH, PGP, Bitcoin, domain | "Verified · your key" |
@@ -18,7 +14,8 @@ withdrawing per contact, replay protection, storage, expiry, re-checks and the U
 ## The model
 
 1. **Made once, in Profile → Identities.** Ghostly creates a fresh Ed25519 **proof key** for the proof (one
-   per proof, so two proofs never link to each other) and builds the **statement**, which names the
+   per proof, so two proofs never link to each other; its seed is sealed with a device key like the wallet
+   seeds) and builds the **statement**, which names the
    external identity and authorizes that key. The person has the external identity sign or attest it with
    one of the provider's `signers`. Ghostly runs the provider's `verify` on it before saving, so a proof
    that would not verify is never kept. The proof key's seed stays in the profile.
@@ -27,14 +24,19 @@ withdrawing per contact, replay protection, storage, expiry, re-checks and the U
    keys, the conversation, the session and that challenge; the contact's app checks the presentation,
    then runs the provider's `verify` on the statement and evidence itself, and stores the outcome with its
    scope and time.
-3. **Withdrawn** per contact, or everywhere by removing the proof from the profile. The contact is told
-   (now, or when it next connects) and shows it as withdrawn; a copy it kept cannot be erased.
+3. **Withdrawn** per contact: that contact is told (now, or when it next connects) and shows it as
+   withdrawn; future presentations there stop; a copy it kept cannot be erased. **Revoked** by removing it
+   from the profile: withdrawn everywhere, and the proof key publishes a revocation record on Pkarr
+   (`_ghostly-revoked`, republished until expiry) that contacts find even if the person never reconnects.
+
+Providers produce and verify only the **binding** (external identity → proof key). The per-chat
+presentation, withdrawal and revocation are shared code: never re-implement them in a provider.
 
 A copy of what a contact received is useless elsewhere: another contact's challenge is different, the
 audience is wrong, and nobody else has the proof key. The external identity itself links every
 conversation it is shared in; that is what the person is choosing to reveal, and the UI says so.
 
-This is a delegation (see [WISP 300](../../../../docs/wisps/300-peer-proofs.md)): the external signer authorizes the proof
+This is a delegation (see [WISP 300](../../../../docs/wisps/300-peer-proofs.md#implementation--2026-09-23-identity-proofs)): the external signer authorizes the proof
 key once, instead of signing every contact's challenge. It is what makes publish-style (DNS) and
 paste-back (SSH, PGP, Bitcoin) proofs usable, and one OpenID login enough for every contact.
 
@@ -107,7 +109,7 @@ A provider has one or more signers; the UI shows the ones whose `platforms` incl
 |---|---|---|---|
 | `in-app` | a signer Ghostly can call: NIP-07, NIP-46, a wallet API | renders `fields`, calls `run`, shows `onAuthUrl` as a link (never opens it) and `onProgress` | `run(ctx, work)`: open, hand `work` a session with `subject()` and `sign(statement)`, always clean up |
 | `external-tool` | ssh-keygen, gpg, a Bitcoin wallet's "sign message" | shows `instructions(statement)` with copy buttons and a paste field | `instructions`, `parse(pasted)` |
-| `redirect` | OpenID Connect | a button; `start(statement, ctx)` opens the popup and resolves with the evidence | `start` (PKCE, `nonce` from `statement.id`, `state`, popup) |
+| `redirect` | OpenID Connect | "Continue" prepares the statement; a second button calls `start(statement, ctx)` **synchronously from its click** (nothing awaited before it, so the popup keeps the user activation) | `start` (PKCE, `nonce` from `statement.id`, `state`, popup): open the popup before any `await` |
 | `publish` | DNS TXT, `/.well-known/…` | shows `instructions(statement)`, then "Check" | `instructions`, `evidence` (often `{}`: the verifier looks it up) |
 
 For `in-app`, the subject comes from the signer (`session.subject()`); for the others the person types or
@@ -146,17 +148,22 @@ is shared. The contact's app never trusts the sender's check.
 - Fetch only fixed, well-known endpoints or ones derived from the subject (the domain itself, the issuer's
   JWKS from its discovery document on the issuer's own host). Never a URL from the evidence.
 - `lookupDisplay` (optional: a public name/picture for a verified subject, like Nostr kind-0) runs **only
-  when the person asks**, never automatically. Sanitize like avatars (plain-text name, bounded raster,
+  when the person asks**, never automatically; `lookupLabel` names its button. A name is always shown with
+  its `source` right under it, so say plainly what it is and who checked it ("User ID on the key, written by
+  its holder"). A name never replaces the contact's chat name. Sanitize like avatars (plain-text name, bounded raster,
   re-encoded to a data URL; see `profiles/public.ts`).
 
 ## Expiry and re-checks
 
 - Every proof expires (`expiresAt`); both sides show it as expired afterwards, never as verified. The person
-  makes a new one; sharing it again replaces the contact's copy.
+  makes a new one; sharing it replaces the contact's copy of the same identity.
+- Early revocation is shared: "Check again" (offered for every provider) looks up the proof key's Pkarr
+  revocation record first, and the app does so every 12 hours by itself. A revoked proof shows "Revoked by
+  its owner".
 - A signature stays valid until expiry. A **published** record can disappear sooner: declare
-  `recheck: { afterSeconds }`. The contact's app shows when it last checked, offers "Check again" after
-  that time, and shows a failed re-check honestly ("Could not be confirmed on …"), without deleting the
-  proof. `describeIdentityProof` then requires the harness to have `revoke()`.
+  `recheck: { afterSeconds }`. The contact's app shows when it last checked and always offers "Check again"
+  (`recheckDue` marks it due after that time), and shows a failed re-check honestly ("Could not be confirmed
+  on …"), without deleting the proof. `describeIdentityProof` then requires the harness to have `revoke()`.
 
 ## On the wire
 
@@ -189,7 +196,14 @@ storing the outcome are one transaction.
   redirect), `fake-record` (published, re-checked). In the app only when
   `localStorage["ghostly-test-identities"] === "1"`.
 - **e2e**: two peers (`e2e/support/fixtures.ts`), a test signer injected in the page (for Nostr, a NIP-07
-  `window.nostr` backed by a key in the test process); never a real account.
+  `window.nostr` backed by a key in the test process: `e2e/web/identity-proofs.spec.ts`); never a real
+  account. `e2e/web/identity-proof-kinds.spec.ts` drives the paste-back and redirect flows with the fakes.
+  Test ids: Profile `identity-add` → `add-identity` with `add-identity-<provider>`, `add-identity-signer`,
+  `add-identity-subject`, `add-identity-validity`, `add-identity-field-<name>`, `add-identity-start`, then
+  `add-identity-copy-<step>`, `add-identity-paste`, `add-identity-finish`, `add-identity-error`; saved rows
+  `identity-proof`. Chat: Options → `chat-identities-open` → `chat-identities` with `chat-identity-share`,
+  `chat-identity-withdraw`, `chat-identity-mine-status`, `chat-identity-received` (`data-status`),
+  `chat-identity-recheck`, `chat-identity-lookup`; header `chat-identity-badges`.
 - Real services: gate on `GHOSTLY_<NAME>_LIVE=1`, skip otherwise; never a person's real account or key.
   Never print or commit a private key.
 

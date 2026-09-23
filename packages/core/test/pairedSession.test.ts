@@ -43,6 +43,15 @@ describe("paired chat admission and session binding", () => {
     expect(p.a.supports("payments-usdt/1")).toBe(peerSupports);
     expect(p.b.supports("payments-usdt/1")).toBe(peerSupports);
   });
+  it.each([false,true])("negotiates identity proofs only when both peers offer them; an older peer just goes without (%s)",async peerSupports=>{
+    const all={paymentsSupport:true,usdtPaymentsSupport:true,arkPaymentsSupport:true,barkPaymentsSupport:true,filesSupport:true,proofSupport:true,transportSwitchSupport:true,allowFallback:true};
+    const p=pair(undefined,{...all,identitySupport:peerSupports},{...all,identitySupport:true});
+    await confirming(p);await p.a.confirm(p.a.state.code!);await p.b.confirm(p.b.state.code!);
+    await vi.waitFor(()=>expect(p.a.state.status).toBe("ready"));
+    expect(p.a.identitySupport).toBe(peerSupports);
+    expect(p.b.identitySupport).toBe(peerSupports);
+    expect(p.a.supports("payments-bark/1")).toBe(true);
+  });
   it.each([false,true])("negotiates Bark only when both peers advertise it, beside every other capability (%s)",async peerSupports=>{
     const all={paymentsSupport:true,usdtPaymentsSupport:true,arkPaymentsSupport:true,filesSupport:true,proofSupport:true,transportSwitchSupport:true,allowFallback:true};
     const p=pair(undefined,{...all,barkPaymentsSupport:peerSupports},{...all,barkPaymentsSupport:true});

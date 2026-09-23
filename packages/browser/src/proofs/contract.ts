@@ -173,4 +173,6 @@ export interface IdentityProofProvider<E = unknown> {
    * never automatically. Sanitize like avatars: plain-text name, bounded raster re-encoded to a data URL.
    */
   lookupDisplay?(subject: string, options: { signal: AbortSignal }): Promise<IdentityDisplay | undefined>;
+  /** The button that runs `lookupDisplay`. Default: "Show public profile". */
+  lookupLabel?: string;
 }
