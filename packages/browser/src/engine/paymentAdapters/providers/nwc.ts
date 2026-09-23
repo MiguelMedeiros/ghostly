@@ -317,7 +317,9 @@ export class NwcLightning implements LightningProvider {
   }
 
   private capabilitiesOf(methods: ReadonlySet<string>): LightningCapabilities {
-    return { receive: methods.has("make_invoice"), send: methods.has("pay_invoice"), balance: methods.has("get_balance"), lookup: methods.has("lookup_invoice") };
+    const lookup = methods.has("lookup_invoice");
+    // Paying needs looking up: a payment whose answer is lost could never be settled, and would hold the source.
+    return { receive: methods.has("make_invoice"), send: methods.has("pay_invoice") && lookup, balance: methods.has("get_balance"), lookup };
   }
 
   /**
@@ -327,7 +329,13 @@ export class NwcLightning implements LightningProvider {
    */
   private async readInfo(offered: ReadonlySet<string>) {
     if (!offered.has("get_info")) return;
-    const info = await this.request("get_info", {});
+    let info: Record<string, unknown>;
+    try { info = await this.request("get_info", {}); }
+    catch (error) {
+      // The service has it, this connection may not use it: the same as a wallet without it.
+      if (error instanceof NwcError && ["RESTRICTED", "UNAUTHORIZED", "NOT_IMPLEMENTED"].includes(error.code)) return;
+      throw error;
+    }
     if (info.network !== undefined) {
       const network = typeof info.network === "string" ? NETWORKS[info.network.toLowerCase()] : undefined;
       if (!network) throw new Error("The wallet is on a network Ghostly does not know");
@@ -451,7 +459,7 @@ export class NwcLightning implements LightningProvider {
   async payInvoice(invoice: string, _maxFee: number): Promise<LightningPayResult> {
     const decoded = decodeBolt11(invoice);
     if (!decoded?.paymentHash || decoded.amountSat === null) throw new NothingSpentError("That invoice cannot be paid through NWC");
-    if (!this.capabilities.send) throw new NothingSpentError("This wallet connection may not pay invoices");
+    if (!this.capabilities.send) throw new NothingSpentError("This wallet connection may not pay and look up invoices");
     let result: Record<string, unknown>;
     try {
       result = await this.request("pay_invoice", { invoice: decoded.invoice }, { ms: this.options.payMs ?? PAY_MS, expiresIn: PAY_EXPIRY_S });

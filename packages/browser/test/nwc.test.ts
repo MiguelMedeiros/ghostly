@@ -116,6 +116,14 @@ describe("talking to the wallet", () => {
     const receiveOnly = await connect(await wallet({ methods: ["get_info", "make_invoice", "lookup_invoice"] }));
     expect(receiveOnly.capabilities).toEqual({ receive: true, send: false, balance: false, lookup: true });
     await expect(receiveOnly.payInvoice(fakeInvoice(5, hash()), 10)).rejects.toBeInstanceOf(NothingSpentError);
+    // Paying without looking up could leave a payment that nothing can ever settle: not offered.
+    expect((await connect(await wallet({ methods: ["get_info", "pay_invoice", "get_balance"] }))).capabilities.send).toBe(false);
+    // get_info in the service but not for this connection: connects, as a wallet without it would.
+    const restricted = await wallet({ network: "regtest" });
+    restricted.options.methods = ["get_balance", "make_invoice", "pay_invoice", "lookup_invoice"];
+    const noInfo = await connect(restricted);
+    expect((await noInfo.info()).network).toBe("bitcoin");
+    expect(noInfo.capabilities.send).toBe(true);
     const info = await (await connect(await wallet({ alias: "Test hub" }))).info();
     expect(info.alias).toBe(`Test hub via ${new URL(relay.url).host}`);
   });
