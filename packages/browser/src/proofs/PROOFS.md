@@ -214,3 +214,4 @@ storing the outcome are one transaction.
 | `nostr` | self-custodied | NIP-07 extension, NIP-46 remote signer | nothing | shipped |
 | `domain` | self-custodied | DNS TXT record, `/.well-known/ghostly.json` (publish); NIP-05 with a NIP-07/NIP-46 signer | the chosen DNS-over-HTTPS resolver; for the file methods also the domain's web server | experimental, [draft 3xx](../../../../docs/wisps/3xx-domain.md) |
 | `openpgp` | self-custodied | gpg (paste signature and key), gpg with the key from keys.openpgp.org | nothing (`lookupDisplay`, on request: keys.openpgp.org) | shipped; [WISP 3xx](../../../../docs/wisps/3xx-openpgp.md) |
+| `bitcoin` | self-custodied | the person's wallet: Sparrow, Bitcoin Core, Electrum, COLDCARD, Trezor Suite, another BIP-322 wallet (paste) | nothing | experimental: BIP-322 2.0.0 + legacy P2PKH, [draft 3xx](../../../../docs/wisps/3xx-bitcoin.md) |

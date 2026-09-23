@@ -1,4 +1,5 @@
 import type { IdentityProofProvider } from "./contract";
+import { bitcoin } from "./providers/bitcoin";
 import { nostr } from "./providers/nostr";
 import { domain } from "./providers/domain";
 import { openpgp } from "./providers/openpgp";
@@ -12,6 +13,7 @@ export const IDENTITY_PROVIDERS: readonly IdentityProofProvider[] = [
   nostr,
   domain,
   openpgp,
+  bitcoin,
 ];
 
 /** The registered providers, plus the fakes when this browser asked for them (e2e). */

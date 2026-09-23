@@ -171,3 +171,11 @@ export function decodeTx(bytes: Uint8Array): Tx {
   r.end();
   return { version, inputs, outputs, lockTime };
 }
+
+/** The address decoded on whichever network it belongs to (mainnet first), or a `BitcoinAddressError`. */
+export function decodeAnyBitcoinAddress(address: string): BitcoinAddressInfo {
+  try { return decodeBitcoinAddress(address, "mainnet"); } catch (e) {
+    if (!(e instanceof BitcoinAddressError) || !/test-network/.test(e.message)) throw e;
+    return decodeBitcoinAddress(address, "testnet");
+  }
+}

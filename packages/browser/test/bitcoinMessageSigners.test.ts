@@ -1,42 +1,17 @@
-import { bip322ToSpend, decodeBitcoinAddress, encodeTx, txHash, verifyBitcoinMessage, type BitcoinProofNetwork } from "@ghostly/core";
-import { secp256k1, schnorr } from "@noble/curves/secp256k1.js";
-import { RawWitness, Transaction, p2pkh, p2sh, p2tr, p2wpkh, utils } from "@scure/btc-signer";
+import { verifyBitcoinMessage, type BitcoinProofNetwork } from "@ghostly/core";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { RawWitness, utils } from "@scure/btc-signer";
 import { describe, expect, it } from "vitest";
 import { guidesFor } from "../src/proofs/bitcoinWallets";
+import { REGTEST, SIGNET, testBitcoinWallet, type TestNet, type TestScript } from "./helpers/bitcoinSign";
 
-/**
- * Own BIP-322 signatures on test-network addresses, made by an independent signer: @scure/btc-signer computes
- * its own sighashes, so a match proves the verifier's BIP 143 / 341 / legacy digests, not just its round trip.
- * Keys are fresh random test keys, never printed.
- */
+// Own BIP-322 signatures on test-network addresses, made by an independent signer (helpers/bitcoinSign.ts).
 
-const REGTEST = { bech32: "bcrt", pubKeyHash: 0x6f, scriptHash: 0xc4, wif: 0xef };
-const SIGNET = { bech32: "tb", pubKeyHash: 0x6f, scriptHash: 0xc4, wif: 0xef };
-type Net = typeof SIGNET;
-
+const sign = (kind: TestScript, net: TestNet, message: string) => {
+  const wallet = testBitcoinWallet(kind, net);
+  return { address: wallet.address, ...wallet.signBip322(message) };
+};
 const b64 = (b: Uint8Array) => Buffer.from(b).toString("base64");
-const reverse = (b: Uint8Array) => Uint8Array.from(b).reverse();
-
-function sign(kind: "p2wpkh" | "p2tr" | "p2sh-p2wpkh" | "p2pkh", net: Net, message: string) {
-  const secret = secp256k1.utils.randomSecretKey();
-  const pub = secp256k1.getPublicKey(secret, true);
-  const payment = kind === "p2wpkh" ? p2wpkh(pub, net) : kind === "p2tr" ? p2tr(schnorr.getPublicKey(secret), undefined, net)
-    : kind === "p2sh-p2wpkh" ? p2sh(p2wpkh(pub, net), net) : p2pkh(pub, net);
-  const address = payment.address!;
-  const toSpend = bip322ToSpend(message, decodeBitcoinAddress(address, "testnet").scriptPubKey);
-  const tx = new Transaction({ version: 0, allowUnknownOutputs: true });
-  tx.addInput({
-    txid: reverse(txHash(toSpend)), index: 0, sequence: 0,
-    ...(kind === "p2pkh" ? { nonWitnessUtxo: encodeTx(toSpend) } : { witnessUtxo: { script: payment.script, amount: 0n } }),
-    ...(kind === "p2sh-p2wpkh" ? { redeemScript: (payment as ReturnType<typeof p2sh>).redeemScript } : {}),
-    ...(kind === "p2tr" ? { tapInternalKey: (payment as ReturnType<typeof p2tr>).tapInternalKey } : {}),
-  });
-  tx.addOutput({ script: Uint8Array.of(0x6a), amount: 0n });
-  tx.sign(secret);
-  tx.finalize();
-  const witness = tx.getInput(0).finalScriptWitness;
-  return { address, simple: witness ? `smp${b64(RawWitness.encode(witness))}` : undefined, full: `ful${b64(tx.extract())}` };
-}
 
 const verify = (address: string, message: string, signature: string, network: BitcoinProofNetwork = "testnet") =>
   verifyBitcoinMessage({ address, message, signature, network });

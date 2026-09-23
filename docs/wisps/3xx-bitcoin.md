@@ -8,7 +8,7 @@
 | Updated | 2026-09-23 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [300](300-peer-proofs.md) |
-| Implementation | Experimental verifier and proof provider; see below |
+| Implementation | Experimental provider `bitcoin` (`packages/browser/src/proofs/providers/bitcoin.ts`); verifier in `@ghostly/core` |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 
@@ -33,7 +33,7 @@ Two formats wallets produce today; a verifier accepts exactly these and nothing 
 - **Checked scripts only.** Without a full script interpreter the verifier checks P2WPKH, P2TR key path, P2SH-P2WPKH and P2PKH, applying BIP-322's required rules for them: SIGHASH_ALL (or SIGHASH_DEFAULT for P2TR), strict DER, low S, compressed keys in witness v0, exact `to_sign` shape (one input spending `to_spend:0`, one zero-value `OP_RETURN` output, version 0 or 2). Everything else is **inconclusive**, which a proof treats as not proven: multisig and other P2WSH/P2SH scripts, a Taproot script path whose control block commits to the output key, an annex, witness versions above 1.
 - **Proof of funds (`pof…`) is refused**, deliberately: it is the one BIP-322 variant about coins, and this proof makes no claim about coins.
 - **Time locks.** The official full vectors set nLockTime and nSequence (BIP-322: "valid at time T and age S"). For the single-key scripts checked, those gate when a real spend could confirm, not who holds the key; the verifier accepts them and reports T and S.
-- **Networks** follow the wallet mode: Mainnet accepts only `bc1…`, `1…`, `3…`; Testnet accepts every test network's addresses (`tb1…` testnet3/testnet4/signet/mutinynet, `bcrt1…` regtest, `m…`/`n…`/`2…`). An address of the other mode is refused with a reason naming the mode to switch to.
+- **Networks.** The verifier takes the mode, Mainnet (`bc1…`, `1…`, `3…`) or Testnet (every test network: `tb1…` testnet3/testnet4/signet/mutinynet, `bcrt1…` regtest, `m…`/`n…`/`2…`), and refuses an address of the other one with a reason naming the mode to switch to. The provider takes the mode from the address itself, since a contact verifies whatever its own wallet mode, and labels a test-network proof "test network" in its short form and its verified source.
 
 ## Statement and signing
 
@@ -45,11 +45,12 @@ Person-facing steps per wallet live in `packages/browser/src/proofs/bitcoinWalle
 
 - All official BIP-322 2.0.0 vectors (`basic-test-vectors.json`, `generated-test-vectors.json`, copied unchanged to `packages/core/test/fixtures/bip322/`): message hashes, `to_spend`/`to_sign` ids, every valid simple/full signature of a checked type verifies and fails for another message; every other type is inconclusive; every proof of funds is refused; every error vector is refused (invalid where the script is checked).
 - Independent signer: fresh test keys signed with `@scure/btc-signer`, which computes its own BIP 143/341/legacy sighashes, on signet/testnet (`tb`) and regtest (`bcrt`) addresses for all four script types, simple and full; another address, another statement, the other network mode and a high-S signature are refused.
+- The provider passes the shared identity-proof contract suite (`describeIdentityProof`) for P2WPKH and P2TR simple, P2SH-P2WPKH and P2PKH full, legacy P2PKH, on signet, regtest and mainnet addresses: own evidence after a JSON trip, every binding field mattering, another key refused, malformed evidence refused, the validity limit, and the share with two contacts including a replay to a third.
 - Legacy: signatures from Bitcoin Core v31.0 `signmessage` on regtest legacy addresses, and Bitcoin Core's own `message_verify` example; compressed and uncompressed recovery; SegWit headers refused.
 
 ## Open decisions
 
-Hardware wallets' current BIP-322 support and message-length limits per model and firmware (roadmap, "Hardware and signing"); whether to add a script interpreter for multisig; whether Ghostly's own on-chain wallet may sign statements (a signer broker must show the statement, never sign silently).
+Hardware wallets' current BIP-322 support and message-length limits per model and firmware (roadmap, "Hardware and signing"); whether to add a script interpreter for multisig; whether the wallet mode should restrict which network's addresses a person may prove (today the address's own prefix decides, and test-network proofs are labelled as such); "sign with my Ghostly wallet", once an on-chain source can sign messages (`OnchainProvider` cannot; Bitcoin Core's `signmessage` is legacy-only), showing the statement and asking first.
 
 ## References
 
