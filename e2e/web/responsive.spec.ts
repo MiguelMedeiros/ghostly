@@ -33,9 +33,12 @@ async function layoutProblems(page: Page, root: string): Promise<string[]> {
     const body = pageRoot.querySelector("[data-page-body]");
     if (body && body.scrollWidth > body.clientWidth + 1) problems.push(`the page's column scrolls sideways: ${body.scrollWidth} > ${body.clientWidth}`);
 
+    // A control inside something made to scroll sideways (the wallet deck's track) may rest past the edge; the scroller itself may not.
+    const scroller = (el: Element) => { for (let p = el.parentElement; p && p !== pageRoot; p = p.parentElement) { const s = getComputedStyle(p); if ((s.overflowX === "auto" || s.overflowX === "scroll") && p.scrollWidth > p.clientWidth + 1) return p; } return null; };
     for (const el of pageRoot.querySelectorAll("button, a, input, select, textarea, [role=radio], [role=switch]")) {
       if (!visible(el)) continue;
-      const r = el.getBoundingClientRect();
+      const box = scroller(el) ?? el;
+      const r = box.getBoundingClientRect();
       if (r.left < edge.left - 1 || r.right > edge.right + 1) problems.push(`${describe(el)} is cut off: ${Math.round(r.left)}–${Math.round(r.right)} outside ${Math.round(edge.left)}–${Math.round(edge.right)}`);
     }
 
@@ -72,7 +75,7 @@ for (const width of WIDTHS) {
     const header = await page.getByTestId("wallet").locator("header").boundingBox();
     const mode = await page.getByTestId("wallet-mode").boundingBox();
     expect(mode!.x + mode!.width).toBeLessThanOrEqual(header!.x + header!.width + 1);
-    for (const card of ["cashu", "lightning", "arkade", "usdt", "bitcoin"] as const) {
+    for (const card of ["cashu", "lightning", "arkade", "bark", "usdt", "bitcoin"] as const) {
       await page.getByTestId(`wallet-card-${card}`).click();
       await expectTidy(page, "[data-testid=wallet]", `the ${card} wallet`);
     }

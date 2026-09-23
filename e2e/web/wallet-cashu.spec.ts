@@ -11,7 +11,7 @@ const UNREACHABLE = "https://mint.unreachable.invalid";
 
 async function cashu(p: Peer) {
   await openWallet(p, "cashu");
-  await expect(p.page.getByTestId("wallet-card-cashu")).toHaveAttribute("aria-pressed", "true");
+  await expect(p.page.getByTestId("wallet-card-cashu")).toHaveAttribute("aria-selected", "true");
   return p.page;
 }
 
@@ -88,8 +88,9 @@ test("the Lightning card is invoices only, and its settings lead to the Cashu ca
   const alice = await peer("lightning-card");
   await openWallet(alice, "lightning");
   const page = alice.page;
-  await expect(page.getByTestId("wallet-card-lightning")).toHaveAttribute("aria-pressed", "true");
-  const tabs = page.getByRole("tablist").getByRole("tab");
+  await expect(page.getByTestId("wallet-card-lightning")).toHaveAttribute("aria-selected", "true");
+  // The card's own tabs, under the deck (which is a tablist too).
+  const tabs = page.getByRole("tabpanel").getByRole("tablist").getByRole("tab");
   await expect(tabs).toHaveText(["Receive", "Send"]);
   await expect(page.getByTestId("wallet-history")).toHaveCount(0);
   // No mint settings here: they belong to the Cashu card.
@@ -98,8 +99,8 @@ test("the Lightning card is invoices only, and its settings lead to the Cashu ca
   await expect(page.getByTestId("wallet-pay-input")).toHaveAttribute("placeholder", "Paste a Lightning invoice");
 
   await page.getByRole("button", { name: "Cashu settings" }).click();
-  await expect(page.getByTestId("wallet-card-cashu")).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByTestId("wallet-card-lightning")).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByTestId("wallet-card-cashu")).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("wallet-card-lightning")).toHaveAttribute("aria-selected", "false");
   await expect(tabs).toHaveText(["Receive", "Send", "History"]);
   await expect(page.getByTestId("wallet-mints")).toBeVisible();
   await expect(page.getByRole("button", { name: "Cashu settings" })).toHaveCount(0);

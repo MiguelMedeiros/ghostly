@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { WalletCards, type WalletRail } from "../components/WalletCards";
+import { WalletDeck } from "../components/WalletDeck";
+import type { WalletRail } from "../components/walletCardData";
 import { CashuWallet } from "../components/wallet/CashuWallet";
 import { ArkWalletPanel } from "../components/ArkWalletPanel";
 import { BarkWalletPanel } from "../components/BarkWalletPanel";
@@ -17,7 +18,7 @@ const remembered = (): WalletRail => {
 };
 
 /**
- * The wallet, as a page beside the chat list like Settings: every card at the top, the chosen
+ * The wallet, as a page beside the chat list like Settings: every card at the top, as a deck, the chosen
  * one below with what it is for (receive, send) and its few options.
  */
 export function Wallet() {
@@ -46,12 +47,14 @@ export function Wallet() {
       {modeError && <p role="alert" className="text-xs text-danger">{modeError}</p>}
       {platform?.notice && <p className="px-3 py-2 rounded-lg bg-yellow-500/10 text-yellow-500 text-xs" data-testid="platform-notice">{platform.notice}</p>}
       {!wallet || !state ? <p className="text-text-muted text-sm">The wallet is not available here.</p> : <>
-        <WalletCards state={state} selected={rail} testMints={wallet.testMintUrls} onSelect={select} />
-        {(rail === "cashu" || rail === "lightning") && <CashuWallet key={rail} wallet={wallet} state={state} rail={rail} onOpenCashu={() => select("cashu")} />}
-        {rail === "arkade" && <ArkWalletPanel wallet={wallet} state={state} />}
-        {rail === "bark" && <BarkWalletPanel wallet={wallet} state={state} />}
-        {rail === "usdt" && <UsdtWalletPanel wallet={wallet} state={state} />}
-        {rail === "bitcoin" && <BitcoinWalletPanel wallet={wallet} state={state} />}
+        <WalletDeck state={state} selected={rail} testMints={wallet.testMintUrls} onSelect={select} />
+        <div role="tabpanel" id="wallet-panel" aria-labelledby={`wallet-tab-${rail}`}>
+          {(rail === "cashu" || rail === "lightning") && <CashuWallet key={rail} wallet={wallet} state={state} rail={rail} onOpenCashu={() => select("cashu")} />}
+          {rail === "arkade" && <ArkWalletPanel wallet={wallet} state={state} />}
+          {rail === "bark" && <BarkWalletPanel wallet={wallet} state={state} />}
+          {rail === "usdt" && <UsdtWalletPanel wallet={wallet} state={state} />}
+          {rail === "bitcoin" && <BitcoinWalletPanel wallet={wallet} state={state} />}
+        </div>
       </>}
     </Page>
   );

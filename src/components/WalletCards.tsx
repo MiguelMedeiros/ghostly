@@ -1,5 +1,6 @@
 import type {WalletState} from '../lib/platform';
 import {walletCards,type WalletCard} from './walletCardData';
+/** The wallet page's cards live in WalletDeck.tsx; here are the mark every card wears and the chat's small picker. */
 import './wallet-cards.css';
 import type {ChatRail,WalletRail} from './walletCardData';
 export type {ChatRail,WalletRail} from './walletCardData';
@@ -9,15 +10,6 @@ export function WalletMark({rail}:{rail:WalletRail}) {
  </svg>;
 }
 const Check=()=><span className="wallet-card-selected" aria-hidden="true"><svg viewBox="0 0 16 16" width="14" height="14"><path d="m3 8 3 3 7-7" fill="none" stroke="currentColor" strokeWidth="2"/></svg></span>;
-export function WalletCards({state,selected,onSelect,testMints}:{state:WalletState;selected:WalletRail|null;onSelect:(rail:WalletRail)=>void;testMints:readonly string[]}) {
- return <div className="wallet-card-grid" role="group" aria-label="Wallet integrations">
-  {walletCards(state,testMints).map(card=><button key={card.id} type="button" className={`wallet-card wallet-card-${card.id}`} aria-label={`Select ${card.name} wallet`} aria-pressed={selected===card.id} data-testid={`wallet-card-${card.id}`} onClick={()=>onSelect(card.id)}>
-   <span className="wallet-card-top"><WalletMark rail={card.id}/><Check/></span>
-   <span className="wallet-card-name">{card.name}</span><span className="wallet-card-balance">{card.balance}</span>
-   <span className="wallet-card-detail">{card.detail}</span><span className="wallet-card-status">{card.status}</span>
-  </button>)}
- </div>;
-}
 /** The same cards, small, to pick how a payment in the chat is made. */
 export function MiniCards({state,testMints,selected,onSelect,disabled}:{state:WalletState;testMints:readonly string[];selected:ChatRail;onSelect:(rail:ChatRail)=>void;disabled?:(card:WalletCard&{id:ChatRail})=>string|undefined}) {
  return <div className="wallet-card-row" role="radiogroup" aria-label="Pay with">
