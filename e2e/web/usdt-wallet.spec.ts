@@ -72,13 +72,13 @@ test('wallet cards fit a narrow screen, keep keyboard focus and respect reduced 
  const p=await peer('wallet-cards-mobile',{mobile:true,viewport:{width:390,height:844}});
  await p.page.emulateMedia({reducedMotion:'reduce'});
  await p.page.goto('/#/wallet');
- const cards=p.page.getByRole('group',{name:'Wallet integrations'});
- // Cashu, Lightning, Ark, Bark, Bitcoin, USDT: six cards, still no sideways scroll at 390 px.
- await expect(cards.getByRole('button')).toHaveCount(6);
+ const cards=p.page.getByRole('tablist',{name:'Wallet integrations'});
+ // Cashu, Lightning, Ark, Bark, Bitcoin, USDT: six cards on a snapping track, and the page itself never scrolls sideways at 390 px.
+ await expect(cards.getByRole('tab')).toHaveCount(6);
  await p.page.getByTestId('wallet-card-usdt').focus();
  await expect(p.page.getByTestId('wallet-card-usdt')).toBeFocused();
  await p.page.keyboard.press('Enter');
- await expect(p.page.getByTestId('wallet-card-usdt')).toHaveAttribute('aria-pressed','true');
+ await expect(p.page.getByTestId('wallet-card-usdt')).toHaveAttribute('aria-selected','true');
  await expect(p.page.getByTestId('wallet-card-usdt')).toContainText('Ethereum',{timeout:60000});
  expect(await p.page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
  expect(await p.page.getByTestId('wallet-card-usdt').evaluate(el=>getComputedStyle(el).transitionDuration)).toBe('0s');
