@@ -130,8 +130,10 @@ pub async fn paired_hyperdht_start(
                 },
                 request = rx.recv() => {
                     let Some(request) = request else { break };
-                    if request.reply.is_some() && pending.is_some() { let _ = request.reply.unwrap().send(Err("A native connection attempt is already running".into())); continue; }
-                    if request.reply.is_some() { pending = request.reply; }
+                    if let Some(reply) = request.reply {
+                        if pending.is_some() { let _ = reply.send(Err("A native connection attempt is already running".into())); continue; }
+                        pending = Some(reply);
+                    }
                     if input.write_all((request.value.to_string() + "\n").as_bytes()).await.is_err() { break; }
                 },
                 _ = child.wait() => break,
