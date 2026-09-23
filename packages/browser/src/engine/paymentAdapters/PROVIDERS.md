@@ -10,6 +10,13 @@ BDK wallet, a Bitcoin Core wallet. Each profile has one **active source** of eac
 
 The Cashu card always uses the mints directly, whatever the Lightning source.
 
+In a chat, on-chain Bitcoin is the `bitcoin` way of paying (endpoint `btc-onchain/1`): a request carries a fresh
+address of the payee's source, a Send asks the contact's app for one, the payer's review is a transaction signed
+by its source, and the payer sends the txid as a hint. The payee's request is paid only once its own source shows
+a confirmed transaction paying that address at least the amount: through `received(address)` when the provider
+has it, else the hint checked against `history`. It is allowed only through the `paired-payments` list of an open
+session, never offered in the handshake (a full offer already has the 16 capabilities older apps accept).
+
 Everything that is not specific to a provider is shared and already written: storage, sealed secrets,
 per-mode sources, the source picker and config form, the Lightning journal and reconciliation, the
 on-chain review/approve/reconcile flow. A provider is one module and one line.
@@ -111,6 +118,10 @@ Browsers reach HTTP(S) APIs only with CORS; say so in the description when a nod
 - e2e: `localStorage["ghostly-test-providers"] = "1"` (`useFakeProviders(peer)` in `e2e/support/fixtures.ts`)
   adds the fakes to the pickers, in Testnet only. `e2e/web/wallet-sources.spec.ts` drives the picker, the
   Lightning card through a source and the Bitcoin card.
+- A provider that loads WebAssembly (BDK) cannot rely on Vite's ESM `.wasm` import: load the glue and
+  instantiate the module yourself on first use (see `providers/bdkSdk.ts`), and read the same file from disk in
+  Node tests. A mocked HTTP backend given as `fetch` to a WebAssembly client must give its `Response` a `url`
+  (see `test/helpers/fakeEsplora.ts`).
 - Real networks: gate on `GHOSTLY_<NAME>_REGTEST=1` (for example `GHOSTLY_LND_REGTEST=1`,
   `GHOSTLY_BITCOIND_REGTEST=1`), skip otherwise, and document in `e2e/README.md` what must be running and on
   which ports. Tests never start or stop shared infrastructure, never use real funds, and never print a

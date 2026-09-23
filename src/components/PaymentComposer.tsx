@@ -5,13 +5,13 @@ import type { WalletPlatform } from "../lib/platform";
 import type { PaymentReview as Review } from "@ghostly/core";
 import { PaymentReview } from "./PaymentReview";
 import { MiniCards, type ChatRail } from "./WalletCards";
-import { walletCards, type WalletCard } from "./walletCardData";
+import { ONCHAIN_FEE_CAP, walletCards, type WalletCard } from "./walletCardData";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 
 interface PaymentComposerProps {
   balance: number;
   onSend: (amount: number, memo: string) => Promise<string | null>;
-  onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark") => Promise<string | null>;
+  onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin") => Promise<string | null>;
   onClose: () => void;
   reviewContext?:{wallet:WalletPlatform;peer:string;linkId:string};
 }
@@ -37,8 +37,8 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   };
   const [rail, setRail] = useState<ChatRail>(() => {
     const allowed = (id: ChatRail) => !peer?.paymentMethods || peer.paymentMethods[id];
-    try { const saved = localStorage.getItem(RAIL_KEY); if ((saved === "cashu" || saved === "lightning" || saved === "arkade" || saved === "bark" || saved === "usdt") && allowed(saved)) return saved; } catch { /* storage unavailable */ }
-    return (["cashu", "lightning", "arkade", "bark", "usdt"] as const).find(allowed) ?? "cashu";
+    try { const saved = localStorage.getItem(RAIL_KEY); if ((saved === "cashu" || saved === "lightning" || saved === "arkade" || saved === "bark" || saved === "bitcoin" || saved === "usdt") && allowed(saved)) return saved; } catch { /* storage unavailable */ }
+    return (["cashu", "lightning", "arkade", "bark", "bitcoin", "usdt"] as const).find(allowed) ?? "cashu";
   });
   const [review, setReview] = useState<Review | null>(null);
   const [amount, setAmount] = useState("");
@@ -48,12 +48,12 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   const containerRef = useRef<HTMLDivElement>(null);
   useOutsideDismiss(containerRef, true, onClose);
 
-  const method: "cashu" | "arkade" | "usdt" | "bark" = rail === "lightning" ? "cashu" : rail;
+  const method: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" = rail === "lightning" ? "cashu" : rail;
   const usdt = state?.usdt;
-  const unit = method === "usdt" ? (usdt?.chainId && usdt.chainId !== 1 ? "TEST-USDT" : "USDT") : method === "arkade" ? (state?.ark?.network && state.ark.network !== "bitcoin" ? "test sats" : "sats") : method === "bark" ? (state?.bark?.network !== "bitcoin" ? "test sats" : "sats") : state?.mode === "testnet" ? "test sats" : "sats";
+  const unit = method === "usdt" ? (usdt?.chainId && usdt.chainId !== 1 ? "TEST-USDT" : "USDT") : method === "arkade" ? (state?.ark?.network && state.ark.network !== "bitcoin" ? "test sats" : "sats") : method === "bark" ? (state?.bark?.network !== "bitcoin" ? "test sats" : "sats") : method === "bitcoin" ? (state?.bitcoin?.network && state.bitcoin.network !== "bitcoin" ? "test sats" : "sats") : state?.mode === "testnet" ? "test sats" : "sats";
   const decimals = method === "usdt" ? usdt?.decimals ?? 6 : 0;
   const value = Number(amount);
-  // Ecash goes straight to the contact; Ark, Bark and USDT ask the contact's app for an address first. Lightning
+  // Ecash goes straight to the contact; Ark, Bark, on-chain and USDT ask the contact's app for an address first. Lightning
   // pays a request the contact sends.
   const canSend = rail !== "lightning";
   const [asking, setAsking] = useState<string | null>(null);
@@ -63,7 +63,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   const send = async () => {
     setError(""); setBusy("send");
     try {
-      if (reviewContext && (method === "arkade" || method === "bark" || method === "usdt")) {
+      if (reviewContext && (method === "arkade" || method === "bark" || method === "bitcoin" || method === "usdt")) {
         const units = method === "usdt" ? parsePaymentAmount(amount, decimals) : value;
         setAsking((await reviewContext.wallet.askToPay(reviewContext.peer, units, method, memo || undefined)).askId);
         return;
@@ -89,7 +89,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
       if (answer?.target) {
         clearInterval(timer);
         const token = answer.target.method === "usdt";
-        void context.wallet.preparePayment({ target: answer.target, amount: answer.amount, feeCap: token ? parsePaymentAmount("0.001", 18) : 10, payee: context.peer, linkId: answer.linkId, requestId: answer.id })
+        void context.wallet.preparePayment({ target: answer.target, amount: answer.amount, feeCap: token ? parsePaymentAmount("0.001", 18) : answer.target.method === "bitcoin" ? ONCHAIN_FEE_CAP : CASHU_FEE_CAP, payee: context.peer, linkId: answer.linkId, requestId: answer.id })
           .then(setReview, (e: unknown) => setError(e instanceof Error ? e.message : "Could not prepare payment"))
           .finally(() => setAsking(null));
       } else if (Date.now() - started > 45_000) {
@@ -111,7 +111,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   };
 
   const field = "w-full bg-input-bg border-none rounded-lg px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent";
-  const spendable = method === "cashu" ? balance : method === "arkade" ? state?.ark?.balance : method === "bark" ? state?.bark?.balance : usdt ? Number(usdt.balance) : undefined;
+  const spendable = method === "cashu" ? balance : method === "arkade" ? state?.ark?.balance : method === "bark" ? state?.bark?.balance : method === "bitcoin" ? state?.bitcoin?.balance : usdt ? Number(usdt.balance) : undefined;
 
   return (
     <>
@@ -146,10 +146,10 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
         </button>
       </div>
       <p className="text-text-muted text-[11px] leading-snug m-0">
-        {blocked ? blocked : canSend
+        {blocked ? blocked : rail === "cashu"
           ? `${balance.toLocaleString()} sats available. Sent as ecash straight to your contact; requests also carry a Lightning invoice.`
           : rail === "lightning" ? "Request with a Lightning invoice. To pay over Lightning, tap Pay on your contact's request."
-          : `Send asks your contact's app for a ${rail === "arkade" ? "fresh Ark" : rail === "bark" ? "fresh Bark" : "USDT"} address, then shows the payment to approve.`}
+          : `Send asks your contact's app for a ${rail === "arkade" ? "fresh Ark" : rail === "bark" ? "fresh Bark" : rail === "bitcoin" ? "fresh Bitcoin" : "USDT"} address, then shows the payment to approve.${rail === "bitcoin" ? " Paid once it confirms on-chain." : ""}`}
       </p>
       {review && reviewContext && <PaymentReview key={review.id} review={review} wallet={reviewContext.wallet} onClose={onClose} />}
       {error && <p className="text-danger text-xs m-0">{error}</p>}

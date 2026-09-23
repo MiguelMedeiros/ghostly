@@ -21,7 +21,7 @@ export function WalletCards({state,selected,onSelect,testMints}:{state:WalletSta
 /** The same cards, small, to pick how a payment in the chat is made. */
 export function MiniCards({state,testMints,selected,onSelect,disabled}:{state:WalletState;testMints:readonly string[];selected:ChatRail;onSelect:(rail:ChatRail)=>void;disabled?:(card:WalletCard&{id:ChatRail})=>string|undefined}) {
  return <div className="wallet-card-row" role="radiogroup" aria-label="Pay with">
-  {walletCards(state,testMints).filter((card):card is WalletCard&{id:ChatRail}=>card.id!=='bitcoin').map(card=>{const why=disabled?.(card);return <button key={card.id} type="button" role="radio" aria-checked={selected===card.id} aria-pressed={selected===card.id} disabled={!!why} title={why??card.detail} className={`wallet-card wallet-card-mini wallet-card-${card.id}`} data-testid={`payment-card-${card.id}`} onClick={()=>onSelect(card.id)}>
+  {walletCards(state,testMints).map(card=>{const why=disabled?.(card);return <button key={card.id} type="button" role="radio" aria-checked={selected===card.id} aria-pressed={selected===card.id} disabled={!!why} title={why??card.detail} className={`wallet-card wallet-card-mini wallet-card-${card.id}`} data-testid={`payment-card-${card.id}`} onClick={()=>onSelect(card.id)}>
    <span className="wallet-card-top"><WalletMark rail={card.id}/><Check/></span>
    <span className="wallet-card-name">{card.name}</span><span className="wallet-card-balance">{card.balance}</span>
   </button>;})}

@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import type { ProviderDescriptorView } from "@ghostly/browser/engine/paymentAdapters/providers/types";
+import { BdkForm } from "./BdkForm";
 import { BreezForm } from "./BreezForm";
 
 /** What a provider's own configuration form gets. It calls `onSubmit` with the values of its fields. */
@@ -16,5 +17,6 @@ export interface ProviderFormProps {
  * other provider gets the generic form built from its `fields`. See PROVIDERS.md.
  */
 export const PROVIDER_FORMS: Record<string, ComponentType<ProviderFormProps>> = {
+  bdk: BdkForm,
   breez: BreezForm,
 };

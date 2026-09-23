@@ -1,9 +1,11 @@
 import {formatPaymentAmount} from '@ghostly/core';
 import type {WalletState} from '../lib/platform';
 export type WalletRail = 'cashu' | 'lightning' | 'arkade' | 'bark' | 'usdt' | 'bitcoin';
-/** The cards a chat can pay with: on-chain Bitcoin is not a chat payment method (yet). */
-export type ChatRail = Exclude<WalletRail, 'bitcoin'>;
+/** The cards a chat can pay with: all of them. */
+export type ChatRail = WalletRail;
 export const CASHU_MINT_SOURCE = 'cashu-mint';
+/** The fee limit an on-chain payment starts with, in sats: a small transaction at a few sat/vB. The review shows the real fee. */
+export const ONCHAIN_FEE_CAP = 2_000;
 export interface WalletCard {id:WalletRail;name:string;balance:string;detail:string;status:string;ready:boolean}
 /** What each card shows, shared by the wallet page and the chat's payment picker. */
 export function walletCards(state:WalletState,testMints:readonly string[]):WalletCard[] {

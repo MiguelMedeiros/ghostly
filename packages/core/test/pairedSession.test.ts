@@ -63,6 +63,17 @@ describe("paired chat admission and session binding", () => {
     expect(p.a.allowsPayment("bark")).toBe(peerSupports);
     expect(p.a.allowsPayment("arkade")).toBe(true);
   });
+  it("never offers on-chain Bitcoin in the handshake: a full offer stays within the 16 older apps accept", async () => {
+    const all={paymentsSupport:true,usdtPaymentsSupport:true,arkPaymentsSupport:true,barkPaymentsSupport:true,filesSupport:true,proofSupport:true,transportSwitchSupport:true,allowFallback:true,trustOnFirstUse:true};
+    const p=pair(undefined,all,all);
+    // Trust on first use: no code to confirm.
+    await vi.waitFor(()=>expect(p.a.state.status).toBe("ready"));
+    const offered=(p.a as unknown as {offer:{capabilities:string[]}}).offer.capabilities;
+    expect(offered.length).toBeLessThanOrEqual(16);
+    expect(offered.some(c=>c.includes("bitcoin"))).toBe(false);
+    // Only the open session's paired-payments list (GhostLink) can allow it.
+    expect(p.a.allowsPayment("bitcoin")).toBe(false);
+  });
   const ready = async (p: ReturnType<typeof pair>) => {
     await confirming(p); await p.a.confirm(p.a.state.code!); await p.b.confirm(p.b.state.code!);
     await vi.waitFor(() => { expect(p.a.state.status).toBe("ready"); expect(p.b.state.status).toBe("ready"); });

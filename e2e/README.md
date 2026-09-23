@@ -51,10 +51,12 @@ E2E_MINT_URL=http://127.0.0.1:3338 npm run test:e2e
 | `web/wallet-cashu.spec.ts` · `wallets-ready.spec.ts` · `wallet-backups.spec.ts` | wallets ready with no setup, Cashu send/mint errors, the Lightning card, test sats; Ark and USDT recovery phrase and encrypted backup files (`@network`) |
 | `web/wallet-providers.spec.ts` | every wallet provider sending and receiving, in the Testnet mode: Cashu (in over Lightning, Send and Request in the chat), Lightning (in through an invoice, out paying an invoice the test mint does not own, `@network`), Ark, Bark and USDT (in, Send from the wallet, Send and Request in the chat; gated, see below) |
 | `web/bark-wallet.spec.ts` | Bark (Second's Ark) is not on Mainnet yet; `@network`: a Testnet wallet on Second's signet server by itself, and a chat offers Bark only when both sides allow it (Arkade stays separate) |
+| `web/wallet-bdk.spec.ts` | the BDK wallet as the on-chain source: offered in Testnet only, a new wallet's 12 words shown once, a bad phrase or an unreachable Esplora refused before anything is saved, the chat's Bitcoin card; gated (see below): funded, a Send from the wallet, a Send and a Request paid in the chat on regtest |
 | `web/wallet-sources.spec.ts` | where Lightning and on-chain Bitcoin come from: the Lightning card on the Cashu mints by default, a source picked per mode (invoices through it, Mainnet keeping its own), the Bitcoin card's "no source" state and an on-chain send through a source — with the fake providers, no network |
 | `web/wallet-nwc.spec.ts` | Lightning through Nostr Wallet Connect: a wallet connected by its URI receives and pays over its relay, and a bad URI or a Mainnet wallet in Testnet is refused — against a fake NWC wallet service on a relay in the test process, no network; gated (`GHOSTLY_NWC_REGTEST=1`, see below): two people on their own Alby Hub, a chat request paid over a regtest channel |
 | `web/wallet-cln.spec.ts` | Core Lightning as the Lightning source (gated, `GHOSTLY_CLN_REGTEST=1`): the form with a restricted rune (never back in the page), an invoice of the node paid by the other node, an invoice of the other node paid from the card, a chat request paid from one person's node to the other's, balances on both nodes and both cards |
 | `web/payment-extras.spec.ts` | with `E2E_MINT_URL`: memo and "test sats" in both bubbles, a refused payment is taken back, ecash nobody picks up can be taken back, invoice cards |
+| `extension/wallet-bdk.spec.ts` | gated (`GHOSTLY_BDK_REGTEST=1`): the BDK wallet's WebAssembly in the extension's offscreen document, receiving and sending on regtest |
 | `extension/interop.spec.ts` | the extension and the web app: chat, file, video call |
 | `extension/services.spec.ts` | a local web app shared by one extension and opened by another over WebRTC, stopped, offline, gone |
 | `extension/paired-services.spec.ts` · `services-extras.spec.ts` | sharing from the chat itself; the contact opens it from Services; removed, it is gone everywhere |
@@ -201,6 +203,28 @@ counterpart and pay it 200 from Send, and Bob's chat request of 150 paid by Alic
 balances are checked. The extension test makes a wallet in the offscreen document (where the WebAssembly runs
 there) and moves sats in and out. The request is paid through the bubble's "Copy invoice" and the Lightning card: the bubble's
 own review pays Cashu only for now.
+### BDK (on-chain Bitcoin) on regtest
+
+The BDK wallet runs in the page (bitcoindevkit in WebAssembly) and reads the chain from an Esplora server, so its
+stack is bitcoind 31 with a miner wallet and an electrs answering browsers (CORS), worthless regtest coins, in
+containers named `ghostly-bdk-*` on `127.0.0.1:44201` (bitcoind RPC) and `127.0.0.1:44202` (Esplora):
+
+```bash
+docker compose -p ghostly-bdk -f e2e/support/bdk-regtest/docker-compose.yml up -d
+node e2e/support/bdk-regtest/regtest.mjs ready     # a miner wallet with coins, Esplora caught up
+GHOSTLY_BDK_REGTEST=1 npm test -w @ghostly/browser -- bdk.regtest   # the provider contract on the real chain
+npm run build:web && npx vite preview web --port 44210 --strictPort &
+E2E_WEB_URL=http://localhost:44210 GHOSTLY_BDK_REGTEST=1 npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/wallet-bdk.spec.ts
+npm run build:extension && GHOSTLY_BDK_REGTEST=1 npx playwright test -c e2e/playwright.config.ts --project=extension e2e/extension/wallet-bdk.spec.ts   # the engine in an offscreen document
+docker compose -p ghostly-bdk -f e2e/support/bdk-regtest/docker-compose.yml down -v   # when done
+```
+
+Both peers make a new BDK wallet on Regtest with the local Esplora; the miner pays Alice's address; Alice sends
+to Bob's address from the wallet page (signed at review, broadcast at approval, settled after a block); in the
+chat Bob sends (his app asks hers for a fresh address) and then requests, which Alice pays from the bubble. A
+request is marked paid only once the payee's own wallet sees the transaction confirmed on its address. The txids
+and balances are printed; `regtest.mjs tx <txid>` shows bitcoind's view of one. Funded signet or Mutinynet runs
+are not automated: their faucets need a login or a CAPTCHA.
 
 ### Nostr Wallet Connect on regtest
 

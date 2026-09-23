@@ -76,8 +76,8 @@ test("the Bitcoin card says no source is configured, and pays on-chain through o
   await useTestnet(alice);
   await openWallet(alice, "bitcoin");
   await expect(panel.getByTestId("bitcoin-empty")).toBeVisible();
-  // Bitcoin Core is registered, but its RPC has no CORS: it is offered on Desktop only, never here.
-  await expect(panel.getByTestId("onchain-source-select").locator("option")).toHaveText(["1 available…", /Fake Bitcoin wallet/]);
+  // Bitcoin Core is registered, but its RPC has no CORS: it is offered on Desktop only, never here. BDK runs in the page.
+  await expect(panel.getByTestId("onchain-source-select").locator("option")).toHaveText(["2 available…", /BDK wallet/, /Fake Bitcoin wallet/]);
   await panel.getByTestId("onchain-source-select").selectOption("fake-onchain");
   await panel.getByTestId("provider-form-fake-onchain").getByLabel("Access token").fill("token");
   await panel.getByTestId("provider-save").click();
