@@ -3,6 +3,8 @@ import type { PaymentMethodName } from "@ghostly/core";
 import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
 import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
+import type { LightningView } from "../engine/paymentAdapters/providers/lightningService";
+import type { BitcoinView } from "../engine/paymentAdapters/providers/bitcoinService";
 import type { PaymentReview, PaymentTarget } from "@ghostly/core";
 import type { DeliveryMode, DhtDeliveryState, DhtDeliveryView } from "@ghostly/core";
 import type { PublicProfile, ProfileChoice } from '../profiles/public';
@@ -202,6 +204,10 @@ export interface WalletView {
   /** Second's Ark (Bark): a different Ark server from `ark`, not interchangeable with it. */
   bark?: BarkWalletView;
   usdt?: UsdtWalletView;
+  /** The Lightning source of this mode (the Cashu mints by default) and its latest operations. */
+  lightning?: LightningView;
+  /** The on-chain Bitcoin source of this mode, if one is set up. */
+  bitcoin?: BitcoinView;
   intents?: PaymentReview[];
   mints: MintView[];
   balance: number;

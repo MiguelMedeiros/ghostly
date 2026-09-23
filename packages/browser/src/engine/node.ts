@@ -9,6 +9,11 @@ import { intentRepository } from "./paymentAdapters/persistence";
 import type { ArkPrepared } from "./paymentAdapters/arkade";
 import { CashuAdapter } from "./paymentAdapters/cashu";
 import type { CashuPrepared } from "./wallet";
+import { LightningService } from "./paymentAdapters/providers/lightningService";
+import { BitcoinService, type BitcoinPrepared } from "./paymentAdapters/providers/bitcoinService";
+import { CASHU_MINT_SOURCE } from "./paymentAdapters/providers/cashuMint";
+import { defaultRegistry, type ProviderRegistry } from "./paymentAdapters/providers/registry";
+import type { ProviderPlatform } from "./paymentAdapters/providers/types";
 import type { EngineApi } from "../shared/rpc";
 import { EXTERNAL_IDENTITIES_ENABLED } from '../shared/features';
 import { readPubkyProof } from '../proofs/storage';
@@ -160,6 +165,10 @@ export interface NodeOptions {
   localFetch?: LocalFetch;
   /** Create and connect the Ark, Bark and USDT wallets at start. Default: on; tests without a network turn it off. */
   automaticWallets?: boolean;
+  /** Where this engine runs, for the wallet providers that only work on some platforms. Default: web. */
+  platform?: ProviderPlatform;
+  /** The Lightning and on-chain providers on offer. Default: the registry (tests pass their own). */
+  providers?: ProviderRegistry;
 }
 
 export interface NodeEvents {
@@ -225,6 +234,12 @@ export class GhostlyNode implements EngineImplementation {
     execute: (review, prepared, persist) => this.barkWallet.require().execute(review, prepared as BarkPrepared, persist),
     reconcile: (review, prepared) => this.barkWallet.require().reconcile(review, prepared as BarkPrepared),
   }, {
+    method:"bitcoin",
+    prepare:(target,amount,feeCap)=>this.bitcoin.adapter.prepare(target,amount,feeCap),
+    execute:(review,prepared,persist)=>this.bitcoin.adapter.execute(review,prepared as BitcoinPrepared,persist),
+    reconcile:(review,prepared,persist)=>this.bitcoin.adapter.reconcile(review,prepared as BitcoinPrepared,persist),
+    release:(review,prepared)=>this.bitcoin.adapter.release!(review,prepared as BitcoinPrepared),
+  }, {
     method:"cashu",
     prepare:(target,amount,feeCap)=>new CashuAdapter(this.wallet,(r,t)=>this.desk.recordCashu(r,t)).prepare(target,amount,feeCap),
     execute:(review,prepared,persist)=>new CashuAdapter(this.wallet,(r,t)=>this.desk.recordCashu(r,t)).execute(review,prepared as CashuPrepared,persist),
@@ -240,10 +255,23 @@ export class GhostlyNode implements EngineImplementation {
   }
   private readonly wallet = new CashuWallet(() => this.modeMints(), {
     onChange: () => void this.refreshWallet(),
-    onQuotePaid: (quote) => void this.desk.onQuotePaid(quote),
-    onMeltResolved: (melt, paid) => void this.desk.onMeltResolved(melt, paid),
+    // The mints settle their own invoices and payments; the Lightning journal learns it from here.
+    onQuotePaid: (quote) => void this.lightning.reportInvoicePaid(quote.invoice, { paymentId: quote.paymentId, mint: quote.mint }),
+    onMeltResolved: (melt, paid) => void this.lightning.reportPaymentResolved(melt.request, paid, { paymentId: melt.paymentId, mint: melt.mint }),
     onTestMintNeeded: async (mint) => void (await this.walletAddMint({ url: mint })),
   }, () => this.settings.mints);
+  private registry?: ProviderRegistry;
+  private providers() { return this.registry ??= this.options.providers ?? defaultRegistry(); }
+  /** Read when a source connects, once the constructor has run. */
+  private readonly providerHost = () => ({ platform: this.options.platform ?? "web" as const, cashu: this.wallet });
+  /** Lightning through the active source of the mode: the Cashu mints unless the person chose another. */
+  private readonly lightning: LightningService = new LightningService(() => this.providers().lightning, this.providerHost, {
+    changed: () => void this.refreshWallet(),
+    received: (op) => void this.desk.onLightningPaid(op),
+    resolved: (op, paid) => void this.desk.onLightningResolved(op, paid),
+  }, CASHU_MINT_SOURCE);
+  /** On-chain Bitcoin through the active source of the mode: none until the person sets one up. */
+  private readonly bitcoin = new BitcoinService(() => this.providers().onchain, this.providerHost, () => void this.refreshWallet());
   private readonly desk = new PaymentDesk(this.wallet, {
     onReviewedPaymentResult:async(id)=>{await this.reconcilePayment({id});},
     onReviewedPaymentRefused:async(id,reason)=>{
@@ -261,7 +289,11 @@ export class GhostlyNode implements EngineImplementation {
       }
       this.emitState();
     },
-  }, this.arkWallet, this.usdtWallet, this.barkWallet);
+  }, this.arkWallet, this.usdtWallet, this.barkWallet, {
+    createInvoice: (amount, paymentId) => this.lightning.createInvoice(amount, { paymentId }),
+    quote: async (invoice) => { const quote = await this.lightning.quote(invoice); return { ...quote, mint: quote.source === CASHU_MINT_SOURCE ? quote.mint : undefined }; },
+    pay: (quote, note, paymentId) => this.lightning.pay(quote.quote, { note, paymentId }),
+  });
 
   constructor(
     private readonly events: NodeEvents,
@@ -280,7 +312,7 @@ export class GhostlyNode implements EngineImplementation {
     const history = view.history.filter((tx) => !tx.mint || isWorthlessMint(tx.mint) === (mode === "testnet"));
     let waitingTestSats = 0;
     if (mode === "mainnet") for (const mint of this.settings.mints.filter(isWorthlessMint)) waitingTestSats += await this.wallet.balanceAt(mint);
-    this.walletView = { ...view, mode, waitingTestSats, history, feesPaid: history.reduce((sum, tx) => sum + tx.fee, 0), ark: this.arkWallet.view, bark: this.barkWallet.view, usdt: this.usdtWallet.view, intents: (await intentRepository.list()).map((saved) => saved.review) };
+    this.walletView = { ...view, mode, waitingTestSats, history, feesPaid: history.reduce((sum, tx) => sum + tx.fee, 0), ark: this.arkWallet.view, bark: this.barkWallet.view, usdt: this.usdtWallet.view, lightning: this.lightning.view, bitcoin: this.bitcoin.view, intents: (await intentRepository.list()).map((saved) => saved.review) };
     for (const tx of this.walletView.history) {
       const fresh = !this.walletFeedbackIds.has(tx.id);
       this.walletFeedbackIds.add(tx.id);
@@ -296,7 +328,7 @@ export class GhostlyNode implements EngineImplementation {
     if(this.shuttingDown)return;
     try {
       for(const {review} of await intentRepository.list()){
-        if(!["submitted","unknown"].includes(review.state) || (review.method==="arkade" && !this.arkWallet.adapter) || (review.method==="bark" && !this.barkWallet.adapter) || (review.method==="usdt" && !this.usdtWallet.adapter))continue;
+        if(!["submitted","unknown"].includes(review.state) || (review.method==="arkade" && !this.arkWallet.adapter) || (review.method==="bark" && !this.barkWallet.adapter) || (review.method==="usdt" && !this.usdtWallet.adapter) || (review.method==="bitcoin" && !this.bitcoin.sources.active))continue;
         await this.reconcilePayment({id:review.id}).catch(()=>{});
       }
     } finally {if(!this.shuttingDown)this.paymentTimer=setTimeout(()=>void this.pollPaymentStatus(),10000);}
@@ -316,6 +348,8 @@ export class GhostlyNode implements EngineImplementation {
     await this.arkWallet.setMode(this.settings.walletMode ?? "mainnet");
     await this.barkWallet.setMode(this.settings.walletMode ?? "mainnet");
     await this.usdtWallet.setMode(this.settings.walletMode ?? "mainnet");
+    await this.lightning.start(this.settings.walletMode ?? "mainnet");
+    await this.bitcoin.start(this.settings.walletMode ?? "mainnet");
     await this.desk.start();
     await this.refreshWallet();
     this.wallet.start();
@@ -332,6 +366,9 @@ export class GhostlyNode implements EngineImplementation {
     }
     this.emitState();
     void this.pollPaymentStatus().catch(()=>{});
+    // The Lightning and Bitcoin sources the person set up (the Cashu mints need no network to connect).
+    void this.lightning.recover().then(() => this.lightning.ensureReady());
+    void this.bitcoin.ensureReady();
     // Every profile has its wallets ready to receive without any setup; they connect in the background.
     if (this.options.automaticWallets !== false) {
       void this.arkWallet.ensureReady();
@@ -347,6 +384,8 @@ export class GhostlyNode implements EngineImplementation {
     await this.arkWallet.stop();
     await this.barkWallet.stop();
     await this.usdtWallet.stop();
+    await this.lightning.stop();
+    await this.bitcoin.stop();
     await this.nativeQueue;
     await Promise.allSettled([...this.outboxes.values()].map(outbox => outbox.stop()));
     await Promise.allSettled([...this.links.values()].map((live) => live.link?.stop(true)));
@@ -859,7 +898,8 @@ export class GhostlyNode implements EngineImplementation {
     await this.updateSettings({ settings: { walletMode: mode, mints } });
     // Queued behind whatever the wallets are doing (a new wallet on a slow network): the switch answers at
     // once, and each wallet follows in order, so switching back and forth ends on the last choice.
-    const followed = Promise.all([this.arkWallet.setMode(mode), this.barkWallet.setMode(mode), this.usdtWallet.setMode(mode)]).then(() => this.refreshWallet());
+    const followed = Promise.all([this.arkWallet.setMode(mode), this.barkWallet.setMode(mode), this.usdtWallet.setMode(mode), this.lightning.setMode(mode), this.bitcoin.setMode(mode)]).then(() => this.refreshWallet());
+    void followed.then(() => { void this.lightning.ensureReady(); void this.bitcoin.ensureReady(); }, () => {});
     if (this.options.automaticWallets !== false) void followed.then(() => { void this.arkWallet.ensureReady(); void this.barkWallet.ensureReady(); void this.usdtWallet.ensureReady(); }, () => {});
     // Names, fees and limits of this mode's mints (a mint just added has none yet).
     for (const mint of this.modeMints()) void this.wallet.checkMint(mint).then(() => this.refreshWallet(), () => {});
@@ -878,18 +918,34 @@ export class GhostlyNode implements EngineImplementation {
     await this.refreshWallet();
   }
 
-  async walletReceiveLightning({ amount }: { amount: number }) {
-    const quote = await this.wallet.receiveLightning(amount);
-    return { quote: quote.quote, invoice: quote.invoice, expiresAt: quote.expiresAt };
+  /** `via: "cashu"`: ecash straight from the mints (the Cashu card). Otherwise the active Lightning source. */
+  async walletReceiveLightning({ amount, via }: { amount: number; via?: "cashu" }) {
+    if (via === "cashu") {
+      const quote = await this.wallet.receiveLightning(amount);
+      return { quote: quote.quote, invoice: quote.invoice, expiresAt: quote.expiresAt, source: CASHU_MINT_SOURCE };
+    }
+    const created = await this.lightning.createInvoice(amount);
+    return { quote: created.paymentHash, invoice: created.invoice, expiresAt: created.expiresAt, paymentHash: created.paymentHash, source: created.source };
   }
 
-  walletQuoteInvoice({ invoice }: { invoice: string }) {
-    return this.wallet.quoteInvoice(invoice);
+  walletQuoteInvoice({ invoice, via }: { invoice: string; via?: "cashu" }) {
+    return via === "cashu" ? this.wallet.quoteInvoice(invoice) : this.lightning.quote(invoice);
   }
 
   async walletPayQuote({ quote, mint }: { quote: string; mint: string }) {
-    return { paid: await this.wallet.payQuote(quote, mint) };
+    // A quote of the Lightning source, or a melt quote the Cashu card asked the mints for.
+    return { paid: this.lightning.hasQuote(quote) ? await this.lightning.pay(quote) : await this.wallet.payQuote(quote, mint) };
   }
+
+  /** Makes a provider this mode's Lightning source, with the values of its form (secrets are sealed). */
+  async lightningSetSource({ providerId, values }: { providerId: string; values: Record<string, string> }) { await this.lightning.sources.set(providerId, values); await this.refreshWallet(); }
+  /** Back to the default source, the Cashu mints. */
+  async lightningClearSource() { await this.lightning.sources.clear(); await this.refreshWallet(); }
+  async lightningRefresh() { await this.lightning.sources.refresh(); await this.lightning.reconcile(); }
+  async bitcoinSetSource({ providerId, values }: { providerId: string; values: Record<string, string> }) { await this.bitcoin.sources.set(providerId, values); await this.refreshWallet(); }
+  async bitcoinClearSource() { await this.bitcoin.sources.clear(); await this.refreshWallet(); }
+  async bitcoinReceiveAddress() { const address = await this.bitcoin.receiveAddress(); await this.refreshWallet(); return address; }
+  bitcoinRefresh() { return this.bitcoin.sources.refresh(); }
 
   walletInspectCashu({ text }: { text: string }) {
     return { inspection: this.wallet.inspect(text) };

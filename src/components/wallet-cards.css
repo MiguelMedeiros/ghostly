@@ -6,6 +6,7 @@
 .wallet-card-arkade{--card-rgb:146,167,255;background-color:#1b233b}
 .wallet-card-bark{--card-rgb:255,150,110;background-color:#33201a}
 .wallet-card-usdt{--card-rgb:62,220,161;background-color:#112e28}
+.wallet-card-bitcoin{--card-rgb:247,147,26;background-color:#2a1c0e}
 .wallet-card-top{display:flex;align-items:center;justify-content:space-between;color:rgb(var(--card-rgb));margin-bottom:8px;position:relative}
 .wallet-card-selected{width:19px;height:19px;display:grid;place-items:center;border-radius:50%;border:1px solid rgba(var(--card-rgb),.25);color:transparent;transition:background 180ms ease,color 180ms ease}
 .wallet-card[aria-pressed=true]{border-color:rgb(var(--card-rgb));box-shadow:0 0 0 1px rgba(var(--card-rgb),.22),0 7px 20px #0003;transform:translateY(-2px)}

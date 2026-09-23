@@ -18,7 +18,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
   const payment = wallet?.getPayment(paymentId) ?? null;
   /** Its way of paying is off in this chat: the request stays readable, but nothing here can pay it. */
   const allowed = platform?.getPeer(peerPubKey)?.paymentMethods;
-  const paymentsOff = !!allowed && !!payment && (payment.target ? !allowed[payment.target.method] : !(allowed.cashu || allowed.lightning));
+  const paymentsOff = !!allowed && !!payment && (payment.target ? !(allowed as Partial<Record<string, boolean>>)[payment.target.method] : !(allowed.cashu || allowed.lightning));
   const [review,setReview] = useState<Review|null>(null);
   const [mint,setMint] = useState("");
   const [feeCap,setFeeCap] = useState<string|null>(null);

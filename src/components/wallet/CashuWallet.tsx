@@ -7,6 +7,8 @@ import { PaymentReview } from "../PaymentReview";
 import { Actions, Amount, Block, Button, Notice, Row, Section, input, type Action } from "./ui";
 import { useRun } from "./run";
 import { ButtonGroup, InputGroup, Truncate } from "../layout";
+import { SourcePicker } from "./providers/SourcePicker";
+import { CASHU_MINT_SOURCE } from "../walletCardData";
 
 const TX_LABEL = {
   "lightning-in": "Received over Lightning",
@@ -20,14 +22,16 @@ const TX_LABEL = {
 const shortFee = (ppk: number) => (ppk === 0 ? "No fee to spend" : `${ppk / 1000} sat per proof (about 1 sat a payment)`);
 
 /**
- * Cashu and Lightning share one balance: ecash held by the mints, filled and emptied over Lightning.
- * The Cashu card also holds the mint settings; the Lightning card is about invoices.
+ * Cashu and Lightning share one balance while Lightning goes through the mints (the default source):
+ * ecash held by the mints, filled and emptied over Lightning. The Cashu card also holds the mint
+ * settings; the Lightning card is about invoices, and where they are paid into and from (its source).
  */
 export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: WalletPlatform; state: WalletState; rail: "cashu" | "lightning"; onOpenCashu: () => void }) {
   const [action, setAction] = useState<Action>("receive");
   const { busy, error, setError, run } = useRun();
   const [amount, setAmount] = useState("");
   const [invoice, setInvoice] = useState<string | null>(null);
+  const [paymentHash, setPaymentHash] = useState<string | undefined>();
   /** Balance when the invoice was created: once it grew by the amount, the invoice was paid. */
   const [balanceBefore, setBalanceBefore] = useState(0);
   const [copied, setCopied] = useState(false);
@@ -45,7 +49,12 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: Wall
   const testBalance = testMints.reduce((sum, m) => sum + m.balance, 0);
   const realShown = useCountUp(state.balance - testBalance);
   const testShown = useCountUp(testBalance);
-  const invoicePaid = invoice !== null && state.balance >= balanceBefore + Number(amount);
+  // The Cashu card always uses the mints; the Lightning card uses the mode's source (the mints by default).
+  const ln = state.lightning;
+  const viaMint = rail === "cashu" || !ln?.providerId || ln.providerId === CASHU_MINT_SOURCE;
+  const sourceName = ln?.alias ?? ln?.label ?? "the source";
+  const invoicePaid = invoice !== null && ((viaMint && state.balance >= balanceBefore + Number(amount))
+    || !!ln?.recent.some((op) => op.direction === "in" && op.paymentHash === paymentHash && op.state === "paid"));
   const isToken = /^cashu[AB]/i.test(payInput.trim());
   const pasted = isToken ? null : decodeBolt11(payInput);
 
@@ -54,11 +63,19 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: Wall
   return (
     <div className="space-y-6">
       <div className="space-y-4">
-        <p className="text-text-primary" data-testid="wallet-balance">
-          <span className="text-4xl font-semibold tabular-nums">{(testnet ? testShown : realShown).toLocaleString()}</span>
-          <span className="text-text-muted text-sm ml-2">{testnet ? "test sats" : "sats"}</span>
-          {testMint && <span className="block text-xs text-yellow-500 mt-1" data-testid="wallet-test-balance">{testShown.toLocaleString()} test sats (worthless)</span>}
-        </p>
+        {viaMint ? (
+          <p className="text-text-primary" data-testid="wallet-balance">
+            <span className="text-4xl font-semibold tabular-nums">{(testnet ? testShown : realShown).toLocaleString()}</span>
+            <span className="text-text-muted text-sm ml-2">{testnet ? "test sats" : "sats"}</span>
+            {testMint && <span className="block text-xs text-yellow-500 mt-1" data-testid="wallet-test-balance">{testShown.toLocaleString()} test sats (worthless)</span>}
+          </p>
+        ) : (
+          <p className="text-text-primary" data-testid="wallet-balance">
+            <span className="text-4xl font-semibold tabular-nums">{ln?.balance === undefined ? "—" : ln.balance.toLocaleString()}</span>
+            <span className="text-text-muted text-sm ml-2">{testnet ? "test sats" : "sats"} · {sourceName}</span>
+            {ln?.status !== "ready" && <span className="block text-xs text-yellow-500 mt-1" data-testid="lightning-source-state">{ln?.error ?? "Connecting to the source…"}</span>}
+          </p>
+        )}
         {!testnet && !!state.waitingTestSats && (
           <Notice tone="warning" testId="wallet-waiting-test-sats">
             {state.waitingTestSats.toLocaleString()} test sats are waiting in Testnet.{" "}
@@ -91,9 +108,9 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: Wall
                 </div>
               </div>
             ) : (
-              <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); void run(async () => { setBalanceBefore(state.balance); setInvoice((await wallet.receiveLightning(Number(amount))).invoice); }); }}>
+              <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); void run(async () => { setBalanceBefore(state.balance); const created = await wallet.receiveLightning(Number(amount), rail === "cashu" ? "cashu" : undefined); setPaymentHash(created.paymentHash); setInvoice(created.invoice); }); }}>
                 <Amount value={amount} onChange={setAmount} unit="sats" testId="wallet-receive-amount" autoFocus />
-                <Button type="submit" variant="primary" className="w-full" data-testid="wallet-create-invoice" disabled={busy || !amount || !state.mints.length}>{busy ? "Asking the mint…" : "Create Lightning invoice"}</Button>
+                <Button type="submit" variant="primary" className="w-full" data-testid="wallet-create-invoice" disabled={busy || !amount || (viaMint ? !state.mints.length : ln?.status !== "ready")}>{busy ? (viaMint ? "Asking the mint…" : `Asking ${sourceName}…`) : "Create Lightning invoice"}</Button>
                 <Notice>{rail === "cashu" ? "Got an ecash token instead? Paste it under Send." : "Anyone can pay this invoice from any Lightning wallet."}</Notice>
               </form>
             )}
@@ -106,12 +123,12 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: Wall
               <>
                 <p className="text-text-primary text-sm">Pay <b>{quote.amount.toLocaleString()} sats</b><span className="text-text-muted"> + up to {quote.feeReserve.toLocaleString()} in fees</span></p>
                 <ButtonGroup fill>
-                  <Button variant="primary" disabled={busy} onClick={() => void run(async () => { const paid = await wallet.payQuote(quote.quote, quote.mint); setQuote(null); setPayInput(""); setNotice(paid ? "Paid." : "The payment is still pending at the mint."); })}>{busy ? "Paying…" : "Pay"}</Button>
+                  <Button variant="primary" disabled={busy} onClick={() => void run(async () => { const paid = await wallet.payQuote(quote.quote, quote.mint); setQuote(null); setPayInput(""); setNotice(paid ? "Paid." : viaMint ? "The payment is still pending at the mint." : "The payment is still pending. It is being checked; nothing is paid again."); })}>{busy ? "Paying…" : "Pay"}</Button>
                   <Button onClick={() => setQuote(null)}>Cancel</Button>
                 </ButtonGroup>
               </>
             ) : (
-              <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); void run(async () => { if (isToken) { const received = await wallet.receiveToken(payInput); setPayInput(""); setNotice(`Redeemed ${received.toLocaleString()} sats.`); } else setQuote(await wallet.quoteInvoice(payInput)); }); }}>
+              <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); void run(async () => { if (isToken) { const received = await wallet.receiveToken(payInput); setPayInput(""); setNotice(`Redeemed ${received.toLocaleString()} sats.`); } else setQuote(await wallet.quoteInvoice(payInput, rail === "cashu" ? "cashu" : undefined)); }); }}>
                 <textarea data-testid="wallet-pay-input" className={`${input} font-mono text-xs resize-none`} rows={3} autoFocus
                   placeholder={rail === "cashu" ? "Paste a Lightning invoice or an ecash token" : "Paste a Lightning invoice"} value={payInput} onChange={(e) => setPayInput(e.target.value)} />
                 {pasted && (
@@ -165,9 +182,22 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: Wall
       </div>
 
       {rail === "lightning" ? (
-        <Section title="Settings">
-          <Row label="Balance" hint="Lightning uses your Cashu balance: invoices are paid into, and paid from, your Cashu mints."><Button onClick={onOpenCashu}>Cashu settings</Button></Row>
-        </Section>
+        <>
+          {!viaMint && !!ln?.recent.length && (
+            <Section title="Recent" testId="lightning-recent">
+              {ln.recent.map((op) => (
+                <Row key={`${op.direction}-${op.paymentHash}`} testId="lightning-op" label={<>{op.direction === "in" ? "Invoice" : "Payment"} · {op.amount.toLocaleString()} sats</>}
+                  hint={`${new Date(op.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} · ${op.state}${op.fee ? ` · fee ${op.fee}` : ""}${op.error ? ` · ${op.error}` : ""}`} />
+              ))}
+            </Section>
+          )}
+          {ln && <SourcePicker kind="lightning" view={ln} onSet={(id, values) => wallet.lightningSetSource(id, values)} onClear={() => wallet.lightningClearSource()} />}
+          {viaMint && (
+            <Section title="Settings">
+              <Row label="Balance" hint="Lightning uses your Cashu balance: invoices are paid into, and paid from, your Cashu mints."><Button onClick={onOpenCashu}>Cashu settings</Button></Row>
+            </Section>
+          )}
+        </>
       ) : (
         <>
           <Section title="Mints" testId="wallet-mints">

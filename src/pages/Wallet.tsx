@@ -4,6 +4,7 @@ import { CashuWallet } from "../components/wallet/CashuWallet";
 import { ArkWalletPanel } from "../components/ArkWalletPanel";
 import { BarkWalletPanel } from "../components/BarkWalletPanel";
 import { UsdtWalletPanel } from "../components/UsdtWalletPanel";
+import { BitcoinWalletPanel } from "../components/BitcoinWalletPanel";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { useI18n } from "../contexts/I18nContext";
 import { Segmented } from "../components/wallet/ui";
@@ -11,7 +12,7 @@ import { Page } from "../components/layout";
 
 const RAIL_KEY = "ghostly-wallet-rail";
 const remembered = (): WalletRail => {
-  try { const saved = sessionStorage.getItem(RAIL_KEY); if (saved === "cashu" || saved === "lightning" || saved === "arkade" || saved === "bark" || saved === "usdt") return saved; } catch { /* storage unavailable */ }
+  try { const saved = sessionStorage.getItem(RAIL_KEY); if (saved === "cashu" || saved === "lightning" || saved === "arkade" || saved === "bark" || saved === "usdt" || saved === "bitcoin") return saved; } catch { /* storage unavailable */ }
   return "cashu";
 };
 
@@ -50,6 +51,7 @@ export function Wallet() {
         {rail === "arkade" && <ArkWalletPanel wallet={wallet} state={state} />}
         {rail === "bark" && <BarkWalletPanel wallet={wallet} state={state} />}
         {rail === "usdt" && <UsdtWalletPanel wallet={wallet} state={state} />}
+        {rail === "bitcoin" && <BitcoinWalletPanel wallet={wallet} state={state} />}
       </>}
     </Page>
   );
