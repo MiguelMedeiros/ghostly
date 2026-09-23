@@ -156,7 +156,7 @@ function newLiveLink(stored: StoredLink, lastMessageAt: number, files = emptyLin
 }
 
 /** What a host may replace. The defaults are what a browser can do on its own. */
-const PAYMENT_METHODS: PaymentMethodName[] = ["cashu", "lightning", "arkade", "usdt", "bark"];
+const PAYMENT_METHODS: PaymentMethodName[] = ["cashu", "lightning", "arkade", "usdt", "bark", "bitcoin"];
 
 export interface NodeOptions {
   nativeTransports?: Partial<Record<NativeTransport, (seedB64: string) => Promise<NativeEndpoint>>>;
@@ -275,7 +275,7 @@ export class GhostlyNode implements EngineImplementation {
     resolved: (op, paid) => void this.desk.onLightningResolved(op, paid),
   }, CASHU_MINT_SOURCE);
   /** On-chain Bitcoin through the active source of the mode: none until the person sets one up. */
-  private readonly bitcoin = new BitcoinService(() => this.providers().onchain, this.providerHost, () => void this.refreshWallet());
+  private readonly bitcoin = new BitcoinService(() => this.providers().onchain, this.providerHost, () => { void this.refreshWallet(); void this.desk.reconcileBitcoinReceipts().catch(()=>{}); });
   private readonly desk = new PaymentDesk(this.wallet, {
     onReviewedPaymentResult:async(id)=>{await this.reconcilePayment({id});},
     onReviewedPaymentRefused:async(id,reason)=>{
@@ -297,7 +297,7 @@ export class GhostlyNode implements EngineImplementation {
     createInvoice: (amount, paymentId) => this.lightning.createInvoice(amount, { paymentId }),
     quote: async (invoice) => { const quote = await this.lightning.quote(invoice); return { ...quote, mint: quote.source === CASHU_MINT_SOURCE ? quote.mint : undefined }; },
     pay: (quote, note, paymentId) => this.lightning.pay(quote.quote, { note, paymentId }),
-  });
+  }, this.bitcoin);
 
   /** Identity proofs: this profile's, and those shared in each paired chat (WISP 300). */
   private readonly identities = new IdentityProofs({
@@ -1034,6 +1034,7 @@ export class GhostlyNode implements EngineImplementation {
       if(params.target.method==="usdt" && !live.link.supportsUsdtPayments)throw new Error("This peer does not support USDT payments");
       if(params.target.method==="arkade" && !live.link.supportsArkPayments)throw new Error("This peer does not support Ark payments");
       if(params.target.method==="bark" && !live.link.supportsBarkPayments)throw new Error("This peer does not support Bark payments");
+      if(params.target.method==="bitcoin" && !live.link.supportsBitcoinPayments)throw new Error("This peer does not take on-chain Bitcoin in this chat");
       const request=params.requestId ? this.desk.payment(params.requestId) : undefined;
       if(params.requestId){
         if(!request || request.linkId!==params.linkId || request.direction!=="in" || request.state!=="pending" || request.amount!==params.amount)throw new Error("Payment review does not match the authenticated request");
@@ -1053,6 +1054,7 @@ export class GhostlyNode implements EngineImplementation {
       if(!link || (intent.review.method==="arkade" && !link.supportsArkPayments))throw new Error("Reconnect the data link before approving. Your review was saved.");
       if(intent.review.method==="usdt" && !link.supportsUsdtPayments)throw new Error("Reconnect a peer supporting USDT before approving");
       if(intent.review.method==="bark" && !link.supportsBarkPayments)throw new Error("Reconnect a peer supporting Bark before approving");
+      if(intent.review.method==="bitcoin" && !link.supportsBitcoinPayments)throw new Error("Reconnect a peer taking on-chain Bitcoin before approving");
       if(intent.review.method==="cashu" && !link.allowsPayment("cashu"))throw new Error("Cashu is off in this chat");
       await link.requirePaymentSupport();
       if (intent.review.requestId) {
@@ -1064,6 +1066,7 @@ export class GhostlyNode implements EngineImplementation {
     await this.desk.confirmReviewedCashu(review);
     if(review.state==="settled")await this.desk.recordArk(review).catch(()=>{});
     await this.desk.recordBark(review).catch(()=>{});
+    await this.desk.recordBitcoin(review).catch(()=>{});
     await this.desk.recordUsdt(review).catch(()=>{});
     await this.arkWallet.refresh();await this.barkWallet.refresh();await this.usdtWallet.refresh();return review;
   }
@@ -1072,6 +1075,7 @@ export class GhostlyNode implements EngineImplementation {
     await this.desk.confirmReviewedCashu(review);
     if(review.state==="settled")await this.desk.recordArk(review).catch(()=>{});
     await this.desk.recordBark(review).catch(()=>{});
+    await this.desk.recordBitcoin(review).catch(()=>{});
     await this.desk.recordUsdt(review).catch(()=>{});
     await this.arkWallet.refresh();await this.barkWallet.refresh();await this.usdtWallet.refresh();return review;
   }
@@ -1081,13 +1085,13 @@ export class GhostlyNode implements EngineImplementation {
     return this.desk.send(params);
   }
 
-  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" }) {
+  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" }) {
     return this.desk.request({ linkId: params.linkId, amount: params.amount, memo: params.memo, timestamp: params.timestamp, method: params.method });
   }
 
-  /** Paying on a card without a request (Ark, Bark, USDT): the contact's app answers with one. */
-  askToPay(params: { linkId: string; amount: number; method: "arkade" | "usdt" | "bark"; memo?: string; timestamp: number }) {
-    if (params.method !== "arkade" && params.method !== "usdt" && params.method !== "bark") throw new Error("Only Ark, Bark and USDT are paid this way");
+  /** Paying on a card without a request (Ark, Bark, USDT, on-chain): the contact's app answers with one. */
+  askToPay(params: { linkId: string; amount: number; method: "arkade" | "usdt" | "bark" | "bitcoin"; memo?: string; timestamp: number }) {
+    if (params.method !== "arkade" && params.method !== "usdt" && params.method !== "bark" && params.method !== "bitcoin") throw new Error("Only Ark, Bark, USDT and on-chain Bitcoin are paid this way");
     return this.desk.ask(params);
   }
 

@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { useCountUp } from "../hooks/useCountUp";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { isWorthlessMint } from "@ghostly/browser/shared/mints";
+import { ONCHAIN_FEE_CAP } from "./walletCardData";
 
 const STATE_LABEL = {
   payment: { pending: "Waiting for your contact…", settled: "Received", failed: "Failed", reclaimed: "Taken back" },
@@ -69,10 +70,10 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
   // Its invoice, through the Lightning source, when ecash cannot pay it here: no shared mint, or Cashu off.
   const viaLightning = !payment.target && !!payment.invoice && allowed?.lightning !== false && (!sharedMints.length || allowed?.cashu === false);
   // Lightning's default ceiling is the one the engine pays requests under.
-  const feeInput=feeCap??(tokenPayment?'0.001':viaLightning?String(Math.max(10,Math.ceil(payment.amount*0.03))):'10');
+  const feeInput=feeCap??(tokenPayment?'0.001':payment.target?.method==='bitcoin'?String(ONCHAIN_FEE_CAP):viaLightning?String(Math.max(10,Math.ceil(payment.amount*0.03))):'10');
   const title = isRequest ? (outgoing ? "You requested" : "Requests") : outgoing ? "You sent" : "Sent you";
   // Test sats are worth nothing, and the bubble says so: a contact must not pass them off as money.
-  const testSats = payment.target?.method === "arkade" || payment.target?.method === "bark" ? payment.target.network !== "bitcoin"
+  const testSats = payment.target?.method === "arkade" || payment.target?.method === "bark" || payment.target?.method === "bitcoin" ? payment.target.network !== "bitcoin"
     : payment.target?.method === "cashu" ? payment.target.network === "cashu-test"
     : !tokenPayment && (payment.mint ? isWorthlessMint(payment.mint) : payment.mints?.length ? payment.mints.every(isWorthlessMint)
       // A request with only an invoice: its chain says (test mints use lnbc, but they come with their mints).
@@ -97,14 +98,14 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
         </span>
         {" "}<span className="text-xs ml-1 text-[hsla(0,0%,100%,0.7)]">{tokenPayment?payment.target?.asset:testSats?'test sats':'sats'}</span>
       </p>
-      {payment.target && <p className="text-xs text-text-muted">{payment.target.method==="usdt"?"USDT":payment.target.method==="arkade"?"Ark":payment.target.method==="bark"?"Bark":"Cashu"} · {payment.target.network}</p>}
+      {payment.target && <p className="text-xs text-text-muted">{payment.target.method==="usdt"?"USDT":payment.target.method==="arkade"?"Ark":payment.target.method==="bark"?"Bark":payment.target.method==="bitcoin"?"Bitcoin on-chain":"Cashu"} · {payment.target.network}</p>}
       {review && <PaymentReview review={review} wallet={wallet} onClose={()=>setReview(null)}/>}
       {payment.memo && <p className="text-[13px] m-0 mt-0.5 wrap-break-word">{payment.memo}</p>}
       <p
         className={`text-[11px] m-0 mt-1 ${payment.state === "failed" ? "text-danger" : payment.state === "settled" ? "text-accent" : "text-[hsla(0,0%,100%,0.6)]"}`}
         data-testid="payment-state"
       >
-        {payment.lightningPending && payment.state === "pending" ? "Lightning payment pending…" : STATE_LABEL[payment.kind][payment.state]}
+        {payment.lightningPending && payment.state === "pending" ? "Lightning payment pending…" : payment.kind === "payment" && payment.state === "pending" && payment.target?.method === "bitcoin" ? "Waiting for a confirmation…" : STATE_LABEL[payment.kind][payment.state]}
         {payment.error && payment.state !== "settled" ? ` · ${payment.error}` : ""}
       </p>
 

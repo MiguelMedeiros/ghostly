@@ -1,3 +1,4 @@
+import { bdk } from "./bdk";
 import { bitcoindRpc } from "./bitcoind";
 import { breez } from "./breez";
 import { cashuMint } from "./cashuMint";
@@ -22,6 +23,7 @@ export const LIGHTNING_PROVIDERS: readonly LightningProviderDescriptor[] = [
 
 export const ONCHAIN_PROVIDERS: readonly OnchainProviderDescriptor[] = [
   bitcoindRpc,
+  bdk,
 ];
 
 export interface ProviderRegistry {

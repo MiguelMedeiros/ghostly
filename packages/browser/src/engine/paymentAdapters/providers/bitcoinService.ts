@@ -61,6 +61,19 @@ export class BitcoinService {
     return this.target(await provider.receiveAddress(), (await provider.info()).network);
   }
 
+  /**
+   * A transaction of the active source paying `target` at least `amount`, none of `claimed`. With a source
+   * that can list what an address received, that is the proof; otherwise the contact's `hint` txid must be
+   * one of the source's own receives of at least the amount.
+   */
+  async received(target: PaymentTarget, amount: number, claimed: ReadonlySet<string>, hint?: string): Promise<{ txid: string; confirmations: number } | undefined> {
+    const provider = this.sources.active;
+    if (!provider || target.method !== "bitcoin" || (await provider.info()).network !== target.network) return undefined;
+    const candidates = provider.received ? await provider.received(target.address) : hint ? (await provider.history(100)).filter((tx) => tx.txid === hint) : [];
+    const tx = candidates.find((tx) => tx.amount >= amount && !claimed.has(tx.txid) && /^[0-9a-f]{64}$/.test(tx.txid));
+    return tx && { txid: tx.txid, confirmations: tx.confirmations };
+  }
+
   private target(address: string, network: string): PaymentTarget {
     // Throws on an address that is not of this network.
     return validatePaymentTarget({ method: "bitcoin", network, provider: ONCHAIN_PROVIDER, asset: "BTC", unit: "sat", address, expiresAt: Date.now() + 15 * 60 * 1000 });

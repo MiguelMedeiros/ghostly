@@ -236,6 +236,18 @@ describe("asking to pay", () => {
     expect((decodeControl(JSON.stringify({ ...ask, memo: "m".repeat(500) })) as { memo: string }).memo).toHaveLength(140);
     // Bark (Second's Ark) is its own way of paying, asked for by name.
     expect(decodeControl(encodeControl({ ...ask, m: "bark" }))).toEqual({ ...ask, m: "bark" });
+    // On-chain Bitcoin too: the answer carries a fresh address of the payee's on-chain source.
+    expect(decodeControl(encodeControl({ ...ask, m: "bitcoin" }))).toEqual({ ...ask, m: "bitcoin" });
+  });
+});
+
+describe("on-chain payment targets", () => {
+  it("are a BTC address of their network, through the on-chain source", async () => {
+    const { validatePaymentTarget, ONCHAIN_PROVIDER } = await import("../src/paymentIntent");
+    const target = { method: "bitcoin", network: "regtest", provider: ONCHAIN_PROVIDER, asset: "BTC", unit: "sat", address: "bcrt1qs758ursh4q9z627kt3pp5yysm78ddny6txaqgw", expiresAt: Date.now() + 60_000 };
+    expect(validatePaymentTarget(target)).toMatchObject({ method: "bitcoin", network: "regtest" });
+    for (const bad of [{ network: "signet" }, { address: "tb1qs758ursh4q9z627kt3pp5yysm78ddny6txaqgw" }, { provider: "https://mempool.space" }, { asset: "USDT" }])
+      expect(() => validatePaymentTarget({ ...target, ...bad }), JSON.stringify(bad)).toThrow();
   });
 });
 

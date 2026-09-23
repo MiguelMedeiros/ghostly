@@ -62,14 +62,27 @@ function parseSats(value: string, asset: string): number | null {
   return Number(value);
 }
 
+/**
+ * On-chain Bitcoin as the desk needs it (the engine's BitcoinService, through the active on-chain source).
+ */
+export interface DeskBitcoin {
+  /** Where to be paid: a fresh address of the active source, as a request carries it. */
+  requestTarget(): Promise<PaymentTarget>;
+  /**
+   * A transaction of the active source that pays this target at least `amount`, and is none of `claimed`;
+   * `hint` is the txid the contact said it paid with. Undefined while there is none.
+   */
+  received(target: PaymentTarget, amount: number, claimed: ReadonlySet<string>, hint?: string): Promise<{ txid: string; confirmations: number } | undefined>;
+}
+
 /** Paying in ecash failed before any token existed, so nothing reached the contact and Lightning is safe to try. */
 class NoEcashError extends Error {}
 
 const arkSats=(network:string)=>network==="bitcoin"?"sats":"test sats";
-type AskMethod = "arkade" | "usdt" | "bark";
-const RAIL_NAME: Record<AskMethod, string> = { arkade: "Ark", usdt: "USDT", bark: "Bark" };
+type AskMethod = "arkade" | "usdt" | "bark" | "bitcoin";
+const RAIL_NAME: Record<AskMethod, string> = { arkade: "Ark", usdt: "USDT", bark: "Bark", bitcoin: "on-chain Bitcoin" };
 /** Both sides allow this way of paying on the open data link. */
-const allows = (link: GhostLink, method: AskMethod) => method === "arkade" ? link.supportsArkPayments : method === "bark" ? link.supportsBarkPayments : link.supportsUsdtPayments;
+const allows = (link: GhostLink, method: AskMethod) => method === "arkade" ? link.supportsArkPayments : method === "bark" ? link.supportsBarkPayments : method === "bitcoin" ? link.supportsBitcoinPayments : link.supportsUsdtPayments;
 export class PaymentDesk {
   private readonly payments = new Map<string, StoredPayment>();
   private readonly paying = new Map<string, Promise<void>>();
@@ -78,6 +91,7 @@ export class PaymentDesk {
   private checkingArk=false;
   private checkingUsdt=false;
   private checkingBark=false;
+  private checkingBitcoin=false;
 
   constructor(
     private readonly wallet: CashuWallet,
@@ -86,6 +100,7 @@ export class PaymentDesk {
     private readonly usdt?: UsdtWallet,
     private readonly bark?: BarkWallet,
     private readonly lightning: DeskLightning = mintLightning(wallet),
+    private readonly bitcoin?: DeskBitcoin,
   ) {}
 
   async start(): Promise<void> {
@@ -151,6 +166,15 @@ export class PaymentDesk {
       await this.save({id,linkId:params.linkId,kind:"request",direction:"out",amount:params.amount,unit:UNIT,memo,state:"pending",createdAt:params.timestamp,target,ask:params.ask});
       await this.host.storeMessage({linkId:params.linkId,id:`me_${params.timestamp}`,text:`Requested ${params.amount} ${arkSats(target.network)} on Bark`,sender:"me",timestamp:params.timestamp,via:"datalink",paymentId:id});
       await link.sendPaymentRequest({id,timestamp:params.timestamp,amount:{value:String(params.amount),asset:UNIT},memo,endpoints:[[ENDPOINT.bark,JSON.stringify(target)]],ask:params.ask});
+      return {paymentId:id};
+    }
+    if (params.method === "bitcoin") {
+      if (!link.supportsBitcoinPayments || !this.bitcoin) throw new Error("Both peers need on-chain Bitcoin on a connected data link");
+      // A fresh address for this request only: what arrives on it is what pays it.
+      const target = await this.bitcoin.requestTarget();
+      await this.save({id,linkId:params.linkId,kind:"request",direction:"out",amount:params.amount,unit:UNIT,memo,state:"pending",createdAt:params.timestamp,target,ask:params.ask});
+      await this.host.storeMessage({linkId:params.linkId,id:`me_${params.timestamp}`,text:`Requested ${params.amount} ${arkSats(target.network)} on-chain`,sender:"me",timestamp:params.timestamp,via:"datalink",paymentId:id});
+      await link.sendPaymentRequest({id,timestamp:params.timestamp,amount:{value:String(params.amount),asset:UNIT},memo,endpoints:[[ENDPOINT.bitcoin,JSON.stringify(target)]],ask:params.ask});
       return {paymentId:id};
     }
     // Each way of paying goes in only if this chat allows it on both sides.
@@ -345,13 +369,16 @@ export class PaymentDesk {
       return;
     }
     let target: PaymentTarget | undefined;
-    const arkPayload=findEndpoint(request.endpoints,ENDPOINT.arkade), barkPayload=findEndpoint(request.endpoints,ENDPOINT.bark);
+    const arkPayload=findEndpoint(request.endpoints,ENDPOINT.arkade), barkPayload=findEndpoint(request.endpoints,ENDPOINT.bark), bitcoinPayload=findEndpoint(request.endpoints,ENDPOINT.bitcoin);
     if (arkPayload) {
       if(!link?.supportsArkPayments)return;
       try {target=validatePaymentTarget(JSON.parse(arkPayload));if(target.method!=="arkade")return;} catch {return;}
     } else if (barkPayload) {
       if(!link?.supportsBarkPayments)return;
       try {target=validatePaymentTarget(JSON.parse(barkPayload));if(target.method!=="bark")return;} catch {return;}
+    } else if (bitcoinPayload) {
+      if(!link?.supportsBitcoinPayments)return;
+      try {target=validatePaymentTarget(JSON.parse(bitcoinPayload));if(target.method!=="bitcoin")return;} catch {return;}
     }
     // Keep only the ways of paying this chat allows; a request with none left is dropped.
     const invoice = link?.allowsPayment("lightning") ? findEndpoint(request.endpoints, ENDPOINT.bolt11) : undefined;
@@ -359,7 +386,7 @@ export class PaymentDesk {
     if (!target && !invoice && !mints.length) return;
     await this.save({
       target,
-      ask: target?.method === "arkade" || target?.method === "bark" ? this.answering(linkId, request, target.method, amount) : undefined,
+      ask: target?.method === "arkade" || target?.method === "bark" || target?.method === "bitcoin" ? this.answering(linkId, request, target.method, amount) : undefined,
       id: request.id,
       linkId,
       kind: "request",
@@ -395,6 +422,7 @@ export class PaymentDesk {
     if(payment.endpoint[0]===ENDPOINT.usdt) { await this.receiveUsdt(linkId,payment); return; }
     if(payment.endpoint[0]===ENDPOINT.arkade) { await this.receiveArk(linkId,payment); return; }
     if(payment.endpoint[0]===ENDPOINT.bark) { await this.receiveBark(linkId,payment); return; }
+    if(payment.endpoint[0]===ENDPOINT.bitcoin) { await this.receiveBitcoin(linkId,payment); return; }
     const link = this.host.getLink(linkId);
     const known = this.payments.get(payment.id);
     if (known && (known.linkId !== linkId || known.direction !== "in" || known.kind !== "payment")) {
@@ -675,6 +703,60 @@ export class PaymentDesk {
     } finally {this.checkingBark=false;}
   }
 
+  /**
+   * Our on-chain payment is out (broadcast) or confirmed: said in the chat once, and the contact is told the
+   * txid (a hint; their own wallet is the proof). The request it answers is paid only once it confirms.
+   */
+  async recordBitcoin(review:PaymentReview):Promise<void> {
+    if(review.method!=="bitcoin" || !review.linkId || !review.txid || !["submitted","settled","unknown","failed"].includes(review.state))return;
+    const known=this.payments.get(review.id);
+    if(known && (known.linkId!==review.linkId || known.kind!=="payment" || known.direction!=="out"))return;
+    // Failed after it went out (another transaction spent its coins): only what was recorded is updated.
+    if(review.state==="failed"){ if(known && known.state!=="failed")await this.save({...known,state:"failed",error:review.error}); return; }
+    const state=review.state==="settled" ? "settled" : "pending";
+    if(known?.state===state && known.txid===review.txid)return;
+    await this.save({id:review.id,linkId:review.linkId,kind:"payment",direction:"out",amount:review.amount,unit:UNIT,state,createdAt:review.createdAt,requestId:review.requestId,target:review,txid:review.txid});
+    if(state==="settled" && review.requestId){const request=this.payments.get(review.requestId);if(request?.linkId===review.linkId)await this.save({...request,state:"settled",txid:review.txid});}
+    if(!known)await this.host.storeMessage({linkId:review.linkId,id:`me_${review.createdAt}`,text:`${review.amount} ${arkSats(review.network)} on-chain`,sender:"me",timestamp:review.createdAt,via:"datalink",paymentId:review.id});
+    // Replayable; it never causes another spend.
+    const link=this.host.getLink(review.linkId);
+    if(link?.supportsBitcoinPayments)await link.sendPayment({id:review.id,timestamp:review.createdAt,requestId:review.requestId,amount:{value:String(review.amount),asset:UNIT},endpoint:[ENDPOINT.bitcoin,JSON.stringify({txid:review.txid})]});
+  }
+  /** The contact says it paid one of our on-chain requests. Pending until our own wallet sees it confirmed. */
+  private async receiveBitcoin(linkId:string,payment:Payment):Promise<void> {
+    const link=this.host.getLink(linkId),request=payment.requestId ? this.payments.get(payment.requestId) : undefined;
+    if(!link?.supportsBitcoinPayments || request?.target?.method!=="bitcoin" || request.linkId!==linkId || request.direction!=="out" || request.kind!=="request")return;
+    const existing=this.payments.get(payment.id);
+    if(existing && (existing.linkId!==linkId || existing.direction!=="in" || existing.requestId!==request.id))return;
+    if(existing || parseSats(payment.amount.value,payment.amount.asset)!==request.amount)return;
+    let hint:unknown;try {hint=JSON.parse(payment.endpoint[1]).txid;}catch{return;}
+    if(typeof hint!=="string" || !/^[0-9a-f]{64}$/.test(hint))return;
+    const settled=request.state==="settled";
+    await this.save({id:payment.id,linkId,kind:"payment",direction:"in",amount:request.amount,unit:UNIT,state:settled?"settled":"pending",createdAt:payment.timestamp,target:request.target,requestId:request.id,txid:settled?request.txid:hint});
+    await this.host.storeMessage({linkId,id:`peer_${payment.timestamp}`,text:`${request.amount} ${arkSats(request.target.network)} on-chain${settled?"":" — waiting for a confirmation"}`,sender:"peer",timestamp:payment.timestamp,via:"datalink",paymentId:payment.id});
+    await this.reconcileBitcoinReceipts();
+  }
+  /**
+   * An on-chain request is paid when this wallet's source has a confirmed transaction paying the address made
+   * for it at least the amount asked. It settles with or without the contact's receipt; one transaction pays
+   * one request.
+   */
+  async reconcileBitcoinReceipts():Promise<void> {
+    if(this.checkingBitcoin || !this.bitcoin)return;
+    this.checkingBitcoin=true;
+    try {
+      for(const request of [...this.payments.values()]) {
+        if(request.kind!=="request" || request.direction!=="out" || request.state!=="pending" || request.target?.method!=="bitcoin")continue;
+        const claimed=new Set([...this.payments.values()].filter(p=>p.target?.method==="bitcoin" && p.kind==="request" && p.id!==request.id && p.txid).map(p=>p.txid!));
+        const receipt=[...this.payments.values()].find(p=>p.kind==="payment" && p.direction==="in" && p.requestId===request.id && p.linkId===request.linkId);
+        const seen=await this.bitcoin.received(request.target,request.amount,claimed,receipt?.txid).catch(()=>undefined);
+        if(!seen || seen.confirmations<1)continue;
+        await this.save({...this.current(request),state:"settled",txid:seen.txid});
+        for(const payment of this.payments.values())if(payment.kind==="payment" && payment.direction==="in" && payment.requestId===request.id && payment.state==="pending")await this.save({...payment,state:"settled",txid:seen.txid});
+      }
+    } finally {this.checkingBitcoin=false;}
+  }
+
   // -- internals -------------------------------------------------------------------
 
   private async sendEcash(
@@ -750,6 +832,12 @@ export class PaymentDesk {
         if(!link.supportsBarkPayments)continue;
         if(payment.kind==="request" && payment.state==="pending" && payment.target.expiresAt>Date.now())await link.sendPaymentRequest({id:payment.id,timestamp:payment.createdAt,amount:{value:String(payment.amount),asset:UNIT},memo:payment.memo,endpoints:[[ENDPOINT.bark,JSON.stringify(payment.target)]],ask:payment.ask});
         else if(payment.kind==="payment" && payment.state==="settled")await link.sendPayment({id:payment.id,timestamp:payment.createdAt,requestId:payment.requestId,amount:{value:String(payment.amount),asset:UNIT},endpoint:[ENDPOINT.bark,JSON.stringify({txid:payment.txid})]});
+        continue;
+      }
+      if (payment.target?.method === "bitcoin") {
+        if(!link.supportsBitcoinPayments)continue;
+        if(payment.kind==="request" && payment.state==="pending" && payment.target.expiresAt>Date.now())await link.sendPaymentRequest({id:payment.id,timestamp:payment.createdAt,amount:{value:String(payment.amount),asset:UNIT},memo:payment.memo,endpoints:[[ENDPOINT.bitcoin,JSON.stringify(payment.target)]],ask:payment.ask});
+        else if(payment.kind==="payment" && payment.txid && payment.state!=="failed")await link.sendPayment({id:payment.id,timestamp:payment.createdAt,requestId:payment.requestId,amount:{value:String(payment.amount),asset:UNIT},endpoint:[ENDPOINT.bitcoin,JSON.stringify({txid:payment.txid})]});
         continue;
       }
       if (payment.target?.method === "arkade") {

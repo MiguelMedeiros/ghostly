@@ -108,9 +108,9 @@ export interface EngineApi {
   /** Everything held, as tokens: the only backup there is for now. */
   walletExport(): { mint: string; token: string; amount: number }[];
   sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number }): { paymentId: string };
-  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" }): { paymentId: string };
+  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" }): { paymentId: string };
   /** Asks the contact for a way to pay it (Ark, USDT); its answer is a request carrying `askId`. */
-  askToPay(params: { linkId: string; amount: number; method: "arkade" | "usdt" | "bark"; memo?: string; timestamp: number }): { askId: string };
+  askToPay(params: { linkId: string; amount: number; method: "arkade" | "usdt" | "bark" | "bitcoin"; memo?: string; timestamp: number }): { askId: string };
   /** `via: "lightning"`: the Lightning payment the person reviewed, never ecash instead, within `maxFee`. */
   payRequest(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number }): void;
   reclaimPayment(params: { paymentId: string }): void;

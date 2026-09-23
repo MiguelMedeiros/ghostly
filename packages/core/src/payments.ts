@@ -22,6 +22,8 @@ export const ENDPOINT = {
   /** Second's Ark (Bark). Payload in a request: a payment target; in a payment: a receipt hint. */
   bark: "btc-bark/1",
   usdt: "usdt-erc20/1",
+  /** On-chain Bitcoin. Payload in a request: a payment target (a fresh address); in a payment: a receipt hint `{ txid }`. */
+  bitcoin: "btc-onchain/1",
 } as const;
 
 export interface PaymentAmount {
@@ -49,7 +51,7 @@ export interface PaymentAsk {
   id: string;
   timestamp: number;
   amount: PaymentAmount;
-  method: "arkade" | "usdt" | "bark";
+  method: "arkade" | "usdt" | "bark" | "bitcoin";
   memo?: string;
 }
 

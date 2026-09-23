@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@arkade-os/sdk": "0.4.74",
+    "@bitcoindevkit/bdk-wallet-web": "0.3.0",
     "@breeztech/breez-sdk-spark": "0.26.0",
     "@cashu/cashu-ts": "^4.10.2",
     "@ghostly/core": "*",
