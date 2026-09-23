@@ -238,8 +238,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "development",
     note: {
-      en: "Desktop app only, in paired chats.",
-      "pt-br": "Só no app desktop, em chats pareados.",
+      en: "Desktop app only, in paired chats, after a first WebRTC pairing.",
+      "pt-br": "Só no app desktop, em chats pareados, depois de um primeiro pareamento por WebRTC.",
     },
   },
   "103-hyperdht": {
@@ -249,8 +249,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "development",
     note: {
-      en: "Desktop app only, in paired chats.",
-      "pt-br": "Só no app desktop, em chats pareados.",
+      en: "Desktop app only, in paired chats, after a first WebRTC pairing.",
+      "pt-br": "Só no app desktop, em chats pareados, depois de um primeiro pareamento por WebRTC.",
     },
   },
   "200-payments": {
@@ -280,8 +280,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "development",
     note: {
-      en: "Experimental. Payment flows were exercised on a local regtest network only; unilateral exit is still a release gate.",
-      "pt-br": "Experimental. Os pagamentos foram exercitados só numa rede regtest local; a saída unilateral ainda é requisito de lançamento.",
+      en: "Experimental. New profiles get a Bitcoin mainnet wallet automatically; payment flows were exercised only on a local regtest network. Unilateral exit is still a release gate.",
+      "pt-br": "Experimental. Perfis novos ganham automaticamente uma carteira na mainnet do Bitcoin; os pagamentos foram exercitados só numa rede regtest local. A saída unilateral ainda é requisito de lançamento.",
     },
     feature: inApp("wallets", "Wallets", "Carteiras"),
   },

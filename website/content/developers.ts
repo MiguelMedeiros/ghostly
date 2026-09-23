@@ -83,7 +83,7 @@ const en = {
     eyebrow: "03 — Negotiation",
     title: "Two peers. One honest answer.",
     lead: "A conceptual demo of the paired-session rule: each side offers what it has, in its own order; the intersection is ranked by both orders together. If there's nothing in common, the answer is no.",
-    note: "Transport ranking uses the same rule as packages/core/src/pairedTransports.ts. Capabilities are simplified. Paired sessions are in development.",
+    note: "Transport ranking uses the same rule as packages/core/src/pairedTransports.ts. The very first pairing always runs over WebRTC, which is how the peers learn each other's native addresses; the ranking applies after that. Capabilities are simplified. Paired sessions are in development.",
     scenarios: "Try a scenario",
     scenarioNames: {
       match: "Desktop ↔ desktop",
@@ -180,6 +180,7 @@ const en = {
     notes: [
       "Calls are available in chats over the legacy WebRTC profile; paired chats don't have calls yet. Screen sharing needs a computer.",
       "The extension shows the backup screen but runs a single profile; restoring there can't switch to the new profile.",
+      "The CLI speaks the legacy DHT text profile. Its invitation format isn't the app's, so a CLI ↔ app chat needs the keys passed by hand.",
       "Infrastructure you may touch: public Pkarr relays (browsers), Google STUN servers, Cashu mints, Iroh's n0 relays, HyperDHT's public bootstrap nodes, Ark operators, Ethereum RPCs. No TURN server by default.",
     ],
   },
@@ -274,7 +275,7 @@ const ptBr: DevCopy = {
     eyebrow: "03 — Negociação",
     title: "Dois peers. Uma resposta honesta.",
     lead: "Uma demonstração conceitual da regra das sessões pareadas: cada lado oferece o que tem, na própria ordem; a interseção é ordenada pelas duas ordens juntas. Se não houver nada em comum, a resposta é não.",
-    note: "A ordem de transportes usa a mesma regra de packages/core/src/pairedTransports.ts. As capacidades estão simplificadas. Sessões pareadas estão em desenvolvimento.",
+    note: "A ordem de transportes usa a mesma regra de packages/core/src/pairedTransports.ts. O primeiro pareamento sempre roda por WebRTC, que é como os peers aprendem os endereços nativos um do outro; a ordem vale a partir daí. As capacidades estão simplificadas. Sessões pareadas estão em desenvolvimento.",
     scenarios: "Teste um cenário",
     scenarioNames: {
       match: "Desktop ↔ desktop",
@@ -371,6 +372,7 @@ const ptBr: DevCopy = {
     notes: [
       "Chamadas existem nos chats do perfil WebRTC legado; os chats pareados ainda não têm chamadas. Compartilhar a tela exige um computador.",
       "A extensão mostra a tela de backup, mas roda um único perfil; restaurar ali não troca para o perfil novo.",
+      "A CLI fala o perfil de texto legado pela DHT. O formato de convite dela não é o do app, então um chat CLI ↔ app exige passar as chaves à mão.",
       "Infraestrutura que você pode tocar: relays públicos do Pkarr (navegadores), servidores STUN do Google, mints Cashu, relays n0 do Iroh, nós públicos de bootstrap da HyperDHT, operadores Ark, RPCs Ethereum. Sem servidor TURN por padrão.",
     ],
   },

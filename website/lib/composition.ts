@@ -102,8 +102,8 @@ export const PRESETS: { id: PresetId; blocks: (bl: Block) => boolean; title: Loc
     blocks: (bl) => ["core", "keys", "invite", "dhttext", "chat"].includes(bl.id),
     title: { en: "The CLI today", "pt-br": "A CLI hoje" },
     blurb: {
-      en: "The real command-line client: rendezvous, keys, invitations and short text over DHT records. No live transport at all.",
-      "pt-br": "O cliente de linha de comando real: encontro, chaves, convites e textos curtos por registros na DHT. Nenhum transporte ao vivo.",
+      en: "The real command-line client: rendezvous, keys, its own invitations and short text over DHT records. No live transport at all. (Its invitations don't open in the app; interop needs the keys passed by hand.)",
+      "pt-br": "O cliente de linha de comando real: encontro, chaves, convites próprios e textos curtos por registros na DHT. Nenhum transporte ao vivo. (Os convites dela não abrem no app; a interoperabilidade exige passar as chaves à mão.)",
     },
   },
   {
