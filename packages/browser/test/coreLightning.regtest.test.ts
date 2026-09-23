@@ -21,7 +21,8 @@ const settings = (node: Node) => ({ url: CLN_REGTEST[node].websocket as string, 
 const socket: SocketFactory = (url) => new WebSocket(url) as never;
 const connect = (node: Node, overrides: Partial<ReturnType<typeof settings>> = {}) => CoreLightning.connect({ ...settings(node), ...overrides }, undefined, socket);
 
-describe.skipIf(!enabled)("Core Lightning on regtest", () => {
+// Real nodes, runes made through docker exec: seconds, not milliseconds.
+describe.skipIf(!enabled)("Core Lightning on regtest", { timeout: 60_000 }, () => {
   describeLightningProvider("Core Lightning", async () => {
     const provider = connect("alice"), bob = connect("bob");
     return {
