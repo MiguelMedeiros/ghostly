@@ -1,12 +1,12 @@
-/* Each wallet's ink, as a class any element can wear (the cards here, the deck in wallet-deck.css, the chat's payment picker). */
+.wallet-card{--card-rgb:36,211,194;position:relative;min-width:0;min-height:145px;overflow:hidden;border:1px solid rgba(var(--card-rgb),.24);border-radius:15px;padding:13px;text-align:left;cursor:pointer;color:#e9f2f6;background:linear-gradient(135deg,rgba(var(--card-rgb),.16),transparent 76%),#12212c;box-shadow:0 5px 14px #0002;transition:transform 180ms ease,border-color 180ms ease,box-shadow 180ms ease;display:flex;flex-direction:column;align-items:stretch;gap:3px;-webkit-tap-highlight-color:transparent}
+.wallet-card::before{content:"";position:absolute;pointer-events:none;width:155px;height:155px;right:-80px;top:-54px;border:1px solid rgba(var(--card-rgb),.26);border-radius:50%;box-shadow:0 0 0 18px rgba(var(--card-rgb),.035),0 0 0 38px rgba(var(--card-rgb),.025);transform:translate(0,0);transition:transform 220ms ease}
+/* Each wallet's ink, as a class any element can wear (after .wallet-card's own default: the cards here, the deck in wallet-deck.css, the chat's payment picker). */
 .wallet-card-cashu{--card-rgb:36,211,194}
 .wallet-card-lightning{--card-rgb:243,195,87}
 .wallet-card-arkade{--card-rgb:146,167,255}
 .wallet-card-bark{--card-rgb:255,150,110}
 .wallet-card-usdt{--card-rgb:62,220,161}
 .wallet-card-bitcoin{--card-rgb:247,147,26}
-.wallet-card{--card-rgb:36,211,194;position:relative;min-width:0;min-height:145px;overflow:hidden;border:1px solid rgba(var(--card-rgb),.24);border-radius:15px;padding:13px;text-align:left;cursor:pointer;color:#e9f2f6;background:linear-gradient(135deg,rgba(var(--card-rgb),.16),transparent 76%),#12212c;box-shadow:0 5px 14px #0002;transition:transform 180ms ease,border-color 180ms ease,box-shadow 180ms ease;display:flex;flex-direction:column;align-items:stretch;gap:3px;-webkit-tap-highlight-color:transparent}
-.wallet-card::before{content:"";position:absolute;pointer-events:none;width:155px;height:155px;right:-80px;top:-54px;border:1px solid rgba(var(--card-rgb),.26);border-radius:50%;box-shadow:0 0 0 18px rgba(var(--card-rgb),.035),0 0 0 38px rgba(var(--card-rgb),.025);transform:translate(0,0);transition:transform 220ms ease}
 .wallet-card.wallet-card-lightning{background-color:#282315}
 .wallet-card.wallet-card-arkade{background-color:#1b233b}
 .wallet-card.wallet-card-bark{background-color:#33201a}
