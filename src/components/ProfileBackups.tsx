@@ -6,6 +6,7 @@ import { createProfileBackup, restoreProfileBackup } from "../lib/profileBackup"
 import { switchProfile } from "../lib/profiles";
 import { Block, Button, Notice, Row, Section, Segmented, input } from "./wallet/ui";
 import { useRun } from "./wallet/run";
+import { ButtonGroup, FieldGrid, InputGroup, Truncate } from "./layout";
 
 const size = (bytes: number) => (bytes > 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
 const EMPTY_S3: S3Config = { endpoint: "", region: "us-east-1", bucket: "", prefix: "ghostly", accessKeyId: "", secretAccessKey: "" };
@@ -56,14 +57,14 @@ export function ProfileBackups({ canSwitch }: { canSwitch: boolean }) {
       <Row label="Back up" hint="The whole profile, sealed with a passphrase"><Button data-testid="backup-open" onClick={() => toggle("backup")}>{open === "backup" ? "Close" : "Back up…"}</Button></Row>
       {open === "backup" && (
         <Block>
-          <div className="grid grid-cols-2 gap-2 max-sm:grid-cols-1">
+          <FieldGrid>
             <input data-testid="backup-passphrase" type="password" autoComplete="new-password" className={input} placeholder="Passphrase (12+)" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} />
             <input data-testid="backup-confirm" type="password" autoComplete="new-password" className={input} placeholder="Repeat" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
-          </div>
-          <div className="flex gap-2">
+          </FieldGrid>
+          <ButtonGroup>
             <Button variant="primary" data-testid="backup-download" disabled={busy || !ready} onClick={() => void backup("file")}>{busy ? "Working…" : "Download"}</Button>
             {s3 && <Button data-testid="backup-s3" disabled={busy || !ready} onClick={() => void backup("s3")}>Save to S3</Button>}
-          </div>
+          </ButtonGroup>
           <Notice>Whoever has the file and the passphrase can spend its wallets.</Notice>
         </Block>
       )}
@@ -75,36 +76,36 @@ export function ProfileBackups({ canSwitch }: { canSwitch: boolean }) {
           {from === "file" || !s3 ? (
             <input data-testid="restore-file" type="file" accept=".ghostly-backup,application/json" className={input} onChange={(e) => { const f = e.target.files?.[0]; if (f) void f.text().then(setFile); }} />
           ) : (
-            <div className="flex gap-2">
+            <InputGroup>
               {listing?.length ? (
                 <select data-testid="restore-pick" aria-label="Backup to restore" className={input} value={picked} onChange={(e) => setPicked(e.target.value)}>
                   {listing.map((b) => <option key={b.name} value={b.name}>{new Date(b.created || b.modified || 0).toLocaleString()}{b.size ? ` · ${size(b.size)}` : ""}</option>)}
                 </select>
               ) : listing ? <Notice>None yet.</Notice> : null}
               <Button data-testid="restore-list" disabled={busy} onClick={() => void run(async () => { const all = (await s3.list(space())).filter((b) => b.name.endsWith(".ghostly-backup")).reverse(); setListing(all); setPicked(all[0]?.name ?? ""); })}>{listing ? "Refresh" : "List"}</Button>
-            </div>
+            </InputGroup>
           )}
-          <div className="flex gap-2">
+          <InputGroup>
             <input data-testid="restore-passphrase" type="password" autoComplete="current-password" className={input} placeholder="Passphrase" value={restorePass} onChange={(e) => setRestorePass(e.target.value)} />
             <Button variant="primary" data-testid="restore-go" disabled={busy || !restorePass || (from === "file" || !s3 ? !file : !picked)} onClick={() => void restore()}>{busy ? "Restoring…" : "Restore"}</Button>
-          </div>
+          </InputGroup>
           <Notice>Original still here? Keep using just one: they share wallets.</Notice>
         </Block>
       )}
 
-      <Row label="S3 storage" hint={s3 ? s3.description.replace(/^S3 · /, "") : "Off"}><Button data-testid="s3-setup" onClick={() => toggle("s3")}>{open === "s3" ? "Close" : s3 ? "Edit" : "Set up"}</Button></Row>
+      <Row label="S3 storage" hint={s3 ? <Truncate>{s3.description.replace(/^S3 · /, "")}</Truncate> : "Off"}><Button data-testid="s3-setup" onClick={() => toggle("s3")}>{open === "s3" ? "Close" : s3 ? "Edit" : "Set up"}</Button></Row>
       {open === "s3" && (
         <Block>
-          <div className="grid grid-cols-2 gap-2 max-sm:grid-cols-1">
+          <FieldGrid>
             {([["endpoint", "Endpoint (https://…)"], ["bucket", "Bucket"], ["accessKeyId", "Access key"], ["secretAccessKey", "Secret key"], ["region", "Region"], ["prefix", "Folder"]] as const).map(([key, label]) => (
               <input key={key} data-testid={`s3-${key}`} aria-label={label} placeholder={label} spellCheck={false} autoComplete="off" type={key === "secretAccessKey" ? "password" : "text"} className={input}
                 value={draft[key]} onChange={(e) => setDraft({ ...draft, [key]: e.target.value })} />
             ))}
-          </div>
-          <div className="flex gap-2">
+          </FieldGrid>
+          <ButtonGroup>
             <Button variant="primary" data-testid="s3-save" disabled={busy} onClick={() => void run(async () => { const store = new S3Store(draft); await store.test(space()); updateBackupStorage({ backupS3: draft }); setOpen("none"); setDone(`Connected · ${store.description.replace(/^S3 · /, "")}`); })}>{busy ? "Testing…" : "Test and save"}</Button>
             {s3 && <Button variant="danger" onClick={() => { updateBackupStorage({ backupS3: null }); setOpen("none"); }}>Remove</Button>}
-          </div>
+          </ButtonGroup>
           <Notice>Keys stay on this device. The bucket must allow this app in its CORS rules.</Notice>
         </Block>
       )}

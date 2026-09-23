@@ -6,6 +6,7 @@ import { useCountUp } from "../../hooks/useCountUp";
 import { PaymentReview } from "../PaymentReview";
 import { Actions, Amount, Block, Button, Notice, Row, Section, input, type Action } from "./ui";
 import { useRun } from "./run";
+import { ButtonGroup, InputGroup, Truncate } from "../layout";
 
 const TX_LABEL = {
   "lightning-in": "Received over Lightning",
@@ -77,15 +78,15 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: Wall
                 <Button onClick={() => { setInvoice(null); setAmount(""); }}>Done</Button>
               </div>
             ) : invoice ? (
-              <div className="flex gap-4 items-center max-sm:flex-col">
+              <div className="flex flex-wrap gap-4 items-center justify-center">
                 <div className="bg-white rounded-xl p-2.5 shrink-0"><QRCodeSVG value={invoice.toUpperCase()} size={168} /></div>
-                <div className="min-w-0 flex-1 space-y-2.5 max-sm:w-full">
+                <div className="min-w-0 flex-[1_1_14rem] space-y-2.5">
                   <p className="text-text-primary text-sm">Invoice for <b>{Number(amount).toLocaleString()} sats</b></p>
                   <code className="block bg-surface-alt rounded-lg p-2 text-[10px] text-text-muted font-mono break-all max-h-20 overflow-y-auto select-all" data-testid="wallet-invoice">{invoice}</code>
-                  <div className="flex gap-2">
+                  <ButtonGroup>
                     <Button variant="primary" onClick={() => { void navigator.clipboard.writeText(invoice); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>{copied ? "Copied" : "Copy invoice"}</Button>
                     <Button onClick={() => setInvoice(null)}>New amount</Button>
-                  </div>
+                  </ButtonGroup>
                   <Notice>Waiting for the payment…</Notice>
                 </div>
               </div>
@@ -104,10 +105,10 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: Wall
             {quote ? (
               <>
                 <p className="text-text-primary text-sm">Pay <b>{quote.amount.toLocaleString()} sats</b><span className="text-text-muted"> + up to {quote.feeReserve.toLocaleString()} in fees</span></p>
-                <div className="flex gap-2">
-                  <Button variant="primary" className="flex-1" disabled={busy} onClick={() => void run(async () => { const paid = await wallet.payQuote(quote.quote, quote.mint); setQuote(null); setPayInput(""); setNotice(paid ? "Paid." : "The payment is still pending at the mint."); })}>{busy ? "Paying…" : "Pay"}</Button>
+                <ButtonGroup fill>
+                  <Button variant="primary" disabled={busy} onClick={() => void run(async () => { const paid = await wallet.payQuote(quote.quote, quote.mint); setQuote(null); setPayInput(""); setNotice(paid ? "Paid." : "The payment is still pending at the mint."); })}>{busy ? "Paying…" : "Pay"}</Button>
                   <Button onClick={() => setQuote(null)}>Cancel</Button>
-                </div>
+                </ButtonGroup>
               </>
             ) : (
               <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); void run(async () => { if (isToken) { const received = await wallet.receiveToken(payInput); setPayInput(""); setNotice(`Redeemed ${received.toLocaleString()} sats.`); } else setQuote(await wallet.quoteInvoice(payInput)); }); }}>
@@ -131,7 +132,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: Wall
 
         {action === "history" && (
           <div className="bg-surface rounded-xl p-4 space-y-2 animate-fade-in" data-testid="wallet-history-list">
-            <div className="flex items-center justify-between text-xs text-text-muted">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-text-muted">
               <span>{state.history.length === 0 ? "Nothing yet" : `${state.history.length} movement${state.history.length === 1 ? "" : "s"}`}</span>
               <span data-testid="wallet-fees-paid">Fees paid: {state.feesPaid.toLocaleString()} sats</span>
             </div>
@@ -173,17 +174,17 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: Wall
             <Block><Notice>Mints hold your sats. Keep pocket money only.</Notice></Block>
             {state.mints.map((mint, index) => (
               <Row key={mint.url} testId="mint-row" label={<>{mint.name}{index === 0 && <span className="text-accent ml-2 text-[10px] uppercase tracking-wider">Primary</span>}</>}
-                hint={<><span data-testid="mint-fees">{mint.info ? shortFee(mint.info.inputFeePpk) : "Not reachable right now"}</span> · {mint.url.replace(/^https?:\/\//, "")}</>}>
-                <span className="text-sm text-text-secondary tabular-nums mr-1">{mint.balance.toLocaleString()} sats</span>
+                hint={<><span data-testid="mint-fees">{mint.info ? shortFee(mint.info.inputFeePpk) : "Not reachable right now"}</span><Truncate className="font-mono" title={mint.url}>{mint.url.replace(/^https?:\/\//, "")}</Truncate></>}
+                value={`${mint.balance.toLocaleString()} sats`}>
                 {index !== 0 && <Button onClick={() => void run(() => wallet.setPrimaryMint(mint.url))}>Make primary</Button>}
                 <Button variant="danger" onClick={() => void run(() => wallet.removeMint(mint.url))} aria-label={`Remove ${mint.name}`}>Remove</Button>
               </Row>
             ))}
             <Block>
-              <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); void run(async () => { await wallet.addMint(mintUrl); setMintUrl(""); }); }}>
+              <InputGroup as="form" onSubmit={(e) => { e.preventDefault(); void run(async () => { await wallet.addMint(mintUrl); setMintUrl(""); }); }}>
                 <input data-testid="wallet-mint-url" className={`${input} font-mono text-xs`} placeholder="Add a mint: https://…" value={mintUrl} onChange={(e) => setMintUrl(e.target.value)} />
                 <Button type="submit" variant="primary" data-testid="wallet-add-mint" disabled={busy || !mintUrl.trim()}>Add</Button>
-              </form>
+              </InputGroup>
             </Block>
           </Section>
           <Section title="Settings">

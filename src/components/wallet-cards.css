@@ -1,4 +1,5 @@
-.wallet-card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;isolation:isolate}
+/* As many cards per line as fit at 128px each: two in a phone-wide column, one line of four on a wide one. */
+.wallet-card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,128px),1fr));gap:12px;isolation:isolate}
 .wallet-card{--card-rgb:36,211,194;position:relative;min-width:0;min-height:145px;overflow:hidden;border:1px solid rgba(var(--card-rgb),.24);border-radius:15px;padding:13px;text-align:left;cursor:pointer;color:#e9f2f6;background:linear-gradient(135deg,rgba(var(--card-rgb),.16),transparent 76%),#12212c;box-shadow:0 5px 14px #0002;transition:transform 180ms ease,border-color 180ms ease,box-shadow 180ms ease;display:flex;flex-direction:column;align-items:stretch;gap:3px;-webkit-tap-highlight-color:transparent}
 .wallet-card::before{content:"";position:absolute;pointer-events:none;width:155px;height:155px;right:-80px;top:-54px;border:1px solid rgba(var(--card-rgb),.26);border-radius:50%;box-shadow:0 0 0 18px rgba(var(--card-rgb),.035),0 0 0 38px rgba(var(--card-rgb),.025);transform:translate(0,0);transition:transform 220ms ease}
 .wallet-card-lightning{--card-rgb:243,195,87;background-color:#282315}
@@ -14,7 +15,8 @@
 .wallet-card-status{font-size:9px;line-height:1.4;letter-spacing:.025em;color:rgb(var(--card-rgb));margin-top:7px;position:relative}
 .wallet-card:focus-visible{outline:2px solid #f2ffff;outline-offset:3px}
 @media(hover:hover){.wallet-card:hover{transform:translateY(-3px);border-color:rgba(var(--card-rgb),.7)}.wallet-card:hover::before{transform:translate(-5px,5px)}}
-@media(max-width:360px){.wallet-card-grid{gap:8px}.wallet-card{padding:11px;min-height:140px}.wallet-card-balance{font-size:15px}}
+/* The page column, not the window, decides (components/layout/Page.tsx). */
+@container (max-width:360px){.wallet-card-grid{gap:8px}.wallet-card-grid .wallet-card{padding:11px;min-height:132px}.wallet-card-grid .wallet-card-balance{font-size:15px}}
 @media(prefers-reduced-motion:reduce){.wallet-card,.wallet-card::before,.wallet-card-selected{transition:none!important;transform:none!important}}
 [data-reduce-motion=true] .wallet-card,[data-reduce-motion=true] .wallet-card::before,[data-reduce-motion=true] .wallet-card-selected{transition:none!important;transform:none!important}
 /* The same cards, small, where a payment is chosen in the chat. */
