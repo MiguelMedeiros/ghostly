@@ -135,6 +135,9 @@ test("a bare SSH key is proven on the device, and another key's signature is ref
   await expect(received).toHaveAttribute("data-status", "verified");
   await received.getByText("Details").click();
   await expect(received).toContainText("SSH signature (nistp256)");
-  await expect(received.getByTestId("chat-identity-recheck")).toHaveCount(0);
+  // A re-check looks for a revocation of the proof key; the signature itself needs no forge.
+  await received.getByTestId("chat-identity-recheck").click();
+  await expect(received.getByTestId("chat-identity-recheck")).toHaveText("Check again");
+  await expect(received).toHaveAttribute("data-status", "verified");
   expect(asked).toEqual([]);
 });
