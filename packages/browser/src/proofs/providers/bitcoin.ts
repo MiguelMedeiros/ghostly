@@ -13,9 +13,12 @@ import { BITCOIN_PROOF_LIMITS, BITCOIN_WALLET_GUIDES, guidesFor, type BitcoinWal
  * is verified as such and labelled "test network" wherever it is shown.
  *
  * TODO(ghostly-wallet signer): "Sign with my Ghostly wallet" belongs here as an `in-app` signer once an
- * on-chain source can sign messages. `OnchainProvider` (engine/paymentAdapters/providers/onchain.ts) has
- * no such method today; Bitcoin Core's `signmessage` works for legacy addresses only and BDK exposes no
- * message signing. It must show the statement and ask before signing, never sign silently.
+ * on-chain source can sign messages. None can today: `OnchainProvider` (engine/paymentAdapters/providers/
+ * onchain.ts) has no such method, Bitcoin Core's `signmessage` is legacy-only, and bdk-wallet-web has no
+ * message signing. The BDK source keeps its phrase in the engine, so the path is an optional
+ * `signMessage?(address, message)` on `OnchainProvider`, implemented in bdk.ts with a BIP-322 simple
+ * witness for its own P2WPKH/P2TR address, exposed through an engine RPC that shows the statement and
+ * asks first; never sign silently, and never hand the key to the UI.
  */
 
 export interface BitcoinEvidence {
