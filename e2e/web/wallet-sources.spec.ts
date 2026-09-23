@@ -13,11 +13,14 @@ test("the Lightning card starts on the Cashu mints and offers only what this mod
   await expect(source.getByTestId("lightning-source-current")).toContainText("Cashu mints");
   await expect(source.getByTestId("lightning-source-current")).toContainText("Default");
   await expect(alice.page.getByTestId("wallet-card-lightning")).toContainText("Invoices via Cashu");
-  // Without the test flag the fakes are not there, in either mode.
-  await expect(source.getByTestId("lightning-source-select").locator("option")).toHaveText(["1 available…", /Cashu mints/]);
-  await useTestnet(alice);
-  await openWallet(alice, "lightning");
-  await expect(alice.page.getByTestId("lightning-source-select").locator("option")).toHaveCount(2);
+  // Without the test flag the fakes are not there, in either mode. (Counted loosely: every real provider adds one.)
+  for (const mode of ["mainnet", "testnet"]) {
+    if (mode === "testnet") { await useTestnet(alice); await openWallet(alice, "lightning"); }
+    const options = alice.page.getByTestId("lightning-source-select").locator("option");
+    await expect(options.first()).toHaveText(/^\d+ available…$/);
+    await expect(options.filter({ hasText: "Cashu mints" })).toHaveCount(1);
+    await expect(options.filter({ hasText: "(test)" })).toHaveCount(0);
+  }
 });
 
 test("a Lightning source is picked per mode: invoices go through it, and Mainnet keeps its own", async ({ peer }) => {
