@@ -42,7 +42,7 @@ Valid proof plus participation possession succeeds; wrong audience/key/channel, 
 
 ## References
 
-[Peer keys](02-peer-keys.md), [Nostr](301-nostr.md), [Pubky](302-pubky.md), [Keet](303-keet.md).
+[Peer keys](02-peer-keys.md), [Nostr](301-nostr.md), [Pubky](302-pubky.md), [Keet](303-keet.md), [Domain](3xx-domain.md).
 
 ## Implementation follow-up — 2026-09-20
 
@@ -71,3 +71,9 @@ One line of UTF-8, no trailing newline, space-free fields in a fixed order (inje
 **Status shown.** Verified, expired (binding or evidence expiry), withdrawn (the sharer's participation-authenticated notice; copies cannot be erased), revoked by its owner (the Pkarr record), could not be confirmed (a failed re-check of a provider whose evidence can go stale, such as a DNS record), and from a previous key (another participation key). The category is always shown: *self-custodied* ("their own key") or *provider-attested* ("attested by <issuer>"). A proof establishes control under its scheme, not a civil identity. Removing a proof from the profile withdraws it from every chat and revokes it.
 
 **Tests.** Core vectors and exchange (replay, restart, other session, window, expiry, withdrawal, queued share), the provider contract suite `describeIdentityProof` on every provider and fake, and e2e with two contacts (`e2e/web/identity-proofs.spec.ts`, `identity-proof-kinds.spec.ts`).
+
+### Providers
+
+Providers under the [provider contract](../../packages/browser/src/proofs/PROOFS.md), one line each:
+
+- **Domain** (`domain`, experimental, [draft 3xx](3xx-domain.md)): a DNS TXT record at `_ghostly.<domain>` or `/.well-known/ghostly.json` names the proof key and the statement id, published once; NIP-05 users can instead sign with the Nostr key their `nostr.json` names for `_`. Looked up through a DNS-over-HTTPS resolver the contact chooses; web servers on private addresses are never contacted; re-checked after a day, so removing the record withdraws the proof.
