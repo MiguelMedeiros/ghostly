@@ -1,0 +1,50 @@
+/* The wallet deck (components/WalletDeck.tsx). The deck wears the chosen card's colour class (wallet-cards.css
+   sets --card-rgb per wallet), so the glow behind it and the dots below it take that card's ink. */
+/* The deck takes the whole column (the page's container), wider than the panel below it, up to 960px. */
+.wallet-deck{--deck-ease:cubic-bezier(.22,1,.36,1);--bleed:min(100cqw,960px);position:relative;display:grid;gap:14px;isolation:isolate;width:var(--bleed);margin-inline:calc((var(--bleed) - 100%) / -2)}
+.wallet-deck-glow{position:absolute;left:0;right:0;top:-12%;height:124%;z-index:-1;pointer-events:none;background:rgb(var(--card-rgb));opacity:.13;-webkit-mask-image:radial-gradient(ellipse closest-side at 50% 50%,#000 0%,rgba(0,0,0,.55) 40%,transparent 100%);mask-image:radial-gradient(ellipse closest-side at 50% 50%,#000 0%,rgba(0,0,0,.55) 40%,transparent 100%);transition:background-color .6s var(--deck-ease)}
+
+/* Every card, in either layout. Its own gradient and ink; the balance scales with the card. */
+.wallet-deck-track{position:relative;outline:none}
+.wallet-deck-card{--from:#0f3b44;--to:#0b1f2a;position:absolute;left:50%;top:50%;width:var(--card-w);height:var(--card-h);margin:calc(var(--card-h) / -2) 0 0 calc(var(--card-w) / -2);box-sizing:border-box;border-radius:clamp(14px,calc(var(--card-w) * .06),18px);padding:clamp(12px,calc(var(--card-w) * .065),18px);display:grid;grid-template-rows:auto 1fr auto;align-items:start;text-align:left;color:#f2f8fb;cursor:pointer;-webkit-tap-highlight-color:transparent;
+ background:radial-gradient(circle at 85% 10%,rgba(var(--card-rgb),.3),transparent 55%),linear-gradient(135deg,var(--from),var(--to));border:1px solid rgba(var(--card-rgb),.32);box-shadow:0 22px 44px -26px rgba(0,0,0,.9);
+ transform:translate3d(var(--x),var(--y),0) rotateY(var(--ry)) scale(var(--s));filter:brightness(var(--b));
+ transition:transform .55s var(--deck-ease),filter .55s var(--deck-ease),border-color .4s;will-change:transform}
+.wallet-deck-card::after{content:"";position:absolute;inset:-1px;border-radius:inherit;pointer-events:none;opacity:0;box-shadow:0 0 56px -10px rgba(var(--card-rgb),.7),0 36px 70px -30px rgba(0,0,0,.95);transition:opacity .5s var(--deck-ease)}
+.wallet-deck-card[data-active=true]{border-color:rgba(var(--card-rgb),.85)}
+.wallet-deck-card[data-active=true]::after{opacity:1}
+.wallet-deck-card:focus-visible{outline:2px solid #f2ffff;outline-offset:4px}
+.wallet-deck .wallet-card-cashu{--from:#0f3b44;--to:#0b1f2a}
+.wallet-deck .wallet-card-lightning{--from:#4a3510;--to:#1f1a0e}
+.wallet-deck .wallet-card-arkade{--from:#2a2d5c;--to:#141630}
+.wallet-deck .wallet-card-bark{--from:#4d2519;--to:#20120e}
+.wallet-deck .wallet-card-usdt{--from:#0f4034;--to:#0a1f1a}
+.wallet-deck .wallet-card-bitcoin{--from:#43250c;--to:#1d140b}
+.wallet-deck-card-top{display:flex;align-items:center;justify-content:space-between;gap:9px;min-width:0}
+.wallet-deck-card-glyph{display:grid;place-items:center;width:34px;height:34px;border-radius:9px;color:rgb(var(--card-rgb));background:rgba(var(--card-rgb),.13);border:1px solid rgba(var(--card-rgb),.22)}
+.wallet-deck-card-glyph>svg{width:22px;height:22px}
+.wallet-deck-card-name{font-size:clamp(12px,calc(var(--card-w) * .06),14px);font-weight:650;letter-spacing:-.005em;white-space:nowrap}
+.wallet-deck-card-balance{align-self:end;font-size:clamp(16px,calc(var(--card-w) * .085),24px);font-weight:600;letter-spacing:-.025em;line-height:1.2;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;padding-bottom:6px}
+.wallet-deck-card-foot{display:flex;align-items:baseline;justify-content:space-between;gap:8px;min-width:0}
+.wallet-deck-card-detail{font-size:11px;line-height:1.35;color:rgba(255,255,255,.68);min-width:0}
+.wallet-deck-card-status{font-size:10px;line-height:1.4;letter-spacing:.03em;color:rgb(var(--card-rgb));white-space:nowrap;flex-shrink:0}
+
+/* Wide column: the fan. The cards sit on one spot and spread by the offsets WalletDeck computes; the chosen one lifts. */
+.wallet-deck[data-mode=fan] .wallet-deck-track{height:calc(var(--card-h) + 48px);perspective:1600px;overflow:visible}
+@media(hover:hover){.wallet-deck[data-mode=fan] .wallet-deck-card:hover:not([data-active=true]){filter:brightness(1)}}
+
+/* Narrow column: a snapping track. The chosen card is the one at rest in the centre. */
+.wallet-deck[data-mode=track] .wallet-deck-track{display:flex;gap:12px;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;padding:10px calc(var(--deck-w) * .12);scrollbar-width:none;-webkit-overflow-scrolling:touch;cursor:grab}
+.wallet-deck[data-mode=track] .wallet-deck-track::-webkit-scrollbar{display:none}
+.wallet-deck[data-mode=track] .wallet-deck-track[data-dragging=true]{scroll-snap-type:none;cursor:grabbing;user-select:none}
+.wallet-deck[data-mode=track] .wallet-deck-card{position:static;flex:0 0 var(--card-w);width:auto;height:auto;aspect-ratio:1.586;margin:0;scroll-snap-align:center;transform:none;scale:.94;filter:brightness(.85);transition:scale .4s var(--deck-ease),filter .4s var(--deck-ease),border-color .4s}
+.wallet-deck[data-mode=track] .wallet-deck-card[data-active=true]{scale:1;filter:none}
+.wallet-deck[data-mode=track] .wallet-deck-card::after{box-shadow:0 0 40px -10px rgba(var(--card-rgb),.6),0 20px 40px -24px rgba(0,0,0,.9)}
+.wallet-deck-dots{display:none;justify-content:center;gap:8px}
+.wallet-deck[data-mode=track] .wallet-deck-dots{display:flex}
+.wallet-deck-dots span{width:8px;height:8px;border-radius:999px;background:var(--theme-border-bright);transition:width .3s var(--deck-ease),background-color .3s}
+.wallet-deck-dots span[data-on=true]{width:22px;background:rgb(var(--card-rgb))}
+
+/* Reduced motion: the final frame, at once. Everything still fans, snaps and selects. */
+@media(prefers-reduced-motion:reduce){.wallet-deck-card,.wallet-deck-card::after,.wallet-deck-glow,.wallet-deck-dots span{transition:none!important}.wallet-deck-track{scroll-behavior:auto}}
+[data-reduce-motion=true] .wallet-deck-card,[data-reduce-motion=true] .wallet-deck-card::after,[data-reduce-motion=true] .wallet-deck-glow,[data-reduce-motion=true] .wallet-deck-dots span{transition:none!important}
