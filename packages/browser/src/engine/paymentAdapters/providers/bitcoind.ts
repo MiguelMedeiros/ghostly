@@ -219,7 +219,7 @@ export class BitcoindOnchain implements OnchainProvider {
       const seen = rejected ? await this.known(prepared.txid) : await this.known(prepared.txid).catch(() => undefined);
       if (seen) {
         if (["mempool", "confirmed"].includes((await this.status(prepared)).state)) return prepared.txid;
-        throw new Error(`Your node refused to send it again: ${error.message}`, { cause: error });
+        throw error; // Not a NothingSpentError: an unknown outcome, reconciled by txid.
       }
       if (seen === false) await this.unlock(this.outpoints(tx)).catch(() => {});
       throw new NothingSpentError(`Your node did not send it: ${error.message}`);
