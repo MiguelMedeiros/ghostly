@@ -14,7 +14,7 @@
 
 ## Scope
 
-An optional proof, shared with one contact at a time, that the person can sign with the key behind a Bitcoin address. The person signs Ghostly's proof statement (WISP 300) in their own wallet and pastes the signature; the contact's app verifies it locally, with no network access, no blockchain lookup and no third party.
+An optional proof that the person can sign with the key behind a Bitcoin address. It follows WISP 300's two layers: the person signs, once, in their own wallet, the **binding statement** by which the address authorizes their Ghostly profile key for a validity window; per chat, the app presents that binding with a presentation signed by the profile key and bound to the chat, the contact and a fresh challenge, without asking the wallet again. Sharing stays per contact. The contact's app verifies the address signature over the binding locally, with no network access, no blockchain lookup and no third party. This document covers only the address signature over the binding; the binding and presentation formats are WISP 300's.
 
 **What it does not prove**, and every surface that shows the proof must say so: that the address holds any balance, now or ever; that the person sent or received any past payment; that they would pay, or spend from the address at all. A message signature is also obsolete the moment it is made: the key may be shared, sold or lost later (BIP-322, "Motivation").
 
@@ -37,7 +37,7 @@ Two formats wallets produce today; a verifier accepts exactly these and nothing 
 
 ## Statement and signing
 
-The signed message is Ghostly's proof statement (WISP 300) exactly as shown, with the address as the external identity, in UTF-8. Its fields are ASCII, which matters for hardware wallets that restrict message characters. Wallets differ in whether they trim whitespace (Sparrow trims the message), so the statement has none at either end.
+The signed message is WISP 300's binding statement exactly as shown, with the address as the external identity, in UTF-8. It is signed once per address and profile key, not per chat or contact. Its fields are ASCII, which matters for hardware wallets that restrict message characters. Wallets differ in whether they trim whitespace (Sparrow trims the message), so the statement has none at either end.
 
 Person-facing steps per wallet live in `packages/browser/src/proofs/bitcoinWallets.ts` and are shown filtered by the address type: Sparrow (BIP322 (Simple) for software wallets; hardware wallets there sign only the Electrum format), Bitcoin Core and Electrum (legacy only, so a legacy address), COLDCARD (BIP-322 per its firmware guide), Trezor Suite (legacy, Legacy account), and a generic BIP-322 path.
 
