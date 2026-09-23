@@ -172,6 +172,34 @@ a payment the mint has to make, not one it already knows. On regtest an Ark batc
 and coins in it become recoverable: the test takes the Recover action when it shows, and allows for the
 few sats that batch costs.
 
+### Breez (Spark) on Breez's regtest
+
+Breez's nodeless SDK is the `breez` Lightning source (Testnet only for now). Its regtest is hosted by Breez and
+Lightspark: **nothing runs locally, no API key**, worthless sats. The Ghostly side makes fresh wallets each run;
+the other side of every payment is a counterpart wallet the test runs from Node with the SDK's Node build
+(`support/breez.ts`, wallets under the system temp folder, `ghostly-breez-e2e/`).
+
+The counterpart is funded from Lightspark's public regtest faucet (the one behind
+https://app.lightspark.com/regtest-faucet, no login) only when it holds fewer than 3,000 sats. The faucet
+rate-limits by IP, so reuse one funded counterpart across runs: put its recovery phrase in
+`GHOSTLY_BREEZ_COUNTERPART` (never commit or print it; without it a new one is made and funded each run).
+
+```bash
+export GHOSTLY_BREEZ_COUNTERPART="<twelve words of a funded regtest wallet>"   # optional
+GHOSTLY_BREEZ_TESTNET=1 npx vitest run test/breez.testnet.test.ts                # in packages/browser: the provider contract on regtest
+npm run build:web && npx vite preview web --port 44401 --strictPort &
+E2E_WEB_URL=http://localhost:44401 GHOSTLY_BREEZ_TESTNET=1 npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/breez-wallet.spec.ts
+npm run build:extension && GHOSTLY_BREEZ_TESTNET=1 npx playwright test -c e2e/playwright.config.ts --project=extension e2e/extension/breez.spec.ts
+```
+
+The vitest run is the shared `describeLightningProvider` contract against real regtest: an invoice of ours paid by
+the counterpart, one of the counterpart's paid by us, one too big refused as nothing spent. The Playwright run
+has Alice and Bob each make a Breez wallet in the app (WebAssembly in the page), Alice receive 1,000 sats from the
+counterpart and pay it 200 from Send, and Bob's chat request of 150 paid by Alice's Breez wallet into Bob's; both
+balances are checked. The extension test makes a wallet in the offscreen document (where the WebAssembly runs
+there) and moves sats in and out. The request is paid through the bubble's "Copy invoice" and the Lightning card: the bubble's
+own review pays Cashu only for now.
+
 ### Bark (Second's Ark) on regtest
 
 Bark is a different Ark server from Arkade and cannot pay it, so it has its own stack: bitcoind 31, captaind 0.7.1
