@@ -3,6 +3,7 @@
 import { useRef } from "react";
 import { motion, useScroll, useTransform } from "motion/react";
 import { useCalm } from "@/lib/useCalm";
+import "@/app/statement.css";
 
 /**
  * A second of silence between the acts: one sentence gets the whole screen,

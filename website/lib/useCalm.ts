@@ -1,19 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useMediaQuery } from "./useMediaQuery";
+
+export const CALM_QUERY = "(prefers-reduced-motion: reduce)";
 
 /**
- * prefers-reduced-motion, read after hydration so the first client render
- * matches the server's (which can't know the preference).
+ * prefers-reduced-motion. False on the server; the layout script adds
+ * `html.calm` before hydration so CSS can carry the still layout meanwhile.
  */
 export function useCalm(): boolean {
-  const [calm, setCalm] = useState(false);
-  useEffect(() => {
-    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const update = () => setCalm(query.matches);
-    update();
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }, []);
-  return calm;
+  return useMediaQuery(CALM_QUERY);
 }

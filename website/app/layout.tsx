@@ -143,7 +143,7 @@ export default function RootLayout({
       <head>
         {/* Scenes only hold the screen when scripts run; without them every step reads in order. */}
         <Script id="js-flag" strategy="beforeInteractive">
-          {"document.documentElement.classList.add('js')"}
+          {"var d=document.documentElement;d.classList.add('js');try{if(matchMedia('(prefers-reduced-motion: reduce)').matches)d.classList.add('calm');if(matchMedia('(max-width: 860px)').matches)d.dataset.orient='portrait'}catch(e){}"}
         </Script>
         <Script
           src="https://www.googletagmanager.com/gtag/js?id=G-KXK4ESQ5DZ"

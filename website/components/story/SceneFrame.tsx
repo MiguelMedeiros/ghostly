@@ -1,9 +1,9 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { motion, motionValue, useInView, useScroll, useTransform, type MotionValue } from "motion/react";
+import { motion, motionValue, useInView, useMotionValueEvent, useScroll, useTransform, type MotionValue } from "motion/react";
 import { useCalm } from "@/lib/useCalm";
-import { orientationOf, stepAt, stepOf, usePortrait, type Camera } from "@/components/home/stage";
+import { EXIT, orientationOf, stepAt, stepOf, usePortrait, type Camera } from "@/components/home/stage";
 import { BLOCKING, ROOMS, valueAt, type Chapter } from "./poses";
 
 /**
@@ -94,6 +94,16 @@ export function SceneFrame({
   }, [calm, n, p, scrollYProgress]);
 
   const { camera, focus } = useBlocking(p, chapter, portrait, calm);
+
+  // The chapter's furniture (its picture and its panel) fades in as the chapter
+  // pins and is gone before the actors start their glide at EXIT, so a hand-off
+  // shows only the backdrop and the two ghosts. While it is invisible it takes
+  // no clicks.
+  const enter = useTransform(p, [0, 0.04], [0, 1]);
+  const leave = useTransform(p, [EXIT - 0.04, EXIT], [1, 0]);
+  const furniture = useTransform([enter, leave], ([a, b]) => Math.min(a as number, b as number));
+  const [hidden, setHidden] = useState(false);
+  useMotionValueEvent(furniture, "change", (v) => setHidden(v < 0.05));
   const state = useMemo<SceneState>(() => ({ p, step, n, still: false, portrait, camera, focus }), [p, step, n, portrait, camera, focus]);
 
   const jump = (i: number) => {
@@ -148,11 +158,14 @@ export function SceneFrame({
         style={{ ...style, height: `${100 + n * length}svh` }}
       >
         <div className="scene-sticky">
-          <div className="scene-visual" aria-hidden="true">
+          <motion.div className="scene-visual" aria-hidden="true" style={{ opacity: furniture }}>
             {visual}
-          </div>
-          <motion.div className="scene-copy">
-            <h2 className="eyebrow">{eyebrow}</h2>
+          </motion.div>
+          <motion.div className="scene-wash" aria-hidden="true" style={{ opacity: furniture }} />
+          <motion.div className="scene-copy" data-hidden={hidden} style={{ opacity: furniture }}>
+            <h2 className="eyebrow" id={`${id}-eyebrow`}>
+              {eyebrow}
+            </h2>
             <ol className="scene-steps">
               {steps.map((s, i) => (
                 <li key={i} className="scene-step" data-active={i === step} aria-current={i === step ? "step" : undefined}>
@@ -162,7 +175,7 @@ export function SceneFrame({
                 </li>
               ))}
             </ol>
-            <div className="scene-progress" role="group" aria-label={label}>
+            <div className="scene-progress" role="group" aria-labelledby={`${id}-eyebrow`}>
               {steps.map((s, i) => (
                 <button key={i} type="button" data-on={i <= step} aria-current={i === step ? "step" : undefined} onClick={() => jump(i)}>
                   <span className="sr-only">

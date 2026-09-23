@@ -11,13 +11,15 @@ const CASPER = ["chat/1", "files/2", "payments-cashu/1", "webrtc/1"];
 const SHARED = BOO.filter((c) => CASPER.includes(c));
 
 type Layout = { row: number; tagW: number; font: number; boo: [number, number]; casper: [number, number]; plan: [number, number]; planW: number; planH: number; booRows: string[] };
-const L: Layout = { row: 40, tagW: 220, font: 12.5, boo: [640, 310], casper: [1060, 310], plan: [1000, 650], planW: 240, planH: 132, booRows: BOO };
-const P: Layout = { row: 34, tagW: 168, font: 11, boo: [12, 230], casper: [210, 230], plan: [195, 330], planW: 210, planH: 116, booRows: BOO.slice(0, 6) };
+// Columns hang under the actors (heads at y 190 / 150 in poses.ts); the plan lands bottom right, clear of both columns.
+const L: Layout = { row: 40, tagW: 200, font: 14, boo: [720, 430], casper: [1040, 430], plan: [1080, 680], planW: 240, planH: 132, booRows: BOO };
+const P: Layout = { row: 34, tagW: 168, font: 12, boo: [12, 316], casper: [210, 316], plan: [195, 400], planW: 210, planH: 116, booRows: BOO.slice(0, 5) };
 
-function Tag({ p, n, x, y, w, font, text, shared, i, side }: { p: MotionValue<number>; n: number; x: number; y: number; w: number; font: number; text: string; shared: boolean; i: number; side: "l" | "r" }) {
+function Tag({ p, n, x, y, w, font, text, shared, i, side, portrait }: { p: MotionValue<number>; n: number; x: number; y: number; w: number; font: number; text: string; shared: boolean; i: number; side: "l" | "r"; portrait: boolean }) {
   const appear = useStep(p, 0, n, [0.05 + i * 0.07, 0.2 + i * 0.07], [0, 1]);
   const keep = useStep(p, 1, n, [0.1, 0.5], [1, shared ? 1 : 0.28]);
-  const fade = useStep(p, 2, n, [0.1, 0.5], [1, 0.25]);
+  // In step 3 the plan takes over; on phones nothing may linger behind the sheet.
+  const fade = useStep(p, 2, n, [0.1, 0.5], [1, shared && !portrait ? 0.25 : 0]);
   const opacity = useTransform([appear, keep, fade], ([a, k, f]) => (a as number) * (k as number) * (f as number));
   const glow = useStep(p, 1, n, [0.15 + i * 0.05, 0.4 + i * 0.05], [0, shared ? 1 : 0]);
   const strike = useStep(p, 1, n, [0.2, 0.45], [0, 1]);
@@ -49,10 +51,10 @@ function Visual({ labels }: { labels: { boo: string; casper: string; plan: strin
   return (
     <Stage portrait={portrait} camera={camera} light={{ color: "#4ade80", opacity: light }}>
       <StaticActors chapter="agree" />
-      <text x={C.boo[0]} y={booLabelY} fontSize={portrait ? 11 : 13} fill="#a3b0c2" className="mono">
+      <text x={C.boo[0]} y={booLabelY} fontSize={portrait ? 12 : 14} fill="#a3b0c2" className="mono">
         {labels.boo}
       </text>
-      <text x={C.casper[0] + C.tagW} y={casperLabelY} fontSize={portrait ? 11 : 13} fill="#a3b0c2" textAnchor="end" className="mono">
+      <text x={C.casper[0] + C.tagW} y={casperLabelY} fontSize={portrait ? 12 : 14} fill="#a3b0c2" textAnchor="end" className="mono">
         {labels.casper}
       </text>
 
@@ -68,15 +70,15 @@ function Visual({ labels }: { labels: { boo: string; casper: string; plan: strin
       })}
 
       {C.booRows.map((c, i) => (
-        <Tag key={c} p={p} n={n} x={C.boo[0]} y={C.boo[1] + i * C.row} w={C.tagW} font={C.font} text={c} shared={SHARED.includes(c)} i={i} side="l" />
+        <Tag key={c} p={p} n={n} x={C.boo[0]} y={C.boo[1] + i * C.row} w={C.tagW} font={C.font} text={c} shared={SHARED.includes(c)} i={i} side="l" portrait={portrait} />
       ))}
       {casperRows.map((c, i) => (
-        <Tag key={c} p={p} n={n} x={C.casper[0]} y={C.casper[1] + i * C.row} w={C.tagW} font={C.font} text={c} shared i={i + 1} side="r" />
+        <Tag key={c} p={p} n={n} x={C.casper[0]} y={C.casper[1] + i * C.row} w={C.tagW} font={C.font} text={c} shared i={i + 1} side="r" portrait={portrait} />
       ))}
 
       <motion.g style={{ x: C.plan[0], y: C.plan[1], opacity: plan, scale: planScale }}>
         <rect x={-C.planW / 2} y={-C.planH / 2} width={C.planW} height={C.planH} rx="16" fill="#08131a" stroke="#4ade80" strokeWidth="1.5" />
-        <text x="0" y={-C.planH / 2 + 26} textAnchor="middle" fontSize={portrait ? 10 : 11} letterSpacing="2" fill="#4ade80" className="mono">
+        <text x="0" y={-C.planH / 2 + 26} textAnchor="middle" fontSize={portrait ? 11 : 13} letterSpacing="2" fill="#4ade80" className="mono">
           {labels.plan.toUpperCase()}
         </text>
         {["chat/1 · files/2", "payments-cashu/1", "→ webrtc/1"].map((line, i) => (

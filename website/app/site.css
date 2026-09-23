@@ -697,16 +697,35 @@ html.js .act:not(.act--static) .scene-actors-static {
   display: none;
 }
 
-/* The copy floats in a lit corner over the picture. */
+/* The copy sits over the picture on a soft wash that runs the full height of
+   the stage and fades before it reaches the actors, so it never has an edge. */
+.scene-wash {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+.scene[data-copy="left"] .scene-wash {
+  background: linear-gradient(90deg, rgb(var(--chapter-rgb) / 0.94) 0%, rgb(var(--chapter-rgb) / 0.8) 24%, rgb(var(--chapter-rgb) / 0.35) 40%, transparent 52%);
+}
+.scene[data-copy="right"] .scene-wash {
+  background: linear-gradient(270deg, rgb(var(--chapter-rgb) / 0.94) 0%, rgb(var(--chapter-rgb) / 0.8) 24%, rgb(var(--chapter-rgb) / 0.35) 40%, transparent 52%);
+}
+.scene[data-copy="bottom-left"] .scene-wash {
+  background: radial-gradient(ellipse 64% 115% at 0% 100%, rgb(var(--chapter-rgb) / 0.94) 0%, rgb(var(--chapter-rgb) / 0.7) 42%, rgb(var(--chapter-rgb) / 0.25) 72%, transparent 100%);
+}
+.scene[data-copy="bottom-right"] .scene-wash {
+  background: radial-gradient(ellipse 64% 115% at 100% 100%, rgb(var(--chapter-rgb) / 0.94) 0%, rgb(var(--chapter-rgb) / 0.7) 42%, rgb(var(--chapter-rgb) / 0.25) 72%, transparent 100%);
+}
 .scene-copy {
   position: absolute;
   z-index: 2;
-  width: min(460px, calc(100% - 48px));
+  width: min(440px, calc(100% - 48px));
   display: grid;
   gap: 18px;
-  padding: 40px;
-  border-radius: 28px;
-  background: radial-gradient(70% 90% at 30% 50%, rgb(var(--chapter-rgb) / 0.9), rgb(var(--chapter-rgb) / 0.55) 70%, transparent);
+}
+.scene-copy[data-hidden="true"] {
+  pointer-events: none;
 }
 .scene[data-copy="left"] .scene-copy,
 .scene[data-copy="right"] .scene-copy {
@@ -723,7 +742,7 @@ html.js .act:not(.act--static) .scene-actors-static {
 }
 .scene[data-copy="bottom-left"] .scene-copy,
 .scene[data-copy="bottom-right"] .scene-copy {
-  bottom: 8vh;
+  bottom: 12vh;
 }
 .scene-steps {
   position: relative;
@@ -790,13 +809,15 @@ html.js .act:not(.act--static) .scene-actors-static {
 
 /* Phones: the picture on top, the copy in a sheet that rises from the bottom. */
 @media (max-width: 860px) {
+  .scene-wash {
+    display: none;
+  }
   .scene-copy,
   .scene[data-copy] .scene-copy {
     inset: auto 0 0 0;
     width: auto;
     transform: none;
     padding: 36px 16px 22px;
-    border-radius: 0;
     background: linear-gradient(to bottom, transparent, rgb(var(--chapter-rgb)) 40px);
     gap: 12px;
   }
@@ -885,6 +906,9 @@ html:not(.js) .scene .scene-visual {
   border-radius: 20px;
   overflow: hidden;
   border: 1px solid var(--line);
+}
+html:not(.js) .scene-wash {
+  display: none;
 }
 html:not(.js) .scene .scene-copy,
 html:not(.js) .scene[data-copy] .scene-copy {

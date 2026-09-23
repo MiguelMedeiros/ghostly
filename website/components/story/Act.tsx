@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, useInView, useMotionValueEvent, useScroll, useSpring, useTransform, type MotionValue } from "motion/react";
 import { Ghost, type GhostMood } from "@/components/ghost/Ghost";
-import { orientationOf, scatter, stepOf, usePortrait } from "@/components/home/stage";
+import { orientationOf, scatter, stepOf, usePortrait, VIEW_BOX_ORIGIN } from "@/components/home/stage";
 import { useCalm } from "@/lib/useCalm";
 import { BLOCKING, poseAt, ROOMS, STAGE, valueAt, type Chapter } from "./poses";
 
@@ -18,6 +18,9 @@ import { BLOCKING, poseAt, ROOMS, STAGE, valueAt, type Chapter } from "./poses";
 export type ActChapter = { id: string; chapter: Chapter; kind?: "pinned" | "free" };
 
 type Range = { chapter: Chapter; start: number; end: number; steps: number };
+type Located = { chapter: Chapter; t: number; steps: number };
+
+const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
 export function Act({
   id,
@@ -76,6 +79,9 @@ function LiveAct({ id, chapters, field, bubble, children }: { id: string; chapte
         const end = c.kind === "free" ? (top + h) / travel : (top + h - vh) / travel;
         next.push({ chapter: c.chapter, start: top / travel, end, steps });
       }
+      const prev = rangesRef.current;
+      const same = prev.length === next.length && prev.every((r, i) => r.chapter === next[i].chapter && r.start === next[i].start && r.end === next[i].end && r.steps === next[i].steps);
+      if (same) return;
       rangesRef.current = next;
       setRanges(next);
     };
@@ -89,12 +95,20 @@ function LiveAct({ id, chapters, field, bubble, children }: { id: string; chapte
     };
   }, [chapters]);
 
-  // Which chapter and sub-progress a global act progress is in.
-  const locate = (v: number): { chapter: Chapter; t: number; steps: number } | null => {
+  // Which chapter and sub-progress a global act progress is in. A pinned chapter
+  // ends one viewport before the next one starts; in that hand-off the actors
+  // already stand at the shared pose, and the room and moods switch halfway.
+  const locate = (v: number): Located | null => {
     const rs = rangesRef.current;
     if (!rs.length) return null;
-    for (const r of rs) {
-      if (v < r.end) return { chapter: r.chapter, t: r.end === r.start ? 0 : Math.max(0, Math.min(1, (v - r.start) / (r.end - r.start))), steps: r.steps };
+    for (let i = 0; i < rs.length; i++) {
+      const r = rs[i];
+      if (v >= r.end) continue;
+      if (i > 0 && v < r.start) {
+        const prev = rs[i - 1];
+        return v < (prev.end + r.start) / 2 ? { chapter: prev.chapter, t: 1, steps: prev.steps } : { chapter: r.chapter, t: 0, steps: r.steps };
+      }
+      return { chapter: r.chapter, t: r.end === r.start ? 0 : clamp01((v - r.start) / (r.end - r.start)), steps: r.steps };
     }
     const last = rs[rs.length - 1];
     return { chapter: last.chapter, t: 1, steps: last.steps };
@@ -111,24 +125,31 @@ function LiveAct({ id, chapters, field, bubble, children }: { id: string; chapte
     return valueAt(BLOCKING[orient][at.chapter].focus, at.t);
   };
 
+  // Every actor channel, opacity included, goes through the same spring: no hard cuts inside an act.
   const spring = { stiffness: 120, damping: 26, mass: 0.8 };
   const bx = useSpring(useTransform(actP, (v) => pose("boo", v).x), spring);
   const by = useSpring(useTransform(actP, (v) => pose("boo", v).y), spring);
   const bs = useSpring(useTransform(actP, (v) => pose("boo", v).s / 100), spring);
-  const ba = useTransform(actP, (v) => pose("boo", v).a);
+  const ba = useSpring(useTransform(actP, (v) => pose("boo", v).a), spring);
   const cx = useSpring(useTransform(actP, (v) => pose("casper", v).x), spring);
   const cy = useSpring(useTransform(actP, (v) => pose("casper", v).y), spring);
   const cs = useSpring(useTransform(actP, (v) => pose("casper", v).s / 100), spring);
-  const ca = useTransform(actP, (v) => pose("casper", v).a);
+  const ca = useSpring(useTransform(actP, (v) => pose("casper", v).a), spring);
   const fx = useTransform(actP, (v) => focus(v)[0]);
   const fy = useTransform(actP, (v) => focus(v)[1]);
   const scale = useTransform(actP, (v) => {
     const at = locate(v);
     return at ? valueAt(BLOCKING[orient][at.chapter].camera, at.t) : 1;
   });
+  // Scaling about the viewBox origin, then translating by focus·(1−s), keeps the focal point still.
   const camX = useTransform([scale, fx], ([s, f]) => (f as number) * (1 - (s as number)));
   const camY = useTransform([scale, fy], ([s, f]) => (f as number) * (1 - (s as number)));
   const fieldY = useTransform(actP, [0, 1], [0, -80]);
+  // Boo's line stays for the first half of the opening chapter, then fades as he starts to move.
+  const bubbleFade = useTransform(actP, (v) => {
+    const end = rangesRef.current[0]?.end ?? 0;
+    return end ? 1 - clamp01((v - end * 0.45) / (end * 0.35)) : 1;
+  });
 
   // Gazes: each ghost looks at the focal point (pupils move up to ±2.2 / ±1.8 units).
   const booLook = useGaze(bx, by, bs, fx, fy);
@@ -163,7 +184,6 @@ function LiveAct({ id, chapters, field, bubble, children }: { id: string; chapte
   }, [nodes, portrait]);
 
   const room = ROOMS[scene.chapter];
-  const first = scene.chapter === chapters[0].chapter;
 
   return (
     <div id={id} ref={ref} className="act" data-chapter={scene.chapter} data-inview={inView} style={{ ["--chapter-bg" as string]: room }}>
@@ -184,18 +204,18 @@ function LiveAct({ id, chapters, field, bubble, children }: { id: string; chapte
               ))}
             </motion.g>
           )}
-          <motion.g style={{ x: camX, y: camY, scale }}>
-            <motion.g className="actor" style={{ x: cx, y: cy, scale: cs, opacity: ca }}>
+          <motion.g style={{ x: camX, y: camY, scale, ...VIEW_BOX_ORIGIN }}>
+            <motion.g className="actor" style={{ x: cx, y: cy, scale: cs, opacity: ca, ...VIEW_BOX_ORIGIN }}>
               <g className="stage-bob" style={{ animationDelay: "-1.37s" }}>
                 <Ghost who="casper" size={100} mood={casperMood} look={casperLook} float={false} halo phase={1} />
               </g>
             </motion.g>
-            <motion.g className="actor" style={{ x: bx, y: by, scale: bs, opacity: ba }}>
+            <motion.g className="actor" style={{ x: bx, y: by, scale: bs, opacity: ba, ...VIEW_BOX_ORIGIN }}>
               <g className="stage-bob">
                 <Ghost who="boo" size={100} mood={booMood} look={booLook} float={false} halo />
               </g>
             </motion.g>
-            {bubble && first && <Bubble text={bubble} x={bx} y={by} s={bs} portrait={portrait} />}
+            {bubble && <Bubble text={bubble} x={bx} y={by} s={bs} fade={bubbleFade} portrait={portrait} />}
           </motion.g>
         </svg>
       </div>
@@ -204,39 +224,43 @@ function LiveAct({ id, chapters, field, bubble, children }: { id: string; chapte
   );
 }
 
+/** Pupils toward the focal point. A ghost at (x, y, s) has its eyes near (x + 50s, y + 45s). */
 function useGaze(x: MotionValue<number>, y: MotionValue<number>, s: MotionValue<number>, fx: MotionValue<number>, fy: MotionValue<number>) {
-  const lx = useTransform([x, s, fx], ([gx, gs, f]) => Math.max(-1, Math.min(1, ((f as number) - ((gx as number) + (gs as number) * 40)) / 420)) * 2.2);
+  const lx = useTransform([x, s, fx], ([gx, gs, f]) => Math.max(-1, Math.min(1, ((f as number) - ((gx as number) + (gs as number) * 50)) / 420)) * 2.2);
   const ly = useTransform([y, s, fy], ([gy, gs, f]) => Math.max(-1, Math.min(1, ((f as number) - ((gy as number) + (gs as number) * 45)) / 320)) * 1.8);
   return { x: lx, y: ly };
 }
 
-/** Boo's line, typed out once, anchored above his head. */
-function Bubble({ text, x, y, s, portrait }: { text: string; x: MotionValue<number>; y: MotionValue<number>; s: MotionValue<number>; portrait: boolean }) {
+/** Boo's line, typed out once per page load, anchored above his head; it fades as the story moves on. */
+function Bubble({ text, x, y, s, fade, portrait }: { text: string; x: MotionValue<number>; y: MotionValue<number>; s: MotionValue<number>; fade: MotionValue<number>; portrait: boolean }) {
   const [shown, setShown] = useState(0);
   useEffect(() => {
     let i = 0;
+    let tick: number | undefined;
     const start = window.setTimeout(() => {
-      const id = window.setInterval(() => {
+      tick = window.setInterval(() => {
         i++;
         setShown(i);
-        if (i >= text.length) window.clearInterval(id);
+        if (i >= text.length && tick !== undefined) window.clearInterval(tick);
       }, 35);
     }, 1200);
-    return () => window.clearTimeout(start);
+    return () => {
+      window.clearTimeout(start);
+      if (tick !== undefined) window.clearInterval(tick);
+    };
   }, [text]);
   const bw = portrait ? 200 : 260;
   const bh = portrait ? 44 : 52;
   const ox = useTransform([x, s], ([gx, gs]) => (gx as number) + (gs as number) * (portrait ? 30 : 70));
   const oy = useTransform([y, s], ([gy, gs]) => (gy as number) - bh - 8 + (portrait ? 0 : (gs as number) * 4));
   return (
-    <motion.g style={{ x: ox, y: oy }} className="act-bubble" data-on={shown > 0}>
+    <motion.g style={{ x: ox, y: oy, opacity: fade }} className="act-bubble" data-on={shown > 0}>
       <rect width={bw} height={bh} rx={bh / 2} fill="rgba(34,211,238,0.14)" />
       <path d={`M18 ${bh} l-8 12 l20 -12 z`} fill="rgba(34,211,238,0.14)" />
       <text x={bw / 2} y={bh / 2 + 6} textAnchor="middle" fontSize={portrait ? 15 : 18} fill="#22d3ee">
         {text.slice(0, shown)}
-        <tspan className="act-caret">|</tspan>
+        {shown < text.length && <tspan className="act-caret">|</tspan>}
       </text>
     </motion.g>
   );
 }
-

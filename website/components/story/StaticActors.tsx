@@ -2,7 +2,7 @@
 
 import { motion, useTransform } from "motion/react";
 import { Ghost } from "@/components/ghost/Ghost";
-import { orientationOf } from "@/components/home/stage";
+import { orientationOf, VIEW_BOX_ORIGIN } from "@/components/home/stage";
 import { useScene } from "./SceneFrame";
 import { BLOCKING, poseAt, type Chapter } from "./poses";
 
@@ -30,10 +30,10 @@ export function StaticActors({ chapter }: { chapter: Chapter }) {
   const mood = (who: "boo" | "casper") => b.moods[who][Math.min(step, b.moods[who].length - 1)];
   return (
     <g className="scene-actors-static">
-      <motion.g style={{ x: casper.x, y: casper.y, scale: casper.s, opacity: casper.a }}>
+      <motion.g style={{ x: casper.x, y: casper.y, scale: casper.s, opacity: casper.a, ...VIEW_BOX_ORIGIN }}>
         <Ghost who="casper" size={100} mood={mood("casper")} look={{ x: -0.6, y: 0.2 }} float={false} halo phase={1} />
       </motion.g>
-      <motion.g style={{ x: boo.x, y: boo.y, scale: boo.s, opacity: boo.a }}>
+      <motion.g style={{ x: boo.x, y: boo.y, scale: boo.s, opacity: boo.a, ...VIEW_BOX_ORIGIN }}>
         <Ghost who="boo" size={100} mood={mood("boo")} look={{ x: 0.6, y: 0.2 }} float={false} halo />
       </motion.g>
     </g>

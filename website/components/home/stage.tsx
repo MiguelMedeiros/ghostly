@@ -1,18 +1,21 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useId } from "react";
 import { motion, useTransform, type MotionValue } from "motion/react";
 import { Ghost, type GhostMood } from "@/components/ghost/Ghost";
 import { STAGE, type Orientation } from "@/components/story/poses";
-
-/** Clamp-mapped scroll value: `useAt(p, [0.2, 0.4], [0, 1])`. */
-export function useAt(p: MotionValue<number>, input: number[], output: number[]) {
-  return useTransform(p, input, output, { clamp: true });
-}
+import { useMediaQuery } from "@/lib/useMediaQuery";
 
 /** Every scene keeps p∈[0,.06] for its entrance and [.94,1] for its exit. */
 export const ENTER = 0.06;
 export const EXIT = 0.94;
+
+/**
+ * motion scales an SVG group about its own bounding box by default. Stage
+ * maths (camera about a focal point, poses as top-left corners) need the
+ * viewBox origin instead: spread this into the style of any transformed group.
+ */
+export const VIEW_BOX_ORIGIN = { originX: 0, originY: 0, transformBox: "view-box" } as const;
 
 /** Which step (0…n-1) a scene progress is in. */
 export function stepOf(p: number, n: number): number {
@@ -33,17 +36,11 @@ export function useStep(p: MotionValue<number>, i: number, n: number, range: num
   return useTransform(p, range.map((f) => stepAt(i, f, n)), output, { clamp: true });
 }
 
-/** Landscape stages until 860px; portrait below. SSR assumes landscape. */
+export const PORTRAIT_QUERY = "(max-width: 860px)";
+
+/** Landscape stages until 860px; portrait below. The server assumes landscape. */
 export function usePortrait(): boolean {
-  const [portrait, setPortrait] = useState(false);
-  useEffect(() => {
-    const q = window.matchMedia("(max-width: 860px)");
-    const update = () => setPortrait(q.matches);
-    update();
-    q.addEventListener("change", update);
-    return () => q.removeEventListener("change", update);
-  }, []);
-  return portrait;
+  return useMediaQuery(PORTRAIT_QUERY);
 }
 
 export const orientationOf = (portrait: boolean): Orientation => (portrait ? "portrait" : "landscape");
@@ -57,7 +54,6 @@ export function StageGhost({
   mood,
   look,
   phase,
-  tilt,
   style,
   className = "",
 }: {
@@ -68,7 +64,6 @@ export function StageGhost({
   mood?: GhostMood;
   look?: { x: number; y: number };
   phase?: number;
-  tilt?: number;
   style?: React.ComponentProps<typeof motion.g>["style"];
   className?: string;
 }) {
@@ -76,7 +71,7 @@ export function StageGhost({
     <motion.g style={style} className={className}>
       <g transform={`translate(${x} ${y})`}>
         <g className="stage-bob" style={{ animationDelay: `${-(phase ?? 0) * 1.37}s` }}>
-          <Ghost who={who} mood={mood} look={look} size={size} phase={phase} float={false} tilt={tilt} halo />
+          <Ghost who={who} mood={mood} look={look} size={size} phase={phase} float={false} halo />
         </g>
       </g>
     </motion.g>
@@ -126,10 +121,11 @@ export function Stage({
 
 function CameraGroup({ camera, light, children }: { camera: Camera; light?: React.ComponentProps<typeof Stage>["light"]; children: React.ReactNode }) {
   const id = useId().replace(/:/g, "");
+  // Scaling about the viewBox origin, then translating by focus·(1−s), keeps the focal point still.
   const x = useTransform([camera.scale, camera.fx], ([s, fx]) => (fx as number) * (1 - (s as number)));
   const y = useTransform([camera.scale, camera.fy], ([s, fy]) => (fy as number) * (1 - (s as number)));
   return (
-    <motion.g style={{ x, y, scale: camera.scale }}>
+    <motion.g style={{ x, y, scale: camera.scale, ...VIEW_BOX_ORIGIN }}>
       {light && (
         <>
           <defs>

@@ -1,0 +1,37 @@
+/* The statement between the acts. Owned by components/story/Statement.tsx. */
+
+.statement {
+  height: 130vh;
+  background: #030507;
+}
+.statement[data-static="true"] {
+  height: auto;
+  padding-block: 18vh;
+}
+.statement-sticky {
+  position: sticky;
+  top: 0;
+  height: 100svh;
+  display: grid;
+  align-items: center;
+}
+.statement[data-static="true"] .statement-sticky {
+  position: static;
+  height: auto;
+}
+.statement-text {
+  font-size: clamp(40px, 8.5vw, 136px);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.035em;
+  max-width: 14ch;
+  text-wrap: balance;
+}
+.statement-word {
+  display: inline-block;
+  overflow: hidden;
+}
+.statement-word > span {
+  display: inline-block;
+}
+
