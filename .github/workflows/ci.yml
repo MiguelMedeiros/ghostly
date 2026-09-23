@@ -2,10 +2,11 @@ name: CI
 
 on:
   push:
+    # dev: where features land (main holds what is released; see CONTRIBUTING.md).
     # claude/security-auto-*: the security routine's fixes; see security-autorelease.yml.
-    branches: [main, master, "claude/security-auto-**"]
+    branches: [main, master, dev, "claude/security-auto-**"]
   pull_request:
-    branches: [main, master]
+    branches: [main, master, dev]
 
 permissions:
   contents: read
