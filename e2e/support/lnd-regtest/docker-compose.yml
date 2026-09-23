@@ -1,0 +1,46 @@
+# A disposable LND regtest stack for the gated LND tests: bitcoind and two LND nodes (Alice's, Bob's) with a
+# channel between them, worthless coins, nothing public.
+#   docker compose -p ghostly-lnd -f e2e/support/lnd-regtest/docker-compose.yml up -d
+#   node e2e/support/lnd-regtest/regtest.mjs ready
+# Only the two REST APIs are published, on 127.0.0.1:44710 (Alice) and 127.0.0.1:44720 (Bob). They allow the
+# origin of the web build the e2e serves on port 44780 (restcors), and keep LND's own self-signed certificate.
+name: ghostly-lnd
+x-lnd: &lnd
+  image: lightninglabs/lnd:v0.19.3-beta
+  depends_on: { bitcoind: { condition: service_healthy } }
+  healthcheck:
+    test: ["CMD-SHELL", "lncli --network=regtest getinfo >/dev/null 2>&1 || exit 1"]
+    interval: 3s
+    retries: 40
+services:
+  bitcoind:
+    image: bitcoin/bitcoin:31.0
+    container_name: ghostly-lnd-bitcoind
+    command: ["bitcoind", "-regtest", "-printtoconsole", "-server", "-txindex", "-fallbackfee=0.0001",
+      "-rpcbind=0.0.0.0", "-rpcallowip=0.0.0.0/0",
+      "-rpcauth=ghostly:869c6a1a3104e3d0eb4be22a654d8699$$945ec1189e2e772085bb4e2f79cb04520891df0df15348df995ad238a28ddb9a",
+      "-zmqpubrawblock=tcp://0.0.0.0:28332", "-zmqpubrawtx=tcp://0.0.0.0:28333"]
+    healthcheck:
+      test: ["CMD-SHELL", "bitcoin-cli -regtest -rpcuser=ghostly -rpcpassword=regtest getblockchaininfo || exit 1"]
+      interval: 3s
+      retries: 20
+  alice:
+    <<: *lnd
+    container_name: ghostly-lnd-alice
+    command: ["--noseedbackup", "--bitcoin.regtest", "--bitcoin.node=bitcoind",
+      "--bitcoind.rpchost=bitcoind:18443", "--bitcoind.rpcuser=ghostly", "--bitcoind.rpcpass=regtest",
+      "--bitcoind.zmqpubrawblock=tcp://bitcoind:28332", "--bitcoind.zmqpubrawtx=tcp://bitcoind:28333",
+      "--listen=0.0.0.0:9735", "--rpclisten=127.0.0.1:10009", "--restlisten=0.0.0.0:8080",
+      "--restcors=http://localhost:44780", "--restcors=http://127.0.0.1:44780",
+      "--alias=ghostly-alice", "--tlsextradomain=alice"]
+    ports: ["127.0.0.1:44710:8080"]
+  bob:
+    <<: *lnd
+    container_name: ghostly-lnd-bob
+    command: ["--noseedbackup", "--bitcoin.regtest", "--bitcoin.node=bitcoind",
+      "--bitcoind.rpchost=bitcoind:18443", "--bitcoind.rpcuser=ghostly", "--bitcoind.rpcpass=regtest",
+      "--bitcoind.zmqpubrawblock=tcp://bitcoind:28332", "--bitcoind.zmqpubrawtx=tcp://bitcoind:28333",
+      "--listen=0.0.0.0:9735", "--rpclisten=127.0.0.1:10009", "--restlisten=0.0.0.0:8080",
+      "--restcors=http://localhost:44780", "--restcors=http://127.0.0.1:44780",
+      "--alias=ghostly-bob", "--tlsextradomain=bob"]
+    ports: ["127.0.0.1:44720:8080"]

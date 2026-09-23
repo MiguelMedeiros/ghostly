@@ -56,6 +56,8 @@ E2E_MINT_URL=http://127.0.0.1:3338 npm run test:e2e
 | `web/wallet-sources.spec.ts` | where Lightning and on-chain Bitcoin come from: the Lightning card on the Cashu mints by default, a source picked per mode (invoices through it, Mainnet keeping its own), the Bitcoin card's "no source" state and an on-chain send through a source — with the fake providers, no network |
 | `web/wallet-nwc.spec.ts` | Lightning through Nostr Wallet Connect: a wallet connected by its URI receives and pays over its relay, and a bad URI or a Mainnet wallet in Testnet is refused — against a fake NWC wallet service on a relay in the test process, no network; gated (`GHOSTLY_NWC_REGTEST=1`, see below): two people on their own Alby Hub, a chat request paid over a regtest channel |
 | `web/wallet-cln.spec.ts` | Core Lightning as the Lightning source (gated, `GHOSTLY_CLN_REGTEST=1`): the form with a restricted rune (never back in the page), an invoice of the node paid by the other node, an invoice of the other node paid from the card, a chat request paid from one person's node to the other's, balances on both nodes and both cards |
+
+| `web/wallet-lnd.spec.ts` | gated (`GHOSTLY_LND_REGTEST=1`): the LND provider against two real regtest nodes, over REST from the page — the form, invoices in and out through the Lightning card, a chat request paid, both nodes' balances |
 | `web/payment-extras.spec.ts` | with `E2E_MINT_URL`: memo and "test sats" in both bubbles, a refused payment is taken back, ecash nobody picks up can be taken back, invoice cards |
 | `extension/wallet-bdk.spec.ts` | gated (`GHOSTLY_BDK_REGTEST=1`): the BDK wallet's WebAssembly in the extension's offscreen document, receiving and sending on regtest |
 | `extension/interop.spec.ts` | the extension and the web app: chat, file, video call |
@@ -255,6 +257,30 @@ pays through NWC and checks both nodes' channel balances, makes a real lost answ
 anything leaves. The Playwright test gives each person a hub of their own and has Alice pay Bob's request in the
 chat; balances are checked in both apps and on both nodes. Pairing URIs come from `nwcUri()` in `regtest.mjs`,
 in memory, with the relay rewritten to the host's address; the CLI never prints one (it carries a spending key).
+
+### LND on regtest
+
+Two LND nodes (Alice's and Bob's) on one bitcoind, with a channel from Alice to Bob that pushed half of it to
+Bob, all worthless regtest coins, in containers named `ghostly-lnd-*`. Only the REST APIs are published, on
+`127.0.0.1:44710` (Alice) and `127.0.0.1:44720` (Bob); they allow the origin `http://localhost:44780`
+(`restcors`), so the web build must be served there:
+
+```bash
+docker compose -p ghostly-lnd -f e2e/support/lnd-regtest/docker-compose.yml up -d
+node e2e/support/lnd-regtest/regtest.mjs ready      # mines, funds Alice, opens the channel, bakes the scoped macaroons (once)
+npm run build:web && npx vite preview web --port 44780 --strictPort &
+E2E_WEB_URL=http://localhost:44780 GHOSTLY_LND_REGTEST=1 npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/wallet-lnd.spec.ts
+GHOSTLY_LND_REGTEST=1 npm test -w @ghostly/browser -- lndProvider     # the provider contract against Alice's node, Bob paying
+GHOSTLY_LND_REGTEST=1 cargo test --manifest-path src-tauri/Cargo.toml lnd   # the desktop command, the node's certificate pinned
+docker compose -p ghostly-lnd -f e2e/support/lnd-regtest/docker-compose.yml down -v   # when done
+```
+
+Each app is given its own node's address, a macaroon baked with `info:read invoices:read invoices:write
+offchain:read offchain:write` (never the admin one: the form refuses it) and the node's `tls.cert`. LND's
+certificate is self-signed, which a browser does not trust: the test's contexts are opened with
+`ignoreHTTPSErrors`, standing in for a node set up with a real certificate (a reverse proxy, `letsencryptdomain`).
+Desktop needs neither CORS nor a trusted certificate: Rust pins `tls.cert`, which the Rust test checks against the
+same node. Credentials are read from the containers in memory (`regtest.mjs`'s `credentials()`) and never printed.
 
 ### Bark (Second's Ark) on regtest
 

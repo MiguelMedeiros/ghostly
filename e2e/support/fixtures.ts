@@ -17,6 +17,8 @@ export interface PeerOptions {
   viewport?: { width: number; height: number };
   /** Emulates a phone: touch, mobile user agent, narrow viewport. */
   mobile?: boolean;
+  /** Trusts any certificate, as a browser trusts a node's that a person has set up properly (self-hosted nodes in tests). */
+  ignoreHTTPSErrors?: boolean;
 }
 
 type Fixtures = {
@@ -31,6 +33,7 @@ export async function openPeer(browser: Browser, relay: LocalRelay, baseURL: str
     permissions: ["camera", "microphone", "clipboard-read", "clipboard-write"],
     viewport: options.viewport ?? (options.mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 }),
     ...(options.mobile ? { isMobile: true, hasTouch: true } : {}),
+    ...(options.ignoreHTTPSErrors ? { ignoreHTTPSErrors: true } : {}),
   });
   await relay.attach(context);
   await attachMint(context);

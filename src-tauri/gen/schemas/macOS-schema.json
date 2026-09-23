@@ -219,6 +219,12 @@
           "markdownDescription": "Enables the get_public_key command without any pre-configured scope."
         },
         {
+          "description": "Enables the lnd_request command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-lnd-request",
+          "markdownDescription": "Enables the lnd_request command without any pre-configured scope."
+        },
+        {
           "description": "Enables the local_fetch command without any pre-configured scope.",
           "type": "string",
           "const": "allow-local-fetch",
@@ -397,6 +403,12 @@
           "type": "string",
           "const": "deny-get-public-key",
           "markdownDescription": "Denies the get_public_key command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the lnd_request command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-lnd-request",
+          "markdownDescription": "Denies the lnd_request command without any pre-configured scope."
         },
         {
           "description": "Denies the local_fetch command without any pre-configured scope.",
