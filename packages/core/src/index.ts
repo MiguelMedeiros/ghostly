@@ -28,6 +28,8 @@ export * from "./pairedTransports";
 
 export * from "./peerProofs";
 
+export * from './domainProofs';
+
 export * from './pubkyRing';
 
 export * from './ringLink';

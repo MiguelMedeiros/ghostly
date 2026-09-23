@@ -7,6 +7,7 @@ import { useUpdate } from "../contexts/UpdateContext";
 import { notificationPermission, requestNotifications, type NoticePermission } from "../lib/notifications";
 import { getVersion } from "@tauri-apps/api/app";
 import { NetworkSettings } from "../components/NetworkSettings";
+import { DomainProofSettings } from "../components/DomainProofSettings";
 import { Block, ButtonGroup, FieldGrid, InputGroup, Page, Row, Section } from "../components/layout";
 import { Switch } from "../components/wallet/ui";
 import {
@@ -342,6 +343,8 @@ export function Settings() {
       </Section>
 
       <NetworkSettings />
+
+      <DomainProofSettings />
 
       <Section title={t("settings.data")}>
         <Row label={t("settings.storageUsed")} value={`${formatBytes(storageInfo.used)} (${storageInfo.keys} items)`} />

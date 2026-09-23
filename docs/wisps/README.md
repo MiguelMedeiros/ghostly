@@ -44,6 +44,7 @@ The implementation column is independent of document status. Existing features c
 | [301](301-nostr.md) | Nostr | Draft | Implemented experimental proof; signer/runtime limits below |
 | [Pubky · 3xx planned](302-pubky.md) | Pubky | Draft | Local import experimental; Ring bridge blocked |
 | [Keet · 3xx planned](303-keet.md) | Keet | Draft | Compatible local import experimental; app bridge blocked |
+| [Domain · 3xx planned](3xx-domain.md) | Domain Proofs | Draft | Experimental provider: DNS TXT, /.well-known/ghostly.json, NIP-05 |
 | [400](400-chat.md) | Chat Messaging | Draft | Existing 1:1 messages; stronger semantics proposed |
 | [401](401-paired-chat.md) | Paired Chat | Draft | Current paired WebRTC; native Iroh/HyperDHT where supported. |
 | [402](402-legacy-chat.md) | Legacy Timestamp Chat | Draft | Existing legacy 1:1 clients. |

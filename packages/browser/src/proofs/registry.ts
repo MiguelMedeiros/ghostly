@@ -1,5 +1,6 @@
 import type { IdentityProofProvider } from "./contract";
 import { nostr } from "./providers/nostr";
+import { domain } from "./providers/domain";
 import { FAKE_IDENTITY_PROVIDERS, testIdentitiesEnabled } from "./testing";
 
 /**
@@ -8,6 +9,7 @@ import { FAKE_IDENTITY_PROVIDERS, testIdentitiesEnabled } from "./testing";
  */
 export const IDENTITY_PROVIDERS: readonly IdentityProofProvider[] = [
   nostr,
+  domain,
 ];
 
 /** The registered providers, plus the fakes when this browser asked for them (e2e). */

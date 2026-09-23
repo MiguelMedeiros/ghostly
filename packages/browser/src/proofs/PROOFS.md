@@ -212,3 +212,4 @@ storing the outcome are one transaction.
 | id | Category | Signers | `verify` contacts | Status |
 |---|---|---|---|---|
 | `nostr` | self-custodied | NIP-07 extension, NIP-46 remote signer | nothing | shipped |
+| `domain` | self-custodied | DNS TXT record, `/.well-known/ghostly.json` (publish); NIP-05 with a NIP-07/NIP-46 signer | the chosen DNS-over-HTTPS resolver; for the file methods also the domain's web server | experimental, [draft 3xx](../../../../docs/wisps/3xx-domain.md) |

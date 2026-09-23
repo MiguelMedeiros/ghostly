@@ -9,7 +9,7 @@ All 37 specifications remain Draft. Family numbering was approved on 2026-09-22.
 | 00–99 | Foundations: process, Ghost Core, peer keys, common capabilities |
 | 100–199 | Transport negotiation (100), WebRTC (101), Iroh (102), HyperDHT (103) |
 | 200–299 | Payment negotiation (200), Cashu (201), experimental Arkade (202), Lightning (203) |
-| 300–399 | Identity proofs (300; external proofs optional), Nostr (301; disabled experimental), Pubky and Keet (3xx; planned, number to be defined) |
+| 300–399 | Identity proofs (300; external proofs optional), Nostr (301; disabled experimental), Pubky, Keet and Domain (3xx; planned, number to be defined) |
 | 400–499 | Chat messaging (400), an independent application capability |
 | 500–599 | File transfer (500), an independent application capability |
 | 600–699 | Voice and video (600), an independent application capability |
