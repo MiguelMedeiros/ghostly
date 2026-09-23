@@ -1,0 +1,43 @@
+# A disposable Lightning regtest stack for the gated WebLN tests: worthless coins, nothing public.
+#   docker compose -p ghostly-webln -f e2e/support/webln-regtest/docker-compose.yml up -d
+#   node e2e/support/webln-regtest/regtest.mjs ready
+# Two LND nodes with a channel between them: "alice" backs one person's browser wallet, "bob" the other's.
+# Their REST APIs are on 127.0.0.1:44610 and :44611 only, without macaroons or TLS (a throwaway regtest node:
+# there is no credential to keep). bitcoind is not published at all; LND reads its RPC cookie.
+name: ghostly-webln
+x-lnd: &lnd
+  image: lightninglabs/lnd:v0.19.3-beta
+  depends_on: { bitcoind: { condition: service_healthy } }
+  volumes: ["bitcoind:/bitcoind:ro"]
+services:
+  bitcoind:
+    image: bitcoin/bitcoin:31.0
+    container_name: ghostly-webln-bitcoind
+    command: ["bitcoind", "-regtest", "-printtoconsole", "-server", "-txindex", "-fallbackfee=0.0001",
+      "-rpcbind=0.0.0.0", "-rpcallowip=0.0.0.0/0", "-rpccookieperms=all",
+      "-zmqpubrawblock=tcp://0.0.0.0:28332", "-zmqpubrawtx=tcp://0.0.0.0:28333"]
+    volumes: ["bitcoind:/home/bitcoin/.bitcoin"]
+    healthcheck:
+      test: ["CMD-SHELL", "bitcoin-cli -regtest -datadir=/home/bitcoin/.bitcoin getblockchaininfo || exit 1"]
+      interval: 3s
+      retries: 20
+  alice:
+    <<: *lnd
+    container_name: ghostly-webln-alice
+    command: ["--bitcoin.regtest", "--bitcoin.node=bitcoind", "--bitcoind.rpchost=bitcoind:18443",
+      "--bitcoind.rpccookie=/bitcoind/regtest/.cookie", "--bitcoind.zmqpubrawblock=tcp://bitcoind:28332",
+      "--bitcoind.zmqpubrawtx=tcp://bitcoind:28333", "--noseedbackup",
+      "--restlisten=0.0.0.0:8080", "--rpclisten=127.0.0.1:10009", "--listen=0.0.0.0:9735",
+      "--bitcoin.defaultchanconfs=1", "--trickledelay=500", "--alias=ghostly-webln-alice"]
+    ports: ["127.0.0.1:44610:8080"]
+  bob:
+    <<: *lnd
+    container_name: ghostly-webln-bob
+    command: ["--bitcoin.regtest", "--bitcoin.node=bitcoind", "--bitcoind.rpchost=bitcoind:18443",
+      "--bitcoind.rpccookie=/bitcoind/regtest/.cookie", "--bitcoind.zmqpubrawblock=tcp://bitcoind:28332",
+      "--bitcoind.zmqpubrawtx=tcp://bitcoind:28333", "--noseedbackup",
+      "--restlisten=0.0.0.0:8080", "--rpclisten=127.0.0.1:10009", "--listen=0.0.0.0:9735",
+      "--bitcoin.defaultchanconfs=1", "--trickledelay=500", "--alias=ghostly-webln-bob"]
+    ports: ["127.0.0.1:44611:8080"]
+volumes:
+  bitcoind:

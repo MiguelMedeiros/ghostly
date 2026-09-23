@@ -52,6 +52,7 @@ E2E_MINT_URL=http://127.0.0.1:3338 npm run test:e2e
 | `web/wallet-providers.spec.ts` | every wallet provider sending and receiving, in the Testnet mode: Cashu (in over Lightning, Send and Request in the chat), Lightning (in through an invoice, out paying an invoice the test mint does not own, `@network`), Ark, Bark and USDT (in, Send from the wallet, Send and Request in the chat; gated, see below) |
 | `web/bark-wallet.spec.ts` | Bark (Second's Ark) is not on Mainnet yet; `@network`: a Testnet wallet on Second's signet server by itself, and a chat offers Bark only when both sides allow it (Arkade stays separate) |
 | `web/wallet-bdk.spec.ts` | the BDK wallet as the on-chain source: offered in Testnet only, a new wallet's 12 words shown once, a bad phrase or an unreachable Esplora refused before anything is saved, the chat's Bitcoin card; gated (see below): funded, a Send from the wallet, a Send and a Request paid in the chat on regtest |
+| `web/wallet-webln.spec.ts` | the browser wallet (WebLN) as the Lightning source, with `window.webln` injected by the test: no wallet, a refused connection, invoices in and payments out (reviewed in Ghostly first), a refused wallet prompt that spends nothing, a chat request paid between two browser wallets (Lightning only, reviewed in the bubble); with `GHOSTLY_WEBLN_REGTEST=1`, the same against two real regtest LND nodes (see below) |
 | `web/wallet-sources.spec.ts` | where Lightning and on-chain Bitcoin come from: the Lightning card on the Cashu mints by default, a source picked per mode (invoices through it, Mainnet keeping its own), the Bitcoin card's "no source" state and an on-chain send through a source — with the fake providers, no network |
 | `web/wallet-nwc.spec.ts` | Lightning through Nostr Wallet Connect: a wallet connected by its URI receives and pays over its relay, and a bad URI or a Mainnet wallet in Testnet is refused — against a fake NWC wallet service on a relay in the test process, no network; gated (`GHOSTLY_NWC_REGTEST=1`, see below): two people on their own Alby Hub, a chat request paid over a regtest channel |
 | `web/wallet-cln.spec.ts` | Core Lightning as the Lightning source (gated, `GHOSTLY_CLN_REGTEST=1`): the form with a restricted rune (never back in the page), an invoice of the node paid by the other node, an invoice of the other node paid from the card, a chat request paid from one person's node to the other's, balances on both nodes and both cards |
@@ -296,3 +297,30 @@ method, a wrong node id refused at the handshake, balances on both nodes, and an
 `regtest.mjs` (restricted to the methods Ghostly calls) and handed to the test, never printed. Node's built-in
 `WebSocket` sends lower-case header names, which Core Lightning's listener refuses; browsers send them as it
 expects, and the Node tests use the `ws` package.
+
+### WebLN (browser wallets) on regtest
+
+A browser wallet cannot be installed in Playwright's Chromium, so `support/webln.ts` does what one does: it
+injects `window.webln` into the page, and every call goes to a wallet in the test process. Without a variable
+that wallet is an in-memory fake (`packages/browser/test/helpers/fakeWebln.ts`). With `GHOSTLY_WEBLN_REGTEST=1`
+it is a real LND node of a disposable regtest stack (`packages/browser/test/helpers/lndWebln.ts`), one per
+person: bitcoind 31 and two LND 0.19 nodes, "alice" and "bob", with a 2M-sat channel between them (half on each
+side), in containers named `ghostly-webln-*`. Only the two REST APIs are published, on `127.0.0.1:44610` and
+`:44611`; the tests read each node's TLS certificate and macaroon from its container into memory and never
+print them.
+
+```bash
+docker compose -p ghostly-webln -f e2e/support/webln-regtest/docker-compose.yml up -d
+node e2e/support/webln-regtest/regtest.mjs ready     # mines, funds both nodes, opens the channel (once)
+GHOSTLY_WEBLN_REGTEST=1 npm test -w @ghostly/browser -- weblnProvider.regtest
+npm run build:web && npx vite preview web --port 44680 --strictPort &
+E2E_WEB_URL=http://localhost:44680 GHOSTLY_WEBLN_REGTEST=1 npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/wallet-webln.spec.ts
+docker compose -p ghostly-webln -f e2e/support/webln-regtest/docker-compose.yml down -v   # when done
+```
+
+The vitest file runs the provider contract against Alice's node (Bob's pays and is paid) and a payment whose
+answer is lost, found paid by looking it up. The e2e connects each person's browser wallet in the app: Alice
+receives 1,000 sats from Bob's node, pays 400 from the Lightning card, and pays Bob's 250-sat request in the chat
+(Cashu off, so it carries only his wallet's invoice) after reviewing it in the bubble; both nodes' channel
+balances move by exactly that, both apps show them, and the balances are printed. What a real Alby adds on top —
+its own prompts, its own fee budget — is not exercised here.

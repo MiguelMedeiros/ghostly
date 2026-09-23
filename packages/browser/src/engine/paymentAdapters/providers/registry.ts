@@ -6,6 +6,7 @@ import { coreLightning } from "./coreLightning";
 import { nwc } from "./nwc";
 import type { LightningProviderDescriptor } from "./lightning";
 import type { OnchainProviderDescriptor } from "./onchain";
+import { webln } from "./webln";
 import { fakeLightning, fakeOnchain, testProvidersEnabled } from "./testing";
 import { networkMode, type ProviderNetwork, type ProviderPlatform } from "./types";
 import type { WalletMode } from "../../../shared/mints";
@@ -19,6 +20,7 @@ export const LIGHTNING_PROVIDERS: readonly LightningProviderDescriptor[] = [
   breez,
   nwc,
   coreLightning,
+  webln,
 ];
 
 export const ONCHAIN_PROVIDERS: readonly OnchainProviderDescriptor[] = [

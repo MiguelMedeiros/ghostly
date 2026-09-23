@@ -108,6 +108,38 @@ and in an offscreen document for `extension`: a provider that needs `window.webl
 needs a raw TCP socket or a local process is `["desktop"]` and gets there through a Tauri command.
 Browsers reach HTTP(S) APIs only with CORS; say so in the description when a node must allow the origin.
 
+### The browser wallet (WebLN)
+
+[providers/webln.ts](providers/webln.ts) is the example of a provider that lives in the page. How the call
+reaches `window.webln` on each platform:
+
+| Platform | Engine runs in | `window.webln` |
+|---|---|---|
+| web | the app's own page | yes: a WebLN extension (Alby…) injects it into the page, and the engine calls it directly |
+| extension | an offscreen document of Ghostly's extension | no: other extensions do not inject into `chrome-extension://` pages, the offscreen document included |
+| desktop | the Tauri webview | no: a webview runs no browser extensions |
+
+So it is `platforms: ["web"]`. It has no fields and no secret (the wallet keeps its own keys): its form is
+`WeblnForm` in `src/components/wallet/providers/`, a "Connect browser wallet" button that says whether a
+wallet is in the page. Connecting calls `enable()` (the wallet's own approval prompt), then:
+
+- **What it can do** comes from `getInfo().methods` when the wallet lists them (Alby puts every method on the
+  object whether its account supports it or not), else from the functions present: `makeInvoice` → receive,
+  `sendPayment` → send, `getBalance` (in sats or msats) → balance, `lookupInvoice` → lookup.
+- **Its chain**: WebLN has no field for it. A chain the wallet names in `getInfo()` is taken; otherwise the
+  wallet makes a 1-sat invoice, whose prefix says it. A wallet that can only pay and names no chain is
+  Mainnet only (in Testnet it could be spending real sats as "test sats"). Every invoice it makes or is asked
+  to pay is checked against that chain anyway.
+- **Paying**: Ghostly's review and approval come first; the wallet may then show its own prompt. WebLN takes
+  no fee limit, so the wallet applies its own; the fee is shown when the wallet reports it. A preimage that
+  hashes to the payment hash is paid. `NothingSpentError` only for what certainly did not leave: Ghostly's own
+  checks (chain, balance from `getBalance`), the person refusing the wallet's prompt (`User rejected`,
+  `RejectionError`…), or the wallet giving up before any HTLC (`no_route`, `insufficient_balance`). Anything
+  else (no answer within 5 minutes, an error that says nothing, an answer without a valid preimage) is
+  unknown, and reconciled with `lookupInvoice` when the wallet has it. WebLN has no word for "failed", so a
+  lookup either finds the payment paid or leaves it pending; without `lookupInvoice` an unknown payment stays
+  unknown, and the Lightning card says to check it in the wallet itself.
+
 ## Testing
 
 - Unit: the fakes in [providers/testing.ts](providers/testing.ts) (`FakeLightningProvider`,

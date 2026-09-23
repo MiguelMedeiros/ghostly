@@ -159,7 +159,8 @@ export class LightningService {
       op = result.state === "paid" ? { ...op, state: "paid", fee: result.fee, ref: result.ref, settledAt: Date.now() } : { ...op, state: "pending", ref: result.ref };
     } catch (error) {
       if (error instanceof NothingSpentError) { await this.put({ ...op, state: "failed", error: redact(error) }); throw error; }
-      op = { ...op, state: "unknown", error: "No answer from the source. It is being checked; nothing is paid again." };
+      // A source that cannot look payments up never settles this by itself: say so rather than "being checked".
+      op = { ...op, state: "unknown", error: quote.provider.capabilities.lookup ? "No answer from the source. It is being checked; nothing is paid again." : "No answer from the source, and it cannot be asked: check this payment in the wallet itself. It is never paid again." };
     }
     await this.put(op);
     if (op.state !== "paid") this.schedule(OUT_POLL_MS);
