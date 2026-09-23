@@ -23,6 +23,12 @@ const en = {
     booSays: "Is anyone out there?",
     skip: "Skip the story",
   },
+  statement: {
+    // The last sentence of dht.steps[0].body, given the whole screen between the acts.
+    before: "There is ",
+    accent: "no",
+    after: " Ghostly server in the middle.",
+  },
   invite: {
     eyebrow: "01 — The invitation",
     label: "How an invitation works",
@@ -288,6 +294,7 @@ const en = {
       cta: "Download the .zip",
     },
     cli: { title: "Command line", body: "For scripts, bots and agents.", cta: "CLI guide" },
+    otherPlatforms: "Other platforms",
     note: "Downloads are the public release, v{v}. Features marked “in development” arrive with {n}.",
     all: "All release files",
     conversation: [
@@ -322,6 +329,11 @@ const ptBr: HomeCopy = {
     follow: "Siga o Boo",
     booSays: "Tem alguém aí?",
     skip: "Pular a história",
+  },
+  statement: {
+    before: "Não há ",
+    accent: "um servidor",
+    after: " do Ghostly no meio.",
   },
   invite: {
     eyebrow: "01 — O convite",
@@ -588,6 +600,7 @@ const ptBr: HomeCopy = {
       cta: "Baixar o .zip",
     },
     cli: { title: "Linha de comando", body: "Para scripts, bots e agentes.", cta: "Guia da CLI" },
+    otherPlatforms: "Outras plataformas",
     note: "Os downloads são a versão pública, v{v}. Recursos marcados “em desenvolvimento” chegam com a {n}.",
     all: "Todos os arquivos da versão",
     conversation: [

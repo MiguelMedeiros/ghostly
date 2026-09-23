@@ -20,7 +20,8 @@ After `npm run build`, restart a running dev server: reader routes are static
 | Path | What |
 |---|---|
 | `app/` | Routes. English at the root, Brazilian Portuguese under `app/pt-br/` (thin wrappers around the same page components). |
-| `components/home/` | Homepage scenes. Each scroll scene is a `SceneFrame` (`components/story/`) with an SVG stage driven by scroll progress. |
+| `components/home/` | Homepage: the hero, the four story chapters, the product section, your space, the architecture and the finale. |
+| `components/story/` | The film's machinery. `Act` pins one full-bleed backdrop behind its chapters and keeps one Boo and one Casper in it; `SceneFrame` is a chapter (full-bleed stage, floating copy panel, step mapping); `poses.ts` is the blocking table (actors, camera, focal point per chapter, landscape and portrait); `Statement` is the sentence between the acts. |
 | `components/dev/` | `/developers`: vocabulary, composition board, negotiation demo, path, availability table. |
 | `components/catalog/`, `components/reader/`, `components/roadmap/` | Catalog, WISP reader, roadmap. |
 | `components/ghost/Ghost.tsx` | Boo and Casper. `components/site/GhostPet.tsx` is the original pointer ghost, kept as it was. |
@@ -29,6 +30,22 @@ After `npm run build`, restart a running dev server: reader routes are static
 | `lib/wisp-editorial.ts` | Per-WISP benefit line, availability and optional video metadata. |
 | `lib/composition.ts` | Blocks and presets of the composition board. |
 | `content/videos/` | The video lesson template and an example script. |
+
+## The story spine
+
+Two acts, one continuous take each. Every chapter reads its coordinates from
+`components/story/poses.ts` (stage units: 1440×900 landscape, 390×844 portrait),
+so the exit pose of one chapter is the entry pose of the next by construction.
+Inside a chapter, beats are placed with `useStep(p, step, n, [from, to], [a, b])`
+from `components/home/stage.tsx`: a range inside one step, in step units, so
+copy and picture stay in sync when a step's text changes. With reduced motion,
+or without scripts, the same components render an illustrated article — one
+still per step (`stills` on each scene) — and the act backdrop is not drawn.
+
+Debug helpers, not shipped: `.shots.mjs` (screenshots of any page at scroll
+fractions), `.spine.mjs` (each chapter at chosen sub-progress values),
+`.modes2.mjs` (reduced motion and no-JS renders with a console-error check).
+They need the dev server on :4330 and Chrome.
 
 ## Availability, checked against code
 

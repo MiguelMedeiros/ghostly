@@ -1,6 +1,7 @@
 "use client";
 
 import { useId } from "react";
+import { motion, type MotionValue } from "motion/react";
 import { useCalm } from "@/lib/useCalm";
 
 /**
@@ -15,7 +16,9 @@ export type GhostMood =
   | "wink"
   | "sleep"
   | "calm"
-  | "curious";
+  | "curious"
+  | "lonely"
+  | "excited";
 
 export const GHOST_COLORS = {
   boo: "#22d3ee",
@@ -23,16 +26,24 @@ export const GHOST_COLORS = {
   shade: "#94a3b8",
 } as const;
 
+export type Look = { x: number; y: number } | { x: MotionValue<number>; y: MotionValue<number> };
+
 type Props = {
   who?: keyof typeof GHOST_COLORS;
   color?: string;
   mood?: GhostMood;
-  /** Where the pupils point, -1…1 on each axis. */
-  look?: { x: number; y: number };
+  /** Where the pupils point, -1…1 on each axis (numbers or motion values). */
+  look?: Look;
   size?: number | string;
   className?: string;
   /** Soft bob up and down. */
   float?: boolean;
+  /** Lean toward something, in degrees (about the hem centre). */
+  tilt?: number;
+  /** Pink cheeks, whatever the mood. */
+  blush?: boolean;
+  /** Cheap halo instead of a CSS filter: for stages with many ghosts. */
+  halo?: boolean;
   /** Accessible name; leave empty for a decorative ghost. */
   title?: string;
   /** Stagger for the idle loops so two ghosts never move in unison. */
@@ -57,6 +68,11 @@ function bodyPath(frame: number): string {
 
 const FRAMES = [0, 1.6, 3.2, 4.8].map(bodyPath);
 const STILL = FRAMES[0];
+const INK = "#0b1622";
+
+function isMotionLook(look: Look): look is { x: MotionValue<number>; y: MotionValue<number> } {
+  return typeof look.x !== "number";
+}
 
 export function Ghost({
   who = "boo",
@@ -66,23 +82,31 @@ export function Ghost({
   size = 96,
   className = "",
   float = true,
+  tilt = 0,
+  blush,
+  halo = false,
   title,
   phase = 0,
 }: Props) {
   const reduce = useCalm();
   const id = useId().replace(/:/g, "");
   const fill = color ?? GHOST_COLORS[who];
-  const lx = Math.max(-1, Math.min(1, look.x)) * 2.2;
-  const ly = Math.max(-1, Math.min(1, look.y)) * 1.8;
   const closed = mood === "sleep";
   const delay = `${-phase * 1.37}s`;
+  const wide = mood === "surprised" || mood === "excited";
+  const cheeks = blush ?? (mood === "happy" || mood === "excited");
+
+  // Pupils: plain numbers become a static translate; motion values animate freely.
+  const pupilStyle = isMotionLook(look)
+    ? { x: look.x, y: look.y }
+    : { transform: `translate(${(Math.max(-1, Math.min(1, look.x)) * 2.2).toFixed(2)}px, ${(Math.max(-1, Math.min(1, look.y)) * 1.8).toFixed(2)}px)` };
 
   return (
     <svg
       viewBox="0 0 80 100"
       width={size}
       height={typeof size === "number" ? size * 1.25 : undefined}
-      className={`ghost ${float ? "ghost--float" : ""} ${className}`}
+      className={`ghost ${float ? "ghost--float" : ""} ${halo ? "ghost--halo" : ""} ${className}`}
       style={{ ["--ghost" as string]: fill, animationDelay: delay }}
       role={title ? "img" : undefined}
       aria-label={title}
@@ -95,65 +119,78 @@ export function Ghost({
           <stop offset="45%" stopColor="#fff" stopOpacity="0.06" />
           <stop offset="100%" stopColor="#000" stopOpacity="0.12" />
         </radialGradient>
+        {halo && (
+          <radialGradient id={`halo-${id}`} cx="50%" cy="45%" r="50%">
+            <stop offset="0%" stopColor={fill} stopOpacity="0.42" />
+            <stop offset="100%" stopColor={fill} stopOpacity="0" />
+          </radialGradient>
+        )}
       </defs>
-      {[fill, `url(#sheen-${id})`].map((paint, i) => (
-        <path key={i} d={STILL} fill={paint} style={i ? { mixBlendMode: "soft-light" } : undefined}>
-          {!reduce && (
-            <animate
-              attributeName="d"
-              dur="3.2s"
-              begin={delay}
-              repeatCount="indefinite"
-              values={[...FRAMES, FRAMES[0]].join(";")}
-              calcMode="spline"
-              keySplines={Array(FRAMES.length).fill("0.45 0 0.55 1").join(";")}
-            />
-          )}
-        </path>
-      ))}
-
-      <g className={`ghost-eyes ${closed ? "" : "ghost-eyes--blink"}`} style={{ animationDelay: delay }}>
-        {closed ? (
-          <>
-            <path d="M23 37 Q29 41 35 37" stroke="#0b1622" strokeWidth="3" fill="none" strokeLinecap="round" />
-            <path d="M45 37 Q51 41 57 37" stroke="#0b1622" strokeWidth="3" fill="none" strokeLinecap="round" />
-          </>
-        ) : (
-          <>
-            {mood === "wink" ? (
-              <path d="M23 37 Q29 32 35 37" stroke="#0b1622" strokeWidth="3" fill="none" strokeLinecap="round" />
-            ) : (
-              <ellipse cx="29" cy="36" rx={mood === "surprised" ? 7 : 6} ry={mood === "surprised" ? 7.5 : 6.5} fill="#0b1622" />
+      {halo && <ellipse cx="40" cy="46" rx="56" ry="60" fill={`url(#halo-${id})`} />}
+      <g className="ghost-lean" style={{ transform: `rotate(${tilt}deg)` }}>
+        {[fill, `url(#sheen-${id})`].map((paint, i) => (
+          <path key={i} d={STILL} fill={paint} style={i ? { mixBlendMode: "soft-light" } : undefined}>
+            {!reduce && (
+              <animate
+                attributeName="d"
+                dur="3.2s"
+                begin={delay}
+                repeatCount="indefinite"
+                values={[...FRAMES, FRAMES[0]].join(";")}
+                calcMode="spline"
+                keySplines={Array(FRAMES.length).fill("0.45 0 0.55 1").join(";")}
+              />
             )}
-            <ellipse cx="51" cy="36" rx={mood === "surprised" ? 7 : 6} ry={mood === "surprised" ? 7.5 : 6.5} fill="#0b1622" />
-            <g className="ghost-pupils" style={{ transform: `translate(${lx}px, ${ly}px)` }}>
-              {mood !== "wink" && <circle cx="30.5" cy="34" r="2" fill="#fff" />}
-              <circle cx="52.5" cy="34" r="2" fill="#fff" />
-            </g>
-          </>
+          </path>
+        ))}
+
+        <g className={`ghost-eyes ${closed ? "" : "ghost-eyes--blink"}`} style={{ animationDelay: delay }}>
+          {closed ? (
+            <>
+              <path d="M23 37 Q29 41 35 37" stroke={INK} strokeWidth="3" fill="none" strokeLinecap="round" />
+              <path d="M45 37 Q51 41 57 37" stroke={INK} strokeWidth="3" fill="none" strokeLinecap="round" />
+            </>
+          ) : (
+            <>
+              {mood === "wink" ? (
+                <path d="M23 37 Q29 32 35 37" stroke={INK} strokeWidth="3" fill="none" strokeLinecap="round" />
+              ) : (
+                <ellipse cx="29" cy="36" rx={wide ? 7 : 6} ry={wide ? 7.5 : mood === "lonely" ? 6 : 6.5} fill={INK} />
+              )}
+              <ellipse cx="51" cy="36" rx={wide ? 7 : 6} ry={wide ? 7.5 : mood === "lonely" ? 6 : 6.5} fill={INK} />
+              <motion.g className="ghost-pupils" style={pupilStyle}>
+                {mood !== "wink" && <circle cx="30.5" cy={mood === "lonely" ? 37 : 34} r="2" fill="#fff" />}
+                <circle cx="52.5" cy={mood === "lonely" ? 37 : 34} r="2" fill="#fff" />
+              </motion.g>
+            </>
+          )}
+        </g>
+
+        {mood === "happy" || mood === "wink" ? (
+          <path d="M33 50 Q40 57 47 50" stroke={INK} strokeWidth="3" fill="none" strokeLinecap="round" />
+        ) : mood === "excited" ? (
+          <path d="M31 49 Q40 61 49 49 Z" fill={INK} />
+        ) : mood === "talk" ? (
+          <ellipse cx="40" cy="52" rx="4.5" ry="4" fill={INK} className="ghost-mouth-talk" />
+        ) : mood === "surprised" ? (
+          <ellipse cx="40" cy="54" rx="4.5" ry="6" fill={INK} />
+        ) : mood === "curious" ? (
+          <ellipse cx="41" cy="53" rx="3.2" ry="3.6" fill={INK} />
+        ) : mood === "sleep" ? (
+          <ellipse cx="40" cy="52" rx="3" ry="2.4" fill={INK} />
+        ) : mood === "lonely" ? (
+          <path d="M36 53 L44 53" stroke={INK} strokeWidth="3" fill="none" strokeLinecap="round" />
+        ) : (
+          <path d="M35 51 Q40 54 45 51" stroke={INK} strokeWidth="3" fill="none" strokeLinecap="round" />
+        )}
+
+        {cheeks && (
+          <g opacity="0.35" fill="#f472b6">
+            <ellipse cx="21" cy="46" rx="4" ry="2.2" />
+            <ellipse cx="59" cy="46" rx="4" ry="2.2" />
+          </g>
         )}
       </g>
-
-      {mood === "happy" || mood === "wink" ? (
-        <path d="M33 50 Q40 57 47 50" stroke="#0b1622" strokeWidth="3" fill="none" strokeLinecap="round" />
-      ) : mood === "talk" ? (
-        <ellipse cx="40" cy="52" rx="4.5" ry="4" fill="#0b1622" className="ghost-mouth-talk" />
-      ) : mood === "surprised" ? (
-        <ellipse cx="40" cy="54" rx="4.5" ry="6" fill="#0b1622" />
-      ) : mood === "curious" ? (
-        <ellipse cx="41" cy="53" rx="3.2" ry="3.6" fill="#0b1622" />
-      ) : mood === "sleep" ? (
-        <ellipse cx="40" cy="52" rx="3" ry="2.4" fill="#0b1622" />
-      ) : (
-        <path d="M35 51 Q40 54 45 51" stroke="#0b1622" strokeWidth="3" fill="none" strokeLinecap="round" />
-      )}
-
-      {mood === "happy" && (
-        <g opacity="0.35" fill="#f472b6">
-          <ellipse cx="21" cy="46" rx="4" ry="2.2" />
-          <ellipse cx="59" cy="46" rx="4" ry="2.2" />
-        </g>
-      )}
     </svg>
   );
 }

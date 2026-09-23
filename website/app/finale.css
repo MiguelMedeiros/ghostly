@@ -1,0 +1,428 @@
+/* Finale: the story closes. Boo and Casper meet, talk, Casper leaves and Boo
+   turns to you. Every rule is prefixed fin-; the default frame (no scripts,
+   reduced motion) is the finished one, and only html.js + motion hides it. */
+
+.fin {
+  --fin-travel: 160px;
+  --fin-gap: 40px;
+  --fin-ghost: 150px;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 70% 55% at 50% 22%, rgba(34, 211, 238, 0.09), transparent 70%),
+    radial-gradient(ellipse 40% 30% at 50% 100%, rgba(0, 168, 132, 0.06), transparent 70%),
+    var(--bg);
+}
+.fin-inner {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  gap: 0;
+}
+.fin-eyebrow {
+  transition: opacity 0.6s var(--ease);
+}
+
+/* ── The stage ─────────────────────────────────── */
+.fin-stage {
+  position: relative;
+  width: 100%;
+  margin-top: 30px;
+}
+.fin-actors {
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  gap: var(--fin-gap);
+  min-height: calc(var(--fin-ghost) * 1.25 + 58px);
+}
+/* A fixed footprint: the bubble sits out of flow above it, so a longer line
+   never widens the actor and re-centres the pair. Only --k moves them. */
+.fin-actor {
+  position: relative;
+  width: var(--fin-ghost);
+  display: grid;
+  justify-items: center;
+  align-content: end;
+  transform: translateX(calc(var(--k, 0) * var(--fin-travel)));
+  transition:
+    transform 0.9s var(--ease),
+    opacity 0.6s var(--ease);
+}
+.fin[data-state="play"]:not([data-step="-1"]) .fin-actor {
+  transition-duration: 1.6s, 0.6s;
+  transition-timing-function: linear, var(--ease);
+}
+.fin-body {
+  position: relative;
+  transform-origin: 50% 70%;
+  transition:
+    transform 0.45s var(--ease),
+    opacity 0.45s var(--ease);
+}
+.fin-actor .ghost {
+  width: var(--fin-ghost);
+  height: auto;
+}
+.fin-bubble {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  padding: 9px 16px;
+  border-radius: 18px;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translate(-50%, 8px) scale(0.92);
+  transition:
+    opacity 0.3s var(--ease),
+    transform 0.3s var(--ease);
+}
+.fin-bubble:empty {
+  visibility: hidden;
+}
+.fin-bubble[data-on="true"] {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.fin-bubble--boo {
+  background: rgba(34, 211, 238, 0.14);
+  color: var(--cyan);
+  border-bottom-left-radius: 5px;
+}
+.fin-bubble--casper {
+  background: rgba(74, 222, 128, 0.14);
+  color: var(--mint);
+  border-bottom-right-radius: 5px;
+}
+
+/* Casper's exit: he shrinks to nothing and three small ghosts drift up. The
+   particles are siblings of the body (positioned over the actor), so they stay
+   visible while the body collapses. */
+.fin-poof {
+  position: absolute;
+  left: 50%;
+  top: 38%;
+  width: 22px;
+  height: 22px;
+  margin: -11px;
+  color: var(--mint);
+  opacity: 0;
+  pointer-events: none;
+  --dx: calc((var(--n) - 1) * 30px);
+}
+.fin[data-poof="true"] .fin-actor--casper .fin-body {
+  transform: scale(0);
+  opacity: 0;
+}
+.fin[data-poof="true"] .fin-actor--casper .fin-body > .ghost {
+  filter: none;
+}
+.fin[data-poof="true"] .fin-actor--casper .fin-poof {
+  animation: fin-poof 1s var(--ease) calc(var(--n) * 70ms) both;
+}
+.fin[data-poof="true"] .fin-actor--casper .fin-bubble {
+  opacity: 0;
+  transform: translate(-50%, -6px) scale(0.9);
+}
+@keyframes fin-poof {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.6);
+  }
+  25% {
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--dx), -70px) scale(1) rotate(calc((var(--n) - 1) * 14deg));
+  }
+}
+/* With Casper gone, Boo takes the centre and looks at you. */
+html.js .fin[data-state="done"][data-poof="true"] .fin-actor--boo {
+  transform: translateX(calc(50% + var(--fin-gap) / 2));
+}
+
+/* ── Title, lead, call to action ───────────────── */
+.fin-title {
+  margin-top: 22px;
+  max-width: 12em;
+}
+/* Portuguese runs longer ("Você já é um fantasma." is 22 characters); capped a
+   little under the English volume it stays on two lines inside the wrap. */
+.fin-title:lang(pt) {
+  font-size: min(var(--t-display), 112px);
+}
+.fin-title-line {
+  display: block;
+}
+.fin-word {
+  display: inline-block;
+}
+.fin-word-in {
+  display: inline-block;
+  clip-path: inset(-0.25em -0.1em -0.3em -0.1em);
+  transition:
+    clip-path 0.7s var(--ease),
+    transform 0.7s var(--ease);
+  transition-delay: calc(var(--i, 0) * 60ms);
+}
+.fin-lead {
+  margin-top: 26px;
+  max-width: 34em;
+}
+.fin-cta {
+  margin-top: 34px;
+}
+.fin[data-state="done"][data-poof="true"] .fin-cta {
+  animation: fin-glow 0.9s ease-out 1 both;
+}
+@keyframes fin-glow {
+  0% {
+    box-shadow: 0 10px 30px -10px rgba(34, 211, 238, 0.55);
+  }
+  35% {
+    box-shadow:
+      0 10px 30px -10px rgba(34, 211, 238, 0.55),
+      0 0 0 10px rgba(34, 211, 238, 0.22),
+      0 0 70px 10px rgba(34, 211, 238, 0.35);
+  }
+  100% {
+    box-shadow:
+      0 10px 30px -10px rgba(34, 211, 238, 0.55),
+      0 0 0 0 rgba(34, 211, 238, 0),
+      0 0 0 0 rgba(34, 211, 238, 0);
+  }
+}
+
+/* ── The download strip: one line, two rules, no cards ── */
+.fin-strip {
+  --fin-list: 84px; /* two rows of 32px links, a 6px row gap and 14px above */
+  position: relative;
+  width: 100%;
+  max-width: 880px;
+  margin-top: 64px;
+  padding: 22px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px 32px;
+  flex-wrap: wrap;
+  text-align: left;
+}
+/* The open list spans the whole strip below the row, so the two link-arrow
+   items keep their place instead of wrapping. */
+.fin-strip:has(.fin-details[open]) {
+  padding-bottom: calc(22px + var(--fin-list));
+}
+html.js .fin-strip:has(.fin-details[open]:not([data-detected])) {
+  padding-bottom: 22px;
+}
+.fin-details[open] .fin-platforms {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 22px;
+}
+.fin-desktop {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+.fin-strip-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  text-transform: uppercase;
+}
+.fin-desktop-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+.fin-installer {
+  min-height: 46px;
+  padding: 10px 18px;
+  font-size: 15px;
+}
+.fin-installer svg {
+  width: 18px;
+  height: 18px;
+}
+.fin-details summary {
+  list-style: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 2px;
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 500;
+}
+.fin-details summary::-webkit-details-marker {
+  display: none;
+}
+.fin-details summary:hover {
+  color: var(--cyan);
+}
+.fin-details-mark {
+  width: 8px;
+  height: 8px;
+  border-right: 1.6px solid currentColor;
+  border-bottom: 1.6px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform 0.2s var(--ease);
+}
+.fin-details[open] .fin-details-mark {
+  transform: translateY(1px) rotate(-135deg);
+}
+/* With scripts, the list waits for the detection so it never shows for a frame
+   on a machine we can name; without scripts it is simply there. */
+html.js .fin-details[open]:not([data-detected]) .fin-platforms {
+  display: none;
+}
+.fin-platforms {
+  display: grid;
+  grid-template-columns: repeat(3, max-content);
+  grid-auto-rows: 32px;
+  gap: 6px 32px;
+  padding: 14px 0 0;
+}
+.fin-platforms a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  color: var(--muted);
+  font-size: 15px;
+  white-space: nowrap;
+}
+.fin-platforms a:hover {
+  color: var(--cyan);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.fin-platforms a[aria-current="true"] {
+  color: var(--text);
+}
+.fin-platforms svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.fin-more {
+  font-size: 15px;
+  white-space: nowrap;
+}
+.fin-more svg {
+  width: 18px;
+  height: 18px;
+}
+.fin-note {
+  margin-top: 18px;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  line-height: 1.7;
+  max-width: 56em;
+}
+.fin-note a {
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.fin-note a:hover {
+  color: var(--cyan);
+}
+
+/* ── The sequence (only with scripts and motion) ─ */
+@media (prefers-reduced-motion: no-preference) {
+  html.js .fin[data-state="idle"] .fin-eyebrow {
+    opacity: 0;
+    transition: none;
+  }
+  html.js .fin[data-state="idle"] .fin-actor {
+    opacity: 0;
+    transition: none;
+  }
+  html.js .fin[data-state="idle"] .fin-actor--boo {
+    transform: translateX(calc(-1 * var(--fin-travel)));
+  }
+  html.js .fin[data-state="idle"] .fin-actor--casper {
+    transform: translateX(var(--fin-travel));
+  }
+  html.js .fin:not([data-state="done"]) .fin-word-in {
+    clip-path: inset(0 -0.1em 100% -0.1em);
+    transform: translateY(0.35em);
+    transition: none;
+  }
+}
+
+/* ── Phone: the ghosts sit right above the button ─ */
+@media (max-width: 720px) {
+  .fin {
+    --fin-travel: 100px;
+    --fin-ghost: 77px;
+  }
+  .fin-eyebrow {
+    order: 1;
+  }
+  .fin-title {
+    order: 2;
+  }
+  .fin-lead {
+    order: 3;
+    margin-top: 18px;
+  }
+  .fin-stage {
+    order: 4;
+    margin-top: 26px;
+  }
+  .fin-cta {
+    order: 5;
+    margin-top: 8px;
+    width: 100%;
+    max-width: 420px;
+  }
+  .fin-strip {
+    order: 6;
+    margin-top: 44px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 18px;
+  }
+  .fin-note {
+    order: 7;
+  }
+  .fin-actors {
+    min-height: calc(var(--fin-ghost) * 1.25 + 50px);
+  }
+  .fin-bubble {
+    font-size: 13px;
+    padding: 7px 12px;
+  }
+  .fin-poof {
+    --dx: calc((var(--n) - 1) * 18px);
+  }
+  /* Stacked, the list simply opens in place. */
+  .fin-strip:has(.fin-details[open]) {
+    padding-bottom: 22px;
+  }
+  .fin-details[open] .fin-platforms {
+    position: static;
+  }
+  .fin-platforms {
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 18px;
+  }
+}
+@media (max-width: 400px) {
+  .fin-platforms {
+    grid-template-columns: 1fr;
+  }
+}

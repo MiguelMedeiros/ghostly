@@ -1,23 +1,30 @@
 "use client";
 
-import { createContext, useContext, useEffect, useRef, useState } from "react";
-import {
-  motionValue,
-  useMotionValueEvent,
-  useScroll,
-  type MotionValue,
-} from "motion/react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { motion, motionValue, useInView, useScroll, useTransform, type MotionValue } from "motion/react";
 import { useCalm } from "@/lib/useCalm";
+import { orientationOf, stepAt, stepOf, usePortrait, type Camera } from "@/components/home/stage";
+import { BLOCKING, ROOMS, valueAt, type Chapter } from "./poses";
 
 /**
- * A scene that holds the screen while its story plays: the section is taller
- * than the viewport, its stage sticks, and scroll progress (0…1) drives the
- * picture while the copy steps through. Every step's text is in the DOM for
- * readers and search; with reduced motion the scene becomes a plain sequence.
+ * A chapter of the story: a full-bleed stage that holds the screen while its
+ * steps play, with the copy in a floating panel over the picture. Scroll
+ * progress (0…1) drives the picture; the copy steps through. Every step's text
+ * is in the DOM for readers and search. With reduced motion, or without
+ * scripts, the chapter becomes an illustrated article: one still per step.
  */
 export type SceneStep = { title: string; body: string; note?: string };
+export type CopyAt = "left" | "right" | "bottom-left" | "bottom-right";
 
-type SceneState = { p: MotionValue<number>; step: number; still: boolean };
+type SceneState = {
+  p: MotionValue<number>;
+  step: number;
+  n: number;
+  still: boolean;
+  portrait: boolean;
+  camera: Camera;
+  focus: { x: MotionValue<number>; y: MotionValue<number> };
+};
 const SceneContext = createContext<SceneState | null>(null);
 
 export function useScene(): SceneState {
@@ -26,48 +33,107 @@ export function useScene(): SceneState {
   return ctx;
 }
 
+function hexToRgb(hex: string) {
+  const n = parseInt(hex.slice(1), 16);
+  return `${(n >> 16) & 255} ${(n >> 8) & 255} ${n & 255}`;
+}
+
+/** Camera and focal point for a chapter, from the blocking table. */
+function useBlocking(p: MotionValue<number>, chapter: Chapter, portrait: boolean, calm: boolean) {
+  const b = BLOCKING[orientationOf(portrait)][chapter];
+  const scale = useTransform(p, (v) => (calm ? 1 : valueAt(b.camera, v)));
+  const fx = useTransform(p, (v) => valueAt(b.focus, v)[0]);
+  const fy = useTransform(p, (v) => valueAt(b.focus, v)[1]);
+  return { camera: { scale, fx, fy }, focus: { x: fx, y: fy } };
+}
+
 export function SceneFrame({
   id,
+  chapter,
   eyebrow,
   steps,
+  stills,
   visual,
-  flip = false,
-  length = 85,
-  stillAt = 1,
+  copyAt = "left",
+  length = 70,
   label,
   children,
 }: {
   id: string;
+  chapter: Chapter;
   eyebrow: string;
   steps: SceneStep[];
+  /** Progress to freeze each step at, for the static figures. */
+  stills: number[];
   visual: React.ReactNode;
-  flip?: boolean;
+  copyAt?: CopyAt;
   /** Scroll length per step, in viewport heights. */
   length?: number;
-  /** Progress to show when motion is reduced. */
-  stillAt?: number;
   label?: string;
   children?: React.ReactNode;
 }) {
   const ref = useRef<HTMLElement>(null);
-  const reduce = useCalm();
+  const calm = useCalm();
+  const portrait = usePortrait();
+  const n = steps.length;
+  const inView = useInView(ref, { margin: "20% 0px 20% 0px" });
   const { scrollYProgress } = useScroll({ target: ref, offset: ["start start", "end end"] });
-  const [step, setStep] = useState(0);
-  const [still] = useState(() => motionValue(stillAt));
 
-  useMotionValueEvent(scrollYProgress, "change", (v) => {
-    const next = Math.min(steps.length - 1, Math.max(0, Math.floor(v * steps.length * 0.9999)));
-    setStep((prev) => (prev === next ? prev : next));
-  });
-
-  // Jumping to the scene by anchor lands on its first step.
+  // Server HTML and the first paint carry the story pose, not the scroll-0 pose.
+  const [p] = useState(() => motionValue(stills[Math.min(1, n - 1)]));
+  const [step, setStep] = useState(1 < n ? 1 : 0);
   useEffect(() => {
-    setStep(Math.min(steps.length - 1, Math.floor(scrollYProgress.get() * steps.length)));
-  }, [scrollYProgress, steps.length]);
+    if (calm) return;
+    const sync = (v: number) => {
+      p.set(v);
+      const next = stepOf(v, n);
+      setStep((prev) => (prev === next ? prev : next));
+    };
+    sync(scrollYProgress.get());
+    return scrollYProgress.on("change", sync);
+  }, [calm, n, p, scrollYProgress]);
 
-  const state: SceneState = reduce
-    ? { p: still, step: steps.length - 1, still: true }
-    : { p: scrollYProgress, step, still: false };
+  const { camera, focus } = useBlocking(p, chapter, portrait, calm);
+  const state = useMemo<SceneState>(() => ({ p, step, n, still: false, portrait, camera, focus }), [p, step, n, portrait, camera, focus]);
+
+  const jump = (i: number) => {
+    const el = ref.current;
+    if (!el) return;
+    const top = el.getBoundingClientRect().top + window.scrollY;
+    const travel = el.offsetHeight - window.innerHeight;
+    window.scrollTo({ top: top + travel * stepAt(i, 0.2, n), behavior: "smooth" });
+  };
+
+  const room = ROOMS[chapter];
+  const style = { "--chapter-bg": room, "--chapter-rgb": hexToRgb(room) } as React.CSSProperties;
+
+  if (calm) {
+    // An illustrated article: each paragraph beside its own still frame.
+    return (
+      <SceneContext.Provider value={{ ...state, still: true }}>
+      <section ref={ref} id={id} className="scene scene--static" data-chapter={chapter} aria-label={label} style={style}>
+        <div className="wrap scene-static">
+          <h2 className="eyebrow">{eyebrow}</h2>
+          <ol className="scene-static-steps">
+            {steps.map((s, i) => (
+              <li key={i} className="scene-static-step">
+                <StaticFigure state={{ ...state, still: true, step: i }} at={stills[i] ?? stills[stills.length - 1]} chapter={chapter} portrait={portrait}>
+                  {visual}
+                </StaticFigure>
+                <div className="scene-static-copy">
+                  <h3 className="h-scene">{s.title}</h3>
+                  <p className="body">{s.body}</p>
+                  {s.note && <p className="note">{s.note}</p>}
+                </div>
+              </li>
+            ))}
+          </ol>
+          {children && <div className="scene-static-extra">{children}</div>}
+        </div>
+      </section>
+      </SceneContext.Provider>
+    );
+  }
 
   return (
     <SceneContext.Provider value={state}>
@@ -75,36 +141,57 @@ export function SceneFrame({
         ref={ref}
         id={id}
         className="scene"
-        data-static={reduce}
+        data-chapter={chapter}
+        data-inview={inView}
+        data-copy={copyAt}
         aria-label={label}
-        style={reduce ? undefined : { height: `${100 + steps.length * length}vh` }}
+        style={{ ...style, height: `${100 + n * length}svh` }}
       >
         <div className="scene-sticky">
-          <div className={`wrap scene-grid ${flip ? "scene-grid--flip" : ""}`}>
-            <div className="scene-copy">
-              <h2 className="eyebrow">{eyebrow}</h2>
-              <ol className="scene-steps">
-                {steps.map((s, i) => (
-                  <li key={i} className="scene-step" data-active={reduce || i === step}>
-                    <h3>{s.title}</h3>
-                    <p>{s.body}</p>
-                    {s.note && <small>{s.note}</small>}
-                  </li>
-                ))}
-              </ol>
-              <div className="scene-progress" aria-hidden="true">
-                {steps.map((_, i) => (
-                  <span key={i} data-on={i <= step} />
-                ))}
-              </div>
-              {children}
-            </div>
-            <div className="scene-visual" aria-hidden="true">
-              {visual}
-            </div>
+          <div className="scene-visual" aria-hidden="true">
+            {visual}
           </div>
+          <motion.div className="scene-copy">
+            <h2 className="eyebrow">{eyebrow}</h2>
+            <ol className="scene-steps">
+              {steps.map((s, i) => (
+                <li key={i} className="scene-step" data-active={i === step} aria-current={i === step ? "step" : undefined}>
+                  <h3 className="h-scene">{s.title}</h3>
+                  <p className="body">{s.body}</p>
+                  {s.note && <p className="note">{s.note}</p>}
+                </li>
+              ))}
+            </ol>
+            <div className="scene-progress" role="group" aria-label={label}>
+              {steps.map((s, i) => (
+                <button key={i} type="button" data-on={i <= step} aria-current={i === step ? "step" : undefined} onClick={() => jump(i)}>
+                  <span className="sr-only">
+                    {i + 1}: {s.title}
+                  </span>
+                </button>
+              ))}
+            </div>
+            {children}
+          </motion.div>
         </div>
       </section>
+    </SceneContext.Provider>
+  );
+}
+
+/** One frozen frame of the scene, for the static article. */
+function StaticFigure({ state, at, chapter, portrait, children }: { state: SceneState; at: number; chapter: Chapter; portrait: boolean; children: React.ReactNode }) {
+  const [p] = useState(() => motionValue(at));
+  const b = BLOCKING[orientationOf(portrait)][chapter];
+  const scale = useTransform(p, () => 1);
+  const fx = useTransform(p, (v) => valueAt(b.focus, v)[0]);
+  const fy = useTransform(p, (v) => valueAt(b.focus, v)[1]);
+  const value = useMemo<SceneState>(() => ({ ...state, p, camera: { scale, fx, fy }, focus: { x: fx, y: fy } }), [state, p, scale, fx, fy]);
+  return (
+    <SceneContext.Provider value={value}>
+      <figure className="scene-static-figure" aria-hidden="true">
+        {children}
+      </figure>
     </SceneContext.Provider>
   );
 }

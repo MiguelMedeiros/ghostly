@@ -28,6 +28,24 @@
   --wrap: 1180px;
   --nav-h: 64px;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  /* One type voice at different volumes. Mono is for eyebrows, captions, chips and code only. */
+  --t-display: clamp(56px, 9.5vw, 148px);
+  --t-section: clamp(40px, 5.4vw, 72px);
+  --t-scene: clamp(34px, 4.2vw, 60px);
+  --t-card: 26px;
+  --t-lead: clamp(18px, 1.6vw, 21px);
+  --t-body: 17px;
+  --t-note: 15px;
+  --t-micro: 13px;
+  --t-caption: 12px;
+  /* Chapter rooms: each section owns a background so the eye learns the story changed register. */
+  --room-hero: #05070b;
+  --room-dht: #070a1f;
+  --room-agree: #0b0e14;
+  --room-alive: #030507;
+  --room-read: #0b1219;
+  --room-space: #0d0b14;
+  --room-open: #0b0716;
 }
 
 html {
@@ -115,29 +133,55 @@ body {
   opacity: 0.7;
 }
 .h-display {
-  font-size: clamp(44px, 7.4vw, 104px);
-  line-height: 0.98;
-  letter-spacing: -0.035em;
+  font-size: var(--t-display);
+  line-height: 0.95;
+  letter-spacing: -0.04em;
   font-weight: 700;
+  text-wrap: balance;
 }
 .h-section {
-  font-size: clamp(34px, 5vw, 64px);
+  font-size: var(--t-section);
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-weight: 700;
+  text-wrap: balance;
+}
+.h-scene {
+  font-size: var(--t-scene);
   line-height: 1.02;
   letter-spacing: -0.03em;
   font-weight: 700;
   text-wrap: balance;
 }
 .h-card {
-  font-size: clamp(20px, 2vw, 26px);
+  font-size: var(--t-card);
   line-height: 1.15;
   letter-spacing: -0.015em;
   font-weight: 650;
 }
 .lead {
-  font-size: clamp(17px, 1.6vw, 21px);
-  line-height: 1.55;
+  font-size: var(--t-lead);
+  line-height: 1.5;
   color: var(--muted);
   text-wrap: pretty;
+  max-width: 40em;
+}
+.body {
+  font-size: var(--t-body);
+  line-height: 1.6;
+  max-width: 34em;
+}
+/* A quiet aside under a claim: limits, clients, caveats. */
+.note {
+  font-size: var(--t-note);
+  line-height: 1.55;
+  color: var(--dim);
+}
+.caption {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: var(--t-caption);
+  letter-spacing: 0.06em;
+  color: var(--dim);
 }
 .muted {
   color: var(--muted);
@@ -449,9 +493,6 @@ body {
   position: relative;
   padding-block: clamp(88px, 12vw, 160px);
 }
-.section--tight {
-  padding-block: clamp(64px, 8vw, 104px);
-}
 .section-head {
   display: grid;
   gap: 18px;
@@ -509,11 +550,12 @@ body {
 }
 @keyframes ghost-blink {
   0%,
-  92%,
+  94.5%,
+  98.5%,
   100% {
     transform: scaleY(1);
   }
-  95% {
+  96.5% {
     transform: scaleY(0.1);
   }
 }
@@ -561,51 +603,143 @@ body {
   }
 }
 
-/* ── Scroll scenes ───────────────────────────────── */
+/* ── Acts and scenes ─────────────────────────────── */
+/* An act pins one full-bleed backdrop behind its chapters; the chapters scroll over it. */
+.act {
+  position: relative;
+  overflow: clip;
+  --chapter-bg: var(--room-hero);
+}
+.act-backdrop {
+  position: sticky;
+  top: 0;
+  height: 100svh;
+  margin-bottom: -100svh;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.act-backdrop .stage {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.act-room {
+  fill: var(--chapter-bg);
+  transition: fill 0.9s var(--ease);
+}
+.act > :not(.act-backdrop) {
+  position: relative;
+  z-index: 1;
+}
+.act[data-inview="false"] .stage-bob,
+.act[data-inview="false"] .dht-node,
+.act[data-inview="false"] .ghost-eyes--blink {
+  animation-play-state: paused;
+}
+.act-bubble {
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+.act-bubble[data-on="true"] {
+  opacity: 1;
+}
+.act-caret {
+  animation: caret 1s steps(1) infinite;
+}
+@keyframes caret {
+  50% {
+    opacity: 0;
+  }
+}
+
 .scene {
   position: relative;
+  --chapter-bg: var(--room-hero);
+  --chapter-rgb: 5 7 11;
 }
 .scene-sticky {
   position: sticky;
   top: 0;
   height: 100vh;
   height: 100svh;
-  display: grid;
-  align-items: center;
   overflow: hidden;
 }
-.scene-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 0.78fr) minmax(0, 1.22fr);
-  gap: clamp(24px, 4vw, 56px);
-  align-items: center;
-  padding-top: var(--nav-h);
+.scene-visual {
+  position: absolute;
+  inset: 0;
 }
-.scene-grid--flip {
-  grid-template-columns: minmax(0, 1.22fr) minmax(0, 0.78fr);
+.scene-visual .stage {
+  width: 100%;
+  height: 100%;
 }
-.scene-grid--flip .scene-copy {
-  order: 2;
+.stage text {
+  font-family: var(--font-inter), system-ui, sans-serif;
 }
+.stage .mono,
+.stage text.mono {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+}
+.stage-bob {
+  animation: ghost-bob 4.2s ease-in-out infinite;
+}
+.scene[data-inview="false"] .stage-bob,
+.scene[data-inview="false"] .dht-node,
+.scene[data-inview="false"] .ghost-eyes--blink {
+  animation-play-state: paused;
+}
+.key-light {
+  mix-blend-mode: screen;
+}
+/* In the story the act draws the actors; a scene's own ghosts only carry the stills. */
+html.js .act:not(.act--static) .scene-actors-static {
+  display: none;
+}
+
+/* The copy floats in a lit corner over the picture. */
 .scene-copy {
+  position: absolute;
+  z-index: 2;
+  width: min(460px, calc(100% - 48px));
   display: grid;
   gap: 18px;
+  padding: 40px;
+  border-radius: 28px;
+  background: radial-gradient(70% 90% at 30% 50%, rgb(var(--chapter-rgb) / 0.9), rgb(var(--chapter-rgb) / 0.55) 70%, transparent);
+}
+.scene[data-copy="left"] .scene-copy,
+.scene[data-copy="right"] .scene-copy {
+  top: 50%;
+  transform: translateY(-50%);
+}
+.scene[data-copy="left"] .scene-copy,
+.scene[data-copy="bottom-left"] .scene-copy {
+  left: max(24px, calc((100vw - var(--wrap)) / 2 + 24px));
+}
+.scene[data-copy="right"] .scene-copy,
+.scene[data-copy="bottom-right"] .scene-copy {
+  right: max(24px, calc((100vw - var(--wrap)) / 2 + 24px));
+}
+.scene[data-copy="bottom-left"] .scene-copy,
+.scene[data-copy="bottom-right"] .scene-copy {
+  bottom: 8vh;
 }
 .scene-steps {
   position: relative;
   display: grid;
-  min-height: 190px;
+  min-height: 210px;
 }
 .scene-step {
   grid-area: 1 / 1;
   display: grid;
-  gap: 10px;
+  gap: 12px;
   align-content: start;
   opacity: 0;
   transform: translateY(14px);
   transition:
-    opacity 0.18s ease,
-    transform 0.18s ease;
+    opacity 0.12s ease,
+    transform 0.12s ease;
   pointer-events: none;
 }
 .scene-step[data-active="true"] {
@@ -613,95 +747,162 @@ body {
   transform: none;
   pointer-events: auto;
   transition:
-    opacity 0.45s 0.16s var(--ease),
-    transform 0.45s 0.16s var(--ease);
+    opacity 0.45s 0.08s var(--ease),
+    transform 0.45s 0.08s var(--ease);
 }
-.scene-step h3 {
-  font-size: clamp(24px, 2.8vw, 36px);
-  line-height: 1.08;
-  letter-spacing: -0.02em;
-  font-weight: 700;
-}
-.scene-step p {
+.scene-step .body {
   color: var(--muted);
-  font-size: clamp(16px, 1.4vw, 19px);
-  line-height: 1.55;
-  max-width: 34em;
-}
-.scene-step small {
-  color: var(--dim);
-  font-size: 14px;
-  line-height: 1.5;
 }
 .scene-progress {
   display: flex;
-  gap: 8px;
+  gap: 4px;
+  margin-left: -10px;
 }
-.scene-progress span {
+.scene-progress button {
+  position: relative;
+  width: 40px;
+  height: 44px;
+  cursor: pointer;
+}
+.scene-progress button::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 6px;
+  top: 50%;
   height: 3px;
-  width: 26px;
   border-radius: 3px;
   background: var(--line-2);
   transition:
     background 0.3s,
-    width 0.3s;
+    transform 0.3s var(--ease);
 }
-.scene-progress span[data-on="true"] {
+.scene-progress button[data-on="true"]::before {
   background: var(--cyan);
-  width: 40px;
 }
-.scene-visual {
-  position: relative;
-  aspect-ratio: 1.15;
-  width: 100%;
-  max-height: calc(100svh - var(--nav-h) - 80px);
+.scene-progress button[aria-current="step"]::before {
+  transform: scaleX(1.35);
+  transform-origin: left;
 }
+.scene-progress button:hover::before {
+  background: var(--text);
+}
+
+/* Phones: the picture on top, the copy in a sheet that rises from the bottom. */
 @media (max-width: 860px) {
-  .scene-grid,
-  .scene-grid--flip {
-    grid-template-columns: 1fr;
-    gap: 8px;
-    align-content: center;
-    height: 100%;
-  }
-  .scene-grid--flip .scene-copy {
-    order: 0;
-  }
-  .scene-visual {
-    aspect-ratio: auto;
-    height: 50svh;
-    max-height: none;
-  }
-  .scene-copy {
+  .scene-copy,
+  .scene[data-copy] .scene-copy {
+    inset: auto 0 0 0;
+    width: auto;
+    transform: none;
+    padding: 36px 16px 22px;
+    border-radius: 0;
+    background: linear-gradient(to bottom, transparent, rgb(var(--chapter-rgb)) 40px);
     gap: 12px;
   }
   .scene-steps {
-    min-height: 200px;
+    min-height: 0;
+  }
+  .scene-step {
+    gap: 8px;
+  }
+  .scene-step .h-scene {
+    font-size: clamp(26px, 7vw, 32px);
+  }
+  .scene-step .body {
+    font-size: 16px;
+  }
+  .scene-step .note {
+    font-size: 14px;
   }
 }
 
-/* Reduced motion or no scripts: every scene becomes a plain, readable sequence. */
+/* Reduced motion or no scripts: an illustrated article, one still per step. */
+.scene--static {
+  padding-block: 64px 24px;
+}
+.scene-static {
+  display: grid;
+  gap: 28px;
+}
+.scene-static-steps {
+  display: grid;
+  gap: 40px;
+}
+.scene-static-step {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  gap: 32px;
+  align-items: center;
+}
+.scene-static-figure {
+  margin: 0;
+  aspect-ratio: 1.6;
+  border-radius: 20px;
+  overflow: hidden;
+  background: var(--chapter-bg);
+  border: 1px solid var(--line);
+}
+.scene-static-figure .stage {
+  width: 100%;
+  height: 100%;
+}
+.scene-static-copy {
+  display: grid;
+  gap: 12px;
+}
+.scene-static-copy .body {
+  color: var(--muted);
+}
+.scene-static-extra {
+  padding-top: 8px;
+}
+@media (max-width: 860px) {
+  .scene-static-step {
+    grid-template-columns: 1fr;
+  }
+}
+/* Without scripts the story layout collapses into the same article shape. */
+html:not(.js) .act-backdrop {
+  display: none;
+}
 html:not(.js) .scene {
   height: auto !important;
+  padding-block: 48px;
 }
-html:not(.js) .scene .scene-sticky,
-.scene[data-static="true"] .scene-sticky {
+html:not(.js) .scene .scene-sticky {
   position: relative;
   height: auto;
-  padding-block: 96px;
+  display: grid;
+  gap: 28px;
+  max-width: var(--wrap);
+  margin-inline: auto;
+  padding-inline: 24px;
 }
-html:not(.js) .scene .scene-steps,
-.scene[data-static="true"] .scene-steps {
+html:not(.js) .scene .scene-visual {
+  position: relative;
+  aspect-ratio: 1.6;
+  border-radius: 20px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+html:not(.js) .scene .scene-copy,
+html:not(.js) .scene[data-copy] .scene-copy {
+  position: static;
+  width: auto;
+  transform: none;
+  padding: 0;
+  background: none;
+}
+html:not(.js) .scene .scene-steps {
   gap: 26px;
 }
-html:not(.js) .scene .scene-step,
-.scene[data-static="true"] .scene-step {
+html:not(.js) .scene .scene-step {
   grid-area: auto;
   opacity: 1;
   transform: none;
 }
-html:not(.js) .scene .scene-progress,
-.scene[data-static="true"] .scene-progress {
+html:not(.js) .scene .scene-progress {
   display: none;
 }
 
