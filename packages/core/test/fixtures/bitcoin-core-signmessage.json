@@ -1,0 +1,20 @@
+{
+  "source": "Bitcoin Core v31.0.0 regtest, `signmessage` on `getnewaddress \"\" legacy` addresses",
+  "legacy": [
+    {
+      "address": "mqvTkkSbEBnp4z18Eo58Tq6oiuuK9qJBPr",
+      "message": "[\"ghostly-peer-proof\",1,\"bitcoin-address\",\"Olá — regtest ✓\"]",
+      "signature": "IH7/EvfC3ABmF3aW7vuwK3mQcyhRzHCEKJTRIv8qGbyZUBuWRjXjeeGbk19uvu98W4qM9lrq4LqUXzI6QX45j78="
+    },
+    {
+      "address": "mw9GhE8g9Zx7H1PzCATYDTzMPbLkCMkUkB",
+      "message": "",
+      "signature": "HwD+oj8re3uOxrXf+cG6L0irQNtpHxRd1x48/JyepqOsL268bVOx+W+mc35/FcW4m3EhcRSY0f65ZoupOgw4GFk="
+    },
+    {
+      "address": "n32CRfg2Th9yEmnRpN3Nt6A2gtdjhkUqZg",
+      "message": "line one\nline two",
+      "signature": "IJOkOQJ/WUN9kE/xPWG8Eju/qYf/MnIAnkwggYTc5Ys6FOJA5d5FNZ+I63WOwOxkrYA6lfPjdV98jgF5NIFfF/g="
+    }
+  ]
+}
