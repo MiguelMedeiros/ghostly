@@ -1049,7 +1049,7 @@ export class GhostlyNode implements EngineImplementation {
     return this.desk.ask(params);
   }
 
-  payRequest(params: { linkId: string; paymentId: string }) {
+  payRequest(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number }) {
     return this.desk.payRequest(params);
   }
 

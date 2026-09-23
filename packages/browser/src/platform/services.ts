@@ -160,10 +160,10 @@ export const servicesPlatform: ServicesPlatform | null = {
       const { paymentId } = await engine.call("requestPayment", { linkId: link.id, amount, memo, timestamp, method });
       return { timestamp, paymentId };
     },
-    async payRequest(peerPubKeyZ32, paymentId) {
+    async payRequest(peerPubKeyZ32, paymentId, options) {
       const link = engine.linkByPeer(peerPubKeyZ32);
       if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
-      await engine.call("payRequest", { linkId: link.id, paymentId });
+      await engine.call("payRequest", { linkId: link.id, paymentId, ...options });
     },
     reclaim: (paymentId) => engine.call("reclaimPayment", { paymentId }),
     getPayment: (paymentId) => engine.state?.payments[paymentId] ?? null,

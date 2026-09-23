@@ -52,6 +52,7 @@ E2E_MINT_URL=http://127.0.0.1:3338 npm run test:e2e
 | `web/wallet-providers.spec.ts` | every wallet provider sending and receiving, in the Testnet mode: Cashu (in over Lightning, Send and Request in the chat), Lightning (in through an invoice, out paying an invoice the test mint does not own, `@network`), Ark, Bark and USDT (in, Send from the wallet, Send and Request in the chat; gated, see below) |
 | `web/bark-wallet.spec.ts` | Bark (Second's Ark) is not on Mainnet yet; `@network`: a Testnet wallet on Second's signet server by itself, and a chat offers Bark only when both sides allow it (Arkade stays separate) |
 | `web/wallet-sources.spec.ts` | where Lightning and on-chain Bitcoin come from: the Lightning card on the Cashu mints by default, a source picked per mode (invoices through it, Mainnet keeping its own), the Bitcoin card's "no source" state and an on-chain send through a source — with the fake providers, no network |
+| `web/wallet-nwc.spec.ts` | Lightning through Nostr Wallet Connect: a wallet connected by its URI receives and pays over its relay, and a bad URI or a Mainnet wallet in Testnet is refused — against a fake NWC wallet service on a relay in the test process, no network; gated (`GHOSTLY_NWC_REGTEST=1`, see below): two people on their own Alby Hub, a chat request paid over a regtest channel |
 | `web/payment-extras.spec.ts` | with `E2E_MINT_URL`: memo and "test sats" in both bubbles, a refused payment is taken back, ecash nobody picks up can be taken back, invoice cards |
 | `extension/interop.spec.ts` | the extension and the web app: chat, file, video call |
 | `extension/services.spec.ts` | a local web app shared by one extension and opened by another over WebRTC, stopped, offline, gone |
@@ -199,6 +200,35 @@ counterpart and pay it 200 from Send, and Bob's chat request of 150 paid by Alic
 balances are checked. The extension test makes a wallet in the offscreen document (where the WebAssembly runs
 there) and moves sats in and out. The request is paid through the bubble's "Copy invoice" and the Lightning card: the bubble's
 own review pays Cashu only for now.
+
+### Nostr Wallet Connect on regtest
+
+Two regtest LND nodes with a channel between them (alice → bob, 1,000,000 sats, 400,000 pushed to bob), each
+behind its own Alby Hub, which answers Nostr Wallet Connect (NIP-47) over a local strfry relay. Worthless coins,
+containers named `ghostly-nwc-*`, everything on `127.0.0.1`:
+
+| Port | |
+|---|---|
+| 44501 | bitcoind RPC (regtest) |
+| 44502 | the Nostr relay, `ws://127.0.0.1:44502` |
+| 44511 / 44512 | LND REST, alice / bob |
+| 44521 / 44522 | Alby Hub, alice / bob |
+
+```bash
+docker compose -p ghostly-nwc -f e2e/support/nwc-regtest/docker-compose.yml up -d
+node e2e/support/nwc-regtest/regtest.mjs ready      # funds both nodes, opens the channel, starts both hubs (idempotent)
+GHOSTLY_NWC_REGTEST=1 npm test -w @ghostly/browser -- nwc.regtest
+npm run build:web && npx vite preview web --port 44581 --strictPort &
+E2E_WEB_URL=http://localhost:44581 GHOSTLY_NWC_REGTEST=1 npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/wallet-nwc.spec.ts
+docker compose -p ghostly-nwc -f e2e/support/nwc-regtest/docker-compose.yml down -v   # when done
+```
+
+The vitest file runs the provider contract against alice's hub (bob's node pays and is paid over the channel),
+pays through NWC and checks both nodes' channel balances, makes a real lost answer (the provider gives up after
+50 ms, the hub pays anyway, `lookup_invoice` finds it paid) and a payment over the app's budget refused before
+anything leaves. The Playwright test gives each person a hub of their own and has Alice pay Bob's request in the
+chat; balances are checked in both apps and on both nodes. Pairing URIs come from `nwcUri()` in `regtest.mjs`,
+in memory, with the relay rewritten to the host's address; the CLI never prints one (it carries a spending key).
 
 ### Bark (Second's Ark) on regtest
 

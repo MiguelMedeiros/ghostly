@@ -97,7 +97,8 @@ export interface EngineApi {
   requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" }): { paymentId: string };
   /** Asks the contact for a way to pay it (Ark, USDT); its answer is a request carrying `askId`. */
   askToPay(params: { linkId: string; amount: number; method: "arkade" | "usdt" | "bark"; memo?: string; timestamp: number }): { askId: string };
-  payRequest(params: { linkId: string; paymentId: string }): void;
+  /** `via: "lightning"`: the Lightning payment the person reviewed, never ecash instead, within `maxFee`. */
+  payRequest(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number }): void;
   reclaimPayment(params: { paymentId: string }): void;
   disconnect(params: { linkId: string }): void;
   addService(params: { name: string; target: string }): { serviceId: string };

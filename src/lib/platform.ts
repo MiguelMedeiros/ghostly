@@ -196,7 +196,8 @@ export interface WalletPlatform {
   askToPay(peerPubKeyZ32: string, amount: number, method: "arkade" | "usdt" | "bark", memo?: string): Promise<{ askId: string }>;
   /** The contact's request answering an ask, once it arrived. */
   answerTo(askId: string): ChatPayment | null;
-  payRequest(peerPubKeyZ32: string, paymentId: string): Promise<void>;
+  /** Pays a contact's request. `via: "lightning"`: its invoice through the Lightning source, as reviewed, within `maxFee`. */
+  payRequest(peerPubKeyZ32: string, paymentId: string, options?: { via?: "lightning"; maxFee?: number }): Promise<void>;
   reclaim(paymentId: string): Promise<void>;
   getPayment(paymentId: string): ChatPayment | null;
 }
