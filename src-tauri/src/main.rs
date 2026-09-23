@@ -1,11 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod crypto;
+mod hyperdht;
+mod local_fetch;
 mod notifications;
 mod paired_transport;
-mod hyperdht;
-mod crypto;
-mod local_fetch;
 mod pkarr_client;
 mod records;
 mod types;
@@ -113,8 +113,8 @@ mod tests {
             })
             .manage(paired_transport::TransportState::default())
             .invoke_handler(only_main(tauri::generate_handler![
-            notifications::native_notification_permission,
-            notifications::native_private_notification,
+                notifications::native_notification_permission,
+                notifications::native_private_notification,
                 paired_transport::paired_native_close,
                 commands::get_profile,
                 commands::generate_enc_key,
@@ -157,9 +157,25 @@ mod tests {
         .build()
         .unwrap();
 
-        for command in ["native_notification_permission", "native_private_notification", "paired_iroh_start", "paired_iroh_connect", "paired_native_send", "paired_native_close",
-            "paired_hyperdht_start", "paired_hyperdht_connect", "paired_hyperdht_send", "paired_hyperdht_stop"] {
-            assert!(invoke(&viewer, &url, command, serde_json::json!({"connectionId":0})).is_err());
+        for command in [
+            "native_notification_permission",
+            "native_private_notification",
+            "paired_iroh_start",
+            "paired_iroh_connect",
+            "paired_native_send",
+            "paired_native_close",
+            "paired_hyperdht_start",
+            "paired_hyperdht_connect",
+            "paired_hyperdht_send",
+            "paired_hyperdht_stop",
+        ] {
+            assert!(invoke(
+                &viewer,
+                &url,
+                command,
+                serde_json::json!({"connectionId":0})
+            )
+            .is_err());
         }
         assert!(invoke(&viewer, &url, "get_profile", serde_json::json!({})).is_err());
         assert!(invoke(&viewer, &url, "generate_enc_key", serde_json::json!({})).is_err());
@@ -175,7 +191,13 @@ mod tests {
         let main = WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .unwrap();
-        assert!(invoke(&main, "tauri://localhost", "paired_native_close", serde_json::json!({"connectionId":0})).is_ok());
+        assert!(invoke(
+            &main,
+            "tauri://localhost",
+            "paired_native_close",
+            serde_json::json!({"connectionId":0})
+        )
+        .is_ok());
         assert!(invoke(
             &main,
             "tauri://localhost",

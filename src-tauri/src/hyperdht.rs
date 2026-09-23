@@ -119,7 +119,10 @@ pub async fn paired_hyperdht_start(
                             if let Some(reply) = ready.take() { let _ = reply.send(Err(error.clone())); }
                             if let Some(reply) = pending.take() { let _ = reply.send(Err(error)); }
                         },
-                        Some("open") => { if let Some(socket) = value["id"].as_u64() { sockets.push(socket); } if events.send(value).is_err() { break; } },
+                        Some("open") => {
+                            if let Some(socket) = value["id"].as_u64() { sockets.push(socket); }
+                            if events.send(value).is_err() { break; }
+                        },
                         Some("closed") => { sockets.retain(|socket| Some(*socket) != value["id"].as_u64()); if events.send(value).is_err() { break; } },
                         Some("frame") => { if events.send(value).is_err() { break; } },
                         _ => break,

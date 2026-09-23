@@ -166,9 +166,17 @@ pub fn updater_can_install() -> bool {
 #[tauri::command]
 pub fn open_project_link(url: String) -> Result<(), String> {
     let root = "https://github.com/MiguelMedeiros/ghostly";
-    if url != root && url != format!("{root}/releases")
-        && !url.strip_prefix(&format!("{root}/releases/tag/"))
-            .is_some_and(|tag| !tag.is_empty() && tag.bytes().all(|c| c.is_ascii_alphanumeric() || b".-_".contains(&c))) {
+    if url != root
+        && url != format!("{root}/releases")
+        && !url
+            .strip_prefix(&format!("{root}/releases/tag/"))
+            .is_some_and(|tag| {
+                !tag.is_empty()
+                    && tag
+                        .bytes()
+                        .all(|c| c.is_ascii_alphanumeric() || b".-_".contains(&c))
+            })
+    {
         return Err("Not a Ghostly project link".into());
     }
     #[cfg(target_os = "macos")]
@@ -176,7 +184,9 @@ pub fn open_project_link(url: String) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     let result = std::process::Command::new("xdg-open").arg(&url).spawn();
     #[cfg(target_os = "windows")]
-    let result = std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url]).spawn();
+    let result = std::process::Command::new("rundll32")
+        .args(["url.dll,FileProtocolHandler", &url])
+        .spawn();
     result.map(|_| ()).map_err(|e| e.to_string())
 }
 
