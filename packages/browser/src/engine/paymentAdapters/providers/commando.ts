@@ -157,7 +157,8 @@ export interface CommandoOptions {
 interface Pending { method: string; chunks: Uint8Array[]; size: number; resolve(value: unknown): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }
 
 const MAX_REPLY = 4 * 1024 * 1024;
-const MAX_BUFFER = 70_000;
+/** One websocket frame may carry many Lightning messages; one this large is not an answer to anything. */
+const MAX_FRAME = MAX_REPLY + 0x10000;
 const text = new TextDecoder();
 
 /**
@@ -231,8 +232,9 @@ export class CommandoClient {
       ws.onmessage = ({ data }) => {
         if (!(data instanceof ArrayBuffer) && !ArrayBuffer.isView(data)) return fail("The node sent something that is not binary");
         const chunk = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+        if (chunk.length > MAX_FRAME) return fail("The node sent more than it was asked for");
+        // What is left between frames is at most one partial message: the loop below takes every whole one.
         buffer = concatBytes(buffer, chunk);
-        if (buffer.length > MAX_BUFFER) return fail("The node sent more than a Lightning message");
         try {
           if (stage === "act2") {
             if (buffer.length < ACT_TWO) return;

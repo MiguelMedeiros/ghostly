@@ -69,6 +69,8 @@ class FakeNode {
   sockets: FakeSocket[] = [];
   /** Split replies in chunks of this many bytes (commando's "continues" messages). */
   chunk = 0;
+  /** Send everything written in one turn as a single websocket frame, as a busy node may. */
+  coalesce = false;
   constructor(public handler: Handler) {}
   socket = (url: string): SocketLike => { const s = new FakeSocket(this, url); this.sockets.push(s); return s; };
 }
@@ -90,7 +92,15 @@ class FakeSocket implements SocketLike {
   close() { if (this.readyState === 3) return; this.readyState = 3; setTimeout(() => this.onclose?.({}), 0); }
   /** The node hangs up. */
   drop() { this.readyState = 3; this.onclose?.({}); }
-  private deliver(bytes: Uint8Array) { const copy = bytes.slice(); setTimeout(() => this.readyState === 1 && this.onmessage?.({ data: copy.buffer }), 0); }
+  private queued: Uint8Array[] = [];
+  private deliver(bytes: Uint8Array) {
+    if (this.node.coalesce && this.stage === "open") {
+      if (!this.queued.length) setTimeout(() => { const frame = concatBytes(...this.queued); this.queued = []; if (this.readyState === 1) this.onmessage?.({ data: frame.buffer }); }, 0);
+      this.queued.push(bytes.slice());
+      return;
+    }
+    const copy = bytes.slice(); setTimeout(() => this.readyState === 1 && this.onmessage?.({ data: copy.buffer }), 0);
+  }
   sendMessage(message: Uint8Array) { this.deliver(this.transport!.encryptMessage(message)); }
 
   send(data: Uint8Array) {
@@ -221,6 +231,12 @@ describe("CommandoClient", () => {
     await expect(pending).rejects.toMatchObject({ name: "CommandoTransportError", sent: true });
     expect(await c.call("getinfo")).toEqual({ ok: true });
     expect(node.sockets).toHaveLength(2);
+  });
+
+  it("reads many whole messages from one websocket frame", async () => {
+    const node = new FakeNode(() => ({ big: "z".repeat(300_000) }));
+    node.chunk = 60_000; node.coalesce = true;
+    expect(await open(node).call<{ big: string }>("listinvoices")).toEqual({ big: "z".repeat(300_000) });
   });
 
   it("refuses an answer larger than it reads", async () => {
