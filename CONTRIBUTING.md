@@ -99,12 +99,20 @@ Open an issue with the `enhancement` label describing:
 - Your proposed solution
 - Any alternatives you've considered
 
+### Branches
+
+- **`dev`** is where work lands: features and fixes branch off it and come back to it.
+- **`main`** is what was released. It moves only for a release (`dev` merged into it with a merge commit, never a squash) or a hotfix.
+- **A hotfix** branches off `main`, is released from there, and `main` is then merged back into `dev`.
+
+Security flaws are the exception: never a public issue or pull request for one (see [SECURITY.md](SECURITY.md)).
+
 ### Pull Requests
 
 1. **Fork** the repository
-2. **Create** your feature branch
+2. **Create** your feature branch from `dev`
    ```bash
-   git checkout -b feature/spooky-feature
+   git checkout -b feature/spooky-feature origin/dev
    ```
 3. **Make** your changes
 4. **Test** your changes
@@ -123,7 +131,7 @@ Open an issue with the `enhancement` label describing:
    ```bash
    git push origin feature/spooky-feature
    ```
-7. **Open** a Pull Request
+7. **Open** a Pull Request against `dev`
 
 ## Code Style
 

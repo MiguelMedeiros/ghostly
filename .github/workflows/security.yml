@@ -4,9 +4,9 @@ name: Security
 # new advisories appear without anyone touching the lock files.
 on:
   push:
-    branches: [main, "claude/security-auto-**"]
+    branches: [main, dev, "claude/security-auto-**"]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
   schedule:
     - cron: "17 6 * * *"
   workflow_dispatch:
