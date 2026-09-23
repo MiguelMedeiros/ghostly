@@ -42,7 +42,7 @@ Valid proof plus participation possession succeeds; wrong audience/key/channel, 
 
 ## References
 
-[Peer keys](02-peer-keys.md), [Nostr](301-nostr.md), [Pubky](302-pubky.md), [Keet](303-keet.md), [Domain](3xx-domain.md), [OpenPGP](3xx-openpgp.md).
+[Peer keys](02-peer-keys.md), [Nostr](301-nostr.md), [Pubky](302-pubky.md), [Keet](303-keet.md), [Domain](3xx-domain.md), [OpenPGP](3xx-openpgp.md), [Bitcoin address](3xx-bitcoin.md).
 
 ## Implementation follow-up — 2026-09-20
 
@@ -78,6 +78,7 @@ Providers under the [provider contract](../../packages/browser/src/proofs/PROOFS
 
 - **Domain** (`domain`, experimental, [draft 3xx](3xx-domain.md)): a DNS TXT record at `_ghostly.<domain>` or `/.well-known/ghostly.json` names the proof key and the statement id, published once; NIP-05 users can instead sign with the Nostr key their `nostr.json` names for `_`. Looked up through a DNS-over-HTTPS resolver the contact chooses; web servers on private addresses are never contacted; re-checked after a day, so removing the record withdraws the proof.
 - **OpenPGP** (`openpgp`, [draft 3xx](3xx-openpgp.md)): the person clearsigns the statement once with their own gpg (a YubiKey or OpenPGP card works unchanged) and pastes it with their public key; the contact verifies locally, with expiry and revocation checked at signing and at verification. The key's user ID is shown with the warning that its holder wrote it; keys.openpgp.org is asked, on request only, which emails it confirmed.
+- **Bitcoin address** (`bitcoin`, experimental, [draft 3xx](3xx-bitcoin.md)): the address's own signature over the binding statement, made once in the person's wallet and pasted back: BIP-322 2.0.0 simple/full (P2WPKH, P2TR key path, P2SH-P2WPKH, P2PKH) or legacy `signmessage` for P2PKH only. Checked on the device with no blockchain lookup; multisig and script paths are inconclusive, proof of funds refused. Proves no balance, past payment or willingness to pay, and says so.
 
 ## Implementation follow-up — 2026-09-23: OpenPGP
 
