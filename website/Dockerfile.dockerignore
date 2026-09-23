@@ -1,0 +1,13 @@
+# Context is the repository root; send only what the site build reads.
+*
+!website
+!docs
+!packages/core/src
+!CONTRIBUTING.md
+!SECURITY.md
+website/node_modules
+website/.next
+website/public/reference
+website/Dockerfile
+website/docker-compose.yml
+**/.DS_Store

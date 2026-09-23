@@ -1,5 +1,6 @@
-import { DocsNavbar } from "@/components/DocsNavbar";
-import { Footer } from "@/components/Footer";
+import { Nav } from "@/components/site/Nav";
+import { SiteFooter } from "@/components/site/Footer";
+import { GhostPet } from "@/components/site/GhostPet";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -50,8 +51,8 @@ function Section({
 export default function PrivacyPage() {
   return (
     <>
-      <DocsNavbar />
-      <main className="pt-16 bg-[#060a10] min-h-screen">
+      <Nav locale="en" />
+      <main id="content" className="pt-16 bg-[#060a10] min-h-screen">
         <div className="max-w-3xl mx-auto px-4 py-16">
           <h1 className="text-4xl md:text-5xl font-bold mb-3 bg-gradient-to-r from-cyan-400 to-cyan-300 bg-clip-text text-transparent">
             Privacy Policy
@@ -248,7 +249,8 @@ export default function PrivacyPage() {
           </Section>
         </div>
       </main>
-      <Footer />
+      <SiteFooter />
+      <GhostPet />
     </>
   );
 }

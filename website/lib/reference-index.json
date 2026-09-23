@@ -6,7 +6,13 @@
       "01-process"
     ],
     "slug": "00-process",
-    "title": "WISP 00 — WISP process and document format"
+    "title": "WISP 00 — WISP process and document format",
+    "status": "Draft",
+    "updated": "2026-09-20",
+    "implementation": "Process proposal",
+    "dependencies": [],
+    "summary": "Separate Ghost, the small rendezvous primitive, from Ghostly, its reference application, and make independently implementable extensions reviewable. WISP is the working document name; this draft does not decide its expanded acronym.",
+    "notices": []
   },
   {
     "file": "01-ghost-core.md",
@@ -15,7 +21,15 @@
       "02-ghost-core"
     ],
     "slug": "01-ghost-core",
-    "title": "WISP 01 — Ghost Core Protocol"
+    "title": "WISP 01 — Ghost Core Protocol",
+    "status": "Draft",
+    "updated": "2026-09-20",
+    "implementation": "Existing rendezvous; modular boundary proposed",
+    "dependencies": [
+      "00-process.md"
+    ],
+    "summary": "Ghost is a minimal, ephemeral rendezvous and small-record exchange primitive over Pkarr/Mainline DHT. Records can contain small encrypted messages and signaling, not only pointers to a homeserver. Ghostly currently composes it with WebRTC and application services. Local history is separate from network presence.",
+    "notices": []
   },
   {
     "file": "02-peer-keys.md",
@@ -24,7 +38,15 @@
       "03-peer-keys"
     ],
     "slug": "02-peer-keys",
-    "title": "WISP 02 — Peer Keys"
+    "title": "WISP 02 — Peer Keys",
+    "status": "Draft",
+    "updated": "2026-09-20",
+    "implementation": "Existing per-link keys; lifecycle extensions proposed",
+    "dependencies": [
+      "01-ghost-core.md"
+    ],
+    "summary": "The follow-up adds transcript-negotiated signed signaling, durable per-message delivery/retry state and observed extension interoperability; see the implementation profile for exact partial coverage and residual risks. This does not change Draft status.",
+    "notices": []
   },
   {
     "file": "03-capabilities.md",
@@ -33,21 +55,51 @@
       "04-capabilities"
     ],
     "slug": "03-capabilities",
-    "title": "WISP 03 — Capability Negotiation"
+    "title": "WISP 03 — Capability Negotiation",
+    "status": "Draft",
+    "updated": "2026-09-20",
+    "implementation": "Existing advertisements; negotiation proposed",
+    "dependencies": [
+      "01-ghost-core.md",
+      "02-peer-keys.md"
+    ],
+    "summary": "The follow-up adds transcript-negotiated signed signaling, durable per-message delivery/retry state and observed extension interoperability; see the implementation profile for exact partial coverage and residual risks. This does not change Draft status.",
+    "notices": []
   },
   {
     "file": "04-profiles.md",
     "sourcePath": "docs/wisps/04-profiles.md",
     "aliases": [],
     "slug": "04-profiles",
-    "title": "WISP 04 — Local Profiles"
+    "title": "WISP 04 — Local Profiles",
+    "status": "Draft",
+    "updated": "2026-09-23",
+    "implementation": "Experimental: web and desktop clients; the browser extension runs one profile",
+    "dependencies": [
+      "01-ghost-core.md",
+      "02-peer-keys.md",
+      "200-payments.md",
+      "700-local-services.md"
+    ],
+    "summary": "A profile is a local container on one device. It holds everything a person may want to keep apart — for example \"Personal\" and \"Work\" — and exactly one profile is active in a running client. A profile is not a protocol identity: contacts never learn that profiles exist, how many there are, or their names. Each chat already has its own keys (02); a profile groups chats and everything tied to them.",
+    "notices": []
   },
   {
     "file": "05-backups.md",
     "sourcePath": "docs/wisps/05-backups.md",
     "aliases": [],
     "slug": "05-backups",
-    "title": "WISP 05 — Profile Backups"
+    "title": "WISP 05 — Profile Backups",
+    "status": "Draft",
+    "updated": "2026-09-23",
+    "implementation": "Experimental: web and desktop clients",
+    "dependencies": [
+      "04-profiles.md",
+      "200-payments.md",
+      "1000-storage.md"
+    ],
+    "summary": "A profile backup captures one local profile (04) completely, so it can be brought back on this or another device: chats and their keys, messages and files, wallets and their payment journal, shared services and grants, per-chat payment choices and settings. It is one opaque, encrypted bundle. Where a bundle is kept — a file, an S3 bucket — is the concern of storage adapters (1000); this document defines what a bundle",
+    "notices": []
   },
   {
     "file": "100-transports.md",
@@ -56,28 +108,64 @@
       "05-transports"
     ],
     "slug": "100-transports",
-    "title": "WISP 100 — Transport Negotiation"
+    "title": "WISP 100 — Transport Negotiation",
+    "status": "Draft",
+    "updated": "2026-09-20",
+    "implementation": "Experimental paired-chat negotiation; see increment",
+    "dependencies": [
+      "02-peer-keys.md",
+      "03-capabilities.md"
+    ],
+    "summary": "The native transport increment documents the implemented wire profile, negotiation rule, platform evidence and remaining limitations. It does not make this Draft Final or establish independent implementation conformance. Baseline absence statements below describe the initial inspection before that increment.",
+    "notices": []
   },
   {
     "file": "1000-storage.md",
     "sourcePath": "docs/wisps/1000-storage.md",
     "aliases": [],
     "slug": "1000-storage",
-    "title": "WISP 1000 — Storage Contract"
+    "title": "WISP 1000 — Storage Contract",
+    "status": "Draft",
+    "updated": "2026-09-23",
+    "implementation": "Experimental: local file (1001) and S3-compatible (1002) adapters",
+    "dependencies": [
+      "04-profiles.md",
+      "05-backups.md"
+    ],
+    "summary": "Storage keeps encrypted bundles (05) somewhere other than the running profile: a file the person holds, a bucket, later a WebDAV share or a relay. The 10xx family defines one contract that every place implements, so backups, and later continuity features, do not depend on any single provider. Storage never sees plaintext and never decides what a bundle contains.",
+    "notices": []
   },
   {
     "file": "1001-local-storage.md",
     "sourcePath": "docs/wisps/1001-local-storage.md",
     "aliases": [],
     "slug": "1001-local-storage",
-    "title": "WISP 1001 — Local File Storage"
+    "title": "WISP 1001 — Local File Storage",
+    "status": "Draft",
+    "updated": "2026-09-23",
+    "implementation": "Experimental: web and desktop clients",
+    "dependencies": [
+      "1000-storage.md",
+      "05-backups.md"
+    ],
+    "summary": "The simplest place: a file the person keeps. It needs no account, network or credential.",
+    "notices": []
   },
   {
     "file": "1002-s3-storage.md",
     "sourcePath": "docs/wisps/1002-s3-storage.md",
     "aliases": [],
     "slug": "1002-s3-storage",
-    "title": "WISP 1002 — S3-Compatible Storage"
+    "title": "WISP 1002 — S3-Compatible Storage",
+    "status": "Draft",
+    "updated": "2026-09-23",
+    "implementation": "Experimental: web and desktop clients; exercised against a local S3-compatible server",
+    "dependencies": [
+      "1000-storage.md",
+      "05-backups.md"
+    ],
+    "summary": "Any service speaking the S3 object API: AWS S3, Cloudflare R2, Backblaze B2, Wasabi, MinIO, Garage and others.",
+    "notices": []
   },
   {
     "file": "101-webrtc.md",
@@ -86,7 +174,15 @@
       "06-webrtc"
     ],
     "slug": "101-webrtc",
-    "title": "WISP 101 — WebRTC"
+    "title": "WISP 101 — WebRTC",
+    "status": "Draft",
+    "updated": "2026-09-20",
+    "implementation": "Existing adapter behavior; WISP binding proposed",
+    "dependencies": [
+      "100-transports.md"
+    ],
+    "summary": "The follow-up adds transcript-negotiated signed signaling, durable per-message delivery/retry state and observed extension interoperability; see the implementation profile for exact partial coverage and residual risks. This does not change Draft status.",
+    "notices": []
   },
   {
     "file": "102-iroh.md",
@@ -95,7 +191,15 @@
       "07-iroh"
     ],
     "slug": "102-iroh",
-    "title": "WISP 102 — Iroh"
+    "title": "WISP 102 — Iroh",
+    "status": "Draft",
+    "updated": "2026-09-20",
+    "implementation": "Experimental native paired-chat adapter; see increment",
+    "dependencies": [
+      "100-transports.md"
+    ],
+    "summary": "The native transport increment documents the implemented wire profile, negotiation rule, platform evidence and remaining limitations. It does not make this Draft Final or establish independent implementation conformance. Baseline absence statements below describe the initial inspection before that increment.",
+    "notices": []
   },
   {
     "file": "103-hyperdht.md",
@@ -104,7 +208,15 @@
       "08-hyperdht"
     ],
     "slug": "103-hyperdht",
-    "title": "WISP 103 — HyperDHT"
+    "title": "WISP 103 — HyperDHT",
+    "status": "Draft",
+    "updated": "2026-09-20",
+    "implementation": "Experimental native paired-chat adapter; see increment",
+    "dependencies": [
+      "100-transports.md"
+    ],
+    "summary": "The native transport increment documents the implemented wire profile, negotiation rule, platform evidence and remaining limitations. It does not make this Draft Final or establish independent implementation conformance. Baseline absence statements below describe the initial inspection before that increment.",
+    "notices": []
   },
   {
     "file": "200-payments.md",
@@ -113,7 +225,16 @@
       "17-payments"
     ],
     "slug": "200-payments",
-    "title": "WISP 200 — Payment Negotiation"
+    "title": "WISP 200 — Payment Negotiation",
+    "status": "Draft",
+    "updated": "2026-09-20",
+    "implementation": "Existing payment frames; generic integration proposed",
+    "dependencies": [
+      "03-capabilities.md",
+      "100-transports.md"
+    ],
+    "summary": "Ghost negotiates payment methods and carries requests/results; it does not mandate a new wallet. Current pay-req, pay, pay-res frames use request/payment IDs, decimal-text amounts, an asset and ordered endpoints. Initial identifiers are cashu and btc-lightning-bolt11. Frames run only over the data link. The application currently includes Cashu wallet code; that is a reference integration, not a Core requirement.",
+    "notices": []
   },
   {
     "file": "201-cashu.md",
@@ -122,14 +243,32 @@
       "18-cashu"
     ],
     "slug": "201-cashu",
-    "title": "WISP 201 — Cashu"
+    "title": "WISP 201 — Cashu",
+    "status": "Draft",
+    "updated": "2026-09-20",
+    "implementation": "Existing application integration",
+    "dependencies": [
+      "200-payments.md"
+    ],
+    "summary": "Ghostly currently uses Cashu tokens and mint-backed wallet operations. Requests advertise accepted mints; an in-band payment carries a token; the recipient attempts redemption and returns a result. The application keeps pending operations and recovery state. This functionality belongs to the application/payment component, not Core rendezvous.",
+    "notices": []
   },
   {
     "file": "202-arkade.md",
     "sourcePath": "docs/wisps/202-arkade.md",
     "aliases": [],
     "slug": "202-arkade",
-    "title": "WISP 202 — Ark payments via Arkade"
+    "title": "WISP 202 — Ark payments via Arkade",
+    "status": "Draft",
+    "updated": "2026-09-22",
+    "implementation": "Experimental browser adapter, Arkade SDK 0.4.74; regtest evidence below. Every new profile starts with a Bitcoin mainnet wallet on arkade.computer.",
+    "documentKind": "Adapter",
+    "dependencies": [
+      "200-payments.md",
+      "03-capabilities.md"
+    ],
+    "summary": "This adapter implements Ark payments using @arkade-os/sdk 0.4.74. Ark is the payment method; Arkade is the selected provider implementation. Bark remains an alternative provider candidate, not a separate currency or an automatically compatible adapter. Arkade was selected because its TypeScript wallet, transaction preparation, operator/indexer clients and browser repositories fit the existing browser engine. That cho",
+    "notices": []
   },
   {
     "file": "203-lightning.md",
@@ -138,7 +277,15 @@
       "19-lightning"
     ],
     "slug": "203-lightning",
-    "title": "WISP 203 — Lightning"
+    "title": "WISP 203 — Lightning",
+    "status": "Draft",
+    "updated": "2026-09-20",
+    "implementation": "Existing invoice integration",
+    "dependencies": [
+      "200-payments.md"
+    ],
+    "summary": "The current btc-lightning-bolt11 endpoint carries an invoice; the application supports Lightning through its Cashu component and invoice UI. This is not evidence of a universal external-wallet adapter or a locally operated Lightning node. BOLT 11 is the invoice format reference.",
+    "notices": []
   },
   {
     "file": "204-bark.md",
@@ -154,7 +301,16 @@
       "09-peer-proofs"
     ],
     "slug": "300-peer-proofs",
-    "title": "WISP 300 — Identity Proofs"
+    "title": "WISP 300 — Identity Proofs",
+    "status": "Draft",
+    "updated": "2026-09-20",
+    "implementation": "Experimental Nostr subset; see follow-up",
+    "dependencies": [
+      "02-peer-keys.md",
+      "03-capabilities.md"
+    ],
+    "summary": "External identity is an optional attestation about a participation, not the session's transport or its per-message signer. No external proof adapter was found in current core/browser code. A participant may offer multiple proofs or none; local/channel policy decides whether any are required.",
+    "notices": []
   },
   {
     "file": "301-nostr.md",
@@ -163,7 +319,15 @@
       "10-nostr"
     ],
     "slug": "301-nostr",
-    "title": "WISP 301 — Nostr"
+    "title": "WISP 301 — Nostr",
+    "status": "Draft",
+    "updated": "2026-09-20",
+    "implementation": "Experimental Nostr subset; see follow-up",
+    "dependencies": [
+      "300-peer-proofs.md"
+    ],
+    "summary": "Optional Nostr proof of a Ghost participation. No implementation was found. NIP-01 defines Nostr's signed event structure; it does not define this Ghost proof or reserve a Ghost event kind.",
+    "notices": []
   },
   {
     "file": "302-pubky.md",
@@ -172,7 +336,18 @@
       "11-pubky"
     ],
     "slug": "302-pubky",
-    "title": "WISP 3xx — Pubky"
+    "title": "WISP 3xx — Pubky",
+    "status": "Draft",
+    "updated": "2026-09-20",
+    "implementation": "Experimental local import and modified-Ring adapter; see follow-up",
+    "dependencies": [
+      "300-peer-proofs.md"
+    ],
+    "summary": "Optional Pubky identity proof bound to a participation. Existing Pkarr use and Paykit-inspired payment identifiers do not constitute Pubky identity integration. The browser documentation explicitly describes the current lack of Pubky Ring integration.",
+    "notices": [
+      "Release decision (2026-09-21): external identity proofs and external profile lookup are deferred. This release exposes only Ghostly participation identity. Nostr, Pubky, Keet, imports and Ring UI are disabled; previous experiments and stored data are preserved for future work. Descriptions below are historical/research, not available release features.",
+      "Planned integration. No current integration is enabled or promised. The historical document identifier 302 remains in the URL for link compatibility; it is not a committed WISP number."
+    ]
   },
   {
     "file": "303-keet.md",
@@ -181,7 +356,17 @@
       "12-keet"
     ],
     "slug": "303-keet",
-    "title": "WISP 3xx — Keet"
+    "title": "WISP 3xx — Keet",
+    "status": "Draft",
+    "updated": "2026-09-20",
+    "implementation": "Blocked on existing-identity signer API; see follow-up",
+    "dependencies": [
+      "300-peer-proofs.md"
+    ],
+    "summary": "Investigate an optional Keet identity proof. This is a feasibility draft, not a claim that Keet exposes an appropriate signing API, public identity format or bridge. Keet's official site describes the product; it is not evidence of a Ghost integration contract. No local adapter was found.",
+    "notices": [
+      "Planned integration. No current integration is enabled or promised. The historical document identifier 303 remains in the URL for link compatibility; it is not a committed WISP number."
+    ]
   },
   {
     "file": "400-chat.md",
@@ -190,28 +375,64 @@
       "13-chat"
     ],
     "slug": "400-chat",
-    "title": "WISP 400 — Chat Messaging"
+    "title": "WISP 400 — Chat Messaging",
+    "status": "Draft",
+    "updated": "2026-09-20",
+    "implementation": "Existing 1:1 messages; stronger semantics proposed",
+    "dependencies": [
+      "02-peer-keys.md",
+      "03-capabilities.md"
+    ],
+    "summary": "This document defines common responsibilities and proposed extensions. Exact implemented encodings and runtime limits belong to 401 · Paired Chat, 402 · Legacy Timestamp Chat, 403 · Bounded DHT Text. Supporting a concrete profile does not establish full conformance to this Draft.",
+    "notices": []
   },
   {
     "file": "401-paired-chat.md",
     "sourcePath": "docs/wisps/401-paired-chat.md",
     "aliases": [],
     "slug": "401-paired-chat",
-    "title": "WISP 401 — Paired Chat"
+    "title": "WISP 401 — Paired Chat",
+    "status": "Draft",
+    "updated": "2026-09-22",
+    "implementation": "Current paired WebRTC; native Iroh/HyperDHT where supported.",
+    "documentKind": "Profile",
+    "dependencies": [
+      "400-chat.md"
+    ],
+    "summary": "This profile binds the independent chat contract to the implemented paired-chat/1 session and negotiated chat/1 capability. Both peers authenticate participation keys and the agreed channel before application traffic. Data travels over the selected WebRTC, Iroh or HyperDHT adapter where that runtime provides it; a particular adapter is not part of the message identity.",
+    "notices": []
   },
   {
     "file": "402-legacy-chat.md",
     "sourcePath": "docs/wisps/402-legacy-chat.md",
     "aliases": [],
     "slug": "402-legacy-chat",
-    "title": "WISP 402 — Legacy Timestamp Chat"
+    "title": "WISP 402 — Legacy Timestamp Chat",
+    "status": "Draft",
+    "updated": "2026-09-22",
+    "implementation": "Existing legacy 1:1 clients.",
+    "documentKind": "Profile",
+    "dependencies": [
+      "400-chat.md"
+    ],
+    "summary": "Legacy live text is {t:\"m\",ts,m} on the data channel. Offline small-record text uses encrypted msgs batches with timestamp acknowledgements. LinkSession.sendMessage limits input to 500 UTF-8 bytes; record packing can truncate a single message to 400 characters or omit older content to fit its total budget. The 500-byte input limit is therefore not a delivery guarantee. Live sender and parser bounds differ; callers mu",
+    "notices": []
   },
   {
     "file": "403-dht-text.md",
     "sourcePath": "docs/wisps/403-dht-text.md",
     "aliases": [],
     "slug": "403-dht-text",
-    "title": "WISP 403 — Bounded DHT Text"
+    "title": "WISP 403 — Bounded DHT Text",
+    "status": "Draft",
+    "updated": "2026-09-22",
+    "implementation": "Modern DHT-only and explicitly permitted fallback paths; native DHT versus browser relays differ.",
+    "documentKind": "Profile",
+    "dependencies": [
+      "400-chat.md"
+    ],
+    "summary": "This profile is a small-record delivery path, not an adapter pretending that the DHT is a live byte stream. It uses separate directional Pkarr mailboxes and the dm/dmk envelope described in DHT delivery. The envelope binds sender participation, intended recipient, sequence, times, delivery mode, message ID and receipt. Known participation keys must not be silently replaced.",
+    "notices": []
   },
   {
     "file": "500-files.md",
@@ -220,21 +441,48 @@
       "14-files"
     ],
     "slug": "500-files",
-    "title": "WISP 500 — File Transfer"
+    "title": "WISP 500 — File Transfer",
+    "status": "Draft",
+    "updated": "2026-09-20",
+    "implementation": "Existing 1:1 transfer",
+    "dependencies": [
+      "03-capabilities.md",
+      "100-transports.md"
+    ],
+    "summary": "This document defines common responsibilities and proposed extensions. Exact implemented encodings and runtime limits belong to 501 · Paired Files, 502 · Legacy File Frames. Supporting a concrete profile does not establish full conformance to this Draft.",
+    "notices": []
   },
   {
     "file": "501-paired-files.md",
     "sourcePath": "docs/wisps/501-paired-files.md",
     "aliases": [],
     "slug": "501-paired-files",
-    "title": "WISP 501 — Paired Files"
+    "title": "WISP 501 — Paired Files",
+    "status": "Draft",
+    "updated": "2026-09-22",
+    "implementation": "Negotiated paired data links; WebRTC and supported native adapters.",
+    "documentKind": "Profile",
+    "dependencies": [
+      "500-files.md"
+    ],
+    "summary": "Both peers negotiate files/2. pf-start announces ID, sanitized metadata and exact byte length. pf-chunk carries offset plus base64url data; stop-and-wait credits allow one 16 KiB chunk in flight per sender. pf-end binds final offset and SHA-256 digest. pf-ack identifies phase and offset; pf-cancel identifies the sender/receiver side.",
+    "notices": []
   },
   {
     "file": "502-legacy-files.md",
     "sourcePath": "docs/wisps/502-legacy-files.md",
     "aliases": [],
     "slug": "502-legacy-files",
-    "title": "WISP 502 — Legacy File Frames"
+    "title": "WISP 502 — Legacy File Frames",
+    "status": "Draft",
+    "updated": "2026-09-22",
+    "implementation": "Legacy live data links; both peers online.",
+    "documentKind": "Profile",
+    "dependencies": [
+      "500-files.md"
+    ],
+    "summary": "A file control frame announces file ID, stream ID, name, size, MIME and timestamp. Binary kind-3 chunks carry content and END marks completion. Enforce announced length, 100 MiB per file, three incoming files per peer,500MiBreceived storage per peer and 30-second idle timeout. Unknown/duplicate stream IDs and excess/truncated bodies are errors.",
+    "notices": []
   },
   {
     "file": "600-media.md",
@@ -243,14 +491,32 @@
       "15-media"
     ],
     "slug": "600-media",
-    "title": "WISP 600 — Voice and Video"
+    "title": "WISP 600 — Voice and Video",
+    "status": "Draft",
+    "updated": "2026-09-20",
+    "implementation": "Existing 1:1 calls and screen sharing",
+    "dependencies": [
+      "03-capabilities.md",
+      "100-transports.md"
+    ],
+    "summary": "This document defines common responsibilities and proposed extensions. Exact implemented encodings and runtime limits belong to 601 · WebRTC Media. Supporting a concrete profile does not establish full conformance to this Draft.",
+    "notices": []
   },
   {
     "file": "601-webrtc-media.md",
     "sourcePath": "docs/wisps/601-webrtc-media.md",
     "aliases": [],
     "slug": "601-webrtc-media",
-    "title": "WISP 601 — WebRTC Media"
+    "title": "WISP 601 — WebRTC Media",
+    "status": "Draft",
+    "updated": "2026-09-22",
+    "implementation": "Compatible legacy WebRTC chats; capture varies by platform; not current paired sessions.",
+    "documentKind": "Profile",
+    "dependencies": [
+      "600-media.md"
+    ],
+    "summary": "The implemented 1:1 profile uses compact call signaling and live call control frames, with ICE/fingerprint/candidate validation and a freshness window. Its v2 behavior pre-negotiates video so camera/screen changes can use replaceTrack; picture state is signaled separately. Call signal validation and the protocol define exact fields and legacy compatibility.",
+    "notices": []
   },
   {
     "file": "700-local-services.md",
@@ -259,14 +525,32 @@
       "16-local-services"
     ],
     "slug": "700-local-services",
-    "title": "WISP 700 — Local Services"
+    "title": "WISP 700 — Local Services",
+    "status": "Draft",
+    "updated": "2026-09-20",
+    "implementation": "Existing HTTP proxy",
+    "dependencies": [
+      "03-capabilities.md",
+      "100-transports.md"
+    ],
+    "summary": "This document defines common responsibilities and proposed extensions. Exact implemented encodings and runtime limits belong to 701 · HTTP Local Service Profile. Supporting a concrete profile does not establish full conformance to this Draft.",
+    "notices": []
   },
   {
     "file": "701-http-services.md",
     "sourcePath": "docs/wisps/701-http-services.md",
     "aliases": [],
     "slug": "701-http-services",
-    "title": "WISP 701 — HTTP Local Service Profile"
+    "title": "WISP 701 — HTTP Local Service Profile",
+    "status": "Draft",
+    "updated": "2026-09-22",
+    "implementation": "Legacy desktop/extension hosting; web viewer where supported; not paired hosted HTTP.",
+    "documentKind": "Profile",
+    "dependencies": [
+      "700-local-services.md"
+    ],
+    "summary": "Control req frames carry request ID, service ID, method, path, sanitized headers and body presence. res carries status/headers/body presence; bounded binary chunks carry bodies and rst cancels/resets. Reject unknown/disabled/unauthorized service IDs, invalid methods/headers, target escape, excess body/concurrency and idle timeout. Do not inherit the host's cookies or local credentials.",
+    "notices": []
   },
   {
     "file": "800-invite-join.md",
@@ -275,14 +559,32 @@
       "20-invite-join"
     ],
     "slug": "800-invite-join",
-    "title": "WISP 800 — Invite and Join"
+    "title": "WISP 800 — Invite and Join",
+    "status": "Draft",
+    "updated": "2026-09-20",
+    "implementation": "Existing bearer invite; admission protocol proposed",
+    "dependencies": [
+      "01-ghost-core.md",
+      "02-peer-keys.md"
+    ],
+    "summary": "This document defines common responsibilities and proposed extensions. Exact implemented encodings and runtime limits belong to 801 · Implemented Invitation Profiles. Supporting a concrete profile does not establish full conformance to this Draft.",
+    "notices": []
   },
   {
     "file": "801-invitation-profiles.md",
     "sourcePath": "docs/wisps/801-invitation-profiles.md",
     "aliases": [],
     "slug": "801-invitation-profiles",
-    "title": "WISP 801 — Implemented Invitation Profiles"
+    "title": "WISP 801 — Implemented Invitation Profiles",
+    "status": "Draft",
+    "updated": "2026-09-22",
+    "implementation": "Current modern pair1/pair2d creation plus legacy imports.",
+    "documentKind": "Profile",
+    "dependencies": [
+      "800-invite-join.md"
+    ],
+    "summary": "Modern pair1/ invitations choose streams initially; pair2d/ chooses DHT-only. They bootstrap the same conversation, participation identity, durable peer pin and message history. Legacy connection strings remain readable and carry a joining seed, creator public key and encryption key. A copied invitation is a bearer capability; hiding a saved invite after a message does not invalidate other copies.",
+    "notices": []
   },
   {
     "file": "900-group-sessions.md",
@@ -291,7 +593,18 @@
       "21-group-sessions"
     ],
     "slug": "900-group-sessions",
-    "title": "WISP 900 — Group Session Negotiation"
+    "title": "WISP 900 — Group Session Negotiation",
+    "status": "Draft",
+    "updated": "2026-09-20",
+    "implementation": "Proposed; no group implementation found",
+    "dependencies": [
+      "02-peer-keys.md",
+      "03-capabilities.md",
+      "100-transports.md",
+      "800-invite-join.md"
+    ],
+    "summary": "Define a concrete candidate group architecture that moves fanout, membership synchronization and history traffic off Pkarr/DHT. No group session, group key schedule or group delivery layer was found in the inspected implementation. This draft specifies responsibilities and state transitions for review; cryptographic and wire profiles remain validation gates.",
+    "notices": []
   },
   {
     "file": "901-gossipsub.md",
@@ -300,118 +613,161 @@
       "22-gossipsub"
     ],
     "slug": "901-gossipsub",
-    "title": "WISP 9xx — GossipSub Transport"
+    "title": "WISP 9xx — GossipSub Transport",
+    "status": "Draft",
+    "updated": "2026-09-20",
+    "implementation": "Proposed; no adapter found",
+    "dependencies": [
+      "100-transports.md",
+      "900-group-sessions.md"
+    ],
+    "summary": "Evaluate GossipSub as an off-DHT distribution layer for group sessions. No Ghostly adapter was found. libp2p GossipSub v1.1 describes mesh/gossip routing and peer scoring; neither routing nor scoring is group encryption, membership consensus or guaranteed storage.",
+    "notices": [
+      "Planned integration. No current integration is enabled or promised. The historical document identifier 901 remains in the URL for link compatibility; it is not a committed WISP number."
+    ]
   },
   {
     "file": "ADAPTER-ROADMAP.md",
     "sourcePath": "docs/wisps/ADAPTER-ROADMAP.md",
     "aliases": [],
     "slug": "adapter-roadmap",
-    "title": "Ghostly adapter and ecosystem roadmap"
+    "title": "Ghostly adapter and ecosystem roadmap",
+    "dependencies": [],
+    "notices": []
   },
   {
     "file": "IMPLEMENTATION.md",
     "sourcePath": "docs/wisps/IMPLEMENTATION.md",
     "aliases": [],
     "slug": "implementation",
-    "title": "Implementation evidence and security limits"
+    "title": "Implementation evidence and security limits",
+    "dependencies": [],
+    "notices": []
   },
   {
     "file": "INTEROP.md",
     "sourcePath": "docs/wisps/INTEROP.md",
     "aliases": [],
     "slug": "interop",
-    "title": "Interoperability and conformance plan"
+    "title": "Interoperability and conformance plan",
+    "dependencies": [],
+    "notices": []
   },
   {
     "file": "MAP.md",
     "sourcePath": "docs/wisps/MAP.md",
     "aliases": [],
     "slug": "map",
-    "title": "Composable Ghost architecture"
+    "title": "Composable Ghost architecture",
+    "dependencies": [],
+    "notices": []
   },
   {
     "file": "NUMBERING.md",
     "sourcePath": "docs/wisps/NUMBERING.md",
     "aliases": [],
     "slug": "numbering",
-    "title": "WISP numbering and compatibility"
+    "title": "WISP numbering and compatibility",
+    "dependencies": [],
+    "notices": []
   },
   {
     "file": "PAIRED-CAPABILITIES.md",
     "sourcePath": "docs/wisps/PAIRED-CAPABILITIES.md",
     "aliases": [],
     "slug": "paired-capabilities",
-    "title": "Files and sats in paired chat"
+    "title": "Files and sats in paired chat",
+    "dependencies": [],
+    "notices": []
   },
   {
     "file": "PAIRED-CHAT-INCREMENT.md",
     "sourcePath": "docs/wisps/PAIRED-CHAT-INCREMENT.md",
     "aliases": [],
     "slug": "paired-chat-increment",
-    "title": "Experimental paired chat increment"
+    "title": "Experimental paired chat increment",
+    "dependencies": [],
+    "notices": []
   },
   {
     "file": "PROOF-INCREMENT.md",
     "sourcePath": "docs/wisps/PROOF-INCREMENT.md",
     "aliases": [],
     "slug": "proof-increment",
-    "title": "Optional peer proofs — implementation increment"
+    "title": "Optional peer proofs — implementation increment",
+    "dependencies": [],
+    "notices": []
   },
   {
     "file": "PUBLIC-PROFILES.md",
     "sourcePath": "docs/wisps/PUBLIC-PROFILES.md",
     "aliases": [],
     "slug": "public-profiles",
-    "title": "Identity presentation and local public profiles"
+    "title": "Identity presentation and local public profiles",
+    "dependencies": [],
+    "notices": []
   },
   {
     "file": "README.md",
     "sourcePath": "docs/wisps/README.md",
     "aliases": [],
     "slug": "readme",
-    "title": "WISP working catalogue"
+    "title": "WISP working catalogue",
+    "dependencies": [],
+    "notices": []
   },
   {
     "file": "TRANSPORT-INCREMENT.md",
     "sourcePath": "docs/wisps/TRANSPORT-INCREMENT.md",
     "aliases": [],
     "slug": "transport-increment",
-    "title": "Experimental native transport increment"
+    "title": "Experimental native transport increment",
+    "dependencies": [],
+    "notices": []
   },
   {
     "file": "PROTOCOL.md",
     "sourcePath": "docs/PROTOCOL.md",
     "aliases": [],
     "slug": "protocol",
-    "title": "The Ghost Protocol"
+    "title": "The Ghost Protocol",
+    "dependencies": [],
+    "notices": []
   },
   {
     "file": "USDT-INTEGRATION.md",
     "sourcePath": "docs/USDT-INTEGRATION.md",
     "aliases": [],
     "slug": "usdt-integration",
-    "title": "USDT via Tether WDK — experimental implementation"
+    "title": "USDT via Tether WDK — experimental implementation",
+    "dependencies": [],
+    "notices": []
   },
   {
     "file": "DHT-DELIVERY.md",
     "sourcePath": "docs/DHT-DELIVERY.md",
     "aliases": [],
     "slug": "dht-delivery",
-    "title": "DHT delivery for modern conversations"
+    "title": "DHT delivery for modern conversations",
+    "dependencies": [],
+    "notices": []
   },
   {
     "file": "CONTRIBUTING.md",
     "sourcePath": "CONTRIBUTING.md",
     "aliases": [],
     "slug": "contributing",
-    "title": "Contributing to Ghostly 👻"
+    "title": "Contributing to Ghostly 👻",
+    "dependencies": [],
+    "notices": []
   },
   {
     "file": "SECURITY.md",
     "sourcePath": "SECURITY.md",
     "aliases": [],
     "slug": "security",
-    "title": "Security Policy"
+    "title": "Security Policy",
+    "dependencies": [],
+    "notices": []
   }
 ]

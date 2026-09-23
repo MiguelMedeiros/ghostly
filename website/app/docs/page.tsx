@@ -1,6 +1,7 @@
 import { ProtocolDocs } from "@/components/ProtocolDocs";
-import { DocsNavbar } from "@/components/DocsNavbar";
-import { Footer } from "@/components/Footer";
+import { Nav } from "@/components/site/Nav";
+import { SiteFooter } from "@/components/site/Footer";
+import { GhostPet } from "@/components/site/GhostPet";
 import type { Metadata } from "next";
 import Link from "next/link";
 
@@ -35,8 +36,8 @@ export const metadata: Metadata = {
 export default function DocsPage() {
   return (
     <>
-      <DocsNavbar />
-      <main className="pt-16">
+      <Nav locale="en" />
+      <main id="content" className="pt-16">
         <aside className="mx-auto mt-8 max-w-5xl border-l-2 border-cyan bg-cyan/5 px-6 py-4 text-sm text-gray-300">
           This guide describes the legacy record and signaling profile. For
           current paired capabilities, client limits and draft contracts, visit
@@ -48,7 +49,8 @@ export default function DocsPage() {
         </aside>
         <ProtocolDocs />
       </main>
-      <Footer />
+      <SiteFooter />
+      <GhostPet />
     </>
   );
 }

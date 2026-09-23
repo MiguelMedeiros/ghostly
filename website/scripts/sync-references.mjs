@@ -70,6 +70,43 @@ paths.push(
   "CONTRIBUTING.md",
   "SECURITY.md",
 );
+// Plain text of a Markdown fragment: links keep their label, code keeps its text.
+const plain = (text) =>
+  text
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/[*_`]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+// What a WISP says about itself in its header table and first section, so the
+// catalogue follows the documents instead of a copy of them.
+function describe(body) {
+  const field = (...names) => {
+    for (const name of names) {
+      const row = body.match(new RegExp(`^\\|\\s*${name}\\s*\\|\\s*(.+?)\\s*\\|\\s*$`, "m"));
+      if (row) return row[1];
+    }
+    return undefined;
+  };
+  const dependencies = [...(field("Dependencies") ?? "").matchAll(/\]\(([^)#]+\.md)/g)].map((m) => basename(m[1]));
+  const firstSection = body.split(/^## .+$/m)[1] ?? "";
+  const paragraph = firstSection
+    .split(/\n\s*\n/)
+    .map((block) => block.trim())
+    .find((block) => block && !/^[|>#`-]/.test(block) && !/^\d+\./.test(block));
+  const notices = [...body.matchAll(/^> (?:\*\*)?(Release decision[^\n]*|Planned integration[^\n]*)/gm)].map((m) => plain(m[1]));
+  const status = field("Status");
+  const implementation = field("Implementation");
+  const updated = field("Updated");
+  return {
+    status: status ? plain(status) : undefined,
+    updated: updated ? plain(updated) : undefined,
+    implementation: implementation ? plain(implementation) : undefined,
+    documentKind: plain(field("Document kind", "Kind") ?? "") || undefined,
+    dependencies,
+    summary: paragraph ? plain(paragraph).slice(0, 420) : undefined,
+    notices,
+  };
+}
 const entries = paths.map((sourcePath) => {
   const file = basename(sourcePath);
   copyFileSync(resolve(root, sourcePath), resolve(destination, file));
@@ -80,6 +117,7 @@ const entries = paths.map((sourcePath) => {
     aliases: numbering.filter((entry) => entry.file === file && entry.oldFile !== file).map((entry) => entry.oldFile.replace(/\.md$/, "").toLowerCase()),
     slug: file.replace(/\.md$/, "").toLowerCase(),
     title: body.match(/^#\s+(.+)$/m)?.[1] ?? file,
+    ...(numbering.some((entry) => entry.file === file) ? describe(body) : { dependencies: [], notices: [] }),
   };
 });
 for (const entry of numbering.filter((entry) => entry.oldFile !== entry.file)) {
@@ -93,4 +131,25 @@ writeFileSync(
 );
 console.log(
   `Synced ${entries.length} reference documents and their route index.`,
+);
+
+// Code the developer page quotes, cut from the source so it can't drift.
+function excerpt(file, startPattern) {
+  const lines = readFileSync(resolve(root, file), "utf8").split("\n");
+  const start = lines.findIndex((line) => line.includes(startPattern));
+  if (start < 0) throw new Error(`Snippet "${startPattern}" not found in ${file}`);
+  let end = start;
+  while (end < lines.length && lines[end] !== "}") end++;
+  return { file, line: start + 1, code: lines.slice(start, end + 1).join("\n") };
+}
+writeFileSync(
+  resolve(root, "website/lib/code-snippets.json"),
+  JSON.stringify(
+    {
+      createLink: excerpt("packages/core/src/invite.ts", "/** Creates both ends of a link"),
+      rankTransports: excerpt("packages/core/src/pairedTransports.ts", "/** Symmetric rank sum"),
+    },
+    null,
+    2,
+  ) + "\n",
 );
