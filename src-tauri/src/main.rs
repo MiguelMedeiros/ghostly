@@ -4,6 +4,7 @@ mod bitcoind_rpc;
 mod commands;
 mod crypto;
 mod hyperdht;
+mod lnd;
 mod local_fetch;
 mod notifications;
 mod paired_transport;
@@ -88,6 +89,7 @@ fn main() {
             commands::resolve_records,
             commands::local_fetch,
             commands::bitcoind_rpc,
+            commands::lnd_request,
             commands::open_service_window,
             commands::service_respond,
             commands::updater_can_install,

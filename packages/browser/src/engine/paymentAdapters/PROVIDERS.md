@@ -108,6 +108,12 @@ and in an offscreen document for `extension`: a provider that needs `window.webl
 needs a raw TCP socket or a local process is `["desktop"]` and gets there through a Tauri command.
 Browsers reach HTTP(S) APIs only with CORS; say so in the description when a node must allow the origin.
 
+On desktop, `host.invoke(command, args)` calls a command of the Tauri app (`src-tauri/src/`); it is absent on
+the web and in the extension. Register the command in `src-tauri/build.rs` (`COMMANDS`), `main.rs` and
+`capabilities/default.json`, and keep it narrow: the LND provider's `lnd_request` (`src-tauri/src/lnd.rs`)
+only reaches LND's REST paths, pins the node's certificate, and bounds sizes and time. A provider can offer
+the same API both ways, `fetch` in a browser and a command on desktop (see `providers/lnd.ts`).
+
 ### The browser wallet (WebLN)
 
 [providers/webln.ts](providers/webln.ts) is the example of a provider that lives in the page. How the call

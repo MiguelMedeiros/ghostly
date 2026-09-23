@@ -4,6 +4,7 @@ use tauri::State;
 
 use crate::bitcoind_rpc::{self, RpcError};
 use crate::crypto;
+use crate::lnd::{self, LndRequest, LndResponse};
 use crate::local_fetch::{self, LocalResponse};
 use crate::pkarr_client;
 use crate::records::{self, RecordInput, ResolvedPacket};
@@ -147,6 +148,32 @@ pub async fn bitcoind_rpc(
     params: Vec<serde_json::Value>,
 ) -> Result<serde_json::Value, RpcError> {
     bitcoind_rpc::call(url, wallet, user, password, method, params).await
+}
+
+/// One call to the person's LND node for the LND Lightning source; see lnd.rs.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn lnd_request(
+    url: String,
+    macaroon: String,
+    certificate: Option<String>,
+    method: String,
+    path: String,
+    body: Option<String>,
+    stream: Option<String>,
+    timeout_ms: u64,
+) -> Result<LndResponse, String> {
+    lnd::request(LndRequest {
+        url,
+        macaroon,
+        certificate,
+        method,
+        path,
+        body,
+        stream,
+        timeout_ms,
+    })
+    .await
 }
 
 #[tauri::command]

@@ -4,6 +4,7 @@ import { breez } from "./breez";
 import { cashuMint } from "./cashuMint";
 import { coreLightning } from "./coreLightning";
 import { nwc } from "./nwc";
+import { lnd } from "./lnd";
 import type { LightningProviderDescriptor } from "./lightning";
 import type { OnchainProviderDescriptor } from "./onchain";
 import { webln } from "./webln";
@@ -21,6 +22,7 @@ export const LIGHTNING_PROVIDERS: readonly LightningProviderDescriptor[] = [
   nwc,
   coreLightning,
   webln,
+  lnd,
 ];
 
 export const ONCHAIN_PROVIDERS: readonly OnchainProviderDescriptor[] = [

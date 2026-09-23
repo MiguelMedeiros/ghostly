@@ -29,6 +29,7 @@ const COMMANDS: &[&str] = &[
     "resolve_records",
     "local_fetch",
     "bitcoind_rpc",
+    "lnd_request",
     "open_service_window",
     "service_respond",
     "updater_can_install",

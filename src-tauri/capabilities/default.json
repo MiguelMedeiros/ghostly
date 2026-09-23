@@ -30,6 +30,7 @@
     "allow-resolve-records",
     "allow-local-fetch",
     "allow-bitcoind-rpc",
+    "allow-lnd-request",
     "allow-open-service-window",
     "allow-service-respond",
     "allow-updater-can-install",
