@@ -104,10 +104,11 @@ test("a sent payment's memo shows in both bubbles", async ({ peer }) => {
 
 test("a payment the contact refuses comes back, and is never shown as paid", async ({ peer }) => {
   const [alice, bob] = await chatting(peer, "refused-alice", "refused-bob");
-  // Alice keeps her sats at a mint Bob has not chosen: the local mint under its own address, which the
-  // app does not know as a test mint. Bob's wallet only takes ecash from mints he picked, and refuses.
+  // Both are in Testnet, where Bob's test mint is the public one. Alice keeps her test sats at a mint
+  // Bob has not chosen: the local mint under its own address (a mint on this machine belongs to Testnet
+  // too, and is never added by itself). Bob's wallet only takes ecash from mints he picked, and refuses.
+  for (const p of [alice, bob]) await testMint(p);
   const own = mintEndpoint();
-  await openWallet(alice, "cashu");
   await alice.page.getByTestId("wallet-mint-url").fill(own);
   await alice.page.getByTestId("wallet-add-mint").click();
   const row = alice.page.getByTestId("mint-row").filter({ hasText: own.replace(/^https?:\/\//, "") });
@@ -115,8 +116,8 @@ test("a payment the contact refuses comes back, and is never shown as paid", asy
   await row.getByRole("button", { name: "Make primary" }).click();
   await expect(alice.page.getByTestId("mint-row").first()).toContainText(own.replace(/^https?:\/\//, ""));
   await fund(alice, 60);
-  await expect.poll(() => balanceOf(alice.page, "wallet-balance")).toBe(60);
-  await openChat(alice);
+  await expect.poll(() => balanceOf(alice.page, "wallet-test-balance")).toBe(60);
+  for (const p of [alice, bob]) await openChat(p);
 
   const review = await prepareSend(alice, 21);
   await review.getByRole("button", { name: "Approve payment" }).click();
@@ -144,8 +145,8 @@ test("a payment the contact refuses comes back, and is never shown as paid", asy
 
   // The sats are Alice's again, less the mint's fee for swapping them twice.
   await openWallet(alice, "cashu");
-  await expect.poll(() => balanceOf(alice.page, "wallet-balance")).toBeGreaterThanOrEqual(56);
-  expect(await balanceOf(alice.page, "wallet-balance")).toBeLessThan(60);
+  await expect.poll(() => balanceOf(alice.page, "wallet-test-balance")).toBeGreaterThanOrEqual(56);
+  expect(await balanceOf(alice.page, "wallet-test-balance")).toBeLessThan(60);
   await alice.page.getByTestId("wallet-history").click();
   await expect(alice.page.getByTestId("wallet-tx").filter({ hasText: "Took a payment back" })).toHaveCount(1);
   await expect(alice.page.getByTestId("wallet-tx").filter({ hasText: "Sent ecash" })).toHaveCount(1);
