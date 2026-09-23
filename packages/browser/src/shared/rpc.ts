@@ -46,6 +46,20 @@ export interface EngineApi {
   preparePeerProof(params: { linkId: string; externalKey: string; adapter?: ProofAdapter }): ProofChallenge;
   submitPeerProof(params: { linkId: string; challenge: ProofChallenge; event: ProofEvidence }): void;
   withdrawPeerProof(params: { linkId: string; adapter?: ProofAdapter }): void;
+  /** Profile → Identities: a fresh proof key and the statement to sign. */
+  beginIdentityProof(params: { provider: string; subject: string; validityDays?: number }): { draftId: string; binding: import("@ghostly/core").IdentityBinding };
+  /** Verifies the evidence (as a contact would) and saves the proof. */
+  completeIdentityProof(params: { draftId: string; evidence: unknown }): import("./types").IdentityProofView;
+  cancelIdentityProof(params: { draftId: string }): void;
+  /** Removes it from the profile and withdraws it from every chat. */
+  removeIdentityProof(params: { id: string }): void;
+  /** Shares it with this contact (now, or when it next connects). */
+  shareIdentityProof(params: { linkId: string; id: string }): void;
+  withdrawIdentityProof(params: { linkId: string; id: string }): void;
+  /** Runs the provider's check again on what the contact shared. */
+  recheckIdentityProof(params: { linkId: string; id: string }): void;
+  /** Only on request: the public name/picture of what the contact shared. */
+  lookupIdentityDisplay(params: { linkId: string; id: string }): void;
   createLink(): { linkId: string; inviteCode: string };
   joinLink(params: { inviteCode: string }): { linkId: string };
   /** Makes sure a link with these parameters runs; used by UIs that keep their own session list. */

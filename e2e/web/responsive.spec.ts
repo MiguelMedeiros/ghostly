@@ -100,6 +100,10 @@ for (const width of WIDTHS) {
     }
     await page.getByTestId("profile-new").click();
     await expectTidy(page, "[data-testid=profile-page]", "Profile, a new profile");
+    // Adding an identity: the dialog holds together too (Nostr, remote signer: no extension in this page).
+    await page.getByTestId("identity-add").click();
+    await expect(page.getByTestId("add-identity-field-bunker")).toBeVisible();
+    await expectTidy(page, "[data-testid=add-identity]", "Profile, adding an identity");
   });
 }
 

@@ -9,6 +9,7 @@ import type { PaymentReview, PaymentTarget } from "@ghostly/core";
 import type { DeliveryMode, DhtDeliveryState, DhtDeliveryView } from "@ghostly/core";
 import type { PublicProfile, ProfileChoice } from '../profiles/public';
 import type { ProofLedger, ProofAdapter } from "@ghostly/core";
+import type { IdentityDisplay, IdentityLedger, IdentityStatus, SharedIdentity, VerifiedIdentity } from "@ghostly/core";
 import type { DataLinkState, LinkStatus, ServiceAd, PairingState, NativeTransport, PairedTransport, TransportDescriptors } from "@ghostly/core";
 
 /** A link as stored in IndexedDB. Same fields Desktop keeps in its ChatSession. */
@@ -18,6 +19,8 @@ export interface StoredLink {
   publicProfiles?: PublicProfile[];
   profileChoice?: ProfileChoice;
   peerProofs?: ProofLedger;
+  /** Identity proofs shared in this chat, both ways (WISP 300). */
+  identities?: IdentityLedger;
   profile?: "paired-chat/1";
   participationSeed?: string;
   transportSeeds?: Partial<Record<NativeTransport, string>>;
@@ -270,7 +273,52 @@ export interface Settings {
   walletMode?: WalletMode;
 }
 
+/** A proof of this profile (Profile → Identities). */
+export interface IdentityProofView {
+  id: string;
+  provider: string;
+  subject: string;
+  /** The proof key the statement authorizes. */
+  key: string;
+  verified: VerifiedIdentity;
+  issuedAt: number;
+  /** Seconds: the earlier of the statement's and the evidence's expiry. */
+  expiresAt: number;
+  createdAt: number;
+  /** Chats it is currently shared in (or queued for). */
+  sharedWith: number;
+}
+
+/** A contact's proof, as this app checked it. */
+export interface ReceivedIdentityView {
+  id: string;
+  provider: string;
+  subject: string;
+  verified: VerifiedIdentity;
+  /** A public name/picture looked up on request. */
+  display?: IdentityDisplay;
+  status: IdentityStatus;
+  verifiedAt: number;
+  checkedAt: number;
+  expiresAt: number;
+  error?: string;
+  /** The provider's checks can go stale and the last one is old enough to repeat. */
+  recheckDue: boolean;
+}
+
+export interface LinkIdentitiesView {
+  /** Both sides offer identity proofs and the channel is open now. */
+  support: boolean;
+  /** Providers the contact's app said it can verify. */
+  contactProviders?: string[];
+  shared: SharedIdentity[];
+  received: ReceivedIdentityView[];
+  error?: string;
+}
+
 export interface LinkView {
+  /** Identity proofs in this chat; absent for chats that are not paired. */
+  identities?: LinkIdentitiesView;
   discoveryError?: string;
   publicProfiles?: PublicProfile[];
   profileChoice?: ProfileChoice;
@@ -331,4 +379,6 @@ export interface EngineState {
   transfers: Record<string, FileTransferView>;
   wallet: WalletView;
   payments: Record<string, PaymentView>;
+  /** This profile's identity proofs. */
+  identityProofs: IdentityProofView[];
 }

@@ -4,6 +4,8 @@ import { useOutsideDismiss, useBackdropDismiss } from "../hooks/useDismiss";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { createPortal } from "react-dom";
 import { ChatPaymentsDialog } from "../components/ChatPaymentsDialog";
+import { ChatIdentitiesDialog } from "../components/identities/ChatIdentitiesDialog";
+import { IdentityBadges } from "../components/identities/IdentityBadges";
 import { ChatServicesDialog } from "../components/ChatServicesDialog";
 import { PinIcon } from "../components/PinIcon";
 import { useI18n } from "../contexts/I18nContext";
@@ -219,6 +221,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const chatPeer = platform?.getPeer(params?.peerPubKeyB64 ?? "");
   const paymentsOn = !chatPeer?.paymentMethods || Object.values(chatPeer.paymentMethods).some(Boolean);
   const [showPayments, setShowPayments] = useState(false);
+  const [showIdentities, setShowIdentities] = useState(false);
   const [showServices, setShowServices] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [connectionOpen, setConnectionOpen] = useState(false);
@@ -383,6 +386,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 maxLength={30}
               />
             ) : (
+              <div className="flex items-center gap-1.5 min-w-0">
               <p
                 onClick={startEditLabel}
                 className={`text-[15px] font-normal m-0 leading-tight truncate cursor-pointer hover:text-accent transition-colors ${isAnonymous ? "text-text-muted/60 italic" : "text-text-primary"}`}
@@ -406,6 +410,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                   </svg>
                 )}
               </p>
+              {paired && <IdentityBadges peerKey={params.peerPubKeyB64} onOpen={() => setShowIdentities(true)} />}
+              </div>
             )}
             <div ref={connectionRef} className="relative">
               <button
@@ -548,6 +554,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                     className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>
                     Payments…
+                  </button>
+                )}
+                {paired && (
+                  <button data-testid="chat-identities-open" onClick={() => { setShowIdentities(true); setMenuOpen(false); }}
+                    className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" /><path d="m9 12 2 2 4-4" /></svg>
+                    Identities…
                   </button>
                 )}
                 {platform && platform.getPeer(params.peerPubKeyB64) && (
@@ -703,6 +716,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
 
       {showServices && params && (
         <ChatServicesDialog peerPubKey={params.peerPubKeyB64} name={displayName || t("common.anonymous")} onClose={() => setShowServices(false)} />
+      )}
+      {showIdentities && params && (
+        <ChatIdentitiesDialog peerKey={params.peerPubKeyB64} name={displayName || t("common.anonymous")} onClose={() => setShowIdentities(false)} />
       )}
       {showPayments && chatPeer && params && platform && (
         <ChatPaymentsDialog peer={chatPeer} name={displayName || t("common.anonymous")} onClose={() => setShowPayments(false)}

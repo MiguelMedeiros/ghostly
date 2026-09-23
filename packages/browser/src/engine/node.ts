@@ -16,9 +16,10 @@ import { defaultRegistry, type ProviderRegistry } from "./paymentAdapters/provid
 import type { ProviderHost, ProviderPlatform } from "./paymentAdapters/providers/types";
 import type { EngineApi } from "../shared/rpc";
 import { EXTERNAL_IDENTITIES_ENABLED } from '../shared/features';
+import { IdentityProofs } from './identities';
 import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
-import { MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
+import { MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
 import {
   DEFAULT_RELAYS,
   GhostLink,
@@ -297,6 +298,28 @@ export class GhostlyNode implements EngineImplementation {
     pay: (quote, note, paymentId) => this.lightning.pay(quote.quote, { note, paymentId }),
   });
 
+  /** Identity proofs: this profile's, and those shared in each paired chat (WISP 300). */
+  private readonly identities = new IdentityProofs({
+    ledger: linkId => { const stored = this.links.get(linkId)?.stored; return stored?.profile ? stored.identities ?? emptyIdentityLedger() : undefined; },
+    updateLedger: async (linkId, change) => {
+      const identities = await db.updateIdentities(linkId, change);
+      const live = this.links.get(linkId);
+      if (live) live.stored = { ...live.stored, identities };
+      return identities;
+    },
+    channel: linkId => {
+      const link = this.links.get(linkId)?.link;
+      return link?.identitySupport ? { scope: () => link.identityScope(), send: frame => link.sendIdentityProof(frame) } : undefined;
+    },
+    keys: linkId => {
+      const stored = this.links.get(linkId)?.stored;
+      return { mine: stored?.participationSeed ? identityFromSeedB64(stored.participationSeed).pubKeyZ32 : undefined, theirs: stored?.pairedPeerKey };
+    },
+    linkIds: () => [...this.links.keys()],
+    online: () => this.settings.online,
+    emit: () => this.emitState(),
+  });
+
   constructor(
     private readonly events: NodeEvents,
     private readonly options: NodeOptions = {},
@@ -344,6 +367,7 @@ export class GhostlyNode implements EngineImplementation {
     }
     this.relays?.setRelays(this.settings.relays);
     this.services = await db.getServices();
+    await this.identities.load();
     await this.arkWallet.start();
     await this.barkWallet.start();
     await this.usdtWallet.start();
@@ -404,6 +428,7 @@ export class GhostlyNode implements EngineImplementation {
       transfers: Object.fromEntries(this.transfers),
       wallet: this.walletView,
       payments: this.desk.views(),
+      identityProofs: this.identities.views(),
     };
   }
 
@@ -523,6 +548,17 @@ export class GhostlyNode implements EngineImplementation {
     await (await this.proofsFor(linkId)).withdraw(adapter);
   }
 
+  // -- identity proofs ------------------------------------------------------
+
+  beginIdentityProof(params: { provider: string; subject: string; validityDays?: number }) { return this.identities.begin(params); }
+  completeIdentityProof(params: { draftId: string; evidence: unknown }) { return this.identities.complete(params); }
+  cancelIdentityProof(params: { draftId: string }): void { this.identities.cancel(params); }
+  removeIdentityProof(params: { id: string }): Promise<void> { return this.identities.remove(params); }
+  shareIdentityProof(params: { linkId: string; id: string }): Promise<void> { return this.identities.share(params); }
+  withdrawIdentityProof(params: { linkId: string; id: string }): Promise<void> { return this.identities.withdraw(params); }
+  recheckIdentityProof(params: { linkId: string; id: string }): Promise<void> { return this.identities.recheck(params); }
+  lookupIdentityDisplay(params: { linkId: string; id: string }): Promise<void> { return this.identities.lookupDisplay(params); }
+
   async confirmPair({ linkId, code }: { linkId: string; code: string }): Promise<void> {
     const link = this.links.get(linkId)?.link;
     if (!link) throw new Error("Peer is offline");
@@ -540,6 +576,7 @@ export class GhostlyNode implements EngineImplementation {
     this.outboxes.delete(linkId);
     void live.link?.stop(true);
     this.links.delete(linkId);
+    this.identities.forget(linkId);
     void db.deleteLink(linkId);
     void this.desk.forgetLink(linkId);
     this.emitState();
@@ -1247,6 +1284,7 @@ export class GhostlyNode implements EngineImplementation {
       events: {
         onDhtDelivery: () => this.emitState(),
         onPeerProof: EXTERNAL_IDENTITIES_ENABLED ? async frame => { await (await this.proofsFor(linkId)).receive(frame); } : undefined,
+        onIdentityProof: stored.profile ? frame => this.identities.frame(linkId, frame) : undefined,
         onTransportsChanged: () => this.emitState(),
         onDiscoveryError: error => { live.discoveryError = error ?? undefined; this.emitState(); },
         onTransportDiscovery: async (peerDescriptors, peerTransports, peerFallback) => {
@@ -1256,6 +1294,7 @@ export class GhostlyNode implements EngineImplementation {
         },
         onPairingState: state => {
           live.pairing = state;
+          if (state.status === "ready") this.identities.ready(linkId); else this.identities.closed(linkId);
           if (EXTERNAL_IDENTITIES_ENABLED && state.status === "ready") void this.proofsFor(linkId).then(p => p.resendWithdrawals()).catch(() => {});
           else live.proofs?.stop();
           this.emitState();
@@ -1279,7 +1318,7 @@ export class GhostlyNode implements EngineImplementation {
         onDataLinkState: (state) => {
           live.dataLink = state;
           if (state === "open") void this.desk.replay(linkId).catch(() => {});
-          if (state !== "open") live.proofs?.stop();
+          if (state !== "open") { live.proofs?.stop(); this.identities.closed(linkId); }
           if (stored.profile && live.stored.deliveryMode !== "dht" && state !== "open") void this.outboxFor(linkId).disconnected().catch(() => {});
           if (stored.profile && state !== "open" && live.pairing?.status !== "error") live.pairing = { status: "connecting" };
           this.emitState();
@@ -1405,6 +1444,7 @@ export class GhostlyNode implements EngineImplementation {
     const { stored, presence } = live;
     return {
       id: stored.id,
+      identities: this.identities.linkView(stored.id, live.link?.identitySupport ?? false),
       profile: stored.profile,
       pairing: live.pairing,
       discoveryError: live.discoveryError,

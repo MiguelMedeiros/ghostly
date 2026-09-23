@@ -5,10 +5,10 @@
 | Candidate number | 300; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
 | Revision | 0.1 |
-| Updated | 2026-09-20 |
+| Updated | 2026-09-23 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md) |
-| Implementation | Experimental Nostr subset; see follow-up |
+| Implementation | Identity proofs with a provider contract; Nostr first. See [2026-09-23](#implementation--2026-09-23-identity-proofs) |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 
@@ -39,3 +39,23 @@ Valid proof plus participation possession succeeds; wrong audience/key/channel, 
 ## Implementation follow-up — 2026-09-20
 
 The [proof increment](PROOF-INCREMENT.md) now includes explicit experimental local imports for Pubky and Keet-compatible keys, alongside external-signer Nostr. Multiple proofs coexist per conversation. Ghostly participation remains the default. Pubky Ring and existing Keet account signer bridges remain unavailable; local key control is not evidence of those integrations. All WISPs remain Draft; earlier baseline inspections are historical.
+
+## Implementation — 2026-09-23: identity proofs
+
+Replaces the per-adapter `proof-*` experiment for new proofs (that code stays disabled; its stored data is kept). Code: `packages/core/src/identityProofs.ts` (statement, presentation, exchange), `packages/browser/src/proofs/` (provider contract, registry, providers), `packages/browser/src/engine/identities.ts`; provider guide: [PROOFS.md](../../packages/browser/src/proofs/PROOFS.md).
+
+**Delegated binding.** The open decisions above are settled as follows. A proof is made once per profile: the external identity signs (or, for a provider-attested account, an issuer attests) one canonical statement authorizing a fresh Ed25519 *proof key*, one per proof so proofs never link to each other:
+
+```
+Ghostly identity proof v1: I control <provider>:<subject> and authorize the Ghostly key <proof key, z-base-32> to present it to contacts I choose, from <issued, UTC ISO-8601 seconds> until <expires>. Nonce: <16 random bytes, base64url>
+```
+
+One line of UTF-8, no trailing newline, space-free fields in a fixed order (injective; verifiers rebuild it from the binding, never parse it). Validity is at most 400 days and at most the provider's own limit. The statement's SHA-256 is the proof id.
+
+**Per-contact presentation.** Sharing is a choice per chat. Over the authenticated paired channel, only when both offers carry `identity-proof/1`, the contact commits a fresh 32-byte challenge, then the proof key signs `["ghostly-identity-presentation",1,id,presenter,verifier,conversationHash,sessionTranscriptHash,nonce,issuedAt]`. Presenter and verifier are the current participation keys, never rendezvous keys, and the session hash is the `PairedSession` transcript digest. The contact checks the presentation, then runs the provider's verification itself on the statement and evidence, and stores evidence, result, scope and time. A challenge is single-use, answered within 300 s, at most 8 outstanding, and consuming it and recording the outcome are one transaction. A copy replayed elsewhere fails (other audience, unknown nonce, no proof key). Frames: `idp-hello`, `idp-request`, `idp-challenge`, `idp-present`, `idp-result`, `idp-withdraw`, `idp-withdrawn`, each at most 32 KiB, evidence at most 16 KiB. Legacy peers do not offer the capability and are simply unverified.
+
+**What this trades.** The external signer does not see which contact a proof is presented to: the person chooses per chat inside Ghostly, and a compromised Ghostly profile could present its proofs to anyone until they expire or are removed. In exchange, publish-style (DNS) and paste-back (SSH, PGP, Bitcoin) proofs are usable, and one OpenID login serves every contact.
+
+**Status shown.** Verified, expired (binding or evidence expiry), withdrawn (the sharer's participation-authenticated notice; copies cannot be erased), could not be confirmed (a failed re-check of a provider whose evidence can go stale, such as a DNS record), and from a previous key (another participation key). The category is always shown: *self-custodied* ("their own key") or *provider-attested* ("attested by <issuer>"). A proof establishes control under its scheme, not a civil identity. Removing a proof from the profile withdraws it from every chat and deletes its proof key.
+
+**Tests.** Core vectors and exchange (replay, restart, other session, window, expiry, withdrawal, queued share), the provider contract suite `describeIdentityProof` on every provider and fake, and e2e with two contacts (`e2e/web/identity-proofs.spec.ts`, `identity-proof-kinds.spec.ts`).
