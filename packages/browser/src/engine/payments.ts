@@ -200,7 +200,7 @@ export class PaymentDesk {
   }
 
   /** Pays a contact's request: ecash when we share a mint with funds, Lightning from any of our mints otherwise. */
-  payRequest(params: { linkId: string; paymentId: string }): Promise<void> {
+  payRequest(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number }): Promise<void> {
     const key = `${params.linkId}:${params.paymentId}`;
     const running = this.paying.get(key);
     if (running) return running;
@@ -209,7 +209,7 @@ export class PaymentDesk {
     return operation;
   }
 
-  private async payRequestOnce(params: { linkId: string; paymentId: string }): Promise<void> {
+  private async payRequestOnce(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number }): Promise<void> {
     const request = this.payments.get(params.paymentId);
     if (!request || request.kind !== "request" || request.direction !== "in" || request.linkId !== params.linkId) {
       throw new Error("Unknown payment request");
@@ -225,7 +225,9 @@ export class PaymentDesk {
     const link = this.requireLink(params.linkId);
     await link.requirePaymentSupport();
     const lightning = !!request.invoice && link.allowsPayment("lightning");
-    if (link.allowsPayment("cashu")) {
+    // The person reviewed a Lightning payment: that is what is paid, never ecash in its place.
+    if (params.via === "lightning" && !lightning) throw new Error("This request cannot be paid over Lightning in this chat");
+    if (params.via !== "lightning" && link.allowsPayment("cashu")) {
       try {
         await this.sendEcash(link, {
           linkId: params.linkId,
@@ -243,7 +245,8 @@ export class PaymentDesk {
 
     const quote = await this.lightning.quote(request.invoice!);
     if (quote.amount !== request.amount) throw new Error("The invoice does not match the requested amount");
-    const feeLimit = Math.max(10, Math.ceil(request.amount * 0.03));
+    // Never above the ceiling the person approved, when they set one.
+    const feeLimit = Math.min(Math.max(10, Math.ceil(request.amount * 0.03)), params.maxFee ?? Infinity);
     if (quote.feeReserve > feeLimit) throw new Error(`The Lightning fee (${quote.feeReserve} sats) is too high`);
     // Marked before the mint is asked to pay, so a pending payment is never paid a second time.
     await this.save({ ...this.current(request), lightningPending: true, error: undefined });

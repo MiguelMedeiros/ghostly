@@ -27,7 +27,8 @@ async function useNwc(p: Peer, uri: string) {
 async function lightningBalance(p: Peer): Promise<number> {
   await openWallet(p, "lightning");
   const text = await p.page.getByTestId("wallet-balance").innerText();
-  return Number(text.replace(/[^\d]/g, "").match(/^\d+/)?.[0] ?? NaN);
+  // "576,410 test sats · <source>": the leading number only.
+  return Number(text.trim().match(/^[\d,]+/)?.[0].replaceAll(",", "") ?? NaN);
 }
 
 test.describe("NWC with a fake wallet service", () => {
@@ -104,9 +105,12 @@ test.describe("NWC on regtest Lightning", () => {
     for (const [p, uri] of [[alice, aliceUri], [bob, bobUri]] as const) { await useTestnet(p); await useNwc(p, uri); }
     const before = { alice: await lightningBalance(alice), bob: await lightningBalance(bob), channel: regtest.balances() };
 
-    // Bob asks with a Lightning invoice: his own wallet's. Alice holds no ecash, so her app pays it over
-    // Lightning, from her wallet.
+    // Bob asks over Lightning only (Cashu off in this chat): the invoice in the request is his own wallet's.
     await openChat(bob);
+    await bob.page.getByTitle("Options").click();
+    await bob.page.getByTestId("chat-payments-open").click();
+    await bob.page.getByTestId("chat-payments").getByTestId("chat-payments-cashu").click();
+    await bob.page.getByTestId("chat-payments-save").click();
     await bob.page.getByTestId("payment-button").click();
     await bob.page.getByTestId("payment-card-lightning").click();
     await bob.page.getByTestId("payment-amount").fill("2100");
@@ -117,7 +121,11 @@ test.describe("NWC on regtest Lightning", () => {
     const request = chat(alice).getByTestId("payment-bubble").filter({ hasText: "Requests" }).last();
     await expect(request).toContainText("2,100");
     await request.getByTestId("payment-pay").click();
-    await request.getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
+    // Reviewed as a Lightning payment through her own NWC wallet, then approved.
+    const review = request.getByTestId("payment-review");
+    await expect(review).toContainText("Pay 2,100 test sats over Lightning");
+    await expect(review).toContainText(/Through .* via 127\.0\.0\.1:44502/);
+    await review.getByRole("button", { name: "Approve payment" }).click();
     await expect(request.getByTestId("payment-state")).toHaveText("Paid", { timeout: 90_000 });
     // Bob's app sees it paid through his own wallet, not on Alice's word.
     await expect(chat(bob).getByTestId("payment-bubble").filter({ hasText: "You requested" }).last().getByTestId("payment-state")).toHaveText("Paid", { timeout: 90_000 });

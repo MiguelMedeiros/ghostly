@@ -179,6 +179,19 @@ describe("ways of paying chosen per chat", () => {
     expect(wallet.createToken).not.toHaveBeenCalled();
     expect(wallet.quoteInvoice).toHaveBeenCalledWith("lnbc40");
   });
+  it("pays a Lightning payment reviewed as such over Lightning, never with ecash in its place, within its fee", async () => {
+    const { desk, wallet, allowed, state } = await setup([incomingRequest]);
+    wallet.createToken.mockResolvedValue({ token: "fixture", mint: MINT });
+    wallet.payQuote.mockResolvedValue(true);
+    allowed.lightning = false;
+    await expect(desk.payRequest({ linkId: "l1", paymentId: "r1", via: "lightning" })).rejects.toThrow(/cannot be paid over Lightning/);
+    allowed.lightning = true;
+    await expect(desk.payRequest({ linkId: "l1", paymentId: "r1", via: "lightning", maxFee: 1 })).rejects.toThrow(/fee \(2 sats\) is too high/);
+    await desk.payRequest({ linkId: "l1", paymentId: "r1", via: "lightning", maxFee: 2 });
+    expect(wallet.createToken).not.toHaveBeenCalled();
+    expect(wallet.payQuote).toHaveBeenCalledOnce();
+    expect(state("r1")).toMatchObject({ state: "settled" });
+  });
 });
 
 describe("a contact refusing ecash", () => {
