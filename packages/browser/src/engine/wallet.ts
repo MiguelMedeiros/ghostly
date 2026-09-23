@@ -297,6 +297,16 @@ export class CashuWallet {
     return quote;
   }
 
+  /** Where one of our invoices stands at its mint. Only a question: ecash is minted by the poll above. */
+  async mintQuoteState(mint: string, quote: string): Promise<string> {
+    return String((await (await this.wallet(mint)).checkMintQuoteBolt11(quote)).state);
+  }
+
+  /** Where one of our Lightning payments stands at its mint. Only a question: `pollMelts` books the answer. */
+  async meltQuoteState(mint: string, quote: string): Promise<string> {
+    return String((await (await this.wallet(mint)).checkMeltQuoteBolt11(quote)).state);
+  }
+
   // -- ecash out and in --------------------------------------------------------
 
   /**

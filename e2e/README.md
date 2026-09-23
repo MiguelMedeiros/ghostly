@@ -51,6 +51,7 @@ E2E_MINT_URL=http://127.0.0.1:3338 npm run test:e2e
 | `web/wallet-cashu.spec.ts` · `wallets-ready.spec.ts` · `wallet-backups.spec.ts` | wallets ready with no setup, Cashu send/mint errors, the Lightning card, test sats; Ark and USDT recovery phrase and encrypted backup files (`@network`) |
 | `web/wallet-providers.spec.ts` | every wallet provider sending and receiving, in the Testnet mode: Cashu (in over Lightning, Send and Request in the chat), Lightning (in through an invoice, out paying an invoice the test mint does not own, `@network`), Ark, Bark and USDT (in, Send from the wallet, Send and Request in the chat; gated, see below) |
 | `web/bark-wallet.spec.ts` | Bark (Second's Ark) is not on Mainnet yet; `@network`: a Testnet wallet on Second's signet server by itself, and a chat offers Bark only when both sides allow it (Arkade stays separate) |
+| `web/wallet-sources.spec.ts` | where Lightning and on-chain Bitcoin come from: the Lightning card on the Cashu mints by default, a source picked per mode (invoices through it, Mainnet keeping its own), the Bitcoin card's "no source" state and an on-chain send through a source — with the fake providers, no network |
 | `web/payment-extras.spec.ts` | with `E2E_MINT_URL`: memo and "test sats" in both bubbles, a refused payment is taken back, ecash nobody picks up can be taken back, invoice cards |
 | `extension/interop.spec.ts` | the extension and the web app: chat, file, video call |
 | `extension/services.spec.ts` | a local web app shared by one extension and opened by another over WebRTC, stopped, offline, gone |
@@ -113,6 +114,23 @@ the actual wallet UI, and checks request/review/approval plus receipt reconcilia
 after recipient unlock. SDK funding uses a native ESM child process to preserve
 conditional exports; the seed is returned through its private pipe, not logged.
 This does not validate mainnet, unilateral exits or native/mobile payments.
+
+### Lightning and on-chain providers
+
+`useFakeProviders(peer)` sets `localStorage["ghostly-test-providers"] = "1"` and reloads: the fake Lightning
+and Bitcoin providers (regtest, in memory) then show up in the source pickers, in Testnet only. That is
+how `wallet-sources.spec.ts` drives a source with nothing running.
+
+A real provider (NWC, WebLN, LND, Core Lightning, Breez, BDK, Bitcoin Core…) gets a gated test of its
+own, like Ark's: `GHOSTLY_<NAME>_REGTEST=1` with the node or wallet already running (a regtest stack on
+ports it documents here), `test.skip` otherwise.
+
+```bash
+GHOSTLY_LND_REGTEST=1 npx playwright test e2e/web/wallet-lnd.spec.ts -c e2e/playwright.config.ts --project=web
+```
+
+The test does not start or stop infrastructure, uses worthless regtest coins only, and never prints a
+secret (macaroons, runes, URIs). See `packages/browser/src/engine/paymentAdapters/PROVIDERS.md`.
 
 ### Every provider, sending and receiving
 

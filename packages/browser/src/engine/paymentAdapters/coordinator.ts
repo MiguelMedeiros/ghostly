@@ -53,6 +53,8 @@ export class PaymentCoordinator {
   }); }
   cancel(id: string): Promise<PaymentReview> { return this.once(id,async () => {
     const saved = await this.repository.cancel(id);
+    // Only now, once no approval can claim it: what prepare reserved goes back. Best effort, nothing was spent.
+    await this.adapters.find(a=>a.method===saved.review.method)?.release?.(saved.review,saved.prepared).catch(()=>{});
     this.changed(saved.review); return saved.review;
   }); }
   private adapter(method: string) { const adapter=this.adapters.find(a=>a.method===method); if(!adapter)throw new Error("This payment method is unavailable"); return adapter; }

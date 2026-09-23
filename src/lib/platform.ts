@@ -5,6 +5,8 @@ import type { ArkCreate, ArkWalletView } from "@ghostly/browser/engine/paymentAd
 import type { ArkConfig } from "@ghostly/browser/engine/paymentAdapters/arkade";
 import type { BarkCreate, BarkWalletView } from "@ghostly/browser/engine/paymentAdapters/barkWallet";
 import type { BarkConfig } from "@ghostly/browser/engine/paymentAdapters/bark";
+import type { LightningView } from "@ghostly/browser/engine/paymentAdapters/providers/lightningService";
+import type { BitcoinView } from "@ghostly/browser/engine/paymentAdapters/providers/bitcoinService";
 import type { DataLinkState, ServiceAd, PairingState } from "@ghostly/core";
 import type { ChatFile } from "./types";
 
@@ -87,6 +89,10 @@ export interface WalletState {
   ark?: ArkWalletView;
   bark?: BarkWalletView;
   usdt?: UsdtWalletView;
+  /** The Lightning source of this mode (the Cashu mints by default) and its latest operations. */
+  lightning?: LightningView;
+  /** The on-chain Bitcoin source of this mode, if one is set up. */
+  bitcoin?: BitcoinView;
   intents?: PaymentReview[];
   mints: { url: string; name: string; balance: number; info: MintInfo | null }[];
   balance: number;
@@ -166,10 +172,20 @@ export interface WalletPlatform {
   setPrimaryMint(url: string): Promise<void>;
   /** Real money or test networks, for every wallet at once. */
   setMode(mode: "mainnet" | "testnet"): Promise<void>;
-  receiveLightning(amount: number): Promise<{ invoice: string; expiresAt: number | null }>;
-  quoteInvoice(invoice: string): Promise<{ quote: string; mint: string; amount: number; feeReserve: number }>;
-  /** True when paid, false while the mint holds the payment pending. Throws when the sats did not leave. */
+  /** An invoice from the active Lightning source; `via: "cashu"` asks the Cashu mints whatever the source. */
+  receiveLightning(amount: number, via?: "cashu"): Promise<{ invoice: string; expiresAt: number | null; paymentHash?: string; source?: string }>;
+  quoteInvoice(invoice: string, via?: "cashu"): Promise<{ quote: string; mint: string; amount: number; feeReserve: number; source?: string }>;
+  /** True when paid, false while the payment is pending (or its answer lost). Throws when the sats did not leave. */
   payQuote(quote: string, mint: string): Promise<boolean>;
+  /** Makes a provider this mode's Lightning source, with the values typed in its form. */
+  lightningSetSource(providerId: string, values: Record<string, string>): Promise<void>;
+  /** Back to the Cashu mints. */
+  lightningClearSource(): Promise<void>;
+  bitcoinSetSource(providerId: string, values: Record<string, string>): Promise<void>;
+  bitcoinClearSource(): Promise<void>;
+  /** A fresh address of the Bitcoin source to be paid on. */
+  bitcoinReceiveAddress(): Promise<string>;
+  bitcoinRefresh(): Promise<void>;
   receiveToken(token: string): Promise<number>;
   /** Null when the text is neither an ecash token nor a Cashu payment request. */
   inspectCashu(text: string): Promise<CashuInspection | null>;

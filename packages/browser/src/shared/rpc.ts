@@ -76,10 +76,18 @@ export interface EngineApi {
   /** The primary mint is where Lightning invoices are created. */
   walletSetPrimaryMint(params: { url: string }): void;
   walletRemoveMint(params: { url: string }): void;
-  /** A Lightning invoice that, once paid by anyone, lands in the wallet as ecash. */
-  walletReceiveLightning(params: { amount: number }): { quote: string; invoice: string; expiresAt: number | null };
-  walletQuoteInvoice(params: { invoice: string }): { quote: string; mint: string; amount: number; feeReserve: number };
+  /** A Lightning invoice from the active source (`via: "cashu"`: from the mints, landing as ecash). */
+  walletReceiveLightning(params: { amount: number; via?: "cashu" }): { quote: string; invoice: string; expiresAt: number | null; paymentHash?: string; source: string };
+  walletQuoteInvoice(params: { invoice: string; via?: "cashu" }): { quote: string; mint: string; amount: number; feeReserve: number; source?: string };
   walletPayQuote(params: { quote: string; mint: string }): { paid: boolean };
+  /** Makes a provider this mode's Lightning source. `values`: its form; secret fields are sealed, never returned. */
+  lightningSetSource(params: { providerId: string; values: Record<string, string> }): void;
+  lightningClearSource(): void;
+  lightningRefresh(): void;
+  bitcoinSetSource(params: { providerId: string; values: Record<string, string> }): void;
+  bitcoinClearSource(): void;
+  bitcoinReceiveAddress(): string;
+  bitcoinRefresh(): void;
   /** Redeems a token pasted by the user. Only mints the user added are accepted. */
   walletReceiveToken(params: { token: string }): { amount: number };
   walletInspectCashu(params: { text: string }): { inspection: CashuInspection | null };

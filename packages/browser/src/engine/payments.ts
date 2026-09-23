@@ -37,6 +37,23 @@ export interface PaymentDeskHost {
   onReviewedPaymentRefused?(id:string,reason:string):Promise<void>;
 }
 
+/**
+ * Lightning as the desk needs it: the invoice a request carries, and paying a contact's invoice. The
+ * engine hands it the active Lightning source; alone (tests), the desk uses the Cashu mints directly.
+ */
+export interface DeskLightning {
+  createInvoice(amount: number, paymentId: string): Promise<{ invoice: string }>;
+  /** `mint`: the Cashu mint that will pay, when it is one. */
+  quote(invoice: string): Promise<{ quote: string; mint?: string; amount: number; feeReserve: number }>;
+  /** True once paid, false while pending. Throws only when the sats did not go out. */
+  pay(quote: { quote: string; mint?: string }, note: string, paymentId: string): Promise<boolean>;
+}
+export const mintLightning = (wallet: CashuWallet): DeskLightning => ({
+  createInvoice: (amount, paymentId) => wallet.receiveLightning(amount, paymentId),
+  quote: (invoice) => wallet.quoteInvoice(invoice),
+  pay: (quote, note, paymentId) => wallet.payQuote(quote.quote, quote.mint!, note, paymentId),
+});
+
 const newId = () => toBase64Url(randomBytes(12));
 
 /** Whole sats only: that is all ecash in `sat` can represent. */
@@ -68,6 +85,7 @@ export class PaymentDesk {
     private readonly ark?: ArkWallet,
     private readonly usdt?: UsdtWallet,
     private readonly bark?: BarkWallet,
+    private readonly lightning: DeskLightning = mintLightning(wallet),
   ) {}
 
   async start(): Promise<void> {
@@ -138,7 +156,7 @@ export class PaymentDesk {
     // Each way of paying goes in only if this chat allows it on both sides.
     const ecash = link.allowsPayment("cashu"), lightning = link.allowsPayment("lightning");
     if (!ecash && !lightning) throw new Error("Cashu and Lightning are off in this chat");
-    const quote = lightning ? await this.wallet.receiveLightning(params.amount, id) : undefined;
+    const quote = lightning ? await this.lightning.createInvoice(params.amount, id) : undefined;
     // A request is in real sats or in test sats, never both: ecash from a test mint, worth nothing, must
     // never settle a request for real money. The primary mint says which one this wallet is using.
     const own = (await this.wallet.view()).mints.map((m) => m.url);
@@ -223,7 +241,7 @@ export class PaymentDesk {
       }
     } else if (!lightning) throw new Error("No way of paying this request is allowed in this chat");
 
-    const quote = await this.wallet.quoteInvoice(request.invoice!);
+    const quote = await this.lightning.quote(request.invoice!);
     if (quote.amount !== request.amount) throw new Error("The invoice does not match the requested amount");
     const feeLimit = Math.max(10, Math.ceil(request.amount * 0.03));
     if (quote.feeReserve > feeLimit) throw new Error(`The Lightning fee (${quote.feeReserve} sats) is too high`);
@@ -231,13 +249,13 @@ export class PaymentDesk {
     await this.save({ ...this.current(request), lightningPending: true, error: undefined });
     let paid: boolean;
     try {
-      paid = await this.wallet.payQuote(quote.quote, quote.mint, request.memo ?? "Paid a contact's request", request.id);
+      paid = await this.lightning.pay(quote, request.memo ?? "Paid a contact's request", request.id);
     } catch (error) {
       // The wallet throws only when the sats did not go out.
       await this.save({ ...this.current(request), lightningPending: undefined });
       throw error;
     }
-    // Still pending at the mint: the wallet settles it later, through onMeltResolved.
+    // Still pending (or its answer lost): the source settles it later, through onLightningResolved.
     if (paid) await this.save({ ...this.current(request), state: "settled", mint: quote.mint, lightningPending: undefined });
   }
 
@@ -483,22 +501,25 @@ export class PaymentDesk {
     });
   }
 
-  /** The mint saw one of our invoices paid: if it was a chat request, tell the contact who paid it. */
-  async onQuotePaid(quote: StoredQuote): Promise<void> {
-    const request = quote.paymentId ? this.payments.get(quote.paymentId) : undefined;
+  /** The Lightning source saw one of our invoices paid: if it was a chat request, tell the contact who paid it. */
+  async onLightningPaid(op: { paymentId?: string; mint?: string }): Promise<void> {
+    const request = op.paymentId ? this.payments.get(op.paymentId) : undefined;
     if (!request || request.state !== "pending") return;
-    await this.save({ ...request, state: "settled", mint: quote.mint });
+    await this.save({ ...request, state: "settled", mint: op.mint });
     this.host.getLink(request.linkId)?.sendPaymentResult({ id: request.id, ok: true });
   }
 
-  /** A Lightning payment of a contact's request that the mint had left pending settled. */
-  async onMeltResolved(melt: PendingMelt, paid: boolean): Promise<void> {
-    const found = melt.paymentId ? this.payments.get(melt.paymentId) : undefined;
+  /** A Lightning payment of a contact's request that was left pending (or unknown) settled. */
+  async onLightningResolved(op: { paymentId?: string; mint?: string }, paid: boolean): Promise<void> {
+    const found = op.paymentId ? this.payments.get(op.paymentId) : undefined;
     if (found?.kind !== "request" || found.direction !== "in") return;
     const request = { ...found, lightningPending: undefined };
-    if (paid) await this.save(request.state === "pending" ? { ...request, state: "settled", mint: melt.mint } : request);
+    if (paid) await this.save(request.state === "pending" ? { ...request, state: "settled", mint: op.mint } : request);
     else await this.save({ ...request, error: "The Lightning payment did not go through" });
   }
+
+  onQuotePaid(quote: StoredQuote): Promise<void> { return this.onLightningPaid(quote); }
+  onMeltResolved(melt: PendingMelt, paid: boolean): Promise<void> { return this.onLightningResolved(melt, paid); }
 
   private async receiveUsdtRequest(linkId:string,request:PaymentRequest) {
     if(!this.host.getLink(linkId)?.supportsUsdtPayments)return;

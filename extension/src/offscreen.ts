@@ -10,7 +10,7 @@ import { UI_PORT, type HttpRequestReply, type RuntimeMessage } from "./messages"
  */
 const VIEWER_MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
 
-const server = new EngineServer();
+const server = new EngineServer({ platform: "extension" });
 
 // Only in `vite build --mode e2e` (test/attacks.mjs plays a malicious peer through it); gone from real builds.
 if (import.meta.env.MODE === "e2e") Object.assign(globalThis, { __ghostly: server });

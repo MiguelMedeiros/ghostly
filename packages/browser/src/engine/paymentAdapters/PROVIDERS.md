@@ -1,0 +1,114 @@
+# Wallet providers: sources of Lightning and on-chain Bitcoin
+
+A **provider** is a way to reach money: the Cashu mints, an LND node, a Nostr Wallet Connect wallet, a
+BDK wallet, a Bitcoin Core wallet. Each profile has one **active source** of each kind per wallet mode:
+
+| Kind | Contract | Default | Used by |
+|---|---|---|---|
+| Lightning | `LightningProvider` ([providers/lightning.ts](providers/lightning.ts)) | the Cashu mints ([providers/cashuMint.ts](providers/cashuMint.ts)) | the Lightning card, the invoice a chat request carries, paying a contact's invoice, invoices pasted in a chat |
+| On-chain | `OnchainProvider` ([providers/onchain.ts](providers/onchain.ts)) | none: the Bitcoin card says "No Bitcoin source configured" | the Bitcoin card, the `bitcoin` payment method of the `PaymentCoordinator` |
+
+The Cashu card always uses the mints directly, whatever the Lightning source.
+
+Everything that is not specific to a provider is shared and already written: storage, sealed secrets,
+per-mode sources, the source picker and config form, the Lightning journal and reconciliation, the
+on-chain review/approve/reconcile flow. A provider is one module and one line.
+
+## Adding a provider
+
+1. Write `providers/<name>.ts`: a class implementing `LightningProvider` or `OnchainProvider`, and a
+   descriptor:
+
+   ```ts
+   export const nwc: LightningProviderDescriptor = {
+     id: "nwc",                        // stable: it is stored with the profile
+     label: "Nostr Wallet Connect",
+     kind: "lightning",
+     description: "A wallet you connect with an NWC URI. That wallet holds the sats.",
+     networks: ["bitcoin", "signet", "regtest", "mutinynet"],   // offered in the modes of these networks
+     platforms: ["web", "extension", "desktop"],               // where it can run
+     fields: [{ name: "uri", label: "Connection URI", kind: "secret", placeholder: "nostr+walletconnect://…" }],
+     custodial: true,
+     validate({ secrets }) { if (!secrets.uri.startsWith("nostr+walletconnect://")) throw new Error("That is not an NWC URI"); },
+     async create({ config, secrets }, host) { return NwcLightning.connect(secrets.uri, host.signal); },
+   };
+   ```
+
+2. Add it to `LIGHTNING_PROVIDERS` or `ONCHAIN_PROVIDERS` in [providers/registry.ts](providers/registry.ts).
+   That is the only shared line you touch; keep the list in the order the picker should show.
+
+3. Only if the declared `fields` cannot express the form (a "Connect" button that asks a browser wallet, a
+   QR scanner): register a component in `src/components/wallet/providers/forms.ts` under the provider id.
+   It receives `ProviderFormProps` and calls `onSubmit(values)`.
+
+4. Tests: run `describeLightningProvider` / `describeOnchainProvider` from
+   `packages/browser/test/helpers/providerContract.ts` against your provider (mocked transport in unit
+   tests; a real regtest counterpart in a gated test), plus your own unit tests. See "Testing" below.
+
+The engine then: lists it in the picker when the platform and the mode fit, renders its form, splits the
+values into `config` (shown back) and `secrets` (sealed), calls `create`, asks `info()` and **refuses a
+network of the other mode** before saving anything, and closes it on a mode switch, a replacement or
+shutdown (`close()`, and `host.signal` aborts).
+
+## Money safety
+
+- **Nothing spent vs unknown.** Throw `NothingSpentError` only when it is certain nothing left the wallet
+  (refused before sending, no route before any HTLC, a transaction never broadcast, not enough funds). It
+  makes the attempt `failed` and retryable. **Any other throw is an unknown outcome**: the payment is
+  journaled as `unknown`, only ever reconciled (`paymentStatus`, `status`), never paid again, and the
+  source cannot be replaced until it ends. When in doubt, do not throw `NothingSpentError`.
+- **Journal before spend.** Lightning payments are written to the journal (`lightningOp-out-<hash>` in the
+  settings store) before `payInvoice` is called; an interrupted `sending` becomes `unknown` at the next
+  start. On-chain payments go through the `PaymentCoordinator`: persist-before-spend and atomic claim.
+- **Sign at prepare, broadcast at execute.** `prepareSend` returns the signed transaction for exactly the
+  reviewed address, amount and fee (≤ `feeCap`). `broadcast` sends that transaction; reconciling a lost
+  answer re-broadcasts the same one (same inputs: it cannot pay twice). `release` unlocks what a cancelled
+  review reserved.
+- **Pending is not failed.** `payInvoice` resolves `pending` for a payment in flight; never resolve or
+  throw "failed" for something that may still settle.
+- **Checks you do not write.** The engine checks what a provider returns: an invoice decodes and has the
+  amount and hash asked for; the fee is within the cap; the prepared transaction pays the reviewed address
+  and amount; the txid broadcast is the one reviewed; in Mainnet, an invoice of a test network is refused.
+  Still validate everything your backend returns, and bound what you read (sizes, time-outs).
+- Amountless invoices are refused for now.
+
+## Secrets
+
+- Declare every credential (NWC URI, macaroon, rune, API key, RPC password) as a `secret` field. It is
+  sealed with a device key (`sealSeed`, like the Ark and USDT seeds) under `<kind>Source-<mode>` in the
+  settings store: never in the `Settings` object, never in the engine state (the view lists only the
+  names of the saved secret fields), never shown again.
+- Never log a secret, and do not put one in an error message. Errors shown to the person pass through
+  `redact()` with the source's secrets, but that is a safety net, not a licence.
+- A provider gets its secrets in `create()` and keeps them in memory only.
+
+## Per mode
+
+- Mainnet and Testnet keep separate sources (`lightningSource-mainnet`, `lightningSource-testnet`,
+  `onchainSource-…`). Switching closes one and opens the other; nothing is replaced.
+- `info().network` must be a network of the mode: `bitcoin` is Mainnet, every other network is Testnet.
+  A provider on the wrong one is closed and refused.
+- The journal and the on-chain intents carry their mode and provider: another source's operations wait
+  until it is active again (only it can answer about them).
+
+## Platforms
+
+`platforms` says where the provider can run. The engine runs in the page for `web` and `desktop` (Tauri)
+and in an offscreen document for `extension`: a provider that needs `window.webln` is `["web"]`; one that
+needs a raw TCP socket or a local process is `["desktop"]` and gets there through a Tauri command.
+Browsers reach HTTP(S) APIs only with CORS; say so in the description when a node must allow the origin.
+
+## Testing
+
+- Unit: the fakes in [providers/testing.ts](providers/testing.ts) (`FakeLightningProvider`,
+  `FakeOnchainProvider`, `fakeInvoice`, `fakeAddress`) and `packages/browser/test/walletProviders.test.ts`
+  show how to drive sources, the journal and the coordinator without a network.
+- Contract: `packages/browser/test/providerContract.test.ts` runs the shared contract suite against the
+  fakes; run it against your provider too.
+- e2e: `localStorage["ghostly-test-providers"] = "1"` (`useFakeProviders(peer)` in `e2e/support/fixtures.ts`)
+  adds the fakes to the pickers, in Testnet only. `e2e/web/wallet-sources.spec.ts` drives the picker, the
+  Lightning card through a source and the Bitcoin card.
+- Real networks: gate on `GHOSTLY_<NAME>_REGTEST=1` (for example `GHOSTLY_LND_REGTEST=1`,
+  `GHOSTLY_BITCOIND_REGTEST=1`), skip otherwise, and document in `e2e/README.md` what must be running and on
+  which ports. Tests never start or stop shared infrastructure, never use real funds, and never print a
+  secret.

@@ -106,7 +106,7 @@ export async function linkLegacy(host: Peer, guest: Peer): Promise<void> {
 export const chat = (peer: Peer) => peer.page.locator(".chat-wallpaper");
 
 /** The wallet is a page beside the chat list, like Settings: opening it puts the chat away. */
-export async function openWallet(peer: Peer, card?: "cashu" | "lightning" | "arkade" | "bark" | "usdt"): Promise<void> {
+export async function openWallet(peer: Peer, card?: "cashu" | "lightning" | "arkade" | "bark" | "usdt" | "bitcoin"): Promise<void> {
   if (!await peer.page.getByTestId("wallet").isVisible()) await peer.page.getByTestId("wallet-chip").click();
   if (card) await peer.page.getByTestId(`wallet-card-${card}`).click();
 }
@@ -116,6 +116,16 @@ export async function useTestnet(peer: Peer): Promise<void> {
   await openWallet(peer);
   await peer.page.getByTestId("wallet-mode").getByRole("radio", { name: "Testnet" }).click();
   await expect(peer.page.getByTestId("testnet-notice")).toBeVisible();
+}
+
+/**
+ * The fake Lightning and on-chain providers (regtest, in memory, Testnet only) join the source pickers:
+ * how a test drives a source without a node. The flag is read when the engine starts, hence the reload.
+ */
+export async function useFakeProviders(peer: Peer): Promise<void> {
+  await peer.page.evaluate(() => localStorage.setItem("ghostly-test-providers", "1"));
+  await peer.page.reload();
+  await expect(peer.page.getByTitle("New Chat")).toBeVisible();
 }
 
 /** Back from the wallet to the chat it was opened from. */

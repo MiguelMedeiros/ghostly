@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { WalletPlatform } from "../lib/platform";
 import type { PaymentReview as Review } from "@ghostly/core";
 import { PaymentReview } from "./PaymentReview";
-import { MiniCards, type WalletRail } from "./WalletCards";
+import { MiniCards, type ChatRail } from "./WalletCards";
 import { walletCards, type WalletCard } from "./walletCardData";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 
@@ -29,14 +29,14 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   const state = wallet?.getState();
   const peer = useServicesPlatform()?.getPeer(reviewContext?.peer ?? "");
   /** Why a card cannot be used in this chat: not set up, off here, or off for the contact. */
-  const unavailable = (card: Pick<WalletCard, "id" | "name" | "ready" | "balance">) => {
+  const unavailable = (card: Pick<WalletCard, "name" | "ready" | "balance"> & { id: ChatRail }) => {
     if (!card.ready) return `${card.name} is ${card.balance.toLowerCase()}`;
     if (peer?.paymentMethods && !peer.paymentMethods[card.id]) return `${card.name} is off in this chat`;
     if (peer?.dataLink === "open" && peer.capabilities?.methods && !peer.capabilities.methods[card.id]) return `Your contact does not accept ${card.name} in this chat`;
     return undefined;
   };
-  const [rail, setRail] = useState<WalletRail>(() => {
-    const allowed = (id: WalletRail) => !peer?.paymentMethods || peer.paymentMethods[id];
+  const [rail, setRail] = useState<ChatRail>(() => {
+    const allowed = (id: ChatRail) => !peer?.paymentMethods || peer.paymentMethods[id];
     try { const saved = localStorage.getItem(RAIL_KEY); if ((saved === "cashu" || saved === "lightning" || saved === "arkade" || saved === "bark" || saved === "usdt") && allowed(saved)) return saved; } catch { /* storage unavailable */ }
     return (["cashu", "lightning", "arkade", "bark", "usdt"] as const).find(allowed) ?? "cashu";
   });
@@ -57,8 +57,8 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   // pays a request the contact sends.
   const canSend = rail !== "lightning";
   const [asking, setAsking] = useState<string | null>(null);
-  const blocked = state && wallet ? unavailable(walletCards(state, wallet.testMintUrls).find((c) => c.id === rail)!) : undefined;
-  const pick = (next: WalletRail) => { setRail(next); setError(""); try { localStorage.setItem(RAIL_KEY, next); } catch { /* storage unavailable */ } };
+  const blocked = state && wallet ? unavailable(walletCards(state, wallet.testMintUrls).find((c): c is WalletCard & { id: ChatRail } => c.id === rail)!) : undefined;
+  const pick = (next: ChatRail) => { setRail(next); setError(""); try { localStorage.setItem(RAIL_KEY, next); } catch { /* storage unavailable */ } };
 
   const send = async () => {
     setError(""); setBusy("send");
