@@ -39,7 +39,7 @@ export function IdentityProofsSection() {
           </Row>
         );
       })}
-      {removing && <Block><Notice>Contacts you shared it with are told it is no longer shared. A copy they kept cannot be erased.</Notice></Block>}
+      {removing && <Block><Notice>Contacts you shared it with are told it is no longer shared, and a revocation is published so they can see it even if you never reconnect. A copy they kept cannot be erased.</Notice></Block>}
       {error && <Block><Notice tone="error">{error}</Notice></Block>}
       {canAdd && <button type="button" data-testid="identity-add" onClick={() => setAdding(true)} className="w-full px-4 py-3 min-h-12 text-left text-sm text-text-secondary hover:text-accent hover:bg-surface-alt transition-colors cursor-pointer last:rounded-b-xl">+ Add an identity</button>}
     </Section>

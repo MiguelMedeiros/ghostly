@@ -22,7 +22,8 @@ interface Pending { draftId: string; statement: IdentityStatement; instructions?
 export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
   const providers = addableProviders();
   const platform = identityPlatform();
-  const [provider, setProvider] = useState<IdentityProofProvider | null>(providers.length === 1 ? providers[0] : null);
+  // Always the picker first, even with one provider: the flow is the same whatever is registered.
+  const [provider, setProvider] = useState<IdentityProofProvider | null>(null);
   const signers = provider ? availableSigners(provider, platform) : [];
   const [signerId, setSignerId] = useState("");
   const signer: IdentitySigner<unknown> | undefined = signers.find(s => s.id === signerId) ?? signers[0];
@@ -162,7 +163,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
                 <p className="text-sm text-text-primary">{provider.label}</p>
                 <p className="text-xs text-text-muted">{provider.category === "provider-attested" ? "A company vouches that you logged in to this account. Your contacts see who vouches." : "Only the holder of this key can make this proof."}</p>
               </div>
-              {providers.length > 1 && <Button disabled={busy} onClick={() => { setProvider(null); setError(""); }}>Back</Button>}
+              <Button disabled={busy} onClick={() => { setProvider(null); setError(""); }}>Back</Button>
             </div>
             {signers.length > 1 && (
               <label className="block text-xs text-text-muted">Sign with

@@ -1,6 +1,9 @@
 import 'fake-indexeddb/auto';
 import { describe, expect, it, vi } from "vitest";
-import { createIdentity, emptyIdentityLedger, identityStatement, IdentityExchange, type IdentityLedger } from "@ghostly/core";
+import { createIdentity, emptyIdentityLedger, identityFromSeed, identityStatement, IdentityExchange, type IdentityLedger } from "@ghostly/core";
+import { STORES, store, wrap } from "../src/shared/idb";
+
+const createIdentityFromSeed = (seed: Uint8Array) => identityFromSeed(seed).pubKeyZ32;
 import { IdentityProofs, type IdentityLinkHost } from "../src/engine/identities";
 import { fakeKey, fakeKeySign, fakeKeySubject, fakeRecord } from "../src/proofs/testing";
 import type { IdentityProofProvider } from "../src/proofs/contract";
@@ -10,6 +13,8 @@ function pair() {
   const keys = { a: createIdentity().pubKeyZ32, b: createIdentity().pubKeyZ32 };
   const ledgers: Record<string, IdentityLedger> = { a: emptyIdentityLedger(), b: emptyIdentityLedger() };
   const connected = { value: true };
+  /** Pkarr: key → records, as a relay would keep them (the signature is the publisher's, by construction). */
+  const pkarr = new Map<string, { label: string; value: string }[]>();
   const engines: Record<string, IdentityProofs> = {};
   const host = (me: "a" | "b"): IdentityLinkHost => {
     const them = me === "a" ? "b" : "a";
@@ -22,12 +27,14 @@ function pair() {
       } : undefined,
       keys: () => ({ mine: keys[me], theirs: keys[them] }),
       linkIds: () => ["chat"], online: () => true, emit: vi.fn(),
+      publish: async (seed, records) => { pkarr.set(createIdentityFromSeed(seed), records); },
+      resolve: async key => pkarr.get(key) ?? null,
     };
   };
   const providers = () => [fakeKey, fakeRecord] as IdentityProofProvider[];
   engines.a = new IdentityProofs(host("a"), providers);
   engines.b = new IdentityProofs(host("b"), providers);
-  return { engines, ledgers, connected };
+  return { engines, ledgers, connected, pkarr };
 }
 
 describe("identity proofs in the engine", () => {
@@ -60,7 +67,7 @@ describe("identity proofs in the engine", () => {
     await vi.waitFor(() => expect(ledgers.a.shared[0]?.status).toBe("accepted"));
     expect(engines.a.views()[0].sharedWith).toBe(1);
     expect(engines.b.linkView("chat", true)!.received[0]).toMatchObject({ id, status: "verified", subject: fakeKeySubject(), recheckDue: false });
-    const restarted = new IdentityProofs({ ...({} as IdentityLinkHost), ledger: () => ledgers.a, linkIds: () => [], online: () => true, emit: vi.fn(), channel: () => undefined, keys: () => ({}), updateLedger: async () => ledgers.a });
+    const restarted = new IdentityProofs({ ...({} as IdentityLinkHost), ledger: () => ledgers.a, linkIds: () => [], online: () => true, emit: vi.fn(), channel: () => undefined, keys: () => ({}), updateLedger: async () => ledgers.a, publish: async () => {}, resolve: async () => null });
     await restarted.load();
     expect(restarted.views().map(v => v.id)).toEqual([id]);
     await engines.a.remove({ id });
@@ -95,5 +102,32 @@ describe("identity proofs in the engine", () => {
       engines.a.ready("chat");
       expect(sent).toHaveLength(2);
     } finally { spy.mockRestore(); }
+  });
+
+  it("keeps proof-key seeds sealed at rest, never in plain text", async () => {
+    const { engines } = pair();
+    await engines.a.load();
+    for (const p of engines.a.views()) await engines.a.remove({ id: p.id });
+    const { draftId, binding } = engines.a.begin({ provider: "fake-key", subject: fakeKeySubject() });
+    await engines.a.complete({ draftId, evidence: fakeKeySign(identityStatement(binding)) });
+    const stored = await wrap<{ seed: { sealed: { ciphertext: number[] }; deviceKey: string } }[]>((await store(STORES.settings, "readonly")).get("identityProofs"));
+    expect(stored.at(-1)!.seed.sealed.ciphertext.length).toBeGreaterThan(32);
+    expect(stored.at(-1)!.seed.deviceKey).toMatch(/^[A-Za-z0-9+/]{40,}$/);
+  });
+
+  it("removing a shared proof publishes a revocation under its proof key; the contact finds it without reconnecting", async () => {
+    const { engines, ledgers, connected, pkarr } = pair();
+    await engines.a.load();
+    for (const p of engines.a.views()) await engines.a.remove({ id: p.id });
+    const { draftId, binding } = engines.a.begin({ provider: "fake-key", subject: fakeKeySubject() });
+    const { id } = await engines.a.complete({ draftId, evidence: fakeKeySign(identityStatement(binding)) });
+    await engines.a.share({ linkId: "chat", id });
+    await vi.waitFor(() => expect(ledgers.b.received.find(r => r.id === id)?.status).toBe("verified"));
+    connected.value = false;
+    await engines.a.remove({ id });
+    await vi.waitFor(() => expect(pkarr.get(binding.key)?.[0]).toMatchObject({ label: "_ghostly-revoked", value: expect.stringContaining(id) }));
+    expect(ledgers.b.received.find(r => r.id === id)?.status).toBe("verified");
+    await engines.b.checkRevocations();
+    expect(engines.b.linkView("chat", false)!.received.find(r => r.id === id)!.status).toBe("revoked");
   });
 });

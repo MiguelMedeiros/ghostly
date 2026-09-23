@@ -42,6 +42,7 @@ test("a Nostr identity is proven once, shared with one contact only, withdrawn, 
   await go(alice, "#/profile");
   await alice.page.getByTestId("identity-add").click();
   const add = alice.page.getByTestId("add-identity");
+  await add.getByTestId("add-identity-nostr").click();
   await expect(add.getByTestId("add-identity-signer")).toHaveValue("nip07");
   await add.getByTestId("add-identity-start").click();
   await expect(add).toHaveCount(0);
@@ -104,4 +105,46 @@ test("a Nostr identity is proven once, shared with one contact only, withdrawn, 
   await expect(dialog.getByTestId("chat-identity-received-status")).toHaveText("Expired");
   await close(bob);
   await expect(bob.page.getByTestId("chat-identity-badges")).toHaveCount(0);
+});
+
+test("removing a proof revokes it for a contact the person never reconnects to", async ({ peer, relay }) => {
+  const [alice, carol] = await Promise.all([peer("idr-alice"), peer("idr-carol")]);
+  await injectNostrSigner(alice);
+  await pair(alice, carol);
+  const withCarol = await chatId(alice);
+  await go(alice, "#/profile");
+  await alice.page.getByTestId("identity-add").click();
+  await alice.page.getByTestId("add-identity-nostr").click();
+  await alice.page.getByTestId("add-identity-start").click();
+  await expect(alice.page.getByTestId("identity-proof")).toHaveCount(1);
+  await go(alice, withCarol);
+  let dialog = await identities(alice);
+  await dialog.getByTestId("chat-identity-share").click();
+  await expect(dialog.getByTestId("chat-identity-mine-status")).toHaveText("Shared · verified by your contact");
+  await close(alice);
+  await expect(carol.page.getByTestId("chat-identity-badges")).toBeVisible();
+
+  // Carol's app is closed when Alice removes it: the withdrawal cannot reach her, the revocation goes to Pkarr.
+  const carolChat = await chatId(carol);
+  await carol.page.goto("about:blank");
+  await go(alice, "#/profile");
+  await alice.page.getByTestId("identity-proof-remove").click();
+  await alice.page.getByTestId("identity-proof-remove-confirm").click();
+  await expect(alice.page.getByTestId("identity-proof")).toHaveCount(0);
+  await expect.poll(() => [...relay.packets.values()].some(packet => packet.includes("_ghostly-revoked"))).toBe(true);
+  await alice.context.close();
+
+  // Alice never comes back. Carol opens Ghostly again and checks: revoked.
+  await carol.page.goto(`/${carolChat}`);
+  await expect(carol.page.getByPlaceholder("Message…")).toBeVisible();
+  dialog = await identities(carol);
+  const received = dialog.getByTestId("chat-identity-received");
+  await expect(received).toHaveAttribute("data-status", /verified|revoked/);
+  await received.getByText("Details").click();
+  // The app also looks by itself a minute after starting; either way it ends revoked.
+  if (await received.getAttribute("data-status") === "verified") await received.getByTestId("chat-identity-recheck").click();
+  await expect(received).toHaveAttribute("data-status", "revoked");
+  await expect(received.getByTestId("chat-identity-received-status")).toHaveText("Revoked by its owner");
+  await close(carol);
+  await expect(carol.page.getByTestId("chat-identity-badges")).toHaveCount(0);
 });

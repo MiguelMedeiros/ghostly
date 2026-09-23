@@ -3,7 +3,7 @@ import { ed25519 } from "@noble/curves/ed25519.js";
 import { createIdentity } from "../src/identity";
 import {
   emptyIdentityLedger, identityStatement, identityStatementText, IdentityExchange, isIdentityBinding, newIdentityBinding,
-  receivedIdentityStatus, signIdentityPresentation, verifyIdentityPresentation, IDENTITY_CHALLENGE_WINDOW,
+  receivedIdentityStatus, revokesIdentity, identityRevocationValue, IDENTITY_REVOCATION_LABEL, signIdentityPresentation, verifyIdentityPresentation, IDENTITY_CHALLENGE_WINDOW,
   type IdentityBinding, type IdentityLedger, type IdentityStatement, type LocalIdentityProof, type VerifiedIdentity,
 } from "../src/identityProofs";
 
@@ -76,6 +76,7 @@ function world(start = 1_800_000_000) {
   const frames: Record<string, unknown>[] = [];
   const errors: string[] = [];
   const online = new Set<string>();
+  const revoked = new Set<string>();
   const peer = (me: string, them: string, context: string, options: { providers?: string[]; session?: () => string } = {}) => {
     const key = `${me}>${them}`;
     ledgers.set(key, ledgers.get(key) ?? emptyIdentityLedger());
@@ -86,12 +87,13 @@ function world(start = 1_800_000_000) {
       providers: () => options.providers ?? ["test"],
       localProof: id => proofs.get(id),
       verify: fakeVerify, now: () => now, onError: e => errors.push(e),
+      revoked: async st => revoked.has(st.id),
     });
     peers.set(key, x); online.add(key);
     return x;
   };
   const ids = { alice: createIdentity().pubKeyZ32, bob: createIdentity().pubKeyZ32, carol: createIdentity().pubKeyZ32 };
-  return { ids, peer, peers, ledgers, frames, errors, online, proofs, addProof, advance: (s: number) => { now += s; }, now: () => now,
+  return { ids, peer, peers, ledgers, revoked, frames, errors, online, proofs, addProof, advance: (s: number) => { now += s; }, now: () => now,
     ledger: (me: string, them: string) => ledgers.get(`${me}>${them}`)! };
 }
 
@@ -256,5 +258,30 @@ describe("identity exchange", () => {
     const ba = w.peer(bob, alice, "a".repeat(64));
     await ba.receive({ t: "idp-present", junk: "x".repeat(40_000) });
     expect(w.errors.at(-1)).toMatch(/too large/);
+  });
+
+  it("reads a revocation record: exact label, this proof's id, nothing else", () => {
+    const id = "a".repeat(64);
+    expect(revokesIdentity([{ label: IDENTITY_REVOCATION_LABEL, value: identityRevocationValue(id, 1_800_000_000) }], id)).toBe(true);
+    expect(revokesIdentity([{ label: IDENTITY_REVOCATION_LABEL, value: identityRevocationValue("b".repeat(64), 1) }], id)).toBe(false);
+    expect(revokesIdentity([{ label: "_other", value: identityRevocationValue(id, 1) }], id)).toBe(false);
+    expect(revokesIdentity([{ label: IDENTITY_REVOCATION_LABEL, value: `${identityRevocationValue(id, 1)};x` }], id)).toBe(false);
+  });
+
+  it("a revoked proof shows as revoked on re-check, and is refused when presented again", async () => {
+    const w = world(), { alice, bob } = w.ids;
+    const ab = w.peer(alice, bob, "a".repeat(64)); const ba = w.peer(bob, alice, "a".repeat(64));
+    const id = w.addProof();
+    await ab.share(id, true);
+    await vi.waitFor(() => expect(w.ledger(bob, alice).received).toHaveLength(1));
+    expect((await ba.recheck(id, { revocationOnly: true })).status).toBe("verified");
+    w.revoked.add(id);
+    const after = await ba.recheck(id, { revocationOnly: true });
+    expect(after.status).toBe("revoked");
+    expect(receivedIdentityStatus(after, alice, bob, w.now())).toBe("revoked");
+    // Someone who still has the proof key presents it again: refused.
+    await ab.share(id, true);
+    await vi.waitFor(() => expect(w.ledger(alice, bob).shared[0].status).toBe("rejected"));
+    expect(w.ledger(alice, bob).shared[0].error).toMatch(/revoked/);
   });
 });

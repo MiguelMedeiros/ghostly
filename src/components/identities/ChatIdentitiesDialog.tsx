@@ -89,6 +89,7 @@ function Received({ r, linkId, busy, act }: { r: ReceivedIdentityView; linkId: s
         {avatar ? <img src={avatar} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" /> : <ProviderMark provider={r.provider} />}
         <div className="min-w-0 flex-[1_1_10rem]">
           <p className="text-sm text-text-primary">{name ?? providerLabel(r.provider)}{name && <span className="text-xs text-text-muted"> · {providerLabel(r.provider)}</span>}</p>
+          {name && <p className="text-[11px] text-text-muted" data-testid="chat-identity-received-name-source">{r.display?.source ?? r.verified.display?.source}</p>}
           <p className="text-xs text-text-muted">{categoryLabel(r.provider, r.verified.attester)}</p>
         </div>
         <StatusPill ok={ok} testId="chat-identity-received-status">{RECEIVED_STATUS[r.status]}</StatusPill>
@@ -99,13 +100,13 @@ function Received({ r, linkId, busy, act }: { r: ReceivedIdentityView; linkId: s
           <code className="block break-all select-all bg-surface-alt rounded-lg p-2 text-[11px] text-text-primary" data-testid="chat-identity-received-subject">{r.subject}</code>
           <p>{r.verified.source}. Checked on this device {dateTime(r.verifiedAt)}{r.checkedAt !== r.verifiedAt ? `, last checked ${dateTime(r.checkedAt)}` : ""}. {r.status === "expired" ? "Expired" : "Valid until"} {date(r.expiresAt)}.</p>
           {r.status === "unconfirmed" && <p className="text-danger">Could not be confirmed on {dateTime(r.checkedAt)}{r.error ? `: ${r.error}` : ""}.</p>}
-          {name && <p>Name{avatar ? " and picture" : ""}: {r.display?.source ?? r.verified.display?.source}. Self-described, not checked.</p>}
+          {r.status === "revoked" && <p>Its owner removed it from their profile and published a revocation, seen {dateTime(r.checkedAt)}.</p>}
           <p>{provider?.category === "provider-attested" ? `${r.verified.attester} says this account logged in. That is only as trustworthy as ${r.verified.attester}.` : "Only the holder of this key could have made this proof."} It does not prove who a person is.</p>
           <div className="flex flex-wrap gap-2">
-            {provider?.recheck && r.status !== "withdrawn" && <Button data-testid="chat-identity-recheck" disabled={!!busy} onClick={() => act(r.id, () => engine.call("recheckIdentityProof", { linkId, id: r.id }))}>{busy === r.id ? "Checking…" : "Check again"}</Button>}
-            {provider?.lookupDisplay && ok && <Button data-testid="chat-identity-lookup" disabled={!!busy} onClick={() => act(r.id, () => engine.call("lookupIdentityDisplay", { linkId, id: r.id }))}>Show public profile</Button>}
+            {r.status !== "withdrawn" && r.status !== "revoked" && <Button data-testid="chat-identity-recheck" disabled={!!busy} onClick={() => act(r.id, () => engine.call("recheckIdentityProof", { linkId, id: r.id }))}>{busy === r.id ? "Checking…" : "Check again"}</Button>}
+            {provider?.lookupDisplay && ok && <Button data-testid="chat-identity-lookup" disabled={!!busy} onClick={() => act(r.id, () => engine.call("lookupIdentityDisplay", { linkId, id: r.id }))}>{provider.lookupLabel ?? "Show public profile"}</Button>}
           </div>
-          {provider?.lookupDisplay && ok && <p className="text-[11px]">Shows the name and picture this identity publishes. Looked up only when you ask; the servers asked learn which identity you looked up.</p>}
+          <p className="text-[11px]">“Check again” looks for a revocation by its owner{provider?.recheck ? " and repeats the check" : ""}.{provider?.lookupDisplay && ok ? " A public profile is looked up only when you ask; the servers asked learn which identity you looked up." : ""}</p>
         </div>
       </details>
     </div>

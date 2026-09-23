@@ -37,6 +37,7 @@ import {
   encodeInviteCode,
   formatLocalTarget,
   identityFromSeedB64,
+  identityFromSeed,
   parseLocalTarget,
   randomBytes,
   safeBlobType,
@@ -318,6 +319,8 @@ export class GhostlyNode implements EngineImplementation {
     linkIds: () => [...this.links.keys()],
     online: () => this.settings.online,
     emit: () => this.emitState(),
+    publish: (seed, records) => this.transport.publish(identityFromSeed(seed), records),
+    resolve: async key => (await this.transport.resolve(key))?.records ?? null,
   });
 
   constructor(
@@ -368,6 +371,7 @@ export class GhostlyNode implements EngineImplementation {
     this.relays?.setRelays(this.settings.relays);
     this.services = await db.getServices();
     await this.identities.load();
+    this.identities.start();
     await this.arkWallet.start();
     await this.barkWallet.start();
     await this.usdtWallet.start();
@@ -407,6 +411,7 @@ export class GhostlyNode implements EngineImplementation {
   async shutdown(): Promise<void> {
     this.shuttingDown = true;
     if(this.paymentTimer)clearTimeout(this.paymentTimer);
+    this.identities.stop();
     await this.arkWallet.stop();
     await this.barkWallet.stop();
     await this.usdtWallet.stop();
@@ -1317,7 +1322,7 @@ export class GhostlyNode implements EngineImplementation {
         },
         onDataLinkState: (state) => {
           live.dataLink = state;
-          if (state === "open") void this.desk.replay(linkId).catch(() => {});
+          if (state === "open") { void this.desk.replay(linkId).catch(() => {}); this.identities.ready(linkId); }
           if (state !== "open") { live.proofs?.stop(); this.identities.closed(linkId); }
           if (stored.profile && live.stored.deliveryMode !== "dht" && state !== "open") void this.outboxFor(linkId).disconnected().catch(() => {});
           if (stored.profile && state !== "open" && live.pairing?.status !== "error") live.pairing = { status: "connecting" };

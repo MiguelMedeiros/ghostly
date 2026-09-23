@@ -40,6 +40,7 @@ export const RECEIVED_STATUS: Record<IdentityStatus, string> = {
   verified: "Verified",
   expired: "Expired",
   withdrawn: "No longer shared",
+  revoked: "Revoked by its owner",
   unconfirmed: "Could not be confirmed",
   "previous-key": "From a previous key",
 };

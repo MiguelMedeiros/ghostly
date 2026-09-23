@@ -14,7 +14,8 @@ withdrawing per contact, replay protection, storage, expiry, re-checks and the U
 ## The model
 
 1. **Made once, in Profile → Identities.** Ghostly creates a fresh Ed25519 **proof key** for the proof (one
-   per proof, so two proofs never link to each other) and builds the **statement**, which names the
+   per proof, so two proofs never link to each other; its seed is sealed with a device key like the wallet
+   seeds) and builds the **statement**, which names the
    external identity and authorizes that key. The person has the external identity sign or attest it with
    one of the provider's `signers`. Ghostly runs the provider's `verify` on it before saving, so a proof
    that would not verify is never kept. The proof key's seed stays in the profile.
@@ -23,8 +24,13 @@ withdrawing per contact, replay protection, storage, expiry, re-checks and the U
    keys, the conversation, the session and that challenge; the contact's app checks the presentation,
    then runs the provider's `verify` on the statement and evidence itself, and stores the outcome with its
    scope and time.
-3. **Withdrawn** per contact, or everywhere by removing the proof from the profile. The contact is told
-   (now, or when it next connects) and shows it as withdrawn; a copy it kept cannot be erased.
+3. **Withdrawn** per contact: that contact is told (now, or when it next connects) and shows it as
+   withdrawn; future presentations there stop; a copy it kept cannot be erased. **Revoked** by removing it
+   from the profile: withdrawn everywhere, and the proof key publishes a revocation record on Pkarr
+   (`_ghostly-revoked`, republished until expiry) that contacts find even if the person never reconnects.
+
+Providers produce and verify only the **binding** (external identity → proof key). The per-chat
+presentation, withdrawal and revocation are shared code: never re-implement them in a provider.
 
 A copy of what a contact received is useless elsewhere: another contact's challenge is different, the
 audience is wrong, and nobody else has the proof key. The external identity itself links every
@@ -142,13 +148,18 @@ is shared. The contact's app never trusts the sender's check.
 - Fetch only fixed, well-known endpoints or ones derived from the subject (the domain itself, the issuer's
   JWKS from its discovery document on the issuer's own host). Never a URL from the evidence.
 - `lookupDisplay` (optional: a public name/picture for a verified subject, like Nostr kind-0) runs **only
-  when the person asks**, never automatically. Sanitize like avatars (plain-text name, bounded raster,
+  when the person asks**, never automatically; `lookupLabel` names its button. A name is always shown with
+  its `source` right under it, so say plainly what it is and who checked it ("User ID on the key, written by
+  its holder"). A name never replaces the contact's chat name. Sanitize like avatars (plain-text name, bounded raster,
   re-encoded to a data URL; see `profiles/public.ts`).
 
 ## Expiry and re-checks
 
 - Every proof expires (`expiresAt`); both sides show it as expired afterwards, never as verified. The person
   makes a new one; sharing it replaces the contact's copy of the same identity.
+- Early revocation is shared: "Check again" (offered for every provider) looks up the proof key's Pkarr
+  revocation record first, and the app does so every 12 hours by itself. A revoked proof shows "Revoked by
+  its owner".
 - A signature stays valid until expiry. A **published** record can disappear sooner: declare
   `recheck: { afterSeconds }`. The contact's app shows when it last checked and always offers "Check again"
   (`recheckDue` marks it due after that time), and shows a failed re-check honestly ("Could not be confirmed
