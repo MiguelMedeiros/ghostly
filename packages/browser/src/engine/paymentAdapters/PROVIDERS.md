@@ -20,6 +20,7 @@ on-chain review/approve/reconcile flow. A provider is one module and one line.
    descriptor:
 
    ```ts
+   // A shortened version of providers/nwc.ts.
    export const nwc: LightningProviderDescriptor = {
      id: "nwc",                        // stable: it is stored with the profile
      label: "Nostr Wallet Connect",
@@ -71,6 +72,8 @@ shutdown (`close()`, and `host.signal` aborts).
   and amount; the txid broadcast is the one reviewed; in Mainnet, an invoice of a test network is refused.
   Still validate everything your backend returns, and bound what you read (sizes, time-outs).
 - Amountless invoices are refused for now.
+- When the backend has no fee limit of its own to pass (NWC's `pay_invoice` carries none), say so in the
+  description: the fee is the wallet's, and the one it reports is passed on as it is.
 
 ## Secrets
 
