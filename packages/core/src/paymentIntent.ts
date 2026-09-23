@@ -1,5 +1,5 @@
 /** Local wallet contract. Capability support is never authorization to spend. */
-export type PaymentMethod = "cashu" | "arkade" | "usdt";
+export type PaymentMethod = "cashu" | "arkade" | "usdt" | "bark";
 export type PaymentNetwork = "bitcoin" | "signet" | "mutinynet" | "regtest" | "cashu-test" | "ethereum" | "sepolia" | "evm-local";
 export type IntentState = "pending" | "submitted" | "settled" | "failed" | "unknown" | "cancelled";
 export interface PaymentTarget {
@@ -78,7 +78,9 @@ export function validatePaymentTarget(value: unknown, now = Date.now()): Payment
     // Only Ethereum carries real USDT; Sepolia and a local chain carry worthless test tokens.
     if (t.network === "ethereum" ? t.chainId !== 1 || t.asset !== "USDT" || t.token!.toLowerCase() !== ETHEREUM_USDT.toLowerCase() || t.decimals !== 6 : t.chainId !== EVM_TEST_CHAINS[t.network as "sepolia" | "evm-local"] || t.asset !== "TEST-USDT" || !Number.isInteger(t.decimals) || t.decimals! < 0 || t.decimals! > 18) throw new Error("Token metadata does not match the network");
     if (!Number.isSafeInteger(t.issuedAt) || t.issuedAt! < 0 || t.issuedAt! > now + 30000 || t.issuedAt! >= t.expiresAt) throw new Error("Invalid token request time");
-  } else if (!["arkade", "cashu"].includes(t.method) || !["bitcoin", "signet", "mutinynet", "regtest", "cashu-test"].includes(t.network) || t.asset !== "BTC" || t.unit !== "sat") throw new Error("Unsupported payment method, asset or network");
+  } else if (!["arkade", "cashu", "bark"].includes(t.method) || !["bitcoin", "signet", "mutinynet", "regtest", "cashu-test"].includes(t.network) || t.asset !== "BTC" || t.unit !== "sat") throw new Error("Unsupported payment method, asset or network");
+  // Second's Ark servers run on Bitcoin, signet and regtest only.
+  if (t.method === "bark" && !["bitcoin", "signet", "regtest"].includes(t.network)) throw new Error("Unsupported Bark network");
   if (typeof t.address !== "string" || !t.address || t.address.length > 4096 || typeof t.provider !== "string" || t.provider.length > 512) throw new Error("Invalid payment destination");
   const url = new URL(t.provider);
   if (url.username || url.password || url.search || url.hash || (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)))) throw new Error("Use HTTPS or a local test provider");

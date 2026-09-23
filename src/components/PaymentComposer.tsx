@@ -11,7 +11,7 @@ import { useServicesPlatform } from "../hooks/useServicesPlatform";
 interface PaymentComposerProps {
   balance: number;
   onSend: (amount: number, memo: string) => Promise<string | null>;
-  onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt") => Promise<string | null>;
+  onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark") => Promise<string | null>;
   onClose: () => void;
   reviewContext?:{wallet:WalletPlatform;peer:string;linkId:string};
 }
@@ -37,8 +37,8 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   };
   const [rail, setRail] = useState<WalletRail>(() => {
     const allowed = (id: WalletRail) => !peer?.paymentMethods || peer.paymentMethods[id];
-    try { const saved = localStorage.getItem(RAIL_KEY); if ((saved === "cashu" || saved === "lightning" || saved === "arkade" || saved === "usdt") && allowed(saved)) return saved; } catch { /* storage unavailable */ }
-    return (["cashu", "lightning", "arkade", "usdt"] as const).find(allowed) ?? "cashu";
+    try { const saved = localStorage.getItem(RAIL_KEY); if ((saved === "cashu" || saved === "lightning" || saved === "arkade" || saved === "bark" || saved === "usdt") && allowed(saved)) return saved; } catch { /* storage unavailable */ }
+    return (["cashu", "lightning", "arkade", "bark", "usdt"] as const).find(allowed) ?? "cashu";
   });
   const [review, setReview] = useState<Review | null>(null);
   const [amount, setAmount] = useState("");
@@ -48,12 +48,12 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   const containerRef = useRef<HTMLDivElement>(null);
   useOutsideDismiss(containerRef, true, onClose);
 
-  const method: "cashu" | "arkade" | "usdt" = rail === "lightning" ? "cashu" : rail;
+  const method: "cashu" | "arkade" | "usdt" | "bark" = rail === "lightning" ? "cashu" : rail;
   const usdt = state?.usdt;
-  const unit = method === "usdt" ? (usdt?.chainId && usdt.chainId !== 1 ? "TEST-USDT" : "USDT") : method === "arkade" ? (state?.ark?.network && state.ark.network !== "bitcoin" ? "test sats" : "sats") : state?.mode === "testnet" ? "test sats" : "sats";
+  const unit = method === "usdt" ? (usdt?.chainId && usdt.chainId !== 1 ? "TEST-USDT" : "USDT") : method === "arkade" ? (state?.ark?.network && state.ark.network !== "bitcoin" ? "test sats" : "sats") : method === "bark" ? (state?.bark?.network !== "bitcoin" ? "test sats" : "sats") : state?.mode === "testnet" ? "test sats" : "sats";
   const decimals = method === "usdt" ? usdt?.decimals ?? 6 : 0;
   const value = Number(amount);
-  // Ecash goes straight to the contact; Ark and USDT ask the contact's app for an address first. Lightning
+  // Ecash goes straight to the contact; Ark, Bark and USDT ask the contact's app for an address first. Lightning
   // pays a request the contact sends.
   const canSend = rail !== "lightning";
   const [asking, setAsking] = useState<string | null>(null);
@@ -63,7 +63,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   const send = async () => {
     setError(""); setBusy("send");
     try {
-      if (reviewContext && (method === "arkade" || method === "usdt")) {
+      if (reviewContext && (method === "arkade" || method === "bark" || method === "usdt")) {
         const units = method === "usdt" ? parsePaymentAmount(amount, decimals) : value;
         setAsking((await reviewContext.wallet.askToPay(reviewContext.peer, units, method, memo || undefined)).askId);
         return;
@@ -111,7 +111,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   };
 
   const field = "w-full bg-input-bg border-none rounded-lg px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent";
-  const spendable = method === "cashu" ? balance : method === "arkade" ? state?.ark?.balance : usdt ? Number(usdt.balance) : undefined;
+  const spendable = method === "cashu" ? balance : method === "arkade" ? state?.ark?.balance : method === "bark" ? state?.bark?.balance : usdt ? Number(usdt.balance) : undefined;
 
   return (
     <>
@@ -149,7 +149,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
         {blocked ? blocked : canSend
           ? `${balance.toLocaleString()} sats available. Sent as ecash straight to your contact; requests also carry a Lightning invoice.`
           : rail === "lightning" ? "Request with a Lightning invoice. To pay over Lightning, tap Pay on your contact's request."
-          : `Send asks your contact's app for a ${rail === "arkade" ? "fresh Ark" : "USDT"} address, then shows the payment to approve.`}
+          : `Send asks your contact's app for a ${rail === "arkade" ? "fresh Ark" : rail === "bark" ? "fresh Bark" : "USDT"} address, then shows the payment to approve.`}
       </p>
       {review && reviewContext && <PaymentReview key={review.id} review={review} wallet={reviewContext.wallet} onClose={onClose} />}
       {error && <p className="text-danger text-xs m-0">{error}</p>}

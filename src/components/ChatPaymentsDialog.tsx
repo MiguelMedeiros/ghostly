@@ -9,7 +9,8 @@ import "./wallet-cards.css";
 const METHODS: { id: PaymentMethodName; name: string; what: string }[] = [
   { id: "cashu", name: "Cashu", what: "Ecash in the chat" },
   { id: "lightning", name: "Lightning", what: "Invoices" },
-  { id: "arkade", name: "Ark", what: "Ark requests" },
+  { id: "arkade", name: "Ark", what: "Ark requests (Arkade)" },
+  { id: "bark", name: "Bark", what: "Ark requests on Second's server; not the same as Arkade" },
   { id: "usdt", name: "USDT", what: "USDT requests" },
 ];
 
@@ -18,7 +19,7 @@ const METHODS: { id: PaymentMethodName; name: string; what: string }[] = [
  * it; a connected contact is told at once, and later sessions offer it in the handshake.
  */
 export function ChatPaymentsDialog({ peer, name, onSave, onClose }: { peer: PeerLinkState; name: string; onSave: (methods: Record<PaymentMethodName, boolean>) => Promise<void>; onClose: () => void }) {
-  const initial = peer.paymentMethods ?? { cashu: true, lightning: true, arkade: true, usdt: true };
+  const initial = peer.paymentMethods ?? { cashu: true, lightning: true, arkade: true, usdt: true, bark: true };
   const [methods, setMethods] = useState(initial);
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const dialog = useRef<HTMLDivElement>(null);

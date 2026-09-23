@@ -49,7 +49,8 @@ E2E_MINT_URL=http://127.0.0.1:3338 npm run test:e2e
 | `web/profile-backup-file.spec.ts` · `profile-backup.spec.ts` | a whole profile backed up to a file (and to S3 with `GHOSTLY_S3_*`), restored as a new profile; passphrase rules |
 | `web/chat-payments.spec.ts` | each chat allows its own ways of paying, both sides' choices shown |
 | `web/wallet-cashu.spec.ts` · `wallets-ready.spec.ts` · `wallet-backups.spec.ts` | wallets ready with no setup, Cashu send/mint errors, the Lightning card, test sats; Ark and USDT recovery phrase and encrypted backup files (`@network`) |
-| `web/wallet-providers.spec.ts` | every wallet provider sending and receiving, in the Testnet mode: Cashu (in over Lightning, Send and Request in the chat), Lightning (in through an invoice, out paying an invoice the test mint does not own, `@network`), Ark and USDT (in, Send from the wallet, Send and Request in the chat; gated, see below) |
+| `web/wallet-providers.spec.ts` | every wallet provider sending and receiving, in the Testnet mode: Cashu (in over Lightning, Send and Request in the chat), Lightning (in through an invoice, out paying an invoice the test mint does not own, `@network`), Ark, Bark and USDT (in, Send from the wallet, Send and Request in the chat; gated, see below) |
+| `web/bark-wallet.spec.ts` | Bark (Second's Ark) is not on Mainnet yet; `@network`: a Testnet wallet on Second's signet server by itself, and a chat offers Bark only when both sides allow it (Arkade stays separate) |
 | `web/payment-extras.spec.ts` | with `E2E_MINT_URL`: memo and "test sats" in both bubbles, a refused payment is taken back, ecash nobody picks up can be taken back, invoice cards |
 | `extension/interop.spec.ts` | the extension and the web app: chat, file, video call |
 | `extension/services.spec.ts` | a local web app shared by one extension and opened by another over WebRTC, stopped, offline, gone |
@@ -121,8 +122,28 @@ With the Ark regtest stack above and the local EVM chain (`/tmp/ghostly-usdt-loc
 GHOSTLY_ARK_REGTEST=1 GHOSTLY_USDT_LOCAL=1 NODE_OPTIONS=--experimental-eventsource npx playwright test e2e/web/wallet-providers.spec.ts -c e2e/playwright.config.ts --project=web
 ```
 
-Without the two variables only Cashu and Lightning run. A test mint marks its own invoices paid, so the
+Without the variables only Cashu and Lightning run. A test mint marks its own invoices paid, so the
 Lightning send pays an invoice from `support/bolt11.ts` instead: signed by a key made for the test, it is
 a payment the mint has to make, not one it already knows. On regtest an Ark batch expires within minutes,
 and coins in it become recoverable: the test takes the Recover action when it shows, and allows for the
 few sats that batch costs.
+
+### Bark (Second's Ark) on regtest
+
+Bark is a different Ark server from Arkade and cannot pay it, so it has its own stack: bitcoind 31, captaind 0.7.1
+(no Lightning), an Esplora (electrs, for the browser's on-chain wallet) and a funder wallet (the bark CLI), all
+worthless regtest coins, in containers named `ghostly-bark-*` on `127.0.0.1:44101-44135`:
+
+```bash
+docker compose -p ghostly-bark -f e2e/support/bark-regtest/docker-compose.yml up -d
+node e2e/support/bark-regtest/regtest.mjs ready     # mines, funds the server, boards the funder (once)
+npm run build:web && npx vite preview web --port 44181 --strictPort &
+E2E_WEB_URL=http://localhost:44181 GHOSTLY_BARK_REGTEST=1 npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/wallet-providers.spec.ts -g Bark
+docker compose -p ghostly-bark -f e2e/support/bark-regtest/docker-compose.yml down -v   # when done
+```
+
+The test switches both peers' Bark wallet from signet to Regtest, has the funder pay Alice's Bark address, sends
+coins on-chain to Bob and moves them into Ark (a board: its on-chain fee comes off), then Alice sends from the
+wallet page, Bob sends in the chat (his app asks hers for an address) and pays his request; balances are checked
+in both apps and the identifiers are printed. captaind is published for amd64 only; on Apple silicon Docker runs
+it emulated. Funded signet runs are not automated: Second's faucet (https://signet.2nd.dev) needs a GitHub login.

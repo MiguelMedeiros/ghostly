@@ -2,6 +2,7 @@ import { useState } from "react";
 import { WalletCards, type WalletRail } from "../components/WalletCards";
 import { CashuWallet } from "../components/wallet/CashuWallet";
 import { ArkWalletPanel } from "../components/ArkWalletPanel";
+import { BarkWalletPanel } from "../components/BarkWalletPanel";
 import { UsdtWalletPanel } from "../components/UsdtWalletPanel";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { useI18n } from "../contexts/I18nContext";
@@ -10,7 +11,7 @@ import { Page } from "../components/layout";
 
 const RAIL_KEY = "ghostly-wallet-rail";
 const remembered = (): WalletRail => {
-  try { const saved = sessionStorage.getItem(RAIL_KEY); if (saved === "cashu" || saved === "lightning" || saved === "arkade" || saved === "usdt") return saved; } catch { /* storage unavailable */ }
+  try { const saved = sessionStorage.getItem(RAIL_KEY); if (saved === "cashu" || saved === "lightning" || saved === "arkade" || saved === "bark" || saved === "usdt") return saved; } catch { /* storage unavailable */ }
   return "cashu";
 };
 
@@ -47,6 +48,7 @@ export function Wallet() {
         <WalletCards state={state} selected={rail} testMints={wallet.testMintUrls} onSelect={select} />
         {(rail === "cashu" || rail === "lightning") && <CashuWallet key={rail} wallet={wallet} state={state} rail={rail} onOpenCashu={() => select("cashu")} />}
         {rail === "arkade" && <ArkWalletPanel wallet={wallet} state={state} />}
+        {rail === "bark" && <BarkWalletPanel wallet={wallet} state={state} />}
         {rail === "usdt" && <UsdtWalletPanel wallet={wallet} state={state} />}
       </>}
     </Page>

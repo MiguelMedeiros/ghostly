@@ -1,6 +1,7 @@
 import type { UsdtWallet } from "./paymentAdapters/usdtWallet";
 import { assertTokenUnits, formatPaymentAmount, validatePaymentTarget, type PaymentReview, type PaymentTarget } from "@ghostly/core";
 import type { ArkWallet } from "./paymentAdapters/arkWallet";
+import type { BarkWallet } from "./paymentAdapters/barkWallet";
 import {
   ENDPOINT,
   cashuRequestPayload,
@@ -48,6 +49,10 @@ function parseSats(value: string, asset: string): number | null {
 class NoEcashError extends Error {}
 
 const arkSats=(network:string)=>network==="bitcoin"?"sats":"test sats";
+type AskMethod = "arkade" | "usdt" | "bark";
+const RAIL_NAME: Record<AskMethod, string> = { arkade: "Ark", usdt: "USDT", bark: "Bark" };
+/** Both sides allow this way of paying on the open data link. */
+const allows = (link: GhostLink, method: AskMethod) => method === "arkade" ? link.supportsArkPayments : method === "bark" ? link.supportsBarkPayments : link.supportsUsdtPayments;
 export class PaymentDesk {
   private readonly payments = new Map<string, StoredPayment>();
   private readonly paying = new Map<string, Promise<void>>();
@@ -55,12 +60,14 @@ export class PaymentDesk {
   private readonly reclaims = new Map<string, Promise<void>>();
   private checkingArk=false;
   private checkingUsdt=false;
+  private checkingBark=false;
 
   constructor(
     private readonly wallet: CashuWallet,
     private readonly host: PaymentDeskHost,
     private readonly ark?: ArkWallet,
     private readonly usdt?: UsdtWallet,
+    private readonly bark?: BarkWallet,
   ) {}
 
   async start(): Promise<void> {
@@ -95,7 +102,7 @@ export class PaymentDesk {
     return { paymentId };
   }
 
-  async request(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt"; ask?: string }): Promise<{ paymentId: string }> {
+  async request(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | AskMethod; ask?: string }): Promise<{ paymentId: string }> {
     if(params.method === "usdt")assertTokenUnits(params.amount);else assertAmount(params.amount);
     const link = this.requireLink(params.linkId);
     await link.requirePaymentSupport();
@@ -117,6 +124,15 @@ export class PaymentDesk {
       await this.save({id,linkId:params.linkId,kind:"request",direction:"out",amount:params.amount,unit:UNIT,memo,state:"pending",createdAt:params.timestamp,target,ask:params.ask});
       await this.host.storeMessage({linkId:params.linkId,id:`me_${params.timestamp}`,text:`Requested ${params.amount} ${arkSats(target.network)} on Ark`,sender:"me",timestamp:params.timestamp,via:"datalink",paymentId:id});
       await link.sendPaymentRequest({id,timestamp:params.timestamp,amount:{value:String(params.amount),asset:UNIT},memo,endpoints:[[ENDPOINT.arkade,JSON.stringify(target)]],ask:params.ask});
+      return {paymentId:id};
+    }
+    if (params.method === "bark") {
+      if (!link.supportsBarkPayments || !this.bark) throw new Error("Both peers need Bark on a connected data link");
+      // A fresh address for this request only: what arrives on it is what pays it.
+      const target = await this.bark.target();
+      await this.save({id,linkId:params.linkId,kind:"request",direction:"out",amount:params.amount,unit:UNIT,memo,state:"pending",createdAt:params.timestamp,target,ask:params.ask});
+      await this.host.storeMessage({linkId:params.linkId,id:`me_${params.timestamp}`,text:`Requested ${params.amount} ${arkSats(target.network)} on Bark`,sender:"me",timestamp:params.timestamp,via:"datalink",paymentId:id});
+      await link.sendPaymentRequest({id,timestamp:params.timestamp,amount:{value:String(params.amount),asset:UNIT},memo,endpoints:[[ENDPOINT.bark,JSON.stringify(target)]],ask:params.ask});
       return {paymentId:id};
     }
     // Each way of paying goes in only if this chat allows it on both sides.
@@ -254,18 +270,18 @@ export class PaymentDesk {
   // -- what the peer does ----------------------------------------------------------
 
   /** Asks this side made to pay, until the contact answers with a request (or two minutes pass). */
-  private readonly asks = new Map<string, { linkId: string; amount: number; method: "arkade" | "usdt"; expiresAt: number }>();
+  private readonly asks = new Map<string, { linkId: string; amount: number; method: AskMethod; expiresAt: number }>();
   private readonly lastAskFrom = new Map<string, number>();
 
   /**
    * Paying without a request (Ark, USDT): the contact's app is asked for an address, and answers with an
    * ordinary request carrying this ask's id. Nothing is paid here: the answer is reviewed and approved.
    */
-  async ask(params: { linkId: string; amount: number; method: "arkade" | "usdt"; memo?: string; timestamp: number }): Promise<{ askId: string }> {
+  async ask(params: { linkId: string; amount: number; method: AskMethod; memo?: string; timestamp: number }): Promise<{ askId: string }> {
     if (params.method === "usdt") assertTokenUnits(params.amount); else assertAmount(params.amount);
     const link = this.requireLink(params.linkId);
     await link.requirePaymentSupport();
-    if (params.method === "arkade" ? !link.supportsArkPayments : !link.supportsUsdtPayments) throw new Error(`Your contact does not accept ${params.method === "arkade" ? "Ark" : "USDT"} in this chat`);
+    if (!allows(link, params.method)) throw new Error(`Your contact does not accept ${RAIL_NAME[params.method]} in this chat`);
     const askId = newId();
     this.asks.set(askId, { linkId: params.linkId, amount: params.amount, method: params.method, expiresAt: Date.now() + 2 * 60_000 });
     const memo = params.memo?.trim().slice(0, 140) || undefined;
@@ -274,7 +290,7 @@ export class PaymentDesk {
   }
 
   /** The ask a request answers, only if this side made it: same chat, way of paying and amount, still fresh. */
-  private answering(linkId: string, request: PaymentRequest, method: "arkade" | "usdt", amount: number): string | undefined {
+  private answering(linkId: string, request: PaymentRequest, method: AskMethod, amount: number): string | undefined {
     const ask = request.ask ? this.asks.get(request.ask) : undefined;
     if (!ask || ask.linkId !== linkId || ask.method !== method || ask.amount !== amount || ask.expiresAt < Date.now()) return undefined;
     this.asks.delete(request.ask!);
@@ -294,7 +310,7 @@ export class PaymentDesk {
     const open = [...this.payments.values()].filter((p) => p.linkId === linkId && p.kind === "request" && p.direction === "out" && p.state === "pending" && p.ask).length;
     if (open >= 5 || !/^[1-9]\d{0,15}$/.test(ask.amount.value)) return;
     if (ask.amount.asset !== (ask.method === "usdt" ? "usdtbase" : UNIT)) return;
-    if (ask.method === "arkade" ? !link.supportsArkPayments : !link.supportsUsdtPayments) return;
+    if (!allows(link, ask.method)) return;
     await this.request({ linkId, amount: Number(ask.amount.value), method: ask.method, memo: ask.memo, timestamp: now, ask: ask.id }).catch(() => {});
   }
 
@@ -308,10 +324,13 @@ export class PaymentDesk {
       return;
     }
     let target: PaymentTarget | undefined;
-    const arkPayload=findEndpoint(request.endpoints,ENDPOINT.arkade);
+    const arkPayload=findEndpoint(request.endpoints,ENDPOINT.arkade), barkPayload=findEndpoint(request.endpoints,ENDPOINT.bark);
     if (arkPayload) {
       if(!link?.supportsArkPayments)return;
       try {target=validatePaymentTarget(JSON.parse(arkPayload));if(target.method!=="arkade")return;} catch {return;}
+    } else if (barkPayload) {
+      if(!link?.supportsBarkPayments)return;
+      try {target=validatePaymentTarget(JSON.parse(barkPayload));if(target.method!=="bark")return;} catch {return;}
     }
     // Keep only the ways of paying this chat allows; a request with none left is dropped.
     const invoice = link?.allowsPayment("lightning") ? findEndpoint(request.endpoints, ENDPOINT.bolt11) : undefined;
@@ -319,7 +338,7 @@ export class PaymentDesk {
     if (!target && !invoice && !mints.length) return;
     await this.save({
       target,
-      ask: target?.method === "arkade" ? this.answering(linkId, request, "arkade", amount) : undefined,
+      ask: target?.method === "arkade" || target?.method === "bark" ? this.answering(linkId, request, target.method, amount) : undefined,
       id: request.id,
       linkId,
       kind: "request",
@@ -354,6 +373,7 @@ export class PaymentDesk {
   private async receivePayment(linkId: string, payment: Payment): Promise<void> {
     if(payment.endpoint[0]===ENDPOINT.usdt) { await this.receiveUsdt(linkId,payment); return; }
     if(payment.endpoint[0]===ENDPOINT.arkade) { await this.receiveArk(linkId,payment); return; }
+    if(payment.endpoint[0]===ENDPOINT.bark) { await this.receiveBark(linkId,payment); return; }
     const link = this.host.getLink(linkId);
     const known = this.payments.get(payment.id);
     if (known && (known.linkId !== linkId || known.direction !== "in" || known.kind !== "payment")) {
@@ -587,6 +607,50 @@ export class PaymentDesk {
     } finally {this.checkingArk=false;}
   }
 
+  /** Our Bark payment went out: said in the chat, and the contact is told (a hint; their wallet is the proof). */
+  async recordBark(review:PaymentReview):Promise<void> {
+    if(review.method!=="bark" || !review.linkId || review.state!=="settled")return;
+    const link=this.requireLink(review.linkId);
+    await this.save({id:review.id,linkId:review.linkId,kind:"payment",direction:"out",amount:review.amount,unit:UNIT,state:"settled",createdAt:review.createdAt,requestId:review.requestId,target:review,txid:review.txid});
+    if(review.requestId){const request=this.payments.get(review.requestId);if(request?.linkId===review.linkId)await this.save({...request,state:"settled"});}
+    await this.host.storeMessage({linkId:review.linkId,id:`me_${review.createdAt}`,text:`${review.amount} ${arkSats(review.network)} on Bark`,sender:"me",timestamp:review.createdAt,via:"datalink",paymentId:review.id});
+    // Replayable; it never causes another spend.
+    if(link.supportsBarkPayments)await link.sendPayment({id:review.id,timestamp:review.createdAt,requestId:review.requestId,amount:{value:String(review.amount),asset:UNIT},endpoint:[ENDPOINT.bark,JSON.stringify({txid:review.txid})]});
+  }
+  /** The contact says it paid one of our Bark requests. Recorded as pending until our own wallet shows it. */
+  private async receiveBark(linkId:string,payment:Payment):Promise<void> {
+    const link=this.host.getLink(linkId),request=payment.requestId ? this.payments.get(payment.requestId) : undefined;
+    if(!link?.supportsBarkPayments || request?.target?.method!=="bark" || request.linkId!==linkId || request.direction!=="out" || request.kind!=="request")return;
+    const existing=this.payments.get(payment.id);
+    if(existing && (existing.linkId!==linkId || existing.direction!=="in" || existing.requestId!==request.id))return;
+    if(existing || parseSats(payment.amount.value,payment.amount.asset)!==request.amount)return;
+    await this.save({id:payment.id,linkId,kind:"payment",direction:"in",amount:request.amount,unit:UNIT,state:request.state==="settled"?"settled":"pending",createdAt:payment.timestamp,target:request.target,requestId:request.id,txid:request.txid});
+    await this.host.storeMessage({linkId,id:`peer_${payment.timestamp}`,text:`${request.amount} ${arkSats(request.target.network)} on Bark${request.state==="settled"?"":" — checking wallet"}`,sender:"peer",timestamp:payment.timestamp,via:"datalink",paymentId:payment.id});
+    await this.reconcileBarkReceipts();
+  }
+  /**
+   * A Bark request is paid when this wallet received, on the address made for it, at least the amount asked,
+   * after asking. It settles with or without the contact's receipt, and one receive pays one request.
+   */
+  async reconcileBarkReceipts():Promise<void> {
+    if(this.checkingBark || !this.bark?.adapter)return;
+    this.checkingBark=true;
+    try {
+      const open=[...this.payments.values()].filter(r=>r.kind==="request" && r.direction==="out" && r.state==="pending" && r.target?.method==="bark");
+      if(open.length)await this.bark.adapter.sync().catch(()=>{});
+      for(const request of open) {
+        if(request.kind!=="request" || request.direction!=="out" || request.state!=="pending" || request.target?.method!=="bark")continue;
+        const adapter=this.bark.adapter;
+        if(!adapter || request.target.provider!==adapter.config.provider || request.target.network!==adapter.config.network)continue;
+        const claimed=new Set([...this.payments.values()].filter(p=>p.target?.method==="bark" && p.kind==="request" && p.txid).map(p=>p.txid!));
+        const txid=await adapter.received(request.target.address,request.amount,request.createdAt,claimed).catch(()=>undefined);
+        if(!txid)continue;
+        await this.save({...this.current(request),state:"settled",txid});
+        for(const payment of this.payments.values())if(payment.kind==="payment" && payment.direction==="in" && payment.requestId===request.id && payment.state==="pending")await this.save({...payment,state:"settled",txid});
+      }
+    } finally {this.checkingBark=false;}
+  }
+
   // -- internals -------------------------------------------------------------------
 
   private async sendEcash(
@@ -656,6 +720,12 @@ export class PaymentDesk {
         if(!link.supportsUsdtPayments)continue;
         if(payment.kind==='request'&&payment.state==='pending'&&payment.target.expiresAt>Date.now())await link.sendPaymentRequest({id:payment.id,timestamp:payment.createdAt,amount:{value:String(payment.amount),asset:payment.unit},memo:payment.memo,endpoints:[[ENDPOINT.usdt,JSON.stringify(payment.target)]],ask:payment.ask});
         else if(payment.kind==='payment'&&payment.txid&&payment.state!=='failed')await link.sendPayment({id:payment.id,timestamp:payment.createdAt,requestId:payment.requestId,amount:{value:String(payment.amount),asset:payment.unit},endpoint:[ENDPOINT.usdt,JSON.stringify({txid:payment.txid})]});
+        continue;
+      }
+      if (payment.target?.method === "bark") {
+        if(!link.supportsBarkPayments)continue;
+        if(payment.kind==="request" && payment.state==="pending" && payment.target.expiresAt>Date.now())await link.sendPaymentRequest({id:payment.id,timestamp:payment.createdAt,amount:{value:String(payment.amount),asset:UNIT},memo:payment.memo,endpoints:[[ENDPOINT.bark,JSON.stringify(payment.target)]],ask:payment.ask});
+        else if(payment.kind==="payment" && payment.state==="settled")await link.sendPayment({id:payment.id,timestamp:payment.createdAt,requestId:payment.requestId,amount:{value:String(payment.amount),asset:UNIT},endpoint:[ENDPOINT.bark,JSON.stringify({txid:payment.txid})]});
         continue;
       }
       if (payment.target?.method === "arkade") {

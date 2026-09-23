@@ -3,6 +3,8 @@ import type { UsdtWalletView, UsdtCreate } from "@ghostly/browser/engine/payment
 import type { PaymentReview, PaymentTarget } from "@ghostly/core";
 import type { ArkCreate, ArkWalletView } from "@ghostly/browser/engine/paymentAdapters/arkWallet";
 import type { ArkConfig } from "@ghostly/browser/engine/paymentAdapters/arkade";
+import type { BarkCreate, BarkWalletView } from "@ghostly/browser/engine/paymentAdapters/barkWallet";
+import type { BarkConfig } from "@ghostly/browser/engine/paymentAdapters/bark";
 import type { DataLinkState, ServiceAd, PairingState } from "@ghostly/core";
 import type { ChatFile } from "./types";
 
@@ -83,6 +85,7 @@ export interface WalletState {
   /** On Mainnet: test sats held at test mints (a contact may have sent some), shown once in Testnet. */
   waitingTestSats?: number;
   ark?: ArkWalletView;
+  bark?: BarkWalletView;
   usdt?: UsdtWalletView;
   intents?: PaymentReview[];
   mints: { url: string; name: string; balance: number; info: MintInfo | null }[];
@@ -140,6 +143,13 @@ export interface WalletPlatform {
   arkRefresh():Promise<void>;
   /** Expired Ark outputs back into the balance; returns the settlement txid. */
   arkRecover():Promise<string>;
+  barkCreate(params: BarkCreate):Promise<void>;
+  barkBackup():Promise<{mnemonic:string;config:BarkConfig}>;
+  barkExportBackup(password:string):Promise<string>;
+  barkRestoreBackup(text:string,password:string):Promise<void>;
+  barkRefresh():Promise<void>;
+  /** On-chain coins of the Bark wallet into Ark; returns the board txid. */
+  barkBoard():Promise<string>;
   preparePayment(params:{target:PaymentTarget;amount:number;feeCap:number;payee:string;linkId?:string;requestId?:string;memo?:string}):Promise<PaymentReview>;
   approvePayment(id:string):Promise<PaymentReview>;
   reconcilePayment(id:string):Promise<PaymentReview>;
@@ -165,9 +175,9 @@ export interface WalletPlatform {
   inspectCashu(text: string): Promise<CashuInspection | null>;
   exportTokens(): Promise<{ mint: string; token: string; amount: number }[]>;
   send(peerPubKeyZ32: string, amount: number, memo?: string): Promise<{ timestamp: number; paymentId: string }>;
-  request(peerPubKeyZ32: string, amount: number, memo?: string, method?: "cashu" | "arkade" | "usdt"): Promise<{ timestamp: number; paymentId: string }>;
-  /** Paying on Ark or USDT without a request: asks the contact's app for one. */
-  askToPay(peerPubKeyZ32: string, amount: number, method: "arkade" | "usdt", memo?: string): Promise<{ askId: string }>;
+  request(peerPubKeyZ32: string, amount: number, memo?: string, method?: "cashu" | "arkade" | "usdt" | "bark"): Promise<{ timestamp: number; paymentId: string }>;
+  /** Paying on Ark, Bark or USDT without a request: asks the contact's app for one. */
+  askToPay(peerPubKeyZ32: string, amount: number, method: "arkade" | "usdt" | "bark", memo?: string): Promise<{ askId: string }>;
   /** The contact's request answering an ask, once it arrived. */
   answerTo(askId: string): ChatPayment | null;
   payRequest(peerPubKeyZ32: string, paymentId: string): Promise<void>;

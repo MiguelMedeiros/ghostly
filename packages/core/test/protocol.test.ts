@@ -234,5 +234,18 @@ describe("asking to pay", () => {
     for (const bad of [{ ...ask, m: "cashu" }, { ...ask, m: "lightning" }, { ...ask, v: "-1" }, { ...ask, v: "1e9" }, { ...ask, id: "x" }, { ...ask, u: "SAT!" }, { ...ask, ts: "1" }])
       expect(decodeControl(JSON.stringify(bad)), JSON.stringify(bad)).toBeNull();
     expect((decodeControl(JSON.stringify({ ...ask, memo: "m".repeat(500) })) as { memo: string }).memo).toHaveLength(140);
+    // Bark (Second's Ark) is its own way of paying, asked for by name.
+    expect(decodeControl(encodeControl({ ...ask, m: "bark" }))).toEqual({ ...ask, m: "bark" });
+  });
+});
+
+describe("Bark payment targets", () => {
+  it("are BTC in sats on Bitcoin, signet or regtest only, and never an Arkade target", async () => {
+    const { validatePaymentTarget } = await import("../src/paymentIntent");
+    const target = { method: "bark", network: "signet", provider: "https://ark.signet.2nd.dev", asset: "BTC", unit: "sat", address: "tark1p…", expiresAt: Date.now() + 60_000 };
+    expect(validatePaymentTarget(target)).toMatchObject({ method: "bark", network: "signet" });
+    expect(validatePaymentTarget({ ...target, network: "regtest", provider: "http://127.0.0.1:44135" })).toMatchObject({ network: "regtest" });
+    for (const bad of [{ network: "mutinynet" }, { network: "cashu-test" }, { asset: "USDT" }, { unit: "token-base" }, { provider: "http://ark.example" }])
+      expect(() => validatePaymentTarget({ ...target, ...bad }), JSON.stringify(bad)).toThrow();
   });
 });

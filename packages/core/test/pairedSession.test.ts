@@ -43,6 +43,17 @@ describe("paired chat admission and session binding", () => {
     expect(p.a.supports("payments-usdt/1")).toBe(peerSupports);
     expect(p.b.supports("payments-usdt/1")).toBe(peerSupports);
   });
+  it.each([false,true])("negotiates Bark only when both peers advertise it, beside every other capability (%s)",async peerSupports=>{
+    const all={paymentsSupport:true,usdtPaymentsSupport:true,arkPaymentsSupport:true,filesSupport:true,proofSupport:true,transportSwitchSupport:true,allowFallback:true};
+    const p=pair(undefined,{...all,barkPaymentsSupport:peerSupports},{...all,barkPaymentsSupport:true});
+    await confirming(p);await p.a.confirm(p.a.state.code!);await p.b.confirm(p.b.state.code!);
+    await vi.waitFor(()=>expect(p.a.state.status).toBe("ready"));
+    expect(p.a.supports("payments-bark/1")).toBe(peerSupports);
+    expect(p.b.supports("payments-bark/1")).toBe(peerSupports);
+    // Bark and Arkade are different Ark servers: one never stands in for the other.
+    expect(p.a.allowsPayment("bark")).toBe(peerSupports);
+    expect(p.a.allowsPayment("arkade")).toBe(true);
+  });
   const ready = async (p: ReturnType<typeof pair>) => {
     await confirming(p); await p.a.confirm(p.a.state.code!); await p.b.confirm(p.b.state.code!);
     await vi.waitFor(() => { expect(p.a.state.status).toBe("ready"); expect(p.b.state.status).toBe("ready"); });

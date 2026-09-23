@@ -1,6 +1,6 @@
 # WISP numbering and compatibility
 
-All 36 specifications remain Draft. Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
+All 37 specifications remain Draft. Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
 
 ## Independent families
 
@@ -39,6 +39,7 @@ Generated from [numbering.json](numbering.json); edit that source instead of thi
 | 18 | [201](201-cashu.md) |
 | 202 | [202](202-arkade.md) |
 | 19 | [203](203-lightning.md) |
+| 204 | [204](204-bark.md) |
 | 09 | [300](300-peer-proofs.md) |
 | 10 | [301](301-nostr.md) |
 | 11 | [3xx · pubky · planned; number to be defined](302-pubky.md) |

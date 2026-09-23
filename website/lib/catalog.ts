@@ -303,6 +303,7 @@ const rows: [
 ];
 rows.push(...([
   ["202", "Ark via Arkade", "Payments", "arkade", "Review and approve an exact Ark payment through a pinned operator.", "Experimental test-network adapter; regtest transfer and HD return payment verified. Mainnet disabled.", "Real local regtest, provider-signature checks and shared coordinator tests; encrypted backup restore verified; exit UI remains a release gate.", "In development"],
+  ["204", "Ark via Bark", "Payments", "bark", "Review and approve an exact payment to a Bark address of the same Second server; not interchangeable with Arkade.", "Experimental, Testnet only (Second's signet server or local regtest). Mainnet not enabled.", "Real local regtest (board, wallet and chat sends, payee-side receipts) and signet wallet/negotiation checks; exits remain a release gate.", "In development"],
   [
     "401",
     "Paired Chat",

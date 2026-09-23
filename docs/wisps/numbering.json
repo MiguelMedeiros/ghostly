@@ -126,6 +126,15 @@
     "numberAssignment": "defined"
   },
   {
+    "oldId": "204",
+    "id": "204",
+    "oldFile": "204-bark.md",
+    "file": "204-bark.md",
+    "kind": "Adapter",
+    "displayNumber": "204",
+    "numberAssignment": "defined"
+  },
+  {
     "oldId": "09",
     "id": "300",
     "oldFile": "09-peer-proofs.md",

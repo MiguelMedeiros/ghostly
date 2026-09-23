@@ -95,13 +95,14 @@ export interface GhostLinkEvents {
   onPaymentResult?(result: PaymentResult): void | Promise<void>;
 }
 
-const PAYMENT_METHODS: PaymentMethodName[] = ["cashu", "lightning", "arkade", "usdt"];
+const PAYMENT_METHODS: PaymentMethodName[] = ["cashu", "lightning", "arkade", "usdt", "bark"];
 
 export interface GhostLinkOptions {
   /** Ways of paying this chat allows. One that is off is not offered in the handshake, sent or accepted. Absent: allowed. */
   paymentMethods?: Partial<Record<PaymentMethodName, boolean>>;
   arkPaymentsSupport?: boolean;
   usdtPaymentsSupport?: boolean;
+  barkPaymentsSupport?: boolean;
   dht?: { state?: DhtDeliveryState; save(state: DhtDeliveryState): Promise<void>; pollMs?: number };
   rtcAvailable?: boolean;
   native?: { peerDescriptors?: TransportDescriptors; peerTransports?: PairedTransport[]; peerFallback?: boolean; preferred?: PairedTransport; fallback?: boolean };
@@ -730,6 +731,7 @@ export class GhostLink {
   }
   get supportsUsdtPayments(): boolean { return this.allowsPayment("usdt"); }
   get supportsArkPayments(): boolean { return this.allowsPayment("arkade"); }
+  get supportsBarkPayments(): boolean { return this.allowsPayment("bark"); }
   /** Payment messages flow at all: some way of paying is allowed by both sides. */
   get supportsPayments(): boolean { return PAYMENT_METHODS.some(m => this.allowsPayment(m)); }
   /** Takes effect at once, and a connected contact is told on the open session; the next handshake offers it too. */
@@ -836,6 +838,7 @@ export class GhostLink {
         filesSupport: !!this.options.events?.onFileIncoming,
         arkPaymentsSupport: this.options.arkPaymentsSupport && this.paymentEnabled("arkade"),
         usdtPaymentsSupport: this.options.usdtPaymentsSupport && this.paymentEnabled("usdt"),
+        barkPaymentsSupport: this.options.barkPaymentsSupport && this.paymentEnabled("bark"),
         cashuPaymentsSupport: this.paymentEnabled("cashu"),
         lightningPaymentsSupport: this.paymentEnabled("lightning"),
         paymentsSupport: PAYMENT_METHODS.some(m => this.paymentEnabled(m)) && !!this.options.events?.onPayment && !!this.options.events?.onPaymentRequest && !!this.options.events?.onPaymentResult,
@@ -945,8 +948,9 @@ export class GhostLink {
             return;
           }
           if (frame?.t === "paired-payments") {
-            if (!Array.isArray(frame.m) || frame.m.length > PAYMENT_METHODS.length || !frame.m.every(m => PAYMENT_METHODS.includes(m as PaymentMethodName))) return;
-            this.peerPaymentMethods = new Set(frame.m as PaymentMethodName[]);
+            // A method this app does not know yet (a newer contact) is left out, not a reason to drop the list.
+            if (!Array.isArray(frame.m) || frame.m.length > 16 || !frame.m.every(m => typeof m === "string")) return;
+            this.peerPaymentMethods = new Set((frame.m as string[]).filter((m): m is PaymentMethodName => PAYMENT_METHODS.includes(m as PaymentMethodName)));
             this.emitPairingState();
             return;
           }
