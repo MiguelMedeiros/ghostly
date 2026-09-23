@@ -229,6 +229,17 @@ describe("CommandoClient", () => {
     await expect(open(node).call("listinvoices", {}, { timeoutMs: 20_000 })).rejects.toThrow(/too large/);
   });
 
+  it("closing during the handshake ends the call at once, with nothing sent", async () => {
+    const silent: SocketLike = { binaryType: "", readyState: 0, send() {}, close() {}, onopen: null, onmessage: null, onerror: null, onclose: null };
+    const c = new CommandoClient({ url: "ws://127.0.0.1:1", nodeId: new FakeNode(() => ({})).id, rune: "r", socket: () => silent, connectTimeoutMs: 60_000 });
+    const pending = c.call("getinfo").catch((e: unknown) => e);
+    await new Promise((r) => setTimeout(r, 10));
+    await c.close();
+    const error = await pending;
+    expect(error).toBeInstanceOf(CommandoTransportError);
+    expect(error).toMatchObject({ sent: false });
+  });
+
   it("the source's signal ends it", async () => {
     const node = new FakeNode((method) => { if (method === "hang") throw HANG; return {}; });
     const controller = new AbortController();

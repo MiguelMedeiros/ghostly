@@ -171,6 +171,8 @@ export class CommandoClient {
   private readonly calls = new Map<string, Pending>();
   private closed = false;
   private readonly remote: Uint8Array;
+  /** Fails the handshake under way, when there is one. */
+  private abortHandshake?: (message: string) => void;
 
   constructor(private readonly options: CommandoOptions) {
     this.remote = hexToBytes(options.nodeId);
@@ -222,6 +224,7 @@ export class CommandoClient {
       let buffer: Uint8Array = new Uint8Array(0), stage: "act2" | "init" | "ready" = "act2", length: number | undefined;
       const fail = (message: string) => { clearTimeout(timer); reject(new CommandoTransportError(message)); this.drop(new CommandoTransportError(message, true), ws); };
       const timer = setTimeout(() => fail("The node did not complete the handshake in time"), connectTimeoutMs);
+      this.abortHandshake = fail;
       ws.onopen = () => { try { ws.send(noise.actOne()); } catch { fail("Could not start the handshake"); } };
       ws.onerror = () => { if (stage !== "ready") fail("Could not reach the node at that address"); };
       ws.onclose = () => { if (stage !== "ready") fail("The node closed the connection during the handshake (is the node id right?)"); else this.drop(new CommandoTransportError("The connection to the node dropped", true), ws); };
@@ -251,7 +254,7 @@ export class CommandoClient {
             buffer = buffer.slice(length + MAC); length = undefined;
             if (stage === "init") {
               if (message.length < 2 || readU16(message) !== MESSAGE.init) continue;
-              stage = "ready"; clearTimeout(timer); resolve();
+              stage = "ready"; clearTimeout(timer); this.abortHandshake = undefined; resolve();
               continue;
             }
             this.receive(message);
@@ -305,9 +308,11 @@ export class CommandoClient {
   /** Ends the connection (or only `socket`, when it is still the current one) and every call on it. */
   private drop(error: Error, socket = this.socket) {
     if (!socket || socket !== this.socket) return;
-    this.socket = undefined; this.transport = undefined;
+    const handshake = this.abortHandshake;
+    this.socket = undefined; this.transport = undefined; this.abortHandshake = undefined;
     socket.onopen = socket.onmessage = socket.onerror = socket.onclose = null;
     try { socket.close(); } catch { /* already closed */ }
+    handshake?.(error.message);
     for (const key of [...this.calls.keys()]) this.settle(key, error);
   }
 }
