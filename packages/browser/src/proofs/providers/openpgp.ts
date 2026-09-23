@@ -84,6 +84,7 @@ export const openpgp: IdentityProofProvider<PgpEvidence> = {
   validity: { defaultDays: 90, maxDays: 365 },
   privacy: `Nothing: the signature is checked on this device. ${KEYSERVER.replace("https://", "")} is contacted only if you choose it for your key, or ask it to confirm emails.`,
   signers: [gpg, gpgKeyserver],
+  lookupLabel: "Check emails with keys.openpgp.org",
   parseEvidence: raw => parsePgpEvidence(raw),
   async verify(statement, evidence, ctx) {
     ctx.signal.throwIfAborted();

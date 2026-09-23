@@ -49,6 +49,10 @@ if (hasGpg) {
 } else it.skip("OpenPGP contract with GnuPG: gpg is not installed here", () => {});
 
 describe("OpenPGP provider", () => {
+  it("names its on-request lookup for what it does", () => {
+    expect(openpgp.lookupLabel).toBe("Check emails with keys.openpgp.org");
+  });
+
   it("is registered", () => {
     expect(IDENTITY_PROVIDERS.map(p => p.id)).toContain("openpgp");
     expect(identityProvider("openpgp")).toBe(openpgp);
