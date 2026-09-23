@@ -5,7 +5,7 @@ import fixture from '../../core/test/fixtures/sshsig/sshsig-vectors.json';
 
 const mine = parseSshPublicKey(fixture.vectors.find(v => v.name === 'ed25519')!.publicKey);
 const other = parseSshPublicKey(fixture.vectors.find(v => v.name === 'rsa-2048')!.publicKey);
-const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+const json = (body: unknown, status = 200) => ({ status, text: JSON.stringify(body) });
 afterEach(() => clearSshForgeCache());
 
 describe('SSH key lookups on GitHub and GitLab', () => {
@@ -15,9 +15,7 @@ describe('SSH key lookups on GitHub and GitLab', () => {
     expect(check.status).toBe('linked');
     expect(describeSshForge(check)).toBe('GitHub: octo-cat (via published SSH key)');
     expect(fetch).toHaveBeenCalledTimes(1);
-    const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe('https://api.github.com/users/octo-cat/keys?per_page=100');
-    expect(init).toMatchObject({ credentials: 'omit', referrerPolicy: 'no-referrer', redirect: 'error' });
+    expect(fetch.mock.calls[0]).toEqual(['https://api.github.com/users/octo-cat/keys?per_page=100', { maxBytes: 256 * 1024 }]);
   });
 
   it('says when the key is not listed or the account does not exist', async () => {
@@ -29,7 +27,7 @@ describe('SSH key lookups on GitHub and GitLab', () => {
   it('resolves a GitLab username to its id, then reads that user\'s keys', async () => {
     const fetch = vi.fn(async (url: string) => url.includes('?username=')
       ? json([{ id: 42, username: 'Some.One' }]) : json([{ id: 7, title: 'laptop', key: `${mine.line} laptop` }]));
-    const check = await checkSshForge('gitlab', 'some.one', mine, { fetch: fetch as unknown as typeof globalThis.fetch });
+    const check = await checkSshForge('gitlab', 'some.one', mine, { fetch });
     expect(check.status).toBe('linked');
     expect(fetch.mock.calls.map(c => c[0])).toEqual(['https://gitlab.com/api/v4/users?username=some.one', 'https://gitlab.com/api/v4/users/42/keys?per_page=100']);
   });
@@ -57,8 +55,11 @@ describe('SSH key lookups on GitHub and GitLab', () => {
   });
 
   it('reports failures as unavailable, never as linked, and bounds what it reads', async () => {
-    const huge = new Response(`[${'{"key":"x"},'.repeat(30_000)}{}]`, { status: 200 });
-    expect(await checkSshForge('github', 'big', mine, { fetch: async () => huge })).toMatchObject({ status: 'unavailable', detail: 'Response too large' });
+    const huge = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(`[${'{"key":"x"},'.repeat(30_000)}{}]`, { status: 200 }));
+    expect(await checkSshForge('github', 'big', mine)).toMatchObject({ status: 'unavailable', detail: 'Response too large' });
+    expect(huge.mock.calls[0][1]).toMatchObject({ credentials: 'omit', referrerPolicy: 'no-referrer' });
+    huge.mockRestore();
+    expect(await checkSshForge('github', 'garbled', mine, { fetch: async () => ({ status: 200, text: '<html>' }) })).toMatchObject({ status: 'unavailable', detail: 'Unexpected response' });
     expect(await checkSshForge('github', 'limited', mine, { fetch: async () => json({}, 403) })).toMatchObject({ status: 'unavailable', detail: expect.stringMatching(/rate limiting/) });
     expect((await checkSshForge('github', 'offline', mine, { fetch: async () => { throw new TypeError('Failed to fetch'); } })).status).toBe('unavailable');
     expect((await checkSshForge('github', 'weird', mine, { fetch: async () => json({ key: mine.line }) })).status).toBe('unavailable');

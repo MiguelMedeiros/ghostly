@@ -33,36 +33,43 @@ export function validForgeLogin(forge: SshForge, login: string): boolean {
     : /^[A-Za-z0-9_.][A-Za-z0-9_.-]{0,254}$/.test(login) && !/\.(?:git|atom)$/i.test(login);
 }
 
-type Fetch = typeof fetch;
+/** An HTTPS GET with a size cap; the identity-proof engine's bounded fetch has this shape. */
+export type ForgeFetch = (url: string, options: { maxBytes: number; signal?: AbortSignal }) => Promise<{ status: number; text: string }>;
 interface Listing { keys: SshPublicKey[] | null; fetchedAt: number; error?: string }
 const cache = new Map<string, Listing | Promise<Listing>>();
 
-async function boundedJson(response: Response): Promise<unknown> {
-  const declared = Number(response.headers.get('content-length'));
-  if (declared > MAX_BODY) throw new Error('Response too large');
+/** Plain `fetch` with the same bounds, for callers outside the engine. */
+export const boundedForgeFetch: ForgeFetch = async (url, { maxBytes, signal }) => {
+  const timeout = AbortSignal.timeout(TIMEOUT_MS);
+  const response = await fetch(url, { credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store',
+    signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+  if (Number(response.headers.get('content-length')) > maxBytes) throw new Error('Response too large');
   const reader = response.body?.getReader();
-  if (!reader) return JSON.parse(await response.text());
   const chunks: Uint8Array[] = [];
   let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.length;
-    if (size > MAX_BODY) { await reader.cancel(); throw new Error('Response too large'); }
-    chunks.push(value);
+  if (reader) {
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.length;
+        if (size > maxBytes) throw new Error('Response too large');
+        chunks.push(value);
+      }
+    } finally { await reader.cancel().catch(() => {}); }
   }
   const all = new Uint8Array(size);
   let at = 0;
   for (const c of chunks) { all.set(c, at); at += c.length; }
-  return JSON.parse(new TextDecoder().decode(all));
-}
+  return { status: response.status, text: new TextDecoder().decode(all) };
+};
 
-async function get(fetcher: Fetch, url: string): Promise<{ status: number; body?: unknown }> {
-  const response = await fetcher(url, { credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store', redirect: 'error',
-    signal: AbortSignal.timeout(TIMEOUT_MS) });
+async function get(fetcher: ForgeFetch, url: string): Promise<{ status: number; body?: unknown }> {
+  const response = await fetcher(url, { maxBytes: MAX_BODY });
   if (response.status === 404) return { status: 404 };
-  if (!response.ok) throw new Error(response.status === 403 || response.status === 429 ? `${new URL(url).host} is rate limiting lookups; try later` : `HTTP ${response.status}`);
-  return { status: response.status, body: await boundedJson(response) };
+  if (response.status < 200 || response.status > 299)
+    throw new Error(response.status === 403 || response.status === 429 ? `${new URL(url).host} is rate limiting lookups; try later` : `HTTP ${response.status}`);
+  try { return { status: response.status, body: JSON.parse(response.text) }; } catch { throw new Error('Unexpected response'); }
 }
 
 function keysFrom(body: unknown): SshPublicKey[] {
@@ -77,7 +84,7 @@ function keysFrom(body: unknown): SshPublicKey[] {
 }
 
 /** The account's published keys, or null when the account does not exist. */
-async function listKeys(forge: SshForge, login: string, fetcher: Fetch): Promise<SshPublicKey[] | null> {
+async function listKeys(forge: SshForge, login: string, fetcher: ForgeFetch): Promise<SshPublicKey[] | null> {
   if (forge === 'github') {
     const r = await get(fetcher, `https://api.github.com/users/${encodeURIComponent(login)}/keys?per_page=100`);
     return r.status === 404 ? null : keysFrom(r.body);
@@ -94,14 +101,14 @@ async function listKeys(forge: SshForge, login: string, fetcher: Fetch): Promise
  * SSH_FORGE_TTL_MS, so reopening a proof re-checks it once the entry is stale;
  * `fresh` skips the cache. Never throws: failures come back as 'unavailable'. */
 export async function checkSshForge(forge: SshForge, login: string, key: Pick<SshPublicKey, 'blob'>,
-  options: { fetch?: Fetch; now?: () => number; fresh?: boolean } = {}): Promise<SshForgeCheck> {
+  options: { fetch?: ForgeFetch; now?: () => number; fresh?: boolean } = {}): Promise<SshForgeCheck> {
   const now = options.now ?? Date.now;
   if (!SSH_FORGES.includes(forge) || !validForgeLogin(forge, login)) return { forge, login, status: 'unavailable', checkedAt: now(), detail: 'Invalid account name' };
   const id = `${forge}:${login.toLowerCase()}`;
   let entry = cache.get(id);
   const stale = (l: Listing) => now() - l.fetchedAt > (l.error ? FAILURE_TTL_MS : SSH_FORGE_TTL_MS);
   if (!entry || options.fresh || (!(entry instanceof Promise) && stale(entry))) {
-    const fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
+    const fetcher = options.fetch ?? boundedForgeFetch;
     const pending: Promise<Listing> = listKeys(forge, login, fetcher)
       .then(keys => ({ keys, fetchedAt: now() }), (e: unknown) => ({ keys: null, fetchedAt: now(), error: e instanceof Error ? e.message : 'Lookup failed' }))
       .then(listing => { if (cache.get(id) === pending) cache.set(id, listing); return listing; });
