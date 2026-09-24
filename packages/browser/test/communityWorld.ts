@@ -13,8 +13,9 @@ interface Edge {
   g: string; me: string; peer: string; kind: "edge" | "host" | "guest"; announced: boolean;
   /** With a `NetworkModel`: when this side opened it, polls fast until, last polled, polls that found the other side, up since. */
   openedAt: number; fastUntil: number; lastPoll: number; polls: number; upAt?: number; wasUp?: boolean;
-  /** An edge opened expecting the other side at once. */
+  /** An edge opened expecting the other side at once; its presence published (the first thing a link does). */
   expected?: boolean;
+  published?: boolean;
 }
 
 /**
@@ -22,8 +23,9 @@ interface Edge {
  * each app's Pkarr budget, and a link that comes up only after both sides polled each other's
  * record a few times (offer, answer), at the pace a `LinkSession` polls on relays: fast while it
  * expects the peer (after opening an entry session or an expected edge, or on finding a fresh
- * packet of the other side), at the background pace otherwise, rarely once up. A poll the budget
- * refuses does not happen.
+ * packet of the other side), at the background pace otherwise, rarely once up. What each side
+ * publishes is charged as a link does: its presence, its offer or answer, the signal cleared once
+ * connected. A poll or a publish the budget refuses does not happen.
  */
 export interface NetworkModel {
   /** Pkarr requests per app and minute: a resolve costs 1, a publish 2 (it goes to both relays); background ones only up to `backgroundPerMinute`. */
@@ -179,6 +181,8 @@ export class CommunityWorld {
     if (edge.polls < this.network.signalPolls || theirs.polls < this.network.signalPolls) return false;
     edge.upAt = theirs.upAt = this.now;
     edge.wasUp = theirs.wasUp = true;
+    // Connected: each side clears its signal from its packet (a publish, best effort).
+    this.spend(peer, 2); this.spend(there, 2);
     return true;
   }
 
@@ -194,15 +198,18 @@ export class CommunityWorld {
     for (const peer of this.peers.values()) {
       if (!peer.online) continue;
       for (const edge of peer.links.values()) {
+        // Its presence first (a publish, retried until the budget lets it through), then polls, found or not.
+        if (!edge.published) edge.published = this.spend(peer, 2);
         const there = this.counterpart(edge);
-        if (!there || !there.peer.online || !this.sameSide(peer, there.peer)) { if (edge.upAt === undefined) edge.polls = 0; else if (!there) { edge.upAt = undefined; edge.polls = 0; } continue; }
+        if (edge.upAt !== undefined && !there) { edge.upAt = undefined; edge.polls = 0; }
         const every = edge.upAt !== undefined ? net.connectedPollMs : this.now < edge.fastUntil ? net.fastPollMs : net.backgroundPollMs;
         if (this.now - edge.lastPoll < every) continue;
         edge.lastPoll = this.now;
         if (!this.spend(peer, 1) || edge.upAt !== undefined) continue;
-        const theirs = there.peer.links.get(there.linkId)!;
+        const theirs = there && there.peer.online && this.sameSide(peer, there.peer) ? there.peer.links.get(there.linkId)! : undefined;
+        if (!theirs?.published) { edge.polls = 0; continue; }
         if (edge.polls === 0 && this.now - theirs.openedAt < net.expectMs) edge.fastUntil = Math.max(edge.fastUntil, this.now + net.expectMs);
-        // Seeing the other side's offer is also what answering it needs: a publish.
+        // Seeing the other side is what dialing or answering it needs: a publish of the offer or answer.
         if (edge.polls === 0 && !this.spend(peer, 2)) continue;
         edge.polls++;
       }
