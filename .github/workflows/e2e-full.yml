@@ -6,10 +6,9 @@ name: E2E (full)
 # it, runs the gated vitest contracts and the web and extension suites, and takes it down (see e2e/README.md).
 # Breez's hosted regtest is not part of it: its faucet needs a reCAPTCHA, so those suites are skipped here.
 # Nightly on dev and by hand; not on pull requests, on purpose: it takes far longer than a merge should wait.
+# Measured on ubuntu-24.04 (2026-09-24): about 42 minutes — the environment up and funded in under a minute,
+# the vitest contracts in 37 s, Playwright (2 workers, one retry) in 39 minutes.
 on:
-  # TEMPORARY, removed before merge: measures a run on a GitHub runner from the pull request's branch.
-  push:
-    branches: [feat/e2e-full-infra]
   schedule:
     - cron: "23 3 * * *"
   workflow_dispatch:
