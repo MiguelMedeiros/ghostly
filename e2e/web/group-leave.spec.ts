@@ -33,10 +33,8 @@ test("leaving: gone from the list at once, heard by an admin who was away, and t
   await alice.page.getByTestId("new-group").click();
   await alice.page.getByTestId("new-group-name").fill("Leavers");
   await alice.page.getByTestId("new-group-create").click();
-  await alice.page.getByTestId("group-members").click();
-  await alice.page.getByTestId("group-link-enable").click();
-  const url = await alice.page.getByTestId("group-link-url").inputValue();
-  await alice.page.keyboard.press("Escape");
+  const url = await alice.page.getByTestId("group-share-dialog").getByTestId("group-link-url").inputValue();
+  await alice.page.getByTestId("group-share-done").click();
   for (const p of [bob, carol]) {
     await p.page.goto(url);
     await expect(groupChat(p)).toHaveAttribute("data-status", "active", { timeout: 120_000 });

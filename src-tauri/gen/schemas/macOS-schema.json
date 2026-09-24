@@ -381,6 +381,12 @@
           "markdownDescription": "Enables the service_respond command without any pre-configured scope."
         },
         {
+          "description": "Enables the share_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-share-text",
+          "markdownDescription": "Enables the share_text command without any pre-configured scope."
+        },
+        {
           "description": "Enables the updater_can_install command without any pre-configured scope.",
           "type": "string",
           "const": "allow-updater-can-install",
@@ -589,6 +595,12 @@
           "type": "string",
           "const": "deny-service-respond",
           "markdownDescription": "Denies the service_respond command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the share_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-share-text",
+          "markdownDescription": "Denies the share_text command without any pre-configured scope."
         },
         {
           "description": "Denies the updater_can_install command without any pre-configured scope.",

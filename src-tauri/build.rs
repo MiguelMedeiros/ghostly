@@ -35,6 +35,7 @@ const COMMANDS: &[&str] = &[
     "updater_can_install",
     "open_project_link",
     "open_payment_link",
+    "share_text",
     "oidc_loopback_start",
     "oidc_loopback_wait",
     "oidc_loopback_cancel",

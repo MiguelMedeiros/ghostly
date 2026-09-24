@@ -41,6 +41,7 @@ export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClo
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
       </button>
     </div>
+    {live.isAdmin && live.status === "active" && <GroupLinkPanel group={live} />}
     <ul className="mt-3 max-h-56 space-y-1 overflow-y-auto" data-testid="group-member-list">
       {live.members.map(m => <li key={m.key} data-testid="group-member" data-key={m.key} data-role={m.role} className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-surface-hover">
         <span role="img" aria-label={m.online ? "reachable" : "not reachable"} className={`h-2 w-2 shrink-0 rounded-full ${m.online ? "bg-green-500" : "bg-text-muted"}`} />
@@ -70,7 +71,6 @@ export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClo
           </li>;
         })}
       </ul>
-      <GroupLinkPanel group={live} />
     </div>}
     {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
     <p data-testid="group-read-note" className="mt-4 rounded-lg bg-surface-alt/80 p-3 text-xs leading-relaxed text-text-secondary">{GROUP_READ_NOTE}</p>
