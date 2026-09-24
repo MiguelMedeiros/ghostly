@@ -16,7 +16,7 @@ const en = {
     badge: "Peer to peer · No account to create",
     title1: "Find your people.",
     title2: "Talk peer to peer.",
-    lead: "Ghostly connects you straight to the people you invite — to chat, send files and sats, call, and share what runs on your computer.",
+    lead: "Ghostly connects you straight to the people you invite — to chat one to one or as a group, send files and sats, call, and share what runs on your computer.",
     open: "Open in your browser",
     download: "Download the app",
     micro: "Nothing to install · Free and open source",
@@ -41,7 +41,7 @@ const en = {
       {
         title: "Share it your way.",
         body: "As a link, a QR code or a text code — in person, by message, however you like. Only share it with the person you want to meet.",
-        note: "Links work in the current release. Scanning a QR code with the camera arrives with the next one.",
+        note: "Scanning the QR code with a camera is new in 0.5.0.",
       },
       {
         title: "Connect.",
@@ -89,7 +89,7 @@ const en = {
       {
         title: "A plan both agreed to.",
         body: "Chat, files and Cashu, over WebRTC — because that's what these two have in common. Change the apps, and the plan changes with them.",
-        note: "Negotiated abilities come with paired chats, in the next release. Chats in the current release use a fixed set.",
+        note: "Negotiated abilities come with paired chats, new in 0.5.0. Chats started with an older version keep a fixed set.",
       },
     ],
     boo: "Boo · desktop",
@@ -106,7 +106,7 @@ const en = {
       },
       {
         title: "A direct line for the real conversation.",
-        body: "Messages, files and payments travel over a live connection between the two devices: WebRTC in the web app, extension and desktop, and Iroh or HyperDHT between desktop apps in the next release. Calls use WebRTC media.",
+        body: "Messages, files and payments travel over a live connection between the two devices: WebRTC in the web app, extension and desktop, and Iroh or HyperDHT between desktop apps from 0.5.0. Calls use WebRTC media.",
       },
       {
         title: "Honest about the route.",
@@ -120,7 +120,7 @@ const en = {
   next: {
     eyebrow: "05 — What happens next",
     title: "Now that you're connected.",
-    lead: "Everything here is in the current release, unless the badge says otherwise.",
+    lead: "Available in the app today, unless the badge says it arrives in 0.5.0.",
     shot: "Screenshot of the Ghostly app",
     illustration: "Illustration",
     fromDev: "Development build, {n}",
@@ -132,7 +132,7 @@ const en = {
         title: "Say it your way.",
         body: "Private one-to-one conversations with delivery receipts and local history. No phone number, no public profile.",
         level: "released" as Level,
-        extra: "In development: paired chats with pinned keys, names and pictures, and messages held for a contact who is away.",
+        extra: "New in 0.5.0: paired chats with pinned keys, names and pictures, and messages held for a contact who is away.",
         extraLevel: "development" as Level,
       },
       {
@@ -147,25 +147,26 @@ const en = {
         id: "calls",
         icon: "video",
         title: "Be a little closer.",
-        body: "Voice, video and screen sharing, one to one.",
+        body: "Voice, video and screen sharing, one to one — turn the camera on or share your screen without calling again.",
         level: "released" as Level,
-        extra: "In chats over WebRTC. Screen sharing needs a computer. Paired chats don't have calls yet.",
+        extra: "Screen sharing needs a computer. Calls ring in chats over WebRTC; paired chats and groups don't ring yet.",
       },
       {
         id: "sats",
         icon: "bolt",
         title: "A little thank-you.",
-        body: "Send or request sats right in the conversation, as Cashu ecash or a Lightning invoice.",
+        body: "Send or request sats right in the conversation — ecash, a Lightning invoice, or from the wallet you already use.",
         level: "released" as Level,
-        extra: "A Cashu mint you choose holds the funds and handles Lightning. Pick one you trust.",
+        extra: "New in 0.5.0: your own Lightning node or wallet (NWC, LND, Core Lightning, WebLN, Breez), Lightning addresses, paying from any wallet, Ark, USDT and on-chain bitcoin — several on test networks first.",
+        extraLevel: "development" as Level,
       },
       {
         id: "groups",
         icon: "group",
         title: "Bring the whole group.",
-        body: "A private group for the people you already talk to: invite them from your chats, one admin, everyone reaches everyone directly.",
+        body: "A private group of up to eight: invite people from your chats, or hand out the group's link so anyone you give it to can join. Everyone reaches everyone directly.",
         level: "development" as Level,
-        extra: "Up to eight members, text only for now; files, calls and payments aren't in groups yet.",
+        extra: "Text only for now, with one admin who can replace or turn off the link.",
       },
       {
         id: "identities",
@@ -173,7 +174,7 @@ const en = {
         title: "Prove who you are. Only to whom you choose.",
         body: "Attach an outside identity to your profile once — a Nostr key, a domain, an OpenPGP or SSH key, a Bitcoin address — and share it with one contact at a time. Their app verifies it on the device.",
         level: "development" as Level,
-        extra: "Never required to talk. Withdraw it per contact, or revoke it everywhere. Accounts at Google, Microsoft, Apple, GitLab or Twitch are merged but wait for registered clients.",
+        extra: "Never required to talk. Withdraw it from one chat, or revoke it everywhere.",
       },
       {
         id: "services",
@@ -181,7 +182,7 @@ const en = {
         title: "Made here. Open there.",
         body: "Let a contact open a web app running on your computer — a photo gallery, a dashboard, a prototype — while you're online.",
         level: "released" as Level,
-        extra: "Desktop app or browser extension at both ends. Plain HTTP requests: no WebSockets or streaming. Choosing exactly which contacts see each app is in development.",
+        extra: "Desktop app or browser extension at both ends; plain HTTP, no WebSockets. Choosing which contacts see each app arrives in 0.5.0.",
       },
       {
         id: "cli",
@@ -239,7 +240,7 @@ const en = {
         kind: "invoices",
         level: "released" as Level,
         body: "Pay and receive Lightning invoices from the chat.",
-        limits: "Through your Cashu mint in the current release. In the next one your own node or wallet can be the source: NWC, LND, Core Lightning, a browser wallet (WebLN, web app only) or Breez on a local regtest — and it pays Lightning addresses, while any other wallet can pay your invoice from its QR code.",
+        limits: "Through your Cashu mint today. From 0.5.0 your own node or wallet can be the source — NWC, LND, Core Lightning, a browser wallet (WebLN, web app only) or Breez on a test network — it pays Lightning addresses, and any other wallet can pay your invoice from its QR code.",
         more: "development" as Level,
       },
       {
@@ -322,11 +323,11 @@ const en = {
     },
     extension: {
       title: "Browser extension",
-      body: "Chrome and Chromium browsers, as a .zip to load unpacked.",
-      cta: "Download",
+      body: "From the Chrome Web Store, for Chrome, Brave, Edge and other Chromium browsers.",
+      cta: "Add to Chrome",
     },
     cli: { title: "Command line", body: "For scripts, bots and agents.", cta: "CLI guide" },
-    note: "Downloads are the public release, v{v}. Features marked “in development” arrive with {n}.",
+    note: "Downloads are the public release, v{v}. Anything marked “Coming in {n}” arrives with the next one.",
     all: "All release files",
     conversation: [
       { side: "boo", text: "Boo! 👻" },
@@ -354,7 +355,7 @@ const ptBr: HomeCopy = {
     badge: "Peer to peer · Sem criar conta",
     title1: "Encontre sua gente.",
     title2: "Converse direto.",
-    lead: "O Ghostly liga você diretamente às pessoas que você convida — para conversar, mandar arquivos e sats, fazer chamadas e compartilhar o que roda no seu computador.",
+    lead: "O Ghostly liga você diretamente às pessoas que você convida — para conversar a dois ou em grupo, mandar arquivos e sats, fazer chamadas e compartilhar o que roda no seu computador.",
     open: "Abrir no navegador",
     download: "Baixar o app",
     micro: "Nada para instalar · Gratuito e de código aberto",
@@ -378,7 +379,7 @@ const ptBr: HomeCopy = {
       {
         title: "Compartilhe do seu jeito.",
         body: "Como link, QR code ou código de texto — pessoalmente, por mensagem, como preferir. Compartilhe só com quem você quer encontrar.",
-        note: "Links funcionam na versão atual. Escanear um QR code com a câmera chega na próxima.",
+        note: "Escanear o QR code com a câmera é novidade da 0.5.0.",
       },
       {
         title: "Conecte.",
@@ -426,7 +427,7 @@ const ptBr: HomeCopy = {
       {
         title: "Um plano que os dois aceitaram.",
         body: "Chat, arquivos e Cashu, por WebRTC — porque é isso que esses dois têm em comum. Troque os apps, e o plano muda junto.",
-        note: "Capacidades negociadas chegam com os chats pareados, na próxima versão. Os chats da versão atual usam um conjunto fixo.",
+        note: "Capacidades negociadas chegam com os chats pareados, novidade da 0.5.0. Chats iniciados numa versão anterior mantêm um conjunto fixo.",
       },
     ],
     boo: "Boo · desktop",
@@ -443,7 +444,7 @@ const ptBr: HomeCopy = {
       },
       {
         title: "Uma linha direta para a conversa de verdade.",
-        body: "Mensagens, arquivos e pagamentos vão por uma conexão ao vivo entre os dois aparelhos: WebRTC no app web, na extensão e no desktop, e Iroh ou HyperDHT entre apps desktop na próxima versão. Chamadas usam mídia WebRTC.",
+        body: "Mensagens, arquivos e pagamentos vão por uma conexão ao vivo entre os dois aparelhos: WebRTC no app web, na extensão e no desktop, e Iroh ou HyperDHT entre apps desktop a partir da 0.5.0. Chamadas usam mídia WebRTC.",
       },
       {
         title: "Sincero sobre o caminho.",
@@ -457,7 +458,7 @@ const ptBr: HomeCopy = {
   next: {
     eyebrow: "05 — E depois",
     title: "Agora que vocês estão conectados.",
-    lead: "Tudo aqui está na versão atual, a menos que o selo diga outra coisa.",
+    lead: "Disponível no app hoje, a menos que o selo diga que chega na 0.5.0.",
     shot: "Captura de tela do app Ghostly",
     illustration: "Ilustração",
     fromDev: "Build de desenvolvimento, {n}",
@@ -469,7 +470,7 @@ const ptBr: HomeCopy = {
         title: "Diga do seu jeito.",
         body: "Conversas privadas um a um, com confirmação de entrega e histórico local. Sem número de telefone, sem perfil público.",
         level: "released",
-        extra: "Em desenvolvimento: chats pareados com chaves fixadas, nomes e fotos, e mensagens guardadas para um contato ausente.",
+        extra: "Novidade da 0.5.0: chats pareados com chaves fixadas, nomes e fotos, e mensagens guardadas para um contato ausente.",
         extraLevel: "development",
       },
       {
@@ -484,25 +485,26 @@ const ptBr: HomeCopy = {
         id: "calls",
         icon: "video",
         title: "Fique mais perto.",
-        body: "Voz, vídeo e compartilhamento de tela, um a um.",
+        body: "Voz, vídeo e compartilhamento de tela, um a um — ligue a câmera ou mostre a tela sem ligar de novo.",
         level: "released",
-        extra: "Em chats sobre WebRTC. Compartilhar a tela exige um computador. Os chats pareados ainda não têm chamadas.",
+        extra: "Compartilhar a tela exige um computador. Chamadas tocam nos chats por WebRTC; chats pareados e grupos ainda não tocam.",
       },
       {
         id: "sats",
         icon: "bolt",
         title: "Um agradinho.",
-        body: "Envie ou peça sats na própria conversa, como ecash Cashu ou uma fatura Lightning.",
+        body: "Envie ou peça sats na própria conversa — ecash, uma fatura Lightning, ou da carteira que você já usa.",
         level: "released",
-        extra: "Um mint Cashu que você escolhe guarda os fundos e cuida da Lightning. Escolha um em que você confia.",
+        extra: "Novidade da 0.5.0: seu próprio nó ou carteira Lightning (NWC, LND, Core Lightning, WebLN, Breez), Lightning addresses, pagar de qualquer carteira, Ark, USDT e bitcoin on-chain — vários primeiro em redes de teste.",
+        extraLevel: "development",
       },
       {
         id: "groups",
         icon: "group",
         title: "Traga o grupo todo.",
-        body: "Um grupo privado com as pessoas com quem você já conversa: convide pelos seus chats, um admin, todos se falam direto.",
+        body: "Um grupo privado de até oito pessoas: convide pelos seus chats, ou passe o link do grupo para quem você quiser que entre. Todos se falam direto.",
         level: "development",
-        extra: "Até oito pessoas, só texto por enquanto; arquivos, chamadas e pagamentos ainda não entram em grupos.",
+        extra: "Só texto por enquanto, com um admin que pode trocar ou desligar o link.",
       },
       {
         id: "identities",
@@ -510,7 +512,7 @@ const ptBr: HomeCopy = {
         title: "Prove quem você é. Só para quem você escolher.",
         body: "Vincule uma identidade externa ao seu perfil uma vez — uma chave Nostr, um domínio, uma chave OpenPGP ou SSH, um endereço Bitcoin — e compartilhe com um contato por vez. O app dele verifica no aparelho.",
         level: "development",
-        extra: "Nunca é exigido para conversar. Retire por contato, ou revogue em todo lugar. Contas no Google, Microsoft, Apple, GitLab ou Twitch estão integradas, mas esperam o registro dos clientes.",
+        extra: "Nunca é exigido para conversar. Retire de um chat, ou revogue em todo lugar.",
       },
       {
         id: "services",
@@ -518,7 +520,7 @@ const ptBr: HomeCopy = {
         title: "Feito aqui. Aberto lá.",
         body: "Deixe um contato abrir um app web que roda no seu computador — uma galeria de fotos, um painel, um protótipo — enquanto você está online.",
         level: "released",
-        extra: "App desktop ou extensão nas duas pontas. Pedidos HTTP simples: sem WebSockets nem streaming. Escolher exatamente quais contatos veem cada app está em desenvolvimento.",
+        extra: "App desktop ou extensão nas duas pontas; HTTP simples, sem WebSockets. Escolher quais contatos veem cada app chega na 0.5.0.",
       },
       {
         id: "cli",
@@ -576,7 +578,7 @@ const ptBr: HomeCopy = {
         kind: "faturas",
         level: "released",
         body: "Pague e receba faturas Lightning pelo chat.",
-        limits: "Pelo seu mint Cashu na versão atual. Na próxima, seu próprio nó ou carteira pode ser a fonte: NWC, LND, Core Lightning, uma carteira do navegador (WebLN, só no app web) ou Breez num regtest local — e ela paga Lightning addresses, enquanto qualquer outra carteira paga a sua fatura pelo QR code.",
+        limits: "Pelo seu mint Cashu hoje. A partir da 0.5.0, seu próprio nó ou carteira pode ser a fonte — NWC, LND, Core Lightning, uma carteira do navegador (WebLN, só no app web) ou Breez numa rede de teste —, ela paga Lightning addresses e qualquer outra carteira paga a sua fatura pelo QR code.",
         more: "development",
       },
       {
@@ -659,11 +661,11 @@ const ptBr: HomeCopy = {
     },
     extension: {
       title: "Extensão do navegador",
-      body: "Chrome e navegadores Chromium, como .zip para carregar sem empacotar.",
-      cta: "Baixar",
+      body: "Pela Chrome Web Store, para Chrome, Brave, Edge e outros navegadores Chromium.",
+      cta: "Adicionar ao Chrome",
     },
     cli: { title: "Linha de comando", body: "Para scripts, bots e agentes.", cta: "Guia da CLI (em inglês)" },
-    note: "Os downloads são a versão pública, v{v}. Recursos marcados “em desenvolvimento” chegam com a {n}.",
+    note: "Os downloads são a versão pública, v{v}. O que está marcado “Chega na {n}” vem com a próxima.",
     all: "Todos os arquivos da versão",
     conversation: [
       { side: "boo", text: "Buu! 👻" },

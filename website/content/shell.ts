@@ -1,5 +1,5 @@
 import type { Localized } from "@/lib/i18n";
-import type { Level } from "@/lib/status";
+import { NEXT_VERSION, type Level } from "@/lib/status";
 
 export const APP_URL = "https://app.ghostly.tools";
 export const REPO_URL = "https://github.com/MiguelMedeiros/ghostly";
@@ -42,7 +42,7 @@ const en = {
     pet: "Hide the ghost",
     levels: {
       released: "Available",
-      development: "In development",
+      development: `Coming in ${NEXT_VERSION}`,
       building: "Being built",
       planned: "Planned",
       research: "Research",
@@ -98,7 +98,7 @@ const ptBr: ShellCopy = {
     pet: "Esconder o fantasma",
     levels: {
       released: "Disponível",
-      development: "Em desenvolvimento",
+      development: `Chega na ${NEXT_VERSION}`,
       building: "Sendo construído",
       planned: "Planejado",
       research: "Pesquisa",

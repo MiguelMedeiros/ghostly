@@ -22,6 +22,8 @@ export const DOWNLOADS = {
   linuxDeb: asset(`Ghostly_${VERSION}_amd64.deb`),
   linuxAppImage: asset(`Ghostly_${VERSION}_amd64.AppImage`),
   extensionZip: asset(`ghostly-browser-extension-${VERSION}.zip`),
+  /** The browser extension, published on the Chrome Web Store (item nbedaagicniejlmfcncndfjcejaidbcf). */
+  chromeStore: "https://chromewebstore.google.com/detail/ghostly/nbedaagicniejlmfcncndfjcejaidbcf",
 } as const;
 
 /** The installer a download strip should lead with. */
@@ -56,7 +58,7 @@ export function defaultInstaller(userAgent: string, platform = "", arch?: string
 
 export type DownloadKey = keyof typeof DOWNLOADS;
 /** The desktop installers: every download except the browser extension. */
-export type DesktopKey = Exclude<DownloadKey, "extensionZip">;
+export type DesktopKey = Exclude<DownloadKey, "extensionZip" | "chromeStore">;
 export type PlatformId = "mac" | "windows" | "linux";
 
 /** The three desktop platforms, each with its installers in the order a download panel lists them. */
