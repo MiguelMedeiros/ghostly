@@ -66,7 +66,8 @@ describe("active sources, one per wallet mode", () => {
     expect(first.view).toMatchObject({ providerId: "fake-lightning", status: "ready", config: { alias: "Node A", behaviour: "settle" }, secrets: ["token"] });
     expect(JSON.stringify(first.view)).not.toContain("super-secret-token");
     expect(JSON.stringify(await settings())).not.toContain("super-secret-token");
-    expect(await keys()).toEqual(["lightningSource-testnet"]);
+    // Besides the source, only the last balance it read (to show while it reconnects after a restart).
+    expect((await keys()).filter((k) => k !== "lightningSourceSeen-testnet")).toEqual(["lightningSource-testnet"]);
 
     const again = service([descriptor]).lightning;
     await again.start("testnet");
@@ -89,6 +90,7 @@ describe("active sources, one per wallet mode", () => {
     expect(lightning.view).toMatchObject({ providerId: "fake-lightning", mode: "testnet", status: "ready" });
     await lightning.sources.clear();
     expect(lightning.view).toMatchObject({ providerId: CASHU_MINT_SOURCE });
+    // The source and the last balance it read are both forgotten.
     expect(await keys()).toEqual([]);
   });
 

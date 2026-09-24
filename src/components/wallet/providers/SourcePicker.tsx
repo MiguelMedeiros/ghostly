@@ -1,12 +1,53 @@
 import { useState } from "react";
 import type { SourceView } from "@ghostly/browser/engine/paymentAdapters/providers/sources";
-import type { ProviderDescriptorView } from "@ghostly/browser/engine/paymentAdapters/providers/types";
+import type { ProviderDescriptorView, ProviderField } from "@ghostly/browser/engine/paymentAdapters/providers/types";
 import { Block, Button, Notice, Row, Section, input } from "../ui";
 import { useRun } from "../run";
 import { Select } from "../../ui/Select";
 import { PROVIDER_FORMS, type ProviderFormProps } from "./forms";
 
 const STATUS = { none: "Not set up", connecting: "Connecting…", ready: "Connected", error: "Not connected" } as const;
+
+/** A field's suggested values that fit the other fields (`when`), as buttons that fill it in. */
+function Suggestions({ field, values, onPick }: { field: ProviderField; values: Record<string, string | undefined>; onPick: (value: string) => void }) {
+  const fitting = (field.suggestions ?? []).filter((s) => Object.entries(s.when ?? {}).every(([name, value]) => values[name] === value));
+  if (!fitting.length) return null;
+  return (
+    <span className="flex flex-wrap gap-1.5" data-testid={`field-suggestions-${field.name}`}>
+      {fitting.map((s) => (
+        <button key={s.value} type="button" title={s.value} data-value={s.value} onClick={() => onPick(s.value)}
+          className={`text-[11px] px-2 py-0.5 rounded-full border ${values[field.name] === s.value ? "border-accent text-accent" : "border-border text-text-secondary hover:text-text-primary"}`}>{s.label}</button>
+      ))}
+    </span>
+  );
+}
+
+/**
+ * Changes where a saved source reads from (its `changeable` fields, a server address) without typing its
+ * secrets again: the same wallet, another server.
+ */
+function ServerForm({ kind, fields, config, busy, onSubmit, onCancel }: { kind: string; fields: ProviderField[]; config: Record<string, string>; busy: boolean; onSubmit: (values: Record<string, string>) => void; onCancel: () => void }) {
+  const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(fields.map((f) => [f.name, config[f.name] ?? ""])));
+  const set = (name: string, value: string) => setValues((v) => ({ ...v, [name]: value }));
+  return (
+    <form className="space-y-3" data-testid={`${kind}-source-server-form`} autoComplete="off" onSubmit={(e) => { e.preventDefault(); onSubmit(values); }}>
+      {fields.map((field, i) => (
+        <label key={field.name} className="block space-y-1">
+          <span className="text-xs text-text-secondary">{field.label}{field.optional && <span className="text-text-muted"> (optional)</span>}</span>
+          {/* Opened from the card's own button, further up: focusing it brings the form into view. */}
+          <input aria-label={field.label} autoFocus={i === 0} className={`${input} font-mono text-xs`} type={field.kind === "url" ? "url" : "text"} spellCheck={false} placeholder={field.placeholder} value={values[field.name]} onChange={(e) => set(field.name, e.target.value)} />
+          <Suggestions field={field} values={{ ...config, ...values }} onPick={(value) => set(field.name, value)} />
+          {field.help && <span className="block text-[11px] text-text-muted">{field.help}</span>}
+        </label>
+      ))}
+      <div className="flex flex-wrap gap-2">
+        <Button type="submit" variant="primary" disabled={busy} data-testid={`${kind}-source-server-save`}>{busy ? "Connecting…" : "Use this server"}</Button>
+        <Button type="button" disabled={busy} onClick={onCancel}>Cancel</Button>
+      </div>
+      <Notice>The wallet stays the same; only where it reads the chain changes. It is checked before it is saved.</Notice>
+    </form>
+  );
+}
 
 /** The form built from a provider's declared fields. Secret fields are password inputs, never filled back in. */
 export function ProviderConfigForm({ descriptor, mode, busy, onSubmit }: ProviderFormProps) {
@@ -26,6 +67,7 @@ export function ProviderConfigForm({ descriptor, mode, busy, onSubmit }: Provide
             <input aria-label={field.label} className={`${input} ${field.kind === "text" ? "" : "font-mono text-xs"}`} type={field.kind === "secret" ? "password" : field.kind === "url" ? "url" : "text"}
               autoComplete={field.kind === "secret" ? "new-password" : "off"} spellCheck={false} placeholder={field.placeholder} value={values[field.name]} onChange={(e) => set(field.name, e.target.value)} />
           )}
+          {field.kind !== "secret" && <Suggestions field={field} values={values} onPick={(value) => set(field.name, value)} />}
           {field.help && <span className="block text-[11px] text-text-muted">{field.help}</span>}
         </label>
       ))}
@@ -35,27 +77,55 @@ export function ProviderConfigForm({ descriptor, mode, busy, onSubmit }: Provide
   );
 }
 
+/** The source's line under its name: connected, reconnecting after a failure (and why), or unavailable. */
+export function sourceStatus(view: SourceView): string {
+  if (view.status === "connecting" && view.failures) return `Connecting… · ${view.error ?? "no answer yet"} · trying again by itself`;
+  if (view.status === "error" && view.error) return view.retryAt ? `${view.error} · trying again by itself` : view.error;
+  return view.error ?? [STATUS[view.status], view.alias, view.network && view.network !== "bitcoin" ? view.network : undefined, view.custodial ? "custodial" : undefined].filter(Boolean).join(" · ");
+}
+
+/** Whether a saved source has a server that "Change server" can edit. */
+export const changeableFields = (view: SourceView): ProviderField[] =>
+  view.providerId && !view.isDefault ? view.offered.find((d) => d.id === view.providerId)?.fields.filter((f) => f.changeable) ?? [] : [];
+
 /**
  * Where a card's money comes from: the source in use for this mode, and the providers that can replace
- * it, each with its own form. Mainnet and Testnet keep separate sources.
+ * it, each with its own form. Mainnet and Testnet keep separate sources. A source that is not connected
+ * can be tried again now (Retry), and one with a server can move to another (Change server) keeping its
+ * wallet; `changing` / `onChanging` let the card open that form from its own Change server button.
  */
-export function SourcePicker({ kind, view, onSet, onClear }: { kind: "lightning" | "onchain"; view: SourceView; onSet: (providerId: string, values: Record<string, string>) => Promise<void>; onClear?: () => Promise<void> }) {
+export function SourcePicker({ kind, view, onSet, onClear, onRetry, onReconfigure, changing, onChanging }: {
+  kind: "lightning" | "onchain"; view: SourceView;
+  onSet: (providerId: string, values: Record<string, string>) => Promise<void>; onClear?: () => Promise<void>;
+  onRetry?: () => Promise<void>; onReconfigure?: (values: Record<string, string>) => Promise<void>;
+  changing?: boolean; onChanging?: (open: boolean) => void;
+}) {
   const { busy, error, run } = useRun();
   const [chosen, setChosen] = useState<string>("");
   const [saved, setSaved] = useState("");
+  const [ownChanging, setOwnChanging] = useState(false);
+  const serverOpen = changing ?? ownChanging, setServerOpen = onChanging ?? setOwnChanging;
   const offered = view.offered;
   const descriptor: ProviderDescriptorView | undefined = offered.find((d) => d.id === chosen);
   const Form = descriptor ? PROVIDER_FORMS[descriptor.id] ?? ProviderConfigForm : null;
   const current = offered.find((d) => d.id === view.providerId);
+  const serverFields = onReconfigure ? changeableFields(view) : [];
+  const failing = view.status === "error" || (view.status === "connecting" && !!view.failures);
   const submit = (values: Record<string, string>) => void run(async () => { setSaved(""); await onSet(descriptor!.id, values); setChosen(""); setSaved(`${descriptor!.label} is now your ${kind === "onchain" ? "Bitcoin" : "Lightning"} source.`); });
+  const reconfigure = (values: Record<string, string>) => void run(async () => { setSaved(""); await onReconfigure!(values); setServerOpen(false); setSaved(`${view.label ?? "The source"} now uses that server.`); });
 
   return (
     <Section title="Source" testId={`${kind}-source`}>
       <Row testId={`${kind}-source-current`}
         label={view.providerId ? <>{view.label ?? view.providerId}{view.isDefault && <span className="text-accent ml-2 text-[10px] uppercase tracking-wider">Default</span>}</> : "No source"}
-        hint={<span data-testid={`${kind}-source-status`}>{view.error ?? [STATUS[view.status], view.alias, view.network && view.network !== "bitcoin" ? view.network : undefined, view.custodial ? "custodial" : undefined].filter(Boolean).join(" · ")}</span>}>
+        hint={<span data-testid={`${kind}-source-status`}>{sourceStatus(view)}</span>}>
+        {onRetry && failing && view.providerId && <Button disabled={busy} onClick={() => void run(onRetry)} data-testid={`${kind}-source-retry`}>Retry</Button>}
+        {serverFields.length > 0 && !serverOpen && <Button disabled={busy} onClick={() => { setServerOpen(true); setSaved(""); }} data-testid={`${kind}-source-change-server`}>Change server</Button>}
         {onClear && view.providerId && !view.isDefault && <Button disabled={busy} onClick={() => void run(onClear)} data-testid={`${kind}-source-clear`}>{kind === "lightning" ? "Back to Cashu mints" : "Remove"}</Button>}
       </Row>
+      {serverOpen && serverFields.length > 0 && (
+        <Block><ServerForm kind={kind} fields={serverFields} config={view.config ?? {}} busy={busy} onSubmit={reconfigure} onCancel={() => setServerOpen(false)} /></Block>
+      )}
       <Block>
         {offered.length === 0 ? (
           <Notice testId={`${kind}-source-none-offered`}>No {kind === "onchain" ? "on-chain Bitcoin" : "Lightning"} provider is available here yet{view.mode === "testnet" ? " in Testnet" : ""}.</Notice>

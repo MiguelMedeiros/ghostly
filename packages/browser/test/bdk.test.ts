@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
 import { BdkOnchain, bdk, parseBdkSettings, type BdkStore } from "../src/engine/paymentAdapters/providers/bdk";
 import { fakeAddress } from "../src/engine/paymentAdapters/providers/testing";
-import { NothingSpentError, type ProviderSettings } from "../src/engine/paymentAdapters/providers/types";
+import { NothingSpentError, SourceConfigError, SourceUnreachableError, type ProviderSettings } from "../src/engine/paymentAdapters/providers/types";
 import { newBdkPhrase } from "../src/engine/paymentAdapters/providers/bdkPhrase";
 import { describeOnchainProvider } from "./helpers/providerContract";
 import { FakeEsplora } from "./helpers/fakeEsplora";
@@ -40,8 +40,10 @@ describeOnchainProvider("BDK (mocked Esplora)", async () => {
 describe("the BDK wallet's settings", () => {
   it("are checked before anything is contacted", () => {
     expect(parseBdkSettings(settings({}, `  ${ABANDON.toUpperCase().replace(/ /g, "  ")} `))).toMatchObject({ network: "regtest", esplora: ESPLORA, mnemonic: ABANDON });
-    expect(parseBdkSettings(settings({ network: "signet", esplora: "" }))).toMatchObject({ esplora: "https://mempool.space/signet/api", script: "bip84" });
-    expect(parseBdkSettings(settings({ network: "mutinynet", esplora: "https://mutinynet.com/api/" }))).toMatchObject({ esplora: "https://mutinynet.com/api" });
+    // Blank: every public server of the network, blockstream.info first (mempool.space does not answer everywhere).
+    expect(parseBdkSettings(settings({ network: "signet", esplora: "" }))).toMatchObject({ esplora: "https://blockstream.info/signet/api", servers: ["https://blockstream.info/signet/api", "https://mempool.space/signet/api"], script: "bip84" });
+    expect(parseBdkSettings(settings({ network: "mutinynet", esplora: "" }))).toMatchObject({ servers: ["https://mutinynet.com/api"] });
+    expect(parseBdkSettings(settings({ network: "mutinynet", esplora: "https://mutinynet.com/api/" }))).toMatchObject({ esplora: "https://mutinynet.com/api", servers: ["https://mutinynet.com/api"] });
     for (const [config, mnemonic, error] of [
       [{ network: "bitcoin" }, undefined, /test network/],
       [{ network: "testnet" }, undefined, /test network/],
@@ -64,9 +66,120 @@ describe("the BDK wallet's settings", () => {
 
   it("refuses an Esplora server of another network, or one that does not answer", async () => {
     esplora.genesis = "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f";
-    await expect(open()).rejects.toThrow(/not on regtest/);
+    await expect(open()).rejects.toThrow(/is on Bitcoin mainnet, not regtest/);
     esplora.genesis = "0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206";
-    await expect(BdkOnchain.open(settings(), { signal: new AbortController().signal }, { bdk: nodeBdk, fetch: () => Promise.reject(new TypeError("fetch failed")) })).rejects.toThrow(/did not answer/);
+    await expect(BdkOnchain.open(settings(), { signal: new AbortController().signal }, { bdk: nodeBdk, fetch: () => Promise.reject(new TypeError("fetch failed")) })).rejects.toThrow(/not running/);
+  });
+});
+
+describe("why the BDK wallet could not connect", () => {
+  const signal = () => new AbortController().signal;
+  const openWith = (fetcher: typeof fetch, config: Record<string, string> = {}, deps: { bdk?: typeof nodeBdk } = {}) => BdkOnchain.open(settings(config), { signal: signal() }, { bdk: nodeBdk, fetch: fetcher, ...deps });
+  const answer = (status: number, body: string): typeof fetch => async (input) => Object.defineProperty(new Response(body, { status }), "url", { value: String(input) });
+  const refused: typeof fetch = () => Promise.reject(new TypeError("Load failed"));
+  const failure = async (opening: Promise<unknown>) => { try { await opening; } catch (error) { return error as Error; } throw new Error("it opened"); };
+
+  it("no answer in time: unreachable, tried again later, not a setting", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      // Like WebKit: the fetch ends when its signal aborts ("Fetch is aborted"), never before.
+      const hanging: typeof fetch = (_input, init) => new Promise((_resolve, reject) => init!.signal!.addEventListener("abort", () => reject(new DOMException("Fetch is aborted", "AbortError"))));
+      const opening = failure(openWith(hanging, { esplora: "https://esplora.example/api" }));
+      await vi.advanceTimersByTimeAsync(20_000);
+      const error = await opening;
+      expect(error).toBeInstanceOf(SourceUnreachableError);
+      expect(error.message).toBe("the Esplora server at esplora.example did not answer in 20 s");
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("closing the source is not a server that did not answer", async () => {
+    const controller = new AbortController();
+    const hanging: typeof fetch = (_input, init) => new Promise((_resolve, reject) => init!.signal!.addEventListener("abort", () => reject(new DOMException("Fetch is aborted", "AbortError"))));
+    const opening = failure(BdkOnchain.open(settings(), { signal: controller.signal }, { bdk: nodeBdk, fetch: hanging }));
+    controller.abort();
+    expect(await opening).not.toBeInstanceOf(SourceUnreachableError);
+  });
+
+  it("a local server that refuses: it is not running; a remote one: it did not answer", async () => {
+    const local = await failure(openWith(refused));
+    expect(local).toBeInstanceOf(SourceUnreachableError);
+    expect(local.message).toBe("nothing answers at 127.0.0.1:44299: the local Esplora server is not running");
+    const remote = await failure(openWith(refused, { esplora: "https://esplora.example/api" }));
+    expect(remote).toBeInstanceOf(SourceUnreachableError);
+    expect(remote.message).toBe("the Esplora server at esplora.example did not answer (Load failed)");
+  });
+
+  it("down or busy for a moment (5xx, 429): unreachable", async () => {
+    for (const status of [502, 503, 429]) {
+      const error = await failure(openWith(answer(status, "Bad gateway")));
+      expect(error, String(status)).toBeInstanceOf(SourceUnreachableError);
+      expect(error.message).toContain(`answered ${status}: it is down or busy`);
+    }
+  });
+
+  it("wrong network, named when it is a known chain", async () => {
+    for (const [genesis, chain] of [
+      ["000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f", "Bitcoin mainnet"],
+      ["000000000933ea01ad0ee984209779baaec3ced90fa3f408719526f8d77f4943", "testnet3"],
+      ["00000000da84f2bafbbc53dee25a72ae507ff4914b867c565be350b0da8bf043", "testnet4"],
+      ["00000008819873e925422c1ff0f99f7cc9bbb232af63a077a480a3633bee1ef6", "signet"],
+      ["11".repeat(32), "another chain"],
+    ]) {
+      const error = await failure(openWith(answer(200, genesis)));
+      expect(error, chain).toBeInstanceOf(SourceConfigError);
+      expect(error.message).toBe(`wrong network: the Esplora server at 127.0.0.1:44299 is on ${chain}, not regtest`);
+    }
+  });
+
+  it("not an Esplora API at all (a web page, a 404): a setting to change", async () => {
+    for (const [status, body] of [[404, "Not found"], [200, "<!doctype html><html>"]] as const) {
+      const error = await failure(openWith(answer(status, body)));
+      expect(error).toBeInstanceOf(SourceConfigError);
+      expect(error.message).toBe(`http://127.0.0.1:44299 is not an Esplora API (it answered ${status} for block 0)`);
+    }
+  });
+
+  it("a phrase that makes no wallet: bad descriptor", async () => {
+    const broken = async () => ({ ...(await nodeBdk()), seed_to_descriptor: () => { throw new Error("invalid key"); } }) as Awaited<ReturnType<typeof nodeBdk>>;
+    const error = await failure(openWith(esplora.fetch, {}, { bdk: broken }));
+    expect(error).toBeInstanceOf(SourceConfigError);
+    expect(error.message).toBe("bad descriptor: the recovery phrase does not make a BIP84 wallet (invalid key)");
+    // A setting checked before anything is contacted is a setting too.
+    expect(await failure(BdkOnchain.open(settings({}, "abandon abandon"), { signal: signal() }, { bdk: nodeBdk, fetch: esplora.fetch }))).toBeInstanceOf(SourceConfigError);
+  });
+
+  it("blank server: the public ones of the network are asked together, and the first on the chain is used", async () => {
+    // The fake answers under /api: the path of a public server, on it.
+    const onFake = (input: RequestInfo | URL) => String(input instanceof Request ? input.url : input).replace("/signet/api", "/api");
+    esplora.genesis = "00000008819873e925422c1ff0f99f7cc9bbb232af63a077a480a3633bee1ef6";
+    const asked: string[] = [];
+    const publicServers: typeof fetch = async (input, init) => {
+      const url = new URL(String(input instanceof Request ? input.url : input));
+      asked.push(url.host);
+      if (url.host === "blockstream.info") throw new TypeError("Load failed");
+      return esplora.fetch(onFake(input), init);
+    };
+    const provider = await BdkOnchain.open(settings({ network: "signet", esplora: "" }), { signal: signal() }, { bdk: nodeBdk, fetch: publicServers });
+    expect(provider.config.esplora).toBe("https://mempool.space/signet/api");
+    expect(new Set(asked)).toEqual(new Set(["blockstream.info", "mempool.space"]));
+    await provider.close();
+
+    const none = await failure(BdkOnchain.open(settings({ network: "signet", esplora: "" }), { signal: signal() }, { bdk: nodeBdk, fetch: refused }));
+    expect(none).toBeInstanceOf(SourceUnreachableError);
+    expect(none.message).toBe("no public signet Esplora server answered (blockstream.info, mempool.space): the Esplora server at blockstream.info did not answer (Load failed)");
+    // Every one on another chain: that is the setting (the network chosen), not the servers.
+    esplora.genesis = "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f";
+    expect(await failure(BdkOnchain.open(settings({ network: "signet", esplora: "" }), { signal: signal() }, { bdk: nodeBdk, fetch: (input, init) => esplora.fetch(onFake(input), init) }))).toBeInstanceOf(SourceConfigError);
+  });
+
+  it("offers the public servers of the network chosen, and a local regtest one, under the server field", () => {
+    const field = bdk.fields.find((f) => f.name === "esplora")!;
+    expect(field.changeable).toBe(true);
+    const offered = (network: string) => field.suggestions!.filter((s) => s.when?.network === network).map((s) => s.value);
+    expect(offered("signet")).toEqual(["https://blockstream.info/signet/api", "https://mempool.space/signet/api"]);
+    expect(offered("mutinynet")).toEqual(["https://mutinynet.com/api"]);
+    expect(offered("regtest")).toEqual(["http://127.0.0.1:47002"]);
+    for (const s of field.suggestions!) expect(() => parseBdkSettings(settings({ network: s.when!.network, esplora: s.value })), s.value).not.toThrow();
   });
 });
 

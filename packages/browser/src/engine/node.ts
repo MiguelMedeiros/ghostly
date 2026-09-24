@@ -881,6 +881,9 @@ export class GhostlyNode implements EngineImplementation {
   wake(): void {
     for (const live of this.links.values()) live.link?.wake();
     this.hold.wake();
+    // A wallet source that could not be reached at start-up (no network yet, a server asleep) tries again.
+    this.lightning.sources.wake();
+    this.bitcoin.sources.wake();
   }
 
   exportLinks() {
@@ -1366,9 +1369,13 @@ export class GhostlyNode implements EngineImplementation {
   async lightningSetSource({ providerId, values }: { providerId: string; values: Record<string, string> }) { await this.lightning.sources.set(providerId, values); await this.refreshWallet(); }
   /** Back to the default source, the Cashu mints. */
   async lightningClearSource() { await this.lightning.sources.clear(); await this.refreshWallet(); }
+  async lightningRetrySource() { await this.lightning.sources.retryNow(); await this.refreshWallet(); }
+  async lightningReconfigureSource({ values }: { values: Record<string, string> }) { await this.lightning.sources.reconfigure(values); await this.refreshWallet(); }
   async lightningRefresh() { await this.lightning.sources.refresh(); await this.lightning.reconcile(); }
   async bitcoinSetSource({ providerId, values }: { providerId: string; values: Record<string, string> }) { await this.bitcoin.sources.set(providerId, values); await this.refreshWallet(); }
   async bitcoinClearSource() { await this.bitcoin.sources.clear(); await this.refreshWallet(); }
+  async bitcoinRetrySource() { await this.bitcoin.sources.retryNow(); await this.refreshWallet(); }
+  async bitcoinReconfigureSource({ values }: { values: Record<string, string> }) { await this.bitcoin.sources.reconfigure(values); await this.refreshWallet(); }
   async bitcoinReceiveAddress() { const address = await this.bitcoin.receiveAddress(); await this.refreshWallet(); return address; }
   bitcoinRefresh() { return this.bitcoin.sources.refresh(); }
 

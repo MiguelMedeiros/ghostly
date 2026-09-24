@@ -45,12 +45,15 @@ function lightningCard(state:WalletState,cashu:string,unit:string):WalletCard {
  const ln=state.lightning;
  if(!ln||!ln.providerId||ln.providerId===CASHU_MINT_SOURCE)return {id:'lightning',name:'Lightning',balance:cashu,detail:'Invoices via Cashu',status:'Shared balance',ready:state.mints.length>0};
  const ready=ln.status==='ready';
- return {id:'lightning',name:'Lightning',balance:ready?ln.balance!==undefined?`${ln.balance.toLocaleString()} ${unit}`:'Ready':ln.status==='error'?'Unavailable':'Connecting…',detail:`Via ${ln.alias??ln.label??ln.providerId}`,status:ready?'Ready':ln.status==='error'?'Check settings':'Connecting…',ready};
+ // Reconnecting: the last balance it read (the status says it is not a fresh one), until it is unavailable.
+ const last=ln.status==='connecting'&&ln.balance!==undefined?`${ln.balance.toLocaleString()} ${unit}`:undefined;
+ return {id:'lightning',name:'Lightning',balance:ready?ln.balance!==undefined?`${ln.balance.toLocaleString()} ${unit}`:'Ready':ln.status==='error'?'Unavailable':last??'Connecting…',detail:`Via ${ln.alias??ln.label??ln.providerId}`,status:ready?'Ready':ln.status==='error'?'Check settings':'Connecting…',ready};
 }
 /** On-chain Bitcoin through the mode's source; there is none until one is set up. */
 function bitcoinCard(state:WalletState,unit:string):WalletCard {
  const bt=state.bitcoin,ready=bt?.status==='ready';
  const sats=(n:number)=>`${n.toLocaleString()} ${unit}`;
- return {id:'bitcoin',name:'Bitcoin',balance:ready?sats(bt!.balance??0):!bt||bt.status==='none'?'No source':bt.status==='error'?'Unavailable':'Connecting…',
+ const last=bt?.status==='connecting'&&bt.balance!==undefined?sats(bt.balance):undefined;
+ return {id:'bitcoin',name:'Bitcoin',balance:ready?sats(bt!.balance??0):!bt||bt.status==='none'?'No source':bt.status==='error'?'Unavailable':last??'Connecting…',
   detail:bt?.providerId?`On-chain · ${bt.alias??bt.label??bt.providerId}`:'On-chain',status:ready?'Ready':!bt||bt.status==='none'?'Set up':bt.status==='error'?'Check settings':'Connecting…',ready};
 }

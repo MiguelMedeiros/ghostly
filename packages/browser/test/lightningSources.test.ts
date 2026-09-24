@@ -319,13 +319,14 @@ describe("the sources of each wallet mode", () => {
     stops.push(s);
     await s.start("testnet");
     await s.ensureReady();
-    expect(s.view).toMatchObject({ status: "error", error: "Could not connect to Node: refused key •••" });
+    // One failure is not "unavailable": it is tried again by itself, and says why meanwhile.
+    expect(s.view).toMatchObject({ status: "connecting", error: "Could not connect to Node: refused key •••", failures: 1 });
     expect(changed).toHaveBeenCalled();
     await expect(s.use()).rejects.toThrow("refused key •••");
     fail = false;
     await s.ensureReady();
     expect(s.view.status).toBe("ready");
-  });
+  }, 30_000); // Every attempt unseals the secret (a 600k-round PBKDF2).
 
   it("a connection still waiting when the mode switches is dropped, and closed when it arrives", async () => {
     let arrive!: (n: Node) => void;

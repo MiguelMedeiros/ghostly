@@ -7,7 +7,7 @@ import type { WalletMode } from "../../../shared/mints";
 import { STORES, store, transact, wrap } from "../../../shared/idb";
 import { loadBdk, type Bdk } from "./bdkSdk";
 import type { OnchainBalance, OnchainInfo, OnchainPrepared, OnchainProvider, OnchainProviderDescriptor, OnchainSendRequest, OnchainTx, OnchainTxStatus } from "./onchain";
-import { NothingSpentError, type ProviderHost, type ProviderSettings } from "./types";
+import { NothingSpentError, SourceConfigError, SourceUnreachableError, type ProviderHost, type ProviderSettings } from "./types";
 
 /**
  * On-chain Bitcoin through BDK (bitcoindevkit) in WebAssembly: a descriptor wallet whose keys come from a
@@ -28,12 +28,35 @@ const GENESIS: Record<BdkNetwork, string> = {
   signet: "00000008819873e925422c1ff0f99f7cc9bbb232af63a077a480a3633bee1ef6",
   mutinynet: "00000008819873e925422c1ff0f99f7cc9bbb232af63a077a480a3633bee1ef6",
 };
-/** Public Esplora servers that answer browsers (CORS). Regtest has none: it is always your own. */
-export const DEFAULT_ESPLORA: Partial<Record<BdkNetwork, string>> = { signet: "https://mempool.space/signet/api", mutinynet: "https://mutinynet.com/api" };
+/**
+ * Public Esplora servers that answer browsers (CORS), tried together when the field is left blank: the
+ * first one on the right chain is used. Regtest has none: it is always your own. mempool.space is not the
+ * first because it does not answer from every network (it did not from the maintainer's).
+ */
+export const PUBLIC_ESPLORA: Record<BdkNetwork, readonly string[]> = {
+  signet: ["https://blockstream.info/signet/api", "https://mempool.space/signet/api"],
+  mutinynet: ["https://mutinynet.com/api"],
+  regtest: [],
+};
+/** What a chain's block 0 says about it, to name the network an Esplora server is really on. */
+const CHAIN_OF_GENESIS: Record<string, string> = {
+  "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f": "Bitcoin mainnet",
+  "000000000933ea01ad0ee984209779baaec3ced90fa3f408719526f8d77f4943": "testnet3",
+  "00000000da84f2bafbbc53dee25a72ae507ff4914b867c565be350b0da8bf043": "testnet4",
+  [GENESIS.signet]: "signet",
+  [GENESIS.regtest]: "regtest",
+};
 export type BdkScript = "bip84" | "bip86";
 const SCRIPT: Record<BdkScript, { type: "p2wpkh" | "p2tr"; label: string }> = { bip84: { type: "p2wpkh", label: "BIP84" }, bip86: { type: "p2tr", label: "BIP86" } };
 
-export interface BdkConfig { network: BdkNetwork; esplora: string; script: BdkScript }
+export interface BdkConfig {
+  network: BdkNetwork;
+  /** The server typed in, else the first public one of the network. */
+  esplora: string;
+  /** Where to look for the chain: the one typed in, or every public server of the network. */
+  servers: readonly string[];
+  script: BdkScript;
+}
 
 const STOP_GAP = 20;
 const PARALLEL = 4;
@@ -67,30 +90,53 @@ export function parseBdkSettings({ config, secrets }: ProviderSettings): BdkConf
   if (!BDK_NETWORKS.includes(network)) throw new Error("Choose a test network: Signet, Mutinynet or Regtest");
   const script = (config.script || "bip84") as BdkScript;
   if (!(script in SCRIPT)) throw new Error("Choose BIP84 or BIP86");
-  const esplora = (config.esplora || DEFAULT_ESPLORA[network] || "").trim().replace(/\/+$/, "");
-  if (!esplora) throw new Error("Regtest needs the address of your own Esplora server");
-  let url: URL;
-  try { url = new URL(esplora); } catch { throw new Error("The Esplora address is not a URL"); }
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))) throw new Error("The Esplora server must use HTTPS (plain HTTP only on this computer)");
-  if (url.username || url.password) throw new Error("Put no credentials in the Esplora address");
+  const typed = (config.esplora ?? "").trim().replace(/\/+$/, "");
+  const servers = typed ? [typed] : PUBLIC_ESPLORA[network];
+  if (!servers.length) throw new Error("Regtest needs the address of your own Esplora server");
+  if (typed) {
+    let url: URL;
+    try { url = new URL(typed); } catch { throw new Error("The Esplora address is not a URL"); }
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && isLocal(url))) throw new Error("The Esplora server must use HTTPS (plain HTTP only on this computer)");
+    if (url.username || url.password) throw new Error("Put no credentials in the Esplora address");
+  }
   const mnemonic = (secrets.mnemonic ?? "").trim().toLowerCase().split(/\s+/).join(" ");
   if (!validateMnemonic(mnemonic, wordlist)) throw new Error("That recovery phrase is not valid (BIP39, English)");
-  return { network, esplora, script, mnemonic };
+  return { network, esplora: servers[0], servers, script, mnemonic };
 }
+
+const isLocal = (url: URL) => ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
 
 /** Where a reviewed transaction went: the answer an Esplora gives about it and its inputs. */
 class Esplora {
-  constructor(readonly url: string, private readonly signal: AbortSignal, private readonly fetcher: typeof fetch) {}
+  readonly host: string;
+  private readonly local: boolean;
+  constructor(readonly url: string, private readonly signal: AbortSignal, private readonly fetcher: typeof fetch) {
+    const parsed = new URL(url);
+    this.host = parsed.host;
+    this.local = isLocal(parsed);
+  }
 
-  /** Bounded: a time limit, and at most `limit` characters read. */
+  /**
+   * Bounded: a time limit, and at most `limit` characters read. No answer at all (a time-out, a refused
+   * connection, no network) is a `SourceUnreachableError` that says which; closing the source is not.
+   */
   async request(path: string, init: RequestInit = {}, limit = 64 * 1024): Promise<{ status: number; body: string }> {
     // Not AbortSignal.any: the WebKit of Desktop's WebView may be older than it.
+    let timedOut = false;
     const controller = new AbortController(), abort = () => controller.abort();
-    const timer = setTimeout(abort, HTTP_TIMEOUT);
+    const timer = setTimeout(() => { timedOut = true; abort(); }, HTTP_TIMEOUT);
     this.signal.addEventListener("abort", abort, { once: true });
     if (this.signal.aborted) abort();
     try {
-      const response = await this.fetcher(`${this.url}${path}`, { ...init, signal: controller.signal });
+      let response: Response;
+      try { response = await this.fetcher(`${this.url}${path}`, { ...init, signal: controller.signal }); }
+      catch (error) {
+        if (this.signal.aborted) throw error;
+        if (timedOut) throw new SourceUnreachableError(`the Esplora server at ${this.host} did not answer in ${HTTP_TIMEOUT / 1000} s`, error);
+        // A local address fails at once when nothing listens there (connection refused).
+        if (this.local) throw new SourceUnreachableError(`nothing answers at ${this.host}: the local Esplora server is not running`, error);
+        throw new SourceUnreachableError(`the Esplora server at ${this.host} did not answer (${message(error)})`, error);
+      }
       const reader = response.body?.getReader();
       let body = "";
       if (reader) {
@@ -105,6 +151,39 @@ class Esplora {
       return { status: response.status, body };
     } finally { clearTimeout(timer); this.signal.removeEventListener("abort", abort); }
   }
+  /**
+   * The server is an Esplora on the wallet's chain: its block 0 is the network's genesis. A server that
+   * is down for a moment (5xx, 429) is unreachable; anything else it says is a setting to change.
+   */
+  async probe(network: BdkNetwork) {
+    const { status, body } = await this.request("/block-height/0", {}, 1024);
+    if (status >= 500 || status === 429) throw new SourceUnreachableError(`the Esplora server at ${this.host} answered ${status}: it is down or busy`);
+    const genesis = body.trim();
+    if (status !== 200 || !/^[0-9a-f]{64}$/.test(genesis)) throw new SourceConfigError(`${this.url} is not an Esplora API (it answered ${status} for block 0)`);
+    if (genesis !== GENESIS[network]) throw new SourceConfigError(`wrong network: the Esplora server at ${this.host} is on ${CHAIN_OF_GENESIS[genesis] ?? "another chain"}, not ${network}`);
+  }
+
+  /**
+   * The first of `servers` that is an Esplora of `network`, all asked at once. When none is: the settings'
+   * problem if every one said something wrong, else "unreachable" (the next attempt may find one).
+   */
+  static async first(servers: readonly string[], network: BdkNetwork, signal: AbortSignal, fetcher: typeof fetch): Promise<Esplora> {
+    if (servers.length === 1) { const only = new Esplora(servers[0], signal, fetcher); await only.probe(network); return only; }
+    const errors: unknown[] = [];
+    return new Promise<Esplora>((resolve, reject) => {
+      for (const url of servers) {
+        const esplora = new Esplora(url, signal, fetcher);
+        esplora.probe(network).then(() => resolve(esplora), (error) => {
+          errors.push(error);
+          if (errors.length < servers.length) return;
+          if (signal.aborted) return reject(errors[0]);
+          if (errors.every((e) => e instanceof SourceConfigError)) return reject(errors[0]);
+          reject(new SourceUnreachableError(`no public ${network} Esplora server answered (${servers.map((s) => new URL(s).host).join(", ")}): ${message(errors[0])}`, errors[0]));
+        });
+      }
+    });
+  }
+
   async text(path: string) {
     const { status, body } = await this.request(path);
     if (status !== 200) throw new Error(`Esplora answered ${status} for ${path.split("/")[1]}`);
@@ -145,19 +224,26 @@ export class BdkOnchain implements OnchainProvider {
   }
   private scanned: boolean;
 
+  /**
+   * Checks the settings, finds an Esplora server on the wallet's chain, and loads the wallet. What fails
+   * says why: `SourceUnreachableError` (no answer: try again later), `SourceConfigError` (a setting).
+   */
   static async open(settings: ProviderSettings, host: Pick<ProviderHost, "signal">, deps: BdkDeps = {}): Promise<BdkOnchain> {
-    const { mnemonic, ...config } = parseBdkSettings(settings);
+    let parsed: ReturnType<typeof parseBdkSettings>;
+    try { parsed = parseBdkSettings(settings); } catch (error) { throw new SourceConfigError(message(error), error); }
+    const { mnemonic, ...found } = parsed;
     const fetcher = deps.fetch ?? globalThis.fetch.bind(globalThis);
-    const esplora = new Esplora(config.esplora, host.signal, fetcher);
     // The server must be on the network the wallet is for: a regtest wallet never reads another chain.
-    let genesis: string;
-    try { genesis = await esplora.text("/block-height/0"); } catch (error) { throw Object.assign(new Error(`the Esplora server did not answer (${message(error)})`), { cause: error }); }
-    if (genesis !== GENESIS[config.network]) throw new Error(`that Esplora server is not on ${config.network}`);
+    const esplora = await Esplora.first(found.servers, found.network, host.signal, fetcher);
+    const config: BdkConfig = { ...found, esplora: esplora.url };
     const bdk = await (deps.bdk ?? loadBdk)();
     const chain = CHAIN[config.network];
-    const pair = bdk.seed_to_descriptor(mnemonicToSeedSync(mnemonic), chain, SCRIPT[config.script].type);
-    let wallet = bdk.Wallet.create(chain, pair.external, pair.internal);
-    const publicDescriptor = wallet.public_descriptor("external");
+    let pair: ReturnType<Bdk["seed_to_descriptor"]>, wallet: Wallet, publicDescriptor: string;
+    try {
+      pair = bdk.seed_to_descriptor(mnemonicToSeedSync(mnemonic), chain, SCRIPT[config.script].type);
+      wallet = bdk.Wallet.create(chain, pair.external, pair.internal);
+      publicDescriptor = wallet.public_descriptor("external");
+    } catch (error) { throw new SourceConfigError(`bad descriptor: the recovery phrase does not make a ${SCRIPT[config.script].label} wallet (${message(error)})`, error); }
     const fingerprint = /\[([0-9a-f]{8})\//.exec(publicDescriptor)?.[1] ?? "";
     const key = `bdkWallet-${config.network}-${hex(sha256(new TextEncoder().encode(publicDescriptor))).slice(0, 32)}`;
     const walletStore = deps.store ?? idbBdkStore;
@@ -167,7 +253,7 @@ export class BdkOnchain implements OnchainProvider {
       // A state this version cannot read is rebuilt from the chain: it holds nothing the chain does not.
       catch { stored = undefined; }
     }
-    const provider = new BdkOnchain(bdk, wallet, config, key, esplora, new bdk.EsploraClient(config.esplora, 2), walletStore, fingerprint, stored);
+    const provider = new BdkOnchain(bdk, wallet, config, key, esplora, new bdk.EsploraClient(esplora.url, 2), walletStore, fingerprint, stored);
     host.signal.addEventListener("abort", () => { provider.closed = true; }, { once: true });
     provider.persist();
     return provider;
@@ -380,8 +466,13 @@ export class BdkOnchain implements OnchainProvider {
 
 const FIELDS = [
   { name: "network", label: "Network", kind: "select", options: [{ value: "signet", label: "Signet" }, { value: "mutinynet", label: "Mutinynet" }, { value: "regtest", label: "Regtest" }], defaults: { testnet: "signet" } },
-  { name: "esplora", label: "Esplora server", kind: "url", optional: true, placeholder: "https://mempool.space/signet/api",
-    help: "Blank: mempool.space for Signet, mutinynet.com for Mutinynet. Regtest needs your own; it must allow this app's origin (CORS)." },
+  { name: "esplora", label: "Esplora server", kind: "url", optional: true, changeable: true, placeholder: "Blank: a public server of the network",
+    help: "Blank: the public servers of Signet (blockstream.info, mempool.space) or Mutinynet (mutinynet.com), whichever answers. Regtest needs your own; it must allow this app's origin (CORS).",
+    suggestions: [
+      ...PUBLIC_ESPLORA.signet.map((value) => ({ value, label: `${new URL(value).host} (Signet)`, when: { network: "signet" } })),
+      ...PUBLIC_ESPLORA.mutinynet.map((value) => ({ value, label: `${new URL(value).host} (Mutinynet)`, when: { network: "mutinynet" } })),
+      { value: "http://127.0.0.1:47002", label: "This computer: the e2e regtest stack (npm run e2e:infra:up)", when: { network: "regtest" } },
+    ] },
   { name: "script", label: "Addresses", kind: "select", options: [{ value: "bip84", label: "Native SegWit (BIP84, bc1q…)" }, { value: "bip86", label: "Taproot (BIP86, bc1p…)" }] },
   { name: "mnemonic", label: "Recovery phrase", kind: "secret", placeholder: "twelve or twenty-four words", help: "BIP39, English. Leave it to Ghostly to make a new wallet, or type yours to restore one." },
 ] as const satisfies OnchainProviderDescriptor["fields"];

@@ -118,9 +118,16 @@ export interface EngineApi {
   /** Makes a provider this mode's Lightning source. `values`: its form; secret fields are sealed, never returned. */
   lightningSetSource(params: { providerId: string; values: Record<string, string> }): void;
   lightningClearSource(): void;
+  /** Tries the mode's Lightning source again now, instead of after the wait between attempts. */
+  lightningRetrySource(): void;
+  /** Changes the server of the saved Lightning source (its `changeable` fields), keeping its secrets. */
+  lightningReconfigureSource(params: { values: Record<string, string> }): void;
   lightningRefresh(): void;
   bitcoinSetSource(params: { providerId: string; values: Record<string, string> }): void;
   bitcoinClearSource(): void;
+  bitcoinRetrySource(): void;
+  /** Changes the server of the saved Bitcoin source (a BDK wallet's Esplora), keeping the wallet. */
+  bitcoinReconfigureSource(params: { values: Record<string, string> }): void;
   bitcoinReceiveAddress(): string;
   bitcoinRefresh(): void;
   /** Redeems a token pasted by the user. Only mints the user added are accepted. */

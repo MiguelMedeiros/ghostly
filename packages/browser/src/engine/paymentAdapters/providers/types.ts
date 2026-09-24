@@ -32,6 +32,18 @@ export interface ProviderField {
   options?: { value: string; label: string }[];
   /** Pre-filled per mode, e.g. a public test server for Testnet. */
   defaults?: Partial<Record<WalletMode, string>>;
+  /**
+   * Values offered under a `url` or `text` field (a list to pick from, anything may still be typed), each
+   * only while the other fields hold `when`: e.g. a public Esplora server per network.
+   */
+  suggestions?: { value: string; label: string; when?: Record<string, string> }[];
+  /**
+   * A server address that can be changed on a saved source without its secrets being typed again, and
+   * without changing whose money it is: an Esplora server of a BDK wallet (the wallet is the phrase). The
+   * source's "Change server" edits these fields only. Never mark a field that picks another account (a
+   * node's URL: another node is other money).
+   */
+  changeable?: boolean;
 }
 
 /** What the person typed, split by the field kinds: `config` is shown back, `secrets` never is. */
@@ -113,6 +125,8 @@ export function providerDescriptorProblems(d: ProviderDescriptor<unknown>): stri
       if (!f.label?.trim()) problems.push(`field ${f.name} has no label`);
       if (!FIELD_KINDS.includes(f.kind)) problems.push(`field ${f.name} has an unknown kind`);
       if (f.kind === "select" && !f.options?.length) problems.push(`field ${f.name} is a select without options`);
+      if (f.suggestions !== undefined && (!Array.isArray(f.suggestions) || f.suggestions.some((o: { value?: unknown; label?: unknown } | undefined) => typeof o?.value !== "string" || typeof o?.label !== "string"))) problems.push(`field ${f.name} has malformed suggestions`);
+      if (f.changeable && (f.kind === "secret" || f.kind === "select")) problems.push(`field ${f.name} cannot be changeable: only a server address can`);
     }
   }
   if (typeof d.create !== "function") problems.push("create is not a function");
@@ -136,6 +150,27 @@ export const describeProvider = ({ id, label, kind, description, networks, platf
 export class NothingSpentError extends Error {
   constructor(message: string) { super(message); this.name = "NothingSpentError"; }
 }
+
+/**
+ * The source could not be reached: no answer, a time-out, a refused connection, a server error. The
+ * engine keeps trying by itself (with backoff) and shows the source as connecting meanwhile.
+ */
+export class SourceUnreachableError extends Error {
+  constructor(message: string, cause?: unknown) { super(message); this.name = "SourceUnreachableError"; if (cause !== undefined) Object.assign(this, { cause }); }
+}
+
+/**
+ * A setting of the source is wrong (a server on another network, a phrase that makes no wallet): trying
+ * again changes nothing until the setting does. The engine shows it as unavailable at once.
+ */
+export class SourceConfigError extends Error {
+  constructor(message: string, cause?: unknown) { super(message); this.name = "SourceConfigError"; if (cause !== undefined) Object.assign(this, { cause }); }
+}
+
+/** What went wrong connecting a source, by name (a plugin bundles its own copies of these classes). */
+export type SourceProblem = "unreachable" | "config" | "other";
+export const sourceProblem = (error: unknown): SourceProblem =>
+  error instanceof Error && error.name === "SourceUnreachableError" ? "unreachable" : error instanceof Error && error.name === "SourceConfigError" ? "config" : "other";
 
 /**
  * Whether an error says nothing was spent. By name, not by class: a provider built outside the app (an

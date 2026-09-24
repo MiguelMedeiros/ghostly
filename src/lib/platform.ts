@@ -224,8 +224,16 @@ export interface WalletPlatform {
   lightningSetSource(providerId: string, values: Record<string, string>): Promise<void>;
   /** Back to the Cashu mints. */
   lightningClearSource(): Promise<void>;
+  /** Tries the Lightning source again now. */
+  lightningRetrySource(): Promise<void>;
+  /** Changes the server of the saved Lightning source, keeping its secrets. */
+  lightningReconfigureSource(values: Record<string, string>): Promise<void>;
   bitcoinSetSource(providerId: string, values: Record<string, string>): Promise<void>;
   bitcoinClearSource(): Promise<void>;
+  /** Tries the Bitcoin source again now. */
+  bitcoinRetrySource(): Promise<void>;
+  /** Changes the server of the saved Bitcoin source (a BDK wallet's Esplora), keeping the wallet. */
+  bitcoinReconfigureSource(values: Record<string, string>): Promise<void>;
   /** A fresh address of the Bitcoin source to be paid on. */
   bitcoinReceiveAddress(): Promise<string>;
   bitcoinRefresh(): Promise<void>;
