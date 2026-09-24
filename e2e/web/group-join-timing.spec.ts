@@ -46,6 +46,8 @@ test("time a join through a group's link, step by step", { tag: ["@feature:group
     await alice.page.getByTestId("sidebar-new-more").click();
     await alice.page.getByTestId("new-group").click();
     await alice.page.getByTestId("new-group-name").fill(`timing ${run}`);
+    // A private group (group-mesh/1): the join the admin's app answers.
+    await alice.page.getByTestId("new-group-kind-mesh").click();
     await alice.page.getByTestId("new-group-create").click();
     const url = await alice.page.getByTestId("group-share-dialog").getByTestId("group-link-url").inputValue();
     await alice.page.getByTestId("group-share-dialog").getByTestId("group-share-done").click();

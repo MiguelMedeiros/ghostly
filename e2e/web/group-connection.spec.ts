@@ -31,6 +31,8 @@ test("the group's connection: every member's edge, down when one goes away, gone
   await alice.page.getByTestId("sidebar-new-more").click();
   await alice.page.getByTestId("new-group").click();
   await alice.page.getByTestId("new-group-name").fill("Mesh");
+  // A private group (group-mesh/1): everyone connects to everyone, which is what this control sums up.
+  await alice.page.getByTestId("new-group-kind-mesh").click();
   await alice.page.getByTestId("new-group-create").click();
   const url = await alice.page.getByTestId("group-share-dialog").getByTestId("group-link-url").inputValue();
   await alice.page.getByTestId("group-share-done").click();

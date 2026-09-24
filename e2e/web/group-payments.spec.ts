@@ -63,6 +63,8 @@ test.describe("group payments", { tag: "@network" }, () => {
     await alice.page.getByTestId("sidebar-new-more").click();
     await alice.page.getByTestId("new-group").click();
     await alice.page.getByTestId("new-group-name").fill("Lunch");
+    // A private group (group-mesh/1): payments are not part of community groups.
+    await alice.page.getByTestId("new-group-kind-mesh").click();
     await alice.page.getByTestId("new-group-create").click();
     const url = await alice.page.getByTestId("group-share-dialog").getByTestId("group-link-url").inputValue();
     await alice.page.getByTestId("group-share-done").click();
