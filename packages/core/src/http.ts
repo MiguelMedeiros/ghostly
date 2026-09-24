@@ -599,6 +599,11 @@ export class HttpClient {
         LIMITS.requestTimeoutMs + 5_000,
       );
       request.signal?.addEventListener("abort", () => this.abort(id, new GhostlyHttpError("aborted", "Request aborted")));
+      // Aborted before this point (while it waited for a slot, or before the call): the listener never fires.
+      if (request.signal?.aborted) {
+        this.abort(id, new GhostlyHttpError("aborted", "Request aborted"), false);
+        return;
+      }
 
       try {
         this.channel.send(

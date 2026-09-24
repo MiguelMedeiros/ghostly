@@ -632,3 +632,40 @@ describe("webLocalFetch", () => {
     await vi.waitFor(() => expect(fake.cancelled()).toBe(true));
   });
 });
+
+describe("HttpClient and a signal that fires before the request goes out", () => {
+  const client = () => {
+    const r = recorder();
+    return { ...r, client: new HttpClient(r.channel) };
+  };
+  const requests = (controls: ControlFrame[]) => controls.filter((f) => f.t === "req") as HttpRequestFrame[];
+
+  it("never sends a request whose signal is already aborted", async () => {
+    const c = client();
+    await expect(c.client.request("atlas", { method: "GET", path: "/", signal: AbortSignal.abort() })).rejects.toMatchObject({ code: "aborted" });
+    expect(c.controls()).toEqual([]);
+    // Its slot is free again.
+    void c.client.request("atlas", { method: "GET", path: "/next" }).catch(() => {});
+    await flush();
+    expect(requests(c.controls()).map((f) => f.p)).toEqual(["/next"]);
+    c.client.close();
+  });
+
+  it("never sends a request aborted while it waits for a slot, and hands the slot on", async () => {
+    const c = client();
+    const first = Array.from({ length: LIMITS.maxClientInFlight }, () => c.client.request("atlas", { method: "GET", path: "/" }));
+    const controller = new AbortController();
+    const cancelled = c.client.request("atlas", { method: "GET", path: "/cancelled", signal: controller.signal });
+    const after = c.client.request("atlas", { method: "GET", path: "/after" });
+    await flush();
+    controller.abort();
+    c.client.handleResponse({ t: "res", id: 1, st: 204, h: [], b: false });
+    await first[0];
+    await expect(cancelled).rejects.toMatchObject({ code: "aborted" });
+    await flush();
+    expect(requests(c.controls()).map((f) => f.p)).not.toContain("/cancelled");
+    expect(requests(c.controls()).at(-1)?.p).toBe("/after");
+    c.client.close();
+    await Promise.allSettled([...first, after]);
+  });
+});
