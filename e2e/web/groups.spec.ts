@@ -152,7 +152,10 @@ test("four people: create, invite, everyone reads everyone, catch-up, removal, a
   // Alice leaves; the two who stay see it.
   await alice.page.getByTestId("group-options").click();
   await alice.page.getByTestId("group-leave").click();
-  await expect(groupChat(alice)).toHaveAttribute("data-status", "left");
+  await alice.page.getByTestId("group-leave-confirm").click();
+  // Gone from her list at once, not kept as a dead row.
+  await expect(alice.page.getByTestId("group-row")).toHaveCount(0);
+  await expect(groupChat(alice)).toHaveCount(0);
   await expect(bob.page.getByTestId("group-event").filter({ hasText: "Alice is no longer a member" })).toBeVisible({ timeout: 60_000 });
   await bob.page.getByTestId("group-members").click();
   await expect(bob.page.getByTestId("group-member")).toHaveCount(2);

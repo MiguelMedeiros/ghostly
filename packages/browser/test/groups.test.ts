@@ -148,18 +148,18 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     expect(world.texts("bob")).toEqual(["hello bob", "hello alice"]);
     expect((await alice.messages(groupId)).filter(m => !m.event).map(m => m.sender)).toEqual(["me", "peer"]);
 
-    await bob.leave(groupId); await world.settle();
-    expect(bob.views()[0]).toMatchObject({ status: "left" });
+    // Leaving: the group is gone from Bob's list and history at once; the admin removes him and closes the edges.
+    await bob.leave(groupId);
+    expect(bob.views()).toEqual([]);
+    expect(await bob.messages(groupId)).toEqual([]);
+    await world.settle();
     expect(alice.views()[0].members).toHaveLength(1);
     await world.settle();
     expect(world.peers.get("alice")!.edges.size).toBe(0);
     expect(world.peers.get("bob")!.edges.size).toBe(0);
     expect(world.events("alice")).toEqual(["created", "joined", "gone"]);
-
-    // Forgetting removes the group and its history from the device.
-    await bob.forget(groupId);
-    expect(bob.views()).toEqual([]);
-    expect(await bob.messages(groupId)).toEqual([]);
+    // Nothing of it is left on Bob's device once the admin confirmed.
+    expect(await world.peers.get("bob")!.store.getGroups()).toEqual([]);
   });
 
   it("refuses to invite what it cannot: a contact without groups, a member twice, or as a non-admin", async () => {
@@ -299,5 +299,115 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     await ginaAgain.load();
     expect(world.peers.get("gina")!.entries.size).toBe(1);
     expect(ginaAgain.views()[0].invitation).toMatchObject({ viaLink: true });
+  });
+
+  describe("leaving", () => {
+    /** Alice (admin), Bob and Carol, invited from Alice's contacts, with their edges up. */
+    async function trio() {
+      const world = new World();
+      const alice = world.add("alice"), bob = world.add("bob"), carol = world.add("carol");
+      world.chats.set("chat-ab", ["alice", "bob"]);
+      world.chats.set("chat-ac", ["alice", "carol"]);
+      await alice.load(); await bob.load(); await carol.load();
+      const keys = (globalThis as unknown as { __keys: Map<string, string> }).__keys;
+      const stateOf = (g: Groups, id: string): GroupState => (g as unknown as { sessions: Map<string, { state: GroupState }> }).sessions.get(id)!.state;
+      const record = (g: Groups) => { for (const v of g.views()) if (v.myKey) keys.set(stateOf(g, v.id).seedB64, v.myKey); };
+      const groupId = await alice.create("Ghosts");
+      await alice.invite(groupId, "chat-ab"); await alice.invite(groupId, "chat-ac"); await world.settle();
+      await bob.accept(groupId); await world.settle();
+      await carol.accept(groupId); await world.settle();
+      record(alice); record(bob); record(carol);
+      await world.settle(); await world.meet();
+      const known = new Map([alice, bob, carol].map(g => [g, g.views()[0].myKey!]));
+      const key = (g: Groups) => known.get(g) ?? g.views()[0].myKey!;
+      /** Takes the edge between two members down (or up again) on both sides. */
+      const edge = (a: string, b: Groups, open: boolean) => {
+        for (const e of world.peers.get(a)!.edges.values()) if (e.peer === key(b)) e.open = open;
+        for (const e of [...world.peers.values()].find(p => p.groups === b)!.edges.values()) if (e.peer === key(world.peers.get(a)!.groups)) e.open = open;
+      };
+      return { world, alice, bob, carol, groupId, key, edge, known };
+    }
+
+    it("a member leaving while the admin is away: gone from its list at once, and the admin hears it when they meet", async () => {
+      const { world, alice, bob, carol, groupId, key, edge } = await trio();
+      const bobKey = key(bob);
+      edge("alice", bob, false);
+      // The contact chat is down too: nothing can carry the leave now.
+      world.chats.delete("chat-ab");
+      await bob.leave(groupId); await world.settle();
+      expect(bob.views()).toEqual([]);
+      expect(await bob.messages(groupId)).toEqual([]);
+      // Only the edge to the admin stays, waiting for it; Carol's is closed.
+      expect([...world.peers.get("bob")!.edges.values()].map(e => e.peer)).toEqual([key(alice)]);
+      expect(alice.views()[0].members.map(m => m.key)).toContain(bobKey);
+
+      edge("alice", bob, true);
+      await world.meet(); await world.settle();
+      expect(alice.views()[0].members.map(m => m.key)).not.toContain(bobKey);
+      expect(carol.views()[0].members.map(m => m.key)).not.toContain(bobKey);
+      expect(world.peers.get("bob")!.edges.size).toBe(0);
+      expect(await world.peers.get("bob")!.store.getGroups()).toEqual([]);
+    });
+
+    it("the admin leaving hands the role to a member who is online, who then removes it", async () => {
+      const { world, alice, bob, carol, groupId, key, edge } = await trio();
+      const aliceKey = key(alice);
+      edge("alice", bob, false);
+      expect(alice.successor(groupId)).toBe(key(carol));
+      await alice.leave(groupId); await world.settle();
+      expect(alice.views()).toEqual([]);
+      expect(carol.views()[0]).toMatchObject({ isAdmin: true });
+      expect(carol.views()[0].members.map(m => m.key)).not.toContain(aliceKey);
+      expect(await world.peers.get("alice")!.store.getGroups()).toEqual([]);
+      // Bob, away for all of it, is caught up by Carol when they meet.
+      await world.meet(); await world.settle();
+      expect(bob.views()[0].members.map(m => [m.key, m.role])).toEqual(carol.views()[0].members.map(m => [m.key, m.role]));
+      expect(await carol.send(groupId, "still here")).toEqual({ error: null });
+      await world.settle();
+      expect(world.texts("bob")).toContain("still here");
+    });
+
+    it("the admin cannot leave when nobody is online to take over, and a group of one simply goes", async () => {
+      const { world, alice, bob, carol, groupId, edge } = await trio();
+      edge("alice", bob, false); edge("alice", carol, false);
+      await expect(alice.leave(groupId)).rejects.toThrow(/nobody else in the group is online/);
+      expect(alice.views()[0]).toMatchObject({ status: "active", isAdmin: true });
+
+      const solo = await alice.create("Just me");
+      await alice.leave(solo); await world.settle();
+      expect(alice.views().map(v => v.id)).toEqual([groupId]);
+      expect(await alice.messages(solo)).toEqual([]);
+    });
+
+    it("a leave the admin never hears is forgotten after a week", async () => {
+      const { world, alice, bob, groupId, edge } = await trio();
+      edge("alice", bob, false);
+      world.chats.delete("chat-ab");
+      await bob.leave(groupId); await world.settle();
+      expect(await world.peers.get("bob")!.store.getGroups()).toHaveLength(1);
+      await bob.tick(Date.now() + 6 * 24 * 60 * 60_000);
+      expect(await world.peers.get("bob")!.store.getGroups()).toHaveLength(1);
+      await bob.tick(Date.now() + 8 * 24 * 60 * 60_000); await world.settle();
+      expect(await world.peers.get("bob")!.store.getGroups()).toEqual([]);
+      expect(world.peers.get("bob")!.edges.size).toBe(0);
+      void alice;
+    });
+
+    it("a tombstone survives a restart and still delivers the leave", async () => {
+      const { world, alice, bob, groupId, key, edge, known } = await trio();
+      const bobKey = key(bob);
+      edge("alice", bob, false);
+      world.chats.delete("chat-ab");
+      await bob.leave(groupId); await world.settle();
+      const again = new Groups({ ...(bob as unknown as { host: GroupsHost }).host, emit: vi.fn() }, world.peers.get("bob")!.store);
+      await again.load(); await world.settle();
+      world.peers.get("bob")!.groups = again;
+      known.set(again, key(bob));
+      expect(again.views()).toEqual([]);
+      edge("alice", again, true);
+      await world.meet(); await world.settle();
+      expect(alice.views()[0].members.map(m => m.key)).not.toContain(bobKey);
+      expect(await world.peers.get("bob")!.store.getGroups()).toEqual([]);
+    });
   });
 });

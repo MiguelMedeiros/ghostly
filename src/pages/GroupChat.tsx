@@ -6,6 +6,7 @@ import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
 import { GroupMembersDialog } from "../components/GroupMembersDialog";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
+import { LeaveGroupDialog } from "../components/LeaveGroupDialog";
 import { useOutsideDismiss } from "../hooks/useDismiss";
 import { markGroupRead, memberName } from "../lib/groups";
 import type { ChatMessage } from "../lib/types";
@@ -39,6 +40,7 @@ export function GroupChat() {
   const [showMembers, setShowMembers] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmForget, setConfirmForget] = useState(false);
+  const [confirmLeave, setConfirmLeave] = useState(false);
   const [error, setError] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
   const { settings } = useSettings();
@@ -104,7 +106,7 @@ export function GroupChat() {
               <button onClick={() => { setShowMembers(true); setMenuOpen(false); }} className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary">Members…</button>
               {group.isAdmin && <button data-testid="group-rotate" onClick={() => void act(() => engine.call("rotateGroup", { groupId }))} className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary">Rotate keys</button>}
               <div className="border-t border-border my-1" />
-              {group.status === "active" && <button data-testid="group-leave" onClick={() => void act(() => engine.call("leaveGroup", { groupId }))} className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-danger hover:bg-surface-hover">Leave group</button>}
+              {group.status === "active" && <button data-testid="group-leave" onClick={() => { setMenuOpen(false); setConfirmLeave(true); }} className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-danger hover:bg-surface-hover">Leave group</button>}
               <button data-testid="group-forget" onClick={() => { setMenuOpen(false); setConfirmForget(true); }} className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-danger hover:bg-surface-hover">Delete from this device</button>
             </div>}
           </div>
@@ -132,6 +134,8 @@ export function GroupChat() {
         fileUnavailable="Files are not part of groups yet" paymentsUnavailable="Payments are not part of groups yet" />
 
       {showMembers && <GroupMembersDialog group={group} onClose={() => setShowMembers(false)} />}
+      {confirmLeave && <LeaveGroupDialog group={group} onClose={() => setConfirmLeave(false)}
+        onConfirm={async () => { await engine.call("leaveGroup", { groupId }); setConfirmLeave(false); navigate("/"); }} />}
       {confirmForget && <DeleteChatDialog name={group.name} onClose={() => setConfirmForget(false)}
         onConfirm={() => { setConfirmForget(false); void engine.call("forgetGroup", { groupId }).catch(() => {}); navigate("/"); }} />}
     </div>
