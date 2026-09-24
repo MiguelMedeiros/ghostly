@@ -1,11 +1,16 @@
 # Security updates open on their own (they need "Dependabot security updates"
 # on in the repository settings). The weekly version updates below are grouped
 # so they arrive as a few pull requests, not dozens.
+#
+# Everything targets dev, where work lands; main only holds what is released
+# (CONTRIBUTING.md). Security updates still open against the default branch,
+# which is dev as well.
 version: 2
 updates:
   - package-ecosystem: npm
     directory: /
     schedule: { interval: weekly, day: monday }
+    target-branch: dev
     # typescript-eslint does not support TypeScript 7 yet; drop once it does.
     ignore:
       - dependency-name: typescript
@@ -17,6 +22,7 @@ updates:
   - package-ecosystem: npm
     directory: /website
     schedule: { interval: weekly, day: monday }
+    target-branch: dev
     # typescript-eslint does not support TypeScript 7 yet; drop once it does.
     ignore:
       - dependency-name: typescript
@@ -32,6 +38,7 @@ updates:
   - package-ecosystem: cargo
     directory: /
     schedule: { interval: weekly, day: monday }
+    target-branch: dev
     groups:
       cargo:
         patterns: ["*"]
@@ -39,9 +46,11 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly, day: monday }
+    target-branch: dev
     groups:
       actions:
         patterns: ["*"]
   - package-ecosystem: docker
     directories: [/web, /website]
     schedule: { interval: weekly, day: monday }
+    target-branch: dev
