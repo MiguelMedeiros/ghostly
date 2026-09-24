@@ -6,6 +6,8 @@ import { useI18n } from "../contexts/I18nContext";
 import { ensureSession } from "../lib/storage";
 import { HomeProjectLinks } from "../components/HomeProjectLinks";
 import { chatPath } from "../lib/url";
+import { groupPath } from "../lib/groups";
+import { engine } from "@ghostly/browser/platform/engine";
 
 export function Home() {
   const navigate = useNavigate();
@@ -87,7 +89,8 @@ export function Home() {
         </button>
         <button onClick={() => setJoining(true)} className="inline-flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-lg border border-border px-3 py-2.5 text-sm font-semibold text-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"><svg aria-hidden="true" width="18" height="18" className="shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5 M3 12h12 M10 7l5 5-5 5"/></svg>Join</button>
         </div>
-        {joining && <JoinDialog onClose={() => setJoining(false)} onJoin={keys => {setJoining(false);navigate(chatPath(ensureSession(keys)));}} />}
+        {joining && <JoinDialog onClose={() => setJoining(false)} onJoin={keys => {setJoining(false);navigate(chatPath(ensureSession(keys)));}}
+          onJoinGroup={async link => { const { groupId } = await engine.call("joinGroupByLink", { link }); setJoining(false); navigate(groupPath(groupId)); }} />}
       </div>
     </div>
     <HomeProjectLinks />

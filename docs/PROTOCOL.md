@@ -231,7 +231,7 @@ Host errors are ordinary responses with an `x-ghostly-error` header, so a browse
 
 ### 6.5 Private groups (`group-mesh/1`)
 
-A group of up to eight peers, on top of paired links. Frames are `group-*` control frames and carry no `id`, so an app from before groups drops them; they flow only on a paired session where both sides announced `{ "t": "paired-groups", "v": [1] }` after the handshake. The invitation travels on the inviter's contact chat; everything else on one dedicated paired link per pair of members, whose keys both derive from their member keys and the group id. The full profile, with its key schedule, membership rules and bounds, is [WISP 9xx · Group Mesh](wisps/9xx-group-mesh.md).
+A group of up to eight peers, on top of paired links. Frames are `group-*` control frames and carry no `id`, so an app from before groups drops them; they flow only on a paired session where both sides announced `{ "t": "paired-groups", "v": [1] }` after the handshake. The invitation travels on the inviter's contact chat; everything else on one dedicated paired link per pair of members, whose keys both derive from their member keys and the group id. An admin may also share one link (`group1/<group id>/<entry key>`, `group-entry/1`) that anyone can use: a joiner leaves its member key in a sealed Pkarr record every holder of the link can derive, and the admin's app admits it over a paired session derived from the link's entry key and that member key. The full profile, with its key schedule, membership rules and bounds, is [WISP 9xx · Group Mesh](wisps/9xx-group-mesh.md).
 
 ```
 → { "t": "group-invite", "g", "name", "admin", "e", "n" }               contact chat: an admin invites

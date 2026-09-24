@@ -49,3 +49,4 @@ export * from './sshsig';
 export * from "./groupCrypto";
 export * from "./groupCommits";
 export * from "./groupSession";
+export * from "./groupEntry";

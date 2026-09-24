@@ -58,6 +58,11 @@ export interface StoredLink {
   /** An edge of a private group (WISP 900): the group, and the member at the other end. Not a chat. */
   group?: string;
   groupPeer?: string;
+  /**
+   * Not an edge but an entry session of the group's link (`group-entry/1`): `host` on the admin's
+   * side, toward a joiner's member key; `guest` on the joiner's, toward the link's entry key.
+   */
+  groupEntry?: "host" | "guest";
 }
 
 /** What happened to a group's membership, as a line in its history. */
@@ -80,7 +85,11 @@ export interface StoredGroup {
     seedB64?: string;
     /** Chain pieces that precede the welcome of a long chain. */
     pieces: { t: "group-chain"; g: string; commits: GroupCommit[] }[];
+    /** Joining through the group's link: its entry key, the admin's side of `linkId` (an entry session, not a contact chat). */
+    entry?: string;
   };
+  /** On the admin's side: the group's link is on, with this entry key seed (`group-entry/1`). */
+  entry?: { seedB64: string; createdAt: number };
   state?: GroupState;
   /** Member key → the contact chat that invited them (or me): the path for courtesy notices. */
   contacts?: Record<string, string>;
@@ -109,7 +118,9 @@ export interface GroupView {
   isAdmin: boolean;
   members: GroupMemberView[];
   /** On the invitee's side, until the welcome arrives. */
-  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean };
+  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; viaLink?: boolean };
+  /** The group's link while it is on (`group1/<id>/<entry key>`); only the admin who made it sees it. */
+  entryLink?: string;
   /** Contacts (by chat id) invited by me and not yet in. */
   invited: string[];
   /** Contact chats that are members, by chat id → member key. */

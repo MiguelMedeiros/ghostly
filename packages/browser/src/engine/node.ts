@@ -66,6 +66,8 @@ import {
   type NativeTransport,
   type PairedTransport,
   type GroupState,
+  type GroupEntryLink,
+  entryParams,
 } from "@ghostly/core";
 import type { AttentionEvent, EngineImplementation } from "../shared/rpc";
 import { fileStore, type StoredFile } from "../shared/idb";
@@ -227,6 +229,8 @@ export class GhostlyNode implements EngineImplementation {
   private readonly transfers = new Map<string, FileTransferView>();
   private stateTimer: ReturnType<typeof setTimeout> | null = null;
   private paymentTimer:ReturnType<typeof setTimeout>|null=null;
+  /** Group links: admins read knocks, joiners knock (WISP 9xx § Entry link). */
+  private groupEntryTimer: ReturnType<typeof setInterval> | null = null;
   private walletView: WalletView = { mints: [], balance: 0, history: [], feesPaid: 0 };
 
   private readonly usdtWallet = new UsdtWallet(() => { void this.refreshWallet(); void this.desk.reconcileUsdtReceipts().catch(()=>{}); });
@@ -436,9 +440,17 @@ export class GhostlyNode implements EngineImplementation {
     contactName: linkId => { const stored = this.links.get(linkId)?.stored; return stored?.label || stored?.peerNick || undefined; },
     edges: groupId => {
       const edges = new Map<string, string>();
-      for (const live of this.links.values()) if (live.stored.group === groupId && live.stored.groupPeer) edges.set(live.stored.groupPeer, live.stored.id);
+      for (const live of this.links.values()) if (live.stored.group === groupId && live.stored.groupPeer && !live.stored.groupEntry) edges.set(live.stored.groupPeer, live.stored.id);
       return edges;
     },
+    entries: groupId => {
+      const entries = new Map<string, string>();
+      for (const live of this.links.values()) if (live.stored.group === groupId && live.stored.groupPeer && live.stored.groupEntry) entries.set(live.stored.groupPeer, live.stored.id);
+      return entries;
+    },
+    openEntry: (link, role, seedB64, peer) => this.openEntry(link, role, seedB64, peer),
+    publish: (identity, records) => this.transport.publish(identity, records),
+    resolve: async pubKeyZ32 => (await this.transport.resolve(pubKeyZ32))?.records ?? null,
     openEdge: (state, peer) => this.openEdge(state, peer),
     closeEdge: async linkId => {
       const live = this.links.get(linkId);
@@ -535,7 +547,7 @@ export class GhostlyNode implements EngineImplementation {
       if (!this.links.get(linkId)?.stored.group) void this.refreshPublicProfiles({ linkId }).catch(() => {});
     }
     this.emitState();
-    if (this.settings.online) this.hold.start();
+    if (this.settings.online) { this.hold.start(); this.startGroupEntries(); }
     void this.pollPaymentStatus().catch(()=>{});
     // The Lightning and Bitcoin sources the person set up (the Cashu mints need no network to connect).
     void this.lightning.recover().then(() => this.lightning.ensureReady());
@@ -552,6 +564,7 @@ export class GhostlyNode implements EngineImplementation {
   async shutdown(): Promise<void> {
     this.shuttingDown = true;
     if(this.paymentTimer)clearTimeout(this.paymentTimer);
+    this.stopGroupEntries();
     this.stopWatchingAdapters?.();
     this.identities.stop();
     this.nostrSocial.stop();
@@ -1126,6 +1139,13 @@ export class GhostlyNode implements EngineImplementation {
   }
   acceptGroupInvitation({ groupId }: { groupId: string }): Promise<void> { return this.groups.accept(groupId); }
   declineGroupInvitation({ groupId }: { groupId: string }): Promise<void> { return this.groups.decline(groupId); }
+  async enableGroupLink({ groupId, reset }: { groupId: string; reset?: boolean }): Promise<{ link: string }> { return { link: await this.groups.enableLink(groupId, reset === true) }; }
+  disableGroupLink({ groupId }: { groupId: string }): Promise<void> { return this.groups.disableLink(groupId); }
+  async joinGroupByLink({ link }: { link: string }): Promise<{ groupId: string }> {
+    if (typeof link !== "string") throw new Error("This is not a link to a group");
+    if (!this.settings.online) throw new Error("Go online to join a group");
+    return { groupId: await this.groups.joinByLink(link) };
+  }
   sendGroupMessage({ groupId, text }: { groupId: string; text: string }): Promise<{ error: string | null }> {
     if (typeof text !== "string") return Promise.resolve({ error: "Nothing to send" });
     return this.groups.send(groupId, text);
@@ -1435,7 +1455,9 @@ export class GhostlyNode implements EngineImplementation {
     } else if (!wasOnline && this.settings.online) {
       for (const live of this.links.values()) this.startLink(live.stored.id, await db.getMessages(live.stored.id));
       this.hold.start();
+      this.startGroupEntries();
     }
+    if (wasOnline && !this.settings.online) this.stopGroupEntries();
     if (wasOnline && !this.settings.online) await this.hold.stop();
     this.emitState();
   }
@@ -1503,11 +1525,38 @@ export class GhostlyNode implements EngineImplementation {
     return id;
   }
 
+  /**
+   * An entry session of a group's link: a paired link derived like an edge, from the entry key and
+   * the joiner's member key, pinned to the other one in advance. It carries the admission and nothing else.
+   */
+  private async openEntry(link: GroupEntryLink, role: "host" | "guest", seedB64: string, peer: string): Promise<string> {
+    const me = identityFromSeedB64(seedB64);
+    const params = entryParams(link, me.seed, me.pubKeyZ32, peer);
+    const id = identityFromSeedB64(params.seedB64).pubKeyZ32.slice(0, 16);
+    if (this.links.has(id)) return id;
+    const stored: StoredLink = { id, ...params, participationSeed: seedB64, pairedPeerKey: peer, requireSignedSignals: true,
+      peerTrust: { version: 1, verifiedKey: peer }, group: link.g, groupPeer: peer, groupEntry: role, createdAt: Date.now() };
+    this.links.set(id, newLiveLink(stored, 0));
+    try { await db.putLink(stored); }
+    catch (error) { this.links.delete(id); throw error; }
+    if (this.settings.online) this.startLink(id, []);
+    return id;
+  }
+
+  private startGroupEntries(): void {
+    if (this.groupEntryTimer || this.shuttingDown) return;
+    this.groupEntryTimer = setInterval(() => void this.groups.tick().catch(() => {}), 1_000);
+  }
+  private stopGroupEntries(): void {
+    if (this.groupEntryTimer) clearInterval(this.groupEntryTimer);
+    this.groupEntryTimer = null;
+  }
+
   private startEdge(linkId: string): void {
     const live = this.links.get(linkId);
     if (!live || live.link) return;
     const { stored } = live;
-    const group = stored.group!, peer = stored.groupPeer!;
+    const group = stored.group!, peer = stored.groupPeer!, entry = !!stored.groupEntry;
     live.pairing = { status: "connecting" };
     live.link = new GhostLink({
       paymentMethods: { cashu: false, lightning: false, arkade: false, usdt: false, bark: false, bitcoin: false },
@@ -1527,9 +1576,13 @@ export class GhostlyNode implements EngineImplementation {
       getHostedHttpService: () => undefined,
       groupsSupport: true,
       events: {
-        onGroupFrame: frame => this.groups.handleEdgeFrame(group, peer, frame),
-        onGroupsSupport: supported => { if (supported) this.groups.edgeReady(group, peer, linkId); this.emitState(); },
-        onPresence: presence => { live.presence = presence; this.groups.edgeNick(group, peer, presence.nick); this.emitState(); },
+        // An entry session carries the admission frames a contact chat would; an edge, the group's own.
+        onGroupFrame: frame => entry ? this.groups.handleContactFrame(linkId, frame) : this.groups.handleEdgeFrame(group, peer, frame),
+        onGroupsSupport: supported => {
+          if (supported) { if (entry) this.groups.entryReady(group, linkId, peer); else this.groups.edgeReady(group, peer, linkId); }
+          this.emitState();
+        },
+        onPresence: presence => { live.presence = presence; if (!entry) this.groups.edgeNick(group, peer, presence.nick); this.emitState(); },
         onPairingState: state => { live.pairing = state; this.emitState(); },
         onDataLinkState: state => {
           live.dataLink = state;

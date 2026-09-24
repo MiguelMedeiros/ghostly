@@ -1,12 +1,16 @@
 import { useBackdropDismiss } from "../hooks/useDismiss";
 import { useEffect, useRef, useState } from "react";
 import jsQR from "jsqr";
+import { decodeGroupEntryLink } from "@ghostly/core";
 import { parseInvite } from "../lib/url";
 import { useI18n } from "../contexts/I18nContext";
 import type { SessionKeys } from "../lib/storage";
 
-/** Scanned data is only parsed as an invite; never opened as a URL or executed. */
-export function JoinDialog({ onJoin, onClose }: { onJoin(keys: SessionKeys): void; onClose(): void }) {
+/**
+ * Scanned data is only parsed as an invite; never opened as a URL or executed. A group's link
+ * (`group1/…`) goes to `onJoinGroup`, which the dialog waits for, so a refusal is shown here.
+ */
+export function JoinDialog({ onJoin, onJoinGroup, onClose }: { onJoin(keys: SessionKeys): void; onJoinGroup?(link: string): Promise<void>; onClose(): void }) {
   const { t } = useI18n();
   const closed = useRef(false);
   const busyRef = useRef(false);
@@ -48,6 +52,15 @@ export function JoinDialog({ onJoin, onClose }: { onJoin(keys: SessionKeys): voi
   useEffect(() => { if (manual) manualInput.current?.focus(); }, [manual]);
   const accept = (value: string) => {
     if (joined.current || closed.current) return;
+    if (onJoinGroup && decodeGroupEntryLink(value)) {
+      joined.current = true; stop(); busyRef.current = true; setBusy(true);
+      onJoinGroup(value.trim()).catch((cause: unknown) => {
+        if (closed.current) return;
+        joined.current = false; busyRef.current = false; setBusy(false);
+        setError(cause instanceof Error ? cause.message : t("join.invalid")); setManual(true);
+      });
+      return;
+    }
     const keys = parseInvite(value);
     if (!keys) { setError(t("join.invalid")); setManual(true); return; }
     joined.current = true; stop(); onJoin(keys);

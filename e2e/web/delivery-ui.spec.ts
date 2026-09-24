@@ -84,8 +84,8 @@ test("header connection popover, four desktop destinations and resizing preserve
   for(const width of [280,435,600]) {
     const handle=await a.page.getByTestId("sidebar-resize").boundingBox();
     await a.page.mouse.move(handle!.x+2,handle!.y+100); await a.page.mouse.down(); await a.page.mouse.move(width,handle!.y+100); await a.page.mouse.up();
-    const headerActions = a.page.getByTestId("sidebar-chat-actions").getByRole("button");
-    const newBounds = (await headerActions.nth(0).boundingBox())!, joinBounds = (await headerActions.nth(1).boundingBox())!;
+    // New (with its arrow for a group) and Join share the header evenly.
+    const newBounds = (await a.page.getByTestId("sidebar-new").boundingBox())!, joinBounds = (await a.page.getByTestId("sidebar-chat-actions").getByRole("button", { name: "Join chat" }).boundingBox())!;
     expect(Math.abs(newBounds.width - joinBounds.width)).toBeLessThanOrEqual(1);
     expect(newBounds.height).toBe(joinBounds.height);
     expect(joinBounds.x + joinBounds.width).toBeLessThanOrEqual(width);
@@ -152,7 +152,8 @@ test("home actions have equal sizes and enabled controls signal clicks", async (
     const join = mobile ? p.page.getByRole("button", {name: "Join chat", exact: true}).first() : actions.nth(1);
     // Home fades in: let it settle, then measure both, so the animation cannot land between them.
     await p.page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== "running" || a.effect?.getTiming().iterations === Infinity));
-    const first = (await create.boundingBox())!, second = (await join.boundingBox())!;
+    // On a phone these are the list's header actions, where New shares its cell with the arrow that offers a group.
+    const first = (await (mobile ? p.page.getByTestId("sidebar-new") : create).boundingBox())!, second = (await join.boundingBox())!;
     expect(Math.abs(first.width - second.width)).toBeLessThanOrEqual(1);
     expect(first.height).toBe(second.height); expect(Math.abs(first.y - second.y)).toBeLessThan(0.5);
     await expect(create).toHaveCSS("cursor", "pointer"); await expect(join).toHaveCSS("cursor", "pointer");

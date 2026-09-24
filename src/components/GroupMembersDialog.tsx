@@ -6,6 +6,7 @@ import type { GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { useBackdropDismiss } from "../hooks/useDismiss";
 import { publicKeyLabel } from "../lib/publicKeyLabel";
 import { memberName } from "../lib/groups";
+import { GroupLinkPanel } from "./GroupLinkPanel";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -30,7 +31,7 @@ export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClo
   const contacts = (state?.links ?? []).filter(l => l.profile && !live.memberLinks[l.id]);
   const invited = new Set(live.invited);
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); onClose(); }} aria-labelledby={`${id}-title`} data-testid="group-members-dialog"
-    className="m-auto w-[calc(100%_-_2rem)] max-w-md rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
+    className="m-auto w-[calc(100%_-_2rem)] max-w-md max-h-[90dvh] overflow-y-auto rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <div className="flex items-start justify-between gap-3">
       <div>
         <h2 id={`${id}-title`} className="text-base font-semibold">{live.name}</h2>
@@ -69,6 +70,7 @@ export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClo
           </li>;
         })}
       </ul>
+      <GroupLinkPanel group={live} />
     </div>}
     {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
     <p data-testid="group-read-note" className="mt-4 rounded-lg bg-surface-alt/80 p-3 text-xs leading-relaxed text-text-secondary">{GROUP_READ_NOTE}</p>

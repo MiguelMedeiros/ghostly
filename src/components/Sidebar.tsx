@@ -10,6 +10,7 @@ import type { GroupView } from "@ghostly/browser/shared/types";
 import { NewGroupDialog } from "./NewGroupDialog";
 import { groupPath, groupReadAt, groupRouteId } from "../lib/groups";
 import { useIsMobile } from "../hooks/useIsMobile";
+import { useOutsideDismiss } from "../hooks/useDismiss";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { JoinDialog } from "./JoinDialog";
 import { useBackgroundPoller } from "../hooks/useBackgroundPoller";
@@ -51,7 +52,7 @@ function GroupRow({ group, active, onOpen }: { group: GroupView; active: boolean
     setBusy(true);
     try { await engine.call(method, { groupId: group.id }); } catch { /* the row says what state it is in */ } finally { setBusy(false); }
   };
-  const status = invitation ? (invitation.accepted ? "Joining…" : `Invited by ${invitation.contact || "a contact"} · ${invitation.members} member${invitation.members === 1 ? "" : "s"}`)
+  const status = invitation ? (invitation.viaLink ? (invitation.admin ? "Joining…" : "Waiting for the admin's app…") : invitation.accepted ? "Joining…" : `Invited by ${invitation.contact || "a contact"} · ${invitation.members} member${invitation.members === 1 ? "" : "s"}`)
     : group.status !== "active" ? group.statusReason ?? group.status : `${group.members.length} member${group.members.length === 1 ? "" : "s"}`;
   return (
     <div data-testid="group-row" data-group={group.id} onClick={onOpen}
@@ -61,7 +62,7 @@ function GroupRow({ group, active, onOpen }: { group: GroupView; active: boolean
         {unread && <span className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-accent" />}
       </div>
       <div className="flex-1 min-w-0 py-1">
-        <span className={`text-[15px] truncate block ${unread ? "text-text-primary font-semibold" : "text-text-primary"}`}>{group.name}</span>
+        <span className={`text-[15px] truncate block ${unread ? "text-text-primary font-semibold" : "text-text-primary"}`}>{group.name || "A group"}</span>
         <p className="text-[12px] truncate m-0 text-text-muted">{status}</p>
         {invitation && !invitation.accepted && <div className="mt-1.5 flex gap-2">
           <button disabled={busy} data-testid="group-accept" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }} className="rounded-lg bg-accent px-3 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40">Accept</button>
@@ -88,6 +89,9 @@ export function Sidebar() {
   const [search, setSearch] = useState("");
   const [showNewChat, setShowNewChat] = useState(false);
   const [showNewGroup, setShowNewGroup] = useState(false);
+  const [newMenuOpen, setNewMenuOpen] = useState(false);
+  const newMenuRef = useRef<HTMLDivElement>(null);
+  useOutsideDismiss(newMenuRef, newMenuOpen, () => setNewMenuOpen(false));
   const groups = useSyncExternalStore(subscribeEngine, engineSnapshot)?.groups ?? [];
   const activeGroupId = groupRouteId(location.pathname);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -216,15 +220,32 @@ export function Sidebar() {
             Testnet
           </Link>
         )}
-        <div className="grid shrink-0 grid-cols-3 items-stretch gap-1 whitespace-nowrap" data-testid="sidebar-chat-actions">
-          <button onClick={() => navigate(chatPath(createPairedChat()))} aria-label={t("sidebar.startChat")} title={t("sidebar.newChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center gap-1 rounded-lg bg-accent p-2 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8"/></svg><span className="sidebar-action-label">{t("sidebar.new")}</span></button>
+        <div className="grid shrink-0 grid-cols-2 items-stretch gap-1 whitespace-nowrap" data-testid="sidebar-chat-actions">
+          {/* New: one click is a chat, as always; the arrow beside it also offers a group. */}
+          <div ref={newMenuRef} role="group" aria-label={t("sidebar.new")} data-testid="sidebar-new" className="sidebar-new-split relative flex min-w-0">
+            <button onClick={() => navigate(chatPath(createPairedChat()))} aria-label={t("sidebar.startChat")} title={t("sidebar.newChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 flex-1 items-center justify-center gap-1 rounded-l-lg bg-accent p-2 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8"/></svg><span className="sidebar-action-label">{t("sidebar.new")}</span></button>
+            <button onClick={() => setNewMenuOpen(open => !open)} aria-haspopup="true" aria-expanded={newMenuOpen} aria-controls="sidebar-new-menu" aria-label="Create a group or a chat" title="Create a group or a chat" data-testid="sidebar-new-more"
+              className="inline-flex min-h-10 w-6 shrink-0 items-center justify-center rounded-r-lg border-l border-panel-header/25 bg-accent text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header">
+              <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${newMenuOpen ? "rotate-180" : ""}`}><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+            {newMenuOpen && <div id="sidebar-new-menu" data-testid="sidebar-new-menu" className="absolute right-0 top-full z-50 mt-1 min-w-[220px] rounded-lg border border-border bg-surface-alt py-1 shadow-lg animate-fade-in">
+              <button onClick={() => { setNewMenuOpen(false); navigate(chatPath(createPairedChat())); }} className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-text-primary hover:bg-surface-hover max-md:min-h-11 focus-visible:outline-none focus-visible:bg-surface-hover">
+                <svg aria-hidden="true" width="16" height="16" className="shrink-0 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8"/></svg>
+                <span><span className="block">Chat</span><span className="block text-xs text-text-muted">One person, with an invite</span></span>
+              </button>
+              <button onClick={() => { setNewMenuOpen(false); setShowNewGroup(true); }} data-testid="new-group" className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-text-primary hover:bg-surface-hover max-md:min-h-11 focus-visible:outline-none focus-visible:bg-surface-hover">
+                <svg aria-hidden="true" width="16" height="16" className="shrink-0 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M19 8v6M16 11h6" /></svg>
+                <span><span className="block">Group</span><span className="block text-xs text-text-muted">Up to eight, from contacts or a link</span></span>
+              </button>
+            </div>}
+          </div>
           <button onClick={() => setShowNewChat(true)} aria-label={t("join.submit")} title={t("sidebar.joinChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center gap-1 rounded-lg p-2 text-sm font-medium text-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 8V6a3 3 0 0 1 3-3h11a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H9l-5 3v-6 M2 12h12 M10 8l4 4-4 4"/></svg><span className="sidebar-action-label">{t("sidebar.join")}</span></button>
-          <button onClick={() => setShowNewGroup(true)} aria-label="New group" title="New group" data-testid="new-group" className="sidebar-header-action inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center gap-1 rounded-lg p-2 text-sm font-medium text-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M19 8v6M16 11h6" /></svg><span className="sidebar-action-label">Group</span></button>
         </div>
       </div>
       <UpdateBanner />
       {showNewGroup && <NewGroupDialog onClose={() => setShowNewGroup(false)} onCreated={id => { setShowNewGroup(false); navigate(groupPath(id)); }} />}
-      {showNewChat && <JoinDialog onClose={() => setShowNewChat(false)} onJoin={keys => {setShowNewChat(false); navigate(chatPath(ensureSession(keys))); refreshSessions();}} />}
+      {showNewChat && <JoinDialog onClose={() => setShowNewChat(false)} onJoin={keys => {setShowNewChat(false); navigate(chatPath(ensureSession(keys))); refreshSessions();}}
+        onJoinGroup={async link => { const { groupId } = await engine.call("joinGroupByLink", { link }); setShowNewChat(false); navigate(groupPath(groupId)); }} />}
 
       {/* Search */}
       <div className="px-3 py-2 bg-sidebar-bg">

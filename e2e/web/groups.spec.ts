@@ -61,6 +61,7 @@ test("four people: create, invite, everyone reads everyone, catch-up, removal, a
   await pair(bob, dave);
 
   // Create.
+  await alice.page.getByTestId("sidebar-new-more").click();
   await alice.page.getByTestId("new-group").click();
   await alice.page.getByTestId("new-group-name").fill("Ghosts");
   await alice.page.getByTestId("new-group-create").click();
