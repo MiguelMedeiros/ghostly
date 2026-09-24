@@ -50,3 +50,5 @@ export * from "./groupCrypto";
 export * from "./groupCommits";
 export * from "./groupSession";
 export * from "./groupEntry";
+export * from "./groupCommunity";
+export * from "./communityRendezvous";

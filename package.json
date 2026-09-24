@@ -36,7 +36,8 @@
     "check:desktop-bundle": "node scripts/check-desktop-bundle.mjs",
     "postinstall": "patch-package",
     "build:sdk": "npm run build -w @ghostly/sdk",
-    "test:sdk-example": "node scripts/sdk-example.mjs"
+    "test:sdk-example": "node scripts/sdk-example.mjs",
+    "test:group-load": "GROUP_LOAD=${GROUP_LOAD:-256} npm run test:group-load -w @ghostly/browser"
   },
   "dependencies": {
     "@emoji-mart/data": "^1.2.1",

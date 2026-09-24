@@ -1,7 +1,7 @@
 import { useBackdropDismiss } from "../hooks/useDismiss";
 import { useEffect, useRef, useState } from "react";
 import jsQR from "jsqr";
-import { decodeGroupEntryLink } from "@ghostly/core";
+import { decodeCommunityLink, decodeGroupEntryLink } from "@ghostly/core";
 import { parseInvite } from "../lib/url";
 import { useI18n } from "../contexts/I18nContext";
 import type { SessionKeys } from "../lib/storage";
@@ -52,7 +52,7 @@ export function JoinDialog({ onJoin, onJoinGroup, onClose }: { onJoin(keys: Sess
   useEffect(() => { if (manual) manualInput.current?.focus(); }, [manual]);
   const accept = (value: string) => {
     if (joined.current || closed.current) return;
-    if (onJoinGroup && decodeGroupEntryLink(value)) {
+    if (onJoinGroup && (decodeGroupEntryLink(value) || decodeCommunityLink(value))) {
       joined.current = true; stop(); busyRef.current = true; setBusy(true);
       onJoinGroup(value.trim()).catch((cause: unknown) => {
         if (closed.current) return;

@@ -70,7 +70,7 @@ function ChatLinkIntake() {
 }
 
 /**
- * A group's link opened in the app (`#/join/group1/…`): it leaves the address at once, like an
+ * A group's link opened in the app (`#/join/group1/…` or `#/join/group2/…`): it leaves the address at once, like an
  * invite; once the app is unlocked the engine joins and the group opens, saying it waits for the admin's app.
  */
 function GroupLinkIntake() {

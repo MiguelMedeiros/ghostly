@@ -119,7 +119,7 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     const alice = world.add("alice"), bob = world.add("bob");
     world.chats.set("chat-ab", ["alice", "bob"]);
     await alice.load(); await bob.load();
-    const groupId = await alice.create("Ghosts");
+    const groupId = await alice.create("Ghosts", "mesh");
     const keys = (globalThis as unknown as { __keys: Map<string, string> }).__keys;
     const record = (g: Groups) => { for (const v of g.views()) if (v.myKey) keys.set(stateOf(g, v.id).seedB64, v.myKey); };
     const stateOf = (g: Groups, id: string): GroupState => (g as unknown as { sessions: Map<string, { state: GroupState }> }).sessions.get(id)!.state;
@@ -167,7 +167,7 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     const world = new World();
     const alice = world.add("alice");
     await alice.load();
-    const groupId = await alice.create("Ghosts");
+    const groupId = await alice.create("Ghosts", "mesh");
     await expect(alice.invite(groupId, "chat-nobody")).rejects.toThrow(/updated Ghostly/);
     world.chats.set("chat-ab", ["alice", "bob"]);
     const bob = world.add("bob"); await bob.load();
@@ -183,7 +183,7 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     const alice = world.add("alice"), bob = world.add("bob");
     world.chats.set("chat-ab", ["alice", "bob"]);
     await alice.load(); await bob.load();
-    const groupId = await alice.create("Ghosts");
+    const groupId = await alice.create("Ghosts", "mesh");
     await alice.invite(groupId, "chat-ab"); await world.settle();
     await bob.accept(groupId); await world.settle();
     const again = new Groups({ ...(bob as unknown as { host: GroupsHost }).host, emit: vi.fn() }, world.peers.get("bob")!.store);
@@ -199,7 +199,7 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     const keys = (globalThis as unknown as { __keys: Map<string, string> }).__keys;
     const stateOf = (g: Groups, id: string): GroupState => (g as unknown as { sessions: Map<string, { state: GroupState }> }).sessions.get(id)!.state;
     const record = (g: Groups) => { for (const v of g.views()) if (v.myKey) keys.set(stateOf(g, v.id).seedB64, v.myKey); };
-    const groupId = await alice.create("Ghosts");
+    const groupId = await alice.create("Ghosts", "mesh");
     await alice.invite(groupId, "chat-ab"); await world.settle();
     await bob.accept(groupId); await world.settle();
     record(alice); record(bob);
@@ -281,7 +281,7 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     const world = new World();
     const alice = world.add("alice"), dave = world.add("dave"), erin = world.add("erin");
     await alice.load(); await dave.load(); await erin.load();
-    const groupId = await alice.create("Ghosts");
+    const groupId = await alice.create("Ghosts", "mesh");
     const old = await alice.enableLink(groupId);
     const fresh = await alice.enableLink(groupId, true);
     expect(fresh).not.toBe(old);
@@ -308,7 +308,7 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     const alice = world.add("alice"), frank = world.add("frank");
     await alice.load(); await frank.load();
     await expect(frank.joinByLink("group1/nope")).rejects.toThrow(/not a link to a group/);
-    const groupId = await alice.create("Ghosts");
+    const groupId = await alice.create("Ghosts", "mesh");
     const code = await alice.enableLink(groupId);
     await frank.joinByLink(code);
     await alice.tick(); await world.settle();
@@ -327,7 +327,7 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     const world = new World();
     const alice = world.add("alice"), gina = world.add("gina");
     await alice.load(); await gina.load();
-    const groupId = await alice.create("Ghosts");
+    const groupId = await alice.create("Ghosts", "mesh");
     await gina.joinByLink(await alice.enableLink(groupId));
     await alice.tick(); await world.settle();
     expect(world.peers.get("alice")!.entries.size).toBe(1);
@@ -351,7 +351,7 @@ describe("group engine: admission over a contact chat, edges from the roster", (
       const keys = (globalThis as unknown as { __keys: Map<string, string> }).__keys;
       const stateOf = (g: Groups, id: string): GroupState => (g as unknown as { sessions: Map<string, { state: GroupState }> }).sessions.get(id)!.state;
       const record = (g: Groups) => { for (const v of g.views()) if (v.myKey) keys.set(stateOf(g, v.id).seedB64, v.myKey); };
-      const groupId = await alice.create("Ghosts");
+      const groupId = await alice.create("Ghosts", "mesh");
       await alice.invite(groupId, "chat-ab"); await alice.invite(groupId, "chat-ac"); await world.settle();
       await bob.accept(groupId); await world.settle();
       await carol.accept(groupId); await world.settle();
@@ -412,7 +412,7 @@ describe("group engine: admission over a contact chat, edges from the roster", (
       await expect(alice.leave(groupId)).rejects.toThrow(/nobody else in the group is online/);
       expect(alice.views()[0]).toMatchObject({ status: "active", isAdmin: true });
 
-      const solo = await alice.create("Just me");
+      const solo = await alice.create("Just me", "mesh");
       await alice.leave(solo); await world.settle();
       expect(alice.views().map(v => v.id)).toEqual([groupId]);
       expect(await alice.messages(solo)).toEqual([]);

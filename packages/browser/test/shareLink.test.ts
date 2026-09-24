@@ -6,6 +6,7 @@ vi.mock('../../../src/lib/platform', () => ({
   servicesPlatform: { shareText: (text: string, anchor?: unknown) => platform.shareText ? platform.shareText(text, anchor) : null },
 }));
 const { shareLink } = await import('../../../src/lib/shareLink');
+// covers: groups.link.share
 
 const URL_ = 'https://app.ghostly.tools/#/join/group1/AAAAAAAAAAAAAAAAAAAAAA/ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1u';
 

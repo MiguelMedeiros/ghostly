@@ -72,7 +72,7 @@ export function paymentView(patch: Partial<PaymentView> = {}): PaymentView {
 }
 
 export function groupView(patch: Partial<GroupView> = {}): GroupView {
-  return { id: "group-1", name: "Friends", createdAt: 0, isAdmin: false, members: [], invited: [], memberLinks: {}, lastMessageAt: 0, canSend: true, ...patch };
+  return { id: "group-1", name: "Friends", profile: "mesh", createdAt: 0, isAdmin: false, members: [], invited: [], memberLinks: {}, lastMessageAt: 0, canSend: true, ...patch };
 }
 
 /**

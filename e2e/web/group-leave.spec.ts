@@ -32,6 +32,8 @@ test("leaving: gone from the list at once, heard by an admin who was away, and t
   await alice.page.getByTestId("sidebar-new-more").click();
   await alice.page.getByTestId("new-group").click();
   await alice.page.getByTestId("new-group-name").fill("Leavers");
+  // A private group (group-mesh/1): this spec is about that profile.
+  await alice.page.getByTestId("new-group-kind-mesh").click();
   await alice.page.getByTestId("new-group-create").click();
   const url = await alice.page.getByTestId("group-share-dialog").getByTestId("group-link-url").inputValue();
   await alice.page.getByTestId("group-share-done").click();

@@ -65,7 +65,6 @@ import {
   type NativeEndpoint,
   type NativeTransport,
   type PairedTransport,
-  type GroupState,
   type GroupEntryLink,
   entryParams,
 } from "@ghostly/core";
@@ -443,7 +442,8 @@ export class GhostlyNode implements EngineImplementation {
       if (!link) throw new Error("You are offline");
       link.sendGroupFrame(frame);
     },
-    linkReady: linkId => !!this.links.get(linkId)?.link?.groupsSupport,
+    linkReady: (linkId, version = 1) => !!this.links.get(linkId)?.link?.supportsGroupVersion(version),
+    myNick: () => this.settings.nick || undefined,
     contactName: linkId => { const stored = this.links.get(linkId)?.stored; return stored?.label || stored?.peerNick || undefined; },
     edges: groupId => this.groupEdges(groupId),
     entries: groupId => {
@@ -1175,9 +1175,9 @@ export class GhostlyNode implements EngineImplementation {
 
   // -- private groups --------------------------------------------------------
 
-  async createGroup({ name }: { name: string }): Promise<{ groupId: string }> {
+  async createGroup({ name, profile }: { name: string; profile?: "community" | "mesh" }): Promise<{ groupId: string }> {
     if (typeof name !== "string" || !name.trim()) throw new Error("Give the group a name");
-    return { groupId: await this.groups.create(name.trim().slice(0, 48)) };
+    return { groupId: await this.groups.create(name.trim().slice(0, 48), profile === "mesh" ? "mesh" : "community") };
   }
   inviteToGroup({ groupId, linkId }: { groupId: string; linkId: string }): Promise<void> {
     if (!this.links.get(linkId)?.stored.profile || this.links.get(linkId)?.stored.group) throw new Error("Invite a paired contact");
@@ -1566,7 +1566,7 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** The edge of a group toward one member: a paired link pinned to that member's key, carrying group frames and nothing else. */
-  private async openEdge(state: GroupState, peer: string, expectPeer = false): Promise<string> {
+  private async openEdge(state: { id: string; seedB64: string }, peer: string, expectPeer = false): Promise<string> {
     const me = identityFromSeedB64(state.seedB64);
     const params = edgeParams(state.id, me.seed, me.pubKeyZ32, peer);
     const id = identityFromSeedB64(params.seedB64).pubKeyZ32.slice(0, 16);

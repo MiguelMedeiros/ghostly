@@ -13,7 +13,7 @@ import type { NostrContactCache, NostrContactView, NostrSocialSettings, NostrSoc
 import type { ProofLedger, ProofAdapter } from "@ghostly/core";
 import type { IdentityDisplay, IdentityLedger, IdentityStatus, SharedIdentity, VerifiedIdentity } from "@ghostly/core";
 import type { DataLinkState, LinkStatus, ServiceAd, PairingState, NativeTransport, PairedTransport, TransportDescriptors } from "@ghostly/core";
-import type { GroupCommit, GroupRole, GroupState, GroupStatus } from "@ghostly/core";
+import type { CommunityState, GroupCommit, GroupRole, GroupState, GroupStatus } from "@ghostly/core";
 
 /** A link as stored in IndexedDB. Same fields Desktop keeps in its ChatSession. */
 export interface StoredLink {
@@ -99,6 +99,13 @@ export interface StoredGroup {
    * a leave said while the admin was away still reaches it.
    */
   left?: { at: number; admin: string };
+  /** A community group (`group-community/1`) I am in: its session state. Mesh groups use `state`. */
+  community?: CommunityState;
+  /**
+   * Joining a community group through its link (`group2/…`), or again after my admission lost a
+   * race: my member seed, the entry session, and what arrived of the welcome.
+   */
+  joining?: { g: string; host: string; seedB64: string; linkId: string; name: string; inviter: string; invitedAt?: number; pieces: unknown[]; since: number };
 }
 
 export interface GroupMemberView {
@@ -139,8 +146,10 @@ export interface GroupView {
   id: string;
   name: string;
   createdAt: number;
+  /** Which kind of group: a private mesh of up to eight (`group-mesh/1`) or a community (`group-community/1`). */
+  profile: "mesh" | "community";
   /** Absent while it is only an invitation. */
-  status?: GroupStatus;
+  status?: GroupStatus | "lost";
   statusReason?: string;
   epoch?: number;
   myKey?: string;
@@ -156,6 +165,8 @@ export interface GroupView {
   memberLinks: Record<string, string>;
   lastMessageAt: number;
   canSend: boolean;
+  /** Community groups: how this device is connected (a hub for others, or through hubs). */
+  community?: { hub: boolean; hubs: number; connected: number };
 }
 
 /** One item held in this device's storage for the contact, or on its way there. */

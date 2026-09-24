@@ -116,7 +116,7 @@ async function groupOf(names: string[]) {
   const alice = world.add("alice");
   const others = names.map(n => { world.chats.set(`chat-a${n[0]}`, ["alice", n]); return world.add(n); });
   for (const g of [alice, ...others]) await g.load();
-  const groupId = await alice.create("Ghosts");
+  const groupId = await alice.create("Ghosts", "mesh");
   for (const [i, g] of others.entries()) {
     await alice.invite(groupId, `chat-a${names[i][0]}`); await world.settle();
     await g.accept(groupId); await world.settle();
@@ -210,7 +210,7 @@ describe("invitations: what the admission exchange ignores", () => {
     const world = new World();
     const alice = world.add("alice");
     await alice.load();
-    const groupId = await alice.create("Ghosts");
+    const groupId = await alice.create("Ghosts", "mesh");
     for (let i = 0; i < 7; i++) { world.chats.set(`chat-${i}`, ["alice", `p${i}`]); await world.add(`p${i}`).load(); await alice.invite(groupId, `chat-${i}`); }
     world.chats.set("chat-7", ["alice", "p7"]); world.add("p7");
     await expect(alice.invite(groupId, "chat-7")).rejects.toThrow(/eight members/);
@@ -221,7 +221,7 @@ describe("invitations: what the admission exchange ignores", () => {
     const world = new World();
     const alice = world.add("alice"), bob = world.add("bob");
     world.chats.set("chat-ab", ["alice", "bob"]);
-    const groupId = await alice.create("Ghosts");
+    const groupId = await alice.create("Ghosts", "mesh");
     await alice.invite(groupId, "chat-ab"); await world.settle();
     expect(view(alice).invited).toEqual(["chat-ab"]);
     await expect(bob.accept("unknown")).rejects.toThrow(/No invitation/);
@@ -236,7 +236,7 @@ describe("invitations: what the admission exchange ignores", () => {
     const world = new World();
     const alice = world.add("alice"), bob = world.add("bob");
     world.chats.set("chat-ab", ["alice", "bob"]);
-    const groupId = await alice.create("Ghosts");
+    const groupId = await alice.create("Ghosts", "mesh");
     await alice.invite(groupId, "chat-ab"); await world.settle();
     world.chats.delete("chat-ab");
     await expect(bob.accept(groupId)).rejects.toThrow(/not connected/);
@@ -247,7 +247,7 @@ describe("invitations: what the admission exchange ignores", () => {
     const world = new World();
     const alice = world.add("alice"), bob = world.add("bob");
     world.chats.set("chat-ab", ["alice", "bob"]);
-    const groupId = await alice.create("Ghosts");
+    const groupId = await alice.create("Ghosts", "mesh");
     const admin = view(alice).myKey!;
     await bob.handleContactFrame("chat-ab", { t: "group-invite", g: "short", name: "x", admin });
     await bob.handleContactFrame("chat-ab", { t: "group-invite", g: "A".repeat(22), name: "x", admin: "not a key" });
@@ -277,7 +277,7 @@ describe("invitations: what the admission exchange ignores", () => {
     const world = new World();
     const alice = world.add("alice"), bob = world.add("bob");
     world.chats.set("chat-ab", ["alice", "bob"]);
-    const groupId = await alice.create("Ghosts");
+    const groupId = await alice.create("Ghosts", "mesh");
     await alice.handleContactFrame("chat-ab", { t: "group-accept", g: groupId, key: createIdentity().pubKeyZ32 });
     await alice.invite(groupId, "chat-ab"); await world.settle();
     await alice.handleContactFrame("chat-ab", { t: "group-accept", g: groupId, key: "nope" });
@@ -290,7 +290,7 @@ describe("invitations: what the admission exchange ignores", () => {
     const world = new World();
     const alice = world.add("alice"), bob = world.add("bob");
     world.chats.set("chat-ab", ["alice", "bob"]);
-    const groupId = await alice.create("Ghosts");
+    const groupId = await alice.create("Ghosts", "mesh");
     await alice.invite(groupId, "chat-ab"); await world.settle();
     await bob.accept(groupId);
     // The accept is on its way; before the welcome comes back, junk arrives.
@@ -333,7 +333,7 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     const t0 = Date.now();
     const world = new World();
     const alice = world.add("alice", { ...timings, pollMs: 5_000, warmPollMs: 2_000, warmMs: 60_000 });
-    const groupId = await alice.create("Ghosts");
+    const groupId = await alice.create("Ghosts", "mesh");
     const code = await alice.enableLink(groupId);
     const looks = () => world.resolves.get("alice") ?? 0;
     await alice.tick(t0); expect(looks()).toBe(1);
@@ -360,7 +360,7 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     const t0 = Date.now();
     const world = new World();
     const alice = world.add("alice"), dan = world.add("dan", timings);
-    const groupId = await alice.create("Ghosts");
+    const groupId = await alice.create("Ghosts", "mesh");
     await dan.joinByLink(await alice.enableLink(groupId)); await flush();
     expect(world.publishes).toBe(1);
     await dan.tick(t0 + 1_000);
@@ -384,7 +384,7 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     const t0 = Date.now();
     const world = new World();
     const alice = world.add("alice"), dan = world.add("dan", timings);
-    const groupId = await alice.create("Ghosts");
+    const groupId = await alice.create("Ghosts", "mesh");
     await dan.joinByLink(await alice.enableLink(groupId)); await flush();
     const host = (dan as unknown as { host: GroupsHost }).host;
     let seen = false;
@@ -406,7 +406,7 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     const t0 = Date.now();
     const world = new World();
     const alice = world.add("alice", timings), dan = world.add("dan", timings);
-    const groupId = await alice.create("Ghosts");
+    const groupId = await alice.create("Ghosts", "mesh");
     await dan.joinByLink(await alice.enableLink(groupId)); await flush();
     const hostEntries = () => [...world.peers.get("alice")!.entries.values()].length;
     await alice.tick(t0); await world.settle();
@@ -430,7 +430,7 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const world = new World();
     const alice = world.add("alice", timings);
-    const groupId = await alice.create("Ghosts");
+    const groupId = await alice.create("Ghosts", "mesh");
     const code = await alice.enableLink(groupId);
     for (let i = 0; i < 5; i++) { await world.add(`j${i}`).joinByLink(code); await flush(); }
     await alice.tick(Date.now()); await world.settle();
@@ -442,7 +442,7 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     const t0 = Date.now();
     const world = new World();
     const alice = world.add("alice", timings), dan = world.add("dan");
-    const groupId = await alice.create("Ghosts");
+    const groupId = await alice.create("Ghosts", "mesh");
     await dan.joinByLink(await alice.enableLink(groupId)); await flush();
     world.peers.get("alice")!.failEntry = true;
     await alice.tick(t0);
@@ -458,7 +458,7 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const world = new World();
     const alice = world.add("alice", timings), dan = world.add("dan");
-    const groupId = await alice.create("Ghosts");
+    const groupId = await alice.create("Ghosts", "mesh");
     await dan.joinByLink(await alice.enableLink(groupId)); await flush();
     const sent = vi.spyOn((alice as unknown as { host: GroupsHost }).host, "sendOnLink");
     alice.entryReady(groupId, "entry:alice:stranger", createIdentity().pubKeyZ32);
@@ -473,7 +473,7 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     const world = new World();
     const alice = world.add("alice"), bob = world.add("bob");
     world.chats.set("chat-ab", ["alice", "bob"]);
-    const groupId = await alice.create("Ghosts");
+    const groupId = await alice.create("Ghosts", "mesh");
     const code = await alice.enableLink(groupId);
     await alice.invite(groupId, "chat-ab"); await world.settle();
     await bob.accept(groupId);

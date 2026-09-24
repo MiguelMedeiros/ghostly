@@ -38,6 +38,8 @@ test("strangers join a group through its link, and a replaced link reaches nobod
   await expect(alice.page.getByTestId("sidebar-new-menu")).toBeVisible();
   await alice.page.getByTestId("new-group").click();
   await alice.page.getByTestId("new-group-name").fill("Open ghosts");
+  // A private group (group-mesh/1): this spec is about that profile.
+  await alice.page.getByTestId("new-group-kind-mesh").click();
   await alice.page.getByTestId("new-group-create").click();
   await expect(alice.page.getByTestId("group-name")).toHaveText("Open ghosts");
 
@@ -124,6 +126,8 @@ test("with the admin's app open, joining through the link takes seconds and show
   await alice.page.getByTestId("sidebar-new-more").click();
   await alice.page.getByTestId("new-group").click();
   await alice.page.getByTestId("new-group-name").fill("Quick ghosts");
+  // A private group (group-mesh/1): this spec is about that profile.
+  await alice.page.getByTestId("new-group-kind-mesh").click();
   await alice.page.getByTestId("new-group-create").click();
   const shareDialog = alice.page.getByTestId("group-share-dialog");
   const url = await shareDialog.getByTestId("group-link-url").inputValue();

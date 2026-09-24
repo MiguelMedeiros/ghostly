@@ -6,6 +6,7 @@ import type { GroupView } from "@ghostly/browser/shared/types";
 import { useBackdropDismiss } from "../hooks/useDismiss";
 import { copyText, shareLink } from "../lib/shareLink";
 import { groupLinkUrl } from "../lib/groups";
+import { COMMUNITY_LIMITS } from "@ghostly/core";
 
 const MAX_MEMBERS = 8;
 
@@ -31,7 +32,9 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
   const shareButton = useRef<HTMLButtonElement>(null);
   useEffect(() => () => clearTimeout(saidTimer.current), []);
   const url = groupLinkUrl(group);
-  const full = group.members.length >= MAX_MEMBERS;
+  const community = group.profile === "community";
+  const cap = community ? COMMUNITY_LIMITS.members : MAX_MEMBERS;
+  const full = group.members.length >= cap;
   const flash = (what: "copied" | "shared") => {
     setSaid(what); clearTimeout(saidTimer.current);
     saidTimer.current = setTimeout(() => setSaid(""), 2500);
@@ -52,8 +55,10 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
     } catch { setError("Sharing did not work. Copy the link instead."); }
   };
   const note = full
-    ? `The group is full (${MAX_MEMBERS} of ${MAX_MEMBERS}): nobody gets in through the link until someone leaves.`
-    : `Anyone who opens this link joins, without being your contact or saying who they are. They get in while your app is open, up to ${MAX_MEMBERS} members.`;
+    ? `The group is full (${cap} of ${cap}): nobody gets in through the link until someone leaves.`
+    : community
+      ? `Anyone who opens this link joins, without being anyone's contact or saying who they are. Any member's app lets them in, so it works while you are away; up to ${cap} members. Removing someone does not stop them from opening the link again: the admin makes a new one for that.`
+      : `Anyone who opens this link joins, without being your contact or saying who they are. They get in while your app is open, up to ${cap} members.`;
 
   if (!url) return <div className={large ? "text-center" : "mt-4"} data-testid="group-link" data-state="off">
     {!large && <h3 className="text-xs font-bold uppercase tracking-wider text-accent">Group link</h3>}

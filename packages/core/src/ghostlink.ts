@@ -813,6 +813,8 @@ export class GhostLink {
   }
   /** Both sides announced groups on this session and it is open. */
   get groupsSupport(): boolean { return !!this.options.groupsSupport && this.isDataLinkOpen && !!this.peerGroupVersions?.includes(1); }
+  /** Both sides announced this version of groups (1: `group-mesh/1`, 2: `group-community/1` too). */
+  supportsGroupVersion(version: number): boolean { return this.groupsSupport && !!this.peerGroupVersions?.includes(version); }
   /** A `group-*` frame to the peer. Only while both sides support groups; never queued. */
   sendGroupFrame(frame: object): void {
     if (!this.groupsSupport || !this.channel) throw new Error("This contact is not connected, or needs an updated Ghostly for groups");
@@ -823,7 +825,7 @@ export class GhostLink {
   /** Older apps drop this frame (it carries no id): to them this contact has no groups. */
   private sendGroupsSupport(): void {
     if (!this.options.groupsSupport || !this.options.params.profile || !this.channel || !this.isDataLinkOpen) return;
-    try { this.channel.send(JSON.stringify({ t: "paired-groups", v: [1] })); } catch { /* the next session announces it */ }
+    try { this.channel.send(JSON.stringify({ t: "paired-groups", v: [1, 2] })); } catch { /* the next session announces it */ }
   }
   /** Older apps drop this frame (it carries no id) and keep using the handshake offer. */
   private sendPaymentMethods(): void {

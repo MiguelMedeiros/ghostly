@@ -40,21 +40,24 @@ function eventText(message: StoredMessage, group: GroupView): string {
   return message.text;
 }
 
-/** A join through a link, step by step: what the joiner's app knows so far, never more. */
-const JOIN_STEPS: { stage: GroupJoinStage; label: string }[] = [
-  { stage: "knocked", label: "Knock left for the admin's app" },
-  { stage: "answered", label: "The admin's app answered" },
+/** A join through a link, step by step: what the joiner's app knows so far, never more. In a community any member's app answers. */
+const joinSteps = (community: boolean): { stage: GroupJoinStage; label: string }[] => [
+  { stage: "knocked", label: community ? "Knock left for the group" : "Knock left for the admin's app" },
+  { stage: "answered", label: community ? "A member's app answered" : "The admin's app answered" },
   { stage: "admitted", label: "Let in: getting the group's keys" },
 ];
 /** How long after joining a group with nobody reached yet says it is still connecting (later, they are simply away). */
 const JUST_JOINED_MS = 5 * 60_000;
 const JOIN_ORDER: GroupJoinStage[] = ["knocking", "knocked", "answered", "admitted"];
 
-function joiningText(stage: GroupJoinStage, name: string): { title: string; body: string } {
-  if (stage === "admitted") return { title: `Joining ${name || "the group"}…`, body: "The admin's app answered: getting the group's keys. You are in in a moment." };
-  if (stage === "answered") return { title: "Waiting to be let in", body: "The admin's app saw you knock and is connecting to you. You are in in a moment." };
-  if (stage === "knocked") return { title: "Waiting to be let in", body: "Waiting for the admin's app to let you in. It happens on its own as soon as their app is open: you can leave this page and come back." };
-  return { title: "Waiting to be let in", body: "Leaving a knock where the admin's app looks for one…" };
+function joiningText(stage: GroupJoinStage, name: string, community: boolean): { title: string; body: string } {
+  const who = community ? "A member's app" : "The admin's app";
+  if (stage === "admitted") return { title: `Joining ${name || "the group"}…`, body: `${who} answered: getting the group's keys. You are in in a moment.` };
+  if (stage === "answered") return { title: "Waiting to be let in", body: `${who} saw you knock and is connecting to you. You are in in a moment.` };
+  if (stage === "knocked") return { title: "Waiting to be let in", body: community
+    ? "Waiting for someone in the group to let you in. It happens on its own as soon as any member's app is open: you can leave this page and come back."
+    : "Waiting for the admin's app to let you in. It happens on its own as soon as their app is open: you can leave this page and come back." };
+  return { title: "Waiting to be let in", body: community ? "Leaving a knock where the group's apps look for one…" : "Leaving a knock where the admin's app looks for one…" };
 }
 
 /** One private group: its members and roles behind the header, its history, and the composer. */
@@ -113,15 +116,19 @@ export function GroupChat() {
   const peerOf = (paymentId: string) => { const linkId = state.payments[paymentId]?.linkId; return state.edges?.find(l => l.id === linkId)?.peerPubKeyZ32 ?? ""; };
   const joiningByLink = group.invitation?.viaLink;
   const stage: GroupJoinStage = group.invitation?.stage ?? (group.invitation?.admin ? "admitted" : "knocked");
-  const joining = joiningText(stage, group.name);
+  const joining = joiningText(stage, group.name, group.profile === "community");
   // Just in (my own "You joined" line is recent), and no member reached yet: the edges are being set up.
   const justJoined = messages.some(m => m.event === "joined" && !m.member && Date.now() - m.timestamp < JUST_JOINED_MS);
   const connecting = group.status === "active" && others.length > 0 && reachable === 0 && justJoined;
+  const community = group.profile === "community" ? group.community : undefined;
+  const count = `${group.members.length} member${group.members.length === 1 ? "" : "s"}`;
   const subtitle = joiningByLink ? (group.invitation!.admin ? "Joining…" : "Joining through a link")
+    : community && group.status === "active" ? `${count} · ${community.hub ? "your app relays for others" : community.connected ? "connected" : "connecting…"}`
     : group.invitation ? `Invitation from ${group.invitation.contact || "a contact"}`
-    : group.status === "active" ? `${group.members.length} member${group.members.length === 1 ? "" : "s"} · ${reachable} of ${others.length} reachable`
+    : group.status === "active" ? `${count} · ${reachable} of ${others.length} reachable`
     : group.statusReason ?? group.status;
-  const canShare = group.isAdmin && group.status === "active";
+  // In a community every member can let people in, so every member hands the link out; in a private group, the admin.
+  const canShare = group.status === "active" && (group.isAdmin || (group.profile === "community" && !!group.entryLink));
   const openShare = async () => {
     setError("");
     // The link may be off: sharing it turns it on.
@@ -186,7 +193,7 @@ export function GroupChat() {
           <h2 className="mt-4 text-base font-semibold text-text-primary">{joining.title}</h2>
           <p className="mt-2 text-sm leading-relaxed text-text-muted">{joining.body}</p>
           <ol data-testid="group-joining-steps" data-stage={stage} className="mx-auto mt-4 w-fit space-y-1.5 text-left text-xs">
-            {JOIN_STEPS.map(step => {
+            {joinSteps(group.profile === "community").map(step => {
               const done = JOIN_ORDER.indexOf(stage) >= JOIN_ORDER.indexOf(step.stage);
               const current = !done && JOIN_ORDER[JOIN_ORDER.indexOf(step.stage) - 1] === stage;
               return <li key={step.stage} data-state={done ? "done" : current ? "current" : "todo"} className={`flex items-center gap-2 ${done ? "text-text-primary" : current ? "text-accent" : "text-text-muted/60"}`}>
@@ -216,7 +223,7 @@ export function GroupChat() {
 
       {!joiningByLink && <MessageInput draftId={`group:${groupId}`} key={groupId} onSend={send} disabled={!group.canSend} maxLength={16_384}
         fileUnavailable="Files are not part of groups yet"
-        paymentsUnavailable={others.length === 0 ? "Nobody else is in the group yet" : undefined}
+        paymentsUnavailable={group.profile === "community" ? "Payments are not part of community groups yet" : others.length === 0 ? "Nobody else is in the group yet" : undefined}
         paymentComposer={close => <GroupPaymentComposer group={group} onClose={close} />} />}
 
       {showMembers && <GroupMembersDialog group={group} onClose={() => setShowMembers(false)} />}
