@@ -615,6 +615,8 @@ export const group: Block = {
     await a.page.getByTestId("sidebar-new-more").click();
     await a.page.getByTestId("new-group").click();
     await a.page.getByTestId("new-group-name").fill(name);
+    // A private group (group-mesh/1): its `group1` link and contact invitations are what this block walks.
+    await a.page.getByTestId("new-group-kind-mesh").click();
     await a.page.getByTestId("new-group-create").click();
     // A new group opens on its link, already on.
     const share = a.page.getByTestId("group-share-dialog");
