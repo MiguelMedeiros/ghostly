@@ -4,6 +4,7 @@ import type { NostrDraft, NostrDraftRequest, NostrPublishResult } from "@ghostly
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
 import { nostrSignerChoices, signNostrDraft, type NostrSignerChoice } from "../../lib/nostr";
 import { Button, Notice, input } from "../wallet/ui";
+import { Select } from "../ui/Select";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -70,10 +71,9 @@ export function NostrPublishDialog({ request, onClose, onDone }: { request: Nost
           </div>
           <Notice tone="warning" testId="nostr-publish-notice">Public on Nostr. {draft!.notice}</Notice>
           {choices.length > 1 && (
-            <label className="block text-xs text-text-muted">Sign with
-              <select data-testid="nostr-publish-signer" value={signer} onChange={e => setSigner(e.target.value as NostrSignerChoice)} className={`${input} mt-1`}>
-                {choices.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-              </select>
+            <label className="block space-y-1 text-xs text-text-muted">Sign with
+              <Select data-testid="nostr-publish-signer" aria-label="Sign with" value={signer} onChange={setSigner}
+                options={choices.map(c => ({ value: c.id, label: c.label }))} />
             </label>
           )}
           {signer === "nip46" && (
