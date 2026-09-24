@@ -1,4 +1,4 @@
-import { expect, test, type Peer } from "../support/fixtures";
+import { expect, openProfilePage, test, type Peer } from "../support/fixtures";
 
 /**
  * Leaving a group takes it off the list at once, even while the admin is away (the admin hears it
@@ -9,7 +9,7 @@ const rows = (peer: Peer) => peer.page.getByTestId("sidebar").getByTestId("group
 const event = (peer: Peer, text: string) => expect(peer.page.getByTestId("group-event").filter({ hasText: text })).toBeVisible({ timeout: 120_000 });
 
 async function setName(peer: Peer, name: string): Promise<void> {
-  await peer.page.getByTestId("account-profile").click();
+  await openProfilePage(peer.page);
   await peer.page.getByTestId("account-nickname").fill(name);
   await expect(peer.page.getByTestId("account-nickname")).toHaveValue(name);
   await peer.page.goBack();

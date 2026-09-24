@@ -13,17 +13,17 @@ test.describe("wallet", { tag: "@network" }, () => {
 
   const balance = async (peer: Peer) => {
     await showCashu(peer);
-    return Number(((await peer.page.getByTestId("wallet-test-balance").textContent()) ?? "").match(/^([\d,]+)/)![1].replace(",", ""));
+    return Number(((await peer.page.getByTestId("wallet-balance").textContent()) ?? "").match(/^([\d,]+)/)![1].replace(",", ""));
   };
   async function showCashu(peer: Peer): Promise<void> {
-    if (await peer.page.getByTestId("wallet-test-balance").isVisible()) return;
+    if (await peer.page.getByTestId("wallet-balance").isVisible()) return;
     await openWallet(peer, "cashu");
   }
 
   async function switchToTestMint(peer: Peer): Promise<void> {
     await openWallet(peer, "cashu");
     await peer.page.getByTestId("wallet-mode").getByRole("radio", { name: "Testnet" }).click();
-    await expect(peer.page.getByTestId("wallet-test-balance")).toBeVisible();
+    await expect(peer.page.getByTestId("wallet-balance")).toBeVisible();
     await openChat(peer);
   }
 
@@ -43,7 +43,7 @@ test.describe("wallet", { tag: "@network" }, () => {
 
     const invoice = await receive(alice, 100);
     expect(invoice.startsWith("lnbc"), "the mint issued a Lightning invoice").toBe(true);
-    await expect(alice.page.getByTestId("wallet-test-balance")).toHaveText(/^100 test sats/);
+    await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^100\s*sats/);
     await expect(alice.page.getByTestId("wallet-paid")).toBeVisible();
 
     await openChat(alice);
@@ -55,10 +55,10 @@ test.describe("wallet", { tag: "@network" }, () => {
     const directReview = alice.page.getByTestId("payment-composer").getByTestId("payment-review");
     await expect(directReview).toContainText("cashu-test");
     await showCashu(bob);
-    await expect(bob.page.getByTestId("wallet-test-balance")).toHaveText(/^0 test sats/);
+    await expect(bob.page.getByTestId("wallet-balance")).toHaveText(/^0\s*sats/);
     await directReview.getByRole("button", { name: "Approve payment" }).click();
     const sent = (p: Peer) => chat(p).getByTestId("payment-bubble").filter({ hasText: "21" }).getByTestId("payment-state");
-    await expect(bob.page.getByTestId("wallet-test-balance")).toHaveText(/^21 test sats/);
+    await expect(bob.page.getByTestId("wallet-balance")).toHaveText(/^21\s*sats/);
     await openChat(bob);
     await expect(sent(bob)).toHaveText(/Received/);
     await expect(sent(alice)).toHaveText(/Received/);
@@ -80,7 +80,7 @@ test.describe("wallet", { tag: "@network" }, () => {
     await requestReview.getByRole("button", { name: "Approve payment" }).click();
     for (const p of [alice, bob]) await expect(chat(p).getByTestId("payment-bubble").filter({ hasText: "equest" }).getByTestId("payment-state")).toHaveText(/Paid/);
     await showCashu(bob);
-    await expect(bob.page.getByTestId("wallet-test-balance")).toHaveText(/^31 test sats/);
+    await expect(bob.page.getByTestId("wallet-balance")).toHaveText(/^31\s*sats/);
 
     await showCashu(alice);
     await alice.page.getByTestId("wallet-history").click();
@@ -102,7 +102,7 @@ test.describe("wallet", { tag: "@network" }, () => {
     await connect(alice, bob);
     await switchToTestMint(alice);
     await receive(alice, 50);
-    await expect(alice.page.getByTestId("wallet-test-balance")).toHaveText(/^50 test sats/);
+    await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^50\s*sats/);
     await openChat(alice);
     await alice.page.getByTestId("payment-button").click();
     await alice.page.getByTestId("payment-card-cashu").click();
@@ -119,7 +119,7 @@ test.describe("wallet", { tag: "@network" }, () => {
     await expect(bob.page.getByTestId("wallet-waiting-test-sats")).toContainText("10 test sats are waiting in Testnet");
     await bob.page.getByTestId("wallet-waiting-test-sats").getByRole("button", { name: "Switch to Testnet" }).click();
     await expect(bob.page.getByTestId("testnet-badge")).toBeVisible();
-    await expect(bob.page.getByTestId("wallet-test-balance")).toHaveText(/^10 test sats/);
+    await expect(bob.page.getByTestId("wallet-balance")).toHaveText(/^10\s*sats/);
   });
 
   test("an invoice pasted into the chat is a card that can be paid", { tag: ["@feature:payments.lightning.invoice-card"] }, async ({ peer }) => {
@@ -128,7 +128,7 @@ test.describe("wallet", { tag: "@network" }, () => {
     await connect(alice, bob);
     for (const p of [alice, bob]) await switchToTestMint(p);
     await receive(alice, 50);
-    await expect(alice.page.getByTestId("wallet-test-balance")).toHaveText(/^50 test sats/);
+    await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^50\s*sats/);
 
     const pasted = await receive(bob, 12);
     await openChat(bob);

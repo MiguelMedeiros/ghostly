@@ -5,6 +5,7 @@ import { PaymentReview } from "./PaymentReview";
 import { BackupRows } from "./wallet/BackupRows";
 import { Actions, Address, Amount, Block, Button, Notice, Row, Section, Segmented, input, type Action } from "./wallet/ui";
 import { useRun } from "./wallet/run";
+import { pageUnit } from "./walletCardData";
 
 type Network = "signet" | "regtest";
 /** Second's public signet server, or a local regtest one (e2e/support/bark-regtest). */
@@ -24,7 +25,7 @@ export function BarkWalletPanel({ wallet, state }: { wallet: WalletPlatform; sta
  const [address, setAddress] = useState(""), [amount, setAmount] = useState(""), [review, setReview] = useState<Review | null>(null);
  const [custom, setCustom] = useState(false), [provider, setProvider] = useState(""), [explorer, setExplorer] = useState("");
  const network = (bark?.network === "regtest" ? "regtest" : "signet") as Network;
- const unit = bark?.network === "bitcoin" ? "sats" : "test sats";
+ const unit = pageUnit(state, bark?.network !== "bitcoin");
  const ready = !!bark?.configured && !bark.locked;
  const intents = (state.intents ?? []).filter(i => i.method === "bark");
  // Not answering (made, or never made because the server did not answer): another server can still be chosen.

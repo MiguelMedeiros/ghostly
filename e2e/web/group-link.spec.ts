@@ -1,4 +1,4 @@
-import { expect, test, type Peer } from "../support/fixtures";
+import { expect, openProfilePage, test, type Peer } from "../support/fixtures";
 import { setClipboard } from "../support/clipboard";
 
 /**
@@ -11,7 +11,7 @@ const wallpaper = (peer: Peer) => peer.page.locator(".chat-wallpaper");
 const sees = (peer: Peer, text: string) => expect(wallpaper(peer).getByText(text, { exact: true })).toBeVisible({ timeout: 90_000 });
 
 async function setName(peer: Peer, name: string): Promise<void> {
-  await peer.page.getByTestId("account-profile").click();
+  await openProfilePage(peer.page);
   await peer.page.getByTestId("account-nickname").fill(name);
   await expect(peer.page.getByTestId("account-nickname")).toHaveValue(name);
   await peer.page.goBack();

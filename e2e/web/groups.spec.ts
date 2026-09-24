@@ -1,4 +1,4 @@
-import { expect, test, type Peer } from "../support/fixtures";
+import { expect, openProfilePage, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 
 /**
@@ -10,7 +10,7 @@ const groupChat = (peer: Peer) => peer.page.getByTestId("group-chat");
 const wallpaper = (peer: Peer) => peer.page.locator(".chat-wallpaper");
 
 async function setName(peer: Peer, name: string): Promise<void> {
-  await peer.page.getByTestId("account-profile").click();
+  await openProfilePage(peer.page);
   await peer.page.getByTestId("account-nickname").fill(name);
   await expect(peer.page.getByTestId("account-nickname")).toHaveValue(name);
   await peer.page.goBack();

@@ -54,6 +54,6 @@ export function CardDeck({onSelect,onChoose,testId,...props}:CardDeckProps) {
 
 /** The wallet page's deck: tabs over the chosen card's panel. */
 export function WalletDeck({state,selected,onSelect,testMints}:{state:WalletState;selected:WalletRail;onSelect:(rail:WalletRail)=>void;testMints:readonly string[]}) {
- return <CardDeck cards={walletCards(state,testMints)} selected={selected} onSelect={onSelect} kind="tabs" label="Wallet integrations" name="wallet-deck"
+ return <CardDeck cards={walletCards(state,testMints,{badged:true})} selected={selected} onSelect={onSelect} kind="tabs" label="Wallet integrations" name="wallet-deck"
   testId={rail=>`wallet-card-${rail}`} hoverDelay={90}/>;
 }

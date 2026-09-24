@@ -17,11 +17,11 @@ test("paired chat: files, real WebRTC, local mint send/request and persistence",
   for (const p of [alice, bob]) {
     await openWallet(p, "cashu");
     await p.page.getByTestId("wallet-mode").getByRole("radio", { name: "Testnet" }).click();
-    await expect(p.page.getByTestId("wallet-test-balance")).toBeVisible();
+    await expect(p.page.getByTestId("wallet-balance")).toBeVisible();
   }
   await alice.page.getByTestId("wallet-receive").click(); await alice.page.getByTestId("wallet-receive-amount").fill("100");
   await alice.page.getByTestId("wallet-create-invoice").click();
-  await expect(alice.page.getByTestId("wallet-test-balance")).toHaveText(/^100 test sats/);
+  await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^100\s*sats/);
   for (const p of [alice, bob]) await openChat(p);
   await alice.page.getByTestId("payment-button").click(); await alice.page.getByTestId("payment-card-cashu").click(); await alice.page.getByTestId("payment-amount").fill("21");
   await alice.page.getByTestId("payment-send").click();
@@ -30,7 +30,7 @@ test("paired chat: files, real WebRTC, local mint send/request and persistence",
   const payment = (p: Peer) => chat(p).getByTestId("payment-bubble").filter({ hasText: "21" }).getByTestId("payment-state");
   for (const p of [alice, bob]) await expect(payment(p)).toHaveText(/Received/);
   await openWallet(bob, "cashu");
-  await expect(bob.page.getByTestId("wallet-test-balance")).toHaveText(/^21 test sats/);
+  await expect(bob.page.getByTestId("wallet-balance")).toHaveText(/^21\s*sats/);
   await alice.page.getByTestId("payment-composer").getByRole("button", { name: "Close", exact: true }).click();
   await openChat(bob);
   // Ecash only: the fake mint pays a request's own Lightning invoice by itself and would race Alice.
@@ -43,13 +43,13 @@ test("paired chat: files, real WebRTC, local mint send/request and persistence",
   await chat(alice).getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
   for (const p of [alice, bob]) await expect(chat(p).getByTestId("payment-bubble").filter({ hasText: "equest" }).getByTestId("payment-state")).toHaveText(/Paid/);
   await openWallet(bob, "cashu");
-  await expect(bob.page.getByTestId("wallet-test-balance")).toHaveText(/^31 test sats/);
+  await expect(bob.page.getByTestId("wallet-balance")).toHaveText(/^31\s*sats/);
   await openChat(bob);
   await alice.page.reload(); await bob.page.reload();
   for (const p of [alice, bob]) { await expect(payment(p)).toHaveText(/Received/); await expect(p.page.getByPlaceholder("Message…")).toBeEnabled(); }
   await expect(bubble.getByTestId("file-save")).toBeVisible();
   await openWallet(bob, "cashu");
-  await expect(bob.page.getByTestId("wallet-test-balance")).toHaveText(/^31 test sats/);
+  await expect(bob.page.getByTestId("wallet-balance")).toHaveText(/^31\s*sats/);
   await bob.page.getByTestId("wallet-history").click();
   await expect(bob.page.getByTestId("wallet-tx").filter({ hasText: "Received ecash" })).toHaveCount(2);
   await openChat(bob);

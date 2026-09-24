@@ -70,13 +70,20 @@ export function Address({ value, qr, uri, testId, note, actions }: { value: stri
   return <PayExternally uri={uri ?? qr ?? value} value={value} testId={testId} note={note} actions={actions} label="Receiving address" />;
 }
 
+/** The focus is on a wallet card, put there from the keyboard. */
+function keyingThroughCards(): boolean {
+  const active = document.activeElement;
+  if (!active?.closest(".wallet-deck-track")) return false;
+  try { return active.matches(":focus-visible"); } catch { return true; }
+}
+
 /** A large amount field: what matters most when paying is the number. */
 export function Amount({ value, onChange, unit, decimals = 0, testId, autoFocus }: { value: string; onChange: (next: string) => void; unit: string; decimals?: number; testId?: string; autoFocus?: boolean }) {
-  // Focused where it is, without scrolling to it (as it mounts, like autoFocus, so a deck that keeps the focus after an
-  // arrow key still gets the last word): the wallet's cards above it stay in view, and a card that comes up
-  // as the pointer passes over it does not move the page under that pointer.
+  // Focused where it is, without scrolling to it: the wallet's cards above it stay in view, and a card that comes up
+  // as the pointer passes over it does not move the page under that pointer. Not while someone moves through the
+  // wallet's cards with the keys: the panel mounts a moment after its card comes up, and the card keeps the focus.
   const input = useRef<HTMLInputElement>(null);
-  useLayoutEffect(() => { if (autoFocus) input.current?.focus({ preventScroll: true }); }, [autoFocus]);
+  useLayoutEffect(() => { if (autoFocus && !keyingThroughCards()) input.current?.focus({ preventScroll: true }); }, [autoFocus]);
   return (
     <label className="flex items-baseline gap-2 bg-surface-alt rounded-xl px-4 py-3 border border-border focus-within:ring-2 focus-within:ring-accent">
       <input ref={input} data-testid={testId} inputMode={decimals ? "decimal" : "numeric"} placeholder="0" aria-label={`Amount in ${unit}`}

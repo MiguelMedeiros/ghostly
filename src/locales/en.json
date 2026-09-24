@@ -223,6 +223,7 @@
   "tabs": {
     "chats": "Chats",
     "wallet": "Wallet",
+    "wallets": "Wallets",
     "share": "Share",
     "profile": "Profile",
     "services": "Services",
@@ -239,6 +240,7 @@
     "locked": "locked",
     "add": "Add a profile",
     "manage": "Manage profiles",
+    "open": "Open profile",
     "othersUnread": "unread messages in another profile",
     "switching": "Opening {{name}}…",
     "holdHint": "Or hold Settings in the tab bar"

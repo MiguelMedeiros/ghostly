@@ -6,7 +6,7 @@ test("on a phone: tabs for chats, wallet, sharing and settings, and Profile thro
   await expect(tabs).toBeVisible();
   await expect(tabs.getByRole("button", { name: "Chats" })).toHaveAttribute("aria-current", "page");
 
-  await tabs.getByRole("button", { name: "Wallet" }).click();
+  await tabs.getByRole("button", { name: "Wallets" }).click();
   await expect(page).toHaveURL(/#\/wallet$/);
   await expect(page.getByRole("heading", { name: "Wallet" })).toBeVisible();
   await expect(page.getByTestId("wallet")).toBeVisible();

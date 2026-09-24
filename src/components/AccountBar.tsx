@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import { useMyAvatar } from "../hooks/useAvatars";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useI18n } from "../contexts/I18nContext";
@@ -8,14 +8,21 @@ import { THEME_COLOR, currentProfile, themeOf } from "../lib/profiles";
 import { useIdentityAttention } from "../lib/identities";
 import { IdentitiesIcon } from "./identities/IdentitiesIcon";
 import { ProfileSwitcherMenu } from "./ProfileSwitcher";
-import { shortcutLabel, SWITCHER_SHORTCUT, useLongPress, useProfileGlances, useProfileSwitcher } from "../hooks/useProfileSwitcher";
+import { SWITCHER_SHORTCUT, useProfileGlances, useProfileSwitcher } from "../hooks/useProfileSwitcher";
 
 
 /**
  * The one fixed row at the foot of the sidebar: who you are, what you hold, and
  * the way into everything else. Profile, wallet, identities, services and Settings
- * are all pages beside the list.
+ * are all pages beside the list. The Profile place is named after the profile it
+ * stands for; the Wallets place says only that: the balance is on the page and its cards.
  */
+/** The active profile, following a rename or a switch (lib/profiles announces both as "profiles-updated"). */
+function useCurrentProfile() {
+  const [, bump] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => { window.addEventListener("profiles-updated", bump); return () => window.removeEventListener("profiles-updated", bump); }, []);
+  return currentProfile();
+}
 /** 21 → "21", 1500 → "1.5k", 2_000_000 → "2M": short enough for a badge on an icon. */
 const compact = (sats: number) => new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(sats);
 
@@ -32,31 +39,17 @@ export function AccountBar() {
   const wallet = platform?.wallet;
   const walletState = wallet?.getState();
   const balance = walletState?.balance ?? 0;
-  // Test sats are worthless: the bar shows what the money actually is, and the
-  // panel is where the test balance is spelled out.
-  // In Testnet the wallet shows only test mints: the whole balance is test sats, and the bar says so.
+  // The balance is not shown here (the Wallet page and its cards have it), but what came in while the wallet was
+  // closed is counted on the icon, real and test sats apart: test sats are worthless. In Testnet the wallet holds
+  // only test mints, so the whole balance is test sats.
   const testnet = walletState?.mode === "testnet";
   const testBalance = testnet ? balance : walletState?.mints.filter((m) => wallet?.testMintUrls.includes(m.url)).reduce((sum, m) => sum + m.balance, 0) ?? 0;
   const realBalance = balance - testBalance;
-  const balanceLabel = !walletState ? "— sats" : testnet ? `${testBalance.toLocaleString()} test sats` : `${realBalance.toLocaleString()} sats`;
-  const walletLabelRef = useRef<HTMLSpanElement>(null);
-  const [walletLabelLayout, setWalletLabelLayout] = useState({ fontSize: 10 });
-  useEffect(() => {
-    const label = walletLabelRef.current, button = label?.parentElement;
-    if (!label || !button) return;
-    const context = document.createElement("canvas").getContext("2d");
-    if (!context) return;
-    const fit = () => {
-      context.font = `10px ${getComputedStyle(label).fontFamily}`;
-      const available = Math.max(1, button.clientWidth - 8);
-      const balanceWidth = context.measureText(balanceLabel).width;
-      setWalletLabelLayout({ fontSize: Math.min(10, 10 * available / Math.max(1, balanceWidth)) });
-    };
-    const observer = new ResizeObserver(fit); observer.observe(button); fit();
-    return () => observer.disconnect();
-  }, [balanceLabel, wallet]);
+  // The Profile place wears the profile's name (renamed or switched, it follows); "Profile" only for a profile with none.
+  const profile = useCurrentProfile();
+  const profileName = profile.name || t("tabs.profile");
   // Five places in a sidebar that can be 280px wide: when any label would be cut, the labels go (the icons,
-  // their tooltips and names stay), all at once so the row stays even. The balance is a value, not a label: it shrinks instead.
+  // their tooltips and names stay), all at once so the row stays even.
   const navRef = useRef<HTMLElement>(null);
   const [labelsHidden, setLabelsHidden] = useState(false);
   useEffect(() => {
@@ -73,7 +66,7 @@ export function AccountBar() {
     };
     const observer = new ResizeObserver(fit); observer.observe(nav); fit();
     return () => observer.disconnect();
-  }, [t]);
+  }, [t, profileName]);
   const identityAttention = useIdentityAttention();
   const onIdentities = location.pathname === "/identities";
   const lastBalanceRef = useRef({ real: realBalance, test: testBalance, testnet });
@@ -82,13 +75,12 @@ export function AccountBar() {
 
   const onWallet = location.pathname === "/wallet";
   const onProfile = location.pathname === "/profile";
-  const profile = currentProfile();
   const myAvatar = useMyAvatar();
-  // The account switcher: the chevron, a right-click or a long press on Profile, or Alt+Shift+P.
+  // The account switcher: a click on the Profile place (the menu leads to the Profile page too), or Alt+Shift+P.
+  // Where there is one profile only, the place is the way to the Profile page.
   const canSwitch = !!platform?.features.profiles;
   const switcher = useProfileSwitcher(canSwitch);
   const glances = useProfileGlances();
-  const longPress = useLongPress(switcher.show);
   const profileLabel = `${t("settings.profile")}: ${profile.name}${name ? `, ${name}` : `, ${t("common.anonymous")}`}, ${online ? "Online" : "Offline"}${
     canSwitch && glances.othersUnread ? `, ${t("profileSwitcher.othersUnread")}` : ""}`;
   useEffect(() => {
@@ -104,66 +96,49 @@ export function AccountBar() {
   }, [onWallet]);
   // Real sats say how many; test sats only that some came (they are worth nothing).
   const unseenLabel = unseen.real ? `+${compact(unseen.real)}` : unseen.test ? `+${compact(unseen.test)}` : "";
+  const unseenTitle = unseen.real ? `${unseen.real.toLocaleString()} new sats` : `${unseen.test.toLocaleString()} new ${testnet ? "sats" : "test sats"}`;
 
 
   return (
     <div ref={panelRoot} className="account-footer relative border-t border-border bg-sidebar-bg" data-testid="account-bar">
       <nav ref={navRef} aria-label="Account" className="account-actions" data-compact={labelsHidden || undefined}>
-        <div className="relative grid min-w-0">
-          <button
-            data-testid="account-profile"
-            onClick={() => navigate(onProfile ? "/" : "/profile")}
-            {...(canSwitch ? longPress : {})}
-            aria-label={profileLabel}
-            aria-current={onProfile ? "page" : undefined}
-            className={`account-action select-none ${onProfile ? "bg-surface-hover" : "hover:bg-surface-alt"}`}
-            title={`${t("settings.profile")}: ${profile.name}`}
-          >
-            <span className="relative w-[23px] h-[23px] shrink-0 flex items-center justify-center">
-              {/* The active profile's initial in its own color: which profile this is, at a glance. */}
-              {myAvatar
-                ? <img src={myAvatar} alt="" aria-hidden="true" draggable={false} className="w-[23px] h-[23px] rounded-full object-cover" />
-                : <span aria-hidden="true" className="grid place-items-center w-[23px] h-[23px] rounded-full text-[12px] font-bold text-[#111b21]" style={{ background: THEME_COLOR[themeOf(profile.id)] }}>{profile.name.charAt(0).toUpperCase()}</span>}
-              {platform && (
-                <span
-                  className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-sidebar-bg ${
-                    online ? "bg-accent" : "bg-gray-500"
-                  }`}
-                />
-              )}
-              {/* Unread messages left in another profile: a ring on the picture, the switcher says where. */}
-              {canSwitch && glances.othersUnread > 0 && <span data-testid="account-profile-others" aria-hidden="true" className="profile-others-ring" />}
-            </span>
-            <span className="account-label">{t("tabs.profile")}</span>
-          </button>
-          {canSwitch && (
-            <button
-              type="button"
-              data-testid="account-profile-switcher"
-              data-switcher-opener=""
-              onClick={switcher.toggle}
-              aria-label={t("profileSwitcher.title")}
-              aria-haspopup="menu"
-              aria-expanded={switcher.open}
-              aria-keyshortcuts={SWITCHER_SHORTCUT}
-              title={`${t("profileSwitcher.title")} (${shortcutLabel()})`}
-              className="profile-switcher-chevron"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m7 15 5-5 5 5" /></svg>
-            </button>
-          )}
-        </div>
+        <button
+          data-testid="account-profile"
+          onClick={canSwitch ? switcher.toggle : () => navigate(onProfile ? "/" : "/profile")}
+          {...(canSwitch ? { "data-switcher-opener": "", "aria-haspopup": "menu" as const, "aria-expanded": switcher.open, "aria-keyshortcuts": SWITCHER_SHORTCUT } : {})}
+          aria-label={profileLabel}
+          aria-current={onProfile ? "page" : undefined}
+          className={`account-action select-none ${onProfile ? "bg-surface-hover" : "hover:bg-surface-alt"}`}
+          title={`${t("settings.profile")}: ${profile.name}`}
+        >
+          <span className="relative w-[23px] h-[23px] shrink-0 flex items-center justify-center">
+            {/* The active profile's initial in its own color: which profile this is, at a glance. */}
+            {myAvatar
+              ? <img src={myAvatar} alt="" aria-hidden="true" draggable={false} className="w-[23px] h-[23px] rounded-full object-cover" />
+              : <span aria-hidden="true" className="grid place-items-center w-[23px] h-[23px] rounded-full text-[12px] font-bold text-[#111b21]" style={{ background: THEME_COLOR[themeOf(profile.id)] }}>{profile.name.charAt(0).toUpperCase()}</span>}
+            {platform && (
+              <span
+                className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-sidebar-bg ${
+                  online ? "bg-accent" : "bg-gray-500"
+                }`}
+              />
+            )}
+            {/* Unread messages left in another profile: a ring on the picture, the switcher says where. */}
+            {canSwitch && glances.othersUnread > 0 && <span data-testid="account-profile-others" aria-hidden="true" className="profile-others-ring" />}
+          </span>
+          <span className="account-label">{profileName}</span>
+        </button>
 
         {wallet && (
           <button
             data-testid="wallet-chip"
             onClick={() => navigate(onWallet ? "/" : "/wallet")}
-            aria-label={`Wallet: ${walletState ? balanceLabel : "balance unavailable"}${testBalance ? `, ${testBalance.toLocaleString()} test sats` : ""}${unseen.real ? `, ${unseen.real.toLocaleString()} new sats` : unseen.test ? `, ${unseen.test.toLocaleString()} new test sats` : ""}`}
+            aria-label={`${t("tabs.wallets")}${unseenLabel ? `, ${unseenTitle}` : ""}`}
             aria-current={onWallet ? "page" : undefined}
             className={`account-action relative ${
               onWallet ? "bg-surface-hover text-accent" : "text-text-secondary hover:text-text-primary"
             }`}
-            title={`Wallet: ${walletState ? balanceLabel : "balance unavailable"}`}
+            title={unseenLabel ? `${t("tabs.wallets")}: ${unseenTitle}` : t("tabs.wallets")}
           >
             <span className="relative shrink-0 flex">
               <svg aria-hidden="true" width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -171,16 +146,11 @@ export function AccountBar() {
               </svg>
               {/* On the icon itself, saying how much came in: it belongs to the wallet, not to the space beside it. */}
               {unseenLabel && (
-                <span data-testid="wallet-new" aria-hidden="true" title={unseen.real ? `${unseen.real.toLocaleString()} new sats` : `${unseen.test.toLocaleString()} new test sats`}
+                <span data-testid="wallet-new" aria-hidden="true" title={unseenTitle}
                   className={`wallet-new ${unseen.real ? "" : "wallet-new-test"}`} key={unseenLabel}>{unseenLabel}</span>
               )}
             </span>
-            {testBalance > 0 && (
-              <span className="sr-only" title="Test sats, worth nothing">
-                +{testBalance.toLocaleString()}
-              </span>
-            )}
-            <span ref={walletLabelRef} className="account-wallet-label" style={{fontSize: walletLabelLayout.fontSize}}><span className="account-balance" data-testid="wallet-chip-balance">{balanceLabel}</span></span>
+            <span className="account-label">{t("tabs.wallets")}</span>
           </button>
         )}
 

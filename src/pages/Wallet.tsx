@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useDeferredValue, useState } from "react";
 import { WalletDeck } from "../components/WalletDeck";
 import type { WalletRail } from "../components/walletCardData";
 import { CashuWallet } from "../components/wallet/CashuWallet";
@@ -29,6 +29,9 @@ export function Wallet() {
   const [rail, setRail] = useState<WalletRail>(remembered);
   const testnet = state?.mode === "testnet";
   const [switching, setSwitching] = useState(false), [modeError, setModeError] = useState("");
+  // The deck paints first and the chosen card's panel follows, in a render React can interrupt for frames: the two
+  // together overrun a frame, and opening the wallet (or bringing up another card) would stutter.
+  const panel = useDeferredValue<WalletRail | null>(rail, null);
   const select = (next: WalletRail) => { setRail(next); try { sessionStorage.setItem(RAIL_KEY, next); } catch { /* storage unavailable */ } };
 
   return (
@@ -49,11 +52,11 @@ export function Wallet() {
       {!wallet || !state ? <p className="text-text-muted text-sm">The wallet is not available here.</p> : <>
         <WalletDeck state={state} selected={rail} testMints={wallet.testMintUrls} onSelect={select} />
         <div role="tabpanel" id="wallet-panel" aria-labelledby={`wallet-tab-${rail}`}>
-          {(rail === "cashu" || rail === "lightning") && <CashuWallet key={rail} wallet={wallet} state={state} rail={rail} onOpenCashu={() => select("cashu")} />}
-          {rail === "arkade" && <ArkWalletPanel wallet={wallet} state={state} />}
-          {rail === "bark" && <BarkWalletPanel wallet={wallet} state={state} />}
-          {rail === "usdt" && <UsdtWalletPanel wallet={wallet} state={state} />}
-          {rail === "bitcoin" && <BitcoinWalletPanel wallet={wallet} state={state} />}
+          {(panel === "cashu" || panel === "lightning") && <CashuWallet key={panel} wallet={wallet} state={state} rail={panel} onOpenCashu={() => select("cashu")} />}
+          {panel === "arkade" && <ArkWalletPanel wallet={wallet} state={state} />}
+          {panel === "bark" && <BarkWalletPanel wallet={wallet} state={state} />}
+          {panel === "usdt" && <UsdtWalletPanel wallet={wallet} state={state} />}
+          {panel === "bitcoin" && <BitcoinWalletPanel wallet={wallet} state={state} />}
         </div>
       </>}
     </Page>

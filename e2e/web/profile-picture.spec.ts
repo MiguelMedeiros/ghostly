@@ -1,4 +1,4 @@
-import { chat, connect, expect, link, test, type Peer } from "../support/fixtures";
+import { chat, connect, expect, link, openProfilePage, test, type Peer } from "../support/fixtures";
 
 /** A real 300×200 JPEG with an EXIF segment carrying a marker, standing in for a photo's location. */
 async function photoWithExif(peer: Peer): Promise<Buffer> {
@@ -27,7 +27,7 @@ test("a profile picture goes to paired contacts, without anything of the file, a
   await expect(bob.page.getByTestId("chat-avatar")).toHaveCount(0);
 
   // Something that is not a picture is refused with a reason.
-  await alice.page.getByTestId("account-profile").click();
+  await openProfilePage(alice.page);
   await alice.page.getByTestId("profile-avatar-input").setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
   await expect(alice.page.getByText("Choose a picture")).toBeVisible();
 
@@ -66,7 +66,7 @@ test("a picture set while a contact is away reaches them when they come back", {
   await connect(alice, bob);
   const url = bob.page.url();
   await bob.page.close();
-  await alice.page.getByTestId("account-profile").click();
+  await openProfilePage(alice.page);
   await alice.page.getByTestId("profile-avatar-input").setInputFiles({ name: "me.jpg", mimeType: "image/jpeg", buffer: await photoWithExif(alice) });
   await expect(alice.page.getByTestId("profile-avatar-remove")).toBeVisible();
   bob.page = await bob.context.newPage();

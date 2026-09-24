@@ -223,6 +223,7 @@
   "tabs": {
     "chats": "Chats",
     "wallet": "Cartera",
+    "wallets": "Carteras",
     "share": "Compartir",
     "profile": "Perfil",
     "services": "Servicios",
@@ -239,6 +240,7 @@
     "locked": "bloqueado",
     "add": "Añadir un perfil",
     "manage": "Gestionar perfiles",
+    "open": "Abrir perfil",
     "othersUnread": "mensajes sin leer en otro perfil",
     "switching": "Abriendo {{name}}…",
     "holdHint": "O mantén pulsado Ajustes en la barra de pestañas"

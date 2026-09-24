@@ -48,7 +48,7 @@ test("a Lightning source is picked per mode: invoices go through it, and Mainnet
   await page.getByTestId("wallet-receive-amount").fill("12");
   await page.getByTestId("wallet-create-invoice").click();
   await expect(page.getByTestId("wallet-invoice")).toHaveText(/^\s*lnbcrt/);
-  await expect(page.getByTestId("wallet-paid")).toContainText("12 test sats received", { timeout: 30_000 });
+  await expect(page.getByTestId("wallet-paid")).toContainText("12 sats received", { timeout: 30_000 });
   await expect(page.getByTestId("lightning-recent").getByTestId("lightning-op").first()).toContainText("paid");
 
   // Mainnet has its own source: still the mints. Back in Testnet, the fake is still there.
@@ -81,7 +81,7 @@ test("the Bitcoin card says no source is configured, and pays on-chain through o
   await panel.getByTestId("onchain-source-select").selectOption("fake-onchain");
   await panel.getByTestId("provider-form-fake-onchain").getByLabel("Access token").fill("token");
   await panel.getByTestId("provider-save").click();
-  await expect(page.getByTestId("wallet-card-bitcoin")).toContainText("100,000 test sats");
+  await expect(page.getByTestId("wallet-card-bitcoin")).toContainText("100,000 sats");
 
   await panel.getByTestId("bitcoin-new-address").click();
   await expect(panel.getByTestId("bitcoin-address")).toHaveText(/^\s*bcrt1/);

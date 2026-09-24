@@ -5,6 +5,7 @@ import { PaymentReview } from "./PaymentReview";
 import { BackupRows } from "./wallet/BackupRows";
 import { Actions, Address, Amount, Block, Button, Notice, Row, Section, Segmented, input, type Action } from "./wallet/ui";
 import { useRun } from "./wallet/run";
+import { pageUnit } from "./walletCardData";
 import { InputGroup, Truncate } from "./layout";
 
 type Network = "bitcoin" | "mutinynet" | "signet" | "regtest";
@@ -28,7 +29,7 @@ export function ArkWalletPanel({ wallet, state }: { wallet: WalletPlatform; stat
  const [custom, setCustom] = useState(false), [provider, setProvider] = useState(""), [explorer, setExplorer] = useState("");
  const network = (ark?.network ?? "bitcoin") as Network;
  const test = network !== "bitcoin";
- const unit = test ? "test sats" : "sats";
+ const unit = pageUnit(state, test);
  const ready = !!ark?.configured && !ark.locked;
  const intents = (state.intents ?? []).filter(i => i.method === "arkade");
  const stuck = !!ark?.configured && !!ark.automatic && !ready;

@@ -1,4 +1,4 @@
-import { expect, test } from "../support/fixtures";
+import { expect, openProfilePage, test } from "../support/fixtures";
 import { injectNostrSigner } from "../support/nostrSigner";
 
 /**
@@ -35,7 +35,7 @@ test("the account bar opens Identities, where a proof is added and listed; Profi
   await expect(page.getByTestId("nostr-section")).toBeVisible();
 
   // Profile no longer holds them, and says where they are.
-  await page.getByTestId("account-profile").click();
+  await openProfilePage(page);
   await expect(page.getByTestId("profile-page")).toBeVisible();
   await expect(page.getByTestId("profile-page").getByTestId("identity-proof")).toHaveCount(0);
   await expect(page.getByTestId("profile-page").getByTestId("nostr-section")).toHaveCount(0);

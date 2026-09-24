@@ -23,6 +23,8 @@ import './deck.css';
  */
 /** How far the chosen card rises: less than a card's bottom padding, so no text of the card behind shows under it. */
 const LIFT=9;
+/** The width each deck (by name) last had: a deck opened again starts at it instead of measuring itself first. */
+const lastWidth=new Map<string,number>();
 
 const reducedMotion=()=>typeof window!=='undefined'&&(document.documentElement.dataset.reduceMotion==='true'||window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 /** A mouse or trackpad that can hover: the stack. A finger: the track. */
@@ -70,11 +72,11 @@ export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,
  const part=(p:string)=>`deck-${p} ${className}-${p}`;
  const active=Math.max(0,cards.findIndex(card=>card.id===selected));
  const root=useRef<HTMLDivElement>(null),track=useRef<HTMLDivElement>(null),tabs=useRef<(HTMLButtonElement|null)[]>([]);
- const latest=useRef({onSelect,ids:cards.map(card=>card.id),selected});
- latest.current={onSelect,ids:cards.map(card=>card.id),selected};
- const [width,setWidth]=useState(0);
+ const [width,setWidth]=useState(()=>lastWidth.get(name)??0);
  const fine=useFinePointer();
  const mode=fine?'stack':'track';
+ const latest=useRef({onSelect,ids:cards.map(card=>card.id),selected,mode});
+ latest.current={onSelect,ids:cards.map(card=>card.id),selected,mode};
  const layout=useMemo(()=>stackLayout(width,cards.length,size&&{max:size.max,share:size.share}),[width,cards.length,size?.max,size?.share]); // eslint-disable-line react-hooks/exhaustive-deps
  const strips=useMemo(()=>stackStrips(layout,active),[layout,active]);
  const cardWidth=mode==='track'?Math.round(width*.76):layout.width,cardHeight=Math.round(cardWidth/1.586);
@@ -93,19 +95,24 @@ export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,
   // eslint-disable-next-line react-hooks/exhaustive-deps
  },[shown.n]);
 
- // The deck sizes itself from the space it gets, not from the window (components/layout/README.md).
+ // The deck sizes itself from the space it gets, not from the window (components/layout/README.md). Only the first
+ // deck of its name measures itself as it mounts: a forced layout of the whole page just built, and a second render
+ // before the first paint. A deck opened again starts at the width that deck last had, which is right unless the
+ // column changed meanwhile, and the observer corrects it then. (Not synchronously: a re-layout inside the observer's
+ // own delivery is the "ResizeObserver loop" error.)
  useLayoutEffect(()=>{
   const el=root.current;if(!el)return;
-  const measure=()=>setWidth(el.getBoundingClientRect().width);
-  measure();
+  const measure=()=>{const next=el.getBoundingClientRect().width;lastWidth.set(name,next);setWidth(next);};
+  if(!lastWidth.has(name))measure();
   const observer=new ResizeObserver(measure);observer.observe(el);
   return ()=>observer.disconnect();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
  },[]);
 
- /** Only the track scrolls: the stack is absolutely placed and there is nothing to bring into view. Says whether it moves. */
+ /** Only the track scrolls: the stack is absolutely placed, nothing to bring into view (and no layout to read for it). Says whether it moves. */
  const centre=useCallback((i:number,smooth:boolean)=>{
   const el=track.current,tab=tabs.current[i];
-  if(!el||!tab||el.scrollWidth<=el.clientWidth+1)return false;
+  if(!el||!tab||latest.current.mode!=='track'||el.scrollWidth<=el.clientWidth+1)return false;
   const left=Math.max(0,Math.min(el.scrollWidth-el.clientWidth,tab.offsetLeft-(el.clientWidth-tab.offsetWidth)/2));
   const moves=Math.abs(el.scrollLeft-left)>=1;
   el.scrollTo({left,behavior:smooth&&!reducedMotion()?'smooth':'auto'});
@@ -208,7 +215,7 @@ export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,
     // The button is the strip of the card that shows; the face is the whole card, placed from the button.
     const strip=strips[i]??{left:0,right:cardWidth},left=layout.lefts[i]??0;
     const place={'--bl':`${Math.round(strip.left)}px`,'--bw':`${Math.max(6,Math.round(strip.right-strip.left))}px`,'--fl':`${Math.round(left)-Math.round(strip.left)}px`,'--ft':`${top}px`,
-     '--y':`${on?-LIFT:0}px`,'--s':on?1:Math.max(.9,1-.025*distance),'--b':on?1:Math.max(.45,.92-.13*distance),'--origin':offset<0?'left center':offset>0?'right center':'center',zIndex:20-distance} as CSSProperties;
+     '--y':`${on?-LIFT:0}px`,'--s':on?1:Math.max(.9,1-.025*distance),'--dim':on?0:1-Math.max(.45,.92-.13*distance),'--origin':offset<0?'left center':offset>0?'right center':'center',zIndex:20-distance} as CSSProperties;
     const semantics=kind==='tabs'?{role:'tab',id:panel?.tabId(card.id),'aria-selected':on,'aria-controls':panel?.id}:{role:'radio','aria-checked':on};
     return <button key={card.id} ref={el=>{tabs.current[i]=el;}} type="button" {...semantics} tabIndex={on?0:-1} aria-disabled={why?true:undefined} title={why}
      className={`${part('card')} ${tone(card)}`} data-active={on} data-blocked={why?true:undefined} data-testid={testId(card)} style={place} onClick={()=>choose(i)}>

@@ -223,6 +223,7 @@
   "tabs": {
     "chats": "Discussions",
     "wallet": "Portefeuille",
+    "wallets": "Portefeuilles",
     "share": "Partager",
     "profile": "Profil",
     "services": "Services",
@@ -239,6 +240,7 @@
     "locked": "verrouillé",
     "add": "Ajouter un profil",
     "manage": "Gérer les profils",
+    "open": "Ouvrir le profil",
     "othersUnread": "messages non lus dans un autre profil",
     "switching": "Ouverture de {{name}}…",
     "holdHint": "Ou maintenez Paramètres dans la barre d’onglets"

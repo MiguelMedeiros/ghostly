@@ -25,7 +25,7 @@ async function chatting(peer: (name: string) => Promise<Peer>, a: string, b: str
 async function testMint(p: Peer): Promise<void> {
   await openWallet(p, "cashu");
   await p.page.getByTestId("wallet-mode").getByRole("radio", { name: "Testnet" }).click();
-  await expect(p.page.getByTestId("wallet-test-balance")).toBeVisible();
+  await expect(p.page.getByTestId("wallet-balance")).toBeVisible();
 }
 
 /** Fills the wallet over Lightning at its primary mint; the local mint pays its own invoices. */
@@ -180,7 +180,7 @@ test("a contact who turns Cashu off stops a reviewed payment before anything is 
   await expect(chat(bob).getByTestId("payment-bubble")).toHaveCount(0);
   await review.getByRole("button", { name: "Cancel" }).click();
   await openWallet(alice, "cashu");
-  await expect(alice.page.getByTestId("wallet-test-balance")).toHaveText(/^50 test sats/);
+  await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^50\s*sats/);
 });
 
 // Every send from the chat is reviewed; ecash the contact never picks up can still be taken back.

@@ -223,6 +223,7 @@
   "tabs": {
     "chats": "Chat",
     "wallet": "Portafoglio",
+    "wallets": "Portafogli",
     "share": "Condividi",
     "profile": "Profilo",
     "services": "Servizi",
@@ -239,6 +240,7 @@
     "locked": "bloccato",
     "add": "Aggiungi un profilo",
     "manage": "Gestisci profili",
+    "open": "Apri il profilo",
     "othersUnread": "messaggi non letti in un altro profilo",
     "switching": "Apertura di {{name}}…",
     "holdHint": "Oppure tieni premuto Impostazioni nella barra delle schede"

@@ -120,23 +120,25 @@ test.describe("test sats", { tag: "@network" }, () => {
     expect(realMints).toBeGreaterThan(0);
 
     await mode.getByRole("radio", { name: "Testnet" }).click();
-    // Said everywhere: the notice on the wallet, the badge by the name (on every page), test sats in the bar.
+    // Said once: the notice on the wallet and the badge by the name (on every page); the cards count plain sats, and the bar counts nothing.
     await expect(page.getByTestId("testnet-notice")).toBeVisible();
     await expect(page.getByTestId("testnet-badge")).toBeVisible();
-    await expect(page.getByTestId("wallet-chip-balance")).toHaveText("0 test sats");
+    await expect(page.getByTestId("wallet-chip"), "the bar names the place, not the balance").toHaveText("Wallets");
     // Only test mints, the public one first, and it is where invoices are made.
     await expect(page.getByTestId("mint-row")).toHaveCount(1);
     await expect(page.getByTestId("mint-row").first()).toContainText("testnut.cashu.space");
     await expect(page.getByTestId("mint-row").first()).toContainText("Primary");
-    await expect(page.getByTestId("wallet-card-cashu")).toContainText("0 test sats");
+    await expect(page.getByTestId("wallet-card-cashu")).toContainText("0 sats");
+    await expect(page.getByTestId("wallet-card-cashu")).not.toContainText("test sats");
 
     await page.getByTestId("wallet-receive").click();
     await page.getByTestId("wallet-receive-amount").fill("21");
     await page.getByTestId("wallet-create-invoice").click();
-    await expect(page.getByTestId("wallet-test-balance")).toHaveText("21 test sats (worthless)");
-    await expect(page.getByTestId("wallet-balance")).toContainText(/^21\s*test sats/);
-    await expect(page.getByTestId("wallet-card-cashu")).toContainText("21 test sats");
-    await expect(page.getByTestId("wallet-chip-balance")).toHaveText("21 test sats");
+    await expect(page.getByTestId("wallet-balance")).toHaveText(/^21\s*sats$/);
+    await expect(page.getByTestId("wallet-test-balance"), "the badge says it; the panel does not say it again").toHaveCount(0);
+    await expect(page.getByTestId("wallet-card-cashu")).toContainText("21 sats");
+    await expect(page.getByTestId("wallet-chip")).toHaveText("Wallets");
+    await expect(page.getByTestId("wallet-chip")).toHaveAccessibleName("Wallets");
 
     // Mainnet again: real mints and real sats only, no warning; the test sats wait for Testnet.
     await mode.getByRole("radio", { name: "Mainnet" }).click();
@@ -145,11 +147,11 @@ test.describe("test sats", { tag: "@network" }, () => {
     await expect(page.getByTestId("mint-row")).toHaveCount(realMints);
     await expect(page.getByTestId("mint-row").filter({ hasText: "testnut.cashu.space" })).toHaveCount(0);
     await expect(page.getByTestId("wallet-balance")).toContainText(/^0\s*sats/);
-    await expect(page.getByTestId("wallet-chip-balance")).toHaveText("0 sats");
+    await expect(page.getByTestId("wallet-chip"), "the bar names the place, not the balance").toHaveText("Wallets");
     await expect(page.getByTestId("wallet-new"), "switching is not sats arriving").toHaveCount(0);
 
     await mode.getByRole("radio", { name: "Testnet" }).click();
-    await expect(page.getByTestId("wallet-test-balance")).toHaveText("21 test sats (worthless)");
+    await expect(page.getByTestId("wallet-balance")).toHaveText(/^21\s*sats$/);
     await page.reload();
     await expect(page.getByTestId("testnet-badge"), "the mode is kept").toBeVisible();
   });

@@ -70,13 +70,15 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: Wall
         {viaMint ? (
           <p className="text-text-primary" data-testid="wallet-balance">
             <span className="text-4xl font-semibold tabular-nums">{(testnet ? testShown : realShown).toLocaleString()}</span>
-            <span className="text-text-muted text-sm ml-2">{testnet ? "test sats" : "sats"}</span>
-            {testMint && <span className="block text-xs text-yellow-500 mt-1" data-testid="wallet-test-balance">{testShown.toLocaleString()} test sats (worthless)</span>}
+            <span className="text-text-muted text-sm ml-2">sats</span>
+            {/* In Testnet the whole balance is test sats and the page's badge and banner say so; in Mainnet a test
+                mint's sats are set apart, and say what they are. */}
+            {testMint && !testnet && <span className="block text-xs text-yellow-500 mt-1" data-testid="wallet-test-balance">{testShown.toLocaleString()} test sats (worthless)</span>}
           </p>
         ) : (
           <p className="text-text-primary" data-testid="wallet-balance">
             <span className="text-4xl font-semibold tabular-nums">{ln?.balance === undefined ? "—" : ln.balance.toLocaleString()}</span>
-            <span className="text-text-muted text-sm ml-2">{testnet ? "test sats" : "sats"} · {sourceName}</span>
+            <span className="text-text-muted text-sm ml-2">sats · {sourceName}</span>
             {ln?.status !== "ready" && <span className="block text-xs text-yellow-500 mt-1" data-testid="lightning-source-state">{ln?.error ?? "Connecting to the source…"}</span>}
           </p>
         )}
@@ -95,7 +97,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: Wall
                 <svg width="56" height="56" viewBox="0 0 56 56" className="mx-auto text-accent animate-check-ring" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="28" cy="28" r="25" /><polyline points="16 29 25 38 41 20" className="animate-check-draw" />
                 </svg>
-                <p className="text-accent text-sm font-semibold" data-testid="wallet-paid">⚡ {Number(amount).toLocaleString()} {testnet ? "test sats" : "sats"} received</p>
+                <p className="text-accent text-sm font-semibold" data-testid="wallet-paid">⚡ {Number(amount).toLocaleString()} sats received</p>
                 <Button onClick={() => { setInvoice(null); setAmount(""); }}>Done</Button>
               </div>
             ) : invoice ? (

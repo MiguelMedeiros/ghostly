@@ -7,7 +7,7 @@ test.describe("wallet badge", { tag: "@network" }, () => {
   async function testSats(peer: Peer) {
     await openWallet(peer, "cashu");
     await peer.page.getByTestId("wallet-mode").getByRole("radio", { name: "Testnet" }).click();
-    await expect(peer.page.getByTestId("wallet-test-balance")).toBeVisible();
+    await expect(peer.page.getByTestId("wallet-balance")).toBeVisible();
   }
 
   test("what came in while the wallet was closed shows on its icon, and goes once it is opened", { tag: ["@feature:wallet.badge", "@feature:payments.cashu.send"] }, async ({ peer }, testInfo) => {
@@ -21,7 +21,7 @@ test.describe("wallet badge", { tag: "@network" }, () => {
     await alice.page.getByTestId("wallet-receive").click();
     await alice.page.getByTestId("wallet-receive-amount").fill("50");
     await alice.page.getByTestId("wallet-create-invoice").click();
-    await expect(alice.page.getByTestId("wallet-test-balance")).toHaveText(/^50 test sats/);
+    await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^50\s*sats/);
     // Her own wallet was open when they arrived: nothing to point out.
     await openChat(alice);
     await expect(alice.page.getByTestId("wallet-new")).toHaveCount(0);
@@ -37,7 +37,7 @@ test.describe("wallet badge", { tag: "@network" }, () => {
     const badge = bob.page.getByTestId("wallet-new");
     await expect(badge).toHaveText("+21");
     await expect(badge).toHaveClass(/wallet-new-test/);
-    await expect(bob.page.getByTestId("wallet-chip")).toHaveAttribute("aria-label", /21 new test sats/);
+    await expect(bob.page.getByTestId("wallet-chip")).toHaveAttribute("aria-label", /21 new sats/);
     // It sits on the icon, inside the wallet button, not in the gap beside it.
     const icon = (await bob.page.getByTestId("wallet-chip").locator("svg").boundingBox())!;
     const box = (await badge.boundingBox())!, button = (await bob.page.getByTestId("wallet-chip").boundingBox())!;

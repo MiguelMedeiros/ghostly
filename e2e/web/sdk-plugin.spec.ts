@@ -37,7 +37,7 @@ test("a plugin's Lightning source and identity proof show in the pickers and wor
   await page.getByTestId("wallet-receive-amount").fill("21");
   await page.getByTestId("wallet-create-invoice").click();
   await expect(page.getByTestId("wallet-invoice")).toHaveText(/^\s*lnbcrt/);
-  await expect(page.getByTestId("wallet-paid")).toContainText("21 test sats received", { timeout: 30_000 });
+  await expect(page.getByTestId("wallet-paid")).toContainText("21 sats received", { timeout: 30_000 });
   await expect(page.getByTestId("wallet-balance")).toContainText("21,021");
 
   // The identity proof: signed outside Ghostly with a BIP-340 key held by this test, pasted back.

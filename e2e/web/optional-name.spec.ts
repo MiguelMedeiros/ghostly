@@ -1,9 +1,9 @@
-import {test,expect} from "../support/fixtures";
+import { expect, openProfilePage, test } from "../support/fixtures";
 import {pair} from "../support/paired";
 test("profile name is optional, editing and clearing persist, and a cleared name reaches the contact",{tag:["@feature:profiles.name-optional","@feature:chat.paired.nickname-sync"]},async({peer})=>{
   const a=await peer("optional-name"),b=await peer("named-contact");
   // The profile is a page beside the list; opening it twice would toggle back.
-  const openProfile=async()=>{if(!await a.page.getByTestId("profile-page").isVisible())await a.page.getByTestId("account-profile").click();};
+  const openProfile=async()=>{if(!await a.page.getByTestId("profile-page").isVisible())await openProfilePage(a.page);};
   const closeProfile=()=>a.page.goBack();
   await openProfile();
   const input=a.page.getByTestId("account-nickname");

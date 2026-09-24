@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, test } from "../support/fixtures";
+import { expect, openProfilePage, test } from "../support/fixtures";
 
 // The lock screen hides the app behind a password. It holds across a reload, can be changed and turned
 // off, and follows a profile: a new one starts locked like the one it came from, and another profile's
@@ -78,7 +78,7 @@ test("profiles and the lock: a new profile is locked too, and deleting a locked 
   await setLock(page, "shared secret");
 
   // A new profile starts behind the same lock: it is not a way around it.
-  await page.getByTestId("account-profile").click();
+  await openProfilePage(page);
   await page.getByTestId("profile-new").click();
   await page.getByTestId("profile-new-name").fill("Side");
   await page.getByTestId("profile-create").click();

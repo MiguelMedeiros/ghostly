@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { expect, test } from "../support/fixtures";
+import { expect, openProfilePage, test } from "../support/fixtures";
 import { signS3 } from "../../packages/browser/src/backup/s3";
 
 // WISP 05 / 1000 / 1002: a whole profile backed up to S3-compatible storage and to a file, and each
@@ -18,7 +18,7 @@ test("a whole profile goes to S3 and to a file, and each comes back as a new pro
   const { page } = await peer("profile-backup");
   await page.getByTitle("New Chat").click();
   await expect(page.getByTestId("invite-card")).toBeVisible();
-  await page.getByTestId("account-profile").click();
+  await openProfilePage(page);
   await page.getByTestId("account-nickname").fill("Backed Up");
   const backups = page.getByTestId("profile-backups");
 

@@ -39,9 +39,9 @@ async function receiveOverLightning(p: Peer, sats: number) {
   await p.page.getByTestId("wallet-receive").click();
   await p.page.getByTestId("wallet-receive-amount").fill(String(sats));
   await p.page.getByTestId("wallet-create-invoice").click();
-  await expect(p.page.getByTestId("wallet-paid")).toContainText(`${sats} test sats received`, { timeout: 60_000 });
+  await expect(p.page.getByTestId("wallet-paid")).toContainText(`${sats} sats received`, { timeout: 60_000 });
 }
-const testSats = (p: Peer) => p.page.getByTestId("wallet-test-balance");
+const testSats = (p: Peer) => p.page.getByTestId("wallet-balance");
 
 test.describe("Cashu and Lightning", { tag: "@network" }, () => {
   test.describe.configure({ retries: 2 });
@@ -49,7 +49,7 @@ test.describe("Cashu and Lightning", { tag: "@network" }, () => {
   test("Cashu: in over Lightning, a Send in the chat, and a Request paid in the chat", { tag: ["@feature:wallet.cashu.receive-lightning", "@feature:payments.cashu.send", "@feature:payments.cashu.request", "@feature:payments.chat.review"] }, async ({ peer }) => {
     const [alice, bob] = await twoInTestnet(peer, ["cashu-alice", "cashu-bob"]);
     await receiveOverLightning(alice, 100);
-    await expect(testSats(alice)).toHaveText(/^100 test sats/);
+    await expect(testSats(alice)).toHaveText(/^100\s*sats/);
 
     await openChat(alice);
     await composer(alice, "cashu", "21");
@@ -67,7 +67,7 @@ test.describe("Cashu and Lightning", { tag: "@network" }, () => {
     await request.getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
     await expect(request.getByTestId("payment-state")).toHaveText("Paid", { timeout: 60_000 });
     await openWallet(bob, "cashu");
-    await expect(testSats(bob)).toHaveText(/^31 test sats/, { timeout: 30_000 });
+    await expect(testSats(bob)).toHaveText(/^31\s*sats/, { timeout: 30_000 });
   });
 
   // A test mint marks its own invoices paid by itself: one peer paying the other's invoice at the same
@@ -76,16 +76,16 @@ test.describe("Cashu and Lightning", { tag: "@network" }, () => {
   test("Lightning: in through an invoice, out by paying someone else's invoice from Send", { tag: ["@feature:wallet.lightning.cashu-mint.receive", "@feature:wallet.lightning.cashu-mint.pay", "@feature:wallet.cashu.receive-lightning"] }, async ({ peer }) => {
     const [alice, bob] = await twoInTestnet(peer, ["ln-alice", "ln-bob"]);
     await receiveOverLightning(alice, 100);
-    await expect(testSats(alice)).toHaveText(/^100 test sats/);
+    await expect(testSats(alice)).toHaveText(/^100\s*sats/);
 
     await openWallet(bob, "lightning");
     await bob.page.getByTestId("wallet-receive").click();
     await bob.page.getByTestId("wallet-receive-amount").fill("25");
     await bob.page.getByTestId("wallet-create-invoice").click();
     await expect(bob.page.getByTestId("wallet-invoice")).toHaveText(/^\s*lnbc/);
-    await expect(bob.page.getByTestId("wallet-paid")).toContainText("25 test sats received", { timeout: 60_000 });
+    await expect(bob.page.getByTestId("wallet-paid")).toContainText("25 sats received", { timeout: 60_000 });
     await openWallet(bob, "cashu");
-    await expect(testSats(bob)).toHaveText(/^25 test sats/);
+    await expect(testSats(bob)).toHaveText(/^25\s*sats/);
 
     await openWallet(alice, "lightning");
     await alice.page.getByTestId("wallet-send").click();
@@ -119,7 +119,7 @@ test("Ark: in, a Send from the wallet, a Send in the chat and a Request paid in 
     await expect(panel(p).getByTestId("ark-address")).toBeVisible();
   }
   // In: the funded wallet shows its sats.
-  await expect(balance(alice)).toHaveText(/^9,900\s*test sats/, { timeout: 30_000 });
+  await expect(balance(alice)).toHaveText(/^9,900\s*sats/, { timeout: 30_000 });
 
   // A Send from the wallet page, to Bob's address.
   const bobAddress = (await panel(bob).getByTestId("ark-address").innerText()).trim();
@@ -129,7 +129,7 @@ test("Ark: in, a Send from the wallet, a Send in the chat and a Request paid in 
   await panel(alice).getByRole("button", { name: "Review payment" }).click();
   await panel(alice).getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
   await expect(panel(alice).getByTestId("review-status")).toHaveText("settled", { timeout: 60_000 });
-  await expect(balance(bob)).toHaveText(/^500\s*test sats/, { timeout: 60_000 });
+  await expect(balance(bob)).toHaveText(/^500\s*sats/, { timeout: 60_000 });
 
   // A Send in the chat: Bob's app asks Alice's for an address, Bob approves.
   for (const p of [alice, bob]) await openChat(p);
@@ -183,7 +183,7 @@ test("Bark: in over Ark and on-chain, a Send from the wallet, a Send in the chat
   // In over Ark: a Bark wallet of the same server (the funder) pays Alice's address.
   const funded = JSON.parse(regtest("pay", address[alice.name], "20000"));
   expect(funded).toMatchObject({ status: "successful", kind: "send", sat: -20000 });
-  await expect(balance(alice)).toHaveText(/^20,000\s*test sats/, { timeout: 60_000 });
+  await expect(balance(alice)).toHaveText(/^20,000\s*sats/, { timeout: 60_000 });
 
   // In on-chain: coins to Bob's on-chain address, then moved into Ark (a board, confirmed on regtest).
   await panel(bob).getByRole("radio", { name: "Bitcoin on-chain" }).click();
@@ -235,7 +235,7 @@ test("Bark: in over Ark and on-chain, a Send from the wallet, a Send in the chat
   // Payments between Bark wallets cost nothing on this server: 20,000 in, 5,000 out, 2,000 in, 1,000 out;
   // what was boarded, 5,000 in, 2,000 out, 1,000 in.
   await openWallet(alice, "bark");
-  await expect(balance(alice)).toHaveText(/^16,000\s*test sats/, { timeout: 60_000 });
+  await expect(balance(alice)).toHaveText(/^16,000\s*sats/, { timeout: 60_000 });
   await openWallet(bob, "bark");
   await expect.poll(() => sats(bob), { timeout: 60_000 }).toBe(boarded + 4_000);
   console.log("Bark regtest evidence:", JSON.stringify({ funded, onchainTxid, boarded, walletSend, alice: await sats(alice), bob: await sats(bob), funder: JSON.parse(regtest("balance")).spendable_sat }));

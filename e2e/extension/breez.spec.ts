@@ -27,7 +27,7 @@ test("Breez runs in the extension's offscreen document: in and out on regtest", 
     const invoice = (await page.getByTestId("wallet-invoice").innerText()).trim();
     expect(invoice).toMatch(/^lnbcrt3u1/);
     await other.pay(invoice);
-    await expect(page.getByTestId("wallet-paid")).toContainText("300 test sats received", { timeout: 90_000 });
+    await expect(page.getByTestId("wallet-paid")).toContainText("300 sats received", { timeout: 90_000 });
 
     const before = await other.balance();
     await page.getByTestId("wallet-send").click();
@@ -36,7 +36,7 @@ test("Breez runs in the extension's offscreen document: in and out on regtest", 
     await page.getByRole("button", { name: "Pay", exact: true }).click();
     await expect(page.getByTestId("wallet-notice")).toHaveText("Paid.", { timeout: 90_000 });
     await expect.poll(() => other.balance(), { timeout: 60_000 }).toBe(before + 100);
-    await expect(page.getByTestId("wallet-balance")).toHaveText(/^(19\d|200)\s*test sats/, { timeout: 60_000 });
+    await expect(page.getByTestId("wallet-balance")).toHaveText(/^(19\d|200)\s*sats/, { timeout: 60_000 });
   } finally {
     await other.close();
   }
