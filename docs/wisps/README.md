@@ -42,6 +42,7 @@ The implementation column is independent of document status. Existing features c
 | [204](204-bark.md) | Ark via Bark | Draft | Experimental, Testnet only; regtest verified; not compatible with Arkade; exits pending |
 | [300](300-peer-proofs.md) | Identity Proofs | Draft | Experimental Nostr subset |
 | [301](301-nostr.md) | Nostr | Draft | Implemented experimental proof; signer/runtime limits below |
+| [Nostr social · 3xx planned](3xx-nostr-social.md) | Nostr social layer | Draft | Experimental: profile, follows, notes on request; publication through the person's signer, off by default |
 | [Pubky · 3xx planned](302-pubky.md) | Pubky | Draft | Local import experimental; Ring bridge blocked |
 | [Keet · 3xx planned](303-keet.md) | Keet | Draft | Compatible local import experimental; app bridge blocked |
 | [Domain · 3xx planned](3xx-domain.md) | Domain Proofs | Draft | Experimental provider: DNS TXT, /.well-known/ghostly.json, NIP-05 |

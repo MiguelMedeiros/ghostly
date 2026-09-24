@@ -17,9 +17,12 @@ import type { ProviderHost, ProviderPlatform } from "./paymentAdapters/providers
 import type { EngineApi } from "../shared/rpc";
 import { EXTERNAL_IDENTITIES_ENABLED } from '../shared/features';
 import { IdentityProofs } from './identities';
+import { NostrSocial } from './nostrSocial';
+import { normalizeNostrRelays } from '../nostr/relay';
+import type { NostrDraft, NostrDraftRequest, NostrPublishResult } from '../nostr/types';
 import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
-import { MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
+import { MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
 import {
   DEFAULT_RELAYS,
   GhostLink,
@@ -306,6 +309,7 @@ export class GhostlyNode implements EngineImplementation {
       const identities = await db.updateIdentities(linkId, change);
       const live = this.links.get(linkId);
       if (live) live.stored = { ...live.stored, identities };
+      void this.nostrSocial.ledgerChanged(linkId).catch(() => {});
       return identities;
     },
     channel: linkId => {
@@ -321,6 +325,34 @@ export class GhostlyNode implements EngineImplementation {
     emit: () => this.emitState(),
     publish: (seed, records) => this.transport.publish(identityFromSeed(seed), records),
     resolve: async key => (await this.transport.resolve(key))?.records ?? null,
+  });
+
+  /** The Nostr social layer (profile, follows, notes, publication) on top of verified Nostr proofs. */
+  private readonly nostrSocial = new NostrSocial({
+    settings: () => this.settings.nostr,
+    online: () => this.settings.online,
+    emit: () => this.emitState(),
+    ownSubjects: () => this.identities.views().filter(p => p.provider === "nostr").map(p => p.subject),
+    contactSubjects: linkId => {
+      const stored = this.links.get(linkId)?.stored;
+      if (!stored?.profile || !stored.identities) return [];
+      const mine = stored.participationSeed ? identityFromSeedB64(stored.participationSeed).pubKeyZ32 : undefined;
+      const t = Math.floor(Date.now() / 1000);
+      return [...new Set(stored.identities.received.filter(r => r.binding.provider === "nostr" && receivedIdentityStatus(r, stored.pairedPeerKey, mine, t) === "verified").map(r => r.verified.subject))];
+    },
+    linkIds: () => [...this.links.keys()],
+    readContacts: linkId => this.links.get(linkId)?.stored.nostrSocial,
+    writeContacts: async (linkId, nostrSocial) => {
+      const live = this.links.get(linkId);
+      if (!live) return;
+      await db.patchLink(linkId, { nostrSocial });
+      live.stored = { ...live.stored, nostrSocial };
+    },
+    setDisplay: async (linkId, subject, display) => {
+      const identities = await db.updateIdentities(linkId, l => ({ ...l, received: l.received.map(r => r.binding.provider === "nostr" && r.verified.subject === subject ? { ...r, display } : r) }));
+      const live = this.links.get(linkId);
+      if (live) live.stored = { ...live.stored, identities };
+    },
   });
 
   constructor(
@@ -372,6 +404,7 @@ export class GhostlyNode implements EngineImplementation {
     this.services = await db.getServices();
     await this.identities.load();
     this.identities.start();
+    await this.nostrSocial.load();
     await this.arkWallet.start();
     await this.barkWallet.start();
     await this.usdtWallet.start();
@@ -412,6 +445,7 @@ export class GhostlyNode implements EngineImplementation {
     this.shuttingDown = true;
     if(this.paymentTimer)clearTimeout(this.paymentTimer);
     this.identities.stop();
+    this.nostrSocial.stop();
     await this.arkWallet.stop();
     await this.barkWallet.stop();
     await this.usdtWallet.stop();
@@ -434,6 +468,7 @@ export class GhostlyNode implements EngineImplementation {
       wallet: this.walletView,
       payments: this.desk.views(),
       identityProofs: this.identities.views(),
+      nostr: this.nostrSocial.state(),
     };
   }
 
@@ -562,7 +597,17 @@ export class GhostlyNode implements EngineImplementation {
   shareIdentityProof(params: { linkId: string; id: string }): Promise<void> { return this.identities.share(params); }
   withdrawIdentityProof(params: { linkId: string; id: string }): Promise<void> { return this.identities.withdraw(params); }
   recheckIdentityProof(params: { linkId: string; id: string }): Promise<void> { return this.identities.recheck(params); }
-  lookupIdentityDisplay(params: { linkId: string; id: string }): Promise<void> { return this.identities.lookupDisplay(params); }
+  lookupIdentityDisplay(params: { linkId: string; id: string }): Promise<void> {
+    // A Nostr profile comes through the social layer, from the relays the person configured.
+    const r = this.links.get(params.linkId)?.stored.identities?.received.find(x => x.id === params.id);
+    if (r?.binding.provider === "nostr") return this.nostrSocial.loadContact({ linkId: params.linkId, subject: r.verified.subject, what: "profile" });
+    return this.identities.lookupDisplay(params);
+  }
+  nostrLoadContact(params: { linkId: string; subject: string; what: "profile" | "follows" | "notes"; more?: boolean }): Promise<void> { return this.nostrSocial.loadContact(params); }
+  nostrForgetContact(params: { linkId: string; subject: string }): Promise<void> { return this.nostrSocial.forgetContact(params); }
+  nostrLoadOwn(params: { subject: string }): Promise<void> { return this.nostrSocial.loadOwn(params); }
+  nostrDraft(params: NostrDraftRequest): Promise<NostrDraft> { return this.nostrSocial.draft(params); }
+  nostrPublish(params: { draftId: string; event: unknown }): Promise<NostrPublishResult> { return this.nostrSocial.publish(params); }
 
   async confirmPair({ linkId, code }: { linkId: string; code: string }): Promise<void> {
     const link = this.links.get(linkId)?.link;
@@ -582,6 +627,7 @@ export class GhostlyNode implements EngineImplementation {
     void live.link?.stop(true);
     this.links.delete(linkId);
     this.identities.forget(linkId);
+    this.nostrSocial.forgetLink(linkId);
     void db.deleteLink(linkId);
     void this.desk.forgetLink(linkId);
     this.emitState();
@@ -598,6 +644,8 @@ export class GhostlyNode implements EngineImplementation {
   setActiveLink({ linkId }: { linkId: string | null }): void {
     this.activeLinkId = linkId;
     if (linkId) void this.ensureNativeEndpoints(linkId);
+    // With automatic profiles on, a stale Nostr profile is refreshed when the chat is opened.
+    if (linkId && this.settings.nostr?.autoLoadProfiles) void this.nostrSocial.ledgerChanged(linkId).catch(() => {});
     for (const [id, live] of this.links) live.link?.session.setActive(id === linkId);
     // Opening a chat is someone wanting to talk: reconnect now, not after the wait between attempts.
     if (linkId) this.links.get(linkId)?.link?.wake();
@@ -1159,6 +1207,7 @@ export class GhostlyNode implements EngineImplementation {
     for (const server of settings.iceServers ?? []) { const problem = iceServerProblem(server); if (problem) throw new Error(problem); }
     if (settings.avatar !== undefined && settings.avatar !== "" && typeof sanitizeAvatar(settings.avatar) !== "string") throw new Error("Use a small JPEG picture");
     if (settings.relays && this.relays && !settings.relays.some((relay) => normalizeRelayUrl(relay))) throw new Error("Enter at least one relay address (https://…)");
+    if (settings.nostr) settings = { ...settings, nostr: { relays: normalizeNostrRelays(settings.nostr.relays), autoLoadProfiles: settings.nostr.autoLoadProfiles === true, publish: settings.nostr.publish === true } };
     this.settings = { ...this.settings, ...settings };
     if (settings.relays) {
       this.relays?.setRelays(settings.relays);
@@ -1454,6 +1503,7 @@ export class GhostlyNode implements EngineImplementation {
     return {
       id: stored.id,
       identities: this.identities.linkView(stored.id, live.link?.identitySupport ?? false),
+      nostr: this.nostrSocial.linkView(stored.id),
       profile: stored.profile,
       pairing: live.pairing,
       discoveryError: live.discoveryError,

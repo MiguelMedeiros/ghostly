@@ -10,6 +10,8 @@ import { createProfile, currentProfile, listProfiles, renameProfile, switchProfi
 import { Block, Button, Notice, Row, Section, Segmented, input } from "../components/wallet/ui";
 import { ProfileBackups } from "../components/ProfileBackups";
 import { IdentityProofsSection } from "../components/identities/IdentityProofsSection";
+import { NostrSection } from "../components/nostr/NostrSection";
+import { useEngineState } from "../lib/identities";
 import { DeleteProfileDialog } from "../components/DeleteProfileDialog";
 import { ProfileBadge } from "../components/ProfileBadge";
 import { setMyAvatar, useMyAvatar } from "../hooks/useAvatars";
@@ -48,6 +50,9 @@ export function Profile() {
   const platform = useServicesPlatform();
   const { current, all } = useProfiles();
   const myAvatar = useMyAvatar();
+  const engineState = useEngineState();
+  // The Nostr layer is shown once it has anything to show: a Nostr key of this profile, or a contact's.
+  const showNostr = !!engineState && (engineState.nostr.own.length > 0 || engineState.links.some(l => l.nostr?.length));
   const [name, setName] = useState(current.name);
   const [creating, setCreating] = useState(false), [newName, setNewName] = useState("");
   const [deleting, setDeleting] = useState<ProfileEntry | null>(null);
@@ -99,6 +104,7 @@ export function Profile() {
       </Section>
 
       <IdentityProofsSection />
+      {showNostr && <NostrSection />}
 
       <Section title="In this profile" testId="profile-links">
         <LinkRow label="Chats" value={`${chats} ${chats === 1 ? "chat" : "chats"}`} onClick={() => navigate("/")} />

@@ -8,6 +8,7 @@ import type { BitcoinView } from "../engine/paymentAdapters/providers/bitcoinSer
 import type { PaymentReview, PaymentTarget } from "@ghostly/core";
 import type { DeliveryMode, DhtDeliveryState, DhtDeliveryView } from "@ghostly/core";
 import type { PublicProfile, ProfileChoice } from '../profiles/public';
+import type { NostrContactCache, NostrContactView, NostrSocialSettings, NostrSocialState } from "../nostr/types";
 import type { ProofLedger, ProofAdapter } from "@ghostly/core";
 import type { IdentityDisplay, IdentityLedger, IdentityStatus, SharedIdentity, VerifiedIdentity } from "@ghostly/core";
 import type { DataLinkState, LinkStatus, ServiceAd, PairingState, NativeTransport, PairedTransport, TransportDescriptors } from "@ghostly/core";
@@ -21,6 +22,8 @@ export interface StoredLink {
   peerProofs?: ProofLedger;
   /** Identity proofs shared in this chat, both ways (WISP 300). */
   identities?: IdentityLedger;
+  /** The contact's Nostr profile, follows and notes, cached under their proven key, loaded only on request. */
+  nostrSocial?: Record<string, NostrContactCache>;
   profile?: "paired-chat/1";
   participationSeed?: string;
   transportSeeds?: Partial<Record<NativeTransport, string>>;
@@ -271,6 +274,8 @@ export interface Settings {
   mintsInitialized: boolean;
   /** Real money, or test networks: every wallet follows it. Absent means mainnet. */
   walletMode?: WalletMode;
+  /** The Nostr social layer: relays, automatic profile loading, publication. Absent means the defaults, everything off. */
+  nostr?: NostrSocialSettings;
 }
 
 /** A proof of this profile (Profile → Identities). */
@@ -319,6 +324,8 @@ export interface LinkIdentitiesView {
 export interface LinkView {
   /** Identity proofs in this chat; absent for chats that are not paired. */
   identities?: LinkIdentitiesView;
+  /** The contact's Nostr data, one entry per key they proved in this chat. */
+  nostr?: NostrContactView[];
   discoveryError?: string;
   publicProfiles?: PublicProfile[];
   profileChoice?: ProfileChoice;
@@ -381,4 +388,6 @@ export interface EngineState {
   payments: Record<string, PaymentView>;
   /** This profile's identity proofs. */
   identityProofs: IdentityProofView[];
+  /** The Nostr social layer: the person's own keys' data and the effective settings. */
+  nostr: NostrSocialState;
 }

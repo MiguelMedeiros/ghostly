@@ -409,6 +409,22 @@
     "notices": []
   },
   {
+    "file": "3xx-nostr-social.md",
+    "sourcePath": "docs/wisps/3xx-nostr-social.md",
+    "aliases": [],
+    "slug": "3xx-nostr-social",
+    "title": "WISP 3xx — Nostr social layer",
+    "status": "Draft",
+    "updated": "2026-09-23",
+    "implementation": "Experimental: packages/browser/src/nostr/, packages/browser/src/engine/nostrSocial.ts; see below",
+    "dependencies": [
+      "300-peer-proofs.md",
+      "301-nostr.md"
+    ],
+    "summary": "What a proven Nostr identity (301 under 300) lets a person show and do in Ghostly, as separate capabilities, each permitted on its own, exactly as the roadmap's layer table separates them:",
+    "notices": []
+  },
+  {
     "file": "3xx-oidc-proofs.md",
     "sourcePath": "docs/wisps/3xx-oidc-proofs.md",
     "aliases": [],
@@ -680,15 +696,15 @@
     "slug": "900-group-sessions",
     "title": "WISP 900 — Group Session Negotiation",
     "status": "Draft",
-    "updated": "2026-09-20",
-    "implementation": "Proposed; no group implementation found",
+    "updated": "2026-09-23",
+    "implementation": "Core protocol of the first profile, group-mesh/1, in packages/core; engine and UI follow",
     "dependencies": [
       "02-peer-keys.md",
       "03-capabilities.md",
       "100-transports.md",
       "800-invite-join.md"
     ],
-    "summary": "Define a concrete candidate group architecture that moves fanout, membership synchronization and history traffic off Pkarr/DHT. No group session, group key schedule or group delivery layer was found in the inspected implementation. This draft specifies responsibilities and state transitions for review; cryptographic and wire profiles remain validation gates.",
+    "summary": "Define how a group of Ghostly peers agrees on who is in it, protects what they say across membership changes, and moves it between them without touching Pkarr/DHT. Revision 0.1 was a proposal with every choice open. Revision 0.2 records the choices made for the first distribution profile, 9xx · Group Mesh, and what remains a blocker. The contract below is what any group profile of Ghostly must provide; the mesh profi",
     "notices": []
   },
   {
@@ -710,6 +726,15 @@
     "notices": [
       "Planned integration. No current integration is enabled or promised. The historical document identifier 901 remains in the URL for link compatibility; it is not a committed WISP number."
     ]
+  },
+  {
+    "file": "9xx-group-mesh.md",
+    "sourcePath": "docs/wisps/9xx-group-mesh.md",
+    "aliases": [],
+    "slug": "9xx-group-mesh",
+    "title": "WISP 9xx — Group Mesh Distribution Profile",
+    "dependencies": [],
+    "notices": []
   },
   {
     "file": "ADAPTER-ROADMAP.md",

@@ -216,6 +216,15 @@
     "numberAssignment": "unassigned"
   },
   {
+    "oldId": "—",
+    "id": "309",
+    "oldFile": "3xx-nostr-social.md",
+    "file": "3xx-nostr-social.md",
+    "kind": "Adapter",
+    "displayNumber": "3xx",
+    "numberAssignment": "unassigned"
+  },
+  {
     "oldId": "13",
     "id": "400",
     "oldFile": "13-chat.md",

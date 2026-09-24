@@ -48,3 +48,7 @@ Nostr is the first provider of the [identity proofs](300-peer-proofs.md#implemen
 - **Profile.** A kind-0 name/picture is looked up only when the contact asks ("Show public profile"), from two fixed relays, signature-checked, name sanitized as plain text, picture from fixed hosts re-encoded to a small JPEG; labelled self-described.
 
 Tests: the contract suite, template tampering, a real NIP-46 WebSocket exchange with an isolated disposable bunker, a NIP-07 signer injected into the page in e2e. No real Nostr account was used.
+
+## Implementation follow-up — 2026-09-23: social layer
+
+What the proven key lets a person show and do (profile, follows, notes, publication) is the separate, experimental [Nostr social layer](3xx-nostr-social.md): each part a capability of its own, loaded on request from the relays the person configures, publication off by default and only through NIP-07/NIP-46. The kind-0 lookup mentioned above now goes through it (the person's relays, not two fixed ones).
