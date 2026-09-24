@@ -378,6 +378,15 @@
     "numberAssignment": "unassigned"
   },
   {
+    "oldId": "—",
+    "id": "903",
+    "oldFile": "9xx-group-community.md",
+    "file": "9xx-group-community.md",
+    "kind": "Profile",
+    "displayNumber": "9xx",
+    "numberAssignment": "unassigned"
+  },
+  {
     "oldId": "22",
     "id": "901",
     "oldFile": "22-gossipsub.md",

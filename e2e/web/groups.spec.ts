@@ -64,6 +64,8 @@ test("four people: create, invite, everyone reads everyone, catch-up, removal, a
   await alice.page.getByTestId("sidebar-new-more").click();
   await alice.page.getByTestId("new-group").click();
   await alice.page.getByTestId("new-group-name").fill("Ghosts");
+  // A private group (group-mesh/1): this spec is about that profile.
+  await alice.page.getByTestId("new-group-kind-mesh").click();
   await alice.page.getByTestId("new-group-create").click();
   // A new group opens on its link; this one fills up from contacts.
   await expect(alice.page.getByTestId("group-share-dialog")).toBeVisible();

@@ -43,7 +43,7 @@ function previewText(text: string): string {
 const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
 const engineSnapshot = () => engine.state;
 
-/** A private group, or an invitation to one, in the chat list. */
+/** A group (private or community), or an invitation to one, in the chat list. */
 function GroupRow({ group, active, onOpen }: { group: GroupView; active: boolean; onOpen(): void }) {
   const [busy, setBusy] = useState(false);
   const invitation = group.invitation;
@@ -52,7 +52,7 @@ function GroupRow({ group, active, onOpen }: { group: GroupView; active: boolean
     setBusy(true);
     try { await engine.call(method, { groupId: group.id }); } catch { /* the row says what state it is in */ } finally { setBusy(false); }
   };
-  const status = invitation ? (invitation.viaLink ? (invitation.admin ? "Joining…" : invitation.stage === "answered" ? "The admin's app answered…" : "Waiting for the admin's app…") : invitation.accepted ? "Joining…" : `Invited by ${invitation.contact || "a contact"} · ${invitation.members} member${invitation.members === 1 ? "" : "s"}`)
+  const status = invitation ? (invitation.viaLink ? (invitation.admin ? "Joining…" : group.profile === "community" ? "Waiting to be let in…" : invitation.stage === "answered" ? "The admin's app answered…" : "Waiting for the admin's app…") : invitation.accepted ? "Joining…" : `Invited by ${invitation.contact || "a contact"} · ${invitation.members} member${invitation.members === 1 ? "" : "s"}`)
     : group.status !== "active" ? group.statusReason ?? group.status : `${group.members.length} member${group.members.length === 1 ? "" : "s"}`;
   return (
     <div data-testid="group-row" data-group={group.id} onClick={onOpen}
@@ -238,7 +238,7 @@ export function Sidebar() {
               </button>
               <button onClick={() => { setNewMenuOpen(false); setShowNewGroup(true); }} data-testid="new-group" className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-text-primary hover:bg-surface-hover max-md:min-h-11 focus-visible:outline-none focus-visible:bg-surface-hover">
                 <svg aria-hidden="true" width="16" height="16" className="shrink-0 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M19 8v6M16 11h6" /></svg>
-                <span><span className="block">Group</span><span className="block text-xs text-text-muted">Up to eight, from contacts or a link</span></span>
+                <span><span className="block">Group</span><span className="block text-xs text-text-muted">A link anyone can open</span></span>
               </button>
             </div>}
           </div>

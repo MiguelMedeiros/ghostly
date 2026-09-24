@@ -18,7 +18,7 @@ describe("a contact who is no longer a member", () => {
       edgeNick: () => undefined, openEntry: async () => "entry", entries: () => new Map(), publish: async () => {}, resolve: async () => null, storeMessage: async () => {}, emit: () => {},
     };
     const alice = new Groups(host, store);
-    const groupId = await alice.create("Ghosts");
+    const groupId = await alice.create("Ghosts", "mesh");
     await alice.invite(groupId, "chat-ab");
     const bob = createIdentity().pubKeyZ32;
     await alice.handleContactFrame("chat-ab", { t: "group-accept", g: groupId, key: bob });

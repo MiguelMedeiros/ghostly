@@ -147,7 +147,8 @@ export interface EngineApi {
   setFastPoll(params: { linkId: string; fast: boolean }): void;
 
   // Private groups (WISP 900, `group-mesh/1`). Group messages arrive as `messages` events under `group:<id>`.
-  createGroup(params: { name: string }): { groupId: string };
+  /** `profile`: a community (the default: the link is the way in, hundreds of members) or a private mesh of up to eight contacts. */
+  createGroup(params: { name: string; profile?: "community" | "mesh" }): { groupId: string };
   /** Invites a contact (a paired chat whose app announced groups) to a group I administer. */
   inviteToGroup(params: { groupId: string; linkId: string }): void;
   acceptGroupInvitation(params: { groupId: string }): void;

@@ -1,18 +1,19 @@
 import {
   GroupSession, MAX_GROUP_CHAIN, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
-  knockIdentity, knockRecords, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature,
+  knockIdentity, knockRecords, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink,
   type GhostRecord, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupState, type Identity, type Roster,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { db } from "./db";
 import { traceJoin } from "./joinTrace";
+import { COMMUNITY_TIMINGS, Communities, type CommunityTimings } from "./community";
 
 /** What the engine gives the groups: its links, its storage and its state emitter. */
 export interface GroupsHost {
   /** Sends a frame on a paired link (a contact chat or an edge). Throws when it cannot. */
   sendOnLink(linkId: string, frame: object): void;
-  /** The link is open and both sides announced groups. */
-  linkReady(linkId: string): boolean;
+  /** The link is open and both sides announced groups (`version` 2: community groups too). */
+  linkReady(linkId: string, version?: number): boolean;
   /** A name for a contact chat, for the invitation. */
   contactName(linkId: string): string | undefined;
   /** Member key → edge link id, for the edges of this group that exist. */
@@ -21,7 +22,7 @@ export interface GroupsHost {
    * Creates and starts the edge of a group toward a member; resolves to its link id. `expectPeer`:
    * the member is online this very moment (we just met over the admission), so it looks fast for it.
    */
-  openEdge(state: GroupState, peerMemberKey: string, expectPeer?: boolean): Promise<string>;
+  openEdge(state: { id: string; seedB64: string }, peerMemberKey: string, expectPeer?: boolean): Promise<string>;
   closeEdge(linkId: string): Promise<void>;
   /** The nick the member at the other end of an edge announced. */
   edgeNick(linkId: string): string | undefined;
@@ -39,6 +40,8 @@ export interface GroupsHost {
   resolve(pubKeyZ32: string): Promise<GhostRecord[] | null>;
   storeMessage(message: StoredMessage): Promise<void>;
   emit(): void;
+  /** My name, for community groups, where it travels (encrypted) with my messages. */
+  myNick?(): string | undefined;
 }
 
 /** Where groups and their history are kept: the engine's database, or a test's memory. */
@@ -95,11 +98,17 @@ export class Groups {
   /** Joiner side: groups whose knock is published, for the stage the joiner is shown. */
   private readonly knocked = new Set<string>();
   private ticking = false;
+  /** Community groups (`group-community/1`) live in their own engine; this class routes to it. */
+  readonly communities: Communities;
 
-  constructor(private readonly host: GroupsHost, private readonly store: GroupStore = db, private readonly timings: EntryTimings = ENTRY_TIMINGS) {}
+  constructor(private readonly host: GroupsHost, private readonly store: GroupStore = db, private readonly timings: EntryTimings = ENTRY_TIMINGS, communityTimings: CommunityTimings = COMMUNITY_TIMINGS) {
+    this.communities = new Communities(host, store, communityTimings);
+  }
 
   async load(): Promise<void> {
-    for (const group of await this.store.getGroups()) {
+    const all = await this.store.getGroups();
+    await this.communities.load(all.filter(g => g.community || g.joining));
+    for (const group of all.filter(g => !g.community && !g.joining)) {
       this.stored.set(group.id, group);
       if (group.state) this.attach(group.state);
       const history = await this.store.getMessages(MESSAGE_LINK(group.id)), last = history[history.length - 1];
@@ -113,12 +122,16 @@ export class Groups {
   }
 
   views(): GroupView[] {
+    return [...this.meshViews(), ...this.communities.views()].sort((a, b) => Math.max(b.lastMessageAt, b.createdAt) - Math.max(a.lastMessageAt, a.createdAt));
+  }
+
+  private meshViews(): GroupView[] {
     return [...this.stored.values()].filter(group => !group.left && (group.invitation || this.sessions.has(group.id))).map(group => {
       const session = this.sessions.get(group.id);
       const edges = this.host.edges(group.id);
       // A chat stays in `contacts` after its member is removed or leaves (the removal notice goes over it): only a member still in the roster counts.
       const contacts = Object.entries(group.contacts ?? {}).filter(([key]) => !session || rosterHas(session.roster, key));
-      const base = { id: group.id, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, invited: [...(this.invited.get(group.id) ?? [])],
+      const base = { id: group.id, profile: "mesh" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, invited: [...(this.invited.get(group.id) ?? [])],
         memberLinks: Object.fromEntries(contacts.map(([key, linkId]) => [linkId, key])) };
       if (!session) {
         const invitation = group.invitation!;
@@ -141,9 +154,13 @@ export class Groups {
 
   messages(groupId: string): Promise<StoredMessage[]> { return this.store.getMessages(MESSAGE_LINK(groupId)); }
 
+  private isCommunity(groupId: string): boolean { return this.communities.has(groupId); }
+
   // -- what the person does ------------------------------------------------
 
-  async create(name: string): Promise<string> {
+  /** A new group: a community (the link is the way in, hundreds of members) or a private mesh of up to eight contacts. */
+  async create(name: string, profile: "community" | "mesh" = "community"): Promise<string> {
+    if (profile === "community") return this.communities.create(name);
     const state = GroupSession.create(name);
     const group: StoredGroup = { id: state.id, createdAt: state.createdAt, state, contacts: {} };
     await this.store.putGroup(group);
@@ -155,6 +172,7 @@ export class Groups {
   }
 
   async invite(groupId: string, linkId: string): Promise<void> {
+    if (this.isCommunity(groupId)) throw new Error("Share the group's link with them: anyone who opens it joins");
     const session = this.session(groupId);
     if (!session.isAdmin) throw new Error("Only the admin can invite");
     const group = this.stored.get(groupId)!;
@@ -187,6 +205,7 @@ export class Groups {
   }
 
   async send(groupId: string, text: string): Promise<{ error: string | null }> {
+    if (this.isCommunity(groupId)) return this.communities.send(groupId, text);
     const session = this.sessions.get(groupId);
     if (!session) return { error: "You are not in this group yet" };
     const result = await session.sendText(text);
@@ -198,6 +217,7 @@ export class Groups {
    * role commit reaches someone who can then remove me. None when nobody else is reachable.
    */
   successor(groupId: string): string | undefined {
+    if (this.isCommunity(groupId)) return this.communities.successor(groupId);
     const session = this.sessions.get(groupId);
     if (!session) return undefined;
     const edges = this.host.edges(groupId);
@@ -211,6 +231,7 @@ export class Groups {
    * members hands the role to one who is online first; alone, the group simply goes.
    */
   async leave(groupId: string): Promise<void> {
+    if (this.isCommunity(groupId)) return this.communities.leave(groupId);
     const session = this.session(groupId);
     const group = this.stored.get(groupId)!;
     if (session.status !== "active") return this.forget(groupId);
@@ -247,16 +268,18 @@ export class Groups {
   }
 
   async remove(groupId: string, key: string): Promise<void> {
+    if (this.isCommunity(groupId)) return this.communities.remove(groupId, key);
     const session = this.session(groupId);
     await session.remove(key);
     const contact = this.stored.get(groupId)!.contacts?.[key];
     if (contact) { try { this.host.sendOnLink(contact, { t: "group-removed", g: groupId }); } catch { /* the commit went over the edge, if it was up */ } }
   }
 
-  makeAdmin(groupId: string, key: string): Promise<void> { return this.session(groupId).transferAdmin(key); }
-  rotate(groupId: string): Promise<void> { return this.session(groupId).rotate(); }
+  makeAdmin(groupId: string, key: string): Promise<void> { return this.isCommunity(groupId) ? this.communities.makeAdmin(groupId, key) : this.session(groupId).transferAdmin(key); }
+  rotate(groupId: string): Promise<void> { return this.isCommunity(groupId) ? this.communities.rotate(groupId) : this.session(groupId).rotate(); }
 
   async forget(groupId: string): Promise<void> {
+    if (this.isCommunity(groupId)) return this.communities.forget(groupId);
     const session = this.sessions.get(groupId);
     if (session?.status === "active") { try { await this.leave(groupId); } catch { /* the admin cannot leave a group with members: forgetting it is still allowed */ } }
     this.sessions.delete(groupId);
@@ -275,6 +298,10 @@ export class Groups {
 
   /** Turns the link on, or replaces it (`reset`): a new entry key, so the old link reaches nobody. */
   async enableLink(groupId: string, reset = false): Promise<string> {
+    if (this.isCommunity(groupId)) {
+      const current = this.communities.entryLink(groupId);
+      return current && !reset ? current : this.communities.replaceLink(groupId);
+    }
     const session = this.session(groupId);
     if (!session.isAdmin) throw new Error("Only the admin can share a link to the group");
     const group = this.stored.get(groupId)!;
@@ -291,6 +318,7 @@ export class Groups {
   }
 
   async disableLink(groupId: string): Promise<void> {
+    if (this.isCommunity(groupId)) { await this.communities.replaceLink(groupId, true); return; }
     const group = this.stored.get(groupId);
     if (!group?.entry) return;
     delete group.entry;
@@ -305,8 +333,14 @@ export class Groups {
    * opening the link was the consent, and the welcome must come from the key the link named.
    */
   async joinByLink(code: string): Promise<string> {
+    if (decodeCommunityLink(code)) {
+      const g = decodeCommunityLink(code)!.g;
+      if (this.stored.has(g)) await this.forget(g);
+      return this.communities.joinByLink(code);
+    }
     const link = decodeGroupEntryLink(code);
     if (!link) throw new Error("This is not a link to a group");
+    if (this.isCommunity(link.g)) throw new Error("This group is joined with its current link");
     const existing = this.stored.get(link.g);
     if (existing?.state?.status === "active" || existing?.invitation?.entry === link.host) return link.g;
     if (existing?.invitation?.seedB64 && !existing.invitation.entry) throw new Error("You are already joining this group");
@@ -354,11 +388,13 @@ export class Groups {
         if (now - (this.lastPoll.get(group.id) ?? 0) >= every) { this.lastPoll.set(group.id, now); await this.answerKnocks(group, session, now).catch(() => {}); }
       }
       for (const [key, until] of this.refused) if (until <= now) this.refused.delete(key);
+      await this.communities.tick(now);
     } finally { this.ticking = false; }
   }
 
   /** An entry session came up with groups on both sides: the admin's side invites over it. */
   entryReady(groupId: string, linkId: string, peer: string): void {
+    if (this.isCommunity(groupId)) { this.communities.entryReady(groupId, linkId, peer); return; }
     const session = this.sessions.get(groupId);
     if (!session?.isAdmin || !this.pendingEntries.get(groupId)?.has(peer)) return;
     try { this.host.sendOnLink(linkId, session.inviteFrame()); } catch { return; }
@@ -428,6 +464,8 @@ export class Groups {
   async handleContactFrame(linkId: string, frame: Record<string, unknown>): Promise<void> {
     const g = typeof frame.g === "string" ? frame.g : "";
     if (!/^[A-Za-z0-9_-]{22}$/.test(g)) return;
+    // Community admission runs on entry sessions only; a mesh app never sees these (it announces 1 only).
+    if (this.isCommunity(g) || frame.v === 2) { if (this.isCommunity(g)) await this.communities.handleEntryFrame(linkId, frame); return; }
     switch (frame.t) {
       case "group-invite": {
         if (typeof frame.admin !== "string" || !MEMBER_KEY.test(frame.admin) || typeof frame.name !== "string") return;
@@ -539,6 +577,7 @@ export class Groups {
 
   /** A `group-*` frame on an edge: from the member the edge is pinned to. */
   async handleEdgeFrame(groupId: string, peerKey: string, frame: unknown): Promise<void> {
+    if (this.isCommunity(groupId)) return this.communities.handleEdgeFrame(groupId, peerKey, frame);
     const left = this.stored.get(groupId)?.left;
     if (left) {
       // Only one thing matters to a group I left: the admin's commit that removes me.
@@ -558,6 +597,7 @@ export class Groups {
 
   /** An edge came up with groups on both sides: both sides say where they are. */
   edgeReady(groupId: string, peerKey: string, linkId: string): void {
+    if (this.isCommunity(groupId)) { this.communities.edgeReady(groupId, peerKey, linkId); return; }
     const left = this.stored.get(groupId)?.left;
     if (left) {
       // The admin was away when I left: now it hears it.
@@ -571,6 +611,7 @@ export class Groups {
   }
 
   edgeNick(groupId: string, peerKey: string, nick: string | undefined): void {
+    if (this.isCommunity(groupId)) { this.communities.edgeNick(groupId, peerKey, nick); return; }
     void this.sessions.get(groupId)?.setNick(peerKey, nick);
   }
 

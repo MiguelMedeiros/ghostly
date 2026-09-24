@@ -18,13 +18,15 @@ async function captureSharing(peer: Peer, webShare: boolean): Promise<void> {
 }
 const sharing = (peer: Peer) => peer.page.evaluate(() => (window as unknown as { qaSharing: { copied: string[]; shared: { title?: string; url?: string }[] } }).qaSharing);
 
-test("a new group opens on its link; Copy, Share and the header's Share link; joining waits with nothing to decide", async ({ peer }) => {
+test("a new group opens on its link; Copy, Share and the header's Share link; joining waits with nothing to decide", { tag: ["@feature:groups.link.share", "@feature:groups.link.join", "@feature:groups.link.enable"] }, async ({ peer }) => {
   test.setTimeout(6 * 60_000);
   const alice = await peer("alice");
   await alice.page.getByTestId("sidebar-new-more").click();
   await alice.page.getByTestId("new-group").click();
   await expect(alice.page.getByTestId("new-group-dialog")).toContainText("You get a link to share");
   await alice.page.getByTestId("new-group-name").fill("Open door");
+  // A private group (group-mesh/1): this spec is about that profile.
+  await alice.page.getByTestId("new-group-kind-mesh").click();
   await alice.page.getByTestId("new-group-create").click();
 
   // The screen a new group ends on: the link is the main thing, with a QR, and what it does.

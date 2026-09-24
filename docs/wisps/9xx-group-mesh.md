@@ -14,6 +14,8 @@
 
 ## What this profile is
 
+> A group whose link is meant for a large community, open while the admin is away and for hundreds of members, is the [community profile](9xx-group-community.md). This one stays the small private group: contacts, or a link that works while the admin's app is open.
+
 `group-mesh/1` lets up to eight members exchange **text** over a full mesh of pairwise, authenticated data sessions, with a membership chain and epoch keys that exclude removed members from everything sent after their removal and admitted members from everything sent before their admission. It is the bounded mesh prototype 900 asked for, with three decisions made explicit:
 
 1. **Topology: a mesh of dedicated pairwise edges, derived from the roster.** Every pair of members runs one [paired-chat/1](401-paired-chat.md) link of its own, whose rendezvous identities and discovery key both sides derive from the X25519 secret of their member keys and the group id (`edgeParams` in [`groupCrypto.ts`](../../packages/core/src/groupCrypto.ts)). Nobody distributes edge parameters, nobody but the two members can compute them, and the edge's paired session is pinned in advance to the member keys the roster names, so admission of a member is the only trust step. Edges are WebRTC only in this increment; native transports are not offered on them.

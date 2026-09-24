@@ -603,6 +603,18 @@ export const editorial: Record<string, Entry> = {
       "pt-br": "Só texto, por WebRTC; arquivos, chamadas e pagamentos são recusados em grupos. Entrega ao vivo: quem estava fora recupera as mensagens recentes de cada autor. Número ainda não atribuído.",
     },
   },
+  "9xx-group-community": {
+    group: "together",
+    benefit: {
+      en: "A group whose link is the way in: anyone who opens it joins, any member lets them in while the admin is away, up to 256 members.",
+      "pt-br": "Um grupo em que o link é a porta: quem abre entra, qualquer membro deixa entrar mesmo com o admin fora, até 256 membros.",
+    },
+    level: "development",
+    note: {
+      en: "Text only. Online members elect a few hubs that relay; whoever was away is caught up by whoever is there. The cap is what a headless load test measured. Number not yet assigned.",
+      "pt-br": "Só texto. Os membros online elegem alguns hubs que repassam; quem estava fora recebe de quem estiver lá. O limite é o que um teste de carga sem interface mediu. Número ainda não atribuído.",
+    },
+  },
   "901-gossipsub": {
     benefit: {
       en: "Evaluate GossipSub as a distribution layer for groups larger than the mesh.",

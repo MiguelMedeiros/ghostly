@@ -392,7 +392,7 @@ describe("private groups through the engine", () => {
 
   it("a group's edge is a link the engine runs, pinned to the member, never shown or exported as a chat", async () => {
     const { node } = await started();
-    const { groupId } = await node.createGroup({ name: "  Friends  " });
+    const { groupId } = await node.createGroup({ name: "  Friends  ", profile: "mesh" });
     const state = (await db.getGroups()).find((g) => g.id === groupId)!.state;
     const member = createIdentity().pubKeyZ32;
     const edgeId = await node["openEdge"](state as never, member);
@@ -409,5 +409,16 @@ describe("private groups through the engine", () => {
     await host.closeEdge(edgeId);
     expect(edge.stop).toHaveBeenCalledWith(true);
     expect(await saved(edgeId)).toBeUndefined();
+  });
+
+  it("a community group is what a group is by default; its link is group2 and every member's", async () => {
+    const { node } = await started();
+    const { groupId } = await node.createGroup({ name: "Plaza" });
+    const stored = (await db.getGroups()).find((g) => g.id === groupId)!;
+    expect(stored.community?.profile).toBe("group-community/1");
+    expect(stored.state).toBeUndefined();
+    const { link } = await node.enableGroupLink({ groupId });
+    expect(link).toMatch(new RegExp(`^group2/${groupId}/`));
+    expect(node.getState().groups.find(g => g.id === groupId)).toMatchObject({ profile: "community", isAdmin: true, entryLink: link });
   });
 });

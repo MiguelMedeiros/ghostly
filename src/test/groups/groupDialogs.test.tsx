@@ -214,8 +214,20 @@ describe("NewGroupDialog", () => {
     await user.type(screen.getByTestId("new-group-name"), "   ");
     expect(create).toBeDisabled();
     await user.type(screen.getByTestId("new-group-name"), "Climbing  {Enter}");
-    expect(engine.callsTo("createGroup")).toEqual([{ name: "Climbing" }]);
+    // A community is what a new group is unless the person picks Private.
+    expect(engine.callsTo("createGroup")).toEqual([{ name: "Climbing", profile: "community" }]);
     expect(onCreated).toHaveBeenCalledWith("new-group");
+  });
+
+  it("makes a private group (up to eight, contacts or a link) when that kind is picked", async () => {
+    const { user, engine, onCreated } = open();
+    engine.on("createGroup", () => ({ groupId: "small" }));
+    expect(screen.getByTestId("new-group-kind-community").querySelector("input")).toBeChecked();
+    await user.click(screen.getByTestId("new-group-kind-mesh"));
+    expect(screen.getByTestId("new-group-kind-mesh").querySelector("input")).toBeChecked();
+    await user.type(screen.getByTestId("new-group-name"), "Family{Enter}");
+    expect(engine.callsTo("createGroup")).toEqual([{ name: "Family", profile: "mesh" }]);
+    expect(onCreated).toHaveBeenCalledWith("small");
   });
 
   it("shows why a group could not be created, and lets the user try again", async () => {

@@ -1,6 +1,6 @@
 # WISP numbering and compatibility
 
-All 46 specifications remain Draft. Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
+All 47 specifications remain Draft. Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
 
 ## Independent families
 
@@ -67,6 +67,7 @@ Generated from [numbering.json](numbering.json); edit that source instead of thi
 | 801 | [801](801-invitation-profiles.md) |
 | 21 | [900](900-group-sessions.md) |
 | — | [9xx · group-mesh · planned; number to be defined](9xx-group-mesh.md) |
+| — | [9xx · group-community · planned; number to be defined](9xx-group-community.md) |
 | 22 | [9xx · gossipsub · planned; number to be defined](901-gossipsub.md) |
 | — 1000 | [1000](1000-storage.md) |
 | — 1001 | [1001](1001-local-storage.md) |

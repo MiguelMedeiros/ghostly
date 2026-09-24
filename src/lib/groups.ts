@@ -1,4 +1,4 @@
-import { decodeGroupEntryLink, groupEntryUrl } from "@ghostly/core";
+import { decodeCommunityLink, decodeGroupEntryLink, groupEntryUrl } from "@ghostly/core";
 import { getPrefix } from "./storage";
 import type { GroupMemberView } from "@ghostly/browser/shared/types";
 import { publicKeyLabel } from "./publicKeyLabel";
@@ -48,8 +48,10 @@ function linkOrigin(): string {
   return /^https?:$/.test(window.location.protocol) ? window.location.origin : PUBLIC_APP;
 }
 
-/** The address a group's link opens, or "" while it is off. */
+/** The address a group's link opens (`group1/…` for a private group, `group2/…` for a community), or "" while it is off. */
 export function groupLinkUrl(group: { entryLink?: string }): string {
-  const link = group.entryLink ? decodeGroupEntryLink(group.entryLink) : null;
-  return link ? groupEntryUrl(linkOrigin(), link) : "";
+  if (!group.entryLink) return "";
+  const mesh = decodeGroupEntryLink(group.entryLink);
+  if (mesh) return groupEntryUrl(linkOrigin(), mesh);
+  return decodeCommunityLink(group.entryLink) ? `${linkOrigin().replace(/\/+$/, "")}/#/join/${group.entryLink}` : "";
 }

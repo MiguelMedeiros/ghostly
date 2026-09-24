@@ -55,3 +55,15 @@ it("an app without groups never sees a group frame, and a contact on it cannot b
   expect(framesOld).not.toHaveBeenCalled();
   await Promise.all([a.stop(false), b.stop(false)]);
 });
+
+it("announces both group versions; an app with only the mesh keeps mesh groups and never gets community ones", async () => {
+  const { a, b } = attachedPair([{ onGroupFrame: vi.fn() }, { onGroupFrame: vi.fn() }], [true, true]);
+  await vi.waitFor(() => { expect(a.supportsGroupVersion(2)).toBe(true); expect(b.supportsGroupVersion(2)).toBe(true); });
+  expect(a.supportsGroupVersion(1)).toBe(true);
+  // The other side is an app from before community groups: it announces the mesh only.
+  (b as unknown as { channel: { send(d: string): void } }).channel.send(JSON.stringify({ t: "paired-groups", v: [1] }));
+  await vi.waitFor(() => expect(a.supportsGroupVersion(2)).toBe(false));
+  expect(a.groupsSupport).toBe(true);
+  expect(a.supportsGroupVersion(1)).toBe(true);
+  await Promise.all([a.stop(false), b.stop(false)]);
+});

@@ -101,7 +101,7 @@ describe("Sidebar: groups in the chat list", () => {
     await user.click(screen.getByTestId("sidebar-new-more"));
     await user.click(screen.getByTestId("new-group"));
     await user.type(screen.getByTestId("new-group-name"), "Book club{Enter}");
-    expect(engine.callsTo("createGroup")).toEqual([{ name: "Book club" }]);
+    expect(engine.callsTo("createGroup")).toEqual([{ name: "Book club", profile: "community" }]);
     expect(await screen.findByText("/group/fresh")).toBeInTheDocument();
     expect(screen.queryByTestId("new-group-dialog")).not.toBeInTheDocument();
   });

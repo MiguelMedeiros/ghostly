@@ -9,7 +9,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:group-load": "vitest run test/communityLoad.test.ts --reporter=verbose"
   },
   "dependencies": {
     "@arkade-os/sdk": "0.4.74",
