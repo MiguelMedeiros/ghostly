@@ -8,6 +8,8 @@ import {
 import { createRingInputRouter } from "../src/ringInput";
 import { createRingLink, parseRingLink } from "../src/ringLink";
 
+// covers: core.ring-link, proofs.pubky
+
 const root = createIdentity(), delegate = createIdentity();
 const iat = 1_800_000_000, exp = iat + RING_LIFETIME;
 const statement = "the statement";

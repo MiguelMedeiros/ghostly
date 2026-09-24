@@ -4,6 +4,8 @@ import { createIdentity } from "../src/identity";
 import { MAX_DNS_PACKET_BYTES, measureRecords, type GhostRecord } from "../src/pkarr";
 import { LABEL, MAX_MSGS_PAYLOAD_B64, RECORD_TTL, buildLinkRecords, parseLinkRecords } from "../src/records";
 
+// covers: core.records
+
 const id = createIdentity();
 const key = generateEncryptionKey();
 const parse = (records: GhostRecord[]) => parseLinkRecords({ pubKeyZ32: id.pubKeyZ32, timestampMicros: 1_500n, records }, key);

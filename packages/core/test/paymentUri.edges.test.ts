@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import fc from "fast-check";
 import { paymentUri, qrText, satsToBtc } from "../src/paymentUri";
 
+// covers: payments.uri, payments.external
+
 const ADDRESS = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq";
 /** BIP 21 query values, decoded the strict way: `+` is a plus sign, not a space. */
 const query = (uri: string) => Object.fromEntries(uri.slice(uri.indexOf("?") + 1).split("&").map(p => p.split("=").map(decodeURIComponent)));

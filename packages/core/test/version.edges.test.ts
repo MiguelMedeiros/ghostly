@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import fc from "fast-check";
 import { compareVersions, isNewerVersion } from "../src";
 
+// covers: core.version
+
 const part = fc.integer({ min: 0, max: 999_999 });
 const version = fc.tuple(part, part, part);
 const text = ([a, b, c]: [number, number, number]) => `${a}.${b}.${c}`;

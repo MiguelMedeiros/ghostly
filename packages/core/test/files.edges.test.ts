@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { FileTransfers, type FileInfo, type FileSink } from "../src/files";
 import { CHUNK_KIND, LIMITS, decodeChunk, decodeControl, type FileFrame, type FrameChannel } from "../src/frames";
 
+// covers: files.legacy.send, files.size-limit
+
 afterEach(() => void vi.useRealTimers());
 
 /** FileTransfers on a channel that records what it sends; frames from the peer are fed by hand. */

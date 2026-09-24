@@ -3,6 +3,8 @@ import fc from "fast-check";
 import { createIdentity } from "../src/identity";
 import { fitSignedPairedSignal, signPairedSignal, verifyPairedSignal } from "../src/pairedSignal";
 
+// covers: chat.paired.session, transport.webrtc, core.peer-keys
+
 const owner = createIdentity(), attacker = createIdentity();
 const from = createIdentity().pubKeyZ32, to = createIdentity().pubKeyZ32;
 const base = { t: "o", ts: 100, u: "ufrag", p: "password", f: "a".repeat(64), s: "actpass" };

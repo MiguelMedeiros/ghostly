@@ -25,6 +25,8 @@ import {
   type LocalResponse,
 } from "../src/http";
 
+// covers: services.http, core.frames
+
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();

@@ -6,6 +6,8 @@ import {
   normalizeDomain, parseDomainTxt, recordsFromTxt, recordsFromWellKnown, txtValue, type DomainRecord,
 } from '../src/domainProofs';
 
+// covers: proofs.domain.dns, proofs.domain.https
+
 const hex = (b: Uint8Array) => Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
 const record = (): DomainRecord => ({ key: createIdentity().pubKeyZ32, proof: hex(crypto.getRandomValues(new Uint8Array(32))) });
 const mine = record();

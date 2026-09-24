@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TransportSwitch, type TransportPolicy } from "../src/transportSwitch";
 
+// covers: transport.switch, transport.preference
+
 /** Two switches wired through an explicit queue: nothing moves until `flush`. Key "0" coordinates. */
 function peers(timeoutMs?: number) {
   const policies: Omit<TransportPolicy, "revision" | "intent">[] = [0, 1].map(() => ({ preferred: "webrtc/1", fallback: true,

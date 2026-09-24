@@ -3,6 +3,8 @@ import { createIdentity } from "../src/identity";
 import { createRelayPayload } from "../src/pkarr";
 import { DEFAULT_RELAYS, RelayTransport, normalizeRelayUrl } from "../src/relay";
 
+// covers: core.relay-client
+
 const id = createIdentity();
 const packet = (micros: bigint) => new Response(createRelayPayload(id, [{ label: "_ts", value: String(micros) }], micros) as BodyInit);
 

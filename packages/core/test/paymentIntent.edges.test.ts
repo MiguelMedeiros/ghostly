@@ -4,6 +4,8 @@ import {
   EVM_TEST_CHAINS, ONCHAIN_PROVIDER, SEPOLIA_TEST_USDT, assertTokenUnits, assertWholeSats, formatPaymentAmount, parsePaymentAmount, validatePaymentTarget,
 } from "../src/paymentIntent";
 
+// covers: payments.amounts, payments.targets
+
 const NOW = 1_800_000_000_000;
 const DAY = 24 * 60 * 60 * 1000;
 const ark = { method: "arkade", network: "bitcoin", provider: "https://arkade.example.com", asset: "BTC", unit: "sat", address: "ark1qexample", expiresAt: NOW + 60_000 };

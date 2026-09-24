@@ -4,6 +4,8 @@ import { bech32 } from "@scure/base";
 import { decodeBolt11, findBolt11 } from "../src";
 import { testInvoice } from "./invoice";
 
+// covers: payments.bolt11
+
 // BOLT 11's own example ("1 cup coffee", 2500u, 60 s expiry), for mutations.
 const SPEC_INVOICE =
   "lnbc2500u1pvjluezsp5zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zygspp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdq5xysxxatsyp3k7enxv4jsxqzpu9qrsgquk0rl77nj30yxdy8j9vdx85fkpmdla2087ne0xh8nhedh8w27kyke0lp53ut353s06fv3qfegext0eh0ymjpf39tuven09sam30g4vgpfna3rh";

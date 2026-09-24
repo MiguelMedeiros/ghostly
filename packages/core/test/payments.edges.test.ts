@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import fc from "fast-check";
 import { ENDPOINT, cashuRequestPayload, findEndpoint, parseCashuRequestPayload } from "../src/payments";
 
+// covers: payments.cashu.request, payments.targets
+
 describe("the mints a cashu request names", () => {
   it("round-trips a list of mints", () => {
     const mints = ["https://mint.example.com", "http://127.0.0.1:3338"];

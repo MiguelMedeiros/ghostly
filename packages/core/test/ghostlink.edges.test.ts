@@ -11,6 +11,8 @@ import type { BoundChannel, NativeBinding, NativeEndpoint } from "../src/pairedT
 import { signPairedSignal } from "../src/pairedSignal";
 import { createChannelPair } from "./helpers";
 
+// covers: chat.paired.session, chat.paired.send, chat.paired.receipts, chat.paired.reconnect, chat.paired.nickname-sync, chat.legacy.send, core.liveness, core.capabilities, transport.switch, payments.chat.frames
+
 type Side = Partial<Omit<GhostLinkOptions, "params" | "transport" | "events">> & { events?: GhostLinkEvents; profile?: boolean };
 type Frame = string | Uint8Array | Record<string, unknown> | unknown[];
 type Internal = { attach(channel: FrameChannel): void; channel: FrameChannel | null };

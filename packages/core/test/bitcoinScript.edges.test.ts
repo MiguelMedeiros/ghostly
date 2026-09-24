@@ -8,6 +8,8 @@ import {
 } from "../src";
 import generated from "./fixtures/bip322/generated-test-vectors.json";
 
+// covers: core.bitcoin-address, proofs.bitcoin
+
 const base58 = createBase58check(sha256);
 const b64 = (s: string) => Uint8Array.from(Buffer.from(s, "base64"));
 const segwitAddress = (hrp: string, version: number, program: Uint8Array) =>

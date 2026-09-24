@@ -9,6 +9,8 @@ import {
   type ImportedProof, type ProofAdapter, type ProofChallenge, type ProofLedger, type ProofRecord, type StorageProof,
 } from '../src/peerProofs';
 
+// covers: proofs.peer-proofs
+
 const NOW = 1_800_000_000;
 const hex = (b: Uint8Array) => Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
 const nonce = () => toBase64Url(crypto.getRandomValues(new Uint8Array(32)));

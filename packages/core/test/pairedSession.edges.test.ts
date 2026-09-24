@@ -3,6 +3,8 @@ import { createIdentity } from "../src/identity";
 import { PairedSession, type PairedSessionOptions } from "../src/pairedSession";
 import { createChannelPair } from "./helpers";
 
+// covers: chat.paired.session, chat.paired.verify, core.capabilities, core.version, core.peer-keys
+
 const active: PairedSession[] = [];
 afterEach(() => { active.splice(0).forEach(s => s.stop()); vi.useRealTimers(); vi.restoreAllMocks(); });
 const rendezvous: [string, string] = [createIdentity().pubKeyZ32, createIdentity().pubKeyZ32];

@@ -8,6 +8,8 @@ import {
 } from "../src";
 import { testInvoice } from "./invoice";
 
+// covers: wallet.lnurl.protocol
+
 const METADATA = JSON.stringify([["text/plain", "Pay alice"], ["text/identifier", "alice@ln.example.com"]]);
 const PARAMS = { tag: "payRequest", callback: "https://ln.example.com/cb", minSendable: 1000, maxSendable: 100_000_000, metadata: METADATA, commentAllowed: 64 };
 const ALICE: LightningDestination = { kind: "address", text: "alice@ln.example.com", url: "https://ln.example.com/.well-known/lnurlp/alice", domain: "ln.example.com", name: "alice" };

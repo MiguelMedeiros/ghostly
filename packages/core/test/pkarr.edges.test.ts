@@ -5,6 +5,8 @@ import { encodeTxtPacket } from "../src/dns";
 import { createIdentity, sign } from "../src/identity";
 import { MAX_DNS_PACKET_BYTES, PacketTooLargeError, createRelayPayload, measureRecords, parseRelayPayload } from "../src/pkarr";
 
+// covers: core.records
+
 const id = createIdentity();
 
 /** A relay payload around any DNS packet, signed the BEP44 way by `seed`. */

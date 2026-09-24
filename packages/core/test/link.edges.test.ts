@@ -15,6 +15,8 @@ import {
 import type { GhostRecord, SignedPacket } from "../src/pkarr";
 import type { PkarrTransport } from "../src/transport";
 
+// covers: chat.legacy.send, core.records
+
 const NOW = 1_800_000_000_000;
 const I = RELAY_POLL_INTERVALS;
 

@@ -4,6 +4,8 @@ import { fromBase64Url, toBase64Url } from "../src/bytes";
 import { createLink, decodeInviteCode, encodeInviteCode, type LinkParams } from "../src/invite";
 import { createIdentity } from "../src/identity";
 
+// covers: invite.formats, invite.invalid
+
 const seedB64 = "A".repeat(43), encKeyB64 = "B".repeat(43);
 const peerPubKeyZ32 = createIdentity().pubKeyZ32;
 const legacy: LinkParams = { seedB64, peerPubKeyZ32, encKeyB64 };

@@ -5,6 +5,8 @@ import type { FileInfo, FileSink } from "../src/files";
 import { LIMITS, type FrameChannel } from "../src/frames";
 import { PairedFiles } from "../src/pairedFiles";
 
+// covers: files.paired.send, files.size-limit
+
 afterEach(() => void vi.useRealTimers());
 
 const ID = "file-0001";

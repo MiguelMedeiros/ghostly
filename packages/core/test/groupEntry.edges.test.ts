@@ -7,6 +7,8 @@ import { concatBytes, toBase64Url, utf8Encode } from "../src/bytes";
 import { KNOCK_TTL_MS, MAX_KNOCKS, decodeGroupEntryLink, encodeGroupEntryLink, groupEntryUrl, knockRecords, mergeKnocks, readKnocks } from "../src/groupEntry";
 import { createIdentity, publicKeyFromZ32 } from "../src/identity";
 
+// covers: groups.protocol.entry
+
 const g = "AbCdEfGhIjKlMnOpQrStUv";
 const host = createIdentity();
 const link = { g, host: host.pubKeyZ32 };

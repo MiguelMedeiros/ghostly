@@ -6,6 +6,8 @@ import {
   type IdentityLedger, type IdentityStatement, type LocalIdentityProof, type ReceivedIdentity, type VerifiedIdentity,
 } from "../src/identityProofs";
 
+// covers: proofs.binding, proofs.share, proofs.withdraw, proofs.expiry
+
 const NOW = 1_800_000_000;
 const SUBJECT = "npub-test-subject";
 

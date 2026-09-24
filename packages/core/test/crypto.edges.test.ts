@@ -6,6 +6,8 @@ import {
 import { decrypt, encrypt, generateEncryptionKey, tryDecrypt } from "../src/crypto";
 import { createIdentity, identityFromSeed, identityFromSeedB64, publicKeyFromZ32, sign, verify } from "../src/identity";
 
+// covers: core.crypto, core.peer-keys
+
 describe("bytes codecs", () => {
   it("round-trips any bytes through base64, base64url and z-base-32", () => {
     fc.assert(fc.property(fc.uint8Array({ maxLength: 96 }), bytes => {

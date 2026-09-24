@@ -11,6 +11,8 @@ import {
 import basic from "./fixtures/bip322/basic-test-vectors.json";
 import generated from "./fixtures/bip322/generated-test-vectors.json";
 
+// covers: proofs.bitcoin, core.bitcoin-address
+
 // Negative cases are the official BIP-322 v2.0.0 vectors (fixtures/bip322/) with one thing changed, or
 // fresh keys signed here with the BIP-143 / BIP-341 / legacy sighash written out from the BIPs.
 

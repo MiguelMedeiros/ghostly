@@ -3,6 +3,8 @@ import fc from "fast-check";
 import { concatBytes, utf8Encode } from "../src/bytes";
 import { decodeTxtPacket, encodeTxtPacket, type TxtRecord } from "../src/dns";
 
+// covers: core.records
+
 const header = (questions: number, answers: number) => Uint8Array.of(0, 0, 0x80, 0, questions >> 8, questions & 0xff, answers >> 8, answers & 0xff, 0, 0, 0, 0);
 const name = (...labels: string[]) => concatBytes(...labels.flatMap(l => [Uint8Array.of(utf8Encode(l).length), utf8Encode(l)]), Uint8Array.of(0));
 /** type, class IN, ttl, rdlength */

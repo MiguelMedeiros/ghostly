@@ -6,6 +6,8 @@ import {
 } from "../src/groupCrypto";
 import { createIdentity } from "../src/identity";
 
+// covers: groups.protocol.crypto
+
 const hex = (b: Uint8Array) => Array.from(b, x => x.toString(16).padStart(2, "0")).join("");
 
 describe("epoch key schedule", () => {

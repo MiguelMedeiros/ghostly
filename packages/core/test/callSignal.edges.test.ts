@@ -9,6 +9,8 @@ import {
   waitForIceGathering,
 } from "../src";
 
+// covers: calls.signal
+
 const NOW = 1_760_000_000_000;
 const base = { t: "o", ts: NOW, u: "x9Kq", p: "Q2m1yU7tX8nB4vL0pR6sZ3aW", f: "ab".repeat(32), s: "actpass" };
 const withCandidate = (c: unknown) => parseCallSignal(JSON.stringify({ ...base, c: [c] }), NOW);

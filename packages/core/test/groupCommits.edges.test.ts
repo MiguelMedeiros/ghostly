@@ -8,6 +8,8 @@ import {
 } from "../src/groupCommits";
 import { createIdentity, type Identity } from "../src/identity";
 
+// covers: groups.protocol.commits
+
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 const G = toBase64Url(new Uint8Array(16).fill(9));
 

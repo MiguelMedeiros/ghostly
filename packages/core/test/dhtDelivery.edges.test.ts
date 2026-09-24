@@ -10,6 +10,8 @@ import { DhtDelivery, DHT_MESSAGE_TTL, emptyDhtDeliveryState, type DhtDeliverySt
 import type { PairingCredentials } from "../src/pairedSession";
 import type { GhostRecord, SignedPacket } from "../src/pkarr";
 
+// covers: chat.dht.delivery, chat.dht.send, chat.dht.errors
+
 const ID = "abcdefghijklmnopqrstuv", ID2 = "bcdefghijklmnopqrstuvw";
 
 /**

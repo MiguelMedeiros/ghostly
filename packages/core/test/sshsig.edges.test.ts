@@ -5,6 +5,8 @@ import { toBase64, utf8Encode } from '../src/bytes';
 import { SSH_PUBLIC_KEY_MAX, SSHSIG_MAX_ARMOR, SshSigError, parseSshPublicKey, parseSshSignature, verifySshSignature } from '../src/sshsig';
 import fixture from './fixtures/sshsig/sshsig-vectors.json';
 
+// covers: proofs.ssh
+
 // Every negative case starts from a real ssh-keygen vector (fixtures/sshsig/) and changes one field.
 const { message, vectors } = fixture;
 const byName = (name: string) => vectors.find(v => v.name === name)!;

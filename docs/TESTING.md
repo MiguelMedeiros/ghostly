@@ -74,11 +74,11 @@ n/a: the package only re-exports code that lives (and is counted) elsewhere.
 
 | | Unit | Rust | E2E web | E2E ext | E2E desktop | Gated |
 |---|---:|---:|---:|---:|---:|---:|
-| features with one | 187 | 8 | 185 | 18 | 1 | 55 |
+| features with one | 191 | 8 | 185 | 18 | 1 | 55 |
 
 E2E in any client: 192. Unit tests only: 47. Gated suites only: 7. User-visible features of a client with no E2E test in that client: web 38, extension 197, desktop 217.
 
-Tests read: 78 E2E specs (78 tagged), 130 unit test files (130 tagged), 7 Rust files with `// covers:`.
+Tests read: 78 E2E specs (78 tagged), 171 unit test files (171 tagged), 7 Rust files with `// covers:`.
 
 ### Gaps
 
@@ -169,7 +169,7 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | `profiles.lock` | 04 | WED | 1 | · | 1 | · | · | · |
 | `profiles.name-optional` | 04 | WED | · | · | 2 | · | · | · |
 | `profiles.picture` | 04 | WED | 1 | · | 1 | · | · | · |
-| `profiles.picture.sanitize` (protocol) | 04 | WEDC | 3 | · | 1 | · | · | · |
+| `profiles.picture.sanitize` (protocol) | 04 | WEDC | 4 | · | 1 | · | · | · |
 | `profiles.public` | 04 | WED | 2 | · | · | · | · | · |
 
 #### backup
@@ -194,29 +194,29 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 
 | Feature | WISP | Clients | Unit | Rust | E2E web | E2E ext | E2E desktop | Gated |
 |---|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| `core.records` (protocol) | 01 | WEDC | 1 | · | · | · | · | 1 |
-| `core.relay-client` (protocol) | 01 | WEDC | 1 | · | · | · | · | 2 |
+| `core.records` (protocol) | 01 | WEDC | 5 | · | · | · | · | 1 |
+| `core.relay-client` (protocol) | 01 | WEDC | 2 | · | · | · | · | 2 |
 | `core.dht-direct` (protocol) | 01 | DC | · | · | · | · | · | · |
-| `core.crypto` (protocol) | 01 | WEDC | 1 | · | · | · | · | · |
-| `core.peer-keys` (protocol) | 02 | WEDC | 5 | · | 1 | · | · | 1 |
-| `core.capabilities` (protocol) | 03 | WED | 3 | · | · | · | · | · |
-| `core.version` (protocol) | 03 | WEDC | 2 | · | · | · | · | · |
-| `core.frames` (protocol) | 400 | WED | 1 | · | · | · | · | · |
-| `core.text-limits` (protocol) | 400 | WEDC | 3 | · | · | · | · | · |
-| `core.liveness` (protocol) | 401 | WED | 1 | · | 1 | · | · | · |
-| `core.ring-link` (protocol) | 302 | WED | 3 | · | · | · | · | 1 |
+| `core.crypto` (protocol) | 01 | WEDC | 2 | · | · | · | · | · |
+| `core.peer-keys` (protocol) | 02 | WEDC | 8 | · | 1 | · | · | 1 |
+| `core.capabilities` (protocol) | 03 | WED | 5 | · | · | · | · | · |
+| `core.version` (protocol) | 03 | WEDC | 4 | · | · | · | · | · |
+| `core.frames` (protocol) | 400 | WED | 4 | · | · | · | · | · |
+| `core.text-limits` (protocol) | 400 | WEDC | 4 | · | · | · | · | · |
+| `core.liveness` (protocol) | 401 | WED | 2 | · | 1 | · | · | · |
+| `core.ring-link` (protocol) | 302 | WED | 4 | · | · | · | · | 1 |
 | `core.keet-identity` (protocol) | 303 | WED | 1 | · | · | · | · | · |
-| `core.bitcoin-address` (protocol) | 200 | WEDC | 2 | · | · | · | · | · |
+| `core.bitcoin-address` (protocol) | 200 | WEDC | 4 | · | · | · | · | · |
 
 #### transport
 
 | Feature | WISP | Clients | Unit | Rust | E2E web | E2E ext | E2E desktop | Gated |
 |---|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| `transport.webrtc` (protocol) | 101 | WED | 2 | · | 2 | · | · | · |
-| `transport.iroh` (protocol) | 102 | D | 1 | 1 | · | · | · | 2 |
+| `transport.webrtc` (protocol) | 101 | WED | 5 | · | 2 | · | · | · |
+| `transport.iroh` (protocol) | 102 | D | 2 | 1 | · | · | · | 2 |
 | `transport.hyperdht` (protocol) | 103 | D | · | · | · | · | · | 1 |
-| `transport.switch` (protocol) | 100 | WED | 2 | · | · | · | · | 1 |
-| `transport.preference` | 100 | D | 4 | · | · | · | · | 1 |
+| `transport.switch` (protocol) | 100 | WED | 5 | · | · | · | · | 1 |
+| `transport.preference` | 100 | D | 6 | · | · | · | · | 1 |
 | `transport.native-pool` (protocol) | 100 | D | 1 | · | · | · | · | · |
 
 #### invite
@@ -232,8 +232,8 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | `invite.qr.image` | 801 | WED | · | · | 2 | 1 | · | · |
 | `invite.clipboard` | 801 | WED | · | · | 1 | · | · | · |
 | `invite.link` | 801 | WD | 1 | · | 1 | · | · | · |
-| `invite.invalid` | 801 | WED | 1 | · | 4 | · | · | · |
-| `invite.formats` (protocol) | 801 | WEDC | 2 | · | · | · | · | · |
+| `invite.invalid` | 801 | WED | 2 | · | 4 | · | · | · |
+| `invite.formats` (protocol) | 801 | WEDC | 3 | · | · | · | · | · |
 | `invite.dht` | 801 | WED | · | · | 2 | 1 | · | · |
 | `invite.discovery-errors` | 801 | WED | 1 | · | 1 | · | · | · |
 
@@ -253,11 +253,11 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | Feature | WISP | Clients | Unit | Rust | E2E web | E2E ext | E2E desktop | Gated |
 |---|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
 | `chat.paired.pair` | 401 | WED | · | · | 4 | · | · | · |
-| `chat.paired.send` | 401 | WED | · | · | 6 | · | · | · |
-| `chat.paired.receipts` | 401 | WED | 1 | · | 1 | · | · | 1 |
-| `chat.paired.verify` | 401 | WED | 3 | · | 2 | · | · | · |
+| `chat.paired.send` | 401 | WED | 1 | · | 6 | · | · | · |
+| `chat.paired.receipts` | 401 | WED | 2 | · | 1 | · | · | 1 |
+| `chat.paired.verify` | 401 | WED | 4 | · | 2 | · | · | · |
 | `chat.paired.status` | 401 | WED | 3 | · | 5 | · | · | · |
-| `chat.paired.reconnect` | 401 | WED | 3 | · | 2 | · | · | 1 |
+| `chat.paired.reconnect` | 401 | WED | 4 | · | 2 | · | · | 1 |
 | `chat.paired.offline-send` | 401 | WED | 1 | · | 1 | · | · | 1 |
 | `chat.paired.delete-message` | 400 | WED | 1 | · | 1 | · | · | · |
 | `chat.paired.message-details` | 400 | WED | · | · | 1 | · | · | · |
@@ -265,19 +265,19 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | `chat.paired.image-links` | 400 | WED | · | · | 1 | · | · | · |
 | `chat.paired.emoji` |  | WED | · | · | 2 | · | · | · |
 | `chat.paired.gifs` |  | WED | · | · | 1 | · | · | · |
-| `chat.paired.nickname-sync` | 401 | WED | · | · | 2 | · | · | · |
+| `chat.paired.nickname-sync` | 401 | WED | 1 | · | 2 | · | · | · |
 | `chat.paired.join-notice` | 401 | WED | 1 | · | · | · | · | · |
 | `chat.paired.draft` |  | WED | · | · | 2 | · | · | · |
-| `chat.paired.session` (protocol) | 401 | WED | 3 | · | · | · | · | · |
+| `chat.paired.session` (protocol) | 401 | WED | 6 | · | · | · | · | · |
 | `chat.paired.storage` (protocol) | 401 | WED | 2 | · | 1 | · | · | · |
-| `chat.legacy.send` | 402 | WEDC | · | · | 1 | · | · | · |
+| `chat.legacy.send` | 402 | WEDC | 2 | · | 1 | · | · | · |
 | `chat.legacy.limits` | 402 | WED | · | · | 1 | · | · | · |
-| `chat.dht.send` | 403 | WED | 4 | · | 1 | 1 | · | · |
+| `chat.dht.send` | 403 | WED | 5 | · | 1 | 1 | · | · |
 | `chat.dht.offline` | 403 | WED | 1 | · | 1 | · | · | 1 |
 | `chat.dht.fallback` | 403 | WED | 1 | · | 1 | · | · | · |
-| `chat.dht.errors` | 403 | WED | 1 | · | 1 | · | · | · |
+| `chat.dht.errors` | 403 | WED | 2 | · | 1 | · | · | · |
 | `chat.dht.key-change` | 403 | WED | 1 | · | 1 | · | · | · |
-| `chat.dht.delivery` (protocol) | 403 | WEDC | 2 | · | · | · | · | 1 |
+| `chat.dht.delivery` (protocol) | 403 | WEDC | 3 | · | · | · | · | 1 |
 
 #### delivery
 
@@ -288,19 +288,19 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | `delivery.hold.text` | 404 | WED | 1 | · | · | · | · | 1 |
 | `delivery.hold.picture` | 404 | WED | 1 | · | · | · | · | 1 |
 | `delivery.hold.request` | 404 | WED | 1 | · | · | · | · | 1 |
-| `delivery.hold.tamper` | 404 | WED | 2 | · | · | · | · | 1 |
-| `delivery.hold.expiry` | 404 | WED | 1 | · | · | · | · | 1 |
+| `delivery.hold.tamper` | 404 | WED | 3 | · | · | · | · | 1 |
+| `delivery.hold.expiry` | 404 | WED | 2 | · | · | · | · | 1 |
 | `delivery.hold.legacy-peer` | 404 | WED | 1 | · | 1 | · | · | · |
-| `delivery.hold.protocol` (protocol) | 404 | WED | 3 | · | · | · | · | · |
+| `delivery.hold.protocol` (protocol) | 404 | WED | 4 | · | · | · | · | · |
 
 #### files
 
 | Feature | WISP | Clients | Unit | Rust | E2E web | E2E ext | E2E desktop | Gated |
 |---|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| `files.paired.send` | 501 | WED | 1 | · | 3 | 1 | · | 1 |
+| `files.paired.send` | 501 | WED | 2 | · | 3 | 1 | · | 1 |
 | `files.paired.images` | 501 | WED | · | · | 1 | · | · | · |
-| `files.legacy.send` | 502 | WED | 1 | · | 1 | 1 | · | · |
-| `files.size-limit` | 500 | WED | · | · | 1 | · | · | · |
+| `files.legacy.send` | 502 | WED | 2 | · | 1 | 1 | · | · |
+| `files.size-limit` | 500 | WED | 2 | · | 1 | · | · | · |
 | `files.size-label` |  | WED | 1 | · | · | · | · | · |
 | `files.persistence` (protocol) | 500 | WED | 1 | · | 1 | · | · | · |
 
@@ -319,7 +319,7 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | `calls.mini-window` | 601 | WED | · | · | 2 | · | · | · |
 | `calls.route-keep` | 601 | WED | 1 | · | · | · | · | · |
 | `calls.lock` | 601 | WED | · | · | 1 | · | · | · |
-| `calls.signal` (protocol) | 600 | WED | 1 | · | · | · | · | · |
+| `calls.signal` (protocol) | 600 | WED | 2 | · | · | · | · | · |
 
 #### groups
 
@@ -327,19 +327,19 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 |---|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
 | `groups.create` | 900 | WED | 2 | · | 2 | · | · | · |
 | `groups.invite` | 900 | WED | 2 | · | 1 | · | · | · |
-| `groups.send` | 902 | WED | 2 | · | 2 | · | · | · |
-| `groups.catch-up` | 902 | WED | 1 | · | 1 | · | · | · |
-| `groups.remove-member` | 900 | WED | 1 | · | 1 | · | · | · |
+| `groups.send` | 902 | WED | 3 | · | 2 | · | · | · |
+| `groups.catch-up` | 902 | WED | 2 | · | 1 | · | · | · |
+| `groups.remove-member` | 900 | WED | 2 | · | 1 | · | · | · |
 | `groups.admin-change` | 900 | WED | 1 | · | 2 | · | · | · |
-| `groups.rotate` | 900 | WED | 1 | · | 1 | · | · | · |
-| `groups.leave` | 900 | WED | 2 | · | 2 | · | · | · |
+| `groups.rotate` | 900 | WED | 2 | · | 1 | · | · | · |
+| `groups.leave` | 900 | WED | 3 | · | 2 | · | · | · |
 | `groups.forget` | 900 | WED | 1 | · | · | · | · | · |
 | `groups.link.enable` | 900 | WED | 1 | · | 1 | · | · | · |
 | `groups.link.join` | 900 | WED | 1 | · | 1 | · | · | · |
 | `groups.link.replace` | 900 | WED | 1 | · | 1 | · | · | · |
-| `groups.protocol.commits` (protocol) | 900 | WED | 1 | · | · | · | · | · |
-| `groups.protocol.crypto` (protocol) | 900 | WED | 1 | · | · | · | · | · |
-| `groups.protocol.entry` (protocol) | 900 | WED | 2 | · | · | · | · | · |
+| `groups.protocol.commits` (protocol) | 900 | WED | 3 | · | · | · | · | · |
+| `groups.protocol.crypto` (protocol) | 900 | WED | 2 | · | · | · | · | · |
+| `groups.protocol.entry` (protocol) | 900 | WED | 3 | · | · | · | · | · |
 | `groups.protocol.link-frames` (protocol) | 900 | WED | 1 | · | · | · | · | · |
 
 #### services
@@ -347,11 +347,11 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | Feature | WISP | Clients | Unit | Rust | E2E web | E2E ext | E2E desktop | Gated |
 |---|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
 | `services.add` | 701 | ED | · | · | · | 3 | · | · |
-| `services.share` | 701 | ED | 1 | · | · | 3 | · | · |
+| `services.share` | 701 | ED | 2 | · | · | 3 | · | · |
 | `services.open` | 701 | ED | · | · | · | 3 | · | · |
 | `services.stop` | 701 | ED | · | · | · | 3 | · | · |
 | `services.web-unavailable` | 700 | W | · | · | 2 | · | · | · |
-| `services.http` (protocol) | 701 | WED | 3 | · | · | 2 | · | · |
+| `services.http` (protocol) | 701 | WED | 5 | · | · | 2 | · | · |
 | `services.desktop-viewer` | 701 | D | · | 2 | · | · | · | · |
 
 #### payments
@@ -365,10 +365,10 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | `payments.chat.memo` | 200 | WED | · | · | 1 | · | · | · |
 | `payments.chat.cards` | 200 | WED | 1 | · | 1 | · | · | · |
 | `payments.chat.reconcile` (protocol) | 200 | WED | 7 | · | · | · | · | 4 |
-| `payments.chat.frames` (protocol) | 200 | WED | 2 | · | · | · | · | · |
-| `payments.targets` (protocol) | 200 | WEDC | 3 | · | · | · | · | · |
+| `payments.chat.frames` (protocol) | 200 | WED | 4 | · | · | · | · | · |
+| `payments.targets` (protocol) | 200 | WEDC | 5 | · | · | · | · | · |
 | `payments.cashu.send` | 201 | WED | 2 | · | 6 | 1 | · | 1 |
-| `payments.cashu.request` | 201 | WED | 1 | · | 4 | 1 | · | · |
+| `payments.cashu.request` | 201 | WED | 2 | · | 4 | 1 | · | · |
 | `payments.cashu.reclaim` | 201 | WED | 1 | · | 1 | · | · | · |
 | `payments.cashu.test-sats` | 201 | WED | 1 | · | 2 | · | · | · |
 | `payments.cashu.token-card` | 201 | WED | 1 | · | 1 | · | · | · |
@@ -381,11 +381,11 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | `payments.usdt.send` | 200 | WED | 1 | · | · | · | · | 2 |
 | `payments.bitcoin.send` | 200 | WED | 2 | · | · | · | · | 1 |
 | `payments.bitcoin.offer` | 200 | WED | 1 | · | 1 | · | · | · |
-| `payments.external` | 205 | WED | 2 | · | 1 | · | · | · |
+| `payments.external` | 205 | WED | 3 | · | 1 | · | · | · |
 | `payments.lnurl.card` | 205 | WED | · | · | 1 | · | · | · |
-| `payments.uri` (protocol) | 205 | WEDC | 1 | · | · | · | · | · |
-| `payments.bolt11` (protocol) | 203 | WEDC | 1 | · | · | · | · | · |
-| `payments.amounts` (protocol) | 200 | WEDC | 1 | · | · | · | · | · |
+| `payments.uri` (protocol) | 205 | WEDC | 2 | · | · | · | · | · |
+| `payments.bolt11` (protocol) | 203 | WEDC | 2 | · | · | · | · | · |
+| `payments.amounts` (protocol) | 200 | WEDC | 2 | · | · | · | · | · |
 
 #### wallet
 
@@ -420,7 +420,7 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | `wallet.lightning.lnd.pay` | 203 | WED | 1 | 1 | · | · | · | 2 |
 | `wallet.lightning.provider-contract` (protocol) | 203 | WED | 9 | · | · | · | · | 4 |
 | `wallet.lnurl.address` | 205 | WED | 1 | · | 1 | · | · | · |
-| `wallet.lnurl.protocol` (protocol) | 205 | WEDC | 2 | · | · | · | · | · |
+| `wallet.lnurl.protocol` (protocol) | 205 | WEDC | 3 | · | · | · | · | · |
 | `wallet.onchain.sources` | 200 | WED | 1 | · | 1 | · | · | 1 |
 | `wallet.onchain.bdk.create` | 200 | WED | 1 | · | 1 | · | · | · |
 | `wallet.onchain.bdk.send` | 200 | WE | 1 | · | · | · | · | 3 |
@@ -445,22 +445,22 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | Feature | WISP | Clients | Unit | Rust | E2E web | E2E ext | E2E desktop | Gated |
 |---|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
 | `proofs.picker` | 300 | WED | 2 | · | 1 | · | · | · |
-| `proofs.share` | 300 | WED | 2 | · | 8 | · | · | · |
-| `proofs.withdraw` | 300 | WED | 2 | · | 1 | · | · | · |
+| `proofs.share` | 300 | WED | 3 | · | 8 | · | · | · |
+| `proofs.withdraw` | 300 | WED | 3 | · | 1 | · | · | · |
 | `proofs.revoke` | 300 | WED | 2 | · | 1 | · | · | · |
-| `proofs.expiry` | 300 | WED | 2 | · | 1 | · | · | · |
+| `proofs.expiry` | 300 | WED | 3 | · | 1 | · | · | · |
 | `proofs.recheck` | 300 | WED | · | · | 1 | · | · | · |
 | `proofs.unverifiable` | 300 | WED | · | · | 1 | · | · | · |
-| `proofs.binding` (protocol) | 300 | WED | 2 | · | 1 | · | · | · |
+| `proofs.binding` (protocol) | 300 | WED | 3 | · | 1 | · | · | · |
 | `proofs.contract` (protocol) | 300 | WED | 9 | · | · | · | · | · |
 | `proofs.nostr` | 301 | WED | 3 | · | 2 | · | · | · |
-| `proofs.domain.dns` | 304 | WED | 3 | · | 1 | · | · | · |
-| `proofs.domain.https` | 304 | WED | 3 | · | 1 | · | · | · |
+| `proofs.domain.dns` | 304 | WED | 4 | · | 1 | · | · | · |
+| `proofs.domain.https` | 304 | WED | 4 | · | 1 | · | · | · |
 | `proofs.domain.resolver` | 304 | WED | 1 | · | 1 | · | · | · |
 | `proofs.openpgp` | 305 | WED | 2 | · | 1 | · | · | · |
 | `proofs.openpgp.keyserver` | 305 | WED | 2 | · | · | · | · | · |
-| `proofs.bitcoin` | 306 | WED | 4 | · | 1 | · | · | · |
-| `proofs.ssh` | 307 | WED | 2 | · | 1 | · | · | · |
+| `proofs.bitcoin` | 306 | WED | 6 | · | 1 | · | · | · |
+| `proofs.ssh` | 307 | WED | 3 | · | 1 | · | · | · |
 | `proofs.ssh.github` | 307 | WED | 2 | · | 1 | · | · | · |
 | `proofs.ssh.gitlab` | 307 | WED | 2 | · | · | · | · | · |
 | `proofs.oidc` | 308 | WED | 3 | · | 1 | · | · | · |
@@ -468,9 +468,9 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | `proofs.oidc.callback.web` | 308 | W | 1 | · | 1 | · | · | · |
 | `proofs.oidc.callback.desktop` | 308 | WD | 1 | 1 | 1 | · | · | · |
 | `proofs.oidc.callback.extension` | 308 | E | · | · | · | · | · | · |
-| `proofs.pubky` | 302 | WED | 1 | · | · | · | · | · |
+| `proofs.pubky` | 302 | WED | 2 | · | · | · | · | · |
 | `proofs.keet` | 303 | WED | 2 | · | · | · | · | · |
-| `proofs.peer-proofs` (protocol) | 300 | WED | 6 | · | · | · | · | · |
+| `proofs.peer-proofs` (protocol) | 300 | WED | 7 | · | · | · | · | · |
 
 #### nostr
 

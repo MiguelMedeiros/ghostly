@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import fc from "fast-check";
 import { rankTransports, transportOrder, TRANSPORTS, type PairedTransport } from "../src/pairedTransports";
 
+// covers: transport.switch, transport.preference, transport.iroh
+
 const names = fc.constantFrom<string>(...TRANSPORTS, "tcp/1", "webrtc/2", "", "__proto__");
 const list = fc.uniqueArray(names, { maxLength: 6 });
 const available = fc.uniqueArray(fc.constantFrom(...TRANSPORTS), { maxLength: 3 });

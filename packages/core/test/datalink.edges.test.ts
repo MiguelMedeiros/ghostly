@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DataLink, type DataLinkOptions, type DataLinkState } from "../src/datalink";
 import { DATA_CHANNEL_ID, DATA_CHANNEL_LABEL, RTC_SIGNAL_MAX_AGE_MS, parseRtcSignal, type RtcSignal } from "../src/signal";
 
+// covers: transport.webrtc, core.frames
+
 const NOW = 1_800_000_000_000;
 const CONNECT_TIMEOUT_MS = 90_000;
 const DISCONNECT_GRACE_MS = 12_000;

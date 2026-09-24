@@ -12,6 +12,8 @@ import type { LinkParams } from "../src/invite";
 import type { GhostRecord, SignedPacket } from "../src/pkarr";
 import { HOLD_LIMITS, HoldKeys, HoldRefusedError, isHoldUrl, newHoldMailbox, readManifest, type HoldPointer } from "../src/storeForward";
 
+// covers: delivery.hold.protocol, delivery.hold.tamper, delivery.hold.expiry
+
 const NOW = 1_800_000_000_000;
 
 /**

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import fc from "fast-check";
 import { MAX_SERVICES, decodeServices, encodeServices, isValidServiceId, serviceIdFromName, servicesFromWire, servicesToWire, type ServiceAd } from "../src/services";
 
+// covers: services.share
+
 describe("service advertisements from a peer", () => {
   it("refuses advertisements that are not JSON objects with a version and a list", () => {
     for (const json of ["{", "null", "5", '"s"', '{"s":[]}', '{"v":"1","s":[]}', '{"v":0,"s":[]}', '{"v":1}', '{"v":1,"s":{}}']) {

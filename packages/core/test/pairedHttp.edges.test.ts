@@ -4,6 +4,8 @@ import { CHUNK_KIND, LIMITS, encodeChunk, encodeControl, type FrameChannel } fro
 import { parseLocalTarget, type LocalFetch } from "../src/http";
 import { PairedHttp } from "../src/pairedHttp";
 
+// covers: services.http
+
 /** One PairedHttp on a channel that records the `ph` frames it sends; peer frames are fed by hand. */
 function side(localFetch: LocalFetch = vi.fn<LocalFetch>(() => new Promise(() => {}))) {
   const sent: Record<string, unknown>[] = [];

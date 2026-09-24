@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import fc from "fast-check";
 import { buildDataSdp, extractRtcParams, parseRtcSignal, type RtcSignal } from "../src/signal";
 
+// covers: transport.webrtc
+
 const valid: RtcSignal = { t: "o", ts: 1, u: "ufrag", p: "pwd+/=_-", f: "ab".repeat(32), s: "actpass", c: ["h,192.168.1.2,5000", "s,203.0.113.5,6000", "r,turn.example,3478"] };
 const json = (patch: Record<string, unknown>) => JSON.stringify({ ...valid, ...patch });
 

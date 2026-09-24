@@ -7,6 +7,8 @@ import {
   GROUP_LIMITS, GroupSession, type GroupCommitFrame, type GroupEdgeFrame, type GroupIncomingMessage, type GroupMessageFrame, type GroupState,
 } from "../src/groupSession";
 
+// covers: groups.protocol.commits, groups.send, groups.catch-up, groups.rotate, groups.remove-member, groups.leave
+
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 const secretAad = (g: string, e: number, member: string) => JSON.stringify(["ghostly-group/1 secret", g, e, member]);
 

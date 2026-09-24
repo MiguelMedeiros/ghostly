@@ -16,6 +16,8 @@ import {
   type FrameChannel,
 } from "../src/frames";
 
+// covers: core.frames, payments.chat.frames
+
 const KNOWN_KINDS = new Set(["hello", "m", "call", "svc", "req", "res", "file", "pay-req", "pay", "pay-ask", "pay-res", "rst", "ping", "pong"]);
 const decode = (value: unknown) => decodeControl(JSON.stringify(value));
 /** Pads a `svc` frame so its JSON is exactly `bytes` long. */

@@ -3,6 +3,8 @@ import fc from "fast-check";
 import { MAX_AVATAR_SIDE, jpegSize, sanitizeAvatar } from "../src/avatar";
 import { MAX_NICK_LENGTH, sanitizeDisplayText, sanitizeNick } from "../src/text";
 
+// covers: core.text-limits, profiles.picture.sanitize
+
 describe("nicknames from a peer", () => {
   it("is undefined for anything that is not a string", () => {
     for (const v of [undefined, null, 5, {}, ["Alice"], true]) expect(sanitizeNick(v)).toBeUndefined();
