@@ -95,6 +95,7 @@
     "privateNotice": "Nuevo mensaje",
     "title": "Configuración",
     "profile": "Perfil",
+    "profileLinkHint": "Nombre, foto, copias de seguridad y otros perfiles",
     "defaultNickname": "Apodo Predeterminado",
     "defaultNicknameHint": "Este nombre se usará por defecto en nuevos chats",
     "nicknamePlaceholder": "Ingresa tu apodo...",

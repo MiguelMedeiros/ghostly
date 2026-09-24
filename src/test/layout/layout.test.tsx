@@ -1,7 +1,7 @@
 import { screen } from "@testing-library/react";
 import { Link, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
-import { Block, ButtonGroup, FieldGrid, InputGroup, Page, Row, Section, Truncate } from "../../components/layout";
+import { Block, ButtonGroup, FieldGrid, InputGroup, LinkRow, Page, Row, Section, Truncate } from "../../components/layout";
 import { renderApp } from "../render";
 
 // covers: app.responsive
@@ -53,6 +53,22 @@ describe("Row", () => {
   it("has no controls container without children", () => {
     renderApp(<Row testId="row" label="Alone" />);
     expect(screen.getByTestId("row").children).toHaveLength(1);
+  });
+});
+
+describe("LinkRow", () => {
+  it("is one button for the whole line, whose long label ellipsizes and whose value never shrinks", async () => {
+    const onClick = vi.fn();
+    const { user } = renderApp(<LinkRow testId="link" leading={<span>W</span>} label="A rather long profile name" hint="Name, picture" value="3 chats" onClick={onClick} />);
+    const link = screen.getByRole("button", { name: /A rather long profile name/ });
+    expect(link).toBe(screen.getByTestId("link"));
+    expect(link).toHaveClass("w-full", "min-h-12");
+    expect(screen.getByText("A rather long profile name")).toHaveClass("truncate");
+    expect(screen.getByText("A rather long profile name").parentElement).toHaveClass("min-w-0", "flex-1");
+    expect(screen.getByText("Name, picture")).toHaveClass("break-words");
+    expect(screen.getByText("3 chats")).toHaveClass("shrink-0", "whitespace-nowrap");
+    await user.click(link);
+    expect(onClick).toHaveBeenCalledOnce();
   });
 });
 

@@ -8,7 +8,11 @@ import { notificationPermission, requestNotifications, type NoticePermission } f
 import { getVersion } from "@tauri-apps/api/app";
 import { NetworkSettings } from "../components/NetworkSettings";
 import { DomainProofSettings } from "../components/DomainProofSettings";
-import { Block, ButtonGroup, FieldGrid, InputGroup, Page, Row, Section } from "../components/layout";
+import { Block, ButtonGroup, FieldGrid, InputGroup, LinkRow, Page, Row, Section } from "../components/layout";
+import { ProfileBadge } from "../components/ProfileBadge";
+import { useIsMobile } from "../hooks/useIsMobile";
+import { useMyAvatar } from "../hooks/useAvatars";
+import { currentProfile } from "../lib/profiles";
 import { Switch } from "../components/wallet/ui";
 import {
   hashPassword,
@@ -35,6 +39,9 @@ export function Settings() {
   const { t } = useI18n();
   const { lock } = useLockScreen();
   const update = useUpdate();
+  const isMobile = useIsMobile();
+  const profile = currentProfile();
+  const myAvatar = useMyAvatar();
 
   const [lockEnabled, setLockEnabled] = useState(settings.lockScreen.enabled);
   const [newPassword, setNewPassword] = useState("");
@@ -192,6 +199,11 @@ export function Settings() {
       )}
 
       <Section title={t("settings.profile")}>
+        {/* A phone has no account bar, and Profile no tab of its own (the bar is full): this is the way there. */}
+        {isMobile && (
+          <LinkRow testId="settings-profile-link" leading={<ProfileBadge entry={profile} size={36} avatar={myAvatar} />}
+            label={profile.name} hint={t("settings.profileLinkHint")} onClick={() => navigate("/profile")} />
+        )}
         <Block>
           <div>
             <label htmlFor="settings-nickname" className="text-text-primary text-sm block">{t("settings.defaultNickname")}</label>

@@ -95,6 +95,7 @@
     "privateNotice": "Nova mensagem",
     "title": "Configurações",
     "profile": "Perfil",
+    "profileLinkHint": "Nome, foto, backups e outros perfis",
     "defaultNickname": "Apelido Padrão",
     "defaultNicknameHint": "Este nome será usado como padrão em novos chats",
     "nicknamePlaceholder": "Digite seu apelido...",

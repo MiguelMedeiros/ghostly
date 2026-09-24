@@ -95,6 +95,7 @@
     "privateNotice": "新しいメッセージ",
     "title": "設定",
     "profile": "プロフィール",
+    "profileLinkHint": "名前、写真、バックアップ、ほかのプロフィール",
     "defaultNickname": "デフォルトニックネーム",
     "defaultNicknameHint": "この名前は新しいチャットのデフォルトとして使用されます",
     "nicknamePlaceholder": "ニックネームを入力...",
