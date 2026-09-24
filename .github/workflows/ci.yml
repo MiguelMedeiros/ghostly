@@ -54,7 +54,7 @@ jobs:
           fi
           files=$(gh api --paginate "$FILES_URL" --jq '.[].filename')
           echo "$files"
-          if grep -qE '^(src-tauri/|cli/|native-transports/|Cargo\.(toml|lock)$|\.github/workflows/ci\.yml$)' <<< "$files"; then
+          if grep -qE '^(src-tauri/|cli/|native-transports/|Cargo\.(toml|lock)$)' <<< "$files"; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
           else
             echo "rust=false" >> "$GITHUB_OUTPUT"
