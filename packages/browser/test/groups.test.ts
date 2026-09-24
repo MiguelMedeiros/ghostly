@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Groups, type GroupStore, type GroupsHost } from "../src/engine/groups";
-import type { GroupState } from "@ghostly/core";
+import { identityFromSeedB64, type GhostRecord, type GroupState } from "@ghostly/core";
 import type { StoredGroup, StoredMessage } from "../src/shared/types";
 
 /** One peer's database, in memory. */
@@ -19,14 +19,30 @@ function memoryStore(messages: StoredMessage[]): GroupStore {
  * engines ask for. Frames are delivered straight to the other side's handler,
  * as the paired links would once both announced groups.
  */
+interface Entry { g: string; me: string; peer: string; role: "host" | "guest" }
+
 class World {
-  readonly peers = new Map<string, { groups: Groups; messages: StoredMessage[]; edges: Map<string, { peer: string; state: GroupState; open: boolean }>; store: GroupStore }>();
+  readonly peers = new Map<string, { groups: Groups; messages: StoredMessage[]; edges: Map<string, { peer: string; state: GroupState; open: boolean }>; entries: Map<string, Entry>; store: GroupStore }>();
+  /** Pkarr, shared: key → records. */
+  readonly pkarr = new Map<string, GhostRecord[]>();
   /** contact chat id → [owner, other owner]: the same chat has one id on each side here, for simplicity. */
   readonly chats = new Map<string, [string, string]>();
   private pending: Promise<unknown>[] = [];
 
+  /** The other end of an entry session, when both sides opened it. */
+  counterpart(entry: Entry): { name: string; linkId: string } | undefined {
+    for (const [name, peer] of this.peers) for (const [linkId, e] of peer.entries) if (e.g === entry.g && e.me === entry.peer && e.peer === entry.me) return { name, linkId };
+    return undefined;
+  }
+  /** Entry sessions whose both ends exist come up: the admin's side hears it. */
+  async meetEntries(): Promise<void> {
+    for (const peer of this.peers.values()) for (const [linkId, e] of peer.entries) if (e.role === "host" && this.counterpart(e)) peer.groups.entryReady(e.g, linkId, e.peer);
+    await this.settle();
+  }
+
   add(name: string): Groups {
     const edges = new Map<string, { peer: string; state: GroupState; open: boolean }>();
+    const entries = new Map<string, Entry>();
     const messages: StoredMessage[] = [];
     const host: GroupsHost = {
       sendOnLink: (linkId, frame) => {
@@ -36,26 +52,43 @@ class World {
           this.pending.push(this.peers.get(other)!.groups.handleContactFrame(linkId, frame as Record<string, unknown>));
           return;
         }
+        const entry = entries.get(linkId);
+        if (entry) {
+          const there = this.counterpart(entry);
+          if (!there) throw new Error("entry down");
+          this.pending.push(this.peers.get(there.name)!.groups.handleContactFrame(there.linkId, frame as Record<string, unknown>));
+          return;
+        }
         const edge = edges.get(linkId);
         if (!edge || !edge.open) throw new Error("edge down");
-        const target = [...this.peers.values()].find(p => [...p.edges.values()].some(e => e.state.id === edge.state.id && e.peer === myKey(edge.state)));
+        // The member at the other end: its edge points back at me, and its key is the one mine points at.
+        const mine = (e: { peer: string; state: GroupState }) => e.state.id === edge.state.id && e.peer === myKey(edge.state) && myKey(e.state) === edge.peer;
+        const target = [...this.peers.values()].find(p => [...p.edges.values()].some(mine));
         if (!target) throw new Error("nobody there");
-        const theirEdge = [...target.edges.entries()].find(([, e]) => e.state.id === edge.state.id && e.peer === myKey(edge.state))!;
+        const theirEdge = [...target.edges.entries()].find(([, e]) => mine(e))!;
         if (!theirEdge[1].open) throw new Error("edge down");
         this.pending.push(target.groups.handleEdgeFrame(edge.state.id, myKey(edge.state), frame));
       },
-      linkReady: linkId => this.chats.has(linkId) || !!edges.get(linkId)?.open,
+      linkReady: linkId => this.chats.has(linkId) || !!edges.get(linkId)?.open || (entries.has(linkId) && !!this.counterpart(entries.get(linkId)!)),
       contactName: linkId => this.chats.has(linkId) ? `contact:${linkId}` : undefined,
       edges: groupId => new Map([...edges.entries()].filter(([, e]) => e.state.id === groupId).map(([id, e]) => [e.peer, id])),
       openEdge: async (state, peer) => { const id = `edge:${name}:${peer.slice(0, 6)}`; edges.set(id, { peer, state, open: true }); return id; },
-      closeEdge: async linkId => { edges.delete(linkId); },
+      closeEdge: async linkId => { edges.delete(linkId); entries.delete(linkId); },
+      openEntry: async (link, role, seedB64, peer) => {
+        const me = identityFromSeedB64(seedB64).pubKeyZ32, id = `entry:${name}:${peer.slice(0, 6)}`;
+        entries.set(id, { g: link.g, me, peer, role });
+        return id;
+      },
+      entries: groupId => new Map([...entries.entries()].filter(([, e]) => e.g === groupId).map(([id, e]) => [e.peer, id])),
+      publish: async (identity, records) => { this.pkarr.set(identity.pubKeyZ32, records); },
+      resolve: async key => this.pkarr.get(key) ?? null,
       edgeNick: () => undefined,
       storeMessage: async message => { if (!messages.some(m => m.id === message.id)) messages.push(message); },
       emit: () => {},
     };
     const store = memoryStore(messages);
     const groups = new Groups(host, store);
-    this.peers.set(name, { groups, messages, edges, store });
+    this.peers.set(name, { groups, messages, edges, entries, store });
     return groups;
   }
   /** Both sides of every open edge introduce themselves, as they do when an edge comes up. */
@@ -156,5 +189,115 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     await again.load();
     expect(again.views()[0]).toMatchObject({ id: groupId, status: "active", epoch: 1 });
     expect((await again.messages(groupId)).map(m => m.event)).toEqual(["joined"]);
+  });
+  it("a stranger joins through the group's link: knocks, is admitted over an entry session, then meets everyone on edges", async () => {
+    const world = new World();
+    const alice = world.add("alice"), bob = world.add("bob"), carol = world.add("carol");
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    await alice.load(); await bob.load(); await carol.load();
+    const keys = (globalThis as unknown as { __keys: Map<string, string> }).__keys;
+    const stateOf = (g: Groups, id: string): GroupState => (g as unknown as { sessions: Map<string, { state: GroupState }> }).sessions.get(id)!.state;
+    const record = (g: Groups) => { for (const v of g.views()) if (v.myKey) keys.set(stateOf(g, v.id).seedB64, v.myKey); };
+    const groupId = await alice.create("Ghosts");
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    await bob.accept(groupId); await world.settle();
+    record(alice); record(bob);
+
+    await expect(bob.enableLink(groupId)).rejects.toThrow(/Only the admin/);
+    const code = await alice.enableLink(groupId);
+    expect(code).toMatch(new RegExp(`^group1/${groupId}/`));
+    expect(await alice.enableLink(groupId)).toBe(code); // the same link until it is replaced
+    expect(alice.views()[0].entryLink).toBe(code);
+    expect(bob.views()[0].entryLink).toBeUndefined();
+
+    // Carol is nobody's contact. Opening the link joins at once: nothing to accept.
+    expect(await carol.joinByLink(`https://app.ghostly.tools/#/join/${code}`)).toBe(groupId);
+    expect(carol.views()[0]).toMatchObject({ id: groupId, name: "", invitation: { viaLink: true, accepted: true, admin: "" } });
+    expect(world.pkarr.size).toBe(1); // the knock
+
+    await alice.tick(); await world.settle();
+    expect(world.peers.get("alice")!.entries.size).toBe(1);
+    await world.meetEntries();
+    record(carol);
+    expect(carol.views()[0]).toMatchObject({ name: "Ghosts", status: "active", epoch: 2 });
+    expect(carol.views()[0].members).toHaveLength(3);
+    expect(world.events("carol")).toEqual(["joined"]);
+    // The entry session is closed on the joiner's side at once; it is not a contact of the group.
+    expect(world.peers.get("carol")!.entries.size).toBe(0);
+    expect(alice.views()[0].memberLinks).toEqual({ "chat-ab": bob.views()[0].myKey });
+    expect(alice.views()[0].invited).toEqual([]);
+
+    await world.settle(); await world.meet();
+    expect(await carol.send(groupId, "hi from a stranger")).toEqual({ error: null });
+    await world.settle();
+    expect(world.texts("alice")).toContain("hi from a stranger");
+    expect(world.texts("bob")).toContain("hi from a stranger");
+
+    // A knock seen again later is not answered twice: that key is a member now.
+    await alice.tick(Date.now() + 10_000); await world.settle();
+    expect(world.peers.get("alice")!.entries.size).toBe(1); // only the lingering one
+  });
+
+  it("a replaced or turned-off link reaches nobody, and the admin role going away turns it off", async () => {
+    const world = new World();
+    const alice = world.add("alice"), dave = world.add("dave"), erin = world.add("erin");
+    await alice.load(); await dave.load(); await erin.load();
+    const groupId = await alice.create("Ghosts");
+    const old = await alice.enableLink(groupId);
+    const fresh = await alice.enableLink(groupId, true);
+    expect(fresh).not.toBe(old);
+    await dave.joinByLink(old); await world.settle();
+    await alice.tick(); await world.settle();
+    // Dave knocked under the old link's identity, which nobody reads any more.
+    expect(world.peers.get("alice")!.entries.size).toBe(0);
+
+    await alice.disableLink(groupId);
+    expect(alice.views()[0].entryLink).toBeUndefined();
+    await erin.joinByLink(fresh);
+    await alice.tick(Date.now() + 60_000); await world.settle();
+    expect(world.peers.get("alice")!.entries.size).toBe(0);
+    expect(erin.views()[0].status).toBeUndefined();
+
+    // Giving up: the joiner cancels, and its entry session and knock state go.
+    await erin.forget(groupId);
+    expect(erin.views()).toEqual([]);
+    expect(world.peers.get("erin")!.entries.size).toBe(0);
+  });
+
+  it("refuses a link that is not one, and an accept whose key is not the one that knocked", async () => {
+    const world = new World();
+    const alice = world.add("alice"), frank = world.add("frank");
+    await alice.load(); await frank.load();
+    await expect(frank.joinByLink("group1/nope")).rejects.toThrow(/not a link to a group/);
+    const groupId = await alice.create("Ghosts");
+    const code = await alice.enableLink(groupId);
+    await frank.joinByLink(code);
+    await alice.tick(); await world.settle();
+    const [linkId] = [...world.peers.get("alice")!.entries.keys()];
+    alice.entryReady(groupId, linkId, [...world.peers.get("alice")!.entries.values()][0].peer);
+    // Invited on that session, someone answering with another member key than the one that knocked is not admitted…
+    await alice.handleContactFrame(linkId, { t: "group-accept", g: groupId, key: identityFromSeedB64("A".repeat(43)).pubKeyZ32 });
+    expect(alice.views()[0].members).toHaveLength(1);
+    // …and the one that knocked still is.
+    await world.settle();
+    expect(alice.views()[0].members).toHaveLength(2);
+    expect(alice.views()[0].members.map(m => m.key)).not.toContain(identityFromSeedB64("A".repeat(43)).pubKeyZ32);
+  });
+
+  it("drops the admin's admissions in flight on restart; the joiner keeps its side and knocks again", async () => {
+    const world = new World();
+    const alice = world.add("alice"), gina = world.add("gina");
+    await alice.load(); await gina.load();
+    const groupId = await alice.create("Ghosts");
+    await gina.joinByLink(await alice.enableLink(groupId));
+    await alice.tick(); await world.settle();
+    expect(world.peers.get("alice")!.entries.size).toBe(1);
+    const again = new Groups({ ...(alice as unknown as { host: GroupsHost }).host, emit: vi.fn() }, world.peers.get("alice")!.store);
+    await again.load();
+    expect(world.peers.get("alice")!.entries.size).toBe(0);
+    const ginaAgain = new Groups({ ...(gina as unknown as { host: GroupsHost }).host, emit: vi.fn() }, world.peers.get("gina")!.store);
+    await ginaAgain.load();
+    expect(world.peers.get("gina")!.entries.size).toBe(1);
+    expect(ginaAgain.views()[0].invitation).toMatchObject({ viaLink: true });
   });
 });

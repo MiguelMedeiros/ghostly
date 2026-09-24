@@ -9,6 +9,7 @@ import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { useOutsideDismiss } from "../hooks/useDismiss";
 import { markGroupRead, memberName } from "../lib/groups";
 import type { ChatMessage } from "../lib/types";
+import { useSettings } from "../contexts/SettingsContext";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -40,6 +41,13 @@ export function GroupChat() {
   const [confirmForget, setConfirmForget] = useState(false);
   const [error, setError] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
+  const { settings } = useSettings();
+  // Members learn my name on the edges, as a contact does on a chat: the engine must know it here too.
+  const engineNick = state?.settings.nick;
+  useEffect(() => {
+    const nick = settings.defaultNickname;
+    if (engineNick !== undefined && engineNick !== nick) void engine.call("updateSettings", { settings: { nick } }).catch(() => {});
+  }, [settings.defaultNickname, engineNick]);
   const bottomRef = useRef<HTMLDivElement>(null);
   useOutsideDismiss(menuRef, menuOpen, () => setMenuOpen(false));
 
@@ -62,7 +70,9 @@ export function GroupChat() {
 
   const others = group.members.filter(m => !m.me);
   const reachable = others.filter(m => m.online).length;
-  const subtitle = group.invitation ? `Invitation from ${group.invitation.contact || "a contact"}`
+  const joiningByLink = group.invitation?.viaLink;
+  const subtitle = joiningByLink ? (group.invitation!.admin ? "Joining…" : "Joining through a link")
+    : group.invitation ? `Invitation from ${group.invitation.contact || "a contact"}`
     : group.status === "active" ? `${group.members.length} member${group.members.length === 1 ? "" : "s"} · ${reachable} of ${others.length} reachable`
     : group.statusReason ?? group.status;
   const act = async (action: () => Promise<unknown>) => {
@@ -81,7 +91,7 @@ export function GroupChat() {
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg>
           </button>
           <div className="min-w-0">
-            <p className="text-[15px] m-0 leading-tight truncate text-text-primary" data-testid="group-name">{group.name}</p>
+            <p className="text-[15px] m-0 leading-tight truncate text-text-primary" data-testid="group-name">{group.name || "A group"}</p>
             <button onClick={() => setShowMembers(true)} data-testid="group-members" className="text-xs text-text-muted/80 truncate hover:text-accent cursor-pointer max-w-[60vw]">{subtitle}</button>
           </div>
         </div>
@@ -103,6 +113,10 @@ export function GroupChat() {
 
       {(error || (group.status && group.status !== "active")) && <div role="status" data-testid="group-notice" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
         {error || group.statusReason}
+      </div>}
+      {joiningByLink && !error && <div role="status" data-testid="group-joining" className="flex items-center gap-3 px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
+        <span className="flex-1">{group.invitation!.admin ? "The admin's app answered: getting the group's keys…" : "Waiting for the admin's app to let you in. It happens on its own when their app is open; you can leave this page."}</span>
+        <button onClick={() => { void engine.call("forgetGroup", { groupId }).catch(() => {}); navigate("/"); }} data-testid="group-joining-cancel" className="shrink-0 rounded px-2 py-1 text-xs text-danger hover:bg-danger/10">Cancel</button>
       </div>}
 
       <div className="flex-1 overflow-y-auto chat-wallpaper">

@@ -65,7 +65,7 @@ The implementation column is independent of document status. Existing features c
 | [800](800-invite-join.md) | Invite and Join | Draft | Existing bearer invite; admission protocol proposed |
 | [801](801-invitation-profiles.md) | Implemented Invitation Profiles | Draft | Current modern pair1/pair2d creation plus legacy imports. |
 | [900](900-group-sessions.md) | Group Session Negotiation | Draft | Contract of the first profile; implemented as `group-mesh/1`, text only |
-| [Group Mesh · 9xx planned](9xx-group-mesh.md) | Group Mesh Distribution Profile | Draft | `group-mesh/1`: core, engine and UI; unit and four-browser e2e; web, extension and desktop |
+| [Group Mesh · 9xx planned](9xx-group-mesh.md) | Group Mesh Distribution Profile | Draft | `group-mesh/1` and its entry link `group-entry/1`: core, engine and UI; unit and four-browser e2e; web, extension and desktop |
 | [GossipSub · 9xx planned](901-gossipsub.md) | GossipSub Transport | Draft | Proposed; no adapter found |
 | [1000](1000-storage.md) | Storage Contract | Draft | Experimental: object contract, naming and adapter rules |
 | [1001](1001-local-storage.md) | Local File Storage | Draft | Experimental adapter |

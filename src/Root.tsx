@@ -18,6 +18,8 @@ import { ensureSession, loadSession } from "./lib/storage";
 import { useI18n } from "./contexts/I18nContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { chatPath, parseChatRoute } from "./lib/url";
+import { groupPath } from "./lib/groups";
+import { engine } from "@ghostly/browser/platform/engine";
 import "./index.css";
 
 /**
@@ -67,6 +69,42 @@ function ChatLinkIntake() {
 }
 
 /**
+ * A group's link opened in the app (`#/join/group1/…`): it leaves the address at once, like an
+ * invite; once the app is unlocked the engine joins and the group opens, saying it waits for the admin's app.
+ */
+function GroupLinkIntake() {
+  const { pathname } = useLocation();
+  const navigate = useNavigate();
+  const { hasUnlocked } = useLockScreen();
+  const [code, setCode] = useState("");
+  const [problem, setProblem] = useState("");
+  useEffect(() => {
+    const found = pathname.match(/^\/join\/(.+)$/)?.[1];
+    if (!found) return;
+    setCode(decodeURIComponent(found));
+    navigate("/", { replace: true });
+  }, [pathname, navigate]);
+  useEffect(() => {
+    if (!code || !hasUnlocked) return;
+    setCode("");
+    engine.call("joinGroupByLink", { link: code })
+      .then(({ groupId }) => navigate(groupPath(groupId)))
+      .catch((cause: unknown) => setProblem(cause instanceof Error ? cause.message : "This link to a group does not work"));
+  }, [code, hasUnlocked, navigate]);
+  useEffect(() => {
+    if (!problem) return;
+    const timer = setTimeout(() => setProblem(""), 6000);
+    return () => clearTimeout(timer);
+  }, [problem]);
+  return problem ? (
+    <div role="alert" data-testid="group-link-invalid" onClick={() => setProblem("")}
+      className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-danger shadow-xl cursor-pointer">
+      {problem}
+    </div>
+  ) : null;
+}
+
+/**
  * A chat has no route element of its own: `App` keeps it loaded across a trip
  * to Settings, so a call it holds is not hung up on the way.
  */
@@ -98,6 +136,7 @@ export function Root() {
             <HashRouter>
               <ErrorBoundary>
               <ChatLinkIntake />
+              <GroupLinkIntake />
               <LockGate>
                 {/* Asking for updates says this device runs Ghostly: not before the password. */}
                 <UpdateProvider>

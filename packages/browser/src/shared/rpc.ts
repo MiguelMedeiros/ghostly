@@ -150,6 +150,11 @@ export interface EngineApi {
   inviteToGroup(params: { groupId: string; linkId: string }): void;
   acceptGroupInvitation(params: { groupId: string }): void;
   declineGroupInvitation(params: { groupId: string }): void;
+  /** Turns the group's link on (or replaces it with a new one: the old one stops working). Admin only. */
+  enableGroupLink(params: { groupId: string; reset?: boolean }): { link: string };
+  disableGroupLink(params: { groupId: string }): void;
+  /** Joins through a group's link (`group1/…`, or an address carrying it); resolves at once, admission follows. */
+  joinGroupByLink(params: { link: string }): { groupId: string };
   sendGroupMessage(params: { groupId: string; text: string }): { error: string | null };
   groupMessages(params: { groupId: string }): StoredMessage[];
   leaveGroup(params: { groupId: string }): void;

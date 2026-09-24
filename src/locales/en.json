@@ -58,7 +58,7 @@
     "shareFailed": "Could not share. Copy the invite instead."
   },
   "join": {
-    "title": "Join a chat",
+    "title": "Join a chat or group",
     "close": "Close join",
     "cameraPreview": "QR camera preview",
     "paste": "Paste from clipboard",

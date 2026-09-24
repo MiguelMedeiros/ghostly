@@ -803,4 +803,7 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
 @container chat-sidebar (max-width: 340px) {
   .sidebar-action-label { display: none; }
   .sidebar-header-action { width: 40px; gap: 0; }
+  /* New and its arrow share one cell; Join fills the other, so both read the same size. */
+  .sidebar-new-split > .sidebar-header-action { width: auto; }
+  [data-testid="sidebar-chat-actions"] > .sidebar-header-action { width: 100%; }
 }

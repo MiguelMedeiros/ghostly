@@ -4,11 +4,11 @@
 |---|---|
 | Number assignment | 9xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-23 |
+| Revision | 0.2 |
+| Updated | 2026-09-24 |
 | Document kind | Profile |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [400](400-chat.md), [401](401-paired-chat.md), [800](800-invite-join.md), [900](900-group-sessions.md) |
-| Implementation | `group-mesh/1`: core protocol in [`packages/core`](../../packages/core/src/groupSession.ts); engine, UI and four-browser e2e in [`packages/browser`](../../packages/browser/src/engine/groups.ts) and [`e2e/web/groups.spec.ts`](../../e2e/web/groups.spec.ts); web, extension and desktop share it |
+| Implementation | `group-mesh/1`: core protocol in [`packages/core`](../../packages/core/src/groupSession.ts) and, for the group's link (`group-entry/1`), [`groupEntry.ts`](../../packages/core/src/groupEntry.ts); engine, UI and four-browser e2e in [`packages/browser`](../../packages/browser/src/engine/groups.ts) and [`e2e/web/groups.spec.ts`](../../e2e/web/groups.spec.ts); web, extension and desktop share it |
 
 > This Draft documents the first distribution profile of [900](900-group-sessions.md) as implemented, not full contract conformance or an independent implementation certification. Numbers and wire formats are not registered standards.
 
@@ -58,6 +58,26 @@ inviter → contact:  { "t": "group-welcome", "g", "name", "commits": [ … ], "
 
 The invitee generates its member key on accepting. The admin commits `add`, tells the existing members over their edges, and sends the welcome over the contact chat. The joiner verifies the chain, unseals and confirms the secret, then opens edges to every other member. Being in the roster is the only admission; the contact chat is only the authenticated path that carried it.
 
+### Entry link (`group-entry/1`)
+
+An admin can also hand out **one link that anyone may use**, so people who are not their contacts can join, without a contact chat and without saying who they are:
+
+```
+group1/<group id>/<entry key>          (in the web app: https://…/#/join/group1/<group id>/<entry key>)
+```
+
+The **entry key** is an Ed25519 key the admin makes for the link and for nothing else; its seed stays on the admin's device. From the link alone every holder derives the same **knock identity** (seed = HKDF-SHA-256 over the entry key, salted by the group id, info `ghostly-group-entry/1 knock seed`) and a knock key (info `… knock key`).
+
+1. The joiner generates its member key for the group and publishes, under the knock identity, a `_knock` record: the latest knocks `[[member key, ms], …]` (at most six, each fresh for three minutes), sealed with XChaCha20-Poly1305 under the knock key with the group id as associated data. It reads the record first and keeps other joiners' fresh knocks, since everyone holding the link writes the same Pkarr key; it republishes every few seconds (every twenty after two minutes) until its entry session is up.
+2. The admin's app reads the knock identity every few seconds. For every fresh knock that is not a member, not already in progress and not recently timed out, while the group has room, it opens an **entry session**: a paired-chat/1 link whose rendezvous identities and discovery key derive, exactly like an edge, from the X25519 secret of the entry key and the joiner's member key, under the salt `entry/<group id>` so it never coincides with an edge. Each side pins the other in advance: the admin the knocked member key, the joiner the entry key. At most four run at once; one that does not finish within three minutes is closed and its key not answered for ten.
+3. On the open session the ordinary admission runs: `group-invite`, then `group-accept` (sent at once: opening the link was the joiner's consent) whose `key` must be the member key the session is pinned to, then the welcome. The joiner closes its side when it has joined; the admin closes its own shortly after sending the welcome. An entry session is never a contact chat: nobody records it as one, and courtesy notices do not use it.
+
+**Trust anchor.** The entry key the link named. The session is pinned to it, so the admin who invites over it is whoever holds its seed, and the welcome must admit the joiner in a commit signed by the member key that invitation named, as for a contact's invitation.
+
+**Revocation.** The admin turns the link off, or replaces it with a new entry key; knocks under the old knock identity are then read by nobody. The link also stops working when its admin stops being the admin (the app turns it off): a new admin makes its own.
+
+**What it gives and does not give.** The link is a bearer capability: whoever has it joins while it is on and the admin's app is open, as many people as the group has room for, and the admin cannot tell who they are beyond the name they announce. Relays see a Pkarr key and an opaque value, then ordinary paired signaling; neither the group id nor the member keys appear on them. Holders of the link can read each other's pending member keys and can overwrite each other's knocks (they are republished), which is a nuisance, not a way in. There is no approval step, expiry or use count in this increment; those are open decisions.
+
 A member leaves by wiping its secrets at once and sending `{ "t": "group-leave", "g" }` to the admin, who commits `remove`. The sole admin cannot leave a group with other members without transferring the role first. Removal is a `remove` commit; the removed member is told over its edge and, as a courtesy, with `{ "t": "group-removed", "g" }` over the contact chat when the remover has one. A removed member that was offline for both is not told; it sees the group go silent.
 
 ## Messages
@@ -98,11 +118,11 @@ Eight members; 1024 commits; 16 KiB of text; 32 own messages and 128 KiB kept fo
 
 ## Conformance
 
-[`packages/core/test/groups.test.ts`](../../packages/core/test/groups.test.ts) exercises: everyone reads everyone; a removed member holds no secret and cannot decrypt the next epoch, its old-epoch messages are accepted for that epoch only and a re-stamped one is refused; a new member cannot read earlier epochs and is not re-sent them; two admissions serialized before either edge is up; duplicate, out-of-order, tampered, foreign-key and wrong-group frames; offline catch-up across a rotation from the authors' logs; buffering ahead of the chain; forks, and lying syncs that are not forks; admin transfer, with the former admin's commits refused; leaving; bounded logs and waiting rooms; long chains in pieces; welcomes from the wrong admin; restart from saved state. [`groupLink.test.ts`](../../packages/core/test/groupLink.test.ts) checks that group frames flow only after both sides announced groups, and that an app without them sees nothing. [`e2e/web/groups.spec.ts`](../../e2e/web/groups.spec.ts) runs four browsers through a local relay: create, invite two from the contacts, everyone reads everyone with sender names, one closes its tab and misses two messages and a rotation and is caught up on return, one is removed and is told and reads nothing after, the admin role moves and the new admin brings in a fourth who reads nothing earlier, the founder leaves. [`packages/browser/test/groups.test.ts`](../../packages/browser/test/groups.test.ts) covers the admission exchange, edge lifecycle and restart at the engine level.
+[`packages/core/test/groups.test.ts`](../../packages/core/test/groups.test.ts) exercises: everyone reads everyone; a removed member holds no secret and cannot decrypt the next epoch, its old-epoch messages are accepted for that epoch only and a re-stamped one is refused; a new member cannot read earlier epochs and is not re-sent them; two admissions serialized before either edge is up; duplicate, out-of-order, tampered, foreign-key and wrong-group frames; offline catch-up across a rotation from the authors' logs; buffering ahead of the chain; forks, and lying syncs that are not forks; admin transfer, with the former admin's commits refused; leaving; bounded logs and waiting rooms; long chains in pieces; welcomes from the wrong admin; restart from saved state. [`groupLink.test.ts`](../../packages/core/test/groupLink.test.ts) checks that group frames flow only after both sides announced groups, and that an app without them sees nothing. [`e2e/web/groups.spec.ts`](../../e2e/web/groups.spec.ts) runs four browsers through a local relay: create, invite two from the contacts, everyone reads everyone with sender names, one closes its tab and misses two messages and a rotation and is caught up on return, one is removed and is told and reads nothing after, the admin role moves and the new admin brings in a fourth who reads nothing earlier, the founder leaves. [`packages/browser/test/groups.test.ts`](../../packages/browser/test/groups.test.ts) covers the admission exchange, edge lifecycle and restart at the engine level, and the entry link: a stranger knocking and admitted over an entry session, a replaced or turned-off link reaching nobody, an accept for another key than the one that knocked refused, admissions in flight dropped on the admin's restart. [`groupEntry.test.ts`](../../packages/core/test/groupEntry.test.ts) checks the link format, the knock identity and sealing, knock merging and the entry session's derivation. [`e2e/web/group-link.spec.ts`](../../e2e/web/group-link.spec.ts) runs four browsers that never pair: two join through the admin's link, one by opening it and one by pasting it into Join, everyone reads everyone by name, and a replaced link leaves the fourth waiting.
 
 ## Open decisions
 
-Multiple admins; a member key update (post-compromise security for a member's own key); files and media in groups, each behind a capability of its own; native transports on edges; a relay or GossipSub profile ([901](901-gossipsub.md)) for larger groups; a negotiated store for members that are never online together.
+Approval of each entry before admission, and an expiry or use count on a link; multiple admins; a member key update (post-compromise security for a member's own key); files and media in groups, each behind a capability of its own; native transports on edges; a relay or GossipSub profile ([901](901-gossipsub.md)) for larger groups; a negotiated store for members that are never online together.
 
 ## References
 
