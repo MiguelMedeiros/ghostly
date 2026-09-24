@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { ensureSession, listSessions, ownsKey, setStorageProfile } from "../../../src/lib/storage";
 import { clearAllData, loadSettings } from "../../../src/lib/settings";
-import { activeProfileId, createProfile, listProfiles, renameProfile, switchProfile, themeOf } from "../../../src/lib/profiles";
+import { activeProfileId, createProfile, lastRouteOf, listProfiles, renameProfile, switchProfile, themeOf } from "../../../src/lib/profiles";
 // covers: profiles.create, profiles.switch, app.clear-data
 
 vi.mock("@ghostly/browser/shared/idb", () => ({ clearChatData: vi.fn(async () => {}) }));
@@ -16,13 +16,14 @@ class FakeStorage {
   removeItem(k: string) { this.entries.delete(k); }
 }
 let storage: FakeStorage;
-const reload = vi.fn();
+const reload = vi.fn(), replaceState = vi.fn();
 beforeEach(() => {
+  replaceState.mockClear();
   storage = new FakeStorage();
   reload.mockClear();
   setStorageProfile("");
   Object.defineProperty(globalThis, "localStorage", { value: storage, configurable: true });
-  Object.defineProperty(globalThis, "window", { value: { dispatchEvent: vi.fn(), location: { hash: "", reload } }, configurable: true });
+  Object.defineProperty(globalThis, "window", { value: { dispatchEvent: vi.fn(), location: { hash: "", reload }, history: { replaceState } }, configurable: true });
 });
 const chat = (peer: string) => ensureSession({ seedB64: "c2VlZA", peerPubKeyB64: peer, encKeyB64: "ZW5j" });
 
@@ -45,12 +46,25 @@ it("gives a new profile a name, a color no other profile uses, and the current l
   expect(() => createProfile("   ")).toThrow("name");
 });
 
-it("switches by restarting as the other profile", () => {
-  const work = createProfile("Work");
-  switchProfile(work.id);
-  expect(activeProfileId()).toBe(work.id);
-  expect(reload).toHaveBeenCalledOnce();
-  expect(() => switchProfile("nosuchprof")).toThrow("Unknown");
+it("switches by restarting as the other profile, each one reopening where it was left", () => {
+  vi.useFakeTimers();
+  try {
+    const work = createProfile("Work");
+    (window.location as { hash: string }).hash = "#/wallet";
+    switchProfile(work.id);
+    // The page shows the switch for a moment, still as the old profile, then restarts as the new one.
+    expect(activeProfileId()).toBe("");
+    vi.advanceTimersByTime(100);
+    expect(activeProfileId()).toBe(work.id);
+    expect(reload).toHaveBeenCalledOnce();
+    expect(lastRouteOf(""), "Personal was left on its wallet").toBe("/wallet");
+    expect(replaceState).toHaveBeenCalledWith(null, "", "#/");
+    expect(() => switchProfile("nosuchprof")).toThrow("Unknown");
+    // Back to Personal: its wallet.
+    switchProfile("");
+    vi.advanceTimersByTime(100);
+    expect(replaceState).toHaveBeenLastCalledWith(null, "", "#/wallet");
+  } finally { vi.useRealTimers(); }
 });
 
 it("keeps each profile's chats to itself, the default one included", () => {

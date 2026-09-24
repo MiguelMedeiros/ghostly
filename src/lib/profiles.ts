@@ -40,9 +40,9 @@ function read(): Registry {
     return { version: 1, active: "", profiles: [{ ...DEFAULT_ENTRY }] };
   }
 }
-function write(registry: Registry): void {
+function write(registry: Registry, notify = true): void {
   localStorage.setItem(registryKey(), JSON.stringify(registry));
-  window.dispatchEvent(new Event("profiles-updated"));
+  if (notify) window.dispatchEvent(new Event("profiles-updated"));
 }
 const cleanName = (name: string) => name.replace(/\s+/g, " ").trim().slice(0, 32);
 
@@ -120,14 +120,66 @@ export function renameProfile(id: string, name: string): void {
   write({ ...registry, profiles: registry.profiles.map((p) => (p.id === id ? { ...p, name: clean } : p)) });
 }
 
+/** Where a profile's own keys start in localStorage: `ghostly_<ns>_`, or `ghostly_` for the default one. */
+export const prefixOf = (id: string) => (namespaceOf(id) ? `ghostly_${namespaceOf(id)}_` : "ghostly_");
+
+/**
+ * The places a profile can be left on and come back to. A chat or a group by its id, never an address that
+ * carries keys (an invite, a group link), which must not be written down.
+ */
+const RETURNABLE = /^\/(?:wallet|services|profile|identities|settings|chat\/[^/]+|group\/[^/]+)?$/;
+const lastRouteKey = (id: string) => `${prefixOf(id)}last_route`;
+/** Where this profile was when it was last left: switching back to it opens there. */
+export function lastRouteOf(id: string): string {
+  try {
+    const route = localStorage.getItem(lastRouteKey(id)) ?? "";
+    return RETURNABLE.test(route) ? route : "/";
+  } catch { return "/"; }
+}
+function rememberRoute(id: string): void {
+  const route = window.location.hash.replace(/^#/, "").split("?")[0] || "/";
+  try {
+    if (RETURNABLE.test(route)) localStorage.setItem(lastRouteKey(id), route);
+    else localStorage.removeItem(lastRouteKey(id));
+  } catch { /* storage unavailable: it opens on the chat list */ }
+}
+
+/** What the switch overlay shows while the app restarts as another profile, kept across the reload. */
+export interface PendingSwitch { id: string; name: string; color: string; avatar?: string; at: number }
+const SWITCH_KEY = "ghostly_switching";
+/** A switch started in the last few seconds: the page that just loaded is its other half. */
+export function pendingSwitch(): PendingSwitch | null {
+  try {
+    const pending = JSON.parse(sessionStorage.getItem(SWITCH_KEY) ?? "null") as PendingSwitch | null;
+    return pending && typeof pending.name === "string" && Date.now() - pending.at < 15_000 ? pending : null;
+  } catch { return null; }
+}
+export function clearPendingSwitch(): void {
+  try { sessionStorage.removeItem(SWITCH_KEY); } catch { /* nothing kept */ }
+}
+
 /**
  * Makes another profile the active one and restarts the app, so no peer, wallet or timer of the old
- * profile keeps running beside the new one. Contacts of the old profile see it go offline.
+ * profile keeps running beside the new one. Contacts of the old profile see it go offline. The profile
+ * left keeps its place; the one opened goes back to its own (`route` overrides it, e.g. a new profile's
+ * page). Its lock, if it has one, asks for the password before anything of it shows.
  */
-export function switchProfile(id: string): void {
+export function switchProfile(id: string, options: { route?: string; avatar?: string } = {}): void {
   const registry = read();
-  if (!registry.profiles.some((p) => p.id === id)) throw new Error("Unknown profile");
-  write({ ...registry, active: id });
-  window.location.hash = "#/profile";
-  window.location.reload();
+  const target = registry.profiles.find((p) => p.id === id);
+  if (!target) throw new Error("Unknown profile");
+  if (id === registry.active) return;
+  rememberRoute(registry.active);
+  const pending: PendingSwitch = { id, name: target.name, color: THEME_COLOR[themeOf(id)], avatar: options.avatar, at: Date.now() };
+  try { sessionStorage.setItem(SWITCH_KEY, JSON.stringify(pending)); } catch { /* no overlay after the reload */ }
+  window.dispatchEvent(new CustomEvent<PendingSwitch>("profile-switching", { detail: pending }));
+  // A moment for the overlay to be painted: the browser keeps that frame until the new page draws. Until
+  // then this page stays the old profile under it (whatever re-renders reads the registry), so the new one
+  // becomes active only now, quietly.
+  setTimeout(() => {
+    write({ ...read(), active: id }, false);
+    // Not through the router: the old profile would try to open the new one's chat first.
+    window.history.replaceState(null, "", `#${options.route ?? lastRouteOf(id)}`);
+    window.location.reload();
+  }, 80);
 }

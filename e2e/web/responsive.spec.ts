@@ -128,7 +128,8 @@ async function navProblems(page: Page): Promise<string[]> {
   return bar.evaluate((nav) => {
     const problems: string[] = [];
     const edge = nav.getBoundingClientRect();
-    const items = [...nav.querySelectorAll("button")];
+    // The places themselves: the account switcher's chevron rides on Profile's corner and is not one.
+    const items = [...nav.querySelectorAll("button:not(.profile-switcher-chevron)")];
     if (items.length !== 5) problems.push(`${items.length} items, not 5`);
     for (const item of items) {
       const r = item.getBoundingClientRect(), name = item.getAttribute("aria-label") ?? item.textContent;
@@ -153,6 +154,15 @@ test("the account bar keeps its five places at the list's narrowest", { tag: ["@
   expect(Math.round((await page.getByTestId("account-bar").boundingBox())!.width)).toBeLessThanOrEqual(281);
   expect(await navProblems(page)).toEqual([]);
   await expectTidy(page, "[data-testid=identities-page]", "Identities beside the narrowest list");
+  // The account switcher fits the narrowest list: inside it, every line tall enough to tap, no name cut short of a word.
+  await page.getByTestId("account-profile-switcher").click();
+  const bar = (await page.getByTestId("account-bar").boundingBox())!;
+  const menu = (await page.getByTestId("profile-switcher").boundingBox())!;
+  expect(menu.x).toBeGreaterThanOrEqual(bar.x);
+  expect(menu.x + menu.width).toBeLessThanOrEqual(bar.x + bar.width + 1);
+  expect(menu.y).toBeGreaterThanOrEqual(0);
+  for (const line of await page.getByTestId("profile-switcher").locator("[role^=menuitem]").all()) expect((await line.boundingBox())!.height).toBeGreaterThanOrEqual(40);
+  await page.keyboard.press("Escape");
   // In Portuguese too, whose labels are longer.
   await page.getByTestId("account-settings").click();
   await page.getByRole("combobox", { name: "Language" }).selectOption("pt");

@@ -7,6 +7,8 @@ import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { THEME_COLOR, currentProfile, themeOf } from "../lib/profiles";
 import { useIdentityAttention } from "../lib/identities";
 import { IdentitiesIcon } from "./identities/IdentitiesIcon";
+import { ProfileSwitcherMenu } from "./ProfileSwitcher";
+import { shortcutLabel, SWITCHER_SHORTCUT, useLongPress, useProfileGlances, useProfileSwitcher } from "../hooks/useProfileSwitcher";
 
 
 /**
@@ -82,6 +84,13 @@ export function AccountBar() {
   const onProfile = location.pathname === "/profile";
   const profile = currentProfile();
   const myAvatar = useMyAvatar();
+  // The account switcher: the chevron, a right-click or a long press on Profile, or Alt+Shift+P.
+  const canSwitch = !!platform?.features.profiles;
+  const switcher = useProfileSwitcher(canSwitch);
+  const glances = useProfileGlances();
+  const longPress = useLongPress(switcher.show);
+  const profileLabel = `${t("settings.profile")}: ${profile.name}${name ? `, ${name}` : `, ${t("common.anonymous")}`}, ${online ? "Online" : "Offline"}${
+    canSwitch && glances.othersUnread ? `, ${t("profileSwitcher.othersUnread")}` : ""}`;
   useEffect(() => {
     const last = lastBalanceRef.current;
     // Switching between Mainnet and Testnet changes what is shown, not what came in.
@@ -100,29 +109,50 @@ export function AccountBar() {
   return (
     <div ref={panelRoot} className="account-footer relative border-t border-border bg-sidebar-bg" data-testid="account-bar">
       <nav ref={navRef} aria-label="Account" className="account-actions" data-compact={labelsHidden || undefined}>
-        <button
-          data-testid="account-profile"
-          onClick={() => navigate(onProfile ? "/" : "/profile")}
-          aria-label={`${t("settings.profile")}: ${profile.name}${name ? `, ${name}` : `, ${t("common.anonymous")}`}, ${online ? "Online" : "Offline"}`}
-          aria-current={onProfile ? "page" : undefined}
-          className={`account-action ${onProfile ? "bg-surface-hover" : "hover:bg-surface-alt"}`}
-          title={`${t("settings.profile")}: ${profile.name}`}
-        >
-          <span className="relative w-[23px] h-[23px] shrink-0 flex items-center justify-center">
-            {/* The active profile's initial in its own color: which profile this is, at a glance. */}
-            {myAvatar
-              ? <img src={myAvatar} alt="" aria-hidden="true" draggable={false} className="w-[23px] h-[23px] rounded-full object-cover" />
-              : <span aria-hidden="true" className="grid place-items-center w-[23px] h-[23px] rounded-full text-[12px] font-bold text-[#111b21]" style={{ background: THEME_COLOR[themeOf(profile.id)] }}>{profile.name.charAt(0).toUpperCase()}</span>}
-            {platform && (
-              <span
-                className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-sidebar-bg ${
-                  online ? "bg-accent" : "bg-gray-500"
-                }`}
-              />
-            )}
-          </span>
-          <span className="account-label">{t("tabs.profile")}</span>
-        </button>
+        <div className="relative grid min-w-0">
+          <button
+            data-testid="account-profile"
+            onClick={() => navigate(onProfile ? "/" : "/profile")}
+            {...(canSwitch ? longPress : {})}
+            aria-label={profileLabel}
+            aria-current={onProfile ? "page" : undefined}
+            className={`account-action select-none ${onProfile ? "bg-surface-hover" : "hover:bg-surface-alt"}`}
+            title={`${t("settings.profile")}: ${profile.name}`}
+          >
+            <span className="relative w-[23px] h-[23px] shrink-0 flex items-center justify-center">
+              {/* The active profile's initial in its own color: which profile this is, at a glance. */}
+              {myAvatar
+                ? <img src={myAvatar} alt="" aria-hidden="true" draggable={false} className="w-[23px] h-[23px] rounded-full object-cover" />
+                : <span aria-hidden="true" className="grid place-items-center w-[23px] h-[23px] rounded-full text-[12px] font-bold text-[#111b21]" style={{ background: THEME_COLOR[themeOf(profile.id)] }}>{profile.name.charAt(0).toUpperCase()}</span>}
+              {platform && (
+                <span
+                  className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-sidebar-bg ${
+                    online ? "bg-accent" : "bg-gray-500"
+                  }`}
+                />
+              )}
+              {/* Unread messages left in another profile: a ring on the picture, the switcher says where. */}
+              {canSwitch && glances.othersUnread > 0 && <span data-testid="account-profile-others" aria-hidden="true" className="profile-others-ring" />}
+            </span>
+            <span className="account-label">{t("tabs.profile")}</span>
+          </button>
+          {canSwitch && (
+            <button
+              type="button"
+              data-testid="account-profile-switcher"
+              data-switcher-opener=""
+              onClick={switcher.toggle}
+              aria-label={t("profileSwitcher.title")}
+              aria-haspopup="menu"
+              aria-expanded={switcher.open}
+              aria-keyshortcuts={SWITCHER_SHORTCUT}
+              title={`${t("profileSwitcher.title")} (${shortcutLabel()})`}
+              className="profile-switcher-chevron"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m7 15 5-5 5 5" /></svg>
+            </button>
+          )}
+        </div>
 
         {wallet && (
           <button
@@ -204,6 +234,7 @@ export function AccountBar() {
           <span className="account-label">{t("sidebar.settings")}</span>
         </button>
       </nav>
+      {switcher.open && <ProfileSwitcherMenu variant="popover" glances={glances} onClose={switcher.close} />}
     </div>
   );
 }

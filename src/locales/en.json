@@ -227,5 +227,17 @@
   },
   "identities": {
     "attention": "needs attention"
+  },
+  "profileSwitcher": {
+    "title": "Switch profile",
+    "current": "current profile",
+    "switchTo": "Switch to {{name}}",
+    "unread": "{{count}} unread",
+    "locked": "locked",
+    "add": "Add a profile",
+    "manage": "Manage profiles",
+    "othersUnread": "unread messages in another profile",
+    "switching": "Opening {{name}}…",
+    "holdHint": "Or hold Settings in the tab bar"
   }
 }

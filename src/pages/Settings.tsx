@@ -12,7 +12,9 @@ import { Block, ButtonGroup, FieldGrid, InputGroup, LinkRow, Page, Row, Section 
 import { ProfileBadge } from "../components/ProfileBadge";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useMyAvatar } from "../hooks/useAvatars";
-import { currentProfile } from "../lib/profiles";
+import { currentProfile, listProfiles } from "../lib/profiles";
+import { openProfileSwitcher } from "../hooks/useProfileSwitcher";
+import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { Switch } from "../components/wallet/ui";
 import {
   hashPassword,
@@ -42,6 +44,7 @@ export function Settings() {
   const isMobile = useIsMobile();
   const profile = currentProfile();
   const myAvatar = useMyAvatar();
+  const canSwitch = !!useServicesPlatform()?.features.profiles;
 
   const [lockEnabled, setLockEnabled] = useState(settings.lockScreen.enabled);
   const [newPassword, setNewPassword] = useState("");
@@ -203,6 +206,11 @@ export function Settings() {
         {isMobile && (
           <LinkRow testId="settings-profile-link" leading={<ProfileBadge entry={profile} size={36} avatar={myAvatar} />}
             label={profile.name} hint={t("settings.profileLinkHint")} onClick={() => navigate("/profile")} />
+        )}
+        {/* The account switcher, where a phone's tab bar holds it (holding Settings opens it too). */}
+        {isMobile && canSwitch && (
+          <LinkRow testId="settings-profile-switch" label={t("profileSwitcher.title")} hint={t("profileSwitcher.holdHint")}
+            value={listProfiles().length > 1 ? listProfiles().length : undefined} onClick={openProfileSwitcher} />
         )}
         <Block>
           <div>

@@ -227,5 +227,17 @@
   },
   "identities": {
     "attention": "requiere atención"
+  },
+  "profileSwitcher": {
+    "title": "Cambiar de perfil",
+    "current": "perfil actual",
+    "switchTo": "Cambiar a {{name}}",
+    "unread": "{{count}} sin leer",
+    "locked": "bloqueado",
+    "add": "Añadir un perfil",
+    "manage": "Gestionar perfiles",
+    "othersUnread": "mensajes sin leer en otro perfil",
+    "switching": "Abriendo {{name}}…",
+    "holdHint": "O mantén pulsado Ajustes en la barra de pestañas"
   }
 }
