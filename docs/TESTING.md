@@ -84,9 +84,9 @@ Tests read: 78 E2E specs (78 tagged), 130 unit test files (130 tagged), 7 Rust f
 
 | Feature | WISP | Clients | Needs | Why untested |
 |---|---|---|---|---|
-| `app.error-boundary` |  | web, extension, desktop |  | No test throws inside a page to see the error screen; needs a UI unit test (src/ has no test runner yet) |
+| `app.error-boundary` |  | web, extension, desktop |  | No test throws inside a page to see the error screen; a component test (npm run test:ui) can now |
 | `app.updates.desktop` |  | desktop | update-feed | The Tauri updater needs a signed release feed; the Desktop harness only has a boot smoke test |
-| `settings.storage-used` |  | web, extension, desktop |  | Nothing asserts the storage figure in Settings; needs a UI unit test |
+| `settings.storage-used` |  | web, extension, desktop |  | Nothing asserts the storage figure in Settings; a component test (npm run test:ui) can |
 | `storage.local` | 1001 | web, extension, desktop |  | The local file storage adapter (WISP 1001) is exercised only through backup.profile.file, never on its own |
 | `core.dht-direct` | 01 | desktop, cli | mainline-dht | src-tauri/src/pkarr_client.rs has no Rust test, and the Desktop smoke test only reads the label in Settings |
 | `wallet.cashu.receive-token` | 201 | web, extension, desktop | cashu-mint | Receiving a pasted token from the wallet page is untested; the chat token card (payments.cashu.token-card) is |
