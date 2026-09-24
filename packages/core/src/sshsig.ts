@@ -148,7 +148,7 @@ export function parseSshSignature(armored: string): ParsedSignature {
   if (lines.length < 3 || lines[0] !== '-----BEGIN SSH SIGNATURE-----' || lines[lines.length - 1] !== '-----END SSH SIGNATURE-----')
     fail('Paste the whole signature, from -----BEGIN SSH SIGNATURE----- to -----END SSH SIGNATURE-----');
   const r = new Reader(strictBase64(lines.slice(1, -1).join(''), SSHSIG_MAX_ARMOR));
-  if (utf8Decode(r.raw(6)) !== 'SSHSIG') fail('Not an SSH signature');
+  if (!bytesEqual(r.raw(6), utf8Encode('SSHSIG'))) fail('Not an SSH signature');
   if (r.u32() !== 1) fail('Unsupported SSH signature version');
   const key = parseKeyBlob(r.string(1100));
   const namespace = r.text(64);
