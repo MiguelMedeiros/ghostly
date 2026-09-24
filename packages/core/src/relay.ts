@@ -1,6 +1,6 @@
 import type { Identity } from "./identity";
 import { createRelayPayload, parseRelayPayload, type GhostRecord, type SignedPacket } from "./pkarr";
-import type { PkarrTransport } from "./transport";
+import type { PkarrRequestOptions, PkarrTransport } from "./transport";
 
 /**
  * Public Pkarr relays. They are generic Pkarr infrastructure (an HTTP bridge to
@@ -15,7 +15,12 @@ export const DEFAULT_RELAYS = ["https://pkarr.pubky.org", "https://pkarr.pubky.a
  * (120 a minute when this was written) and one address is often shared by
  * several peers: two browser profiles, a tab and an extension, a household.
  */
-const REQUESTS_PER_MINUTE = 30;
+export const REQUESTS_PER_MINUTE = 30;
+/**
+ * Of those, what background requests (`{ background: true }`: periodic looks at shared records, as a
+ * community group's hub makes) may spend: the rest is kept for links, whose signaling cannot wait.
+ */
+export const BACKGROUND_REQUESTS_PER_MINUTE = 20;
 /** A relay that fails at the network level is left alone for this long. */
 const NETWORK_ERROR_COOLDOWN_MS = 20_000;
 
@@ -70,7 +75,7 @@ export class RelayTransport implements PkarrTransport {
    * Publishes to every relay. Peers may be configured with different relay
    * sets; writing everywhere keeps the overlap warm, the DHT covers the rest.
    */
-  async publish(identity: Identity, records: GhostRecord[]): Promise<void> {
+  async publish(identity: Identity, records: GhostRecord[], options: PkarrRequestOptions = {}): Promise<void> {
     if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
 
     // BEP44 sequence numbers must strictly increase.
@@ -88,9 +93,9 @@ export class RelayTransport implements PkarrTransport {
 
         // A relay refuses (428) to replace a packet whose DHT put is still in flight, unless told which
         // packet is being replaced. Links publish in bursts (a message, its ack, a signal), so say so.
-        let response = await this.put(relay, identity.pubKeyZ32, payload, previous);
+        let response = await this.put(relay, identity.pubKeyZ32, payload, previous, options.background);
         // 412: the relay never got `previous` (it was busy, or restarted). There is one writer per key, so insist.
-        if (response.status === 412) response = await this.put(relay, identity.pubKeyZ32, payload);
+        if (response.status === 412) response = await this.put(relay, identity.pubKeyZ32, payload, undefined, options.background);
         if (response.status === 429) this.coolDown(relay, response);
         if (!response.ok) throw new Error(`${relay} responded ${response.status}`);
       }),
@@ -109,14 +114,14 @@ export class RelayTransport implements PkarrTransport {
    * The newest validly signed packet seen so far wins, which also covers a
    * relay that is still serving an older cached copy.
    */
-  async resolve(pubKeyZ32: string): Promise<SignedPacket | null> {
+  async resolve(pubKeyZ32: string, options: PkarrRequestOptions = {}): Promise<SignedPacket | null> {
     if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
 
     const start = this.cursor++;
     let reachable = false;
     for (let i = 0; i < this.relays.length; i++) {
       const relay = this.relays[(start + i) % this.relays.length];
-      if (this.isCoolingDown(relay, "GET") || !this.take(relay)) continue;
+      if (this.isCoolingDown(relay, "GET") || !this.take(relay, options.background)) continue;
       try {
         const response = await this.request(`${relay}/${pubKeyZ32}`, { method: "GET" });
         if (response.status === 429) {
@@ -139,7 +144,8 @@ export class RelayTransport implements PkarrTransport {
       }
     }
     if (!reachable) {
-      const resting = this.relays.every((r) => this.isCoolingDown(r, "GET") || (this.spent.get(r)?.length ?? 0) >= REQUESTS_PER_MINUTE);
+      const limit = options.background ? BACKGROUND_REQUESTS_PER_MINUTE : REQUESTS_PER_MINUTE;
+      const resting = this.relays.every((r) => this.isCoolingDown(r, "GET") || (this.spent.get(r)?.length ?? 0) >= limit);
       // Holding back is not an outage: report what is already known.
       if (resting && this.newest.has(pubKeyZ32)) return this.newest.get(pubKeyZ32)!;
       throw new Error("No Pkarr relay reachable");
@@ -147,9 +153,9 @@ export class RelayTransport implements PkarrTransport {
     return this.newest.get(pubKeyZ32) ?? null;
   }
 
-  private async put(relay: string, pubKeyZ32: string, payload: Uint8Array, replaces?: bigint): Promise<Response> {
+  private async put(relay: string, pubKeyZ32: string, payload: Uint8Array, replaces?: bigint, background = false): Promise<Response> {
     if (this.isCoolingDown(relay, "PUT")) throw new Error("Discovery relay is cooling down; retry shortly");
-    if (!this.take(relay)) throw new Error("Discovery request budget reached; retry shortly");
+    if (!this.take(relay, background)) throw new Error("Discovery request budget reached; retry shortly");
     try { return await this.request(`${relay}/${pubKeyZ32}`, {
       method: "PUT",
       body: payload as BodyInit,
@@ -160,11 +166,11 @@ export class RelayTransport implements PkarrTransport {
     }
   }
 
-  /** Discovery reads and writes share a bounded per-relay request budget. */
-  private take(relay: string): boolean {
+  /** Discovery reads and writes share a bounded per-relay request budget; background requests only part of it. */
+  private take(relay: string, background = false): boolean {
     const now = Date.now();
     const recent = (this.spent.get(relay) ?? []).filter((at) => now - at < 60_000);
-    if (recent.length >= REQUESTS_PER_MINUTE) {
+    if (recent.length >= (background ? BACKGROUND_REQUESTS_PER_MINUTE : REQUESTS_PER_MINUTE)) {
       this.spent.set(relay, recent);
       return false;
     }

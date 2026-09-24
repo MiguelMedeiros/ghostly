@@ -136,8 +136,10 @@ export function GroupChat() {
   const canShare = group.status === "active" && (group.isAdmin || (group.profile === "community" && !!group.entryLink));
   const openShare = async () => {
     setError("");
-    // The link may be off: sharing it turns it on.
-    if (!group.entryLink) { try { await engine.call("enableGroupLink", { groupId }); } catch (e) { setError(e instanceof Error ? e.message : "Could not turn the link on"); return; } }
+    // The link may be off: sharing it turns it on. On or not, the engine hears it is being handed out
+    // (whoever gets it opens it soon, so this app looks for knocks faster a while).
+    try { await engine.call("enableGroupLink", { groupId }); }
+    catch (e) { if (!group.entryLink) { setError(e instanceof Error ? e.message : "Could not turn the link on"); return; } }
     setSharing("share");
   };
   const act = async (action: () => Promise<unknown>) => {
