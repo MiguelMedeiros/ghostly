@@ -39,6 +39,7 @@ import {
   createIdentity,
   decodeInviteCode,
   encodeInviteCode,
+  edgeParams,
   formatLocalTarget,
   identityFromSeedB64,
   identityFromSeed,
@@ -64,6 +65,7 @@ import {
   type NativeEndpoint,
   type NativeTransport,
   type PairedTransport,
+  type GroupState,
 } from "@ghostly/core";
 import type { AttentionEvent, EngineImplementation } from "../shared/rpc";
 import { fileStore, type StoredFile } from "../shared/idb";
@@ -80,6 +82,7 @@ import type {
   WalletView,
 } from "../shared/types";
 import { db } from "./db";
+import { Groups } from "./groups";
 import { mayReach } from "./serviceAccess";
 import { Outbox } from "./outbox";
 import { PaymentDesk } from "./payments";
@@ -360,6 +363,33 @@ export class GhostlyNode implements EngineImplementation {
     },
   });
 
+  /** Private groups (WISP 900): sessions, admission on contact chats, and the pairwise edges that carry them. */
+  private readonly groups = new Groups({
+    sendOnLink: (linkId, frame) => {
+      const link = this.links.get(linkId)?.link;
+      if (!link) throw new Error("You are offline");
+      link.sendGroupFrame(frame);
+    },
+    linkReady: linkId => !!this.links.get(linkId)?.link?.groupsSupport,
+    contactName: linkId => { const stored = this.links.get(linkId)?.stored; return stored?.label || stored?.peerNick || undefined; },
+    edges: groupId => {
+      const edges = new Map<string, string>();
+      for (const live of this.links.values()) if (live.stored.group === groupId && live.stored.groupPeer) edges.set(live.stored.groupPeer, live.stored.id);
+      return edges;
+    },
+    openEdge: (state, peer) => this.openEdge(state, peer),
+    closeEdge: async linkId => {
+      const live = this.links.get(linkId);
+      if (!live?.stored.group) return;
+      this.links.delete(linkId);
+      await live.link?.stop(true);
+      await db.deleteLink(linkId);
+    },
+    edgeNick: linkId => this.links.get(linkId)?.presence.nick || undefined,
+    storeMessage: message => this.storeMessage(message),
+    emit: () => this.emitState(),
+  });
+
   constructor(
     private readonly events: NodeEvents,
     private readonly options: NodeOptions = {},
@@ -423,15 +453,23 @@ export class GhostlyNode implements EngineImplementation {
     this.wallet.start();
     this.stopWatchingAdapters ??= onAdaptersChanged(() => { if (!this.shuttingDown) { this.lightning.refreshOffered(); this.bitcoin.refreshOffered(); } });
 
+    const history = new Map<string, StoredMessage[]>();
     for (const stored of await db.getLinks()) {
-      const messages = await db.getMessages(stored.id);
-      const storedFiles = await fileStore.listForLink(stored.id);
+      const messages = stored.group ? [] : await db.getMessages(stored.id);
+      const storedFiles = stored.group ? [] : await fileStore.listForLink(stored.id);
       for (const file of storedFiles) if (file.transfer) this.transfers.set(file.id,
         file.transfer.state === "transferring" ? { ...file.transfer, state: "failed", error: "Transfer interrupted. Retry when connected." } : file.transfer);
       const files = linkFilesFrom(stored.id, storedFiles, messages);
       this.links.set(stored.id, newLiveLink(stored, messages[messages.length - 1]?.timestamp ?? 0, files));
-      if (stored.profile) await this.outboxFor(stored.id).recover();
-      if (this.settings.online) { this.startLink(stored.id, messages); void this.refreshPublicProfiles({ linkId: stored.id }).catch(() => {}); }
+      history.set(stored.id, messages);
+      if (stored.profile && !stored.group) await this.outboxFor(stored.id).recover();
+    }
+    // Groups know their edges from the links above, and may add or drop some before anything dials.
+    await this.groups.load();
+    if (this.settings.online) for (const [linkId, messages] of history) {
+      if (!this.links.has(linkId)) continue;
+      this.startLink(linkId, messages);
+      if (!this.links.get(linkId)?.stored.group) void this.refreshPublicProfiles({ linkId }).catch(() => {});
     }
     this.emitState();
     void this.pollPaymentStatus().catch(()=>{});
@@ -467,7 +505,8 @@ export class GhostlyNode implements EngineImplementation {
     return {
       settings: this.settings,
       transport: this.transport.describe(),
-      links: [...this.links.values()].map((live) => this.viewOf(live)).sort((a, b) => b.createdAt - a.createdAt),
+      // Group edges are links the engine runs, not chats anyone sees.
+      links: [...this.links.values()].filter((live) => !live.stored.group).map((live) => this.viewOf(live)).sort((a, b) => b.createdAt - a.createdAt),
       services: this.services
         .map((s) => ({ ...s, requests: this.requestCounts.get(s.id) ?? 0 }))
         .sort((a, b) => a.createdAt - b.createdAt),
@@ -476,6 +515,7 @@ export class GhostlyNode implements EngineImplementation {
       payments: this.desk.views(),
       identityProofs: this.identities.views(),
       nostr: this.nostrSocial.state(),
+      groups: this.groups.views(),
     };
   }
 
@@ -664,7 +704,7 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   exportLinks() {
-    return [...this.links.values()].map(({ stored }) => ({
+    return [...this.links.values()].filter(({ stored }) => !stored.group).map(({ stored }) => ({
       profile: stored.profile,
       deliveryMode: stored.deliveryMode,
       seedB64: stored.seedB64,
@@ -958,6 +998,29 @@ export class GhostlyNode implements EngineImplementation {
   disconnect({ linkId }: { linkId: string }): void {
     this.links.get(linkId)?.link?.disconnect();
   }
+
+  // -- private groups --------------------------------------------------------
+
+  async createGroup({ name }: { name: string }): Promise<{ groupId: string }> {
+    if (typeof name !== "string" || !name.trim()) throw new Error("Give the group a name");
+    return { groupId: await this.groups.create(name.trim().slice(0, 48)) };
+  }
+  inviteToGroup({ groupId, linkId }: { groupId: string; linkId: string }): Promise<void> {
+    if (!this.links.get(linkId)?.stored.profile || this.links.get(linkId)?.stored.group) throw new Error("Invite a paired contact");
+    return this.groups.invite(groupId, linkId);
+  }
+  acceptGroupInvitation({ groupId }: { groupId: string }): Promise<void> { return this.groups.accept(groupId); }
+  declineGroupInvitation({ groupId }: { groupId: string }): Promise<void> { return this.groups.decline(groupId); }
+  sendGroupMessage({ groupId, text }: { groupId: string; text: string }): Promise<{ error: string | null }> {
+    if (typeof text !== "string") return Promise.resolve({ error: "Nothing to send" });
+    return this.groups.send(groupId, text);
+  }
+  groupMessages({ groupId }: { groupId: string }): Promise<StoredMessage[]> { return this.groups.messages(groupId); }
+  leaveGroup({ groupId }: { groupId: string }): Promise<void> { return this.groups.leave(groupId); }
+  removeGroupMember({ groupId, key }: { groupId: string; key: string }): Promise<void> { return this.groups.remove(groupId, key); }
+  makeGroupAdmin({ groupId, key }: { groupId: string; key: string }): Promise<void> { return this.groups.makeAdmin(groupId, key); }
+  rotateGroup({ groupId }: { groupId: string }): Promise<void> { return this.groups.rotate(groupId); }
+  forgetGroup({ groupId }: { groupId: string }): Promise<void> { return this.groups.forget(groupId); }
 
   setCallSignal({ linkId, signal }: { linkId: string; signal: string | null }): void {
     void this.links.get(linkId)?.link?.setCallSignal(signal);
@@ -1300,10 +1363,66 @@ export class GhostlyNode implements EngineImplementation {
     }
   }
 
+  /** The edge of a group toward one member: a paired link pinned to that member's key, carrying group frames and nothing else. */
+  private async openEdge(state: GroupState, peer: string): Promise<string> {
+    const me = identityFromSeedB64(state.seedB64);
+    const params = edgeParams(state.id, me.seed, me.pubKeyZ32, peer);
+    const id = identityFromSeedB64(params.seedB64).pubKeyZ32.slice(0, 16);
+    if (this.links.has(id)) return id;
+    const stored: StoredLink = { id, ...params, participationSeed: state.seedB64, pairedPeerKey: peer, requireSignedSignals: true,
+      peerTrust: { version: 1, verifiedKey: peer }, group: state.id, groupPeer: peer, createdAt: Date.now() };
+    this.links.set(id, newLiveLink(stored, 0));
+    try { await db.putLink(stored); }
+    catch (error) { this.links.delete(id); throw error; }
+    if (this.settings.online) this.startLink(id, []);
+    return id;
+  }
+
+  private startEdge(linkId: string): void {
+    const live = this.links.get(linkId);
+    if (!live || live.link) return;
+    const { stored } = live;
+    const group = stored.group!, peer = stored.groupPeer!;
+    live.pairing = { status: "connecting" };
+    live.link = new GhostLink({
+      paymentMethods: { cashu: false, lightning: false, arkade: false, usdt: false, bark: false, bitcoin: false },
+      params: stored,
+      rtcAvailable: typeof RTCPeerConnection !== "undefined",
+      // Pinned in advance to the member the roster names: there is nothing to trust on first use.
+      pairing: { credentials: { seedB64: stored.participationSeed!, peerKey: peer, requireSignedSignals: true, verifiedPeerKey: peer },
+        pinPeer: async key => { if (key !== peer) throw new Error("Not the member this edge belongs to"); }, trustOnFirstUse: false },
+      transport: this.transport,
+      nick: this.settings.nick || undefined,
+      pollIntervals: this.pollIntervals,
+      autoConnect: true,
+      createPeerConnection: () =>
+        new RTCPeerConnection({ iceServers: [...(RTC_CONFIG.iceServers ?? []), ...this.settings.iceServers.filter((server) => !iceServerProblem(server))] }),
+      localFetch: this.localFetch,
+      getServices: () => [{ id: "chat", type: "chat" }],
+      getHostedHttpService: () => undefined,
+      groupsSupport: true,
+      events: {
+        onGroupFrame: frame => this.groups.handleEdgeFrame(group, peer, frame),
+        onGroupsSupport: supported => { if (supported) this.groups.edgeReady(group, peer, linkId); this.emitState(); },
+        onPresence: presence => { live.presence = presence; this.groups.edgeNick(group, peer, presence.nick); this.emitState(); },
+        onPairingState: state => { live.pairing = state; this.emitState(); },
+        onDataLinkState: state => {
+          live.dataLink = state;
+          if (state !== "open" && live.pairing?.status !== "error") live.pairing = { status: "connecting" };
+          this.emitState();
+        },
+        onStatus: status => { live.status = status; this.emitState(); },
+        onDiscoveryError: error => { live.discoveryError = error ?? undefined; this.emitState(); },
+      },
+    });
+    live.link.start();
+  }
+
   private startLink(linkId: string, messages: StoredMessage[]): void {
     const live = this.links.get(linkId);
     if (!live || live.link) return;
     const { stored } = live;
+    if (stored.group) return this.startEdge(linkId);
     if (stored.profile) live.pairing = { status: "connecting" };
     const lastSeenTimestamp = messages.reduce(
       (max, m) => (m.sender === "peer" && m.via === "pkarr" ? Math.max(max, m.timestamp) : max),
@@ -1352,7 +1471,11 @@ export class GhostlyNode implements EngineImplementation {
       // A paired contact learns only the apps granted to it, on the open session; nothing is published.
       getPairedServices: () => this.advertisedServices(stored.peerPubKeyZ32).filter((service) => service.type === "http"),
       getHostedHttpService: (id) => this.hostedService(id, stored.peerPubKeyZ32),
+      // Private groups are announced on paired chats; their admission frames arrive here.
+      groupsSupport: !!stored.profile,
       events: {
+        onGroupFrame: stored.profile ? frame => this.groups.handleContactFrame(linkId, frame) : undefined,
+        onGroupsSupport: () => this.emitState(),
         onDhtDelivery: () => this.emitState(),
         onPeerProof: EXTERNAL_IDENTITIES_ENABLED ? async frame => { await (await this.proofsFor(linkId)).receive(frame); } : undefined,
         onIdentityProof: stored.profile ? frame => this.identities.frame(linkId, frame) : undefined,
@@ -1458,7 +1581,7 @@ export class GhostlyNode implements EngineImplementation {
     const expected = this.links.get(linkId)?.link;
     const operation = this.nativeQueue.then(async () => {
       const live = this.links.get(linkId), link = live?.link;
-      if (this.shuttingDown || !live?.stored.profile || live.stored.deliveryMode === "dht" || !link || link !== expected) return;
+      if (this.shuttingDown || !live?.stored.profile || live.stored.group || live.stored.deliveryMode === "dht" || !link || link !== expected) return;
       for (const [transport, factory] of Object.entries(this.options.nativeTransports ?? {})) {
         const key = transport as NativeTransport;
         if (!factory || link.availableTransports.includes(key)) continue;
@@ -1524,6 +1647,7 @@ export class GhostlyNode implements EngineImplementation {
       capabilities: { files: live.link?.supportsFiles ?? false, payments: live.link?.supportsPayments ?? false,
         methods: Object.fromEntries(PAYMENT_METHODS.map(m => [m, live.link?.allowsPayment(m) ?? false])) as Record<PaymentMethodName, boolean> },
       paymentMethods: Object.fromEntries(PAYMENT_METHODS.map(m => [m, stored.paymentMethods?.[m] !== false])) as Record<PaymentMethodName, boolean>,
+      groups: live.link?.groupsSupport ?? false,
       participationKey: stored.participationSeed ? identityFromSeedB64(stored.participationSeed).pubKeyZ32 : undefined,
       peerParticipationKey: stored.pairedPeerKey,
       publicProfiles: EXTERNAL_IDENTITIES_ENABLED ? stored.publicProfiles : undefined,

@@ -110,6 +110,8 @@ export function App() {
   const chats = useLoadedChats();
 
   const inChat = pathname.startsWith("/chat");
+  // A group is a conversation too: on a phone it takes the whole screen, without the tab bar.
+  const inGroup = pathname.startsWith("/group/");
 
   if (!isMobile) {
     return (
@@ -139,7 +141,7 @@ export function App() {
           <Outlet />
         </div>
       )}
-      {!inChat && <MobileTabBar />}
+      {!inChat && !inGroup && <MobileTabBar />}
     </div>
   );
 }

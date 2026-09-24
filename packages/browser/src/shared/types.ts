@@ -12,6 +12,7 @@ import type { NostrContactCache, NostrContactView, NostrSocialSettings, NostrSoc
 import type { ProofLedger, ProofAdapter } from "@ghostly/core";
 import type { IdentityDisplay, IdentityLedger, IdentityStatus, SharedIdentity, VerifiedIdentity } from "@ghostly/core";
 import type { DataLinkState, LinkStatus, ServiceAd, PairingState, NativeTransport, PairedTransport, TransportDescriptors } from "@ghostly/core";
+import type { GroupCommit, GroupRole, GroupState, GroupStatus } from "@ghostly/core";
 
 /** A link as stored in IndexedDB. Same fields Desktop keeps in its ChatSession. */
 export interface StoredLink {
@@ -51,6 +52,67 @@ export interface StoredLink {
   deletedIds?: string[];
   /** Ways of paying this device allows in this chat. Absent or true: allowed. */
   paymentMethods?: Partial<Record<PaymentMethodName, boolean>>;
+  /** An edge of a private group (WISP 900): the group, and the member at the other end. Not a chat. */
+  group?: string;
+  groupPeer?: string;
+}
+
+/** What happened to a group's membership, as a line in its history. */
+export type GroupEvent = "created" | "joined" | "gone" | "admin" | "rotated" | "removed" | "left" | "forked";
+
+/** A private group as stored: an invitation not yet answered, or a group I am (or was) in. */
+export interface StoredGroup {
+  id: string;
+  createdAt: number;
+  /** Pending (or accepted, awaiting the welcome) invitation, on the invitee's side. */
+  invitation?: {
+    name: string;
+    /** The inviter's member key, learned over the contact chat: the admin who must have admitted me. */
+    admin: string;
+    /** The contact chat it came over. */
+    linkId: string;
+    e: number;
+    n: number;
+    /** My member seed, once accepted. */
+    seedB64?: string;
+    /** Chain pieces that precede the welcome of a long chain. */
+    pieces: { t: "group-chain"; g: string; commits: GroupCommit[] }[];
+  };
+  state?: GroupState;
+  /** Member key → the contact chat that invited them (or me): the path for courtesy notices. */
+  contacts?: Record<string, string>;
+}
+
+export interface GroupMemberView {
+  key: string;
+  role: GroupRole;
+  me: boolean;
+  nick?: string;
+  /** The pairwise edge to this member is open (always true for me). */
+  online: boolean;
+  /** Messages of the current epoch known to be missing from this member. */
+  missing: number;
+}
+
+export interface GroupView {
+  id: string;
+  name: string;
+  createdAt: number;
+  /** Absent while it is only an invitation. */
+  status?: GroupStatus;
+  statusReason?: string;
+  epoch?: number;
+  myKey?: string;
+  isAdmin: boolean;
+  members: GroupMemberView[];
+  /** On the invitee's side, until the welcome arrives. */
+  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean };
+  /** Contacts (by chat id) invited by me and not yet in. */
+  invited: string[];
+  /** Contact chats that are members, by chat id → member key. */
+  memberLinks: Record<string, string>;
+  lastMessageAt: number;
+  canSend: boolean;
 }
 
 /** A file attached to a message. The bytes live in the `files` store under `id`. */
@@ -235,6 +297,10 @@ export interface StoredMessage {
   nick?: string;
   file?: MessageFile;
   paymentId?: string;
+  /** Group messages: the member key of the sender. */
+  member?: string;
+  /** Group history lines that are not messages. */
+  event?: GroupEvent;
 }
 
 /** A local web application the user chose to share. */
@@ -342,6 +408,8 @@ export interface LinkView {
   capabilities?: { files: boolean; payments: boolean; methods?: Record<PaymentMethodName, boolean> };
   /** Ways of paying this device allows in this chat. */
   paymentMethods?: Record<PaymentMethodName, boolean>;
+  /** Both sides announced private groups on the open session: this contact can be invited. */
+  groups?: boolean;
   availableTransports?: PairedTransport[];
   deliveryMode?: DeliveryMode;
   dhtDelivery?: DhtDeliveryView;
@@ -390,4 +458,6 @@ export interface EngineState {
   identityProofs: IdentityProofView[];
   /** The Nostr social layer: the person's own keys' data and the effective settings. */
   nostr: NostrSocialState;
+  /** Private groups and pending invitations (WISP 900). */
+  groups: GroupView[];
 }

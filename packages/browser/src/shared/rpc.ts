@@ -141,6 +141,22 @@ export interface EngineApi {
   updateSettings(params: { settings: Partial<Settings> }): void;
   setCallSignal(params: { linkId: string; signal: string | null }): void;
   setFastPoll(params: { linkId: string; fast: boolean }): void;
+
+  // Private groups (WISP 900, `group-mesh/1`). Group messages arrive as `messages` events under `group:<id>`.
+  createGroup(params: { name: string }): { groupId: string };
+  /** Invites a contact (a paired chat whose app announced groups) to a group I administer. */
+  inviteToGroup(params: { groupId: string; linkId: string }): void;
+  acceptGroupInvitation(params: { groupId: string }): void;
+  declineGroupInvitation(params: { groupId: string }): void;
+  sendGroupMessage(params: { groupId: string; text: string }): { error: string | null };
+  groupMessages(params: { groupId: string }): StoredMessage[];
+  leaveGroup(params: { groupId: string }): void;
+  removeGroupMember(params: { groupId: string; key: string }): void;
+  makeGroupAdmin(params: { groupId: string; key: string }): void;
+  /** A fresh epoch secret without a membership change. */
+  rotateGroup(params: { groupId: string }): void;
+  /** Forgets the group and its history on this device (leaving first when still in it). */
+  forgetGroup(params: { groupId: string }): void;
 }
 
 /** What the engine implements: any call may be answered asynchronously. */

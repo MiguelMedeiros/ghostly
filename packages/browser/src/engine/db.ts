@@ -1,6 +1,6 @@
 import { emptyIdentityLedger, emptyProofLedger, type IdentityLedger, type ProofLedger } from "@ghostly/core";
 import { STORES, fileStore, store, wrap, openDb } from "../shared/idb";
-import type { Settings, StoredLink, StoredMessage, StoredService } from "../shared/types";
+import type { Settings, StoredGroup, StoredLink, StoredMessage, StoredService } from "../shared/types";
 
 /**
  * Durable local state of the browser peer. Identity seeds live here the same
@@ -145,6 +145,20 @@ export const db = {
   },
   async deleteMessage(linkId: string, messageId: string): Promise<void> {
     await wrap((await store(STORES.messages, "readwrite")).delete([linkId, messageId]));
+  },
+
+  async getGroups(): Promise<StoredGroup[]> {
+    return wrap((await store(STORES.groups, "readonly")).getAll());
+  },
+  async putGroup(group: StoredGroup): Promise<void> {
+    await wrap((await store(STORES.groups, "readwrite")).put(group));
+  },
+  /** The group and its history. */
+  async deleteGroup(groupId: string): Promise<void> {
+    await wrap((await store(STORES.groups, "readwrite")).delete(groupId));
+    const messages = await store(STORES.messages, "readwrite");
+    const keys = await wrap(messages.index("byLink").getAllKeys(`group:${groupId}`));
+    await Promise.all(keys.map((key) => wrap(messages.delete(key))));
   },
 
   async getServices(): Promise<StoredService[]> {
