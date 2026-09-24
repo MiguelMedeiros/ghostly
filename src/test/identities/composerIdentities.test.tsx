@@ -142,7 +142,8 @@ describe("ComposerIdentityPicker", () => {
     await deckAgain();
     expect(chosen()).toBe(cards()[1]);
     expect(within(cards()[1]).getByTestId("id-card-shared")).toBeInTheDocument();
-    expect(cards()[1]).toHaveFocus();
+    // The focus follows as the deck mounts (an effect, a moment after the deck shows).
+    await waitFor(() => expect(cards()[1]).toHaveFocus());
     expect(hint()).toMatch(/^Alice sees your domain example.net/);
   });
 
@@ -174,7 +175,7 @@ describe("ComposerIdentityPicker", () => {
     await user.click(screen.getByRole("button", { name: "Choose another identity" }));
     await deckAgain();
     expect(chosen()).toBe(cards()[0]);
-    expect(cards()[0]).toHaveFocus();
+    await waitFor(() => expect(cards()[0]).toHaveFocus());
     expect(engine.callsTo("shareIdentityProof")).toEqual([]);
   });
 
