@@ -194,7 +194,7 @@ export function Select<V extends string = string>({
 
   const small = size === "sm";
   // Every side is set: a popover's own style (inset: 0) would fill in any side left out.
-  const style: CSSProperties = { position: "fixed", margin: 0, top: "auto", right: "auto", bottom: "auto", left: 0, ...(place ?? { top: 0, visibility: "hidden" }) };
+  const style: CSSProperties = { position: "fixed", margin: 0, top: "auto", right: "auto", bottom: "auto", ...(place ?? { top: 0, left: 0, visibility: "hidden" }) };
   const listLabel = labelledBy ? { "aria-labelledby": labelledBy } : ariaLabel ? { "aria-label": ariaLabel } : { "aria-labelledby": triggerId };
 
   return (
@@ -223,7 +223,7 @@ export function Select<V extends string = string>({
       >
         {current?.icon && <span aria-hidden="true" className="flex shrink-0 items-center">{current.icon}</span>}
         <span className="min-w-0 flex-1 truncate">
-          {current ? <>{current.label}{current.description && <span className="ms-2 text-xs text-text-muted">{current.description}</span>}</> : <span className="text-text-muted">{placeholder}</span>}
+          {current ? <>{current.label}{current.description && <> <span className="ms-1 text-xs text-text-muted">{current.description}</span></>}</> : <span className="text-text-muted">{placeholder}</span>}
         </span>
         <svg aria-hidden="true" width={small ? 12 : 14} height={small ? 12 : 14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
           className={`shrink-0 text-text-muted transition-transform ${open ? "rotate-180" : ""}`}><path d="m6 9 6 6 6-6" /></svg>
@@ -253,6 +253,9 @@ export function Select<V extends string = string>({
               role="option"
               aria-selected={i === selected}
               aria-disabled={o.disabled || undefined}
+              // Named by its first line, described by its second: read as "Quad9, dns.quad9.net", not run together.
+              aria-labelledby={`${optionId(i)}-label`}
+              aria-describedby={o.description ? `${optionId(i)}-description` : undefined}
               data-value={o.value}
               data-active={i === active || undefined}
               onMouseMove={() => { if (usable(i) && i !== active) setActive(i); }}
@@ -261,8 +264,8 @@ export function Select<V extends string = string>({
             >
               {o.icon && <span aria-hidden="true" className="flex shrink-0 items-center">{o.icon}</span>}
               <span className="min-w-0 flex-1">
-                <span className="block truncate">{o.label}</span>
-                {o.description && <span className="block truncate text-xs text-text-muted">{o.description}</span>}
+                <span id={`${optionId(i)}-label`} className="block truncate">{o.label}</span>
+                {o.description && <span id={`${optionId(i)}-description`} className="block truncate text-xs text-text-muted">{o.description}</span>}
               </span>
               <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
                 className={`shrink-0 text-accent ${i === selected ? "" : "invisible"}`}><path d="M20 6 9 17l-5-5" /></svg>

@@ -33,7 +33,7 @@ test("an identity is added, shared and withdrawn from the chat's composer", { ta
   await picker.getByTestId("composer-identities-add").click();
   const add = alice.page.getByTestId("add-identity");
   await add.getByTestId("add-identity-nostr").click();
-  await expect(add.getByTestId("add-identity-signer")).toHaveValue("nip07");
+  await expect(add.getByTestId("add-identity-signer")).toHaveAttribute("data-value", "nip07");
   await add.getByTestId("add-identity-start").click();
   await expect(add).toHaveCount(0);
   expect(await chatId(alice)).toBe(withBob);

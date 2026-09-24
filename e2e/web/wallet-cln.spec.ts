@@ -1,5 +1,6 @@
 import { CLN_REGTEST, channelBalance, invoice, nodeId, pay, rune } from "../support/cln-regtest/regtest.mjs";
 import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
+import { choose } from "../support/select";
 
 /**
  * Core Lightning as the Lightning source, against the regtest stack in e2e/support/cln-regtest (two nodes,
@@ -20,7 +21,7 @@ async function useNode(p: Peer, node: Node) {
   await useTestnet(p);
   await openWallet(p, "lightning");
   const source = p.page.getByTestId("lightning-source");
-  await source.getByTestId("lightning-source-select").selectOption("core-lightning");
+  await choose(source.getByTestId("lightning-source-select"), "core-lightning");
   const form = source.getByTestId("provider-form-core-lightning");
   await form.getByLabel("Node id").fill(nodeId(node));
   await form.getByLabel("WebSocket address").fill(CLN_REGTEST[node].websocket);

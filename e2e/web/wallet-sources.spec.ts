@@ -1,4 +1,5 @@
 import { expect, openWallet, test, useFakeProviders, useTestnet } from "../support/fixtures";
+import { choose, optionsOf, close } from "../support/select";
 
 /**
  * Where Lightning and on-chain Bitcoin come from: a source per wallet mode, picked on the card. The
@@ -16,10 +17,12 @@ test("the Lightning card starts on the Cashu mints and offers only what this mod
   // Without the test flag the fakes are not there, in either mode. (Counted loosely: every real provider adds one.)
   for (const mode of ["mainnet", "testnet"]) {
     if (mode === "testnet") { await useTestnet(alice); await openWallet(alice, "lightning"); }
-    const options = alice.page.getByTestId("lightning-source-select").locator("option");
-    await expect(options.first()).toHaveText(/^\d+ available…$/);
+    const select = alice.page.getByTestId("lightning-source-select");
+    await expect(select).toHaveText(/^\d+ available…$/);
+    const options = await optionsOf(select);
     await expect(options.filter({ hasText: "Cashu mints" })).toHaveCount(1);
     await expect(options.filter({ hasText: "(test)" })).toHaveCount(0);
+    await close(select);
   }
 });
 
@@ -30,7 +33,7 @@ test("a Lightning source is picked per mode: invoices go through it, and Mainnet
   await openWallet(alice, "lightning");
   const page = alice.page, source = page.getByTestId("lightning-source");
 
-  await source.getByTestId("lightning-source-select").selectOption("fake-lightning");
+  await choose(source.getByTestId("lightning-source-select"), "fake-lightning");
   const form = source.getByTestId("provider-form-fake-lightning");
   await form.getByLabel("Name").fill("Test node");
   await form.getByLabel("Access token").fill("not-a-real-secret");
@@ -77,8 +80,9 @@ test("the Bitcoin card says no source is configured, and pays on-chain through o
   await openWallet(alice, "bitcoin");
   await expect(panel.getByTestId("bitcoin-empty")).toBeVisible();
   // Bitcoin Core is registered, but its RPC has no CORS: it is offered on Desktop only, never here. BDK runs in the page.
-  await expect(panel.getByTestId("onchain-source-select").locator("option")).toHaveText(["2 available…", /BDK wallet/, /Fake Bitcoin wallet/]);
-  await panel.getByTestId("onchain-source-select").selectOption("fake-onchain");
+  await expect(panel.getByTestId("onchain-source-select")).toHaveText("2 available…");
+  await expect(await optionsOf(panel.getByTestId("onchain-source-select"))).toHaveText([/BDK wallet/, /Fake Bitcoin wallet/]);
+  await choose(panel.getByTestId("onchain-source-select"), "fake-onchain");
   await panel.getByTestId("provider-form-fake-onchain").getByLabel("Access token").fill("token");
   await panel.getByTestId("provider-save").click();
   await expect(page.getByTestId("wallet-card-bitcoin")).toContainText("100,000 sats");

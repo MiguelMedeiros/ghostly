@@ -1,6 +1,7 @@
 import { expect, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 import { testBitcoinWallet } from "../../packages/browser/test/helpers/bitcoinSign";
+import { choose } from "../support/select";
 
 /**
  * A Bitcoin address proof end to end, on a test network. Alice signs the statement once for a signet
@@ -37,7 +38,7 @@ test("a Bitcoin address proof: verified by the contact it is shared with, absent
   await expect(add).toContainText("Does not prove the address holds any balance");
   await expect(add).toContainText("Does not prove they would pay you");
   await add.getByTestId("add-identity-subject").fill(wallet.address.toUpperCase());
-  await add.getByTestId("add-identity-signer").selectOption("sparrow");
+  await choose(add.getByTestId("add-identity-signer"), "sparrow");
   await add.getByTestId("add-identity-start").click();
 
   // What the person copies into the wallet: one line naming this address (normalized to lower case).

@@ -43,6 +43,7 @@
     {"id":"app.responsive","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Right-hand pages (Wallet, Identities, Services, Settings, Profile) hold together at every width"},
     {"id":"app.sidebar-resize","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"The chat list can be dragged wider without squeezing the page below a phone's width"},
     {"id":"app.popovers","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Popovers and dialogs close on Escape / outside click and keep their target"},
+    {"id":"app.select","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Selects: one look everywhere, a native select's keyboard and screen-reader semantics, a list that clears dialogs and fits phones"},
     {"id":"app.emoji-picker","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Emoji popover follows the composer; a sheet on phones"},
     {"id":"app.i18n","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"The interface language can be changed (en, pt, es, fr, it, ja, zh, ar)"},
     {"id":"app.theme","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Color theme and light/dark/system mode apply at once and survive a reload"},

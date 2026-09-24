@@ -20,6 +20,7 @@ import {
 import type { Combination } from "./dimensions";
 import { CARD, type Step } from "./plan";
 import { unmet } from "./requirements";
+import { choose, optionsOf, close } from "../support/select";
 
 /**
  * The building blocks a scenario is made of. Each one does one thing a person
@@ -316,7 +317,7 @@ function identityKit(w: World): IdentityKit | undefined {
         before: async () => { await injectNostrSigner(a); },
         add: async () => {
           const add = await start("add-identity-nostr");
-          await expect(add.getByTestId("add-identity-signer")).toHaveValue("nip07");
+          await expect(add.getByTestId("add-identity-signer")).toHaveAttribute("data-value", "nip07");
           await add.getByTestId("add-identity-start").click();
           await saved();
         },
@@ -332,7 +333,7 @@ function identityKit(w: World): IdentityKit | undefined {
         },
         add: async () => {
           const add = await start("add-identity-domain");
-          await add.getByTestId("add-identity-signer").selectOption("dns");
+          await choose(add.getByTestId("add-identity-signer"), "dns");
           await add.getByTestId("add-identity-subject").fill(site!.domain);
           await add.getByTestId("add-identity-start").click();
           site!.publishTxt((await add.getByTestId("add-identity-copy-1").textContent())!);
@@ -377,7 +378,7 @@ function identityKit(w: World): IdentityKit | undefined {
         add: async () => {
           const add = await start("add-identity-bitcoin");
           await add.getByTestId("add-identity-subject").fill(key.address);
-          await add.getByTestId("add-identity-signer").selectOption("sparrow");
+          await choose(add.getByTestId("add-identity-signer"), "sparrow");
           await add.getByTestId("add-identity-start").click();
           const statement = (await add.getByTestId("add-identity-copy-0").textContent())!.trim();
           await add.getByTestId("add-identity-paste").fill(key.signBip322(statement).simple!);
@@ -392,7 +393,7 @@ function identityKit(w: World): IdentityKit | undefined {
         before: async () => { for (const p of [a, b]) await issuer.attach(p.context); },
         add: async () => {
           const add = await start("add-identity-oidc");
-          await add.getByTestId("add-identity-signer").selectOption("oidc-email");
+          await choose(add.getByTestId("add-identity-signer"), "oidc-email");
           await add.getByTestId("add-identity-start").click();
           const [popup] = await Promise.all([a.context.waitForEvent("page"), add.getByTestId("add-identity-finish").click()]);
           await popup.getByRole("link", { name: "Continue as alice" }).click();
@@ -545,7 +546,7 @@ async function lightningThroughWebln(w: World): Promise<void> {
     await installWebln(p, source);
     await wallet(p, "lightning");
     const picker = p.page.getByTestId("lightning-source");
-    await picker.getByTestId("lightning-source-select").selectOption("webln");
+    await choose(picker.getByTestId("lightning-source-select"), "webln");
     await expect(picker.getByTestId("webln-found")).toBeVisible();
     await picker.getByTestId("provider-form-webln").getByRole("button", { name: either("Connect browser wallet") }).click();
     await expect(picker.getByTestId("lightning-source-saved")).toBeVisible({ timeout: 30_000 });
@@ -583,7 +584,9 @@ async function mainnetUi({ a, b, combo }: World): Promise<void> {
     if (card === "bitcoin") await expect(p.page.getByTestId("onchain-source-none-offered")).toBeVisible();
     if (card === "lightning" && combo.rail !== "ln-mint") {
       // Only the sources Mainnet allows are offered; the test sources never are.
-      const options = await p.page.getByTestId("lightning-source-select").locator("option").allTextContents();
+      const select = p.page.getByTestId("lightning-source-select");
+      const options = await (await optionsOf(select)).allTextContents();
+      await close(select);
       expect(options.join(" ")).not.toMatch(/fake|regtest/i);
     }
   }

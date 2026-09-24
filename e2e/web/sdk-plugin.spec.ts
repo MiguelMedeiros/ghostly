@@ -1,5 +1,6 @@
 import { schnorr } from "@noble/curves/secp256k1.js";
 import { expect, openWallet, test, useTestnet } from "../support/fixtures";
+import { choose, optionsOf, close } from "../support/select";
 
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
@@ -14,11 +15,12 @@ test("a plugin's Lightning source and identity proof show in the pickers and wor
   await openWallet(alice, "lightning");
   const source = page.getByTestId("lightning-source");
   // Regtest only: not offered in Mainnet, whatever the plugin says.
-  await expect(source.getByTestId("lightning-source-select").locator("option").filter({ hasText: "Paper Lightning" })).toHaveCount(0);
+  await expect((await optionsOf(source.getByTestId("lightning-source-select"))).filter({ hasText: "Paper Lightning" })).toHaveCount(0);
+  await close(source.getByTestId("lightning-source-select"));
 
   await useTestnet(alice);
   await openWallet(alice, "lightning");
-  await source.getByTestId("lightning-source-select").selectOption("paper-lightning");
+  await choose(source.getByTestId("lightning-source-select"), "paper-lightning");
   const form = source.getByTestId("provider-form-paper-lightning");
   await expect(source.getByTestId("lightning-source-config")).toContainText("An example source built with the SDK");
   await form.getByLabel("Name").fill("Paper node");
@@ -46,7 +48,7 @@ test("a plugin's Lightning source and identity proof show in the pickers and wor
   await page.getByTestId("identity-add").click();
   const add = page.getByTestId("add-identity");
   await add.getByTestId("add-identity-example-schnorr").click();
-  await add.getByTestId("add-identity-signer").selectOption("paste");
+  await choose(add.getByTestId("add-identity-signer"), "paste");
   await add.getByTestId("add-identity-subject").fill(hex(schnorr.getPublicKey(secret)));
   await add.getByTestId("add-identity-start").click();
   const statement = await add.getByTestId("add-identity-copy-0").textContent();

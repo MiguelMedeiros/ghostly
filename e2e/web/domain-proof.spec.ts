@@ -1,6 +1,7 @@
 import { expect, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 import { DOMAIN_SLOTS, startTestDomain, type TestDomain } from "../support/domain";
+import { choose } from "../support/select";
 
 /**
  * Domain identity proofs. The test domain is served by support/domain.ts: a local DNS-over-HTTPS
@@ -23,7 +24,7 @@ async function startDomainProof(peer: Peer, domain: string, signer: "dns" | "htt
   await peer.page.getByTestId("identity-add").click();
   const add = peer.page.getByTestId("add-identity");
   await add.getByTestId("add-identity-domain").click();
-  await add.getByTestId("add-identity-signer").selectOption(signer);
+  await choose(add.getByTestId("add-identity-signer"), signer);
   await add.getByTestId("add-identity-subject").fill(domain.toUpperCase());
   await add.getByTestId("add-identity-start").click();
   return add;
@@ -137,10 +138,10 @@ test("the resolver that checks domain proofs is the person's choice, says what i
   const { page } = await peer("dom-settings");
   await page.goto("/#/settings");
   const resolver = page.getByTestId("doh-resolver");
-  await expect(resolver).toHaveValue("quad9");
+  await expect(resolver).toHaveAttribute("data-value", "quad9");
   await expect(page.getByText(/learns which domain was looked up/)).toContainText("Quad9");
-  await resolver.selectOption("cloudflare");
+  await choose(resolver, "cloudflare");
   await expect(page.getByText(/learns which domain was looked up/)).toContainText("Cloudflare");
   await page.reload();
-  await expect(page.getByTestId("doh-resolver")).toHaveValue("cloudflare");
+  await expect(page.getByTestId("doh-resolver")).toHaveAttribute("data-value", "cloudflare");
 });

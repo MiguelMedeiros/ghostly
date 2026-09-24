@@ -25,7 +25,7 @@ async function startPgp(peer: Peer, fingerprint: string) {
   await peer.page.getByTestId("identity-add").click();
   const add = peer.page.getByTestId("add-identity");
   await add.getByTestId("add-identity-openpgp").click();
-  await expect(add.getByTestId("add-identity-signer")).toHaveValue("gpg");
+  await expect(add.getByTestId("add-identity-signer")).toHaveAttribute("data-value", "gpg");
   await add.getByTestId("add-identity-subject").fill(fingerprint.replace(/(.{4})/g, "$1 ")); // as gpg --fingerprint prints it
   await add.getByTestId("add-identity-start").click();
   const statement = (await add.getByTestId("add-identity-copy-2").textContent())!;

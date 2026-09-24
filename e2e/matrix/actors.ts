@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Locator } from "@playwright/test";
 import { expect, type Peer } from "../support/fixtures";
+import { choose } from "../support/select";
 
 /**
  * A person in a scenario: a web or extension peer, with the language and the
@@ -57,7 +58,7 @@ export async function openChat(actor: Actor): Promise<void> {
 
 export async function setLanguage(actor: Actor, locale: "en" | "pt"): Promise<void> {
   await go(actor, "#/settings");
-  await actor.page.locator("select").first().selectOption(locale);
+  await choose(actor.page.getByTestId("settings-language"), locale);
   await expect(actor.page.getByRole("heading", { name: locale === "pt" ? "Configurações" : "Settings", exact: true })).toBeVisible();
   actor.locale = locale;
   await home(actor);

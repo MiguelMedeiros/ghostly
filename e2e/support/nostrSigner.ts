@@ -26,7 +26,7 @@ export async function addNostrIdentity(peer: Peer): Promise<void> {
   await peer.page.getByTestId("identity-add").click();
   const add = peer.page.getByTestId("add-identity");
   await add.getByTestId("add-identity-nostr").click();
-  await expect(add.getByTestId("add-identity-signer")).toHaveValue("nip07");
+  await expect(add.getByTestId("add-identity-signer")).toHaveAttribute("data-value", "nip07");
   await add.getByTestId("add-identity-start").click();
   await expect(add).toHaveCount(0);
   await expect(peer.page.getByTestId("identity-proof").filter({ hasText: "Nostr" })).toHaveCount(1);

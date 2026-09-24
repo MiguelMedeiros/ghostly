@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "../support/fixtures";
+import { choose } from "../support/select";
 
 const version = JSON.parse(readFileSync(join(import.meta.dirname, "..", "..", "web", "package.json"), "utf8")).version;
 
@@ -45,12 +46,12 @@ test("color theme and mode apply at once and survive a reload", { tag: ["@featur
 test("the language changes the interface", { tag: ["@feature:app.i18n"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await page.goto("/#/settings");
-  await page.locator("select").first().selectOption("pt");
+  await choose(page.getByTestId("settings-language"), "pt");
   await expect(page.getByTitle("Nova Conversa")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Configurações" })).toBeVisible();
   await page.reload();
   await expect(page.getByTitle("Nova Conversa")).toBeVisible();
-  await page.locator("select").first().selectOption("en");
+  await choose(page.getByTestId("settings-language"), "en");
   await expect(page.getByTitle("New Chat")).toBeVisible();
 });
 
@@ -62,7 +63,7 @@ test("<html lang> and <html dir> follow the language, from the first paint", { t
   await expect(html).toHaveAttribute("dir", "ltr");
 
   // Arabic turns the page right to left: screen readers, hyphenation and spell-check read it as Arabic.
-  await page.locator("select").first().selectOption("ar");
+  await choose(page.getByTestId("settings-language"), "ar");
   await expect(html).toHaveAttribute("lang", "ar");
   await expect(html).toHaveAttribute("dir", "rtl");
 
@@ -76,10 +77,10 @@ test("<html lang> and <html dir> follow the language, from the first paint", { t
   expect(await page.evaluate(() => (window as unknown as { atLoad: string[] }).atLoad)).toEqual(["ar", "rtl"]);
   await expect(page.getByRole("heading", { name: "الإعدادات" })).toBeVisible();
 
-  await page.locator("select").first().selectOption("pt");
+  await choose(page.getByTestId("settings-language"), "pt");
   await expect(html).toHaveAttribute("lang", "pt-BR");
   await expect(html).toHaveAttribute("dir", "ltr");
-  await page.locator("select").first().selectOption("en");
+  await choose(page.getByTestId("settings-language"), "en");
   await expect(html).toHaveAttribute("lang", "en");
 });
 
@@ -151,7 +152,7 @@ test("lock screen: locks by itself after the chosen idle time", { tag: ["@featur
   await passwords.nth(1).fill("spooky");
   await page.getByRole("button", { name: "Set password" }).click();
   await expect(page.getByText("Password set successfully")).toBeVisible();
-  await page.locator("select").filter({ hasText: "1 minute" }).selectOption("1");
+  await choose(page.getByTestId("settings-timeout"), "1");
   await page.clock.runFor(30_000);
   await expect(page.getByText("Ghostly is locked")).toHaveCount(0);
   await page.clock.runFor(45_000);
