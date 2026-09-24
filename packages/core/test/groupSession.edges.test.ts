@@ -565,3 +565,26 @@ describe("sync and leave", () => {
     expect(alice.role(createIdentity().pubKeyZ32)).toBeUndefined();
   });
 });
+
+describe("replay of an old epoch", () => {
+  it("does not deliver again a message from an epoch whose replay window is gone, though its secret is still held", async () => {
+    const { net, alice, bob, carol } = await trio();
+    await bob.sendText("once");
+    await net.settle();
+    const old = net.sent.find(s => s.from === bob.myKey && s.to === carol.myKey && s.frame.t === "group-msg")!.frame as GroupMessageFrame;
+    const oldSecret = carol.state.secrets[old.e];
+    for (let i = 0; i < GROUP_LIMITS.secrets + 2; i++) await alice.rotate();
+    await net.settle();
+    // Marking a newer message drops the replay window of epochs this far back.
+    await bob.sendText("now");
+    await net.settle();
+    expect(net.texts(carol)).toEqual(["once", "now"]);
+    expect(carol.state.seen[bob.myKey][old.e]).toBeUndefined();
+    // A member that missed the secrets in between still holds the old one: pruning by count leaves it.
+    const state = clone(carol.state);
+    state.secrets = { [old.e]: oldSecret, [carol.epoch]: state.secrets[carol.epoch] };
+    const restored = net.add(state);
+    await restored.handle(bob.myKey, clone(old));
+    expect(net.texts(restored)).toEqual([]);
+  });
+});

@@ -386,6 +386,8 @@ export class GroupSession {
   private async receiveMessage(from: string, raw: unknown): Promise<void> {
     if (!isMessageFrame(raw) || raw.s !== from || raw.s === this.myKey) return;
     if (raw.e > this.epoch) { this.park(from, raw); return; }
+    // Its replay window is gone (markSeen), even if a sparse set of secrets still holds its secret.
+    if (raw.e < this.epoch - GROUP_LIMITS.secrets) return;
     const commit = this.state.chain[raw.e];
     // Not from a member of that epoch, or from before I was one: nothing to read, nothing to ask for.
     if (!commit || !rosterHas(commit.m, raw.s) || !rosterHas(commit.m, this.myKey)) return;
