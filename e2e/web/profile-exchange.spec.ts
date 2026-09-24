@@ -102,7 +102,8 @@ test("a profile that stops sharing its name and picture is shown as a contact wi
   await onProfile(alice, () => alice.page.getByTestId("profile-share").click());
   await expect(header(bob)).toHaveText(/^Contact · \S{6}$/, { timeout: 15_000 });
   await expect(bob.page.getByTestId("chat-avatar")).toHaveCount(0);
-  await expect(row(bob).getByText("Private Alice")).toHaveCount(0);
+  // The chat's name, that is: the join notice sent before still names her, as history does.
+  await expect(row(bob).getByText("Private Alice", { exact: true })).toHaveCount(0);
 
   // The choice stays with the profile across a reload.
   await alice.page.reload();
