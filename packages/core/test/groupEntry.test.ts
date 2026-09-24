@@ -4,7 +4,7 @@ import {
 } from "../src/groupEntry";
 import { edgeParams } from "../src/groupCrypto";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
-import { fromBase64Url } from "../src/bytes";
+import { fromBase64Url, toBase64Url } from "../src/bytes";
 // covers: groups.protocol.entry
 
 const g = "AbCdEfGhIjKlMnOpQrStUv";
@@ -40,8 +40,13 @@ describe("group entry links (group-entry/1)", () => {
     expect(records[0].value).not.toContain(joiner);
     expect(readKnocks(link, records)).toEqual([{ key: joiner, ts: 1_000 }]);
     expect(readKnocks({ g, host: createIdentity().pubKeyZ32 }, records)).toEqual([]);
-    const tampered = [{ ...records[0], value: records[0].value.slice(0, -2) + (records[0].value.endsWith("A") ? "BB" : "AA") }];
-    expect(readKnocks(link, tampered)).toEqual([]);
+    // Tamper with the bytes, not the text: base64url's last char carries spare bits, so a text edit can decode to the same box.
+    const sealed = fromBase64Url(records[0].value);
+    for (const at of [0, 40, sealed.length - 1]) {
+      const bytes = sealed.slice();
+      bytes[at] ^= 1;
+      expect(readKnocks(link, [{ ...records[0], value: toBase64Url(bytes) }])).toEqual([]);
+    }
     expect(readKnocks(link, [])).toEqual([]);
     expect(readKnocks(link, [{ label: "_knock", value: "!!" }])).toEqual([]);
     expect(fromBase64Url(records[0].value).length).toBeLessThan(900);
