@@ -6,6 +6,7 @@ import numbering from "@/lib/wisp-numbering.json";
 import candidates from "@/lib/roadmap-candidates.json";
 import { GROUPS, wisps, wispCount } from "@/lib/wisps";
 import { Catalog, type CatalogRow } from "./Catalog";
+import { Glossary } from "./Glossary";
 import { WispMap } from "./WispMap";
 import "@/app/catalog.css";
 
@@ -41,6 +42,7 @@ export function CatalogPage({ locale }: { locale: Locale }) {
           <span className="eyebrow">{t.eyebrow}</span>
           <h1 className="h-section">{t.title}</h1>
           <p className="lead">{t.lead.replace("{n}", String(wispCount))}</p>
+          <Glossary t={t.glossary} />
         </div>
       </section>
       <div className="wrap">

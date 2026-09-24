@@ -36,19 +36,8 @@ const en = {
       packets: { message: "hi!", file: "notes.pdf", payment: "2,100 sat", mint: "mint" },
     },
   },
-  words: {
-    eyebrow: "01 — Six words",
-    items: [
-      { id: "wisp", term: "WISP", gloss: "A contract anyone can implement", key: "WISP 03" },
-      { id: "capability", term: "Capability", gloss: "What a running client offers", key: "files/2" },
-      { id: "adapter", term: "Adapter", gloss: "One technology behind a contract", key: "webrtc/1" },
-      { id: "profile", term: "Protocol profile", gloss: "The exact wire rules in use", key: "paired-chat/1" },
-      { id: "provider", term: "Provider / signer", gloss: "Who runs a service or signs for it", key: "Cashu mint" },
-      { id: "plugin", term: "Plugin", gloss: "Adapters packaged and compiled into a build", key: "registerAdapters()", level: "development" as Level },
-    ],
-  },
   compose: {
-    eyebrow: "02 — Composition",
+    eyebrow: "01 — Composition",
     title: "Pick the pieces. See what you get.",
     lead: "Each row is an area of the architecture, each block a piece with its own contract. Pick a composition: it lights the pieces it needs.",
     presets: "Compositions",
@@ -63,7 +52,7 @@ const en = {
     boardLabel: "Architecture board",
   },
   negotiate: {
-    eyebrow: "03 — Negotiation",
+    eyebrow: "02 — Negotiation",
     title: "Two peers. One honest answer.",
     lead: "Each side offers what it has, in its own order. What both have is ranked by both orders together. Nothing in common means no.",
     scenarios: "Scenario",
@@ -106,7 +95,7 @@ const en = {
     casper: "Casper",
   },
   path: {
-    eyebrow: "04 — Your path",
+    eyebrow: "03 — Your path",
     title: "From reading to building.",
     steps: [
       {
@@ -140,7 +129,7 @@ const en = {
     ],
   },
   availability: {
-    eyebrow: "05 — Where it runs",
+    eyebrow: "04 — Where it runs",
     title: "Client by client.",
     lead: "The same feature can be available in one client and not another. This is the honest map.",
     feature: "Feature",
@@ -215,19 +204,8 @@ const ptBr: DevCopy = {
       packets: { message: "oi!", file: "notas.pdf", payment: "2.100 sat", mint: "mint" },
     },
   },
-  words: {
-    eyebrow: "01 — Seis palavras",
-    items: [
-      { id: "wisp", term: "WISP", gloss: "Um contrato que qualquer um implementa", key: "WISP 03" },
-      { id: "capability", term: "Capability", gloss: "O que um cliente rodando oferece", key: "files/2" },
-      { id: "adapter", term: "Adapter", gloss: "Uma tecnologia por trás de um contrato", key: "webrtc/1" },
-      { id: "profile", term: "Perfil de protocolo", gloss: "As regras exatas de wire em uso", key: "paired-chat/1" },
-      { id: "provider", term: "Provider / signer", gloss: "Quem opera um serviço ou assina por ele", key: "mint Cashu" },
-      { id: "plugin", term: "Plugin", gloss: "Adapters empacotados e compilados num build", key: "registerAdapters()", level: "development" },
-    ],
-  },
   compose: {
-    eyebrow: "02 — Composição",
+    eyebrow: "01 — Composição",
     title: "Escolha as peças. Veja o que sai.",
     lead: "Cada linha é uma área da arquitetura; cada bloco, uma peça com o próprio contrato. Escolha uma composição: ela acende as peças de que precisa.",
     presets: "Composições",
@@ -242,7 +220,7 @@ const ptBr: DevCopy = {
     boardLabel: "Tabuleiro da arquitetura",
   },
   negotiate: {
-    eyebrow: "03 — Negociação",
+    eyebrow: "02 — Negociação",
     title: "Dois peers. Uma resposta honesta.",
     lead: "Cada lado oferece o que tem, na própria ordem. O que os dois têm é ordenado pelas duas ordens juntas. Nada em comum quer dizer não.",
     scenarios: "Cenário",
@@ -285,7 +263,7 @@ const ptBr: DevCopy = {
     casper: "Casper",
   },
   path: {
-    eyebrow: "04 — Seu caminho",
+    eyebrow: "03 — Seu caminho",
     title: "Da leitura à construção.",
     steps: [
       {
@@ -319,7 +297,7 @@ const ptBr: DevCopy = {
     ],
   },
   availability: {
-    eyebrow: "05 — Onde roda",
+    eyebrow: "04 — Onde roda",
     title: "Cliente por cliente.",
     lead: "O mesmo recurso pode existir num cliente e não em outro. Este é o mapa honesto.",
     feature: "Recurso",

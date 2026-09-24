@@ -22,8 +22,8 @@ After `npm run build`, restart a running dev server: reader routes are static
 | `app/` | Routes. English at the root, Brazilian Portuguese under `app/pt-br/` (thin wrappers around the same page components). |
 | `components/home/` | Homepage: the hero, the four story chapters, the product section (one phone beside each window), your space, the wallet deck, the architecture stack and the finale with its download panel. |
 | `components/story/` | The film's machinery. `Act` pins one full-bleed backdrop behind its chapters and keeps one Boo and one Casper in it; `SceneFrame` is a chapter (full-bleed stage, floating copy panel, step mapping); `poses.ts` is the blocking table (actors, camera, focal point per chapter, landscape and portrait); `Statement` is the sentence between the acts. |
-| `components/dev/` | `/developers`: vocabulary, composition board, negotiation demo, path, availability table. |
-| `components/catalog/`, `components/reader/`, `components/roadmap/` | Catalog, WISP reader, roadmap. |
+| `components/dev/` | `/developers`: protocol loop, composition board, negotiation demo, path, availability table. |
+| `components/catalog/`, `components/reader/`, `components/roadmap/` | Catalog (with the six-word glossary at `#glossary`, linked from the reader), WISP reader, roadmap. |
 | `components/ghost/Ghost.tsx` | Boo and Casper. `components/site/GhostPet.tsx` is the original pointer ghost, kept as it was. |
 | `content/*.ts` | All copy, one object per locale. A missing translation is a type error. |
 | `lib/wisps.ts` | The catalog model, built from `docs/wisps/numbering.json` and the documents. |

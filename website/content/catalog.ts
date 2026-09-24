@@ -1,4 +1,5 @@
 import type { Localized } from "@/lib/i18n";
+import { NEXT_VERSION } from "@/lib/status";
 
 const en = {
   meta: {
@@ -38,6 +39,18 @@ const en = {
     color: "Color: whether it already works in the app",
   },
   listTitle: "Search and full list",
+  glossary: {
+    title: "Glossary",
+    hint: "WISP, capability, adapter, profile, provider, plugin",
+    items: [
+      { id: "wisp", term: "WISP", gloss: "A contract anyone can implement", key: "WISP 03" },
+      { id: "capability", term: "Capability", gloss: "What a running client offers", key: "files/2" },
+      { id: "adapter", term: "Adapter", gloss: "One technology behind a contract", key: "webrtc/1" },
+      { id: "profile", term: "Protocol profile", gloss: "The exact wire rules in use", key: "paired-chat/1" },
+      { id: "provider", term: "Provider / signer", gloss: "Who runs a service or signs for it", key: "Cashu mint" },
+      { id: "plugin", term: "Plugin", gloss: "Adapters packaged and compiled into a build", key: "registerAdapters()", status: `In development (${NEXT_VERSION})` },
+    ] as { id: string; term: string; gloss: string; key: string; status?: string }[],
+  },
 };
 
 export type CatalogCopy = typeof en;
@@ -80,6 +93,18 @@ const ptBr: CatalogCopy = {
     color: "Cor: se já funciona no app",
   },
   listTitle: "Busca e lista completa",
+  glossary: {
+    title: "Glossário",
+    hint: "WISP, capability, adapter, perfil, provider, plugin",
+    items: [
+      { id: "wisp", term: "WISP", gloss: "Um contrato que qualquer um implementa", key: "WISP 03" },
+      { id: "capability", term: "Capability", gloss: "O que um cliente rodando oferece", key: "files/2" },
+      { id: "adapter", term: "Adapter", gloss: "Uma tecnologia por trás de um contrato", key: "webrtc/1" },
+      { id: "profile", term: "Perfil de protocolo", gloss: "As regras exatas de wire em uso", key: "paired-chat/1" },
+      { id: "provider", term: "Provider / signer", gloss: "Quem opera um serviço ou assina por ele", key: "mint Cashu" },
+      { id: "plugin", term: "Plugin", gloss: "Adapters empacotados e compilados num build", key: "registerAdapters()", status: `Em desenvolvimento (${NEXT_VERSION})` },
+    ],
+  },
 };
 
 export const catalog: Localized<CatalogCopy> = { en, "pt-br": ptBr };

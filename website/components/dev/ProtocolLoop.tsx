@@ -2,8 +2,6 @@
 
 import { useEffect, useRef } from "react";
 import type { DevCopy } from "@/content/developers";
-import type { Locale } from "@/lib/i18n";
-import { LevelBadge } from "@/components/site/Level";
 import { DUR } from "@/lib/motion";
 import "@/app/dev-loop.css";
 
@@ -135,7 +133,7 @@ const STACK = [
 function ChipBox({ chip, x, y, w, font, pop, litAt, dimAt }: { chip: Chip; x: number; y: number; w: number; font: number; pop: number; litAt: number; dimAt: number }) {
   return (
     <g className="pl-pop" style={v({ a: pop, d: 0.3 })}>
-      <g className={chip.shared ? undefined : "pl-dim"} style={chip.shared ? undefined : v({ a: dimAt, d: 0.4 })} data-k={chip.c === C.transport ? "adapter" : "capability"}>
+      <g className={chip.shared ? undefined : "pl-dim"} style={chip.shared ? undefined : v({ a: dimAt, d: 0.4 })}>
         <rect x={x} y={y} width={w} height={26} rx={8} fill="#101a27" stroke={C.edge} />
         {chip.shared && <rect className="pl-in" style={v({ a: litAt, d: 0.4 })} x={x} y={y} width={w} height={26} rx={8} fill={chip.c} fillOpacity={0.18} stroke={chip.c} strokeWidth={1.5} />}
         <text className="mono" x={x + 10} y={y + 17.5} fontSize={font} fill={C.soft}>
@@ -233,7 +231,7 @@ function Packet({ kind, x, y, w, font, label, mint, at, d, dx = 0, dy = 0 }: { k
           {label}
         </text>
         {kind === "payment" && (
-          <g data-k="provider">
+          <g>
             <path d={`M${mint ? w - 52 : w - 16} -5 l5 5 l-5 5 l-5 -5z`} fill={c} />
             {mint && (
               <text className="mono" x={w - 43} y={4.5} fontSize={font} fill={c}>
@@ -256,7 +254,7 @@ function Captions({ t, x, y, tagX, tagY, size, tagSize, anchor }: { t: LoopCopy;
             {t.phases[k]}
           </text>
           {PHASE_TAGS[k] && (
-            <text className="mono" x={tagX} y={tagY} textAnchor={anchor} fontSize={tagSize} fill={C.core} data-k="wisp">
+            <text className="mono" x={tagX} y={tagY} textAnchor={anchor} fontSize={tagSize} fill={C.core}>
               {PHASE_TAGS[k]}
             </text>
           )}
@@ -320,10 +318,10 @@ function Landscape({ t }: { t: LoopCopy }) {
       <g className="pl-fade">
         <path className="pl-draw" style={v({ a: TL.line, d: 0.7 })} d={`M314 ${lineY} L686 ${lineY}`} pathLength={1} stroke={C.transport} strokeWidth={2.5} fill="none" />
         <g className="pl-in" style={v({ a: TL.pill, d: 0.3 })}>
-          <text className="mono" x={500} y={272} textAnchor="middle" fontSize={13} fill={C.dim} data-k="profile">
+          <text className="mono" x={500} y={272} textAnchor="middle" fontSize={13} fill={C.dim}>
             paired-chat/1
           </text>
-          <g transform={`translate(500 ${lineY + 30})`} data-k="adapter">
+          <g transform={`translate(500 ${lineY + 30})`}>
             <rect x={-46} y={-13} width={92} height={26} rx={13} fill={C.transport} fillOpacity={0.18} stroke={C.transport} />
             <text className="mono" x={0} y={4.5} textAnchor="middle" fontSize={13} fill={C.text}>
               webrtc/1
@@ -389,13 +387,13 @@ function Portrait({ t }: { t: LoopCopy }) {
       <g className="pl-fade">
         <path className="pl-draw" style={v({ a: TL.line, d: 0.7 })} d={`M${lineX} ${top} L${lineX} ${B.y}`} pathLength={1} stroke={C.transport} strokeWidth={2.5} fill="none" />
         <g className="pl-in" style={v({ a: TL.pill, d: 0.3 })}>
-          <g transform="translate(246 402)" data-k="adapter">
+          <g transform="translate(246 402)">
             <rect x={-46} y={-13} width={92} height={26} rx={13} fill={C.transport} fillOpacity={0.18} stroke={C.transport} />
             <text className="mono" x={0} y={4.5} textAnchor="middle" fontSize={12} fill={C.text}>
               webrtc/1
             </text>
           </g>
-          <text className="mono" x={246} y={436} textAnchor="middle" fontSize={12} fill={C.dim} data-k="profile">
+          <text className="mono" x={246} y={436} textAnchor="middle" fontSize={12} fill={C.dim}>
             paired-chat/1
           </text>
         </g>
@@ -500,26 +498,5 @@ export function ProtocolLoop({ t }: { t: LoopCopy }) {
       <Portrait t={t} />
       <span className="pl-pausemark" aria-hidden="true" />
     </figure>
-  );
-}
-
-/** The six words, as a legend under the loop: each key is drawn the way the loop draws what it names. */
-export function ProtocolLegend({ words, locale }: { words: DevCopy["words"]; locale: Locale }) {
-  return (
-    <div className="pl-legend-wrap">
-      <span className="caption pl-legend-eyebrow">{words.eyebrow}</span>
-      <ul className="pl-legend">
-        {words.items.map((w) => (
-          <li key={w.id} className={`pl-leg pl-leg--${w.id}`} data-k={w.id}>
-            <span className="pl-key mono">{w.key}</span>
-            <span className="pl-term">
-              {w.term}
-              {"level" in w && w.level && <LevelBadge level={w.level} locale={locale} small />}
-            </span>
-            <span className="pl-gloss">{w.gloss}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
   );
 }

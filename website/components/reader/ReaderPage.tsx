@@ -72,6 +72,9 @@ export async function ReaderPage({ reference, requested, locale }: { reference: 
 
         <div className="reader-layout">
           <aside className="reader-side">
+            <Link className="reader-glossary" href={`${href(locale, "/developers/catalog")}#glossary`}>
+              {t.glossary} →
+            </Link>
             <details className="reader-all" open>
               <summary>{t.all}</summary>
               <nav aria-label={t.all}>
