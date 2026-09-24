@@ -1,4 +1,4 @@
-import { chat, expect, test, type Peer } from "../support/fixtures";
+import { chat, expect, openProfilePage, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 
 /** A small JPEG in one color, as a phone photo would be before the app redraws it. */
@@ -15,7 +15,7 @@ async function photo(peer: Peer, color: string): Promise<Buffer> {
 
 /** The Profile page is beside the chat list; what is set there applies to this profile only. */
 async function onProfile(peer: Peer, work: () => Promise<void>): Promise<void> {
-  if (!await peer.page.getByTestId("profile-page").isVisible()) await peer.page.getByTestId("account-profile").click();
+  if (!await peer.page.getByTestId("profile-page").isVisible()) await openProfilePage(peer.page);
   await work();
   await peer.page.goBack();
 }
