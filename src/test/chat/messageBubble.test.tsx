@@ -211,6 +211,7 @@ describe("MessageBubble: delivery", () => {
     ["sent", "Sent · waiting for receipt"],
     ["held", "Held · waiting for your contact"],
     ["delivered", "Received by peer"],
+    ["queued", "Not confirmed yet · sends again by itself"],
     ["failed", "Delivery unconfirmed"],
   ] as const)("says a %s message is %s", (delivery, text) => {
     bubble({ sender: "me", delivery });
@@ -231,6 +232,12 @@ describe("MessageBubble: delivery", () => {
     expect(screen.getByRole("status")).toHaveTextContent("The contact's app is closed");
     await user.click(screen.getByRole("button", { name: "Retry message" }));
     expect(engine.callsTo("retryMessage")).toEqual([{ linkId: "link-1", messageId: "m1" }]);
+  });
+
+  it("asks nothing of the person while a message is being sent again by itself", () => {
+    bubble({ sender: "me", delivery: "queued", deliveryError: "Connection closed before receipt." });
+    expect(screen.getByRole("status")).not.toHaveTextContent("Delivery unconfirmed");
+    expect(screen.queryByRole("button", { name: "Retry message" })).not.toBeInTheDocument();
   });
 
   it("does not retry into a chat that is not there", async () => {

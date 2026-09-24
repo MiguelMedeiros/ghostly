@@ -34,7 +34,7 @@ Iroh is linked into the Rust app. HyperDHT runs in a fixed packaged Node process
 
 `node scripts/prepare-native-runtime.mjs` installs the separate locked dependency graph, copies the build host's Node executable and packages the runtime. Generated files are ignored under `src-tauri/native-runtime`; dependency versions remain in the checked-in lockfile. The local tested bundle is macOS arm64. Cross-architecture packaging and signed release distribution need their own platform validation; a successful local app is not evidence for Windows/Linux/mobile release support. The bundled runtime adds approximately 137 MiB before app packaging in this environment.
 
-Each runtime limits native endpoints to eight per adapter and two admitted channels per endpoint. Iroh descriptors keep at most eight addresses, prioritizing IPv4 so temporary IPv6 addresses cannot displace every LAN route. Startup/dial timeouts surface failure. A lost native runtime closes its channels and is removed from runtime availability; explicit retry remains necessary for uncertain messages.
+Each runtime limits native endpoints to eight per adapter and two admitted channels per endpoint. Iroh descriptors keep at most eight addresses, prioritizing IPv4 so temporary IPv6 addresses cannot displace every LAN route. Startup/dial timeouts surface failure. A lost native runtime closes its channels and is removed from runtime availability; uncertain messages are queued and sent again once a channel is back ([automatic resend](PAIRED-CHAT-INCREMENT.md#automatic-resend)).
 
 ## Reproducible validation
 

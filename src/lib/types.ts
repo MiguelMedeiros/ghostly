@@ -23,7 +23,7 @@ export interface ChatFile {
 
 export interface ChatMessage {
   /** `held`: waiting in this device's storage for the contact to come back (WISP 4xx). */
-  delivery?: "sending" | "sent" | "held" | "delivered" | "failed";
+  delivery?: "sending" | "sent" | "queued" | "held" | "delivered" | "failed";
   deliveryError?: string;
   id: string;
   text: string;

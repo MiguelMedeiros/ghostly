@@ -126,6 +126,23 @@ describe("paired chat messages from the peer", () => {
     expect(onMessageReceipt).toHaveBeenCalledOnce();
   });
 
+  it("acknowledges a resent id again, so a sender whose receipt was lost settles it without a second message", async () => {
+    const onMessageReceipt = vi.fn();
+    const t = linkedPair([{ events: { onMessageReceipt } }, {}]);
+    await t.ready();
+    const send = vi.spyOn(t.cb, "send");
+    const id = newId();
+    // The first copy arrived; its receipt is lost with the old session. The resend carries the same id.
+    t.toB({ t: "paired-message", id, ts: 7, m: "once" });
+    await t.settle("b");
+    expect(await t.a.sendMessage("once", 7, id)).toBeNull();
+    await vi.waitFor(() => expect(onMessageReceipt).toHaveBeenCalledWith(id));
+    const receipts = sentFrames(send).filter(f => f.t === "paired-received" && f.id === id);
+    expect(receipts).toHaveLength(2);
+    // Both copies reach the engine under one id, which its storage keeps once (pairedStorage.test.ts).
+    expect(t.onMessageB.mock.calls.filter(([m]) => m.id === id).map(([m]) => m.text)).toEqual(["once", "once"]);
+  });
+
   it("drops messages with a malformed id, text or timestamp and sends no receipt for them", async () => {
     const t = linkedPair();
     await t.ready();
