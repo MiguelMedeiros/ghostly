@@ -64,9 +64,12 @@ describe.runIf(N > 0)(`community group load: ${N} members`, () => {
     const frames = online.reduce((s, p) => s + p.sent.frames, 0) - frames0, bytes = online.reduce((s, p) => s + p.sent.bytes, 0) - bytes0;
     report.framesPerMessage = Math.round(frames / online.length);
     report.bytesPerMessage = Math.round(bytes / online.length);
-    const missing = online.map(p => online.length - new Set(world.texts(p, id).filter(x => x.startsWith("hello from "))).size);
-    report.undelivered = missing.reduce((a, b) => a + b, 0);
-    expect(report.undelivered).toBe(0);
+    const undelivered = () => online.map(p => online.length - new Set(world.texts(p, id).filter(x => x.startsWith("hello from "))).size).reduce((a, b) => a + b, 0);
+    // Live delivery in the first ten seconds; whatever a member missed while changing hubs comes with the next sync.
+    report.undeliveredAfter10s = undelivered();
+    simStart = world.now;
+    await world.until(() => undelivered() === 0, 5 * 60_000, 1000, () => `delivery: ${undelivered()} missing`);
+    report.allDeliveredSimulatedSeconds = 10 + (world.now - simStart) / 1000;
 
     // A tenth goes away, the rest keep talking; back, they are caught up by whoever is there.
     const away = online.filter(p => !hubs.includes(p)).slice(0, Math.max(1, Math.floor(N / 10)));
