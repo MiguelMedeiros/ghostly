@@ -94,7 +94,7 @@ Every member keeps the last 256 frames of the group, from everyone (at most 1 Mi
 
 ## Admission through the link
 
-The joiner does what it does in the mesh: a member key, knocks, an entry session toward the entry key. Knocks are spread over four records (`<group id>.<n>` in place of the group id in the knock identity's derivation, `n` the first byte of the joiner's key modulo 4), so a crowd opening the link at once is not six at a time; a hub reads one of them every 1.25 seconds, in turn. Every member holds the entry key's seed (sealed in the welcome), so any member can answer, but never two at once: an entry session derives from the entry key and the joiner's key, the same for every hub, and two hubs answering one joiner collide on it and neither gets through. The hubs **at the door** are those that republished in the last 45 seconds and have been hubs for a minute (all of them, when none has), so that every hub, having read the beacon since, agrees on the set; the **door** is the lowest-keyed of them. Each attempt belongs to one hub, in turns of two minutes counted from when a hub first saw the knock with the current set of hubs at the door (when the set changes, say because the door's app closed, the count starts again and the new door answers at once): the door first, then the other hubs at the door, in the order they rank for this joiner (highest `SHA-256(knock key ‖ hub key)` first), round again. A hub opens a session only in the first 20 seconds of its turn, gives up on one nobody answered after 90 (a paired session over Pkarr can take the better part of a minute to come up), and after its first turn answers only a joiner still knocking. Over the entry session: `group-invite`, `group-accept`, then the welcome, in pieces when the chain is long:
+The joiner does what it does in the mesh: a member key, knocks, an entry session toward the entry key. Knocks are spread over four records (`<group id>.<n>` in place of the group id in the knock identity's derivation, `n` the first byte of the joiner's key modulo 4), so a crowd opening the link at once is not six at a time; a hub reads one of them every 1.25 seconds, in turn. Every member holds the entry key's seed (sealed in the welcome), so any member can answer, but never two at once: an entry session derives from the entry key and the joiner's key, the same for every hub, and two hubs answering one joiner collide on it and neither gets through. The hubs **at the door** are those that republished in the last 45 seconds and have been hubs for a minute (all of them, when none has), so that every hub, having read the beacon since, agrees on the set; the **door** is the lowest-keyed of them. Each attempt belongs to one hub, in turns of two minutes counted from when a hub first saw the knock with the current set of hubs at the door (when the set changes, say because the door's app closed, the count starts again and the new door answers at once, but only a joiner whose knock was refreshed in the last fifteen seconds, since the former door may still be letting it in; a joiner stops knocking as soon as it sees a member's side of its entry session): the door first, then the other hubs at the door, in the order they rank for this joiner (highest `SHA-256(knock key ‖ hub key)` first), round again. A hub opens a session only in the first 20 seconds of its turn, gives up on one nobody answered after 90 (a paired session over Pkarr can take the better part of a minute to come up), and after its first turn answers only a joiner still knocking. Over the entry session: `group-invite`, `group-accept`, then the welcome, in pieces when the chain is long:
 
 ```
 { "t": "group-welcome", "v": 2, "g", "name", "commits": [ … ], "secrets": [ { "e", "s" } ], "rv": <sealed rendezvous secret>, "entry": <sealed entry seed> }
@@ -131,18 +131,18 @@ A member leaves by sending `{ "t": "group-leave", "v": 2, "g", "s", "ls" }` to i
 
 | | 128 members | 256 members |
 |---|---|---|
-| Admission of everyone through the link, in waves of 16, the admin's app closed after the first | 300 s simulated | 452 s simulated (about 34 a minute) |
-| Everyone on one roster afterwards | 23 s | 47 s |
+| Admission of everyone through the link, in waves of 16, the admin's app closed after the first | 96 s simulated | 742 s simulated (about 21 a minute; 452 to 1248 s over four runs) |
+| Everyone on one roster afterwards | 24 s | 10 s |
 | Admissions that lost a race | 0 | 0 |
-| Hubs; edges per hub (most, mean); edges per member | 3; 50, 43; 1 | 6; 53, 47; 1 |
-| A message from every member to every member: frames sent per message (all peers) | 128 | 274 (1.07 per member) |
-| … bytes sent per message (all peers) | 49 KB | 105 KB (about 410 bytes per member) |
-| … messages not delivered | 0 | 0 |
+| Hubs; edges per hub (most, mean); edges per member | 3; 50, 43; 1 | 8; 55, 38; 1 |
+| A message from every member to every member: frames sent per message (all peers, periodic syncs included) | 130 | 299 (1.17 per member) |
+| … bytes sent per message (all peers) | 59 KB | 126 KB (about 490 bytes per member) |
+| … messages not delivered within 10 s | 0 | 0 |
 | A tenth away while twenty others speak, caught up on return | 1 s | 1 s |
 | A removal: a fresh secret sealed to everyone else and relayed; everyone can send again | 1 s simulated | 1 s simulated |
-| Memory of all engines together | 181 MiB | 455 MiB |
+| Memory of all engines together | 259 MiB | 511 MiB |
 
-This measures the protocol, the topology rules and the cryptography at the cap. It does not measure what only real networks show: WebRTC between hundreds of browsers (the e2e has six), a browser holding the fifty-odd peer connections of a busy hub, public Pkarr relays' rate limits (the 256-member run made 15 253 Pkarr reads and writes in total), or an entry session over the public relays, which on the loaded test machine took from 5 to 80 seconds to come up. The cap is therefore a measured bound for the protocol and a stated one for the network.
+This measures the protocol, the topology rules and the cryptography at the cap. It does not measure what only real networks show: WebRTC between hundreds of browsers (the e2e has six), a browser holding the fifty-odd peer connections of a busy hub, public Pkarr relays' rate limits (the 256-member run made 18 035 Pkarr reads and writes in total), or an entry session over the public relays, which on the loaded test machine took from 5 to 80 seconds to come up. The cap is therefore a measured bound for the protocol and a stated one for the network.
 
 ## Open decisions
 

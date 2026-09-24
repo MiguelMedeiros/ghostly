@@ -81,7 +81,7 @@ interface Live {
   lastKnockPoll: number;
   /** Joiners with an entry session open: key → since; knocks first seen: key → when, and with which hubs at the door. */
   pendingEntries: Map<string, number>;
-  knocksSeen: Map<string, { first: number; doors: string }>;
+  knocksSeen: Map<string, { first: number; doors: string; changed?: boolean }>;
   knockShard?: number;
   /** As a member: when I started waiting for each hub, and hubs that did not take me (until when). */
   hubWaits: Map<string, number>;
@@ -273,7 +273,8 @@ export class Communities {
       const live = this.live.get(group.id);
       if (group.joining && (!live || live.session.status === "lost")) {
         const waited = now - group.joining.since, every = waited > this.timings.patienceMs ? this.timings.slowKnockMs : this.timings.knockMs;
-        if (!this.host.linkReady(group.joining.linkId, 2) && now - (this.lastKnock.get(group.id) ?? 0) >= every) await this.knock(group, now).catch(() => {});
+        // Knocking stops as soon as a member's side of the entry session is seen, before it is up: that one is answering.
+        if (!this.host.linkReady(group.joining.linkId, 2) && !this.host.linkSeen?.(group.joining.linkId) && now - (this.lastKnock.get(group.id) ?? 0) >= every) await this.knock(group, now).catch(() => {});
         if (!live) continue;
       }
       if (!live) continue;
@@ -474,8 +475,12 @@ export class Communities {
       // Turns count from when this knock was first seen with the current set of hubs at the door: when
       // that set changes (the door's app closed), the new door answers at once instead of waiting a turn.
       const doorSig = [...hubs].sort().join(","), seen = live.knocksSeen.get(key);
-      const first = seen && seen.doors === doorSig ? seen.first : now;
-      live.knocksSeen.set(key, { first, doors: doorSig });
+      const changed = !!seen && seen.doors !== doorSig;
+      const first = seen && !changed ? seen.first : now;
+      live.knocksSeen.set(key, { first, doors: doorSig, changed: changed || !!seen?.changed });
+      // After a change of doors, the hub that was the door may still be letting this joiner in: only a
+      // joiner still knocking (it stops once it sees a member's side) is answered again.
+      if (live.knocksSeen.get(key)!.changed && now - ts > 15_000) continue;
       // One door: the hub with the lowest key answers, so admissions are one after the other and
       // rarely race. Two hubs answering one joiner at once would collide on the same entry session
       // (it derives from the link's entry key and the joiner's key, the same for every hub) and
