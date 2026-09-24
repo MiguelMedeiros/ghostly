@@ -21,6 +21,11 @@ and a new card or panel holds together at every width for free.
 `wallet/ui.tsx` re-exports `Section`, `Row` and `Block`, and keeps the controls (`Button`, `Switch`,
 `Segmented` — `compact` for a header —, `Amount`, `Address`, `input`).
 
+A choice among several options is `Select` (`ui/Select.tsx`; `fit` in a `Row`, `size="sm"` in a chat bubble), never a
+native `<select>` (lint refuses one): options take a `description` (a second, dimmer line) and an `icon`, and the list
+clears dialogs and fits a phone. Tests drive it with `choose()` / `optionsOf()` (`src/test/select.ts`,
+`e2e/support/select.ts`), and read its value from `data-value`.
+
 Rules of thumb:
 
 - A flex child that holds text gets `min-w-0`; amounts, buttons and badges get `shrink-0` /
