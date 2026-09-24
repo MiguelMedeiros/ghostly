@@ -194,7 +194,8 @@ so every scenario is also a mixed pair. A block whose infrastructure is not up i
 scenario goes on; the report lists what was skipped. In the HTML report (`playwright-report-matrix/`) every scenario
 is tagged `@<dimension>:<value>` (`@clients:web-extension` for the pair): filter by one to see every scenario with it.
 
-The matrix runs every night with the ephemeral environment (`e2e-full.yml`), not on pull requests. It serves its own
+The matrix runs every night with the ephemeral environment (`e2e-full.yml`: four shards, then one report with the
+matrix in the run's summary), not on pull requests. It serves its own
 build on port 47300 (`MATRIX_WEB_PORT`), and its test domain uses 47320-47399.
 
 ## When they run

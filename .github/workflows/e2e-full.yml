@@ -75,3 +75,107 @@ jobs:
             playwright-report
             test-results
           retention-days: 14
+
+  # The combination matrix (e2e/matrix/): every pair of clients, transport, delivery, wallet, rail, proof, group,
+  # profile, language and screen, as whole stories between two people, on the same environment. Four shards,
+  # each with its own copy of the environment; the report job merges them into one HTML report and puts the
+  # matrix (combination → result) in the run's summary. A scenario whose block needs something the environment
+  # does not have is reported as partial, not failed.
+  matrix:
+    name: Combination matrix (${{ matrix.shard }}/4)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'dev' || github.ref }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Pull the environment's images
+        run: |
+          for attempt in 1 2 3; do
+            docker compose -p ghostly-e2e -f e2e/infra/docker-compose.yml pull --quiet && exit 0
+            echo "pull failed (attempt $attempt), retrying"; sleep 15
+          done
+          exit 1
+
+      - name: Start the environment
+        run: npm run e2e:infra:up
+
+      - name: Run shard ${{ matrix.shard }} of the matrix
+        env:
+          MATRIX_WORKERS: "2"
+        run: npm run e2e:matrix -- --shard ${{ matrix.shard }}/4
+
+      - name: Stop the environment
+        if: ${{ always() }}
+        run: npm run e2e:infra:down
+
+      - name: Upload the shard's results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: matrix-blob-${{ matrix.shard }}
+          path: blob-report-matrix
+          retention-days: 3
+
+  matrix-report:
+    name: Combination matrix report
+    needs: matrix
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'dev' || github.ref }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download the shards' results
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: matrix-blob-*
+          path: blob-report-matrix
+          merge-multiple: true
+
+      # The config's reporters, once over every shard: the HTML report and the matrix summary (reporter.ts).
+      - name: Merge the report
+        run: npx playwright merge-reports -c e2e/playwright.matrix.config.ts blob-report-matrix
+
+      - name: Upload the report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report-matrix
+          path: |
+            playwright-report-matrix
+            test-results/matrix-summary
+          retention-days: 14
