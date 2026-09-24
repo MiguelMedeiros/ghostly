@@ -225,7 +225,7 @@ export function GroupChat() {
 
       {!joiningByLink && <MessageInput draftId={`group:${groupId}`} key={groupId} onSend={send} disabled={!group.canSend} maxLength={16_384}
         fileUnavailable="Files are not part of groups yet"
-        paymentsUnavailable={group.profile === "community" ? "Payments are not part of community groups yet" : others.length === 0 ? "Nobody else is in the group yet" : undefined}
+        paymentsUnavailable={others.length === 0 ? "Nobody else is in the group yet" : undefined}
         paymentComposer={close => <GroupPaymentComposer group={group} onClose={close} />} />}
 
       {showMembers && <GroupMembersDialog group={group} onClose={() => setShowMembers(false)} />}

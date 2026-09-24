@@ -1,5 +1,6 @@
-import { useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
+import { pairLinkId } from "@ghostly/browser/shared/payLinks";
 import type { GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { useOutsideDismiss } from "../hooks/useDismiss";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
@@ -16,7 +17,8 @@ const message = (e: unknown) => e instanceof Error ? e.message : String(e);
 /**
  * ⚡ in a group (WISP 9xx § Payments): first whom — one member, or the whole group for a request anyone may pay
  * once — then the chat's own cards, review and approval. With one member everything goes over the edge to them,
- * exactly as in a chat; the group sees what happens as a note.
+ * exactly as in a chat; in a community, through the group, sealed to them (hubs pass it on unread, and a member who
+ * is away gets it on return). The group sees what happens as a note.
  */
 export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onClose(): void }) {
   const state = useSyncExternalStore(subscribe, snapshot);
@@ -25,10 +27,17 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
   const ref = useRef<HTMLDivElement>(null);
   useOutsideDismiss(ref, to === null, onClose);
   const others = group.members.filter(m => !m.me);
-  const linkOf = (m: GroupMemberView): LinkView | undefined => m.edge ? state?.edges?.find(l => l.id === m.edge!.linkId) : undefined;
+  const community = group.profile === "community";
+  // A community member is reached through the group: a link the engine lists once their ways of paying are known.
+  const linkIdOf = (m: GroupMemberView) => community ? pairLinkId(group.id, m.key) : m.edge?.linkId;
+  const linkOf = (m: GroupMemberView): LinkView | undefined => { const id = linkIdOf(m); return id ? state?.edges?.find(l => l.id === id) : undefined; };
+  // Their app is asked what it takes, so the cards say what the two of you share.
+  useEffect(() => { if (community && to && to !== EVERYONE) void engine.call("groupPaymentHello", { groupId: group.id, member: to }).catch(() => {}); }, [community, group.id, to]);
   /** Why this member cannot be paid right now, if they cannot. */
   const why = (m: GroupMemberView): string | undefined => {
     const link = linkOf(m);
+    // Through the group it goes now or when they are back; only a member who said it takes nothing cannot be paid.
+    if (community) return link?.capabilities && !link.capabilities.payments ? "They take no way of paying you allow" : undefined;
     if (!link || m.edge?.state !== "open") return "Not reachable right now";
     if (!link.capabilities?.payments) return "Their app takes no payments in groups (it needs an update), or they turned every way off";
     return undefined;
@@ -48,7 +57,8 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
     }} />;
 
   const member = to ? others.find(m => m.key === to) : undefined;
-  const link = member && linkOf(member);
+  const found = member && linkOf(member);
+  const link = found ?? (member && community ? { id: pairLinkId(group.id, member.key), peerPubKeyZ32: member.key } : undefined);
   if (member && link) return <PaymentComposer balance={balance} contact={memberName(member)} onBack={() => setTo(null)} onClose={onClose}
     reviewContext={wallet ? { wallet, peer: link.peerPubKeyZ32, linkId: link.id } : undefined}
     onSend={async (amount, memo) => {
@@ -66,7 +76,9 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
     <div ref={ref} data-testid="group-pay-recipients" onKeyDown={e => e.key === "Escape" && onClose()}
       className="sheet sheet-padded absolute bottom-full left-0 mb-2 z-50 animate-fade-in w-[360px] max-w-[calc(100vw-1.5rem)] max-md:max-w-none bg-panel-header border border-border rounded-2xl shadow-2xl p-3">
       <p className="m-0 px-1 text-sm font-semibold text-text-primary">Pay or request</p>
-      <p className="m-0 px-1 text-xs text-text-muted">The payment goes only between the two of you; everyone in the group sees who paid whom and how much.</p>
+      <p className="m-0 px-1 text-xs text-text-muted">{community
+        ? "The payment is sealed to the two of you: the group passes it on without reading it, and someone away gets it when they are back. Everyone sees who paid whom and how much."
+        : "The payment goes only between the two of you; everyone in the group sees who paid whom and how much."}</p>
       <ul className="mt-2 max-h-72 space-y-1 overflow-y-auto">
         {others.map(m => {
           const reason = why(m);

@@ -1,4 +1,4 @@
-import { expect, test, type Peer } from "../support/fixtures";
+import { expect, openProfilePage, test, type Peer } from "../support/fixtures";
 
 /**
  * A group's picture (WISP 9xx § Metadata) between three browsers that never pair: the admin sets it
@@ -10,7 +10,7 @@ const headerPicture = (peer: Peer) => peer.page.getByTestId("group-avatar");
 const rowPicture = (peer: Peer) => peer.page.getByTestId("group-row").getByTestId("group-row-avatar");
 
 async function setName(peer: Peer, name: string): Promise<void> {
-  await peer.page.getByTestId("account-profile").click();
+  await openProfilePage(peer.page);
   await peer.page.getByTestId("account-nickname").fill(name);
   await expect(peer.page.getByTestId("account-nickname")).toHaveValue(name);
   await peer.page.goBack();

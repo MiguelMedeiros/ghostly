@@ -46,7 +46,8 @@ export class CommunityWorld {
 
   constructor(private readonly timings: CommunityTimings = { ...COMMUNITY_TIMINGS, hubJitterMs: 0 }) {}
 
-  add(name: string): Peer {
+  /** `extra`: more of the host, for what a test runs on top of the groups (payments). */
+  add(name: string, extra?: (peer: Peer) => Partial<GroupsHost>): Peer {
     const links = new Map<string, Edge>();
     const messages: StoredMessage[] = [];
     const peer: Peer = { name, groups: null as unknown as Groups, store: memoryStore(messages), messages, links, online: true, nick: name, sent: { frames: 0, bytes: 0 } };
@@ -82,6 +83,7 @@ export class CommunityWorld {
       storeMessage: async message => { if (!messages.some(m => m.id === message.id)) messages.push(message); },
       emit: () => {},
       myNick: () => peer.nick,
+      ...extra?.(peer),
     };
     peer.groups = new Groups(host, peer.store, undefined, this.timings);
     this.peers.set(name, peer);
@@ -123,7 +125,12 @@ export class CommunityWorld {
     for (let i = 0; i < 500; i++) {
       this.announce();
       const batch = this.pending.splice(0);
-      if (!batch.length) break;
+      if (!batch.length) {
+        // What the engines handed on (payments) may send more.
+        await Promise.all([...this.peers.values()].map(p => p.groups.communityIdle()));
+        if (!this.pending.length) break;
+        continue;
+      }
       await Promise.allSettled(batch);
     }
   }

@@ -63,6 +63,37 @@ function sealKey(shared: Uint8Array, ephemeralPublic: Uint8Array, recipientZ32: 
   return hkdf(sha256, shared, ephemeralPublic, concatBytes(info("seal"), utf8Encode(recipientZ32)), 32);
 }
 
+/**
+ * Something for one member only, from another, inside a frame the whole group carries (`group-community/1`
+ * pair payloads: payments between two members relayed by hubs). The key mixes an ephemeral X25519 exchange
+ * against the recipient's member key with the static exchange between sender and recipient: only the
+ * recipient can open it, only the sender (or the recipient) can have made it, and a later leak of the
+ * sender's seed alone opens nothing. The associated data binds it to the frame that carries it.
+ */
+export function sealPair(senderSeed: Uint8Array, senderZ32: string, recipientZ32: string, plaintext: Uint8Array, aad: string): SealedSecret {
+  const ephemeral = x25519.utils.randomSecretKey();
+  const ephemeralPublic = x25519.getPublicKey(ephemeral);
+  const recipient = ed25519.utils.toMontgomery(publicKeyFromZ32(recipientZ32));
+  const key = pairKey(x25519.getSharedSecret(ephemeral, recipient), x25519.getSharedSecret(ed25519.utils.toMontgomerySecret(senderSeed), recipient), ephemeralPublic, senderZ32, recipientZ32);
+  const nonce = randomBytes(NONCE_LENGTH);
+  return { e: toBase64Url(ephemeralPublic), n: toBase64Url(nonce), c: toBase64Url(xchacha20poly1305(key, nonce, utf8Encode(aad)).encrypt(plaintext)) };
+}
+
+/** Null unless `senderZ32` sealed it to this seed with this associated data. */
+export function openPair(mySeed: Uint8Array, myZ32: string, senderZ32: string, sealed: SealedSecret, aad: string): Uint8Array | null {
+  try {
+    const ephemeralPublic = fromBase64Url(sealed.e), nonce = fromBase64Url(sealed.n);
+    if (ephemeralPublic.length !== 32 || nonce.length !== NONCE_LENGTH) return null;
+    const mine = ed25519.utils.toMontgomerySecret(mySeed);
+    const key = pairKey(x25519.getSharedSecret(mine, ephemeralPublic), x25519.getSharedSecret(mine, ed25519.utils.toMontgomery(publicKeyFromZ32(senderZ32))), ephemeralPublic, senderZ32, myZ32);
+    return xchacha20poly1305(key, nonce, utf8Encode(aad)).decrypt(fromBase64Url(sealed.c));
+  } catch { return null; }
+}
+
+function pairKey(ephemeralShared: Uint8Array, staticShared: Uint8Array, ephemeralPublic: Uint8Array, senderZ32: string, recipientZ32: string): Uint8Array {
+  return hkdf(sha256, concatBytes(ephemeralShared, staticShared), ephemeralPublic, concatBytes(utf8Encode("ghostly-group/2 pair"), utf8Encode(senderZ32), utf8Encode(recipientZ32)), 32);
+}
+
 /** Text under the epoch message key, bound to its header. */
 export function encryptText(messageKey: Uint8Array, aad: string, text: string): { n: string; c: string } {
   const nonce = randomBytes(NONCE_LENGTH);

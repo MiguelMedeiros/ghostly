@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { COMMUNITY_TOPOLOGY } from "@ghostly/core";
 import { CommunityWorld, type Peer } from "./communityWorld";
-// covers: groups.protocol.community-topology
+// covers: groups.protocol.community-topology, groups.protocol.community-pair
 
 /**
  * Load test of `group-community/1` on headless engines (the real `Groups`/`Communities`/
@@ -13,7 +13,8 @@ import { CommunityWorld, type Peer } from "./communityWorld";
  * It measures what the profile's member cap rests on: admission of everyone through the link in
  * waves, with the admin gone after the first ones; hub election and edges per peer; delivery of a
  * message from every member to every member, with frames and bytes per message; catch-up of a
- * tenth of the group that was away; a removal re-keying everyone else. Numbers go to stdout as JSON.
+ * tenth of the group that was away; payloads sealed to one member (payments) through the hubs, to
+ * members there and away; a removal re-keying everyone else. Numbers go to stdout as JSON.
  */
 const N = Number(process.env.GROUP_LOAD ?? 0);
 const WAVE = 16;
@@ -23,7 +24,10 @@ describe.runIf(N > 0)(`community group load: ${N} members`, () => {
     const report: Record<string, unknown> = { members: N };
     const wall = () => performance.now();
     const world = new CommunityWorld();
-    const admin = world.add("admin");
+    // Pair payloads (payments) each peer opened: from whom, what.
+    const opened = new Map<string, { sender: string; payload: Record<string, unknown> }[]>();
+    const add = (name: string) => world.add(name, () => ({ communityPair: (_g, sender, payload) => { opened.set(name, [...(opened.get(name) ?? []), { sender, payload }]); } }));
+    const admin = add("admin");
     const id = await admin.groups.create("Load");
     const link = await admin.groups.enableLink(id);
     const peers: Peer[] = [admin];
@@ -31,7 +35,7 @@ describe.runIf(N > 0)(`community group load: ${N} members`, () => {
     // Admission through the link, in waves; the admin closes its app after the first wave.
     let t = wall(), simStart = world.now;
     for (let i = 1; i < N; i += WAVE) {
-      const wave = Array.from({ length: Math.min(WAVE, N - i) }, (_, j) => world.add(`p${i + j}`));
+      const wave = Array.from({ length: Math.min(WAVE, N - i) }, (_, j) => add(`p${i + j}`));
       for (const p of wave) await p.groups.joinByLink(link);
       await world.until(() => wave.every(p => world.member(p, id)), 15 * 60_000, 1000, () => `wave ${i}: ${wave.filter(p => !world.member(p, id)).map(p => p.name).join(",")}`);
       peers.push(...wave);
@@ -82,6 +86,30 @@ describe.runIf(N > 0)(`community group load: ${N} members`, () => {
     await world.until(() => away.every(p => talking.every(q => world.texts(p, id).includes(`while away ${q.name}`))), 5 * 60_000, 1000,
       () => `catch-up: ${away.filter(p => !talking.every(q => world.texts(p, id).includes(`while away ${q.name}`))).map(p => `${p.name} has ${talking.filter(q => world.texts(p, id).includes(`while away ${q.name}`)).length}/${talking.length} ${JSON.stringify(world.view(p, id)?.community)}`).slice(0, 5).join("; ")}`);
     report.catchUpSimulatedSeconds = (world.now - simStart) / 1000;
+
+    // Payloads sealed to one member (what payments ride on), between members that are not hubs: through the
+    // hubs, opened by their recipient only; then to members who are away, caught up on return.
+    const plain = online.filter(p => p.online && !hubs.includes(p));
+    const pairs = Array.from({ length: Math.min(32, Math.floor(plain.length / 2)) }, (_, i) => [plain[2 * i], plain[2 * i + 1]] as const);
+    const keyOf = (p: Peer) => world.view(p, id)!.myKey!;
+    const got = (p: Peer, n: number) => (opened.get(p.name) ?? []).some(o => o.payload.n === n);
+    const pf0 = online.reduce((s, p) => s + p.sent.frames, 0), pb0 = online.reduce((s, p) => s + p.sent.bytes, 0);
+    simStart = world.now;
+    for (const [i, [from, to]] of pairs.entries()) await from.groups.sendCommunityPair(id, keyOf(to), { n: i, token: `sealed-${i}` });
+    await world.until(() => pairs.every(([, to], i) => got(to, i)), 5 * 60_000, 1000, () => `pairs: ${pairs.filter(([, to], i) => !got(to, i)).length} missing`);
+    report.pairDeliveredSimulatedSeconds = (world.now - simStart) / 1000;
+    report.pairFramesPerPayload = Math.round((online.reduce((s, p) => s + p.sent.frames, 0) - pf0) / Math.max(1, pairs.length));
+    report.pairBytesPerPayload = Math.round((online.reduce((s, p) => s + p.sent.bytes, 0) - pb0) / Math.max(1, pairs.length));
+    // Nobody but the recipient opened any of them.
+    for (const p of online) for (const o of opened.get(p.name) ?? []) expect(pairs[o.payload.n as number]?.[1]).toBe(p);
+    const absent = pairs.slice(0, 5).map(([, to]) => to);
+    for (const p of absent) p.online = false;
+    for (const [i, [from, to]] of pairs.slice(0, 5).entries()) await from.groups.sendCommunityPair(id, keyOf(to), { n: 1000 + i });
+    await world.run(5_000);
+    for (const p of absent) p.online = true;
+    simStart = world.now;
+    await world.until(() => absent.every((p, i) => got(p, 1000 + i)), 5 * 60_000, 1000, () => `pairs away: ${absent.filter((p, i) => !got(p, 1000 + i)).length} missing`);
+    report.pairAwayCatchUpSimulatedSeconds = (world.now - simStart) / 1000;
 
     // The admin returns and removes someone: a fresh secret sealed to everyone else, relayed by the hubs.
     admin.online = true;

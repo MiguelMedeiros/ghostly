@@ -42,6 +42,10 @@ export interface GroupsHost {
   emit(): void;
   /** My name, for community groups, where it travels (encrypted) with my messages. */
   myNick?(): string | undefined;
+  /** An application frame a member of a community sent the group (a note about a payment, a request to everyone). */
+  communityApp?(groupId: string, sender: string, frame: Record<string, unknown>): Promise<void> | void;
+  /** A payload a member of a community sealed to me (a payment between the two of us). */
+  communityPair?(groupId: string, sender: string, payload: Record<string, unknown>): Promise<void> | void;
 }
 
 /** Where groups and their history are kept: the engine's database, or a test's memory. */
@@ -155,6 +159,13 @@ export class Groups {
   messages(groupId: string): Promise<StoredMessage[]> { return this.store.getMessages(MESSAGE_LINK(groupId)); }
 
   private isCommunity(groupId: string): boolean { return this.communities.has(groupId); }
+  /** A community group (`group-community/1`) rather than a private one. */
+  isCommunityGroup(groupId: string): boolean { return this.isCommunity(groupId); }
+  /** Through a community group: an application frame to everyone, or a payload sealed to one member. */
+  sendCommunityApp(groupId: string, frame: Record<string, unknown>): Promise<void> { return this.communities.sendApp(groupId, frame); }
+  sendCommunityPair(groupId: string, to: string, payload: Record<string, unknown>): Promise<void> { return this.communities.sendPair(groupId, to, payload); }
+  /** Resolves once the community frames received so far were handed to the engine (tests). */
+  communityIdle(): Promise<void> { return this.communities.idle(); }
 
   // -- what the person does ------------------------------------------------
 
