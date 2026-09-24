@@ -425,7 +425,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn closing_tells_the_other_end_and_a_reconnect_is_a_new_handshake() {
         let app = app();
-        let (alice, _, alice_seen) = start(&app, 4).await;
+        let (alice, _, _) = start(&app, 4).await;
         let (_, bob_address, bob_seen) = start(&app, 5).await;
         let first = connect(&app, alice, &bob_address).await.unwrap();
         let first_binding = event(&bob_seen, kind("open")).await["binding"].clone();
@@ -450,7 +450,6 @@ mod tests {
         assert_ne!(reopened["binding"]["context"], first_binding["context"]);
         paired_native_send(app.state(), second, "again".into()).unwrap();
         event(&bob_seen, |e| e["text"] == "again").await;
-        drop(alice_seen);
     }
 
     #[tokio::test(flavor = "multi_thread")]
