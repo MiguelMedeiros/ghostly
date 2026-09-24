@@ -1,6 +1,8 @@
 //! The `ghostly-cli` binary: its arguments, its JSON, its exit codes. Only the
 //! commands that never touch the network.
 
+// covers: cli.identity, cli.invite, cli.send
+
 use std::io::Write;
 use std::process::{Command, Output, Stdio};
 

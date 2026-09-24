@@ -97,6 +97,7 @@ pub async fn fetch(
 /// Only this machine, never a redirect, never more than the limit.
 #[cfg(test)]
 mod tests {
+    // covers: desktop.local-fetch
     use super::*;
     use crate::test_support::{closed_port, read_request, respond, tokio_listener, Requests};
     use tokio::io::AsyncWriteExt;

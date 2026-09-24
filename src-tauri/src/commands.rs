@@ -298,6 +298,7 @@ mod project_link_tests {
 
 #[cfg(test)]
 mod tests {
+    // covers: desktop.crypto, desktop.payment-links, app.project-links, chat.dht.delivery
     use super::*;
     use crate::test_support::{pkarr_client, pkarr_relay, Relay};
     use base64::engine::general_purpose::STANDARD;

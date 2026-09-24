@@ -1,5 +1,7 @@
 //! The library the CLI is built on, end to end against a relay held in memory.
 
+// covers: cli.identity, cli.invite, cli.send, cli.recv, chat.dht.delivery
+
 mod support;
 
 use ghostly::{

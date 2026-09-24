@@ -258,6 +258,7 @@ pub fn paired_hyperdht_stop(state: State<'_, HyperState>, endpoint_id: u64) {
 /// runtime itself (Node and sidecar.mjs) is played by a queue here.
 #[cfg(test)]
 mod tests {
+    // covers: transport.hyperdht, transport.native-pool
     use super::*;
     use tauri::test::{mock_builder, MockRuntime};
 

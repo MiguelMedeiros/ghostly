@@ -284,6 +284,7 @@ pub async fn paired_iroh_stop(
 /// the bridge's own bookkeeping.
 #[cfg(test)]
 mod tests {
+    // covers: transport.iroh, transport.native-pool
     use super::*;
     use serde_json::Value;
     use tauri::ipc::InvokeResponseBody;
