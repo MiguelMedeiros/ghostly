@@ -9,6 +9,8 @@ import { groupView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { LANGUAGES, SECTIONS, lookup } from "./locales";
 
+// covers: app.i18n
+
 /** Something like `chat.deleteMessage` or `common.cancel`: what `t()` shows for a key its locale lacks. */
 const RAW_KEY = new RegExp(`\\b(?:${SECTIONS.join("|")})(?:\\.[a-zA-Z]+)+\\b`, "g");
 

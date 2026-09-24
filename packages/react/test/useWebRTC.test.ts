@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakePeerConnection, installWebRTCFakes, remote, type FakeMediaDevices } from "./fakes";
 import { renderCall, settle } from "./harness";
 
+// covers: calls.audio, calls.video, calls.cancel, calls.decline, calls.screen-share, calls.upgrade
+
 let devices: FakeMediaDevices;
 let uninstall: () => void;
 

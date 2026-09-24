@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakePeerConnection, installWebRTCFakes, remote, type FakeMediaDevices } from "./fakes";
 import { renderCall, settle } from "./harness";
 
+// covers: calls.cancel
+
 /**
  * Unmounting cancels a call attempt still waiting for the microphone or for ICE, as a hang-up does. Before, the
  * unmount cleanup only stopped the tracks and closed the connection it had then: when the prompt answered

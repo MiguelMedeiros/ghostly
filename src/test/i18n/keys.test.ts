@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { LANGUAGES, LOCALES, flatten, literalKeys, lookup } from "./locales";
 
+// covers: app.i18n
+
 /**
  * `t(key)` returns the key itself when a locale lacks it, so a missing translation shows `chat.deleteMessage`
  * in the UI instead of failing anywhere. These tests are where it fails instead.
