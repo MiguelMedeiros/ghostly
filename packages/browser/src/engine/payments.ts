@@ -39,6 +39,10 @@ export interface PaymentDeskHost {
   heldPaymentMethods?(linkId: string): PaymentMethodName[] | null;
   holdRequest?(linkId: string, request: PaymentRequest, messageId: string): Promise<void>;
   onReviewedPaymentResult?(id:string):Promise<void>;
+  /** The group an edge link belongs to (WISP 9xx), for requests to a whole group. */
+  groupOf?(linkId: string): string | undefined;
+  /** The edge links of a group, to its other members, that exist. */
+  groupLinks?(groupId: string): string[];
   /** A reviewed send the contact refused, whose ecash came back: its review is closed as failed. */
   onReviewedPaymentRefused?(id:string,reason:string):Promise<void>;
 }
@@ -147,7 +151,8 @@ export class PaymentDesk {
     return { paymentId };
   }
 
-  async request(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | AskMethod; ask?: string }): Promise<{ paymentId: string }> {
+  /** `rail`: a Cashu request carries only ecash, a Lightning one only an invoice; without it, whatever the chat allows. */
+  async request(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | AskMethod; ask?: string; rail?: "cashu" | "lightning" }): Promise<{ paymentId: string }> {
     if(params.method === "usdt")assertTokenUnits(params.amount);else assertAmount(params.amount);
     const link = this.requireLink(params.linkId);
     // A Cashu/Lightning request that can be held for an away contact needs no session; anything else does.
@@ -193,9 +198,9 @@ export class PaymentDesk {
     }
     // Each way of paying goes in only if this chat allows it on both sides. While the contact is away and the
     // request can be held for them, "both sides" is what their app allowed at the last session.
-    const ecash = held ? held.includes("cashu") && link.paymentEnabled("cashu") : link.allowsPayment("cashu");
-    const lightning = held ? held.includes("lightning") && link.paymentEnabled("lightning") : link.allowsPayment("lightning");
-    if (!ecash && !lightning) throw new Error(held ? "Your contact allowed neither Cashu nor Lightning in this chat" : "Cashu and Lightning are off in this chat");
+    const ecash = params.rail !== "lightning" && (held ? held.includes("cashu") && link.paymentEnabled("cashu") : link.allowsPayment("cashu"));
+    const lightning = params.rail !== "cashu" && (held ? held.includes("lightning") && link.paymentEnabled("lightning") : link.allowsPayment("lightning"));
+    if (!ecash && !lightning) throw new Error(params.rail ? `${params.rail === "cashu" ? "Cashu" : "Lightning"} is not allowed by both of you here` : held ? "Your contact allowed neither Cashu nor Lightning in this chat" : "Cashu and Lightning are off in this chat");
     const quote = lightning ? await this.lightning.createInvoice(params.amount, id) : undefined;
     // A request is in real sats or in test sats, never both: ecash from a test mint, worth nothing, must
     // never settle a request for real money. The primary mint says which one this wallet is using.
@@ -240,6 +245,58 @@ export class PaymentDesk {
     if (held) await this.host.holdRequest!(params.linkId, request, `me_${params.timestamp}`);
     else await link.sendPaymentRequest(request);
     return { paymentId: id };
+  }
+
+  /**
+   * A request to a whole group (WISP 9xx § Payments): one request, on one rail, sent to every member over their
+   * edge; the first payment that settles it wins. One rail only, because each enforces "once" by itself: a
+   * Lightning invoice can be paid once, and ecash is checked here before it is redeemed (a later token is refused
+   * unredeemed, so its payer takes it back). Two rails at once would let an invoice and a token both pay it.
+   */
+  async requestFromGroup(params: { groupId: string; amount: number; memo?: string; timestamp: number; rail: "cashu" | "lightning" }): Promise<{ paymentId: string }> {
+    assertAmount(params.amount);
+    if (params.rail !== "cashu" && params.rail !== "lightning") throw new Error("A request to the group is paid in Cashu or over Lightning");
+    const id = newId();
+    const memo = params.memo?.trim().slice(0, 140) || undefined;
+    const quote = params.rail === "lightning" ? await this.lightning.createInvoice(params.amount, id) : undefined;
+    const own = (await this.wallet.view()).mints.map((m) => m.url);
+    const testing = own.length > 0 && isWorthlessMint(own[0]);
+    const mints = params.rail === "cashu" ? own.filter((url) => isWorthlessMint(url) === testing) : [];
+    if (params.rail === "cashu" && !mints.length) throw new Error("Add a Cashu mint first");
+    const linkId = `group:${params.groupId}`;
+    await this.save({ id, linkId, group: params.groupId, kind: "request", direction: "out", amount: params.amount, unit: UNIT, memo, state: "pending", createdAt: params.timestamp, invoice: quote?.invoice, mints });
+    await this.host.storeMessage({ linkId, id: `me_${params.timestamp}`, text: `⚡ Requested ${params.amount.toLocaleString()} sats from the group`, sender: "me", timestamp: params.timestamp, via: "datalink", paymentId: id });
+    // Members whose edge is down get it when it opens (replay).
+    for (const edge of this.host.groupLinks?.(params.groupId) ?? []) await this.sendGroupRequest(edge, this.payments.get(id)!).catch(() => {});
+    return { paymentId: id };
+  }
+
+  /** A request to the group, on one member's edge, as long as that member takes its rail. */
+  private async sendGroupRequest(linkId: string, request: StoredPayment): Promise<void> {
+    const link = this.host.getLink(linkId);
+    if (!link?.supportsPayments) return;
+    const endpoints: [string, string][] = request.invoice
+      ? (link.allowsPayment("lightning") ? [[ENDPOINT.bolt11, request.invoice]] : [])
+      : (link.allowsPayment("cashu") && request.mints?.length ? [[ENDPOINT.cashu, cashuRequestPayload(request.mints)]] : []);
+    if (!endpoints.length) return;
+    await link.sendPaymentRequest({ id: request.id, timestamp: request.createdAt, amount: { value: String(request.amount), asset: UNIT }, memo: request.memo, endpoints });
+  }
+
+  /** This link may pay this request of ours: its own chat, or, for a request to a group, any edge of that group. */
+  private owns(request: StoredPayment, linkId: string): boolean {
+    return request.linkId === linkId || (!!request.group && this.host.groupOf?.(linkId) === request.group);
+  }
+
+  /**
+   * Why a token cannot pay a request to the group, checked before anything is redeemed: already paid, or it would
+   * not settle it (too little, a mint the request did not name). Undefined when it can.
+   */
+  private refuseForGroup(request: StoredPayment, payment: Payment): string | undefined {
+    if (request.state !== "pending") return "Already paid by another member of the group";
+    const token = this.wallet.inspect?.(payment.endpoint[1]);
+    if (token && token.kind === "token" && (token.amount < request.amount || !(request.mints ?? []).includes(token.mint)))
+      return "This ecash does not pay the request: the amount or the mint differs";
+    return undefined;
   }
 
   /** Pays a contact's request: ecash when we share a mint with funds, Lightning from any of our mints otherwise. */
@@ -292,7 +349,7 @@ export class PaymentDesk {
     const feeLimit = Math.min(Math.max(10, Math.ceil(request.amount * 0.03)), params.maxFee ?? Infinity);
     if (quote.feeReserve > feeLimit) throw new Error(`The Lightning fee (${quote.feeReserve} sats) is too high`);
     // Marked before the mint is asked to pay, so a pending payment is never paid a second time.
-    await this.save({ ...this.current(request), lightningPending: true, error: undefined });
+    await this.save({ ...this.current(request), lightningPending: true, paidHere: true, error: undefined });
     let paid: boolean;
     try {
       paid = await this.lightning.pay(quote, request.memo ?? "Paid a contact's request", request.id);
@@ -441,11 +498,14 @@ export class PaymentDesk {
   }
 
   onPayment(linkId: string, payment: Payment): Promise<void> {
-    const running = this.receiving.get(payment.id);
+    // Payments of one request to a group, from several members, one after the other: the first settles it, the
+    // others then find it paid and are refused before anything is redeemed.
+    const key = payment.requestId && this.payments.get(payment.requestId)?.group ? `request:${payment.requestId}` : payment.id;
+    const running = this.receiving.get(key);
     // Serialise even a collision from a different link, then re-check ownership.
     const operation = (running ?? Promise.resolve()).catch(() => {}).then(() => this.receivePayment(linkId, payment));
-    this.receiving.set(payment.id, operation);
-    return operation.finally(() => { if (this.receiving.get(payment.id) === operation) this.receiving.delete(payment.id); });
+    this.receiving.set(key, operation);
+    return operation.finally(() => { if (this.receiving.get(key) === operation) this.receiving.delete(key); });
   }
 
   private async receivePayment(linkId: string, payment: Payment): Promise<void> {
@@ -472,6 +532,12 @@ export class PaymentDesk {
       // Not redeemed: the token stays the contact's, and they can take it back.
       link?.sendPaymentResult({ id: payment.id, ok: false, error: "Cashu is off in this chat" });
       return;
+    }
+    const forGroup = payment.requestId ? this.payments.get(payment.requestId) : undefined;
+    if (forGroup?.group && forGroup.kind === "request" && forGroup.direction === "out" && this.owns(forGroup, linkId)) {
+      const refused = this.refuseForGroup(forGroup, payment);
+      // Not redeemed either: the member takes it back.
+      if (refused) { link.sendPaymentResult({ id: payment.id, ok: false, error: refused }); return; }
     }
     const [identifier, token] = payment.endpoint;
     try {
@@ -500,13 +566,14 @@ export class PaymentDesk {
       if (
         request?.kind === "request" &&
         request.direction === "out" &&
-        request.linkId === linkId &&
+        this.owns(request, linkId) &&
         request.state === "pending" &&
         amount >= request.amount &&
         (request.mints ?? []).includes(mint) &&
         (!isWorthlessMint(mint) || (request.mints ?? []).every(isWorthlessMint))
       ) {
-        await this.save({ ...request, state: "settled", mint });
+        if (request.group) await this.settleRequest(request, { mint });
+        else await this.save({ ...request, state: "settled", mint });
       }
       await this.host.storeMessage({
         linkId,
@@ -579,7 +646,9 @@ export class PaymentDesk {
    */
   private async settleRequest(request: StoredPayment, extra: Partial<StoredPayment> = {}): Promise<void> {
     await this.save({ ...this.current(request), ...extra, state: "settled" });
-    this.host.getLink(request.linkId)?.sendPaymentResult({ id: request.id, ok: true });
+    // A request to a group closes on every member's copy: nobody else pays it.
+    const links = request.group ? this.host.groupLinks?.(request.group) ?? [] : [request.linkId];
+    for (const linkId of links) this.host.getLink(linkId)?.sendPaymentResult({ id: request.id, ok: true });
   }
 
   // -- paid from another wallet -------------------------------------------------------
@@ -614,7 +683,7 @@ export class PaymentDesk {
   private async receiveCheck(linkId: string, payment: Payment): Promise<void> {
     const link = this.host.getLink(linkId);
     const request = payment.requestId ? this.payments.get(payment.requestId) : undefined;
-    if (!link || !request || request.kind !== "request" || request.direction !== "out" || request.linkId !== linkId) return;
+    if (!link || !request || request.kind !== "request" || request.direction !== "out" || !this.owns(request, linkId)) return;
     const rail = request.target ? request.target.method : request.invoice ? "lightning" : undefined;
     if (!rail || rail === "usdt" || rail === "cashu" || payment.endpoint[0] !== (rail === "lightning" ? ENDPOINT.bolt11 : ENDPOINT_OF[rail])) return;
     if (request.state === "settled") { link.sendPaymentResult({ id: request.id, ok: true }); return; }
@@ -926,6 +995,13 @@ export class PaymentDesk {
   async replay(linkId: string): Promise<void> {
     const link = this.host.getLink(linkId);
     if (!link?.supportsPayments) return;
+    // Our open requests to this edge's group reach the member now; one already paid is closed on their side.
+    const group = this.host.groupOf?.(linkId);
+    if (group) for (const request of this.payments.values()) {
+      if (request.group !== group || request.kind !== "request" || request.direction !== "out") continue;
+      if (request.state === "pending") await this.sendGroupRequest(linkId, request);
+      else if (request.state === "settled") link.sendPaymentResult({ id: request.id, ok: true });
+    }
     for (const payment of this.payments.values()) {
       if (payment.linkId !== linkId || payment.direction !== "out" || this.reclaims.has(payment.id)) continue;
       if(payment.target?.method==='usdt') {

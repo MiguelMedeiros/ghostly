@@ -127,6 +127,10 @@ export const db = {
     });
     return added;
   },
+  /** Writes a message whether or not it is there: lines of history that change as what they tell changes. */
+  async putMessage(message: StoredMessage): Promise<void> {
+    await wrap((await store(STORES.messages, "readwrite")).put(message));
+  },
   async updateDelivery(linkId: string, id: string, delivery: NonNullable<StoredMessage["delivery"]>, deliveryError?: string): Promise<void> {
     const tx = (await openDb()).transaction(STORES.messages, "readwrite");
     const messages = tx.objectStore(STORES.messages);

@@ -301,6 +301,13 @@ export interface StoredPayment {
   requestId?: string;
   /** Requests we pay: a Lightning payment is in flight at the mint, so paying again would pay twice. */
   lightningPending?: boolean;
+  /** Requests we pay: this device paid it over Lightning (the payee's wallet cannot say who paid an invoice). */
+  paidHere?: boolean;
+  /**
+   * A request to a whole group (WISP 9xx § Payments): the group's id. Its `linkId` is `group:<id>`, it went to
+   * every member over their edges, and the first member whose payment settles it pays it; later ones are refused.
+   */
+  group?: string;
 }
 
 /** What pages see of a payment: everything but the token. */
@@ -393,6 +400,64 @@ export interface StoredMessage {
   member?: string;
   /** Group history lines that are not messages. */
   event?: GroupEvent;
+  /** Group history: a payment between members, as the group knows it (WISP 9xx § Payments). */
+  groupPay?: GroupPayNote;
+}
+
+/** The ways of paying a group note can name. */
+export type GroupPayRail = "cashu" | "lightning" | "arkade" | "bark" | "bitcoin" | "usdt";
+
+/**
+ * A payment between two members as the whole group sees it (WISP 9xx § Payments): who pays whom, how much, over
+ * what, and how it stands. No money and nothing to pay with: that travels only on the edge between the two.
+ */
+export interface GroupPayNote {
+  id: string;
+  /** `request`: a member asks to be paid; `payment`: a member sends without a request. */
+  kind: "request" | "payment";
+  /** Who pays: a member key, or `*` for a request any member may pay once. */
+  from: string;
+  /** Who is paid. */
+  to: string;
+  /** In the unit's smallest denomination (sats, token base units). */
+  amount: string;
+  unit: string;
+  decimals: number;
+  rail: GroupPayRail;
+  /** Test money (test mints, test networks): worth nothing. */
+  test?: boolean;
+  memo?: string;
+  /** The request answers the payer's own ask (Ark, Bark, on-chain, USDT): the payer started it. */
+  ask?: boolean;
+  createdAt: number;
+  /** `sent`: the payer says it paid, the payee has not confirmed. `closed`: failed, refused or taken back. */
+  state: "open" | "sent" | "paid" | "closed";
+  /** Who paid it: the payee's word, or, when its wallet cannot tell (an invoice), the only member who said so. */
+  by?: string;
+  /** Members who said they paid it. */
+  claims?: string[];
+  /** The last note this device said about it, sent again when an edge opens. */
+  mine?: GroupPayFrame;
+}
+
+/** `group-pay` on an edge (WISP 9xx § Payments). Old apps drop it. */
+export interface GroupPayFrame {
+  t: "group-pay";
+  g: string;
+  id: string;
+  k: "req" | "pay";
+  f: string;
+  to: string;
+  v: string;
+  u: string;
+  d: number;
+  r: GroupPayRail;
+  x?: 1;
+  m?: string;
+  a?: 1;
+  ts: number;
+  st: GroupPayNote["state"];
+  by?: string;
 }
 
 /** A local web application the user chose to share. */
@@ -582,4 +647,6 @@ export interface EngineState {
   nostr: NostrSocialState;
   /** Private groups and pending invitations (WISP 900). */
   groups: GroupView[];
+  /** The links of groups' edges: not chats, but payments with a member travel on them. */
+  edges?: LinkView[];
 }

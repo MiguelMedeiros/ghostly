@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
-import type { GroupJoinStage, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
+import type { EngineState, GroupJoinStage, GroupPayNote, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
 import { GroupMembersDialog } from "../components/GroupMembersDialog";
@@ -9,6 +9,8 @@ import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { LeaveGroupDialog } from "../components/LeaveGroupDialog";
 import { GroupShareDialog } from "../components/GroupLinkPanel";
 import { GroupConnection } from "../components/GroupConnection";
+import { GroupPaymentComposer } from "../components/GroupPaymentComposer";
+import { GroupPaymentCaption, GroupPaymentNote } from "../components/GroupPaymentNote";
 import { useOutsideDismiss } from "../hooks/useDismiss";
 import { markGroupRead, memberName } from "../lib/groups";
 import type { ChatMessage } from "../lib/types";
@@ -19,8 +21,14 @@ const snapshot = () => engine.state;
 
 function toChatMessage(message: StoredMessage, group: GroupView): ChatMessage {
   const member = message.member ? group.members.find(m => m.key === message.member) : undefined;
-  return { id: message.id, text: message.text, sender: message.sender, timestamp: message.timestamp,
+  return { id: message.id, text: message.text, sender: message.sender, timestamp: message.timestamp, paymentId: message.paymentId,
     nick: message.sender === "peer" && message.member ? (member ? memberName(member) : `Member ${message.member.slice(0, 8)}`) : undefined };
+}
+
+/** The group note a payment of this device is part of: a request's own, or the request a payment answers. */
+function noteIdOf(state: EngineState, paymentId: string): string {
+  const payment = state.payments[paymentId];
+  return payment?.kind === "payment" && payment.requestId ? payment.requestId : paymentId;
 }
 
 /** A membership line, naming its member as the roster knows them now; what was stored, when they are gone. */
@@ -99,6 +107,10 @@ export function GroupChat() {
 
   const others = group.members.filter(m => !m.me);
   const reachable = others.filter(m => m.online).length;
+  // Payments: this device's own bubbles (from the desk, over an edge) and the notes the group shares about them.
+  const notes = new Map<string, GroupPayNote>(messages.filter(m => m.groupPay).map(m => [m.groupPay!.id, m.groupPay!]));
+  const ownNotes = new Set(messages.filter(m => m.paymentId && !m.groupPay).map(m => noteIdOf(state, m.paymentId!)));
+  const peerOf = (paymentId: string) => { const linkId = state.payments[paymentId]?.linkId; return state.edges?.find(l => l.id === linkId)?.peerPubKeyZ32 ?? ""; };
   const joiningByLink = group.invitation?.viaLink;
   const stage: GroupJoinStage = group.invitation?.stage ?? (group.invitation?.admin ? "admitted" : "knocked");
   const joining = joiningText(stage, group.name);
@@ -190,13 +202,22 @@ export function GroupChat() {
         <div className="max-w-3xl mx-auto py-3">
           {messages.map(m => m.event
             ? <div key={m.id} data-testid="group-event" className="flex justify-center mb-3.5 px-6"><span className="rounded-lg bg-surface-alt/90 px-3 py-1.5 text-center text-[11px] text-text-muted">{eventText(m, group)}</span></div>
+            // A note about a payment this device is part of is shown under its own bubble instead.
+            : m.groupPay ? (ownNotes.has(m.groupPay.id) ? null : <GroupPaymentNote key={m.id} note={m.groupPay} group={group} />)
+            : m.paymentId ? <div key={m.id} data-testid="group-payment">
+              <MessageBubble message={toChatMessage(m, group)} peerAck={Number.MAX_SAFE_INTEGER} peerPubKey={peerOf(m.paymentId)} />
+              {/* Said once, under the request (or the payment) itself: not again under a payment that answers it. */}
+              {noteIdOf(state, m.paymentId) === m.paymentId && notes.get(m.paymentId) && <GroupPaymentCaption note={notes.get(m.paymentId)!} group={group} />}
+            </div>
             : <MessageBubble key={m.id} message={toChatMessage(m, group)} peerAck={Number.MAX_SAFE_INTEGER} />)}
           <div ref={bottomRef} />
         </div>
       </div>}
 
       {!joiningByLink && <MessageInput draftId={`group:${groupId}`} key={groupId} onSend={send} disabled={!group.canSend} maxLength={16_384}
-        fileUnavailable="Files are not part of groups yet" paymentsUnavailable="Payments are not part of groups yet" />}
+        fileUnavailable="Files are not part of groups yet"
+        paymentsUnavailable={others.length === 0 ? "Nobody else is in the group yet" : undefined}
+        paymentComposer={close => <GroupPaymentComposer group={group} onClose={close} />} />}
 
       {showMembers && <GroupMembersDialog group={group} onClose={() => setShowMembers(false)} />}
       {sharing && group.entryLink && <GroupShareDialog group={group} created={sharing === "created"} onClose={() => setSharing("")} />}

@@ -23,7 +23,7 @@ import { normalizeNostrRelays } from '../nostr/relay';
 import type { NostrDraft, NostrDraftRequest, NostrPublishResult } from '../nostr/types';
 import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
-import { type PaymentRequest, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
+import { type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
 import {
   DEFAULT_RELAYS,
   GhostLink,
@@ -87,6 +87,7 @@ import type {
 import { db } from "./db";
 import { Groups } from "./groups";
 import { edgeView } from "./groupEdges";
+import { GroupPayments } from "./groupPayments";
 import { mayReach } from "./serviceAccess";
 import { Outbox } from "./outbox";
 import { HoldEngine } from "./hold";
@@ -303,6 +304,8 @@ export class GhostlyNode implements EngineImplementation {
       this.emitState();
     },
     getLink: (linkId) => this.links.get(linkId)?.link ?? null,
+    groupOf: (linkId) => { const stored = this.links.get(linkId)?.stored; return stored?.group && !stored.groupEntry ? stored.group : undefined; },
+    groupLinks: (groupId) => [...this.groupEdges(groupId).values()],
     storeMessage: (message) => this.storeMessage(message),
     heldPaymentMethods: (linkId): PaymentMethodName[] | null => { const live = this.links.get(linkId); return live && this.holdingFor(live) ? this.hold.heldPaymentMethods(linkId) : null; },
     holdRequest: (linkId, request, messageId) => this.hold.hold(linkId, { kind: "pay-req", id: request.id, messageId, ref: request.id, bytes: 1024, timestamp: request.timestamp }),
@@ -312,6 +315,7 @@ export class GhostlyNode implements EngineImplementation {
           this.feedback("confirmed", payment.id);
         }
       }
+      void this.groupPayments.sync().catch(() => {});
       this.emitState();
     },
   }, this.arkWallet, this.usdtWallet, this.barkWallet, {
@@ -441,11 +445,7 @@ export class GhostlyNode implements EngineImplementation {
     },
     linkReady: linkId => !!this.links.get(linkId)?.link?.groupsSupport,
     contactName: linkId => { const stored = this.links.get(linkId)?.stored; return stored?.label || stored?.peerNick || undefined; },
-    edges: groupId => {
-      const edges = new Map<string, string>();
-      for (const live of this.links.values()) if (live.stored.group === groupId && live.stored.groupPeer && !live.stored.groupEntry) edges.set(live.stored.groupPeer, live.stored.id);
-      return edges;
-    },
+    edges: groupId => this.groupEdges(groupId),
     entries: groupId => {
       const entries = new Map<string, string>();
       for (const live of this.links.values()) if (live.stored.group === groupId && live.stored.groupPeer && live.stored.groupEntry) entries.set(live.stored.groupPeer, live.stored.id);
@@ -467,6 +467,38 @@ export class GhostlyNode implements EngineImplementation {
     storeMessage: message => this.storeMessage(message),
     emit: () => this.emitState(),
   });
+
+  /**
+   * Payments in groups (WISP 9xx § Payments): the money goes over the edge to one member through the desk, like a
+   * chat's; what the group sees of it goes to every member as a `group-pay` note.
+   */
+  private readonly groupPayments = new GroupPayments({
+    payments: () => Object.values(this.desk.views()),
+    edgeOf: linkId => { const stored = this.links.get(linkId)?.stored; return stored?.group && stored.groupPeer && !stored.groupEntry ? { groupId: stored.group, member: stored.groupPeer } : undefined; },
+    edges: groupId => this.groupEdges(groupId),
+    membership: groupId => {
+      const group = this.groups.views().find(g => g.id === groupId);
+      return group?.status === "active" && group.myKey ? { me: group.myKey, members: new Set(group.members.map(m => m.key)) } : undefined;
+    },
+    send: (linkId, frame) => {
+      const link = this.links.get(linkId)?.link;
+      if (!link) throw new Error("You are offline");
+      link.sendGroupFrame(frame);
+    },
+    messages: groupId => db.getMessages(`group:${groupId}`),
+    putMessage: async message => {
+      await db.putMessage(message);
+      this.events.onMessages(message.linkId, await db.getMessages(message.linkId));
+      this.emitState();
+    },
+  });
+
+  /** Member key → edge link id, for the edges of a group that exist (open or not). */
+  private groupEdges(groupId: string): Map<string, string> {
+    const edges = new Map<string, string>();
+    for (const live of this.links.values()) if (live.stored.group === groupId && live.stored.groupPeer && !live.stored.groupEntry) edges.set(live.stored.groupPeer, live.stored.id);
+    return edges;
+  }
 
   constructor(
     private readonly events: NodeEvents,
@@ -597,6 +629,7 @@ export class GhostlyNode implements EngineImplementation {
       payments: this.desk.views(),
       identityProofs: this.identities.views(),
       nostr: this.nostrSocial.state(),
+      edges: [...this.links.values()].filter(live => live.stored.group && !live.stored.groupEntry).map(live => this.viewOf(live)),
       groups: this.groups.views().map(group => ({ ...group, members: group.members.map(member => {
         const edge = member.me ? undefined : this.edgeView(group.id, member.key);
         return edge ? { ...member, edge } : member;
@@ -1360,8 +1393,17 @@ export class GhostlyNode implements EngineImplementation {
     return this.desk.send(params);
   }
 
-  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" }) {
-    return this.desk.request({ linkId: params.linkId, amount: params.amount, memo: params.memo, timestamp: params.timestamp, method: params.method });
+  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin"; rail?: "cashu" | "lightning" }) {
+    return this.desk.request({ linkId: params.linkId, amount: params.amount, memo: params.memo, timestamp: params.timestamp, method: params.method,
+      ...(params.rail === "cashu" || params.rail === "lightning" ? { rail: params.rail } : {}) });
+  }
+
+  /** A request any member of a group may pay, once (WISP 9xx § Payments). */
+  requestGroupPayment(params: { groupId: string; amount: number; memo?: string; timestamp: number; rail: "cashu" | "lightning" }) {
+    const group = this.groups.views().find(g => g.id === params.groupId);
+    if (group?.status !== "active") throw new Error("You are not in this group");
+    if (group.members.length < 2) throw new Error("Nobody else is in the group yet");
+    return this.desk.requestFromGroup(params);
   }
 
   /** Paying on a card without a request (Ark, Bark, USDT, on-chain): the contact's app answers with one. */
@@ -1577,7 +1619,11 @@ export class GhostlyNode implements EngineImplementation {
     let seen = false;
     live.pairing = { status: "connecting" };
     live.link = new GhostLink({
-      paymentMethods: { cashu: false, lightning: false, arkade: false, usdt: false, bark: false, bitcoin: false },
+      // An edge carries payments with its member (WISP 9xx § Payments), as a chat does; an entry session does not.
+      paymentMethods: entry ? { cashu: false, lightning: false, arkade: false, usdt: false, bark: false, bitcoin: false } : stored.paymentMethods,
+      arkPaymentsSupport: !entry,
+      usdtPaymentsSupport: !entry,
+      barkPaymentsSupport: !entry,
       params: stored,
       rtcAvailable: typeof RTCPeerConnection !== "undefined",
       // Pinned in advance to the member the roster names: there is nothing to trust on first use.
@@ -1594,13 +1640,23 @@ export class GhostlyNode implements EngineImplementation {
       getHostedHttpService: () => undefined,
       groupsSupport: true,
       events: {
-        // An entry session carries the admission frames a contact chat would; an edge, the group's own.
-        onGroupFrame: frame => entry ? this.groups.handleContactFrame(linkId, frame) : this.groups.handleEdgeFrame(group, peer, frame),
+        // An entry session carries the admission frames a contact chat would; an edge, the group's own, and what the group sees of payments.
+        onGroupFrame: frame => entry ? this.groups.handleContactFrame(linkId, frame)
+          : (frame as { t?: unknown }).t === "group-pay" ? this.groupPayments.receive(group, peer, frame) : this.groups.handleEdgeFrame(group, peer, frame),
         onGroupsSupport: supported => {
           if (supported) traceJoin(group, "link.ready", { role });
-          if (supported) { if (entry) this.groups.entryReady(group, linkId, peer); else this.groups.edgeReady(group, peer, linkId); }
+          if (supported) {
+            if (entry) this.groups.entryReady(group, linkId, peer);
+            else { this.groups.edgeReady(group, peer, linkId); void this.groupPayments.edgeReady(group, linkId).catch(() => {}); }
+          }
           this.emitState();
         },
+        ...(entry ? {} : {
+          onPaymentRequest: (request: PaymentRequest) => this.desk.onPaymentRequest(linkId, request),
+          onPaymentAsk: (ask: PaymentAsk) => this.desk.onPaymentAsk(linkId, ask),
+          onPayment: (payment: Payment) => this.desk.onPayment(linkId, payment),
+          onPaymentResult: (result: PaymentResult) => this.desk.onPaymentResult(linkId, result),
+        }),
         onPresence: presence => {
           if (presence.online && !seen) { seen = true; traceJoin(group, "link.presence", { role }); }
           if (presence.lastPacketAt !== live.presence.lastPacketAt) traceJoin(group, "link.packet", { role, packetAt: presence.lastPacketAt });
@@ -1610,6 +1666,8 @@ export class GhostlyNode implements EngineImplementation {
           traceJoin(group, `link.${state}`, { role });
           // The last moment the member was reachable on it: when it opens, and when it stops being open.
           if (state === "open" || live.dataLink === "open") live.lastSyncAt = Date.now();
+          // Payments with this member that did not get through go again, never twice.
+          if (state === "open" && !entry) void this.desk.replay(linkId).catch(() => {});
           live.dataLink = state;
           if (state !== "open" && live.pairing?.status !== "error") live.pairing = { status: "connecting" };
           this.emitState();
@@ -1827,6 +1885,10 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   private async storeMessage(message: StoredMessage): Promise<void> {
+    // A payment with a member lands in the group's history, from that member, under an id of the edge's own.
+    const edge = this.links.get(message.linkId)?.stored;
+    if (edge?.group && edge.groupPeer && !edge.groupEntry)
+      message = { ...message, linkId: `group:${edge.group}`, id: `${edge.id}:${message.id}`, ...(message.sender === "peer" ? { member: edge.groupPeer } : {}) };
     const live = this.links.get(message.linkId);
     // The peer republishes what it sent for a few minutes: what was deleted here stays deleted.
     if (live?.stored.deletedIds?.includes(message.id)) return;
