@@ -97,6 +97,40 @@ The test needs no network either. It asserts what only the Desktop wiring can pr
 
 `npm run check:desktop-bundle` runs everywhere, in a second, and catches the same class of mistake from the other end: it reads what `src/desktop/` asks of Rust and fails if it is not in `dist/`, and it fails when a module is added to `PLATFORM_MODULES` without someone writing down why Desktop can live with the stand-in. It is a build assertion, not a test — but it is what stands between a Mac and a Desktop feature that silently does nothing. CI runs it on every pull request.
 
+## The combination matrix
+
+Each spec above tests one feature in one setup. `matrix/` tests them together: two people on a combination of
+clients, transport, delivery, wallet mode, payment rail and source, identity proof, group, restored profile, language
+and screen size — every pair of values at least once, and every client × transport × delivery combination.
+
+```bash
+npm run e2e:matrix                                # every scenario, with .env.e2e from npm run e2e:infra:up
+npm run e2e:matrix -- --only mx-1a2b3c4d          # reproduce one by the id in the report
+npm run e2e:matrix -- --combo client=web-extension,delivery=dht,locale=pt   # any combination (the rest filled in)
+npm run e2e:matrix:table                          # after changing dimensions.ts or plan.ts: rewrite the table in matrix.spec.ts
+npm run e2e:matrix -- --list                      # print the matrix, run nothing
+npm run e2e:matrix -- --shard 1/4 --docs          # a shard; --docs writes the table into docs/TESTING.md
+```
+
+| | |
+|---|---|
+| `matrix/dimensions.ts` | the dimensions and their values, as data; the constraints (what cannot exist, and why); which subset is covered fully |
+| `matrix/pairwise.ts` | the generator: all pairs (and the chosen n-wise subset) with the fewest scenarios, greedy and seeded, so a seed is always the same matrix and a scenario id (a hash of its combination) always the same combination |
+| `matrix/plan.ts` | the steps of a scenario as data: which apply to a combination, the features of `features.json` each covers, the infrastructure each needs, which are not written yet — and so the scenario's tags |
+| `matrix/blocks.ts` | how each step is acted out — pair, talk, away and back (live, DHT, store-and-forward), transport, files, identity proof, payments, group, backup and restore — each asserting what the other person sees |
+| `matrix/matrix.spec.ts` | one test per scenario, from the table written into it (`npm run e2e:matrix:table`): the tags are string literals the test map reads, and `table.test.ts` (in `npm test`) fails when the table no longer matches the generator |
+| `matrix/actors.ts` | one way to drive a web or extension peer in English or Portuguese, on a laptop or a phone (`either("Join chat")` matches the text in both languages) |
+| `matrix/requirements.ts` | what a block needs from outside (a mint, S3, a regtest stack, `gpg`…) and how to tell it is up |
+| `matrix/reporter.ts` | the matrix as a table: `test-results/matrix-summary/summary.md` and `results.json`, the job summary in CI |
+
+A (the host) is always a laptop in English; B (who joins) carries the scenario's language, screen and restored profile,
+so every scenario is also a mixed pair. A block whose infrastructure is not up is skipped with the reason and the
+scenario goes on; the report lists what was skipped. In the HTML report (`playwright-report-matrix/`) every scenario
+is tagged `@<dimension>:<value>` (`@clients:web-extension` for the pair): filter by one to see every scenario with it.
+
+The matrix runs every night with the ephemeral environment (`e2e-full.yml`), not on pull requests. It serves its own
+build on port 47300 (`MATRIX_WEB_PORT`), and its test domain uses 47320-47399.
+
 ## When they run
 
 - Before every release: the `Release` workflow runs them first, and neither the draft release nor the web image is made unless they pass. Desktop is a job of its own there, so a Rust build never holds up the browser tests.

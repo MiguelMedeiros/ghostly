@@ -26,3 +26,8 @@ dist-e2e
 
 # Unit test coverage (npm run coverage)
 /coverage/
+
+# The ephemeral test environment (npm run e2e:infra:up) writes its addresses and keys here
+.env.e2e
+playwright-report-matrix
+blob-report-matrix

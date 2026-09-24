@@ -42,8 +42,9 @@ function listen(server: Server, port: number): Promise<number> {
 }
 
 /** `slot` keeps parallel Playwright workers on distinct ports inside 45100-45199. */
-export async function startTestDomain(slot = 0): Promise<TestDomain> {
-  if (slot < 0 || slot > 44) throw new Error("Test domain slot out of the 45100-45199 range");
+/** `base` moves the two ports elsewhere (the matrix runs on 47300-47399); by default they are this session's. */
+export async function startTestDomain(slot = 0, base = 45110): Promise<TestDomain> {
+  if (slot < 0 || (base === 45110 && slot > 44)) throw new Error("Test domain slot out of the 45100-45199 range");
   const domain = `e2e-${Math.random().toString(36).slice(2, 10)}.ghostly.tools`;
   const zone: Zone = { a: { [domain]: ["203.0.113.7"] }, txt: {}, ttl: 1 };
   const files = new Map<string, string>();
@@ -67,8 +68,8 @@ export async function startTestDomain(slot = 0): Promise<TestDomain> {
     if (body === undefined) { res.writeHead(404, { "access-control-allow-origin": "*" }).end("not found"); return; }
     res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*", "cache-control": "no-store" }).end(body);
   });
-  const dohPort = await listen(doh, 45110 + slot * 2);
-  const webPort = await listen(web, 45111 + slot * 2);
+  const dohPort = await listen(doh, base + slot * 2);
+  const webPort = await listen(web, base + 1 + slot * 2);
 
   return {
     domain, zone, files, asked,
