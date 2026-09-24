@@ -4,6 +4,7 @@ import { useOutsideDismiss, useBackdropDismiss } from "../hooks/useDismiss";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { createPortal } from "react-dom";
 import { ChatPaymentsDialog } from "../components/ChatPaymentsDialog";
+import { ChatHoldDialog } from "../components/ChatHoldDialog";
 import { ChatIdentitiesDialog } from "../components/identities/ChatIdentitiesDialog";
 import { IdentityBadges } from "../components/identities/IdentityBadges";
 import { ChatServicesDialog } from "../components/ChatServicesDialog";
@@ -221,6 +222,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const chatPeer = platform?.getPeer(params?.peerPubKeyB64 ?? "");
   const paymentsOn = !chatPeer?.paymentMethods || Object.values(chatPeer.paymentMethods).some(Boolean);
   const [showPayments, setShowPayments] = useState(false);
+  const [showHold, setShowHold] = useState(false);
   const [showIdentities, setShowIdentities] = useState(false);
   const [showServices, setShowServices] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -556,6 +558,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                     Payments…
                   </button>
                 )}
+                {paired && platform?.getPeer(params.peerPubKeyB64) && (
+                  <button data-testid="chat-hold-open" onClick={() => { setShowHold(true); setMenuOpen(false); }}
+                    className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 8v13H3V8" /><path d="M1 3h22v5H1z" /><path d="M10 12h4" /></svg>
+                    Hold messages…
+                  </button>
+                )}
                 {paired && (
                   <button data-testid="chat-identities-open" onClick={() => { setShowIdentities(true); setMenuOpen(false); }}
                     className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors">
@@ -655,6 +664,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         </div>
       </div>
 
+      {chatPeer?.hold && (chatPeer.hold.outstanding > 0 || chatPeer.hold.error) && (
+        <div data-testid="hold-indicator" className="px-4 py-1 text-[11px] text-text-secondary bg-surface-alt/60 border-t border-border truncate" role="status">
+          {chatPeer.hold.outstanding > 0 && `${chatPeer.hold.outstanding} ${chatPeer.hold.outstanding === 1 ? "item" : "items"} held for ${displayName || t("common.anonymous")} · ${(chatPeer.hold.bytes / 1024 / 1024).toFixed(1)} MB of ${Math.round(chatPeer.hold.maxBytes / 1024 / 1024)} MB`}
+          {chatPeer.hold.outstanding > 0 && chatPeer.hold.error && " · "}
+          {chatPeer.hold.error && <span className="text-danger">{chatPeer.hold.error}</span>}
+        </div>
+      )}
+
       {/* Input */}
       <MessageInput draftId={sessionId}
         key={sessionId}
@@ -665,8 +682,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         maxBytes={dhtOnly ? deliveryPeer?.dhtDelivery?.maxTextBytes ?? 256 : undefined}
         maxLength={paired ? 16_384 : platform?.getPeer(params.peerPubKeyB64)?.dataLink === "open" ? 4000 : undefined}
         onSendFile={platform ? sendFile : undefined}
-        fileUnavailable={dhtOnly ? "DHT carries text only. Choose a live connection for files." : paired && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.files ? (pairedReady ? "Update both peers to send files" : "Connect and confirm your peer to send files") : undefined}
-        paymentsUnavailable={!paymentsOn ? "Payments are off in this chat. Choose them under ⋮ → Payments." : dhtOnly ? "DHT carries text only. Choose a live connection for sats." : paired && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.payments ? (pairedReady ? "Your contact has payments off in this chat, or needs an updated Ghostly" : "Connect and confirm your peer to send sats") : undefined}
+        fileUnavailable={dhtOnly ? "DHT carries text only. Choose a live connection for files." : paired && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.files ? (pairedReady ? "Update both peers to send files" : "Connect and confirm your peer to send files, or hold messages for them under ⋮ → Hold messages") : undefined}
+        paymentsUnavailable={!paymentsOn ? "Payments are off in this chat. Choose them under ⋮ → Payments." : dhtOnly ? "DHT carries text only. Choose a live connection for sats." : paired && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.payments ? (pairedReady ? "Your contact has payments off in this chat, or needs an updated Ghostly" : deliveryPeer?.textDelivery === "hold" ? "Your contact allowed neither Cashu nor Lightning at your last session; a request cannot be held" : "Connect and confirm your peer to send sats") : undefined}
         payments={
           walletState && wallet && peerKey
             ? { balance: walletState.balance, onSend: paySend, onRequest: payRequest,reviewContext:platform?.getPeer(peerKey)?.id ? {wallet,peer:peerKey,linkId:platform.getPeer(peerKey)!.id!}:undefined }
@@ -719,6 +736,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
       )}
       {showIdentities && params && (
         <ChatIdentitiesDialog peerKey={params.peerPubKeyB64} name={displayName || t("common.anonymous")} onClose={() => setShowIdentities(false)} />
+      )}
+      {showHold && chatPeer && params && platform && (
+        <ChatHoldDialog peer={chatPeer} name={displayName || t("common.anonymous")} onClose={() => setShowHold(false)}
+          onSave={(enabled) => platform.setChatHold(params.peerPubKeyB64, enabled)} />
       )}
       {showPayments && chatPeer && params && platform && (
         <ChatPaymentsDialog peer={chatPeer} name={displayName || t("common.anonymous")} onClose={() => setShowPayments(false)}

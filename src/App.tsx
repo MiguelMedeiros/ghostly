@@ -8,6 +8,9 @@ import { listSessions } from "./lib/storage";
 import { parseCallSignal } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useIsMobile } from "./hooks/useIsMobile";
+import { useServicesPlatform } from "./hooks/useServicesPlatform";
+import { useSettings } from "./contexts/SettingsContext";
+import { newSpace } from "@ghostly/browser/backup/storage";
 import { useViewportHeight } from "./hooks/useViewportHeight";
 
 /** The browser's status bar follows the header of whichever theme is active. */
@@ -50,6 +53,23 @@ function useWakeOnReturn() {
     window.addEventListener("online", wake);
     return () => { document.removeEventListener("visibilitychange", wake); window.removeEventListener("focus", wake); window.removeEventListener("online", wake); };
   }, []);
+}
+
+/**
+ * The peer holds items for away contacts in this profile's S3 storage (WISP 4xx), the one set up under
+ * Profile → Backups: whenever that changes, the peer is told, credentials and space alike, and told when
+ * it goes. The space is chosen here once, as a backup would choose it.
+ */
+function useHoldStorageSync() {
+  const { settings, updateBackupStorage } = useSettings();
+  const platform = useServicesPlatform();
+  const s3 = settings.backupS3 ? JSON.stringify(settings.backupS3) : null;
+  const space = settings.backupSpace;
+  useEffect(() => {
+    if (!platform) return;
+    if (s3 && !space) { updateBackupStorage({ backupSpace: newSpace() }); return; }
+    void platform.setHoldStorage(s3 && space ? { s3: JSON.parse(s3), space } : null).catch(() => {});
+  }, [platform, s3, space, updateBackupStorage]);
 }
 
 function useLoadedChats() {
@@ -102,6 +122,7 @@ function useLoadedChats() {
 }
 
 export function App() {
+  useHoldStorageSync();
   const isMobile = useIsMobile();
   const { pathname } = useLocation();
   useViewportHeight();

@@ -1,5 +1,6 @@
 import { PROOF_ADAPTERS, proofCapability, type ProofAdapter } from "./peerProofs";
 import { IDENTITY_PROOF_CAPABILITY } from "./identityProofs";
+import { HOLD_CAPABILITY } from "./storeForward";
 import { fromBase64Url, randomBytes, toBase64Url, utf8Encode } from "./bytes";
 import { identityFromSeedB64, publicKeyFromZ32, sign, verify } from "./identity";
 import type { FrameChannel } from "./frames";
@@ -56,6 +57,8 @@ export interface PairedSessionOptions {
   usdtPaymentsSupport?: boolean;
   barkPaymentsSupport?: boolean;
   transportSwitchSupport?: boolean;
+  /** Store-and-forward for an away contact (`hold/1`): this device accepts held items and may hold some. */
+  holdSupport?: boolean;
   /** TOFU admission is distinct from an optional human comparison. */
   trustOnFirstUse?: boolean;
   verifyPeer?: (key: string) => Promise<void>;
@@ -113,11 +116,11 @@ export class PairedSession {
   constructor(private channel: FrameChannel, private options: PairedSessionOptions) {
     this.identity = identityFromSeedB64(options.credentials.seedB64);
     this.transport = options.binding?.transport ?? "webrtc/1";
-    this.offer = { t: "pair-offer", versions: [1], transports: options.transports ?? [this.transport], capabilities: ["chat/1", "signed-signal/1", ...(options.trustOnFirstUse ? ["tofu/1"] : []), ...(options.filesSupport ? ["files/2"] : []), ...(options.paymentsSupport && (options.cashuPaymentsSupport !== false || options.lightningPaymentsSupport !== false) ? ["payments/1"] : []), ...(options.paymentsSupport && options.cashuPaymentsSupport !== false ? ["payments-cashu/1"] : []), ...(options.paymentsSupport && options.lightningPaymentsSupport !== false ? ["payments-lightning/1"] : []), ...(options.arkPaymentsSupport && options.paymentsSupport ? ["payments-arkade/1"] : []), ...(options.usdtPaymentsSupport && options.paymentsSupport ? ["payments-usdt/1"] : []), ...(options.barkPaymentsSupport && options.paymentsSupport ? ["payments-bark/1"] : []), ...(options.transportSwitchSupport ? ["transport-switch/1"] : []), ...(options.proofSupport ? PROOF_ADAPTERS.map(proofCapability) : []), ...(options.identitySupport ? [IDENTITY_PROOF_CAPABILITY] : []), ...(options.allowFallback ? ["transport-fallback/1"] : [])],
+    this.offer = { t: "pair-offer", versions: [1], transports: options.transports ?? [this.transport], capabilities: ["chat/1", "signed-signal/1", ...(options.trustOnFirstUse ? ["tofu/1"] : []), ...(options.filesSupport ? ["files/2"] : []), ...(options.paymentsSupport && (options.cashuPaymentsSupport !== false || options.lightningPaymentsSupport !== false) ? ["payments/1"] : []), ...(options.paymentsSupport && options.cashuPaymentsSupport !== false ? ["payments-cashu/1"] : []), ...(options.paymentsSupport && options.lightningPaymentsSupport !== false ? ["payments-lightning/1"] : []), ...(options.arkPaymentsSupport && options.paymentsSupport ? ["payments-arkade/1"] : []), ...(options.usdtPaymentsSupport && options.paymentsSupport ? ["payments-usdt/1"] : []), ...(options.barkPaymentsSupport && options.paymentsSupport ? ["payments-bark/1"] : []), ...(options.transportSwitchSupport ? ["transport-switch/1"] : []), ...(options.holdSupport ? [HOLD_CAPABILITY] : []), ...(options.proofSupport ? PROOF_ADAPTERS.map(proofCapability) : []), ...(options.identitySupport ? [IDENTITY_PROOF_CAPABILITY] : []), ...(options.allowFallback ? ["transport-fallback/1"] : [])],
       key: this.identity.pubKeyZ32, nonce: toBase64Url(randomBytes(32)) };
   }
 
-  supports(capability: "files/2" | "payments/1" | "payments-arkade/1" | "payments-usdt/1" | "payments-bark/1"): boolean { return this.state.status === "ready" && this.offer.capabilities.includes(capability) && !!this.peer?.capabilities.includes(capability); }
+  supports(capability: "files/2" | "payments/1" | "payments-arkade/1" | "payments-usdt/1" | "payments-bark/1" | typeof HOLD_CAPABILITY): boolean { return this.state.status === "ready" && this.offer.capabilities.includes(capability) && !!this.peer?.capabilities.includes(capability); }
   /**
    * Both sides allow this way of paying. A peer that offers payments/1 without naming Cashu or
    * Lightning predates choosing them per chat, and allows both.
@@ -134,6 +137,8 @@ export class PairedSession {
     return theirs.includes("payments/1") && (theirs.includes(capability) || !theirs.includes(other));
   }
   get peerTransportSwitchSupport(): boolean { return !!this.peer?.capabilities.includes("transport-switch/1"); }
+  /** The peer's offer alone carries `hold/1`: it accepts held items from us, whatever we offered. */
+  get peerHoldSupport(): boolean { return !!this.peer?.capabilities.includes(HOLD_CAPABILITY); }
 
   get proofSession(): string { return this.digest; }
   get peerProofAdapters(): ProofAdapter[] { return PROOF_ADAPTERS.filter(a => this.offer.capabilities.includes(proofCapability(a)) && this.peer?.capabilities.includes(proofCapability(a))); }

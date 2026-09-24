@@ -1,6 +1,6 @@
 import type { StoredMessage } from "../shared/types";
 
-export type Delivery = "sending" | "sent" | "delivered" | "failed";
+export type Delivery = "sending" | "sent" | "held" | "delivered" | "failed";
 export interface OutboxStore {
   read(): Promise<StoredMessage[]>;
   update(id: string, delivery: Delivery, error?: string): Promise<void>;
@@ -19,7 +19,8 @@ export class Outbox {
 
   async recover(): Promise<void> {
     for (const message of await this.store.read()) {
-      if (message.delivery !== "sending" && message.delivery !== "sent") continue;
+      // Held items have their own durable queue and are picked up by the store-and-forward engine.
+      if (message.via === "hold" || (message.delivery !== "sending" && message.delivery !== "sent")) continue;
       const until = this.pendingUntil?.(message);
       if (until && until > Date.now()) {
         await this.store.update(message.id, "sent");

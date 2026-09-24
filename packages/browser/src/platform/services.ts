@@ -37,13 +37,19 @@ export const servicesPlatform: ServicesPlatform | null = {
 
   getPeer(peerPubKeyZ32) {
     const link = engine.linkByPeer(peerPubKeyZ32);
-    return link ? { id: link.id, deliveryMode: link.deliveryMode, textDelivery: link.textDelivery, canSendText: link.canSendText, dhtDelivery: link.dhtDelivery, capabilities: link.capabilities, paymentMethods: link.paymentMethods, pairing: link.pairing, dataLink: link.dataLink, online: link.peerOnline, services: link.peerServices } : null;
+    return link ? { id: link.id, deliveryMode: link.deliveryMode, textDelivery: link.textDelivery, canSendText: link.canSendText, dhtDelivery: link.dhtDelivery, hold: link.hold, capabilities: link.capabilities, paymentMethods: link.paymentMethods, pairing: link.pairing, dataLink: link.dataLink, online: link.peerOnline, services: link.peerServices } : null;
   },
   async setChatPaymentMethods(peerPubKeyZ32, methods) {
     const link = engine.linkByPeer(peerPubKeyZ32);
     if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
     await engine.call("setChatPaymentMethods", { linkId: link.id, methods });
   },
+  async setChatHold(peerPubKeyZ32, enabled) {
+    const link = engine.linkByPeer(peerPubKeyZ32);
+    if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
+    await engine.call("setChatHold", { linkId: link.id, enabled });
+  },
+  setHoldStorage: (holdStorage) => engine.call("updateSettings", { settings: { holdStorage } }),
   connect(peerPubKeyZ32) {
     const link = engine.linkByPeer(peerPubKeyZ32);
     if (link) void engine.call("connect", { linkId: link.id }).catch(() => {});

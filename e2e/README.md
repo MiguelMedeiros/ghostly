@@ -49,6 +49,7 @@ E2E_MINT_URL=http://127.0.0.1:3338 npm run test:e2e
 | `web/profile-backup-file.spec.ts` · `profile-backup.spec.ts` | a whole profile backed up to a file (and to S3 with `GHOSTLY_S3_*`), restored as a new profile; passphrase rules |
 | `web/chat-payments.spec.ts` | each chat allows its own ways of paying, both sides' choices shown |
 | `web/sdk-plugin.spec.ts` | adapters built outside the app against `@ghostly/sdk` (`examples/sdk-adapter`), compiled into this build with `GHOSTLY_PLUGINS`: the plugin's Lightning source in the picker (Testnet only), connected, an invoice seen paid; its identity proof added from a pasted signature |
+| `web/store-forward.spec.ts` | held messages (WISP 4xx): with `GHOSTLY_S3_*`, text, a picture and a request held in Alice's S3 while Bob's page is closed, picked up in order when he is back, a changed object refused, an expired one dropped; a contact without the switch is unaffected (no S3 needed) |
 | `web/wallet-cashu.spec.ts` · `wallets-ready.spec.ts` · `wallet-backups.spec.ts` | wallets ready with no setup, Cashu send/mint errors, the Lightning card, test sats; Ark and USDT recovery phrase and encrypted backup files (`@network`) |
 | `web/wallet-providers.spec.ts` | every wallet provider sending and receiving, in the Testnet mode: Cashu (in over Lightning, Send and Request in the chat), Lightning (in through an invoice, out paying an invoice the test mint does not own, `@network`), Ark, Bark and USDT (in, Send from the wallet, Send and Request in the chat; gated, see below) |
 | `web/bark-wallet.spec.ts` | Bark (Second's Ark) is not on Mainnet yet; `@network`: a Testnet wallet on Second's signet server by itself, and a chat offers Bark only when both sides allow it (Arkade stays separate) |
@@ -106,6 +107,19 @@ Not on pull requests: at about four minutes it would hold up every merge. `npm r
 ## Writing one
 
 For Desktop, use `test` and `app` from `support/desktop.ts`: `app.text(selector)` returns null until something matches, so wait with `expect.poll`. For the browser clients, use `test` and `peer` from `support/fixtures.ts` (or `extensionPeer` / `webPeer` from `support/extension.ts`), `link(a, b)` to put two people in a chat and `connect(a, b)` to wait for the peer-to-peer link. Look for text in the conversation with `chat(peer)`, since the chat list previews the last message too. Prefer what a person sees (titles, labels, text); add a `data-testid` to the app when there is nothing else to hold on to.
+
+### Held messages on a local S3 server
+
+`profile-backup.spec.ts` and `store-forward.spec.ts` need an S3-compatible server on `127.0.0.1` and its keys in the environment; any MinIO will do, in a container named `ghostly-saf-*` (never print the keys):
+
+```bash
+docker run -d --name ghostly-saf-minio -p 127.0.0.1:46010:9000 -e MINIO_ROOT_USER=<key> -e MINIO_ROOT_PASSWORD=<secret> quay.io/minio/minio server /data
+npm run build:web && npx vite preview web --port 46020 --strictPort &
+E2E_WEB_URL=http://localhost:46020 GHOSTLY_S3_ENDPOINT=http://127.0.0.1:46010 GHOSTLY_S3_KEY=<key> GHOSTLY_S3_SECRET=<secret> npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/store-forward.spec.ts
+docker rm -f ghostly-saf-minio   # when done
+```
+
+Each run makes a bucket of its own. `localStorage["ghostly-test-hold-ttl"]` (milliseconds) shortens how long an item is held, so the test can watch one expire; nothing else reads it and it never lengthens the lifetime.
 
 ### Experimental Ark payments
 

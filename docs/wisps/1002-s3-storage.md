@@ -26,6 +26,7 @@ Any service speaking the S3 object API: AWS S3, Cloudflare R2, Backblaze B2, Was
 | `get` | `GET /<bucket>/<prefix><name>` |
 | `list` | `GET /<bucket>?list-type=2&prefix=<prefix><space>/backups/`, following `continuation-token` |
 | `remove` | `DELETE /<bucket>/<prefix><name>` |
+| `presign` | `GET /<bucket>/<prefix><name>?X-Amz-Algorithm=…&X-Amz-Credential=…&X-Amz-Date=…&X-Amz-Expires=…&X-Amz-SignedHeaders=host&X-Amz-Signature=…`, signed in the client, `UNSIGNED-PAYLOAD`, at most seven days ([4xx](4xx-store-and-forward.md)) |
 
 Every request is signed with AWS Signature Version 4 in the client (`x-amz-content-sha256` carries the payload hash; `UNSIGNED-PAYLOAD` is not used). No SDK, proxy or server of Ghostly's sits in between.
 
@@ -41,4 +42,5 @@ Every request is signed with AWS Signature Version 4 in the client (`x-amz-conte
 
 - The secret access key is stored on the device, in the profile's settings, like any other profile data. Someone who can read the profile can use the key; scope it accordingly.
 - The provider sees object sizes, timing and the client's IP address, not content.
-- Names never leave the app's folder: a client MUST refuse object names other than `<space>/backups/<file>` (no empty, `.` or `..` segments, in the prefix either), MUST ignore listed keys outside `<prefix><space>/backups/`, and SHOULD bound listing pages (this client: 100) and object size (the bundle limit of [05](05-backups.md)). Someone else with write access to the bucket, or the provider, can then at most offer a bundle that fails to open.
+- A contact picking up held items reads presigned addresses from its own client, so the bucket's CORS rules must allow `GET` from that client's origin; `*` for `GET` is fine (the address is the authorization, and the object is ciphertext). Writes stay the person's own.
+- Names never leave the app's folders: a client MUST refuse object names other than `<space>/backups/<file>` and `<space>/hold/<mailbox>/<file>` (no empty, `.` or `..` segments, in the prefix either), MUST ignore listed keys outside the folder it asked for, and SHOULD bound listing pages (this client: 100) and object size (the bundle limit of [05](05-backups.md)). Someone else with write access to the bucket, or the provider, can then at most offer a bundle that fails to open.

@@ -93,6 +93,8 @@ export interface EngineApi {
   setDeliveryMode(params: { linkId: string; mode: DeliveryMode }): void;
   setTransportPreference(params: { linkId: string; preferred: PairedTransport; fallback: boolean }): void;
   setChatPaymentMethods(params: { linkId: string; methods: Partial<Record<import("@ghostly/core").PaymentMethodName, boolean>> }): void;
+  /** Store-and-forward in one chat (WISP 4xx): accept held items from this contact, and hold items for it while it is away. */
+  setChatHold(params: { linkId: string; enabled: boolean }): void;
   connect(params: { linkId: string }): void;
   walletAddMint(params: { url: string; primary?: boolean }): { url: string; name: string };
   /** Real money or test networks, for every wallet at once. */

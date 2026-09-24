@@ -6,7 +6,8 @@ import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
 import type { LightningView } from "../engine/paymentAdapters/providers/lightningService";
 import type { BitcoinView } from "../engine/paymentAdapters/providers/bitcoinService";
 import type { PaymentReview, PaymentTarget } from "@ghostly/core";
-import type { DeliveryMode, DhtDeliveryState, DhtDeliveryView } from "@ghostly/core";
+import type { DeliveryMode, DhtDeliveryState, DhtDeliveryView, HoldKind } from "@ghostly/core";
+import type { S3Config } from "../backup/s3";
 import type { PublicProfile, ProfileChoice } from '../profiles/public';
 import type { NostrContactCache, NostrContactView, NostrSocialSettings, NostrSocialState } from "../nostr/types";
 import type { ProofLedger, ProofAdapter } from "@ghostly/core";
@@ -52,6 +53,8 @@ export interface StoredLink {
   deletedIds?: string[];
   /** Ways of paying this device allows in this chat. Absent or true: allowed. */
   paymentMethods?: Partial<Record<PaymentMethodName, boolean>>;
+  /** Store-and-forward for this contact (WISP 4xx, `hold/1`). Absent: off, as for every chat from before it. */
+  hold?: HoldState;
   /** An edge of a private group (WISP 900): the group, and the member at the other end. Not a chat. */
   group?: string;
   groupPeer?: string;
@@ -113,6 +116,53 @@ export interface GroupView {
   memberLinks: Record<string, string>;
   lastMessageAt: number;
   canSend: boolean;
+}
+
+/** One item held in this device's storage for the contact, or on its way there. */
+export interface HeldEntry {
+  seq: number;
+  /** The id on the wire: the text's wire id, the file's wire id or the payment id. */
+  id: string;
+  /** The chat message this item is, for its delivery state. */
+  messageId: string;
+  kind: Exclude<HoldKind, "manifest">;
+  /** What to rebuild the bundle from: the file's local id or the payment id; text is on the message. */
+  ref?: string;
+  /** The object's name in storage, chosen before the first upload and kept across retries. */
+  name: string;
+  bytes: number;
+  ts: number;
+  expires: number;
+  state: "queued" | "held" | "failed";
+  error?: string;
+}
+
+/** Everything store-and-forward keeps per chat: the switch, what the contact said, sequences and the outbox. */
+export interface HoldState {
+  /** This device offers `hold/1` in this chat: it accepts held items, and holds items for the contact when it can. */
+  enabled: boolean;
+  /** The contact's app accepts held items, as it last said (handshake or session). */
+  peerAllows?: boolean;
+  /** This device's mailbox folder for the contact in its storage, chosen once. */
+  mailbox?: string;
+  /** Sequence of the last item held for the contact. */
+  outSeq: number;
+  /** Highest sequence received from the contact and stored. */
+  inSeq: number;
+  /** Highest sequence the contact said it received of what was held for it. */
+  peerAck: number;
+  /** This device's pointer revision, and the contact's last seen one. */
+  pointerRev: number;
+  peerPointerRev: number;
+  /** When the manifest and its addresses were last signed (they live seven days). */
+  manifestSignedAt?: number;
+  outbox: HeldEntry[];
+  /** Items from the contact refused on the way in (changed, oversized, not for this chat). */
+  refused: number;
+  /** Their sequences, the last 32, told to the contact on this device's pointer. */
+  refusedSeqs?: number[];
+  /** Ways of paying the contact allowed at the last session, for requests held while it is away. */
+  peerPaymentMethods?: PaymentMethodName[];
 }
 
 /** A file attached to a message. The bytes live in the `files` store under `id`. */
@@ -286,14 +336,16 @@ export interface WalletView {
 
 export interface StoredMessage {
   wireId?: string;
-  delivery?: "sending" | "sent" | "delivered" | "failed";
+  /** `held`: in this device's storage, waiting for the contact to come back (WISP 4xx). */
+  delivery?: "sending" | "sent" | "held" | "delivered" | "failed";
   deliveryError?: string;
   linkId: string;
   id: string;
   text: string;
   sender: "me" | "peer";
   timestamp: number;
-  via: "pkarr" | "datalink";
+  /** `hold`: through the sender's storage while the other side was away (WISP 4xx). */
+  via: "pkarr" | "datalink" | "hold";
   nick?: string;
   file?: MessageFile;
   paymentId?: string;
@@ -342,6 +394,34 @@ export interface Settings {
   walletMode?: WalletMode;
   /** The Nostr social layer: relays, automatic profile loading, publication. Absent means the defaults, everything off. */
   nostr?: NostrSocialSettings;
+  /**
+   * Where items are held for away contacts (WISP 4xx): the profile's S3 storage and its random space
+   * (WISP 1000/1002), as set up under Profile → Backups. Kept here for the peer, which may run outside the
+   * page; never copied into a backup.
+   */
+  holdStorage?: { s3: S3Config; space: string } | null;
+}
+
+/** What pages see of store-and-forward in one chat. */
+export interface LinkHoldView {
+  /** The switch of this chat on this device. */
+  enabled: boolean;
+  /** The contact's app accepts held items, as it last said; undefined until it said anything. */
+  peerAllows?: boolean;
+  /** This device has storage to hold items in (Profile → Backups → S3 storage). */
+  storage: boolean;
+  /** Items can be held for the contact right now: switch on, contact allows it, storage set up, contact pinned. */
+  canHold: boolean;
+  /** Items held for the contact and not yet picked up. */
+  outstanding: number;
+  bytes: number;
+  maxBytes: number;
+  maxItems: number;
+  ttlMs: number;
+  /** Items from the contact refused on the way in. */
+  refused: number;
+  /** The last problem holding or picking up, for people. */
+  error?: string;
 }
 
 /** A proof of this profile (Profile → Identities). */
@@ -414,7 +494,9 @@ export interface LinkView {
   deliveryMode?: DeliveryMode;
   dhtDelivery?: DhtDeliveryView;
   canSendText?: boolean;
-  textDelivery?: "stream" | "dht" | "unavailable";
+  /** `hold`: the contact is away and what is sent now waits in this device's storage for it. */
+  textDelivery?: "stream" | "dht" | "hold" | "unavailable";
+  hold?: LinkHoldView;
   transportErrors?: Partial<Record<PairedTransport, string>>;
   preferredTransport?: PairedTransport;
   transportFallback?: boolean;

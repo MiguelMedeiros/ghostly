@@ -9,6 +9,19 @@ export interface BackupStore {
 }
 export interface StoredBackup { name: string; size?: number; modified?: number; created: number }
 
+/**
+ * A place that can also hold items for an away contact (WISP 4xx store-and-forward): it hands out
+ * addresses that read one object for a while without any credential, which is what the contact gets.
+ */
+export interface HoldStore extends BackupStore {
+  /** A URL that reads `name` for `seconds` (at most seven days), from anywhere, with no credential. */
+  presign(name: string, seconds: number): Promise<string>;
+  /** The objects of one mailbox folder, `<space>/hold/<mailbox>/`. */
+  listFolder(space: string, mailbox: string): Promise<StoredBackup[]>;
+  remove(name: string): Promise<void>;
+}
+export const HELD_MEDIA_TYPE = "application/vnd.ghostly.held";
+
 const BASE32 = "abcdefghijklmnopqrstuvwxyz234567";
 const random = (n: number) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => BASE32[b % 32]).join("");
 
@@ -20,6 +33,12 @@ export function backupName(space: string, at = new Date()): string {
   const stamp = at.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
   return `${space}/backups/${stamp}-${random(8)}.ghostly-backup`;
 }
+
+/** `<space>/hold/<mailbox>/<sequence, 8 digits>-<random>.ghostly-held`: one held item; the manifest is `manifest.ghostly-held`. */
+export function heldName(space: string, mailbox: string, seq: number): string {
+  return `${space}/hold/${mailbox}/${String(seq).padStart(8, "0")}-${random(8)}.ghostly-held`;
+}
+export const manifestName = (space: string, mailbox: string) => `${space}/hold/${mailbox}/manifest.ghostly-held`;
 
 /** When a backup was made, read from its name. */
 export function createdFromName(name: string): number {
