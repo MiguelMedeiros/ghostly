@@ -4,6 +4,8 @@ import { settle, type FakeWorld } from "./fakeChrome";
 import { resetEngine } from "./fakeEngine";
 import { bootExtension } from "./extension";
 
+// covers: extension.engine, services.add, app.updates.extension, proofs.oidc.callback.extension
+
 vi.mock("@ghostly/browser/engine/server", async () => (await import("./fakeEngine")).engineServerModule);
 
 let world: FakeWorld;

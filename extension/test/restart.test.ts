@@ -3,6 +3,8 @@ import { fire, settle, type FakeWorld } from "./fakeChrome";
 import { engineControl, okResponse, resetEngine } from "./fakeEngine";
 import { OTHER_PEER, PEER, SERVICE, bodyText, bootExtension, engine, openViewer, pauseRequest, restartServiceWorker } from "./extension";
 
+// covers: extension.engine, services.open, app.updates.extension
+
 vi.mock("@ghostly/browser/engine/server", async () => (await import("./fakeEngine")).engineServerModule);
 
 /**

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { VIEWER_URL_PATTERN, parseViewerUrl, viewerUrl } from "../src/shared/viewer";
 import { PEER } from "./extension";
 
+// covers: services.open
+
 describe("the viewer's virtual origin", () => {
   it("puts the peer key right under .invalid, so each peer is a site of its own", () => {
     expect(viewerUrl(PEER, "atlas")).toBe(`https://atlas.${PEER}.invalid/`);
