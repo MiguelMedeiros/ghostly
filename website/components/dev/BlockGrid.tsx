@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { BLOCKS, DIMS, PRESETS, type Block, type PresetId } from "@/lib/composition";
 import { href, type Locale } from "@/lib/i18n";
-import { LEVELS, type Level } from "@/lib/status";
+import { LEVELS, RELEASED_VERSION, type Level } from "@/lib/status";
 import { LevelBadge } from "@/components/site/Level";
 import { shell } from "@/content/shell";
 import { useCalm } from "@/lib/useCalm";
@@ -20,8 +20,22 @@ export type GridLabels = {
   docs: string;
   included: string;
   close: string;
+  /** "+{n} over v{v}": how many pieces a composition adds to the public release. */
+  added?: string;
   stages?: { title: string; play: string; pause: string; names: Record<Level, string> };
 };
+
+/** Reader titles for reference documents, and for drafts the numbered catalogue does not list yet. */
+const REF_NAMES: Record<string, string> = {
+  "usdt-integration": "USDT integration",
+  "adapter-roadmap": "Adapter roadmap",
+  sdk: "Ghostly SDK",
+  "4xx-store-and-forward": "Store-and-forward for an away contact",
+  "9xx-group-mesh": "Group mesh distribution profile",
+};
+
+const RELEASED_COUNT = BLOCKS.filter((bl) => bl.level === "released").length;
+const PRESET_COUNTS = Object.fromEntries(PRESETS.map((p) => [p.id, BLOCKS.filter(p.blocks).length])) as Record<PresetId, number>;
 
 /**
  * The architecture as a flat grid: one row per area, one block per piece.
@@ -64,35 +78,49 @@ export function BlockGrid({
 
   const levels = shell[locale].levels;
   const count = t.included.replace("{n}", String(on.size)).replace("{t}", String(BLOCKS.length));
+  // The next release, measured against the public one: the step it is.
+  const added =
+    mode === "compose" && preset === "next" && t.added
+      ? t.added.replace("{n}", String(on.size - RELEASED_COUNT)).replace("{v}", RELEASED_VERSION)
+      : null;
 
-  const detail = (bl: Block) => (
-    <div className="bgrid-detail" role="region" aria-label={bl.name}>
-      <div className="bgrid-detail-head">
-        <h4>{bl.name}</h4>
-        <LevelBadge level={bl.level} locale={locale} small />
-        <button type="button" className="bgrid-close" onClick={() => setSelected(null)} aria-label={t.close}>
-          ×
-        </button>
-      </div>
-      <p>{bl.enables[locale]}</p>
-      <p className="bgrid-specs">
-        <span className="dim">{bl.wisps.length ? t.specs : t.noSpec}:</span>{" "}
-        {bl.wisps.map((slug) => {
-          const w = wisps.find((x) => x.slug === slug);
-          return w ? (
+  const detail = (bl: Block) => {
+    const hasRefs = bl.wisps.length > 0 || (bl.refs?.length ?? 0) > 0;
+    return (
+      <div className="bgrid-detail" role="region" aria-label={bl.name}>
+        <div className="bgrid-detail-head">
+          <h4>{bl.name}</h4>
+          <LevelBadge level={bl.level} locale={locale} small />
+          <button type="button" className="bgrid-close" onClick={() => setSelected(null)} aria-label={t.close}>
+            ×
+          </button>
+        </div>
+        <p>{bl.enables[locale]}</p>
+        <p className="bgrid-specs">
+          <span className="dim">
+            {bl.wisps.length ? t.specs : t.noSpec}
+            {hasRefs ? ":" : "."}
+          </span>{" "}
+          {bl.wisps.map((slug) => {
+            const w = wisps.find((x) => x.slug === slug);
+            // A draft the numbered catalogue does not list yet still has a reader page.
+            const number = w?.number ?? slug.split("-")[0];
+            const name = w?.name ?? REF_NAMES[slug];
+            return name ? (
+              <Link key={slug} href={href(locale, `/developers/wisps/${slug}`)}>
+                <span className="mono">{number}</span> {name}
+              </Link>
+            ) : null;
+          })}
+          {bl.refs?.map((slug) => (
             <Link key={slug} href={href(locale, `/developers/wisps/${slug}`)}>
-              <span className="mono">{w.number}</span> {w.name}
+              {t.docs}: {REF_NAMES[slug] ?? slug}
             </Link>
-          ) : null;
-        })}
-        {bl.refs?.map((slug) => (
-          <Link key={slug} href={href(locale, `/developers/wisps/${slug}`)}>
-            {t.docs}: {slug === "usdt-integration" ? "USDT integration" : "Adapter roadmap"}
-          </Link>
-        ))}
-      </p>
-    </div>
-  );
+          ))}
+        </p>
+      </div>
+    );
+  };
 
   return (
     <div className="bgrid" data-mode={mode}>
@@ -102,11 +130,18 @@ export function BlockGrid({
             {PRESETS.map((p) => (
               <button key={p.id} role="radio" aria-checked={p.id === preset} className="preset" onClick={() => setPreset(p.id)}>
                 {p.title[locale]}
+                <span className="bgrid-preset-n mono" aria-hidden="true">
+                  {PRESET_COUNTS[p.id]}
+                </span>
               </button>
             ))}
           </div>
           <p className="composer-blurb">
-            {PRESETS.find((p) => p.id === preset)!.blurb[locale]} <span className="dim mono">· {count}</span>
+            {PRESETS.find((p) => p.id === preset)!.blurb[locale]}{" "}
+            <span className="bgrid-count mono">
+              <span className="dim">· {count}</span>
+              {added ? <span className="bgrid-delta"> · {added}</span> : null}
+            </span>
           </p>
         </div>
       ) : (

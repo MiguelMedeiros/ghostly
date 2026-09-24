@@ -4,6 +4,7 @@ import { shell } from "@/content/shell";
 import { Nav } from "./Nav";
 import { SiteFooter } from "./Footer";
 import { GhostPet } from "./GhostPet";
+import { GhostSwarm } from "./GhostSwarm";
 import { HtmlLang } from "./HtmlLang";
 
 export function Shell({ locale = "en", children }: { locale?: Locale; children: React.ReactNode }) {
@@ -18,6 +19,7 @@ export function Shell({ locale = "en", children }: { locale?: Locale; children: 
       <main id="content">{children}</main>
       <SiteFooter locale={locale} />
       <GhostPet label={t.pet} />
+      <GhostSwarm />
     </div>
   );
 }

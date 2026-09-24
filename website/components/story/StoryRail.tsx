@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { jumpTo } from "@/components/site/GhostSwarm";
 import "@/app/rail.css";
 
 export type RailMark = { id: string; label: string };
@@ -61,8 +62,7 @@ export function StoryRail({ marks, label }: { marks: RailMark[]; label: string }
 
   const jump = (id: string) => {
     const el = document.getElementById(id);
-    if (!el) return;
-    window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY + 1, behavior: "smooth" });
+    if (el) jumpTo(el);
   };
 
   return (

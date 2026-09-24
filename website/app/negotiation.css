@@ -1,0 +1,647 @@
+/* /developers — the paired-session negotiation loop (components/dev/Negotiation.tsx).
+   Every rule here is prefixed ng-. The older .nego-* / .peer-* rules in developers.css
+   belonged to the interactive form this loop replaced and are no longer used. */
+
+.ng {
+  display: grid;
+  gap: 22px;
+}
+
+/* ── Scenario tabs: the four cases, the active one carries the loop's progress ── */
+.ng-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.ng-tabs-label {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-right: 6px;
+}
+.ng-tab {
+  position: relative;
+  overflow: hidden;
+  padding: 9px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.2s,
+    color 0.2s,
+    border-color 0.2s;
+}
+.ng-tab:hover {
+  color: var(--text);
+  border-color: rgba(34, 211, 238, 0.4);
+}
+.ng-tab[aria-pressed="true"] {
+  color: var(--text);
+  border-color: rgba(34, 211, 238, 0.55);
+  background: rgba(34, 211, 238, 0.08);
+}
+.ng-tab:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+.ng-tab-n {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-right: 8px;
+  border-radius: 50%;
+  border: 1px solid var(--line-2);
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--dim);
+}
+.ng-tab[aria-pressed="true"] .ng-tab-n {
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+.ng-tabs-current {
+  display: none;
+}
+.ng-tab-bar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: calc(var(--p, 0) * 100%);
+  background: var(--cyan);
+  transition: width 0.12s linear;
+}
+.ng-tab[aria-pressed="false"] .ng-tab-n {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-right: 8px;
+  border-radius: 50%;
+  border: 1px solid var(--line-2);
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--dim);
+}
+.ng-tab[aria-pressed="true"] .ng-tab-n {
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+.ng-tab-bar {
+  display: none;
+}
+
+/* ── One scenario: phase caption, stage, sub-caption. Remounts per scenario,
+   so it fades in; data-leaving fades it out (together a DUR.md cross-fade). ── */
+.ng-scene {
+  display: grid;
+  gap: 16px;
+  animation: ng-fade var(--ng-fade, 0.3s) var(--ease-in-out) both;
+  transition: opacity var(--ng-fade, 0.3s) var(--ease-in-out);
+}
+.ng-scene[data-leaving] {
+  opacity: 0;
+}
+.ng-step {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 32px;
+}
+.ng-step-dots {
+  display: inline-flex;
+  gap: 6px;
+}
+.ng-step-dots i {
+  width: 22px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line-2);
+  transition: background var(--dur-sm) var(--ease-in-out);
+}
+.ng-step-dots i[data-on] {
+  background: var(--cyan);
+}
+.ng-step-text {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  color: var(--text);
+  animation: ng-in var(--dur-sm) var(--ease-in-out) both;
+}
+.ng-step-text[data-kind="ok"] {
+  color: var(--mint);
+}
+.ng-step-text[data-kind="no"] {
+  color: var(--rose);
+}
+
+/* ── Stage: Boo | result | Casper ─────────────────────────────────────────── */
+.ng-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr) minmax(0, 1fr);
+  gap: 18px 44px;
+  align-items: stretch;
+  min-height: 372px;
+}
+.ng-peer {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  padding: 20px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  min-width: 0;
+}
+.ng-peer[data-who="boo"] {
+  border-color: rgba(34, 211, 238, 0.3);
+}
+.ng-peer[data-who="casper"] {
+  border-color: rgba(74, 222, 128, 0.3);
+}
+.ng-peer-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.ng-peer-head svg {
+  filter: none;
+  flex: none;
+}
+.ng-peer-name {
+  font-weight: 700;
+  font-size: 18px;
+  line-height: 1.1;
+}
+.ng-peer-platform {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.ng-tag {
+  display: inline-block;
+  white-space: nowrap;
+  padding: 0 7px;
+  line-height: 16px;
+  border-radius: 6px;
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  color: var(--amber);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+.ng-label {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.ng-field {
+  display: grid;
+  gap: 8px;
+}
+
+/* Ordered transports and capability chips. data-state: idle | shared | off. */
+.ng-order,
+.ng-rows {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: n;
+}
+.ng-order li,
+.ng-rows li {
+  counter-increment: n;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 9px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--text);
+  min-width: 0;
+  transition:
+    color 0.35s,
+    border-color 0.35s,
+    background 0.35s,
+    opacity 0.35s;
+}
+.ng-order li::before,
+.ng-rows li::before {
+  content: counter(n);
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  color: var(--dim);
+  font-size: 12px;
+  min-width: 1ch;
+  transition: color 0.35s;
+}
+.ng-order li {
+  animation: ng-in 0.45s var(--ease) both;
+  animation-delay: calc(var(--i, 0) * 80ms);
+}
+.ng-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ng-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border-radius: 8px;
+  border: 1px solid var(--line-2);
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 12.5px;
+  color: var(--text);
+  max-width: 100%;
+  transition:
+    color 0.35s,
+    border-color 0.35s,
+    background 0.35s,
+    opacity 0.35s;
+  animation: ng-in 0.45s var(--ease) both;
+  animation-delay: calc(240ms + var(--i, 0) * 70ms);
+}
+.ng-order li[data-state="shared"],
+.ng-chip[data-state="shared"] {
+  border-color: rgba(74, 222, 128, 0.55);
+  background: rgba(74, 222, 128, 0.08);
+}
+.ng-order li[data-state="shared"]::before {
+  color: var(--mint);
+}
+.ng-order li[data-state="off"],
+.ng-chip[data-state="off"] {
+  color: var(--dim);
+  opacity: 0.55;
+  text-decoration: line-through;
+  text-decoration-color: rgba(244, 114, 182, 0.75);
+  text-decoration-thickness: 1.5px;
+}
+
+/* ── The result card ─────────────────────────────────────────────────────── */
+.ng-result {
+  position: relative;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  padding: 22px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-2);
+  background: linear-gradient(180deg, #0a1520, var(--bg));
+  min-width: 0;
+  transition: border-color 0.4s;
+}
+.ng-result[data-verdict="ok"] {
+  border-color: rgba(74, 222, 128, 0.4);
+}
+.ng-result[data-verdict="no"] {
+  border-color: rgba(244, 114, 182, 0.45);
+}
+.ng-verdict {
+  font-weight: 700;
+  font-size: 22px;
+  line-height: 1.15;
+  min-height: 1.15em;
+  transition: color 0.35s;
+}
+.ng-verdict[data-kind="wait"] {
+  color: var(--dim);
+  font-weight: 500;
+  font-size: 16px;
+  animation: ng-pulse 1.4s ease-in-out infinite;
+}
+.ng-verdict[data-kind="ok"] {
+  color: var(--mint);
+}
+.ng-verdict[data-kind="no"] {
+  color: var(--rose);
+}
+.ng-rows li {
+  padding: 8px 10px;
+  animation: ng-slide 0.5s var(--ease) both;
+  animation-delay: calc(var(--i, 0) * 130ms);
+}
+.ng-rows li[data-first="true"] {
+  border-color: var(--mint);
+  color: var(--mint);
+}
+.ng-rows li[data-first="true"]::before {
+  color: var(--mint);
+}
+.ng-rows .mono {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* rank on Boo's list + rank on Casper's list = score (lower wins) */
+.ng-sum {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+.ng-sum b {
+  font-weight: 700;
+}
+.ng-sum b[data-who="boo"] {
+  color: var(--cyan);
+}
+.ng-sum b[data-who="casper"] {
+  color: var(--mint);
+}
+.ng-sum b[data-total] {
+  color: var(--text);
+}
+.ng-fail {
+  color: var(--muted);
+  font-size: 14.5px;
+  line-height: 1.55;
+  animation: ng-in 0.5s var(--ease) both;
+}
+.ng-result .ng-chips {
+  animation: ng-in 0.45s var(--ease) both;
+}
+.ng-result .ng-chip {
+  animation-delay: calc(var(--i, 0) * 70ms);
+}
+.ng-result .ng-label {
+  animation: ng-in 0.45s var(--ease) both;
+}
+
+/* Beams: each peer's offer travelling into the card (dashes flow while the
+   offers are compared), a steady line once agreed, a broken one on a no. */
+.ng-beam {
+  position: absolute;
+  top: 58px;
+  width: 44px;
+  height: 2px;
+  pointer-events: none;
+  background-size: 12px 2px;
+  animation: ng-flow 0.6s linear infinite;
+}
+.ng-beam[data-side="boo"] {
+  right: 100%;
+  background-image: linear-gradient(90deg, var(--cyan) 0 6px, transparent 6px 12px);
+}
+.ng-beam[data-side="casper"] {
+  left: 100%;
+  background-image: linear-gradient(90deg, transparent 0 6px, var(--mint) 6px 12px);
+  animation-direction: reverse;
+}
+.ng-result[data-verdict="ok"] .ng-beam {
+  animation: none;
+  background-image: none;
+  background-color: var(--mint);
+  box-shadow: 0 0 10px rgba(74, 222, 128, 0.55);
+}
+.ng-result[data-verdict="no"] .ng-beam {
+  animation: none;
+  background-image: linear-gradient(90deg, var(--rose) 0 16px, transparent 16px 28px, var(--rose) 28px);
+  background-size: auto;
+  opacity: 0.8;
+}
+.ng-result[data-verdict="no"] .ng-beam::after {
+  content: "×";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -54%);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--rose);
+}
+
+/* ── Caption and the one-line truth ─────────────────────────── */
+.ng-caption {
+  margin: 0;
+  max-width: 78ch;
+  min-height: 1.55em;
+  font-size: 15.5px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.ng-truth {
+  display: grid;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--dim);
+}
+.ng-truth p {
+  margin: 0;
+}
+.ng-truth a {
+  color: var(--cyan);
+}
+.ng-truth a:hover {
+  text-decoration: underline;
+}
+.ng-truth-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+}
+.ng-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.ng-status::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--lvl-development);
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.15);
+}
+
+@keyframes ng-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes ng-slide {
+  from {
+    opacity: 0;
+    transform: translateX(-18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes ng-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes ng-flow {
+  to {
+    background-position: 12px 0;
+  }
+}
+@keyframes ng-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* ── Phones and narrow tablets: the peers stay face to face, the result below ── */
+@media (max-width: 720px) {
+  .ng-stage {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px;
+    min-height: 0;
+  }
+  .ng-result {
+    grid-column: 1 / -1;
+    order: 1;
+    padding: 18px;
+  }
+  .ng-beam {
+    display: none;
+  }
+  .ng-peer {
+    padding: 12px;
+    gap: 12px;
+  }
+  .ng-peer-head {
+    gap: 8px;
+  }
+  .ng-peer-head svg {
+    width: 34px;
+    height: 42.5px;
+  }
+  .ng-peer-name {
+    font-size: 16px;
+  }
+  .ng-peer-platform,
+  .ng-label {
+    font-size: 11px;
+  }
+  .ng-order li,
+  .ng-rows li {
+    font-size: 12px;
+    padding: 6px 8px;
+    gap: 8px;
+  }
+  .ng-chip {
+    font-size: 11.5px;
+    padding: 4px 7px;
+  }
+  .ng-chips {
+    gap: 5px;
+  }
+  .ng-verdict {
+    font-size: 20px;
+  }
+  .ng-caption {
+    font-size: 14.5px;
+  }
+  .ng-step-text {
+    font-size: 19px;
+  }
+  /* Phones: the four scenarios become numbered dots; the current one is named below them. */
+  .ng-tabs {
+    gap: 10px;
+  }
+  .ng-tab {
+    padding: 0;
+    width: 40px;
+    height: 40px;
+    display: inline-grid;
+    place-items: center;
+  }
+  .ng-tab-n {
+    margin: 0;
+    border: 0;
+    width: auto;
+    height: auto;
+    font-size: 14px;
+  }
+  .ng-tab-name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .ng-tabs-current {
+    display: block;
+    margin: -12px 0 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ng *,
+  .ng *::before {
+    animation: none !important;
+    transition: none !important;
+  }
+  .ng-tab-n {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-right: 8px;
+  border-radius: 50%;
+  border: 1px solid var(--line-2);
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--dim);
+}
+.ng-tab[aria-pressed="true"] .ng-tab-n {
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+.ng-tab-bar {
+    display: none;
+  }
+}

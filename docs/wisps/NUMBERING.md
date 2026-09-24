@@ -1,6 +1,6 @@
 # WISP numbering and compatibility
 
-All 44 specifications remain Draft. Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
+All 46 specifications remain Draft. Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
 
 ## Independent families
 
@@ -10,12 +10,12 @@ All 44 specifications remain Draft. Family numbering was approved on 2026-09-22.
 | 100–199 | Transport negotiation (100), WebRTC (101), Iroh (102), HyperDHT (103) |
 | 200–299 | Payment negotiation (200), Cashu (201), experimental Arkade (202), Lightning (203), Bark (204), Lightning addresses (205) |
 | 300–399 | Identity proofs (300; external proofs optional), Nostr (301), Pubky, Keet, domain, OpenPGP, Bitcoin address, SSH and OpenID Connect providers, and the Nostr social layer (3xx; planned, number to be defined) |
-| 400–499 | Chat messaging (400), an independent application capability |
+| 400–499 | Chat messaging (400), an independent application capability; store-and-forward for an away contact (4xx; planned, number to be defined) |
 | 500–599 | File transfer (500), an independent application capability |
 | 600–699 | Voice and video (600), an independent application capability |
 | 700–799 | Local services (700), an independent application capability |
 | 800–899 | Invite and join (800), an independent admission contract |
-| 900–999 | Group session negotiation (900), optional GossipSub distribution (9xx; planned, number to be defined) |
+| 900–999 | Group session negotiation (900), the group mesh profile and optional GossipSub distribution (9xx; planned, number to be defined) |
 
 202 documents the experimental Arkade integration, its regtest evidence and unfinished release gates. A document describing an adapter does not establish that an adapter is implemented. A vendor/plugin does not automatically require a WISP. These families are not a mandatory stack; DHT text has its own bounded delivery path and external identity remains optional.
 
@@ -55,6 +55,7 @@ Generated from [numbering.json](numbering.json); edit that source instead of thi
 | 401 | [401](401-paired-chat.md) |
 | 402 | [402](402-legacy-chat.md) |
 | 403 | [403](403-dht-text.md) |
+| — | [4xx · store-and-forward · planned; number to be defined](4xx-store-and-forward.md) |
 | 14 | [500](500-files.md) |
 | 501 | [501](501-paired-files.md) |
 | 502 | [502](502-legacy-files.md) |
@@ -65,6 +66,7 @@ Generated from [numbering.json](numbering.json); edit that source instead of thi
 | 20 | [800](800-invite-join.md) |
 | 801 | [801](801-invitation-profiles.md) |
 | 21 | [900](900-group-sessions.md) |
+| — | [9xx · group-mesh · planned; number to be defined](9xx-group-mesh.md) |
 | 22 | [9xx · gossipsub · planned; number to be defined](901-gossipsub.md) |
 | — 1000 | [1000](1000-storage.md) |
 | — 1001 | [1001](1001-local-storage.md) |

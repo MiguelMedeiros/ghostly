@@ -76,6 +76,16 @@ const SHOTS: Record<string, Shot> = {
     crop: { x: 0.275, y: 0.26, w: 0.45 },
     mobile: "/screenshots/current/services-mobile.webp",
   },
+  groups: {
+    src: "/screenshots/current/groups.webp",
+    alt: "A private group called Haunted house with Boo, Casper and Spooky talking, in the development build",
+    from: "dev",
+    width: 2560,
+    height: 1640,
+    // The conversation column with the group header and the three voices.
+    crop: { x: 0.36, y: 0.0, w: 0.64 },
+    mobile: "/screenshots/current/groups-mobile.webp",
+  },
   identities: {
     src: "/screenshots/current/identities-chat.webp",
     alt: "Casper's chat with Boo, the Identities dialog open: Boo's SSH key and OpenPGP key, each verified as their own key, in the development build",

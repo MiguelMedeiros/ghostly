@@ -238,7 +238,18 @@
     "status": "Planned",
     "range": "2xx",
     "section": "Rails and wallet adapters",
-    "body": "**Provider / signer route**\n\nApproved invoice/address/payment URI; return to Ghostly for status\n\n**Runtime and platform route**\n\nCross-platform copy/QR/deep link, wallet-dependent callback\n\n**Confirmed evidence, Ghostly status, restriction / next decision**\n\n**Proposal** extending current invoice UX. “Opened wallet” and user “done” are not confirmed settlement. Track unknown outcomes and independently reconcile where possible.",
+    "body": "**Provider / signer route**\n\nEvery request and every receive shown as QR, text and a `lightning:` / BIP 21 URI (`lightning=`, `ark=`); the payee's own source settles\n\n**Runtime and platform route**\n\nCopy/QR everywhere; the link opened by the system on desktop (`open_payment_link`) and by the extension's background page\n\n**Confirmed evidence, Ghostly status, restriction / next decision**\n\n**Current subset**, [200](200-payments.md#paid-from-another-wallet), [203](203-lightning.md#paid-from-another-wallet). “Opened wallet” and “I paid” are never settlement: the payee's wallet sees the invoice, transaction or virtual output, marks the request paid and tells the payer; “I paid” only makes it look now. No wallet callback is relied on.",
+    "sourceAnchor": "rails-and-wallet-adapters"
+  },
+  {
+    "id": "candidate-lightning-address-lnurl-pay",
+    "title": "Lightning address / LNURL-pay",
+    "family": "2",
+    "kind": "Payment rail",
+    "status": "Planned",
+    "range": "2xx",
+    "section": "Rails and wallet adapters",
+    "body": "**Provider / signer route**\n\nLUD-16/06/01/17/12/09 paying through the active Lightning source; parsing and checks in core, fetching in the engine\n\n**Runtime and platform route**\n\nSame on web, extension and desktop (the service must allow CORS); a local LNURL server in e2e\n\n**Confirmed evidence, Ghostly status, restriction / next decision**\n\n**Current subset**, [Draft 205](205-lnurl.md). Domain named before any fetch, bounded fetches, invoice amount and metadata commitment checked. Receiving on an address needs a server the person runs and is out of scope; LUD-18/21 and BOLT 12 open.",
     "sourceAnchor": "rails-and-wallet-adapters"
   },
   {
@@ -722,7 +733,7 @@
     "status": "Planned",
     "range": "9xx",
     "section": "Communication, groups and storage",
-    "body": "**Composition and provider/runtime options**\n\n800 admission + 900 membership, roles/policies, epochs, welcome/remove, one chosen distribution profile\n\n**Dependencies and criteria for readiness**\n\nDefine membership authority and recovery; rekey on removal, concurrent invites, offline members, rollback/replay. Initial eight-member test cap is a proposal, not measured product capacity.",
+    "body": "**Composition and provider/runtime options**\n\n**Current:** 900 with the [group mesh profile](9xx-group-mesh.md): one admin per epoch, signed commit chain, epoch secrets sealed per member, welcome/remove/role/rotate, a mesh of roster-derived pairwise edges, text only\n\n**Dependencies and criteria for readiness**\n\nShipped for up to eight members with unit and four-browser tests (removal, offline catch-up from authors' logs, admin transfer, forks). Next: multiple admins, member key updates, files/media/payments behind their own group capabilities, native transports on edges, a store for members never online together. The eight-member cap is a first-profile bound, not measured capacity.",
     "sourceAnchor": "communication-groups-and-storage"
   },
   {
@@ -730,10 +741,10 @@
     "title": "Group crypto",
     "family": "9",
     "kind": "Cryptographic profile",
-    "status": "Research",
+    "status": "Planned",
     "range": "9xx",
     "section": "Communication, groups and storage",
-    "body": "**Composition and provider/runtime options**\n\n**New suggestion / research:** evaluate established [MLS RFC9420](https://www.rfc-editor.org/rfc/rfc9420.html) and maintained implementations\n\n**Dependencies and criteria for readiness**\n\nNo automatic MLS adoption. Resolve credentials, authentication service, delivery service, forks, multi-device membership and tested epoch recovery. GossipSub alone provides none of these.",
+    "body": "**Composition and provider/runtime options**\n\n**Decided for the first profile:** epoch secrets sealed with X25519 per member, HKDF keys, XChaCha20-Poly1305 with signed envelopes, confirmation tags; [MLS RFC9420](https://www.rfc-editor.org/rfc/rfc9420.html) evaluated and not adopted at this size\n\n**Dependencies and criteria for readiness**\n\nForward secrecy per epoch and post-compromise security on removal/rotation are tested; a compromised member seed is healed by removal, not rotation. Revisit MLS if groups grow past the mesh, or when member key updates are needed.",
     "sourceAnchor": "communication-groups-and-storage"
   },
   {

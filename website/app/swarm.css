@@ -1,0 +1,78 @@
+/* The swarm: ghosts cover the screen while a page changes. Owned by components/site/GhostSwarm.tsx. */
+.swarm {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  overflow: hidden;
+  pointer-events: auto;
+}
+.swarm-veil {
+  position: absolute;
+  inset: 0;
+  background: var(--bg);
+  opacity: 0;
+  transition: opacity 0.34s var(--ease-out) 0.12s;
+}
+.swarm[data-phase="in"] .swarm-veil,
+.swarm[data-phase="hold"] .swarm-veil {
+  opacity: 0.97;
+}
+.swarm[data-phase="out"] .swarm-veil {
+  opacity: 0;
+  transition: opacity 0.4s var(--ease-in) 0.05s;
+}
+.swarm-ghost {
+  position: absolute;
+  display: block;
+  transform: translate(-50%, -50%);
+  will-change: transform, opacity;
+}
+.swarm-ghost svg {
+  width: 100%;
+  height: 100%;
+}
+/* In: the flock rises from below-left and settles over the page. */
+.swarm[data-phase="in"] .swarm-ghost {
+  animation: swarm-in 0.42s var(--ease-out) var(--d) both;
+}
+/* Hold: a gentle bob while the page changes underneath. */
+.swarm[data-phase="hold"] .swarm-ghost {
+  animation: swarm-bob 1.2s ease-in-out infinite alternate;
+}
+/* Out: up and away to the right, the first ones in leave first. */
+.swarm[data-phase="out"] .swarm-ghost {
+  animation: swarm-out 0.52s var(--ease-in) var(--d) both;
+}
+@keyframes swarm-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) translate(-18vw, 70vh) rotate(calc(var(--t) * -2)) scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) rotate(var(--t));
+  }
+}
+@keyframes swarm-bob {
+  from {
+    transform: translate(-50%, -50%) rotate(var(--t));
+  }
+  to {
+    transform: translate(-50%, -54%) rotate(var(--t));
+  }
+}
+@keyframes swarm-out {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%) rotate(var(--t));
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -50%) translate(22vw, -80vh) rotate(calc(var(--t) * 2)) scale(0.7);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .swarm {
+    display: none;
+  }
+}

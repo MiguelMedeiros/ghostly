@@ -5,6 +5,7 @@ import { motion, useInView, useMotionValueEvent, useScroll, useSpring, useTransf
 import { Ghost, type GhostMood } from "@/components/ghost/Ghost";
 import { orientationOf, scatter, stepOf, useCards, usePortrait, VIEW_BOX_ORIGIN } from "@/components/home/stage";
 import { useCalm } from "@/lib/useCalm";
+import { SPRING, useScrub } from "@/lib/motion";
 import { BLOCKING, poseAt, ROOMS, STAGE, valueAt, type Chapter } from "./poses";
 
 /**
@@ -58,7 +59,9 @@ function LiveAct({ id, chapters, field, bubble, children }: { id: string; chapte
   const portrait = usePortrait();
   const orient = orientationOf(portrait);
   const inView = useInView(ref, { margin: "10% 0px 10% 0px" });
-  const { scrollYProgress: actP } = useScroll({ target: ref, offset: ["start start", "end end"] });
+  const { scrollYProgress: rawActP } = useScroll({ target: ref, offset: ["start start", "end end"] });
+  // The camera, the focal point and the field follow the smoothed progress; the actors add their own weight on top.
+  const actP = useScrub(rawActP);
   const [ranges, setRanges] = useState<Range[]>([]);
   const rangesRef = useRef<Range[]>([]);
 
@@ -127,7 +130,7 @@ function LiveAct({ id, chapters, field, bubble, children }: { id: string; chapte
   };
 
   // Every actor channel, opacity included, goes through the same spring: no hard cuts inside an act.
-  const spring = { stiffness: 120, damping: 26, mass: 0.8 };
+  const spring = SPRING.actor;
   const bx = useSpring(useTransform(actP, (v) => pose("boo", v).x), spring);
   const by = useSpring(useTransform(actP, (v) => pose("boo", v).y), spring);
   const bs = useSpring(useTransform(actP, (v) => pose("boo", v).s / 100), spring);

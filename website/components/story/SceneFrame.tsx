@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { animate as tween, motion, motionValue, useInView, useMotionValue, useMotionValueEvent, useScroll, useTransform, type MotionValue } from "motion/react";
 import { useCalm } from "@/lib/useCalm";
+import { DUR, EASE, useScrub } from "@/lib/motion";
 import { EXIT, orientationOf, stepAt, stepOf, useCards, usePortrait, type Camera } from "@/components/home/stage";
 import { BLOCKING, ROOMS, STAGE, valueAt, type Chapter } from "./poses";
 
@@ -83,7 +84,8 @@ export function SceneFrame({
   const portrait = usePortrait();
   const n = steps.length;
   const inView = useInView(ref, { margin: "20% 0px 20% 0px" });
-  const { scrollYProgress } = useScroll({ target: ref, offset: ["start start", "end end"] });
+  const { scrollYProgress: rawProgress } = useScroll({ target: ref, offset: ["start start", "end end"] });
+  const scrollYProgress = useScrub(rawProgress);
 
   // Server HTML and the first paint carry the story pose, not the scroll-0 pose.
   const [p] = useState(() => motionValue(stills[Math.min(1, n - 1)]));
@@ -209,7 +211,7 @@ function StaticFigure({ state, at, from, play, chapter, portrait, children }: { 
   const inView = useInView(ref, { amount: 0.55, once: true });
   useEffect(() => {
     if (!play || !inView) return;
-    const controls = tween(p, at, { duration: 1.8, ease: [0.22, 1, 0.36, 1] });
+    const controls = tween(p, at, { duration: DUR.beat, ease: EASE.out });
     return () => controls.stop();
   }, [play, inView, at, p]);
   const b = BLOCKING[orientationOf(portrait)][chapter];

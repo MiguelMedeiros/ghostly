@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { animate as tween, motion, useInView, useMotionValue, useScroll, useTransform, type MotionValue } from "motion/react";
 import { useCalm } from "@/lib/useCalm";
+import { useScrub } from "@/lib/motion";
 import { useCards } from "@/components/home/stage";
 import "@/app/statement.css";
 
@@ -18,7 +19,8 @@ export function Statement({ before, accent, after }: { before: string; accent: s
   const calm = useCalm();
   const cards = useCards();
   const still = calm || cards;
-  const { scrollYProgress } = useScroll({ target: ref, offset: ["start end", "end start"] });
+  const { scrollYProgress: rawProgress } = useScroll({ target: ref, offset: ["start end", "end start"] });
+  const scrollYProgress = useScrub(rawProgress);
   // Touch devices: no pin; the sentence reveals once when it is on screen.
   const local = useMotionValue<number>(REVEAL[0]);
   const inView = useInView(ref, { amount: 0.5, once: true });
