@@ -25,16 +25,24 @@ fn trim_to_fit(
             return Ok((encrypted, batch.len()));
         }
         if batch.len() == 1 {
+            // Alone it still does not fit: keep as much of its start as does.
+            // Characters are not bytes (é is two, 👻 four, and JSON escapes
+            // some), so the cut shrinks until the sealed text fits.
             let msg = batch[0];
-            let max_text = msg.m.chars().take(400).collect::<String>();
-            let truncated = CompactMessage {
-                t: msg.t,
-                m: max_text,
-            };
-            let json =
-                serde_json::to_string(&vec![&truncated]).map_err(|e| format!("JSON: {}", e))?;
-            let encrypted = crypto::encrypt(&json, enc_key)?;
-            return Ok((encrypted, 1));
+            let mut chars = msg.m.chars().count().min(400);
+            loop {
+                let truncated = CompactMessage {
+                    t: msg.t,
+                    m: msg.m.chars().take(chars).collect(),
+                };
+                let json =
+                    serde_json::to_string(&vec![&truncated]).map_err(|e| format!("JSON: {}", e))?;
+                let encrypted = crypto::encrypt(&json, enc_key)?;
+                if encrypted.len() <= max_payload || chars == 0 {
+                    return Ok((encrypted, 1));
+                }
+                chars = chars * 9 / 10;
+            }
         }
         batch.remove(0);
     }

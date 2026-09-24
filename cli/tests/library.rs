@@ -176,3 +176,19 @@ async fn a_long_message_is_cut_to_fit_one_record() {
     let heard = client.recv(&alice.pubkey, &alice.shared_key).await.unwrap();
     assert_eq!(heard.messages[0].text, "y".repeat(400));
 }
+
+#[tokio::test]
+async fn a_long_message_in_any_script_is_cut_until_it_fits() {
+    let relay = support::relay().await;
+    let alice = new_identity();
+    let client = GhostClient::with_client(support::client(&relay));
+    for text in ["é".repeat(2_000), "👻".repeat(2_000), "\"".repeat(2_000)] {
+        client
+            .send(&alice.seed, &alice.pubkey, &alice.shared_key, &text, None)
+            .await
+            .unwrap_or_else(|error| panic!("{}: {error}", &text[..4]));
+        let heard = client.recv(&alice.pubkey, &alice.shared_key).await.unwrap();
+        let got = &heard.messages[0].text;
+        assert!(!got.is_empty() && text.starts_with(got.as_str()), "{got}");
+    }
+}

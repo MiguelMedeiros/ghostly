@@ -654,4 +654,37 @@ mod tests {
             .unwrap();
         assert_eq!(batch.messages[0].text, "y".repeat(400));
     }
+
+    #[tokio::test]
+    async fn a_long_message_in_any_script_is_cut_until_it_fits() {
+        let relay = pkarr_relay().await;
+        let app = app(&relay);
+        let alice = create_keypair().unwrap();
+        let key = generate_enc_key();
+        for text in [
+            "é".repeat(2_000),
+            "👻".repeat(2_000),
+            "\"".repeat(2_000),
+            "日本語".repeat(700),
+        ] {
+            let kept = publish_messages(
+                app.state(),
+                alice.seed_b64.clone(),
+                vec![message(1, &text)],
+                key.clone(),
+                0,
+                None,
+                None,
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{}: {error}", &text[..8]));
+            assert_eq!(kept, 1);
+            let batch = resolve_messages(app.state(), alice.pub_key_z32.clone(), key.clone())
+                .await
+                .unwrap()
+                .unwrap();
+            let got = &batch.messages[0].text;
+            assert!(!got.is_empty() && text.starts_with(got.as_str()), "{got}");
+        }
+    }
 }
