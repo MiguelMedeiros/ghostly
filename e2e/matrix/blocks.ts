@@ -692,10 +692,10 @@ export const restore: Block = {
     await again.getByTestId("restore-file").setInputFiles({ name: file.suggestedFilename(), mimeType: "application/json", buffer: bundle });
     await again.getByTestId("restore-passphrase").fill(PASSPHRASE);
     await again.getByTestId("restore-go").click();
-    await expect(restored.page.getByTestId("profile-row")).toHaveCount(2, { timeout: 60_000 });
-    // "A restore always becomes a new profile, then Ghostly switches to it" (ProfileBackups.tsx).
-    await go(restored, "#/profile");
+    // "A restore always becomes a new profile, then Ghostly switches to it" (ProfileBackups.tsx): the app
+    // starts again on #/profile by itself. Navigating meanwhile would race that reload.
     await expect(restored.page.getByTestId("profile-name"), "the restored profile is the one in use").toHaveValue(/\(restored\)$/, { timeout: 60_000 });
+    await expect(restored.page.getByTestId("profile-row")).toHaveCount(2);
     restored.chatHash = b.chatHash;
     w.b = restored;
     await openChat(restored);

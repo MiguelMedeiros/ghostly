@@ -66,7 +66,7 @@
     {"id":"settings.storage-used","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Settings shows the storage used"},
     {"id":"profiles.create","wisp":"04","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Create a profile; profiles keep chats, settings and wallets apart, each in its own color"},
     {"id":"profiles.switch","wisp":"04","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Switch between profiles"},
-    {"id":"profiles.switcher","wisp":"04","kind":"feature","clients":["web","desktop"],"infra":[],"title":"Account switcher on the account bar and the phone's tab bar: one tap to another profile, its last place, unread left in others, a locked one asks first"},
+    {"id":"profiles.switcher","wisp":"04","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Account switcher on the account bar and the phone's tab bar: one tap to another profile, its last place, unread left in others, a locked one asks first"},
     {"id":"profiles.delete","wisp":"04","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Delete a profile (a locked one asks its password)"},
     {"id":"profiles.lock","wisp":"04","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"A new profile is locked too when the lock is on"},
     {"id":"profiles.name-optional","wisp":"04","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"The profile name is optional; editing and clearing persist, and a cleared name reaches the contact"},

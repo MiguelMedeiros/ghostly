@@ -1,5 +1,5 @@
 import { concatBytes, fromBase64, toBase64, utf8Encode } from "@ghostly/core";
-import type { HttpRequestReply, RuntimeMessage } from "./messages";
+import type { EngineStatus, HttpRequestReply, RuntimeMessage } from "./messages";
 import { parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
 import { rememberPendingUpdate } from "./updates";
 
@@ -10,27 +10,49 @@ import { rememberPendingUpdate } from "./updates";
 
 // -- peer lifecycle ----------------------------------------------------------
 
-let creatingOffscreen: Promise<void> | null = null;
+let starting: Promise<void> | null = null;
 
-async function ensureEngine(): Promise<void> {
-  if (creatingOffscreen) return creatingOffscreen;
-  if (await chrome.offscreen.hasDocument()) return waitForEngine();
-  creatingOffscreen ??= chrome.offscreen
+/**
+ * Makes sure the peer runs, as the profile in use (WISP 04). Every caller waits on the same attempt, so
+ * a switch seen by two pages at once restarts the peer once. Nothing of this lives in the worker between
+ * events: the document, and the profile registry the document reads, are the state.
+ */
+function ensureEngine(): Promise<void> {
+  starting ??= startEngine().finally(() => (starting = null));
+  return starting;
+}
+
+async function startEngine(): Promise<void> {
+  if (!(await chrome.offscreen.hasDocument())) await createEngineDocument();
+  const status = await waitForEngine();
+  if (status.profile === status.active) return;
+  // A page made another profile the one in use. The running peer stops and its document closes before
+  // the next one opens: never two peers, and never one peer over two profiles' data.
+  await chrome.runtime.sendMessage({ target: "engine", type: "stop" } satisfies RuntimeMessage).catch(() => {});
+  await chrome.offscreen.closeDocument().catch(() => {});
+  await createEngineDocument();
+  await waitForEngine();
+}
+
+async function createEngineDocument(): Promise<void> {
+  await chrome.offscreen
     .createDocument({
       url: "offscreen.html",
       reasons: [chrome.offscreen.Reason.WEB_RTC],
       justification: "Ghostly keeps WebRTC connections to your peers while the browser is open.",
     })
-    .then(waitForEngine)
-    .finally(() => (creatingOffscreen = null));
-  await creatingOffscreen;
+    // A worker stopped mid-start may have created it already; that one is the peer.
+    .catch(async (error) => {
+      if (!(await chrome.offscreen.hasDocument())) throw error;
+    });
 }
 
 /** The document exists before its script listens; wait until the peer answers. */
-async function waitForEngine(): Promise<void> {
+async function waitForEngine(): Promise<EngineStatus> {
   for (let attempt = 0; attempt < 100; attempt++) {
     try {
-      if (await chrome.runtime.sendMessage({ target: "engine", type: "ping" } satisfies RuntimeMessage)) return;
+      const status = (await chrome.runtime.sendMessage({ target: "engine", type: "ping" } satisfies RuntimeMessage)) as EngineStatus | undefined;
+      if (status) return status;
     } catch {
       // nobody is listening yet
     }

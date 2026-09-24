@@ -1,5 +1,6 @@
 import type { EngineClientSink } from "@ghostly/browser/engine/server";
 import type { RpcRequest } from "@ghostly/browser/shared/rpc";
+import { databaseName } from "@ghostly/browser/shared/idb";
 
 /**
  * Stands in for `@ghostly/browser/engine/server` in the offscreen document: the
@@ -24,13 +25,15 @@ export interface EngineRequestInit {
 
 export interface FakeEngineControl {
   servers: FakeEngineServer[];
+  /** Peers starting and stopping, in order: `start <database>`, `stop <database>`. */
+  log: string[];
   ready: Promise<void>;
   respond: (peer: string, service: string, init: EngineRequestInit) => Promise<EngineResponse>;
 }
 
 export function engineControl(): FakeEngineControl {
   const holder = globalThis as { __fakeEngine?: FakeEngineControl };
-  holder.__fakeEngine ??= { servers: [], ready: Promise.resolve(), respond: async () => okResponse("") };
+  holder.__fakeEngine ??= { servers: [], log: [], ready: Promise.resolve(), respond: async () => okResponse("") };
   return holder.__fakeEngine;
 }
 
@@ -50,6 +53,8 @@ export class FakeEngineServer {
   readonly requests: { peer: string; service: string; init: EngineRequestInit }[] = [];
   shutdowns = 0;
   readonly ready: Promise<void>;
+  /** The peer database the document had chosen when it started this peer (mock `shared/idb` to read it). */
+  readonly database = databaseName();
   readonly node = {
     request: (peer: string, service: string, init: EngineRequestInit) => {
       this.requests.push({ peer, service, init });
@@ -57,12 +62,14 @@ export class FakeEngineServer {
     },
     shutdown: async () => {
       this.shutdowns++;
+      engineControl().log.push(`stop ${this.database}`);
     },
   };
 
   constructor(readonly options: unknown) {
     this.ready = engineControl().ready;
     engineControl().servers.push(this);
+    engineControl().log.push(`start ${this.database}`);
   }
 
   attach(client: EngineClientSink): void {

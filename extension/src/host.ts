@@ -2,15 +2,22 @@ import type { BrowserHost } from "@ghostly/browser/host";
 import { UI_PORT, type RuntimeMessage } from "./messages";
 import { extensionUpdates } from "./updates";
 import { extensionOidc } from "./oidc";
+import { pageProfileIsCurrent } from "./profile";
 
 /** Ghostly Browser: the peer lives in the offscreen document, reached through extension messaging. */
 export const extensionHost: BrowserHost = {
   version: chrome.runtime.getManifest().version,
-  features: { shareLocalServices: true, openServices: true },
+  features: { shareLocalServices: true, openServices: true, profiles: true },
   updates: extensionUpdates,
   oidc: extensionOidc,
 
   async connect(onMessage, onDisconnect) {
+    // Another tab switched profiles since this page started: it starts again as that one (ui/main.tsx)
+    // rather than show one profile's pages over the other's peer.
+    if (!pageProfileIsCurrent()) {
+      location.reload();
+      throw new Error("Switching profiles…");
+    }
     const ready = await chrome.runtime.sendMessage({ target: "background", type: "ensure-engine" } satisfies RuntimeMessage);
     if (!ready?.ok) throw new Error(ready?.error ?? "The Ghostly peer is unavailable. Reopen the extension to retry.");
     const port = chrome.runtime.connect({ name: UI_PORT });
