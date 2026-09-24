@@ -7,7 +7,8 @@ test("brand returns home and preserves the conversation and multiline draft",{ t
   await a.page.getByPlaceholder("Message…").fill("Draft line 1\nDraft line 2");
   const chat=a.page.url();const brand=a.page.getByRole("link",{name:"Go home",exact:true});
   await brand.focus();await brand.press("Enter");await expect(a.page.getByTestId("home-chat-actions")).toBeVisible();
-  await a.page.goBack();await expect(a.page).toHaveURL(chat);
+  // Home is at the bottom of the history (going home is going back): the chat is ahead of it now.
+  await a.page.goForward();await expect(a.page).toHaveURL(chat);
   await expect(a.page.getByPlaceholder("Message…")).toHaveValue("Draft line 1\nDraft line 2");
   await expect(a.page.locator(".chat-wallpaper").getByText("Kept history",{exact:true})).toBeVisible();
   await brand.click();await expect(a.page.getByTestId("home-chat-actions")).toBeVisible();

@@ -70,6 +70,8 @@ export function useAnchorHome(isIntake: (pathname: string) => boolean) {
   const navigate = useNavigate();
   const { pathname, state, key } = useLocation();
   useEffect(() => {
+    // The app opened on its bare address: home says so (`#/`), like every other way of reaching it.
+    if (pathname === HOME && typeof window !== "undefined" && !window.location.hash) { void navigate(HOME, { replace: true, state }); return; }
     if (pathname === HOME || readNav(state) || isIntake(pathname)) return;
     const stack = stackOf(pathname, state);
     execute(navigate, key, plan(stack, [{ path: HOME }, { path: pathname }], userState(state)));
