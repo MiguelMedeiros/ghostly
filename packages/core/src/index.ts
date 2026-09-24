@@ -43,3 +43,6 @@ export * from "./bitcoinScript";
 export * from "./bip322";
 export * from "./bitcoinMessage";
 export * from './sshsig';
+export * from "./groupCrypto";
+export * from "./groupCommits";
+export * from "./groupSession";
