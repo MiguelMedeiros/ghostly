@@ -129,6 +129,12 @@ export interface GroupEdgeView {
   error?: string;
 }
 
+/**
+ * How far a join through a group's link got, as the joiner can know it: the knock is being left,
+ * it is there for the admin's app to read, that app opened the entry session, it let me in.
+ */
+export type GroupJoinStage = "knocking" | "knocked" | "answered" | "admitted";
+
 export interface GroupView {
   id: string;
   name: string;
@@ -141,7 +147,7 @@ export interface GroupView {
   isAdmin: boolean;
   members: GroupMemberView[];
   /** On the invitee's side, until the welcome arrives. */
-  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; viaLink?: boolean };
+  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; viaLink?: boolean; stage?: GroupJoinStage };
   /** The group's link while it is on (`group1/<id>/<entry key>`); only the admin who made it sees it. */
   entryLink?: string;
   /** Contacts (by chat id) invited by me and not yet in. */

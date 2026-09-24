@@ -33,7 +33,7 @@ import {
 } from "./http";
 import type { LinkParams } from "./invite";
 import type { Payment, PaymentAsk, PaymentRequest, PaymentResult } from "./payments";
-import { LinkSession, type LinkStatus, type PeerPresence, type PollIntervals } from "./link";
+import { EXPECT_PEER_MS, LinkSession, type LinkStatus, type PeerPresence, type PollIntervals } from "./link";
 import type { ResolvedLink } from "./records";
 import { servicesFromWire, servicesToWire, type ServiceAd } from "./services";
 import { PairedHttp } from "./pairedHttp";
@@ -198,6 +198,8 @@ export class GhostLink {
   private openWaiters: { resolve: () => void; reject: (e: Error) => void }[] = [];
   private lastAutoConnectAt = 0;
   private autoConnectFailures = 0;
+  /** The peer's packet I last looked fast for its offer after (its timestamp): once per packet. */
+  private offerAwaitedFor = 0;
 
   constructor(options: GhostLinkOptions) {
     this.options = options;
@@ -669,7 +671,14 @@ export class GhostLink {
   /** Only the lower key offers, so two peers coming online together do not collide. */
   private maybeAutoConnect(presence: PeerPresence): void {
     if (this.streamBlocked || !this.options.autoConnect || !presence.online || this.channel || this.dataLink.state !== "idle") return;
-    if (this.myPubKeyZ32 > this.options.params.peerPubKeyZ32) return;
+    if (this.myPubKeyZ32 > this.options.params.peerPubKeyZ32) {
+      // The other side dials as soon as it sees me. A packet of its that is new to me and fresh says it just
+      // (re)appeared, so its offer is a poll away; an old one (a contact online for a while, as when this app
+      // starts) says nothing is coming now, and looking fast for it would only spend the relays' budget.
+      const fresh = Date.now() - presence.lastPacketAt < EXPECT_PEER_MS;
+      if (fresh && presence.lastPacketAt !== this.offerAwaitedFor) { this.offerAwaitedFor = presence.lastPacketAt; this.session.expectPeer(); }
+      return;
+    }
     const wait = Math.min(AUTO_CONNECT_RETRY_MS * 2 ** this.autoConnectFailures, AUTO_CONNECT_MAX_RETRY_MS);
     if (Date.now() - this.lastAutoConnectAt < wait) return;
     this.lastAutoConnectAt = Date.now();
@@ -1152,6 +1161,11 @@ export class GhostLink {
     this.autoConnectFailures = 0;
     this.lastAutoConnectAt = 0;
     this.maybeAutoConnect(this.presence);
+  }
+
+  /** A link made just now for a peer that is about to show up (a group's entry session): look fast for a while. */
+  expectPeer(): void {
+    this.session.expectPeer();
   }
 
   /**

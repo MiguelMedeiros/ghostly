@@ -94,6 +94,7 @@ import { S3Store } from "../backup/s3";
 import type { HoldStore } from "../backup/storage";
 import { PaymentDesk } from "./payments";
 import { CashuWallet } from "./wallet";
+import { traceJoin } from "./joinTrace";
 
 const DEFAULT_SETTINGS: Settings = {
   online: true,
@@ -451,9 +452,10 @@ export class GhostlyNode implements EngineImplementation {
       return entries;
     },
     openEntry: (link, role, seedB64, peer) => this.openEntry(link, role, seedB64, peer),
+    linkSeen: linkId => { const live = this.links.get(linkId); return !!live?.presence?.online || (!!live?.dataLink && live.dataLink !== "idle"); },
     publish: (identity, records) => this.transport.publish(identity, records),
     resolve: async pubKeyZ32 => (await this.transport.resolve(pubKeyZ32))?.records ?? null,
-    openEdge: (state, peer) => this.openEdge(state, peer),
+    openEdge: (state, peer, expectPeer) => this.openEdge(state, peer, expectPeer),
     closeEdge: async linkId => {
       const live = this.links.get(linkId);
       if (!live?.stored.group) return;
@@ -1522,7 +1524,7 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** The edge of a group toward one member: a paired link pinned to that member's key, carrying group frames and nothing else. */
-  private async openEdge(state: GroupState, peer: string): Promise<string> {
+  private async openEdge(state: GroupState, peer: string, expectPeer = false): Promise<string> {
     const me = identityFromSeedB64(state.seedB64);
     const params = edgeParams(state.id, me.seed, me.pubKeyZ32, peer);
     const id = identityFromSeedB64(params.seedB64).pubKeyZ32.slice(0, 16);
@@ -1533,6 +1535,7 @@ export class GhostlyNode implements EngineImplementation {
     try { await db.putLink(stored); }
     catch (error) { this.links.delete(id); throw error; }
     if (this.settings.online) this.startLink(id, []);
+    if (expectPeer) this.links.get(id)?.link?.expectPeer();
     return id;
   }
 
@@ -1551,6 +1554,8 @@ export class GhostlyNode implements EngineImplementation {
     try { await db.putLink(stored); }
     catch (error) { this.links.delete(id); throw error; }
     if (this.settings.online) this.startLink(id, []);
+    // The other side is due any moment (the admin's app answers a knock in seconds): look fast meanwhile.
+    this.links.get(id)?.link?.expectPeer();
     return id;
   }
 
@@ -1568,6 +1573,8 @@ export class GhostlyNode implements EngineImplementation {
     if (!live || live.link) return;
     const { stored } = live;
     const group = stored.group!, peer = stored.groupPeer!, entry = !!stored.groupEntry;
+    const role = stored.groupEntry ?? "edge";
+    let seen = false;
     live.pairing = { status: "connecting" };
     live.link = new GhostLink({
       paymentMethods: { cashu: false, lightning: false, arkade: false, usdt: false, bark: false, bitcoin: false },
@@ -1590,12 +1597,16 @@ export class GhostlyNode implements EngineImplementation {
         // An entry session carries the admission frames a contact chat would; an edge, the group's own.
         onGroupFrame: frame => entry ? this.groups.handleContactFrame(linkId, frame) : this.groups.handleEdgeFrame(group, peer, frame),
         onGroupsSupport: supported => {
+          if (supported) traceJoin(group, "link.ready", { role });
           if (supported) { if (entry) this.groups.entryReady(group, linkId, peer); else this.groups.edgeReady(group, peer, linkId); }
           this.emitState();
         },
-        onPresence: presence => { live.presence = presence; if (!entry) this.groups.edgeNick(group, peer, presence.nick); this.emitState(); },
+        onPresence: presence => {
+          if (presence.online && !seen) { seen = true; traceJoin(group, "link.presence", { role }); }
+          live.presence = presence; if (!entry) this.groups.edgeNick(group, peer, presence.nick); this.emitState(); },
         onPairingState: state => { live.pairing = state; this.emitState(); },
         onDataLinkState: state => {
+          traceJoin(group, `link.${state}`, { role });
           // The last moment the member was reachable on it: when it opens, and when it stops being open.
           if (state === "open" || live.dataLink === "open") live.lastSyncAt = Date.now();
           live.dataLink = state;
@@ -1606,6 +1617,7 @@ export class GhostlyNode implements EngineImplementation {
         onDiscoveryError: error => { live.discoveryError = error ?? undefined; this.emitState(); },
       },
     });
+    traceJoin(group, "link.start", { role });
     live.link.start();
   }
 

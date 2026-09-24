@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Groups, type GroupStore, type GroupsHost } from "../src/engine/groups";
-import { identityFromSeedB64, type GhostRecord, type GroupState } from "@ghostly/core";
+import { createIdentity, encodeGroupEntryLink, identityFromSeedB64, randomBytes, toBase64Url, type GhostRecord, type GroupState } from "@ghostly/core";
 import type { StoredGroup, StoredMessage } from "../src/shared/types";
 // covers: groups.create, groups.invite, groups.send, groups.leave, groups.forget, groups.link.enable, groups.link.join, groups.link.replace, groups.protocol.entry
 
@@ -23,7 +23,7 @@ function memoryStore(messages: StoredMessage[]): GroupStore {
 interface Entry { g: string; me: string; peer: string; role: "host" | "guest" }
 
 class World {
-  readonly peers = new Map<string, { groups: Groups; messages: StoredMessage[]; edges: Map<string, { peer: string; state: GroupState; open: boolean }>; entries: Map<string, Entry>; store: GroupStore }>();
+  readonly peers = new Map<string, { groups: Groups; messages: StoredMessage[]; edges: Map<string, { peer: string; state: GroupState; open: boolean; expectPeer?: boolean }>; entries: Map<string, Entry>; store: GroupStore }>();
   /** Pkarr, shared: key → records. */
   readonly pkarr = new Map<string, GhostRecord[]>();
   /** contact chat id → [owner, other owner]: the same chat has one id on each side here, for simplicity. */
@@ -42,7 +42,7 @@ class World {
   }
 
   add(name: string): Groups {
-    const edges = new Map<string, { peer: string; state: GroupState; open: boolean }>();
+    const edges = new Map<string, { peer: string; state: GroupState; open: boolean; expectPeer?: boolean }>();
     const entries = new Map<string, Entry>();
     const messages: StoredMessage[] = [];
     const host: GroupsHost = {
@@ -73,7 +73,7 @@ class World {
       linkReady: linkId => this.chats.has(linkId) || !!edges.get(linkId)?.open || (entries.has(linkId) && !!this.counterpart(entries.get(linkId)!)),
       contactName: linkId => this.chats.has(linkId) ? `contact:${linkId}` : undefined,
       edges: groupId => new Map([...edges.entries()].filter(([, e]) => e.state.id === groupId).map(([id, e]) => [e.peer, id])),
-      openEdge: async (state, peer) => { const id = `edge:${name}:${peer.slice(0, 6)}`; edges.set(id, { peer, state, open: true }); return id; },
+      openEdge: async (state, peer, expectPeer) => { const id = `edge:${name}:${peer.slice(0, 6)}`; edges.set(id, { peer, state, open: true, expectPeer }); return id; },
       closeEdge: async linkId => { edges.delete(linkId); entries.delete(linkId); },
       openEntry: async (link, role, seedB64, peer) => {
         const me = identityFromSeedB64(seedB64).pubKeyZ32, id = `entry:${name}:${peer.slice(0, 6)}`;
@@ -214,10 +214,14 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     // Carol is nobody's contact. Opening the link joins at once: nothing to accept.
     expect(await carol.joinByLink(`https://app.ghostly.tools/#/join/${code}`)).toBe(groupId);
     expect(carol.views()[0]).toMatchObject({ id: groupId, name: "", invitation: { viaLink: true, accepted: true, admin: "" } });
+    // The joiner is told how far it got, and only what it knows: its knock is there to be read…
+    await vi.waitFor(() => expect(carol.views()[0].invitation!.stage).toBe("knocked"));
     expect(world.pkarr.size).toBe(1); // the knock
 
     await alice.tick(); await world.settle();
     expect(world.peers.get("alice")!.entries.size).toBe(1);
+    // …the admin's app opened the entry session…
+    expect(carol.views()[0].invitation!.stage).toBe("answered");
     await world.meetEntries();
     record(carol);
     expect(carol.views()[0]).toMatchObject({ name: "Ghosts", status: "active", epoch: 2 });
@@ -229,6 +233,13 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     expect(alice.views()[0].invited).toEqual([]);
 
     await world.settle(); await world.meet();
+    // An admin and the member it admits were both here a moment ago: the edge between them looks fast for
+    // the other side (Bob's to Alice from his own admission too); the one between the two members does not.
+    const expecting = (who: string) => [...world.peers.get(who)!.edges.values()].filter(e => e.expectPeer).map(e => e.peer).sort();
+    const [aliceKey, bobKey, carolKey] = [alice, bob, carol].map(g => g.views()[0].myKey!);
+    expect(expecting("carol")).toEqual([aliceKey]);
+    expect(expecting("alice")).toEqual([bobKey, carolKey].sort());
+    expect(expecting("bob")).toEqual([aliceKey]);
     expect(await carol.send(groupId, "hi from a stranger")).toEqual({ error: null });
     await world.settle();
     expect(world.texts("alice")).toContain("hi from a stranger");
@@ -237,6 +248,33 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     // A knock seen again later is not answered twice: that key is a member now.
     await alice.tick(Date.now() + 10_000); await world.settle();
     expect(world.peers.get("alice")!.entries.size).toBe(1); // only the lingering one
+  });
+
+  it("tells the joiner how far a join through a link got: knocking, knocked, answered, admitted", async () => {
+    let publish!: () => void;
+    let seen = false, ready = false;
+    const host: GroupsHost = {
+      sendOnLink: vi.fn(), linkReady: () => ready, linkSeen: () => seen, contactName: () => undefined, edges: () => new Map(), openEdge: vi.fn(),
+      closeEdge: vi.fn(async () => {}), edgeNick: () => undefined, openEntry: vi.fn(async () => "entry-1"), entries: () => new Map(),
+      publish: vi.fn(() => new Promise<void>(resolve => { publish = resolve; })), resolve: vi.fn(async () => null), storeMessage: vi.fn(async () => {}), emit: vi.fn(),
+    };
+    const carol = new Groups(host, memoryStore([]));
+    const g = toBase64Url(randomBytes(16)), admin = createIdentity().pubKeyZ32;
+    await carol.joinByLink(encodeGroupEntryLink({ g, host: createIdentity().pubKeyZ32 }));
+    const stage = () => carol.views()[0].invitation!.stage;
+    expect(stage()).toBe("knocking");
+    await vi.waitFor(() => expect(host.publish).toHaveBeenCalled());
+    const emits = vi.mocked(host.emit).mock.calls.length;
+    publish();
+    await vi.waitFor(() => expect(stage()).toBe("knocked"));
+    expect(host.emit).toHaveBeenCalledTimes(emits + 1); // the app hears it
+    seen = true; // the admin's side of the entry session is here
+    expect(stage()).toBe("answered");
+    seen = false; ready = true;
+    expect(stage()).toBe("answered");
+    await carol.handleContactFrame("entry-1", { t: "group-invite", g, admin, name: "Ghosts", e: 1, n: 2 });
+    expect(stage()).toBe("admitted");
+    expect(host.sendOnLink).toHaveBeenCalledWith("entry-1", expect.objectContaining({ t: "group-accept", g }));
   });
 
   it("a replaced or turned-off link reaches nobody, and the admin role going away turns it off", async () => {

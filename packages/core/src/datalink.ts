@@ -85,11 +85,13 @@ export class DataLink {
       await this.answer(signal);
     } else if (this.state === "offering" && signal.o === this.myOfferTs && this.pc) {
       this.lastSignalTs = signal.ts;
+      const pc = this.pc;
       try {
-        await this.pc.setRemoteDescription({ type: "answer", sdp: buildDataSdp(signal) });
-        this.setState("connecting");
+        await pc.setRemoteDescription({ type: "answer", sdp: buildDataSdp(signal) });
+        // On a quick path the channel is open before this resolves: never step back from open.
+        if (this.pc === pc && this.state === "offering") this.setState("connecting");
       } catch {
-        this.reset();
+        if (this.pc === pc) this.reset();
       }
     }
   }

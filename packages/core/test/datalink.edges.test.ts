@@ -156,6 +156,20 @@ describe("DataLink handshake", () => {
     expect(b.dl.fingerprints).toEqual([remote, local]);
   });
 
+  it("an offerer whose channel opens while it applies the answer stays open", async () => {
+    const a = link("aaaa", "bbbb", pc => {
+      const apply = pc.setRemoteDescription.bind(pc);
+      pc.setRemoteDescription = async description => { await apply(description); pc.channel.open(); };
+    });
+    const b = link("bbbb", "aaaa");
+    await a.dl.connect();
+    vi.advanceTimersByTime(1);
+    await b.dl.handleSignal(a.lastSignal());
+    await a.dl.handleSignal(b.lastSignal());
+    expect(a.dl.state).toBe("open");
+    expect(a.states).toEqual(["offering", "open"]);
+  });
+
   it("does not offer again while already busy", async () => {
     const a = link("aaaa", "bbbb");
     await a.dl.connect();

@@ -96,3 +96,57 @@ test("strangers join a group through its link, and a replaced link reaches nobod
   await dave.page.getByTestId("group-joining-cancel").click();
   await expect(dave.page.getByTestId("group-row")).toHaveCount(0);
 });
+
+/**
+ * With the admin's app open, a join through the link takes seconds, not a minute: the side of a
+ * connection that answers used to leave the offer to its 30 s background poll, on the entry session
+ * and again on the edge to the admin, so a join took 5–45 s and reaching the admin 11–143 s (10 runs).
+ * Now 6–7 s and 9–12 s (e2e/web/group-join-timing.spec.ts). Two people join, so the old wait, which
+ * struck about three joins in five, cannot slip through by luck; the bounds leave room for a busy machine.
+ */
+const JOIN_BOUND_MS = 12_000;
+const REACH_BOUND_MS = 20_000;
+
+/** Every step the joining card shows, in order, however quickly they go by. */
+function watchSteps(): void {
+  const w = window as unknown as { __stages?: string[] };
+  if (w.__stages) return;
+  w.__stages = [];
+  new MutationObserver(() => {
+    const stage = document.querySelector("[data-testid=group-joining-steps]")?.getAttribute("data-stage");
+    if (stage && w.__stages!.at(-1) !== stage) w.__stages!.push(stage);
+  }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-stage"] });
+}
+
+test("with the admin's app open, joining through the link takes seconds and shows each step", { tag: ["@feature:groups.link.join"] }, async ({ peer }) => {
+  test.setTimeout(3 * 60_000);
+  const [alice, bob, carol] = await Promise.all([peer("alice"), peer("bob"), peer("carol")]);
+  await alice.page.getByTestId("sidebar-new-more").click();
+  await alice.page.getByTestId("new-group").click();
+  await alice.page.getByTestId("new-group-name").fill("Quick ghosts");
+  await alice.page.getByTestId("new-group-create").click();
+  const shareDialog = alice.page.getByTestId("group-share-dialog");
+  const url = await shareDialog.getByTestId("group-link-url").inputValue();
+  await shareDialog.getByTestId("group-share-done").click();
+
+  for (const [joiner, members] of [[bob, 2], [carol, 3]] as const) {
+    await joiner.page.addInitScript(watchSteps);
+    await joiner.page.evaluate(watchSteps);
+    const started = Date.now();
+    await joiner.page.goto(url);
+    await expect(groupChat(joiner)).toHaveAttribute("data-status", "active", { timeout: JOIN_BOUND_MS });
+    const joined = Date.now() - started;
+    // The admin at least: the other members come up at their own pace.
+    await expect(joiner.page.getByTestId("group-members")).toContainText(new RegExp(`${members} members · [1-9] of`), { timeout: REACH_BOUND_MS });
+    const reached = Date.now() - started;
+    console.log(`  ${joiner.name} joined in ${joined} ms, reached the admin in ${reached} ms`);
+    expect(joined).toBeLessThan(JOIN_BOUND_MS);
+    expect(reached).toBeLessThan(REACH_BOUND_MS);
+    // The steps went forward only, and the card said something before the group opened.
+    const stages = await joiner.page.evaluate(() => (window as unknown as { __stages: string[] }).__stages);
+    const order = ["knocking", "knocked", "answered", "admitted"];
+    expect(stages.length).toBeGreaterThan(0);
+    expect(stages.map(s => order.indexOf(s))).toEqual(stages.map(s => order.indexOf(s)).sort((a, b) => a - b));
+    await expect(alice.page.getByTestId("group-members")).toContainText(`${members} members`);
+  }
+});

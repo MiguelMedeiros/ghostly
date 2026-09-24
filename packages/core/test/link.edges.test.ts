@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Identity } from "../src/identity";
 import { createLink, type LinkParams } from "../src/invite";
 import {
+  EXPECT_PEER_MS,
   AWAITING_PEER_MS,
   IDLE_THRESHOLD,
   LinkSession,
@@ -407,6 +408,40 @@ describe("LinkSession poll pacing", () => {
     await settle();
     expect(lastPoll(a.ev)).toBe(I.active);
     a.s.setFastPoll(false);
+    await a.s.stop(false);
+  });
+
+  it("looks fast for a while when an offer is on its way, then falls back; a longer fast window is kept", async () => {
+    const { a, b } = pair();
+    await b.s.refreshAdvertisement();
+    a.s.start();
+    await settle();
+    expect(lastPoll(a.ev)).toBe(I.background); // the peer was seen: no longer awaiting it
+    const polls = a.transport.resolve.mock.calls.length;
+    a.s.expectPeer();
+    await settle();
+    expect(a.transport.resolve).toHaveBeenCalledTimes(polls + 1); // looks at once
+    expect(lastPoll(a.ev)).toBe(I.fast);
+    vi.setSystemTime(NOW + EXPECT_PEER_MS - 1);
+    a.s.pollNow();
+    await settle();
+    expect(lastPoll(a.ev)).toBe(I.fast);
+    vi.setSystemTime(NOW + EXPECT_PEER_MS);
+    a.s.pollNow();
+    await settle();
+    expect(lastPoll(a.ev)).toBe(I.background);
+
+    // Signaling's own fast window (45 s) is longer: awaiting an offer does not cut it short, nor poll again.
+    a.s.setFastPoll(true);
+    await settle();
+    const before = a.transport.resolve.mock.calls.length;
+    a.s.expectPeer();
+    await settle();
+    expect(a.transport.resolve).toHaveBeenCalledTimes(before);
+    vi.setSystemTime(NOW + EXPECT_PEER_MS + 40_000);
+    a.s.pollNow();
+    await settle();
+    expect(lastPoll(a.ev)).toBe(I.fast);
     await a.s.stop(false);
   });
 

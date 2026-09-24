@@ -19,6 +19,8 @@ export interface PeerOptions {
   mobile?: boolean;
   /** Trusts any certificate, as a browser trusts a node's that a person has set up properly (self-hosted nodes in tests). */
   ignoreHTTPSErrors?: boolean;
+  /** Talks to the public Pkarr relays themselves instead of the test's relay (measurements only: the suite stays offline). */
+  realRelays?: boolean;
 }
 
 type Fixtures = {
@@ -35,7 +37,7 @@ export async function openPeer(browser: Browser, relay: LocalRelay, baseURL: str
     ...(options.mobile ? { isMobile: true, hasTouch: true } : {}),
     ...(options.ignoreHTTPSErrors ? { ignoreHTTPSErrors: true } : {}),
   });
-  await relay.attach(context);
+  if (!options.realRelays) await relay.attach(context);
   await attachMint(context);
   await stubGifServices(context);
   const page = await context.newPage();
