@@ -158,7 +158,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
         ) : (
           <div className="space-y-4">
             <div className="flex items-center gap-3">
-              <ProviderMark provider={provider.id} />
+              <ProviderMark provider={provider.id} subject={needsSubject ? subject : undefined} />
               <div className="min-w-0 flex-1">
                 <p className="text-sm text-text-primary">{provider.label}</p>
                 <p className="text-xs text-text-muted">{provider.category === "provider-attested" ? "A company vouches that you logged in to this account. Your contacts see who vouches." : "Only the holder of this key can make this proof."}</p>
@@ -181,11 +181,16 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
               </label>
             ))}
             {needsSubject && (provider.subject.options ? (
-              <label className="block text-xs text-text-muted">{provider.subject.label}
-                <select data-testid="add-identity-subject" className={`${input} mt-1`} value={subject} disabled={busy} onChange={e => setSubject(e.target.value)}>
-                  {provider.subject.options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-              </label>
+              <div className="text-xs text-text-muted" role="radiogroup" aria-label={provider.subject.label} data-testid="add-identity-subject" data-value={subject}>{provider.subject.label}
+                <div className="mt-1 grid gap-2 grid-cols-2 @sm:grid-cols-3">
+                  {provider.subject.options.map(o => (
+                    <button key={o.value} type="button" role="radio" aria-checked={subject === o.value} disabled={busy} onClick={() => setSubject(o.value)}
+                      className={`flex items-center gap-2 rounded-xl border p-2 text-sm cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${subject === o.value ? "border-accent bg-accent/5 text-text-primary" : "border-border text-text-secondary hover:bg-surface-alt"}`}>
+                      <ProviderMark provider={provider.id} subject={o.value} /><span className="truncate">{o.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             ) : (
               <label className="block text-xs text-text-muted">{provider.subject.label}
                 <input data-testid="add-identity-subject" className={`${input} mt-1 font-mono`} value={subject} placeholder={provider.subject.placeholder} disabled={busy} spellCheck={false} autoComplete="off" onChange={e => setSubject(e.target.value)} />

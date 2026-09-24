@@ -26,7 +26,7 @@ export function IdentityProofsSection() {
         const expired = p.expiresAt <= now;
         const attested = providerOf(p.provider)?.category === "provider-attested";
         return (
-          <Row key={p.id} testId="identity-proof" leading={<ProviderMark provider={p.provider} />}
+          <Row key={p.id} testId="identity-proof" leading={<ProviderMark provider={p.provider} subject={p.verified.subject} />}
             label={<span className="flex flex-wrap items-center gap-2"><span>{providerLabel(p.provider)}</span><StatusPill ok={!expired}>{expired ? "Expired" : attested ? `Attested by ${p.verified.attester}` : "Your key"}</StatusPill></span>}
             hint={<>
               <span className="font-mono break-all" data-testid="identity-proof-subject" title={p.verified.subject}>{shortSubject(p.provider, p.verified.subject)}</span>
