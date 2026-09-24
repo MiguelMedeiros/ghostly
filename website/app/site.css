@@ -1,0 +1,1181 @@
+/* Ghostly site: tokens, shell and the pieces every page shares.
+   The palette, the mono wordmark and the ghosts come from the original site. */
+
+:root {
+  --bg: #060a10;
+  --bg-2: #08101a;
+  --surface: #0d1117;
+  --surface-2: #111a25;
+  --surface-3: #172231;
+  --line: #1e293b;
+  --line-2: #2b3b52;
+  --text: #e8edf5;
+  --muted: #a3b0c2;
+  --dim: #7a8aa6;
+  --cyan: #22d3ee;
+  --green: #00a884;
+  --mint: #4ade80;
+  --amber: #fbbf24;
+  --violet: #a78bfa;
+  --sky: #60a5fa;
+  --rose: #f472b6;
+  --lvl-released: #4ade80;
+  --lvl-development: #fbbf24;
+  --lvl-building: #a78bfa;
+  --lvl-planned: #60a5fa;
+  --lvl-research: #94a3b8;
+  --radius: 18px;
+  --wrap: 1180px;
+  --nav-h: 64px;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  /* One type voice at different volumes. Mono is for eyebrows, captions, chips and code only. */
+  --t-display: clamp(56px, 9.5vw, 148px);
+  --t-section: clamp(40px, 5.4vw, 72px);
+  --t-scene: clamp(34px, 4.2vw, 60px);
+  --t-card: 26px;
+  --t-lead: clamp(18px, 1.6vw, 21px);
+  --t-body: 17px;
+  --t-note: 15px;
+  --t-micro: 13px;
+  --t-caption: 12px;
+  /* Chapter rooms: each section owns a background so the eye learns the story changed register. */
+  --room-hero: #05070b;
+  --room-dht: #070a1f;
+  --room-agree: #0b0e14;
+  --room-alive: #030507;
+  --room-read: #0b1219;
+  --room-space: #0d0b14;
+  --room-open: #0b0716;
+}
+
+html {
+  background: var(--bg);
+  overflow-x: clip;
+  scroll-padding-top: calc(var(--nav-h) + 16px);
+}
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+body {
+  background: var(--bg);
+  color: var(--text);
+  overflow-x: clip;
+}
+::selection {
+  background: rgba(34, 211, 238, 0.3);
+}
+:where(a, button, summary, input, select, pre, [tabindex]):focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.skip-link {
+  position: fixed;
+  left: 16px;
+  top: -60px;
+  z-index: 100;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: var(--cyan);
+  color: #031018;
+  font-weight: 700;
+  transition: top 0.2s;
+}
+.skip-link:focus {
+  top: 12px;
+}
+
+.wrap {
+  width: 100%;
+  max-width: var(--wrap);
+  margin-inline: auto;
+  padding-inline: 24px;
+}
+@media (max-width: 640px) {
+  .wrap {
+    padding-inline: 16px;
+  }
+}
+
+/* ── Type ─────────────────────────────────────────── */
+.mono {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+}
+.eyebrow {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--cyan);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.eyebrow::before {
+  content: "";
+  width: 18px;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.7;
+}
+.h-display {
+  font-size: var(--t-display);
+  line-height: 0.95;
+  letter-spacing: -0.04em;
+  font-weight: 700;
+  text-wrap: balance;
+}
+.h-section {
+  font-size: var(--t-section);
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-weight: 700;
+  text-wrap: balance;
+}
+.h-scene {
+  font-size: var(--t-scene);
+  line-height: 1.02;
+  letter-spacing: -0.03em;
+  font-weight: 700;
+  text-wrap: balance;
+}
+.h-card {
+  font-size: var(--t-card);
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+  font-weight: 650;
+}
+.lead {
+  font-size: var(--t-lead);
+  line-height: 1.5;
+  color: var(--muted);
+  text-wrap: pretty;
+  max-width: 40em;
+}
+.body {
+  font-size: var(--t-body);
+  line-height: 1.6;
+  max-width: 34em;
+}
+/* A quiet aside under a claim: limits, clients, caveats. */
+.note {
+  font-size: var(--t-note);
+  line-height: 1.55;
+  color: var(--dim);
+}
+.caption {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: var(--t-caption);
+  letter-spacing: 0.06em;
+  color: var(--dim);
+}
+.muted {
+  color: var(--muted);
+}
+.dim {
+  color: var(--dim);
+}
+.accent {
+  color: var(--cyan);
+}
+.accent-green {
+  color: var(--mint);
+}
+.text-gradient-animated {
+  background: linear-gradient(135deg, #22d3ee 0%, #00a884 50%, #22d3ee 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: gradient-shift 4s linear infinite;
+}
+@keyframes gradient-shift {
+  to {
+    background-position: 200% center;
+  }
+}
+
+/* ── Buttons ─────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 12px 22px;
+  border-radius: 14px;
+  font-weight: 650;
+  font-size: 16px;
+  border: 1px solid var(--line-2);
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.02);
+  transition:
+    transform 0.2s var(--ease),
+    border-color 0.2s,
+    background 0.2s,
+    box-shadow 0.2s;
+  white-space: nowrap;
+}
+.btn:hover {
+  border-color: rgba(34, 211, 238, 0.5);
+  color: var(--cyan);
+  transform: translateY(-1px);
+}
+.btn--primary {
+  border: 0;
+  color: #031018;
+  background: linear-gradient(100deg, var(--cyan), var(--green));
+  box-shadow: 0 10px 30px -10px rgba(34, 211, 238, 0.55);
+}
+.btn--primary:hover {
+  color: #031018;
+  box-shadow: 0 16px 40px -12px rgba(34, 211, 238, 0.7);
+}
+.btn--lg {
+  min-height: 60px;
+  padding: 16px 30px;
+  font-size: 19px;
+  border-radius: 18px;
+}
+.btn svg {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+.link-arrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--cyan);
+  font-weight: 600;
+}
+.link-arrow:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+/* ── Level badges and the Draft chip ─────────────── */
+.level {
+  --c: var(--lvl-research);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--c);
+  background: color-mix(in srgb, var(--c) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c) 30%, transparent);
+  white-space: nowrap;
+}
+.level::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--c);
+  flex: none;
+}
+.level[data-level="released"] {
+  --c: var(--lvl-released);
+}
+.level[data-level="development"] {
+  --c: var(--lvl-development);
+}
+.level[data-level="building"] {
+  --c: var(--lvl-building);
+}
+.level[data-level="planned"] {
+  --c: var(--lvl-planned);
+}
+.level[data-level="research"] {
+  --c: var(--lvl-research);
+  border-style: dashed;
+}
+.level[data-level="building"]::before {
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.level--sm {
+  font-size: 11px;
+  padding: 2px 8px 2px 6px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 7px;
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  white-space: nowrap;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ── Navigation ──────────────────────────────────── */
+.nav {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 50;
+  height: var(--nav-h);
+  display: flex;
+  align-items: center;
+  transition:
+    background 0.3s,
+    border-color 0.3s;
+  border-bottom: 1px solid transparent;
+}
+.nav[data-scrolled="true"] {
+  background: rgba(6, 10, 16, 0.78);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border-color: rgba(30, 41, 59, 0.7);
+}
+.nav-inner {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-weight: 700;
+  font-size: 18px;
+  color: var(--text);
+}
+.brand svg {
+  width: 26px;
+  height: 26px;
+  color: var(--cyan);
+}
+.nav-links {
+  display: flex;
+  gap: 4px;
+  margin-inline: auto;
+}
+.nav-links a {
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 14px;
+  color: var(--muted);
+  transition:
+    color 0.2s,
+    background 0.2s;
+}
+.nav-links a:hover,
+.nav-links a[aria-current="page"] {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+}
+.nav-links a[aria-current="page"] {
+  color: var(--cyan);
+}
+.nav-end {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.nav-cta {
+  min-height: 38px;
+  padding: 8px 16px;
+  font-size: 14px;
+  border-radius: 11px;
+}
+.lang-switch {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 2px;
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 12px;
+}
+.lang-switch a {
+  padding: 5px 8px;
+  border-radius: 8px;
+  color: var(--dim);
+}
+.lang-switch a[aria-current="true"] {
+  color: var(--text);
+  background: var(--surface-3);
+}
+.nav-menu {
+  display: none;
+  position: relative;
+}
+.nav-menu summary {
+  list-style: none;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+}
+.nav-menu summary::-webkit-details-marker {
+  display: none;
+}
+.nav-menu[open] .nav-sheet {
+  display: flex;
+}
+.nav-sheet {
+  display: none;
+  position: fixed;
+  top: var(--nav-h);
+  left: 0;
+  right: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px;
+  min-height: calc(100vh - var(--nav-h));
+  min-height: calc(100svh - var(--nav-h));
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+}
+.nav:has(.nav-menu[open]) {
+  background: var(--bg);
+}
+.nav-sheet a {
+  padding: 14px 12px;
+  border-radius: 12px;
+  font-size: 17px;
+  color: var(--text);
+}
+.nav-sheet a:hover {
+  background: var(--surface-2);
+}
+@media (max-width: 900px) {
+  .nav-links,
+  .nav-end .lang-switch,
+  .nav-end .nav-cta {
+    display: none;
+  }
+  .nav-menu {
+    display: block;
+  }
+  .nav-end {
+    margin-left: auto;
+  }
+  .nav-sheet .lang-switch {
+    display: inline-flex;
+    align-self: flex-start;
+    margin-top: 8px;
+  }
+}
+
+/* ── Sections ────────────────────────────────────── */
+.section {
+  position: relative;
+  padding-block: clamp(88px, 12vw, 160px);
+}
+.section-head {
+  display: grid;
+  gap: 18px;
+  max-width: 760px;
+  margin-bottom: clamp(40px, 6vw, 72px);
+}
+.section-head--center {
+  text-align: center;
+  margin-inline: auto;
+  justify-items: center;
+}
+.divider-glow {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(34, 211, 238, 0.35), transparent);
+}
+.bg-grid {
+  background-image:
+    linear-gradient(rgba(34, 211, 238, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34, 211, 238, 0.035) 1px, transparent 1px);
+  background-size: 60px 60px;
+}
+.card {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+}
+
+/* ── Ghost character ─────────────────────────────── */
+.ghost {
+  display: block;
+  overflow: visible;
+  filter: drop-shadow(0 0 18px color-mix(in srgb, var(--ghost) 45%, transparent));
+}
+/* The halo ghosts draw their own glow; a filter on top would double the cost for nothing. */
+.ghost--halo {
+  filter: none;
+}
+.ghost--float {
+  animation: ghost-bob 4.2s ease-in-out infinite;
+}
+.ghost-eyes--blink {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ghost-blink 5.3s infinite;
+}
+.ghost-pupils {
+  transition: transform 0.5s var(--ease);
+}
+.ghost-mouth-talk {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ghost-talk 0.42s ease-in-out infinite alternate;
+}
+@keyframes ghost-bob {
+  50% {
+    transform: translateY(-8px);
+  }
+}
+@keyframes ghost-blink {
+  0%,
+  94.5%,
+  98.5%,
+  100% {
+    transform: scaleY(1);
+  }
+  96.5% {
+    transform: scaleY(0.1);
+  }
+}
+@keyframes ghost-talk {
+  from {
+    transform: scaleY(0.55);
+  }
+  to {
+    transform: scaleY(1.25);
+  }
+}
+
+/* Rising little ghosts: the original hero and download backdrop. */
+.particles {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.particles span {
+  position: absolute;
+  color: var(--cyan);
+  opacity: 0;
+  animation: particle-rise var(--d, 12s) ease-in-out var(--delay, 0s) infinite;
+}
+.particles span svg {
+  width: 100%;
+  height: 100%;
+}
+@keyframes particle-rise {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 20px, 0) rotate(0deg);
+  }
+  20% {
+    opacity: var(--o, 0.12);
+  }
+  60% {
+    opacity: var(--o, 0.12);
+    transform: translate3d(10px, -30px, 0) rotate(5deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(-4px, -70px, 0) rotate(-5deg);
+  }
+}
+
+/* ── Acts and scenes ─────────────────────────────── */
+/* An act pins one full-bleed backdrop behind its chapters; the chapters scroll over it. */
+.act {
+  position: relative;
+  overflow: clip;
+  --chapter-bg: var(--room-hero);
+}
+.act-backdrop {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100svh;
+  margin-bottom: -100vh;
+  margin-bottom: -100svh;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.act-backdrop .stage {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.act-room {
+  fill: var(--chapter-bg);
+  transition: fill 0.9s var(--ease);
+}
+.act > :not(.act-backdrop) {
+  position: relative;
+  z-index: 1;
+}
+/* Idle loops rest while their act, scene or section is off screen. */
+[data-inview="false"] :is(.stage-bob, .dht-node, .ghost-eyes--blink, .ghost-mouth-talk, .act-caret, .particles span, .bg-grid, .ghost--float, .text-gradient-animated, .zzz span) {
+  animation-play-state: paused;
+}
+.act-bubble {
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+.act-bubble[data-on="true"] {
+  opacity: 1;
+}
+.act-caret {
+  animation: caret 1s steps(1) infinite;
+}
+@keyframes caret {
+  50% {
+    opacity: 0;
+  }
+}
+
+.scene {
+  position: relative;
+  --chapter-bg: var(--room-hero);
+  --chapter-rgb: 5 7 11;
+}
+.scene-sticky {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100svh;
+  overflow: hidden;
+}
+.scene-visual {
+  position: absolute;
+  inset: 0;
+}
+.scene-visual .stage {
+  width: 100%;
+  height: 100%;
+}
+.stage text {
+  font-family: var(--font-inter), system-ui, sans-serif;
+}
+.stage .mono,
+.stage text.mono {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+}
+.stage-bob {
+  animation: ghost-bob 4.2s ease-in-out infinite;
+}
+.key-light {
+  mix-blend-mode: screen;
+}
+/* In the story the act draws the actors; a scene's own ghosts only carry the stills. */
+html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act--static) .scene-actors-static {
+  display: none;
+}
+
+/* The copy sits over the picture on a soft wash that runs the full height of
+   the stage and fades before it reaches the actors, so it never has an edge. */
+.scene-wash {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+.scene[data-copy="left"] .scene-wash {
+  background: linear-gradient(90deg, rgb(var(--chapter-rgb) / 0.94) 0%, rgb(var(--chapter-rgb) / 0.8) 24%, rgb(var(--chapter-rgb) / 0.35) 40%, transparent 52%);
+}
+.scene[data-copy="right"] .scene-wash {
+  background: linear-gradient(270deg, rgb(var(--chapter-rgb) / 0.94) 0%, rgb(var(--chapter-rgb) / 0.8) 24%, rgb(var(--chapter-rgb) / 0.35) 40%, transparent 52%);
+}
+.scene[data-copy="bottom-left"] .scene-wash {
+  background: radial-gradient(ellipse 64% 115% at 0% 100%, rgb(var(--chapter-rgb) / 0.94) 0%, rgb(var(--chapter-rgb) / 0.7) 42%, rgb(var(--chapter-rgb) / 0.25) 72%, transparent 100%);
+}
+.scene[data-copy="bottom-right"] .scene-wash {
+  background: radial-gradient(ellipse 64% 115% at 100% 100%, rgb(var(--chapter-rgb) / 0.94) 0%, rgb(var(--chapter-rgb) / 0.7) 42%, rgb(var(--chapter-rgb) / 0.25) 72%, transparent 100%);
+}
+.scene-copy {
+  position: absolute;
+  z-index: 2;
+  width: min(440px, calc(100% - 48px));
+  display: grid;
+  gap: 18px;
+}
+.scene-copy[data-hidden="true"] {
+  pointer-events: none;
+}
+.scene[data-copy="left"] .scene-copy,
+.scene[data-copy="right"] .scene-copy {
+  top: 50%;
+  transform: translateY(-50%);
+}
+.scene[data-copy="left"] .scene-copy,
+.scene[data-copy="bottom-left"] .scene-copy {
+  left: max(24px, calc((100vw - var(--wrap)) / 2 + 24px));
+}
+.scene[data-copy="right"] .scene-copy,
+.scene[data-copy="bottom-right"] .scene-copy {
+  right: max(24px, calc((100vw - var(--wrap)) / 2 + 24px));
+}
+.scene[data-copy="bottom-left"] .scene-copy,
+.scene[data-copy="bottom-right"] .scene-copy {
+  bottom: 12vh;
+}
+.scene-steps {
+  position: relative;
+  display: grid;
+  min-height: 210px;
+}
+.scene-step {
+  grid-area: 1 / 1;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  opacity: 0;
+  transform: translateY(14px);
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+  pointer-events: none;
+}
+.scene-step[data-active="true"] {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+  transition:
+    opacity 0.45s 0.08s var(--ease),
+    transform 0.45s 0.08s var(--ease);
+}
+.scene-step .body {
+  color: var(--muted);
+}
+.scene-progress {
+  display: flex;
+  gap: 4px;
+  margin-left: -10px;
+}
+.scene-progress button {
+  position: relative;
+  width: 40px;
+  height: 44px;
+  cursor: pointer;
+}
+.scene-progress button::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 6px;
+  top: 50%;
+  height: 3px;
+  border-radius: 3px;
+  background: var(--line-2);
+  transition:
+    background 0.3s,
+    transform 0.3s var(--ease);
+}
+.scene-progress button[data-on="true"]::before {
+  background: var(--cyan);
+}
+.scene-progress button[aria-current="step"]::before {
+  transform: scaleX(1.35);
+  transform-origin: left;
+}
+.scene-progress button:hover::before {
+  background: var(--text);
+}
+
+/* Phones: the picture on top, the copy in a sheet that rises from the bottom. */
+@media (max-width: 860px) {
+  .scene-wash {
+    display: none;
+  }
+  .scene-copy,
+  .scene[data-copy] .scene-copy {
+    inset: auto 0 0 0;
+    width: auto;
+    transform: none;
+    padding: 36px 16px 22px;
+    background: linear-gradient(to bottom, transparent, rgb(var(--chapter-rgb)) 40px);
+    gap: 12px;
+  }
+  .scene-steps {
+    min-height: 0;
+  }
+  .scene-step {
+    gap: 8px;
+  }
+  .scene-step .h-scene {
+    font-size: clamp(26px, 7vw, 32px);
+  }
+  .scene-step .body {
+    font-size: 16px;
+  }
+  .scene-step .note {
+    font-size: 14px;
+  }
+}
+
+/* Short phones: the caption sheet must leave the action zone (stage y ≤ 480) visible. */
+@media (max-width: 860px) and (max-height: 720px) {
+  .scene-copy,
+  .scene[data-copy] .scene-copy {
+    padding: 26px 16px 14px;
+    gap: 8px;
+  }
+  .scene-step {
+    gap: 6px;
+  }
+  .scene-step .h-scene {
+    font-size: clamp(22px, 6vw, 26px);
+  }
+  .scene-step .body {
+    font-size: 15px;
+    line-height: 1.4;
+  }
+  .scene-step .note {
+    font-size: 13px;
+    line-height: 1.35;
+  }
+  .scene-progress button {
+    height: 34px;
+  }
+}
+
+/* Reduced motion or no scripts: an illustrated article, one still per step. */
+.scene--static {
+  padding-block: 64px 24px;
+}
+.scene-static {
+  display: grid;
+  gap: 28px;
+}
+.scene-static-steps {
+  display: grid;
+  gap: 40px;
+}
+/* One still above its paragraph: the stage keeps the column's width, the title sits beside the body. */
+.scene-static-step {
+  display: grid;
+  gap: 24px;
+}
+.scene-static-figure {
+  margin: 0;
+  aspect-ratio: 1.6;
+  border-radius: 20px;
+  overflow: hidden;
+  background: var(--chapter-bg);
+  border: 1px solid var(--line);
+}
+.scene-static-figure .stage {
+  width: 100%;
+  height: 100%;
+}
+.scene-static-copy {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 10px 48px;
+  align-items: start;
+}
+.scene-static-copy .h-scene {
+  grid-row: 1 / span 2;
+}
+.scene-static-copy .body {
+  color: var(--muted);
+}
+.scene-static-extra {
+  padding-top: 8px;
+}
+@media (max-width: 860px) {
+  .scene-static-copy {
+    grid-template-columns: 1fr;
+  }
+  .scene-static-copy .h-scene {
+    grid-row: auto;
+  }
+  /* The portrait stage is 390 × 844 with the action in y 120–500 (nav-safe to sheet-safe): show that band, not a 1.6 slice through the ghosts. */
+  .scene-static-figure {
+    aspect-ratio: 390 / 380;
+  }
+  .scene-static-figure .stage {
+    height: auto;
+    margin-top: -30.77%;
+  }
+}
+/* Phones: the still bleeds to the viewport edge so the 390-unit stage renders 1:1 (its 11-unit labels at 11px). */
+@media (max-width: 640px) {
+  .scene-static-figure {
+    margin-inline: -16px;
+    border-radius: 0;
+    border-inline-width: 0;
+  }
+}
+/* Portrait tablets: a phone-shaped still at phone size, not a 720px-wide slab of ghosts. */
+@media (min-width: 641px) and (max-width: 860px) {
+  .scene-static-figure {
+    width: 100%;
+    max-width: 460px;
+    margin-inline: auto;
+  }
+}
+/* Without scripts, or with reduced motion before hydration, the story layout
+   collapses into the same article shape: the reader gets the article at first
+   paint instead of a film that shrinks by thousands of pixels once scripts run. */
+html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .act-backdrop {
+  display: none;
+}
+html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene:not(.scene--static) {
+  height: auto !important;
+  padding-block: 48px;
+}
+html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .scene-sticky {
+  position: relative;
+  height: auto;
+  display: grid;
+  gap: 28px;
+  max-width: var(--wrap);
+  margin-inline: auto;
+  padding-inline: 24px;
+}
+html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .scene-visual {
+  position: relative;
+  aspect-ratio: 1.6;
+  border-radius: 20px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene-wash {
+  display: none;
+}
+html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .scene-copy,
+html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene[data-copy] .scene-copy {
+  position: static;
+  width: auto;
+  transform: none;
+  padding: 0;
+  background: none;
+}
+html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .scene-steps {
+  gap: 26px;
+}
+html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .scene-step {
+  grid-area: auto;
+  opacity: 1;
+  transform: none;
+}
+html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .scene-progress {
+  display: none;
+}
+
+/* ── Footer ──────────────────────────────────────── */
+.footer {
+  position: relative;
+  border-top: 1px solid rgba(30, 41, 59, 0.6);
+  padding-block: 64px 36px;
+  overflow: hidden;
+}
+.footer-top {
+  display: grid;
+  grid-template-columns: 1.3fr repeat(3, 1fr);
+  gap: 32px;
+  position: relative;
+  z-index: 1;
+}
+.footer h2 {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 14px;
+}
+.footer ul {
+  display: grid;
+  gap: 10px;
+}
+.footer li a {
+  color: var(--muted);
+  font-size: 14px;
+}
+.footer li a:hover {
+  color: var(--cyan);
+}
+.footer-bottom {
+  margin-top: 56px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(30, 41, 59, 0.5);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  font-size: 14px;
+  color: var(--dim);
+  position: relative;
+  z-index: 1;
+}
+.footer-bottom a {
+  color: var(--muted);
+}
+.footer-bottom a:hover {
+  color: var(--cyan);
+}
+.footer-haunt {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.footer-haunt svg {
+  width: 24px;
+  height: 24px;
+  color: var(--cyan);
+}
+.footer-sleeper {
+  position: absolute;
+  right: max(24px, calc((100vw - var(--wrap)) / 2 + 24px));
+  bottom: 84px;
+  width: 56px;
+  opacity: 0.55;
+  z-index: 0;
+}
+.footer-sleeper .zzz {
+  position: absolute;
+  left: 44px;
+  top: -8px;
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  color: var(--cyan);
+}
+.footer-sleeper .zzz span {
+  display: inline-block;
+  animation: zzz 2s ease-in-out infinite;
+}
+.footer-sleeper .zzz span:nth-child(2) {
+  animation-delay: 0.3s;
+  font-size: 0.85em;
+}
+.footer-sleeper .zzz span:nth-child(3) {
+  animation-delay: 0.6s;
+  font-size: 0.7em;
+}
+@keyframes zzz {
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-4px);
+  }
+}
+@media (max-width: 860px) {
+  .footer-top {
+    grid-template-columns: 1fr 1fr;
+  }
+  .footer-top > :first-child {
+    grid-column: 1 / -1;
+  }
+  .footer-sleeper {
+    bottom: auto;
+    top: 64px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .particles {
+    display: none;
+  }
+}
+
+/* The original pointer ghost. */
+.pet {
+  position: absolute;
+  z-index: 40;
+  pointer-events: none;
+  transition:
+    opacity 0.2s,
+    transform 0.2s;
+}
+.pet-hide {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 10px;
+  line-height: 16px;
+  background: rgba(31, 41, 55, 0.5);
+  color: var(--dim);
+  pointer-events: auto;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.pet-hide:hover,
+.pet-hide:focus-visible {
+  opacity: 1;
+  color: #fff;
+}
+.pet-z {
+  animation: zzz 2s ease-in-out infinite;
+}
+@keyframes pet-float {
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+/* Scene stages (SVG) */
+.stage {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.stage text {
+  font-family: var(--font-inter), system-ui, sans-serif;
+}
+.stage .mono,
+.stage text.mono {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+}
+.stage-bob {
+  animation: ghost-bob 4.2s ease-in-out infinite;
+}
+.dht-node {
+  animation: twinkle 4s ease-in-out infinite;
+}
+@keyframes twinkle {
+  50% {
+    opacity: 0.45;
+  }
+}

@@ -1,10 +1,31 @@
 import numbering from "./wisp-numbering.json";
-import references from "./reference-index.json";
-export { references };
+import index from "./reference-index.json";
+
+export type Reference = {
+  file: string;
+  sourcePath: string;
+  aliases: string[];
+  slug: string;
+  title: string;
+  dependencies: string[];
+  notices: string[];
+  status?: string;
+  updated?: string;
+  implementation?: string;
+  summary?: string;
+};
+
+/** Every synced document the reader can show, WISP or supporting reference. */
+export const references = index as Reference[];
+
 export const referencePath = (file: string) => {
   const canonical = numbering.find((entry) => entry.oldFile === file)?.file ?? file;
   return `/developers/wisps/${canonical.replace(/\.md$/, "").toLowerCase()}`;
 };
+
+export function findReference(slug: string): Reference | undefined {
+  return references.find((ref) => ref.slug === slug || ref.aliases.includes(slug));
+}
 
 /** Only known local docs become reader routes. Other relative references identify repository source. */
 export function resolveReferenceUrl(url: string, sourcePath: string): string {
@@ -23,5 +44,5 @@ export function resolveReferenceUrl(url: string, sourcePath: string): string {
   const found = references.find((ref) => ref.sourcePath === normalized || ref.aliases.some((slug) => `docs/wisps/${slug}.md` === normalized));
   return found
     ? referencePath(found.file) + hash
-    : `https://github.com/MiguelMedeiros/ghostly/blob/main/${normalized}${hash}`;
+    : `https://github.com/MiguelMedeiros/ghostly/blob/dev/${normalized}${hash}`;
 }

@@ -1,0 +1,96 @@
+/* The story rail: where you are, how far it goes. Owned by components/story/StoryRail.tsx. */
+.rail {
+  position: fixed;
+  top: var(--nav-h);
+  left: 0;
+  right: 0;
+  z-index: 45;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition:
+    opacity 0.35s var(--ease),
+    transform 0.35s var(--ease);
+}
+.rail[data-on="true"] {
+  opacity: 1;
+  transform: none;
+}
+.rail-inner {
+  position: relative;
+  max-width: var(--wrap);
+  margin-inline: auto;
+  padding: 10px 24px 0;
+}
+.rail-track {
+  position: relative;
+  height: 2px;
+  border-radius: 2px;
+  background: rgba(43, 59, 82, 0.55);
+  pointer-events: auto;
+}
+.rail-fill {
+  position: absolute;
+  inset: 0;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--cyan), var(--mint));
+  transform-origin: left;
+  will-change: transform;
+}
+.rail-mark {
+  position: absolute;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 2px solid rgba(107, 122, 144, 0.9);
+  cursor: pointer;
+  transition:
+    border-color 0.3s,
+    transform 0.3s var(--ease);
+}
+.rail-mark::before {
+  /* A larger hit area than the dot. */
+  content: "";
+  position: absolute;
+  inset: -10px;
+}
+.rail-mark[data-past="true"] {
+  border-color: var(--cyan);
+}
+.rail-mark[aria-current="true"] {
+  border-color: var(--mint);
+  transform: scale(1.35);
+}
+.rail-mark:hover {
+  transform: scale(1.5);
+  border-color: var(--text);
+}
+.rail-label {
+  position: absolute;
+  right: 24px;
+  top: 18px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+@media (max-width: 860px) {
+  .rail-inner {
+    padding: 8px 16px 0;
+  }
+  .rail-label {
+    right: 16px;
+    top: 15px;
+    font-size: 10px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rail,
+  .rail-mark {
+    transition: none;
+  }
+}

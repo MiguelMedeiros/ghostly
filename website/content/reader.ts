@@ -1,0 +1,63 @@
+import type { Localized } from "@/lib/i18n";
+
+const en = {
+  developers: "Developers",
+  catalog: "WISP catalog",
+  reference: "Reference",
+  inShort: "In short",
+  implementation: "Implementation, as the document states it",
+  inApp: "In the app",
+  depends: "Builds on",
+  usedBy: "Used by",
+  children: "Adapters and profiles",
+  implementsContract: "Implements",
+  contents: "On this page",
+  all: "All drafts",
+  moved: "This draft has a new number. You're reading it at its current address; the old link keeps working.",
+  draftNote: "A review draft — not a final standard, and not a promise that every client supports it.",
+  supportNote: "Supporting documentation. It can include dated proposals and historical evidence.",
+  source: "View source on GitHub",
+  download: "Download Markdown",
+  prev: "Previous",
+  next: "Next",
+  back: "Back to the catalog",
+  updated: "Updated",
+  unassigned: "Planned · number to be defined",
+  video: "Video lesson",
+  chapters: "Chapters",
+  repo: "repository",
+  englishDocs: "",
+};
+
+export type ReaderCopy = typeof en;
+
+const ptBr: ReaderCopy = {
+  developers: "Desenvolvedores",
+  catalog: "Catálogo de WISPs",
+  reference: "Referência",
+  inShort: "Em resumo",
+  implementation: "Implementação, como o documento descreve",
+  inApp: "No app",
+  depends: "Depende de",
+  usedBy: "Usado por",
+  children: "Adapters e perfis",
+  implementsContract: "Implementa",
+  contents: "Nesta página",
+  all: "Todos os rascunhos",
+  moved: "Este rascunho ganhou um número novo. Você está lendo no endereço atual; o link antigo continua funcionando.",
+  draftNote: "Um rascunho em revisão — não é padrão final, nem promessa de que todo cliente o suporta.",
+  supportNote: "Documentação de apoio. Pode incluir propostas datadas e evidências históricas.",
+  source: "Ver o código-fonte no GitHub",
+  download: "Baixar o Markdown",
+  prev: "Anterior",
+  next: "Próximo",
+  back: "Voltar ao catálogo",
+  updated: "Atualizado",
+  unassigned: "Planejado · número a definir",
+  video: "Videoaula",
+  chapters: "Capítulos",
+  repo: "repositório",
+  englishDocs: "Os documentos técnicos estão em inglês; o resumo e a navegação estão em português.",
+};
+
+export const reader: Localized<ReaderCopy> = { en, "pt-br": ptBr };

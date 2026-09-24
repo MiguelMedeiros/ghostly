@@ -27,7 +27,7 @@ All ${numbering.length} specifications remain Draft. Family numbering was approv
 | 00–99 | Foundations: process, Ghost Core, peer keys, common capabilities |
 | 100–199 | Transport negotiation (100), WebRTC (101), Iroh (102), HyperDHT (103) |
 | 200–299 | Payment negotiation (200), Cashu (201), experimental Arkade (202), Lightning (203) |
-| 300–399 | Identity proofs (300; external proofs optional), Nostr (301; disabled experimental), Pubky and Keet (3xx; planned, number to be defined) |
+| 300–399 | Identity proofs (300; external proofs optional), Nostr (301), Pubky, Keet, domain, OpenPGP, Bitcoin address, SSH and OpenID Connect providers (3xx; planned, number to be defined) |
 | 400–499 | Chat messaging (400), an independent application capability |
 | 500–599 | File transfer (500), an independent application capability |
 | 600–699 | Voice and video (600), an independent application capability |
@@ -43,7 +43,7 @@ Generated from [numbering.json](numbering.json); edit that source instead of thi
 
 | Previous draft | Current draft |
 |---|---|
-${numbering.map((entry) => `| ${entry.oldId} | [${entry.displayNumber}${entry.numberAssignment === "unassigned" ? " · " + entry.file.replace(/^[0-9]+-/, "").replace(/\.md$/, "") + " · planned; number to be defined" : ""}](${entry.file}) |`).join("\n")}
+${numbering.map((entry) => `| ${entry.oldId} | [${entry.displayNumber}${entry.numberAssignment === "unassigned" ? " · " + entry.file.replace(/^[0-9x]+-/, "").replace(/\.md$/, "") + " · planned; number to be defined" : ""}](${entry.file}) |`).join("\n")}
 
 ## Link compatibility
 
@@ -70,6 +70,43 @@ paths.push(
   "CONTRIBUTING.md",
   "SECURITY.md",
 );
+// Plain text of a Markdown fragment: links keep their label, code keeps its text.
+const plain = (text) =>
+  text
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/[*_`]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+// What a WISP says about itself in its header table and first section, so the
+// catalogue follows the documents instead of a copy of them.
+function describe(body) {
+  const field = (...names) => {
+    for (const name of names) {
+      const row = body.match(new RegExp(`^\\|\\s*${name}\\s*\\|\\s*(.+?)\\s*\\|\\s*$`, "m"));
+      if (row) return row[1];
+    }
+    return undefined;
+  };
+  const dependencies = [...(field("Dependencies") ?? "").matchAll(/\]\(([^)#]+\.md)/g)].map((m) => basename(m[1]));
+  const firstSection = body.split(/^## .+$/m)[1] ?? "";
+  const paragraph = firstSection
+    .split(/\n\s*\n/)
+    .map((block) => block.trim())
+    .find((block) => block && !/^[|>#`-]/.test(block) && !/^\d+\./.test(block));
+  const notices = [...body.matchAll(/^> (?:\*\*)?(Release decision[^\n]*|Planned integration[^\n]*)/gm)].map((m) => plain(m[1]));
+  const status = field("Status");
+  const implementation = field("Implementation");
+  const updated = field("Updated");
+  return {
+    status: status ? plain(status) : undefined,
+    updated: updated ? plain(updated) : undefined,
+    implementation: implementation ? plain(implementation) : undefined,
+    documentKind: plain(field("Document kind", "Kind") ?? "") || undefined,
+    dependencies,
+    summary: paragraph ? plain(paragraph).slice(0, 420) : undefined,
+    notices,
+  };
+}
 const entries = paths.map((sourcePath) => {
   const file = basename(sourcePath);
   copyFileSync(resolve(root, sourcePath), resolve(destination, file));
@@ -80,6 +117,7 @@ const entries = paths.map((sourcePath) => {
     aliases: numbering.filter((entry) => entry.file === file && entry.oldFile !== file).map((entry) => entry.oldFile.replace(/\.md$/, "").toLowerCase()),
     slug: file.replace(/\.md$/, "").toLowerCase(),
     title: body.match(/^#\s+(.+)$/m)?.[1] ?? file,
+    ...(numbering.some((entry) => entry.file === file) ? describe(body) : { dependencies: [], notices: [] }),
   };
 });
 for (const entry of numbering.filter((entry) => entry.oldFile !== entry.file)) {
@@ -93,4 +131,25 @@ writeFileSync(
 );
 console.log(
   `Synced ${entries.length} reference documents and their route index.`,
+);
+
+// Code the developer page quotes, cut from the source so it can't drift.
+function excerpt(file, startPattern) {
+  const lines = readFileSync(resolve(root, file), "utf8").split("\n");
+  const start = lines.findIndex((line) => line.includes(startPattern));
+  if (start < 0) throw new Error(`Snippet "${startPattern}" not found in ${file}`);
+  let end = start;
+  while (end < lines.length && lines[end] !== "}") end++;
+  return { file, line: start + 1, code: lines.slice(start, end + 1).join("\n") };
+}
+writeFileSync(
+  resolve(root, "website/lib/code-snippets.json"),
+  JSON.stringify(
+    {
+      createLink: excerpt("packages/core/src/invite.ts", "/** Creates both ends of a link"),
+      rankTransports: excerpt("packages/core/src/pairedTransports.ts", "/** Symmetric rank sum"),
+    },
+    null,
+    2,
+  ) + "\n",
 );

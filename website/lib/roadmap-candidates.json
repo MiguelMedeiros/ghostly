@@ -150,7 +150,7 @@
     "status": "Current, scoped",
     "range": "2xx",
     "section": "Rails and wallet adapters",
-    "body": "**Provider / signer route**\n\nCurrent invoice flow through wallet/mint; future external node/wallet providers below\n\n**Runtime and platform route**\n\nCurrent app subset; provider/runtime determines expansion\n\n**Confirmed evidence, Ghostly status, restriction / next decision**\n\n**Current subset**, [Draft 203](203-lightning.md). Advertise exact create/pay/lookup methods; validate invoice signature/network/amount/expiry in executing wallet. A displayed invoice or peer receipt is not settlement evidence.",
+    "body": "**Provider / signer route**\n\nOne active `LightningProvider` source per profile and mode; the Cashu mints are the default and only shipped source; external node/wallet providers below plug into the same contract\n\n**Runtime and platform route**\n\nCurrent app subset; provider/runtime determines expansion\n\n**Confirmed evidence, Ghostly status, restriction / next decision**\n\n**Current subset**, [Draft 203](203-lightning.md), [provider guide](../../packages/browser/src/engine/paymentAdapters/PROVIDERS.md). Sources declare create/pay/lookup capabilities; payments are journaled before spending and an unknown outcome is only reconciled. Validate invoice signature/network/amount/expiry in executing wallet. A displayed invoice or peer receipt is not settlement evidence.",
     "sourceAnchor": "rails-and-wallet-adapters"
   },
   {
@@ -183,7 +183,7 @@
     "status": "Planned",
     "range": "2xx",
     "section": "Rails and wallet adapters",
-    "body": "**Provider / signer route**\n\nWallet adapter + BDK/Core/other wallet + chosen signer and chain observer\n\n**Runtime and platform route**\n\nNative library/node first; explicit external wallet/PSBT route for browser\n\n**Confirmed evidence, Ghostly status, restriction / next decision**\n\n**Candidate**: [BDK](https://bitcoindevkit.org/), [Core RPC](https://bitcoincore.org/en/doc/), [PSBT](https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki). Coin selection, fees, change, RBF/reorg, broadcast ambiguity and confirmation policy must be specified.",
+    "body": "**Provider / signer route**\n\n`bitcoin` payment method through one active `OnchainProvider` source per profile and mode (none by default); BDK/Core/other wallet as provider modules\n\n**Runtime and platform route**\n\nNative library/node first; explicit external wallet/PSBT route for browser\n\n**Confirmed evidence, Ghostly status, restriction / next decision**\n\n**Contract in place, no provider shipped**: [draft section](200-payments.md#on-chain-bitcoin-draft), [provider guide](../../packages/browser/src/engine/paymentAdapters/PROVIDERS.md), [BDK](https://bitcoindevkit.org/), [Core RPC](https://bitcoincore.org/en/doc/), [PSBT](https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki). Address validation per network, sign-at-review/broadcast-at-approval and same-transaction reconciliation implemented; coin selection, fee policy, change, RBF/reorg and chat requests remain to be specified.",
     "sourceAnchor": "rails-and-wallet-adapters"
   },
   {
@@ -411,10 +411,10 @@
     "title": "Nostr",
     "family": "3",
     "kind": "Identity / account adapter",
-    "status": "Deferred / research",
+    "status": "Planned",
     "range": "3xx",
     "section": "Identity and social candidate matrix",
-    "body": "**Confirmed upstream primitive / source**\n\nSigned events; [NIP07](https://github.com/nostr-protocol/nips/blob/master/07.md), [NIP46](https://github.com/nostr-protocol/nips/blob/master/46.md)\n\n**Signer, runtime and trust distinction**\n\nBrowser external signer or remote bunker; event signature verification separate from relay delivery\n\n**Ghostly status / next gate**\n\n**Experimental/deferred** proof and profile code. Revalidate scoped event format, replay/expiry and actual signers. Profile/graph/feed/write adapters require separate event schemas and permissions.",
+    "body": "**Confirmed upstream primitive / source**\n\nSigned events; [NIP07](https://github.com/nostr-protocol/nips/blob/master/07.md), [NIP46](https://github.com/nostr-protocol/nips/blob/master/46.md)\n\n**Signer, runtime and trust distinction**\n\nBrowser external signer or remote bunker; event signature verification separate from relay delivery\n\n**Ghostly status / next gate**\n\n**Current** proof provider (2026-09-23): NIP-07 and NIP-46 sign one kind-30078 event carrying the [identity statement](300-peer-proofs.md#implementation--2026-09-23-identity-proofs), never published to a relay; verified by each contact (event id recomputed, BIP-340). Kind-0 name/picture only on request. Graph/feed/write adapters still need separate event schemas and permissions.",
     "sourceAnchor": "identity-and-social-candidate-matrix"
   },
   {
@@ -469,7 +469,7 @@
     "status": "Planned",
     "range": "3xx",
     "section": "Identity and social candidate matrix",
-    "body": "**Confirmed upstream primitive / source**\n\n[RFC9580](https://www.rfc-editor.org/rfc/rfc9580.html) signatures, key/subkey formats\n\n**Signer, runtime and trust distinction**\n\nNative agent or vetted library; hardware-backed OpenPGP possible\n\n**Ghostly status / next gate**\n\n**Candidate**. Define detached signature/canonical bytes, permitted algorithms, signing subkey, revocation/expiry and trust display. Key possession is not trust in a UID/name.",
+    "body": "**Confirmed upstream primitive / source**\n\n[RFC9580](https://www.rfc-editor.org/rfc/rfc9580.html) signatures, key/subkey formats\n\n**Signer, runtime and trust distinction**\n\nThe person's own gpg signs; OpenPGP.js 6 verifies, loaded lazily; hardware-backed OpenPGP works unchanged\n\n**Ghostly status / next gate**\n\n**Experimental** — [WISP 3xx](3xx-openpgp.md). Signed once — clearsigned or detached — over the contract's binding of the OpenPGP key to a Ghostly proof key, then presented per chat without re-signing; v4/v6 keys, allowlisted algorithms (Ed25519, Ed448, ECDSA NIST/brainpool, RSA ≥ 2048), signing subkeys with back-signatures, expiry and hard/soft revocation checked at signing and now, strict size limits, minimal key shared. Fingerprint and user IDs shown with the warning that key possession is not trust in a UID/name; keys.openpgp.org is contacted only on request, and its email check is labelled as its own.",
     "sourceAnchor": "identity-and-social-candidate-matrix"
   },
   {
@@ -480,7 +480,7 @@
     "status": "Planned",
     "range": "3xx",
     "section": "Identity and social candidate matrix",
-    "body": "**Confirmed upstream primitive / source**\n\n`ssh-keygen -Y` signing/verification and namespaces: [OpenSSH manual](https://man.openbsd.org/ssh-keygen)\n\n**Signer, runtime and trust distinction**\n\nNative agent/key or supported hardware security key; browser needs bridge\n\n**Ghostly status / next gate**\n\n**Candidate**. Specify namespace/principals/allowed signers; no silent reuse of SSH auth authority as app consent.",
+    "body": "**Confirmed upstream primitive / source**\n\n`ssh-keygen -Y sign` signatures ([PROTOCOL.sshsig](https://github.com/openssh/openssh-portable/blob/master/PROTOCOL.sshsig)), namespace `ghostly`: [OpenSSH manual](https://man.openbsd.org/ssh-keygen)\n\n**Signer, runtime and trust distinction**\n\nThe person's own `ssh-keygen` (key file, `ssh-agent` or a FIDO security key); Ghostly never sees the private key, the pasted signature is verified locally\n\n**Ghostly status / next gate**\n\n**Experimental providers `ssh`, `ssh-github`, `ssh-gitlab`**, [SSH · 3xx planned](3xx-ssh.md). Ed25519, ECDSA P-256/384/521, RSA (`rsa-sha2-256/512`, ≥2048 bits) and `sk-ssh-ed25519`/`sk-ecdsa` security keys (touch required), checked against real `ssh-keygen` vectors. No principals/allowed-signers file: the subject is the key fingerprint, or a forge account (row below). The key is never used for SSH authentication.",
     "sourceAnchor": "identity-and-social-candidate-matrix"
   },
   {
@@ -491,7 +491,7 @@
     "status": "Planned",
     "range": "3xx",
     "section": "Identity and social candidate matrix",
-    "body": "**Confirmed upstream primitive / source**\n\nLegacy signmessage and [BIP322](https://bips.dev/322/) are different formats\n\n**Signer, runtime and trust distinction**\n\nWallet/device-specific message signing; script/address validation, not merely same secp256k1 curve\n\n**Ghostly status / next gate**\n\n**Candidate**. Pin BIP revision/variant and test vectors; no proof of current balance, historical sender or willingness to spend. Old BIP322 draft formats may differ from current specification.",
+    "body": "**Confirmed upstream primitive / source**\n\nLegacy signmessage and [BIP322](https://bips.dev/322/) are different formats\n\n**Signer, runtime and trust distinction**\n\nWallet/device-specific message signing; script/address validation, not merely same secp256k1 curve\n\n**Ghostly status / next gate**\n\n**Implemented, experimental** (2026-09-23): identity-proof provider `bitcoin`, BIP-322 pinned to 2.0.0 (bitcoin/bips@4061a54) with its official vectors; simple/full for P2WPKH and P2TR key path, full for P2SH-P2WPKH and P2PKH; legacy signmessage for P2PKH only; multisig/script paths inconclusive, proof of funds refused. Paste-back from the person's wallet; \"sign with my Ghostly wallet\" waits for an on-chain source that signs messages. No proof of current balance, historical sender or willingness to spend. [Draft](3xx-bitcoin.md).",
     "sourceAnchor": "identity-and-social-candidate-matrix"
   },
   {
@@ -550,6 +550,17 @@
     "sourceAnchor": "identity-and-social-candidate-matrix"
   },
   {
+    "id": "candidate-domain",
+    "title": "Domain",
+    "family": "3",
+    "kind": "Identity / account adapter",
+    "status": "Planned",
+    "range": "3xx",
+    "section": "Identity and social candidate matrix",
+    "body": "**Confirmed upstream primitive / source**\n\nDNS TXT via [DNS over HTTPS](https://www.rfc-editor.org/rfc/rfc8484), [RFC 8615](https://www.rfc-editor.org/rfc/rfc8615) `/.well-known/ghostly.json`, [NIP-05](https://github.com/nostr-protocol/nips/blob/master/05.md) `nostr.json`\n\n**Signer, runtime and trust distinction**\n\nControl of a name, shown by publishing under it once; the resolver (and, for files, the domain's web server) sees the check; DNS answers are only as honest as the resolver unless DNSSEC validated\n\n**Ghostly status / next gate**\n\n**Experimental provider**, [draft 3xx](3xx-domain.md). Records name the proof key and statement id, not a participation key; private addresses refused before any web fetch; re-checked daily. Not a legal-identity or registrant claim; domain transfer keeps a record alive until the proof expires.",
+    "sourceAnchor": "identity-and-social-candidate-matrix"
+  },
+  {
     "id": "candidate-github",
     "title": "GitHub",
     "family": "3",
@@ -557,7 +568,51 @@
     "status": "Planned",
     "range": "3xx",
     "section": "Identity and social candidate matrix",
-    "body": "**Confirmed upstream primitive / source**\n\n[OAuth authorization](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps)\n\n**Signer, runtime and trust distinction**\n\nProvider-authenticated account access; separate from SSH key control or a signed commit\n\n**Ghostly status / next gate**\n\n**Candidate qualified account assertion**. Define audience/nonce and whether peers trust GitHub or an attestation service. Public profile fetch alone proves nothing about contact ownership.",
+    "body": "**Confirmed upstream primitive / source**\n\n[OAuth authorization](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps); published SSH keys: [GitHub](https://docs.github.com/en/rest/users/keys#list-public-keys-for-a-user), [GitLab](https://docs.gitlab.com/api/user_keys/)\n\n**Signer, runtime and trust distinction**\n\nOAuth is provider-authenticated account access. Published keys are public data the account holder controls; both APIs allow CORS, `github.com/<login>.keys` does not\n\n**Ghostly status / next gate**\n\n**Account proof without OAuth, experimental** (`ssh-github`, `ssh-gitlab`): an SSH key signs the binding and the contact's app shows \"GitHub: <login> (via published SSH key)\" only while that account lists the signing key; re-checked after ten minutes, the lookup disclosed to the person. See [SSH · 3xx planned](3xx-ssh.md). OAuth assertions remain a **candidate** (define audience/nonce, whom peers trust). A profile fetch alone still proves nothing.",
+    "sourceAnchor": "identity-and-social-candidate-matrix"
+  },
+  {
+    "id": "candidate-openid-connect-providers-google-microsoft-entra-work-school-and-personal-apple-gitlab-com-twitch",
+    "title": "OpenID Connect providers: Google, Microsoft (Entra, work/school and personal), Apple, GitLab.com, Twitch",
+    "family": "3",
+    "kind": "Identity / account adapter",
+    "status": "Planned",
+    "range": "3xx",
+    "section": "Identity and social candidate matrix",
+    "body": "**Confirmed upstream primitive / source**\n\n[OpenID Connect Core](https://openid.net/specs/openid-connect-core-1_0.html) ID tokens, each provider's discovery document and JWKS\n\n**Signer, runtime and trust distinction**\n\nThe provider signs an ID token whose `nonce` is the statement id; the contact checks it against the provider's published keys. **Attested by the provider**, not a key the person holds. Public clients, no secret: `id_token` responses (Apple `code id_token`, fragment, no scope; GitLab code + PKCE)\n\n**Ghostly status / next gate**\n\n**In development**, [draft 3xx](3xx-oidc-proofs.md). Needs the maintainer's OAuth client registrations ([checklist](../OIDC-PROVIDERS.md)); until then neither offered nor accepted.",
+    "sourceAnchor": "identity-and-social-candidate-matrix"
+  },
+  {
+    "id": "candidate-facebook",
+    "title": "Facebook",
+    "family": "3",
+    "kind": "Identity / account adapter",
+    "status": "Research",
+    "range": "3xx",
+    "section": "Identity and social candidate matrix",
+    "body": "**Confirmed upstream primitive / source**\n\n[Facebook Login](https://developers.facebook.com/docs/facebook-login/)\n\n**Signer, runtime and trust distinction**\n\nThe web login returns an access token checked through Facebook's API; its OIDC ID token (\"Limited Login\") exists only in the iOS SDK\n\n**Ghostly status / next gate**\n\n**Research**: verifying it needs a Ghostly server that checks the account and signs an attestation, which moves the trust to Ghostly.",
+    "sourceAnchor": "identity-and-social-candidate-matrix"
+  },
+  {
+    "id": "candidate-x-twitter",
+    "title": "X / Twitter",
+    "family": "3",
+    "kind": "Identity / account adapter",
+    "status": "Research",
+    "range": "3xx",
+    "section": "Identity and social candidate matrix",
+    "body": "**Confirmed upstream primitive / source**\n\n[OAuth 2.0](https://docs.x.com/resources/fundamentals/authentication/oauth-2-0/overview)\n\n**Signer, runtime and trust distinction**\n\nOAuth 2.0 with PKCE, but no OpenID Connect: no signed ID token, only API access\n\n**Ghostly status / next gate**\n\n**Research**, for the same reason: without an ID token only a server calling X's API could attest the account.",
+    "sourceAnchor": "identity-and-social-candidate-matrix"
+  },
+  {
+    "id": "candidate-linkedin",
+    "title": "LinkedIn",
+    "family": "3",
+    "kind": "Identity / account adapter",
+    "status": "Research",
+    "range": "3xx",
+    "section": "Identity and social candidate matrix",
+    "body": "**Confirmed upstream primitive / source**\n\n[Sign In with LinkedIn using OpenID Connect](https://learn.microsoft.com/en-us/linkedin/consumer/integrations/self-serve/sign-in-with-linkedin-v2)\n\n**Signer, runtime and trust distinction**\n\nSigns ID tokens, but only through a code exchange that needs the client secret, and its JWKS answers without CORS\n\n**Ghostly status / next gate**\n\n**Research**: needs a Ghostly server; revisit if LinkedIn offers public clients.",
     "sourceAnchor": "identity-and-social-candidate-matrix"
   },
   {
@@ -590,7 +645,7 @@
     "status": "Planned",
     "range": "Unassigned",
     "section": "Hardware and signing",
-    "body": "**Confirmed official capability/source**\n\n[OpenPGP](https://developers.yubico.com/PGP/), [PIV](https://developers.yubico.com/PIV/Introduction/YubiKey_and_PIV.html), OpenSSH route above\n\n**Runtime / physical route**\n\nNative agent/smartcard middleware; device/firmware/slot-specific algorithms\n\n**Restriction and Ghostly gate**\n\n**Candidate signer profiles**. These applets have different policies and formats from FIDO. Check supported curves, PIN/touch, subkeys and revocation; no blanket secp256k1 assumption.",
+    "body": "**Confirmed official capability/source**\n\n[OpenPGP](https://developers.yubico.com/PGP/), [PIV](https://developers.yubico.com/PIV/Introduction/YubiKey_and_PIV.html), OpenSSH route above (FIDO `sk-` SSH keys verified by the `ssh` providers)\n\n**Runtime / physical route**\n\nNative agent/smartcard middleware; device/firmware/slot-specific algorithms\n\n**Restriction and Ghostly gate**\n\n**OpenPGP applet: experimental** through the [OpenPGP proof](3xx-openpgp.md) — gpg drives the card (PIN, touch policy), Ghostly only verifies; the usual card layout (certify-only primary, signing subkey) is in the test vectors. Card curves Ghostly accepts: Ed25519, NIST P-256/384/521, brainpool, RSA ≥ 2048; secp256k1 is refused. Not tested on a physical card. **PIV / SSH: candidate signer profiles**, with different policies and formats from FIDO.",
     "sourceAnchor": "hardware-and-signing"
   },
   {

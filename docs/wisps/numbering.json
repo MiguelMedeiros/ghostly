@@ -36,7 +36,7 @@
     "numberAssignment": "defined"
   },
   {
-    "oldId": "\u2014 04",
+    "oldId": "— 04",
     "id": "04",
     "oldFile": "04-profiles.md",
     "file": "04-profiles.md",
@@ -45,7 +45,7 @@
     "numberAssignment": "defined"
   },
   {
-    "oldId": "\u2014 05",
+    "oldId": "— 05",
     "id": "05",
     "oldFile": "05-backups.md",
     "file": "05-backups.md",
@@ -166,6 +166,51 @@
     "id": "303",
     "oldFile": "12-keet.md",
     "file": "303-keet.md",
+    "kind": "Adapter",
+    "displayNumber": "3xx",
+    "numberAssignment": "unassigned"
+  },
+  {
+    "oldId": "—",
+    "id": "304",
+    "oldFile": "3xx-domain.md",
+    "file": "3xx-domain.md",
+    "kind": "Adapter",
+    "displayNumber": "3xx",
+    "numberAssignment": "unassigned"
+  },
+  {
+    "oldId": "—",
+    "id": "305",
+    "oldFile": "3xx-openpgp.md",
+    "file": "3xx-openpgp.md",
+    "kind": "Adapter",
+    "displayNumber": "3xx",
+    "numberAssignment": "unassigned"
+  },
+  {
+    "oldId": "—",
+    "id": "306",
+    "oldFile": "3xx-bitcoin.md",
+    "file": "3xx-bitcoin.md",
+    "kind": "Adapter",
+    "displayNumber": "3xx",
+    "numberAssignment": "unassigned"
+  },
+  {
+    "oldId": "—",
+    "id": "307",
+    "oldFile": "3xx-ssh.md",
+    "file": "3xx-ssh.md",
+    "kind": "Adapter",
+    "displayNumber": "3xx",
+    "numberAssignment": "unassigned"
+  },
+  {
+    "oldId": "—",
+    "id": "308",
+    "oldFile": "3xx-oidc-proofs.md",
+    "file": "3xx-oidc-proofs.md",
     "kind": "Adapter",
     "displayNumber": "3xx",
     "numberAssignment": "unassigned"
@@ -306,7 +351,7 @@
     "numberAssignment": "unassigned"
   },
   {
-    "oldId": "\u2014 1000",
+    "oldId": "— 1000",
     "id": "1000",
     "oldFile": "1000-storage.md",
     "file": "1000-storage.md",
@@ -315,7 +360,7 @@
     "numberAssignment": "defined"
   },
   {
-    "oldId": "\u2014 1001",
+    "oldId": "— 1001",
     "id": "1001",
     "oldFile": "1001-local-storage.md",
     "file": "1001-local-storage.md",
@@ -324,7 +369,7 @@
     "numberAssignment": "defined"
   },
   {
-    "oldId": "\u2014 1002",
+    "oldId": "— 1002",
     "id": "1002",
     "oldFile": "1002-s3-storage.md",
     "file": "1002-s3-storage.md",

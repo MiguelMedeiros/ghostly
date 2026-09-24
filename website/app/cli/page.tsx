@@ -1,5 +1,6 @@
-import { CLINavbar } from "@/components/cli/CLINavbar";
-import { Footer } from "@/components/Footer";
+import { Nav } from "@/components/site/Nav";
+import { SiteFooter } from "@/components/site/Footer";
+import { GhostPet } from "@/components/site/GhostPet";
 import { CLIHero } from "@/components/cli/CLIHero";
 import { CLIInstall } from "@/components/cli/CLIInstall";
 import { CLISkillInstall } from "@/components/cli/CLISkillInstall";
@@ -39,8 +40,8 @@ export const metadata: Metadata = {
 export default function CLIPage() {
   return (
     <>
-      <CLINavbar />
-      <main>
+      <Nav locale="en" />
+      <main id="content">
         <CLIHero />
         <CLIInstall />
         <CLISkillInstall />
@@ -48,7 +49,8 @@ export default function CLIPage() {
         <CLIExamples />
         <CLIReference />
       </main>
-      <Footer />
+      <SiteFooter />
+      <GhostPet />
     </>
   );
 }

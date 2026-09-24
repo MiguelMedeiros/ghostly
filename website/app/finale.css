@@ -1,0 +1,472 @@
+/* Finale: the story closes. The title, lead and button are there as soon as
+   the reader arrives; above them Boo and Casper meet, talk, Casper leaves and
+   Boo turns to you. Below, the download panel. Every rule is prefixed fin-;
+   the default frame (no scripts, reduced motion) is the finished one, and only
+   html.js + motion hides anything. */
+
+.fin {
+  --fin-travel: 160px;
+  --fin-gap: 40px;
+  --fin-ghost: 150px;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 70% 55% at 50% 22%, rgba(34, 211, 238, 0.09), transparent 70%),
+    radial-gradient(ellipse 40% 30% at 50% 100%, rgba(0, 168, 132, 0.06), transparent 70%),
+    var(--bg);
+}
+.fin-inner {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  gap: 0;
+}
+.fin-eyebrow {
+  transition: opacity 0.6s var(--ease);
+}
+
+/* ── The stage ─────────────────────────────────── */
+.fin-stage {
+  position: relative;
+  width: 100%;
+  margin-top: 30px;
+}
+.fin-actors {
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  gap: var(--fin-gap);
+  min-height: calc(var(--fin-ghost) * 1.25 + 58px);
+}
+/* A fixed footprint: the bubble sits out of flow above it, so a longer line
+   never widens the actor and re-centres the pair. Only --k moves them. */
+.fin-actor {
+  position: relative;
+  width: var(--fin-ghost);
+  display: grid;
+  justify-items: center;
+  align-content: end;
+  transform: translateX(calc(var(--k, 0) * var(--fin-travel)));
+  transition:
+    transform 0.9s var(--ease),
+    opacity 0.6s var(--ease);
+}
+.fin[data-state="play"]:not([data-step="-1"]) .fin-actor {
+  transition-duration: 1.6s, 0.6s;
+  transition-timing-function: linear, var(--ease);
+}
+.fin-body {
+  position: relative;
+  transform-origin: 50% 70%;
+  transition:
+    transform 0.45s var(--ease),
+    opacity 0.45s var(--ease);
+}
+.fin-actor .ghost {
+  width: var(--fin-ghost);
+  height: auto;
+}
+.fin-bubble {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  padding: 9px 16px;
+  border-radius: 18px;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translate(-50%, 8px) scale(0.92);
+  transition:
+    opacity 0.3s var(--ease),
+    transform 0.3s var(--ease);
+}
+.fin-bubble:empty {
+  visibility: hidden;
+}
+.fin-bubble[data-on="true"] {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.fin-bubble--boo {
+  background: rgba(34, 211, 238, 0.14);
+  color: var(--cyan);
+  border-bottom-left-radius: 5px;
+}
+.fin-bubble--casper {
+  background: rgba(74, 222, 128, 0.14);
+  color: var(--mint);
+  border-bottom-right-radius: 5px;
+}
+
+/* Casper's exit: he shrinks to nothing and three small ghosts drift up. The
+   particles are siblings of the body (positioned over the actor), so they stay
+   visible while the body collapses. */
+.fin-poof {
+  position: absolute;
+  left: 50%;
+  top: 38%;
+  width: 22px;
+  height: 22px;
+  margin: -11px;
+  color: var(--mint);
+  opacity: 0;
+  pointer-events: none;
+  --dx: calc((var(--n) - 1) * 30px);
+}
+.fin[data-poof="true"] .fin-actor--casper .fin-body {
+  transform: scale(0);
+  opacity: 0;
+}
+.fin[data-poof="true"] .fin-actor--casper .fin-body > .ghost {
+  filter: none;
+}
+.fin[data-poof="true"] .fin-actor--casper .fin-poof {
+  animation: fin-poof 1s var(--ease) calc(var(--n) * 70ms) both;
+}
+.fin[data-poof="true"] .fin-actor--casper .fin-bubble {
+  opacity: 0;
+  transform: translate(-50%, -6px) scale(0.9);
+}
+@keyframes fin-poof {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.6);
+  }
+  25% {
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--dx), -70px) scale(1) rotate(calc((var(--n) - 1) * 14deg));
+  }
+}
+/* With Casper gone, Boo takes the centre and looks at you. */
+html.js .fin[data-state="done"][data-poof="true"] .fin-actor--boo {
+  transform: translateX(calc(50% + var(--fin-gap) / 2));
+}
+
+/* ── Title, lead, call to action ───────────────── */
+.fin-title {
+  margin-top: 22px;
+  max-width: 12em;
+}
+/* Portuguese runs longer ("Você já é um fantasma." is 22 characters); capped a
+   little under the English volume it stays on two lines inside the wrap. */
+.fin-title:lang(pt) {
+  font-size: min(var(--t-display), 112px);
+}
+.fin-title-line {
+  display: block;
+}
+.fin-word {
+  display: inline-block;
+}
+/* Six or seven words, 45ms apart, 0.55s each: the whole title is up in ~0.8s. */
+.fin-word-in {
+  display: inline-block;
+  clip-path: inset(-0.25em -0.1em -0.3em -0.1em);
+  transition:
+    clip-path 0.55s var(--ease),
+    transform 0.55s var(--ease);
+  transition-delay: calc(var(--i, 0) * 45ms);
+}
+.fin-lead {
+  margin-top: 26px;
+  max-width: 34em;
+  transition:
+    opacity 0.55s var(--ease) 0.15s,
+    transform 0.55s var(--ease) 0.15s;
+}
+.fin-cta {
+  margin-top: 34px;
+  transition:
+    opacity 0.55s var(--ease) 0.25s,
+    transform 0.2s var(--ease),
+    box-shadow 0.2s;
+}
+.fin[data-state="done"][data-poof="true"] .fin-cta {
+  animation: fin-glow 0.9s ease-out 1 both;
+}
+@keyframes fin-glow {
+  0% {
+    box-shadow: 0 10px 30px -10px rgba(34, 211, 238, 0.55);
+  }
+  35% {
+    box-shadow:
+      0 10px 30px -10px rgba(34, 211, 238, 0.55),
+      0 0 0 10px rgba(34, 211, 238, 0.22),
+      0 0 70px 10px rgba(34, 211, 238, 0.35);
+  }
+  100% {
+    box-shadow:
+      0 10px 30px -10px rgba(34, 211, 238, 0.55),
+      0 0 0 0 rgba(34, 211, 238, 0),
+      0 0 0 0 rgba(34, 211, 238, 0);
+  }
+}
+
+/* ── The download panel: a head, three platform cards, two more ── */
+.fin-panel {
+  width: 100%;
+  max-width: 1040px;
+  margin-top: 72px;
+  text-align: left;
+}
+.fin-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 28px;
+  padding-bottom: 18px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+.fin-panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+.fin-panel-title > svg {
+  width: 22px;
+  height: 22px;
+  color: var(--cyan);
+  flex: none;
+}
+.fin-panel-body {
+  color: var(--muted);
+  font-size: var(--t-note);
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+.fin-cards {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 14px;
+}
+.fin-card {
+  grid-column: span 2;
+  padding: 20px 20px 18px;
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  transition:
+    border-color 0.3s,
+    box-shadow 0.3s;
+}
+/* The reader's machine. */
+.fin-card[data-hot="true"] {
+  border-color: rgba(34, 211, 238, 0.42);
+  box-shadow:
+    inset 0 0 0 1px rgba(34, 211, 238, 0.12),
+    0 24px 60px -36px rgba(34, 211, 238, 0.55);
+}
+/* The extension and the CLI: the same shape as a platform card, one button. */
+.fin-card--wide {
+  grid-column: span 3;
+}
+.fin-card--wide > .fin-dl {
+  justify-self: start;
+}
+.fin-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 24px;
+}
+.fin-card-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+.fin-card-title > svg {
+  width: 20px;
+  height: 20px;
+  color: var(--cyan);
+  flex: none;
+}
+.fin-card-text {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.fin-card-body {
+  color: var(--muted);
+  font-size: var(--t-note);
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+.fin-chip--hot {
+  color: var(--cyan);
+  border-color: rgba(34, 211, 238, 0.4);
+  background: rgba(34, 211, 238, 0.08);
+}
+.fin-dls {
+  display: grid;
+  gap: 8px;
+}
+.fin-dl {
+  justify-content: flex-start;
+  min-height: 46px;
+  padding: 10px 14px;
+  gap: 10px;
+  font-size: 15px;
+}
+.fin-dl svg {
+  width: 18px;
+  height: 18px;
+}
+.fin-dl-ext {
+  margin-left: auto;
+  padding-left: 12px;
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.fin-dl:hover .fin-dl-ext {
+  color: var(--cyan);
+}
+/* The exact installer we guessed for this machine. */
+.fin-dl[aria-current="true"] {
+  border-color: rgba(34, 211, 238, 0.55);
+  background: rgba(34, 211, 238, 0.08);
+}
+.fin-dl[aria-current="true"] .fin-dl-ext {
+  color: var(--cyan);
+}
+.fin-note {
+  margin-top: 22px;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  line-height: 1.7;
+  max-width: 56em;
+}
+.fin-note a {
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.fin-note a:hover {
+  color: var(--cyan);
+}
+
+/* ── The reveals (only with scripts and motion) ─ */
+@media (prefers-reduced-motion: no-preference) {
+  /* The eyebrow fades in as the section approaches. */
+  html.js .fin[data-inview="false"] .fin-eyebrow {
+    opacity: 0;
+    transition: none;
+  }
+  /* The ghosts wait off stage until half of it is on screen, then glide in. */
+  html.js .fin[data-state="idle"] .fin-actor {
+    opacity: 0;
+    transition: none;
+  }
+  html.js .fin[data-state="idle"] .fin-actor--boo {
+    transform: translateX(calc(-1 * var(--fin-travel)));
+  }
+  html.js .fin[data-state="idle"] .fin-actor--casper {
+    transform: translateX(var(--fin-travel));
+  }
+  /* Title, lead and button rise the moment the title reaches the viewport. */
+  html.js .fin:not([data-shown="true"]) .fin-word-in {
+    clip-path: inset(0 -0.1em 100% -0.1em);
+    transform: translateY(0.35em);
+    transition: none;
+  }
+  html.js .fin:not([data-shown="true"]) .fin-lead {
+    opacity: 0;
+    transform: translateY(10px);
+    transition: none;
+  }
+  html.js .fin:not([data-shown="true"]) .fin-cta {
+    opacity: 0;
+    transition: none;
+  }
+}
+
+/* ── Narrow: two cards per row, the wide ones stack ─ */
+@media (max-width: 1000px) {
+  .fin-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .fin-card,
+  .fin-card--wide {
+    grid-column: auto;
+  }
+  .fin-cards > :last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ── Phone: the ghosts sit right above the button; the cards stack ─ */
+@media (max-width: 720px) {
+  .fin {
+    --fin-travel: 100px;
+    --fin-ghost: 77px;
+  }
+  .fin-eyebrow {
+    order: 1;
+  }
+  .fin-title {
+    order: 2;
+  }
+  .fin-lead {
+    order: 3;
+    margin-top: 18px;
+  }
+  .fin-stage {
+    order: 4;
+    margin-top: 26px;
+  }
+  .fin-cta {
+    order: 5;
+    margin-top: 8px;
+    width: 100%;
+    max-width: 420px;
+  }
+  .fin-panel {
+    order: 6;
+    margin-top: 48px;
+  }
+  .fin-note {
+    order: 7;
+  }
+  .fin-actors {
+    min-height: calc(var(--fin-ghost) * 1.25 + 50px);
+  }
+  .fin-bubble {
+    font-size: 13px;
+    padding: 7px 12px;
+  }
+  .fin-poof {
+    --dx: calc((var(--n) - 1) * 18px);
+  }
+  .fin-panel-head {
+    display: grid;
+    gap: 6px;
+  }
+  .fin-cards {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+  .fin-card {
+    padding: 18px 16px 16px;
+  }
+  .fin-card--wide > .fin-dl {
+    justify-self: stretch;
+  }
+}

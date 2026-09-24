@@ -1,8 +1,10 @@
 services:
   website:
     build:
-      context: .
-      dockerfile: Dockerfile
+      # The repository root: the build reads docs/ and packages/core/src
+      # (Dockerfile.dockerignore keeps the context to those).
+      context: ..
+      dockerfile: website/Dockerfile
     ports:
       - "${WEBSITE_PORT:-3000}:3000"
     environment:

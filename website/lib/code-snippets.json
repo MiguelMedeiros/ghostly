@@ -1,0 +1,12 @@
+{
+  "createLink": {
+    "file": "packages/core/src/invite.ts",
+    "line": 38,
+    "code": "/** Creates both ends of a link: keep `mine`, hand `invite` to the peer. */\nexport function createLink(): { mine: LinkParams; invite: LinkParams } {\n  const a = createIdentity();\n  const b = createIdentity();\n  const encKeyB64 = toBase64Url(generateEncryptionKey());\n  return {\n    mine: { seedB64: a.seedB64, peerPubKeyZ32: b.pubKeyZ32, encKeyB64 },\n    invite: { seedB64: b.seedB64, peerPubKeyZ32: a.pubKeyZ32, encKeyB64 },\n  };\n}"
+  },
+  "rankTransports": {
+    "file": "packages/core/src/pairedTransports.ts",
+    "line": 26,
+    "code": "/** Symmetric rank sum; the fixed order breaks ties deterministically. Neither\n * a remote list nor a preference can add an unavailable local adapter. */\nexport function rankTransports(local: readonly string[], remote: readonly string[]): PairedTransport[] {\n  return TRANSPORTS.filter(t => local.includes(t) && remote.includes(t))\n    .sort((a, b) => (local.indexOf(a) + remote.indexOf(a)) - (local.indexOf(b) + remote.indexOf(b))\n      || TRANSPORTS.indexOf(a) - TRANSPORTS.indexOf(b));\n}"
+  }
+}

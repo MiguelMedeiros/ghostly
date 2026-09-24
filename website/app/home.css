@@ -1,0 +1,205 @@
+/* Homepage */
+
+/* ── Hero: Act 0 ── */
+.hero {
+  position: relative;
+  min-height: 100vh;
+  min-height: 100svh;
+  display: grid;
+  align-items: center;
+  padding-block: calc(var(--nav-h) + 24px) 56px;
+  overflow: hidden;
+}
+.hero-bg {
+  position: absolute;
+  inset: 0;
+  mask-image: radial-gradient(ellipse at 40% 45%, #000 20%, transparent 70%);
+  opacity: 0.7;
+}
+.hero-light {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(520px 520px at 22% 40%, rgba(34, 211, 238, 0.09), transparent 70%),
+    radial-gradient(640px 640px at 68% 55%, rgba(0, 168, 132, 0.07), transparent 70%);
+}
+.hero-inner {
+  position: relative;
+  display: grid;
+  justify-items: start;
+  gap: 22px;
+  width: auto;
+  max-width: 640px;
+  margin-inline: max(24px, calc((100vw - var(--wrap)) / 2 + 24px)) auto;
+  padding-inline: 0;
+}
+.hero-title {
+  display: grid;
+  font-size: clamp(48px, 7.2vw, 118px);
+}
+.hero-line {
+  display: block;
+  animation: hero-rise 0.7s var(--ease) both;
+}
+.hero-rise {
+  animation: hero-rise 0.7s var(--ease) both;
+}
+@keyframes hero-rise {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+}
+.hero-lead {
+  max-width: 34em;
+}
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 6px;
+}
+.hero-micro {
+  color: var(--dim);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+}
+.hero-follow {
+  display: flex;
+  gap: 22px;
+  align-items: center;
+  font-size: 15px;
+  margin-top: 4px;
+}
+.hero-follow a {
+  padding-block: 12px;
+}
+.hero-skip {
+  color: var(--dim);
+  font-size: 14px;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+/* The still Boo stands in for the actor when the act backdrop is off. */
+.hero-still {
+  position: absolute;
+  right: max(24px, calc((100vw - var(--wrap)) / 2 + 80px));
+  top: 50%;
+  transform: translateY(-46%);
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+}
+html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act--static) .hero-still {
+  display: none;
+}
+.bubble {
+  display: inline-block;
+  padding: 9px 16px;
+  border-radius: 18px;
+  font-size: 14px;
+  white-space: nowrap;
+  position: relative;
+}
+.bubble--boo {
+  background: rgba(34, 211, 238, 0.14);
+  color: var(--cyan);
+  border-bottom-left-radius: 5px;
+}
+@media (max-width: 860px) {
+  .hero {
+    align-items: end;
+    padding-top: calc(var(--nav-h) + 40vh);
+  }
+  .hero-inner {
+    margin-inline: 16px;
+    max-width: none;
+    gap: 14px;
+  }
+  .hero-title {
+    font-size: clamp(40px, 11vw, 48px);
+  }
+  .hero-lead {
+    font-size: 17px;
+  }
+  .hero-actions .btn--primary {
+    width: 100%;
+  }
+  .hero-actions .btn:not(.btn--primary) {
+    border: 0;
+    min-height: 40px;
+    padding-inline: 0;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .hero-still {
+    right: auto;
+    left: 50%;
+    top: calc(var(--nav-h) + 24px);
+    transform: translateX(-50%);
+  }
+}
+
+/* ── Scenes ── */
+.open-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+}
+/* The open chapter's buttons: in the copy panel on wide screens; on phones the sheet
+   keeps only the copy and the layer legend, and the buttons follow the chapter. */
+.open-after {
+  display: grid;
+  gap: 22px;
+  justify-items: start;
+  padding-block: 8px 40px;
+  background: var(--room-open);
+}
+@media (max-width: 860px) {
+  .open-sheet-only,
+  .scene-static-extra:has(> .open-sheet-only:only-child) {
+    display: none;
+  }
+}
+@media (min-width: 861px) {
+  .open-after {
+    display: none;
+  }
+}
+/* Phones only (the wide picture names its slabs itself): the layer legend sits in the sheet
+   under the copy, two or three names per row, so the sheet stays about 330px tall and the
+   whole stack of slabs remains in view above it. */
+.open-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 12px;
+}
+.open-legend li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.open-legend li span {
+  width: 14px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--c);
+  flex: none;
+}
+
+/* ── Reveal ── */
+.reveal[data-reveal="hidden"] {
+  opacity: 0;
+  transform: translateY(28px);
+}
+.reveal[data-reveal="shown"] {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 0.9s var(--ease),
+    transform 0.9s var(--ease);
+}

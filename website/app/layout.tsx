@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { JetBrains_Mono, Inter } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
+import "./site.css";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -15,25 +16,25 @@ const jetbrains = JetBrains_Mono({
 
 const siteConfig = {
   name: "Ghostly",
-  title: "Ghostly — Private chat and sharing, peer to peer",
+  title: "Ghostly — Find each other. Talk peer to peer.",
   description:
-    "Private conversations, files and sats through supported peer-to-peer connections. Explore the Ghostly app, its open contracts and the possibilities ahead. Free and open source.",
+    "Meet the people you choose through a private invitation, then chat, send files and sats, peer to peer. No account to create. Free and open source, built on small open contracts anyone can implement.",
   url: "https://ghostly.tools",
   ogImage: "https://ghostly.tools/og-image.png",
   keywords: [
     "encrypted chat",
-    "ephemeral messaging",
+    "peer-to-peer",
     "DHT",
-    "decentralized",
-    "privacy",
-    "end-to-end encryption",
-    "serverless chat",
     "pkarr",
     "mainline DHT",
-    "secure messaging",
+    "WebRTC",
+    "Iroh",
+    "HyperDHT",
+    "Cashu wallet",
     "localhost sharing",
     "peer-to-peer file transfer",
-    "Cashu wallet",
+    "open protocol",
+    "WISP",
   ],
 };
 
@@ -74,6 +75,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     locale: "en_US",
+    alternateLocale: ["pt_BR"],
     url: siteConfig.url,
     siteName: siteConfig.name,
     title: siteConfig.title,
@@ -83,7 +85,7 @@ export const metadata: Metadata = {
         url: siteConfig.ogImage,
         width: 1200,
         height: 630,
-        alt: "Ghostly — private chat, calls, files, sats and local app sharing",
+        alt: "Ghostly — two friendly ghosts, Boo and Casper, talking peer to peer",
         type: "image/png",
       },
     ],
@@ -101,6 +103,7 @@ export const metadata: Metadata = {
   category: "technology",
 };
 
+// Only what the public release (see lib/release.ts) does today.
 const jsonLd = {
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
@@ -108,7 +111,7 @@ const jsonLd = {
   description: siteConfig.description,
   url: siteConfig.url,
   applicationCategory: "CommunicationApplication",
-  operatingSystem: "macOS, Windows, Linux, Web, Android (Web), iOS (Web)",
+  operatingSystem: "macOS, Windows, Linux, Web",
   offers: {
     "@type": "Offer",
     price: "0",
@@ -120,14 +123,12 @@ const jsonLd = {
     url: "https://miguelmedeiros.dev",
   },
   featureList: [
-    "End-to-end encryption",
-    "Voice and video in supported legacy chats",
-    "Screen sharing in compatible legacy chats on supported computers",
-    "Peer-to-peer file transfers up to 100 MiB",
-    "Cashu ecash wallet with Lightning payments",
-    "Local web app sharing through compatible legacy desktop and extension chats",
-    "Decentralized DHT network",
+    "Private one-to-one chat started from an invitation",
     "No account needed",
+    "Peer-to-peer file transfers up to 100 MiB",
+    "Voice, video and screen sharing over WebRTC",
+    "Cashu ecash wallet with Lightning payments through the mint",
+    "Sharing a local web app from the desktop app or browser extension",
     "Command-line text messaging for scripts and bots",
   ],
 };
@@ -138,8 +139,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark scroll-smooth" data-scroll-behavior="smooth">
+    <html lang="en" className="dark" data-scroll-behavior="smooth" suppressHydrationWarning>
       <head>
+        {/* Scenes only hold the screen when scripts run; without them every step reads in order. */}
+        <Script id="js-flag" strategy="beforeInteractive">
+          {"var d=document.documentElement;d.classList.add('js');try{var q=function(m,f){var l=matchMedia(m);f(l.matches);l.addEventListener('change',function(e){f(e.matches)})};q('(prefers-reduced-motion: reduce)',function(v){d.classList.toggle('calm',v)});q('(max-width: 860px)',function(v){if(v)d.dataset.orient='portrait';else delete d.dataset.orient});q('(pointer: coarse)',function(v){if(v)d.dataset.touch='';else delete d.dataset.touch})}catch(e){}"}
+        </Script>
         <Script
           src="https://www.googletagmanager.com/gtag/js?id=G-KXK4ESQ5DZ"
           strategy="afterInteractive"
