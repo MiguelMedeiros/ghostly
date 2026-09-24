@@ -72,13 +72,13 @@ test("naming a chat: Escape cancels the edit, leaving the field saves it", { tag
   await expect(alice.page.getByText("Invite your contact", { exact: true })).toBeVisible();
   const name = alice.page.getByTitle("Click to set a name");
   const field = alice.page.getByPlaceholder("Set a name...");
-  await expect(name).toHaveText(/Anonymous/);
+  await expect(name).toHaveText(/^Contact · \S{6}$/);
 
   await name.click();
   await field.fill("Not this one");
   await field.press("Escape");
   await expect(field).toHaveCount(0);
-  await expect(name).toHaveText(/Anonymous/);
+  await expect(name).toHaveText(/^Contact · \S{6}$/);
   await expect(rows(alice.page)).not.toContainText("Not this one");
 
   await name.click();

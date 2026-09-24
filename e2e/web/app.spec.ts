@@ -22,6 +22,8 @@ const storedChats = (page: Page) =>
  * refreshes it on a timer, so storage and list can disagree for a moment.
  */
 const chatRows = (page: Page) => page.getByTitle("Delete chat");
+/** A contact with no name yet, as the list and the header call it. */
+const UNNAMED = /^Contact · \S{6}$/;
 
 /**
  * The list itself has settled on `count` chats. Clicking a row before that can hit the
@@ -108,11 +110,11 @@ test("chats can be named and found", { tag: ["@feature:chats.list.rename", "@fea
   const search = page.getByPlaceholder("Search chats...");
   await search.fill("haunted");
   await expect(page.getByText("Haunted house")).toBeVisible();
-  await expect(page.getByText("Anonymous")).toHaveCount(0);
+  await expect(page.getByText(UNNAMED)).toHaveCount(0);
   await search.fill("nothing like this");
   await expect(page.getByText("No results found")).toBeVisible();
   await search.fill("");
-  await expect(page.getByText("Anonymous")).toBeVisible();
+  await expect(page.getByText(UNNAMED)).toBeVisible();
 });
 
 test("tech info shows the keys of the chat", { tag: ["@feature:app.tech-info"] }, async ({ peer }) => {
@@ -136,7 +138,7 @@ test("one chat can be deleted, from the chat or from the list", { tag: ["@featur
 
   await createChat(page);
   await expectChatRows(page, 1);
-  const row = page.getByText("Anonymous").first();
+  const row = page.getByText(UNNAMED).first();
   await row.hover();
   await chatRows(page).click();
   await page.getByRole("dialog").getByRole("button", { name: "Delete chat" }).click();
