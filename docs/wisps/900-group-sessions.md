@@ -64,7 +64,7 @@ The admin invites, removes and transfers its role; any member leaves. Local bloc
 
 ## Compatibility and open decisions
 
-Legacy and current 1:1 clients keep working unchanged; an app without groups is shown as needing an update to be invited. Open before Proposed: multiple admins; member key updates; group files, media and payments as capabilities of their own; native transports on edges; a distribution profile for larger groups; a negotiated store for members never online together; interoperability with a second implementation.
+Legacy and current 1:1 clients keep working unchanged; an app without groups is shown as needing an update to be invited. Open before Proposed: multiple admins; member key updates; group files and media as capabilities of their own (payments between members are in the first profile, [9xx § Payments](9xx-group-mesh.md#payments)); native transports on edges; a distribution profile for larger groups; a negotiated store for members never online together; interoperability with a second implementation.
 
 ## Conformance
 

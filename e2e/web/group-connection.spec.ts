@@ -63,7 +63,8 @@ test("the group's connection: every member's edge, down when one goes away, gone
   await expect(trigger(alice)).toHaveAttribute("aria-label", "Group connection: 1 of 2 reachable");
   await popover(alice);
   await expect(row(alice, "Carol")).not.toHaveAttribute("data-state", "open");
-  await expect(row(alice, "Carol").getByTestId("group-connection-member-status")).toHaveText(/^(Not reachable · last seen (just now|\d+ min ago)|Connecting…)$/);
+  // Away, or, when the relay pushes back while her app is gone, a connection issue that says why: never "Connected".
+  await expect(row(alice, "Carol").getByTestId("group-connection-member-status")).toHaveText(/^((Not reachable|Connection issue) · last seen (just now|\d+ min ago)|Connecting…)$/);
   await expect(row(alice, "Bob").getByTestId("group-connection-member-status")).toHaveText("Connected · WebRTC");
   await alice.page.keyboard.press("Escape");
 

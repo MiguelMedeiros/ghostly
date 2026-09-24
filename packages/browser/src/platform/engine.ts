@@ -54,8 +54,9 @@ class EngineClient {
     return () => this.callListeners.delete(listener);
   }
 
+  /** A chat by its peer's key, or the edge of a group toward a member (payments with that member use it). */
   linkByPeer(peerPubKeyZ32: string): LinkView | undefined {
-    return this.state?.links.find((l) => l.peerPubKeyZ32 === peerPubKeyZ32);
+    return this.state?.links.find((l) => l.peerPubKeyZ32 === peerPubKeyZ32) ?? this.state?.edges?.find((l) => l.peerPubKeyZ32 === peerPubKeyZ32);
   }
 
   async call<M extends EngineMethod>(method: M, ...params: Parameters<EngineApi[M]>): Promise<Result<M>> {

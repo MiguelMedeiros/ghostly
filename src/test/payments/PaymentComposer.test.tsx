@@ -59,7 +59,7 @@ describe("the amount", () => {
     expect(amount()).toHaveValue("1.5");
     await user.type(screen.getByRole("textbox", { name: "What for? (optional)" }), "coffee");
     await user.click(request());
-    expect(onRequest).toHaveBeenCalledWith(1_500_000, "coffee", "usdt");
+    expect(onRequest).toHaveBeenCalledWith(1_500_000, "coffee", "usdt", "usdt");
   });
 
   it("refuses more USDT decimals than the token has, without asking for anything", async () => {
@@ -200,7 +200,8 @@ describe("request and send", () => {
     expect(send()).toHaveAttribute("title", "To pay on this card, tap Pay on your contact's request");
     await user.click(request());
     // A Lightning request is a Cashu request: it carries the invoice.
-    expect(onRequest).toHaveBeenCalledWith(50, "", "cashu");
+    // The card rides along: a chat ignores it, a group asks for that rail only.
+    expect(onRequest).toHaveBeenCalledWith(50, "", "cashu", "lightning");
     expect(onClose).toHaveBeenCalled();
   });
 

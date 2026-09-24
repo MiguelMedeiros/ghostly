@@ -1,5 +1,5 @@
 import { getSessionDraft, setSessionDraft } from "../lib/storage";
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, type ReactNode } from "react";
 import { EmojiPicker } from "./EmojiPicker";
 import { GifPicker } from "./GifPicker";
 import { PaymentComposer } from "./PaymentComposer";
@@ -24,6 +24,8 @@ interface MessageInputProps {
     onSend: (amount: number, memo: string) => Promise<string | null>;
     onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin") => Promise<string | null>;
   };
+  /** A composer of its own for ⚡ instead of the chat's (a group chooses whom to pay first). */
+  paymentComposer?: (close: () => void) => ReactNode;
 }
 
 const DEFAULT_MAX = 500;
@@ -38,6 +40,7 @@ export function MessageInput({
   maxBytes,
   onSendFile,
   payments,
+  paymentComposer,
   fileUnavailable,
   paymentsUnavailable,
 }: MessageInputProps) {
@@ -242,7 +245,7 @@ export function MessageInput({
             </svg>
           </button>
 
-          {payments && (
+          {(payments || paymentComposer) && (
             <button
               onClick={() => setShowPayment((v) => !v)}
               disabled={disabled || !!paymentsUnavailable}
@@ -336,7 +339,8 @@ export function MessageInput({
               onClose={() => { setShowEmoji(false); textareaRef.current?.focus(); }}
             />
         )}
-        {showPayment && payments && !paymentsUnavailable && !disabled && (
+        {showPayment && paymentComposer && !paymentsUnavailable && !disabled && paymentComposer(() => setShowPayment(false))}
+        {showPayment && !paymentComposer && payments && !paymentsUnavailable && !disabled && (
           <PaymentComposer
             reviewContext={payments.reviewContext}
             balance={payments.balance}

@@ -13,11 +13,20 @@ import "./payment-composer.css";
 interface PaymentComposerProps {
   balance: number;
   onSend: (amount: number, memo: string) => Promise<string | null>;
-  onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin") => Promise<string | null>;
+  /** `rail`: the card it was made on, for a request that must carry that way of paying only (groups). */
+  onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin", rail?: ChatRail) => Promise<string | null>;
   onClose: () => void;
   reviewContext?:{wallet:WalletPlatform;peer:string;linkId:string};
   /** Who the chat is with, as the chat shows them. */
   contact?: string;
+  /** Only these cards can be used here (a request to a whole group); the others say why not. */
+  rails?: readonly ChatRail[];
+  /** Why Send cannot be used here, when it cannot (a request to a whole group has nobody to send to). */
+  sendUnavailable?: string;
+  /** Goes back to whatever came before the cards (choosing whom to pay, in a group). */
+  onBack?: () => void;
+  /** What Send and Request do on a card here, when it is not what they do in a chat. */
+  describe?: (rail: ChatRail) => string;
 }
 
 const RAIL_KEY = "ghostly-payment-rail";
@@ -33,7 +42,7 @@ const reducedMotion = () => document.documentElement.dataset.reduceMotion === "t
  * written, then Request or Send. The wallets are already set up, so there is nothing else to choose; every send
  * still stops at a review.
  */
-export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewContext, contact }: PaymentComposerProps) {
+export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewContext, contact, rails, sendUnavailable, onBack, describe }: PaymentComposerProps) {
   const wallet = reviewContext?.wallet;
   const state = wallet?.getState();
   const peer = useServicesPlatform()?.getPeer(reviewContext?.peer ?? "");
@@ -41,13 +50,14 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   /** Why a card cannot be used in this chat: not set up, off here, or off for the contact. */
   const unavailable = (card: Pick<WalletCard, "name" | "ready" | "balance" | "status"> & { id: ChatRail }) => {
     // A card with nothing to connect to yet (no mint, no source) says so; one on its way says where it is ("Ark is connecting…").
+    if (rails && !rails.includes(card.id)) return `${card.name} cannot be used here`;
     if (!card.ready) return card.status === "Set up" || card.status === "Shared balance" ? `${card.name} is not set up yet` : `${card.name} is ${card.balance.toLowerCase()}`;
     if (peer?.paymentMethods && !peer.paymentMethods[card.id]) return `${card.name} is off in this chat`;
     if (peer?.dataLink === "open" && peer.capabilities?.methods && !peer.capabilities.methods[card.id]) return `Your contact does not accept ${card.name} in this chat`;
     return undefined;
   };
   const [rail, setRail] = useState<ChatRail>(() => {
-    const allowed = (id: ChatRail) => !peer?.paymentMethods || peer.paymentMethods[id];
+    const allowed = (id: ChatRail) => (!rails || rails.includes(id)) && (!peer?.paymentMethods || peer.paymentMethods[id]);
     try { const saved = localStorage.getItem(RAIL_KEY); if ((RAILS as readonly string[]).includes(saved ?? "") && allowed(saved as ChatRail)) return saved as ChatRail; } catch { /* storage unavailable */ }
     return RAILS.find(allowed) ?? "cashu";
   });
@@ -69,7 +79,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   const value = Number(amount);
   // Ecash goes straight to the contact; Ark, Bark, on-chain and USDT ask the contact's app for an address first. Lightning
   // pays a request the contact sends.
-  const canSend = rail !== "lightning";
+  const canSend = rail !== "lightning" && !sendUnavailable;
   const [asking, setAsking] = useState<string | null>(null);
   const cards = state && wallet ? walletCards(state, wallet.testMintUrls) : [];
   const card = cards.find((c) => c.id === rail);
@@ -158,7 +168,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   const request = async () => {
     setError(""); setBusy("request");
     try {
-      const err = await onRequest(method === "usdt" ? parsePaymentAmount(amount, decimals) : value, memo, method);
+      const err = await onRequest(method === "usdt" ? parsePaymentAmount(amount, decimals) : value, memo, method, rail);
       if (err) setError(err); else onClose();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not prepare request"); }
     finally { setBusy(null); }
@@ -168,7 +178,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   const spendable = method === "cashu" ? balance : method === "arkade" ? state?.ark?.balance : method === "bark" ? state?.bark?.balance : method === "bitcoin" ? state?.bitcoin?.balance : usdt ? Number(formatPaymentAmount(usdt.balance, decimals)) : undefined;
   const tooMuch = spendable !== undefined && value > spendable;
   /** What Send and Request do on this card, with this contact. */
-  const how = (id: ChatRail) => id === "cashu"
+  const how = (id: ChatRail) => describe ? describe(id) : id === "cashu"
     ? `Send gives ${who} ecash straight away; a request also carries a Lightning invoice.`
     : id === "lightning" ? `Request with a Lightning invoice. To pay ${who} over Lightning, tap Pay on their request.`
     : `Send asks ${who}'s app for a ${id === "arkade" ? "fresh Ark" : id === "bark" ? "fresh Bark" : id === "bitcoin" ? "fresh Bitcoin" : "USDT"} address, then shows the payment to approve.${id === "bitcoin" ? " Paid once it confirms on-chain." : ""}`;
@@ -203,7 +213,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
               {busy === "request" ? "Requesting…" : "Request"}
             </button>
             <button data-testid="payment-send" disabled={!canSend || !!blocked || !value || busy !== null || !!asking || tooMuch} onClick={() => void send()}
-              title={canSend ? undefined : "To pay on this card, tap Pay on your contact's request"} className="payment-back-primary">
+              title={canSend ? undefined : sendUnavailable ?? "To pay on this card, tap Pay on your contact's request"} className="payment-back-primary">
               {asking ? "Asking for an address…" : busy === "send" ? "Preparing…" : "Send"}
             </button>
           </div>
@@ -225,7 +235,10 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
     >
       {side === "cards" ? <>
         <div className="payment-composer-head">
-          <span>Pay or request</span>
+          {onBack && <button type="button" className="payment-back-turn" data-testid="payment-recipient-change" aria-label="Choose someone else" title="Choose someone else" onClick={onBack}>
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          </button>}
+          <span>{sendUnavailable ? "Request" : "Pay or request"}</span>
           <span className="payment-composer-who">with {who}</span>
         </div>
         <CardDeck compact kind="radios" label="Pay with" name="payment-deck" cards={shown} selected={rail} onSelect={(id) => { setRail(id); setError(""); }} onChoose={use}
