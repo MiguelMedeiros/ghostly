@@ -8,7 +8,7 @@ const GHOST = <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C7.582 
 const CHECK = <svg viewBox="0 0 16 16" fill="none"><path d="m3.5 8.5 3 3 6-7" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 
 function StatusIcon({ status }: { status: IdCardContent["status"] }) {
-  const d = status === "verified" ? "m3 8 3 3 7-7" : status === "expiring" ? "M8 4v4.5l3 2" : status === "revoking" ? "M4 8h8" : "M8 4v5M8 11.5v.5";
+  const d = status === "verified" ? "m3 8 3 3 7-7" : status === "expiring" ? "M8 4v4.5l3 2" : status === "revoking" || status === "withdrawn" ? "M4 8h8" : status === "revoked" ? "M4 12 12 4" : "M8 4v5M8 11.5v.5";
   return <svg aria-hidden="true" width="10" height="10" viewBox="0 0 16 16" fill="none"><path d={d} stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
 

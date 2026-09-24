@@ -30,7 +30,13 @@
 .id-card-issuer{font-size:clamp(8px,calc(var(--card-w) * .026),10px);font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:rgba(255,255,255,.85);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .id-card-status{display:inline-flex;align-items:center;gap:4px;flex-shrink:0;border-radius:999px;padding:1px 7px;font-size:clamp(9px,calc(var(--card-w) * .028),11px);font-weight:600;white-space:nowrap;background:rgba(0,0,0,.35);color:#7ee2b8;transition:opacity .4s}
 .id-card-face[data-status=expiring] .id-card-status{color:#fbbf24}
-.id-card-face[data-status=expired] .id-card-status,.id-card-face[data-status=failed] .id-card-status{color:#fca5a5}
+.id-card-face[data-status=expired] .id-card-status{color:#fca5a5}
+/* A check that failed is amber, as everywhere a contact's identity shows (contact-marks.css). */
+.id-card-face[data-status=failed] .id-card-status{color:#fbbf24}
+/* Revoked by its owner: greyed, the identity struck through. No longer shared: greyed. */
+.id-card-face[data-status=revoked],.id-card-face[data-status=withdrawn]{filter:grayscale(.85)}
+.id-card-face[data-status=revoked] .id-card-status,.id-card-face[data-status=withdrawn] .id-card-status{color:rgba(255,255,255,.7)}
+.id-card-face[data-status=revoked] .id-card-subject{text-decoration:line-through;text-decoration-thickness:1.5px}
 .id-card-face[data-status=revoking] .id-card-status{color:rgba(255,255,255,.75)}
 .id-card-mark-end{display:none}
 

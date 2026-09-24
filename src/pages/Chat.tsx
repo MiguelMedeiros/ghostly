@@ -7,7 +7,7 @@ import { createPortal } from "react-dom";
 import { ChatPaymentsDialog } from "../components/ChatPaymentsDialog";
 import { ChatHoldDialog } from "../components/ChatHoldDialog";
 import { ChatIdentitiesDialog } from "../components/identities/ChatIdentitiesDialog";
-import { IdentityBadges } from "../components/identities/IdentityBadges";
+import { IdentityStack } from "../components/identities/ContactMarks";
 import { ChatServicesDialog } from "../components/ChatServicesDialog";
 import { PinIcon } from "../components/PinIcon";
 import { useI18n } from "../contexts/I18nContext";
@@ -352,7 +352,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const showKeySubtitle = true;
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-chat-bg">
+    <div className="chat-column flex-1 flex flex-col h-full bg-chat-bg">
       {/* Chat Header */}
       <div className="h-14 header-safe flex items-center justify-between px-4 max-md:ps-1 max-md:pe-1 bg-panel-header border-b border-border shrink-0">
         <div className="flex items-center gap-3 max-md:gap-1.5 min-w-0">
@@ -420,7 +420,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                   </svg>
                 )}
               </p>
-              {paired && <IdentityBadges peerKey={params.peerPubKeyB64} onOpen={() => setShowIdentities(true)} />}
+              {paired && <IdentityStack peerKey={params.peerPubKeyB64} open={showIdentities} onOpen={() => setShowIdentities(true)} />}
               </div>
             )}
             <div ref={connectionRef} className="relative">
