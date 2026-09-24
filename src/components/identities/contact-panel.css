@@ -1,0 +1,48 @@
+/* A chat's identities beside the chat (ContactIdentitiesPanel.tsx). The chat page is the `chat-pane` container: from
+   900px wide the panel docks at its end and the chat column narrows; narrower, it lies over the chat with a backdrop;
+   on a phone it is a sheet from the bottom, the screen's whole width. */
+.chat-pane{container:chat-pane / inline-size;position:relative;display:flex;min-width:0}
+.contact-panel{position:relative;z-index:30;display:flex;flex-direction:column;flex:none;width:360px;height:100%;min-height:0;
+ background:var(--theme-panel-header);border-inline-start:1px solid var(--theme-border);color:var(--theme-text-primary)}
+.contact-panel-backdrop{display:none}
+@container chat-pane (max-width: 899px){
+ .contact-panel{position:absolute;inset-block:0;inset-inline-end:0;z-index:45;width:min(380px,100%);box-shadow:-24px 0 48px -24px rgba(0,0,0,.6)}
+ .contact-panel-backdrop{display:block;position:absolute;inset:0;z-index:44;background:rgba(0,0,0,.45)}
+}
+@media (max-width: 767px){
+ .contact-panel{position:fixed;inset:auto 0 0 0;z-index:60;width:100%;height:auto;max-height:90dvh;border-inline-start:0;border-top:1px solid var(--theme-border);border-radius:18px 18px 0 0;
+  padding-bottom:env(safe-area-inset-bottom);box-shadow:0 -24px 48px -24px rgba(0,0,0,.6)}
+ .contact-panel-backdrop{position:fixed;z-index:59}
+}
+
+.contact-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:14px 12px 10px 16px;border-bottom:1px solid var(--theme-border);flex:none}
+.contact-panel-title{margin:0;font-size:16px;font-weight:600;line-height:1.3;overflow-wrap:anywhere}
+.contact-panel-lead{margin:2px 0 0;font-size:12px;line-height:1.4;color:var(--theme-text-muted)}
+.contact-panel-close{display:grid;place-items:center;flex:none;width:40px;height:40px;border:0;border-radius:10px;background:none;color:var(--theme-text-muted);cursor:pointer}
+.contact-panel-close:hover{background:var(--theme-surface-hover);color:var(--theme-text-primary)}
+.contact-panel-close:focus-visible,.contact-panel-link:focus-visible{outline:2px solid var(--theme-accent);outline-offset:1px}
+.contact-panel-body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:12px 16px 20px;display:grid;align-content:start;gap:22px}
+.contact-panel-section{display:grid;gap:10px;min-width:0}
+.contact-panel-heading{margin:0;font-size:12px;font-weight:600;letter-spacing:.02em;color:var(--theme-text-muted)}
+.contact-panel-note,.contact-panel-hint{margin:0;font-size:12px;line-height:1.4;color:var(--theme-text-muted)}
+.contact-panel-hint{text-align:center}
+.contact-panel-link{min-height:36px;padding:0 4px;border:0;border-radius:6px;background:none;font-size:12px;color:var(--theme-accent);cursor:pointer}
+.contact-panel-link:hover{text-decoration:underline}
+
+/* The contact's cards and a card turned over: the back is an ID card's back (composer-identities.css), in its ink. */
+.contact-cards{display:grid;gap:8px;min-width:0}
+.contact-card-facts{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;margin:0;font-size:12px;line-height:1.4}
+.contact-card-facts dt{color:rgba(255,255,255,.55)}
+.contact-card-facts dd{margin:0;color:rgba(255,255,255,.88);overflow-wrap:anywhere}
+.contact-card-back[data-status=failed] [data-testid=chat-identity-received-status]{color:#fbbf24}
+.contact-card-back[data-status=revoked] [data-testid=chat-identity-received-status],.contact-card-back[data-status=expired] [data-testid=chat-identity-received-status]{color:#fca5a5}
+.contact-card-action{min-height:36px;padding:0 14px;border-radius:10px;border:1px solid rgba(var(--card-rgb,36,211,194),.5);background:rgba(var(--card-rgb,36,211,194),.14);color:#fff;font-size:13px;font-weight:600;cursor:pointer}
+.contact-card-action:hover{background:rgba(var(--card-rgb,36,211,194),.26)}
+.contact-card-action:focus-visible{outline:2px solid #fff;outline-offset:2px}
+.contact-card-action[aria-disabled=true]{opacity:.6;cursor:progress}
+/* The Nostr key's profile, follows and notes, on the Nostr card's back, on a lighter ground so its text reads. */
+.contact-card-nostr{margin:2px -6px 0;padding:10px;border-radius:12px;background:rgba(0,0,0,.28);border:1px solid rgba(255,255,255,.08)}
+.contact-card-nostr .text-text-muted{color:rgba(255,255,255,.62)}
+.contact-card-nostr .text-text-primary{color:#fff}
+.contact-card-nostr button{min-height:34px;padding:0 12px;border-radius:10px;border:1px solid rgba(var(--card-rgb,36,211,194),.45);background:rgba(var(--card-rgb,36,211,194),.12);color:#fff;font-size:12px;font-weight:600}
+.contact-card-nostr button:hover{background:rgba(var(--card-rgb,36,211,194),.24)}

@@ -11,9 +11,10 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 /**
  * What a contact's proven Nostr key lets the person see, each part on request: the profile (kind 0),
  * whom they follow (kind 3) with direction hints against the person's own list, and their recent notes
- * (kind 1), moderated by the person's own mute list. Every part shows where it came from and when.
+ * (kind 1), moderated by the person's own mute list. Every part shows where it came from and when. `compact` (on the
+ * Nostr ID card's back) says what loading reveals in one short line.
  */
-export function NostrContactCard({ linkId, view, name }: { linkId: string; view: NostrContactView; name: string }) {
+export function NostrContactCard({ linkId, view, name, compact = false }: { linkId: string; view: NostrContactView; name: string; compact?: boolean }) {
   const state = useEngineState();
   const settings = state?.nostr.settings;
   const own = state?.nostr.own ?? [];
@@ -30,7 +31,9 @@ export function NostrContactCard({ linkId, view, name }: { linkId: string; view:
 
   return (
     <div data-testid="nostr-contact" data-subject={view.subject} className="space-y-3 text-xs text-text-muted">
-      <p className="text-[11px]">Nostr, from this key. Loading asks the relays in your profile ({relays.map(r => r.replace(/^wss?:\/\//, "")).join(", ")}), which learn your IP address and that you looked this key up. Everything below is what {name} published about themselves.</p>
+      {compact
+        ? <p className="text-[11px]" data-testid="nostr-contact-note">Loading asks your relays ({relays.map(r => r.replace(/^wss?:\/\//, "")).join(", ")}), which learn your IP address and this key. It is what {name} published about themselves.</p>
+        : <p className="text-[11px]">Nostr, from this key. Loading asks the relays in your profile ({relays.map(r => r.replace(/^wss?:\/\//, "")).join(", ")}), which learn your IP address and that you looked this key up. Everything below is what {name} published about themselves.</p>}
 
       {/* Profile */}
       <div className="space-y-1.5">
