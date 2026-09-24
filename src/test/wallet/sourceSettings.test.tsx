@@ -7,6 +7,8 @@ import type { ProviderDescriptor, ProviderNetwork, ProviderSettings } from "@gho
 import { SourcePicker } from "../../components/wallet/providers/SourcePicker";
 import { renderApp } from "../render";
 
+// covers: wallet.lightning.lnd.connect, wallet.onchain.bitcoind, wallet.lightning.sources
+
 /**
  * What the forms submit is one flat map of values; the engine (ProviderSources.set) splits it by the
  * provider's field kinds into `config`, shown back, and `secrets`, sealed and never shown. These tests

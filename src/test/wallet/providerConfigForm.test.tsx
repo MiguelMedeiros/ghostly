@@ -5,6 +5,8 @@ import { ProviderConfigForm } from "../../components/wallet/providers/SourcePick
 import { renderApp } from "../render";
 import { descriptor } from "./descriptors";
 
+// covers: wallet.lightning.sources, wallet.onchain.sources
+
 /** The generic form a provider gets from its declared fields (every provider without its own form). */
 describe("ProviderConfigForm", () => {
   const form = (d: ProviderDescriptorView, mode: "mainnet" | "testnet" = "mainnet", busy = false) => {

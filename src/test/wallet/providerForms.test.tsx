@@ -9,6 +9,8 @@ import type { ProviderFormProps } from "../../components/wallet/providers/forms"
 import { renderApp } from "../render";
 import { descriptor } from "./descriptors";
 
+// covers: wallet.onchain.bdk.create, wallet.lightning.breez.connect, wallet.lightning.webln.connect
+
 /** A valid BIP39 phrase (the standard test vector), to restore from. */
 const RESTORE = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 

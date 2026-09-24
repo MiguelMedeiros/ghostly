@@ -5,6 +5,8 @@ import { SourcePicker } from "../../components/wallet/providers/SourcePicker";
 import { renderApp } from "../render";
 import { descriptor, offered, sourceView } from "./descriptors";
 
+// covers: wallet.lightning.sources, wallet.onchain.sources
+
 type Kind = "lightning" | "onchain";
 
 function picker(kind: Kind, view: SourceView, { onSet = vi.fn(async () => {}), onClear = vi.fn(async () => {}) }: { onSet?: (id: string, values: Record<string, string>) => Promise<void>; onClear?: () => Promise<void> } = {}) {

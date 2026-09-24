@@ -7,6 +7,8 @@ import { walletView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { offered, sourceView } from "./descriptors";
 
+// covers: wallet.lightning.sources, wallet.onchain.sources
+
 /** The wallet cards hand a source's form to the engine through the platform, as the web app does. */
 describe("choosing a source from the wallet cards", () => {
   const wallet = servicesPlatform!.wallet;
