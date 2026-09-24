@@ -114,7 +114,7 @@ export function ChatRow(p: ChatRowProps) {
     </button>
   );
   return (
-    <div data-testid="chat-row" data-unread={p.unread || undefined} onClick={p.onOpen} title={`${p.label} · ${p.keyLabel}`} className={rowClass(p.active, p.density)}>
+    <div data-testid="chat-row" onClick={p.onOpen} title={`${p.label} · ${p.keyLabel}`} className={rowClass(p.active, p.density)}>
       <div className={`relative shrink-0 rounded-full flex items-center justify-center ${p.active ? "bg-surface-alt" : "bg-surface-hover"}`} style={{ width: size, height: size }}>
         <PeerAvatar peerPubKey={p.peerPubKey} label={p.label} named={p.named} testId="chat-row-avatar" />
         {p.syncing && (
@@ -162,7 +162,7 @@ export function ChatRow(p: ChatRowProps) {
         </>}
         timeCover={
           // Pointer devices only: a phone opens the chat on a tap and pins from the chat's Options.
-          <div data-testid="chat-row-actions" className={`max-md:hidden absolute -top-1 end-0 flex items-center gap-0.5 rounded-md ps-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-within:opacity-100 ${p.active ? "bg-surface-hover" : "bg-surface-alt"}`}>
+          <div data-testid="chat-row-actions" className={`max-md:hidden absolute -top-1 end-0 flex items-center gap-0.5 rounded-md ps-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 ${p.active ? "bg-surface-hover" : "bg-surface-alt"}`}>
             {!p.pinned && pin}
             <button type="button" onClick={p.onDelete} title={p.deleteLabel}
               className="flex h-7 w-7 items-center justify-center rounded-md text-text-muted hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent cursor-pointer">
