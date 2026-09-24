@@ -45,8 +45,11 @@ npm run lint:fix
 # Type checking
 npm run typecheck
 
-# Protocol tests (packages/core)
+# Unit tests: packages/core, packages/browser, packages/sdk, then the UI's component tests
 npm test
+
+# Only the component tests of the UI (src/) and @ghostly/react (see src/test/README.md)
+npm run test:ui
 
 # Browser extension → extension/dist (load it unpacked in chrome://extensions)
 npm run build:extension
