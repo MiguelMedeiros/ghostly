@@ -1,7 +1,7 @@
 name: E2E (full)
 
 # Every end-to-end suite, the gated ones included, against e2e/infra: one Docker Compose project with a regtest
-# chain, Ark and Bark servers, LND and Core Lightning nodes, Alby Hubs, Anvil, MinIO and the Cashu test mint —
+# chain, Ark and Bark servers, LND and Core Lightning nodes, Alby Hubs, Anvil, an S3 server and the Cashu test mint —
 # worthless coins and throwaway keys, all on this runner, so no secrets. `npm run e2e:full` brings it up, funds
 # it, runs the gated vitest contracts and the web and extension suites, and takes it down (see e2e/README.md).
 # Breez's hosted regtest is not part of it: its faucet needs a reCAPTCHA, so those suites are skipped here.

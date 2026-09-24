@@ -255,11 +255,12 @@ services:
     ports: ["127.0.0.1:47070:8545"]
 
   # ── S3 (held messages, profile backups) ─────────────────────────────────────────────────────────────────
-  minio:
-    image: quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
-    container_name: ghostly-e2e-minio
-    command: ["server", "/data"]
-    environment: { MINIO_ROOT_USER: ghostly-e2e, MINIO_ROOT_PASSWORD: ghostly-e2e-worthless }
+  # RustFS, an S3 server in MinIO's mould: MinIO no longer publishes images anyone can pull. The browser calls
+  # it directly, so CORS is open (a throwaway server on 127.0.0.1).
+  s3:
+    image: rustfs/rustfs:1.0.0
+    container_name: ghostly-e2e-s3
+    environment: { RUSTFS_ACCESS_KEY: ghostly-e2e, RUSTFS_SECRET_KEY: ghostly-e2e-worthless, RUSTFS_CORS_ALLOWED_ORIGINS: "*" }
     ports: ["127.0.0.1:47080:9000"]
 
   # ── Cashu: the test mint (fake Lightning backend: its invoices pay themselves), as CI runs it ────────────

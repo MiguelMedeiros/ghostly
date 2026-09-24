@@ -62,10 +62,10 @@ export const VARIABLES = {
   GHOSTLY_USDT_RPC_URL: ["http://127.0.0.1:47070", "Anvil, chain 31337"],
   GHOSTLY_USDT_TOKEN: ["0x5FbDB2315678afecb367f032d93F642f64180aa3", "TestUSDT contract (first deployment of Anvil's first account)"],
 
-  // S3 (held messages, profile backups): MinIO with throwaway keys.
-  GHOSTLY_S3_ENDPOINT: ["http://127.0.0.1:47080", "S3-compatible endpoint (MinIO)"],
-  GHOSTLY_S3_KEY: ["ghostly-e2e", "S3 access key (local MinIO)"],
-  GHOSTLY_S3_SECRET: ["ghostly-e2e-worthless", "S3 secret key (local MinIO)"],
+  // S3 (held messages, profile backups): RustFS with throwaway keys.
+  GHOSTLY_S3_ENDPOINT: ["http://127.0.0.1:47080", "S3-compatible endpoint (RustFS)"],
+  GHOSTLY_S3_KEY: ["ghostly-e2e", "S3 access key (local server)"],
+  GHOSTLY_S3_SECRET: ["ghostly-e2e-worthless", "S3 secret key (local server)"],
 };
 
 const read = (name) => process.env[name] || VARIABLES[name][0];

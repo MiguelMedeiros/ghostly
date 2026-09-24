@@ -25,7 +25,7 @@ Most suites need nothing but the test process (see [No servers](#no-servers)). T
 network — Ark, Bark, BDK, Bitcoin Core, Core Lightning, LND, NWC, WebLN, USDT, S3, the Cashu mint — need services,
 and `e2e/infra/` is all of them in one Docker Compose project: one regtest bitcoind (with a miner wallet) and its
 Esplora, arkd, captaind, two LND nodes for the LND suite, two behind the WebLN wallets, two under Alby Hubs with a
-strfry relay for NWC, two Core Lightning nodes, Anvil with the test USDT contract, MinIO and the Cashu test mint.
+strfry relay for NWC, two Core Lightning nodes, Anvil with the test USDT contract, an S3 server (RustFS) and the Cashu test mint.
 Worthless coins and throwaway keys only. Containers are `ghostly-e2e-*`, host ports `127.0.0.1:47000-47199`.
 
 `e2e:full` starts from nothing and leaves nothing behind: it removes its own project first, brings it up, waits
@@ -61,7 +61,7 @@ endpoint from there, never a literal port. Their names are stable: other suites 
 | 47060 | strfry, the NWC relay | `GHOSTLY_NWC_RELAY_URL` |
 | 47061-47064 | LND REST and Alby Hubs under NWC | `GHOSTLY_NWC_{ALICE,BOB}_{LND,HUB}_URL` |
 | 47070 | Anvil (chain 31337) | `GHOSTLY_USDT_RPC_URL`, `GHOSTLY_USDT_TOKEN` |
-| 47080 | MinIO | `GHOSTLY_S3_ENDPOINT`, `_KEY`, `_SECRET` |
+| 47080 | S3 (RustFS; MinIO no longer publishes pullable images) | `GHOSTLY_S3_ENDPOINT`, `_KEY`, `_SECRET` |
 | 47090 | Cashu test mint (`cashubtc/mintd`, fake Lightning) | `E2E_MINT_URL` |
 | 47100 | the web build under test (`vite preview`) | `E2E_WEB_PORT` |
 | 47110-47119 | Lightning address server, in the test process | `E2E_LNURL_PORT` |
@@ -217,7 +217,7 @@ pairing URIs, notes) from the containers into memory, never printing them.
 ### Held messages on a local S3 server
 
 `profile-backup.spec.ts` and `store-forward.spec.ts` need an S3-compatible server and its keys (`GHOSTLY_S3_*`):
-MinIO in `e2e/infra`.
+RustFS in `e2e/infra` (MinIO no longer publishes images anyone can pull; any S3 server with open CORS does).
 
 ```bash
 npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/store-forward.spec.ts

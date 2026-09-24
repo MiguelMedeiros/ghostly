@@ -66,7 +66,7 @@ const PROBES = {
   "NWC relay": () => tcp(endpoints.nwc.relay.replace(/^ws/, "http")),
   "Alby Hubs": async () => (await http(`${endpoints.nwc.hub.alice}/api/info`)) && http(`${endpoints.nwc.hub.bob}/api/info`),
   Anvil: () => rpc(endpoints.usdt.rpc, "eth_chainId"),
-  MinIO: () => http(`${endpoints.s3.endpoint}/minio/health/live`),
+  S3: () => http(`${endpoints.s3.endpoint}/health`),
   "Cashu mint": () => http(`${process.env.E2E_MINT_URL || VARIABLES.E2E_MINT_URL[0]}/v1/info`),
 };
 
@@ -134,7 +134,16 @@ async function seed() {
     log(`${code === 0 ? "ready" : "FAILED"}: ${name} (${elapsed(since)})`);
     return { name, code, output };
   }));
-  const failed = results.filter((r) => r.code !== 0);
+  // Seeds are idempotent: one that lost a race with the others (a busy host, a block mined under it) goes again,
+  // alone, before the environment is called broken.
+  const failed = [];
+  for (const first of results.filter((r) => r.code !== 0)) {
+    log(`again: ${first.name}`);
+    const since = Date.now();
+    const again = await node(SEEDS[first.name], env);
+    log(`${again.code === 0 ? "ready" : "FAILED"}: ${first.name} (${elapsed(since)})`);
+    if (again.code !== 0) failed.push({ name: first.name, output: `${first.output}\n--- again\n${again.output}` });
+  }
   for (const f of failed) console.error(`--- ${f.name}\n${f.output.trim()}`);
   if (failed.length) throw new Error(`Seeding failed: ${failed.map((f) => f.name).join(", ")}`);
 }

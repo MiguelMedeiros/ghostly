@@ -31,7 +31,7 @@ export async function ready() {
     miner("sendtoaddress", json(bark("onchain", "address")).address, "0.01");
     mine(1);
     bark("board", "900000sat");
-    for (let i = 0; i < 30 && balance().spendable_sat < 200_000; i++) { mine(1); await wait(1000); try { bark("maintain"); } catch { /* next block */ } }
+    for (let i = 0; i < 60 && balance().spendable_sat < 200_000; i++) { mine(1); await wait(1000); try { bark("maintain"); } catch { /* next block */ } }
   }
   if (balance().spendable_sat < 200_000) throw new Error("The funder did not board");
   return balance();
