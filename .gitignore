@@ -19,3 +19,7 @@ dist-e2e
 
 # Generated native HyperDHT runtime
 /src-tauri/native-runtime/
+
+# The SDK example installs @ghostly/sdk from a tarball packed on the spot (scripts/sdk-example.mjs)
+/examples/*/vendor/
+/examples/*/package-lock.json

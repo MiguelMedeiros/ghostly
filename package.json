@@ -8,10 +8,10 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "lint": "eslint src packages extension/src web/src e2e",
-    "lint:fix": "eslint src packages extension/src web/src e2e --fix",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p e2e && npm run typecheck -w @ghostly/core -w @ghostly/browser -w @ghostly/extension -w @ghostly/web",
-    "test": "npm run test -w @ghostly/core -w @ghostly/browser",
+    "lint": "eslint src packages extension/src web/src e2e examples/sdk-adapter/src examples/sdk-adapter/test",
+    "lint:fix": "eslint src packages extension/src web/src e2e examples/sdk-adapter/src examples/sdk-adapter/test --fix",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p e2e && npm run typecheck -w @ghostly/core -w @ghostly/browser -w @ghostly/sdk -w @ghostly/extension -w @ghostly/web",
+    "test": "npm run test -w @ghostly/core -w @ghostly/browser -w @ghostly/sdk",
     "build:extension": "npm run build -w @ghostly/extension",
     "test:interop": "npm run test:interop -w @ghostly/core",
     "test:e2e": "npm run build:extension && playwright test -c e2e/playwright.config.ts",
@@ -21,7 +21,9 @@
     "test:e2e:desktop": "playwright test -c e2e/playwright.desktop.config.ts",
     "build:web": "npm run build -w @ghostly/web",
     "check:desktop-bundle": "node scripts/check-desktop-bundle.mjs",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package",
+    "build:sdk": "npm run build -w @ghostly/sdk",
+    "test:sdk-example": "node scripts/sdk-example.mjs"
   },
   "dependencies": {
     "@emoji-mart/data": "^1.2.1",

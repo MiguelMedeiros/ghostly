@@ -13,6 +13,7 @@ import { LightningService } from "./paymentAdapters/providers/lightningService";
 import { BitcoinService, type BitcoinPrepared } from "./paymentAdapters/providers/bitcoinService";
 import { CASHU_MINT_SOURCE } from "./paymentAdapters/providers/cashuMint";
 import { defaultRegistry, type ProviderRegistry } from "./paymentAdapters/providers/registry";
+import { onAdaptersChanged } from "../plugins/registry";
 import type { ProviderHost, ProviderPlatform } from "./paymentAdapters/providers/types";
 import type { EngineApi } from "../shared/rpc";
 import { EXTERNAL_IDENTITIES_ENABLED } from '../shared/features';
@@ -269,6 +270,8 @@ export class GhostlyNode implements EngineImplementation {
   }, () => this.settings.mints);
   private registry?: ProviderRegistry;
   private providers() { return this.registry ??= this.options.providers ?? defaultRegistry(); }
+  /** A plugin registered or left after start: the pickers show the new list. */
+  private stopWatchingAdapters?: () => void;
   /** Read when a source connects, once the constructor has run. */
   private readonly providerHost = () => ({ platform: this.options.platform ?? "web" as const, cashu: this.wallet, invoke: this.options.invoke });
   /** Lightning through the active source of the mode: the Cashu mints unless the person chose another. */
@@ -416,6 +419,7 @@ export class GhostlyNode implements EngineImplementation {
     await this.desk.start();
     await this.refreshWallet();
     this.wallet.start();
+    this.stopWatchingAdapters ??= onAdaptersChanged(() => { if (!this.shuttingDown) { this.lightning.refreshOffered(); this.bitcoin.refreshOffered(); } });
 
     for (const stored of await db.getLinks()) {
       const messages = await db.getMessages(stored.id);
@@ -444,6 +448,7 @@ export class GhostlyNode implements EngineImplementation {
   async shutdown(): Promise<void> {
     this.shuttingDown = true;
     if(this.paymentTimer)clearTimeout(this.paymentTimer);
+    this.stopWatchingAdapters?.();
     this.identities.stop();
     this.nostrSocial.stop();
     await this.arkWallet.stop();

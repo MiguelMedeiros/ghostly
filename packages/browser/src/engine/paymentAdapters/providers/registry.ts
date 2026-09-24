@@ -9,12 +9,14 @@ import type { LightningProviderDescriptor } from "./lightning";
 import type { OnchainProviderDescriptor } from "./onchain";
 import { webln } from "./webln";
 import { fakeLightning, fakeOnchain, testProvidersEnabled } from "./testing";
-import { networkMode, type ProviderNetwork, type ProviderPlatform } from "./types";
-import type { WalletMode } from "../../../shared/mints";
+import { offeredIn } from "./types";
+import { registeredLightningProviders, registeredOnchainProviders, reserveAdapterIds } from "../../../plugins/registry";
 
 /**
- * Every wallet provider Ghostly knows. Adding one is adding its module next to this file and ONE line in
- * the list of its kind; see PROVIDERS.md. The order is the order of the source picker.
+ * Every wallet provider built into Ghostly. Adding one is adding its module next to this file and ONE
+ * line in the list of its kind; see PROVIDERS.md. The order is the order of the source picker. A
+ * provider written outside the app registers through `plugins/registry.ts` (the SDK) instead, and
+ * comes after these.
  */
 export const LIGHTNING_PROVIDERS: readonly LightningProviderDescriptor[] = [
   cashuMint,
@@ -30,20 +32,33 @@ export const ONCHAIN_PROVIDERS: readonly OnchainProviderDescriptor[] = [
   bdk,
 ];
 
+reserveAdapterIds("lightning", LIGHTNING_PROVIDERS.map((d) => d.id));
+reserveAdapterIds("onchain", ONCHAIN_PROVIDERS.map((d) => d.id));
+
 export interface ProviderRegistry {
-  lightning: readonly LightningProviderDescriptor[];
-  onchain: readonly OnchainProviderDescriptor[];
+  readonly lightning: readonly LightningProviderDescriptor[];
+  readonly onchain: readonly OnchainProviderDescriptor[];
 }
 
-/** The registered providers, plus the fake ones when this browser asked for them (e2e). */
+/** A registered provider whose id a built-in owns is dropped (and said so once): the built-in wins. */
+const warned = new Set<string>();
+function external<D extends { id: string }>(kind: string, builtIn: readonly D[], registered: readonly D[]): D[] {
+  return registered.filter((d) => {
+    const taken = builtIn.some((b) => b.id === d.id);
+    if (taken && !warned.has(`${kind}:${d.id}`)) { warned.add(`${kind}:${d.id}`); console.error(`[ghostly] ${kind} provider ${d.id} from a plugin is ignored: a built-in has that id`); }
+    return !taken;
+  });
+}
+
+/**
+ * The built-in providers, then the ones plugins registered, then the fakes when this browser asked
+ * for them (e2e). Read each time: a plugin registering later shows up on the next read.
+ */
 export function defaultRegistry(): ProviderRegistry {
-  const fakes = testProvidersEnabled();
   return {
-    lightning: [...LIGHTNING_PROVIDERS, ...(fakes ? [fakeLightning] : [])],
-    onchain: [...ONCHAIN_PROVIDERS, ...(fakes ? [fakeOnchain] : [])],
+    get lightning() { return [...LIGHTNING_PROVIDERS, ...external("lightning", LIGHTNING_PROVIDERS, registeredLightningProviders()), ...(testProvidersEnabled() ? [fakeLightning] : [])]; },
+    get onchain() { return [...ONCHAIN_PROVIDERS, ...external("onchain", ONCHAIN_PROVIDERS, registeredOnchainProviders()), ...(testProvidersEnabled() ? [fakeOnchain] : [])]; },
   };
 }
 
-/** A provider can be offered here: it runs on this platform and on a network of this mode. */
-export const offeredIn = (descriptor: { platforms: readonly ProviderPlatform[]; networks: readonly ProviderNetwork[] }, platform: ProviderPlatform, mode: WalletMode) =>
-  descriptor.platforms.includes(platform) && descriptor.networks.some((network) => networkMode(network) === mode);
+export { offeredIn };

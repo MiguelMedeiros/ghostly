@@ -2,8 +2,7 @@ import { STORES, store, transact, wrap } from "../../../shared/idb";
 import type { WalletMode } from "../../../shared/mints";
 import { ModeChanged, ModeGate } from "../modeGate";
 import { newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "../persistence";
-import { offeredIn } from "./registry";
-import { describeProvider, networkMode, redact, type ProviderDescriptor, type ProviderDescriptorView, type ProviderHost, type ProviderKind, type ProviderNetwork, type ProviderSettings } from "./types";
+import { describeProvider, networkMode, offeredIn, redact, type ProviderDescriptor, type ProviderDescriptorView, type ProviderHost, type ProviderKind, type ProviderNetwork, type ProviderSettings } from "./types";
 
 /**
  * What is stored for a source, under `<kind>Source-<mode>` in the settings store: never in the Settings
@@ -103,6 +102,9 @@ export class ProviderSources<P extends Connectable> {
   }
 
   async start(mode: WalletMode) { this.mode = mode; this.gate.switching(mode); this.stored = await this.load(mode); this.view = this.idle(); }
+
+  /** The list of providers changed (a plugin registered): the picker is told, nothing reconnects. */
+  refreshOffered() { this.view = { ...this.view, offered: this.offered() }; this.options.changed(); }
 
   /** Closes the source of the mode being left and loads this mode's. `ensureReady` connects it. */
   setMode(mode: WalletMode): Promise<void> {
