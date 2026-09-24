@@ -2,6 +2,11 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useI18n } from "../contexts/I18nContext";
 import { useIdentityAttention } from "../lib/identities";
 import { IdentitiesIcon } from "./identities/IdentitiesIcon";
+import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { useMyAvatar } from "../hooks/useAvatars";
+import { ProfileBadge } from "./ProfileBadge";
+import { ProfileSwitcherMenu } from "./ProfileSwitcher";
+import { SWITCHER_SHORTCUT, useLongPress, useProfileGlances, useProfileSwitcher } from "../hooks/useProfileSwitcher";
 
 const icon = { width: 24, height: 24, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -54,38 +59,57 @@ const TABS = [
 /**
  * Phone navigation: the places the sidebar's account bar holds on a wide screen, five at most (a 320px phone
  * gives each 64px). Identities is one: it is where a proof about to expire is noticed, and its dot must be
- * seen. Profile is left out, set up once and rarely visited.
+ * seen. Profile is left out, set up once and rarely visited; it is reached from Settings, which carries the
+ * active profile's picture on its icon, and holding Settings opens the account switcher.
  */
 export function MobileTabBar() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { t } = useI18n();
   const identityAttention = useIdentityAttention();
+  const canSwitch = !!useServicesPlatform()?.features.profiles;
+  const switcher = useProfileSwitcher(canSwitch);
+  const glances = useProfileGlances();
+  const longPress = useLongPress(switcher.show);
+  const myAvatar = useMyAvatar();
 
   return (
-    <nav className="shrink-0 flex bg-panel-header border-t border-border pb-safe" data-testid="mobile-tabs">
-      {TABS.map((tab) => {
-        const active = pathname === tab.path;
-        const dot = tab.path === "/identities" && identityAttention;
-        return (
-          <button
-            key={tab.path}
-            onClick={() => navigate(tab.path, { replace: true })}
-            aria-current={active ? "page" : undefined}
-            aria-label={dot ? `${t(tab.label)}, ${t("identities.attention")}` : undefined}
-            data-testid={`mobile-tab-${tab.path.slice(1) || "chats"}`}
-            className={`flex-1 min-w-0 min-h-14 px-0.5 flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-colors ${
-              active ? "text-accent" : "text-text-muted"
-            }`}
-          >
-            <span className="relative flex">
-              {tab.icon}
-              {dot && <span data-testid="identities-attention" aria-hidden="true" className="nav-dot nav-dot-tab" />}
-            </span>
-            <span className="max-w-full truncate text-[11px] font-medium leading-none">{t(tab.label)}</span>
-          </button>
-        );
-      })}
-    </nav>
+    <>
+      <nav className="shrink-0 flex bg-panel-header border-t border-border pb-safe" data-testid="mobile-tabs">
+        {TABS.map((tab) => {
+          const active = pathname === tab.path;
+          const dot = tab.path === "/identities" && identityAttention;
+          const account = tab.path === "/settings" && canSwitch;
+          const others = account && glances.othersUnread > 0;
+          const label = dot ? `${t(tab.label)}, ${t("identities.attention")}` : account ? `${t(tab.label)}, ${glances.current.name}${others ? `, ${t("profileSwitcher.othersUnread")}` : ""}` : undefined;
+          return (
+            <button
+              key={tab.path}
+              onClick={() => navigate(tab.path, { replace: true })}
+              {...(account ? { ...longPress, "data-switcher-opener": "", "aria-haspopup": "menu" as const, "aria-expanded": switcher.open, "aria-keyshortcuts": SWITCHER_SHORTCUT } : {})}
+              aria-current={active ? "page" : undefined}
+              aria-label={label}
+              data-testid={`mobile-tab-${tab.path.slice(1) || "chats"}`}
+              className={`flex-1 min-w-0 min-h-14 px-0.5 flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-colors select-none [-webkit-touch-callout:none] ${
+                active ? "text-accent" : "text-text-muted"
+              }`}
+            >
+              <span className="relative flex">
+                {tab.icon}
+                {dot && <span data-testid="identities-attention" aria-hidden="true" className="nav-dot nav-dot-tab" />}
+                {/* Whose Settings these are: the active profile's picture, ringed when another one left something unread. */}
+                {account && (
+                  <span data-testid="mobile-tab-profile" aria-hidden="true" className="absolute bottom-0 -right-2.5 rounded-full" style={{ boxShadow: `0 0 0 2px var(--theme-panel-header)${others ? ", 0 0 0 3.5px var(--theme-accent)" : ""}` }}>
+                    <ProfileBadge entry={glances.current} size={14} avatar={myAvatar} />
+                  </span>
+                )}
+              </span>
+              <span className="max-w-full truncate text-[11px] font-medium leading-none">{t(tab.label)}</span>
+            </button>
+          );
+        })}
+      </nav>
+      {switcher.open && <ProfileSwitcherMenu variant="sheet" glances={glances} onClose={switcher.close} />}
+    </>
   );
 }

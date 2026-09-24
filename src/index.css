@@ -756,6 +756,27 @@ em-emoji-picker {
 @keyframes wallet-new-in { from { transform: scale(0.3); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .wallet-new, .nav-dot { animation: none; } }
 .account-balance { font-variant-numeric: tabular-nums; }
+/* The account switcher's opener on the Profile place: a small chevron in its corner, out of the picture's way. */
+.profile-switcher-chevron { position: absolute; top: 3px; left: min(calc(50% + 14px), calc(100% - 15px)); width: 15px; height: 18px; display: grid; place-items: center; border-radius: 5px;
+  color: var(--theme-text-muted); cursor: pointer; }
+.profile-switcher-chevron:hover, .profile-switcher-chevron[aria-expanded="true"] { color: var(--theme-accent); background: var(--theme-surface-alt); }
+.profile-switcher-chevron:focus-visible { outline: 2px solid var(--theme-accent); outline-offset: -2px; }
+.profile-switcher-chevron[aria-expanded="true"] svg { transform: rotate(180deg); }
+/* Another profile left something unread: a ring around the picture, in the accent. */
+.profile-others-ring { position: absolute; inset: -3px; border-radius: 999px; box-shadow: 0 0 0 2px var(--theme-accent); pointer-events: none;
+  animation: wallet-new-in 0.45s cubic-bezier(.2,1.6,.4,1) both; }
+.profile-switcher-popover { animation: profile-switcher-in 140ms ease-out both; transform-origin: bottom left; }
+.profile-switcher-sheet { animation: profile-switcher-sheet-in 180ms ease-out both; max-height: 80vh; overflow-y: auto; }
+@keyframes profile-switcher-in { from { opacity: 0; transform: translateY(6px) scale(0.98); } }
+@keyframes profile-switcher-sheet-in { from { transform: translateY(100%); } }
+/* The app restarting as another profile: that profile's picture and name over everything, then out. */
+.profile-switch-splash { animation: profile-switch-in 120ms ease-out both; }
+.profile-switch-splash[data-leaving] { animation: profile-switch-out 180ms ease-in both; }
+@keyframes profile-switch-in { from { opacity: 0; } }
+@keyframes profile-switch-out { to { opacity: 0; } }
+.profile-switch-badge { animation: profile-switch-pulse 1.2s ease-in-out infinite; }
+@keyframes profile-switch-pulse { 50% { transform: scale(0.94); } }
+@media (prefers-reduced-motion: reduce) { .profile-others-ring, .profile-switch-badge { animation: none; } }
 .account-action > svg, .account-action > span:first-child { flex-shrink: 0; }
 
 /* Action affordances, without changing text inputs or disabled controls. */

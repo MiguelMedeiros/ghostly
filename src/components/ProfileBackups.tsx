@@ -49,7 +49,7 @@ export function ProfileBackups({ canSwitch }: { canSwitch: boolean }) {
     if (!text) throw new Error("Choose a backup first");
     const entry = await restoreProfileBackup(text, restorePass);
     setRestorePass("");
-    if (canSwitch) switchProfile(entry.id); else setDone(`Restored as “${entry.name}”.`);
+    if (canSwitch) switchProfile(entry.id, { route: "/profile" }); else setDone(`Restored as “${entry.name}”.`);
   });
 
   return (

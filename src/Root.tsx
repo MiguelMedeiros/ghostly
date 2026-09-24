@@ -15,6 +15,7 @@ import { I18nProvider } from "./contexts/I18nContext";
 import { LockScreenProvider, useLockScreen } from "./contexts/LockScreenContext";
 import { UpdateProvider } from "./contexts/UpdateContext";
 import { LockScreen } from "./components/LockScreen";
+import { ProfileSwitchSplash } from "./components/ProfileSwitchSplash";
 import { ensureSession, loadSession } from "./lib/storage";
 import { useI18n } from "./contexts/I18nContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -134,6 +135,7 @@ export function Root() {
         <I18nProvider>
           <LockScreenProvider>
             <LockScreen />
+            <ProfileSwitchSplash />
             <HashRouter>
               <ErrorBoundary>
               <ChatLinkIntake />

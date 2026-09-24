@@ -227,5 +227,17 @@
   },
   "identities": {
     "attention": "要確認"
+  },
+  "profileSwitcher": {
+    "title": "プロフィールを切り替え",
+    "current": "現在のプロフィール",
+    "switchTo": "{{name}} に切り替え",
+    "unread": "未読 {{count}} 件",
+    "locked": "ロック中",
+    "add": "プロフィールを追加",
+    "manage": "プロフィールを管理",
+    "othersUnread": "別のプロフィールに未読メッセージがあります",
+    "switching": "{{name}} を開いています…",
+    "holdHint": "タブバーの設定を長押しでも切り替えられます"
   }
 }

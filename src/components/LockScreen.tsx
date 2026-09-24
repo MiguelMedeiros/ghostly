@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { useLockScreen } from "../contexts/LockScreenContext";
 import { useI18n } from "../contexts/I18nContext";
+import { currentProfile, listProfiles } from "../lib/profiles";
+import { ProfileBadge } from "./ProfileBadge";
 
 export function LockScreen() {
   const { isLocked, unlock, retryAt } = useLockScreen();
@@ -51,6 +53,8 @@ export function LockScreen() {
   };
 
   if (!isLocked) return null;
+  // With several profiles, which one this password opens: each has its own lock.
+  const profile = listProfiles().length > 1 ? currentProfile() : null;
 
   return (
     <div
@@ -81,6 +85,12 @@ export function LockScreen() {
             {t("lockScreen.title")}
           </h1>
           <p className="text-text-secondary">{t("lockScreen.enterPassword")}</p>
+          {profile && (
+            <p data-testid="lock-profile" className="mt-4 inline-flex items-center gap-2 rounded-full bg-surface px-3 py-1.5 text-sm text-text-primary">
+              <ProfileBadge entry={profile} size={22} />
+              {profile.name}
+            </p>
+          )}
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">

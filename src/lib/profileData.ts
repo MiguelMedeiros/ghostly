@@ -1,5 +1,6 @@
 import { databaseExists } from "@ghostly/browser/backup/database";
-import { activeProfileId, listProfiles, namespaceOf, settingsKeyFor, unregisterProfile } from "./profiles";
+import { activeProfileId, listProfiles, namespaceOf, prefixOf, settingsKeyFor, unregisterProfile } from "./profiles";
+import { unreadUnder } from "./storage";
 import { verifyPassword } from "./settings";
 
 /** What deleting a profile would take away, read from its own storage without starting it. */
@@ -65,6 +66,30 @@ export function profileLock(id: string): string | null {
     const lock = (JSON.parse(localStorage.getItem(settingsKeyFor(id)) ?? "{}") as { lockScreen?: { enabled?: boolean; passwordHash?: string | null } }).lockScreen;
     return lock?.enabled && lock.passwordHash ? lock.passwordHash : null;
   } catch { return null; }
+}
+
+/**
+ * What the switcher shows of a profile that is not running: its picture and how many messages were left
+ * unread in its chats. Nothing new reaches a profile while it is not running (its peer is off), so this is
+ * what was there when it was left. A locked profile shows neither: only its name and that it is locked.
+ */
+export interface ProfileGlance { locked: boolean; unread: number; avatar?: string }
+export async function profileGlance(id: string): Promise<ProfileGlance> {
+  if (profileLock(id)) return { locked: true, unread: 0 };
+  return { locked: false, unread: unreadUnder(prefixOf(id)), avatar: await storedAvatar(databaseOf(id)) };
+}
+/** The picture a profile's peer keeps in its settings (WISP 04), if it is the small JPEG the peer accepts. */
+async function storedAvatar(dbName: string): Promise<string | undefined> {
+  try {
+    const db = await openExisting(dbName);
+    if (!db) return undefined;
+    try {
+      if (!db.objectStoreNames.contains("settings")) return undefined;
+      const settings = await request(db.transaction("settings", "readonly").objectStore("settings").get("settings")) as { avatar?: unknown } | undefined;
+      const avatar = settings?.avatar;
+      return typeof avatar === "string" && avatar.startsWith("data:image/jpeg;base64,") && avatar.length < 45_000 ? avatar : undefined;
+    } finally { db.close(); }
+  } catch { return undefined; }
 }
 
 /**

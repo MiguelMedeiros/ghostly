@@ -227,5 +227,17 @@
   },
   "identities": {
     "attention": "需要处理"
+  },
+  "profileSwitcher": {
+    "title": "切换资料",
+    "current": "当前资料",
+    "switchTo": "切换到 {{name}}",
+    "unread": "{{count}} 条未读",
+    "locked": "已锁定",
+    "add": "添加资料",
+    "manage": "管理资料",
+    "othersUnread": "其他资料中有未读消息",
+    "switching": "正在打开 {{name}}…",
+    "holdHint": "也可以在标签栏长按“设置”"
   }
 }

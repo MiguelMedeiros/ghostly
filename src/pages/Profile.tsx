@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { InputGroup, LinkRow, Page } from "../components/layout";
 import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
@@ -40,7 +40,10 @@ export function Profile() {
   const identities = useEngineState()?.identityProofs.length ?? 0;
   const identityAttention = useIdentityAttention();
   const [name, setName] = useState(current.name);
-  const [creating, setCreating] = useState(false), [newName, setNewName] = useState("");
+  // "Add a profile" in the account switcher lands here with the form open.
+  const wantsNew = !!(useLocation().state as { newProfile?: boolean } | null)?.newProfile;
+  const [creating, setCreating] = useState(wantsNew), [newName, setNewName] = useState("");
+  useEffect(() => { if (wantsNew) { setCreating(true); document.querySelector("[data-testid='profile-list']")?.scrollIntoView({ block: "nearest" }); } }, [wantsNew]);
   const [deleting, setDeleting] = useState<ProfileEntry | null>(null);
   const [error, setError] = useState("");
   useEffect(() => setName(current.name), [current.name]);
@@ -118,7 +121,7 @@ export function Profile() {
         ))}
         {!canSwitch ? <Block><Notice>One profile only in this client, for now.</Notice></Block> : creating ? (
           <Block>
-            <InputGroup as="form" onSubmit={(e) => { e.preventDefault(); attempt(() => { const entry = createProfile(newName); switchProfile(entry.id); }); }}>
+            <InputGroup as="form" onSubmit={(e) => { e.preventDefault(); attempt(() => { const entry = createProfile(newName); switchProfile(entry.id, { route: "/profile" }); }); }}>
               <input data-testid="profile-new-name" autoFocus className={input} placeholder="Name" maxLength={32} value={newName} onChange={(e) => setNewName(e.target.value)} />
               <Button type="submit" variant="primary" data-testid="profile-create" disabled={!newName.trim()}>Create</Button>
               <Button onClick={() => { setCreating(false); setNewName(""); }}>Cancel</Button>

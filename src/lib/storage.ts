@@ -229,6 +229,27 @@ export function listSessions(): ChatSession[] {
   return sessions;
 }
 
+/**
+ * Unread messages in the chats kept under a storage prefix: another profile's, read without starting it
+ * (the account bar's switcher). Same count as the chat list's: messages since the last read one.
+ */
+export function unreadUnder(prefix: string): number {
+  let unread = 0;
+  for (let i = 0; i < localStorage.length; i++) {
+    try {
+      const key = localStorage.key(i);
+      if (!key?.startsWith(prefix) || key.slice(prefix.length).includes("_")) continue;
+      const session = JSON.parse(localStorage.getItem(key) ?? "null") as ChatSession | null;
+      if (!session?.id || !session.mySeedB64 || !session.peerPubKeyB64 || !session.encKeyB64 || !Array.isArray(session.messages)) continue;
+      const read = parseInt(localStorage.getItem(`${prefix}read_${session.id}`) ?? "0", 10) || 0;
+      unread += Math.max(0, session.messages.length - read);
+    } catch {
+      continue;
+    }
+  }
+  return unread;
+}
+
 export function getLastReadCount(sessionId: string): number {
   try {
     const val = localStorage.getItem(`${getPrefix()}read_${sessionId}`);
