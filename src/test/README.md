@@ -11,7 +11,7 @@ no engine, network, IndexedDB or Tauri is involved.
 
 | File | What it gives a test |
 | --- | --- |
-| `setup.ts` | jest-dom matchers; before each test, empty `localStorage` and a reset fake engine; `cleanup` after. |
+| `setup.ts` | jest-dom matchers; before each test, empty `localStorage` and a reset fake engine; `cleanup` after. The web app's session sync (`platform/sync.ts`, started by the sidebar) is a no-op: it would call the engine behind the test's back on every state push. |
 | `fakeEngine.ts` | `fakeEngine`: `setState(patch)` / `update(patch)` push a new engine state to the UI; `on(method, handler)` answers a call; `calls` / `callsTo(method)` show what the UI asked. A call nobody answers **fails**, like an engine error, so a test never passes on a silent no-op. Builders: `engineState`, `linkView`, `paymentView`, `groupView`, `walletView`. |
 | `render.tsx` | `renderApp(ui, { route, language })`: renders inside the router, settings and translations, and returns Testing Library's queries, a `user` (user-event) and `engine` (the fake). |
 
