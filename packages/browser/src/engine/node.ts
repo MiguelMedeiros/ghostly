@@ -905,7 +905,7 @@ export class GhostlyNode implements EngineImplementation {
       await this.hold.hold(linkId, { ...item, messageId, timestamp: message.timestamp });
       return;
     }
-    await this.outboxFor(linkId).transmit(messageId);
+    await this.outboxFor(linkId).transmit(messageId, { manual: true });
   }
 
   /** The contact is away, and both sides chose to hold what is sent meanwhile (WISP 4xx). */
@@ -927,8 +927,8 @@ export class GhostlyNode implements EngineImplementation {
     if (!outbox) {
       outbox = new Outbox({
         read: () => db.getMessages(linkId),
-        update: async (id, delivery, error) => {
-          await db.updateDelivery(linkId, id, delivery, error);
+        update: async (id, delivery, error, extra) => {
+          await db.updateDelivery(linkId, id, delivery, error, extra);
           const messages = await db.getMessages(linkId);
           if (delivery === "sent" || delivery === "delivered") {
             const message = messages.find(item => item.id === id);
@@ -937,10 +937,32 @@ export class GhostlyNode implements EngineImplementation {
           this.events.onMessages(linkId, messages);
         },
       }, message => this.links.get(linkId)?.link?.sendMessage(message.text, message.timestamp, message.wireId)
-        ?? Promise.resolve("You are offline. Reconnect and retry."), message => message.via === "pkarr" ? DHT_MESSAGE_TTL : 20_000, message => {
+        ?? Promise.resolve("You are offline. It is sent again once you are back."), message => message.via === "pkarr" ? DHT_MESSAGE_TTL : 20_000, message => {
         const pending = this.links.get(linkId)?.stored.dhtDeliveryState?.pending;
         return message.via === "pkarr" && pending && pending.message[0] === message.wireId ? pending.expires : undefined;
-      });
+      }, { resender: {
+        // Only while the chat can carry it: a live link, or the DHT path with nothing else awaiting a receipt.
+        // In a live chat, what already went through the DHT fallback waits for the live link.
+        ready: message => {
+          const live = this.links.get(linkId), link = live?.link;
+          if (message.via === "pkarr" && live?.stored.deliveryMode !== "dht" && link?.textDelivery !== "stream") return false;
+          return !!link?.canSendText && !!message.wireId && !link.validateText(message.text, message.timestamp, message.wireId);
+        },
+        requeueExpired: () => this.links.get(linkId)?.stored.deliveryMode !== "dht",
+        via: message => {
+          const delivery = this.links.get(linkId)?.link?.textDelivery;
+          return delivery === "dht" ? "pkarr" : delivery === "stream" ? "datalink" : message.via;
+        },
+        // The contact stays away and both sides allow held items: store-and-forward takes it, under the same id.
+        divert: async message => {
+          const live = this.links.get(linkId), bytes = new TextEncoder().encode(message.text).length;
+          if (!live || !this.holdingFor(live) || !message.wireId || message.file || message.paymentId || bytes > HOLD_LIMITS.maxTextBytes) return false;
+          await db.updateDelivery(linkId, message.id, "sending", undefined, { via: "hold", resendUntil: undefined });
+          this.events.onMessages(linkId, await db.getMessages(linkId));
+          void this.hold.hold(linkId, { kind: "text", id: message.wireId, messageId: message.id, bytes, timestamp: message.timestamp }).catch(() => {});
+          return true;
+        },
+      } });
       this.outboxes.set(linkId, outbox);
     }
     return outbox;
@@ -1739,7 +1761,7 @@ export class GhostlyNode implements EngineImplementation {
       events: {
         onGroupFrame: stored.profile ? frame => this.groups.handleContactFrame(linkId, frame) : undefined,
         onGroupsSupport: () => this.emitState(),
-        onDhtDelivery: () => this.emitState(),
+        onDhtDelivery: () => { if (stored.profile && !stored.group) void this.outboxes.get(linkId)?.flush().catch(() => {}); this.emitState(); },
         onHold: (state) => this.hold.peerSaid(linkId, state),
         onPeerProof: EXTERNAL_IDENTITIES_ENABLED ? async frame => { await (await this.proofsFor(linkId)).receive(frame); } : undefined,
         onIdentityProof: stored.profile ? frame => this.identities.frame(linkId, frame) : undefined,
@@ -1780,6 +1802,8 @@ export class GhostlyNode implements EngineImplementation {
           if (state === "open") { void this.desk.replay(linkId).catch(() => {}); this.identities.ready(linkId); }
           if (state !== "open") { live.proofs?.stop(); this.identities.closed(linkId); }
           if (stored.profile && live.stored.deliveryMode !== "dht" && state !== "open") void this.outboxFor(linkId).disconnected().catch(() => {});
+          // Back live: what the contact has not confirmed goes again at once, under the same ids.
+          if (stored.profile && !stored.group && state === "open") void this.outboxFor(linkId).flush({ reopened: true }).catch(() => {});
           if (stored.profile && state !== "open" && live.pairing?.status !== "error") live.pairing = { status: "connecting" };
           this.emitState();
         },

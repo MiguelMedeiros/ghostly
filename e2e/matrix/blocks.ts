@@ -698,12 +698,14 @@ export const restore: Block = {
     w.b = restored;
     await openChat(restored);
     await sees(restored, `olá from ${a.name}`);
-    // A message sent while A's side still holds the old session ends "Delivery unconfirmed", with a
-    // Retry: A writes once the restored one is connected, as the header tells a person to.
+    // A writes at once, while its side may still hold the old session: a message that goes into it gets no
+    // receipt and is sent again by itself, under the same id, once the restored one is connected.
     await openChat(a);
-    for (const p of [a, restored]) await connected(p);
     await say(a, "welcome back");
+    for (const p of [a, restored]) await connected(p);
     await sees(restored, "welcome back", 120_000);
+    await expect(chatPane(a).locator(".group").filter({ hasText: "welcome back" })).toContainText("Received by peer", { timeout: 120_000 });
+    await expect(chatPane(restored).getByText("welcome back", { exact: true })).toHaveCount(1);
     await say(restored, "restored and here");
     await sees(a, "restored and here", 120_000);
   },

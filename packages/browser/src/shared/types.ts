@@ -394,9 +394,14 @@ export interface WalletView {
 
 export interface StoredMessage {
   wireId?: string;
-  /** `held`: in this device's storage, waiting for the contact to come back (WISP 4xx). */
-  delivery?: "sending" | "sent" | "held" | "delivered" | "failed";
+  /**
+   * `held`: in this device's storage, waiting for the contact to come back (WISP 4xx).
+   * `queued`: unconfirmed, and sent again by itself under the same id once the chat can carry it.
+   */
+  delivery?: "sending" | "sent" | "queued" | "held" | "delivered" | "failed";
   deliveryError?: string;
+  /** Until when a `queued` message is sent again by itself; after that it waits for Retry. */
+  resendUntil?: number;
   linkId: string;
   id: string;
   text: string;

@@ -10,6 +10,10 @@ test("a connection that silently stops answering is noticed, and comes back by i
   await connect(alice, bob);
   const connected = (p: typeof alice) => expect(p.page.getByTestId("connection-options")).toHaveAttribute("aria-label", /Connected/, { timeout: 120_000 });
   for (const p of [alice, bob]) await connected(p);
+  // Pings only count once the contact has answered one (an older app never does), and the first goes 15 s
+  // after the link opens: let one go by. Messages pending on the DHT now take the link as soon as it opens,
+  // so this point comes seconds after it, where it used to come half a minute later.
+  await alice.page.waitForTimeout(20_000);
 
   // Bob's app stops running (paused in the debugger), while its connection stays up: it just never answers.
   const cdp = await bob.context.newCDPSession(bob.page);

@@ -466,7 +466,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
         )}
 
         {isMe && message.delivery && <div className="clear-both pt-1 text-xs text-text-secondary" role="status">
-          {message.delivery === "delivered" ? "Received by peer" : message.delivery === "held" ? "Held · waiting for your contact" : message.delivery === "sent" ? "Sent · waiting for receipt" : message.delivery === "sending" ? "Sending…" : "Delivery unconfirmed"}
+          {message.delivery === "delivered" ? "Received by peer" : message.delivery === "held" ? "Held · waiting for your contact" : message.delivery === "sent" ? "Sent · waiting for receipt" : message.delivery === "sending" ? "Sending…" : message.delivery === "queued" ? "Not confirmed yet · sends again by itself" : "Delivery unconfirmed"}
           {message.delivery === "failed" && <>
             <span className="block">{message.deliveryError}</span>
             <button className="underline text-accent cursor-pointer" onClick={() => {

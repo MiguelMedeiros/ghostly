@@ -131,7 +131,7 @@ export const db = {
   async putMessage(message: StoredMessage): Promise<void> {
     await wrap((await store(STORES.messages, "readwrite")).put(message));
   },
-  async updateDelivery(linkId: string, id: string, delivery: NonNullable<StoredMessage["delivery"]>, deliveryError?: string): Promise<void> {
+  async updateDelivery(linkId: string, id: string, delivery: NonNullable<StoredMessage["delivery"]>, deliveryError?: string, extra?: Partial<Pick<StoredMessage, "via" | "resendUntil">>): Promise<void> {
     const tx = (await openDb()).transaction(STORES.messages, "readwrite");
     const messages = tx.objectStore(STORES.messages);
     const request = messages.get([linkId, id]);
@@ -140,7 +140,7 @@ export const db = {
       // Receipts are terminal; timeout/disconnect/send races cannot undo them.
       // Do not resurrect deleted messages or attach new states to old history.
       if (!message?.delivery || message.delivery === "delivered") return;
-      messages.put({ ...message, delivery, deliveryError });
+      messages.put({ ...message, ...extra, delivery, deliveryError });
     };
     await new Promise<void>((resolve, reject) => {
       tx.oncomplete = () => resolve();
