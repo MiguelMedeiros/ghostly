@@ -3,6 +3,7 @@ import type {WalletState} from '../lib/platform';
 import {walletCards,type WalletCard,type WalletRail} from './walletCardData';
 import {WalletMark} from './WalletCards';
 import {stackLayout,stackStrips,stepCard,stripAt} from './walletStack';
+import {playSwitch,switchDirection} from './walletDeckMotion';
 import './wallet-deck.css';
 
 /**
@@ -15,6 +16,9 @@ import './wallet-deck.css';
  * Each card's button is only the strip of it that shows (the strips tile the stack) and the card's face is a
  * child that takes no clicks: a click lands on the card it is aimed at, whether by a person or by a test that
  * clicks the middle of a card.
+ *
+ * Changing the chosen card is animated (walletDeckMotion.ts): the new card swings up, the old one tucks back, a
+ * sheen crosses the new one and its ghost peeks in. With reduced motion the deck changes at once.
  */
 /** How far the chosen card rises: less than a card's bottom padding, so no text of the card behind shows under it. */
 const LIFT=9;
@@ -38,6 +42,7 @@ export function WalletCardFace({card,after}:{card:WalletCard;after?:boolean}) {
   <span className="wallet-deck-card-ghost" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C7.582 2 4 5.582 4 10v8c0 .75.6 1 1 .6l2-1.6 2 1.6c.4.3.8.3 1.2 0L12 17l1.8 1.6c.4.3.8.3 1.2 0l2-1.6 2 1.6c.4.4 1 .15 1-.6v-8c0-4.418-3.582-8-8-8z"/><circle cx="9" cy="9" r="1.5" fill="var(--ghost-eye)"/><circle cx="15" cy="9" r="1.5" fill="var(--ghost-eye)"/></svg></span>
   <span className="wallet-deck-card-text"><span className="wallet-deck-card-name">{card.name}</span><span className="wallet-deck-card-balance">{card.balance}</span><span className="wallet-deck-card-detail">{card.detail}</span></span>
   <span className="wallet-deck-card-chip" aria-hidden="true"/>
+  <span className="wallet-deck-card-sheen" aria-hidden="true"/>
  </span>;
 }
 
@@ -75,6 +80,19 @@ export function CardDeck({cards,selected,onSelect,onChoose,kind,label,testId,blo
  const strips=useMemo(()=>stackStrips(layout,active),[layout,active]);
  const cardWidth=mode==='track'?Math.round(width*.76):layout.width,cardHeight=Math.round(cardWidth/1.586);
  const trackHeight=cardHeight+LIFT+14;
+
+ // Each change of the chosen card, and where it came from: known while rendering, so the change and its animation
+ // start in the same frame. A deck whose cards change but whose choice does not (the chat's list) plays nothing.
+ const chosen=cards[active]?.id;
+ const [shown,setShown]=useState({id:chosen,from:undefined as WalletRail|undefined,n:0});
+ if(shown.id!==chosen)setShown({id:chosen,from:shown.id,n:shown.n+1});
+ const glow=useRef<HTMLDivElement>(null);
+ useLayoutEffect(()=>{
+  if(!shown.n||reducedMotion())return;
+  const ids=cards.map(card=>card.id),to=ids.indexOf(shown.id!),from=shown.from?ids.indexOf(shown.from):-1;
+  playSwitch({glow:glow.current,incoming:tabs.current[to],outgoing:from<0?null:tabs.current[from],dir:switchDirection(from,to)});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+ },[shown.n]);
 
  // The deck sizes itself from the space it gets, not from the window (components/layout/README.md).
  useLayoutEffect(()=>{
@@ -151,7 +169,7 @@ export function CardDeck({cards,selected,onSelect,onChoose,kind,label,testId,blo
  const top=LIFT+4;
  // The deck wears the chosen card's colour class: its glow and the arrows' marks take that card's ink.
  return <div ref={root} className={`wallet-deck wallet-card-${cards[active].id}${compact?' wallet-deck-compact':''}`} data-mode={mode} style={{'--deck-w':`${width}px`,'--card-w':`${cardWidth}px`,'--card-h':`${cardHeight}px`,'--track-h':`${trackHeight}px`} as CSSProperties}>
-  <div className="wallet-deck-glow" aria-hidden="true"/>
+  <div ref={glow} className="wallet-deck-glow" aria-hidden="true"/>
   <div ref={track} className="wallet-deck-track" role={kind==='tabs'?'tablist':'radiogroup'} aria-label={label} onKeyDown={onKey} onPointerMove={onPointerMove} onPointerLeave={onPointerLeave}>
    {cards.map((card,i)=>{
     const offset=i-active,distance=Math.abs(offset),why=blocked?.(card),on=i===active;
@@ -170,7 +188,7 @@ export function CardDeck({cards,selected,onSelect,onChoose,kind,label,testId,blo
    <button type="button" className="wallet-deck-arrow" aria-label="Previous card" data-testid={`${name}-prev`} onClick={()=>select(stepCard(active,-1,cards.length))}>
     <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
    </button>
-   <div className="wallet-deck-marks" aria-hidden="true">{cards.map((card,i)=><span key={card.id} className={`wallet-card-${card.id}`} data-on={i===active}><WalletMark rail={card.id}/></span>)}</div>
+   <div className="wallet-deck-marks" aria-hidden="true" style={{'--mark-i':active} as CSSProperties}>{cards.map((card,i)=><span key={card.id} className={`wallet-card-${card.id}`} data-on={i===active}><WalletMark rail={card.id}/></span>)}</div>
    <button type="button" className="wallet-deck-arrow" aria-label="Next card" data-testid={`${name}-next`} onClick={()=>select(stepCard(active,1,cards.length))}>
     <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
    </button>

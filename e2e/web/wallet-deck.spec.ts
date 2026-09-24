@@ -152,6 +152,50 @@ test("a desktop column squeezed by the chat list keeps the stack, and every card
   }
 });
 
+/** The switch's own animations (walletDeckMotion.ts) running on each card's face, its ghost and its sheen: not the CSS transitions. */
+const swings = (page: Page) => page.evaluate((ids) => Object.fromEntries(ids.map((id) => {
+  const el = document.querySelector(`[data-testid=wallet-card-${id}]`)!;
+  return [id, [...el.querySelectorAll(".wallet-deck-face, .wallet-deck-card-ghost, .wallet-deck-card-sheen")].flatMap((part) => part.getAnimations().filter((a) => !(a instanceof CSSTransition) && a.playState === "running").map(() => (part as HTMLElement).className))];
+})), [...CARDS]);
+/** Every face at rest: no swing left over, whatever interrupted what. */
+const atRest = (page: Page) => page.evaluate(() => [...document.querySelectorAll(".wallet-deck-face")].every((face) => {
+  const style = getComputedStyle(face);
+  return face.getAnimations().every((a) => a instanceof CSSTransition) && ["none", "0deg"].includes(style.rotate) && ["none", "0px", "0px 0px"].includes(style.translate);
+}));
+
+test("changing the card swings the new one up and tucks the old one back, and quick changes all settle", async ({ peer }) => {
+  const { page } = await peer("alice", { viewport: { width: 1280, height: 900 } });
+  await page.goto("/#/wallet");
+  await chosen(page, "cashu");
+  // Nothing moves on arrival.
+  expect(Object.values(await swings(page)).flat()).toEqual([]);
+
+  await page.getByTestId("wallet-deck-next").click();
+  const moving = await swings(page);
+  expect(moving.lightning).toEqual(expect.arrayContaining(["wallet-deck-face", "wallet-deck-card-ghost", "wallet-deck-card-sheen"]));
+  expect(moving.cashu).toContain("wallet-deck-face");
+  expect(moving.arkade).toEqual([]);
+  await chosen(page, "lightning");
+  await expect.poll(() => atRest(page)).toBe(true);
+
+  // Clicking faster than a swing lasts: every one is interrupted, the last card wins and the stack comes to rest.
+  for (let i = 0; i < 4; i++) await page.getByTestId("wallet-deck-next").click({ delay: 0 });
+  await chosen(page, "usdt");
+  await expect.poll(() => atRest(page)).toBe(true);
+  expect(tiled(await strips(page))).toBe(true);
+});
+
+test("on a phone the card that settles in the centre swings too", async ({ peer }) => {
+  const { page } = await peer("alice", { mobile: true });
+  await page.goto("/#/wallet");
+  await expect(deck(page)).toHaveAttribute("data-mode", "track");
+  await page.getByTestId("wallet-deck-next").click();
+  expect((await swings(page)).lightning).toContain("wallet-deck-face");
+  await chosen(page, "lightning");
+  await expect.poll(() => offCentre(page, "lightning")).toBeLessThan(3);
+  await expect.poll(() => atRest(page)).toBe(true);
+});
+
 test("with reduced motion the deck still stacks, chooses and follows, without a transition", async ({ peer }) => {
   const { page } = await peer("alice", { viewport: { width: 1280, height: 900 } });
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -162,4 +206,19 @@ test("with reduced motion the deck still stacks, chooses and follows, without a 
   await card(page, "bitcoin").focus();
   await page.keyboard.press("ArrowLeft");
   await chosen(page, "bark");
+  // No swing, no sheen, no ghost peeking: the deck changes at once.
+  expect(Object.values(await swings(page)).flat()).toEqual([]);
+  expect(await atRest(page)).toBe(true);
+});
+
+test("the app's own reduced-motion switch stills the deck too", async ({ peer }) => {
+  const { page } = await peer("alice", { viewport: { width: 1280, height: 900 } });
+  await page.goto("/#/settings");
+  await page.getByRole("switch", { name: "Reduce motion" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-reduce-motion", "true");
+  await page.goto("/#/wallet");
+  await page.getByTestId("wallet-deck-next").click();
+  await chosen(page, "lightning");
+  expect(Object.values(await swings(page)).flat()).toEqual([]);
+  expect(await card(page, "lightning").locator(".wallet-deck-face").evaluate((el) => getComputedStyle(el).transitionDuration)).toBe("0s");
 });
