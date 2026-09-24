@@ -2012,6 +2012,7 @@ dependencies = [
  "base64 0.23.1",
  "block2",
  "crypto_secretbox",
+ "futures-util",
  "ghostly-transports",
  "iroh",
  "objc2",

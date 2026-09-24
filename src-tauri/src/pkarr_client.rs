@@ -1,7 +1,8 @@
-use pkarr::{Client, Keypair, PublicKey, ResolvePolicy, SignedPacket};
+use pkarr::{Keypair, PublicKey, SignedPacket};
 use simple_dns::rdata::RData;
 
 use crate::crypto;
+use crate::pkarr_network::Pkarr;
 use crate::types::{CompactMessage, PkarrMessage, ResolvedBatch};
 
 const MAX_MSGS_PAYLOAD_B64: usize = 800;
@@ -52,7 +53,7 @@ fn trim_to_fit(
 }
 
 pub async fn publish_messages(
-    client: &Client,
+    pkarr: &Pkarr,
     keypair: &Keypair,
     messages: &[CompactMessage],
     enc_key: &[u8],
@@ -138,16 +139,13 @@ pub async fn publish_messages(
         .sign(keypair)
         .map_err(|e| format!("Sign error: {}", e))?;
 
-    client
-        .publish(&signed_packet)
-        .await
-        .map_err(|e| format!("Publish error: {}", e))?;
+    pkarr.publish(&signed_packet).await?;
 
     Ok(kept)
 }
 
 pub async fn resolve_messages(
-    client: &Client,
+    pkarr: &Pkarr,
     public_key_z32: &str,
     enc_key: &[u8],
 ) -> Result<Option<ResolvedBatch>, String> {
@@ -155,13 +153,8 @@ pub async fn resolve_messages(
         .try_into()
         .map_err(|e| format!("Invalid public key: {}", e))?;
 
-    let resolved = client
-        .resolve(&public_key, ResolvePolicy::NetworkOnly)
-        .await;
-
-    let signed_packet = match resolved {
-        Ok(p) => p,
-        Err(_) => return Ok(None),
+    let Some(signed_packet) = pkarr.resolve(&public_key).await else {
+        return Ok(None);
     };
 
     let packet_timestamp = signed_packet.timestamp().as_u64() as i64 / 1000;

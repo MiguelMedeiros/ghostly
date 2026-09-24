@@ -22,7 +22,8 @@ crypto_secretbox = "0.1"
 reqwest = { version = "0.13", default-features = false }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 url = "2"
-tokio = { version = "1", features = ["sync", "time", "process", "io-util"] }
+futures-util = { version = "0.3", default-features = false }
+tokio = { version = "1", features = ["rt", "sync", "time", "process", "io-util", "macros"] }
 tauri-plugin-notification = "2"
 
 [dev-dependencies]
