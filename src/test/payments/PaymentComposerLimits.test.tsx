@@ -6,6 +6,8 @@ import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { everyWallet, reviewContext, usdtReady } from "./fixtures";
 
+// covers: payments.usdt.send, payments.bitcoin.offer
+
 /**
  * Two things the composer used to get wrong, found by these tests: USDT's over-balance check, and how an unready
  * card explains itself.

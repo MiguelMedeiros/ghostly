@@ -7,6 +7,8 @@ import { fakeEngine, linkView, paymentView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { lightningSource, MAINNET_INVOICE, mint, REAL_MINT, REGTEST_INVOICE, reviewOf, SIGNET_INVOICE, target, TEST_MINT, TESTNET_INVOICE } from "./fixtures";
 
+// covers: payments.chat.review, payments.chat.method-off, payments.cashu.request, payments.cashu.reclaim, payments.cashu.test-sats, payments.lightning.request, payments.bitcoin.send, payments.usdt.send, payments.external
+
 const ALL_ON = { cashu: true, lightning: true, arkade: true, bark: true, bitcoin: true, usdt: true };
 
 /** The bubble of payment "pay-1" in the chat with "peer". */

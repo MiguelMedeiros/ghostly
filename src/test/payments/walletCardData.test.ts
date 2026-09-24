@@ -5,6 +5,8 @@ import { walletCards, type WalletRail } from "../../components/walletCardData";
 import { walletView } from "../fakeEngine";
 import { arkReady, barkReady, bitcoinSource, lightningSource, mint, REAL_MINT, TEST_MINT, usdtReady } from "./fixtures";
 
+// covers: wallet.deck, wallet.mode
+
 /** One card, as the wallet page and the chat's picker show it. */
 const cardOf = (rail: WalletRail, wallet: Partial<WalletView> = {}) => {
   const { id: _, ...shown } = walletCards(walletView(wallet), TEST_MINTS).find((c) => c.id === rail)!;

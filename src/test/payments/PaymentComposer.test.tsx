@@ -6,6 +6,8 @@ import { fakeEngine, linkView, paymentView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { arkReady, bitcoinSource, everyWallet, mint, REAL_MINT, reviewContext, reviewOf, target, TEST_MINT, usdtReady } from "./fixtures";
 
+// covers: payments.chat.cards, payments.chat.methods, payments.amounts, payments.cashu.send, payments.arkade.send, payments.bark.send, payments.bitcoin.send, payments.usdt.send
+
 const RAIL_KEY = "ghostly-payment-rail";
 const OTHER_MINT = "https://mint2.example.com";
 const ALL_ON = { cashu: true, lightning: true, arkade: true, bark: true, bitcoin: true, usdt: true };
