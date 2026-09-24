@@ -1,5 +1,4 @@
 {
-  "app.error-boundary": "No test throws inside a page to see the error screen; a component test (npm run test:ui) can now",
   "app.updates.desktop": "The Tauri updater needs a signed release feed; the Desktop harness only has a boot smoke test",
   "settings.storage-used": "Nothing asserts the storage figure in Settings; a component test (npm run test:ui) can",
   "storage.local": "The local file storage adapter (WISP 1001) is exercised only through backup.profile.file, never on its own",
