@@ -4,6 +4,7 @@
     "deleteChatTitle": "チャットを削除しますか？",
     "deleteChatLocal": "この端末のチャットと履歴を削除します。相手側のコピーは削除されません。",
     "anonymous": "匿名",
+    "unnamedContact": "連絡先 · {{key}}",
     "save": "保存",
     "cancel": "キャンセル",
     "delete": "削除",
@@ -160,7 +161,9 @@
     "version": "バージョン",
     "website": "ウェブサイト",
     "sourceCode": "ソースコード",
-    "license": "ライセンス"
+    "license": "ライセンス",
+    "shareProfile": "名前と写真を連絡先と共有",
+    "shareProfileHint": "連絡先にはこのプロフィールの名前と写真が表示されます。オフにすると「連絡先」と模様が代わりに表示されます。"
   },
   "updates": {
     "available": "Ghostly {{version}} が公開されました",

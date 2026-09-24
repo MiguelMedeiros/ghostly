@@ -44,6 +44,10 @@ export interface StoredLink {
   encKeyB64: string;
   createdAt: number;
   label?: string;
+  /**
+   * The name the contact asked to be shown by, as they last said it. `""` means a paired contact said they
+   * have none (removed, or not shared); absent means nothing was heard yet.
+   */
   peerNick?: string;
   /** The contact's profile picture, as they last sent it (checked, small JPEG data URL). */
   peerAvatar?: string;
@@ -504,6 +508,11 @@ export interface Settings {
   nick: string;
   /** This profile's picture, shown to paired contacts: a small square JPEG data URL. */
   avatar?: string;
+  /**
+   * Whether contacts are told this profile's name and picture (WISP 401 § name and picture). Absent means
+   * yes; off, every chat and group member is told there is none, and the join notice names nobody.
+   */
+  shareProfile?: boolean;
   relays: string[];
   /** Extra ICE servers (typically TURN) on top of the built-in STUN set. */
   iceServers: IceServerSetting[];
@@ -625,6 +634,10 @@ export interface LinkView {
   myPubKeyZ32: string;
   peerPubKeyZ32: string;
   label?: string;
+  /**
+   * The name the contact asked to be shown by, as they last said it. `""` means a paired contact said they
+   * have none (removed, or not shared); absent means nothing was heard yet.
+   */
   peerNick?: string;
   /** The contact's profile picture, as they last sent it (checked, small JPEG data URL). */
   peerAvatar?: string;

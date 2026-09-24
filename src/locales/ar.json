@@ -4,6 +4,7 @@
     "deleteChatTitle": "حذف المحادثة؟",
     "deleteChatLocal": "سيتم حذف المحادثة وسجلها من هذا الجهاز فقط، وليس نسخة جهة الاتصال.",
     "anonymous": "مجهول",
+    "unnamedContact": "جهة اتصال · {{key}}",
     "save": "حفظ",
     "cancel": "إلغاء",
     "delete": "حذف",
@@ -160,7 +161,9 @@
     "version": "الإصدار",
     "website": "الموقع",
     "sourceCode": "الكود المصدري",
-    "license": "الترخيص"
+    "license": "الترخيص",
+    "shareProfile": "مشاركة اسمي وصورتي مع جهات الاتصال",
+    "shareProfileHint": "ترى جهات اتصالك اسم هذا الملف الشخصي وصورته. عند الإيقاف، يرون «جهة اتصال» ونمطًا بدلًا منهما."
   },
   "updates": {
     "available": "الإصدار {{version}} من Ghostly متاح",

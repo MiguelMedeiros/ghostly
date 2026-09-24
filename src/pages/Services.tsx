@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { listSessions } from "../lib/storage";
-import { publicKeyLabel } from "../lib/publicKeyLabel";
+import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import type { SharedService } from "../lib/platform";
 import { Block, Button, Notice, Row, Section, Switch, input } from "../components/wallet/ui";
 import { ButtonGroup, FieldGrid, Page } from "../components/layout";
@@ -10,7 +10,7 @@ const GLOBE = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke
 
 /** Everyone this device has a chat with, by the key services are granted to. */
 function useContacts() {
-  return listSessions().map((s) => ({ key: s.peerPubKeyB64, name: s.label || s.nick || "Anonymous", short: publicKeyLabel(s.peerPubKeyB64) }));
+  return listSessions().map((s) => ({ key: s.peerPubKeyB64, name: s.label || s.nick || `Contact · ${contactTag(s.peerPubKeyB64)}`, short: publicKeyLabel(s.peerPubKeyB64) }));
 }
 
 /**

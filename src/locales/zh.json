@@ -4,6 +4,7 @@
     "deleteChatTitle": "删除聊天？",
     "deleteChatLocal": "这将删除此设备上的聊天及其记录，不会删除联系人的副本。",
     "anonymous": "匿名",
+    "unnamedContact": "联系人 · {{key}}",
     "save": "保存",
     "cancel": "取消",
     "delete": "删除",
@@ -160,7 +161,9 @@
     "version": "版本",
     "website": "网站",
     "sourceCode": "源代码",
-    "license": "许可证"
+    "license": "许可证",
+    "shareProfile": "与联系人分享我的名字和头像",
+    "shareProfileHint": "你的联系人会看到此个人资料的名字和头像。关闭后，他们只会看到“联系人”和一个图案。"
   },
   "updates": {
     "available": "Ghostly {{version}} 已发布",

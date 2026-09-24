@@ -4,6 +4,7 @@
     "deleteChatTitle": "¿Eliminar chat?",
     "deleteChatLocal": "Se eliminarán el chat y su historial de este dispositivo, no la copia de tu contacto.",
     "anonymous": "Anónimo",
+    "unnamedContact": "Contacto · {{key}}",
     "save": "Guardar",
     "cancel": "Cancelar",
     "delete": "Eliminar",
@@ -160,7 +161,9 @@
     "version": "Versión",
     "website": "Sitio web",
     "sourceCode": "Código fuente",
-    "license": "Licencia"
+    "license": "Licencia",
+    "shareProfile": "Compartir mi nombre y foto con los contactos",
+    "shareProfileHint": "Tus contactos ven el nombre y la foto de este perfil. Desactivado, ven “Contacto” y un patrón en su lugar."
   },
   "updates": {
     "available": "Ghostly {{version}} disponible",

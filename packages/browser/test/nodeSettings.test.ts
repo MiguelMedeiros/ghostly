@@ -85,6 +85,29 @@ describe("settings", () => {
     expect(link.setNick.mock.calls).toEqual([["Ghost"], [undefined]]);
   });
 
+  it("a profile that stops sharing its name and picture tells every chat there is none, and sharing again restores both", async () => {
+    const { node } = engine();
+    const link = stubLink();
+    await addChat(node, link);
+    const avatar = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/wAARCABAAEADASIAAhEBAxEB/9oACAEBAAA/ANk=";
+    await node.updateSettings({ settings: { nick: "Ghost" } });
+    link.setNick.mockClear();
+    await node.updateSettings({ settings: { shareProfile: false } });
+    expect(link.setNick).toHaveBeenLastCalledWith(undefined);
+    expect(link.setAvatar).toHaveBeenLastCalledWith(undefined);
+    expect((await db.getSettings()).shareProfile).toBe(false);
+    // While off, a new name or picture stays here.
+    link.setNick.mockClear(); link.setAvatar.mockClear();
+    await node.updateSettings({ settings: { nick: "Ghost 2" } });
+    await node.updateSettings({ settings: { avatar } }).catch(() => {});
+    expect(link.setNick.mock.calls.flat().filter(Boolean)).toEqual([]);
+    expect(link.setAvatar.mock.calls.flat().filter(Boolean)).toEqual([]);
+    await node.updateSettings({ settings: { shareProfile: true } });
+    expect(link.setNick).toHaveBeenLastCalledWith("Ghost 2");
+    // On is the default: it is not stored.
+    expect(await db.getSettings()).not.toHaveProperty("shareProfile");
+  });
+
   it("removing the held-message storage removes it from the saved settings", async () => {
     const { node } = engine();
     const changed = vi.spyOn(node["hold"], "storageChanged");

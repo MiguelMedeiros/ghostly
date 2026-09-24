@@ -12,6 +12,7 @@ import { useServicesPlatform } from "./hooks/useServicesPlatform";
 import { useSettings } from "./contexts/SettingsContext";
 import { newSpace } from "@ghostly/browser/backup/storage";
 import { useViewportHeight } from "./hooks/useViewportHeight";
+import { useEngineNick } from "./hooks/useAvatars";
 
 /** The browser's status bar follows the header of whichever theme is active. */
 function useThemeColor() {
@@ -72,6 +73,19 @@ function useHoldStorageSync() {
   }, [platform, s3, space, updateBackupStorage]);
 }
 
+/**
+ * The peer tells contacts this profile's name (WISP 401 § name and picture), so it must know the name the
+ * moment it is set on the Profile page, not only once some chat is opened. Each profile keeps its own.
+ */
+function useProfileNameSync() {
+  const { settings } = useSettings();
+  const engineNick = useEngineNick();
+  const nick = settings.defaultNickname;
+  useEffect(() => {
+    if (engineNick !== undefined && engineNick !== nick) void engine.call("updateSettings", { settings: { nick } }).catch(() => {});
+  }, [nick, engineNick]);
+}
+
 function useLoadedChats() {
   const routeSession = chatRouteSession(useLocation().pathname);
   const [callSession, setCallSession] = useState<string | null>(null);
@@ -123,6 +137,7 @@ function useLoadedChats() {
 
 export function App() {
   useHoldStorageSync();
+  useProfileNameSync();
   const isMobile = useIsMobile();
   const { pathname } = useLocation();
   useViewportHeight();

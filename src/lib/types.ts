@@ -55,7 +55,14 @@ export interface ChatSession {
   messages: ChatMessage[];
   createdAt: number;
   lastSyncAt?: number;
+  /** The contact's name: what they last said they go by, or else read out of their messages. */
   nick?: string;
+  /**
+   * `profile`: `nick` is what the contact itself last said it goes by (WISP 401 § name and picture, or a
+   * legacy chat's record), which a name read out of an older message no longer replaces.
+   */
+  nickSource?: "profile";
+  /** The name given to this chat here; it wins over the contact's own. */
   label?: string;
   /**
    * Messages deleted here, by id. The peer keeps republishing what it sent for

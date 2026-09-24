@@ -4,14 +4,14 @@ import { GROUP_READ_NOTE, GROUP_READ_NOTE_COMMUNITY } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { useBackdropDismiss } from "../hooks/useDismiss";
-import { publicKeyLabel } from "../lib/publicKeyLabel";
+import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import { edgeDot, edgeLabel, memberName } from "../lib/groups";
 import { GroupLinkPanel } from "./GroupLinkPanel";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
 
-const contactName = (link: LinkView) => link.label || link.peerNick || `Anonymous · ${publicKeyLabel(link.peerPubKeyZ32)}`;
+const contactName = (link: LinkView) => link.label || link.peerNick || `Contact · ${contactTag(link.peerPubKeyZ32)}`;
 
 /** Who is in a group, with what role; what the admin can do about it; whom to invite; and who can read what. */
 export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClose(): void }) {

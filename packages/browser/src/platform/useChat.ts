@@ -193,11 +193,9 @@ export const useChat: typeof Desktop.useChat = (params) => {
 
   const burn = useCallback(() => setIsBurned(true), []);
 
+  // The name this chat's own notices carry. The peer learns the profile's name from the app (`App.tsx`).
   const setNick = useCallback((nick: string) => {
     nickRef.current = nick || undefined;
-    if (engine.state && engine.state.settings.nick !== nick) {
-      void engine.call("updateSettings", { settings: { nick } }).catch(() => {});
-    }
   }, []);
 
   const setCallSignal = useCallback(async (signal: string | null) => {

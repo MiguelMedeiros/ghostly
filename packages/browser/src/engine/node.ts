@@ -1491,6 +1491,10 @@ export class GhostlyNode implements EngineImplementation {
 
   // -- settings ------------------------------------------------------------
 
+  /** The name contacts are told: none while this profile does not share it. */
+  private get sharedNick(): string | undefined { return this.settings.shareProfile === false ? undefined : this.settings.nick || undefined; }
+  private get sharedAvatar(): string | undefined { return this.settings.shareProfile === false ? undefined : this.settings.avatar || undefined; }
+
   async updateSettings({ settings }: { settings: Partial<Settings> }): Promise<void> {
     const wasOnline = this.settings.online;
     // Checked before anything changes: a relay list with no relay, or a TURN server a browser rejects,
@@ -1509,11 +1513,18 @@ export class GhostlyNode implements EngineImplementation {
     if (settings.avatar !== undefined) {
       if (!this.settings.avatar) delete this.settings.avatar;
       await db.putSettings(this.settings);
-      for (const live of this.links.values()) live.link?.setAvatar(this.settings.avatar);
     }
-    if (settings.nick !== undefined) {
+    if (settings.shareProfile !== undefined) {
+      if (settings.shareProfile !== false) delete this.settings.shareProfile;
+      await db.putSettings(this.settings);
+    }
+    // Contacts connected now are told at once, the others on their next session.
+    if (settings.avatar !== undefined || settings.shareProfile !== undefined) {
+      for (const live of this.links.values()) live.link?.setAvatar(this.sharedAvatar);
+    }
+    if (settings.nick !== undefined || settings.shareProfile !== undefined) {
       // GhostLink tells a paired peer directly; a legacy one still reads the record.
-      for (const live of this.links.values()) live.link?.setNick(this.settings.nick || undefined);
+      for (const live of this.links.values()) live.link?.setNick(this.sharedNick);
     }
     if (settings.holdStorage !== undefined) {
       if (!this.settings.holdStorage) delete this.settings.holdStorage;
@@ -1652,7 +1663,7 @@ export class GhostlyNode implements EngineImplementation {
       pairing: { credentials: { seedB64: stored.participationSeed!, peerKey: peer, requireSignedSignals: true, verifiedPeerKey: peer },
         pinPeer: async key => { if (key !== peer) throw new Error("Not the member this edge belongs to"); }, trustOnFirstUse: false },
       transport: this.transport,
-      nick: this.settings.nick || undefined,
+      nick: this.sharedNick,
       pollIntervals: this.pollIntervals,
       autoConnect: true,
       createPeerConnection: () =>
@@ -1744,8 +1755,8 @@ export class GhostlyNode implements EngineImplementation {
         },
       } : undefined,
       transport: this.transport,
-      nick: this.settings.nick || undefined,
-      avatar: this.settings.avatar || undefined,
+      nick: this.sharedNick,
+      avatar: this.sharedAvatar,
       lastSeenTimestamp,
       pollIntervals: this.pollIntervals,
       autoConnect: true,
@@ -1813,9 +1824,17 @@ export class GhostlyNode implements EngineImplementation {
           void db.patchLink(linkId, { peerAvatar: avatar ?? undefined });
           this.emitState();
         },
+        // A paired contact says its name on every session, and an empty one when it has none to show.
+        onPeerNick: (nick) => {
+          if ((nick ?? "") === live.stored.peerNick) return;
+          live.stored = { ...live.stored, peerNick: nick ?? "" };
+          void db.patchLink(linkId, { peerNick: nick ?? "" });
+          this.emitState();
+        },
         onPresence: (presence) => {
           live.presence = presence;
-          if (presence.nick && presence.nick !== live.stored.peerNick) {
+          // A legacy contact's name is in its record; a paired one's comes only from `onPeerNick`.
+          if (!stored.profile && presence.nick && presence.nick !== live.stored.peerNick) {
             live.stored = { ...live.stored, peerNick: presence.nick };
             void db.patchLink(linkId, { peerNick: presence.nick });
           }

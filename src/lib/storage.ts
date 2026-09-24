@@ -125,7 +125,7 @@ export function addMessage(
   if ((message.sender === "peer" || message.sender === "system") && message.id.startsWith("peer_")) {
     const joinMatch = message.nick ? null : message.text.match(/^👋 (.+) joined$/);
     const nick = peerDisplayName(message.nick ?? joinMatch?.[1]);
-    if (nick) session.nick = nick;
+    if (nick && session.nickSource !== "profile") session.nick = nick;
   }
   
   saveSession(session);
@@ -276,6 +276,21 @@ export function markSessionAsRead(sessionId: string): void {
 export function getUnreadCount(session: ChatSession): number {
   const lastRead = getLastReadCount(session.id);
   return Math.max(0, session.messages.length - lastRead);
+}
+
+/**
+ * Keeps the chat's contact name to what the contact itself last said (on the paired session, or in a legacy
+ * chat's record); `""` means they have none to show. Returns whether anything changed.
+ */
+export function setSessionPeerNick(sessionId: string, peerNick: string): boolean {
+  const session = loadSession(sessionId);
+  if (!session) return false;
+  const nick = peerDisplayName(peerNick);
+  if (session.nickSource === "profile" && session.nick === nick) return false;
+  session.nick = nick;
+  session.nickSource = "profile";
+  saveSession(session);
+  return true;
 }
 
 export function updateSessionLabel(sessionId: string, label: string): void {

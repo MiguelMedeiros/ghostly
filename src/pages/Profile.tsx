@@ -7,12 +7,12 @@ import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { listSessions } from "../lib/storage";
 import { COLOR_THEME_OPTIONS, type ColorScheme } from "../lib/settings";
 import { createProfile, currentProfile, listProfiles, renameProfile, switchProfile, THEME_COLOR, type ProfileEntry } from "../lib/profiles";
-import { Block, Button, Notice, Row, Section, Segmented, input } from "../components/wallet/ui";
+import { Block, Button, Notice, Row, Section, Segmented, Switch, input } from "../components/wallet/ui";
 import { ProfileBackups } from "../components/ProfileBackups";
 import { useEngineState, useIdentityAttention } from "../lib/identities";
 import { DeleteProfileDialog } from "../components/DeleteProfileDialog";
 import { ProfileBadge } from "../components/ProfileBadge";
-import { setMyAvatar, useMyAvatar } from "../hooks/useAvatars";
+import { setMyAvatar, setShareProfile, useMyAvatar, useShareProfile } from "../hooks/useAvatars";
 import { avatarFromFile } from "../lib/avatarImage";
 
 /** Profiles change outside React (another component, another tab); re-read them when they do. */
@@ -37,6 +37,7 @@ export function Profile() {
   const platform = useServicesPlatform();
   const { current, all } = useProfiles();
   const myAvatar = useMyAvatar();
+  const shareProfile = useShareProfile();
   const identities = useEngineState()?.identityProofs.length ?? 0;
   const identityAttention = useIdentityAttention();
   const [name, setName] = useState(current.name);
@@ -89,6 +90,11 @@ export function Profile() {
         <Row label="Name in chats">
           <input data-testid="account-nickname" aria-label={t("settings.nicknamePlaceholder")} className={`${input} w-44 flex-1`} value={settings.defaultNickname} maxLength={20} placeholder="Anonymous" onChange={(e) => updateDefaultNickname(e.target.value)} />
           <button type="button" onClick={randomizeNickname} title={t("settings.randomizeName")} aria-label={t("settings.randomizeName")} className="grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt cursor-pointer">↻</button>
+        </Row>
+        {/* Per profile: contacts are told at once, or told there is nothing to show (WISP 401 § name and picture). */}
+        <Row label={t("settings.shareProfile")} hint={t("settings.shareProfileHint")}>
+          <Switch testId="profile-share" label={t("settings.shareProfile")} checked={shareProfile}
+            onChange={(share) => void setShareProfile(share).then(() => setError(""), (err: unknown) => setError(err instanceof Error ? err.message : String(err)))} />
         </Row>
       </Section>
 

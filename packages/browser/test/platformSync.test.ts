@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatSession } from "../../../src/lib/types";
 import type { LinkView, StoredMessage } from "../src/shared/types";
-// covers: chats.created-marker, chat.paired.join-notice, chat.paired.delete-message, chat.paired.storage
+// covers: chats.created-marker, chat.paired.join-notice, chat.paired.delete-message, chat.paired.storage, chat.paired.nickname-sync
 
 /**
  * Keeping the UI's localStorage sessions and the peer's links in step. The page
@@ -238,5 +238,50 @@ describe("mirroring what the peer stores into the chat", () => {
     expect(stored.messages[0].meta).toBeUndefined();
     const legacy = sync.toChatMessage(message({ id: "q", via: "dht" as never }), "peer-1", "me-1");
     expect(legacy.meta?.dnsRecords).toEqual(["_msgs", "_ts", "_ack"]);
+  });
+});
+
+describe("the contact's own name", () => {
+  const view = (peerNick?: string) => link({ createdAt: 1, profile: "paired-chat/1", peerNick });
+  async function report(links: LinkView[]) {
+    engine.state = { links };
+    for (const listener of engine.stateListeners) listener();
+    await vi.advanceTimersByTimeAsync(0);
+  }
+
+  it("is what the chat list shows as soon as the peer heard it, and follows it when it changes or goes", async () => {
+    imported();
+    storage.saveSession(session({ profile: "paired-chat/1" }));
+    await start([view()]);
+    expect(storage.loadSession("s1")!.nick).toBeUndefined();
+    changes = 0;
+    await report([view("Alice")]);
+    expect(storage.loadSession("s1")).toMatchObject({ nick: "Alice", nickSource: "profile" });
+    expect(changes).toBeGreaterThan(0);
+    await report([view("Alicia")]);
+    expect(storage.loadSession("s1")!.nick).toBe("Alicia");
+    // Nothing new: nothing written, nobody told.
+    changes = 0;
+    await report([view("Alicia")]);
+    expect(changes).toBe(0);
+    // The contact removed it (or stopped sharing it): no stale name stays behind.
+    await report([view("")]);
+    expect(storage.loadSession("s1")!.nick).toBeUndefined();
+  });
+
+  it("is not replaced by a name read out of an older message, and a name given here still wins", async () => {
+    imported();
+    storage.saveSession(session({ profile: "paired-chat/1", label: "My sister" }));
+    await start([view("Alice")]);
+    engine.messageListeners[0]("link-1", [message({ id: "peer_old", text: "👋 Casper joined" })]);
+    expect(storage.loadSession("s1")).toMatchObject({ nick: "Alice", label: "My sister" });
+  });
+
+  it("a legacy chat still learns a name from the contact's messages", async () => {
+    imported();
+    storage.saveSession(session());
+    await start([link({ createdAt: 1 })]);
+    engine.messageListeners[0]("link-1", [message({ id: "peer_j", text: "👋 Casper joined" })]);
+    expect(storage.loadSession("s1")!.nick).toBe("Casper");
   });
 });

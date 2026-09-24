@@ -4,6 +4,7 @@
     "deleteChatTitle": "Delete chat?",
     "deleteChatLocal": "This deletes the chat and its history from this device. Your contact’s copy is not deleted.",
     "anonymous": "Anonymous",
+    "unnamedContact": "Contact · {{key}}",
     "save": "Save",
     "cancel": "Cancel",
     "delete": "Delete",
@@ -160,7 +161,9 @@
     "version": "Version",
     "website": "Website",
     "sourceCode": "Source code",
-    "license": "License"
+    "license": "License",
+    "shareProfile": "Share my name and picture with contacts",
+    "shareProfileHint": "Your contacts see this profile's name and picture. Off, they see “Contact” and a pattern instead."
   },
   "updates": {
     "available": "Ghostly {{version}} is available",

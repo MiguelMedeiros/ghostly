@@ -29,7 +29,7 @@ Number note: legacy reader paths once used `04` for capability negotiation (now 
 | Wallet backups and restores | A backup is made from, and restored into, the active profile |
 | Settings: color theme, light/dark mode, language, nickname, notifications, lock screen, network | Profile settings record |
 | Wallet mode (Mainnet or Testnet) and each mode's wallets ([200](200-payments.md)) | Peer database |
-| Profile picture, shown to paired contacts with the nickname ([401](401-paired-chat.md)); the pictures contacts sent, with their chats | Peer database |
+| Profile picture, shown to paired contacts with the nickname ([401](401-paired-chat.md)), and whether contacts are told either (on unless switched off); the names and pictures contacts sent, with their chats | Peer database |
 | Optional identity proofs (300 series) | Planned; disabled in this release |
 
 Nothing crosses profiles. A contact of one profile cannot reach an app, a wallet or a chat of another.

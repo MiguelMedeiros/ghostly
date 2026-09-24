@@ -81,6 +81,11 @@ export interface GhostLinkEvents {
   onPresence?(presence: PeerPresence): void;
   /** A paired contact's profile picture, already checked; `null` when they removed it. */
   onPeerAvatar?(avatar: string | null): void;
+  /**
+   * The name a paired contact asked to be shown by, already checked; `null` when they have none (never set,
+   * removed, or not shared). Said on every session, so what arrives here is the contact's current choice.
+   */
+  onPeerNick?(nick: string | null): void;
   onMessageReceipt?(id: string): void | Promise<void>;
   /**
    * What the contact's app says about held items (`hold/1`): whether it accepts them (from the handshake, or
@@ -763,9 +768,10 @@ export class GhostLink {
     try { this.channel.send(JSON.stringify({ t: "paired-avatar", a: this.options.avatar ?? "" })); } catch { /* sent again on the next session */ }
   }
 
+  /** An empty `n` says there is no name to show (none set, removed, or not shared). */
   private sendPairedNick(): void {
     if (!this.options.params.profile || !this.channel || !this.isDataLinkOpen) return;
-    this.channel.send(JSON.stringify({ t: "paired-nick", n: this.options.nick ?? "" }));
+    try { this.channel.send(JSON.stringify({ t: "paired-nick", n: this.options.nick ?? "" })); } catch { /* sent again on the next session */ }
   }
 
   private mergePresence(presence: PeerPresence): PeerPresence {
@@ -1089,6 +1095,7 @@ export class GhostLink {
           }
           if (frame?.t === "paired-nick") {
             const nick = sanitizeNick(frame.n);
+            if (typeof frame.n === "string") this.options.events?.onPeerNick?.(nick ?? null);
             if (nick !== this.peerNickOverride) {
               this.peerNickOverride = nick ?? null;
               this.options.events?.onPresence?.(this.presence);

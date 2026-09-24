@@ -10,7 +10,32 @@ export function Avatar({ src, label, testId }: { src?: string; label: string; te
     : <span className="text-text-muted">{label.charAt(0).toUpperCase()}</span>;
 }
 
-/** The picture a contact shares with this chat, or their initial. */
-export function PeerAvatar({ peerPubKey, label, testId }: { peerPubKey?: string; label: string; testId?: string }) {
-  return <Avatar src={usePeerAvatar(peerPubKey)} label={label} testId={testId} />;
+/**
+ * A pattern drawn from a key: the same contact always gets the same one, so a contact with no name or
+ * picture is still told apart at a glance. 5×5 cells mirrored left to right, one hue, all from the key.
+ */
+export function Identicon({ seed }: { seed: string }) {
+  let hash = 2166136261;
+  for (let i = 0; i < seed.length; i++) hash = Math.imul(hash ^ seed.charCodeAt(i), 16777619) >>> 0;
+  const hue = hash % 360, bits = Math.imul(hash, 2654435761) >>> 0;
+  const cells: [number, number][] = [];
+  for (let i = 0; i < 15; i++) {
+    if (!((bits >>> i) & 1)) continue;
+    const x = Math.floor(i / 5), y = i % 5;
+    cells.push([x, y]);
+    if (x < 2) cells.push([4 - x, y]);
+  }
+  return (
+    <svg viewBox="-1 -1 7 7" aria-hidden="true" data-testid="identicon" className="absolute inset-0 w-full h-full rounded-full"
+      style={{ background: `hsl(${hue} 35% 88%)` }}>
+      {cells.map(([x, y]) => <rect key={`${x}.${y}`} x={x} y={y} width="1.02" height="1.02" fill={`hsl(${hue} 55% 42%)`} />)}
+    </svg>
+  );
+}
+
+/** The picture a contact shares with this chat; else their initial, or a pattern of their key when they have no name. */
+export function PeerAvatar({ peerPubKey, label, named = true, testId }: { peerPubKey?: string; label: string; named?: boolean; testId?: string }) {
+  const src = usePeerAvatar(peerPubKey);
+  if (!src && !named && peerPubKey) return <Identicon seed={peerPubKey} />;
+  return <Avatar src={src} label={label} testId={testId} />;
 }

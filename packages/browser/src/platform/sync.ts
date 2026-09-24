@@ -5,10 +5,11 @@ import {
   findSession,
   forgetInviteCode,
   listSessions,
+  setSessionPeerNick,
   updateSessionLabel,
 } from "../../../../src/lib/storage";
 import type { ChatMessage, ChatSession } from "../../../../src/lib/types";
-import type { StoredMessage } from "../shared/types";
+import type { LinkView, StoredMessage } from "../shared/types";
 import { engine } from "./engine";
 
 /**
@@ -89,7 +90,16 @@ function mirrorMessages(linkId: string, messages: StoredMessage[]): void {
     if (updated) session.messages = updated.messages;
     changed = true;
   }
+  if (mirrorPeerNick(session.id, link)) changed = true;
   if (changed) notifySessionsChanged();
+}
+
+/**
+ * The name the contact told the peer (on a paired session, or in a legacy chat's record) is the one the chat
+ * list and header show, unless the chat was renamed here.
+ */
+function mirrorPeerNick(sessionId: string, link: LinkView): boolean {
+  return link.peerNick !== undefined && setSessionPeerNick(sessionId, link.peerNick);
 }
 
 const ensuring = new Set<string>();
@@ -115,10 +125,12 @@ async function reconcile(): Promise<void> {
 
   const sessions = listSessions();
   const peers = new Set(sessions.map((s) => s.peerPubKeyB64));
+  let renamed = false;
 
   for (const session of sessions) {
     const live = engine.linkByPeer(session.peerPubKeyB64);
     if (live && session.deliveryMode !== live.deliveryMode) { session.deliveryMode = live.deliveryMode; saveSession(session); }
+    if (live && mirrorPeerNick(session.id, live)) renamed = true;
     if (session.profile && live?.pairing?.peerKey && ["ready", "waiting"].includes(live.pairing.status)) forgetInviteCode(session.id);
     if (engine.linkByPeer(session.peerPubKeyB64) || ensuring.has(session.id)) continue;
     ensuring.add(session.id);
@@ -133,6 +145,7 @@ async function reconcile(): Promise<void> {
       .catch(() => {})
       .finally(() => ensuring.delete(session.id));
   }
+  if (renamed) notifySessionsChanged();
 
   for (const link of state.links) {
     if (peers.has(link.peerPubKeyZ32) || Date.now() - link.createdAt < FORGET_AFTER_MS) continue;

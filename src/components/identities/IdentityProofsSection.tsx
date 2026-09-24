@@ -5,6 +5,7 @@ import type { IdentityProofView, LinkView } from "@ghostly/browser/shared/types"
 import { Block, Button, Notice, Row } from "../wallet/ui";
 import { Deck } from "../deck/Deck";
 import { addableProviders, chatsByPeer, contactName, SHARED_STATUS, useEngineState } from "../../lib/identities";
+import { contactTag } from "../../lib/publicKeyLabel";
 import { chatPath } from "../../lib/url";
 import type { ChatSession } from "../../lib/types";
 import { useI18n } from "../../contexts/I18nContext";
@@ -61,7 +62,7 @@ export function IdentityProofsSection() {
   const now = Math.floor(Date.now() / 1000);
   const canAdd = addableProviders().length > 0;
   const chats = state.links.some(l => l.identities?.shared.length) ? chatsByPeer() : new Map<string, ChatSession>();
-  const nameOf = (link: LinkView) => contactName(chats.get(link.peerPubKeyZ32)) ?? t("common.anonymous");
+  const nameOf = (link: LinkView) => contactName(chats.get(link.peerPubKeyZ32)) ?? t("common.unnamedContact", { key: contactTag(link.peerPubKeyZ32) });
   /** Contacts whose app checked this proof and refused it. */
   const refusedBy = (id: string) => state.links.filter(l => l.identities?.shared.some(s => s.id === id && s.status === "rejected")).map(nameOf);
 
