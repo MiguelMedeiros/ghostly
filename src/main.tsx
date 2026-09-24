@@ -10,6 +10,8 @@ import { Root } from "./Root";
 import { createDesktopHost } from "./desktop/host";
 import { setStorageProfile } from "./lib/storage";
 import { activeProfileId, namespaceOf, setProfileBase } from "./lib/profiles";
+import { loadSettings } from "./lib/settings";
+import { applyDocumentLanguage } from "./lib/documentLanguage";
 
 async function boot() {
   let profile = "";
@@ -26,10 +28,12 @@ async function boot() {
     setStorageProfile(profile);
     setDatabaseName(`ghostly_${profile}`);
   }
+  // The profile's language on <html> before anything is painted (the I18nProvider keeps it in step from then on).
+  applyDocumentLanguage(loadSettings().language);
 
   const root = createRoot(document.getElementById("root")!);
   await becomeThePeer(`ghostly-peer-${profile}`, () =>
-    root.render(<p style={{ padding: 24, font: "15px system-ui" }}>Ghostly is already running with this profile.</p>),
+    root.render(<p lang="en" style={{ padding: 24, font: "15px system-ui" }}>Ghostly is already running with this profile.</p>),
   );
 
   const host = createDesktopHost(await getVersion().catch(() => "0.0.0"));

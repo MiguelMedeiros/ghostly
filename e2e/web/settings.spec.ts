@@ -54,6 +54,35 @@ test("the language changes the interface", { tag: ["@feature:app.i18n"] }, async
   await expect(page.getByTitle("New Chat")).toBeVisible();
 });
 
+test("<html lang> and <html dir> follow the language, from the first paint", { tag: ["@feature:app.i18n"] }, async ({ peer }) => {
+  const { page } = await peer("alice");
+  await page.goto("/#/settings");
+  const html = page.locator("html");
+  await expect(html).toHaveAttribute("lang", "en");
+  await expect(html).toHaveAttribute("dir", "ltr");
+
+  // Arabic turns the page right to left: screen readers, hyphenation and spell-check read it as Arabic.
+  await page.locator("select").first().selectOption("ar");
+  await expect(html).toHaveAttribute("lang", "ar");
+  await expect(html).toHaveAttribute("dir", "rtl");
+
+  // A reload starts in it: the entry point sets both before React renders, so the page never shows in the wrong direction.
+  await page.addInitScript(() => {
+    document.addEventListener("DOMContentLoaded", () => {
+      (window as unknown as { atLoad: string[] }).atLoad = [document.documentElement.lang, document.documentElement.dir];
+    });
+  });
+  await page.reload();
+  expect(await page.evaluate(() => (window as unknown as { atLoad: string[] }).atLoad)).toEqual(["ar", "rtl"]);
+  await expect(page.getByRole("heading", { name: "الإعدادات" })).toBeVisible();
+
+  await page.locator("select").first().selectOption("pt");
+  await expect(html).toHaveAttribute("lang", "pt-BR");
+  await expect(html).toHaveAttribute("dir", "ltr");
+  await page.locator("select").first().selectOption("en");
+  await expect(html).toHaveAttribute("lang", "en");
+});
+
 test("reduce motion is a switch", { tag: ["@feature:app.reduce-motion", "@feature:app.attention.sounds"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await page.goto("/#/settings");

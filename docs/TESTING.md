@@ -545,7 +545,7 @@ What the first full run found (2026-09-24, dev at `8fd41d4`, a local mint and Mi
   - The invite card keeps the last delivery choice.
   - An extension peer only goes away through the Offline switch.
   - Nicknames travel with messages.
-- Switching the language leaves `<html lang>` unchanged.
+- Switching the language left `<html lang>` unchanged. Fixed since: `<html lang>` and `<html dir>` follow the language from the first paint.
 
 Blocks not run in this run: every Testnet payment on LND, Core Lightning, NWC, Breez, Arkade, Bark, BDK and USDT, which need their regtest stacks. The Desktop scenarios need a pairing adapter for the Linux harness.
 

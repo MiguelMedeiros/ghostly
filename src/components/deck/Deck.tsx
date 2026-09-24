@@ -188,7 +188,8 @@ export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,
  const top=LIFT+4;
  const current=cards[active];
  // The deck wears the chosen card's colour class: its glow and the arrows' marks take that card's ink.
- return <div ref={root} className={`deck ${className}${current?` ${tone(current)}`:''}${compact?` deck-compact ${className}-compact`:''}`} data-mode={mode} style={{'--deck-w':`${width}px`,'--card-w':`${cardWidth}px`,'--card-h':`${cardHeight}px`,'--track-h':`${trackHeight}px`} as CSSProperties}>
+ // Left to right in every language: the stack, its arrows and its marks are placed and moved in physical pixels.
+ return <div ref={root} dir="ltr" className={`deck ${className}${current?` ${tone(current)}`:''}${compact?` deck-compact ${className}-compact`:''}`} data-mode={mode} style={{'--deck-w':`${width}px`,'--card-w':`${cardWidth}px`,'--card-h':`${cardHeight}px`,'--track-h':`${trackHeight}px`} as CSSProperties}>
   <div ref={glow} className={part('glow')} aria-hidden="true"/>
   <div ref={track} className={part('track')} role={kind==='tabs'?'tablist':'radiogroup'} aria-label={label} onKeyDown={onKey} onPointerMove={onPointerMove} onPointerLeave={onPointerLeave}>
    {cards.map((card,i)=>{
