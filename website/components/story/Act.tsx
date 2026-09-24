@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, useInView, useMotionValueEvent, useScroll, useSpring, useTransform, type MotionValue } from "motion/react";
 import { Ghost, type GhostMood } from "@/components/ghost/Ghost";
-import { orientationOf, scatter, stepOf, usePortrait, VIEW_BOX_ORIGIN } from "@/components/home/stage";
+import { orientationOf, scatter, stepOf, useCards, usePortrait, VIEW_BOX_ORIGIN } from "@/components/home/stage";
 import { useCalm } from "@/lib/useCalm";
 import { BLOCKING, poseAt, ROOMS, STAGE, valueAt, type Chapter } from "./poses";
 
@@ -38,7 +38,8 @@ export function Act({
   children: React.ReactNode;
 }) {
   const calm = useCalm();
-  if (calm) {
+  const cards = useCards();
+  if (calm || cards) {
     return (
       <div id={id} className="act act--static">
         {children}

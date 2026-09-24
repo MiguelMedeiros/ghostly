@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Shell } from "@/components/site/Shell";
 import { Act } from "@/components/story/Act";
 import { Statement } from "@/components/story/Statement";
+import { StoryRail } from "@/components/story/StoryRail";
 import { home } from "@/content/home";
 import { href, type Locale } from "@/lib/i18n";
 import { Hero } from "./Hero";
@@ -13,7 +14,6 @@ import { NextSection } from "./NextSection";
 import { SpaceSection } from "./SpaceSection";
 import { OpenScene } from "./OpenScene";
 import { Finale } from "./Finale";
-import { Legend } from "./Legend";
 import "@/app/home.css";
 
 /**
@@ -27,6 +27,20 @@ export function HomePage({ locale }: { locale: Locale }) {
   const t = home[locale];
   return (
     <Shell locale={locale}>
+      <StoryRail
+        label={t.rail}
+        marks={[
+          { id: "hero", label: `00 — ${t.hero.title1}` },
+          { id: "invite", label: t.invite.eyebrow },
+          { id: "dht", label: t.dht.eyebrow },
+          { id: "agree", label: t.agree.eyebrow },
+          { id: "alive", label: t.alive.eyebrow },
+          { id: "next", label: t.next.eyebrow },
+          { id: "space", label: t.space.eyebrow },
+          { id: "open", label: t.open.eyebrow },
+          { id: "download", label: t.finale.eyebrow },
+        ]}
+      />
       <Act
         id="act-1"
         field
@@ -55,7 +69,6 @@ export function HomePage({ locale }: { locale: Locale }) {
         <AliveScene eyebrow={t.alive.eyebrow} label={t.alive.label} steps={t.alive.steps} labels={t.alive} />
       </Act>
       <NextSection t={t.next} locale={locale} />
-      <Legend locale={locale} title={t.legend.title} draft={t.legend.draft} />
       <SpaceSection t={t.space} w={t.wallets} locale={locale} shotLabel={t.next.fromDev} />
       <OpenScene
         eyebrow={t.open.eyebrow}

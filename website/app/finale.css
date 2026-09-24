@@ -1,6 +1,8 @@
-/* Finale: the story closes. Boo and Casper meet, talk, Casper leaves and Boo
-   turns to you. Every rule is prefixed fin-; the default frame (no scripts,
-   reduced motion) is the finished one, and only html.js + motion hides it. */
+/* Finale: the story closes. The title, lead and button are there as soon as
+   the reader arrives; above them Boo and Casper meet, talk, Casper leaves and
+   Boo turns to you. Below, the download panel. Every rule is prefixed fin-;
+   the default frame (no scripts, reduced motion) is the finished one, and only
+   html.js + motion hides anything. */
 
 .fin {
   --fin-travel: 160px;
@@ -161,20 +163,28 @@ html.js .fin[data-state="done"][data-poof="true"] .fin-actor--boo {
 .fin-word {
   display: inline-block;
 }
+/* Six or seven words, 45ms apart, 0.55s each: the whole title is up in ~0.8s. */
 .fin-word-in {
   display: inline-block;
   clip-path: inset(-0.25em -0.1em -0.3em -0.1em);
   transition:
-    clip-path 0.7s var(--ease),
-    transform 0.7s var(--ease);
-  transition-delay: calc(var(--i, 0) * 60ms);
+    clip-path 0.55s var(--ease),
+    transform 0.55s var(--ease);
+  transition-delay: calc(var(--i, 0) * 45ms);
 }
 .fin-lead {
   margin-top: 26px;
   max-width: 34em;
+  transition:
+    opacity 0.55s var(--ease) 0.15s,
+    transform 0.55s var(--ease) 0.15s;
 }
 .fin-cta {
   margin-top: 34px;
+  transition:
+    opacity 0.55s var(--ease) 0.25s,
+    transform 0.2s var(--ease),
+    box-shadow 0.2s;
 }
 .fin[data-state="done"][data-poof="true"] .fin-cta {
   animation: fin-glow 0.9s ease-out 1 both;
@@ -197,135 +207,148 @@ html.js .fin[data-state="done"][data-poof="true"] .fin-actor--boo {
   }
 }
 
-/* ── The download strip: one line, two rules, no cards ── */
-.fin-strip {
-  --fin-list: 84px; /* two rows of 32px links, a 6px row gap and 14px above */
-  position: relative;
+/* ── The download panel: a head, three platform cards, two more ── */
+.fin-panel {
   width: 100%;
-  max-width: 880px;
-  margin-top: 64px;
-  padding: 22px 0;
-  border-top: 1px solid var(--line);
+  max-width: 1040px;
+  margin-top: 72px;
+  text-align: left;
+}
+.fin-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 28px;
+  padding-bottom: 18px;
+  margin-bottom: 18px;
   border-bottom: 1px solid var(--line);
+}
+.fin-panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+.fin-panel-title > svg {
+  width: 22px;
+  height: 22px;
+  color: var(--cyan);
+  flex: none;
+}
+.fin-panel-body {
+  color: var(--muted);
+  font-size: var(--t-note);
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+.fin-cards {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 14px;
+}
+.fin-card {
+  grid-column: span 2;
+  padding: 20px 20px 18px;
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  transition:
+    border-color 0.3s,
+    box-shadow 0.3s;
+}
+/* The reader's machine. */
+.fin-card[data-hot="true"] {
+  border-color: rgba(34, 211, 238, 0.42);
+  box-shadow:
+    inset 0 0 0 1px rgba(34, 211, 238, 0.12),
+    0 24px 60px -36px rgba(34, 211, 238, 0.55);
+}
+/* The extension and the CLI: the same shape as a platform card, one button. */
+.fin-card--wide {
+  grid-column: span 3;
+}
+.fin-card--wide > .fin-dl {
+  justify-self: start;
+}
+.fin-card-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 18px 32px;
-  flex-wrap: wrap;
-  text-align: left;
-}
-/* The open list spans the whole strip below the row, so the two link-arrow
-   items keep their place instead of wrapping. */
-.fin-strip:has(.fin-details[open]) {
-  padding-bottom: calc(22px + var(--fin-list));
-}
-html.js .fin-strip:has(.fin-details[open]:not([data-detected])) {
-  padding-bottom: 22px;
-}
-.fin-details[open] .fin-platforms {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 22px;
-}
-.fin-desktop {
-  display: grid;
   gap: 10px;
-  justify-items: start;
+  min-height: 24px;
 }
-.fin-strip-label {
+.fin-card-title {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  text-transform: uppercase;
+  gap: 10px;
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
 }
-.fin-desktop-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 18px;
-}
-.fin-installer {
-  min-height: 46px;
-  padding: 10px 18px;
-  font-size: 15px;
-}
-.fin-installer svg {
-  width: 18px;
-  height: 18px;
-}
-.fin-details summary {
-  list-style: none;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 2px;
-  color: var(--muted);
-  font-size: 15px;
-  font-weight: 500;
-}
-.fin-details summary::-webkit-details-marker {
-  display: none;
-}
-.fin-details summary:hover {
+.fin-card-title > svg {
+  width: 20px;
+  height: 20px;
   color: var(--cyan);
-}
-.fin-details-mark {
-  width: 8px;
-  height: 8px;
-  border-right: 1.6px solid currentColor;
-  border-bottom: 1.6px solid currentColor;
-  transform: translateY(-2px) rotate(45deg);
-  transition: transform 0.2s var(--ease);
-}
-.fin-details[open] .fin-details-mark {
-  transform: translateY(1px) rotate(-135deg);
-}
-/* With scripts, the list waits for the detection so it never shows for a frame
-   on a machine we can name; without scripts it is simply there. */
-html.js .fin-details[open]:not([data-detected]) .fin-platforms {
-  display: none;
-}
-.fin-platforms {
-  display: grid;
-  grid-template-columns: repeat(3, max-content);
-  grid-auto-rows: 32px;
-  gap: 6px 32px;
-  padding: 14px 0 0;
-}
-.fin-platforms a {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 32px;
-  color: var(--muted);
-  font-size: 15px;
-  white-space: nowrap;
-}
-.fin-platforms a:hover {
-  color: var(--cyan);
-  text-decoration: underline;
-  text-underline-offset: 4px;
-}
-.fin-platforms a[aria-current="true"] {
-  color: var(--text);
-}
-.fin-platforms svg {
-  width: 16px;
-  height: 16px;
   flex: none;
 }
-.fin-more {
-  font-size: 15px;
-  white-space: nowrap;
+.fin-card-text {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
 }
-.fin-more svg {
+.fin-card-body {
+  color: var(--muted);
+  font-size: var(--t-note);
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+.fin-chip--hot {
+  color: var(--cyan);
+  border-color: rgba(34, 211, 238, 0.4);
+  background: rgba(34, 211, 238, 0.08);
+}
+.fin-dls {
+  display: grid;
+  gap: 8px;
+}
+.fin-dl {
+  justify-content: flex-start;
+  min-height: 46px;
+  padding: 10px 14px;
+  gap: 10px;
+  font-size: 15px;
+}
+.fin-dl svg {
   width: 18px;
   height: 18px;
 }
+.fin-dl-ext {
+  margin-left: auto;
+  padding-left: 12px;
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.fin-dl:hover .fin-dl-ext {
+  color: var(--cyan);
+}
+/* The exact installer we guessed for this machine. */
+.fin-dl[aria-current="true"] {
+  border-color: rgba(34, 211, 238, 0.55);
+  background: rgba(34, 211, 238, 0.08);
+}
+.fin-dl[aria-current="true"] .fin-dl-ext {
+  color: var(--cyan);
+}
 .fin-note {
-  margin-top: 18px;
+  margin-top: 22px;
   text-transform: none;
   letter-spacing: 0.02em;
   line-height: 1.7;
@@ -340,12 +363,14 @@ html.js .fin-details[open]:not([data-detected]) .fin-platforms {
   color: var(--cyan);
 }
 
-/* ── The sequence (only with scripts and motion) ─ */
+/* ── The reveals (only with scripts and motion) ─ */
 @media (prefers-reduced-motion: no-preference) {
-  html.js .fin[data-state="idle"] .fin-eyebrow {
+  /* The eyebrow fades in as the section approaches. */
+  html.js .fin[data-inview="false"] .fin-eyebrow {
     opacity: 0;
     transition: none;
   }
+  /* The ghosts wait off stage until half of it is on screen, then glide in. */
   html.js .fin[data-state="idle"] .fin-actor {
     opacity: 0;
     transition: none;
@@ -356,14 +381,38 @@ html.js .fin-details[open]:not([data-detected]) .fin-platforms {
   html.js .fin[data-state="idle"] .fin-actor--casper {
     transform: translateX(var(--fin-travel));
   }
-  html.js .fin:not([data-state="done"]) .fin-word-in {
+  /* Title, lead and button rise the moment the title reaches the viewport. */
+  html.js .fin:not([data-shown="true"]) .fin-word-in {
     clip-path: inset(0 -0.1em 100% -0.1em);
     transform: translateY(0.35em);
     transition: none;
   }
+  html.js .fin:not([data-shown="true"]) .fin-lead {
+    opacity: 0;
+    transform: translateY(10px);
+    transition: none;
+  }
+  html.js .fin:not([data-shown="true"]) .fin-cta {
+    opacity: 0;
+    transition: none;
+  }
 }
 
-/* ── Phone: the ghosts sit right above the button ─ */
+/* ── Narrow: two cards per row, the wide ones stack ─ */
+@media (max-width: 1000px) {
+  .fin-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .fin-card,
+  .fin-card--wide {
+    grid-column: auto;
+  }
+  .fin-cards > :last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ── Phone: the ghosts sit right above the button; the cards stack ─ */
 @media (max-width: 720px) {
   .fin {
     --fin-travel: 100px;
@@ -389,12 +438,9 @@ html.js .fin-details[open]:not([data-detected]) .fin-platforms {
     width: 100%;
     max-width: 420px;
   }
-  .fin-strip {
+  .fin-panel {
     order: 6;
-    margin-top: 44px;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 18px;
+    margin-top: 48px;
   }
   .fin-note {
     order: 7;
@@ -409,20 +455,18 @@ html.js .fin-details[open]:not([data-detected]) .fin-platforms {
   .fin-poof {
     --dx: calc((var(--n) - 1) * 18px);
   }
-  /* Stacked, the list simply opens in place. */
-  .fin-strip:has(.fin-details[open]) {
-    padding-bottom: 22px;
+  .fin-panel-head {
+    display: grid;
+    gap: 6px;
   }
-  .fin-details[open] .fin-platforms {
-    position: static;
+  .fin-cards {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
   }
-  .fin-platforms {
-    grid-template-columns: 1fr 1fr;
-    gap: 6px 18px;
+  .fin-card {
+    padding: 18px 16px 16px;
   }
-}
-@media (max-width: 400px) {
-  .fin-platforms {
-    grid-template-columns: 1fr;
+  .fin-card--wide > .fin-dl {
+    justify-self: stretch;
   }
 }

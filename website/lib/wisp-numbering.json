@@ -171,6 +171,51 @@
     "numberAssignment": "unassigned"
   },
   {
+    "oldId": "—",
+    "id": "304",
+    "oldFile": "3xx-domain.md",
+    "file": "3xx-domain.md",
+    "kind": "Adapter",
+    "displayNumber": "3xx",
+    "numberAssignment": "unassigned"
+  },
+  {
+    "oldId": "—",
+    "id": "305",
+    "oldFile": "3xx-openpgp.md",
+    "file": "3xx-openpgp.md",
+    "kind": "Adapter",
+    "displayNumber": "3xx",
+    "numberAssignment": "unassigned"
+  },
+  {
+    "oldId": "—",
+    "id": "306",
+    "oldFile": "3xx-bitcoin.md",
+    "file": "3xx-bitcoin.md",
+    "kind": "Adapter",
+    "displayNumber": "3xx",
+    "numberAssignment": "unassigned"
+  },
+  {
+    "oldId": "—",
+    "id": "307",
+    "oldFile": "3xx-ssh.md",
+    "file": "3xx-ssh.md",
+    "kind": "Adapter",
+    "displayNumber": "3xx",
+    "numberAssignment": "unassigned"
+  },
+  {
+    "oldId": "—",
+    "id": "308",
+    "oldFile": "3xx-oidc-proofs.md",
+    "file": "3xx-oidc-proofs.md",
+    "kind": "Adapter",
+    "displayNumber": "3xx",
+    "numberAssignment": "unassigned"
+  },
+  {
     "oldId": "13",
     "id": "400",
     "oldFile": "13-chat.md",

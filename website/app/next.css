@@ -11,7 +11,7 @@
   padding-block: clamp(88px, 12vw, 160px) clamp(72px, 9vw, 120px);
 }
 /* The article (no scripts, reduced motion) has no black room before it: fade in from the page instead. */
-html:where(:not(.js), .calm) .nx {
+html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .nx {
   background: linear-gradient(to bottom, var(--bg), var(--room-read) 120px);
 }
 .nx::before {
@@ -136,16 +136,57 @@ html.js .nx-line[data-drawn="true"] path {
 .nx-row-media {
   margin: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
 }
 .nx-row-media .caption {
+  grid-column: 1 / -1;
   text-align: right;
+}
+/* The phone beside a row's window: only where there is room for it (wide stacked layouts). */
+.nx-row-phone {
+  display: none;
+}
+/* On a phone, the phone picture is the natural one: it replaces the desktop crop for rows that have it. */
+@media (max-width: 860px) {
+  .nx-row-media[data-phone="true"] .nx-win {
+    display: none;
+  }
+  .nx-row-media[data-phone="true"] .nx-row-phone {
+    display: block;
+    width: 62%;
+    max-width: 300px;
+    height: auto;
+    margin-inline: auto;
+    border-radius: 18px;
+    border: 4px solid #111a25;
+    box-shadow: 0 30px 50px -20px rgba(0, 0, 0, 0.9);
+  }
 }
 
 /* Stacked rows on a wide screen (reduced motion, no scripts): the picture stays a device, not a billboard. */
 @media (min-width: 861px) {
   .nx-row-media {
     max-width: 760px;
+  }
+  /* Window and phone share the row, feet on the same line; the phone is ≈ 22% of the window's width. */
+  .nx-row-media[data-phone="true"] {
+    max-width: 940px;
+    grid-template-columns: minmax(0, 1fr) 18%;
+    column-gap: 14px;
+    align-items: end;
+  }
+  /* The caption stays under the window's right edge, as on the stage. */
+  .nx-row-media[data-phone="true"] .caption {
+    grid-column: 1;
+  }
+  .nx-row-media[data-phone="true"] .nx-row-phone {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 18px;
+    border: 4px solid #111a25;
+    box-shadow: 0 30px 50px -20px rgba(0, 0, 0, 0.9);
   }
 }
 
@@ -180,7 +221,6 @@ html.js .nx-line[data-drawn="true"] path {
   background: var(--line-2);
 }
 .nx-screen {
-  --dir: 1;
   /* Crop defaults (the whole picture); each shot sets its own, on the screen or the img. */
   --nx-x: 0;
   --nx-y: 0;
@@ -241,6 +281,11 @@ html.js .nx-line[data-drawn="true"] path {
     gap: clamp(32px, 4vw, 64px);
     align-items: start;
   }
+  @media (max-width: 1200px) {
+    .nx-body {
+      --nx-over: 21%; /* the phone (22% of the frame, 14px away) stays inside the column */
+    }
+  }
   .nx-list {
     gap: 0;
   }
@@ -281,6 +326,7 @@ html.js .nx-line[data-drawn="true"] path {
     top: calc(var(--nav-h) + 48px);
   }
   .nx-device {
+    --dir: 1; /* the scroll direction of the last swap, set by the script */
     position: relative;
     margin-right: var(--nx-over);
   }
@@ -298,7 +344,7 @@ html.js .nx-line[data-drawn="true"] path {
   .nx-swap {
     opacity: 0;
     visibility: hidden;
-    transform: translateY(calc(var(--dir) * 12px)) scale(1.03);
+    transform: translateY(calc(var(--dir, 1) * 12px)) scale(1.03);
     transition:
       opacity 0.4s var(--ease),
       transform 0s 0.4s,
@@ -314,6 +360,8 @@ html.js .nx-line[data-drawn="true"] path {
       visibility 0s;
   }
 
+  /* Every screen's phone stands in the same spot to the right of the window; .nx-swap
+     shows the active one and hides the rest, with the window's own crossfade. */
   .nx-phone {
     position: absolute;
     left: calc(100% + 14px);
@@ -324,15 +372,6 @@ html.js .nx-line[data-drawn="true"] path {
     border: 4px solid #111a25;
     box-shadow: 0 30px 50px -20px rgba(0, 0, 0, 0.9);
     pointer-events: none;
-    opacity: 0;
-    transform: translateX(30px);
-    transition:
-      opacity 0.4s var(--ease),
-      transform 0.5s var(--ease);
-  }
-  .nx-phone[data-on="true"] {
-    opacity: 1;
-    transform: none;
   }
   .nx-honesty {
     display: block;
@@ -346,120 +385,5 @@ html.js .nx-line[data-drawn="true"] path {
 @media (prefers-reduced-motion: reduce) {
   html.js .nx-line[data-drawn="false"] path {
     stroke-dashoffset: 0;
-  }
-}
-
-/* ── Legend: an 8vh strip between the rules ───────── */
-.nx-legend {
-  background: var(--room-read);
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-}
-.nx-legend-strip {
-  display: none;
-}
-.nx-legend-details {
-  padding-block: 6px;
-}
-.nx-legend-details summary {
-  list-style: none;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 48px;
-  color: var(--muted);
-}
-.nx-legend-details summary::-webkit-details-marker {
-  display: none;
-}
-.nx-legend-details summary svg {
-  width: 18px;
-  height: 18px;
-  flex: none;
-  color: var(--dim);
-  transition: transform 0.25s var(--ease);
-}
-.nx-legend-details[open] summary svg {
-  transform: rotate(180deg);
-}
-.nx-legend-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 12px;
-}
-.nx-legend-list li {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 6px 10px;
-  color: var(--muted);
-}
-.nx-legend-list .level {
-  flex: none;
-  position: relative;
-  top: -1px;
-}
-.nx-legend-draft {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 6px 10px;
-  color: var(--muted);
-}
-.nx-legend-draft .chip {
-  position: relative;
-  top: -1px;
-}
-.nx-legend-details .nx-legend-list {
-  padding-block: 8px 12px;
-}
-.nx-legend-details .nx-legend-draft {
-  padding-bottom: 16px;
-}
-
-@media (min-width: 861px) {
-  .nx-legend-details {
-    display: none;
-  }
-  /* One band: the title, then each badge above its own help text, the Draft chip last. */
-  .nx-legend-strip {
-    display: grid;
-    grid-template-columns: minmax(96px, auto) repeat(5, minmax(0, 1fr)) minmax(0, 1.35fr);
-    align-items: start;
-    gap: 12px 22px;
-    padding-block: 22px;
-  }
-  .nx-legend-strip .nx-legend-title {
-    text-transform: uppercase;
-    padding-top: 3px;
-  }
-  .nx-legend-strip .nx-legend-list {
-    display: contents;
-  }
-  .nx-legend-strip .nx-legend-list li,
-  .nx-legend-strip .nx-legend-draft {
-    display: grid;
-    justify-items: start;
-    align-content: start;
-    gap: 8px;
-    margin: 0;
-  }
-  .nx-legend-strip .nx-legend-list .level,
-  .nx-legend-strip .nx-legend-draft .chip {
-    top: 0;
-  }
-}
-/* Up to 1200px the seven columns squeeze every note into five or six lines: use
-   three help columns on two rows instead, the title down the left of both. */
-@media (min-width: 861px) and (max-width: 1200px) {
-  .nx-legend-strip {
-    grid-template-columns: minmax(96px, auto) repeat(3, minmax(0, 1fr));
-  }
-  .nx-legend-strip .nx-legend-title {
-    grid-row: span 2;
   }
 }

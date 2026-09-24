@@ -18,11 +18,11 @@ type Shot = {
   /** The part of the picture the window shows: left edge, top edge and width, as
    *  fractions of the image. The height follows from the window's 16:10 shape. */
   crop: { x: number; y: number; w: number };
+  /** The same screen on a phone (390 × 844 at 2×), shown whole beside the window. */
   mobile?: string;
 };
 
-// Real screens. Current ones are from the development build; the call comes from
-// an earlier build because this one can't show a call from the web client.
+// Real screens from the development build, each with its phone counterpart.
 // Each crop zooms into the detail its caption names so the UI text stays legible.
 const SHOTS: Record<string, Shot> = {
   chat: {
@@ -43,16 +43,18 @@ const SHOTS: Record<string, Shot> = {
     height: 1640,
     // The received image bubble and the haunted-house.png row under it.
     crop: { x: 0.385, y: 0.345, w: 0.61 },
+    mobile: "/screenshots/current/file-mobile.webp",
   },
   calls: {
-    src: "/screenshots/current/app-audio-call.webp",
-    alt: "An audio call in progress in the desktop app",
-    from: "old",
-    width: 1400,
-    height: 1123,
-    // The call band: the avatar, the name and the mic / hang-up controls fill the frame;
-    // the header sits too far above the controls to share a 16:10 frame with them.
-    crop: { x: 0.145, y: 0.405, w: 0.71 },
+    src: "/screenshots/current/call.webp",
+    alt: "An audio call with Casper in progress: the timer, the name and the mute, camera, screen and hang-up controls",
+    from: "dev",
+    width: 2560,
+    height: 1640,
+    // The call band: the avatar, the name and the controls fill the frame; the timer
+    // sits too far above them to share a 16:10 frame.
+    crop: { x: 0.19, y: 0.35, w: 0.62 },
+    mobile: "/screenshots/current/call-mobile.webp",
   },
   sats: {
     src: "/screenshots/current/wallet-mainnet.webp",
@@ -62,6 +64,7 @@ const SHOTS: Record<string, Shot> = {
     height: 1640,
     // The four wallet cards, the balance and the Receive / Send row.
     crop: { x: 0.355, y: 0.075, w: 0.625 },
+    mobile: "/screenshots/current/wallet-mobile.webp",
   },
   services: {
     src: "/screenshots/current/services-chat.webp",
@@ -71,8 +74,22 @@ const SHOTS: Record<string, Shot> = {
     height: 1640,
     // The "Apps with Casper" sheet over the chat, the bubble above it kept whole.
     crop: { x: 0.275, y: 0.26, w: 0.45 },
+    mobile: "/screenshots/current/services-mobile.webp",
+  },
+  identities: {
+    src: "/screenshots/current/identities-chat.webp",
+    alt: "Casper's chat with Boo, the Identities dialog open: Boo's SSH key and OpenPGP key, each verified as their own key, in the development build",
+    from: "dev",
+    width: 2560,
+    height: 1640,
+    // The "Identities with Boo" dialog whole, with a little of the chat around it.
+    crop: { x: 0.26, y: 0.215, w: 0.58 },
+    mobile: "/screenshots/current/identities-chat-mobile.webp",
   },
 };
+
+/** Phone screenshots are 390 × 844 at 2×. */
+const PHONE = { width: 780, height: 1688 };
 
 /** CSS custom properties that place the picture inside the window (see .nx-shot). */
 function cropVars(shot: Shot): React.CSSProperties {
@@ -113,7 +130,6 @@ export function NextSection({ t, locale }: { t: HomeCopy["next"]; locale: Locale
   const [drawn, setDrawn] = useState(false);
 
   const items = t.items;
-  const chatIndex = items.findIndex((i) => i.id === "chat");
   const cliIndex = items.findIndex((i) => !SHOTS[i.id]);
   const honesty = (id: string) => {
     const shot = SHOTS[id];
@@ -218,7 +234,7 @@ export function NextSection({ t, locale }: { t: HomeCopy["next"]; locale: Locale
               const shot = SHOTS[item.id];
               return (
                 <li key={item.id} id={`next-${item.id}`} className="nx-item" data-active={i === active}>
-                  <figure className="nx-row-media">
+                  <figure className="nx-row-media" data-phone={!!shot?.mobile}>
                     <div className="nx-win nx-win--light">
                       <Bar />
                       {shot ? (
@@ -232,6 +248,10 @@ export function NextSection({ t, locale }: { t: HomeCopy["next"]; locale: Locale
                         </pre>
                       )}
                     </div>
+                    {shot?.mobile && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img className="nx-row-phone" src={shot.mobile} alt="" aria-hidden="true" loading="lazy" decoding="async" width={PHONE.width} height={PHONE.height} />
+                    )}
                     <figcaption className="caption">{honesty(item.id)}</figcaption>
                   </figure>
                   <div
@@ -260,10 +280,10 @@ export function NextSection({ t, locale }: { t: HomeCopy["next"]; locale: Locale
 
           <div className="nx-stage">
             <div className="nx-sticky">
-              <div className="nx-device">
+              <div className="nx-device" style={{ "--dir": dir } as React.CSSProperties}>
                 <div className="nx-win nx-win--stage" data-cli={active === cliIndex}>
                   <Bar />
-                  <div className="nx-screen" style={{ "--dir": dir } as React.CSSProperties}>
+                  <div className="nx-screen">
                     {items.map((item, i) => {
                       const shot = SHOTS[item.id];
                       if (!shot) {
@@ -292,10 +312,26 @@ export function NextSection({ t, locale }: { t: HomeCopy["next"]; locale: Locale
                     })}
                   </div>
                 </div>
-                {chatIndex >= 0 && SHOTS.chat.mobile && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img className="nx-phone" src={SHOTS.chat.mobile} alt="" data-on={active === chatIndex} aria-hidden="true" loading="lazy" decoding="async" width={780} height={1688} />
-                )}
+                {/* One phone per screen, all standing in the same spot; only the active item's is shown. */}
+                {items.map((item, i) => {
+                  const mobile = SHOTS[item.id]?.mobile;
+                  if (!mobile) return null;
+                  return (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      key={item.id}
+                      className="nx-phone nx-swap"
+                      src={mobile}
+                      alt=""
+                      data-on={i === active}
+                      aria-hidden="true"
+                      loading={i === 0 ? "eager" : "lazy"}
+                      decoding="async"
+                      width={PHONE.width}
+                      height={PHONE.height}
+                    />
+                  );
+                })}
               </div>
               <p className="caption nx-honesty">{honesty(items[active]?.id ?? "")}</p>
             </div>

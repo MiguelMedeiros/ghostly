@@ -7,18 +7,19 @@ import { Ghost } from "@/components/ghost/Ghost";
 import { Stage, useStep } from "./stage";
 
 /** One colour per layer, bottom to top. */
-const COLORS = ["#22d3ee", "#60a5fa", "#a78bfa", "#fbbf24", "#4ade80"];
+const COLORS = ["#22d3ee", "#60a5fa", "#a78bfa", "#fbbf24", "#f472b6", "#2dd4bf", "#4ade80"];
 type Layout = { cx: number; cy: number; W: number; D: number; H: number; gap: number; ghost: number };
-const L: Layout = { cx: 760, cy: 560, W: 210, D: 84, H: 22, gap: 92, ghost: 120 };
-const P: Layout = { cx: 195, cy: 330, W: 110, D: 44, H: 12, gap: 52, ghost: 70 };
+// Seven slabs: the stack opens to 6·gap; the ghosts ride the top one and must stay under stage y ≥ 170 (L) / 130 (P).
+const L: Layout = { cx: 760, cy: 570, W: 210, D: 76, H: 20, gap: 64, ghost: 110 };
+const P: Layout = { cx: 195, cy: 340, W: 100, D: 38, H: 10, gap: 36, ghost: 60 };
 
 function Slab({ p, n, i, label, count, C, portrait }: { p: MotionValue<number>; n: number; i: number; label: string; count: number; C: Layout; portrait: boolean }) {
   const closed = C.cy - i * (C.H + 4);
   const open = C.cy + (count - 1) * (C.gap / 2) - i * C.gap;
   // The stack opens over the first step; labels arrive one by one as it does.
   const y = useStep(p, 0, n, [0.1, 0.95], [closed, open]);
-  const labelOn = useStep(p, 0, n, [0.45 + i * 0.09, 0.6 + i * 0.09], [0, 1]);
-  const labelX = useStep(p, 0, n, [0.45 + i * 0.09, 0.6 + i * 0.09], [24, 0]);
+  const labelOn = useStep(p, 0, n, [0.42 + i * 0.06, 0.56 + i * 0.06], [0, 1]);
+  const labelX = useStep(p, 0, n, [0.42 + i * 0.06, 0.56 + i * 0.06], [24, 0]);
   const shadow = useStep(p, 0, n, [0.1, 0.95], [0, 0.55]);
   const c = COLORS[i];
   const last = i === count - 1;
@@ -102,7 +103,7 @@ function Legend({ layers }: { layers: string[] }) {
   );
 }
 function LegendItem({ p, n, i, color, children }: { p: MotionValue<number>; n: number; i: number; color: string; children: string }) {
-  const on = useStep(p, 0, n, [0.45 + i * 0.09, 0.6 + i * 0.09], [0.25, 1]);
+  const on = useStep(p, 0, n, [0.42 + i * 0.06, 0.56 + i * 0.06], [0.25, 1]);
   return (
     <motion.li style={{ opacity: on, ["--c" as string]: color }}>
       <span aria-hidden="true" />

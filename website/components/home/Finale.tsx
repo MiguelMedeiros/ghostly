@@ -6,13 +6,13 @@ import { useCalm } from "@/lib/useCalm";
 import { Ghost, GhostMark, type GhostMood } from "@/components/ghost/Ghost";
 import { Icon } from "@/components/site/icons";
 import { Particles } from "@/components/site/Particles";
-import { DOWNLOADS, RELEASE_URL, VERSION, defaultInstaller, type InstallerKey } from "@/lib/release";
+import { DOWNLOADS, PLATFORMS, RELEASE_URL, VERSION, defaultInstaller, platformOf, type InstallerKey } from "@/lib/release";
 import { NEXT_VERSION } from "@/lib/status";
 import { APP_URL } from "@/content/shell";
 import type { HomeCopy } from "@/content/home";
 import "@/app/finale.css";
 
-/* Timing of the one-shot sequence, in milliseconds. */
+/* Timing of the ghosts' idle bit, in milliseconds. It never gates the copy. */
 const GLIDE = 900; // the two ghosts arrive from the edges
 const LINE = 1600; // one spoken line
 const SURPRISE = 300; // Boo's reaction to the 21 sats
@@ -23,15 +23,6 @@ const SATS_LINE = 5; // "Here, 21 sats ⚡"
 const POOF_LINE = 7; // "*poof* 👻"
 
 type State = "idle" | "play" | "done";
-
-const INSTALLERS: { key: InstallerKey | "windowsMsi"; label: string }[] = [
-  { key: "macArm", label: "macOS · Apple silicon" },
-  { key: "macIntel", label: "macOS · Intel" },
-  { key: "windowsExe", label: "Windows · .exe" },
-  { key: "windowsMsi", label: "Windows · .msi" },
-  { key: "linuxDeb", label: "Linux · .deb" },
-  { key: "linuxAppImage", label: "Linux · AppImage" },
-];
 
 /** A heading whose words rise into view one by one; screen readers get the plain sentence. */
 function Words({ text, className = "", from = 0 }: { text: string; className?: string; from?: number }) {
@@ -51,23 +42,26 @@ function Words({ text, className = "", from = 0 }: { text: string; className?: s
 }
 
 /**
- * The ending of the story. Boo and Casper meet, talk, and Casper leaves; Boo
- * turns to you and the title lands. Without scripts, or with reduced motion,
- * the final frame is simply there.
+ * The ending of the story. The title, the lead and the button are there the
+ * moment the reader arrives; above them Boo and Casper meet, talk, and Casper
+ * leaves, so Boo turns to you. Below, the download panel: one card per desktop
+ * platform (the reader's machine first), the extension and the CLI. Without
+ * scripts, or with reduced motion, the final frame is simply there.
  */
 export function Finale({ t }: { t: HomeCopy["finale"] }) {
   const reduce = useCalm();
   const sectionRef = useRef<HTMLElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
   // Idle loops (the rising ghosts, the title's gradient) rest while the section is off screen.
   const inView = useInView(sectionRef, { margin: "20% 0px 20% 0px" });
   const played = useRef(false);
   const [state, setState] = useState<State>("idle");
+  const [shown, setShown] = useState(false);
   const [step, setStep] = useState(-1);
   const [surprised, setSurprised] = useState(false);
   const [poof, setPoof] = useState(false);
   const [installer, setInstaller] = useState<InstallerKey | undefined>(undefined);
-  const [detected, setDetected] = useState(false);
 
   // The installer for this machine. Chrome on a Mac says whether it is Apple silicon.
   useEffect(() => {
@@ -77,7 +71,6 @@ export function Finale({ t }: { t: HomeCopy["finale"] }) {
     let cancelled = false;
     const guess = defaultInstaller(nav.userAgent, nav.platform);
     setInstaller(guess);
-    setDetected(true);
     if (guess === "macArm" && nav.userAgentData) {
       nav.userAgentData
         .getHighEntropyValues(["architecture"])
@@ -91,7 +84,22 @@ export function Finale({ t }: { t: HomeCopy["finale"] }) {
     };
   }, []);
 
-  // Arm the sequence when half of the stage is on screen; re-arm once the reader is a viewport away.
+  // The title, lead and button rise the moment the title reaches the viewport.
+  useEffect(() => {
+    const el = titleRef.current;
+    if (!el) return;
+    if (reduce) {
+      setShown(true);
+      return;
+    }
+    const io = new IntersectionObserver(([e]) => {
+      if (e.isIntersecting) setShown(true);
+    });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [reduce]);
+
+  // Arm the ghosts' bit when half of the stage is on screen; re-arm everything once the reader is a viewport away.
   useEffect(() => {
     const el = stageRef.current;
     if (!el) return;
@@ -113,6 +121,7 @@ export function Finale({ t }: { t: HomeCopy["finale"] }) {
         if (!e.isIntersecting && played.current) {
           played.current = false;
           setState("idle");
+          setShown(false);
           setStep(-1);
           setPoof(false);
           setSurprised(false);
@@ -165,11 +174,22 @@ export function Finale({ t }: { t: HomeCopy["finale"] }) {
   const booLook = state === "play" ? { x: 0.8, y: 0.1 } : { x: 0, y: 0.2 };
   const casperLook = state === "play" ? { x: -0.8, y: 0.1 } : { x: -0.6, y: 0.15 };
 
-  const primary = installer ? INSTALLERS.find((d) => d.key === installer) : undefined;
+  // The reader's platform leads the panel; phones and unknown machines get the natural order.
+  const hot = installer ? platformOf(installer) : undefined;
+  const platforms = hot ? [...PLATFORMS.filter((p) => p.id === hot), ...PLATFORMS.filter((p) => p.id !== hot)] : PLATFORMS;
   const speaker = (side: string) => (side === "boo" ? "Boo" : "Casper");
 
   return (
-    <section ref={sectionRef} className="section fin" id="download" data-state={state} data-step={step} data-poof={poof} data-inview={inView}>
+    <section
+      ref={sectionRef}
+      className="section fin"
+      id="download"
+      data-state={state}
+      data-shown={shown}
+      data-step={step}
+      data-poof={poof}
+      data-inview={inView}
+    >
       <Particles count={18} tone="mix" />
       <div className="wrap fin-inner">
         <span className="eyebrow fin-eyebrow">{t.eyebrow}</span>
@@ -208,7 +228,7 @@ export function Finale({ t }: { t: HomeCopy["finale"] }) {
           </ul>
         </div>
 
-        <h2 className="h-display fin-title">
+        <h2 ref={titleRef} className="h-display fin-title">
           <span className="sr-only">
             {t.title1} {t.title2}
           </span>
@@ -225,40 +245,52 @@ export function Finale({ t }: { t: HomeCopy["finale"] }) {
           <GhostMark /> {t.browser.cta} <span aria-hidden="true">↗</span>
         </a>
 
-        <div className="fin-strip">
-          <div className="fin-desktop">
-            <span className="caption fin-strip-label">
-              {t.desktop.title} <span className="chip">v{VERSION}</span>
-            </span>
-            <div className="fin-desktop-row">
-              {primary && (
-                <a className="btn fin-installer" href={DOWNLOADS[primary.key]}>
-                  <Icon name="download" /> {primary.label}
-                </a>
-              )}
-              {/* Open on the server and without scripts; the list waits for the detection so it never flashes. */}
-              <details className="fin-details" open={primary ? undefined : true} data-detected={detected || undefined}>
-                <summary>
-                  {t.otherPlatforms} <span aria-hidden="true" className="fin-details-mark" />
-                </summary>
-                <ul className="fin-platforms">
-                  {INSTALLERS.map((d) => (
-                    <li key={d.key}>
-                      <a href={DOWNLOADS[d.key]} aria-current={d.key === installer ? "true" : undefined}>
-                        <Icon name="download" /> {d.label}
-                      </a>
-                    </li>
+        <div className="fin-panel">
+          <div className="fin-panel-head">
+            <h3 className="fin-panel-title">
+              <Icon name="desktop" /> {t.desktop.title} <span className="chip">v{VERSION}</span>
+            </h3>
+            <p className="fin-panel-body">{t.desktop.body}</p>
+          </div>
+          <div className="fin-cards">
+            {platforms.map((p) => (
+              <div key={p.id} className="card fin-card" data-hot={p.id === hot || undefined}>
+                <div className="fin-card-head">
+                  <h4 className="fin-card-title">{t.desktop.platforms[p.id].name}</h4>
+                  {p.id === hot && <span className="chip fin-chip--hot">{t.desktop.platforms[p.id].chip}</span>}
+                </div>
+                <div className="fin-dls">
+                  {p.installers.map((d) => (
+                    <a key={d.key} className="btn fin-dl" href={DOWNLOADS[d.key]} aria-current={d.key === installer ? "true" : undefined}>
+                      <Icon name="download" /> {t.desktop.installers[d.key]} <span className="fin-dl-ext">{d.ext}</span>
+                    </a>
                   ))}
-                </ul>
-              </details>
+                </div>
+              </div>
+            ))}
+            <div className="card fin-card fin-card--wide">
+              <div className="fin-card-text">
+                <h4 className="fin-card-title">
+                  <Icon name="puzzle" /> {t.extension.title}
+                </h4>
+                <p className="fin-card-body">{t.extension.body}</p>
+              </div>
+              <a className="btn fin-dl" href={DOWNLOADS.extensionZip}>
+                <Icon name="download" /> {t.extension.cta} <span className="fin-dl-ext">.zip</span>
+              </a>
+            </div>
+            <div className="card fin-card fin-card--wide">
+              <div className="fin-card-text">
+                <h4 className="fin-card-title">
+                  <Icon name="terminal" /> {t.cli.title}
+                </h4>
+                <p className="fin-card-body">{t.cli.body}</p>
+              </div>
+              <a className="btn fin-dl" href="/cli">
+                {t.cli.cta} <span aria-hidden="true">→</span>
+              </a>
             </div>
           </div>
-          <a className="link-arrow fin-more" href={DOWNLOADS.extensionZip}>
-            <Icon name="download" /> {t.extension.title} · .zip
-          </a>
-          <a className="link-arrow fin-more" href="/cli">
-            {t.cli.cta} <span aria-hidden="true">→</span>
-          </a>
         </div>
         <p className="caption fin-note">
           {t.note.replace("{v}", VERSION).replace("{n}", NEXT_VERSION)}{" "}

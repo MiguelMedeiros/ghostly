@@ -53,3 +53,40 @@ export function defaultInstaller(userAgent: string, platform = "", arch?: string
   }
   return undefined;
 }
+
+export type DownloadKey = keyof typeof DOWNLOADS;
+/** The desktop installers: every download except the browser extension. */
+export type DesktopKey = Exclude<DownloadKey, "extensionZip">;
+export type PlatformId = "mac" | "windows" | "linux";
+
+/** The three desktop platforms, each with its installers in the order a download panel lists them. */
+export const PLATFORMS: { id: PlatformId; installers: { key: DesktopKey; ext: string }[] }[] = [
+  {
+    id: "mac",
+    installers: [
+      { key: "macArm", ext: ".dmg" },
+      { key: "macIntel", ext: ".dmg" },
+    ],
+  },
+  {
+    id: "windows",
+    installers: [
+      { key: "windowsExe", ext: ".exe" },
+      { key: "windowsMsi", ext: ".msi" },
+    ],
+  },
+  {
+    id: "linux",
+    installers: [
+      { key: "linuxDeb", ext: ".deb" },
+      { key: "linuxAppImage", ext: ".AppImage" },
+    ],
+  },
+];
+
+/** The platform an installer belongs to, so a panel can lead with the detected machine's card. */
+export function platformOf(key: InstallerKey): PlatformId {
+  if (key.startsWith("mac")) return "mac";
+  if (key.startsWith("windows")) return "windows";
+  return "linux";
+}

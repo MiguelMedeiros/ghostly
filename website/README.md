@@ -20,7 +20,7 @@ After `npm run build`, restart a running dev server: reader routes are static
 | Path | What |
 |---|---|
 | `app/` | Routes. English at the root, Brazilian Portuguese under `app/pt-br/` (thin wrappers around the same page components). |
-| `components/home/` | Homepage: the hero, the four story chapters, the product section, your space, the architecture and the finale. |
+| `components/home/` | Homepage: the hero, the four story chapters, the product section (one phone beside each window), your space, the wallet deck, the architecture stack and the finale with its download panel. |
 | `components/story/` | The film's machinery. `Act` pins one full-bleed backdrop behind its chapters and keeps one Boo and one Casper in it; `SceneFrame` is a chapter (full-bleed stage, floating copy panel, step mapping); `poses.ts` is the blocking table (actors, camera, focal point per chapter, landscape and portrait); `Statement` is the sentence between the acts. |
 | `components/dev/` | `/developers`: vocabulary, composition board, negotiation demo, path, availability table. |
 | `components/catalog/`, `components/reader/`, `components/roadmap/` | Catalog, WISP reader, roadmap. |
@@ -30,6 +30,7 @@ After `npm run build`, restart a running dev server: reader routes are static
 | `lib/wisp-editorial.ts` | Per-WISP benefit line, availability and optional video metadata. |
 | `lib/composition.ts` | Blocks and presets of the composition board. |
 | `content/videos/` | The video lesson template and an example script. |
+| `scripts/capture/` | Playwright specs that re-shoot the app screenshots (`public/screenshots/current/`) from a built web app; see its README. |
 
 ## The story spine
 
@@ -46,6 +47,15 @@ reduced motion, or without scripts, the same components render an illustrated
 article — one still per step (`stills` on each scene) — and the act backdrop is
 not drawn; the layout script in `app/layout.tsx` flags `html.calm` and
 `html[data-orient]` before hydration so CSS carries that layout at first paint.
+
+Touch devices (`(pointer: coarse)`) and viewports up to 860px do not get the
+pinned, scroll-scrubbed film: momentum scrolling fights it. `useCards()` in
+`components/home/stage.tsx` switches them to cards — the same article shape as
+reduced motion, but each step's frame plays its beat once as it scrolls into
+view (`StaticFigure` tweens the scene's `p` from the step's start to its still).
+The layout script also flags `html[data-touch]` so the CSS carries that shape
+before hydration. `components/story/StoryRail.tsx` is the thin progress rail
+under the nav: one mark per chapter, filling with the scroll.
 
 Two motion traps worth knowing: motion scales SVG groups about their own
 bounding box, so any scaled `motion.g` positioned by its top-left spreads

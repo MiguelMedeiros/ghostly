@@ -1,9 +1,9 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { motion, motionValue, useInView, useMotionValueEvent, useScroll, useTransform, type MotionValue } from "motion/react";
+import { animate as tween, motion, motionValue, useInView, useMotionValue, useMotionValueEvent, useScroll, useTransform, type MotionValue } from "motion/react";
 import { useCalm } from "@/lib/useCalm";
-import { EXIT, orientationOf, stepAt, stepOf, usePortrait, type Camera } from "@/components/home/stage";
+import { EXIT, orientationOf, stepAt, stepOf, useCards, usePortrait, type Camera } from "@/components/home/stage";
 import { BLOCKING, ROOMS, STAGE, valueAt, type Chapter } from "./poses";
 
 /**
@@ -77,6 +77,9 @@ export function SceneFrame({
 }) {
   const ref = useRef<HTMLElement>(null);
   const calm = useCalm();
+  const cards = useCards();
+  // The article shape: reduced motion (stills) and touch devices (each still plays its beat once).
+  const article = calm || cards;
   const portrait = usePortrait();
   const n = steps.length;
   const inView = useInView(ref, { margin: "20% 0px 20% 0px" });
@@ -86,7 +89,7 @@ export function SceneFrame({
   const [p] = useState(() => motionValue(stills[Math.min(1, n - 1)]));
   const [step, setStep] = useState(1 < n ? 1 : 0);
   useEffect(() => {
-    if (calm) return;
+    if (article) return;
     const sync = (v: number) => {
       p.set(v);
       const next = stepOf(v, n);
@@ -94,7 +97,7 @@ export function SceneFrame({
     };
     sync(scrollYProgress.get());
     return scrollYProgress.on("change", sync);
-  }, [calm, n, p, scrollYProgress]);
+  }, [article, n, p, scrollYProgress]);
 
   const { camera, focus } = useBlocking(p, chapter, portrait, calm);
 
@@ -120,8 +123,8 @@ export function SceneFrame({
   const room = ROOMS[chapter];
   const style = { "--chapter-bg": room, "--chapter-rgb": hexToRgb(room) } as React.CSSProperties;
 
-  if (calm) {
-    // An illustrated article: each paragraph beside its own still frame.
+  if (article) {
+    // An illustrated article: each paragraph with its own frame — a still, or a beat that plays once in view.
     return (
       <SceneContext.Provider value={{ ...state, still: true }}>
       <section ref={ref} id={id} className="scene scene--static" data-chapter={chapter} aria-label={label} style={style}>
@@ -130,14 +133,14 @@ export function SceneFrame({
           <ol className="scene-static-steps">
             {steps.map((s, i) => (
               <li key={i} className="scene-static-step">
-                <StaticFigure state={{ ...state, still: true, step: i }} at={stills[i] ?? stills[stills.length - 1]} chapter={chapter} portrait={portrait}>
-                  {visual}
-                </StaticFigure>
                 <div className="scene-static-copy">
                   <h3 className="h-scene">{s.title}</h3>
                   <p className="body">{s.body}</p>
                   {s.note && <p className="note">{s.note}</p>}
                 </div>
+                <StaticFigure state={{ ...state, still: true, step: i }} at={stills[i] ?? stills[stills.length - 1]} from={stepAt(i, 0, n)} play={!calm} chapter={chapter} portrait={portrait}>
+                  {visual}
+                </StaticFigure>
               </li>
             ))}
           </ol>
@@ -195,18 +198,29 @@ export function SceneFrame({
   );
 }
 
-/** One frozen frame of the scene, for the static article. */
-function StaticFigure({ state, at, chapter, portrait, children }: { state: SceneState; at: number; chapter: Chapter; portrait: boolean; children: React.ReactNode }) {
-  const [p] = useState(() => motionValue(at));
+/**
+ * One frame of the scene for the article. With `play`, the frame starts at the
+ * step's opening pose and plays through to its still once, when it comes into
+ * view (touch devices); otherwise it is simply the still (reduced motion).
+ */
+function StaticFigure({ state, at, from, play, chapter, portrait, children }: { state: SceneState; at: number; from: number; play: boolean; chapter: Chapter; portrait: boolean; children: React.ReactNode }) {
+  const ref = useRef<HTMLElement>(null);
+  const p = useMotionValue(play ? Math.min(from, at) : at);
+  const inView = useInView(ref, { amount: 0.55, once: true });
+  useEffect(() => {
+    if (!play || !inView) return;
+    const controls = tween(p, at, { duration: 1.8, ease: [0.22, 1, 0.36, 1] });
+    return () => controls.stop();
+  }, [play, inView, at, p]);
   const b = BLOCKING[orientationOf(portrait)][chapter];
   // A landscape still is a whole stage in a figure: a slight push about the centre keeps the safe area and lifts the labels above 11px.
-  const scale = useTransform(p, (): number => (portrait ? 1 : 1.1));
+  const scale = useTransform(p, (): number => (portrait ? 1 : 1.25));
   const fx = useTransform(p, (v): number => (portrait ? valueAt(b.focus, v)[0] : STAGE.landscape.w / 2));
-  const fy = useTransform(p, (v): number => (portrait ? valueAt(b.focus, v)[1] : STAGE.landscape.h / 2));
+  const fy = useTransform(p, (v): number => (portrait ? valueAt(b.focus, v)[1] : 470));
   const value = useMemo<SceneState>(() => ({ ...state, p, camera: { scale, fx, fy }, focus: { x: fx, y: fy } }), [state, p, scale, fx, fy]);
   return (
     <SceneContext.Provider value={value}>
-      <figure className="scene-static-figure" aria-hidden="true">
+      <figure ref={ref} className="scene-static-figure" aria-hidden="true">
         {children}
       </figure>
     </SceneContext.Provider>

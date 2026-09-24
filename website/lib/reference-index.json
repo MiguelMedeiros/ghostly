@@ -267,7 +267,7 @@
       "200-payments.md",
       "03-capabilities.md"
     ],
-    "summary": "This adapter implements Ark payments using @arkade-os/sdk 0.4.74. Ark is the payment method; Arkade is the selected provider implementation. Bark remains an alternative provider candidate, not a separate currency or an automatically compatible adapter. Arkade was selected because its TypeScript wallet, transaction preparation, operator/indexer clients and browser repositories fit the existing browser engine. That cho",
+    "summary": "This adapter implements Ark payments using @arkade-os/sdk 0.4.74. Ark is the payment method; Arkade is the selected provider implementation. Bark is a second, separate Ark provider: not a separate currency, and not compatible with this one (a Bark wallet cannot pay an Arkade address). Arkade was selected because its TypeScript wallet, transaction preparation, operator/indexer clients and browser repositories fit the ",
     "notices": []
   },
   {
@@ -279,8 +279,8 @@
     "slug": "203-lightning",
     "title": "WISP 203 — Lightning",
     "status": "Draft",
-    "updated": "2026-09-20",
-    "implementation": "Existing invoice integration",
+    "updated": "2026-09-23",
+    "implementation": "Existing invoice integration; Lightning sources (the Cashu mints by default)",
     "dependencies": [
       "200-payments.md"
     ],
@@ -292,7 +292,17 @@
     "sourcePath": "docs/wisps/204-bark.md",
     "aliases": [],
     "slug": "204-bark",
-    "title": "WISP 204 — Ark payments via Bark"
+    "title": "WISP 204 — Ark payments via Bark",
+    "status": "Draft",
+    "updated": "2026-09-23",
+    "implementation": "Experimental browser adapter, Second's Bark SDK @secondts/bark 0.24.0 (bark 0.7.1, WebAssembly). Testnet mode only: every Testnet profile starts a signet wallet on Second's server; Mainnet makes none yet. Regtest evidence below.",
+    "documentKind": "Adapter",
+    "dependencies": [
+      "200-payments.md",
+      "03-capabilities.md"
+    ],
+    "summary": "Bark is Second's implementation of Ark: a client (bark) and a server (captaind). This adapter is a second Ark provider beside Arkade 202, and not interchangeable with it. Checked on 2026-09-23 against bark 0.7.1:",
+    "notices": []
   },
   {
     "file": "300-peer-proofs.md",
@@ -303,8 +313,8 @@
     "slug": "300-peer-proofs",
     "title": "WISP 300 — Identity Proofs",
     "status": "Draft",
-    "updated": "2026-09-20",
-    "implementation": "Experimental Nostr subset; see follow-up",
+    "updated": "2026-09-23",
+    "implementation": "Identity proofs with a provider contract; Nostr first. See 2026-09-23",
     "dependencies": [
       "02-peer-keys.md",
       "03-capabilities.md"
@@ -321,8 +331,8 @@
     "slug": "301-nostr",
     "title": "WISP 301 — Nostr",
     "status": "Draft",
-    "updated": "2026-09-20",
-    "implementation": "Experimental Nostr subset; see follow-up",
+    "updated": "2026-09-23",
+    "implementation": "Nostr identity-proof provider; see 2026-09-23",
     "dependencies": [
       "300-peer-proofs.md"
     ],
@@ -367,6 +377,81 @@
     "notices": [
       "Planned integration. No current integration is enabled or promised. The historical document identifier 303 remains in the URL for link compatibility; it is not a committed WISP number."
     ]
+  },
+  {
+    "file": "3xx-bitcoin.md",
+    "sourcePath": "docs/wisps/3xx-bitcoin.md",
+    "aliases": [],
+    "slug": "3xx-bitcoin",
+    "title": "WISP 3xx — Bitcoin Address Proof",
+    "status": "Draft",
+    "updated": "2026-09-23",
+    "implementation": "Experimental provider bitcoin (packages/browser/src/proofs/providers/bitcoin.ts); verifier in @ghostly/core",
+    "dependencies": [
+      "300-peer-proofs.md"
+    ],
+    "summary": "An optional proof that the person can sign with the key behind a Bitcoin address. It follows WISP 300's two layers: the person signs, once, in their own wallet, the binding statement by which the address authorizes their Ghostly profile key for a validity window; per chat, the app presents that binding with a presentation signed by the profile key and bound to the chat, the contact and a fresh challenge, without aski",
+    "notices": []
+  },
+  {
+    "file": "3xx-domain.md",
+    "sourcePath": "docs/wisps/3xx-domain.md",
+    "aliases": [],
+    "slug": "3xx-domain",
+    "title": "WISP 3xx — Domain Proofs",
+    "status": "Draft",
+    "updated": "2026-09-23",
+    "implementation": "Experimental provider domain: packages/core/src/domainProofs.ts, packages/browser/src/proofs/domain.ts, packages/browser/src/proofs/providers/domain.ts",
+    "dependencies": [
+      "300-peer-proofs.md"
+    ],
+    "summary": "A person shows a contact that they control a domain name, such as example.com, by publishing a record under it. It is an optional identity proof under 300 and the provider contract: chat works without it, it is shared with one contact at a time, and it says nothing about who holds the domain in law.",
+    "notices": []
+  },
+  {
+    "file": "3xx-oidc-proofs.md",
+    "sourcePath": "docs/wisps/3xx-oidc-proofs.md",
+    "aliases": [],
+    "slug": "3xx-oidc-proofs",
+    "title": "WISP 3xx — Provider-attested identity (OpenID Connect)",
+    "status": "Draft",
+    "updated": "2026-09-23",
+    "implementation": "In development: packages/browser/src/proofs/oidc/; provider clients not yet registered (checklist)",
+    "dependencies": [
+      "300-peer-proofs.md"
+    ],
+    "summary": "A person shows one contact that an account at a provider (Google, Microsoft, Apple, GitLab, Twitch) signed in for this conversation. The evidence is the provider's own signed ID token; the contact checks it against the provider's published keys. No Ghostly server takes part.",
+    "notices": []
+  },
+  {
+    "file": "3xx-openpgp.md",
+    "sourcePath": "docs/wisps/3xx-openpgp.md",
+    "aliases": [],
+    "slug": "3xx-openpgp",
+    "title": "WISP 3xx — OpenPGP",
+    "status": "Draft",
+    "updated": "2026-09-23",
+    "implementation": "Provider openpgp in the identity-proof registry; see Implementation",
+    "dependencies": [
+      "300-peer-proofs.md"
+    ],
+    "summary": "An optional proof that a participant controls an OpenPGP key (RFC 9580, and the RFC 4880 v4 keys people already have). The participant signs a Ghostly statement with their own tooling — gpg --clearsign, or gpg --detach-sign --armor — and gives the result and their public key to their app. Ghostly never holds the secret key, so the same flow works when the key lives on a YubiKey or another OpenPGP card: gpg asks for t",
+    "notices": []
+  },
+  {
+    "file": "3xx-ssh.md",
+    "sourcePath": "docs/wisps/3xx-ssh.md",
+    "aliases": [],
+    "slug": "3xx-ssh",
+    "title": "WISP 3xx — SSH keys",
+    "status": "Draft",
+    "updated": "2026-09-23",
+    "implementation": "Experimental providers ssh, ssh-github, ssh-gitlab; see below",
+    "dependencies": [
+      "300-peer-proofs.md"
+    ],
+    "summary": "An optional identity proof, under 300, that a person controls an SSH key. The key signs, once, the WISP 300 binding statement, which authorizes the profile's own proof key for a validity period; each chat the proof is shared with then gets a presentation signed by that proof key (shared WISP 300 machinery, no SSH involved). A contact's app verifies both locally. Variants prove a GitHub or GitLab account instead of a ",
+    "notices": []
   },
   {
     "file": "400-chat.md",

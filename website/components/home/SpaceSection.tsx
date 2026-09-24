@@ -55,7 +55,6 @@ export function SpaceSection({ t, w, locale, shotLabel }: { t: HomeCopy["space"]
                   <h3 className="h-card">{t.profiles.title}</h3>
                   <LevelBadge level={t.profiles.level} locale={locale} />
                 </div>
-                <p className="body">{t.profiles.body}</p>
                 <div className="sp-chips" aria-hidden="true">
                   {t.profiles.names.map((name, i) => (
                     <div key={name} className="sp-chip" style={{ "--c": PROFILE_COLORS[i], "--i": i } as React.CSSProperties}>
@@ -74,7 +73,6 @@ export function SpaceSection({ t, w, locale, shotLabel }: { t: HomeCopy["space"]
                   <h3 className="h-card">{t.backup.title}</h3>
                   <LevelBadge level={t.backup.level} locale={locale} />
                 </div>
-                <p className="body">{t.backup.body}</p>
                 <div className="sp-flow">
                   <div className="sp-box">
                     <strong>
@@ -108,7 +106,6 @@ export function SpaceSection({ t, w, locale, shotLabel }: { t: HomeCopy["space"]
                   <h3 className="h-card">{t.look.title}</h3>
                   <LevelBadge level={t.look.level} locale={locale} />
                 </div>
-                <p className="body">{t.look.body}</p>
                 <div className="sp-look" aria-hidden="true">
                   <span className="sp-swatches">
                     {THEMES.map((th) => (
@@ -117,6 +114,7 @@ export function SpaceSection({ t, w, locale, shotLabel }: { t: HomeCopy["space"]
                   </span>
                   <span className="sp-langs mono">EN · PT · ES · FR · IT · 日本語 · 中文 · العربية</span>
                 </div>
+                <p className="caption sp-note">{t.look.note}</p>
               </article>
             </div>
           </div>

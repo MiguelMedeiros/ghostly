@@ -7,7 +7,7 @@
 }
 .statement[data-static="true"] {
   height: auto;
-  padding-block: 18vh;
+  padding-block: 14vh 12vh;
 }
 .statement-sticky {
   position: sticky;
@@ -36,11 +36,11 @@
 /* Without scripts, or with reduced motion before hydration (the layout script
    adds html.js and html.calm), the sentence simply reads: no sticky void, every
    word in place. Motion writes inline styles, hence the !important. */
-html:where(:not(.js), .calm) .statement {
+html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .statement {
   height: auto;
   padding-block: 18vh;
 }
-html:where(:not(.js), .calm) .statement-sticky {
+html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .statement-sticky {
   position: static;
   height: auto;
 }

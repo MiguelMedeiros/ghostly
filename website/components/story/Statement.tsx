@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef } from "react";
-import { motion, useScroll, useTransform, type MotionValue } from "motion/react";
+import { useEffect, useRef } from "react";
+import { animate as tween, motion, useInView, useMotionValue, useScroll, useTransform, type MotionValue } from "motion/react";
 import { useCalm } from "@/lib/useCalm";
+import { useCards } from "@/components/home/stage";
 import "@/app/statement.css";
 
 /**
@@ -15,8 +16,19 @@ import "@/app/statement.css";
 export function Statement({ before, accent, after }: { before: string; accent: string; after: string }) {
   const ref = useRef<HTMLElement>(null);
   const calm = useCalm();
+  const cards = useCards();
+  const still = calm || cards;
   const { scrollYProgress } = useScroll({ target: ref, offset: ["start end", "end start"] });
-  const fade = useTransform(scrollYProgress, (v) => 1 - clamp01((v - FADE[0]) / (FADE[1] - FADE[0])));
+  // Touch devices: no pin; the sentence reveals once when it is on screen.
+  const local = useMotionValue<number>(REVEAL[0]);
+  const inView = useInView(ref, { amount: 0.5, once: true });
+  useEffect(() => {
+    if (!cards || calm || !inView) return;
+    const controls = tween(local, REVEAL[1], { duration: 2.2, ease: "linear" });
+    return () => controls.stop();
+  }, [cards, calm, inView, local]);
+  const p = still ? local : scrollYProgress;
+  const fade = useTransform(scrollYProgress, (v) => (still ? 1 : 1 - clamp01((v - FADE[0]) / (FADE[1] - FADE[0]))));
   const words = [
     ...before.trim().split(/\s+/).map((w) => ({ w, accent: false })),
     ...accent.trim().split(/\s+/).map((w) => ({ w, accent: true })),
@@ -25,11 +37,11 @@ export function Statement({ before, accent, after }: { before: string; accent: s
   const slots = schedule(words);
 
   return (
-    <section ref={ref} className="statement" aria-hidden="true" data-static={calm}>
+    <section ref={ref} className="statement" aria-hidden="true" data-static={still}>
       <div className="statement-sticky">
         <motion.p className="wrap statement-text" style={calm ? undefined : { opacity: fade }}>
           {words.map((item, i) => (
-            <Word key={i} p={scrollYProgress} start={slots[i].start} end={slots[i].end} accent={item.accent} calm={calm}>
+            <Word key={i} p={p} start={slots[i].start} end={slots[i].end} accent={item.accent} calm={calm}>
               {item.w}
             </Word>
           ))}

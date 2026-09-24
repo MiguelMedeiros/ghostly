@@ -91,7 +91,7 @@
   justify-items: center;
   gap: 10px;
 }
-html.js:not(.calm) .act:not(.act--static) .hero-still {
+html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act--static) .hero-still {
   display: none;
 }
 .bubble {

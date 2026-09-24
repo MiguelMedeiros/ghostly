@@ -24,7 +24,8 @@ function outline(body: string) {
     if (fence) continue;
     const m = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
     if (!m) continue;
-    const text = m[2].replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/[*_`]/g, "");
+    // Same plain text the renderer slugs: links keep their label, emphasis and code marks go, underscores stay.
+    const text = m[2].replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/[*`]/g, "");
     const id = slugger.slug(text);
     if (m[1].length === 2 || m[1].length === 3) items.push({ depth: m[1].length, text, id });
   }

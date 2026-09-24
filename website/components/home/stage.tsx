@@ -45,6 +45,19 @@ export function usePortrait(): boolean {
 
 export const orientationOf = (portrait: boolean): Orientation => (portrait ? "portrait" : "landscape");
 
+export const TOUCH_QUERY = "(pointer: coarse)";
+
+/**
+ * Phones, and any touch-first device, do not get the pinned, scroll-scrubbed
+ * film: momentum scrolling fights it. They get cards — the same scenes, each
+ * step playing its beat once as its figure comes into view.
+ */
+export function useCards(): boolean {
+  const portrait = useMediaQuery(PORTRAIT_QUERY);
+  const touch = useMediaQuery(TOUCH_QUERY);
+  return portrait || touch;
+}
+
 /** A ghost placed in stage units; `who` colours it, `s` is its width. */
 export function StageGhost({
   x,

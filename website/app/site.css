@@ -694,7 +694,7 @@ body {
   mix-blend-mode: screen;
 }
 /* In the story the act draws the actors; a scene's own ghosts only carry the stills. */
-html.js:not(.calm) .act:not(.act--static) .scene-actors-static {
+html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act--static) .scene-actors-static {
   display: none;
 }
 
@@ -916,13 +916,13 @@ html.js:not(.calm) .act:not(.act--static) .scene-actors-static {
   .scene-static-copy .h-scene {
     grid-row: auto;
   }
-  /* The portrait stage is 390 × 844 with the action in y 70–550: show that band, not a 1.6 slice through the ghosts. */
+  /* The portrait stage is 390 × 844 with the action in y 120–500 (nav-safe to sheet-safe): show that band, not a 1.6 slice through the ghosts. */
   .scene-static-figure {
-    aspect-ratio: 390 / 480;
+    aspect-ratio: 390 / 380;
   }
   .scene-static-figure .stage {
     height: auto;
-    margin-top: -17.95%;
+    margin-top: -30.77%;
   }
 }
 /* Phones: the still bleeds to the viewport edge so the 390-unit stage renders 1:1 (its 11-unit labels at 11px). */
@@ -944,14 +944,14 @@ html.js:not(.calm) .act:not(.act--static) .scene-actors-static {
 /* Without scripts, or with reduced motion before hydration, the story layout
    collapses into the same article shape: the reader gets the article at first
    paint instead of a film that shrinks by thousands of pixels once scripts run. */
-html:where(:not(.js), .calm) .act-backdrop {
+html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .act-backdrop {
   display: none;
 }
-html:where(:not(.js), .calm) .scene:not(.scene--static) {
+html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene:not(.scene--static) {
   height: auto !important;
   padding-block: 48px;
 }
-html:where(:not(.js), .calm) .scene .scene-sticky {
+html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .scene-sticky {
   position: relative;
   height: auto;
   display: grid;
@@ -960,33 +960,33 @@ html:where(:not(.js), .calm) .scene .scene-sticky {
   margin-inline: auto;
   padding-inline: 24px;
 }
-html:where(:not(.js), .calm) .scene .scene-visual {
+html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .scene-visual {
   position: relative;
   aspect-ratio: 1.6;
   border-radius: 20px;
   overflow: hidden;
   border: 1px solid var(--line);
 }
-html:where(:not(.js), .calm) .scene-wash {
+html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene-wash {
   display: none;
 }
-html:where(:not(.js), .calm) .scene .scene-copy,
-html:where(:not(.js), .calm) .scene[data-copy] .scene-copy {
+html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .scene-copy,
+html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene[data-copy] .scene-copy {
   position: static;
   width: auto;
   transform: none;
   padding: 0;
   background: none;
 }
-html:where(:not(.js), .calm) .scene .scene-steps {
+html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .scene-steps {
   gap: 26px;
 }
-html:where(:not(.js), .calm) .scene .scene-step {
+html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .scene-step {
   grid-area: auto;
   opacity: 1;
   transform: none;
 }
-html:where(:not(.js), .calm) .scene .scene-progress {
+html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .scene-progress {
   display: none;
 }
 

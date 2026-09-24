@@ -305,7 +305,7 @@
     linear-gradient(135deg, var(--from), var(--to));
   border: 1px solid color-mix(in srgb, var(--ink) 35%, transparent);
   box-shadow: 0 30px 60px -30px rgba(0, 0, 0, 0.9);
-  transform: translateX(calc(var(--offset) * 72px)) translateY(calc(var(--abs) * 10px)) rotateY(calc(var(--offset) * -16deg)) scale(calc(1 - var(--abs) * 0.06));
+  transform: translateX(calc(var(--offset) * 72px)) translateY(calc(var(--abs) * 10px - var(--lift, 0px))) rotateY(calc(var(--offset) * -16deg)) scale(calc(1 - var(--abs) * 0.06));
   filter: brightness(calc(1 - var(--abs) * 0.2));
   transition:
     transform 0.6s var(--ease),
@@ -315,12 +315,20 @@
 }
 .sp-card[data-active="true"] {
   transform: translateY(-24px);
+  /* The front card is already chosen: clicking it changes nothing, so it does not ask for a click. */
+  cursor: default;
   box-shadow:
     0 50px 80px -30px rgba(0, 0, 0, 0.9),
     0 0 60px -14px color-mix(in srgb, var(--ink) 65%, transparent);
 }
+/* A back card answers the pointer: it brightens and lifts a few px, so it reads as a thing to pick. */
 .sp-card:hover:not([data-active="true"]) {
+  --lift: 8px;
   filter: brightness(1);
+  transition:
+    transform 0.25s var(--ease),
+    filter 0.25s,
+    box-shadow 0.6s;
 }
 .sp-card:focus-visible {
   outline: 2px solid #fff;
@@ -351,23 +359,105 @@
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0.08));
 }
 
+/* The deck with its controls under it: the pointer or the focus anywhere in this
+   zone holds the deck. */
+.sp-deck-zone {
+  display: grid;
+  gap: 18px;
+  justify-items: center;
+  width: 100%;
+}
+.sp-deck-nav {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+}
+.sp-deck-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.sp-deck-arrow {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition:
+    background-color 0.25s,
+    border-color 0.25s,
+    transform 0.25s var(--ease);
+}
+.sp-deck-arrow svg {
+  width: 16px;
+  height: 16px;
+}
+.sp-deck-arrow:hover {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: color-mix(in srgb, var(--glow, var(--text)) 55%, var(--line-2));
+}
+.sp-deck-arrow:active {
+  transform: scale(0.94);
+}
+.sp-deck-arrow:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
+}
+.sp-hint {
+  text-transform: uppercase;
+}
+
+/* Progress: one segment per card. The active one fills over a period (restarted by
+   the element changing), and freezes whenever the deck is waiting. When the deck
+   will not deal at all (reduced motion, or a phone the reader has swiped) the active
+   segment is simply full. */
 .sp-dots {
-  display: none;
-  justify-content: center;
-  gap: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .sp-dots span {
-  width: 8px;
-  height: 8px;
+  position: relative;
+  width: 28px;
+  height: 4px;
   border-radius: 999px;
-  background: var(--line-2);
-  transition:
-    width 0.3s var(--ease),
-    background-color 0.3s;
+  background: rgba(255, 255, 255, 0.18);
+  overflow: hidden;
+  transition: background-color 0.3s;
 }
 .sp-dots span[data-on="true"] {
-  width: 22px;
+  background: rgba(255, 255, 255, 0.28);
+}
+.sp-dots span::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
   background: var(--glow, var(--text));
+  transform-origin: left center;
+  transform: scaleX(0);
+}
+.sp-dots span[data-on="true"]::after {
+  animation: sp-fill var(--period, 3.8s) linear both paused;
+}
+.sp-dots[data-running="true"] span[data-on="true"]::after {
+  animation-play-state: running;
+}
+.sp-dots[data-progress="false"] span[data-on="true"]::after {
+  animation: none;
+  transform: none;
+}
+@keyframes sp-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
 }
 
 /* The description: centred text, no panel. The visible panel is stacked over an
@@ -504,12 +594,17 @@
     transform: none;
     scale: 1;
     filter: none;
+    /* The track scrolls under the pointer, so every card keeps the pointer here. */
+    cursor: pointer;
   }
   .sp-card:hover:not([data-active="true"]) {
     filter: brightness(0.85);
   }
-  .sp-dots {
-    display: flex;
+  .sp-deck-zone {
+    gap: 8px;
+  }
+  .sp-dots span {
+    width: 22px;
   }
 }
 
@@ -522,8 +617,13 @@
   }
   .sp-glow,
   .sp-card,
+  .sp-deck-arrow,
   .sp-dots span {
     transition: none;
+  }
+  .sp-dots span[data-on="true"]::after {
+    animation: none;
+    transform: none;
   }
   .sp-deck {
     scroll-behavior: auto;
