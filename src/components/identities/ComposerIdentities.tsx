@@ -203,10 +203,11 @@ function IdentityBack({ entry, contact, now, busy, done, error, status, actionRe
             <span className="id-card-back-meta">{card.category} · {card.validity}</span>
           </span>
         </div>
-        <p className="id-card-back-state">
+        {/* Once done, the line saying so stands for it: the engine's state catches up a moment later. */}
+        {!done && <p className="id-card-back-state">
           <span data-testid="composer-identity-status" className={tone}>{state}</span>
           {warn && <span data-testid="composer-identity-expiring" className="text-amber-500"> · {warn}</span>}
-        </p>
+        </p>}
         {done ? <p role="status" className="id-card-back-done" data-testid="composer-identity-done">
           <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
           {done === "shared" ? `Shared with ${contact}` : `${contact} no longer sees it`}
