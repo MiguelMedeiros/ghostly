@@ -93,13 +93,35 @@ describe("a chat as the contact drives it", () => {
     const { node, linkOf } = await started(chat);
     const patch = vi.spyOn(db, "patchLink");
     const { events } = linkOf(chat.id).options;
-    events.onPresence({ online: true, lastPacketAt: 9, services: null, nick: "Bob" });
+    events.onPeerNick("Bob");
+    events.onPeerNick("Bob");
     events.onPresence({ online: true, lastPacketAt: 10, services: null, nick: "Bob" });
     events.onPeerAvatar("data:image/jpeg;base64,AAAA");
     events.onPeerAvatar("data:image/jpeg;base64,AAAA");
     events.onPeerAvatar(null);
     expect(patch.mock.calls.map(([, p]) => p)).toEqual([{ peerNick: "Bob" }, { peerAvatar: "data:image/jpeg;base64,AAAA" }, { peerAvatar: undefined }]);
     expect(node.getState().links[0]).toMatchObject({ peerNick: "Bob", peerOnline: true, peerLastSeenAt: 10, peerAvatar: undefined });
+  });
+
+  it("a paired contact's removed name is kept as none, and only the session says it", async () => {
+    const chat = row({ peerNick: "Bob" });
+    const { node, linkOf } = await started(chat);
+    const { events } = linkOf(chat.id).options;
+    events.onPeerNick(null);
+    expect(node.getState().links[0].peerNick).toBe("");
+    await vi.waitFor(async () => expect((await saved(chat.id))?.peerNick).toBe(""));
+    // What the record says (possibly older than the session) does not bring it back.
+    events.onPresence({ online: false, lastPacketAt: 11, services: null, nick: "Bob" });
+    expect(node.getState().links[0].peerNick).toBe("");
+    events.onPeerNick("Robert");
+    expect(node.getState().links[0].peerNick).toBe("Robert");
+  });
+
+  it("a legacy contact's name comes from its record", async () => {
+    const chat = row({ profile: undefined, participationSeed: undefined });
+    const { node, linkOf } = await started(chat);
+    linkOf(chat.id).options.events.onPresence({ online: true, lastPacketAt: 9, services: null, nick: "Old timer" });
+    expect(node.getState().links[0].peerNick).toBe("Old timer");
   });
 
   it("an acknowledgement moves a legacy chat's read mark, never a paired one's", async () => {

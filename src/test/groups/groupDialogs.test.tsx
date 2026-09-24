@@ -96,7 +96,7 @@ describe("GroupMembersDialog", () => {
 
   it("names an unnamed contact by their key", () => {
     members_(groupView({ status: "active", isAdmin: true, members }), [paired({ id: "link-x", peerPubKeyZ32: "k".repeat(52) })]);
-    expect(screen.getByTestId("group-invite-contact")).toHaveTextContent("Anonymous · kkkkkk...kkkkkk");
+    expect(screen.getByTestId("group-invite-contact")).toHaveTextContent("Contact · kkkkkk");
   });
 
   it("invites nobody once members and invitations make eight", () => {

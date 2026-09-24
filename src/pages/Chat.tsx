@@ -1,4 +1,5 @@
-import { publicKeyLabel } from "../lib/publicKeyLabel";
+import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
+import { usePeerNick, useShareProfile } from "../hooks/useAvatars";
 import { PeerAvatar } from "../components/Avatar";
 import { useOutsideDismiss, useBackdropDismiss } from "../hooks/useDismiss";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
@@ -59,6 +60,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const session = useMemo(() => (sessionId ? loadSession(sessionId) : null), [sessionId]);
+  const sharedNick = useShareProfile() ? settings.defaultNickname : "";
   const params: ChatParams | null = useMemo(
     () =>
       session
@@ -69,10 +71,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
             seedB64: session.mySeedB64,
             peerPubKeyB64: session.peerPubKeyB64,
             encKeyB64: session.encKeyB64,
-            nick: settings.defaultNickname || undefined,
+            nick: sharedNick || undefined,
           }
         : null,
-    [session, settings.defaultNickname],
+    [session, sharedNick],
   );
 
   const {
@@ -93,9 +95,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     setNick,
   } = useChat(params);
 
+  // Only what contacts may see: the join notice names nobody while this profile does not share its name.
   useEffect(() => {
-    setNick(settings.defaultNickname);
-  }, [settings.defaultNickname, setNick]);
+    setNick(sharedNick);
+  }, [sharedNick, setNick]);
 
   const addCallEventMessage = useCallback(
     (type: CallEventType, hasVideo: boolean, duration?: number) => {
@@ -216,6 +219,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const [codeCopied, setCodeCopied] = useState(false);
   const [chatLabel, setChatLabel] = useState<string>("");
   const [peerNick, setPeerNick] = useState<string>("");
+  const profileNick = usePeerNick(params?.peerPubKeyB64);
   const [isEditingLabel, setIsEditingLabel] = useState(false);
   const [labelDraft, setLabelDraft] = useState("");
   /** Ways of paying are chosen per chat; the ⚡ works while this device allows at least one. */
@@ -339,8 +343,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const statusLabel = contactStatus(deliveryPeer, paired, status);
 
   const truncatedPeerKey = publicKeyLabel(params.peerPubKeyB64);
-  const displayName = chatLabel || peerNick;
+  // What the contact last said on the session wins over a name read out of an older message.
+  const contactNick = profileNick !== undefined ? profileNick : peerNick;
+  const displayName = chatLabel || contactNick;
   const isAnonymous = !displayName;
+  const shownName = displayName || t("common.unnamedContact", { key: contactTag(params.peerPubKeyB64) });
   const showKeySubtitle = true;
 
   return (
@@ -359,7 +366,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
             </svg>
           </button>
           <div className="relative w-10 h-10 rounded-full bg-surface-hover flex items-center justify-center shrink-0">
-            <PeerAvatar peerPubKey={params?.peerPubKeyB64} label={displayName || t("common.anonymous")} testId="chat-avatar" />
+            <PeerAvatar peerPubKey={params?.peerPubKeyB64} label={shownName} named={!isAnonymous} testId="chat-avatar" />
             {inviteCode && !pairedReady && (
               <span className="absolute -bottom-0.5 -end-0.5 w-[16px] h-[16px] flex items-center justify-center rounded-full text-[8px] bg-accent text-[#111b21] z-10 group/star">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
@@ -394,7 +401,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 className={`text-[15px] font-normal m-0 leading-tight truncate cursor-pointer hover:text-accent transition-colors ${isAnonymous ? "text-text-muted/60 italic" : "text-text-primary"}`}
                 title="Click to set a name"
               >
-                {displayName || t("common.anonymous")}
+                {shownName}
                 {!chatLabel && (
                   <svg
                     width="12"
@@ -656,7 +663,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               message={msg}
               peerAck={peerAck}
               peerPubKey={params.peerPubKeyB64}
-              peerNick={peerNick}
+              peerNick={contactNick}
               onDelete={() => forgetMessage(msg.id)}
             />
           ))}
@@ -666,7 +673,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
 
       {chatPeer?.hold && (chatPeer.hold.outstanding > 0 || chatPeer.hold.error) && (
         <div data-testid="hold-indicator" className="px-4 py-1 text-[11px] text-text-secondary bg-surface-alt/60 border-t border-border truncate" role="status">
-          {chatPeer.hold.outstanding > 0 && `${chatPeer.hold.outstanding} ${chatPeer.hold.outstanding === 1 ? "item" : "items"} held for ${displayName || t("common.anonymous")} · ${(chatPeer.hold.bytes / 1024 / 1024).toFixed(1)} MB of ${Math.round(chatPeer.hold.maxBytes / 1024 / 1024)} MB`}
+          {chatPeer.hold.outstanding > 0 && `${chatPeer.hold.outstanding} ${chatPeer.hold.outstanding === 1 ? "item" : "items"} held for ${shownName} · ${(chatPeer.hold.bytes / 1024 / 1024).toFixed(1)} MB of ${Math.round(chatPeer.hold.maxBytes / 1024 / 1024)} MB`}
           {chatPeer.hold.outstanding > 0 && chatPeer.hold.error && " · "}
           {chatPeer.hold.error && <span className="text-danger">{chatPeer.hold.error}</span>}
         </div>
@@ -689,14 +696,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
             ? { balance: walletState.balance, contact: displayName || undefined, onSend: paySend, onRequest: payRequest,reviewContext:platform?.getPeer(peerKey)?.id ? {wallet,peer:peerKey,linkId:platform.getPeer(peerKey)!.id!}:undefined }
             : undefined
         }
-        identities={paired ? { peerKey: params.peerPubKeyB64, contact: displayName || t("common.anonymous") } : undefined}
+        identities={paired ? { peerKey: params.peerPubKeyB64, contact: shownName } : undefined}
       />
 
       {/* Incoming call notification */}
       {/* Incoming call notification: over whatever is on screen, since this chat may not be. */}
       {webrtc.callState === "incoming" && createPortal(
         <IncomingCallNotification
-          peerName={displayName || t("common.anonymous")}
+          peerName={shownName}
           hasVideo={incomingHasVideo}
           onAcceptAudio={() => { webrtc.acceptCall(false); if (!visible) navigate(chatPath(sessionId)); }}
           onAcceptVideo={() => { webrtc.acceptCall(true); if (!visible) navigate(chatPath(sessionId)); }}
@@ -724,7 +731,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           canShareScreen={webrtc.canShareScreen}
           remoteHasVideo={webrtc.remoteHasVideo}
           callStartedAt={webrtc.callStartedAt}
-          peerName={displayName || t("common.anonymous")}
+          peerName={shownName}
           onHangUp={() => webrtc.hangUp()}
           onToggleMute={webrtc.toggleMute}
           onToggleVideo={webrtc.toggleVideo}
@@ -733,20 +740,20 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
       )}
 
       {showServices && params && (
-        <ChatServicesDialog peerPubKey={params.peerPubKeyB64} name={displayName || t("common.anonymous")} onClose={() => setShowServices(false)} />
+        <ChatServicesDialog peerPubKey={params.peerPubKeyB64} name={shownName} onClose={() => setShowServices(false)} />
       )}
       {showIdentities && params && (
-        <ChatIdentitiesDialog peerKey={params.peerPubKeyB64} name={displayName || t("common.anonymous")} onClose={() => setShowIdentities(false)} />
+        <ChatIdentitiesDialog peerKey={params.peerPubKeyB64} name={shownName} onClose={() => setShowIdentities(false)} />
       )}
       {showHold && chatPeer && params && platform && (
-        <ChatHoldDialog peer={chatPeer} name={displayName || t("common.anonymous")} onClose={() => setShowHold(false)}
+        <ChatHoldDialog peer={chatPeer} name={shownName} onClose={() => setShowHold(false)}
           onSave={(enabled) => platform.setChatHold(params.peerPubKeyB64, enabled)} />
       )}
       {showPayments && chatPeer && params && platform && (
-        <ChatPaymentsDialog peer={chatPeer} name={displayName || t("common.anonymous")} onClose={() => setShowPayments(false)}
+        <ChatPaymentsDialog peer={chatPeer} name={shownName} onClose={() => setShowPayments(false)}
           onSave={(methods) => platform.setChatPaymentMethods(params.peerPubKeyB64, methods)} />
       )}
-      {confirmDelete && <DeleteChatDialog name={`${displayName || t("common.anonymous")} · ${truncatedPeerKey}`} onClose={()=>setConfirmDelete(false)} onConfirm={handleDelete} />}
+      {confirmDelete && <DeleteChatDialog name={`${shownName} · ${truncatedPeerKey}`} onClose={()=>setConfirmDelete(false)} onConfirm={handleDelete} />}
       {/* Tech Info Modal */}
       {showTechInfo && techInfo && (
         <div 

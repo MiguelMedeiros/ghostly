@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { useI18n } from "../../contexts/I18nContext";
 import { categoryLabel, chatsByPeer, contactName, currentStatus, dateTime, providerLabel, RECEIVED_STATUS, shortSubject, useEngineState } from "../../lib/identities";
+import { contactTag } from "../../lib/publicKeyLabel";
 import { chatPath } from "../../lib/url";
 import { Button, Row, Section } from "../wallet/ui";
 import { ProviderMark, StatusPill } from "./ProviderMark";
@@ -20,7 +21,7 @@ export function ContactIdentitiesSection() {
   const chats = links.length ? chatsByPeer() : new Map();
   const received = links.flatMap(link => {
     const chat = chats.get(link.peerPubKeyZ32);
-    return link.identities!.received.map(r => ({ r, status: currentStatus(r), chat, name: contactName(chat) ?? t("common.anonymous") }));
+    return link.identities!.received.map(r => ({ r, status: currentStatus(r), chat, name: contactName(chat) ?? t("common.unnamedContact", { key: contactTag(link.peerPubKeyZ32) }) }));
   }).sort((a, b) => (ORDER[a.status] ?? 2) - (ORDER[b.status] ?? 2));
   if (!received.length) return null;
   return (

@@ -1,4 +1,4 @@
-import { publicKeyLabel } from "../lib/publicKeyLabel";
+import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import { PeerAvatar } from "./Avatar";
 import { useWalletMode } from "../hooks/useAvatars";
 import { DeleteChatDialog } from "./DeleteChatDialog";
@@ -310,7 +310,7 @@ export function Sidebar() {
           const peerName = session.label || session.nick;
           const peerKey = publicKeyLabel(session.peerPubKeyB64);
           const isAnonymous = !peerName;
-          const peerLabel = peerName || t("common.anonymous");
+          const peerLabel = peerName || t("common.unnamedContact", { key: contactTag(session.peerPubKeyB64) });
           const unread = isActive ? 0 : getUnreadCount(session);
           const isCreator = !!getInviteCode(session.id);
 
@@ -334,7 +334,7 @@ export function Sidebar() {
               <div className={`relative w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${
                 isActive ? "bg-surface-alt" : "bg-surface-hover"
               }`}>
-                <PeerAvatar peerPubKey={session.peerPubKeyB64} label={peerLabel} testId="chat-row-avatar" />
+                <PeerAvatar peerPubKey={session.peerPubKeyB64} label={peerLabel} named={!isAnonymous} testId="chat-row-avatar" />
                 {syncingSessions.has(session.id) && (
                   <span className="absolute -top-1 -start-1 w-5 h-5 flex items-center justify-center z-10">
                     <svg
@@ -460,7 +460,7 @@ export function Sidebar() {
       </div>
 
       {confirmDeleteId && <DeleteChatDialog
-        name={(() => { const target=sessions.find(s=>s.id===confirmDeleteId); return `${target?.label || target?.nick || t("common.anonymous")} · ${publicKeyLabel(target?.peerPubKeyB64 ?? confirmDeleteId)}`; })()}
+        name={(() => { const target=sessions.find(s=>s.id===confirmDeleteId); return `${target?.label || target?.nick || t("common.unnamedContact", { key: contactTag(target?.peerPubKeyB64 ?? confirmDeleteId) })} · ${publicKeyLabel(target?.peerPubKeyB64 ?? confirmDeleteId)}`; })()}
         onClose={() => setConfirmDeleteId(null)}
         onConfirm={() => { const id=confirmDeleteId; deleteSession(id); setConfirmDeleteId(null); refreshSessions(); window.dispatchEvent(new Event("session-updated")); if(activeSessionId===id) navigate("/"); }} />}
       {!isMobile && <AccountBar />}

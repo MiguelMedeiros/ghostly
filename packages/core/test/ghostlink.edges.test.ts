@@ -315,6 +315,53 @@ describe("what a paired peer says about itself", () => {
     expect(t.b.presence.nick).toBeUndefined();
   });
 
+  it("each side says its name and picture as soon as the session is ready, the invited side included", async () => {
+    const peerA = { onPeerNick: vi.fn(), onPeerAvatar: vi.fn() }, peerB = { onPeerNick: vi.fn(), onPeerAvatar: vi.fn() };
+    const t = linkedPair([{ nick: "Alice", avatar: jpegAvatar, events: peerA }, { nick: "Bob", events: peerB }]);
+    await t.ready();
+    expect(peerB.onPeerNick).toHaveBeenCalledWith("Alice");
+    expect(peerB.onPeerAvatar).toHaveBeenCalledWith(jpegAvatar);
+    // The inviter learns the invited side's too; a side with no picture says so.
+    expect(peerA.onPeerNick).toHaveBeenCalledWith("Bob");
+    expect(peerA.onPeerAvatar).toHaveBeenCalledWith(null);
+  });
+
+  it("a name removed is said as none, and a malformed one is not taken as a removal", async () => {
+    const onPeerNick = vi.fn();
+    const t = linkedPair([{ nick: "Alice" }, { events: { onPeerNick } }]);
+    await t.ready();
+    expect(onPeerNick).toHaveBeenLastCalledWith("Alice");
+    t.a.setNick(undefined);
+    await t.settle("b");
+    expect(onPeerNick).toHaveBeenLastCalledWith(null);
+    t.a.setNick("Alice again");
+    await t.settle("b");
+    expect(onPeerNick).toHaveBeenLastCalledWith("Alice again");
+    onPeerNick.mockClear();
+    t.toB({ t: "paired-nick", n: { evil: true } });
+    t.toB({ t: "paired-nick" });
+    await t.settle("b");
+    expect(onPeerNick).not.toHaveBeenCalled();
+  });
+
+  it("what changed while the contact was away is said again on the next session", async () => {
+    const peerB = { onPeerNick: vi.fn(), onPeerAvatar: vi.fn() };
+    const t = linkedPair([{ nick: "Alice" }, { events: peerB }]);
+    await t.ready();
+    t.a.disconnect();
+    await vi.waitFor(() => expect(t.b.isDataLinkOpen).toBe(false));
+    // Changed while no session is open: nothing can be sent now.
+    t.a.setNick("Alice (new)");
+    t.a.setAvatar(jpegAvatar);
+    expect(peerB.onPeerNick).not.toHaveBeenCalledWith("Alice (new)");
+    const [ca, cb] = createChannelPair();
+    (t.a as unknown as Internal).attach(ca);
+    (t.b as unknown as Internal).attach(cb);
+    await vi.waitFor(() => { expect(t.a.isDataLinkOpen).toBe(true); expect(t.b.isDataLinkOpen).toBe(true); });
+    await vi.waitFor(() => expect(peerB.onPeerNick).toHaveBeenLastCalledWith("Alice (new)"));
+    expect(peerB.onPeerAvatar).toHaveBeenLastCalledWith(jpegAvatar);
+  });
+
   it("takes a small JPEG avatar or its removal and ignores anything else", async () => {
     const onPeerAvatar = vi.fn();
     const t = linkedPair([{}, { events: { onPeerAvatar } }]);

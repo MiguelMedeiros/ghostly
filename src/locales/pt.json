@@ -4,6 +4,7 @@
     "deleteChatTitle": "Excluir conversa?",
     "deleteChatLocal": "Isso exclui a conversa e o histórico deste dispositivo. A cópia do seu contato não é excluída.",
     "anonymous": "Anônimo",
+    "unnamedContact": "Contato · {{key}}",
     "save": "Salvar",
     "cancel": "Cancelar",
     "delete": "Excluir",
@@ -160,7 +161,9 @@
     "version": "Versão",
     "website": "Website",
     "sourceCode": "Código fonte",
-    "license": "Licença"
+    "license": "Licença",
+    "shareProfile": "Compartilhar meu nome e foto com contatos",
+    "shareProfileHint": "Seus contatos veem o nome e a foto deste perfil. Desligado, veem “Contato” e um padrão no lugar."
   },
   "updates": {
     "available": "Ghostly {{version}} disponível",
