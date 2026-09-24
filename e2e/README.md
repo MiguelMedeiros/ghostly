@@ -72,8 +72,9 @@ but each suite has its own pair of nodes: the LND, WebLN and NWC tests assert ex
 files run in parallel. The Ark, Bark and USDT endpoints are also the web app's own Regtest options
 (`ArkWalletPanel`, `BarkWalletPanel`, `UsdtWalletPanel`), so those ports are fixed. The OIDC issuer and the Nostr
 relay of the social suite need no port: the test process answers their requests (`support/oidcIssuer.ts`,
-`support/nostrRelay.ts`). Breez's regtest is hosted by Breez and Lightspark, not by `e2e/infra`: `e2e:full` turns it
-on (`GHOSTLY_BREEZ_TESTNET=1`) unless the shell set it to something else.
+`support/nostrRelay.ts`). Breez's regtest is hosted by Breez and Lightspark, not by `e2e/infra`, and its faucet now
+asks for a reCAPTCHA: `e2e:full` runs the Breez suites only with a funded counterpart wallet in
+`GHOSTLY_BREEZ_COUNTERPART` (or when the shell sets `GHOSTLY_BREEZ_TESTNET=1`), and skips them otherwise.
 
 Nightly on `dev`, and by hand, the `E2E (full)` workflow (`.github/workflows/e2e-full.yml`) runs `npm run e2e:full`
 on a GitHub runner and keeps the Playwright report. It needs no secrets. See [When they run](#when-they-run) for
@@ -291,9 +292,10 @@ the other side of every payment is a counterpart wallet the test runs from Node 
 (`support/breez.ts`, wallets under the system temp folder, `ghostly-breez-e2e/`).
 
 The counterpart is funded from Lightspark's public regtest faucet (the one behind
-https://app.lightspark.com/regtest-faucet, no login) only when it holds fewer than 3,000 sats. The faucet
-rate-limits by IP, so reuse one funded counterpart across runs: put its recovery phrase in
-`GHOSTLY_BREEZ_COUNTERPART` (never commit or print it; without it a new one is made and funded each run).
+https://app.lightspark.com/regtest-faucet) only when it holds fewer than 3,000 sats. Since 2026-09-24 that faucet
+refuses requests without a reCAPTCHA ("Missing reCAPTCHA token") and rate-limits by IP, so a test can no longer
+fund a new wallet by itself: fund one counterpart by hand on that page and put its recovery phrase in
+`GHOSTLY_BREEZ_COUNTERPART` (never commit or print it).
 
 ```bash
 export GHOSTLY_BREEZ_COUNTERPART="<twelve words of a funded regtest wallet>"   # optional

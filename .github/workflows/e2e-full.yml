@@ -4,7 +4,7 @@ name: E2E (full)
 # chain, Ark and Bark servers, LND and Core Lightning nodes, Alby Hubs, Anvil, MinIO and the Cashu test mint —
 # worthless coins and throwaway keys, all on this runner, so no secrets. `npm run e2e:full` brings it up, funds
 # it, runs the gated vitest contracts and the web and extension suites, and takes it down (see e2e/README.md).
-# Breez's hosted regtest is the one outside service it reaches.
+# Breez's hosted regtest is not part of it: its faucet needs a reCAPTCHA, so those suites are skipped here.
 # Nightly on dev and by hand; not on pull requests, on purpose: it takes far longer than a merge should wait.
 on:
   schedule:

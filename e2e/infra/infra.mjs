@@ -40,7 +40,8 @@ function compose(args, { quiet = false } = {}) {
 
 function containers() {
   const out = compose(["ps", "-a", "--format", "json"], { quiet: true }) ?? "";
-  return out.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  // One JSON object per line (Compose 2.21 and later), or one array (earlier).
+  return out.split("\n").filter(Boolean).flatMap((line) => JSON.parse(line));
 }
 
 // ── Health ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -192,10 +193,11 @@ async function full(args) {
   try {
     await phase("down", async () => down());
     await phase("up", up);
-    // Breez's regtest is hosted by Breez and Lightspark (no key, a faucet): on unless the shell turned it off.
+    // Breez's regtest is hosted by Breez and Lightspark, and its faucet now wants a reCAPTCHA: on only with a funded
+    // counterpart wallet of one's own (GHOSTLY_BREEZ_COUNTERPART), or when the shell turned it on.
     // The Ark SDK opens server-sent events, which Node has behind a flag.
     const env = environment({
-      GHOSTLY_BREEZ_TESTNET: process.env.GHOSTLY_BREEZ_TESTNET ?? "1",
+      GHOSTLY_BREEZ_TESTNET: process.env.GHOSTLY_BREEZ_TESTNET ?? (process.env.GHOSTLY_BREEZ_COUNTERPART ? "1" : "0"),
       NODE_OPTIONS: [process.env.NODE_OPTIONS, "--experimental-eventsource"].filter(Boolean).join(" "),
     });
     // One file at a time: bitcoind.regtest mines a hundred blocks at once, which runs out the clock of any HTLC
