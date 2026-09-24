@@ -67,7 +67,8 @@ const PROBES = {
   "Alby Hubs": async () => (await http(`${endpoints.nwc.hub.alice}/api/info`)) && http(`${endpoints.nwc.hub.bob}/api/info`),
   Anvil: () => rpc(endpoints.usdt.rpc, "eth_chainId"),
   S3: () => http(`${endpoints.s3.endpoint}/health`),
-  "Cashu mint": () => http(`${process.env.E2E_MINT_URL || VARIABLES.E2E_MINT_URL[0]}/v1/info`),
+  // The environment's own mint, whatever E2E_MINT_URL points the suite at.
+  "Cashu mint": () => http(`${VARIABLES.E2E_MINT_URL[0]}/v1/info`),
 };
 
 async function probe() {
@@ -120,7 +121,8 @@ function node(args, env) {
     let output = "";
     child.stdout.on("data", (chunk) => { output += chunk; });
     child.stderr.on("data", (chunk) => { output += chunk; });
-    child.on("close", (code) => resolve({ code, output }));
+    child.on("error", (error) => { output += String(error); });
+    child.on("close", (code) => resolve({ code: code ?? 1, output }));
   });
 }
 
@@ -179,6 +181,7 @@ async function status() {
 function run(command, args, env) {
   return new Promise((resolve) => {
     const child = spawn(command, args, { cwd: ROOT, env, stdio: "inherit" });
+    child.on("error", (error) => { console.error(`${command}: ${error.message}`); resolve(1); });
     child.on("close", (code) => resolve(code ?? 1));
   });
 }
@@ -195,6 +198,7 @@ async function full(args) {
   const cleanup = () => { if (!cleaned && !keep) { cleaned = true; down(); } };
   process.on("SIGINT", () => { cleanup(); process.exit(130); });
   process.on("SIGTERM", () => { cleanup(); process.exit(143); });
+  process.on("SIGHUP", () => { cleanup(); process.exit(129); });
 
   const phases = [];
   const phase = async (name, work) => { const since = Date.now(); const result = await work(); phases.push(`${name} ${elapsed(since)}`); return result; };

@@ -27,7 +27,8 @@ export const VARIABLES = {
   GHOSTLY_USDT_LOCAL: ["1", "USDT suites: the local EVM chain with the test token deployed"],
   GHOSTLY_WEBLN_REGTEST: ["1", "WebLN suites: two LND nodes behind the injected browser wallets"],
 
-  // Harness.
+  // Harness: ports of the suite's own servers. Defaults only, never written to .env.e2e — other runners (the scenario
+  // matrix) read the same names for ranges of their own.
   E2E_WEB_PORT: ["47100", "Port the suite serves the web build on (vite preview); LND's restcors allows this origin"],
   E2E_MINT_URL: ["http://127.0.0.1:47090", "Cashu test mint answering for testnut.cashu.space (support/mint.ts)"],
   E2E_LNURL_PORT: ["47110", "First port the in-process Lightning address server tries (support/lnurl.ts; ten ports)"],
@@ -94,10 +95,15 @@ export const endpoints = {
 /** `host:port` of a URL, the way the app shows where a service is. */
 export const hostOf = (url) => new URL(url).host;
 
-/** The `.env.e2e` file: every variable with its default, commented. */
+/** The suite's own ports: `npm run e2e:full` passes them to its children, `.env.e2e` leaves them out. */
+export const HARNESS_PORTS = ["E2E_WEB_PORT", "E2E_LNURL_PORT", "E2E_DOMAIN_PORT"];
+
+/** The `.env.e2e` file: every variable of the environment with its value, commented. */
 export function dotenv(values = {}) {
   const lines = ["# Written by `npm run e2e:infra:up` (e2e/infra/infra.mjs); removed by `npm run e2e:infra:down`.",
     "# Worthless regtest coins, test tokens and throwaway keys only. Names are listed in e2e/infra/env.mjs."];
-  for (const [name, [value, about]] of Object.entries(VARIABLES)) lines.push(`# ${about}`, `${name}=${values[name] ?? value}`);
+  for (const [name, [value, about]] of Object.entries(VARIABLES)) {
+    if (!HARNESS_PORTS.includes(name)) lines.push(`# ${about}`, `${name}=${values[name] ?? value}`);
+  }
   return `${lines.join("\n")}\n`;
 }

@@ -118,9 +118,12 @@ describe("the Bark adapter", () => {
     await adapter.dispose();
     // Freed now, the SDK would throw "attempted to take ownership of Rust value while it was borrowed".
     expect(wallet.freed).toBe(false);
+    // Closed: a read that comes after it (a refresh already under way) is refused instead of reaching a freed wallet.
+    await expect(adapter.balance()).rejects.toThrow("closed");
     finish();
     await syncing;
-    await vi.waitFor(() => expect(wallet.freed).toBe(true));
+    expect(wallet.freed).toBe(true);
+    await adapter.dispose();
   });
 
   it("waits for a wallet opened again to reach its server, and tells a silent server from a changed one", async () => {

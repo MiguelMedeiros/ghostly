@@ -32,14 +32,22 @@ export class BarkAdapter implements PaymentAdapter<BarkPrepared> {
   readonly method = "bark" as const;
   private queue: Promise<unknown> = Promise.resolve();
   private serial<T>(run: () => Promise<T>): Promise<T> { const next = this.queue.then(run, run); this.queue = next.catch(() => {}); return next; }
-  /** Calls that do not wait for the queue (reads, sync, maintenance): `dispose` frees nothing while one is running. */
+  /** Calls that do not wait for the queue (reads, sync, maintenance): the wallet is freed only once none is running. */
   private running = new Set<Promise<unknown>>();
+  private closed = false;
+  private freed = false;
   private outside<T>(run: () => Promise<T>): Promise<T> {
+    if (this.closed) return Promise.reject(new Error("This Bark wallet is closed"));
     const call = run();
     this.running.add(call);
-    const done = () => { this.running.delete(call); };
+    const done = () => { this.running.delete(call); this.freeWhenIdle(); };
     call.then(done, done);
     return call;
+  }
+  private freeWhenIdle() {
+    if (!this.closed || this.freed || this.running.size) return;
+    this.freed = true;
+    this.wallet.free(); this.onchain.free();
   }
   private constructor(readonly config: BarkConfig, private sdk: BarkSdk, private wallet: BarkWalletHandle, private onchain: BarkOnchainHandle) {}
 
@@ -88,10 +96,11 @@ export class BarkAdapter implements PaymentAdapter<BarkPrepared> {
    * borrowed" and leaves Bark unusable in this page — replacing a wallet that had just opened did exactly that.
    */
   async dispose() {
+    // Closed first: nothing new starts outside the queue, and whatever is running frees the wallet when it ends.
+    this.closed = true;
     await this.queue.catch(() => {});
     try { await this.wallet.stopDaemonWait(); } catch { /* already stopped */ }
-    const free = () => { this.wallet.free(); this.onchain.free(); };
-    if (this.running.size) void Promise.allSettled([...this.running]).then(free); else free();
+    this.freeWhenIdle();
   }
 
   prepare(target: PaymentTarget, amount: number, feeCap: number) { return this.serial(async () => {

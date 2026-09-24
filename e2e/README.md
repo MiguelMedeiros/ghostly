@@ -67,6 +67,9 @@ endpoint from there, never a literal port. Their names are stable: other suites 
 | 47110-47119 | Lightning address server, in the test process | `E2E_LNURL_PORT` |
 | 47120-47199 | domain-proof DoH + well-known servers, in the test process | `E2E_DOMAIN_PORT` |
 
+The last three are the suite's own servers: `e2e:full` sets them, and they are left out of `.env.e2e` so that
+another runner reading that file (the scenario matrix, 47300-47399) keeps its own defaults.
+
 Every Bitcoin service shares the one chain, so Lightning nodes of different implementations can reach each other,
 but each suite has its own pair of nodes: the LND, WebLN and NWC tests assert exact channel balances while other
 files run in parallel. The Ark, Bark and USDT endpoints are also the web app's own Regtest options
