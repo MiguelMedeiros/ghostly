@@ -48,3 +48,29 @@ export function Row({ label, hint, value, leading, children, testId }: {
 export function Block({ children, testId }: { children: ReactNode; testId?: string }) {
   return <div className="px-4 py-3.5 space-y-3 min-w-0" data-testid={testId}>{children}</div>;
 }
+
+/**
+ * A row that goes somewhere: the whole line is one button, with a chevron at the end. Same parts as `Row`
+ * (`leading`, `label`, `hint`, `value`), but no controls of its own.
+ */
+export function LinkRow({ label, hint, value, leading, onClick, testId }: {
+  label: ReactNode;
+  hint?: ReactNode;
+  value?: ReactNode;
+  leading?: ReactNode;
+  onClick: () => void;
+  testId?: string;
+}) {
+  return (
+    <button type="button" data-testid={testId} onClick={onClick}
+      className="w-full flex items-center gap-3 px-4 py-3 min-h-12 text-left hover:bg-surface-alt transition-colors cursor-pointer first:rounded-t-xl last:rounded-b-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent">
+      {leading && <span className="shrink-0">{leading}</span>}
+      <span className="flex-1 min-w-0">
+        <span className="block truncate text-sm text-text-primary">{label}</span>
+        {hint && <span className="block text-xs text-text-muted mt-0.5 break-words">{hint}</span>}
+      </span>
+      {value !== undefined && <span className="shrink-0 whitespace-nowrap text-sm text-text-muted tabular-nums">{value}</span>}
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" className="shrink-0 text-text-muted" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+    </button>
+  );
+}

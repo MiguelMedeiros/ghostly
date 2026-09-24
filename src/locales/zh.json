@@ -95,6 +95,7 @@
     "privateNotice": "新消息",
     "title": "设置",
     "profile": "个人资料",
+    "profileLinkHint": "名称、头像、备份和其他资料",
     "defaultNickname": "默认昵称",
     "defaultNicknameHint": "此名称将作为新聊天的默认名称",
     "nicknamePlaceholder": "输入您的昵称...",

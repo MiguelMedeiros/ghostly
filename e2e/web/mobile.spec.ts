@@ -1,6 +1,6 @@
 import { chat, connect, expect, link, say, test } from "../support/fixtures";
 
-test("on a phone: tabs for chats, wallet, sharing and settings", { tag: ["@feature:app.mobile-layout"] }, async ({ peer }) => {
+test("on a phone: tabs for chats, wallet, sharing and settings, and Profile through Settings", { tag: ["@feature:app.mobile-layout"] }, async ({ peer }) => {
   const { page } = await peer("alice", { mobile: true });
   const tabs = page.getByTestId("mobile-tabs");
   await expect(tabs).toBeVisible();
@@ -16,6 +16,19 @@ test("on a phone: tabs for chats, wallet, sharing and settings", { tag: ["@featu
 
   await tabs.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+
+  // No account bar and no Profile tab: Settings' Profile section leads there, showing the active profile.
+  await expect(page.getByTestId("account-bar")).toHaveCount(0);
+  const profileLink = page.getByTestId("settings-profile-link");
+  await expect(profileLink).toContainText("Name, picture, backups and other profiles");
+  await profileLink.click();
+  await expect(page).toHaveURL(/#\/profile$/);
+  await expect(page.getByTestId("profile-page")).toBeVisible();
+  await page.getByTestId("profile-name").fill("Pocket");
+  await page.getByTestId("profile-name").press("Enter");
+  await tabs.getByRole("button", { name: "Settings" }).click();
+  await expect(profileLink).toContainText("Pocket");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 
   await tabs.getByRole("button", { name: "Chats" }).click();
   await expect(page.getByPlaceholder("Search chats...")).toBeVisible();

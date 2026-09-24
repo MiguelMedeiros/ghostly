@@ -95,6 +95,7 @@
     "privateNotice": "Nouveau message",
     "title": "Paramètres",
     "profile": "Profil",
+    "profileLinkHint": "Nom, photo, sauvegardes et autres profils",
     "defaultNickname": "Pseudo par défaut",
     "defaultNicknameHint": "Ce nom sera utilisé par défaut dans les nouveaux chats",
     "nicknamePlaceholder": "Entrez votre pseudo...",

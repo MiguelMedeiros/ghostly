@@ -95,6 +95,7 @@
     "privateNotice": "Nuovo messaggio",
     "title": "Impostazioni",
     "profile": "Profilo",
+    "profileLinkHint": "Nome, foto, backup e altri profili",
     "defaultNickname": "Nickname Predefinito",
     "defaultNicknameHint": "Questo nome verrà usato come predefinito nelle nuove chat",
     "nicknamePlaceholder": "Inserisci il tuo nickname...",

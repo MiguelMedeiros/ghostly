@@ -1,6 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { InputGroup, Page } from "../components/layout";
+import { InputGroup, LinkRow, Page } from "../components/layout";
 import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
@@ -24,17 +24,6 @@ function useProfiles() {
     return () => { for (const name of ["profiles-updated", "settings-updated", "storage"]) window.removeEventListener(name, changed); };
   }, []);
   return { current: currentProfile(), all: listProfiles() };
-}
-
-/** A row that is a link: label, value, chevron. */
-function LinkRow({ label, value, onClick, testId }: { label: ReactNode; value?: ReactNode; onClick: () => void; testId?: string }) {
-  return (
-    <button type="button" data-testid={testId} onClick={onClick} className="w-full flex items-center gap-3 px-4 py-3 min-h-12 text-left hover:bg-surface-alt transition-colors cursor-pointer first:rounded-t-xl last:rounded-b-xl">
-      <span className="flex-1 min-w-0 truncate text-sm text-text-primary">{label}</span>
-      {value !== undefined && <span className="shrink-0 whitespace-nowrap text-sm text-text-muted tabular-nums">{value}</span>}
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" className="shrink-0 text-text-muted" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
-    </button>
-  );
 }
 
 /**
