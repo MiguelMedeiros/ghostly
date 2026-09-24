@@ -61,9 +61,9 @@ test("an identity is added, shared and withdrawn from the chat's composer", { ta
   await expect(share).toHaveText(/^Share with /);
   await expect(share).toBeFocused();
 
-  // Share: the back says it is done, Bob's app verifies it, and the card comes back wearing the check seal.
+  // Share: the back says it is done (briefly: the UI tests check the line), Bob's app verifies it, and the card comes
+  // back wearing the check seal.
   await share.click();
-  await expect(back.getByTestId("composer-identity-done")).toContainText("Shared with");
   await expect(picker).toHaveAttribute("data-side", "cards");
   await expect(nostr.getByTestId("id-card-shared")).toBeVisible();
   await expect(nostr).toBeFocused();
@@ -80,7 +80,6 @@ test("an identity is added, shared and withdrawn from the chat's composer", { ta
   await expect(back).toContainText("a copy they kept stays");
   await expect(share).toHaveText("Stop sharing");
   await share.click();
-  await expect(back.getByTestId("composer-identity-done")).toContainText("no longer sees it");
   await expect(picker).toHaveAttribute("data-side", "cards");
   await expect(nostr.getByTestId("id-card-shared")).toHaveCount(0);
   await expect(button.getByTestId("composer-identities-count")).toHaveCount(0);
