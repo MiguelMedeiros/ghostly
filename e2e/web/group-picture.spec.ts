@@ -23,6 +23,17 @@ async function join(peer: Peer, url: string): Promise<void> {
   await expect(groupChat(peer)).toHaveAttribute("data-status", "active", { timeout: 180_000 });
 }
 
+/** Opens the members panel, and closes it with its button (a second Escape without a gesture between may be ignored). */
+async function openMembers(peer: Peer): Promise<void> {
+  await peer.page.getByTestId("group-members").click();
+  await expect(peer.page.getByTestId("group-members-dialog")).toBeVisible();
+}
+async function closeMembers(peer: Peer): Promise<void> {
+  const dialog = peer.page.getByTestId("group-members-dialog");
+  await dialog.getByRole("button", { name: "Close" }).click();
+  await expect(dialog).toBeHidden();
+}
+
 /** A PNG drawn in the page: a picture file as someone would pick it (not square, bigger than what is sent). */
 async function pictureFile(peer: Peer, color: string): Promise<{ name: string; mimeType: string; buffer: Buffer }> {
   const dataUrl = await peer.page.evaluate((fill) => {
@@ -45,9 +56,9 @@ async function shows(peer: Peer, picture: string | null): Promise<void> {
     await expect(headerPicture(peer).locator("img")).toHaveAttribute("src", picture);
     await expect(rowPicture(peer).locator("img")).toHaveAttribute("src", picture);
   }
-  await peer.page.getByTestId("group-members").click();
+  await openMembers(peer);
   await expect(peer.page.getByTestId("group-members-avatar")).toHaveAttribute("data-picture", state);
-  await peer.page.keyboard.press("Escape");
+  await closeMembers(peer);
 }
 
 test("three people: the admin sets the group's picture, a late joiner by link sees it, it changes and goes for everyone", { tag: ["@feature:groups.picture.set", "@feature:groups.picture.late-joiner"] }, async ({ peer }) => {
@@ -68,15 +79,15 @@ test("three people: the admin sets the group's picture, a late joiner by link se
   await join(bob, url);
   await expect(bob.page.getByTestId("group-members")).toContainText("2 members", { timeout: 120_000 });
   // Only the admin may change it.
-  await bob.page.getByTestId("group-members").click();
+  await openMembers(bob);
   await expect(bob.page.getByTestId("group-picture-input")).toHaveCount(0);
-  await bob.page.keyboard.press("Escape");
+  await closeMembers(bob);
 
   // Alice picks a picture: cropped square and made small before anything leaves her app.
-  await alice.page.getByTestId("group-members").click();
+  await openMembers(alice);
   await alice.page.getByTestId("group-picture-input").setInputFiles(await pictureFile(alice, "#c0392b"));
   await expect(alice.page.getByTestId("group-members-avatar")).toHaveAttribute("data-picture", "set");
-  await alice.page.keyboard.press("Escape");
+  await closeMembers(alice);
   const first = await headerPicture(alice).locator("img").getAttribute("src");
   expect(first).toMatch(/^data:image\/jpeg;base64,/);
   expect(first!.length).toBeLessThan(40_000);
@@ -93,19 +104,19 @@ test("three people: the admin sets the group's picture, a late joiner by link se
   await carol.page.getByTestId("group-share-dialog").getByTestId("group-share-done").click();
 
   // A new picture replaces it for everyone.
-  await alice.page.getByTestId("group-members").click();
+  await openMembers(alice);
   await alice.page.getByTestId("group-picture-input").setInputFiles(await pictureFile(alice, "#2471a3"));
-  await alice.page.keyboard.press("Escape");
-  await expect(headerPicture(alice).locator("img")).not.toHaveAttribute("src", first!);
+  await expect(alice.page.getByTestId("group-members-avatar").locator("img")).not.toHaveAttribute("src", first!);
+  await closeMembers(alice);
   const second = await headerPicture(alice).locator("img").getAttribute("src");
   await shows(bob, second);
   await shows(carol, second);
 
   // Removed: everyone is back to the group glyph.
-  await alice.page.getByTestId("group-members").click();
+  await openMembers(alice);
   await alice.page.getByTestId("group-picture-remove").click();
   await expect(alice.page.getByTestId("group-members-avatar")).toHaveAttribute("data-picture", "none");
-  await alice.page.keyboard.press("Escape");
+  await closeMembers(alice);
   await shows(alice, null);
   await shows(bob, null);
   await shows(carol, null);
