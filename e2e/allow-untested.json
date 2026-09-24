@@ -4,8 +4,6 @@
   "settings.storage-used": "Nothing asserts the storage figure in Settings; a component test (npm run test:ui) can",
   "storage.local": "The local file storage adapter (WISP 1001) is exercised only through backup.profile.file, never on its own",
   "core.dht-direct": "src-tauri/src/pkarr_client.rs has no Rust test, and the Desktop smoke test only reads the label in Settings",
-  "wallet.cashu.receive-token": "Receiving a pasted token from the wallet page is untested; the chat token card (payments.cashu.token-card) is",
-  "wallet.cashu.export": "walletExport has no test at all",
   "proofs.oidc.callback.extension": "The chromiumapp.org redirect needs a real extension identity flow; no extension OIDC spec exists",
   "desktop.bundle-wiring": "Guarded by npm run check:desktop-bundle in PR CI, a build assertion the test map does not read",
   "desktop.notifications": "Native notifications need the Desktop harness (Linux only) and no spec drives them",
