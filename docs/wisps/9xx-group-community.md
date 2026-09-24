@@ -4,11 +4,11 @@
 |---|---|
 | Number assignment | 9xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.2 |
+| Revision | 0.3 |
 | Updated | 2026-09-24 |
 | Document kind | Profile |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [400](400-chat.md), [401](401-paired-chat.md), [900](900-group-sessions.md), [9xx · Group Mesh](9xx-group-mesh.md) |
-| Implementation | `group-community/1`: core protocol in [`groupCommunity.ts`](../../packages/core/src/groupCommunity.ts) and [`communityRendezvous.ts`](../../packages/core/src/communityRendezvous.ts); engine in [`community.ts`](../../packages/browser/src/engine/community.ts); UI shared with the mesh; unit tests, a six-browser e2e and a headless load test |
+| Implementation | `group-community/1`: core protocol in [`groupCommunity.ts`](../../packages/core/src/groupCommunity.ts) and [`communityRendezvous.ts`](../../packages/core/src/communityRendezvous.ts); engine in [`community.ts`](../../packages/browser/src/engine/community.ts), payments in [`communityPay.ts`](../../packages/browser/src/engine/communityPay.ts); UI shared with the mesh; unit tests, a six-browser e2e, a three-browser payments e2e and a headless load test |
 
 > This Draft documents the second distribution profile of [900](900-group-sessions.md) as implemented. Numbers and wire formats are not registered standards.
 
@@ -88,7 +88,7 @@ A frame for one member (the secret of a fresh epoch sealed to it) carries `to`; 
 { "t": "group-msg", "v": 2, "g", "e", "h": <first 16 hex of the epoch's commit hash>, "s", "n", "ts", "nn", "c", "sig" }
 ```
 
-The ciphertext opens to `{ "text", "nick"? }`: a member's name travels encrypted with what it says, since most members never share an edge. The associated data is `[g, e, h, s, n, ts]`; the signature covers `["ghostly-group/2 msg", g, e, h, s, n, ts, nn, c]`.
+The ciphertext opens to `{ "text", "nick"? }`: a member's name travels encrypted with what it says, since most members never share an edge. Since revision 0.3 it may instead open to an application frame for the group, `{ "x": { … }, "nick"? }`, or to a payload for one member, `{ "p": { "to", "e", "n", "c" }, "nick"? }` (§ Payments); exactly one of `text`, `x` and `p`. Both are frames like any other: same signature, identity, deduplication, relaying, store and catch-up; they are handed to the application instead of the history. The associated data is `[g, e, h, s, n, ts]`; the signature covers `["ghostly-group/2 msg", g, e, h, s, n, ts, nn, c]`.
 
 Every member keeps the last 256 frames of the group, from everyone (at most 1 MiB), and answers a `group-sync` with the commits the other lacks, the secrets of epochs it was in, and the stored frames above the other's high-water marks, for epochs the other was a member of. Frames are signed by their authors, so a relayed or re-sent frame is as authentic as a direct one, and per-sender sequence numbers still reveal gaps. A newcomer is not sent anything from before its admission. A member that lacks the current epoch's secret, or holds frames or commits it cannot place yet, asks its connected members with a `group-sync` every five seconds until it has them: a sealed secret lost on the way is not lost for good. Every member also sends a `group-sync` to whoever it is connected to every thirty seconds, so a commit or a message that went by while an edge was down reaches it without anything left waiting to ask about.
 
@@ -110,24 +110,60 @@ A member leaves by sending `{ "t": "group-leave", "v": 2, "g", "s", "ls" }` to i
 
 A community group has the mesh profile's metadata (its picture), with the same statement, body, box and rules ([9xx · Group Mesh § Metadata](9xx-group-mesh.md#metadata)). Here the frame carries `"v": 2`, `h` must be on the member's **main branch** at index `e`, and `k` is the **hash** of the commit whose epoch key seals the body (as messages name their commit), not an epoch number. The signer must be the admin after `h` and the admin now, so a statement is the admin's word whichever member admitted whom. A hub relays a statement it took as new, like any other frame, so members who reach each other only through hubs get it. A member let in by another member while the admin is away gets it at its first sync with whoever let it in. A new admin, including the member an admin hands its role to before leaving, signs it again.
 
+## Payments
+
+A payment in a community is, as in [`group-mesh/1`](9xx-group-mesh.md) § Payments, a payment **between two members** plus a **note** the rest of the group sees; a request to the whole group is paid **once**. What changes is the transport: two members of a community rarely share an edge, so what they say to each other about the money goes through the hubs, **sealed to the two of them**.
+
+### Pair payloads
+
+A member's payload for another member travels inside an ordinary `group-msg` of the group, as `p`:
+
+```
+{ "p": { "to": <recipient key>, "e": <ephemeral X25519 key>, "n": <24-byte nonce>, "c": <ciphertext> }, "nick"? }
+```
+
+- **Key.** `HKDF-SHA-256(ikm = X25519(ephemeral, recipient) ‖ X25519(sender, recipient), salt = ephemeral public key, info = "ghostly-group/2 pair" ‖ sender key ‖ recipient key)`, member keys taken to X25519 as for sealed secrets. The ephemeral half means a later leak of the sender's seed alone opens nothing; the static half means only the sender (or the recipient) can have made it, independently of the signature.
+- **Cipher.** XChaCha20-Poly1305, associated data `["ghostly-group/2 pair", g, e, h, s, n, ts, to]`: the header of the frame that carries it, and whom it is for. A box lifted into another frame (another sender, sequence, epoch, group, or recipient) does not open.
+- **Carrying.** The `group-msg` around it is sealed to the epoch and signed by the sender like text. So a pair payload is **authenticated** (only the sender signs its frames; a changed byte fails the signature, a hub's own frame opens as from that hub, never as from someone else), **deduplicated across the flood** (the frame identity: sender, epoch, commit, sequence; the replay window of 256 per sender and epoch; a frame older than the window's epochs is not placed at all), **relayed** by hubs once per frame, and **kept** in every member's store and handed to whoever was away at the next `group-sync`, like text. A member who is not `to` keeps and relays it and never opens it.
+- **What a hub (or any member) learns.** That the sender sent the recipient something, when, and its size. Not the amount, the token, the invoice, the address or the memo. The note below tells the group who pays whom and how much anyway; nothing to pay with is ever readable by anyone but the recipient.
+
+The payload is JSON of at most 8 KiB: `{ "pm": [<ways of paying the sender takes>], "hi"?: 1, "f"?: <payment frame> }`, where `f` is one of the ordinary frames of [200](200-payments.md) (`pay-ask`, `pay-req`, `pay`, `pay-res`), checked exactly as on a data link. `pm` does what `paired-payments` does on a chat: every payload says what its sender takes, and a member whose word is not in yet is taken to take Cashu and Lightning. `hi: 1` asks for an answer (`{ "pm" }`, at most every ten seconds per member): an app sends it when its person opens the payment composer on that member. Ecash is a bearer token: it only ever travels inside a pair payload to the payee, so no relayed copy is redeemable by anyone else.
+
+### Everything else is the chat's
+
+The payer's app pays or asks, reviews and approves exactly as in a chat; the payee's app redeems, answers `pay-res`, and the payer takes back ecash refused or never redeemed. A member who was away gets a request, a payment or a receipt from whoever is there when it returns; if the payee is away when the ecash is sent, the token waits sealed in the hubs' stores until it returns (or until the payer takes it back). Receipts are idempotent: a frame delivered twice is handed on once, and the desk answers a payment it already recorded from what it recorded.
+
+### A request to the whole group
+
+Not one `pay-req` per member: one **application frame** to everyone, `{ "x": { "t": "pay-req", "id", "ts", "v", "u", "memo"?, "e": [<one endpoint>], "pm": [...] } }`, sealed to the epoch like text (every member is asked to pay it, so every member may read it). The rules of `group-mesh/1` hold unchanged: **one rail** (Cashu or Lightning), **first valid payment wins** (each payer pays with a pair payload to the payee; the payee checks each token before redeeming it and refuses later ones unredeemed), and **everyone's copy closes**: when it settles, the payee sends `{ "x": { "t": "pay-res", "id": <request id>, "ok": true } }` to everyone. A request and a result are believed only from the member who made the request (the receiving app files them under that member).
+
+### The note
+
+The `group-pay` note of `group-mesh/1`, unchanged in content and rules, goes to everyone as an application frame, `{ "x": { "t": "group-pay", … } }`, instead of on every edge; its author is the frame's signer. It is not said again when an edge opens: the store and catch-up carry it.
+
+### Why not a direct session for the payment
+
+Two members could open an edge between them for the payment (the edges are derived pairwise already). It is not what this profile does, because: a request to the whole group would need an edge to every member, hundreds of them; a member who is away would get nothing until both apps happen to be open at once, whereas the group already keeps frames for whoever was away; and a paired session over Pkarr took 5 to 80 seconds to come up on the test machine, where a frame through the hubs takes a second. The pair payload gives what the edge would (only the two members read it; only the sender makes it), over a path the group maintains anyway.
+
 ## Compatibility
 
-`group-mesh/1` groups, their links and their frames are unchanged. Community frames carry `v: 2`; an app from before metadata drops `group-meta` and relays none of it, and members that reach each other only through such a hub get the picture at their next sync with a newer member; a mesh session ignores them, and an app from before this profile never receives one, since it never announces 2. Community groups are not offered as contact invitations at all.
+`group-mesh/1` groups, their links and their frames are unchanged. Community frames carry `v: 2`; an app from before metadata drops `group-meta` and relays none of it, and members that reach each other only through such a hub get the picture at their next sync with a newer member; a mesh session ignores them, and an app from before this profile never receives one, since it never announces 2. Community groups are not offered as contact invitations at all. An app of revision 0.2 drops a `group-msg` that opens to `x` or `p` (it expects `text`): it shows nothing and, as a hub, does not pass it on, so payments need the two members and the hubs between them on revision 0.3. Text is unaffected.
 
 ## Bounds
 
-256 members; 2048 commits; 8 hubs, 48 members per hub, one hub per member; 256 stored frames and 1 MiB; 96 epoch secrets; 512 commits off the main branch; ties between branches decided within 64 epochs; 16 KiB of text; 60 KiB per frame; four knock records and lobbies of six entries each. The member cap is what the load test below measured; see Conformance.
+256 members; 2048 commits; 8 hubs, 48 members per hub, one hub per member; 256 stored frames and 1 MiB (payment frames included); 96 epoch secrets; 512 commits off the main branch; ties between branches decided within 64 epochs; 16 KiB of text; 8 KiB of application frame or pair payload; 60 KiB per frame; four knock records and lobbies of six entries each. The member cap is what the load test below measured; see Conformance.
 
 ## Security and privacy
 
 - Every member can admit anyone, read every message of the epochs it is in, and relay. A member cannot forge another member's messages, read before its admission, or read after its removal.
 - The admin cannot be bypassed for removal, role or link changes, and cannot equivocate without halting the group.
 - A compromised member seed is healed by removal, as in the mesh; there are no member key updates.
-- Hubs see who is connected to them and when, and relay ciphertext they can read (they are members).
+- Hubs see who is connected to them and when, and relay ciphertext they can read (they are members), except pair payloads: those only their recipient opens.
+- Payments: the group (hubs included) sees who pays or asks whom, how much, over what and the memo, through the note; it never sees a token, invoice or address sent between two members. A hub can drop a pair payload, like any frame; it cannot read, alter, forge or replay one. Another hub, or the next sync, carries it.
 
 ## Conformance
 
-[`packages/core/test/groupCommunity.test.ts`](../../packages/core/test/groupCommunity.test.ts): the genesis binds the id; each kind's authority and roster arithmetic; derived and fresh secrets, and that a newcomer cannot derive an earlier one; a removed member cannot read the next epoch; races between members converge on one branch on every member whatever the order, losing messages stay readable, a losing newcomer is not a member; two admin commits after the same commit fork; stale branches are refused; catch-up of a member away through a removal from a member that is not the author. [`packages/browser/test/community.test.ts`](../../packages/browser/test/community.test.ts): hub election and step-down, lobbies, relaying and deduplication, admission by a member with the admin never online, and restart. [`e2e/web/group-community.spec.ts`](../../e2e/web/group-community.spec.ts): six browsers that never pair, through one relay and real WebRTC: the admin creates the group and closes its app; three people join through the link, let in by a member; everyone reads everyone by name; a member away while another speaks is caught up after the author has left; the admin returns, is caught up and removes someone, who reads nothing after; a late joiner reads only what comes after it. The picture: [`groupMetaSessions.test.ts`](../../packages/core/test/groupMetaSessions.test.ts) and [`groupPicture.test.ts`](../../packages/browser/test/groupPicture.test.ts) (six headless engines with hubs, someone let in while the admin is away, a restart), and [`e2e/web/group-picture.spec.ts`](../../e2e/web/group-picture.spec.ts).
+[`packages/core/test/groupCommunity.test.ts`](../../packages/core/test/groupCommunity.test.ts): the genesis binds the id; each kind's authority and roster arithmetic; derived and fresh secrets, and that a newcomer cannot derive an earlier one; a removed member cannot read the next epoch; races between members converge on one branch on every member whatever the order, losing messages stay readable, a losing newcomer is not a member; two admin commits after the same commit fork; stale branches are refused; catch-up of a member away through a removal from a member that is not the author. [`packages/core/test/communityPair.test.ts`](../../packages/core/test/communityPair.test.ts): a pair payload opens only for its recipient, only as from its sender, only in its frame; a member relaying it reads neither amount nor token; it is handed on once whatever the number of hubs and after a restart; it reaches a member who was away through someone who is not its author; app frames reach everyone once and never the text history. [`packages/browser/test/communityPayments.test.ts`](../../packages/browser/test/communityPayments.test.ts): the real desks over headless communities — a request and its ecash between two members with no edge between them, through the hubs, with nothing readable on any edge; a request and a payment to members who were away, each way; a request to the whole group paid once, the second token refused unredeemed. [`packages/browser/test/community.test.ts`](../../packages/browser/test/community.test.ts): hub election and step-down, lobbies, relaying and deduplication, admission by a member with the admin never online, and restart. [`e2e/web/group-community-payments.spec.ts`](../../e2e/web/group-community-payments.spec.ts): three browsers in a community with a local mint: one requests from another, the third sees it, the second pays through the hubs, all three see it paid; a request to the group paid once. [`e2e/web/group-community.spec.ts`](../../e2e/web/group-community.spec.ts): six browsers that never pair, through one relay and real WebRTC: the admin creates the group and closes its app; three people join through the link, let in by a member; everyone reads everyone by name; a member away while another speaks is caught up after the author has left; the admin returns, is caught up and removes someone, who reads nothing after; a late joiner reads only what comes after it. The picture: [`groupMetaSessions.test.ts`](../../packages/core/test/groupMetaSessions.test.ts) and [`groupPicture.test.ts`](../../packages/browser/test/groupPicture.test.ts) (six headless engines with hubs, someone let in while the admin is away, a restart), and [`e2e/web/group-picture.spec.ts`](../../e2e/web/group-picture.spec.ts).
 
 ### What was measured
 

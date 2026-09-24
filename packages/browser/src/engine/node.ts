@@ -77,6 +77,7 @@ import type {
   FileTransferView,
   LinkView,
   MessageFile,
+  GroupView,
   Settings,
   StoredLink,
   StoredMessage,
@@ -650,6 +651,7 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   getState(): EngineState {
+    const groups = this.groups.views();
     return {
       settings: this.settings,
       transport: this.transport.describe(),
@@ -663,8 +665,8 @@ export class GhostlyNode implements EngineImplementation {
       payments: this.desk.views(),
       identityProofs: this.identities.views(),
       nostr: this.nostrSocial.state(),
-      edges: [...[...this.links.values()].filter(live => live.stored.group && !live.stored.groupEntry).map(live => this.viewOf(live)), ...this.communityPayViews()],
-      groups: this.groups.views().map(group => ({ ...group, members: group.members.map(member => {
+      edges: [...[...this.links.values()].filter(live => live.stored.group && !live.stored.groupEntry).map(live => this.viewOf(live)), ...this.communityPayViews(groups)],
+      groups: groups.map(group => ({ ...group, members: group.members.map(member => {
         const edge = member.me ? undefined : this.edgeView(group.id, member.key);
         return edge ? { ...member, edge } : member;
       }) })),
@@ -672,13 +674,13 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** Community members payments go to (or came from), as links the payment bubbles and the composer look up by key. */
-  private communityPayViews(): LinkView[] {
+  private communityPayViews(groups: GroupView[]): LinkView[] {
     const withPayments = new Map<string, Set<string>>();
     for (const p of Object.values(this.desk.views())) {
       const at = parsePayLink(p.linkId);
       if (at?.member) { const set = withPayments.get(at.groupId) ?? new Set<string>(); set.add(at.member); withPayments.set(at.groupId, set); }
     }
-    return this.groups.views().filter(g => g.profile === "community" && g.status === "active" && g.myKey)
+    return groups.filter(g => g.profile === "community" && g.status === "active" && g.myKey)
       .flatMap(g => this.communityPay.views(g.id, g.myKey!, g.members.map(m => m.key), withPayments.get(g.id) ?? new Set()));
   }
 
@@ -1986,6 +1988,9 @@ export class GhostlyNode implements EngineImplementation {
     const edge = this.links.get(message.linkId)?.stored;
     if (edge?.group && edge.groupPeer && !edge.groupEntry)
       message = { ...message, linkId: `group:${edge.group}`, id: `${edge.id}:${message.id}`, ...(message.sender === "peer" ? { member: edge.groupPeer } : {}) };
+    // …and one with a member of a community, which has no edge: its link through the group names them.
+    const pay = parsePayLink(message.linkId);
+    if (pay?.member) message = { ...message, linkId: `group:${pay.groupId}`, id: `${message.linkId}:${message.id}`, ...(message.sender === "peer" ? { member: pay.member } : {}) };
     const live = this.links.get(message.linkId);
     // The peer republishes what it sent for a few minutes: what was deleted here stays deleted.
     if (live?.stored.deletedIds?.includes(message.id)) return;
