@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { pluginProblems, registerAdapters, SDK_API, type GhostlyAdapterPlugin } from "../src/plugins/registry";
+// covers: sdk.registry, sdk.package
 
 /**
  * `pluginProblems` is the SDK's validator: docs/SDK.md says it lists why a plugin is refused. An adapter
