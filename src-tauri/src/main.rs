@@ -10,6 +10,7 @@ mod notifications;
 mod oidc;
 mod paired_transport;
 mod pkarr_client;
+mod pkarr_network;
 mod records;
 mod share;
 #[cfg(test)]
@@ -18,7 +19,7 @@ mod types;
 mod viewer;
 
 use commands::AppState;
-use pkarr::Client;
+use pkarr_network::Pkarr;
 use tauri::Manager;
 use viewer::ViewerState;
 
@@ -83,11 +84,7 @@ macro_rules! commands {
 }
 
 fn main() {
-    let mut builder = Client::builder();
-
-    builder.cache_size(50);
-
-    let pkarr_client = builder.build().expect("Failed to create pkarr client");
+    let pkarr = Pkarr::desktop().expect("Failed to create pkarr client");
 
     tauri::Builder::default()
         // Updating is always the user's doing: the plugin only looks and downloads
@@ -95,7 +92,7 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
-        .manage(AppState { pkarr_client })
+        .manage(AppState { pkarr })
         .manage(ViewerState::default())
         .manage(paired_transport::TransportState::default())
         .manage(hyperdht::HyperState::default())
@@ -147,16 +144,13 @@ mod tests {
     /// The app as `main()` builds it, every command and state included, on the mock runtime.
     fn app() -> tauri::App<MockRuntime> {
         let relay = format!("http://127.0.0.1:{}", test_support::closed_port());
-        let mut pkarr = Client::builder();
-        pkarr.no_default_network();
-        pkarr.relays(&[relay.as_str()]).unwrap();
         mock_builder()
             // Registered like the real one: Tauri treats app schemes as local pages.
             .register_uri_scheme_protocol(viewer::SCHEME, |_, _| {
                 tauri::http::Response::new(Vec::new())
             })
             .manage(AppState {
-                pkarr_client: pkarr.build().unwrap(),
+                pkarr: Pkarr::new(None, &[relay.parse().unwrap()]).unwrap(),
             })
             .manage(ViewerState::default())
             .manage(paired_transport::TransportState::default())

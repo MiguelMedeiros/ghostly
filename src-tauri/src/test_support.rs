@@ -99,6 +99,8 @@ pub struct Relay {
     pub packets: Arc<Mutex<HashMap<String, Vec<u8>>>>,
     /// Every request's method and path, in order.
     pub requests: Arc<Mutex<Vec<String>>>,
+    /// How long it takes to answer a GET, the way the DHT takes its time.
+    pub delay: Arc<Mutex<std::time::Duration>>,
 }
 
 pub async fn pkarr_relay() -> Relay {
@@ -106,10 +108,11 @@ pub async fn pkarr_relay() -> Relay {
     let url = format!("http://{}", listener.local_addr().unwrap());
     let packets = Arc::new(Mutex::new(HashMap::<String, Vec<u8>>::new()));
     let requests = Arc::new(Mutex::new(Vec::new()));
-    let (store, seen) = (packets.clone(), requests.clone());
+    let delay = Arc::new(Mutex::new(std::time::Duration::ZERO));
+    let (store, seen, slow) = (packets.clone(), requests.clone(), delay.clone());
     tokio::spawn(async move {
         while let Ok((mut stream, _)) = listener.accept().await {
-            let (store, seen) = (store.clone(), seen.clone());
+            let (store, seen, slow) = (store.clone(), seen.clone(), slow.clone());
             tokio::spawn(async move {
                 let Some((head, body)) = read_request(&mut stream).await else {
                     return;
@@ -129,6 +132,8 @@ pub async fn pkarr_relay() -> Relay {
                         respond(&mut stream, "200 OK", &[], b"").await;
                     }
                     "GET" => {
+                        let delay = *slow.lock().unwrap();
+                        tokio::time::sleep(delay).await;
                         let packet = store.lock().unwrap().get(&key).cloned();
                         match packet {
                             Some(packet) => {
@@ -152,7 +157,13 @@ pub async fn pkarr_relay() -> Relay {
         url,
         packets,
         requests,
+        delay,
     }
+}
+
+/// Desktop's Pkarr with `relay` as its only relay and no DHT.
+pub fn pkarr(relay: &Relay) -> crate::pkarr_network::Pkarr {
+    crate::pkarr_network::Pkarr::new(None, &[relay.url.parse().unwrap()]).unwrap()
 }
 
 /// A Pkarr client that only talks to `relay`.

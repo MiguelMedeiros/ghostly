@@ -3,9 +3,11 @@
 //! The peer builds and encrypts its own TXT records; this side only signs,
 //! publishes and resolves them, over the Mainline DHT and the default relays.
 
-use pkarr::{Client, Keypair, PublicKey, ResolvePolicy, SignedPacket};
+use pkarr::{Keypair, PublicKey, SignedPacket};
 use serde::{Deserialize, Serialize};
 use simple_dns::rdata::RData;
+
+use crate::pkarr_network::Pkarr;
 
 #[derive(Debug, Deserialize)]
 pub struct RecordInput {
@@ -29,7 +31,7 @@ pub struct ResolvedPacket {
 }
 
 pub async fn publish(
-    client: &Client,
+    pkarr: &Pkarr,
     keypair: &Keypair,
     records: &[RecordInput],
 ) -> Result<(), String> {
@@ -53,25 +55,18 @@ pub async fn publish(
         .sign(keypair)
         .map_err(|e| format!("Sign error: {}", e))?;
 
-    client
-        .publish(&signed_packet)
-        .await
-        .map_err(|e| format!("Publish error: {}", e))?;
-    Ok(())
+    pkarr.publish(&signed_packet).await
 }
 
 pub async fn resolve(
-    client: &Client,
+    pkarr: &Pkarr,
     public_key_z32: &str,
 ) -> Result<Option<ResolvedPacket>, String> {
     let public_key: PublicKey = public_key_z32
         .try_into()
         .map_err(|e| format!("Invalid public key: {}", e))?;
 
-    let Ok(signed_packet) = client
-        .resolve(&public_key, ResolvePolicy::NetworkOnly)
-        .await
-    else {
+    let Some(signed_packet) = pkarr.resolve(&public_key).await else {
         return Ok(None);
     };
 

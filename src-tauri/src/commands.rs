@@ -1,4 +1,4 @@
-use pkarr::{Client, Keypair};
+use pkarr::Keypair;
 use std::env;
 use tauri::State;
 
@@ -7,12 +7,13 @@ use crate::crypto;
 use crate::lnd::{self, LndRequest, LndResponse};
 use crate::local_fetch::{self, LocalResponse};
 use crate::pkarr_client;
+use crate::pkarr_network::Pkarr;
 use crate::records::{self, RecordInput, ResolvedPacket};
 use crate::types::{CompactMessage, KeypairResult, ResolvedBatch};
 use crate::viewer::{self, ServiceResponse};
 
 pub struct AppState {
-    pub pkarr_client: Client,
+    pub pkarr: Pkarr,
 }
 
 #[tauri::command]
@@ -80,7 +81,7 @@ pub async fn publish_messages(
     let enc_key = crypto::from_base64_url(&enc_key_b64)?;
 
     pkarr_client::publish_messages(
-        &state.pkarr_client,
+        &state.pkarr,
         &keypair,
         &messages,
         &enc_key,
@@ -99,7 +100,7 @@ pub async fn resolve_messages(
 ) -> Result<Option<ResolvedBatch>, String> {
     let enc_key = crypto::from_base64_url(&enc_key_b64)?;
 
-    pkarr_client::resolve_messages(&state.pkarr_client, &public_key_z32, &enc_key).await
+    pkarr_client::resolve_messages(&state.pkarr, &public_key_z32, &enc_key).await
 }
 
 // -- the shared TypeScript peer -------------------------------------------------
@@ -115,7 +116,7 @@ pub async fn publish_records(
         .try_into()
         .map_err(|_| "Seed must be exactly 32 bytes")?;
     let keypair = Keypair::from_secret_key(&seed);
-    records::publish(&state.pkarr_client, &keypair, &records).await
+    records::publish(&state.pkarr, &keypair, &records).await
 }
 
 #[tauri::command]
@@ -123,7 +124,7 @@ pub async fn resolve_records(
     state: State<'_, AppState>,
     public_key_z32: String,
 ) -> Result<Option<ResolvedPacket>, String> {
-    records::resolve(&state.pkarr_client, &public_key_z32).await
+    records::resolve(&state.pkarr, &public_key_z32).await
 }
 
 #[tauri::command]
@@ -300,7 +301,7 @@ mod project_link_tests {
 mod tests {
     // covers: desktop.crypto, desktop.payment-links, app.project-links, chat.dht.delivery
     use super::*;
-    use crate::test_support::{pkarr_client, pkarr_relay, Relay};
+    use crate::test_support::{pkarr, pkarr_relay, Relay};
     use base64::engine::general_purpose::STANDARD;
     use base64::Engine;
     use tauri::test::{mock_builder, MockRuntime};
@@ -426,7 +427,7 @@ mod tests {
     fn app(relay: &Relay) -> tauri::App<MockRuntime> {
         mock_builder()
             .manage(AppState {
-                pkarr_client: pkarr_client(relay),
+                pkarr: pkarr(relay),
             })
             .build(tauri::generate_context!(test = true))
             .expect("app")
