@@ -201,6 +201,8 @@ export function Sidebar() {
     >
       {/* Header */}
       <div className="sidebar-header h-14 header-safe shrink-0 flex items-center justify-between px-4 bg-panel-header">
+        {/* The brand; in Testnet a small badge sits under the wordmark, out of the header's row, so it never takes the buttons' width. */}
+        <div className="relative flex shrink-0 items-center">
         <Link to="/" aria-label="Go home" title="Go home" className="sidebar-home flex items-center gap-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
           <svg width="28" height="28" viewBox="0 0 64 64" className="shrink-0">
             <g transform="translate(12, 8)">
@@ -209,17 +211,18 @@ export function Sidebar() {
               <circle cx="27" cy="20" r="3" fill="currentColor" className="text-sidebar-bg"/>
             </g>
           </svg>
-          <span className="sidebar-wordmark whitespace-nowrap text-accent font-bold text-base tracking-tight">
+          <span className={`sidebar-wordmark whitespace-nowrap text-accent font-bold text-base tracking-tight ${walletMode === "testnet" ? "-translate-y-[7px]" : ""}`}>
             GHOSTLY
           </span>
         </Link>
         {/* Wherever the app is, it says when its wallets are on test networks: nothing there is money. */}
         {walletMode === "testnet" && (
           <Link to="/wallet" data-testid="testnet-badge" title="Wallets are on test networks: test coins, worth nothing"
-            className="mr-auto ml-2 shrink-0 rounded-full border border-amber-500/60 bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-500 hover:bg-amber-500/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500">
+            className="absolute left-9 top-[calc(50%+3px)] rounded-full border border-amber-500/60 bg-amber-500/15 px-1.5 py-px text-[9px] font-bold uppercase leading-[12px] tracking-wider text-amber-500 hover:bg-amber-500/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500">
             Testnet
           </Link>
         )}
+        </div>
         <div className="grid shrink-0 grid-cols-2 items-stretch gap-1 whitespace-nowrap" data-testid="sidebar-chat-actions">
           {/* New: one click is a chat, as always; the arrow beside it also offers a group. */}
           <div ref={newMenuRef} role="group" aria-label={t("sidebar.new")} data-testid="sidebar-new" className="sidebar-new-split relative flex min-w-0">
