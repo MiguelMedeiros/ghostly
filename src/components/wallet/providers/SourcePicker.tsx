@@ -32,13 +32,15 @@ function ServerForm({ kind, fields, config, busy, onSubmit, onCancel }: { kind: 
   return (
     <form className="space-y-3" data-testid={`${kind}-source-server-form`} autoComplete="off" onSubmit={(e) => { e.preventDefault(); onSubmit(values); }}>
       {fields.map((field, i) => (
-        <label key={field.name} className="block space-y-1">
-          <span className="text-xs text-text-secondary">{field.label}{field.optional && <span className="text-text-muted"> (optional)</span>}</span>
-          {/* Opened from the card's own button, further up: focusing it brings the form into view. */}
-          <input aria-label={field.label} autoFocus={i === 0} className={`${input} font-mono text-xs`} type={field.kind === "url" ? "url" : "text"} spellCheck={false} placeholder={field.placeholder} value={values[field.name]} onChange={(e) => set(field.name, e.target.value)} />
+        <div key={field.name} className="space-y-1">
+          <label className="block space-y-1">
+            <span className="text-xs text-text-secondary">{field.label}{field.optional && <span className="text-text-muted"> (optional)</span>}</span>
+            {/* Opened from the card's own button, further up: focusing it brings the form into view. */}
+            <input aria-label={field.label} autoFocus={i === 0} className={`${input} font-mono text-xs`} type={field.kind === "url" ? "url" : "text"} spellCheck={false} placeholder={field.placeholder} value={values[field.name]} onChange={(e) => set(field.name, e.target.value)} />
+          </label>
           <Suggestions field={field} values={{ ...config, ...values }} onPick={(value) => set(field.name, value)} />
           {field.help && <span className="block text-[11px] text-text-muted">{field.help}</span>}
-        </label>
+        </div>
       ))}
       <div className="flex flex-wrap gap-2">
         <Button type="submit" variant="primary" disabled={busy} data-testid={`${kind}-source-server-save`}>{busy ? "Connecting…" : "Use this server"}</Button>
@@ -57,19 +59,22 @@ export function ProviderConfigForm({ descriptor, mode, busy, onSubmit }: Provide
   return (
     <form className="space-y-3" data-testid={`provider-form-${descriptor.id}`} autoComplete="off" onSubmit={(e) => { e.preventDefault(); onSubmit(values); }}>
       {descriptor.fields.map((field) => (
-        <label key={field.name} className="block space-y-1">
-          <span className="text-xs text-text-secondary">{field.label}{field.optional && <span className="text-text-muted"> (optional)</span>}</span>
-          {field.kind === "select" ? (
-            <Select aria-label={field.label} value={values[field.name]} onChange={(v) => set(field.name, v)} options={field.options ?? []} />
-          ) : field.kind === "textarea" ? (
-            <textarea aria-label={field.label} className={`${input} font-mono text-xs resize-none`} rows={3} placeholder={field.placeholder} value={values[field.name]} onChange={(e) => set(field.name, e.target.value)} />
-          ) : (
-            <input aria-label={field.label} className={`${input} ${field.kind === "text" ? "" : "font-mono text-xs"}`} type={field.kind === "secret" ? "password" : field.kind === "url" ? "url" : "text"}
-              autoComplete={field.kind === "secret" ? "new-password" : "off"} spellCheck={false} placeholder={field.placeholder} value={values[field.name]} onChange={(e) => set(field.name, e.target.value)} />
-          )}
+        // The suggestions are buttons: beside the label, not inside it (a label holds one control).
+        <div key={field.name} className="space-y-1">
+          <label className="block space-y-1">
+            <span className="text-xs text-text-secondary">{field.label}{field.optional && <span className="text-text-muted"> (optional)</span>}</span>
+            {field.kind === "select" ? (
+              <Select aria-label={field.label} value={values[field.name]} onChange={(v) => set(field.name, v)} options={field.options ?? []} />
+            ) : field.kind === "textarea" ? (
+              <textarea aria-label={field.label} className={`${input} font-mono text-xs resize-none`} rows={3} placeholder={field.placeholder} value={values[field.name]} onChange={(e) => set(field.name, e.target.value)} />
+            ) : (
+              <input aria-label={field.label} className={`${input} ${field.kind === "text" ? "" : "font-mono text-xs"}`} type={field.kind === "secret" ? "password" : field.kind === "url" ? "url" : "text"}
+                autoComplete={field.kind === "secret" ? "new-password" : "off"} spellCheck={false} placeholder={field.placeholder} value={values[field.name]} onChange={(e) => set(field.name, e.target.value)} />
+            )}
+          </label>
           {field.kind !== "secret" && <Suggestions field={field} values={values} onPick={(value) => set(field.name, value)} />}
           {field.help && <span className="block text-[11px] text-text-muted">{field.help}</span>}
-        </label>
+        </div>
       ))}
       <Button type="submit" variant="primary" className="w-full" disabled={busy} data-testid="provider-save">{busy ? "Connecting…" : `Use ${descriptor.label}`}</Button>
       {descriptor.fields.some((f) => f.kind === "secret") && <Notice>Secrets are sealed on this device and never shown again.</Notice>}
