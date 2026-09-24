@@ -18,7 +18,10 @@ export async function bootExtension(edit?: (manifest: chrome.runtime.Manifest) =
   const copy = structuredClone(manifest) as chrome.runtime.Manifest;
   edit?.(copy);
   const world = installFakeChrome(copy);
+  let documents = 0;
   world.onCreateDocument = async () => {
+    // A new document runs its script afresh; the first one shares the boot's fresh modules.
+    if (documents++) vi.resetModules();
     await world.load("offscreen", () => import("../src/offscreen.ts"));
   };
   await world.load("background", () => import("../src/background.ts"));
@@ -74,4 +77,10 @@ export async function pauseRequest(
 
 export function bodyText(params: Record<string, unknown>): string {
   return Buffer.from(params.body as string, "base64").toString("utf8");
+}
+
+/** A page makes profile `id` the one in use, as `switchProfile` writes it (src/lib/profiles.ts). */
+export function useProfile(world: FakeWorld, id: string, others: string[] = []): void {
+  const profiles = [{ id: "", name: "Personal", createdAt: 0 }, ...[...new Set([id, ...others])].filter(Boolean).map((p) => ({ id: p, name: p, createdAt: 1 }))];
+  world.storage.set("ghostly_profiles", JSON.stringify({ version: 1, active: id, profiles }));
 }

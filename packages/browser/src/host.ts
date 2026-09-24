@@ -38,7 +38,7 @@ export interface BrowserHost {
     shareLocalServices: boolean;
     /** Can this host show a contact's web app on an origin of its own? */
     openServices: boolean;
-    /** Can this host restart as another local profile (WISP 04)? Its peer must run in the page. */
+    /** Can this host restart as another local profile (WISP 04)? The page's own peer, or the extension's offscreen one. */
     profiles?: boolean;
   };
   /** Reaches the peer. `onDisconnect` fires when it goes away; the client then connects again. */

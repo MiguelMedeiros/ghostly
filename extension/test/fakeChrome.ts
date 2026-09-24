@@ -10,7 +10,11 @@
  *   worker's listeners and in-memory state while `storage.session`, tabs and
  *   the offscreen document live on — as in Chrome.
  * - `offscreen.createDocument` runs the hook the test gives it, which loads the
- *   offscreen module in the `offscreen` context.
+ *   offscreen module in the `offscreen` context; `offscreen.closeDocument` fires
+ *   its `pagehide`, drops its listeners, disconnects the ports it answered and
+ *   releases the Web Locks it held, as a closed page does.
+ * - `localStorage` and `navigator.locks` are the origin's: every context shares
+ *   them, as the extension's pages and its offscreen document do.
  *
  * Everything the extension asks of the browser is recorded in `calls`.
  */
@@ -35,9 +39,17 @@ export class FakeEvent<L extends Listener = Listener> {
   hasListeners(): boolean {
     return this.listeners.length > 0;
   }
-  /** Calls every listener, and returns what each returned. */
+  /** Calls every listener in its own context (what it registers belongs there), and returns what each returned. */
   dispatch(...args: Parameters<L>): unknown[] {
-    return this.listeners.map((l) => l.fn(...args));
+    return [...this.listeners].map((l) => {
+      const previous = this.world.context;
+      this.world.context = l.context;
+      try {
+        return l.fn(...args);
+      } finally {
+        this.world.context = previous;
+      }
+    });
   }
   dropContext(context: Context): void {
     for (let i = this.listeners.length - 1; i >= 0; i--) if (this.listeners[i].context === context) this.listeners.splice(i, 1);
@@ -88,6 +100,10 @@ export interface FakeWorld {
   ports: { caller: FakePort; receiver: FakePort }[];
   /** The offscreen document's window events. */
   page: EventTarget;
+  /** The origin's localStorage, shared by every context. */
+  storage: Map<string, string>;
+  /** Web Locks held now, by name, with the context holding each. */
+  locks: Map<string, Context>;
 }
 
 export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld {
@@ -198,6 +214,11 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
         world.offscreenDocument = true;
         await world.onCreateDocument();
       },
+      async closeDocument() {
+        record("offscreen.closeDocument");
+        if (!world.offscreenDocument) throw new Error("No current offscreen document.");
+        closeOffscreen();
+      },
     },
     storage: {
       session: {
@@ -288,11 +309,74 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
   // The offscreen document is a page: it listens for its own `pagehide`.
   const page = new EventTarget();
   world.page = page;
+  const windowListeners: { context: Context; type: string; fn: EventListenerOrEventListenerObject }[] = [];
+
+  world.storage = new Map();
+  const localStorage = {
+    get length() { return world.storage.size; },
+    key: (index: number) => [...world.storage.keys()][index] ?? null,
+    getItem: (key: string) => world.storage.get(key) ?? null,
+    setItem: (key: string, value: string) => void world.storage.set(key, String(value)),
+    removeItem: (key: string) => void world.storage.delete(key),
+    clear: () => world.storage.clear(),
+  };
+
+  world.locks = new Map();
+  const waiting: { name: string; context: Context; grant: () => void }[] = [];
+  const release = (name: string) => {
+    world.locks.delete(name);
+    const next = waiting.findIndex((w) => w.name === name);
+    if (next >= 0) waiting.splice(next, 1)[0].grant();
+  };
+  const locks = {
+    request(name: string, callback: () => Promise<unknown>) {
+      const context = world.context;
+      return new Promise((resolve, reject) => {
+        const grant = () => {
+          world.locks.set(name, context);
+          Promise.resolve(callback()).then(resolve, reject).finally(() => { if (world.locks.get(name) === context) release(name); });
+        };
+        if (world.locks.has(name)) waiting.push({ name, context, grant });
+        else grant();
+      });
+    },
+    query: async () => ({ held: [...world.locks.keys()].map((name) => ({ name })), pending: waiting.map((w) => ({ name: w.name })) }),
+  };
+
+  function closeOffscreen(): void {
+    page.dispatchEvent(new Event("pagehide"));
+    for (const e of world.events) e.dropContext("offscreen");
+    for (let i = windowListeners.length - 1; i >= 0; i--) {
+      const l = windowListeners[i];
+      if (l.context !== "offscreen") continue;
+      page.removeEventListener(l.type, l.fn);
+      windowListeners.splice(i, 1);
+    }
+    for (const { receiver } of world.ports) {
+      if (!receiver.onMessage.listeners.some((l) => l.context === "offscreen")) continue;
+      receiver.onMessage.dropContext("offscreen");
+      receiver.onDisconnect.dropContext("offscreen");
+      receiver.disconnect();
+    }
+    for (const [name, context] of [...world.locks]) if (context === "offscreen") release(name);
+    for (let i = waiting.length - 1; i >= 0; i--) if (waiting[i].context === "offscreen") waiting.splice(i, 1);
+    world.offscreenDocument = false;
+  }
+
   Object.assign(globalThis, {
     chrome: world.chrome,
-    addEventListener: page.addEventListener.bind(page),
-    removeEventListener: page.removeEventListener.bind(page),
+    localStorage,
+    addEventListener(type: string, fn: EventListenerOrEventListenerObject) {
+      windowListeners.push({ context: world.context, type, fn });
+      page.addEventListener(type, fn);
+    },
+    removeEventListener(type: string, fn: EventListenerOrEventListenerObject) {
+      const index = windowListeners.findIndex((l) => l.type === type && l.fn === fn);
+      if (index >= 0) windowListeners.splice(index, 1);
+      page.removeEventListener(type, fn);
+    },
   });
+  Object.defineProperty(globalThis.navigator, "locks", { value: locks, configurable: true });
   return world;
 }
 
