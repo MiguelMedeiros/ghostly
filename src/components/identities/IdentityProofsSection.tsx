@@ -1,18 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { IdentityProofView, LinkView } from "@ghostly/browser/shared/types";
 import { Block, Button, Notice, Row } from "../wallet/ui";
 import { Deck } from "../deck/Deck";
-import { addableProviders, chatsByPeer, contactName, SHARED_STATUS, useEngineState } from "../../lib/identities";
+import { addableProviders, chatsByPeer, contactName, SHARED_STATUS, useEngineState, useNewProof } from "../../lib/identities";
 import { contactTag } from "../../lib/publicKeyLabel";
 import { chatPath } from "../../lib/url";
 import type { ChatSession } from "../../lib/types";
 import { useI18n } from "../../contexts/I18nContext";
 import { AddIdentityDialog } from "./AddIdentityDialog";
-import { AddIdCardFace, IdCardFace } from "./IdCardFace";
+import { AddIdCardFace, IdCardFace, IdCardMark } from "./IdCardFace";
 import { idCard, idCardTone, type IdCardContent } from "./idCard";
-import { providerIcon } from "./ProviderIcons";
 import { ProviderMark, StatusPill } from "./ProviderMark";
 
 /** The last card: a blank one that adds an identity. */
@@ -20,14 +19,6 @@ const ADD = "add";
 type Entry = { id: string; add?: false; proof: IdentityProofView; card: IdCardContent } | { id: typeof ADD; add: true };
 const PANEL = { id: "identity-panel", tabId: (id: string) => `identity-tab-${id}` };
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
-
-/** A card's provider on a 14px tile, for the row of marks under the deck. */
-function MiniMark({ entry }: { entry: Entry }) {
-  if (entry.add) return <span className="id-deck-mark id-deck-mark-plain"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg></span>;
-  const icon = providerIcon(entry.proof.provider, entry.card.bound);
-  if (!icon) return <span className="id-deck-mark id-deck-mark-plain"><svg viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="4" /></svg></span>;
-  return <span className={`id-deck-mark forced-color-adjust-none ${icon.tile}`}>{icon.mark(10)}</span>;
-}
 
 /**
  * Identities → Yours: this profile's proofs of other identities as a deck of ID cards (the wallet's deck, with
@@ -48,15 +39,7 @@ export function IdentityProofsSection() {
   const [error, setError] = useState("");
 
   // A proof just added comes up, so the person sees what they made.
-  const ids = state ? proofs.map(p => p.id).join(" ") : null;
-  const known = useRef<string[] | null>(null);
-  useEffect(() => {
-    if (ids === null) return;
-    const now = ids ? ids.split(" ") : [];
-    const fresh = known.current && now.find(id => !known.current!.includes(id));
-    if (fresh) setChosen(fresh);
-    known.current = now;
-  }, [ids]);
+  useNewProof(state, setChosen);
 
   if (!state) return null;
   const now = Math.floor(Date.now() / 1000);
@@ -86,7 +69,7 @@ export function IdentityProofsSection() {
           kind="tabs" panel={PANEL} label="Your identities" name="identity-deck" className="id-deck" hoverDelay={90}
           testId={e => (e.add ? "identity-add" : "identity-proof")}
           face={(e, { after }) => (e.add ? <AddIdCardFace first={proofs.length === 0} /> : <IdCardFace card={e.card} after={after} />)}
-          mark={e => <MiniMark entry={e} />} tone={e => (e.add ? "id-card-add" : idCardTone({ provider: e.card.provider, subject: e.card.bound, attested: e.card.attested }))} />
+          mark={e => <IdCardMark provider={e.add ? undefined : e.proof.provider} subject={e.add ? undefined : e.card.bound} />} tone={e => (e.add ? "id-card-add" : idCardTone({ provider: e.card.provider, subject: e.card.bound, attested: e.card.attested }))} />
         <div role="tabpanel" id={PANEL.id} aria-labelledby={PANEL.tabId(entry.id)} data-testid="identity-panel" className="bg-surface rounded-xl divide-y divide-border">
           {entry.add ? (
             <Block>

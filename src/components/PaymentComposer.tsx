@@ -8,6 +8,7 @@ import { WalletMark, type ChatRail } from "./WalletCards";
 import { CardDeck, WalletCardFace } from "./WalletDeck";
 import { ONCHAIN_FEE_CAP, walletCards, type WalletCard } from "./walletCardData";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { ComposerSheet, ComposerSheetHead, ForwardArrow } from "./ComposerSheet";
 import "./payment-composer.css";
 
 interface PaymentComposerProps {
@@ -224,29 +225,23 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   );
 
   return (
-    <>
-    <div className="sheet-backdrop" />
-    <div
+    <ComposerSheet
       ref={containerRef}
       data-testid="payment-composer"
       data-side={side}
-      className={`payment-composer wallet-card-${rail} sheet sheet-padded absolute bottom-full left-0 mb-2 z-50 animate-fade-in w-[400px] max-w-[calc(100vw-1.5rem)] bg-panel-header border border-border rounded-2xl shadow-2xl p-3`}
+      className={`payment-composer wallet-card-${rail}`}
       onKeyDown={(e) => e.key === "Escape" && onClose()}
     >
       {side === "cards" ? <>
-        <div className="payment-composer-head">
-          {onBack && <button type="button" className="payment-back-turn" data-testid="payment-recipient-change" aria-label="Choose someone else" title="Choose someone else" onClick={onBack}>
-            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
-          </button>}
-          <span>{sendUnavailable ? "Request" : "Pay or request"}</span>
-          <span className="payment-composer-who">with {who}</span>
-        </div>
+        <ComposerSheetHead title={sendUnavailable ? "Request" : "Pay or request"} who={`with ${who}`} before={onBack && <button type="button" className="payment-back-turn" data-testid="payment-recipient-change" aria-label="Choose someone else" title="Choose someone else" onClick={onBack}>
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        </button>} />
         <CardDeck compact kind="radios" label="Pay with" name="payment-deck" cards={shown} selected={rail} onSelect={(id) => { setRail(id); setError(""); }} onChoose={use}
           testId={(id) => `payment-card-${id}`} blocked={(c) => unavailable(c)} size={{ max: 250, share: .62 }} />
-        <p className="payment-composer-hint" data-blocked={blocked ? true : undefined}>{blocked ?? how(rail)}</p>
-        <button type="button" data-testid="payment-use" className="payment-composer-use" disabled={!!blocked} onClick={() => use(rail)}>
+        <p className="composer-sheet-hint" data-blocked={blocked ? true : undefined}>{blocked ?? how(rail)}</p>
+        <button type="button" data-testid="payment-use" className="composer-sheet-action" disabled={!!blocked} onClick={() => use(rail)}>
           {card ? `Use ${card.name}` : "Continue"}
-          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          <ForwardArrow />
         </button>
       </> : card ? (
         <div ref={flipRef} className="payment-flip" data-flipped={flipped} style={{ "--card-w": `${cardWidth}px`, "--card-h": `${cardHeight}px`, height: flipped ? backHeight : cardHeight } as CSSProperties}>
@@ -256,7 +251,6 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
           </div>
         </div>
       ) : <div ref={flipRef}>{back}</div>}
-    </div>
-    </>
+    </ComposerSheet>
   );
 }
