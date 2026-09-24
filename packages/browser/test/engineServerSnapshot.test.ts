@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EngineEvent, RpcResponse } from "../src/shared/rpc";
+// covers: extension.engine
 
 /**
  * A client attached to the engine gets a snapshot once the peer is ready. A client that goes away while
