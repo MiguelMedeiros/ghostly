@@ -1,12 +1,14 @@
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
-import { GROUP_READ_NOTE, GROUP_READ_NOTE_COMMUNITY } from "@ghostly/core";
+import { GROUP_READ_NOTE, GROUP_READ_NOTE_COMMUNITY, MAX_GROUP_PICTURE_LENGTH } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { useBackdropDismiss } from "../hooks/useDismiss";
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import { edgeDot, edgeLabel, memberName } from "../lib/groups";
 import { GroupLinkPanel } from "./GroupLinkPanel";
+import { GroupAvatar } from "./GroupAvatar";
+import { avatarFromFile } from "../lib/avatarImage";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -33,9 +35,22 @@ export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClo
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); onClose(); }} aria-labelledby={`${id}-title`} data-testid="group-members-dialog"
     className="m-auto w-[calc(100%_-_2rem)] max-w-md max-h-[90dvh] overflow-y-auto rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <div className="flex items-start justify-between gap-3">
-      <div>
-        <h2 id={`${id}-title`} className="text-base font-semibold">{live.name}</h2>
-        <p className="text-xs text-text-muted">{live.members.length} member{live.members.length === 1 ? "" : "s"}{live.epoch !== undefined && <> · epoch {live.epoch}</>}{live.status && live.status !== "active" && <> · {live.status}</>}</p>
+      <div className="flex min-w-0 items-center gap-3">
+        <GroupAvatar picture={live.picture} size={56} testId="group-members-avatar" className="bg-accent/15" />
+        <div className="min-w-0">
+          <h2 id={`${id}-title`} className="truncate text-base font-semibold">{live.name}</h2>
+          <p className="text-xs text-text-muted">{live.members.length} member{live.members.length === 1 ? "" : "s"}{live.epoch !== undefined && <> · epoch {live.epoch}</>}{live.status && live.status !== "active" && <> · {live.status}</>}</p>
+          {/* Only the admin changes the picture: cropped square and redrawn small here, before anything leaves the app. */}
+          {live.isAdmin && live.status === "active" && <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+            <label className={`cursor-pointer text-xs font-medium text-accent hover:underline ${busy !== null ? "pointer-events-none opacity-40" : ""}`}>
+              {live.picture ? "Change picture" : "Add a picture"}
+              <input data-testid="group-picture-input" type="file" accept="image/*" className="sr-only" disabled={busy !== null}
+                onChange={e => { const file = e.target.files?.[0]; e.target.value = ""; if (file) void run("picture", async () => engine.call("setGroupPicture", { groupId: live.id, picture: await avatarFromFile(file, MAX_GROUP_PICTURE_LENGTH) })); }} />
+            </label>
+            {live.picture && <button type="button" data-testid="group-picture-remove" disabled={busy !== null} onClick={() => void run("picture", () => engine.call("setGroupPicture", { groupId: live.id, picture: null }))}
+              className="text-xs text-text-muted hover:text-danger disabled:opacity-40">Remove picture</button>}
+          </div>}
+        </div>
       </div>
       <button onClick={onClose} aria-label="Close" className="rounded-full p-1.5 text-text-muted hover:bg-surface-hover hover:text-text-primary">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>

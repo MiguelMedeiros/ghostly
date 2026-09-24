@@ -70,7 +70,7 @@ export interface StoredLink {
 }
 
 /** What happened to a group's membership, as a line in its history. */
-export type GroupEvent = "created" | "joined" | "gone" | "admin" | "rotated" | "removed" | "left" | "forked";
+export type GroupEvent = "created" | "joined" | "gone" | "admin" | "rotated" | "removed" | "left" | "forked" | "picture";
 
 /** A private group as stored: an invitation not yet answered, or a group I am (or was) in. */
 export interface StoredGroup {
@@ -169,6 +169,8 @@ export interface GroupView {
   memberLinks: Record<string, string>;
   lastMessageAt: number;
   canSend: boolean;
+  /** The group's picture (a JPEG data URL the engine checked), set by its admin; absent for none. */
+  picture?: string;
   /** Community groups: how this device is connected (a hub for others, or through hubs). */
   community?: { hub: boolean; hubs: number; connected: number };
 }

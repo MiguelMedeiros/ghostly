@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Groups, type GroupStore, type GroupsHost } from "../src/engine/groups";
 import { createIdentity, encodeGroupEntryLink, identityFromSeedB64, randomBytes, toBase64Url, type GhostRecord, type GroupState } from "@ghostly/core";
 import type { StoredGroup, StoredMessage } from "../src/shared/types";
-// covers: groups.create, groups.invite, groups.send, groups.leave, groups.forget, groups.link.enable, groups.link.join, groups.link.replace, groups.protocol.entry
+// covers: groups.picture.set, groups.create, groups.invite, groups.send, groups.leave, groups.forget, groups.link.enable, groups.link.join, groups.link.replace, groups.protocol.entry
 
 /** One peer's database, in memory. */
 function memoryStore(messages: StoredMessage[]): GroupStore {
@@ -248,6 +248,42 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     // A knock seen again later is not answered twice: that key is a member now.
     await alice.tick(Date.now() + 10_000); await world.settle();
     expect(world.peers.get("alice")!.entries.size).toBe(1); // only the lingering one
+  });
+
+  it("the admin's picture reaches every member, and a stranger who joins by the link later; members cannot set it", async () => {
+    const world = new World();
+    const alice = world.add("alice"), bob = world.add("bob"), carol = world.add("carol");
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    await alice.load(); await bob.load(); await carol.load();
+    const keys = (globalThis as unknown as { __keys: Map<string, string> }).__keys;
+    const stateOf = (g: Groups, id: string): GroupState => (g as unknown as { sessions: Map<string, { state: GroupState }> }).sessions.get(id)!.state;
+    const record = (g: Groups) => { for (const v of g.views()) if (v.myKey) keys.set(stateOf(g, v.id).seedB64, v.myKey); };
+    const pic = (fill: number) => "data:image/jpeg;base64," + btoa(String.fromCharCode(0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0, 128, 0, 128, 0x03, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1, 0xff, 0xda, 0x00, 0x02, fill, 0xff, 0xd9));
+    const groupId = await alice.create("Ghosts", "mesh");
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    await bob.accept(groupId); await world.settle();
+    record(alice); record(bob);
+    await world.settle(); await world.meet();
+
+    await expect(bob.setPicture(groupId, pic(1))).rejects.toThrow("Only the admin");
+    await alice.setPicture(groupId, pic(1)); await world.settle();
+    expect(alice.views()[0].picture).toBe(pic(1));
+    expect(bob.views()[0].picture).toBe(pic(1));
+    expect(world.peers.get("bob")!.messages.filter(m => m.event === "picture").map(m => m.member)).toEqual([alice.views()[0].myKey]);
+
+    // Carol joins by the link: the picture comes with the first sync on her edges.
+    const code = await alice.enableLink(groupId);
+    await carol.joinByLink(code);
+    await vi.waitFor(() => expect(carol.views()[0].invitation!.stage).toBe("knocked"));
+    await alice.tick(); await world.settle();
+    await world.meetEntries();
+    record(carol);
+    await world.settle(); await world.meet();
+    expect(carol.views()[0]).toMatchObject({ status: "active", picture: pic(1) });
+
+    await alice.setPicture(groupId, null); await world.settle();
+    expect([alice, bob, carol].map(g => g.views()[0].picture)).toEqual([undefined, undefined, undefined]);
+    expect(world.peers.get("carol")!.messages.filter(m => m.event === "picture").map(m => m.text).at(-1)).toMatch(/removed the group's picture$/);
   });
 
   it("tells the joiner how far a join through a link got: knocking, knocked, answered, admitted", async () => {

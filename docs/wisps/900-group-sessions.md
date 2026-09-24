@@ -46,6 +46,10 @@ Exactly **one admin** per epoch is the membership coordinator. The admin signs e
 
 Admission: the admin invites a contact over their authenticated chat; the contact accepts with a member key generated for this group; the admin commits `add`, tells the members over their edges and sends the joiner a welcome holding the chain and the new epoch's secret sealed to it. Trust on first use is of the **admin**: the welcome's chain must admit the joiner in a commit signed by the inviter's member key, learned over the contact chat. Member keys are asserted by the admin's signed commits and pinned on the edges.
 
+## Group metadata
+
+What a group looks like, beside who is in it (today its picture), is **not** part of the membership chain, so no chain rule changes and older apps keep verifying chains they understand. It is a statement signed by the admin and bound to a commit of the chain, sent sealed under an epoch key; members keep the newest one whose signer is the current admin, and hand it on at sync, so late joiners get it without the admin. Both profiles use it: see [9xx · Group Mesh § Metadata](9xx-group-mesh.md#metadata) and [9xx · Group Community § Metadata](9xx-group-community.md#metadata).
+
 ## Security profile
 
 MLS (RFC 9420) was evaluated and not adopted for this profile: with at most eight static members, a ratchet tree buys logarithmic commit cost and healing of individual leaf keys, at the price of a large dependency without a small, maintained browser implementation to pin, and of state-deletion and delivery-service integration rules the profile would then have to prove. The profile uses instead a **fresh random epoch secret per commit, sealed to each member with an ephemeral X25519 exchange against the member's Ed25519 key**, HKDF-derived message and confirmation keys, XChaCha20-Poly1305 with the message header as associated data, and an Ed25519 signature by the sender on every message. Details, guarantees and their limits are in [9xx](9xx-group-mesh.md#keys-and-epochs). Single epoch secrets copied to every invite, a reused pairwise seed, or transport encryption alone are still not a group security profile.

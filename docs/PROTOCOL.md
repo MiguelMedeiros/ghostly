@@ -242,17 +242,19 @@ A second profile, `group-community/1`, is for a group whose link (`group2/<group
 → { "t": "group-welcome", "g", "name", "commits": [ … ], "secrets": [ { "e", "s": { "e", "n", "c" } } ] }
 ↔ { "t": "group-commit", "g", "commit": { "v": 1, "g", "e", "p", "k", "m", "by", "s"?, "ts", "c", "sig" }, "secret"? }
 ↔ { "t": "group-msg", "g", "e", "s", "n", "ts", "nn", "c", "sig" }
-↔ { "t": "group-sync", "g", "e", "h", "have": { <sender>: { <epoch>: <seq> } }, "secrets": [ <epochs> ] }
+↔ { "t": "group-sync", "g", "e", "h", "have": { <sender>: { <epoch>: <seq> } }, "secrets": [ <epochs> ], "mt"? }
 ↔ { "t": "group-secrets", "g", "secrets": [ { "e", "s" } ] }
 → { "t": "group-leave", "g" }                                           to the admin
 → { "t": "group-removed", "g" }                                         contact chat, a courtesy
 ↔ { "t": "group-pay", "g", "id", "k", "f", "to", "v", "u", "d", "r", "x"?, "m"?, "a"?, "ts", "st", "by"? }   what the group sees of a payment
+↔ { "t": "group-meta", "g", "e", "h", "r", "by", "ts", "d", "sig", "k", "nn", "c" }   the group's picture, the admin's word
 ```
 
 - `g` is a 22-character base64url group id; `e` an epoch, the index of a commit in the chain; member keys are z-base-32 Ed25519 keys made for this group.
 - A commit's `m` is the whole roster after it, sorted `[key, role]` pairs with exactly one `admin`; `p` is the SHA-256 of the previous commit's tuple `[v, g, e, p, k, m, by, s, ts, c]`; `sig` is the admin's signature on the same tuple; `c` is an HMAC-SHA-256 of the untagged tuple under the new epoch's confirm key. Kinds: `create`, `add`, `remove`, `role`, `rotate`.
 - A sealed secret `{ "e", "n", "c" }` is an ephemeral X25519 public key, a nonce and an XChaCha20-Poly1305 box of the 32-byte epoch secret, keyed by HKDF-SHA-256 of the shared secret and bound to `["ghostly-group/1 secret", g, e, member]`.
 - A message's `c` is XChaCha20-Poly1305 of the trimmed UTF-8 text (at most 16 KiB) under the epoch message key, with the JSON of `[g, e, s, n, ts]` as associated data; `sig` is the sender's signature on `["ghostly-group/1 msg", g, e, s, n, ts, nn, c]`. `n` counts from 0 in each epoch, per sender. The stable id is `<s>:<e>:<n>`.
+- `group-meta` is the group's metadata (its picture), outside the chain: the admin signs `["ghostly-group meta", g, e, h, r, by, ts, d]`, where `(e, h)` is a commit it is the admin after and `d` the SHA-256 of the JSON body `{ "pic"? }`; the body is sealed under the message key of epoch `k`. Members keep the newest statement (later commit, then higher revision) whose signer is the admin now; a sync's `mt` (`"e.r"`) says which one the sender holds, and whoever holds a newer one sends it. Community frames carry `v: 2` and `k` is a commit hash. The picture is a JPEG data URL of at most 512×512 and 40,000 characters. See [9xx § Metadata](wisps/9xx-group-mesh.md#metadata).
 - Receivers accept a message only from the edge of its sender, for an epoch both were members of, once per `(s, e, n)`; a frame ahead of the chain waits, bounded, while the receiver asks the sender to catch it up. Only the author re-sends its messages, from a log of its last 32.
 - Payments with a member use the ordinary payment frames of §6.4 on the edge to that member (`pay-ask`, `pay-req`, `pay`, `pay-res`), negotiated on the edge exactly as on a paired chat; they never cross another member. A request to the whole group is one `pay-req` sent on every edge, on one rail (Cashu or Lightning), paid once. `group-pay` tells the other members what happened: `k` is `req` or `pay`, `f` the payer (or `*`, a request anyone may pay), `to` the payee, `v`/`u`/`d` the amount, unit and decimals, `r` the rail, `st` `open`, `sent`, `paid` or `closed`, `by` who paid. A receiver believes it only from the member it is about (the edge's peer): the payee for a request's state and for `paid`, the payer for `sent` and for taking that back. Additive: an app without it drops the frame, and an edge of an app without payments on edges negotiates none. Full rules: [WISP 9xx § Payments](wisps/9xx-group-mesh.md#payments).
 

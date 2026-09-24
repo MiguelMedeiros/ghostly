@@ -15,6 +15,7 @@ import { useOutsideDismiss } from "../hooks/useDismiss";
 import { markGroupRead, memberName } from "../lib/groups";
 import type { ChatMessage } from "../lib/types";
 import { useSettings } from "../contexts/SettingsContext";
+import { GroupAvatar } from "../components/GroupAvatar";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -37,6 +38,7 @@ function eventText(message: StoredMessage, group: GroupView): string {
   if (!member) return message.text;
   if (message.event === "joined") return `${memberName(member)} joined`;
   if (message.event === "admin") return `${memberName(member)} ${member.me ? "are" : "is"} now the admin`;
+  if (message.event === "picture") return `${memberName(member)} ${message.text.endsWith("removed the group's picture") ? "removed" : "changed"} the group's picture`;
   return message.text;
 }
 
@@ -147,8 +149,8 @@ export function GroupChat() {
           <button onClick={() => navigate("/")} className="md:hidden w-11 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0" title="Back" data-testid="chat-back">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 19l-7-7 7-7" /></svg>
           </button>
-          <button onClick={() => setShowMembers(true)} className="relative w-10 h-10 rounded-full bg-accent/15 text-accent flex items-center justify-center shrink-0" title="Members" aria-label="Members">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+          <button onClick={() => setShowMembers(true)} className="relative rounded-full shrink-0" title="Members" aria-label="Members">
+            <GroupAvatar picture={group.picture} size={40} glyph={20} testId="group-avatar" className="bg-accent/15" />
           </button>
           <div className="min-w-0">
             <p className="text-[15px] m-0 leading-tight truncate text-text-primary" data-testid="group-name">{group.name || "A group"}</p>

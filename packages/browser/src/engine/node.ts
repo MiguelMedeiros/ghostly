@@ -1223,6 +1223,7 @@ export class GhostlyNode implements EngineImplementation {
   removeGroupMember({ groupId, key }: { groupId: string; key: string }): Promise<void> { return this.groups.remove(groupId, key); }
   makeGroupAdmin({ groupId, key }: { groupId: string; key: string }): Promise<void> { return this.groups.makeAdmin(groupId, key); }
   rotateGroup({ groupId }: { groupId: string }): Promise<void> { return this.groups.rotate(groupId); }
+  setGroupPicture({ groupId, picture }: { groupId: string; picture: string | null }): Promise<void> { return this.groups.setPicture(groupId, picture); }
   forgetGroup({ groupId }: { groupId: string }): Promise<void> { return this.groups.forget(groupId); }
 
   setCallSignal({ linkId, signal }: { linkId: string; signal: string | null }): void {

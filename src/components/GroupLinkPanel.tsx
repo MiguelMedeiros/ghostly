@@ -7,6 +7,7 @@ import { useBackdropDismiss } from "../hooks/useDismiss";
 import { copyText, shareLink } from "../lib/shareLink";
 import { groupLinkUrl } from "../lib/groups";
 import { COMMUNITY_LIMITS } from "@ghostly/core";
+import { GroupAvatar } from "./GroupAvatar";
 
 const MAX_MEMBERS = 8;
 
@@ -125,6 +126,7 @@ export function GroupShareDialog({ group, created = false, onClose }: { group: G
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); onClose(); }} aria-labelledby={`${id}-title`} data-testid="group-share-dialog"
     className="m-auto w-[calc(100%_-_2rem)] max-w-sm max-h-[92dvh] overflow-y-auto rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <div className="mb-4 text-center">
+      <GroupAvatar picture={group.picture} size={64} testId="group-share-avatar" className="mx-auto mb-3 bg-accent/15" />
       <h2 id={`${id}-title`} className="text-lg font-semibold">{created ? `${group.name || "Your group"} is ready` : `Share ${group.name || "the group"}`}</h2>
       <p className="mt-1 text-sm text-text-muted">{created ? "Share its link to bring people in: whoever opens it joins." : "Whoever opens this link joins the group."}</p>
     </div>

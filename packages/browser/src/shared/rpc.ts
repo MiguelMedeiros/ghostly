@@ -165,6 +165,8 @@ export interface EngineApi {
   makeGroupAdmin(params: { groupId: string; key: string }): void;
   /** A fresh epoch secret without a membership change. */
   rotateGroup(params: { groupId: string }): void;
+  /** The admin sets the group's picture (a data URL as `avatarFromFile` makes it), or removes it with null. */
+  setGroupPicture(params: { groupId: string; picture: string | null }): void;
   /** Forgets the group and its history on this device (leaving first when still in it). */
   forgetGroup(params: { groupId: string }): void;
 }

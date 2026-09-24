@@ -7,6 +7,9 @@ import {
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import type { GroupStore, GroupsHost } from "./groups";
 
+/** The line a change of a group's picture leaves in its history (both profiles). */
+export const pictureText = (name: string, set: boolean) => `${name} ${set ? "changed" : "removed"} the group's picture`;
+
 /**
  * Community groups (`group-community/1`, WISP 9xx · Group Community): a link anyone can open, any
  * member lets people in, and online members elect a few hubs through a sealed Pkarr beacon. A hub
@@ -142,7 +145,7 @@ export class Communities {
       const hubs = freshHubs(live.beacon, this.now()).map(h => h.key);
       return [{ ...base, name: s.name, status: s.status, statusReason: s.state.statusReason, epoch: s.epoch, myKey: s.myKey, isAdmin: s.isAdmin,
         ...(s.isMember && s.entryKey ? { entryLink: encodeCommunityLink({ g: s.id, host: s.entryKey }) } : {}),
-        canSend: s.canSend,
+        canSend: s.canSend, ...(s.picture ? { picture: s.picture } : {}),
         community: { hub: live.hub, hubs: hubs.length, connected: [...edges.keys()].filter(ready).length },
         members: s.roster.map(([key, role]) => ({ key, role, me: key === s.myKey,
           nick: key === s.myKey ? undefined : (edges.get(key) && this.host.edgeNick(edges.get(key)!)) || s.state.nicks[key],
@@ -234,6 +237,7 @@ export class Communities {
   async remove(groupId: string, key: string): Promise<void> { await this.require(groupId).remove(key); }
   async makeAdmin(groupId: string, key: string): Promise<void> { await this.require(groupId).transferAdmin(key); }
   async rotate(groupId: string): Promise<void> { await this.require(groupId).rotate(); }
+  async setPicture(groupId: string, picture: string | null): Promise<void> { await this.require(groupId).setPicture(picture); }
   /** A new link (the old one reaches nobody), or none. */
   async replaceLink(groupId: string, off = false): Promise<string> {
     const s = this.require(groupId);
@@ -681,6 +685,10 @@ export class Communities {
         this.lastMessageAt.set(id, Math.max(this.lastMessageAt.get(id) ?? 0, m.timestamp));
       },
       changed: () => { void this.membershipChanged(id); },
+      metaChanged: (by, picture) => {
+        const name = by === session.myKey ? "You" : session.state.nicks[by] ?? `Member ${by.slice(0, 8)}`;
+        void this.event(id, "picture", pictureText(name, !!picture), this.now(), session.epoch, by).then(() => this.host.emit());
+      },
       clock: () => this.now(),
       relay: frame => { if (this.live.get(id)?.hub) for (const linkId of this.host.edges(id).values()) this.sendTo(linkId, frame); },
     });
