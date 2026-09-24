@@ -4,6 +4,9 @@ import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/typ
 import { badgeRank, badgeState, BADGE_ORDER, contactBadges, takeBadges } from "../../components/identities/contactBadges";
 import { ContactMarks, IdentityStack } from "../../components/identities/ContactMarks";
 import { GroupMembersDialog } from "../../components/GroupMembersDialog";
+import { Sidebar } from "../../components/Sidebar";
+import { UpdateProvider } from "../../contexts/UpdateContext";
+import { saveSession } from "../../lib/storage";
 import { groupView, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { DAY, identitiesView, now, receivedView } from "./views";
@@ -203,5 +206,21 @@ describe("a group's member list", () => {
     expect(marks.querySelector("[data-testid=contact-marks-more]")).toHaveTextContent("+5");
     // Bob is no contact of mine: no marks.
     expect(row(BOB).querySelector("[data-testid=group-member-marks]")).toBeNull();
+  });
+});
+
+describe("the chat list", () => {
+  it("shows a contact's two most recognisable verified marks after their name, and +N", () => {
+    const peer = "p".repeat(52);
+    saveSession({ id: "a", profile: "paired-chat/1", mySeedB64: "seed-a", peerPubKeyB64: peer, encKeyB64: "enc", messages: [], createdAt: Date.now(), nick: "Alice", nickSource: "profile" });
+    const { engine } = renderApp(<UpdateProvider><Sidebar /></UpdateProvider>);
+    act(() => engine.update({ links: [linkView({ peerPubKeyZ32: peer, identities: identitiesView({ received: everyKind() }) })] }));
+    const row = screen.getAllByTestId("chat-row").find(r => r.textContent?.includes("Alice"))!;
+    const marks = row.querySelector<HTMLElement>("[data-testid=contact-marks]")!;
+    // After the name, in the line the time is on; the name keeps its own element (it truncates first).
+    expect(marks.previousElementSibling).toHaveAttribute("data-testid", "chat-row-name");
+    expect(marks.closest(".contact-row")).not.toBeNull();
+    expect([...marks.querySelectorAll<HTMLElement>("[data-testid=contact-mark]")].map(m => m.dataset.icon)).toEqual(["domain", "ssh-github"]);
+    expect(marks.querySelector("[data-testid=contact-marks-more]")).toHaveTextContent("+5");
   });
 });
