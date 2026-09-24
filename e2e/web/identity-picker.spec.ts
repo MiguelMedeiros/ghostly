@@ -11,8 +11,9 @@ test("a kind of identity is recognized at a glance, and its caveats are one clic
   await alice.page.getByTestId("identity-add").click();
   const add = alice.page.getByTestId("add-identity");
 
-  // Every card has its own mark, not one shared glyph.
-  const cards = await add.getByRole("listitem").all();
+  // Every built-in card has its own mark, not one shared glyph. The SDK example's identity, compiled into
+  // the suite's build (web/sdk-plugin.spec.ts), is a plugin: it gets the generic key, as any plugin does.
+  const cards = await add.locator('[role="listitem"]:not([data-testid="add-identity-card-example-schnorr"])').all();
   const marks = await Promise.all(cards.map(card => card.locator("[data-icon]").first().getAttribute("data-icon")));
   expect(new Set(marks).size).toBe(cards.length);
   expect(marks).toEqual(expect.arrayContaining(["nostr", "domain", "openpgp", "bitcoin", "ssh", "ssh-github", "ssh-gitlab"]));

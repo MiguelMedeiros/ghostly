@@ -15,7 +15,7 @@ async function cashu(p: Peer) {
   return p.page;
 }
 
-test("Send refuses text that is not a Lightning invoice, and says so", { tag: ["@feature:wallet.cashu.pay-invoice"] }, async ({ peer }) => {
+test("Send refuses text that is neither a Lightning invoice nor an address, and says so", { tag: ["@feature:wallet.cashu.pay-invoice"] }, async ({ peer }) => {
   const page = await cashu(await peer("cashu-send"));
   await page.getByTestId("wallet-send").click();
   const input = page.getByTestId("wallet-pay-input");
@@ -24,18 +24,18 @@ test("Send refuses text that is not a Lightning invoice, and says so", { tag: ["
   await expect(pay, "nothing to pay yet").toBeDisabled();
 
   await input.fill("lnbc-this-is-not-an-invoice");
-  await expect(page.getByText("That is not a Lightning invoice.")).toBeVisible();
+  await expect(page.getByText("That is not a Lightning invoice or a Lightning address.")).toBeVisible();
   await expect(page.getByTestId("wallet-pay-preview")).toHaveCount(0);
   await expect(pay).toBeDisabled();
 
   // An empty field is not an error: the hint comes back.
   await input.fill("");
-  await expect(page.getByText("That is not a Lightning invoice.")).toHaveCount(0);
+  await expect(page.getByText("That is not a Lightning invoice or a Lightning address.")).toHaveCount(0);
   await expect(page.getByText("Paying a contact? Use ⚡ in the chat.")).toBeVisible();
 
   // Something that looks like ecash is offered as a token to redeem, not called a bad invoice.
   await input.fill("cashuBthis-is-not-a-real-token");
-  await expect(page.getByText("That is not a Lightning invoice.")).toHaveCount(0);
+  await expect(page.getByText("That is not a Lightning invoice or a Lightning address.")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Redeem ecash token" })).toBeEnabled();
 });
 
@@ -84,7 +84,7 @@ test("an unreachable mint is refused with a reason a person can act on", { tag: 
   await expect(page.getByTestId("wallet-error")).not.toHaveText(/^Failed to fetch$/);
 });
 
-test("the Lightning card is invoices only, and its settings lead to the Cashu card", { tag: ["@feature:wallet.lightning.card", "@feature:wallet.lightning.sources"] }, async ({ peer }) => {
+test("the Lightning card pays invoices and addresses, not tokens, and its settings lead to the Cashu card", { tag: ["@feature:wallet.lightning.card", "@feature:wallet.lightning.sources"] }, async ({ peer }) => {
   const alice = await peer("lightning-card");
   await openWallet(alice, "lightning");
   const page = alice.page;
@@ -96,7 +96,7 @@ test("the Lightning card is invoices only, and its settings lead to the Cashu ca
   // No mint settings here: they belong to the Cashu card.
   await expect(page.getByTestId("wallet-mints")).toHaveCount(0);
   await page.getByTestId("wallet-send").click();
-  await expect(page.getByTestId("wallet-pay-input")).toHaveAttribute("placeholder", "Paste a Lightning invoice");
+  await expect(page.getByTestId("wallet-pay-input")).toHaveAttribute("placeholder", "Paste a Lightning invoice or a Lightning address");
 
   await page.getByRole("button", { name: "Cashu settings" }).click();
   await expect(page.getByTestId("wallet-card-cashu")).toHaveAttribute("aria-selected", "true");

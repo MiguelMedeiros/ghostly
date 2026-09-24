@@ -235,7 +235,7 @@
     {"id":"wallet.cashu.test-sats","wisp":"201","kind":"feature","clients":["web","extension","desktop"],"infra":["cashu-mint"],"title":"Test sats on the test mint"},
     {"id":"wallet.cashu.export","wisp":"201","kind":"feature","clients":["web","extension","desktop"],"infra":["cashu-mint"],"title":"Export the Cashu wallet"},
     {"id":"wallet.lightning.sources","wisp":"203","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"The Lightning card starts on the Cashu mints; a source is picked per mode"},
-    {"id":"wallet.lightning.card","wisp":"203","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"The Lightning card is invoices only (Receive/Send, no History); its settings lead to the Cashu card"},
+    {"id":"wallet.lightning.card","wisp":"203","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"The Lightning card pays invoices and Lightning addresses, not tokens (Receive/Send, no History); its settings lead to the Cashu card"},
     {"id":"wallet.lightning.cashu-mint.receive","wisp":"203","kind":"feature","clients":["web","extension","desktop"],"infra":["cashu-mint"],"title":"Lightning in through an invoice via the Cashu mint source"},
     {"id":"wallet.lightning.cashu-mint.pay","wisp":"203","kind":"feature","clients":["web","extension","desktop"],"infra":["cashu-mint"],"title":"Lightning out paying someone else's invoice via the Cashu mint source"},
     {"id":"wallet.lightning.breez.connect","wisp":"203","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Breez offered in Testnet only; its form makes or restores a wallet"},
