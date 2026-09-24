@@ -48,6 +48,21 @@ function isOnlyEmojis(text: string): boolean {
   return emojiPattern.test(text.trim()) && text.trim().length <= 12;
 }
 
+/**
+ * A link ends where the sentence around it takes over: trailing punctuation ("see https://x.example/a.") and a
+ * closing bracket or quote the link did not open ("(https://x.example/a)") are left as text.
+ */
+function linkEnd(url: string): string {
+  const pairs: Record<string, string> = { ")": "(", "]": "[", "}": "{" };
+  for (;;) {
+    const last = url[url.length - 1];
+    const opener = pairs[last];
+    const count = (c: string) => url.split(c).length - 1;
+    if (/[.,;:!?'"*_>]/.test(last) || (opener && count(last) > count(opener))) url = url.slice(0, -1);
+    else return url;
+  }
+}
+
 function renderTextWithLinks(text: string) {
   const parts: (string | React.JSX.Element)[] = [];
   let lastIndex = 0;
@@ -56,7 +71,7 @@ function renderTextWithLinks(text: string) {
     if (match.index! > lastIndex) {
       parts.push(text.slice(lastIndex, match.index));
     }
-    const url = match[0];
+    const url = linkEnd(match[0]);
     parts.push(
       <a
         key={match.index}
