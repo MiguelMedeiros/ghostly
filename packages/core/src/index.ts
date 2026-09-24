@@ -52,3 +52,4 @@ export * from "./groupSession";
 export * from "./groupEntry";
 export * from "./groupCommunity";
 export * from "./communityRendezvous";
+export * from "./groupMeta";
