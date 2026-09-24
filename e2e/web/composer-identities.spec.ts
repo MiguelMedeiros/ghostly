@@ -1,9 +1,8 @@
 import { expect, test, type Peer } from "../support/fixtures";
-import { addNostrIdentity, injectNostrSigner } from "../support/nostrSigner";
+import { injectNostrSigner } from "../support/nostrSigner";
 import { pair } from "../support/paired";
 
 const chatId = (peer: Peer) => peer.page.evaluate(() => location.hash);
-const go = (peer: Peer, hash: string) => peer.page.evaluate(h => { location.hash = h; }, hash);
 async function received(peer: Peer) {
   await peer.page.getByTitle("Options").click();
   await peer.page.getByTestId("chat-identities-open").click();
@@ -13,45 +12,59 @@ async function received(peer: Peer) {
 }
 
 /**
- * The composer's identity button, beside ⚡: each identity of the profile is a switch for this chat. One tap
- * shares it, and the contact sees it verified; one tap stops, and the contact sees it is no longer shared.
+ * The composer's identity button, beside ⚡: the profile's identities as ID cards, the way ⚡ shows the ways of
+ * paying. With none yet, the blank card adds one there, without leaving the chat; the chosen card's panel shares it,
+ * and the contact sees it verified; Stop sharing, and the contact sees it is no longer shared.
  */
-test("an identity is shared and withdrawn from the chat's composer", { tag: ["@feature:proofs.composer", "@feature:proofs.share", "@feature:proofs.withdraw"] }, async ({ peer }) => {
+test("an identity is added, shared and withdrawn from the chat's composer", { tag: ["@feature:proofs.composer", "@feature:proofs.share", "@feature:proofs.withdraw"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("cid-alice"), peer("cid-bob")]);
   await injectNostrSigner(alice);
   await pair(alice, bob);
   const withBob = await chatId(alice);
 
-  // No identity yet: the picker leads to the Identities page.
+  // No identity yet: the deck is the blank card, which adds one here.
   const button = alice.page.getByTestId("composer-identities-button");
-  await button.click();
-  const picker = alice.page.getByTestId("composer-identities");
-  await expect(picker.getByTestId("composer-identities-empty")).toContainText("No identities yet");
-  await picker.getByRole("button", { name: "Add one" }).click();
-  await expect(alice.page.getByTestId("identities-mine")).toBeVisible();
-
-  await addNostrIdentity(alice);
-  await go(alice, withBob);
   await expect(button).toHaveAttribute("aria-label", "Share identities in this chat");
   await button.click();
-  const nostr = picker.getByRole("switch").filter({ hasText: "Nostr" });
-  await expect(nostr).toHaveAttribute("aria-checked", "false");
-  await expect(nostr.getByTestId("composer-identity-status")).toHaveText("Not shared");
+  const picker = alice.page.getByTestId("composer-identities");
+  await expect(picker.getByRole("tab")).toHaveCount(1);
+  await expect(picker.getByTestId("composer-identity-add")).toContainText("Add your first identity");
+  await expect(picker.getByTestId("composer-identities-empty")).toContainText("No identities yet");
+  await picker.getByTestId("composer-identities-add").click();
+  const add = alice.page.getByTestId("add-identity");
+  await add.getByTestId("add-identity-nostr").click();
+  await expect(add.getByTestId("add-identity-signer")).toHaveValue("nip07");
+  await add.getByTestId("add-identity-start").click();
+  await expect(add).toHaveCount(0);
+  expect(await chatId(alice)).toBe(withBob);
 
-  // One tap: shared with Bob, verified by his app.
-  await nostr.click();
-  await expect(nostr).toHaveAttribute("aria-checked", "true");
-  await expect(nostr.getByTestId("composer-identity-status")).toHaveText("Shared · verified by your contact");
+  // The new card comes up chosen, not shared yet.
+  const nostr = picker.getByTestId("composer-identity").filter({ hasText: "Nostr" });
+  await expect(nostr).toHaveAttribute("aria-selected", "true");
+  await expect(nostr).toContainText("Not shared with");
+  await expect(nostr.getByTestId("id-card-shared")).toHaveCount(0);
+  const panel = picker.getByTestId("composer-identity-panel");
+  const status = panel.getByTestId("composer-identity-status");
+  const share = panel.getByTestId("composer-identity-share");
+  await expect(panel).toContainText("Nostr");
+  await expect(status).toHaveText("Not shared");
+
+  // Share with this chat: Bob's app verifies it, and the card wears the check seal.
+  await expect(share).toHaveText("Share with this chat");
+  await share.click();
+  await expect(status).toHaveText("Shared · verified by your contact");
+  await expect(nostr.getByTestId("id-card-shared")).toBeVisible();
+  await expect(share).toHaveText("Stop sharing");
   await expect(button.getByTestId("composer-identities-count")).toHaveText("1");
   await expect(bob.page.getByTestId("chat-identity-badges")).toBeVisible();
   let bobs = await received(bob);
   await expect(bobs.row).toHaveAttribute("data-status", "verified");
   await bobs.close();
 
-  // From the same picker, still open: one tap stops it.
-  await nostr.click();
-  await expect(nostr).toHaveAttribute("aria-checked", "false");
-  await expect(nostr.getByTestId("composer-identity-status")).toHaveText("Not shared");
+  // From the same picker, still open: Stop sharing.
+  await share.click();
+  await expect(status).toHaveText("Not shared");
+  await expect(nostr.getByTestId("id-card-shared")).toHaveCount(0);
   await expect(button.getByTestId("composer-identities-count")).toHaveCount(0);
   await expect(bob.page.getByTestId("chat-identity-badges")).toHaveCount(0);
   bobs = await received(bob);
@@ -59,10 +72,14 @@ test("an identity is shared and withdrawn from the chat's composer", { tag: ["@f
   await expect(bobs.row.getByTestId("chat-identity-received-status")).toHaveText("No longer shared");
   await bobs.close();
 
-  // Escape closes it and gives the focus back to the button.
+  // Escape closes it and gives the focus back to the button; opened again, the keys start on the chosen card.
   await alice.page.keyboard.press("Escape");
   await expect(picker).toHaveCount(0);
   await expect(button).toBeFocused();
+  await button.click();
+  await expect(nostr).toBeFocused();
+  await alice.page.keyboard.press("Escape");
+  await expect(picker).toHaveCount(0);
 
   // On a phone the button waits behind the plus with GIF, ⚡ and files; the input keeps its width.
   await alice.page.setViewportSize({ width: 390, height: 844 });
@@ -78,5 +95,11 @@ test("an identity is shared and withdrawn from the chat's composer", { tag: ["@f
   const sheet = await picker.boundingBox();
   expect(sheet!.x).toBeGreaterThanOrEqual(0);
   expect(sheet!.x + sheet!.width).toBeLessThanOrEqual(390);
-  await expect(picker.getByRole("switch").filter({ hasText: "Nostr" })).toBeVisible();
+  // The cards fit the sheet, and so does the action under them.
+  for (const part of [nostr, share]) {
+    await expect(part).toBeVisible();
+    const box = await part.boundingBox();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+  }
 });

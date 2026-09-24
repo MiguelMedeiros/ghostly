@@ -64,7 +64,7 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
   return <>
     <div className="sheet-backdrop" />
     <div ref={ref} data-testid="group-pay-recipients" onKeyDown={e => e.key === "Escape" && onClose()}
-      className="sheet sheet-padded absolute bottom-full left-0 mb-2 z-50 animate-fade-in w-[360px] max-w-[calc(100vw-1.5rem)] bg-panel-header border border-border rounded-2xl shadow-2xl p-3">
+      className="sheet sheet-padded absolute bottom-full left-0 mb-2 z-50 animate-fade-in w-[360px] max-w-[calc(100vw-1.5rem)] max-md:max-w-none bg-panel-header border border-border rounded-2xl shadow-2xl p-3">
       <p className="m-0 px-1 text-sm font-semibold text-text-primary">Pay or request</p>
       <p className="m-0 px-1 text-xs text-text-muted">The payment goes only between the two of you; everyone in the group sees who paid whom and how much.</p>
       <ul className="mt-2 max-h-72 space-y-1 overflow-y-auto">
