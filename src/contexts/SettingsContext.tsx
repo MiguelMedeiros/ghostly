@@ -15,6 +15,7 @@ import {
   type ColorScheme,
   type ColorTheme,
   type Language,
+  type ChatListDensity,
   type LockScreenSettings,
   type NotificationSettings,
 } from "../lib/settings";
@@ -30,6 +31,7 @@ interface SettingsContextValue {
   updateNotifications: (notifications: Partial<NotificationSettings>) => void;
   updateDefaultNickname: (nickname: string) => void;
   updateReduceMotion: (reduce: boolean) => void;
+  updateChatListDensity: (density: ChatListDensity) => void;
   updateCheckForUpdates: (check: boolean) => void;
   randomizeNickname: () => void;
   resetSettings: () => void;
@@ -90,6 +92,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setSettings((prev) => ({ ...prev, reduceMotion: reduce }));
   }, []);
 
+  const updateChatListDensity = useCallback((chatListDensity: ChatListDensity) => {
+    setSettings((prev) => ({ ...prev, chatListDensity }));
+  }, []);
+
   const updateCheckForUpdates = useCallback((check: boolean) => {
     setSettings((prev) => ({ ...prev, checkForUpdates: check }));
   }, []);
@@ -125,6 +131,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         updateNotifications,
         updateDefaultNickname,
         updateReduceMotion,
+        updateChatListDensity,
         updateCheckForUpdates,
         randomizeNickname,
         resetSettings,

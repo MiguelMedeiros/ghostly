@@ -122,6 +122,12 @@
       "light": "ライト",
       "system": "自動"
     },
+    "chatListDensity": "チャット一覧",
+    "chatListDensityDescription": "一覧で各チャットが占める大きさ",
+    "chatListDensities": {
+      "compact": "コンパクト",
+      "comfortable": "ゆったり"
+    },
     "language": "言語",
     "security": "セキュリティ",
     "lockScreen": "ロック画面",

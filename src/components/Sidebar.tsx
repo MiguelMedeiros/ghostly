@@ -1,21 +1,19 @@
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
-import { PeerAvatar } from "./Avatar";
 import { useWalletMode } from "../hooks/useAvatars";
 import { DeleteChatDialog } from "./DeleteChatDialog";
-import { PinIcon } from "./PinIcon";
-import { findMoney } from "../lib/money";
+import { ChatRow, GroupRow } from "./ChatRow";
+import { formatListTime } from "../lib/chatList";
 import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
-import type { GroupView } from "@ghostly/browser/shared/types";
 import { NewGroupDialog } from "./NewGroupDialog";
-import { groupPath, groupReadAt, groupRouteId } from "../lib/groups";
-import { GroupAvatar } from "./GroupAvatar";
+import { groupPath, groupRouteId } from "../lib/groups";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useOutsideDismiss } from "../hooks/useDismiss";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { JoinDialog } from "./JoinDialog";
 import { useBackgroundPoller } from "../hooks/useBackgroundPoller";
 import { useI18n } from "../contexts/I18nContext";
+import { useSettings } from "../contexts/SettingsContext";
 import { AccountBar } from "./AccountBar";
 import { UpdateBanner } from "./UpdateBanner";
 import {
@@ -32,47 +30,8 @@ import { createPairedChat } from "../lib/pairedChat";
 import { chatPath } from "../lib/url";
 import type { ChatSession } from "../lib/types";
 
-/** A pasted invoice or token reads as what it is, not as its first characters. */
-function previewText(text: string): string {
-  const money = findMoney(text);
-  if (!money) return text;
-  if (money.type === "cashu") return "⚡ Ecash";
-  if (money.type === "lnurl") return `⚡ ${money.destination.kind === "address" ? "Lightning address" : "LNURL"} · ${money.destination.text}`;
-  return money.invoice.amountSat === null ? "⚡ Lightning invoice" : `⚡ Lightning invoice · ${money.invoice.amountSat.toLocaleString()} sats`;
-}
-
 const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
 const engineSnapshot = () => engine.state;
-
-/** A group (private or community), or an invitation to one, in the chat list. */
-function GroupRow({ group, active, onOpen }: { group: GroupView; active: boolean; onOpen(): void }) {
-  const [busy, setBusy] = useState(false);
-  const invitation = group.invitation;
-  const unread = !active && !invitation && group.lastMessageAt > groupReadAt(group.id);
-  const answer = async (method: "acceptGroupInvitation" | "declineGroupInvitation") => {
-    setBusy(true);
-    try { await engine.call(method, { groupId: group.id }); } catch { /* the row says what state it is in */ } finally { setBusy(false); }
-  };
-  const status = invitation ? (invitation.viaLink ? (invitation.admin ? "Joining…" : group.profile === "community" ? "Waiting to be let in…" : invitation.stage === "answered" ? "The admin's app answered…" : "Waiting for the admin's app…") : invitation.accepted ? "Joining…" : `Invited by ${invitation.contact || "a contact"} · ${invitation.members} member${invitation.members === 1 ? "" : "s"}`)
-    : group.status !== "active" ? group.statusReason ?? group.status : `${group.members.length} member${group.members.length === 1 ? "" : "s"}`;
-  return (
-    <div data-testid="group-row" data-group={group.id} onClick={onOpen}
-      className={`flex items-center gap-3 px-3 py-3 transition-colors group cursor-pointer ${active ? "bg-surface-hover" : "hover:bg-surface-alt"}`}>
-      <div className="relative shrink-0">
-        <GroupAvatar picture={group.picture} size={48} glyph={22} testId="group-row-avatar" className={active ? "bg-surface-alt" : "bg-surface-hover"} />
-        {unread && <span className="absolute -top-0.5 -end-0.5 w-3 h-3 rounded-full bg-accent" />}
-      </div>
-      <div className="flex-1 min-w-0 py-1">
-        <span className={`text-[15px] truncate block ${unread ? "text-text-primary font-semibold" : "text-text-primary"}`}>{group.name || "A group"}</span>
-        <p className="text-[12px] truncate m-0 text-text-muted">{status}</p>
-        {invitation && !invitation.accepted && <div className="mt-1.5 flex gap-2">
-          <button disabled={busy} data-testid="group-accept" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }} className="rounded-lg bg-accent px-3 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40">Accept</button>
-          <button disabled={busy} data-testid="group-decline" onClick={e => { e.stopPropagation(); void answer("declineGroupInvitation"); }} className="rounded-lg px-3 py-1 text-xs text-text-secondary hover:bg-surface-hover disabled:opacity-40">Decline</button>
-        </div>}
-      </div>
-    </div>
-  );
-}
 
 const MIN_WIDTH = 280;
 const MAX_WIDTH = 600;
@@ -86,6 +45,7 @@ export function Sidebar() {
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const walletMode = useWalletMode();
+  const density = useSettings().settings.chatListDensity;
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [search, setSearch] = useState("");
   const [showNewChat, setShowNewChat] = useState(false);
@@ -168,23 +128,6 @@ export function Sidebar() {
     e.stopPropagation();
     e.preventDefault();
     setConfirmDeleteId(sessionId);
-  };
-
-  const formatTime = (ts: number) => {
-    const now = Date.now();
-    const diff = now - ts;
-    const minutes = Math.floor(diff / 60_000);
-    const hours = Math.floor(diff / 3_600_000);
-    const days = Math.floor(diff / 86_400_000);
-
-    if (minutes < 1) return "now";
-    if (minutes < 60) return `${minutes}m`;
-    if (hours < 24) return `${hours}h`;
-    if (days < 7) return `${days}d`;
-    return new Date(ts).toLocaleDateString([], {
-      month: "short",
-      day: "numeric",
-    });
   };
 
   const filtered = sessions.filter((s) => {
@@ -281,7 +224,7 @@ export function Sidebar() {
       {/* Chat List */}
       <div className="flex-1 overflow-y-auto">
         {groups.filter(g => !search || g.name.toLowerCase().includes(search.toLowerCase())).map(group => (
-          <GroupRow key={group.id} group={group} active={activeGroupId === group.id} onOpen={() => { navigate(groupPath(group.id)); setConfirmDeleteId(null); }} />
+          <GroupRow key={group.id} group={group} density={density} active={activeGroupId === group.id} onOpen={() => { navigate(groupPath(group.id)); setConfirmDeleteId(null); }} />
         ))}
         {filtered.length === 0 && sessions.length === 0 && groups.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full px-8 text-center">
@@ -316,146 +259,25 @@ export function Sidebar() {
           const isCreator = !!getInviteCode(session.id);
 
           return (
-            <div
+            <ChatRow
               key={session.id}
-              onClick={() => {
-                {
-                  markSessionAsRead(session.id);
-                  navigate(path);
-                  setConfirmDeleteId(null);
-                }
-              }}
-              className={`flex items-center gap-3 px-3 py-3 cursor-pointer transition-colors group ${
-                isActive
-                  ? "bg-surface-hover"
-                  : "hover:bg-surface-alt"
-              }`}
-            >
-              {/* Avatar */}
-              <div className={`relative w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${
-                isActive ? "bg-surface-alt" : "bg-surface-hover"
-              }`}>
-                <PeerAvatar peerPubKey={session.peerPubKeyB64} label={peerLabel} named={!isAnonymous} testId="chat-row-avatar" />
-                {syncingSessions.has(session.id) && (
-                  <span className="absolute -top-1 -start-1 w-5 h-5 flex items-center justify-center z-10">
-                    <svg
-                      className="animate-ghost-boo w-5 h-5"
-                      viewBox="0 0 64 64"
-                    >
-                      <g transform="translate(12, 6)">
-                        <path d="M20 4C10.059 4 2 12.059 2 22v18c0 1.5 1.2 2 2 1.2l4-3.2 4 3.2c.8.6 1.6.6 2.4 0L18 38l3.6 3.2c.8.6 1.6.6 2.4 0L28 38l4 3.2c.8.8 2 .3 2-1.2V22C34 12.059 25.941 4 20 4z" fill="currentColor" className="text-text-muted"/>
-                        <circle cx="13" cy="20" r="3" fill="currentColor" className="text-sidebar-bg"/>
-                        <circle cx="27" cy="20" r="3" fill="currentColor" className="text-sidebar-bg"/>
-                      </g>
-                    </svg>
-                  </span>
-                )}
-                {unread > 0 && (
-                  <span className="absolute -top-0.5 -end-0.5 min-w-[18px] h-[18px] flex items-center justify-center bg-accent text-[#111b21] text-[10px] font-bold rounded-full px-1">
-                    {unread > 99 ? "99+" : unread}
-                  </span>
-                )}
-                {isCreator && (
-                  <span className="absolute -bottom-0.5 -end-0.5 w-[18px] h-[18px] flex items-center justify-center rounded-full text-[9px] bg-accent text-[#111b21] z-10 group/star">
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
-                    </svg>
-                    <span className="absolute top-1/2 -translate-y-1/2 start-full ms-2 px-2 py-1 bg-surface-alt text-text-primary text-[10px] rounded whitespace-nowrap opacity-0 group-hover/star:opacity-100 transition-opacity pointer-events-none shadow-lg border border-border">
-                      You created this chat
-                    </span>
-                  </span>
-                )}
-              </div>
-
-              {/* Content */}
-              <div className="flex-1 min-w-0 border-b border-transparent py-1">
-                <div className="flex items-center justify-between gap-2 mb-0.5">
-                  <div className="min-w-0 flex-1">
-                    <span className={`text-[15px] truncate block ${isAnonymous ? "text-text-muted/60 italic" : unread > 0 ? "text-text-primary font-semibold" : "text-text-primary"}`}>
-                      {peerLabel}
-                    </span>
-                    <span className="text-[11px] text-text-muted/60 font-mono whitespace-nowrap block">
-                      {peerKey}
-                    </span>
-                  </div>
-                  <span className={`text-xs shrink-0 ${unread > 0 ? "text-accent font-medium" : "text-text-muted"}`}>
-                    {formatTime(session.lastSyncAt ?? session.createdAt)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-2">
-                    <p className={`text-[13px] truncate m-0 ${unread > 0 ? "text-text-secondary font-medium" : "text-text-muted"}`}>
-                      {lastMsg ? (
-                        <>
-                          {lastMsg.sender === "me" && (
-                            <span className="text-text-secondary">
-                              <svg
-                                width="16"
-                                height="11"
-                                viewBox="0 0 16 11"
-                                fill="none"
-                                className="inline me-0.5 -mt-0.5"
-                              >
-                                <path
-                                  d="M11 1L4.125 8.5L1 5.5"
-                                  stroke="currentColor"
-                                  strokeWidth="1.5"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                />
-                                <path
-                                  d="M15 1L8.125 8.5L7 7.3"
-                                  stroke="currentColor"
-                                  strokeWidth="1.5"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                />
-                              </svg>
-                            </span>
-                          )}
-                          {previewText(lastMsg.text)}
-                        </>
-                      ) : (
-                        <span className="italic">No messages</span>
-                      )}
-                    </p>
-                  <div className="flex items-center gap-1 shrink-0">
-                    {<button
-                      title={isSessionPinned(session.id) ? "Unpin chat" : "Pin chat"}
-                      aria-label={isSessionPinned(session.id) ? "Unpin chat" : "Pin chat"}
-                      aria-pressed={isSessionPinned(session.id)}
-                      onClick={e => { e.stopPropagation(); setSessionPinned(session.id, !isSessionPinned(session.id)); }}
-                      className={`flex min-w-7 items-center justify-center rounded p-1 max-md:p-2 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-opacity focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-100 ${isSessionPinned(session.id) ? "opacity-100 text-accent bg-accent/15" : "opacity-0 text-text-muted"}`}>
-                      <PinIcon active={isSessionPinned(session.id)} />
-                    </button>}
-                    {unread > 0 && (
-                      <span className="w-2.5 h-2.5 rounded-full bg-accent" />
-                    )}
-                    {(
-                      <button
-                        onClick={(e) => handleDelete(session.id, e)}
-                        className="max-md:hidden opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 p-1 text-text-muted hover:text-danger transition-all cursor-pointer"
-                        title={t("sidebar.deleteChat")}
-                      >
-                        <svg
-                          width="14"
-                          height="14"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <path d="M3 6h18" />
-                          <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-                          <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-                        </svg>
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
+              density={density}
+              active={isActive}
+              label={peerLabel}
+              named={!isAnonymous}
+              keyLabel={peerKey}
+              peerPubKey={session.peerPubKeyB64}
+              lastMessage={lastMsg}
+              time={formatListTime(session.lastSyncAt ?? session.createdAt)}
+              unread={unread}
+              pinned={isSessionPinned(session.id)}
+              syncing={syncingSessions.has(session.id)}
+              creator={isCreator}
+              onOpen={() => { markSessionAsRead(session.id); navigate(path); setConfirmDeleteId(null); }}
+              onTogglePin={() => setSessionPinned(session.id, !isSessionPinned(session.id))}
+              onDelete={(e) => handleDelete(session.id, e)}
+              deleteLabel={t("sidebar.deleteChat")}
+            />
           );
         })}
       </div>
