@@ -1,15 +1,22 @@
 import { useEffect, useId, useRef, useState, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { IdentityProofView, LinkView } from "@ghostly/browser/shared/types";
 import { useOutsideDismiss } from "../../hooks/useDismiss";
-import { daysLeft, date, expiringSoon, providerLabel, SHARED_STATUS, shortSubject, useEngineState } from "../../lib/identities";
+import { addableProviders, daysLeft, date, expiringSoon, providerLabel, SHARED_STATUS, useEngineState, useNewProof } from "../../lib/identities";
+import { ComposerSheet, ComposerSheetHead, ForwardArrow } from "../ComposerSheet";
+import { Deck } from "../deck/Deck";
+import { AddIdentityDialog } from "./AddIdentityDialog";
+import { AddIdCardFace, IdCardFace, IdCardMark } from "./IdCardFace";
+import { idCard, idCardTone, type IdCardContent } from "./idCard";
 import { IdentitiesIcon } from "./IdentitiesIcon";
 import { ProviderMark } from "./ProviderMark";
+import "./composer-identities.css";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 type Shared = NonNullable<LinkView["identities"]>["shared"][number];
-/** Shared in this chat, or about to be: what the switch shows as on. */
+/** Shared in this chat, or about to be: what the card shows as shared. */
 const isOn = (s?: Shared) => !!s && s.status !== "withdrawn" && s.status !== "withdrawal-pending";
 
 const useLink = (peerKey: string) => useEngineState()?.links.find(l => l.peerPubKeyZ32 === peerKey);
@@ -30,10 +37,16 @@ export function ComposerIdentityButton({ peerKey, open, onToggle, buttonRef }: {
   );
 }
 
+/** The last card: a blank one that adds an identity. */
+const ADD = "add";
+type Entry = { id: string; add?: false; proof: IdentityProofView; card: IdCardContent; on: boolean } | { id: typeof ADD; add: true };
+
 /**
- * Which of this profile's identities this chat's contact sees, one switch each: sharing and stopping are one
- * tap, through the same engine calls as the chat's Identities dialog. Adding and removing happen on the
- * Identities page.
+ * Which of this profile's identities this chat's contact sees, as the payment picker shows the ways of paying: the
+ * identities are ID cards in a stack (the Identities page's cards, on the same deck), a check seal on those shared
+ * here. The chosen card's panel says what the contact will see and shares it or stops, through the same engine
+ * calls as the chat's Identities dialog; the last card adds one without leaving the chat. Removing an identity
+ * happens on the Identities page.
  */
 export function ComposerIdentityPicker({ peerKey, contact, onClose, anchorRef }: { peerKey: string; contact: string; onClose: () => void; anchorRef?: RefObject<HTMLElement | null> }) {
   const state = useEngineState();
@@ -41,83 +54,116 @@ export function ComposerIdentityPicker({ peerKey, contact, onClose, anchorRef }:
   const link = state?.links.find(l => l.peerPubKeyZ32 === peerKey);
   const ids = link?.identities;
   const mine = state?.identityProofs ?? [];
+  const [chosen, setChosen] = useState<string>();
+  const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(""), [error, setError] = useState("");
   const ref = useRef<HTMLDivElement>(null);
-  const titleId = useId();
-  useOutsideDismiss(ref, true, onClose, anchorRef);
-  // Keys reach the picker as it opens; closing gives the focus back to the button that opened it.
+  const uid = useId();
+  const titleId = `${uid}title`, panel = { id: `${uid}panel`, tabId: (id: string) => `${uid}tab-${id}` };
+  // While an identity is being added, its dialog is the one on top: a click in it does not close the picker.
+  useOutsideDismiss(ref, !adding, onClose, anchorRef);
+  useNewProof(state, setChosen);
+  // Keys reach the chosen card as the picker opens (and again after adding one: the dialog replaces the sheet while it
+  // is open, since a phone's sheet sits above any dialog); closing gives the focus back to the button that opened it.
+  useEffect(() => {
+    if (adding) return;
+    (ref.current?.querySelector<HTMLElement>('[role=tab][tabindex="0"]') ?? ref.current)?.focus({ preventScroll: true });
+  }, [adding]);
   useEffect(() => {
     const anchor = anchorRef?.current;
-    (ref.current?.querySelector<HTMLElement>("[role=switch]:not(:disabled), a, button") ?? ref.current)?.focus({ preventScroll: true });
     return () => { if (anchor?.isConnected) anchor.focus({ preventScroll: true }); };
   }, [anchorRef]);
   const now = Math.floor(Date.now() / 1000);
   const connected = link?.dataLink === "open" && link.pairing?.status === "ready";
   const unsupported = connected && !ids?.support;
+  const canAdd = addableProviders().length > 0;
   const manage = () => { onClose(); navigate("/identities"); };
   const toggle = (p: IdentityProofView, on: boolean) => {
-    if (!link) return;
+    if (!link || busy) return;
     setBusy(p.id); setError("");
     void engine.call(on ? "withdrawIdentityProof" : "shareIdentityProof", { linkId: link.id, id: p.id })
       .catch(e => setError(message(e))).finally(() => setBusy(""));
   };
 
-  return (<>
-    <div className="sheet-backdrop" />
-    <div ref={ref} tabIndex={-1} role="dialog" aria-labelledby={titleId} data-testid="composer-identities"
-      className="sheet sheet-padded absolute bottom-full left-0 mb-2 z-50 animate-fade-in w-[340px] max-w-[calc(100vw-1.5rem)] max-h-[70dvh] overflow-y-auto bg-panel-header border border-border rounded-2xl shadow-2xl p-3 space-y-2 focus:outline-none">
-      <div className="flex items-baseline justify-between gap-3 px-1">
-        <h2 id={titleId} className="text-sm font-medium text-text-primary">Your identities</h2>
-        <span className="text-[11px] text-text-muted truncate">shown to {contact} only</span>
+  const entries: Entry[] = [
+    ...mine.map((proof): Entry => {
+      const shared = ids?.shared.find(s => s.id === proof.id);
+      const on = isOn(shared);
+      const card = idCard(proof, { now, refusedBy: on && shared?.status === "rejected" ? [contact] : [] });
+      return { id: proof.id, proof, on, card: { ...card, shared: on ? `Shared with ${contact}` : `Not shared with ${contact}` } };
+    }),
+    ...(canAdd || mine.length === 0 ? [{ id: ADD, add: true } as const] : []),
+  ];
+  const entry = entries.find(e => e.id === chosen) ?? entries[0];
+  const tone = (e: Entry) => (e.add ? "id-card-add" : idCardTone({ provider: e.card.provider, subject: e.card.bound, attested: e.card.attested }));
+  /** Why this identity cannot be shared here now. Stopping is always possible. */
+  const why = (e: Entry) => {
+    if (e.add || e.on) return undefined;
+    if (e.proof.expiresAt <= now) return `Expired ${date(e.proof.expiresAt)}`;
+    if (ids?.contactProviders && !ids.contactProviders.includes(e.proof.provider)) return `${contact}’s app cannot verify ${providerLabel(e.proof.provider)} yet`;
+    if (unsupported) return `${contact}’s app cannot receive identities yet`;
+    if (!ids) return "Connect to this contact first";
+    return undefined;
+  };
+  const select = (id: string) => { setChosen(id); setError(""); };
+
+  if (adding) return createPortal(<AddIdentityDialog onClose={() => setAdding(false)} />, document.body);
+  return (
+    <ComposerSheet ref={ref} tabIndex={-1} role="dialog" aria-labelledby={titleId} data-testid="composer-identities" className={`composer-identities ${tone(entry)} focus:outline-none max-h-[70dvh] overflow-y-auto`}>
+      <ComposerSheetHead title="Your identities" titleId={titleId} who={`shown to ${contact} only`} />
+      <Deck<Entry> compact cards={entries} selected={entry.id} onSelect={select} onChoose={id => { if (id === ADD) setAdding(true); }}
+        kind="tabs" panel={panel} label="Your identities" name="composer-identity-deck" className="id-deck" size={{ max: 250, share: .62 }}
+        testId={e => (e.add ? "composer-identity-add" : "composer-identity")} blocked={why}
+        face={(e, { after }) => (e.add ? <AddIdCardFace first={mine.length === 0} /> : <IdCardFace card={e.card} after={after} shared={e.on} />)}
+        mark={e => <IdCardMark provider={e.add ? undefined : e.proof.provider} subject={e.add ? undefined : e.card.bound} />}
+        tone={tone} />
+      <div role="tabpanel" id={panel.id} aria-labelledby={panel.tabId(entry.id)} data-testid="composer-identity-panel" className="composer-identity-panel">
+        {entry.add ? <IdentityToAdd first={mine.length === 0} canAdd={canAdd} onAdd={() => setAdding(true)} />
+          : <IdentityToShare entry={entry} contact={contact} now={now} why={why(entry)} busy={busy} status={ids?.shared.find(s => s.id === entry.id)} onToggle={() => toggle(entry.proof, entry.on)} />}
       </div>
-      {mine.length === 0 ? (
-        <div data-testid="composer-identities-empty" className="rounded-xl border border-dashed border-border p-3 text-center space-y-2">
-          <p className="text-xs text-text-muted">No identities yet</p>
-          <button type="button" data-testid="composer-identities-add" onClick={manage}
-            className="min-h-10 px-3 rounded-lg text-sm text-accent hover:bg-surface-alt cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Add one</button>
-        </div>
-      ) : <ul className="space-y-1">{mine.map(p => {
-        const shared = ids?.shared.find(s => s.id === p.id);
-        const on = isOn(shared);
-        const expired = p.expiresAt <= now;
-        const cannot = !!ids?.contactProviders && !ids.contactProviders.includes(p.provider);
-        // Stopping is always possible; sharing needs a proof still valid and a contact that can take it.
-        const blocked = !on && (expired || cannot || unsupported || !ids);
-        const hint = expired ? `Expired ${date(p.expiresAt)}`
-          : !on && cannot ? `${contact}’s app cannot verify ${providerLabel(p.provider)} yet`
-          : shared && shared.status !== "withdrawn" ? `${SHARED_STATUS[shared.status]}${shared.status === "rejected" && shared.error ? `: ${shared.error}` : ""}`
-          : "Not shared";
-        const warn = !expired && expiringSoon(p, now) ? `Expires in ${daysLeft(p.expiresAt, now)} ${daysLeft(p.expiresAt, now) === 1 ? "day" : "days"}` : "";
-        const tone = shared?.status === "rejected" || expired ? "text-danger" : shared?.status === "accepted" && on ? "text-accent" : "text-text-muted";
-        return (
-          <li key={p.id}>
-            <button type="button" role="switch" aria-checked={on} aria-labelledby={`${titleId}-${p.id}`} aria-describedby={`${titleId}-${p.id}-hint`}
-              // While a call runs the switches stay focusable (a disabled button would drop the keyboard's focus).
-              aria-busy={busy === p.id || undefined} aria-disabled={!!busy || undefined} disabled={blocked} onClick={() => { if (!busy) toggle(p, on); }}
-              data-testid="composer-identity" data-provider={p.provider} data-shared={on}
-              className="w-full flex items-center gap-3 rounded-xl p-2 min-h-12 text-left hover:bg-surface-alt cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 aria-disabled:cursor-wait focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
-              <ProviderMark provider={p.provider} subject={p.verified.subject} />
-              <span className="min-w-0 flex-1">
-                <span id={`${titleId}-${p.id}`} className="block text-sm text-text-primary truncate">{providerLabel(p.provider)} <span className="font-mono text-xs text-text-muted">{shortSubject(p.provider, p.verified.subject)}</span></span>
-                <span id={`${titleId}-${p.id}-hint`} className="block text-[11px] leading-4">
-                  <span data-testid="composer-identity-status" className={tone}>{busy === p.id ? (on ? "Stopping…" : "Sharing…") : hint}</span>
-                  {warn && <span data-testid="composer-identity-expiring" className="text-amber-500"> · {warn}</span>}
-                </span>
-              </span>
-              <span aria-hidden="true" className={`relative w-9 h-5 rounded-full shrink-0 transition-colors ${on ? "bg-accent" : "bg-surface-alt border border-border"}`}>
-                <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${on ? "translate-x-4" : ""}`} />
-              </span>
-            </button>
-          </li>
-        );
-      })}</ul>}
-      {mine.length > 0 && unsupported && <p className="px-1 text-[11px] text-text-muted" data-testid="composer-identities-unsupported">{contact}’s app cannot receive identities yet.</p>}
-      {(error || ids?.error) && <p role="alert" className="px-1 text-xs text-danger" data-testid="composer-identities-error">{error || ids?.error}</p>}
+      {mine.length > 0 && unsupported && <p className="px-1 m-0 text-[11px] text-text-muted" data-testid="composer-identities-unsupported">{contact}’s app cannot receive identities yet.</p>}
+      {(error || ids?.error) && <p role="alert" className="px-1 m-0 text-xs text-danger" data-testid="composer-identities-error">{error || ids?.error}</p>}
       {mine.length > 0 && <div className="flex items-center justify-between gap-3 px-1 pt-1 border-t border-border">
-        <p className="text-[11px] text-text-muted">Stopping tells {contact}; a copy they kept stays.</p>
+        <p className="m-0 text-[11px] text-text-muted">Stopping tells {contact}; a copy they kept stays.</p>
         <button type="button" data-testid="composer-identities-manage" onClick={manage}
           className="min-h-10 shrink-0 text-xs text-accent hover:underline cursor-pointer rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Manage identities</button>
       </div>}
+    </ComposerSheet>
+  );
+}
+
+/** The chosen identity's panel: what the contact sees, where it stands in this chat, and Share or Stop sharing. */
+function IdentityToShare({ entry, contact, now, why, busy, status, onToggle }: { entry: Extract<Entry, { add?: false }>; contact: string; now: number; why?: string; busy: string; status?: Shared; onToggle: () => void }) {
+  const { proof: p, card, on } = entry;
+  const hint = why ?? (status && status.status !== "withdrawn" ? `${SHARED_STATUS[status.status]}${status.status === "rejected" && status.error ? `: ${status.error}` : ""}` : "Not shared");
+  const warn = p.expiresAt > now && expiringSoon(p, now) ? `Expires in ${daysLeft(p.expiresAt, now)} ${daysLeft(p.expiresAt, now) === 1 ? "day" : "days"}` : "";
+  const tone = status?.status === "rejected" || why ? "text-danger" : status?.status === "accepted" && on ? "text-accent" : "text-text-muted";
+  const working = busy === p.id;
+  return (<>
+    <div className="composer-identity-sees">
+      <span className="composer-identity-sees-label">What {contact} sees</span>
+      <span className="composer-identity-sees-value"><ProviderMark provider={p.provider} subject={card.bound} small />
+        <span className="min-w-0 truncate"><span className="font-medium text-text-primary">{card.label}</span> <span className="font-mono text-xs" title={card.subject}>{card.short}</span></span></span>
+      <span className="composer-identity-sees-meta">{card.category} · {card.validity}</span>
     </div>
+    <p className="composer-sheet-hint" data-blocked={why ? true : undefined}>
+      <span data-testid="composer-identity-status" className={why ? undefined : tone}>{hint}</span>
+      {warn && <span data-testid="composer-identity-expiring" className="text-amber-500"> · {warn}</span>}
+    </p>
+    {/* While a call runs the button stays focusable (a disabled button would drop the keyboard's focus). */}
+    <button type="button" data-testid="composer-identity-share" data-variant={on ? "secondary" : undefined} className="composer-sheet-action"
+      disabled={!!why} aria-disabled={!!busy || undefined} aria-busy={working || undefined} onClick={onToggle}>
+      {working ? (on ? "Stopping…" : "Sharing…") : on ? "Stop sharing" : <>Share with this chat<ForwardArrow /></>}
+    </button>
   </>);
+}
+
+/** The blank card's panel: what adding an identity is, and the way to it. */
+function IdentityToAdd({ first, canAdd, onAdd }: { first: boolean; canAdd: boolean; onAdd: () => void }) {
+  return (
+    <div className="grid gap-2.5" data-testid={first ? "composer-identities-empty" : undefined}>
+      <p className="composer-sheet-hint">{first ? "No identities yet. " : ""}{canAdd ? "Prove that you hold a Nostr key, a domain or an account, then show it to the contacts you choose, one chat at a time." : "No identity can be added on this device."}</p>
+      {canAdd && <button type="button" data-testid="composer-identities-add" className="composer-sheet-action" onClick={onAdd}>{first ? "Add your first identity" : "Add identity"}<ForwardArrow /></button>}
+    </div>
+  );
 }

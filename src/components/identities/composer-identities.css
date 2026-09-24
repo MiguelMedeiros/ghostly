@@ -1,0 +1,7 @@
+/* The chat's identity picker (ComposerIdentities.tsx): the ID cards' deck in the composer's sheet (ComposerSheet.tsx),
+   and under it the chosen card's panel. The panel takes the chosen card's ink from the sheet, which wears it. */
+.composer-identity-panel{display:grid;gap:10px;min-width:0}
+.composer-identity-sees{display:grid;gap:3px;min-width:0;padding:9px 11px;border-radius:12px;border:1px solid rgba(var(--card-rgb,36,211,194),.3);background:rgba(var(--card-rgb,36,211,194),.06);transition:border-color .4s,background-color .4s}
+.composer-identity-sees-label{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:rgb(var(--card-rgb,36,211,194))}
+.composer-identity-sees-value{display:flex;align-items:center;gap:8px;min-width:0;font-size:13px;color:var(--theme-text-secondary)}
+.composer-identity-sees-meta{font-size:11px;color:var(--theme-text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

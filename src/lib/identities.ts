@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { identityProvider, identityProviders } from "@ghostly/browser/proofs/registry";
 import { availableSigners } from "@ghostly/browser/proofs/verify";
@@ -12,6 +12,23 @@ const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
 /** The engine's state, re-rendered on every change. */
 export const useEngineState = () => useSyncExternalStore(subscribe, snapshot);
+
+/**
+ * Calls `onNew` with a proof that was not there on the last render: one just added comes up in a deck of ID cards, so
+ * the person sees what they made. Nothing on the first state (what the profile already had).
+ */
+export function useNewProof(state: typeof engine.state | undefined, onNew: (id: string) => void) {
+  const ids = state ? (state.identityProofs ?? []).map(p => p.id).join(" ") : null;
+  const known = useRef<string[] | null>(null);
+  const callback = useRef(onNew); callback.current = onNew;
+  useEffect(() => {
+    if (ids === null) return;
+    const now = ids ? ids.split(" ") : [];
+    const fresh = known.current && now.find(id => !known.current!.includes(id));
+    if (fresh) callback.current(fresh);
+    known.current = now;
+  }, [ids]);
+}
 
 /** Where this page runs, for signers that only work on some platforms (a NIP-07 extension is in web pages). */
 export function identityPlatform(): IdentityPlatform {
