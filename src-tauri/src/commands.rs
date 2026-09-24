@@ -416,27 +416,11 @@ mod tests {
     }
 
     #[test]
-    fn the_profile_comes_from_the_environment() {
-        std::env::set_var("GHOSTLY_PROFILE", "wallets-a");
-        assert_eq!(get_profile(), "wallets-a");
-        std::env::remove_var("GHOSTLY_PROFILE");
-        assert_eq!(get_profile(), "");
-    }
-
-    #[test]
     fn the_updater_replaces_only_installs_it_owns() {
-        if cfg!(target_os = "linux") {
-            std::env::remove_var("APPIMAGE");
-            assert!(
-                !updater_can_install(),
-                "a .deb or .rpm belongs to its package manager"
-            );
-            std::env::set_var("APPIMAGE", "/tmp/Ghostly.AppImage");
-            assert!(updater_can_install());
-            std::env::remove_var("APPIMAGE");
-        } else {
-            assert!(updater_can_install());
-        }
+        // Read, never set: another test thread may be resolving a host, and
+        // setenv under getaddrinfo is not safe on Linux.
+        let expected = !cfg!(target_os = "linux") || std::env::var_os("APPIMAGE").is_some();
+        assert_eq!(updater_can_install(), expected);
     }
 
     fn app(relay: &Relay) -> tauri::App<MockRuntime> {
