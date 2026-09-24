@@ -8,6 +8,8 @@ import { markGroupRead } from "../../lib/groups";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
 
+// covers: groups.invite, groups.create
+
 const member = (key: string): GroupMemberView => ({ key: key.padEnd(52, "y"), role: "member", me: false, online: true, missing: 0 });
 const invitation = (patch: Partial<NonNullable<GroupView["invitation"]>> = {}) =>
   groupView({ canSend: false, invitation: { linkId: "link-1", contact: "Alice", admin: "a".padEnd(52, "y"), members: 3, accepted: false, ...patch } });

@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { MessageBubble } from "../../components/MessageBubble";
 import { renderApp } from "../render";
 
+// covers: chat.paired.links
+
 // A link ends where the sentence around it takes over: its trailing punctuation, and a closing bracket it did
 // not open, stay text. Before, "Read https://ghostly.tools/docs." linked to ".../docs." — a page that does not exist.
 describe("MessageBubble links", () => {

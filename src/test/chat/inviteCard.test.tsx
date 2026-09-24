@@ -5,6 +5,8 @@ import { InviteCard } from "../../components/InviteCard";
 import { getInviteCode } from "../../lib/storage";
 import { renderApp } from "../render";
 
+// covers: chat.paired.pair
+
 const { invite } = createLink();
 const live = encodeInviteCode({ ...invite, profile: "paired-chat/1" });
 const text = encodeInviteCode({ ...invite, profile: "paired-chat/1", deliveryMode: "dht" });

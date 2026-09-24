@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import { Block, ButtonGroup, FieldGrid, InputGroup, Page, Row, Section, Truncate } from "../../components/layout";
 import { renderApp } from "../render";
 
+// covers: app.responsive
+
 // The contract in src/components/layout/README.md, as classes and props: happy-dom has no layout, so how
 // these wrap at a given width is the Playwright responsive suite's job. Here: that they ask for it.
 

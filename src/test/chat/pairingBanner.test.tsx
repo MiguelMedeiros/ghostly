@@ -5,6 +5,8 @@ import { PairingBanner } from "../../components/PairingBanner";
 import { linkView, type StatePatch } from "../fakeEngine";
 import { renderApp } from "../render";
 
+// covers: chat.paired.status, chat.paired.verify, chat.paired.reconnect
+
 type Pairing = NonNullable<LinkView["pairing"]>;
 const ready = (patch: Partial<Pairing> = {}): Pairing => ({ status: "ready", transport: "webrtc/1", ...patch } as Pairing);
 const all = ["webrtc/1", "iroh/1", "hyperdht/1"] as LinkView["availableTransports"];
