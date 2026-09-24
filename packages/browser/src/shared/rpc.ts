@@ -132,6 +132,8 @@ export interface EngineApi {
   requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin"; rail?: "cashu" | "lightning" }): { paymentId: string };
   /** A request any member of a group may pay, once (WISP 9xx § Payments). */
   requestGroupPayment(params: { groupId: string; amount: number; memo?: string; timestamp: number; rail: "cashu" | "lightning" }): { paymentId: string };
+  /** The payment composer opened on a member of a community group: their app is asked what ways of paying it takes. */
+  groupPaymentHello(params: { groupId: string; member: string }): void;
   /** Asks the contact for a way to pay it (Ark, USDT); its answer is a request carrying `askId`. */
   askToPay(params: { linkId: string; amount: number; method: "arkade" | "usdt" | "bark" | "bitcoin"; memo?: string; timestamp: number }): { askId: string };
   /** `via: "lightning"`: the Lightning payment the person reviewed, never ecash instead, within `maxFee`. */

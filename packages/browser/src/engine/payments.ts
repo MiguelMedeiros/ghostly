@@ -28,8 +28,15 @@ import { assertAmount, type CashuWallet } from "./wallet";
  */
 const UNIT = "sat";
 
+/**
+ * What the desk needs of a link: a chat's or an edge's GhostLink, or a member of a community group reached
+ * through the group (see communityPay.ts).
+ */
+export type PaymentLink = Pick<GhostLink, "isDataLinkOpen" | "paymentEnabled" | "allowsPayment" | "supportsPayments" | "supportsArkPayments" | "supportsUsdtPayments"
+  | "supportsBarkPayments" | "supportsBitcoinPayments" | "requirePaymentSupport" | "sendPaymentRequest" | "sendPaymentAsk" | "sendPayment" | "sendPaymentResult">;
+
 export interface PaymentDeskHost {
-  getLink(linkId: string): GhostLink | null;
+  getLink(linkId: string): PaymentLink | null;
   storeMessage(message: StoredMessage): Promise<void>;
   onChange(): void;
   /**
@@ -98,7 +105,7 @@ const CHECK_PAYLOAD = JSON.stringify({ check: true });
 const isCheck = (payload: string) => { try { return JSON.parse(payload)?.check === true; } catch { return false; } };
 const RAIL_NAME: Record<AskMethod, string> = { arkade: "Ark", usdt: "USDT", bark: "Bark", bitcoin: "on-chain Bitcoin" };
 /** Both sides allow this way of paying on the open data link. */
-const allows = (link: GhostLink, method: AskMethod) => method === "arkade" ? link.supportsArkPayments : method === "bark" ? link.supportsBarkPayments : method === "bitcoin" ? link.supportsBitcoinPayments : link.supportsUsdtPayments;
+const allows = (link: PaymentLink, method: AskMethod) => method === "arkade" ? link.supportsArkPayments : method === "bark" ? link.supportsBarkPayments : method === "bitcoin" ? link.supportsBitcoinPayments : link.supportsUsdtPayments;
 export class PaymentDesk {
   private readonly payments = new Map<string, StoredPayment>();
   private readonly paying = new Map<string, Promise<void>>();
@@ -935,7 +942,7 @@ export class PaymentDesk {
   // -- internals -------------------------------------------------------------------
 
   private async sendEcash(
-    link: GhostLink,
+    link: PaymentLink,
     params: { linkId: string; amount: number; memo?: string; timestamp: number; requestId?: string; mints?: string[] },
   ): Promise<string> {
     const id = newId();
@@ -1040,7 +1047,7 @@ export class PaymentDesk {
     }
   }
 
-  private requireLink(linkId: string): GhostLink {
+  private requireLink(linkId: string): PaymentLink {
     const link = this.host.getLink(linkId);
     if (!link) throw new Error("You are offline");
     return link;

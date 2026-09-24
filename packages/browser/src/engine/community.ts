@@ -111,6 +111,12 @@ export class Communities {
   private readonly lastKnock = new Map<string, number>();
   constructor(private readonly host: GroupsHost, private readonly store: GroupStore, private readonly timings: CommunityTimings = COMMUNITY_TIMINGS, private readonly random: () => number = Math.random) {}
 
+  /** Application frames and pair payloads handed to the engine, one after the other. */
+  private deliveries: Promise<void> = Promise.resolve();
+  private deliver(task: () => Promise<void> | void): void { this.deliveries = this.deliveries.then(task).catch(() => {}); }
+  /** Resolves once what was received so far has been handed on (tests). */
+  idle(): Promise<void> { return this.deliveries; }
+
   /** The clock: the last tick's time (the engine ticks every second), so every decision reads one clock. */
   private time = 0;
   private now(): number { return this.time || Date.now(); }
@@ -204,6 +210,22 @@ export class Communities {
     if (!live) return { error: "You are not in this group yet" };
     const result = await live.session.sendText(text, this.host.myNick?.());
     return "error" in result ? { error: result.error } : { error: null };
+  }
+
+  /** An application frame to everyone in the group (WISP 9xx · Group Community § Payments). */
+  async sendApp(groupId: string, frame: Record<string, unknown>): Promise<void> {
+    const live = this.live.get(groupId);
+    if (!live) throw new Error("You are not in this group yet");
+    const result = await live.session.sendApp(frame, this.host.myNick?.());
+    if ("error" in result) throw new Error(result.error);
+  }
+
+  /** A payload for one member only, sealed to them and carried by the group (hubs relay it, members keep it for them). */
+  async sendPair(groupId: string, to: string, payload: Record<string, unknown>): Promise<void> {
+    const live = this.live.get(groupId);
+    if (!live) throw new Error("You are not in this group yet");
+    const result = await live.session.sendPair(to, payload, this.host.myNick?.());
+    if ("error" in result) throw new Error(result.error);
   }
 
   /**
@@ -684,6 +706,9 @@ export class Communities {
         await this.host.storeMessage({ linkId: MESSAGE_LINK(id), id: m.id, text: m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp: m.timestamp, via: "datalink" });
         this.lastMessageAt.set(id, Math.max(this.lastMessageAt.get(id) ?? 0, m.timestamp));
       },
+      // Outside the session's queue, in order: what they carry (a payment) may send through the session again.
+      app: m => this.deliver(() => this.host.communityApp?.(id, m.sender, m.frame)),
+      pair: m => this.deliver(() => this.host.communityPair?.(id, m.sender, m.payload)),
       changed: () => { void this.membershipChanged(id); },
       metaChanged: (by, picture) => {
         const name = by === session.myKey ? "You" : session.state.nicks[by] ?? `Member ${by.slice(0, 8)}`;

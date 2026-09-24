@@ -87,6 +87,7 @@ import { db } from "./db";
 import { Groups } from "./groups";
 import { edgeView } from "./groupEdges";
 import { GroupPayments } from "./groupPayments";
+import { CommunityPay, groupLinkId, parsePayLink } from "./communityPay";
 import { mayReach } from "./serviceAccess";
 import { Outbox } from "./outbox";
 import { HoldEngine } from "./hold";
@@ -302,9 +303,10 @@ export class GhostlyNode implements EngineImplementation {
       if(intent && ["submitted","unknown"].includes(intent.review.state))await intentRepository.put({...intent,review:{...intent.review,state:"failed",error:`Refused: ${reason}. The sats came back.`}});
       this.emitState();
     },
-    getLink: (linkId) => this.links.get(linkId)?.link ?? null,
-    groupOf: (linkId) => { const stored = this.links.get(linkId)?.stored; return stored?.group && !stored.groupEntry ? stored.group : undefined; },
-    groupLinks: (groupId) => [...this.groupEdges(groupId).values()],
+    getLink: (linkId) => this.paymentLink(linkId),
+    groupOf: (linkId) => { const stored = this.links.get(linkId)?.stored; return stored?.group && !stored.groupEntry ? stored.group : parsePayLink(linkId)?.groupId; },
+    // A community has no edges to its members: one frame the whole group carries.
+    groupLinks: (groupId) => this.groups.isCommunityGroup(groupId) ? [groupLinkId(groupId)] : [...this.groupEdges(groupId).values()],
     storeMessage: (message) => this.storeMessage(message),
     heldPaymentMethods: (linkId): PaymentMethodName[] | null => { const live = this.links.get(linkId); return live && this.holdingFor(live) ? this.hold.heldPaymentMethods(linkId) : null; },
     holdRequest: (linkId, request, messageId) => this.hold.hold(linkId, { kind: "pay-req", id: request.id, messageId, ref: request.id, bytes: 1024, timestamp: request.timestamp }),
@@ -466,7 +468,35 @@ export class GhostlyNode implements EngineImplementation {
     edgeNick: linkId => this.links.get(linkId)?.presence.nick || undefined,
     storeMessage: message => this.storeMessage(message),
     emit: () => this.emitState(),
+    communityApp: (groupId, sender, frame) => this.communityPay.receiveApp(groupId, sender, frame),
+    communityPair: (groupId, sender, payload) => this.communityPay.receivePair(groupId, sender, payload),
   });
+
+  /**
+   * Payments in community groups (WISP 9xx · Group Community § Payments): the desk pays and requests over a link
+   * per member that sends through the group, sealed to that member; the group request goes to everyone at once.
+   */
+  private readonly communityPay: CommunityPay = new CommunityPay({
+    membership: groupId => this.groups.isCommunityGroup(groupId) ? this.membership(groupId) : undefined,
+    sendApp: (groupId, frame) => this.groups.sendCommunityApp(groupId, frame),
+    sendPair: (groupId, to, payload) => this.groups.sendCommunityPair(groupId, to, payload),
+    enabled: () => ({}),
+    onPaymentRequest: (linkId, request) => this.desk.onPaymentRequest(linkId, request),
+    onPaymentAsk: (linkId, ask) => this.desk.onPaymentAsk(linkId, ask),
+    onPayment: (linkId, payment) => this.desk.onPayment(linkId, payment),
+    onPaymentResult: (linkId, result) => this.desk.onPaymentResult(linkId, result),
+    onNote: (groupId, author, frame) => this.groupPayments.receive(groupId, author, frame),
+    emit: () => this.emitState(),
+  });
+
+  /** My key in an active group, and who is in it. */
+  private membership(groupId: string): { me: string; members: ReadonlySet<string> } | undefined {
+    const group = this.groups.views().find(g => g.id === groupId);
+    return group?.status === "active" && group.myKey ? { me: group.myKey, members: new Set(group.members.map(m => m.key)) } : undefined;
+  }
+
+  /** The link payments with `linkId` go over: a chat's or an edge's, or a community member's through the group. */
+  private paymentLink(linkId: string) { return this.links.get(linkId)?.link ?? this.communityPay.link(linkId); }
 
   /**
    * Payments in groups (WISP 9xx § Payments): the money goes over the edge to one member through the desk, like a
@@ -474,13 +504,17 @@ export class GhostlyNode implements EngineImplementation {
    */
   private readonly groupPayments = new GroupPayments({
     payments: () => Object.values(this.desk.views()),
-    edgeOf: linkId => { const stored = this.links.get(linkId)?.stored; return stored?.group && stored.groupPeer && !stored.groupEntry ? { groupId: stored.group, member: stored.groupPeer } : undefined; },
-    edges: groupId => this.groupEdges(groupId),
-    membership: groupId => {
-      const group = this.groups.views().find(g => g.id === groupId);
-      return group?.status === "active" && group.myKey ? { me: group.myKey, members: new Set(group.members.map(m => m.key)) } : undefined;
+    edgeOf: linkId => {
+      const stored = this.links.get(linkId)?.stored, pay = parsePayLink(linkId);
+      if (pay?.member) return { groupId: pay.groupId, member: pay.member };
+      return stored?.group && stored.groupPeer && !stored.groupEntry ? { groupId: stored.group, member: stored.groupPeer } : undefined;
     },
+    // In a community, notes go to everyone at once, through the group.
+    edges: groupId => this.groups.isCommunityGroup(groupId) ? new Map([["*", groupLinkId(groupId)]]) : this.groupEdges(groupId),
+    membership: groupId => this.membership(groupId),
     send: (linkId, frame) => {
+      const pay = parsePayLink(linkId);
+      if (pay) { void this.groups.sendCommunityApp(pay.groupId, frame as Record<string, unknown>).catch(() => {}); return; }
       const link = this.links.get(linkId)?.link;
       if (!link) throw new Error("You are offline");
       link.sendGroupFrame(frame);
@@ -629,12 +663,29 @@ export class GhostlyNode implements EngineImplementation {
       payments: this.desk.views(),
       identityProofs: this.identities.views(),
       nostr: this.nostrSocial.state(),
-      edges: [...this.links.values()].filter(live => live.stored.group && !live.stored.groupEntry).map(live => this.viewOf(live)),
+      edges: [...[...this.links.values()].filter(live => live.stored.group && !live.stored.groupEntry).map(live => this.viewOf(live)), ...this.communityPayViews()],
       groups: this.groups.views().map(group => ({ ...group, members: group.members.map(member => {
         const edge = member.me ? undefined : this.edgeView(group.id, member.key);
         return edge ? { ...member, edge } : member;
       }) })),
     };
+  }
+
+  /** Community members payments go to (or came from), as links the payment bubbles and the composer look up by key. */
+  private communityPayViews(): LinkView[] {
+    const withPayments = new Map<string, Set<string>>();
+    for (const p of Object.values(this.desk.views())) {
+      const at = parsePayLink(p.linkId);
+      if (at?.member) { const set = withPayments.get(at.groupId) ?? new Set<string>(); set.add(at.member); withPayments.set(at.groupId, set); }
+    }
+    return this.groups.views().filter(g => g.profile === "community" && g.status === "active" && g.myKey)
+      .flatMap(g => this.communityPay.views(g.id, g.myKey!, g.members.map(m => m.key), withPayments.get(g.id) ?? new Set()));
+  }
+
+  /** The payment composer opened on a member of a community: ask what they take, if they did not say lately. */
+  async groupPaymentHello({ groupId, member }: { groupId: string; member: string }): Promise<void> {
+    if (!this.groups.isCommunityGroup(groupId) || !this.membership(groupId)?.members.has(member)) return;
+    await this.communityPay.hello(groupId, member).catch(() => {});
   }
 
   /** The edge of a group toward one member, as the group page shows it: what carries it and when the member was last heard. */
@@ -1356,20 +1407,22 @@ export class GhostlyNode implements EngineImplementation {
   barkBoard() { return this.barkWallet.board(); }
   async preparePayment(params: Parameters<EngineApi["preparePayment"]>[0]) {
     if (params.linkId) {
-      const live=this.links.get(params.linkId); if(!live?.link)throw new Error("The peer is offline");
-      await live.link.requirePaymentSupport();
-      if(params.target.method==="cashu" && !live.link.allowsPayment("cashu"))throw new Error("Cashu is off in this chat");
-      if(params.target.method==="usdt" && !live.link.supportsUsdtPayments)throw new Error("This peer does not support USDT payments");
-      if(params.target.method==="arkade" && !live.link.supportsArkPayments)throw new Error("This peer does not support Ark payments");
-      if(params.target.method==="bark" && !live.link.supportsBarkPayments)throw new Error("This peer does not support Bark payments");
-      if(params.target.method==="bitcoin" && !live.link.supportsBitcoinPayments)throw new Error("This peer does not take on-chain Bitcoin in this chat");
+      const link=this.paymentLink(params.linkId); if(!link)throw new Error("The peer is offline");
+      // Whom the link pays: the chat's contact, or the community member it names.
+      const payee=this.links.get(params.linkId)?.stored.peerPubKeyZ32 ?? parsePayLink(params.linkId)?.member ?? "";
+      await link.requirePaymentSupport();
+      if(params.target.method==="cashu" && !link.allowsPayment("cashu"))throw new Error("Cashu is off in this chat");
+      if(params.target.method==="usdt" && !link.supportsUsdtPayments)throw new Error("This peer does not support USDT payments");
+      if(params.target.method==="arkade" && !link.supportsArkPayments)throw new Error("This peer does not support Ark payments");
+      if(params.target.method==="bark" && !link.supportsBarkPayments)throw new Error("This peer does not support Bark payments");
+      if(params.target.method==="bitcoin" && !link.supportsBitcoinPayments)throw new Error("This peer does not take on-chain Bitcoin in this chat");
       const request=params.requestId ? this.desk.payment(params.requestId) : undefined;
       if(params.requestId){
         if(!request || request.linkId!==params.linkId || request.direction!=="in" || request.state!=="pending" || request.amount!==params.amount)throw new Error("Payment review does not match the authenticated request");
         if(params.target.method!=="cashu" ? JSON.stringify(request.target)!==JSON.stringify(params.target) : !!request.target || params.target.address!==request.id || !request.mints?.includes(params.target.provider))throw new Error("Selected method or mint does not match the authenticated request");
         if(request.lightningPending || Object.values(this.desk.views()).some(p=>p.kind==="payment" && p.requestId===request.id && p.linkId===params.linkId && !["failed","reclaimed"].includes(p.state)))throw new Error("This request already has a payment; reconcile it instead");
-      } else if(params.target.method!=="cashu" || params.target.address!==live.stored.peerPubKeyZ32)throw new Error("Destination does not match the authenticated peer");
-      params={...params,payee:live.stored.peerPubKeyZ32};
+      } else if(params.target.method!=="cashu" || !payee || params.target.address!==payee)throw new Error("Destination does not match the authenticated peer");
+      params={...params,payee};
     }
     if(params.target.method==="cashu" && !params.linkId)throw new Error("Select a Cashu chat request first");
     const memo=typeof params.memo==="string" ? params.memo.trim().slice(0,140) || undefined : undefined;
@@ -1378,7 +1431,7 @@ export class GhostlyNode implements EngineImplementation {
   async approvePayment(params: {id:string}) {
     const intent=await intentRepository.get(params.id);
     if(intent?.review.linkId) {
-      const link=this.links.get(intent.review.linkId)?.link;
+      const link=this.paymentLink(intent.review.linkId);
       if(!link || (intent.review.method==="arkade" && !link.supportsArkPayments))throw new Error("Reconnect the data link before approving. Your review was saved.");
       if(intent.review.method==="usdt" && !link.supportsUsdtPayments)throw new Error("Reconnect a peer supporting USDT before approving");
       if(intent.review.method==="bark" && !link.supportsBarkPayments)throw new Error("Reconnect a peer supporting Bark before approving");
