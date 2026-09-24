@@ -51,6 +51,8 @@ export const test = base.extend<Fixtures>({
           "--use-fake-device-for-media-stream",
           "--use-fake-ui-for-media-stream",
           "--auto-select-desktop-capture-source=Entire screen",
+          // The context option covers pages, not the extension's offscreen document, where its engine runs.
+          ...(options.ignoreHTTPSErrors ? ["--ignore-certificate-errors"] : []),
         ],
       });
       // The update check is the one request that would leave this machine. Answer
