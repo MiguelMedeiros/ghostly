@@ -451,3 +451,133 @@
   border-top: 1px solid var(--line);
   scroll-margin-top: calc(var(--nav-h) + 20px);
 }
+
+/* ── Glossary: the six words, folded under the hero ─── */
+.glossary {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  scroll-margin-top: calc(var(--nav-h) + 16px);
+}
+.glossary summary {
+  cursor: pointer;
+  width: fit-content;
+  color: var(--dim);
+}
+.glossary-title {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.glossary summary:hover .glossary-title,
+.glossary[open] .glossary-title {
+  color: var(--text);
+}
+.glossary-hint {
+  margin-left: 12px;
+  color: var(--dim);
+  font-size: 13px;
+}
+.glossary[open] .glossary-hint {
+  display: none;
+}
+.glossary-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px 28px;
+  margin: 16px 0 4px;
+}
+.gl {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-width: 0;
+}
+.gl dt {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+}
+.gl-term {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+}
+.gl-gloss {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+/* Each key is drawn the way the protocol loop on /developers draws what it names. */
+.gl-key {
+  --k: var(--dim);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 9px;
+  border: 1px solid color-mix(in srgb, var(--k) 70%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--k) 15%, transparent);
+  color: var(--text);
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gl--wisp .gl-key {
+  --k: var(--cyan);
+  border-color: transparent;
+  background: none;
+  padding-inline: 0;
+  color: var(--cyan);
+}
+.gl--capability .gl-key {
+  --k: var(--violet);
+}
+.gl--adapter .gl-key {
+  --k: var(--sky);
+  border-radius: 999px;
+}
+.gl--profile .gl-key {
+  border: 0;
+  border-bottom: 2px solid var(--sky);
+  border-radius: 0;
+  background: none;
+  padding-inline: 0;
+  color: var(--dim);
+}
+.gl--provider .gl-key {
+  border: 0;
+  background: none;
+  padding-inline: 0;
+  color: var(--amber);
+}
+.gl--provider .gl-key::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  background: var(--amber);
+  transform: rotate(45deg);
+}
+.gl--plugin .gl-key {
+  border-style: dashed;
+  background: none;
+}
+@media (max-width: 860px) {
+  .glossary-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 480px) {
+  .glossary-list {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+}

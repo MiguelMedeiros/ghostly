@@ -31,6 +31,15 @@
   overflow-y: auto;
   padding-right: 6px;
 }
+.reader-glossary {
+  display: inline-block;
+  margin-bottom: 14px;
+  color: var(--muted);
+  font-size: 13.5px;
+}
+.reader-glossary:hover {
+  color: var(--text);
+}
 .reader-all summary {
   cursor: pointer;
   font-family: var(--font-jetbrains), ui-monospace, monospace;

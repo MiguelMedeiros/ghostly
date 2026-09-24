@@ -23,7 +23,6 @@
 }
 /* Phones: the same rhythm at a smaller volume. */
 @media (max-width: 640px) {
-  .dv-sec--words,
   .dv-sec--path {
     padding-block: clamp(56px, 9vh, 88px);
   }

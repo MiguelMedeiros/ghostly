@@ -9,7 +9,7 @@ import { wisps, wispCount } from "@/lib/wisps";
 import { REPO_URL } from "@/content/shell";
 import { BlockGrid } from "./BlockGrid";
 import { Negotiation } from "./Negotiation";
-import { ProtocolLoop, ProtocolLegend } from "./ProtocolLoop";
+import { ProtocolLoop } from "./ProtocolLoop";
 import "@/app/developers.css";
 
 export function DevelopersPage({ locale }: { locale: Locale }) {
@@ -38,7 +38,6 @@ export function DevelopersPage({ locale }: { locale: Locale }) {
             </div>
           </div>
           <ProtocolLoop t={t.hero.loop} />
-          <ProtocolLegend words={t.words} locale={locale} />
         </div>
       </section>
 
