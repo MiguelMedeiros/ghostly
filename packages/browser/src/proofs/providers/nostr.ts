@@ -1,10 +1,9 @@
 import { schnorr } from "@noble/curves/secp256k1.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { npubEncode, decode as nip19Decode } from "nostr-tools/nip19";
-import { utf8Encode, type IdentityDisplay, type IdentityStatement } from "@ghostly/core";
+import { utf8Encode, type IdentityStatement } from "@ghostly/core";
 import type { IdentityProofProvider, InAppSigner, SignerSession } from "../contract";
 import { extensionSigner, withNostrSigner } from "../nostr";
-import { cacheAvatar, readNostrProfile } from "../../profiles/public";
 
 /** A signed Nostr event (NIP-01). The evidence of a Nostr proof. */
 export interface NostrEvent { id: string; pubkey: string; created_at: number; kind: number; tags: string[][]; content: string; sig: string }
@@ -93,16 +92,6 @@ export const nostr: IdentityProofProvider<NostrEvent> = {
     if (!valid) throw new Error("Invalid Nostr signature");
     return { subject: event.pubkey, source: "Nostr signature (NIP-01, BIP-340)" };
   },
-  async lookupDisplay(subject, { signal }) {
-    if (!HEX64.test(subject)) return undefined;
-    signal.throwIfAborted();
-    const metadata = await readNostrProfile(subject);
-    signal.throwIfAborted();
-    if (!metadata || (!metadata.name && !metadata.picture)) return undefined;
-    const display: IdentityDisplay = { source: "Nostr profile (kind-0, signed by this key, self-described)", fetchedAt: Math.floor(Date.now() / 1000) };
-    if (metadata.name) display.name = metadata.name;
-    const avatar = await cacheAvatar(metadata.picture);
-    if (avatar) display.avatar = avatar;
-    return display;
-  },
+  // The public profile, follows and notes of a verified key are the Nostr social layer's
+  // (engine/nostrSocial.ts): loaded on request from the relays the person configured, not here.
 };

@@ -2,9 +2,11 @@ import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
+import type { NostrContactView } from "@ghostly/browser/nostr/types";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
 import { categoryLabel, currentStatus, date, dateTime, providerLabel, providerOf, RECEIVED_STATUS, SHARED_STATUS, shortSubject, useEngineState } from "../../lib/identities";
 import { Button, Notice } from "../wallet/ui";
+import { NostrContactCard } from "../nostr/NostrContactCard";
 import { ProviderMark, StatusPill } from "./ProviderMark";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -42,7 +44,7 @@ export function ChatIdentitiesDialog({ peerKey, name, onClose }: { peerKey: stri
         <section className="space-y-2" data-testid="chat-identities-received">
           <h3 className="text-xs font-medium text-text-muted">Shared by {name}</h3>
           {received.length === 0 ? <p className="text-xs text-text-muted" data-testid="chat-identities-none">Nothing shared by this contact.</p>
-            : received.map(r => <Received key={r.id} r={r} busy={busy} act={act} linkId={link!.id} />)}
+            : received.map(r => <Received key={r.id} r={r} busy={busy} act={act} linkId={link!.id} name={name} nostr={link?.nostr?.find(v => v.subject === r.subject)} />)}
         </section>
 
         <section className="space-y-2" data-testid="chat-identities-mine">
@@ -78,7 +80,7 @@ export function ChatIdentitiesDialog({ peerKey, name, onClose }: { peerKey: stri
   );
 }
 
-function Received({ r, linkId, busy, act }: { r: ReceivedIdentityView; linkId: string; busy: string; act: (key: string, work: () => Promise<unknown>) => void }) {
+function Received({ r, linkId, busy, act, name: contactName, nostr }: { r: ReceivedIdentityView; linkId: string; busy: string; act: (key: string, work: () => Promise<unknown>) => void; name: string; nostr?: NostrContactView }) {
   const provider = providerOf(r.provider);
   const ok = r.status === "verified";
   const name = r.display?.name ?? r.verified.display?.name;
@@ -109,6 +111,7 @@ function Received({ r, linkId, busy, act }: { r: ReceivedIdentityView; linkId: s
           <p className="text-[11px]">“Check again” looks for a revocation by its owner{provider?.recheck ? " and repeats the check" : ""}.{provider?.lookupDisplay && ok ? " A public profile is looked up only when you ask; the servers asked learn which identity you looked up." : ""}</p>
         </div>
       </details>
+      {r.provider === "nostr" && ok && nostr && <NostrContactCard linkId={linkId} view={nostr} name={contactName} />}
     </div>
   );
 }

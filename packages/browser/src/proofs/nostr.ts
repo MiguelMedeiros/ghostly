@@ -26,7 +26,12 @@ export function parseProofBunker(input: string): BunkerPointer {
   }
   return { pubkey: uri.hostname, relays, secret: uri.searchParams.get('secret') };
 }
-export async function withNostrSigner<T>(options: { bunker?: string; signal: AbortSignal; onAuth(url: string): void }, work: (signer: NostrSigner) => Promise<T>): Promise<T> {
+/**
+ * Runs `work` with the person's Nostr signer: the page's NIP-07 extension, or a NIP-46 bunker. `permissions`
+ * is what the bunker is asked for (NIP-46 `connect`): the identity proof's `sign_event:30078` by default;
+ * the social layer asks for the kinds it publishes.
+ */
+export async function withNostrSigner<T>(options: { bunker?: string; signal: AbortSignal; onAuth(url: string): void; permissions?: string; appName?: string }, work: (signer: NostrSigner) => Promise<T>): Promise<T> {
   options.signal.throwIfAborted();
   let signer: BunkerSigner | undefined;
   let pool: SimplePool | undefined;
@@ -52,7 +57,7 @@ export async function withNostrSigner<T>(options: { bunker?: string; signal: Abo
         signer = BunkerSigner.fromBunker(clientKey, bp, { pool, skipSwitchRelays: true, onauth: url => {
           try { const u = new URL(url); if (!closed && u.protocol === 'https:' && !u.username && !u.password) options.onAuth(u.href); } catch { /* Invalid signer URL: never navigate. */ }
         } });
-        await signer.sendRequest('connect', [bp.pubkey, bp.secret ?? '', 'sign_event:30078', JSON.stringify({ name: 'Ghostly — optional conversation proof' })]);
+        await signer.sendRequest('connect', [bp.pubkey, bp.secret ?? '', options.permissions ?? 'sign_event:30078', JSON.stringify({ name: options.appName ?? 'Ghostly — optional conversation proof' })]);
         active = signer;
       } else {
         active = extensionSigner();

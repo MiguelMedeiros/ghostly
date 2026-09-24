@@ -8,6 +8,7 @@ import type { ProfileChoice } from '../profiles/public';
 import type { ProofChallenge, ProofEvidence, ProofAdapter } from "@ghostly/core";
 import type { LinkParams, PairedTransport, DeliveryMode } from "@ghostly/core";
 import type { CashuInspection, EngineState, MessageFile, Settings, StoredMessage } from "./types";
+import type { NostrDraft, NostrDraftRequest, NostrPublishResult } from "../nostr/types";
 
 /** UI → engine calls. The extension carries them over a runtime port, the web app calls the peer in the same page. */
 export interface EngineApi {
@@ -60,6 +61,16 @@ export interface EngineApi {
   recheckIdentityProof(params: { linkId: string; id: string }): void;
   /** Only on request: the public name/picture of what the contact shared. */
   lookupIdentityDisplay(params: { linkId: string; id: string }): void;
+  /** Nostr social layer, per contact: their profile (kind 0), follows (kind 3) or notes (kind 1), from the person's relays. Refused without a verified Nostr proof from that contact. */
+  nostrLoadContact(params: { linkId: string; subject: string; what: "profile" | "follows" | "notes"; more?: boolean }): void;
+  /** Forgets what was loaded about a contact's key. */
+  nostrForgetContact(params: { linkId: string; subject: string }): void;
+  /** The person's own profile, follows and mute list for one of their proven keys. */
+  nostrLoadOwn(params: { subject: string }): void;
+  /** Publication, step 1: the unsigned event and the notice to confirm. Refused unless publication is on. */
+  nostrDraft(params: NostrDraftRequest): NostrDraft;
+  /** Publication, step 2: the draft, signed by the person's own signer, sent to their relays. */
+  nostrPublish(params: { draftId: string; event: unknown }): NostrPublishResult;
   createLink(): { linkId: string; inviteCode: string };
   joinLink(params: { inviteCode: string }): { linkId: string };
   /** Makes sure a link with these parameters runs; used by UIs that keep their own session list. */
