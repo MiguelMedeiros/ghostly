@@ -627,6 +627,8 @@ export const group: Block = {
       await nickname(c, "Carol");
       await home(a);
       await a.page.getByTitle(either("New Chat")).click();
+      // The group's edges need a live link: this chat is Live even when the scenario's own is DHT.
+      await a.page.getByRole("radio", { name: either("Live chat") }).click();
       await joinWith(c, await copyInvite(a));
       await expect(c.page.getByPlaceholder("Message…")).toBeEnabled({ timeout: 90_000 });
       await go(a, "#/");
