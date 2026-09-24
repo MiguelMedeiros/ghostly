@@ -71,9 +71,14 @@ async function joinWith(actor: Actor, text: string): Promise<void> {
   await actor.page.getByRole("button", { name: either("Paste from clipboard") }).click();
 }
 
-// Leaving DHT-only after the contact reloaded takes about 70 s to find WebRTC again (measured): hence 3 minutes.
-const connected = (actor: Actor, transport = "WebRTC") =>
-  expect(actor.page.getByTestId("connection-options")).toHaveAttribute("aria-label", new RegExp(`Connected · ${transport}`), { timeout: 180_000 });
+const connected = (actor: Actor, transport = "WebRTC", timeout = 180_000) =>
+  expect(actor.page.getByTestId("connection-options")).toHaveAttribute("aria-label", new RegExp(`Connected · ${transport}`), { timeout });
+/**
+ * Leaving DHT-only after the contact reloaded once took 70 s, and once more than 3 minutes, to find
+ * WebRTC again. It takes seconds now (6–14 s from the first switch, measured by e2e/web/dht-back-timing.spec.ts):
+ * a wait long enough to hide the old behaviour again would not catch it.
+ */
+const LIVE_AGAIN_MS = 45_000;
 
 const hashOf = (actor: Actor) => actor.page.evaluate(() => location.hash);
 
@@ -183,7 +188,7 @@ export const delivery: Block = {
       // The rest of the story needs a live link: files, payments, groups.
       await dhtOnly(b, false);
       await dhtOnly(a, false);
-      for (const p of [a, b]) await connected(p);
+      for (const p of [a, b]) await connected(p, "WebRTC", LIVE_AGAIN_MS);
       await say(b, "live again");
       await sees(a, "live again");
       return;
