@@ -57,8 +57,11 @@ function store(): Store {
   return (g[KEY] ??= { plugins: new Map(), reserved: { lightning: new Set(), onchain: new Set(), identity: new Set() }, listeners: new Set(), seeded: false });
 }
 
-const ids = (kind: AdapterKind, plugin: GhostlyAdapterPlugin): string[] =>
-  (kind === "identity" ? plugin.identities : kind === "lightning" ? plugin.lightning : plugin.onchain)?.map((a) => a.id) ?? [];
+const ids = (kind: AdapterKind, plugin: GhostlyAdapterPlugin): string[] => {
+  // Not trusted to be well formed: pluginProblems reads it before saying what is wrong with it.
+  const list: unknown = kind === "identity" ? plugin.identities : kind === "lightning" ? plugin.lightning : plugin.onchain;
+  return Array.isArray(list) ? list.map((a: { id?: string } | null) => a?.id as string) : [];
+};
 const KINDS: readonly AdapterKind[] = ["lightning", "onchain", "identity"];
 
 /** Problems with a plugin, empty when it can be registered. Does not look at what is already registered. */
@@ -73,6 +76,7 @@ export function pluginProblems(plugin: GhostlyAdapterPlugin): string[] {
     if (list === undefined) continue;
     if (!Array.isArray(list)) { problems.push(`${kind} must be a list of descriptors`); continue; }
     for (const d of list as ProviderDescriptor<unknown>[]) {
+      if (!d || typeof d !== "object") { problems.push(`${kind} ${String(d)}: not a descriptor`); continue; }
       const own = providerDescriptorProblems(d);
       if (d?.kind && d.kind !== kind) own.push(`is listed under ${kind} but says kind ${String(d.kind)}`);
       problems.push(...own.map((p) => `${kind} ${String(d?.id)}: ${p}`));
@@ -80,7 +84,10 @@ export function pluginProblems(plugin: GhostlyAdapterPlugin): string[] {
   }
   if (plugin.identities !== undefined) {
     if (!Array.isArray(plugin.identities)) problems.push("identities must be a list of providers");
-    else for (const p of plugin.identities) problems.push(...descriptorProblems(p).map((m) => `identity ${String(p?.id)}: ${m}`));
+    else for (const p of plugin.identities) {
+      if (!p || typeof p !== "object") problems.push(`identity ${String(p)}: not a provider`);
+      else problems.push(...descriptorProblems(p).map((m) => `identity ${String(p.id)}: ${m}`));
+    }
   }
   for (const kind of KINDS) {
     const list = ids(kind, plugin);
