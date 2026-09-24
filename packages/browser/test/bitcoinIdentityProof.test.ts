@@ -41,8 +41,9 @@ describe("Bitcoin identity provider", () => {
     expect(identityProvider("bitcoin")).toBe(bitcoin);
   });
 
-  it("says what it does not prove, in the picker and next to the address field", () => {
-    for (const text of [bitcoin.description, bitcoin.subject.help!]) expect(text).toMatch(/balance/);
+  it("says what it does not prove, in the picker's details and next to the address field", () => {
+    for (const text of [bitcoin.limits!, bitcoin.subject.help!]) expect(text).toMatch(/balance/);
+    expect(bitcoin.limits).toMatch(/past payment/);
     expect(bitcoin.subject.help).toMatch(/past payment/);
     expect(bitcoin.subject.help).toMatch(/pay you/);
   });

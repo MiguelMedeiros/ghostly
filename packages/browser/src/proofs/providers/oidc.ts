@@ -71,7 +71,9 @@ export function createOidcIdentityProvider(options: OidcIdentityOptions = {}): I
     id: "oidc",
     label: "Account at a provider",
     category: "provider-attested",
-    description: "Sign in with Google, Microsoft, Apple, GitLab or Twitch. The provider vouches that the account is yours: your contact trusts that company, not a key you hold.",
+    summary: "Sign in with Google, Microsoft, Apple…",
+    description: "Sign in with Google, Microsoft, Apple, GitLab or Twitch: the provider vouches to Ghostly, with a signed token, that the account is yours.",
+    limits: "Attested by the provider, not by a key you hold: your contact trusts that company.",
     platforms: ["web", "extension", "desktop"] satisfies IdentityPlatform[],
     subject: {
       label: "Provider",

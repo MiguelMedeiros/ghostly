@@ -27,7 +27,7 @@ export const fakeKeySign = (statement: IdentityStatement, seed = fakeKeyring.see
 export interface FakeKeyEvidence { sig: string }
 export const fakeKey: IdentityProofProvider<FakeKeyEvidence> = {
   id: "fake-key", label: "Test key", category: "self-custodied",
-  description: "A test identity: an Ed25519 key held by this page. For tests only.",
+  summary: "Sign with the test key", description: "A test identity: an Ed25519 key held by this page. For tests only.",
   platforms: ["web", "extension", "desktop"],
   subject: { label: "Public key", placeholder: "64 hex characters", normalize: normalizeHexKey, short: k => `${k.slice(0, 8)}…${k.slice(-4)}` },
   validity: { defaultDays: 30, maxDays: 365 },
@@ -67,7 +67,7 @@ export function fakeAccountToken(statement: IdentityStatement, account = "alice"
 }
 export const fakeAccount: IdentityProofProvider<FakeAccountEvidence> = {
   id: "fake-account", label: "Test account", category: "provider-attested",
-  description: "A test login provider that vouches for an account. For tests only.",
+  summary: "Log in to the test issuer", description: "A test login provider that vouches for an account. For tests only.",
   platforms: ["web", "extension", "desktop"],
   subject: { label: "Provider", options: [{ value: FAKE_ISSUER, label: "Test issuer" }],
     normalize: input => { if (input.trim() !== FAKE_ISSUER) throw new Error("Unknown test issuer"); return FAKE_ISSUER; } },
@@ -97,7 +97,7 @@ export const FAKE_RECORD_HOST = "https://records.ghostly.test/";
 export const fakeRecordText = (statement: IdentityStatement) => `ghostly-proof=${statement.id}`;
 export const fakeRecord: IdentityProofProvider<Record<string, never>> = {
   id: "fake-record", label: "Test record", category: "self-custodied",
-  description: "A test record published where the verifier looks it up, like DNS. For tests only.",
+  summary: "Publish a test record", description: "A test record published where the verifier looks it up, like DNS. For tests only.",
   platforms: ["web", "extension", "desktop"],
   subject: { label: "Name", placeholder: "alice", normalize: input => { const v = input.trim().toLowerCase(); if (!/^[a-z0-9-]{1,63}$/.test(v)) throw new Error("Letters, digits and dashes"); return v; } },
   validity: { defaultDays: 30, maxDays: 365 },

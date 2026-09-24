@@ -105,7 +105,9 @@ export const bitcoin: IdentityProofProvider<BitcoinEvidence> = {
   id: "bitcoin",
   label: "Bitcoin address",
   category: "self-custodied",
-  description: "Proves you can sign with the key behind a Bitcoin address, in your own wallet. It does not prove a balance, a past payment, or that you would pay.",
+  summary: "Sign a message in your own wallet",
+  description: "Proves you can sign with the key behind a Bitcoin address: your wallet signs the statement and you paste the signature.",
+  limits: "It does not prove a balance, a past payment, or that you would pay.",
   platforms: ["web", "extension", "desktop"],
   subject: {
     label: "Bitcoin address",

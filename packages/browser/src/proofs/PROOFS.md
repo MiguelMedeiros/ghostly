@@ -75,7 +75,9 @@ Ghostly identity proof v1: I control nostr:3bf0c63fcb93463407af97a5e5ee64fa883d1
      id: "ssh",                              // stable: in the statement, on the wire, in storage
      label: "SSH key",
      category: "self-custodied",
-     description: "Proves you hold an SSH key: sign the statement with ssh-keygen.",
+     summary: "Sign once with ssh-keygen",                       // the picker card: one short line
+     description: "Proves you hold an SSH key: sign the statement with ssh-keygen.",  // the details view
+     limits: "Does not prove the names in the key's comment.",     // optional: what it does not show
      platforms: ["web", "extension", "desktop"],
      subject: { label: "Public key", placeholder: "ssh-ed25519 AAAA…", normalize: canonicalSshKey, short: fingerprint },
      validity: { defaultDays: 90, maxDays: 365 },
@@ -89,14 +91,16 @@ Ghostly identity proof v1: I control nostr:3bf0c63fcb93463407af97a5e5ee64fa883d1
    };
    ```
 
-2. Add it to `IDENTITY_PROVIDERS` in [registry.ts](registry.ts). That is the only shared line you touch;
-   the order is the picker's.
+2. Add it to `IDENTITY_PROVIDERS` in [registry.ts](registry.ts), the order is the picker's, and give it a
+   mark in `src/components/identities/ProviderIcons.tsx` (`identityProviderIcons.test.tsx` fails for a provider without one).
+   Those are the only shared lines you touch.
 3. Tests: run `describeIdentityProof` from `packages/browser/test/helpers/identityProofContract.ts` against
    your provider (see [identityProofContract.test.ts](../../test/identityProofContract.test.ts)), plus your
    own: real tool output as vectors, every malformed shape of your format, your network answers.
 4. Add a row to the table at the end of this file, and to WISP 300's implementation section.
 
-The UI renders every provider from its descriptor: the picker (label, description, category), the subject
+The UI renders every provider from its descriptor: the picker card (label, summary, category, its mark from
+`src/components/identities/ProviderIcons.tsx`), the details view (description, limits), the subject
 field (`subject`), the validity choice (`validity`), the signer flow by `kind`, the badges (`short`,
 `category`, `source`, `attester`). No component to write.
 

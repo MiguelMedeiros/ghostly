@@ -5,7 +5,8 @@ import { PROVIDER_ICONS } from "./ProviderIcons";
 /** The provider's icon; for an OpenID Connect proof whose subject names a known provider, that provider's. */
 function iconFor(provider: string, subject?: string) {
   const oidc = provider === "oidc" && subject ? providerForIssuer(subject)?.id : undefined;
-  return PROVIDER_ICONS[oidc ? `oidc:${oidc}` : provider];
+  const key = oidc ? `oidc:${oidc}` : provider;
+  return PROVIDER_ICONS[key] ? { key, ...PROVIDER_ICONS[key] } : undefined;
 }
 
 /**
@@ -16,7 +17,7 @@ export function ProviderMark({ provider, subject, small = false }: { provider: s
   const icon = iconFor(provider, subject);
   const box = small ? "h-5 w-5 rounded-md" : "h-10 w-10 rounded-xl";
   // forced-color-adjust-none: in a forced-colours (high-contrast) mode the tile keeps its colour, so a white mark stays visible.
-  if (icon) return <span aria-hidden="true" className={`inline-flex shrink-0 items-center justify-center overflow-hidden forced-color-adjust-none ${box} ${icon.tile}`}>{icon.mark(Math.round((small ? 20 : 40) * (icon.fill ?? 0.6)))}</span>;
+  if (icon) return <span aria-hidden="true" data-icon={icon.key} className={`inline-flex shrink-0 items-center justify-center overflow-hidden forced-color-adjust-none ${box} ${icon.tile}`}>{icon.mark(Math.round((small ? 20 : 40) * (icon.fill ?? 0.6)))}</span>;
   const attested = providerOf(provider)?.category === "provider-attested";
   return (
     <span aria-hidden="true" className={`inline-flex shrink-0 items-center justify-center ${box} bg-surface-alt text-text-secondary border border-border`}>
