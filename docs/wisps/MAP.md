@@ -4,8 +4,8 @@ This map is a design map, not a claim that every box exists or that every combin
 
 | Common base | Identity | Per-connection data transport | Group rules | Group distribution | Per-operation payments | Combinable applications |
 |---|---|---|---|---|---|---|
-| Ghost records / rendezvous (02) | None | WebRTC (101; existing baseline) | Admission / roles (800 and 900) | Bounded mesh prototype proposed | Cashu (201; app integration exists) | Chat (400) |
-| Peer Keys (03) | Nostr (301; experimental implementation) | Iroh (102; proposed) | Membership and epoch security (900; proposed) | GossipSub (901; candidate) | Lightning (203; app integration exists) | Files (500) |
+| Ghost records / rendezvous (02) | None | WebRTC (101; existing baseline) | Admission / roles (800 and 900) | Bounded mesh (9xx group mesh; core protocol implemented) | Cashu (201; app integration exists) | Chat (400) |
+| Peer Keys (03) | Nostr (301; experimental implementation) | Iroh (102; proposed) | Membership and epoch security (900; first profile implemented) | GossipSub (901; candidate) | Lightning (203; app integration exists) | Files (500) |
 | Capability / transport negotiation (03 and 100; proposed) | Pubky (302; local import experimental) | HyperDHT (103; proposed) | Removal / recovery / history policy (900) | Other adapters, including Pear components: investigate only | Ark integration planned (202); on-chain / Spark research | Voice / video (600) |
 | Current record profile exists; modular agreement is new | Keet (303; compatible local import experimental) | Runtime availability differs | Does not select an overlay by itself | Keet distribution API not assumed | External component executes authorized payment | Local services (700) |
 
@@ -44,6 +44,6 @@ The [proof increment](PROOF-INCREMENT.md) now includes explicit experimental loc
 | [600 Media](600-media.md) | [601 WebRTC media](601-webrtc-media.md) | Legacy 1:1 only; runtime capture limits |
 | [700 Local Services](700-local-services.md) | [701 HTTP](701-http-services.md) | Legacy hosting with selected contact access; not paired HTTP |
 | [800 Invite/Join](800-invite-join.md) | [801 implemented invitations](801-invitation-profiles.md) | Bearer bootstrap exists; global consumable admission proposed |
-| [900 Groups](900-group-sessions.md) | [901 GossipSub](901-gossipsub.md) | Both proposed; no implemented group profile |
+| [900 Groups](900-group-sessions.md) | [9xx Group Mesh](9xx-group-mesh.md), [901 GossipSub](901-gossipsub.md) | Mesh profile: core protocol implemented; GossipSub proposed |
 
 Transport100 already separates101/102/103. Payment200 separates201Cashu and203Lightning via Cashu; Ark202 remains implementation work until its substantive contract and evidence are ready. Identity300 separates301/302/303 external proof bindings, currently disabled. Document kinds describe responsibilities, not feature availability.

@@ -61,13 +61,14 @@ The implementation column is independent of document status. Existing features c
 | [701](701-http-services.md) | HTTP Local Service Profile | Draft | Legacy desktop/extension hosting; web viewer where supported; not paired hosted HTTP. |
 | [800](800-invite-join.md) | Invite and Join | Draft | Existing bearer invite; admission protocol proposed |
 | [801](801-invitation-profiles.md) | Implemented Invitation Profiles | Draft | Current modern pair1/pair2d creation plus legacy imports. |
-| [900](900-group-sessions.md) | Group Session Negotiation | Draft | Proposed; no group implementation found |
+| [900](900-group-sessions.md) | Group Session Negotiation | Draft | Contract of the first profile; core protocol implemented |
+| [Group Mesh · 9xx planned](9xx-group-mesh.md) | Group Mesh Distribution Profile | Draft | `group-mesh/1`: core protocol with unit tests; engine and UI in the next increment |
 | [GossipSub · 9xx planned](901-gossipsub.md) | GossipSub Transport | Draft | Proposed; no adapter found |
 | [1000](1000-storage.md) | Storage Contract | Draft | Experimental: object contract, naming and adapter rules |
 | [1001](1001-local-storage.md) | Local File Storage | Draft | Experimental adapter |
 | [1002](1002-s3-storage.md) | S3-Compatible Storage | Draft | Experimental adapter; local S3 server end-to-end |
 
-Dependencies in headers describe the candidate modular design. Conditional dependencies are stated in the body (for example, existing media requires WebRTC). A document can refer to another without making its entire capability mandatory. In particular, 100 does not require a particular transport, 300 does not require an external identity, and 900 does not require GossipSub; 901 is an optional profile of 900. Group chat uses 400, group file sharing uses 500, and neither implies group payments or localhost permissions.
+Dependencies in headers describe the candidate modular design. Conditional dependencies are stated in the body (for example, existing media requires WebRTC). A document can refer to another without making its entire capability mandatory. In particular, 100 does not require a particular transport, 300 does not require an external identity, and 900 does not require GossipSub; the group mesh (9xx) is the first profile of 900 and 901 an optional later one. Group chat uses 400, group file sharing uses 500, and neither implies group payments or localhost permissions.
 
 ## Proposed milestones and exit evidence
 

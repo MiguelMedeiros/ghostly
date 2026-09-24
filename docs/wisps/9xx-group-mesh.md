@@ -1,0 +1,109 @@
+# WISP 9xx — Group Mesh Distribution Profile
+
+| Field | Value |
+|---|---|
+| Number assignment | 9xx; planned, number to be defined |
+| Status | Draft |
+| Revision | 0.1 |
+| Updated | 2026-09-23 |
+| Document kind | Profile |
+| Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [400](400-chat.md), [401](401-paired-chat.md), [800](800-invite-join.md), [900](900-group-sessions.md) |
+| Implementation | `group-mesh/1`: core protocol in [`packages/core`](../../packages/core/src/groupSession.ts); browser engine and UI in the following increment |
+
+> This Draft documents the first distribution profile of [900](900-group-sessions.md) as implemented, not full contract conformance or an independent implementation certification. Numbers and wire formats are not registered standards.
+
+## What this profile is
+
+`group-mesh/1` lets up to eight members exchange **text** over a full mesh of pairwise, authenticated data sessions, with a membership chain and epoch keys that exclude removed members from everything sent after their removal and admitted members from everything sent before their admission. It is the bounded mesh prototype 900 asked for, with three decisions made explicit:
+
+1. **Topology: a mesh of dedicated pairwise edges, derived from the roster.** Every pair of members runs one [paired-chat/1](401-paired-chat.md) link of its own, whose rendezvous identities and discovery key both sides derive from the X25519 secret of their member keys and the group id (`edgeParams` in [`groupCrypto.ts`](../../packages/core/src/groupCrypto.ts)). Nobody distributes edge parameters, nobody but the two members can compute them, and the edge's paired session is pinned in advance to the member keys the roster names, so admission of a member is the only trust step. Edges are WebRTC only in this increment; native transports are not offered on them.
+2. **Delivery: the author sends to every member directly, and only the author re-sends.** A message goes over each open edge. A member whose edge is down gets it later from the author's bounded log (32 messages, 128 KiB), never from a third member, so per-sender order and gap detection stay honest ([400](400-chat.md)). There is no relay, no store-and-forward and no promise of delivery to a member nobody meets again.
+3. **Coordinator: exactly one admin per epoch.** The admin signs every membership commit; there is no election. The role is transferred by a commit; an admin who loses its key leaves a group that can only be re-formed, as 900 says.
+
+Files, media, payments, calls and local services are not part of this profile and are refused in groups.
+
+## Keys and epochs
+
+| Object | Lifetime | Who knows it |
+|---|---|---|
+| Member key (Ed25519) | The member's participation in one group; never reused across groups | Public in the roster; seed only on the member's device |
+| Epoch secret (32 random bytes) | One membership state | Every member of that epoch; sealed to each with an ephemeral X25519 exchange against their member key |
+| Epoch message key, confirm key | Derived from the secret with HKDF-SHA-256, salted by group id and epoch | Same |
+| Edge parameters | The pair, for the life of the group | The two members only |
+
+The committer generates a fresh secret for every commit (admission, removal, role transfer, rotation) and seals it to each member of the **new** roster. A removed member is sent the commit, so it learns it is out, without a secret. A new member's welcome carries the secret of the epoch that admits it and nothing earlier. Secrets of the last sixteen epochs are kept so a member can hand them on during catch-up; older epochs become unreadable.
+
+The commit carries a **confirmation tag**: HMAC-SHA-256, under the epoch's confirm key, of the commit without its tag. A member that unseals a secret checks the tag before keeping it, so a member relaying a secret cannot hand out a wrong one, and the admin's signature covers the tag.
+
+**What this gives and does not give.** Forward secrecy at the granularity of an epoch: a secret leaked later exposes that epoch. Post-compromise security through rotation: after removal or a rotate commit, whoever held the old secret and is not in the roster learns nothing new. A compromised **member seed** is not healed by rotation, because member keys are static: the member must be removed, and its edges with it. This is the deliberate simplification over MLS (see 900 § Security profile); it is adequate for eight members and reviewable in a few hundred lines.
+
+## Membership chain
+
+A commit is `{ v, g, e, p, k, m, by, s?, ts, c, sig }`: version 1, group id, epoch (its index in the chain), the hash of the previous commit (empty for the genesis), a kind (`create`, `add`, `remove`, `role`, `rotate`), the whole roster after it as sorted `[key, role]` pairs, the committer, the member concerned, a timestamp, the confirmation tag and the committer's Ed25519 signature over the canonical tuple `[v, g, e, p, k, m, by, s, ts, c]`. The hash is SHA-256 of that same tuple.
+
+Rules a receiver enforces, in this order: shape (at most eight members, exactly one admin, sorted, distinct), group id, `e` is the next index, `p` matches, the committer is the admin of the previous roster, the roster is exactly the previous roster with the change applied (an admin cannot remove or demote itself; `rotate` names nobody), and the signature verifies. A chain is verified from its genesis; a chain is at most 1024 commits.
+
+**Trust anchor.** The invitation arrives over the inviter's authenticated contact chat, naming the inviter's member key as the admin. The welcome's chain must admit the joiner in a commit signed by that key. Everything else about the roster is what the admin says: a member key with no owner never connects and never signs, but its presence in the list is the admin's claim.
+
+**Forks.** Two validly signed commits after the same epoch halt the group on every member that sees both: status `forked`, no sending, no further commits, re-form the group. A bare claim (a `group-sync` naming a different hash) is not evidence; it is answered with the commit for that epoch, so only a validly signed conflicting history forks anyone.
+
+## Admission and departure
+
+```
+inviter → contact:  { "t": "group-invite", "g", "name", "admin", "e", "n" }
+contact → inviter:  { "t": "group-accept", "g", "key" }   |   { "t": "group-decline", "g" }
+inviter → contact:  { "t": "group-chain", "g", "commits": [ … ] } *   (24 commits at a time, when the chain is long)
+inviter → contact:  { "t": "group-welcome", "g", "name", "commits": [ … ], "secrets": [ { "e", "s": <sealed> } ] }
+```
+
+The invitee generates its member key on accepting. The admin commits `add`, tells the existing members over their edges, and sends the welcome over the contact chat. The joiner verifies the chain, unseals and confirms the secret, then opens edges to every other member. Being in the roster is the only admission; the contact chat is only the authenticated path that carried it.
+
+A member leaves by wiping its secrets at once and sending `{ "t": "group-leave", "g" }` to the admin, who commits `remove`. The sole admin cannot leave a group with other members without transferring the role first. Removal is a `remove` commit; the removed member is told over its edge and, as a courtesy, with `{ "t": "group-removed", "g" }` over the contact chat when the remover has one. A removed member that was offline for both is not told; it sees the group go silent.
+
+## Messages
+
+```
+{ "t": "group-msg", "g", "e", "s": <sender member key>, "n": <sequence in epoch>, "ts", "nn": <nonce>, "c": <box>, "sig" }
+```
+
+Text is trimmed UTF-8 of at most 16 KiB, encrypted with XChaCha20-Poly1305 under the epoch message key with the JSON of `[g, e, s, n, ts]` as associated data, then signed by the sender over `["ghostly-group/1 msg", g, e, s, n, ts, nn, c]`. Sequence numbers start at 0 in every epoch and are the sender's; the stable id of a message is `<sender>:<epoch>:<sequence>`.
+
+A receiver accepts a frame only from the edge of the member it names as sender; only for an epoch the sender and the receiver were both members of; only once per `(sender, epoch, sequence)`, remembering the highest sequence and the 256 below it per sender and epoch; and only with a valid signature and a ciphertext that opens. A frame for an epoch ahead of the receiver's chain, or one whose secret has not arrived, waits (64 frames, 1 MiB) while the receiver asks the sender to catch it up, at most once every ten seconds per member. Anything else is dropped without a reply.
+
+## Catch-up
+
+When an edge opens, each side sends what it knows:
+
+```
+{ "t": "group-sync", "g", "e", "h": <hash of my top commit>, "have": { <sender>: { <epoch>: <highest seq> } }, "secrets": [ <epochs I hold> ] }
+```
+
+The side that is ahead answers with the commits the other lacks (each with the secret sealed for the other when it was in that epoch's roster and the secret is still held), `{ "t": "group-secrets", "g", "secrets": [ … ] }` for epochs the other was in but does not hold, and its **own** messages above the other's `have`, from its bounded log and only for epochs the other was a member of. A member behind on the chain asks in turn. Gaps below the highest sequence that no author fills are reported per sender (`missing`), not hidden.
+
+## Compatibility
+
+Groups are announced after the paired handshake, on the open session, as `{ "t": "paired-groups", "v": [1] }`, the way `paired-payments` is, so a full handshake offer stays within the sixteen capabilities older apps accept. An app without groups drops the announcement and every `group-*` frame (they carry no `id`), keeps chatting 1:1, and is shown as needing an update to be invited. No 1:1 behavior changes.
+
+## Bounds
+
+Eight members; 1024 commits; 16 KiB of text; 32 own messages and 128 KiB kept for catch-up; 64 waiting frames and 1 MiB; 16 epoch secrets; a replay window of 256 sequence numbers per sender and epoch; 16 commits buffered ahead of the chain; 24 commits per welcome piece; 60 KiB per frame. These are the first profile's numbers, chosen to be small, not measured product limits.
+
+## Security and privacy
+
+- The admin sees, and can invent, the roster; it cannot read edges it is not part of, forge another member's messages or hand a removed member a new secret it does not have.
+- Every member can read every message of every epoch it was in, keep it, and forward it out of band. Removal changes keys, not the past.
+- Edges are pairwise Pkarr links: relays see one rendezvous key per member per edge and its signaling; the group id and the roster never touch the DHT.
+- A member's device holds its member seed, the chain, the secrets of recent epochs and its own recent messages in the clear at rest, as chats are held today. Profile backups include them.
+- Denial of service by an insider is bounded to what one edge can carry; a validly signed fork by the admin halts the group by design.
+
+## Conformance
+
+[`packages/core/test/groups.test.ts`](../../packages/core/test/groups.test.ts) exercises: everyone reads everyone; a removed member holds no secret and cannot decrypt the next epoch, its old-epoch messages are accepted for that epoch only and a re-stamped one is refused; a new member cannot read earlier epochs and is not re-sent them; two admissions serialized before either edge is up; duplicate, out-of-order, tampered, foreign-key and wrong-group frames; offline catch-up across a rotation from the authors' logs; buffering ahead of the chain; forks, and lying syncs that are not forks; admin transfer, with the former admin's commits refused; leaving; bounded logs and waiting rooms; long chains in pieces; welcomes from the wrong admin; restart from saved state. [`groupLink.test.ts`](../../packages/core/test/groupLink.test.ts) checks that group frames flow only after both sides announced groups, and that an app without them sees nothing. End-to-end coverage with three and four browsers is the next increment's gate.
+
+## Open decisions
+
+Multiple admins; a member key update (post-compromise security for a member's own key); files and media in groups, each behind a capability of its own; native transports on edges; a relay or GossipSub profile ([901](901-gossipsub.md)) for larger groups; a negotiated store for members that are never online together.
+
+## References
+
+[Group contract](900-group-sessions.md), [paired chat](401-paired-chat.md), [invite/join](800-invite-join.md), [protocol](../PROTOCOL.md#65-private-groups-group-mesh1), [session](../../packages/core/src/groupSession.ts), [commits](../../packages/core/src/groupCommits.ts), [crypto](../../packages/core/src/groupCrypto.ts).

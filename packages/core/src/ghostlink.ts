@@ -97,6 +97,10 @@ export interface GhostLinkEvents {
   onPaymentAsk?(ask: PaymentAsk): void | Promise<void>;
   onPayment?(payment: Payment): void | Promise<void>;
   onPaymentResult?(result: PaymentResult): void | Promise<void>;
+  /** A `group-*` frame (WISP 900) from the peer, only while both sides announced `paired-groups`. */
+  onGroupFrame?(frame: Record<string, unknown>): void | Promise<void>;
+  /** Group frames can flow (both announced), or no longer can. */
+  onGroupsSupport?(supported: boolean): void;
 }
 
 const PAYMENT_METHODS: PaymentMethodName[] = ["cashu", "lightning", "arkade", "usdt", "bark", "bitcoin"];
@@ -107,6 +111,8 @@ export interface GhostLinkOptions {
   arkPaymentsSupport?: boolean;
   usdtPaymentsSupport?: boolean;
   barkPaymentsSupport?: boolean;
+  /** Announce private groups (WISP 900) on the open session. Announced after the handshake, like `paired-payments`, so a full offer stays within what older apps accept. */
+  groupsSupport?: boolean;
   dht?: { state?: DhtDeliveryState; save(state: DhtDeliveryState): Promise<void>; pollMs?: number };
   rtcAvailable?: boolean;
   native?: { peerDescriptors?: TransportDescriptors; peerTransports?: PairedTransport[]; peerFallback?: boolean; preferred?: PairedTransport; fallback?: boolean };
@@ -175,6 +181,8 @@ export class GhostLink {
   /** Ways of paying the contact allows, as it last said on this session; null until it does. */
   private peerPaymentMethods: Set<PaymentMethodName> | null = null;
   private peerNickOverride: string | null = null;
+  /** Group protocol versions the peer announced on this session; null until it does. */
+  private peerGroupVersions: number[] | null = null;
   private livenessTimer: ReturnType<typeof setInterval> | null = null;
   private peerAnswersPings = false;
   private unansweredPings = 0;
@@ -766,6 +774,20 @@ export class GhostLink {
     if (!this.options.params.profile || !this.channel || !this.isDataLinkOpen || this.paired?.state.status !== "ready") return;
     try { this.channel.send(JSON.stringify({ t: "paired-services", s: servicesToWire(this.options.getPairedServices?.() ?? []) })); } catch { /* sent again on the next session */ }
   }
+  /** Both sides announced groups on this session and it is open. */
+  get groupsSupport(): boolean { return !!this.options.groupsSupport && this.isDataLinkOpen && !!this.peerGroupVersions?.includes(1); }
+  /** A `group-*` frame to the peer. Only while both sides support groups; never queued. */
+  sendGroupFrame(frame: object): void {
+    if (!this.groupsSupport || !this.channel) throw new Error("This contact is not connected, or needs an updated Ghostly for groups");
+    const data = JSON.stringify(frame);
+    if (data.length > LIMITS.maxControlFrameBytes) throw new Error("Group frame too large");
+    this.channel.send(data);
+  }
+  /** Older apps drop this frame (it carries no id): to them this contact has no groups. */
+  private sendGroupsSupport(): void {
+    if (!this.options.groupsSupport || !this.options.params.profile || !this.channel || !this.isDataLinkOpen) return;
+    try { this.channel.send(JSON.stringify({ t: "paired-groups", v: [1] })); } catch { /* the next session announces it */ }
+  }
   /** Older apps drop this frame (it carries no id) and keep using the handshake offer. */
   private sendPaymentMethods(): void {
     if (!this.options.params.profile || !this.channel || !this.isDataLinkOpen || this.paired?.state.status !== "ready") return;
@@ -906,6 +928,7 @@ export class GhostLink {
           this.sendPairedAvatar();
           this.sendPaymentMethods();
           this.sendPairedServices();
+          this.sendGroupsSupport();
           migration?.resolve();
           this.rtcCandidateWaiter?.resolve(); this.rtcCandidateWaiter = null;
           // The wait between attempts is for attempts that failed: a link that worked and then dropped
@@ -981,6 +1004,17 @@ export class GhostLink {
             if (!Array.isArray(frame.m) || frame.m.length > 16 || !frame.m.every(m => typeof m === "string")) return;
             this.peerPaymentMethods = new Set((frame.m as string[]).filter((m): m is PaymentMethodName => PAYMENT_METHODS.includes(m as PaymentMethodName)));
             this.emitPairingState();
+            return;
+          }
+          if (frame?.t === "paired-groups") {
+            if (!Array.isArray(frame.v) || frame.v.length > 8 || !frame.v.every(v => Number.isSafeInteger(v) && v > 0)) return;
+            const before = this.groupsSupport;
+            this.peerGroupVersions = frame.v as number[];
+            if (this.groupsSupport !== before) this.options.events?.onGroupsSupport?.(this.groupsSupport);
+            return;
+          }
+          if (typeof frame?.t === "string" && frame.t.startsWith("group-")) {
+            if (this.groupsSupport) await this.options.events?.onGroupFrame?.(frame);
             return;
           }
           if (frame?.t === "paired-reconnect") {
@@ -1114,6 +1148,7 @@ export class GhostLink {
     this.channel = this.httpHost = this.httpClient = this.files = null;
     this.peerServicesOverride = null;
     this.peerNickOverride = null;
+    if (this.peerGroupVersions) { this.peerGroupVersions = null; this.options.events?.onGroupsSupport?.(false); }
     this.session.setDataLinkOpen(false);
     if (wasNative) this.options.events?.onDataLinkState?.("idle");
     this.options.events?.onPresence?.(this.presence);

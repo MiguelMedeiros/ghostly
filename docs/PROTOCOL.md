@@ -225,6 +225,29 @@ Host errors are ordinary responses with an `x-ghostly-error` header, so a browse
 7. From responses, hop-by-hop headers, `Content-Encoding`, `Content-Length`, HSTS, `Alt-Svc` are removed (the body is forwarded decoded), and `Domain` is stripped from `Set-Cookie`.
 8. Limits: 8 MiB request bodies, 32 concurrent requests per peer, 60 s for the local service to answer, 30 s body idle time. Clients cap responses at 64 MiB (the browser viewer at 32 MiB) and keep at most 16 requests in flight.
 
+### 6.5 Private groups (`group-mesh/1`)
+
+A group of up to eight peers, on top of paired links. Frames are `group-*` control frames and carry no `id`, so an app from before groups drops them; they flow only on a paired session where both sides announced `{ "t": "paired-groups", "v": [1] }` after the handshake. The invitation travels on the inviter's contact chat; everything else on one dedicated paired link per pair of members, whose keys both derive from their member keys and the group id. The full profile, with its key schedule, membership rules and bounds, is [WISP 9xx · Group Mesh](wisps/9xx-group-mesh.md).
+
+```
+→ { "t": "group-invite", "g", "name", "admin", "e", "n" }               contact chat: an admin invites
+← { "t": "group-accept", "g", "key" }   |   { "t": "group-decline", "g" }
+→ { "t": "group-chain", "g", "commits": [ … ] } *                       long chains, 24 commits at a time
+→ { "t": "group-welcome", "g", "name", "commits": [ … ], "secrets": [ { "e", "s": { "e", "n", "c" } } ] }
+↔ { "t": "group-commit", "g", "commit": { "v": 1, "g", "e", "p", "k", "m", "by", "s"?, "ts", "c", "sig" }, "secret"? }
+↔ { "t": "group-msg", "g", "e", "s", "n", "ts", "nn", "c", "sig" }
+↔ { "t": "group-sync", "g", "e", "h", "have": { <sender>: { <epoch>: <seq> } }, "secrets": [ <epochs> ] }
+↔ { "t": "group-secrets", "g", "secrets": [ { "e", "s" } ] }
+→ { "t": "group-leave", "g" }                                           to the admin
+→ { "t": "group-removed", "g" }                                         contact chat, a courtesy
+```
+
+- `g` is a 22-character base64url group id; `e` an epoch, the index of a commit in the chain; member keys are z-base-32 Ed25519 keys made for this group.
+- A commit's `m` is the whole roster after it, sorted `[key, role]` pairs with exactly one `admin`; `p` is the SHA-256 of the previous commit's tuple `[v, g, e, p, k, m, by, s, ts, c]`; `sig` is the admin's signature on the same tuple; `c` is an HMAC-SHA-256 of the untagged tuple under the new epoch's confirm key. Kinds: `create`, `add`, `remove`, `role`, `rotate`.
+- A sealed secret `{ "e", "n", "c" }` is an ephemeral X25519 public key, a nonce and an XChaCha20-Poly1305 box of the 32-byte epoch secret, keyed by HKDF-SHA-256 of the shared secret and bound to `["ghostly-group/1 secret", g, e, member]`.
+- A message's `c` is XChaCha20-Poly1305 of the trimmed UTF-8 text (at most 16 KiB) under the epoch message key, with the JSON of `[g, e, s, n, ts]` as associated data; `sig` is the sender's signature on `["ghostly-group/1 msg", g, e, s, n, ts, nn, c]`. `n` counts from 0 in each epoch, per sender. The stable id is `<s>:<e>:<n>`.
+- Receivers accept a message only from the edge of its sender, for an epoch both were members of, once per `(s, e, n)`; a frame ahead of the chain waits, bounded, while the receiver asks the sender to catch it up. Only the author re-sends its messages, from a log of its last 32.
+
 ## 7. What is not in the protocol
 
 - **A central Ghost message server.** The host serves its enabled services while online. Closing Ghostly ends live connectivity; published presence may remain stale and local history persists. Pkarr relays can carry encrypted small-message records; STUN assists discovery and TURN can relay encrypted live traffic.

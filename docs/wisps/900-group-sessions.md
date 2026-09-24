@@ -4,94 +4,72 @@
 |---|---|
 | Candidate number | 900; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-20 |
+| Revision | 0.2 |
+| Updated | 2026-09-23 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [100](100-transports.md), [800](800-invite-join.md) |
-| Implementation | Proposed; no group implementation found |
+| Implementation | Core protocol of the first profile, [`group-mesh/1`](9xx-group-mesh.md), in `packages/core`; engine and UI follow |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 
 ## Purpose and implementation state
 
-Define a concrete candidate group architecture that moves fanout, membership synchronization and history traffic off Pkarr/DHT. No group session, group key schedule or group delivery layer was found in the inspected implementation. This draft specifies responsibilities and state transitions for review; cryptographic and wire profiles remain validation gates.
+Define how a group of Ghostly peers agrees on who is in it, protects what they say across membership changes, and moves it between them without touching Pkarr/DHT. Revision 0.1 was a proposal with every choice open. Revision 0.2 records the choices made for the first distribution profile, [9xx · Group Mesh](9xx-group-mesh.md), and what remains a blocker. The contract below is what any group profile of Ghostly must provide; the mesh profile is the one implemented.
 
 ## Separate the layers
 
-| Layer | Candidate responsibility | Explicit non-guarantee |
+| Layer | Responsibility | Explicit non-guarantee |
 |---|---|---|
-| Ghost rendezvous | Minimal signed, bounded hints to reach an admission/session endpoint | No message history, member roster, per-recipient group fanout or public join queue in DHT |
-| Admission control | Validate invite, participation possession and group policy | Knowing group ID or gossip topic is not membership |
-| Group security | Authenticate membership changes and protect application content across epochs | No custom shared-key scheme is approved here |
-| Delivery | Route encrypted group messages/commits over a selected live topology | Gossip alone gives neither E2EE nor reliable offline storage |
-| Local application | History, message state, permissions and moderation UI | Remote copies cannot be recalled or forcibly erased |
+| Ghost rendezvous | Signed, bounded hints to reach a member: in the mesh profile, one pairwise Pkarr link per pair of members | No message history, member roster, per-recipient group fanout or public join queue in DHT. The group id and roster never touch the DHT. |
+| Admission control | Validate the invitation, the joiner's member key and the admin's authority | Knowing a group id is not membership; a contact chat is only the authenticated path an invitation travels on |
+| Group security | Authenticate membership changes (a signed commit chain) and protect application content across epochs (a fresh secret per epoch, sealed per member) | Removal does not erase what a member already holds; a compromised member key is healed by removal, not rotation |
+| Delivery | Route protected envelopes over the selected topology; in the mesh profile, author to every member directly | Live delivery only; a member nobody meets again gets nothing; no total order |
+| Local application | History, gaps, permissions and moderation UI | Remote copies cannot be recalled |
 
-## Distribution is a negotiated family of adapters
+## Distribution is a negotiated family of profiles
 
-Keep three independent contracts: (a) admission/permissions and group security; (b) distribution/overlay; (c) authenticated transport between adjacent peers. A working set of pairwise transport connections does not prove that all members can understand or route the same group distribution protocol.
+The three contracts stay independent: (a) admission and group security, (b) distribution, (c) authenticated transport between adjacent peers. A group profile names all three and their bounds. Members of one group MUST run the same profile; the first is `group-mesh/1`, a bounded full mesh of [paired-chat/1](401-paired-chat.md) edges. A GossipSub-like flooding profile ([901](901-gossipsub.md)) is a later profile, for larger groups, after measurement; bridges between profiles are not assumed.
 
-The candidate distribution interface exposes supported profile/version, join/leave, publish an opaque protected envelope, receive with routing provenance, bounded validation feedback, delivery availability, backpressure and shutdown. It also declares size limits, duplicate/order semantics, topology/forwarding roles, required edge transports, history availability and privacy costs. It MUST NOT grant membership, mint group secrets or bypass application authentication. Group security passes authorized encrypted payloads to distribution; received payloads still require security/application validation.
+A profile is negotiated per pairwise session, not per group: an app announces `{ "t": "paired-groups", "v": [1] }` on an open paired session, after the handshake. A contact whose app never announces it cannot be invited and never receives a `group-*` frame. Nothing about 1:1 chat changes.
 
-Initial groups MUST agree on one common distribution profile/version and compatible security/application rules. Each edge can negotiate a supported transport only within that profile's requirements. Unsupported overlay combinations fail explicitly even if individual sockets connect. Future bridges require an explicitly supported mapping, authorization, loop/deduplication handling, trust analysis and independent tests; no bridge is assumed now.
+## Topology of the first profile
 
-GossipSub is the initial named candidate in 22, not the permanent group abstraction. A bounded mesh is the first prototype topology. Other adapters, including possible Pear ecosystem components, are research only; Keet does not imply a usable distribution API. None is an additional assigned WISP, an approved custom gossip algorithm or a ready integration.
+A **mesh of dedicated pairwise edges** between members, one per pair, derived by both members from the X25519 secret of their member keys and the group id: rendezvous identities for both sides and the symmetric key of their discovery records. No edge parameters are distributed; the admin cannot compute an edge it is not on; the paired session of an edge is pinned in advance to the roster's member keys, so the only trust step is admission. The mesh is capped at eight members, which is a first-profile bound, not a measured limit: connection cost is quadratic and every edge polls its own rendezvous.
 
-## Initial topology proposal
+A relay or rendezvous-based fan-out was considered and rejected for the first profile: it would make the admin's availability a condition for anyone to talk, and it would make an admin change (a member with edges to nobody) impossible without redistributing links. The mesh makes offline catch-up and admin transfer natural.
 
-Start with a private group using one explicitly identified membership coordinator/admission authority. This serializes admission and policy changes; it is a trust and availability tradeoff, not a central Ghost service. The coordinator may run on a member's device. Loss/offline status pauses membership changes; remaining peers may continue an already-established epoch where policy permits. There is no silent leader election or privilege transfer.
+## Coordinator, roster and epochs
 
-For the first interoperability prototype, propose a bounded full mesh of authenticated pairwise data sessions between members, capped at eight online members for testing, not as a measured product limit. All must support the selected common application/security profile; participants without it fail admission clearly. Full mesh has quadratic connection cost and is not a scale claim. Larger/private routing can negotiate 22 after measurement. Existing 1:1 WebRTC can inform the prototype but is not already a group implementation.
+Exactly **one admin** per epoch is the membership coordinator. The admin signs every change as a commit that carries the whole roster after it and the hash of the previous commit; the chain from the genesis is the authenticated roster of every epoch. Roles are `admin` and `member`; the role moves by a commit. There is no election: an admin who loses its key leaves a group that must be re-formed. Descriptor revision, connection attempt and cryptographic epoch are one counter here, the epoch: every commit (admission, removal, role transfer, rotation) is a new epoch with a new secret, and a network reconnect is not a commit.
 
-Relays and a coordinator need not decrypt application payloads merely to deliver them. If a coordinator is also a group member, it can read content by membership. Any elected delivery/storage peer has explicitly selected retention and traffic visibility. Group media, SFUs and public lobbies are separate profile decisions, not consequences of text routing.
+Admission: the admin invites a contact over their authenticated chat; the contact accepts with a member key generated for this group; the admin commits `add`, tells the members over their edges and sends the joiner a welcome holding the chain and the new epoch's secret sealed to it. Trust on first use is of the **admin**: the welcome's chain must admit the joiner in a commit signed by the inviter's member key, learned over the contact chat. Member keys are asserted by the admin's signed commits and pinned on the edges.
 
-## Session descriptor and agreement
+## Security profile
 
-Candidate descriptor semantics: logical group ID, descriptor revision, authorized coordinator key, participation roster/roles, admission policy, required capabilities and exact versions, chosen delivery/security profile, limits and current membership epoch reference. Keep descriptor and roster OFF the DHT; obtain them over authenticated admission/session connections. Pin the initial authority from the invitation and verify updates against the previous authorized state.
-
-Each participant checks the descriptor against local privacy/security policy before accepting. The coordinator proposes a deterministic common profile using a declared preference order; all admitted participants must acknowledge the compatible result for the prototype. Required incompatibility cannot be bypassed by silently weakening encryption or enabling a relay. Time out missing acknowledgements and explicitly abort or restart with a revised candidate membership; do not claim consensus from silence.
-
-Descriptor revision, transport attempt and cryptographic epoch are different counters. A network reconnect need not change membership; a membership change must update the group security state. Bind accepted policy/roster/profile to the authenticated group context using the selected security protocol's supported mechanisms. Exact encoding and transcript construction are blockers.
-
-## Security profile: evaluate MLS, do not invent group crypto
-
-[MLS (RFC 9420)](https://www.rfc-editor.org/rfc/rfc9420.html) provides group key establishment with epochs and membership changes. It is the candidate to evaluate, not an implemented dependency or an automatically inherited security guarantee. Select a maintained implementation, credentials, cipher suite and delivery integration; verify its required state deletion and commit processing. Authentication, application policy and delivery still need a Ghost profile.
-
-Proposed flow using that candidate:
-
-1. **Create:** creator initializes group security state and admission policy. Pin group/authority context locally.
-2. **Join:** 20 verifies a unique participation and local consent. An authorized membership change produces the new epoch and admission material via the selected security protocol. Deliver that material privately through the authenticated join path; never in DHT/gossip plaintext.
-3. **Activate:** joiner verifies the authorized group context and initializes the accepted epoch before sending. Existing members apply the ordered membership change before accepting application data for that epoch.
-4. **Leave/remove:** accept only a policy-authorized change, advance the security epoch and stop delivering new epoch secrets to the removed participation. Rotate delivery authorization/topic material as specified by the routing profile. Removal cannot erase old history or prevent an authorized insider forwarding new content.
-5. **Reconnect:** retain membership identity, authenticate a fresh data connection and obtain missing authorized state transitions from an available peer. A peer unable to safely catch up must rejoin explicitly; never invent an epoch key from a public descriptor.
-
-The MLS-derived behavior above is conditional on a validated integration. Single epoch secrets copied to every invite, reuse of a legacy pairwise seed, or transport encryption alone MUST NOT be presented as this group security profile.
+MLS (RFC 9420) was evaluated and not adopted for this profile: with at most eight static members, a ratchet tree buys logarithmic commit cost and healing of individual leaf keys, at the price of a large dependency without a small, maintained browser implementation to pin, and of state-deletion and delivery-service integration rules the profile would then have to prove. The profile uses instead a **fresh random epoch secret per commit, sealed to each member with an ephemeral X25519 exchange against the member's Ed25519 key**, HKDF-derived message and confirmation keys, XChaCha20-Poly1305 with the message header as associated data, and an Ed25519 signature by the sender on every message. Details, guarantees and their limits are in [9xx](9xx-group-mesh.md#keys-and-epochs). Single epoch secrets copied to every invite, a reused pairwise seed, or transport encryption alone are still not a group security profile.
 
 ## Ordering, partitions and concurrent changes
 
-Membership changes require one accepted ordered sequence for the prototype. Coordinator serializes candidate changes and records committed state durably; peers reject unauthorized/stale branches. Exact interaction with the security protocol's commit rules must be specified, rather than assuming the coordinator replaces cryptographic validation. Conflicting valid branches halt new membership progression and surface a resynchronization requirement; there is no invented merge or automatic fork winner in this draft.
+The admin serializes commits locally; two admissions made before either newcomer's edge is up produce two epochs, and the newcomers converge on meeting anyone ahead of them. Application messages carry sender, epoch and a per-epoch sequence; receivers keep, per sender and epoch, the highest sequence and a window of 256 below it, accept any order and report gaps per sender. Messages for an epoch ahead of the receiver's chain wait, bounded, while the receiver asks the sender to catch it up. No total order is promised.
 
-Application messages use sender-scoped IDs and declared per-sender ordering from 400, with epoch context and bounded replay/deduplication state. No total chat order is promised. Bound buffering of future-epoch messages while awaiting state, and bound retention of previous-epoch state according to the reviewed security profile. Removed/offline peers do not automatically get future keys. A re-admitted member is a fresh admission, with an explicit history policy.
+Two validly signed commits after the same epoch are a **fork**: the group halts on every member that sees both, and the admin re-forms it. A claim of a different history without a signed commit is answered with the commit, not believed.
 
-## Offline delivery and bulk data
+## Offline delivery
 
-Initial prototype promises live delivery only. Local history remains on devices. Optional encrypted store-and-forward needs an explicit selected peer/service, quota, expiry, consent, gap detection and replay policy. If no peer retained a missing message, report the gap. DHT TTL does not create an offline archive. New members get no old history by default; sharing old content is a separate authorized application action.
-
-Files are announced with bounded metadata and fetched over a negotiated data session; media uses a separately supported profile. Payments remain individually addressed and authorized. Local services require host audience consent; being in a group is not blanket localhost access.
+Live delivery only. A member whose edge was down gets, when the edge opens, the commits it lacks with their secrets (from any member that holds them and was in the roster), and the messages it lacks from each **author's** bounded log of its own recent messages. Nobody re-sends another member's messages. If the author is gone or the log rolled over, the gap is reported per sender. A new member gets no history: the welcome carries no earlier secret and authors do not re-send earlier epochs to it. DHT TTL does not create an archive; a negotiated store is a later profile.
 
 ## Moderation and resource limits
 
-Initial authority may approve/reject joins and remove members under visible group policy. Local blocking/muting remains separate from group removal. Rate-limit join attempts, membership changes, verification work and message ingress. Validate membership/epoch before expensive application processing, bound queues and disconnect abusive sessions. A public “The Haunt” needs additional spam/Sybil evaluation; no anonymous/public-scale abuse solution is claimed.
-
-Prototype proposals to validate: eight members, 16 KiB application-message ceiling, 64 buffered future-epoch messages with a 1 MiB total-byte cap, and bounded per-peer connection/verification queues. Numeric timeouts, history windows, rate limits and larger-group targets remain blockers, not production defaults. Group coordination failure must be visible. Authority transfer requires approval under the pinned policy and security profile; loss of the sole authority otherwise means re-forming/re-inviting, not takeover by the next online peer.
+The admin invites, removes and transfers its role; any member leaves. Local blocking is separate from removal. Bounds of the first profile: eight members, 1024 commits, 16 KiB of text, 32 own messages and 128 KiB kept for catch-up, 64 waiting frames and 1 MiB, 16 epoch secrets, 256 sequence numbers of replay window, one catch-up request per member per ten seconds. Coordination failure is visible: a group is `active`, `left`, `removed` or `forked`, with a reason.
 
 ## Compatibility and open decisions
 
-Legacy 1:1 clients remain pairwise clients; no auto-upgrade to groups. Before Proposed: choose and pin MLS implementation/profile; define signed descriptor encoding and authority transitions; resolve commit/descriptor atomicity and forks; fix bounds/timeouts; select browser/native routing and mobile background behavior; validate coordinator recovery, removal and offline catch-up; measure mesh/GossipSub costs. External identity proofs are optional per group policy and do not replace membership-key authentication.
+Legacy and current 1:1 clients keep working unchanged; an app without groups is shown as needing an update to be invited. Open before Proposed: multiple admins; member key updates; group files, media and payments as capabilities of their own; native transports on edges; a distribution profile for larger groups; a negotiated store for members never online together; interoperability with a second implementation.
 
 ## Conformance
 
-Two independently implemented group clients must create/join with a third participant, send in one epoch, concurrently request joins, remove a member, reject old-epoch/replayed/unauthorized traffic and reconnect after missed updates. Test partitions, forked membership state, coordinator loss, unsupported capability, topic leakage, bounded invalid-message floods and history gaps. Removal must exclude the old member from new secrets under the tested threat model. Report versions, topology, bounds, failures and security review; no success is claimed now.
+The core test suite creates a group, admits two members, has everyone read everyone, takes one offline through a rotation and catches it up, removes one and shows it cannot read or forge, transfers the admin, refuses the former admin, forks on conflicting signed histories, and bounds every buffer: see [9xx · Conformance](9xx-group-mesh.md#conformance). End-to-end tests with three and four browsers are the gate of the engine increment.
 
 ## References
 
-[Invite/admission](800-invite-join.md), [keys](02-peer-keys.md), [chat](400-chat.md), [GossipSub candidate](901-gossipsub.md), [interoperability gates](INTEROP.md).
+[Group mesh profile](9xx-group-mesh.md), [invite/admission](800-invite-join.md), [keys](02-peer-keys.md), [chat](400-chat.md), [GossipSub candidate](901-gossipsub.md), [interoperability gates](INTEROP.md).
