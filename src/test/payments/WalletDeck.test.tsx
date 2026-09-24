@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TEST_MINTS } from "@ghostly/browser/shared/mints";
@@ -98,6 +98,75 @@ describe("the wallet page's deck", () => {
     const { user, onSelect } = showWalletDeck("bark");
     await user.click(tab("bark"));
     expect(onSelect).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * A phone's deck, a snapping track, with the layout a browser would give it (happy-dom has none): cards 228 px wide
+ * every 240 px in a 300 px track, so card i is centred at scrollLeft 240 × i. `scrollTo` records where the deck sends
+ * the track and moves nothing: the test moves it, and says when a scroll ends, in whatever order a browser might.
+ */
+function showTrack(initial: WalletRail) {
+  vi.spyOn(window, "matchMedia").mockImplementation((query) => ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false }));
+  const shown = showWalletDeck(initial);
+  const track = screen.getByRole("tablist");
+  let left = 240 * ORDER.indexOf(initial);
+  const sentTo: number[] = [];
+  const box = (x: number, width: number) => ({ left: x, right: x + width, width, top: 0, bottom: 150, height: 150, x, y: 0, toJSON: () => ({}) }) as DOMRect;
+  Object.defineProperties(track, { scrollLeft: { get: () => left, configurable: true }, scrollWidth: { value: 2000, configurable: true }, clientWidth: { value: 300, configurable: true } });
+  track.getBoundingClientRect = () => box(0, 300);
+  track.scrollTo = ((options: ScrollToOptions) => { sentTo.push(options.left!); }) as typeof track.scrollTo;
+  ORDER.forEach((rail, i) => {
+    const card = tab(rail);
+    Object.defineProperties(card, { offsetLeft: { value: 36 + 240 * i, configurable: true }, offsetWidth: { value: 228, configurable: true } });
+    card.getBoundingClientRect = () => box(36 + 240 * i - left, 228);
+  });
+  /** The track comes to rest at card `i`'s place, and the browser says the scroll ended. */
+  const scrollEnds = (at: WalletRail) => { left = 240 * ORDER.indexOf(at); act(() => { track.dispatchEvent(new Event("scrollend")); }); };
+  return { ...shown, track, sentTo, scrollEnds, moveTo: (at: WalletRail) => { left = 240 * ORDER.indexOf(at); } };
+}
+
+describe("the wallet page's deck on a touch screen", () => {
+  it("chooses the card a swipe leaves in the centre", () => {
+    const { track, scrollEnds, onSelect } = showTrack("cashu");
+    expect(track.closest(".wallet-deck")).toHaveAttribute("data-mode", "track");
+    fireEvent.pointerDown(track);
+    scrollEnds("arkade");
+    expect(onSelect).toHaveBeenCalledWith("arkade");
+    expect(chosen()).toEqual(["wallet-card-arkade"]);
+  });
+
+  it("a second key before the first scroll has ended: the late end of the first does not take the choice back", async () => {
+    const { user, sentTo, moveTo, scrollEnds, onSelect } = showTrack("bark");
+    tab("bark").focus();
+    await user.keyboard("{ArrowRight}");
+    expect(sentTo).toEqual([960]);
+    // The track reaches Bitcoin, and End is pressed before that scroll's end is dispatched.
+    moveTo("bitcoin");
+    await user.keyboard("{End}");
+    expect(sentTo).toEqual([960, 1200]);
+    scrollEnds("bitcoin");
+    expect(chosen()).toEqual(["wallet-card-usdt"]);
+    scrollEnds("usdt");
+    expect(chosen()).toEqual(["wallet-card-usdt"]);
+    expect(onSelect.mock.calls.map(([rail]) => rail)).toEqual(["bitcoin", "usdt"]);
+  });
+
+  it("a finger takes over a scroll the deck started: where the finger leaves the track decides", async () => {
+    const { user, track, scrollEnds } = showTrack("cashu");
+    await user.click(screen.getByTestId("wallet-deck-next"));
+    expect(chosen()).toEqual(["wallet-card-lightning"]);
+    fireEvent.pointerDown(track);
+    scrollEnds("bark");
+    expect(chosen()).toEqual(["wallet-card-bark"]);
+  });
+
+  it("a card already in the centre waits for no scroll: the next swipe chooses at once", async () => {
+    const { user, sentTo, scrollEnds } = showTrack("arkade");
+    await user.click(tab("arkade"));
+    expect(sentTo).toEqual([480]);
+    scrollEnds("bitcoin");
+    expect(chosen()).toEqual(["wallet-card-bitcoin"]);
   });
 });
 

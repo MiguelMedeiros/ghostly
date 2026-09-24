@@ -11,7 +11,7 @@ import { useServicesPlatform } from "../hooks/useServicesPlatform";
  * `testId` names the text element; the QR, the copy button, the link and the "I paid" button carry it
  * with a suffix (`-qr`, `-copy`, `-link`, `-paid`).
  */
-export function PayExternally({ uri, value, testId, note, onPaid, size = 144, actions }: {
+export function PayExternally({ uri, value, testId, note, onPaid, size = 144, actions, label = "Payment QR code" }: {
   /** What a wallet opens: `lightning:…`, `bitcoin:…`. */
   uri: string;
   /** What is copied: the bare invoice or address. */
@@ -23,6 +23,8 @@ export function PayExternally({ uri, value, testId, note, onPaid, size = 144, ac
   size?: number;
   /** More buttons beside Copy. */
   actions?: ReactNode;
+  /** The QR code's name for a screen reader: someone else's invoice to pay, or this wallet's own address. */
+  label?: string;
 }) {
   const platform = useServicesPlatform();
   const [copied, setCopied] = useState(false);
@@ -48,7 +50,7 @@ export function PayExternally({ uri, value, testId, note, onPaid, size = 144, ac
   return (
     <div className="flex flex-wrap gap-3 items-start justify-center" data-testid={`${testId}-external`}>
       <div className="bg-white rounded-xl p-2.5 shrink-0" data-testid={`${testId}-qr`}>
-        <QRCodeSVG value={qrText(uri)} size={size} title="Payment QR code" bgColor="#ffffff" fgColor="#0b0f1a" level="L" className="block max-w-full h-auto" />
+        <QRCodeSVG value={qrText(uri)} size={size} title={label} bgColor="#ffffff" fgColor="#0b0f1a" level="L" className="block max-w-full h-auto" />
       </div>
       <div className="min-w-0 flex-[1_1_12rem] space-y-2">
         <code className="block break-all select-all bg-black/20 rounded-lg p-2 text-[10px] text-inherit opacity-80 font-mono max-h-20 overflow-y-auto" data-testid={testId}>{value}</code>

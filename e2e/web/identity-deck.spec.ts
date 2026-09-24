@@ -2,6 +2,7 @@ import type { Locator, Page } from "@playwright/test";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { expect, test, type Peer } from "../support/fixtures";
 import { addNostrIdentity, injectNostrSigner } from "../support/nostrSigner";
+import { swipe } from "../support/swipe";
 
 /**
  * The person's identities are a deck of ID cards, with the wallet's mechanics (deck/Deck.tsx): with a mouse a
@@ -152,10 +153,9 @@ test("on a phone the ID cards are a snapping track: a swipe chooses the card at 
   await chosen(page, nostr);
   await expect.poll(() => offCentre(page, nostr)).toBeLessThan(3);
 
-  // A finger flicks the track to the left: the blank card settles in the centre and becomes the chosen one.
-  const track = (await page.locator(".id-deck-track").boundingBox())!;
-  const cdp = await context.newCDPSession(page);
-  await cdp.send("Input.synthesizeScrollGesture", { x: track.x + track.width / 2, y: track.y + track.height / 2, xDistance: -Math.round(track.width * 0.6), yDistance: 0, gestureSourceType: "touch", speed: 1500 });
+  // A finger drags the track to the left, past half a card, and lets go: the blank card settles in the centre and
+  // becomes the chosen one.
+  await swipe(context, page.locator(".id-deck-track"), -0.6);
   await chosen(page, addCard(page));
   await expect.poll(() => offCentre(page, addCard(page))).toBeLessThan(3);
   await expect(page.getByTestId("identity-add-open")).toBeVisible();

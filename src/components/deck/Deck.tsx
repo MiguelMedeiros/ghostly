@@ -102,28 +102,39 @@ export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,
   return ()=>observer.disconnect();
  },[]);
 
- /** Only the track scrolls: the stack is absolutely placed and there is nothing to bring into view. */
+ /** Only the track scrolls: the stack is absolutely placed and there is nothing to bring into view. Says whether it moves. */
  const centre=useCallback((i:number,smooth:boolean)=>{
   const el=track.current,tab=tabs.current[i];
-  if(!el||!tab||el.scrollWidth<=el.clientWidth+1)return;
-  el.scrollTo({left:tab.offsetLeft-(el.clientWidth-tab.offsetWidth)/2,behavior:smooth&&!reducedMotion()?'smooth':'auto'});
+  if(!el||!tab||el.scrollWidth<=el.clientWidth+1)return false;
+  const left=Math.max(0,Math.min(el.scrollWidth-el.clientWidth,tab.offsetLeft-(el.clientWidth-tab.offsetWidth)/2));
+  const moves=Math.abs(el.scrollLeft-left)>=1;
+  el.scrollTo({left,behavior:smooth&&!reducedMotion()?'smooth':'auto'});
+  return moves;
  },[]);
+ /**
+  * Where the track is being taken, for a moment, and by whom. A card chosen from outside the deck (a proof just added,
+  * a panel's link to another card): a card added before the one at rest makes the browser snap back to that one, which
+  * is not the person choosing it, so the track is sent there again. A card the deck chose itself (an arrow, a key, a
+  * tap): the end of an earlier scroll, cut off by a quick second key, chooses nothing. Touching the track ends it.
+  */
+ const steer=useRef<{id:string;until:number;resnap:boolean}|null>(null);
  /** The card the deck itself last chose (a key, a click, a swipe, the pointer): any other change came from outside. */
  const own=useRef(chosen);
- const select=(i:number)=>{const id=cards[i]?.id;if(!id)return;own.current=id;if(id!==selected)onSelect(id);centre(i,true);};
+ const select=(i:number)=>{
+  const id=cards[i]?.id;if(!id)return;own.current=id;if(id!==selected)onSelect(id);
+  // Already at rest there: no scroll, so no end to wait for.
+  steer.current=centre(i,true)?{id,until:performance.now()+1000,resnap:false}:null;
+ };
  const choose=(i:number)=>{const card=cards[i];if(!card)return;select(i);if(onChoose&&!blocked?.(card))onChoose(card.id);};
  // The remembered card starts centred; a deck that turns into a track brings it to the centre too.
  useLayoutEffect(()=>{if(width>0)centre(active,false);},
   // eslint-disable-next-line react-hooks/exhaustive-deps
   [mode,width>0]);
- // A card chosen from outside the deck (a proof just added, a panel's link to another card) comes to the centre too,
- // and the track is steered there for a moment: a card added before the one at rest makes the browser snap back to
- // that one, which is not the person choosing it. Touching the track ends the steering.
- const steer=useRef<{id:string;until:number}|null>(null);
+ // A card chosen from outside the deck comes to the centre too, and the track is steered there (`steer`).
  useLayoutEffect(()=>{
   if(!chosen||own.current===chosen)return;
   own.current=chosen;
-  steer.current={id:chosen,until:performance.now()+1000};
+  steer.current={id:chosen,until:performance.now()+1000,resnap:true};
   centre(active,true);
  },[chosen,active,centre]);
 
@@ -138,7 +149,7 @@ export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,
    const steering=steer.current;
    if(steering&&performance.now()<steering.until){
     const want=latest.current.ids.indexOf(steering.id);
-    if(want>=0&&best!==want){centre(want,true);return;}
+    if(want>=0&&best!==want){if(steering.resnap)centre(want,true);return;}
    }
    steer.current=null;
    const id=latest.current.ids[best];
