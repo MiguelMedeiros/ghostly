@@ -1,0 +1,30 @@
+/* A chosen card turned over (Flip.tsx): the chat's payment picker and its identity picker. Both faces sit in the same
+   place; the card grows from a card's height to what its back holds as it turns. */
+.deck-flip{--flip-ease:cubic-bezier(.22,1,.36,1);position:relative;perspective:1200px;transition:height .52s var(--flip-ease)}
+.deck-flip-card{position:absolute;inset:0;transform-style:preserve-3d;transition:transform .52s var(--flip-ease)}
+.deck-flip[data-flipped=true] .deck-flip-card{transform:rotateY(180deg)}
+.deck-flip-front,.deck-flip-back{position:absolute;top:0;left:0;width:100%;-webkit-backface-visibility:hidden;backface-visibility:hidden}
+.deck-flip-front{height:var(--card-h)}
+.deck-flip-back{transform:rotateY(180deg)}
+/* Once turned, the front is out of the way of clicks and of the accessibility tree's idea of what shows. */
+.deck-flip[data-flipped=true] .deck-flip-front{visibility:hidden;transition:visibility 0s .26s}
+.deck-flip[data-flipped=false] .deck-flip-back{visibility:hidden;transition:visibility 0s .26s}
+
+/* The way back to the deck, on a turned card's back (and a step back before the deck, in the payment picker's head). */
+.deck-flip-turn{display:flex;align-items:center;gap:5px;flex:none;padding:5px 9px;border-radius:999px;border:1px solid rgba(var(--card-rgb,36,211,194),.45);background:rgba(0,0,0,.25);color:rgb(var(--card-rgb,36,211,194));font-size:11px;font-weight:600;cursor:pointer}
+.deck-flip-turn:hover{background:rgba(var(--card-rgb,36,211,194),.14)}
+.deck-flip-turn:focus-visible{outline:2px solid #fff;outline-offset:2px}
+
+/* Reduced motion: no turn, the faces cross-fade where they are (Flip.tsx's FADE_MS) and the height changes at once.
+   index.css makes every transition instant then, so the fade keeps its own by importance. The face going away fades
+   out, then hides; the one coming shows at once and fades in. */
+@media(prefers-reduced-motion:reduce){
+ .deck-flip,.deck-flip .deck-flip-card{transition:none!important;transform:none!important}
+ .deck-flip .deck-flip-back{transform:none}
+ .deck-flip[data-flipped=true] .deck-flip-front,.deck-flip[data-flipped=false] .deck-flip-back{opacity:0;transition:opacity .2s ease,visibility 0s .2s!important}
+ .deck-flip[data-flipped=true] .deck-flip-back,.deck-flip[data-flipped=false] .deck-flip-front{opacity:1;transition:opacity .2s ease!important}
+}
+:root[data-reduce-motion=true] .deck-flip,:root[data-reduce-motion=true] .deck-flip .deck-flip-card{transition:none!important;transform:none!important}
+:root[data-reduce-motion=true] .deck-flip .deck-flip-back{transform:none}
+:root[data-reduce-motion=true] .deck-flip[data-flipped=true] .deck-flip-front,:root[data-reduce-motion=true] .deck-flip[data-flipped=false] .deck-flip-back{opacity:0;transition:opacity .2s ease,visibility 0s .2s!important}
+:root[data-reduce-motion=true] .deck-flip[data-flipped=true] .deck-flip-back,:root[data-reduce-motion=true] .deck-flip[data-flipped=false] .deck-flip-front{opacity:1;transition:opacity .2s ease!important}

@@ -1,7 +1,30 @@
 /* The chat's identity picker (ComposerIdentities.tsx): the ID cards' deck in the composer's sheet (ComposerSheet.tsx),
-   and under it the chosen card's panel. The panel takes the chosen card's ink from the sheet, which wears it. */
-.composer-identity-panel{display:grid;gap:10px;min-width:0}
-.composer-identity-sees{display:grid;gap:3px;min-width:0;padding:9px 11px;border-radius:12px;border:1px solid rgba(var(--card-rgb,36,211,194),.3);background:rgba(var(--card-rgb,36,211,194),.06);transition:border-color .4s,background-color .4s}
-.composer-identity-sees-label{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:rgb(var(--card-rgb,36,211,194))}
-.composer-identity-sees-value{display:flex;align-items:center;gap:8px;min-width:0;font-size:13px;color:var(--theme-text-secondary)}
-.composer-identity-sees-meta{font-size:11px;color:var(--theme-text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+   then the chosen card turned over (deck/Flip.tsx). Its back is an ID card's back, in the card's ink (--card-rgb, which
+   the sheet wears): a band, what the contact sees, where it stands in this chat, the action, and the machine line. */
+.id-card-back{position:relative;display:grid;overflow:hidden;border-radius:16px;color:#fff;border:1px solid rgba(var(--card-rgb,36,211,194),.4);
+ background:
+  radial-gradient(120% 80% at 0% 100%,rgba(var(--card-rgb,36,211,194),.16),transparent 60%),
+  repeating-radial-gradient(circle at -15% 120%,transparent 0 9px,rgba(var(--card-rgb,36,211,194),.06) 9px 10px),
+  linear-gradient(160deg,color-mix(in srgb,rgb(var(--card-rgb,36,211,194)) 18%,#101522),#0b0f19 70%);
+ box-shadow:0 24px 50px -28px rgba(0,0,0,.9)}
+.id-card-back-band{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0;padding:7px 10px 7px 14px;
+ background:linear-gradient(90deg,rgba(var(--card-rgb,36,211,194),.34),rgba(var(--card-rgb,36,211,194),.12));border-bottom:1px solid rgba(var(--card-rgb,36,211,194),.3)}
+.id-card-back-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.88)}
+.id-card-back-body{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;padding:12px 14px 6px}
+.id-card-back-sees{display:flex;align-items:center;gap:10px;min-width:0}
+.id-card-back-who{display:grid;min-width:0}
+.id-card-back-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;font-weight:700;line-height:1.2}
+.id-card-back-subject{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;letter-spacing:.02em;color:rgb(var(--card-rgb,36,211,194))}
+.id-card-back-meta{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:rgba(255,255,255,.62)}
+.id-card-back-state{margin:0;font-size:12px;line-height:1.35;color:rgba(255,255,255,.72)}
+.id-card-back-note{margin:-4px 0 0;font-size:11px;line-height:1.35;color:rgba(255,255,255,.55)}
+/* Done: in the action's place, in the card's ink, until the card turns face up again. */
+.id-card-back-done{display:flex;align-items:center;justify-content:center;gap:8px;margin:0;padding:10px 12px;border-radius:12px;font-size:14px;font-weight:700;
+ color:rgb(var(--card-rgb,36,211,194));background:rgba(var(--card-rgb,36,211,194),.12);box-shadow:inset 0 0 0 1px rgba(var(--card-rgb,36,211,194),.45)}
+.id-card-back-mrz{padding:0 14px 10px}
+.id-card-back .composer-sheet-action:focus-visible{outline-color:#fff}
+
+/* Manage identities: a quiet link under the action, to the Identities page. */
+.composer-identities-manage{justify-self:center;min-height:32px;padding:0 8px;border:0;border-radius:6px;background:none;font-size:12px;color:var(--theme-text-muted);cursor:pointer}
+.composer-identities-manage:hover{color:var(--theme-text-primary);text-decoration:underline}
+.composer-identities-manage:focus-visible{outline:2px solid var(--theme-accent,#00c49a);outline-offset:1px}
