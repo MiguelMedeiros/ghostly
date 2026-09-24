@@ -48,6 +48,11 @@ export async function createProfileBackup(passphrase: string, id?: string, lockP
   const peer = await snapshotDatabase(active ? databaseName() : `ghostly_${ns}`);
   const ark: Record<string, ArkDatabaseSnapshot> = {};
   const settingsStore = peer?.stores.find((s) => s.name === "settings");
+  // The peer's copy of the storage credentials (for held messages, WISP 4xx) stays out too, like the page's.
+  for (const [i, key] of (settingsStore?.keys ?? []).entries()) {
+    const value = settingsStore!.values[i] as Record<string, unknown> | null;
+    if (key === "settings" && value && typeof value === "object" && "holdStorage" in value) { const { holdStorage: _hold, ...rest } = value; settingsStore!.values[i] = rest; }
+  }
   for (const [i, key] of (settingsStore?.keys ?? []).entries()) {
     if (!isArkRecord(key)) continue;
     const walletId = (settingsStore!.values[i] as { config?: { walletId?: string } })?.config?.walletId;

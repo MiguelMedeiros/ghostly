@@ -76,7 +76,7 @@ describe("held bundles", () => {
 
   it("publishes a pointer that fits a DHT packet, reads it back only from the contact, and refuses forgeries", () => {
     const { alice, bob, link } = pairKeys();
-    const pointer: HoldPointer = { rev: 7, issued: Date.now(), expires: Date.now() + HOLD_LIMITS.ttlMs, top: 12, ack: 3, count: 2, bytes: 4096,
+    const pointer: HoldPointer = { rev: 7, issued: Date.now(), expires: Date.now() + HOLD_LIMITS.ttlMs, top: 12, ack: 3, count: 2, bytes: 4096, refused: [2, 5],
       manifestUrl: `https://s3.eu-central-1.amazonaws.com/some-bucket/ghostly/abcdefghijklmnop/hold/${newHoldMailbox()}/manifest.ghostly-held?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20260923%2Feu-central-1%2Fs3%2Faws4_request&X-Amz-Date=20260923T120000Z&X-Amz-Expires=604800&X-Amz-SignedHeaders=host&X-Amz-Signature=${"f".repeat(64)}` };
     const records = alice.pointerRecords(pointer);
     const wire = createRelayPayload(alice.identity, records);

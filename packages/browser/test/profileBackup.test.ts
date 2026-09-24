@@ -44,11 +44,13 @@ it("backs up a whole profile and restores it as a new one, wallets relocated and
     s[STORES.messages].put({ linkId: "link1", id: "m1", text: "hello" });
     s[STORES.files].put({ id: "link1-in-f", linkId: "link1", blob: new Blob([new Uint8Array([1, 2, 3, 250])], { type: "application/octet-stream" }), createdAt: 1 });
     s[STORES.settings].put({ config: { walletId: "wallet-old", network: "bitcoin" }, seed: { version: 1 }, deviceKey: "dk" }, "arkWallet");
+    s[STORES.settings].put({ nick: "Miguel", holdStorage: { s3: { endpoint: "https://s3.example", accessKeyId: "AKIA", secretAccessKey: "peer-side-secret" }, space: "abcdefghijklmnop" } }, "settings");
     s[STORES.intents].put({ review: { id: "i1", state: "submitted", method: "arkade" }, prepared: {} });
   });
 
   const bundle = await createProfileBackup("a long backup passphrase");
   expect(bundle).not.toContain("top-secret");
+  expect(bundle, "the peer's copy of the storage credentials stays out too").not.toContain("peer-side-secret");
   expect(bundle).not.toContain("hello");
   await expect(restoreProfileBackup(bundle, "not the passphrase")).rejects.toThrow("Wrong passphrase");
 

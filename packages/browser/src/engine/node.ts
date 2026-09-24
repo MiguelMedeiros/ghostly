@@ -368,6 +368,8 @@ export class GhostlyNode implements EngineImplementation {
     },
     receivePaymentRequest: (linkId, request) => this.desk.onPaymentRequest(linkId, request, true),
     changed: () => this.emitState(),
+    // Tests shorten the lifetime to watch an item expire; nothing else reads this, and it never lengthens it.
+    ttlMs: () => { try { const raw = typeof localStorage !== "undefined" ? localStorage.getItem("ghostly-test-hold-ttl") : null; const ms = raw ? Number(raw) : NaN; return Number.isFinite(ms) && ms > 0 ? ms : undefined; } catch { return undefined; } },
   });
 
   /** Identity proofs: this profile's, and those shared in each paired chat (WISP 300). */

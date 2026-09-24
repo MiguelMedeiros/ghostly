@@ -53,7 +53,7 @@ interface Side {
   refuseFiles?: string;
 }
 
-export function setup(options: { aliceStorage?: boolean; bobStorage?: boolean; now?: () => number } = {}) {
+function setup(options: { aliceStorage?: boolean; bobStorage?: boolean; now?: () => number } = {}) {
   const link = createLink();
   const alice = createIdentity(), bob = createIdentity();
   const transport = relay();
@@ -96,12 +96,12 @@ describe("store-and-forward engine", () => {
     engines.push(a.engine, b.engine);
     a.messages.set("me_t1", { text: "first, while you were out", timestamp: 1000 });
     a.files.set("link-a-out-f1", { bytes: new Uint8Array(70_000).fill(7), name: "ghost.png", size: 70_000, mime: "image/png" });
-    a.requests.set("p1", { id: "p1", timestamp: 3000, amount: { value: "21", asset: "sat" }, memo: "coffee", endpoints: [["cashu", '{"mints":["https://mint.test"]}']] });
+    a.requests.set("p1-payment-req", { id: "p1-payment-req", timestamp: 3000, amount: { value: "21", asset: "sat" }, memo: "coffee", endpoints: [["cashu", '{"mints":["https://mint.test"]}']] });
     a.messages.set("me_2000", { file: { name: "ghost.png", size: 70_000, mime: "image/png" }, timestamp: 2000 });
-    a.messages.set("me_3000", { request: a.requests.get("p1"), timestamp: 3000 });
+    a.messages.set("me_3000", { request: a.requests.get("p1-payment-req"), timestamp: 3000 });
     await a.engine.hold("link-a", { kind: "text", id: "wire-text-1", messageId: "me_t1", bytes: 25, timestamp: 1000 });
     await a.engine.hold("link-a", { kind: "file", id: "wire-file-1", messageId: "me_2000", ref: "link-a-out-f1", bytes: 70_000, timestamp: 2000 });
-    await a.engine.hold("link-a", { kind: "pay-req", id: "p1", messageId: "me_3000", ref: "p1", bytes: 1024, timestamp: 3000 });
+    await a.engine.hold("link-a", { kind: "pay-req", id: "p1-payment-req", messageId: "me_3000", ref: "p1-payment-req", bytes: 1024, timestamp: 3000 });
     expect([...a.delivery.values()].map((d) => d.state)).toEqual(["held", "held", "held"]);
     expect(a.stored.hold!.outSeq).toBe(3);
     expect(a.stored.hold!.outbox.map((e) => e.state)).toEqual(["held", "held", "held"]);
@@ -120,7 +120,7 @@ describe("store-and-forward engine", () => {
     expect(b.received.map((r) => r.kind)).toEqual(["text", "file", "pay-req"]);
     expect(b.received[0]).toMatchObject({ id: "wire-text-1", text: "first, while you were out", timestamp: 1000 });
     expect(b.received[1].bytes).toEqual(new Uint8Array(70_000).fill(7));
-    expect(b.received[2].request).toMatchObject({ id: "p1", amount: { value: "21", asset: "sat" }, memo: "coffee" });
+    expect(b.received[2].request).toMatchObject({ id: "p1-payment-req", amount: { value: "21", asset: "sat" }, memo: "coffee" });
     expect(b.stored.hold!.inSeq).toBe(3);
     expect(transport.packets.size).toBe(2);
     // Alice reads Bob's pointer: delivered, and her bucket is empty again.
@@ -141,7 +141,7 @@ describe("store-and-forward engine", () => {
     const { a, b, buckets } = setup();
     engines.push(a.engine, b.engine);
     a.messages.set("m1", { text: "one", timestamp: 1 }); a.messages.set("m2", { text: "two", timestamp: 2 }); a.messages.set("m3", { text: "three", timestamp: 3 });
-    for (const [i, id] of ["m1", "m2", "m3"].entries()) await a.engine.hold("link-a", { kind: "text", id: `wire-${id}`, messageId: id, bytes: 5, timestamp: i + 1 });
+    for (const [i, id] of ["m1", "m2", "m3"].entries()) await a.engine.hold("link-a", { kind: "text", id: `wire-${id}-item`, messageId: id, bytes: 5, timestamp: i + 1 });
     const second = a.stored.hold!.outbox[1].name;
     buckets.alice.store.tamper(second);
     b.engine.start();
@@ -149,14 +149,18 @@ describe("store-and-forward engine", () => {
     expect(b.stored.hold!.refused).toBe(1);
     expect(b.stored.hold!.inSeq).toBe(3);
     expect(b.engine.view("link-b")?.error).toMatch(/Refused a held item/);
-    // Alice learns Bob's acknowledgement covers all three: the tampered one is gone from her bucket too.
+    // Alice learns Bob's word on all three: two delivered, the tampered one refused, and all gone from her bucket.
     a.engine.start();
     await vi.waitFor(() => expect(a.stored.hold!.outbox).toEqual([]));
+    expect(a.delivery.get("m1")?.state).toBe("delivered");
+    expect(a.delivery.get("m2")).toMatchObject({ state: "failed", error: expect.stringContaining("refused") });
+    expect(a.delivery.get("m3")?.state).toBe("delivered");
+    expect(buckets.alice.store.objects.size).toBe(0);
     // Something Bob's app cannot keep (a file with no room) is refused and skipped the same way.
     a.messages.set("m4", { file: { name: "big", size: 3, mime: "a/b" }, timestamp: 4 });
     a.files.set("f4", { bytes: new Uint8Array(3), name: "big", size: 3, mime: "a/b" });
     b.refuseFiles = "no room for more files";
-    await a.engine.hold("link-a", { kind: "file", id: "wire-m4", messageId: "m4", ref: "f4", bytes: 3, timestamp: 4 });
+    await a.engine.hold("link-a", { kind: "file", id: "wire-m4-item", messageId: "m4", ref: "f4", bytes: 3, timestamp: 4 });
     b.engine.wake("link-b");
     await vi.waitFor(() => expect(b.stored.hold!.inSeq).toBe(4));
     expect(b.stored.hold!.refused).toBe(2);
@@ -168,7 +172,7 @@ describe("store-and-forward engine", () => {
     const put = buckets.alice.store.put;
     buckets.alice.store.put = async () => { throw new Error("S3 refused (503 SlowDown)"); };
     a.messages.set("m1", { text: "one", timestamp: 1 });
-    await expect(a.engine.hold("link-a", { kind: "text", id: "wire-m1", messageId: "m1", bytes: 3, timestamp: 1 })).rejects.toThrow(/Could not store/);
+    await expect(a.engine.hold("link-a", { kind: "text", id: "wire-m1-item", messageId: "m1", bytes: 3, timestamp: 1 })).rejects.toThrow(/Could not store/);
     expect(a.delivery.get("m1")).toMatchObject({ state: "failed", error: expect.stringContaining("SlowDown") });
     expect(a.stored.hold!.outbox[0]).toMatchObject({ seq: 1, state: "failed" });
     buckets.alice.store.put = put;
@@ -191,13 +195,13 @@ describe("store-and-forward engine", () => {
     const { a, b, buckets } = setup({ now: () => now });
     engines.push(a.engine, b.engine);
     a.messages.set("m1", { text: "stale", timestamp: now });
-    await a.engine.hold("link-a", { kind: "text", id: "wire-m1", messageId: "m1", bytes: 5, timestamp: now });
+    await a.engine.hold("link-a", { kind: "text", id: "wire-m1-item", messageId: "m1", bytes: 5, timestamp: now });
     expect(buckets.alice.store.objects.size).toBe(2);
     vi.useFakeTimers({ now });
     a.engine.start();
     now += HOLD_LIMITS.ttlMs + 1000;
     await vi.advanceTimersByTimeAsync(31_000);
-    expect(a.delivery.get("m1")).toMatchObject({ state: "failed", error: expect.stringContaining("seven days") });
+    expect(a.delivery.get("m1")).toMatchObject({ state: "failed", error: expect.stringContaining("whole lifetime") });
     expect(a.stored.hold!.outbox).toEqual([]);
     expect(buckets.alice.store.objects.size).toBe(0);
     vi.useRealTimers();
@@ -211,7 +215,7 @@ describe("store-and-forward engine", () => {
     expect(a.engine.canHold("link-a")).toBe(false);
     expect(a.engine.view("link-a")).toMatchObject({ storage: false, canHold: false, enabled: true, peerAllows: true });
     a.messages.set("m1", { text: "one", timestamp: 1 });
-    await expect(a.engine.hold("link-a", { kind: "text", id: "wire-m1", messageId: "m1", bytes: 3, timestamp: 1 })).rejects.toThrow(/S3 storage/);
+    await expect(a.engine.hold("link-a", { kind: "text", id: "wire-m1-item", messageId: "m1", bytes: 3, timestamp: 1 })).rejects.toThrow(/S3 storage/);
     const { a: c } = setup();
     await c.engine.peerSaid("link-a", { peerAllows: false });
     expect(c.engine.canHold("link-a")).toBe(false);

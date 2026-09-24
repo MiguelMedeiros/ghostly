@@ -186,6 +186,10 @@ Ghostly does not move money. It carries payment requests, payments that fit in a
 - A payee accepts ecash only from mints it chose. Anything else is refused with `pay-res`, and the payer falls back to the Lightning endpoint, which works across mints.
 - A repeated `pay` id is answered with the earlier result and redeemed once.
 
+### 6.3.1 Held items (`hold/1`, experimental)
+
+When both sides of a paired chat turned **Hold messages** on, what one sends while the other's session is closed is not lost and not squeezed into a DHT record: it is sealed (signed with the sender's participation key, encrypted to a key derived from both participation keys and the invite secret), put in the sender's **own** S3-compatible storage under `<space>/hold/<mailbox>/`, listed in a sealed manifest with presigned read addresses, and pointed at from a small signed, encrypted `_hold` record under a per-link Pkarr key. The contact reads the pointer when it is back, fetches and checks each item in sequence order, and acknowledges on its own pointer; the sender then marks the messages received and deletes the objects. Text (16 KiB), files (8 MiB) and Cashu/Lightning payment requests only; never ecash. At most 64 items and 64 MiB per contact, seven days each; an item is readable until seven days after the sender was last online. On the open session each side says `{ "t": "paired-hold", "on": <bool>, "top": <n> }`; older apps drop it. Exact formats, refusals and bounds: [WISP 4xx](wisps/4xx-store-and-forward.md).
+
 ### 6.4 `ghostly-http/1`
 
 ```

@@ -31,6 +31,8 @@ An adapter also has a **description** for people (for example "S3 · my-bucket/g
 
 ## Storage format
 
+Two folders share a space. `<space>/backups/` holds bundles ([05](05-backups.md)); `<space>/hold/<mailbox>/` holds items sealed for an away contact ([4xx store-and-forward](4xx-store-and-forward.md)), media type `application/vnd.ghostly.held`, one random 22-character mailbox per contact. Holding needs one more operation, `presign(name, seconds)`: an address that reads one object with no credential for at most seven days; a place that cannot hand one out (a local file) cannot hold.
+
 - Object name: `<space>/backups/<created>-<random>.ghostly-backup`, where `<created>` is a UTC timestamp `YYYYMMDDTHHMMSSZ`, `<random>` eight base32 characters, and `<space>` a random identifier chosen once per profile. Names never contain a profile name, nickname, key or device detail.
 - An object is exactly one bundle envelope ([05](05-backups.md)), media type `application/vnd.ghostly.backup+json`.
 - Listing a space in name order lists its backups oldest first. Restoring picks by name; the date shown comes from the name.

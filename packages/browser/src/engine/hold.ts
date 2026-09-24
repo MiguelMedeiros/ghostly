@@ -25,6 +25,8 @@ export interface HoldHost {
   changed(): void;
   fetch?: typeof fetch;
   now?: () => number;
+  /** How long an item is held, when a test shortens it; never longer than the profile's seven days. */
+  ttlMs?: () => number | undefined;
 }
 
 /** How often the engine looks at its held items: expiry, renewals, the contact's pointer. */
@@ -59,6 +61,7 @@ export class HoldEngine {
   constructor(private readonly host: HoldHost) {}
 
   private now(): number { return this.host.now?.() ?? Date.now(); }
+  private ttl(): number { const custom = this.host.ttlMs?.(); return custom && custom > 0 ? Math.min(custom, HOLD_LIMITS.ttlMs) : HOLD_LIMITS.ttlMs; }
 
   start(): void {
     if (this.running) return;
@@ -175,7 +178,7 @@ export class HoldEngine {
       const mailbox = hold.mailbox ?? newHoldMailbox();
       const seq = hold.outSeq + 1;
       const now = this.now();
-      const entry: HeldEntry = { seq, id: item.id, messageId: item.messageId, kind: item.kind, ref: item.ref, name: heldName(storage.space, mailbox, seq), bytes: item.bytes, ts: item.timestamp, expires: now + HOLD_LIMITS.ttlMs, state: "queued" };
+      const entry: HeldEntry = { seq, id: item.id, messageId: item.messageId, kind: item.kind, ref: item.ref, name: heldName(storage.space, mailbox, seq), bytes: item.bytes, ts: item.timestamp, expires: now + this.ttl(), state: "queued" };
       await this.save(linkId, { ...hold, mailbox, outSeq: seq, outbox: [...hold.outbox, entry] });
       await this.upload(linkId, entry);
     });
@@ -275,9 +278,9 @@ export class HoldEngine {
       await storage.store.remove(manifestName(storage.space, hold.mailbox)).catch(() => {});
       hold = await this.save(linkId, { ...this.state(linkId), manifestSignedAt: undefined });
     }
-    const pointer: HoldPointer = { rev: hold.pointerRev + 1, issued: now, expires, manifestUrl, top: hold.outSeq, ack: hold.inSeq, count: held.length, bytes: held.reduce((sum, e) => sum + e.bytes, 0) };
+    const pointer: HoldPointer = { rev: hold.pointerRev + 1, issued: now, expires, manifestUrl, top: hold.outSeq, ack: hold.inSeq, count: held.length, bytes: held.reduce((sum, e) => sum + e.bytes, 0), refused: hold.refusedSeqs ?? [] };
     const records = keys.pointerRecords(pointer, now);
-    hold = await this.save(linkId, { ...this.state(linkId), pointerRev: pointer.rev });
+    await this.save(linkId, { ...this.state(linkId), pointerRev: pointer.rev });
     await this.host.transport.publish(keys.identity, records);
     this.lastPublish.set(linkId, now);
   }
@@ -307,15 +310,15 @@ export class HoldEngine {
       hold = await this.save(linkId, { ...hold, outbox: hold.outbox.filter((e) => !expired.includes(e)) });
       for (const entry of expired) {
         await this.host.storage()?.store.remove(entry.name).catch(() => {});
-        await this.host.delivery(linkId, entry.messageId, "failed", "Held for seven days without being picked up. Retry to hold it again.");
+        await this.host.delivery(linkId, entry.messageId, "failed", "Held for its whole lifetime without being picked up. Retry to hold it again.");
       }
       this.host.changed();
     }
     for (const entry of hold.outbox.filter((e) => e.state === "queued")) await this.upload(linkId, entry).catch(() => {});
     hold = this.state(linkId);
     const held = hold.outbox.some((e) => e.state === "held");
-    if (held && this.host.storage() && (expired.length || (hold.manifestSignedAt ?? 0) + RENEW_AFTER_MS <= now)) await this.publish(linkId, true).catch((error) => this.errors.set(linkId, String(error instanceof Error ? error.message : error)));
-    else if ((held || expired.length) && (this.lastPublish.get(linkId) ?? 0) + REPUBLISH_MS <= now) await this.publish(linkId, false).catch(() => {});
+    if (this.host.storage() && (expired.length || (held && (hold.manifestSignedAt ?? 0) + RENEW_AFTER_MS <= now))) await this.publish(linkId, true).catch((error) => this.errors.set(linkId, String(error instanceof Error ? error.message : error)));
+    else if (held && (this.lastPublish.get(linkId) ?? 0) + REPUBLISH_MS <= now) await this.publish(linkId, false).catch(() => {});
   }
 
   /**
@@ -336,12 +339,13 @@ export class HoldEngine {
     let hold = this.state(linkId);
     if (pointer.rev < hold.peerPointerRev) return;
     if (pointer.rev !== hold.peerPointerRev) hold = await this.save(linkId, { ...hold, peerPointerRev: pointer.rev });
-    // What the contact received is delivered here, and leaves storage.
-    const delivered = hold.outbox.filter((e) => e.state !== "failed" && e.seq <= pointer.ack);
-    if (delivered.length) {
-      hold = await this.save(linkId, { ...hold, peerAck: pointer.ack, outbox: hold.outbox.filter((e) => !delivered.includes(e)) });
-      for (const entry of delivered) {
-        await this.host.delivery(linkId, entry.messageId, "delivered");
+    // What the contact received is delivered here, and leaves storage; what it refused is failed here, with the reason.
+    const settled = hold.outbox.filter((e) => e.state !== "failed" && e.seq <= pointer.ack);
+    if (settled.length) {
+      hold = await this.save(linkId, { ...hold, peerAck: pointer.ack, outbox: hold.outbox.filter((e) => !settled.includes(e)) });
+      for (const entry of settled) {
+        if (pointer.refused.includes(entry.seq)) await this.host.delivery(linkId, entry.messageId, "failed", "Your contact's app refused this item: it could not be verified as yours, or was too large for it. Retry to hold it again.");
+        else await this.host.delivery(linkId, entry.messageId, "delivered");
         await this.host.storage()?.store.remove(entry.name).catch(() => {});
       }
       await this.publish(linkId, true).catch(() => {});
@@ -349,14 +353,14 @@ export class HoldEngine {
     } else if (pointer.ack !== hold.peerAck) hold = await this.save(linkId, { ...hold, peerAck: pointer.ack });
     if (pointer.top <= hold.inSeq) { this.expecting.delete(linkId); return; }
     if (!pointer.manifestUrl || pointer.expires <= now) { this.errors.set(linkId, "The contact holds items for you, but their address expired. They are handed out again when the contact is next online."); this.host.changed(); return; }
-    let entries, mailbox = "";
+    let entries: ReturnType<typeof readManifest>, mailbox: string;
     try {
       const manifest = keys.open(await this.fetchBytes(pointer.manifestUrl, HOLD_LIMITS.maxManifestBytes), { maxBytes: HOLD_LIMITS.maxManifestBytes, now });
       if (manifest.header.kind !== "manifest") throw new HoldRefusedError("format", "Not a manifest");
       mailbox = manifest.header.mailbox;
       entries = readManifest(manifest.header.meta).filter(([seq]) => seq > this.state(linkId).inSeq);
     } catch (error) {
-      if (error instanceof HoldRefusedError) { hold = await this.save(linkId, { ...this.state(linkId), refused: this.state(linkId).refused + 1 }); this.errors.set(linkId, `Refused what the contact's storage offered: ${error.message}`); }
+      if (error instanceof HoldRefusedError) { await this.save(linkId, { ...this.state(linkId), refused: this.state(linkId).refused + 1 }); this.errors.set(linkId, `Refused what the contact's storage offered: ${error.message}`); }
       else this.errors.set(linkId, `Could not pick up held items: ${error instanceof Error ? error.message : String(error)}`);
       this.host.changed();
       return;
@@ -364,10 +368,10 @@ export class HoldEngine {
     let changed = false, stop = false;
     for (const [seq, id, kind, bytes, url, expires] of entries) {
       if (stop) break;
-      if (expires <= now) { hold = await this.save(linkId, { ...this.state(linkId), inSeq: seq }); changed = true; continue; }
+      if (expires <= now) { await this.save(linkId, { ...this.state(linkId), inSeq: seq }); changed = true; continue; }
       try {
         // Every item must come from the mailbox its manifest names: one folder, one contact, one direction.
-        const { header, body } = keys.open(await this.fetchBytes(url, Math.min(bytes, HOLD_LIMITS.maxBundleBytes)), { maxBytes: HOLD_LIMITS.maxBundleBytes, now, mailbox: mailbox || undefined });
+        const { header, body } = keys.open(await this.fetchBytes(url, Math.min(bytes, HOLD_LIMITS.maxBundleBytes)), { maxBytes: HOLD_LIMITS.maxBundleBytes, now, mailbox });
         if (header.seq !== seq || header.id !== id || header.kind !== kind) throw new HoldRefusedError("format", "The item does not match the manifest");
         // Stored before the sequence advances: a crash in between stores it again, which the id dedups.
         if (header.kind === "text") await this.host.receiveText(linkId, { id: header.id, text: utf8Decode(body), timestamp: header.ts });
@@ -386,7 +390,7 @@ export class HoldEngine {
         changed = true;
       } catch (error) {
         if (error instanceof HoldRefusedError) {
-          hold = await this.save(linkId, { ...this.state(linkId), inSeq: seq, refused: this.state(linkId).refused + 1 });
+          await this.save(linkId, { ...this.state(linkId), inSeq: seq, refused: this.state(linkId).refused + 1, refusedSeqs: [...(this.state(linkId).refusedSeqs ?? []), seq].slice(-32) });
           this.errors.set(linkId, `Refused a held item from the contact: ${error.message}`);
           changed = true;
         } else {

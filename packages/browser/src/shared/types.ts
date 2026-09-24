@@ -159,6 +159,8 @@ export interface HoldState {
   outbox: HeldEntry[];
   /** Items from the contact refused on the way in (changed, oversized, not for this chat). */
   refused: number;
+  /** Their sequences, the last 32, told to the contact on this device's pointer. */
+  refusedSeqs?: number[];
   /** Ways of paying the contact allowed at the last session, for requests held while it is away. */
   peerPaymentMethods?: PaymentMethodName[];
 }

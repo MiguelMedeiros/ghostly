@@ -54,6 +54,7 @@ The implementation column is independent of document status. Existing features c
 | [401](401-paired-chat.md) | Paired Chat | Draft | Current paired WebRTC; native Iroh/HyperDHT where supported. |
 | [402](402-legacy-chat.md) | Legacy Timestamp Chat | Draft | Existing legacy 1:1 clients. |
 | [403](403-dht-text.md) | Bounded DHT Text | Draft | Modern DHT-only and explicitly permitted fallback paths; native DHT versus browser relays differ. |
+| [Store-and-forward · 4xx planned](4xx-store-and-forward.md) | Store-and-Forward for an Away Contact | Draft | Experimental `hold/1`: sealed items in the sender's own S3 storage, a signed DHT pointer; text, pictures and payment requests |
 | [500](500-files.md) | File Transfer | Draft | Existing 1:1 transfer |
 | [501](501-paired-files.md) | Paired Files | Draft | Negotiated paired data links; WebRTC and supported native adapters. |
 | [502](502-legacy-files.md) | Legacy File Frames | Draft | Legacy live data links; both peers online. |

@@ -76,6 +76,8 @@ export interface HoldPointer {
   ack: number;
   count: number;
   bytes: number;
+  /** Sequences of the reader's items this publisher refused (changed, oversized, not for it): at most the last 32. */
+  refused: number[];
 }
 
 /** Why a bundle, manifest or pointer was refused. Never a reason to trust it a little. */
@@ -161,13 +163,14 @@ export class HoldKeys {
     if (from !== this.to || to !== this.from || recipient !== this.me) throw new HoldRefusedError("not-for-me", "The held item is for another chat");
     if (author !== this.peer) throw new HoldRefusedError("author", "The held item was not signed by this contact");
     if (expect.mailbox && mailbox !== expect.mailbox) throw new HoldRefusedError("not-for-me", "The held item is from another mailbox");
-    let valid = false;
+    let valid: boolean;
     try { valid = verify(fromBase64Url(signature), utf8Encode(JSON.stringify(["ghostly-hold-bundle", fields])), publicKeyFromZ32(author)); } catch { valid = false; }
     if (!valid) throw new HoldRefusedError("signature", "The held item's signature does not check out");
     const body = plain.subarray(4 + headerLength);
     if (bodyDigest(body) !== digest) throw new HoldRefusedError("digest", "The held item's content does not match its header");
     if ((ts as number) > now + HOLD_LIMITS.clockSkewMs) throw new HoldRefusedError("future", "The held item is dated in the future");
-    if ((expires as number) <= (ts as number) || (expires as number) - (ts as number) > HOLD_LIMITS.ttlMs + HOLD_LIMITS.clockSkewMs) throw new HoldRefusedError("limits", "The held item's lifetime is out of bounds");
+    // The item may be older than its upload (a retry, a message written offline); its expiry may not reach past one lifetime from now.
+    if ((expires as number) <= (ts as number) || (expires as number) > now + HOLD_LIMITS.ttlMs + HOLD_LIMITS.clockSkewMs) throw new HoldRefusedError("limits", "The held item's lifetime is out of bounds");
     const header: HoldHeader = { v: 1, from, to, author, recipient, mailbox, seq: seq as number, id, ts: ts as number, kind: kind as HoldKind, meta, digest, expires: expires as number };
     checkKind(header, body);
     return { header, body };
@@ -175,7 +178,7 @@ export class HoldKeys {
 
   /** My pointer, as records to publish under `identity`. Throws when it cannot fit a packet. */
   pointerRecords(pointer: HoldPointer, now = Date.now()): GhostRecord[] {
-    const body = [VERSION, pointer.rev, pointer.issued, pointer.expires, pointer.manifestUrl, pointer.top, pointer.ack, pointer.count, pointer.bytes];
+    const body = [VERSION, pointer.rev, pointer.issued, pointer.expires, pointer.manifestUrl, pointer.top, pointer.ack, pointer.count, pointer.bytes, pointer.refused.slice(-32)];
     const signature = toBase64Url(sign(utf8Encode(JSON.stringify(["ghostly-hold-pointer", this.from, this.to, body])), this.seed));
     const ttl = Math.min(24 * 3600, Math.max(60, Math.ceil((pointer.expires - now) / 1000)));
     const records = [{ label: "_hold", value: encrypt(JSON.stringify([body, signature]), this.sealKey), ttl }];
@@ -192,15 +195,16 @@ export class HoldKeys {
     if (!plain) return null;
     let parsed: unknown;
     try { parsed = JSON.parse(plain); } catch { return null; }
-    if (!Array.isArray(parsed) || parsed.length !== 2 || !Array.isArray(parsed[0]) || parsed[0].length !== 9 || typeof parsed[1] !== "string" || !SIG.test(parsed[1])) return null;
+    if (!Array.isArray(parsed) || parsed.length !== 2 || !Array.isArray(parsed[0]) || (parsed[0].length !== 9 && parsed[0].length !== 10) || typeof parsed[1] !== "string" || !SIG.test(parsed[1])) return null;
     const [body, signature] = parsed as [unknown[], string];
-    const [v, rev, issued, expires, manifestUrl, top, ack, count, bytes] = body;
+    const [v, rev, issued, expires, manifestUrl, top, ack, count, bytes, refused = []] = body;
     if (v !== VERSION || ![rev, issued, expires, top, ack, count, bytes].every(n => Number.isSafeInteger(n) && (n as number) >= 0) ||
-      (manifestUrl !== null && (typeof manifestUrl !== "string" || manifestUrl.length > 2048)) || (issued as number) > now + HOLD_LIMITS.clockSkewMs) return null;
+      (manifestUrl !== null && (typeof manifestUrl !== "string" || manifestUrl.length > 2048)) || (issued as number) > now + HOLD_LIMITS.clockSkewMs ||
+      !Array.isArray(refused) || refused.length > 32 || !refused.every(n => Number.isSafeInteger(n) && (n as number) > 0)) return null;
     try {
       if (!verify(fromBase64Url(signature), utf8Encode(JSON.stringify(["ghostly-hold-pointer", this.to, this.from, body])), publicKeyFromZ32(this.peer))) return null;
     } catch { return null; }
-    return { rev: rev as number, issued: issued as number, expires: expires as number, manifestUrl: manifestUrl as string | null, top: top as number, ack: ack as number, count: count as number, bytes: bytes as number };
+    return { rev: rev as number, issued: issued as number, expires: expires as number, manifestUrl: manifestUrl as string | null, top: top as number, ack: ack as number, count: count as number, bytes: bytes as number, refused: refused as number[] };
   }
 }
 
