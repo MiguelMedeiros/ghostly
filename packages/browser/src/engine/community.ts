@@ -111,11 +111,15 @@ export class Communities {
   private readonly lastKnock = new Map<string, number>();
   constructor(private readonly host: GroupsHost, private readonly store: GroupStore, private readonly timings: CommunityTimings = COMMUNITY_TIMINGS, private readonly random: () => number = Math.random) {}
 
-  /** Application frames and pair payloads handed to the engine, one after the other. */
-  private deliveries: Promise<void> = Promise.resolve();
-  private deliver(task: () => Promise<void> | void): void { this.deliveries = this.deliveries.then(task).catch(() => {}); }
+  /** Application frames and pair payloads handed to the engine, one after the other per group. */
+  private readonly deliveries = new Map<string, Promise<void>>();
+  private deliver(groupId: string, task: () => Promise<void> | void): void {
+    const next = (this.deliveries.get(groupId) ?? Promise.resolve()).then(task).catch(() => {});
+    this.deliveries.set(groupId, next);
+    void next.then(() => { if (this.deliveries.get(groupId) === next) this.deliveries.delete(groupId); });
+  }
   /** Resolves once what was received so far has been handed on (tests). */
-  idle(): Promise<void> { return this.deliveries; }
+  async idle(): Promise<void> { await Promise.all([...this.deliveries.values()]); }
 
   /** The clock: the last tick's time (the engine ticks every second), so every decision reads one clock. */
   private time = 0;
@@ -707,8 +711,8 @@ export class Communities {
         this.lastMessageAt.set(id, Math.max(this.lastMessageAt.get(id) ?? 0, m.timestamp));
       },
       // Outside the session's queue, in order: what they carry (a payment) may send through the session again.
-      app: m => this.deliver(() => this.host.communityApp?.(id, m.sender, m.frame)),
-      pair: m => this.deliver(() => this.host.communityPair?.(id, m.sender, m.payload)),
+      app: m => this.deliver(id, () => this.host.communityApp?.(id, m.sender, m.frame)),
+      pair: m => this.deliver(id, () => this.host.communityPair?.(id, m.sender, m.payload)),
       changed: () => { void this.membershipChanged(id); },
       metaChanged: (by, picture) => {
         const name = by === session.myKey ? "You" : session.state.nicks[by] ?? `Member ${by.slice(0, 8)}`;
