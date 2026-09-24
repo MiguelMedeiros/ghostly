@@ -27,7 +27,15 @@
   --radius: 18px;
   --wrap: 1180px;
   --nav-h: 64px;
+  /* Motion tokens: mirror lib/motion.ts; rules in website/MOTION.md. */
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-in: cubic-bezier(0.55, 0, 1, 0.45);
+  --dur-xs: 0.18s;
+  --dur-sm: 0.32s;
+  --dur-md: 0.6s;
+  --dur-lg: 0.9s;
   /* One type voice at different volumes. Mono is for eyebrows, captions, chips and code only. */
   --t-display: clamp(56px, 9.5vw, 148px);
   --t-section: clamp(40px, 5.4vw, 72px);

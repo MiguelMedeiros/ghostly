@@ -91,7 +91,7 @@ const en: Timeline = {
       title: "Payments",
       items: {
         now: ["Cashu wallet", "Lightning through the mint"],
-        next: ["Ark via Arkade (experimental)", "USDT via Tether WDK (experimental)", "Testnet mode for every wallet", "Lightning sources: NWC · LND · Core Lightning · WebLN · Breez (regtest only)", "Ark via Bark (test networks)", "On-chain: BDK (test networks) · Bitcoin Core (desktop)"],
+        next: ["Ark via Arkade (experimental)", "USDT via Tether WDK (experimental)", "Testnet mode for every wallet", "Lightning sources: NWC · LND · Core Lightning · WebLN · Breez (regtest only)", "Ark via Bark (test networks)", "On-chain: BDK (test networks) · Bitcoin Core (desktop)", "Pay from any other wallet: QR, link, Lightning addresses (LNURL)"],
         planned: ["Mainnet for Bark, Breez and BDK", "Spark, Fedimint, Liquid and other rails"],
       },
     },
@@ -101,8 +101,8 @@ const en: Timeline = {
       title: "Profiles & backup",
       items: {
         now: ["App lock, themes, 8 languages"],
-        next: ["Local profiles", "Sealed backups to a file or S3"],
-        planned: ["Scheduled backups and retention", "More storage places", "Offline sync (store-and-forward)"],
+        next: ["Local profiles", "Sealed backups to a file or S3", "Messages held for an away contact, in your own S3 (store-and-forward)"],
+        planned: ["Scheduled backups and retention", "More storage places"],
       },
     },
     {
@@ -110,9 +110,9 @@ const en: Timeline = {
       color: "#f472b6",
       title: "Identity (optional)",
       items: {
-        next: ["Proofs made once, shared per chat: Nostr · domain · OpenPGP · SSH · Bitcoin address", "OpenID accounts (Google, Microsoft, Apple, GitLab, Twitch) — once clients are registered"],
+        next: ["Proofs made once, shared per chat: Nostr · domain · OpenPGP · SSH · Bitcoin address", "OpenID accounts (Google, Microsoft, Apple, GitLab, Twitch) — once clients are registered", "Nostr social layer: profile, follows, notes; posting off by default"],
         planned: ["Hardware signers, passkeys"],
-        later: ["Profiles, social graph and posts", { text: "Pubky and Keet", level: "research" }],
+        later: [{ text: "Pubky and Keet, and their profiles and content", level: "research" }],
       },
     },
     {
@@ -120,8 +120,9 @@ const en: Timeline = {
       color: "#fb923c",
       title: "Groups",
       items: {
-        planned: ["Private groups, roles and permissions"],
-        later: ["Channels and topics", { text: "Group encryption", level: "research" }],
+        next: ["Private groups of up to eight, text only"],
+        planned: ["Files, calls and payments in groups", "More than one admin"],
+        later: ["Larger groups (GossipSub), channels and topics", { text: "Group encryption beyond epoch keys (MLS)", level: "research" }],
       },
     },
     {
@@ -130,7 +131,8 @@ const en: Timeline = {
       title: "SDKs & plugins",
       items: {
         now: ["Open contracts (WISP drafts)"],
-        planned: ["SDKs and adapter manifests", "Package authenticity and updates"],
+        next: ["@ghostly/sdk: adapters that register without a registry line"],
+        planned: ["Adapter manifests, the SDK on npm", "Package authenticity and updates"],
         later: [{ text: "A permissioned plugin host", level: "research" }],
       },
     },
@@ -194,7 +196,7 @@ const ptBr: Timeline = {
       title: "Pagamentos",
       items: {
         now: ["Carteira Cashu", "Lightning pelo mint"],
-        next: ["Ark via Arkade (experimental)", "USDT via Tether WDK (experimental)", "Modo Testnet para todas as carteiras", "Fontes Lightning: NWC · LND · Core Lightning · WebLN · Breez (só regtest)", "Ark via Bark (redes de teste)", "On-chain: BDK (redes de teste) · Bitcoin Core (desktop)"],
+        next: ["Ark via Arkade (experimental)", "USDT via Tether WDK (experimental)", "Modo Testnet para todas as carteiras", "Fontes Lightning: NWC · LND · Core Lightning · WebLN · Breez (só regtest)", "Ark via Bark (redes de teste)", "On-chain: BDK (redes de teste) · Bitcoin Core (desktop)", "Pagar com qualquer outra carteira: QR, link, Lightning addresses (LNURL)"],
         planned: ["Mainnet para Bark, Breez e BDK", "Spark, Fedimint, Liquid e outros trilhos"],
       },
     },
@@ -204,8 +206,8 @@ const ptBr: Timeline = {
       title: "Perfis e backup",
       items: {
         now: ["Trava do app, temas, 8 idiomas"],
-        next: ["Perfis locais", "Backups selados em arquivo ou S3"],
-        planned: ["Backups agendados e retenção", "Mais lugares de armazenamento", "Sincronização offline (store-and-forward)"],
+        next: ["Perfis locais", "Backups selados em arquivo ou S3", "Mensagens guardadas para um contato ausente, no seu próprio S3 (store-and-forward)"],
+        planned: ["Backups agendados e retenção", "Mais lugares de armazenamento"],
       },
     },
     {
@@ -213,9 +215,9 @@ const ptBr: Timeline = {
       color: "#f472b6",
       title: "Identidade (opcional)",
       items: {
-        next: ["Provas feitas uma vez, compartilhadas por chat: Nostr · domínio · OpenPGP · SSH · endereço Bitcoin", "Contas OpenID (Google, Microsoft, Apple, GitLab, Twitch) — quando os clientes forem registrados"],
+        next: ["Provas feitas uma vez, compartilhadas por chat: Nostr · domínio · OpenPGP · SSH · endereço Bitcoin", "Contas OpenID (Google, Microsoft, Apple, GitLab, Twitch) — quando os clientes forem registrados", "Camada social do Nostr: perfil, quem segue, notas; publicar desligado por padrão"],
         planned: ["Signers de hardware, passkeys"],
-        later: ["Perfis, grafo social e posts", { text: "Pubky e Keet", level: "research" }],
+        later: [{ text: "Pubky e Keet, com os perfis e conteúdos deles", level: "research" }],
       },
     },
     {
@@ -223,8 +225,9 @@ const ptBr: Timeline = {
       color: "#fb923c",
       title: "Grupos",
       items: {
-        planned: ["Grupos privados, papéis e permissões"],
-        later: ["Canais e tópicos", { text: "Criptografia de grupo", level: "research" }],
+        next: ["Grupos privados de até oito pessoas, só texto"],
+        planned: ["Arquivos, chamadas e pagamentos em grupos", "Mais de um admin"],
+        later: ["Grupos maiores (GossipSub), canais e tópicos", { text: "Criptografia de grupo além das chaves por época (MLS)", level: "research" }],
       },
     },
     {
@@ -233,7 +236,8 @@ const ptBr: Timeline = {
       title: "SDKs e plugins",
       items: {
         now: ["Contratos abertos (rascunhos WISP)"],
-        planned: ["SDKs e manifestos de adapters", "Autenticidade de pacotes e atualizações"],
+        next: ["@ghostly/sdk: adapters que se registram sem linha no registro"],
+        planned: ["Manifestos de adapters, o SDK no npm", "Autenticidade de pacotes e atualizações"],
         later: [{ text: "Um host de plugins com permissões", level: "research" }],
       },
     },

@@ -227,7 +227,7 @@
     "slug": "200-payments",
     "title": "WISP 200 — Payment Negotiation",
     "status": "Draft",
-    "updated": "2026-09-20",
+    "updated": "2026-09-24",
     "implementation": "Existing payment frames; generic integration proposed",
     "dependencies": [
       "03-capabilities.md",
@@ -279,7 +279,7 @@
     "slug": "203-lightning",
     "title": "WISP 203 — Lightning",
     "status": "Draft",
-    "updated": "2026-09-23",
+    "updated": "2026-09-24",
     "implementation": "Existing invoice integration; Lightning sources (the Cashu mints by default)",
     "dependencies": [
       "200-payments.md"
@@ -302,6 +302,22 @@
       "03-capabilities.md"
     ],
     "summary": "Bark is Second's implementation of Ark: a client (bark) and a server (captaind). This adapter is a second Ark provider beside Arkade 202, and not interchangeable with it. Checked on 2026-09-23 against bark 0.7.1:",
+    "notices": []
+  },
+  {
+    "file": "205-lnurl.md",
+    "sourcePath": "docs/wisps/205-lnurl.md",
+    "aliases": [],
+    "slug": "205-lnurl",
+    "title": "WISP 205 — Lightning Addresses and LNURL-pay",
+    "status": "Draft",
+    "updated": "2026-09-24",
+    "implementation": "Paying a Lightning address or LNURL through the active Lightning source; no wire format",
+    "dependencies": [
+      "200-payments.md",
+      "203-lightning.md"
+    ],
+    "summary": "A Lightning address (name@domain, LUD-16) or an LNURL (lnurl1…, LUD-01; lnurlp://…, LUD-17) names an HTTPS service that hands out invoices on request (LUD-06). This draft covers paying one from a Ghostly client, in the wallet's Send tab and from an address pasted in a chat. Nothing crosses the data link: the chat carries the address as text, like any invoice. Receiving on a Lightning address needs a server the person",
     "notices": []
   },
   {
@@ -536,6 +552,27 @@
     "notices": []
   },
   {
+    "file": "4xx-store-and-forward.md",
+    "sourcePath": "docs/wisps/4xx-store-and-forward.md",
+    "aliases": [],
+    "slug": "4xx-store-and-forward",
+    "title": "WISP 4xx — Store-and-Forward for an Away Contact",
+    "status": "Draft",
+    "updated": "2026-09-24",
+    "implementation": "Experimental: hold/1 in web, extension and desktop clients; exercised against a local S3-compatible server",
+    "documentKind": "Profile",
+    "dependencies": [
+      "400-chat.md",
+      "401-paired-chat.md",
+      "403-dht-text.md",
+      "1000-storage.md",
+      "1002-s3-storage.md",
+      "200-payments.md"
+    ],
+    "summary": "Today a message for a contact who is away reaches them only as short text through bounded DHT records (403); a picture or a payment request waits until both are online (401). This profile lets what is sent meanwhile be held — text, a small file, a payment request — and delivered when the contact is back, with bounds that are stated rather than implied. Nothing here replaces the paired session or the DHT text path; a ",
+    "notices": []
+  },
+  {
     "file": "500-files.md",
     "sourcePath": "docs/wisps/500-files.md",
     "aliases": [
@@ -697,7 +734,7 @@
     "title": "WISP 900 — Group Session Negotiation",
     "status": "Draft",
     "updated": "2026-09-23",
-    "implementation": "Core protocol of the first profile, group-mesh/1, in packages/core; engine and UI follow",
+    "implementation": "First profile, group-mesh/1: core protocol, browser engine, UI and four-browser e2e; text only",
     "dependencies": [
       "02-peer-keys.md",
       "03-capabilities.md",
@@ -733,7 +770,19 @@
     "aliases": [],
     "slug": "9xx-group-mesh",
     "title": "WISP 9xx — Group Mesh Distribution Profile",
-    "dependencies": [],
+    "status": "Draft",
+    "updated": "2026-09-23",
+    "implementation": "group-mesh/1: core protocol in packages/core; engine, UI and four-browser e2e in packages/browser and e2e/web/groups.spec.ts; web, extension and desktop share it",
+    "documentKind": "Profile",
+    "dependencies": [
+      "02-peer-keys.md",
+      "03-capabilities.md",
+      "400-chat.md",
+      "401-paired-chat.md",
+      "800-invite-join.md",
+      "900-group-sessions.md"
+    ],
+    "summary": "Files, media, payments, calls and local services are not part of this profile and are refused in groups.",
     "notices": []
   },
   {
@@ -841,6 +890,15 @@
     "aliases": [],
     "slug": "protocol",
     "title": "The Ghost Protocol",
+    "dependencies": [],
+    "notices": []
+  },
+  {
+    "file": "SDK.md",
+    "sourcePath": "docs/SDK.md",
+    "aliases": [],
+    "slug": "sdk",
+    "title": "Ghostly SDK: build a wallet source, an identity proof or a client outside the app",
     "dependencies": [],
     "notices": []
   },

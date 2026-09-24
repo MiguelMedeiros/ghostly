@@ -270,6 +270,15 @@
     "numberAssignment": "defined"
   },
   {
+    "oldId": "—",
+    "id": "404",
+    "oldFile": "4xx-store-and-forward.md",
+    "file": "4xx-store-and-forward.md",
+    "kind": "Profile",
+    "displayNumber": "4xx",
+    "numberAssignment": "unassigned"
+  },
+  {
     "oldId": "14",
     "id": "500",
     "oldFile": "14-files.md",
@@ -358,6 +367,15 @@
     "kind": "Contract",
     "displayNumber": "900",
     "numberAssignment": "defined"
+  },
+  {
+    "oldId": "—",
+    "id": "902",
+    "oldFile": "9xx-group-mesh.md",
+    "file": "9xx-group-mesh.md",
+    "kind": "Profile",
+    "displayNumber": "9xx",
+    "numberAssignment": "unassigned"
   },
   {
     "oldId": "22",

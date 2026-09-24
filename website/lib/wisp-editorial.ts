@@ -54,8 +54,8 @@ export const GROUPS: {
     icon: "chat",
     title: { en: "Chat", "pt-br": "Conversa" },
     blurb: {
-      en: "Messages with explicit receipts and retries, over a live link or the bounded DHT path.",
-      "pt-br": "Mensagens com confirmações e novas tentativas explícitas, por um link ao vivo ou pelo caminho limitado da DHT.",
+      en: "Messages with explicit receipts and retries: over a live link, the bounded DHT path, or held in your own storage for a contact who is away.",
+      "pt-br": "Mensagens com confirmações e novas tentativas explícitas: por um link ao vivo, pelo caminho limitado da DHT ou guardadas no seu próprio armazenamento para um contato ausente.",
     },
   },
   {
@@ -122,11 +122,12 @@ export const GROUPS: {
   {
     id: "together",
     ranges: [[900, 999]],
+    order: ["900", "902", "901"],
     icon: "group",
     title: { en: "Groups", "pt-br": "Grupos" },
     blurb: {
-      en: "Proposals for sessions with more than two people.",
-      "pt-br": "Propostas para sessões com mais de duas pessoas.",
+      en: "Private groups of up to eight, text only for now; distribution for larger groups is still a proposal.",
+      "pt-br": "Grupos privados de até oito pessoas, só texto por enquanto; a distribuição para grupos maiores ainda é proposta.",
     },
   },
 ];
@@ -260,8 +261,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "released",
     note: {
-      en: "Payment requests exist in the release; negotiated methods in paired chats are in development.",
-      "pt-br": "Pedidos de pagamento existem na versão pública; métodos negociados em chats pareados estão em desenvolvimento.",
+      en: "Payment requests exist in the release. In development: negotiated methods in paired chats, and any wallet paying a request from its QR code or link — settled only when the payee's own wallet sees the money.",
+      "pt-br": "Pedidos de pagamento existem na versão pública. Em desenvolvimento: métodos negociados em chats pareados, e qualquer carteira pagando um pedido pelo QR code ou link — liquidado só quando a carteira de quem recebe vê o dinheiro.",
     },
     feature: inApp("next", "Send sats", "Enviar sats"),
   },
@@ -292,8 +293,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "released",
     note: {
-      en: "Through the Cashu mints in the current release. In the next one the Lightning source can also be your own node or wallet: NWC, LND, Core Lightning, a browser wallet (WebLN, web app only) or Breez on a local regtest.",
-      "pt-br": "Pelos mints Cashu na versão atual. Na próxima, a fonte Lightning também pode ser seu próprio nó ou carteira: NWC, LND, Core Lightning, uma carteira do navegador (WebLN, só no app web) ou Breez num regtest local.",
+      en: "Through the Cashu mints in the current release. In the next one the Lightning source can also be your own node or wallet (NWC, LND, Core Lightning, WebLN in the web app, Breez on a local regtest), and any other wallet can pay the invoice from its QR code.",
+      "pt-br": "Pelos mints Cashu na versão atual. Na próxima, a fonte Lightning também pode ser seu próprio nó ou carteira (NWC, LND, Core Lightning, WebLN no app web, Breez num regtest local), e qualquer outra carteira pode pagar a fatura pelo QR code.",
     },
     feature: inApp("wallets", "Wallets", "Carteiras"),
   },
@@ -306,6 +307,18 @@ export const editorial: Record<string, Entry> = {
     note: {
       en: "Experimental, test networks only (Second's signet server or a local regtest); Mainnet makes no Bark wallet yet. Not interchangeable with Arkade: its own payment method and capability.",
       "pt-br": "Experimental, só em redes de teste (o servidor signet da Second ou um regtest local); a Mainnet ainda não cria carteira Bark. Não é intercambiável com o Arkade: método e capacidade próprios.",
+    },
+    feature: inApp("wallets", "Wallets", "Carteiras"),
+  },
+  "205-lnurl": {
+    benefit: {
+      en: "Pay a Lightning address (name@domain) or an LNURL from the wallet or straight from a chat, through your Lightning source.",
+      "pt-br": "Pagar um Lightning address (nome@domínio) ou um LNURL pela carteira ou direto do chat, pela sua fonte Lightning.",
+    },
+    level: "development",
+    note: {
+      en: "Paying only: receiving on an address needs a server you run. The domain is named before anything is fetched, and the service must allow cross-origin reads.",
+      "pt-br": "Só pagar: receber num endereço exige um servidor seu. O domínio é mostrado antes de qualquer consulta, e o serviço precisa liberar leituras de outra origem (CORS).",
     },
     feature: inApp("wallets", "Wallets", "Carteiras"),
   },
@@ -329,6 +342,18 @@ export const editorial: Record<string, Entry> = {
     note: {
       en: "Signed once with a NIP-07 browser extension (web app, desktop) or a NIP-46 remote signer. A proof, not a transport, and not permission to publish.",
       "pt-br": "Assinada uma vez com uma extensão NIP-07 (app web, desktop) ou um signer remoto NIP-46. Uma prova, não um transporte, nem permissão para publicar.",
+    },
+  },
+  "3xx-nostr-social": {
+    group: "identity",
+    benefit: {
+      en: "What a proven Nostr key lets a contact see — profile, follows, notes — and, if you turn it on, posting through your own signer.",
+      "pt-br": "O que uma chave Nostr provada deixa um contato ver — perfil, quem segue, notas — e, se você ligar, publicar pelo seu próprio signer.",
+    },
+    level: "development",
+    note: {
+      en: "Experimental. Loaded only on request, from relays you choose; publishing is off by default and each post is confirmed. Web, desktop and extension (NIP-46 only there). Number not yet assigned.",
+      "pt-br": "Experimental. Carregado só quando você pede, dos relays que você escolhe; publicar vem desligado e cada post é confirmado. Web, desktop e extensão (lá só NIP-46). Número ainda não atribuído.",
     },
   },
   "3xx-domain": {
@@ -451,6 +476,18 @@ export const editorial: Record<string, Entry> = {
       "pt-br": "Chats legados: até 500 bytes. Chats pareados (em desenvolvimento): 256 bytes, com novas tentativas por cinco minutos.",
     },
   },
+  "4xx-store-and-forward": {
+    group: "talk",
+    benefit: {
+      en: "Text, a picture or a payment request sent while a contact is away waits, sealed, in your own S3 bucket — and reaches them when they are back.",
+      "pt-br": "Texto, uma imagem ou um pedido de pagamento enviados com o contato ausente esperam, selados, no seu próprio bucket S3 — e chegam quando ele volta.",
+    },
+    level: "development",
+    note: {
+      en: "Experimental, paired chats with the switch on at both ends; web, desktop and extension. Picked up until seven days after you were last online. Ecash is never held. Number not yet assigned.",
+      "pt-br": "Experimental, chats pareados com a opção ligada nas duas pontas; web, desktop e extensão. Pode ser buscado até sete dias depois da última vez que você esteve online. Ecash nunca fica guardado. Número ainda não atribuído.",
+    },
+  },
   "500-files": {
     benefit: {
       en: "Send a file straight to a contact, checked and acknowledged on arrival.",
@@ -545,21 +582,36 @@ export const editorial: Record<string, Entry> = {
   },
   "900-group-sessions": {
     benefit: {
-      en: "A candidate architecture for groups that keeps fanout and membership off the DHT.",
-      "pt-br": "Uma arquitetura candidata para grupos que mantém a distribuição e os membros fora da DHT.",
+      en: "How a group agrees on who is in it, locks out whoever left, and moves messages between members — never through the DHT.",
+      "pt-br": "Como um grupo combina quem faz parte dele, tranca para fora quem saiu e leva as mensagens entre os membros — nunca pela DHT.",
     },
-    level: "planned",
-    note: { en: "Proposal; no implementation.", "pt-br": "Proposta; sem implementação." },
+    level: "development",
+    note: {
+      en: "First profile implemented: group-mesh/1, text only, up to eight members, one admin; web, desktop and extension.",
+      "pt-br": "Primeiro perfil implementado: group-mesh/1, só texto, até oito membros, um admin; web, desktop e extensão.",
+    },
+  },
+  "9xx-group-mesh": {
+    group: "together",
+    benefit: {
+      en: "Up to eight people, each pair on its own authenticated link, with a fresh group key whenever someone joins or leaves.",
+      "pt-br": "Até oito pessoas, cada par num link autenticado próprio, com uma chave de grupo nova sempre que alguém entra ou sai.",
+    },
+    level: "development",
+    note: {
+      en: "Text only, over WebRTC; files, calls and payments are refused in groups. Live delivery: a member who was away catches up from each author's recent messages. Number not yet assigned.",
+      "pt-br": "Só texto, por WebRTC; arquivos, chamadas e pagamentos são recusados em grupos. Entrega ao vivo: quem estava fora recupera as mensagens recentes de cada autor. Número ainda não atribuído.",
+    },
   },
   "901-gossipsub": {
     benefit: {
-      en: "Evaluate GossipSub as a distribution layer for groups.",
-      "pt-br": "Avaliar o GossipSub como camada de distribuição para grupos.",
+      en: "Evaluate GossipSub as a distribution layer for groups larger than the mesh.",
+      "pt-br": "Avaliar o GossipSub como camada de distribuição para grupos maiores que a malha.",
     },
     level: "planned",
     note: {
-      en: "Proposal; no adapter. Number not yet assigned.",
-      "pt-br": "Proposta; sem adapter. Número ainda não atribuído.",
+      en: "A later profile, after the mesh is measured; no adapter. Number not yet assigned.",
+      "pt-br": "Um perfil posterior, depois de medir a malha; sem adapter. Número ainda não atribuído.",
     },
   },
   "1000-storage": {
@@ -568,6 +620,10 @@ export const editorial: Record<string, Entry> = {
       "pt-br": "Onde os pacotes selados ficam guardados — separado do que entra num backup.",
     },
     level: "development",
+    note: {
+      en: "Holds backups and, since store-and-forward, items sealed for an away contact.",
+      "pt-br": "Guarda backups e, desde o store-and-forward, itens selados para um contato ausente.",
+    },
     feature: inApp("space", "Your space", "Seu espaço"),
   },
   "1001-local-storage": {
@@ -576,6 +632,10 @@ export const editorial: Record<string, Entry> = {
       "pt-br": "O lugar mais simples: um arquivo que você guarda. Sem conta, sem rede.",
     },
     level: "development",
+    note: {
+      en: "Backups only: a file has no address to hand a contact, so it cannot hold messages.",
+      "pt-br": "Só backups: um arquivo não tem endereço para entregar a um contato, então não guarda mensagens.",
+    },
   },
   "1002-s3-storage": {
     benefit: {
@@ -584,8 +644,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "development",
     note: {
-      en: "Web and desktop. The bucket must allow the app in its CORS rules.",
-      "pt-br": "Web e desktop. O bucket precisa liberar o app nas regras de CORS.",
+      en: "Backups on web and desktop; held messages on every client. The bucket's CORS rules must allow the app (and GET from your contacts' apps, to hold).",
+      "pt-br": "Backups na web e no desktop; mensagens guardadas em todos os clientes. As regras de CORS do bucket precisam liberar o app (e GET dos apps dos contatos, para guardar mensagens).",
     },
   },
 };

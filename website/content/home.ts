@@ -132,7 +132,7 @@ const en = {
         title: "Say it your way.",
         body: "Private one-to-one conversations with delivery receipts and local history. No phone number, no public profile.",
         level: "released" as Level,
-        extra: "Paired chats — with pinned keys, names and pictures — are in development.",
+        extra: "In development: paired chats with pinned keys, names and pictures, and messages held for a contact who is away.",
         extraLevel: "development" as Level,
       },
       {
@@ -158,6 +158,14 @@ const en = {
         body: "Send or request sats right in the conversation, as Cashu ecash or a Lightning invoice.",
         level: "released" as Level,
         extra: "A Cashu mint you choose holds the funds and handles Lightning. Pick one you trust.",
+      },
+      {
+        id: "groups",
+        icon: "group",
+        title: "Bring the whole group.",
+        body: "A private group for the people you already talk to: invite them from your chats, one admin, everyone reaches everyone directly.",
+        level: "development" as Level,
+        extra: "Up to eight members, text only for now; files, calls and payments aren't in groups yet.",
       },
       {
         id: "identities",
@@ -231,7 +239,7 @@ const en = {
         kind: "invoices",
         level: "released" as Level,
         body: "Pay and receive Lightning invoices from the chat.",
-        limits: "Through your Cashu mint in the current release. In the next one your own node or wallet can be the source: NWC, LND, Core Lightning, a browser wallet (WebLN, web app only) or Breez on a local regtest.",
+        limits: "Through your Cashu mint in the current release. In the next one your own node or wallet can be the source: NWC, LND, Core Lightning, a browser wallet (WebLN, web app only) or Breez on a local regtest — and it pays Lightning addresses, while any other wallet can pay your invoice from its QR code.",
         more: "development" as Level,
       },
       {
@@ -461,7 +469,7 @@ const ptBr: HomeCopy = {
         title: "Diga do seu jeito.",
         body: "Conversas privadas um a um, com confirmação de entrega e histórico local. Sem número de telefone, sem perfil público.",
         level: "released",
-        extra: "Chats pareados — com chaves fixadas, nomes e fotos — estão em desenvolvimento.",
+        extra: "Em desenvolvimento: chats pareados com chaves fixadas, nomes e fotos, e mensagens guardadas para um contato ausente.",
         extraLevel: "development",
       },
       {
@@ -487,6 +495,14 @@ const ptBr: HomeCopy = {
         body: "Envie ou peça sats na própria conversa, como ecash Cashu ou uma fatura Lightning.",
         level: "released",
         extra: "Um mint Cashu que você escolhe guarda os fundos e cuida da Lightning. Escolha um em que você confia.",
+      },
+      {
+        id: "groups",
+        icon: "group",
+        title: "Traga o grupo todo.",
+        body: "Um grupo privado com as pessoas com quem você já conversa: convide pelos seus chats, um admin, todos se falam direto.",
+        level: "development",
+        extra: "Até oito pessoas, só texto por enquanto; arquivos, chamadas e pagamentos ainda não entram em grupos.",
       },
       {
         id: "identities",
@@ -560,7 +576,7 @@ const ptBr: HomeCopy = {
         kind: "faturas",
         level: "released",
         body: "Pague e receba faturas Lightning pelo chat.",
-        limits: "Pelo seu mint Cashu na versão atual. Na próxima, seu próprio nó ou carteira pode ser a fonte: NWC, LND, Core Lightning, uma carteira do navegador (WebLN, só no app web) ou Breez num regtest local.",
+        limits: "Pelo seu mint Cashu na versão atual. Na próxima, seu próprio nó ou carteira pode ser a fonte: NWC, LND, Core Lightning, uma carteira do navegador (WebLN, só no app web) ou Breez num regtest local — e ela paga Lightning addresses, enquanto qualquer outra carteira paga a sua fatura pelo QR code.",
         more: "development",
       },
       {
