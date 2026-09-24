@@ -116,7 +116,9 @@ mod tests {
         // Bytes, not characters: 3-byte characters reach the bound sooner.
         let wide = "€".repeat(MAX_CLIPBOARD_BYTES / 3 + 1);
         assert!(bounded(wide).is_err());
-        let app = app(ClipboardSource::fixed(|| Ok("a".repeat(MAX_CLIPBOARD_BYTES + 1))));
+        let app = app(ClipboardSource::fixed(|| {
+            Ok("a".repeat(MAX_CLIPBOARD_BYTES + 1))
+        }));
         let main = WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .unwrap();
