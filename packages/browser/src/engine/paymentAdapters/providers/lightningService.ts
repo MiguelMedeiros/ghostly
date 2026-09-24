@@ -4,7 +4,7 @@ import type { WalletMode } from "../../../shared/mints";
 import { CASHU_MINT_SOURCE, CashuMintLightning } from "./cashuMint";
 import type { LightningInvoice, LightningProvider, LightningProviderDescriptor } from "./lightning";
 import { ProviderSources, type SourceView } from "./sources";
-import { NothingSpentError, redact, type ProviderHost } from "./types";
+import { isNothingSpentError, redact, type ProviderHost } from "./types";
 
 /**
  * One Lightning operation, journaled under `lightningOp-<direction>-<payment hash>` in the settings store
@@ -92,6 +92,7 @@ export class LightningService {
   async setMode(mode: WalletMode) { this.mode = mode; this.quotes.clear(); await this.sources.setMode(mode); await this.loadRecent(); this.events.changed(); }
   ensureReady() { return this.sources.ensureReady(); }
   async stop() { this.stopped = true; clearTimeout(this.timer); await this.sources.stop(); }
+  refreshOffered() { this.sources.refreshOffered(); }
 
   // -- receiving -----------------------------------------------------------------
 
@@ -158,7 +159,7 @@ export class LightningService {
       const result = await quote.provider.payInvoice(quote.invoice, quote.maxFee, context.note);
       op = result.state === "paid" ? { ...op, state: "paid", fee: result.fee, ref: result.ref, settledAt: Date.now() } : { ...op, state: "pending", ref: result.ref };
     } catch (error) {
-      if (error instanceof NothingSpentError) { await this.put({ ...op, state: "failed", error: redact(error) }); throw error; }
+      if (isNothingSpentError(error)) { await this.put({ ...op, state: "failed", error: redact(error) }); throw error; }
       // A source that cannot look payments up never settles this by itself: say so rather than "being checked".
       op = { ...op, state: "unknown", error: quote.provider.capabilities.lookup ? "No answer from the source. It is being checked; nothing is paid again." : "No answer from the source, and it cannot be asked: check this payment in the wallet itself. It is never paid again." };
     }

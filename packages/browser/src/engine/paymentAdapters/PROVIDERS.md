@@ -21,6 +21,12 @@ Everything that is not specific to a provider is shared and already written: sto
 per-mode sources, the source picker and config form, the Lightning journal and reconciliation, the
 on-chain review/approve/reconcile flow. A provider is one module and one line.
 
+A provider written **outside the app** needs no line here: it is a plugin registered through the SDK
+(`@ghostly/sdk`, `registerAdapters` or `GHOSTLY_PLUGINS` at build time), listed after the built-ins
+under the same platform and mode rules. See [docs/SDK.md](../../../../../docs/SDK.md) and
+`packages/browser/src/plugins/registry.ts`; the contracts, fakes and contract suites below are what it
+exports.
+
 ## Adding a provider
 
 1. Write `providers/<name>.ts`: a class implementing `LightningProvider` or `OnchainProvider`, and a
@@ -50,8 +56,9 @@ on-chain review/approve/reconcile flow. A provider is one module and one line.
    It receives `ProviderFormProps` and calls `onSubmit(values)`.
 
 4. Tests: run `describeLightningProvider` / `describeOnchainProvider` from
-   `packages/browser/test/helpers/providerContract.ts` against your provider (mocked transport in unit
-   tests; a real regtest counterpart in a gated test), plus your own unit tests. See "Testing" below.
+   [providers/contractSuite.ts](providers/contractSuite.ts) (`test/helpers/providerContract.ts` re-exports
+   them) against your provider (mocked transport in unit tests; a real regtest counterpart in a gated
+   test), plus your own unit tests. See "Testing" below.
 
 The engine then: lists it in the picker when the platform and the mode fit, renders its form, splits the
 values into `config` (shown back) and `secrets` (sealed), calls `create`, asks `info()` and **refuses a

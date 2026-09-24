@@ -66,6 +66,10 @@ Ghostly identity proof v1: I control nostr:3bf0c63fcb93463407af97a5e5ee64fa883d1
 - Because the fields never contain spaces and their order is fixed, two different bindings never produce
   the same text; verifiers never parse the text, they rebuild it from the binding they received.
 
+A provider written **outside the app** needs no line in the registry: it is a plugin registered through
+the SDK (`@ghostly/sdk`, `registerAdapters` or `GHOSTLY_PLUGINS` at build time), listed after the
+built-ins. See [docs/SDK.md](../../../../docs/SDK.md) and `packages/browser/src/plugins/registry.ts`.
+
 ## Adding a provider
 
 1. Write `providers/<name>.ts` exporting an `IdentityProofProvider` ([contract.ts](contract.ts)):
@@ -94,9 +98,10 @@ Ghostly identity proof v1: I control nostr:3bf0c63fcb93463407af97a5e5ee64fa883d1
 2. Add it to `IDENTITY_PROVIDERS` in [registry.ts](registry.ts), the order is the picker's, and give it a
    mark in `src/components/identities/ProviderIcons.tsx` (`identityProviderIcons.test.tsx` fails for a provider without one).
    Those are the only shared lines you touch.
-3. Tests: run `describeIdentityProof` from `packages/browser/test/helpers/identityProofContract.ts` against
-   your provider (see [identityProofContract.test.ts](../../test/identityProofContract.test.ts)), plus your
-   own: real tool output as vectors, every malformed shape of your format, your network answers.
+3. Tests: run `describeIdentityProof` from [contractSuite.ts](contractSuite.ts)
+   (`test/helpers/identityProofContract.ts` re-exports it) against your provider (see
+   [identityProofContract.test.ts](../../test/identityProofContract.test.ts)), plus your own: real tool
+   output as vectors, every malformed shape of your format, your network answers.
 4. Add a row to the table at the end of this file, and to WISP 300's implementation section.
 
 The UI renders every provider from its descriptor: the picker card (label, summary, category, its mark from

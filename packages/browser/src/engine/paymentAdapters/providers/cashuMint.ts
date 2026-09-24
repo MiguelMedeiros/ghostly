@@ -95,5 +95,5 @@ export const cashuMint: LightningProviderDescriptor = {
   platforms: PROVIDER_PLATFORMS,
   fields: [],
   custodial: true,
-  async create(_settings, host) { return new CashuMintLightning(host.cashu, host.mode); },
+  async create(_settings, host) { return new CashuMintLightning(host.cashu as CashuWallet, host.mode); },
 };

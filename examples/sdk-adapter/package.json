@@ -1,0 +1,20 @@
+{
+  "name": "ghostly-example-adapters",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "A wallet source and an identity proof for Ghostly, written against @ghostly/sdk alone: the example of an adapter built outside the app.",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ghostly/sdk": "file:vendor/ghostly-sdk.tgz",
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.4.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.1"
+  }
+}

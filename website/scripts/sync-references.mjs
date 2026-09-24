@@ -65,6 +65,7 @@ const paths = readdirSync(source)
   .map((name) => `docs/wisps/${name}`);
 paths.push(
   "docs/PROTOCOL.md",
+  "docs/SDK.md",
   "docs/USDT-INTEGRATION.md",
   "docs/DHT-DELIVERY.md",
   "CONTRIBUTING.md",

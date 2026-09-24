@@ -123,6 +123,7 @@ This works today in **[Ghostly Browser](docs/BROWSER.md)**, a Chromium extension
 - [Experimental native transports](docs/wisps/TRANSPORT-INCREMENT.md) — Paired chat over Iroh and HyperDHT, exact scope and validation
 - [WISP drafts](docs/wisps/README.md) — Proposed modular protocol catalogue, group architecture, evidence and conformance plan
 - [Protocol](docs/PROTOCOL.md) — Records, service advertisements, WebRTC data link, HTTP over WebRTC
+- [SDK](docs/SDK.md) — Build a wallet source, an identity proof or a client outside the app: contracts, contract tests, plugins
 - [Ghostly Browser](docs/BROWSER.md) — Run the extension, share a local app, limitations
 - [Ghostly on the web](docs/WEB.md) — The same client in a tab or on a phone: `docker compose up`
 - [Releasing](docs/RELEASING.md) — Version, tag, publish, deploy

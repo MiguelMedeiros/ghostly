@@ -62,6 +62,11 @@ jobs:
       - name: Build web app
         run: npm run build:web
 
+      # The adapter SDK, the way an outside author gets it: packed into a tarball, installed into
+      # examples/sdk-adapter (not a workspace member), whose adapters must pass the contract suites.
+      - name: SDK tarball and the example built on it
+        run: npm run test:sdk-example
+
   # ============================================
   # Tauri Backend (src-tauri) - Rust
   # ============================================

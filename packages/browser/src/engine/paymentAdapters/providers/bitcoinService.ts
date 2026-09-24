@@ -3,7 +3,7 @@ import type { WalletMode } from "../../../shared/mints";
 import type { OnchainPrepared, OnchainProvider, OnchainProviderDescriptor, OnchainTx } from "./onchain";
 import { intentRepository } from "../persistence";
 import { ProviderSources, type SourceView } from "./sources";
-import { NothingSpentError, redact, type ProviderHost } from "./types";
+import { isNothingSpentError, redact, type ProviderHost } from "./types";
 
 export interface BitcoinView extends SourceView {
   /** The last address handed out to be paid on. */
@@ -44,6 +44,7 @@ export class BitcoinService {
   setMode(mode: WalletMode) { this.address = undefined; this.history = []; return this.sources.setMode(mode); }
   ensureReady() { return this.sources.ensureReady(); }
   stop() { return this.sources.stop(); }
+  refreshOffered() { this.sources.refreshOffered(); }
 
   async receiveAddress(): Promise<string> {
     const { provider } = await this.sources.use();
@@ -98,7 +99,7 @@ export class BitcoinService {
       if (!provider || this.sources.activeId !== prepared.providerId) throw new PaymentPreflightError("The Bitcoin source that prepared this payment is not connected. Nothing was sent.");
       let txid: string;
       try { txid = await provider.broadcast(prepared); }
-      catch (error) { if (error instanceof NothingSpentError) throw new PaymentPreflightError(redact(error)); throw error; }
+      catch (error) { if (isNothingSpentError(error)) throw new PaymentPreflightError(redact(error)); throw error; }
       if (txid !== prepared.txid) throw new Error("The source broadcast a different transaction than the one reviewed");
       void this.sources.refresh();
       return { txid, settled: false, pending: true };

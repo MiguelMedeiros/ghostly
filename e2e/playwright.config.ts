@@ -66,7 +66,8 @@ export default defineConfig({
         url: `http://localhost:${port}`,
         reuseExistingServer: !process.env.CI,
         timeout: 5 * 60_000,
-        // The suite's build knows the local OIDC issuer (support/oidcIssuer.ts); a release build does not.
-        env: { VITE_OIDC_TEST_ISSUER: OIDC_TEST_ISSUER },
+        // The suite's build knows the local OIDC issuer (support/oidcIssuer.ts) and carries the SDK example's
+        // adapters (web/sdk-plugin.spec.ts); a release build does neither.
+        env: { VITE_OIDC_TEST_ISSUER: OIDC_TEST_ISSUER, GHOSTLY_PLUGINS: "examples/sdk-adapter/src/index.ts" },
       },
 });

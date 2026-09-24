@@ -4,7 +4,7 @@ import type { Payment, PaymentType, PrepareSendPaymentResponse } from "@breeztec
 import { loadBreezSdk, type BreezNetwork, type BreezSdkModule, type BreezWallet } from "./breezSdk";
 import { isRecoveryPhrase, normalizePhrase } from "./recoveryPhrase";
 import type { InvoiceStatus, LightningInvoice, LightningPayResult, LightningPaymentRef, LightningPaymentStatus, LightningProvider, LightningProviderDescriptor } from "./lightning";
-import { NothingSpentError, type ProviderNetwork, type ProviderPlatform } from "./types";
+import { isNothingSpentError, NothingSpentError, type ProviderNetwork, type ProviderPlatform } from "./types";
 
 export const BREEZ_SOURCE = "breez";
 /**
@@ -150,7 +150,7 @@ export class BreezLightning implements LightningProvider {
       const { balanceSats } = await this.wallet.getInfo({ ensureSynced: false });
       if (sats(balanceSats) < amount + fee) throw new Error(`Not enough sats in the Breez wallet (${sats(balanceSats)}; ${amount + fee} needed)`);
     } catch (error) {
-      throw error instanceof NothingSpentError ? error : new NothingSpentError(message(error));
+      throw isNothingSpentError(error) ? error : new NothingSpentError(message(error));
     }
     // From here on the sats may be gone: any throw is an unknown outcome, reconciled by the payment hash.
     const { payment } = await this.wallet.sendPayment({ prepareResponse: prepared, options: { type: "bolt11Invoice", preferSpark: false, completionTimeoutSecs: COMPLETION_SECS }, idempotencyKey: idempotencyKey(hash, attempt) });
