@@ -150,7 +150,9 @@ export class PaymentDesk {
   async request(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | AskMethod; ask?: string }): Promise<{ paymentId: string }> {
     if(params.method === "usdt")assertTokenUnits(params.amount);else assertAmount(params.amount);
     const link = this.requireLink(params.linkId);
-    await link.requirePaymentSupport();
+    // A Cashu/Lightning request that can be held for an away contact needs no session; anything else does.
+    const held = !link.isDataLinkOpen ? this.host.heldPaymentMethods?.(params.linkId) ?? null : null;
+    if (!held || (params.method && params.method !== "cashu")) await link.requirePaymentSupport();
 
     const id = newId();
     const memo = params.memo?.trim().slice(0, 140) || undefined;
@@ -191,7 +193,6 @@ export class PaymentDesk {
     }
     // Each way of paying goes in only if this chat allows it on both sides. While the contact is away and the
     // request can be held for them, "both sides" is what their app allowed at the last session.
-    const held = !link.isDataLinkOpen ? this.host.heldPaymentMethods?.(params.linkId) ?? null : null;
     const ecash = held ? held.includes("cashu") && link.paymentEnabled("cashu") : link.allowsPayment("cashu");
     const lightning = held ? held.includes("lightning") && link.paymentEnabled("lightning") : link.allowsPayment("lightning");
     if (!ecash && !lightning) throw new Error(held ? "Your contact allowed neither Cashu nor Lightning in this chat" : "Cashu and Lightning are off in this chat");

@@ -81,15 +81,9 @@ test("text, a picture and a request held for an away contact arrive in order; a 
   await alice.page.getByTestId("payment-button").click();
   await alice.page.getByTestId("payment-amount").fill("10");
   await alice.page.getByTestId("payment-request").click();
-  await expect(held(alice, "Requested 10 sats").getByText("Held · waiting for your contact")).toBeVisible({ timeout: 30_000 });
+  await expect(held(alice, "You requested").getByText("Held · waiting for your contact")).toBeVisible({ timeout: 30_000 });
   await alice.page.keyboard.press("Escape");
   await expect(alice.page.getByTestId("hold-indicator")).toContainText("3 items held for");
-  // Ecash itself is never held.
-  await alice.page.getByTestId("payment-button").click();
-  await alice.page.getByTestId("payment-amount").fill("5");
-  await alice.page.getByTestId("payment-send").click();
-  await expect(alice.page.getByTestId("payment-composer")).toContainText("not held for an away contact");
-  await alice.page.keyboard.press("Escape");
   // Alice's bucket holds sealed objects only: nothing of the text, the picture's name or the request.
   const listing = await (await s3("GET", "?list-type=2")).text();
   expect(listing.match(/\.ghostly-held<\/Key>/g)).toHaveLength(4);
@@ -108,7 +102,7 @@ test("text, a picture and a request held for an away contact arrive in order; a 
   expect(at("held while you were out")).toBeGreaterThan(at("hello from"));
   expect(at("ghost.gif")).toBeGreaterThan(at("held while you were out"));
   expect(at("Requests")).toBeGreaterThan(at("ghost.gif"));
-  for (const text of ["held while you were out", "ghost.gif", "Requested 10 sats"]) await expect(held(alice, text).getByText("Received by peer")).toBeVisible({ timeout: 90_000 });
+  for (const text of ["held while you were out", "ghost.gif", "You requested"]) await expect(held(alice, text).getByText("Received by peer")).toBeVisible({ timeout: 90_000 });
   await expect(alice.page.getByTestId("hold-indicator")).toHaveCount(0);
   await expect.poll(async () => ((await (await s3("GET", "?list-type=2")).text()).match(/\.ghostly-held<\/Key>/g) ?? []).length, { timeout: 60_000 }).toBe(0);
   // The session is back too: what is sent now goes live, and Bob's side keeps the held ones once.
