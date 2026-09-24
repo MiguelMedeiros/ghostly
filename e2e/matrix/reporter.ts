@@ -91,10 +91,11 @@ export default class MatrixReporter implements Reporter {
     });
   }
 
-  onEnd(_result: FullResult): void {
+  onEnd(result: FullResult): void {
     if (this.rows.size === 0) return;
     const rows = [...this.rows.values()];
-    const meta = { seed: String(SEED), wallMs: Date.now() - this.started };
+    // When shards are merged, the run's own duration is the one Playwright reports, not this process's.
+    const meta = { seed: String(SEED), wallMs: result.duration || Date.now() - this.started };
     mkdirSync(this.outputDir, { recursive: true });
     writeFileSync(join(this.outputDir, "results.json"), JSON.stringify({ ...meta, rows }, null, 2));
     writeFileSync(join(this.outputDir, "summary.md"), `${markdown(rows, meta)}\n`);
