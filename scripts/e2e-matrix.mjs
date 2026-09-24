@@ -63,6 +63,15 @@ const run = (command, commandArgs) => {
   return result.status ?? 1;
 };
 
+// A --reporter on the command line replaces the config's: keep the matrix's own, which writes the summary.
+const reporterAt = args.findIndex((a) => a === "--reporter" || a.startsWith("--reporter="));
+if (reporterAt >= 0) {
+  const inline = args[reporterAt].startsWith("--reporter=");
+  const at = inline ? reporterAt : reporterAt + 1;
+  const value = inline ? args[at].slice("--reporter=".length) : args[at];
+  args[at] = `${inline ? "--reporter=" : ""}${value},./e2e/matrix/reporter.ts`;
+}
+
 if (list) process.exit(run("npx", ["playwright", "test", "-c", "e2e/playwright.matrix.config.ts", "--list", ...args]));
 
 // Scenarios with an extension peer need extension/dist; the web build is the config's web server.

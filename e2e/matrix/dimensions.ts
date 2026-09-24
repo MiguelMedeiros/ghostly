@@ -181,6 +181,14 @@ export const CONSTRAINTS: readonly Constraint[] = [
     allows: (a) => !(a.rail === "ln-webln" && a.wallet === "testnet" && hasExtension(a)),
   },
   {
+    // A proves the identity. NIP-07 is the page's own window.nostr: offered on the web and Desktop, never in
+    // the extension, whose pages do not get another extension's (src/lib/nostr.ts); NIP-46 needs a bunker.
+    id: "nip07-host-on-the-web",
+    why: "the Nostr proof is signed by A through NIP-07, which the extension does not offer (another extension's window.nostr never reaches its pages)",
+    dims: ["client", "identity"],
+    allows: (a) => !(a.identity === "nostr" && a.client?.startsWith("extension")),
+  },
+  {
     // support/domain.ts answers DNS-over-HTTPS by routing the page's requests (context.route); the
     // extension verifies in its offscreen document, which routes never reach, and would ask the real resolvers.
     id: "test-domain-web-only",

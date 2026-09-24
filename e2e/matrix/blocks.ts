@@ -463,6 +463,10 @@ async function chatMethods(actor: Actor, off: string[]): Promise<void> {
   await actor.page.getByTestId("chat-payments-save").click();
 }
 
+/** A note of the scenario's own on a payment: the one thing in its bubble no clock or amount can match by accident. */
+const memo = (actor: Actor, text: string) => actor.page.getByLabel("What for? (optional)").fill(text);
+const bubble = (actor: Actor, text: string) => chatPane(actor).getByTestId("payment-bubble").filter({ hasText: text }).last();
+
 const approve = (scope: import("@playwright/test").Locator) => scope.getByTestId("payment-review").getByRole("button", { name: either("Approve payment") }).click();
 
 async function cashuInChat({ a, b }: World): Promise<void> {
@@ -472,21 +476,24 @@ async function cashuInChat({ a, b }: World): Promise<void> {
   await openChat(a);
   await paymentCard(a, "cashu");
   await a.page.getByTestId("payment-amount").fill("21");
+  await memo(a, "matrix send");
   await a.page.getByTestId("payment-send").click();
   await approve(a.page.getByTestId("payment-composer"));
-  await expect(chatPane(b).getByTestId("payment-bubble").filter({ hasText: /21/ }).last().getByTestId("payment-state")).toHaveText(either("Received"), { timeout: 90_000 });
+  await openChat(b);
+  await expect(bubble(b, "matrix send").getByTestId("payment-state")).toHaveText(either("Received"), { timeout: 90_000 });
   await a.page.getByTestId("payment-composer").getByRole("button", { name: either("Close") }).click();
   // A request: B asks, A pays from the bubble.
   await chatMethods(b, ["lightning"]);
   await paymentCard(b, "cashu");
   await b.page.getByTestId("payment-amount").fill("10");
+  await memo(b, "matrix request");
   await b.page.getByTestId("payment-request").click();
   await openChat(a);
-  const request = chatPane(a).getByTestId("payment-bubble").filter({ hasText: /10/ }).last();
+  const request = bubble(a, "matrix request");
   await request.getByTestId("payment-pay").click();
   await approve(request);
   await expect(request.getByTestId("payment-state")).toHaveText(either("Paid"), { timeout: 90_000 });
-  await expect(chatPane(b).getByTestId("payment-bubble").filter({ hasText: /10/ }).last().getByTestId("payment-state")).toHaveText(either("Paid"), { timeout: 90_000 });
+  await expect(bubble(b, "matrix request").getByTestId("payment-state")).toHaveText(either("Paid"), { timeout: 90_000 });
 }
 
 async function lightningThroughMint({ a, b }: World): Promise<void> {
@@ -541,13 +548,15 @@ async function lightningThroughWebln(w: World): Promise<void> {
   await chatMethods(b, ["cashu"]);
   await paymentCard(b, "lightning");
   await b.page.getByTestId("payment-amount").fill("40");
+  await memo(b, "matrix lightning request");
   await b.page.getByTestId("payment-request").click();
   await openChat(a);
-  const request = chatPane(a).getByTestId("payment-bubble").filter({ hasText: /40/ }).last();
+  const request = bubble(a, "matrix lightning request");
   await request.getByTestId("payment-pay").click();
   await approve(request);
   await expect(request.getByTestId("payment-state")).toHaveText(either("Paid"), { timeout: 90_000 });
-  await expect(chatPane(b).getByTestId("payment-bubble").filter({ hasText: /40/ }).last().getByTestId("payment-state")).toHaveText(either("Paid"), { timeout: 90_000 });
+  await openChat(b);
+  await expect(bubble(b, "matrix lightning request").getByTestId("payment-state")).toHaveText(either("Paid"), { timeout: 90_000 });
   expect([aliceWallet.balance, bobWallet.balance]).toEqual([99_960, 100_040]);
 }
 
@@ -675,6 +684,9 @@ export const restore: Block = {
     await again.getByTestId("restore-passphrase").fill(PASSPHRASE);
     await again.getByTestId("restore-go").click();
     await expect(restored.page.getByTestId("profile-row")).toHaveCount(2, { timeout: 60_000 });
+    // "A restore always becomes a new profile, then Ghostly switches to it" (ProfileBackups.tsx).
+    await go(restored, "#/profile");
+    await expect(restored.page.getByTestId("profile-name"), "the restored profile is the one in use").toHaveValue(/\(restored\)$/, { timeout: 60_000 });
     restored.chatHash = b.chatHash;
     w.b = restored;
     await openChat(restored);

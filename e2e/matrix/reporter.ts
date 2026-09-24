@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
-import type { FullResult, Reporter, TestCase, TestResult } from "@playwright/test/reporter";
+import { dirname, join, resolve } from "node:path";
+import type { FullConfig, FullResult, Reporter, TestCase, TestResult } from "@playwright/test/reporter";
 import { DIMENSIONS, SEED } from "./dimensions";
 
 /**
@@ -55,15 +55,17 @@ export function markdown(rows: readonly MatrixRow[], meta: { seed?: string; wall
 
 export default class MatrixReporter implements Reporter {
   private readonly rows = new Map<string, MatrixRow>();
-  private readonly outputDir: string;
+  private outputDir: string;
   private started = Date.now();
 
-  constructor(options: { outputDir?: string } = {}) {
-    this.outputDir = resolve(import.meta.dirname, options.outputDir ?? "../../test-results/matrix-summary");
+  /** `outputDir` is relative to the config file, like the config's other paths. */
+  constructor(private readonly options: { outputDir?: string } = {}) {
+    this.outputDir = resolve(options.outputDir ?? "test-results/matrix-summary");
   }
 
-  onBegin(): void {
+  onBegin(config: FullConfig): void {
     this.started = Date.now();
+    if (config.configFile) this.outputDir = resolve(dirname(config.configFile), this.options.outputDir ?? "../test-results/matrix-summary");
   }
 
   onTestEnd(test: TestCase, result: TestResult): void {
