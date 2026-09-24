@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createIdentity } from "@ghostly/core";
 import { Groups, type GroupStore, type GroupsHost } from "../src/engine/groups";
 import type { StoredGroup } from "../src/shared/types";
+// covers: groups.invite, groups.remove-member
 
 /**
  * `StoredGroup.contacts` keeps the chat a member joined through after they are removed or leave (the
