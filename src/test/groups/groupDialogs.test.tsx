@@ -133,8 +133,8 @@ describe("GroupLinkPanel", () => {
   it("creates the group's link", async () => {
     const { user, engine } = renderApp(<GroupLinkPanel group={admin()} />);
     engine.on("enableGroupLink", () => ({ link: entryLink }));
-    expect(screen.getByText(/Anyone with the link can join/)).toBeInTheDocument();
-    await user.click(screen.getByTestId("group-link-enable"));
+    expect(screen.getByText(/The link is off: nobody can join with it/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Turn on the link" }));
     expect(engine.callsTo("enableGroupLink")).toEqual([{ groupId: id }]);
   });
 
@@ -165,7 +165,7 @@ describe("GroupLinkPanel", () => {
   it("warns that nobody gets in while the group is full", () => {
     const eight = Array.from({ length: 8 }, (_, i) => member({ key: String(i).padEnd(52, "y") }));
     renderApp(<GroupLinkPanel group={admin({ entryLink, members: eight })} />);
-    expect(screen.getByText(/the group is full now, so nobody gets in/)).toBeInTheDocument();
+    expect(screen.getByTestId("group-link-note")).toHaveTextContent("The group is full (8 of 8): nobody gets in through the link until someone leaves.");
   });
 
   it("replaces the link, or turns it off", async () => {
