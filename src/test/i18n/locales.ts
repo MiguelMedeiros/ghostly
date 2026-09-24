@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Language } from "../../lib/settings";
 import en from "../../locales/en.json";
 import pt from "../../locales/pt.json";
@@ -36,3 +39,22 @@ export function literalKeys(source: string): string[] {
 
 /** The top-level sections of en.json (`common`, `chat`...): a DOM string starting with one of them looks like a raw key. */
 export const SECTIONS = Object.keys(en);
+
+const SRC = join(fileURLToPath(import.meta.url), "../../..");
+
+/**
+ * The app's sources (src/, without the tests), read from disk and keyed as `../../components/X.tsx`. Read as files,
+ * not imported with `?raw`: an import would make coverage count each of them as loaded, and empty.
+ */
+export function appSources(): Record<string, string> {
+  const out: Record<string, string> = {};
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) { if (path !== join(SRC, "test")) walk(path); }
+      else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) out[`../../${relative(SRC, path)}`] = readFileSync(path, "utf8");
+    }
+  };
+  walk(SRC);
+  return out;
+}

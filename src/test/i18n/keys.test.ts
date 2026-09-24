@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LANGUAGES, LOCALES, flatten, literalKeys, lookup } from "./locales";
+import { LANGUAGES, LOCALES, appSources, flatten, literalKeys, lookup } from "./locales";
 
 // covers: app.i18n
 
@@ -48,22 +48,12 @@ describe("every locale has the same keys as English", () => {
 });
 
 /** Sources read as text: which keys they ask for is all that matters here. */
-const componentSources = import.meta.glob<string>(
-  [
-    "../../components/{PaymentComposer,PaymentBubble,WalletDeck,GroupMembersDialog,GroupLinkPanel,NewGroupDialog,InviteCard,PairingBanner,MessageBubble}.tsx",
-    "../../components/wallet/providers/*.{ts,tsx}",
-    "../../components/identities/*.tsx",
-    "../../components/layout/*.{ts,tsx}",
-    "../../pages/GroupChat.tsx",
-  ],
-  { query: "?raw", import: "default", eager: true },
-);
-
-const allSources = import.meta.glob<string>(["../../**/*.{ts,tsx}", "!../../test/**", "!../../**/*.test.{ts,tsx}"], {
-  query: "?raw",
-  import: "default",
-  eager: true,
-});
+const allSources = appSources();
+const componentSources = Object.fromEntries(Object.entries(allSources).filter(([path]) => [
+  /^\.\.\/\.\.\/components\/(PaymentComposer|PaymentBubble|WalletDeck|GroupMembersDialog|GroupLinkPanel|NewGroupDialog|InviteCard|PairingBanner|MessageBubble)\.tsx$/,
+  /^\.\.\/\.\.\/components\/(wallet\/providers|identities|layout)\/[^/]+\.tsx?$/,
+  /^\.\.\/\.\.\/pages\/GroupChat\.tsx$/,
+].some((pattern) => pattern.test(path))));
 
 const name = (path: string) => path.replace(/^(\.\.\/)+/, "src/");
 
