@@ -24,7 +24,7 @@ async function leave(peer: Peer): Promise<void> {
   await expect(rows(peer)).toHaveCount(0);
 }
 
-test("leaving: gone from the list at once, heard by an admin who was away, and the admin hands over its role", async ({ peer }) => {
+test("leaving: gone from the list at once, heard by an admin who was away, and the admin hands over its role", { tag: ["@feature:groups.leave", "@feature:groups.admin-change"] }, async ({ peer }) => {
   test.setTimeout(8 * 60_000);
   const [alice, bob, carol] = await Promise.all([peer("alice"), peer("bob"), peer("carol")]);
   await Promise.all([setName(alice, "Alice"), setName(bob, "Bob"), setName(carol, "Carol")]);

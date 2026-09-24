@@ -58,8 +58,9 @@ Unit tests only, measured on 2026-09-24 with `npm run coverage` (gated suites sk
 | Package | Lines | Statements | Functions | Branches |
 |---|---:|---:|---:|---:|
 | core (`packages/core`) | 85.57% | 78.02% | 81.27% | 74.34% |
-| browser (`packages/browser`) | 75.37% | 70.32% | 64.65% | 64.41% |
+| browser (`packages/browser`) — some tests failed | 75.12% | 70.08% | 64.17% | 64.17% |
 | sdk (`packages/sdk`) | n/a | n/a | n/a | n/a |
+| ui (`.`) | 2.87% | 2.52% | 1.97% | 2.25% |
 
 n/a: the package only re-exports code that lives (and is counted) elsewhere.
 
@@ -73,11 +74,11 @@ n/a: the package only re-exports code that lives (and is counted) elsewhere.
 
 | | Unit | Rust | E2E web | E2E ext | E2E desktop | Gated |
 |---|---:|---:|---:|---:|---:|---:|
-| features with one | 186 | 8 | 185 | 18 | 1 | 55 |
+| features with one | 187 | 8 | 185 | 18 | 1 | 55 |
 
 E2E in any client: 192. Unit tests only: 47. Gated suites only: 7. User-visible features of a client with no E2E test in that client: web 38, extension 197, desktop 217.
 
-Tests read: 77 E2E specs (77 tagged), 128 unit test files (128 tagged), 7 Rust files with `// covers:`.
+Tests read: 78 E2E specs (78 tagged), 130 unit test files (130 tagged), 7 Rust files with `// covers:`.
 
 ### Gaps
 
@@ -122,7 +123,7 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | `app.sidebar-resize` |  | WED | · | · | 3 | · | · | · |
 | `app.popovers` |  | WED | · | · | 4 | · | · | · |
 | `app.emoji-picker` |  | WED | · | · | 1 | · | · | · |
-| `app.i18n` |  | WED | · | · | 1 | · | · | · |
+| `app.i18n` |  | WED | 1 | · | 1 | · | · | · |
 | `app.theme` |  | WED | · | · | 2 | · | · | · |
 | `app.reduce-motion` |  | WED | · | · | 1 | · | · | · |
 | `app.version` |  | WED | · | · | 1 | · | · | · |
@@ -256,7 +257,7 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | `chat.paired.receipts` | 401 | WED | 1 | · | 1 | · | · | 1 |
 | `chat.paired.verify` | 401 | WED | 3 | · | 2 | · | · | · |
 | `chat.paired.status` | 401 | WED | 3 | · | 5 | · | · | · |
-| `chat.paired.reconnect` | 401 | WED | 2 | · | 2 | · | · | 1 |
+| `chat.paired.reconnect` | 401 | WED | 3 | · | 2 | · | · | 1 |
 | `chat.paired.offline-send` | 401 | WED | 1 | · | 1 | · | · | 1 |
 | `chat.paired.delete-message` | 400 | WED | 1 | · | 1 | · | · | · |
 | `chat.paired.message-details` | 400 | WED | · | · | 1 | · | · | · |
@@ -329,9 +330,9 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | `groups.send` | 902 | WED | 2 | · | 2 | · | · | · |
 | `groups.catch-up` | 902 | WED | 1 | · | 1 | · | · | · |
 | `groups.remove-member` | 900 | WED | 1 | · | 1 | · | · | · |
-| `groups.admin-change` | 900 | WED | 1 | · | 1 | · | · | · |
+| `groups.admin-change` | 900 | WED | 1 | · | 2 | · | · | · |
 | `groups.rotate` | 900 | WED | 1 | · | 1 | · | · | · |
-| `groups.leave` | 900 | WED | 2 | · | 1 | · | · | · |
+| `groups.leave` | 900 | WED | 2 | · | 2 | · | · | · |
 | `groups.forget` | 900 | WED | 1 | · | · | · | · | · |
 | `groups.link.enable` | 900 | WED | 1 | · | 1 | · | · | · |
 | `groups.link.join` | 900 | WED | 1 | · | 1 | · | · | · |
@@ -393,7 +394,7 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 | `wallet.mode` | 200 | WED | 2 | · | 2 | · | · | · |
 | `wallet.ready` | 200 | WED | 1 | · | 1 | · | · | · |
 | `wallet.badge` | 200 | WED | · | · | 1 | · | · | · |
-| `wallet.deck` |  | WED | 1 | · | 2 | · | · | · |
+| `wallet.deck` |  | WED | 2 | · | 2 | · | · | · |
 | `wallet.history` | 200 | WED | · | · | 3 | · | · | · |
 | `wallet.cashu.mint.add` | 201 | WED | · | · | 3 | 1 | · | · |
 | `wallet.cashu.mint.manage` | 201 | WED | · | · | 2 | 1 | · | · |
