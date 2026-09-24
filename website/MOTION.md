@@ -83,6 +83,18 @@ happens underneath, and leaves up and to the right (0.52 s, `EASE.in`).
 - Reduced motion: no swarm, the change happens at once.
 - Add `data-no-swarm` to a link that must navigate without it.
 
+## The story rail
+
+`components/story/StoryRail.tsx` + `app/rail.css`: the home page's chapter
+timeline, docked at the bottom of the screen. It is furniture, not a subject,
+so it rests at half opacity in muted greys, lights up while you scroll, point
+at it or tab into it, and settles back 1.2 s after the last scroll event
+(`DUR.md`, `EASE.out`). A soft wash of the page colour sits under it so text
+scrolling past fades out instead of meeting the dots. It hides near the top of
+the page and once the footer is within 120 px. On phones (≤ 640 px) only a
+2 px progress hairline is drawn. Reduced motion: no transitions, and scrolling
+does not light it.
+
 ## Devices
 
 | Mode | Who | What moves |
