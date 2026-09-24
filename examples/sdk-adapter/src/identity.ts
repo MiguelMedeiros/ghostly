@@ -22,6 +22,7 @@ export const exampleSchnorr: IdentityProofProvider<SchnorrEvidence> = {
   id: "example-schnorr",
   label: "Schnorr key (SDK example)",
   category: "self-custodied",
+  summary: "Sign once with a BIP-340 key",
   description: "Proves you hold a BIP-340 key: sign the statement with it. An example built with the SDK.",
   platforms: ["web", "extension", "desktop"],
   subject: {

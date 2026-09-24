@@ -25,8 +25,10 @@ if (!packed) throw new Error("npm pack produced no tarball");
 renameSync(join(vendor, packed), join(vendor, "ghostly-sdk.tgz"));
 console.log(`\nPacked ${packed} → examples/sdk-adapter/vendor/ghostly-sdk.tgz\n`);
 
-// A fresh install every time: the tarball's integrity changes with every build.
+// A fresh install every time: the tarball's integrity changes with every build, and a lockfile left by
+// the last run would keep the old package.
 rmSync(join(example, "node_modules/@ghostly"), { recursive: true, force: true });
+rmSync(join(example, "package-lock.json"), { force: true });
 run(example, "npm", ["install", "--no-audit", "--no-fund"]);
 run(example, "npm", ["run", "typecheck"]);
 run(example, "npm", ["test"]);

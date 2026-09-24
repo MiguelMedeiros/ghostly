@@ -142,6 +142,7 @@ import type { IdentityProofProvider } from "@ghostly/sdk";
 
 export const myKey: IdentityProofProvider<{ sig: string }> = {
   id: "my-key", label: "My key", category: "self-custodied",
+  summary: "Sign once with your key",                 // the picker card, about 40 characters
   description: "Proves you hold a key: sign the statement with it.",
   platforms: ["web", "extension", "desktop"],
   subject: { label: "Public key", normalize: canonical, short: fingerprint },
