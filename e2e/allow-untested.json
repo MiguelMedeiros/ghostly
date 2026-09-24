@@ -3,7 +3,6 @@
   "settings.storage-used": "Nothing asserts the storage figure in Settings; a component test (npm run test:ui) can",
   "storage.local": "The local file storage adapter (WISP 1001) is exercised only through backup.profile.file, never on its own",
   "core.dht-direct": "src-tauri/src/pkarr_client.rs has no Rust test, and the Desktop smoke test only reads the label in Settings",
-  "proofs.oidc.callback.extension": "The chromiumapp.org redirect needs a real extension identity flow; no extension OIDC spec exists",
   "desktop.bundle-wiring": "Guarded by npm run check:desktop-bundle in PR CI, a build assertion the test map does not read",
   "desktop.notifications": "Native notifications need the Desktop harness (Linux only) and no spec drives them",
   "desktop.local-fetch": "Rust local_fetch has no test; services are only e2e-tested in the extension",
