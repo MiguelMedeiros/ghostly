@@ -36,6 +36,9 @@ export class EngineServer {
       for (const link of this.node.getState().links) {
         client.post({ kind: "messages", linkId: link.id, messages: await this.node.getMessages(link.id) });
       }
+    }).catch(() => {
+      // The client went away mid-snapshot (dropped, as broadcast does), or the peer never started (every call says so).
+      this.clients.delete(client);
     });
   }
 
