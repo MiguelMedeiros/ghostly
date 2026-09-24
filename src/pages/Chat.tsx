@@ -689,6 +689,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
             ? { balance: walletState.balance, contact: displayName || undefined, onSend: paySend, onRequest: payRequest,reviewContext:platform?.getPeer(peerKey)?.id ? {wallet,peer:peerKey,linkId:platform.getPeer(peerKey)!.id!}:undefined }
             : undefined
         }
+        identities={paired ? { peerKey: params.peerPubKeyB64, contact: displayName || t("common.anonymous") } : undefined}
       />
 
       {/* Incoming call notification */}
