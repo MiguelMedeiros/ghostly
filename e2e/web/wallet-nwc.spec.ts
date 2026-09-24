@@ -26,7 +26,10 @@ async function useNwc(p: Peer, uri: string) {
 /** The balance the Lightning card shows for its source, in sats. */
 async function lightningBalance(p: Peer): Promise<number> {
   await openWallet(p, "lightning");
-  const text = await p.page.getByTestId("wallet-balance").innerText();
+  const shown = p.page.getByTestId("wallet-balance");
+  // Once the wallet has answered: before that the card has no number, and a NaN compares with nothing.
+  await expect(shown).toHaveText(/^\s*[\d,]+/, { timeout: 60_000 });
+  const text = await shown.innerText();
   // "576,410 test sats · <source>": the leading number only.
   return Number(text.trim().match(/^[\d,]+/)?.[0].replaceAll(",", "") ?? NaN);
 }
