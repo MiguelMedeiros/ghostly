@@ -1603,6 +1603,7 @@ export class GhostlyNode implements EngineImplementation {
         },
         onPresence: presence => {
           if (presence.online && !seen) { seen = true; traceJoin(group, "link.presence", { role }); }
+          if (presence.lastPacketAt !== live.presence.lastPacketAt) traceJoin(group, "link.packet", { role, packetAt: presence.lastPacketAt });
           live.presence = presence; if (!entry) this.groups.edgeNick(group, peer, presence.nick); this.emitState(); },
         onPairingState: state => { live.pairing = state; this.emitState(); },
         onDataLinkState: state => {
