@@ -4,6 +4,7 @@ import type { ProviderDescriptorView } from "@ghostly/browser/engine/paymentAdap
 import { ProviderConfigForm } from "../../components/wallet/providers/SourcePicker";
 import { renderApp } from "../render";
 import { descriptor } from "./descriptors";
+import { choose, optionsOf } from "../select";
 
 // covers: wallet.lightning.sources, wallet.onchain.sources
 
@@ -68,12 +69,13 @@ describe("ProviderConfigForm", () => {
 
   it("starts a select on its default for the mode, else its first option", async () => {
     const { user, onSubmit } = form(descriptor("bdk"), "testnet");
-    expect(screen.getByLabelText("Network")).toHaveValue("signet");
+    expect(screen.getByLabelText("Network")).toHaveAttribute("data-value", "signet");
     // No default for the address type: the first option.
-    expect(screen.getByLabelText("Addresses")).toHaveValue("bip84");
-    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["Signet", "Mutinynet", "Regtest", "Native SegWit (BIP84, bc1q…)", "Taproot (BIP86, bc1p…)"]);
-    await user.selectOptions(screen.getByLabelText("Addresses"), "bip86");
-    await user.selectOptions(screen.getByLabelText("Network"), "regtest");
+    expect(screen.getByLabelText("Addresses")).toHaveAttribute("data-value", "bip84");
+    expect((await optionsOf(user, screen.getByLabelText("Network"))).map((o) => o.label)).toEqual(["Signet", "Mutinynet", "Regtest"]);
+    expect((await optionsOf(user, screen.getByLabelText("Addresses"))).map((o) => o.label)).toEqual(["Native SegWit (BIP84, bc1q…)", "Taproot (BIP86, bc1p…)"]);
+    await choose(user, screen.getByLabelText("Addresses"), "bip86");
+    await choose(user, screen.getByLabelText("Network"), "regtest");
     await user.click(screen.getByRole("button", { name: "Use BDK wallet" }));
     expect(onSubmit).toHaveBeenCalledWith({ network: "regtest", esplora: "", script: "bip86", mnemonic: "" });
   });

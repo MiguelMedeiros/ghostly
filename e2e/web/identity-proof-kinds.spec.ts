@@ -1,6 +1,7 @@
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { expect, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
+import { choose } from "../support/select";
 
 const hex = (b: Uint8Array) => Array.from(b, x => x.toString(16).padStart(2, "0")).join("");
 const b64url = (b: Uint8Array) => Buffer.from(b).toString("base64url");
@@ -24,7 +25,7 @@ test("every kind of signer: a pasted signature and a provider's attestation, bot
   await alice.page.getByTestId("identity-add").click();
   const add = alice.page.getByTestId("add-identity");
   await add.getByTestId("add-identity-fake-key").click();
-  await add.getByTestId("add-identity-signer").selectOption("fake-tool");
+  await choose(add.getByTestId("add-identity-signer"), "fake-tool");
   await add.getByTestId("add-identity-subject").fill(hex(ed25519.getPublicKey(seed)));
   await add.getByTestId("add-identity-start").click();
   const statement = await add.getByTestId("add-identity-copy-0").textContent();

@@ -3,6 +3,7 @@ import type { SourceView } from "@ghostly/browser/engine/paymentAdapters/provide
 import type { ProviderDescriptorView } from "@ghostly/browser/engine/paymentAdapters/providers/types";
 import { Block, Button, Notice, Row, Section, input } from "../ui";
 import { useRun } from "../run";
+import { Select } from "../../ui/Select";
 import { PROVIDER_FORMS, type ProviderFormProps } from "./forms";
 
 const STATUS = { none: "Not set up", connecting: "Connecting…", ready: "Connected", error: "Not connected" } as const;
@@ -18,9 +19,7 @@ export function ProviderConfigForm({ descriptor, mode, busy, onSubmit }: Provide
         <label key={field.name} className="block space-y-1">
           <span className="text-xs text-text-secondary">{field.label}{field.optional && <span className="text-text-muted"> (optional)</span>}</span>
           {field.kind === "select" ? (
-            <select aria-label={field.label} className={input} value={values[field.name]} onChange={(e) => set(field.name, e.target.value)}>
-              {field.options?.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
+            <Select aria-label={field.label} value={values[field.name]} onChange={(v) => set(field.name, v)} options={field.options ?? []} />
           ) : field.kind === "textarea" ? (
             <textarea aria-label={field.label} className={`${input} font-mono text-xs resize-none`} rows={3} placeholder={field.placeholder} value={values[field.name]} onChange={(e) => set(field.name, e.target.value)} />
           ) : (
@@ -63,10 +62,14 @@ export function SourcePicker({ kind, view, onSet, onClear }: { kind: "lightning"
         ) : (
           <label className="block space-y-1">
             <span className="text-xs text-text-secondary">{view.providerId ? "Change source" : "Choose a source"}</span>
-            <select aria-label={`${kind === "onchain" ? "Bitcoin" : "Lightning"} source`} data-testid={`${kind}-source-select`} className={input} value={chosen} onChange={(e) => { setChosen(e.target.value); setSaved(""); }}>
-              <option value="">{offered.length} available…</option>
-              {offered.map((d) => <option key={d.id} value={d.id} disabled={d.id === current?.id && view.status === "ready" && d.fields.length === 0}>{d.label}{d.custodial ? " (custodial)" : ""}{d.experimental ? " (experimental)" : ""}{d.id === view.providerId ? " · in use" : ""}</option>)}
-            </select>
+            <Select aria-label={`${kind === "onchain" ? "Bitcoin" : "Lightning"} source`} data-testid={`${kind}-source-select`} value={chosen} placeholder={`${offered.length} available…`}
+              onChange={(v) => { setChosen(v); setSaved(""); }}
+              options={offered.map((d) => ({
+                value: d.id,
+                label: d.label,
+                description: [d.custodial && "Custodial", d.experimental && "Experimental", d.id === view.providerId && "In use"].filter(Boolean).join(" · ") || undefined,
+                disabled: d.id === current?.id && view.status === "ready" && d.fields.length === 0,
+              }))} />
           </label>
         )}
         {descriptor && Form && (

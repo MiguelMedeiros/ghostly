@@ -8,6 +8,7 @@ import { AddIdentityDialog } from "../../components/identities/AddIdentityDialog
 import { fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
 import { proofView } from "./views";
+import { choose, optionsOf } from "../select";
 
 // covers: proofs.picker, proofs.domain.dns, proofs.ssh, proofs.oidc
 
@@ -132,8 +133,8 @@ describe("AddIdentityDialog", () => {
       const { user } = dialog();
       await user.click(screen.getByTestId("add-identity-domain"));
       const validity = screen.getByTestId("add-identity-validity");
-      expect(within(validity).getAllByRole("option").map((o) => o.textContent)).toEqual(["7 days", "30 days", "90 days", "180 days", "365 days"]);
-      expect(validity).toHaveValue("90");
+      expect((await optionsOf(user, validity)).map((o) => o.label)).toEqual(["7 days", "30 days", "90 days", "180 days", "365 days"]);
+      expect(validity).toHaveAttribute("data-value", "90");
     });
 
     it("needs the subject before it continues, and asks the engine to begin with what was chosen", async () => {
@@ -141,12 +142,12 @@ describe("AddIdentityDialog", () => {
       engine.on("beginIdentityProof", () => { throw new Error("Ghostly is offline"); });
       await user.click(screen.getByTestId("add-identity-domain"));
       // The signers that work here; the NIP-07 one needs a browser extension this page does not have.
-      expect(within(screen.getByTestId("add-identity-signer")).getAllByRole("option").map((o) => o.textContent)).toEqual(["DNS TXT record", "File on your website", "NIP-05 with a remote signer"]);
+      expect((await optionsOf(user, screen.getByTestId("add-identity-signer"))).map((o) => o.label)).toEqual(["DNS TXT record", "File on your website", "NIP-05 with a remote signer"]);
       const start = screen.getByTestId("add-identity-start");
       expect(start).toHaveTextContent("Continue");
       expect(start).toBeDisabled();
       await user.type(screen.getByTestId("add-identity-subject"), "example.com");
-      await user.selectOptions(screen.getByTestId("add-identity-validity"), "30");
+      await choose(user, screen.getByTestId("add-identity-validity"), "30");
       await user.click(start);
       expect(engine.callsTo("beginIdentityProof")).toEqual([{ provider: "domain", subject: "example.com", validityDays: 30 }]);
       expect(await screen.findByTestId("add-identity-error")).toHaveTextContent("Ghostly is offline");
@@ -171,7 +172,7 @@ describe("AddIdentityDialog", () => {
     it("switches between a publish signer and an in-app one", async () => {
       const { user } = dialog();
       await user.click(screen.getByTestId("add-identity-domain"));
-      await user.selectOptions(screen.getByTestId("add-identity-signer"), "nip05-nip46");
+      await choose(user, screen.getByTestId("add-identity-signer"), "nip05-nip46");
       expect(screen.queryByTestId("add-identity-subject")).not.toBeInTheDocument();
       expect(screen.getByTestId("add-identity-field-domain")).toHaveAttribute("type", "text");
       expect(screen.getByTestId("add-identity-field-bunker")).toHaveAttribute("type", "password");
@@ -200,8 +201,8 @@ describe("AddIdentityDialog", () => {
       const { user, engine } = dialog();
       answerBegin();
       await user.click(screen.getByTestId("add-identity-oidc"));
-      expect(within(screen.getByTestId("add-identity-validity")).getAllByRole("option").map((o) => o.textContent)).toEqual(["7 days"]);
-      expect(within(screen.getByTestId("add-identity-signer")).getAllByRole("option")).toHaveLength(3);
+      expect((await optionsOf(user, screen.getByTestId("add-identity-validity"))).map((o) => o.label)).toEqual(["7 days"]);
+      expect(await optionsOf(user, screen.getByTestId("add-identity-signer"))).toHaveLength(3);
       await user.click(screen.getByRole("radio", { name: "Google" }));
       await user.click(screen.getByTestId("add-identity-start"));
       expect(engine.callsTo("beginIdentityProof")).toEqual([{ provider: "oidc", subject: "https://accounts.google.com", validityDays: 7 }]);

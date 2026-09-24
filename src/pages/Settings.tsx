@@ -16,6 +16,7 @@ import { currentProfile, listProfiles } from "../lib/profiles";
 import { openProfileSwitcher } from "../hooks/useProfileSwitcher";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { Switch } from "../components/wallet/ui";
+import { Select } from "../components/ui/Select";
 import {
   hashPassword,
   verifyPassword,
@@ -188,7 +189,6 @@ export function Settings() {
   };
 
   const field = "w-full min-w-0 px-3 py-2 min-h-10 bg-input-bg border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent transition-colors";
-  const select = "min-h-10 max-w-full bg-surface-alt text-text-primary px-3 py-2 rounded-lg border border-border focus:outline-none focus:ring-2 focus:ring-accent";
   const button = "px-4 py-2 min-h-10 rounded-lg text-sm font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
   const lockOn = lockEnabled && hasPassword;
   const systemOn = settings.notifications.systemEnabled && noticePermission === "granted";
@@ -291,11 +291,8 @@ export function Settings() {
           </div>
         </Row>
         <Row label={t("settings.language")}>
-          <select aria-label={t("settings.language")} value={settings.language} onChange={(e) => handleLanguageChange(e.target.value as Language)} className={select}>
-            {LANGUAGE_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>{option.native}</option>
-            ))}
-          </select>
+          <Select fit aria-label={t("settings.language")} data-testid="settings-language" value={settings.language} onChange={handleLanguageChange}
+            options={LANGUAGE_OPTIONS.map((option) => ({ value: option.value, label: option.native, description: option.label === option.native ? undefined : option.label }))} />
         </Row>
       </Section>
 
@@ -305,13 +302,8 @@ export function Settings() {
         </Row>
         {hasPassword && (
           <Row label={t("settings.timeout")}>
-            <select aria-label={t("settings.timeout")} value={timeoutMinutes} onChange={(e) => handleTimeoutChange(Number(e.target.value))} className={select}>
-              <option value={1}>{t("settings.timeoutOptions.1")}</option>
-              <option value={5}>{t("settings.timeoutOptions.5")}</option>
-              <option value={15}>{t("settings.timeoutOptions.15")}</option>
-              <option value={30}>{t("settings.timeoutOptions.30")}</option>
-              <option value={60}>{t("settings.timeoutOptions.60")}</option>
-            </select>
+            <Select fit aria-label={t("settings.timeout")} data-testid="settings-timeout" value={String(timeoutMinutes)} onChange={(v) => handleTimeoutChange(Number(v))}
+              options={([1, 5, 15, 30, 60] as const).map((m) => ({ value: String(m), label: t(`settings.timeoutOptions.${m}`) }))} />
           </Row>
         )}
         {(showPasswordForm || hasPassword) && (

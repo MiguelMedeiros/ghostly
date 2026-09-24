@@ -1,5 +1,6 @@
 import { BREEZ_TESTNET, counterpart, type Counterpart } from "../support/breez";
 import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
+import { choose, optionsOf, close } from "../support/select";
 
 /**
  * Breez (the nodeless Breez SDK, on Spark) as the Lightning source. Its wallet is Ghostly's to make: a
@@ -15,11 +16,12 @@ const form = (p: Peer) => source(p).getByTestId("provider-form-breez");
 test("Breez is offered in Testnet only, and its form makes or restores a wallet", { tag: ["@feature:wallet.lightning.breez.connect"] }, async ({ peer }) => {
   const alice = await peer("breez-form");
   await openWallet(alice, "lightning");
-  await expect(source(alice).getByTestId("lightning-source-select").locator("option")).not.toContainText([/Breez/]);
+  await expect((await optionsOf(source(alice).getByTestId("lightning-source-select"))).filter({ hasText: /Breez/ })).toHaveCount(0);
+  await close(source(alice).getByTestId("lightning-source-select"));
 
   await useTestnet(alice);
   await openWallet(alice, "lightning");
-  await source(alice).getByTestId("lightning-source-select").selectOption("breez");
+  await choose(source(alice).getByTestId("lightning-source-select"), "breez");
   await expect(source(alice).getByTestId("lightning-source-config")).toContainText("self-custodial");
 
   // A new wallet: twelve words, to be written down before it is used.
@@ -51,7 +53,7 @@ test.describe("on Breez's regtest", { tag: "@network" }, () => {
   const sats = async (p: Peer) => Number((await balance(p).innerText()).replace(/[^\d]/g, "").match(/^\d+/)?.[0] ?? NaN);
   async function useBreez(p: Peer) {
     await openWallet(p, "lightning");
-    await source(p).getByTestId("lightning-source-select").selectOption("breez");
+    await choose(source(p).getByTestId("lightning-source-select"), "breez");
     await form(p).getByTestId("breez-phrase-written").check();
     await form(p).getByTestId("provider-save").click();
     await expect(source(p).getByTestId("lightning-source-status")).toContainText("Connected", { timeout: 90_000 });

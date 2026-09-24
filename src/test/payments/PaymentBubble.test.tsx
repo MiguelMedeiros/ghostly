@@ -6,6 +6,7 @@ import { PaymentBubble } from "../../components/PaymentBubble";
 import { fakeEngine, linkView, paymentView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { lightningSource, MAINNET_INVOICE, mint, REAL_MINT, REGTEST_INVOICE, reviewOf, SIGNET_INVOICE, target, TEST_MINT, TESTNET_INVOICE } from "./fixtures";
+import { choose } from "../select";
 
 // covers: payments.chat.review, payments.chat.method-off, payments.cashu.request, payments.cashu.reclaim, payments.cashu.test-sats, payments.lightning.request, payments.bitcoin.send, payments.usdt.send, payments.external
 
@@ -124,7 +125,9 @@ describe("paying a request with Cashu", () => {
   it("reviews the payment from the mint both sides share", async () => {
     const { user, engine } = show(incomingRequest({ mints: [REAL_MINT, "https://other.example"] }), { wallet: { mints: [mint(REAL_MINT, 900)] } });
     engine.on("preparePayment", reviewOf);
-    expect(screen.getByRole("combobox", { name: "Cashu mint" })).toHaveDisplayValue(`${REAL_MINT} · 900 sats`);
+    const picker = screen.getByRole("combobox", { name: "Cashu mint" });
+    expect(picker).toHaveAttribute("data-value", REAL_MINT);
+    expect(picker).toHaveTextContent(`${REAL_MINT} 900 sats`);
     await user.click(payButton());
     expect(await screen.findByRole("region", { name: "Payment review" })).toBeInTheDocument();
     expect(engine.callsTo("preparePayment")).toEqual([{
@@ -147,7 +150,7 @@ describe("paying a request with Cashu", () => {
     const other = "https://other.example";
     const { user, engine } = show(incomingRequest({ mints: [REAL_MINT, other] }), { wallet: { mints: [mint(REAL_MINT, 900), mint(other, 50)] } });
     engine.on("preparePayment", reviewOf);
-    await user.selectOptions(screen.getByRole("combobox", { name: "Cashu mint" }), other);
+    await choose(user, screen.getByRole("combobox", { name: "Cashu mint" }), other);
     const fee = screen.getByRole("textbox", { name: "Maximum fee (sats)" });
     await user.clear(fee);
     await user.type(fee, "5x");
@@ -159,7 +162,9 @@ describe("paying a request with Cashu", () => {
 
   it("cannot review a request with no mint in common and no invoice", () => {
     show(incomingRequest({ mints: ["https://other.example"] }), { wallet: { mints: [mint(REAL_MINT, 900)] } });
-    expect(screen.getByRole("option", { name: "No shared configured mint" })).toBeInTheDocument();
+    const picker = screen.getByRole("combobox", { name: "Cashu mint" });
+    expect(picker).toHaveTextContent("No shared configured mint");
+    expect(picker).toBeDisabled();
     expect(payButton()).toBeDisabled();
   });
 

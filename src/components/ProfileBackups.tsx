@@ -6,6 +6,7 @@ import { createProfileBackup, restoreProfileBackup } from "../lib/profileBackup"
 import { switchProfile } from "../lib/profiles";
 import { Block, Button, Notice, Row, Section, Segmented, input } from "./wallet/ui";
 import { useRun } from "./wallet/run";
+import { Select } from "./ui/Select";
 import { ButtonGroup, FieldGrid, InputGroup, Truncate } from "./layout";
 
 const size = (bytes: number) => (bytes > 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
@@ -78,9 +79,8 @@ export function ProfileBackups({ canSwitch }: { canSwitch: boolean }) {
           ) : (
             <InputGroup>
               {listing?.length ? (
-                <select data-testid="restore-pick" aria-label="Backup to restore" className={input} value={picked} onChange={(e) => setPicked(e.target.value)}>
-                  {listing.map((b) => <option key={b.name} value={b.name}>{new Date(b.created || b.modified || 0).toLocaleString()}{b.size ? ` · ${size(b.size)}` : ""}</option>)}
-                </select>
+                <Select data-testid="restore-pick" aria-label="Backup to restore" value={picked} onChange={setPicked}
+                  options={listing.map((b) => ({ value: b.name, label: new Date(b.created || b.modified || 0).toLocaleString(), description: b.size ? size(b.size) : undefined }))} />
               ) : listing ? <Notice>None yet.</Notice> : null}
               <Button data-testid="restore-list" disabled={busy} onClick={() => void run(async () => { const all = (await s3.list(space())).filter((b) => b.name.endsWith(".ghostly-backup")).reverse(); setListing(all); setPicked(all[0]?.name ?? ""); })}>{listing ? "Refresh" : "List"}</Button>
             </InputGroup>

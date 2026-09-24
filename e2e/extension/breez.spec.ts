@@ -1,6 +1,7 @@
 import { BREEZ_TESTNET, counterpart } from "../support/breez";
 import { openWallet, useTestnet } from "../support/fixtures";
 import { expect, test } from "../support/extension";
+import { choose } from "../support/select";
 
 /**
  * The Breez source in the extension, where the engine (and so the SDK's WebAssembly) runs in the
@@ -16,7 +17,7 @@ test("Breez runs in the extension's offscreen document: in and out on regtest", 
     const page = alice.page, source = page.getByTestId("lightning-source");
     await useTestnet(alice);
     await openWallet(alice, "lightning");
-    await source.getByTestId("lightning-source-select").selectOption("breez");
+    await choose(source.getByTestId("lightning-source-select"), "breez");
     await source.getByTestId("breez-phrase-written").check();
     await source.getByTestId("provider-save").click();
     await expect(source.getByTestId("lightning-source-status")).toHaveText("Connected · regtest", { timeout: 90_000 });

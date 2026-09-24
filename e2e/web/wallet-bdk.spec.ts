@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { BDK_REGTEST } from "../support/bdk-regtest/regtest.mjs";
 import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
+import { choose } from "../support/select";
 
 /**
  * The BDK wallet (bitcoindevkit in WebAssembly) as the on-chain Bitcoin source, Testnet only:
@@ -15,7 +16,7 @@ const panel = (p: Peer) => p.page.getByTestId("bitcoin-wallet");
 
 async function chooseBdk(p: Peer) {
   await openWallet(p, "bitcoin");
-  await panel(p).getByTestId("onchain-source-select").selectOption("bdk");
+  await choose(panel(p).getByTestId("onchain-source-select"), "bdk");
   return panel(p).getByTestId("provider-form-bdk");
 }
 
@@ -32,7 +33,7 @@ test("the BDK wallet is offered in Testnet only, shows a new wallet's words once
   await form.getByTestId("provider-save").click();
   await expect(panel(alice)).toContainText("Write the 12 words down first");
   await panel(alice).getByTestId("bdk-written").check();
-  await form.getByLabel("Network").selectOption("regtest");
+  await choose(form.getByLabel("Network"), "regtest");
   // Regtest has no public server.
   await form.getByTestId("provider-save").click();
   await expect(panel(alice).getByTestId("onchain-source-error")).toContainText("Regtest needs the address of your own Esplora server");
@@ -78,7 +79,7 @@ test("BDK on regtest: funded, a Send from the wallet, a Send and a Request paid 
     await useTestnet(p);
     const form = await chooseBdk(p);
     await panel(p).getByTestId("bdk-written").check();
-    await form.getByLabel("Network").selectOption("regtest");
+    await choose(form.getByLabel("Network"), "regtest");
     await form.getByLabel("Esplora server").fill(ESPLORA);
     await form.getByTestId("provider-save").click();
     await expect(panel(p).getByTestId("onchain-source-saved")).toBeVisible({ timeout: 60_000 });

@@ -8,6 +8,7 @@ import { WeblnForm } from "../../components/wallet/providers/WeblnForm";
 import type { ProviderFormProps } from "../../components/wallet/providers/forms";
 import { renderApp } from "../render";
 import { descriptor } from "./descriptors";
+import { choose } from "../select";
 
 // covers: wallet.onchain.bdk.create, wallet.lightning.breez.connect, wallet.lightning.webln.connect
 
@@ -46,7 +47,7 @@ describe("BdkForm", () => {
     const { user, onSubmit } = render(BdkForm, "bdk", "testnet");
     const phrase = shownPhrase("bdk-new-phrase");
     await user.click(screen.getByTestId("bdk-written"));
-    await user.selectOptions(screen.getByLabelText("Addresses"), "bip86");
+    await choose(user, screen.getByLabelText("Addresses"), "bip86");
     await user.click(screen.getByRole("button", { name: "Use BDK wallet" }));
     expect(onSubmit).toHaveBeenCalledWith({ network: "signet", esplora: "", script: "bip86", mnemonic: phrase });
   });
@@ -65,9 +66,9 @@ describe("BdkForm", () => {
 
   it("starts the fields over when switching between new and restore", async () => {
     const { user } = render(BdkForm, "bdk", "testnet");
-    await user.selectOptions(screen.getByLabelText("Network"), "regtest");
+    await choose(user, screen.getByLabelText("Network"), "regtest");
     await user.click(screen.getByRole("radio", { name: "Restore" }));
-    expect(screen.getByLabelText("Network")).toHaveValue("signet");
+    expect(screen.getByLabelText("Network")).toHaveAttribute("data-value", "signet");
   });
 
   it("clears the written-down message when switching to restore", async () => {

@@ -1,6 +1,7 @@
 import { decodeBolt11 } from "@ghostly/core";
 import { balance, credentials, invoice, lookupInvoice, settled } from "../support/lnd-regtest/regtest.mjs";
 import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
+import { choose } from "../support/select";
 
 /**
  * The LND provider against real nodes: GHOSTLY_LND_REGTEST=1 with e2e/infra up (npm run e2e:infra:up) and this
@@ -18,7 +19,7 @@ async function useNode(p: Peer, node: "alice" | "bob") {
   const { url, macaroon, cert } = credentials(node);
   await openWallet(p, "lightning");
   const source = p.page.getByTestId("lightning-source");
-  await source.getByTestId("lightning-source-select").selectOption("lnd");
+  await choose(source.getByTestId("lightning-source-select"), "lnd");
   const form = source.getByTestId("provider-form-lnd");
   await form.getByLabel("REST address").fill(url);
   await form.getByLabel("Macaroon (hex)").fill(macaroon);

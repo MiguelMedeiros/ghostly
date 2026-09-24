@@ -760,6 +760,13 @@ em-emoji-picker {
 .profile-switcher-popover { animation: profile-switcher-in 140ms ease-out both; transform-origin: bottom left; }
 .profile-switcher-sheet { animation: profile-switcher-sheet-in 180ms ease-out both; max-height: 80vh; overflow-y: auto; }
 @keyframes profile-switcher-in { from { opacity: 0; transform: translateY(6px) scale(0.98); } }
+/* A Select's list (components/ui/Select.tsx): opens toward where it sits, from its button's edge. */
+.select-list { animation: select-in 120ms ease-out both; transform-origin: top; }
+.select-list[data-placement="top"] { transform-origin: bottom; animation-name: select-in-up; }
+@keyframes select-in { from { opacity: 0; transform: translateY(-4px) scale(0.98); } }
+@keyframes select-in-up { from { opacity: 0; transform: translateY(4px) scale(0.98); } }
+:root[data-reduce-motion="true"] .select-list { animation: none; }
+@media (prefers-reduced-motion: reduce) { .select-list { animation: none; } }
 @keyframes profile-switcher-sheet-in { from { transform: translateY(100%); } }
 /* The app restarting as another profile: that profile's picture and name over everything, then out. */
 .profile-switch-splash { animation: profile-switch-in 120ms ease-out both; }

@@ -3,6 +3,7 @@ import { ed25519 } from "@noble/curves/ed25519.js";
 import { expect, test, type Peer } from "../support/fixtures";
 import { addNostrIdentity, injectNostrSigner } from "../support/nostrSigner";
 import { swipe } from "../support/swipe";
+import { choose } from "../support/select";
 
 /**
  * The person's identities are a deck of ID cards, with the wallet's mechanics (deck/Deck.tsx): with a mouse a
@@ -49,7 +50,7 @@ async function addTestKey(peer: Peer) {
   await addCard(peer.page).click();
   const add = peer.page.getByTestId("add-identity");
   await add.getByTestId("add-identity-fake-key").click();
-  await add.getByTestId("add-identity-signer").selectOption("fake-tool");
+  await choose(add.getByTestId("add-identity-signer"), "fake-tool");
   await add.getByTestId("add-identity-subject").fill(hex(ed25519.getPublicKey(key)));
   await add.getByTestId("add-identity-start").click();
   const statement = await add.getByTestId("add-identity-copy-0").textContent();

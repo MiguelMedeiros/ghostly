@@ -3,6 +3,7 @@ import { FakeWebln, FakeWeblnLedger } from "../../packages/browser/test/helpers/
 import { lndWebln } from "../../packages/browser/test/helpers/lndWebln";
 import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
 import { connectWebln, installWebln } from "../support/webln";
+import { choose, optionsOf } from "../support/select";
 
 /**
  * Lightning through a browser wallet (WebLN, like Alby): the test puts `window.webln` in the page, backed
@@ -59,8 +60,8 @@ async function requestPaidInChat(alice: Peer, bob: Peer, sats: number, aliceSour
 test("the browser wallet is offered on the web, and says when there is none or it refuses", { tag: ["@feature:wallet.lightning.webln.connect"] }, async ({ peer }) => {
   const alice = await peer("webln-missing");
   const source = await lightningCard(alice);
-  await expect(source.getByTestId("lightning-source-select").locator("option", { hasText: "Browser wallet (WebLN)" })).toHaveCount(1);
-  await source.getByTestId("lightning-source-select").selectOption("webln");
+  await expect((await optionsOf(source.getByTestId("lightning-source-select"))).filter({ hasText: "Browser wallet (WebLN)" })).toHaveCount(1);
+  await choose(source.getByTestId("lightning-source-select"), "webln");
   await expect(source.getByTestId("webln-missing")).toBeVisible();
   await source.getByRole("button", { name: "Connect browser wallet" }).click();
   await expect(source.getByTestId("lightning-source-error")).toContainText("No WebLN wallet in this browser");
@@ -68,7 +69,7 @@ test("the browser wallet is offered on the web, and says when there is none or i
 
   await installWebln(alice, new FakeWebln(undefined, { refuseEnable: true }));
   await lightningCard(alice);
-  await source.getByTestId("lightning-source-select").selectOption("webln");
+  await choose(source.getByTestId("lightning-source-select"), "webln");
   await expect(source.getByTestId("webln-found")).toBeVisible();
   await source.getByRole("button", { name: "Connect browser wallet" }).click();
   await expect(source.getByTestId("lightning-source-error")).toContainText("refused the connection");

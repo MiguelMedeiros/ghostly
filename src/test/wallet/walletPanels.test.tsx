@@ -6,6 +6,7 @@ import { servicesPlatform, type WalletState } from "../../lib/platform";
 import { walletView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { offered, sourceView } from "./descriptors";
+import { choose } from "../select";
 
 // covers: wallet.lightning.sources, wallet.onchain.sources
 
@@ -19,7 +20,7 @@ describe("choosing a source from the wallet cards", () => {
     const { user, engine } = renderApp(<BitcoinWalletPanel wallet={wallet} state={state} />);
     engine.on("bitcoinSetSource", () => undefined);
     expect(screen.getByTestId("bitcoin-empty")).toHaveTextContent("No Bitcoin source configured");
-    await user.selectOptions(screen.getByRole("combobox", { name: "Bitcoin source" }), "bdk");
+    await choose(user, screen.getByRole("combobox", { name: "Bitcoin source" }), "bdk");
     await user.click(screen.getByRole("radio", { name: "Restore" }));
     await user.type(screen.getByLabelText("Recovery phrase"), phrase);
     await user.click(screen.getByRole("button", { name: "Use BDK wallet" }));
@@ -31,7 +32,7 @@ describe("choosing a source from the wallet cards", () => {
     const state = walletView({ mode: "testnet", bitcoin: { ...sourceView({ mode: "testnet", offered: offered("onchain", "testnet") }), history: [] } }) as WalletState;
     const { user, engine } = renderApp(<BitcoinWalletPanel wallet={wallet} state={state} />);
     engine.on("bitcoinSetSource", () => { throw new Error("That recovery phrase is not valid (BIP39, English)"); });
-    await user.selectOptions(screen.getByRole("combobox", { name: "Bitcoin source" }), "bdk");
+    await choose(user, screen.getByRole("combobox", { name: "Bitcoin source" }), "bdk");
     await user.click(screen.getByRole("radio", { name: "Restore" }));
     await user.type(screen.getByLabelText("Recovery phrase"), "not words");
     await user.click(screen.getByRole("button", { name: "Use BDK wallet" }));
@@ -51,7 +52,7 @@ describe("choosing a source from the wallet cards", () => {
     const state = walletView({ lightning: ln }) as WalletState;
     const { user, engine } = renderApp(<CashuWallet wallet={wallet} state={state} rail="lightning" onOpenCashu={() => {}} />);
     engine.on("lightningSetSource", () => undefined).on("lightningClearSource", () => undefined);
-    await user.selectOptions(screen.getByRole("combobox", { name: "Lightning source" }), "nwc");
+    await choose(user, screen.getByRole("combobox", { name: "Lightning source" }), "nwc");
     await user.type(screen.getByLabelText("Connection URI"), "nostr+walletconnect://wallet");
     await user.click(screen.getByRole("button", { name: "Use Nostr Wallet Connect" }));
     expect(await screen.findByTestId("lightning-source-saved")).toHaveTextContent("Nostr Wallet Connect is now your Lightning source.");

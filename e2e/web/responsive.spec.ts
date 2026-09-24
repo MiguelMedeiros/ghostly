@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "../support/fixtures";
+import { choose } from "../support/select";
 
 /**
  * The pages beside the chat list (Wallet, Services, Settings, Profile, Identities) at every width they are shown at:
@@ -165,7 +166,7 @@ test("the account bar keeps its five places at the list's narrowest", { tag: ["@
   await page.keyboard.press("Escape");
   // In Portuguese too, whose labels are longer.
   await page.getByTestId("account-settings").click();
-  await page.getByRole("combobox", { name: "Language" }).selectOption("pt");
+  await choose(page.getByTestId("settings-language"), "pt");
   await expect(page.getByTestId("account-identities")).toHaveAccessibleName("Identidades");
   expect(await navProblems(page)).toEqual([]);
   // "Configurações" does not fit in a fifth of 280px: the labels step aside together, the icons stay.

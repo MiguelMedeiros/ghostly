@@ -4,6 +4,8 @@ import type { SourceView } from "@ghostly/browser/engine/paymentAdapters/provide
 import { SourcePicker } from "../../components/wallet/providers/SourcePicker";
 import { renderApp } from "../render";
 import { descriptor, offered, sourceView } from "./descriptors";
+import type { UserEvent } from "@testing-library/user-event";
+import { choose, optionsOf } from "../select";
 
 // covers: wallet.lightning.sources, wallet.onchain.sources
 
@@ -14,48 +16,47 @@ function picker(kind: Kind, view: SourceView, { onSet = vi.fn(async () => {}), o
 }
 
 const status = (kind: Kind = "lightning") => screen.getByTestId(`${kind}-source-status`);
-const options = () => within(screen.getByTestId("lightning-source-select")).getAllByRole("option");
+/** The Lightning select's options, as "name · description". */
+const options = async (user: UserEvent) => (await optionsOf(user, screen.getByTestId("lightning-source-select"))).map((o) => ({ ...o, text: [o.label, o.description].filter(Boolean).join(" · ") }));
 
 /** Wallet → a card's Source: which provider pays and receives, and how to change it. */
 describe("SourcePicker", () => {
   describe("the source in use", () => {
-    it("says there is none, and offers every provider that runs here", () => {
-      picker("lightning", sourceView({ offered: offered("lightning", "mainnet") }));
+    it("says there is none, and offers every provider that runs here", async () => {
+      const { user } = picker("lightning", sourceView({ offered: offered("lightning", "mainnet") }));
       expect(screen.getByTestId("lightning-source-current")).toHaveTextContent("No source");
       expect(status()).toHaveTextContent("Not set up");
       expect(screen.getByText("Choose a source")).toBeInTheDocument();
       expect(screen.queryByTestId("lightning-source-clear")).not.toBeInTheDocument();
+      expect(screen.getByRole("combobox", { name: "Lightning source" })).toHaveTextContent("5 available…");
       // Registry order; custodial and experimental ones say so.
-      expect(options().map((o) => o.textContent)).toEqual([
-        "5 available…",
-        "Cashu mints (custodial)",
+      expect((await options(user)).map((o) => o.text)).toEqual([
+        "Cashu mints · Custodial",
         "Nostr Wallet Connect",
         "Core Lightning",
-        "Browser wallet (WebLN) (experimental)",
-        "LND node (experimental)",
+        "Browser wallet (WebLN) · Experimental",
+        "LND node · Experimental",
       ]);
     });
 
-    it("shows the default Cashu mints as in use, without a way to remove them", () => {
-      picker("lightning", sourceView({ offered: offered("lightning", "mainnet"), providerId: "cashu-mint", label: "Cashu mints", isDefault: true, custodial: true, status: "ready", network: "bitcoin" }));
+    it("shows the default Cashu mints as in use, without a way to remove them", async () => {
+      const { user } = picker("lightning", sourceView({ offered: offered("lightning", "mainnet"), providerId: "cashu-mint", label: "Cashu mints", isDefault: true, custodial: true, status: "ready", network: "bitcoin" }));
       expect(screen.getByTestId("lightning-source-current")).toHaveTextContent("Cashu mintsDefault");
       // Bitcoin is real money: no network named. Custodial is.
       expect(status()).toHaveTextContent(/^Connected · custodial$/);
       expect(screen.getByText("Change source")).toBeInTheDocument();
       expect(screen.queryByTestId("lightning-source-clear")).not.toBeInTheDocument();
       // Picking it again would change nothing: nothing to configure and already connected.
-      const cashu = options().find((o) => o.textContent?.startsWith("Cashu mints"))!;
-      expect(cashu).toHaveTextContent("Cashu mints (custodial) · in use");
-      expect(cashu).toBeDisabled();
+      const cashu = (await options(user)).find((o) => o.label === "Cashu mints")!;
+      expect(cashu).toMatchObject({ text: "Cashu mints · Custodial · In use", disabled: true });
     });
 
-    it("composes the status line from the connection, the node's alias and a test network", () => {
-      picker("lightning", sourceView({ mode: "testnet", offered: offered("lightning", "testnet"), providerId: "nwc", label: "Nostr Wallet Connect", status: "ready", alias: "Alby Hub", network: "signet" }));
+    it("composes the status line from the connection, the node's alias and a test network", async () => {
+      const { user } = picker("lightning", sourceView({ mode: "testnet", offered: offered("lightning", "testnet"), providerId: "nwc", label: "Nostr Wallet Connect", status: "ready", alias: "Alby Hub", network: "signet" }));
       expect(status()).toHaveTextContent(/^Connected · Alby Hub · signet$/);
       // A source with fields can be picked again, to change them.
-      const nwc = options().find((o) => o.textContent?.startsWith("Nostr Wallet Connect"))!;
-      expect(nwc).toHaveTextContent("Nostr Wallet Connect · in use");
-      expect(nwc).toBeEnabled();
+      const nwc = (await options(user)).find((o) => o.label === "Nostr Wallet Connect")!;
+      expect(nwc).toMatchObject({ text: "Nostr Wallet Connect · In use", disabled: false });
     });
 
     it.each([
@@ -105,9 +106,9 @@ describe("SourcePicker", () => {
       expect(screen.getByTestId("lightning-source-none-offered")).toHaveTextContent(/^No Lightning provider is available here yet in Testnet\.$/);
     });
 
-    it("offers Breez in Testnet only, as experimental", () => {
-      picker("lightning", sourceView({ mode: "testnet", offered: offered("lightning", "testnet") }));
-      expect(options().map((o) => o.textContent)).toContain("Breez (Spark) (experimental)");
+    it("offers Breez in Testnet only, as experimental", async () => {
+      const { user } = picker("lightning", sourceView({ mode: "testnet", offered: offered("lightning", "testnet") }));
+      expect((await options(user)).map((o) => o.text)).toContain("Breez (Spark) · Experimental");
     });
 
     it.each([
@@ -123,7 +124,7 @@ describe("SourcePicker", () => {
     it("shows the provider's description and form once chosen", async () => {
       const { user } = picker("lightning", sourceView({ offered: offered("lightning", "mainnet") }));
       expect(screen.queryByTestId("lightning-source-config")).not.toBeInTheDocument();
-      await user.selectOptions(screen.getByRole("combobox", { name: "Lightning source" }), "nwc");
+      await choose(user, screen.getByRole("combobox", { name: "Lightning source" }), "nwc");
       const config = screen.getByTestId("lightning-source-config");
       expect(config).toHaveTextContent(descriptor("nwc").description);
       expect(within(config).getByTestId("provider-form-nwc")).toBeInTheDocument();
@@ -131,19 +132,19 @@ describe("SourcePicker", () => {
 
     it("hands the typed values to onSet with the provider id, then says the source changed", async () => {
       const { user, onSet } = picker("lightning", sourceView({ offered: offered("lightning", "mainnet") }));
-      await user.selectOptions(screen.getByRole("combobox", { name: "Lightning source" }), "nwc");
+      await choose(user, screen.getByRole("combobox", { name: "Lightning source" }), "nwc");
       await user.type(screen.getByLabelText("Connection URI"), "nostr+walletconnect://wallet");
       await user.click(screen.getByRole("button", { name: "Use Nostr Wallet Connect" }));
       expect(onSet).toHaveBeenCalledWith("nwc", { uri: "nostr+walletconnect://wallet" });
       expect(await screen.findByTestId("lightning-source-saved")).toHaveTextContent("Nostr Wallet Connect is now your Lightning source.");
       // The form closes, the choice is reset.
       expect(screen.queryByTestId("lightning-source-config")).not.toBeInTheDocument();
-      expect(screen.getByRole("combobox", { name: "Lightning source" })).toHaveValue("");
+      expect(screen.getByRole("combobox", { name: "Lightning source" })).toHaveAttribute("data-value", "");
     });
 
     it("says Bitcoin for an on-chain source", async () => {
       const { user, onSet } = picker("onchain", sourceView({ mode: "testnet", offered: [descriptor("bitcoind")] }));
-      await user.selectOptions(screen.getByRole("combobox", { name: "Bitcoin source" }), "bitcoind");
+      await choose(user, screen.getByRole("combobox", { name: "Bitcoin source" }), "bitcoind");
       await user.type(screen.getByLabelText("RPC password or cookie"), "secret");
       await user.click(screen.getByRole("button", { name: "Use Bitcoin Core" }));
       expect(onSet).toHaveBeenCalledWith("bitcoind", { url: "http://127.0.0.1:38332", wallet: "", user: "", password: "secret" });
@@ -153,7 +154,7 @@ describe("SourcePicker", () => {
     it("keeps the form open and shows the engine's refusal", async () => {
       const onSet = vi.fn(async () => { throw new Error("Could not connect to Nostr Wallet Connect: no answer"); });
       const { user } = picker("lightning", sourceView({ offered: offered("lightning", "mainnet") }), { onSet });
-      await user.selectOptions(screen.getByRole("combobox", { name: "Lightning source" }), "nwc");
+      await choose(user, screen.getByRole("combobox", { name: "Lightning source" }), "nwc");
       await user.type(screen.getByLabelText("Connection URI"), "nostr+walletconnect://wallet");
       await user.click(screen.getByRole("button", { name: "Use Nostr Wallet Connect" }));
       expect(await screen.findByTestId("lightning-source-error")).toHaveTextContent("Could not connect to Nostr Wallet Connect: no answer");
@@ -165,10 +166,10 @@ describe("SourcePicker", () => {
 
     it("clears the success notice when another provider is chosen", async () => {
       const { user } = picker("lightning", sourceView({ offered: offered("lightning", "mainnet") }));
-      await user.selectOptions(screen.getByRole("combobox", { name: "Lightning source" }), "cashu-mint");
+      await choose(user, screen.getByRole("combobox", { name: "Lightning source" }), "cashu-mint");
       await user.click(screen.getByRole("button", { name: "Use Cashu mints" }));
       expect(await screen.findByTestId("lightning-source-saved")).toBeInTheDocument();
-      await user.selectOptions(screen.getByRole("combobox", { name: "Lightning source" }), "lnd");
+      await choose(user, screen.getByRole("combobox", { name: "Lightning source" }), "lnd");
       expect(screen.queryByTestId("lightning-source-saved")).not.toBeInTheDocument();
     });
 
@@ -178,7 +179,7 @@ describe("SourcePicker", () => {
       ["bdk", "onchain", "testnet", "bdk-new-phrase"],
     ] as const)("uses %s's own form", async (id, kind, mode, marker) => {
       const { user } = picker(kind, sourceView({ mode, offered: offered(kind, mode) }));
-      await user.selectOptions(screen.getByTestId(`${kind}-source-select`), id);
+      await choose(user, screen.getByTestId(`${kind}-source-select`), id);
       expect(screen.getByTestId(marker)).toBeInTheDocument();
     });
   });

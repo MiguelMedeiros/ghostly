@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import { expect, test, type Peer } from "../support/fixtures";
 import { LocalOidcIssuer } from "../support/oidcIssuer";
 import { pair } from "../support/paired";
+import { choose } from "../support/select";
 
 /**
  * An identity proof attested by an OpenID Connect provider, end to end, against the
@@ -16,7 +17,7 @@ async function addAccountProof(page: Page, issuer: LocalOidcIssuer, signer = "oi
   await page.getByTestId("identity-add").click();
   const add = page.getByTestId("add-identity");
   await add.getByTestId("add-identity-oidc").click();
-  await add.getByTestId("add-identity-signer").selectOption(signer);
+  await choose(add.getByTestId("add-identity-signer"), signer);
   await expect(add.getByTestId("add-identity-subject")).toHaveAttribute("data-value", issuer.issuer);
   await add.getByTestId("add-identity-start").click();
   // The provider's page opens in a popup from this click.

@@ -1,5 +1,6 @@
 import { expect, openProfilePage, test } from "../support/fixtures";
 import { injectNostrSigner } from "../support/nostrSigner";
+import { choose } from "../support/select";
 
 /**
  * Identities is a place of its own: in the account bar under the chat list and in a phone's tab bar, a page
@@ -22,7 +23,7 @@ test("the account bar opens Identities, where a proof is added and listed; Profi
   await page.getByTestId("identity-add").click();
   const add = page.getByTestId("add-identity");
   await add.getByTestId("add-identity-nostr").click();
-  await expect(add.getByTestId("add-identity-signer")).toHaveValue("nip07");
+  await expect(add.getByTestId("add-identity-signer")).toHaveAttribute("data-value", "nip07");
   await add.getByTestId("add-identity-start").click();
   await expect(add).toHaveCount(0);
   const proof = page.getByTestId("identities-page").getByTestId("identity-proof");
@@ -61,7 +62,7 @@ test("a proof in its last days puts a dot on Identities, in the bar and in the p
   await page.getByTestId("identity-add").click();
   const add = page.getByTestId("add-identity");
   await add.getByTestId("add-identity-nostr").click();
-  await add.getByTestId("add-identity-validity").selectOption("7");
+  await choose(add.getByTestId("add-identity-validity"), "7");
   await add.getByTestId("add-identity-start").click();
   await expect(add).toHaveCount(0);
   await expect(page.getByTestId("identity-proof")).toHaveCount(1);

@@ -7,6 +7,7 @@ import { useCountUp } from "../hooks/useCountUp";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { isWorthlessMint } from "@ghostly/browser/shared/mints";
 import { ONCHAIN_FEE_CAP } from "./walletCardData";
+import { Select } from "./ui/Select";
 
 const STATE_LABEL = {
   payment: { pending: "Waiting for your contact…", settled: "Received", failed: "Failed", reclaimed: "Taken back" },
@@ -124,7 +125,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
       )}
       {isRequest && !outgoing && !paymentsOff && (payment.state === "pending" || payment.state === "failed") && !payment.lightningPending && (
         <div className="flex flex-col gap-2 mt-2">
-          {!payment.target && !viaLightning && <label className="text-xs">Cashu mint<select aria-label="Cashu mint" className="block max-w-full bg-input-bg rounded p-1" value={selectedMint??""} onChange={e=>setMint(e.target.value)}>{!sharedMints.length&&<option value="">No shared configured mint</option>}{sharedMints.map(m=><option key={m.url} value={m.url}>{m.url} · {m.balance} sats</option>)}</select></label>}
+          {!payment.target && !viaLightning && <label className="block space-y-1 text-xs">Cashu mint<Select size="sm" aria-label="Cashu mint" value={selectedMint ?? ""} onChange={setMint} disabled={!sharedMints.length} placeholder="No shared configured mint" options={sharedMints.map(m => ({ value: m.url, label: m.url, description: `${m.balance.toLocaleString()} sats` }))} /></label>}
           <label className="text-xs">{tokenPayment?'Maximum gas (ETH)':'Maximum fee (sats)'}<input aria-label={tokenPayment?'Maximum gas (ETH)':'Maximum fee (sats)'} className="block w-20 bg-input-bg rounded p-1" inputMode="numeric" value={feeInput} onChange={e=>setFeeCap(e.target.value.replace(tokenPayment?/[^0-9.]/g:/\D/g,""))}/></label>
           {lnReview && (
             <div data-testid="payment-review" className="rounded-lg bg-black/20 p-2 space-y-1 text-xs">

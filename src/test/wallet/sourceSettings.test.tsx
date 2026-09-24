@@ -6,6 +6,7 @@ import { ProviderSources } from "@ghostly/browser/engine/paymentAdapters/provide
 import type { ProviderDescriptor, ProviderNetwork, ProviderSettings } from "@ghostly/browser/engine/paymentAdapters/providers/types";
 import { SourcePicker } from "../../components/wallet/providers/SourcePicker";
 import { renderApp } from "../render";
+import { choose } from "../select";
 
 // covers: wallet.lightning.lnd.connect, wallet.onchain.bitcoind, wallet.lightning.sources
 
@@ -38,7 +39,7 @@ describe("a source's settings, from the form to the engine", () => {
 
   it("keeps text and url fields as config and puts the secret field in secrets", async () => {
     const { user } = await setUp(["bitcoind"]);
-    await user.selectOptions(screen.getByRole("combobox", { name: "Bitcoin source" }), "bitcoind");
+    await choose(user, screen.getByRole("combobox", { name: "Bitcoin source" }), "bitcoind");
     await user.type(screen.getByLabelText("Wallet name"), "ghostly");
     await user.type(screen.getByLabelText("RPC user"), "ghost");
     await user.type(screen.getByLabelText("RPC password or cookie"), " hunter2 ");
@@ -54,7 +55,7 @@ describe("a source's settings, from the form to the engine", () => {
 
   it("leaves empty optional fields out", async () => {
     const { user } = await setUp(["bitcoind"]);
-    await user.selectOptions(screen.getByRole("combobox", { name: "Bitcoin source" }), "bitcoind");
+    await choose(user, screen.getByRole("combobox", { name: "Bitcoin source" }), "bitcoind");
     // A cookie file's contents, without a user.
     await user.type(screen.getByLabelText("RPC password or cookie"), "__cookie__:abc123");
     await user.click(screen.getByRole("button", { name: "Use Bitcoin Core" }));
@@ -64,7 +65,7 @@ describe("a source's settings, from the form to the engine", () => {
 
   it("says which required field is empty, before anything is contacted", async () => {
     const { user } = await setUp(["bitcoind"]);
-    await user.selectOptions(screen.getByRole("combobox", { name: "Bitcoin source" }), "bitcoind");
+    await choose(user, screen.getByRole("combobox", { name: "Bitcoin source" }), "bitcoind");
     await user.click(screen.getByRole("button", { name: "Use Bitcoin Core" }));
     expect(await screen.findByTestId("onchain-source-error")).toHaveTextContent("Enter rpc password or cookie");
     expect(created).toEqual([]);
@@ -72,7 +73,7 @@ describe("a source's settings, from the form to the engine", () => {
 
   it("shows the provider's own check of the form", async () => {
     const { user } = await setUp(["bitcoind"]);
-    await user.selectOptions(screen.getByRole("combobox", { name: "Bitcoin source" }), "bitcoind");
+    await choose(user, screen.getByRole("combobox", { name: "Bitcoin source" }), "bitcoind");
     await user.clear(screen.getByLabelText("RPC address"));
     await user.type(screen.getByLabelText("RPC address"), "http://me:pw@127.0.0.1:38332");
     await user.type(screen.getByLabelText("RPC password or cookie"), "pw");
@@ -84,9 +85,9 @@ describe("a source's settings, from the form to the engine", () => {
   it("keeps select fields as config and a restored phrase as a secret (BDK)", async () => {
     const phrase = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
     const { user } = await setUp(["bdk"]);
-    await user.selectOptions(screen.getByRole("combobox", { name: "Bitcoin source" }), "bdk");
+    await choose(user, screen.getByRole("combobox", { name: "Bitcoin source" }), "bdk");
     await user.click(screen.getByRole("radio", { name: "Restore" }));
-    await user.selectOptions(screen.getByLabelText("Addresses"), "bip86");
+    await choose(user, screen.getByLabelText("Addresses"), "bip86");
     await user.type(screen.getByLabelText("Recovery phrase"), phrase);
     await user.click(screen.getByRole("button", { name: "Use BDK wallet" }));
     expect(await screen.findByTestId("onchain-source-saved")).toHaveTextContent("BDK wallet is now your Bitcoin source.");
@@ -95,7 +96,7 @@ describe("a source's settings, from the form to the engine", () => {
 
   it("makes a new BDK wallet with the phrase it showed, sealed as a secret", async () => {
     const { user } = await setUp(["bdk"]);
-    await user.selectOptions(screen.getByRole("combobox", { name: "Bitcoin source" }), "bdk");
+    await choose(user, screen.getByRole("combobox", { name: "Bitcoin source" }), "bdk");
     const shown = screen.getByTestId("bdk-new-phrase").querySelectorAll("li");
     const phrase = [...shown].map((li) => li.textContent!.replace(/^\d+/, "")).join(" ");
     await user.click(screen.getByTestId("bdk-written"));
@@ -106,8 +107,8 @@ describe("a source's settings, from the form to the engine", () => {
 
   it("refuses Regtest without an Esplora server, with the provider's message", async () => {
     const { user } = await setUp(["bdk"]);
-    await user.selectOptions(screen.getByRole("combobox", { name: "Bitcoin source" }), "bdk");
-    await user.selectOptions(screen.getByLabelText("Network"), "regtest");
+    await choose(user, screen.getByRole("combobox", { name: "Bitcoin source" }), "bdk");
+    await choose(user, screen.getByLabelText("Network"), "regtest");
     await user.click(screen.getByTestId("bdk-written"));
     await user.click(screen.getByRole("button", { name: "Use BDK wallet" }));
     expect(await screen.findByTestId("onchain-source-error")).toHaveTextContent("Regtest needs the address of your own Esplora server");

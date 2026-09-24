@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { BDK_REGTEST } from "../support/bdk-regtest/regtest.mjs";
 import { expect, test } from "../support/extension";
+import { choose } from "../support/select";
 
 /**
  * The BDK wallet in the extension, where the engine runs in an offscreen document: its WebAssembly loads
@@ -16,10 +17,10 @@ test("BDK on regtest in the extension: a wallet that receives and sends", { tag:
   await page.getByTestId("wallet-mode").getByRole("radio", { name: "Testnet" }).click();
   await page.getByTestId("wallet-card-bitcoin").click();
   const panel = page.getByTestId("bitcoin-wallet");
-  await panel.getByTestId("onchain-source-select").selectOption("bdk");
+  await choose(panel.getByTestId("onchain-source-select"), "bdk");
   const form = panel.getByTestId("provider-form-bdk");
   await panel.getByTestId("bdk-written").check();
-  await form.getByLabel("Network").selectOption("regtest");
+  await choose(form.getByLabel("Network"), "regtest");
   await form.getByLabel("Esplora server").fill(BDK_REGTEST.esplora);
   await form.getByTestId("provider-save").click();
   await expect(panel.getByTestId("onchain-source-status")).toContainText(/Connected · BDK BIP84/, { timeout: 60_000 });

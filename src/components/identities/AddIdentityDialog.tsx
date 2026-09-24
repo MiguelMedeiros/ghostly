@@ -8,6 +8,7 @@ import { addableProviders, identityPlatform } from "../../lib/identities";
 import { FieldGrid } from "../layout";
 import { Button, Notice, input } from "../wallet/ui";
 import { ProviderMark, StatusPill } from "./ProviderMark";
+import { Select } from "../ui/Select";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const VALIDITY = [7, 30, 90, 180, 365];
@@ -163,10 +164,9 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
             </div>
             <ProviderAbout provider={provider} testId="add-identity-about" />
             {signers.length > 1 && (
-              <label className="block text-xs text-text-muted">Sign with
-                <select data-testid="add-identity-signer" className={`${input} mt-1`} value={signer?.id} disabled={busy} onChange={e => { setSignerId(e.target.value); setError(""); }}>
-                  {signers.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-                </select>
+              <label className="block space-y-1 text-xs text-text-muted">Sign with
+                <Select data-testid="add-identity-signer" aria-label="Sign with" value={signer?.id ?? ""} disabled={busy} onChange={id => { setSignerId(id); setError(""); }}
+                  options={signers.map(s => ({ value: s.id, label: s.label }))} />
               </label>
             )}
             {signer?.description && <p className="text-xs text-text-muted">{signer.description}</p>}
@@ -194,10 +194,9 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
                 {provider.subject.help && <span className="block mt-1">{provider.subject.help}</span>}
               </label>
             ))}
-            <label className="block text-xs text-text-muted">Valid for
-              <select data-testid="add-identity-validity" className={`${input} mt-1`} value={validity} disabled={busy} onChange={e => setDays(Number(e.target.value))}>
-                {validityOptions.map(d => <option key={d} value={d}>{d} days</option>)}
-              </select>
+            <label className="block space-y-1 text-xs text-text-muted">Valid for
+              <Select data-testid="add-identity-validity" aria-label="Valid for" value={String(validity)} disabled={busy} onChange={d => setDays(Number(d))}
+                options={validityOptions.map(d => ({ value: String(d), label: `${d} days` }))} />
             </label>
             <p className="text-xs text-text-muted">{provider.privacy} Sharing the same identity with several contacts lets them know it is the same person.</p>
             {provider.experimental && <Notice tone="warning">Experimental: not yet tested with every tool.</Notice>}

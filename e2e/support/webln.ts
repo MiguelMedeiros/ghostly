@@ -1,5 +1,6 @@
 import type { WebLNProvider } from "../../packages/browser/src/engine/paymentAdapters/providers/webln";
 import { expect, type Peer } from "./fixtures";
+import { choose } from "./select";
 
 const METHODS = ["enable", "getInfo", "makeInvoice", "sendPayment", "getBalance", "lookupInvoice"] as const;
 
@@ -27,7 +28,7 @@ export async function installWebln(peer: Peer, wallet: WebLNProvider): Promise<v
 /** Chooses the browser wallet as this mode's Lightning source, on the Lightning card. */
 export async function connectWebln(peer: Peer): Promise<void> {
   const source = peer.page.getByTestId("lightning-source");
-  await source.getByTestId("lightning-source-select").selectOption("webln");
+  await choose(source.getByTestId("lightning-source-select"), "webln");
   await expect(source.getByTestId("webln-found")).toBeVisible();
   await source.getByTestId("provider-form-webln").getByRole("button", { name: "Connect browser wallet" }).click();
   await expect(source.getByTestId("lightning-source-saved")).toBeVisible({ timeout: 30_000 });

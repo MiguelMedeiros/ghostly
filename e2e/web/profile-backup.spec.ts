@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, openProfilePage, test } from "../support/fixtures";
 import { signS3 } from "../../packages/browser/src/backup/s3";
+import { optionsOf, close } from "../support/select";
 
 // WISP 05 / 1000 / 1002: a whole profile backed up to S3-compatible storage and to a file, and each
 // restored as a new profile. Opt-in: a disposable local S3 server (MinIO) on GHOSTLY_S3_ENDPOINT.
@@ -52,7 +53,8 @@ test("a whole profile goes to S3 and to a file, and each comes back as a new pro
   await backups.getByTestId("restore-open").click();
   await backups.getByRole("radio", { name: "S3" }).click();
   await backups.getByTestId("restore-list").click();
-  await expect(backups.getByTestId("restore-pick").locator("option")).toHaveCount(1);
+  await expect(await optionsOf(backups.getByTestId("restore-pick"))).toHaveCount(1);
+  await close(backups.getByTestId("restore-pick"));
   await backups.getByTestId("restore-passphrase").fill("wrong passphrase here");
   await backups.getByTestId("restore-go").click();
   await expect(backups.getByTestId("backup-error")).toContainText("Wrong passphrase");

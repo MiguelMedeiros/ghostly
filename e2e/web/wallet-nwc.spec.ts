@@ -1,5 +1,6 @@
 import { FakeNwcWallet, TestRelay } from "../../packages/browser/test/helpers/fakeNwc";
 import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
+import { choose } from "../support/select";
 
 /**
  * Lightning through Nostr Wallet Connect: the person pastes a wallet's `nostr+walletconnect://` URI as the
@@ -12,7 +13,7 @@ import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, ty
 async function useNwc(p: Peer, uri: string) {
   await openWallet(p, "lightning");
   const source = p.page.getByTestId("lightning-source");
-  await source.getByTestId("lightning-source-select").selectOption("nwc");
+  await choose(source.getByTestId("lightning-source-select"), "nwc");
   await expect(source.getByTestId("lightning-source-config")).toContainText("custodial or not depends on the wallet");
   await source.getByTestId("provider-form-nwc").getByLabel("Connection URI").fill(uri);
   await source.getByTestId("provider-save").click();
@@ -80,7 +81,7 @@ test.describe("NWC with a fake wallet service", () => {
       await useTestnet(alice);
       await openWallet(alice, "lightning");
       const source = alice.page.getByTestId("lightning-source");
-      await source.getByTestId("lightning-source-select").selectOption("nwc");
+      await choose(source.getByTestId("lightning-source-select"), "nwc");
       const form = source.getByTestId("provider-form-nwc");
       await form.getByLabel("Connection URI").fill("lnbc1notauri");
       await source.getByTestId("provider-save").click();
