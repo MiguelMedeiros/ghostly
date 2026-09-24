@@ -100,9 +100,10 @@ export class Groups {
     return [...this.stored.values()].filter(group => !group.left).map(group => {
       const session = this.sessions.get(group.id);
       const edges = this.host.edges(group.id);
-      const contacts = group.contacts ?? {};
+      // A chat stays in `contacts` after its member is removed or leaves (the removal notice goes over it): only a member still in the roster counts.
+      const contacts = Object.entries(group.contacts ?? {}).filter(([key]) => !session || rosterHas(session.roster, key));
       const base = { id: group.id, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, invited: [...(this.invited.get(group.id) ?? [])],
-        memberLinks: Object.fromEntries(Object.entries(contacts).map(([key, linkId]) => [linkId, key])) };
+        memberLinks: Object.fromEntries(contacts.map(([key, linkId]) => [linkId, key])) };
       if (!session) {
         const invitation = group.invitation!;
         return { ...base, name: invitation.name, isAdmin: false, members: [], canSend: false,
@@ -141,7 +142,7 @@ export class Groups {
     const session = this.session(groupId);
     if (!session.isAdmin) throw new Error("Only the admin can invite");
     const group = this.stored.get(groupId)!;
-    if (Object.values(group.contacts ?? {}).includes(linkId)) throw new Error("This contact is already a member");
+    if (Object.entries(group.contacts ?? {}).some(([key, id]) => id === linkId && rosterHas(session.roster, key))) throw new Error("This contact is already a member");
     if (session.roster.length + (this.invited.get(groupId)?.size ?? 0) >= 8) throw new Error("A group holds eight members at most");
     if (!this.host.linkReady(linkId)) throw new Error("Connect to this contact first. Their app needs groups (an updated Ghostly).");
     this.host.sendOnLink(linkId, session.inviteFrame());
