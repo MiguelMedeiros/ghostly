@@ -6,7 +6,7 @@ import { fromBase64Url, randomBytes, toBase64Url, utf8Encode } from "../src/byte
 import { encrypt } from "../src/crypto";
 import { createIdentity, identityFromSeed, identityFromSeedB64, publicKeyFromZ32, sign } from "../src/identity";
 import { createLink } from "../src/invite";
-import { DhtDelivery, DHT_MESSAGE_TTL, emptyDhtDeliveryState, type DhtDeliveryState, type DhtDeliveryView } from "../src/dhtDelivery";
+import { DhtDelivery, DHT_MESSAGE_TTL, LEAVING_DHT_FAST_MS, emptyDhtDeliveryState, type DhtDeliveryState, type DhtDeliveryView } from "../src/dhtDelivery";
 import type { PairingCredentials } from "../src/pairedSession";
 import type { GhostRecord, SignedPacket } from "../src/pkarr";
 
@@ -382,5 +382,41 @@ describe("DHT delivery: sending and lifecycle", () => {
     await vi.advanceTimersByTimeAsync(1_010);
     expect(stream.transport.resolve).toHaveBeenCalledTimes(2);
     await stream.bob.stop();
+  });
+
+  it("announces a change of method at once, however recently it last published", async () => {
+    const h = setup({ pollMs: null }); await h.bob.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.transport.publish).toHaveBeenCalledTimes(1);
+    await h.bob.setMode("stream"); await vi.advanceTimersByTimeAsync(0);
+    expect(h.transport.publish, "not held back by the 4 s spacing").toHaveBeenCalledTimes(2);
+    await h.bob.stop();
+  });
+
+  it("after leaving DHT-only, reads a contact still there at the DHT pace for two minutes, then at 30 s", async () => {
+    const h = setup({ pollMs: null, state: { ...emptyDhtDeliveryState(), peerMode: "dht" } }); await h.bob.start();
+    await vi.advanceTimersByTimeAsync(0);
+    await h.bob.setMode("stream"); await vi.advanceTimersByTimeAsync(0);
+    const reads = h.transport.resolve.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(4_000 * 3 + 10);
+    expect(h.transport.resolve.mock.calls.length - reads).toBe(3);
+    await vi.advanceTimersByTimeAsync(LEAVING_DHT_FAST_MS + 4_000);
+    const later = h.transport.resolve.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(h.transport.resolve.mock.calls.length - later, "two reads a minute, not fifteen").toBe(2);
+    await h.bob.stop();
+  });
+
+  it("reads now when asked, and once more right after a read that was already in flight", async () => {
+    const h = setup({ pollMs: null, mode: "stream" }); let release!: (p: SignedPacket | null) => void;
+    h.transport.resolve.mockImplementationOnce(() => new Promise(r => { release = r; }));
+    await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
+    expect(h.transport.resolve).toHaveBeenCalledTimes(1);
+    h.bob.refresh();
+    release(null); await vi.advanceTimersByTimeAsync(0);
+    expect(h.transport.resolve, "the asked-for read, not the one 30 s later").toHaveBeenCalledTimes(2);
+    h.bob.refresh(); await vi.advanceTimersByTimeAsync(0);
+    expect(h.transport.resolve).toHaveBeenCalledTimes(3);
+    await h.bob.stop();
   });
 });

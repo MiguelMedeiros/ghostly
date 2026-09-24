@@ -8,12 +8,22 @@ import type { LinkParams } from "./invite";
 import type { PairingCredentials } from "./pairedSession";
 import { measureRecords, MAX_DNS_PACKET_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
 import type { PkarrTransport } from "./transport";
+import { traceLink } from "./linkTrace";
 
 export type DeliveryMode = "stream" | "dht";
 export const DHT_TEXT_BYTES = 256;
 export const DHT_MESSAGE_TTL = 5 * 60_000;
 const CONTROL_TTL = 10 * 60_000;
 const MAX_ATTEMPTS = 8;
+/** The contact's mailbox is read this often while either side is DHT-only, and otherwise… */
+const DHT_POLL_MS = 4_000;
+const STREAM_POLL_MS = 30_000;
+/**
+ * …except for this long after this side leaves DHT-only while the contact is still there: its own
+ * switch then shows in seconds, not at the next 30 s read (both sides are blocked from a live link until
+ * each has seen the other leave).
+ */
+export const LEAVING_DHT_FAST_MS = 2 * 60_000;
 const ID = /^[A-Za-z0-9_-]{22}$/;
 type Message = [id: string, timestamp: number, text: string];
 type Body = [version: 1, sequence: number, issued: number, expires: number, author: string, mode: DeliveryMode, message: Message | null, receipt: string | null];
@@ -45,6 +55,8 @@ export class DhtDelivery {
   private mode: DeliveryMode;
   private running = false;
   private ticking = false;
+  private tickAgain = false;
+  private fastUntil = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private chain = Promise.resolve();
   private lastPublish = 0;
@@ -115,10 +127,15 @@ export class DhtDelivery {
     await this.serialize(async () => {
       // Preserve accepted DHT intent, its stable ID and original expiry across mode changes.
       await this.persist({ ...this.state });
-      this.mode = mode; this.controlDue = 0; this.changed();
+      // The contact learns the new method from the next envelope: it goes out now, not after the publish spacing.
+      this.mode = mode; this.controlDue = 0; this.lastPublish = 0;
+      this.fastUntil = mode === "stream" ? Date.now() + LEAVING_DHT_FAST_MS : 0;
+      this.changed();
     });
     void this.tick();
   }
+  /** Reads the contact's mailbox now: something says it may have changed its delivery method. */
+  refresh(): void { void this.tick(); }
   validate(text: string, timestamp: number, id: string): string | null {
     if (this.mode === "stream" && (!this.options.credentials.peerKey || !this.state.peerMode)) return "Offline DHT delivery needs an authenticated contact advertising DHT support. Use a DHT-only invitation for first contact.";
     if (this.errors.peer) return this.errors.peer;
@@ -166,6 +183,7 @@ export class DhtDelivery {
     await this.persist({ ...this.state, sequence: body[1], pending: pending ? { ...pending, attempts: pending.attempts + 1, next: now + Math.min(60_000, 4_000 * 2 ** pending.attempts) } : this.state.pending,
       receipt: receipt ? { ...receipt, attempts: receipt.attempts + 1 } : this.state.receipt });
     this.lastPublish = now; this.controlDue = now + 4 * 60_000;
+    traceLink(this.from, "dht-publish", { mode: this.mode, seq: body[1] });
     await this.options.transport.publish(this.identity, records);
     delete this.errors.publish; this.changed();
   }
@@ -204,6 +222,7 @@ export class DhtDelivery {
       if (nextReceipt?.id !== message[0]) nextReceipt = { id: message[0], expires, attempts: 0 };
     }
     const confirmed = receipt && this.state.pending?.message[0] === receipt ? receipt : this.state.confirmed;
+    if (mode !== this.state.peerMode) traceLink(this.from, "dht-peer-mode", { peerMode: mode });
     await this.persist({ ...this.state, peerSequence: sequence, peerMode: mode, peerRejected: undefined, receipt: nextReceipt, confirmed,
       pending: confirmed && this.state.pending?.message[0] === confirmed ? undefined : this.state.pending });
     if (confirmed) await this.options.receipt(confirmed);
@@ -211,8 +230,10 @@ export class DhtDelivery {
     this.changed();
   }
   private async tick(): Promise<void> {
-    if (!this.running || this.ticking) return;
-    this.ticking = true;
+    if (!this.running) return;
+    // A read asked for during one in flight happens right after it: its answer may predate the reason.
+    if (this.ticking) { this.tickAgain = true; return; }
+    this.ticking = true; this.tickAgain = false;
     if (this.timer) clearTimeout(this.timer); this.timer = null;
     try { await this.serialize(async () => {
       if (!this.running) return;
@@ -223,6 +244,9 @@ export class DhtDelivery {
       this.changed();
     });
     } finally { this.ticking = false; }
-    if (this.running) this.timer = setTimeout(() => void this.tick(), this.options.pollMs ?? (this.mode === "dht" ? 4_000 : 30_000));
+    if (!this.running) return;
+    if (this.tickAgain) { void this.tick(); return; }
+    const waiting = this.mode === "dht" || (this.state.peerMode === "dht" && Date.now() < this.fastUntil);
+    this.timer = setTimeout(() => void this.tick(), this.options.pollMs ?? (waiting ? DHT_POLL_MS : STREAM_POLL_MS));
   }
 }

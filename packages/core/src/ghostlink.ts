@@ -37,6 +37,7 @@ import { EXPECT_PEER_MS, LinkSession, type LinkStatus, type PeerPresence, type P
 import type { ResolvedLink } from "./records";
 import { servicesFromWire, servicesToWire, type ServiceAd } from "./services";
 import { PairedHttp } from "./pairedHttp";
+import { traceLink } from "./linkTrace";
 import type { PkarrTransport } from "./transport";
 
 /**
@@ -200,6 +201,12 @@ export class GhostLink {
   private autoConnectFailures = 0;
   /** The peer's packet I last looked fast for its offer after (its timestamp): once per packet. */
   private offerAwaitedFor = 0;
+  /** Whether the stream was blocked (DHT-only on either side) when last looked at. */
+  private streamWasBlocked: boolean;
+  /** The contact's latest `_rtc` signal while the stream was blocked. */
+  private heldSignal: string | null = null;
+  /** The link packet of a DHT-only contact its mailbox was last read early for (its timestamp): once per packet. */
+  private leftDhtSeenFor = 0;
 
   constructor(options: GhostLinkOptions) {
     this.options = options;
@@ -211,12 +218,14 @@ export class GhostLink {
       receipt: async id => { await options.events?.onMessageReceipt?.(id); },
       changed: view => {
         options.events?.onDhtDelivery?.(view);
+        this.streamBlockChanged();
         if (this.streamBlocked) {
           if (this.channel || this.dialing || this.dataLink.state !== "idle") this.disconnect();
           this.emitDeliveryState();
         } else if (!this.paired) this.maybeAutoConnect(this.session.peerPresence);
       },
     }) : null;
+    this.streamWasBlocked = this.streamBlocked;
     this.peerDescriptors = options.native?.peerDescriptors ?? {};
     this.peerTransports = options.native?.peerTransports;
     this.peerFallback = options.native?.peerFallback ?? false;
@@ -238,27 +247,16 @@ export class GhostLink {
         },
         onPresence: (presence) => {
           events.onPresence?.(this.mergePresence(presence));
+          this.peerMayHaveLeftDht(presence);
           this.maybeAutoConnect(presence);
         },
         onPeerAck: (ack) => events.onPeerAck?.(ack),
         onCallSignal: (signal) => { if (!options.params.profile) events.onCallSignal?.(signal); },
         onRtcSignal: signal => {
-          if (this.streamBlocked) return;
-          const credentials = options.pairing?.credentials;
-          const verified = options.params.profile ? verifyPairedSignal(signal, options.params.peerPubKeyZ32,
-            this.myPubKeyZ32, credentials?.peerKey, credentials?.requireSignedSignals) : signal;
-          if (verified) void this.dataLink.handleSignal(verified);
-          else if (credentials?.requireSignedSignals && !this.isDataLinkOpen) {
-            // Only a valid signature from another key establishes a mismatch.
-            // Malformed or forged traffic cannot claim a new contact identity.
-            const keyMismatch = !!credentials.peerKey && !!verifyPairedSignal(signal,
-              options.params.peerPubKeyZ32, this.myPubKeyZ32, undefined, true);
-            this.securityRejected = true;
-            events.onPairingState?.({ status: "error", keyMismatch, error: keyMismatch
-              ? "This connection uses a different participation key. The saved contact has not been replaced; use a fresh invitation for a new contact."
-              : "Ignored an unauthenticated discovery signal. Keep both peers on the updated version; the saved key has not been replaced.",
-            });
-          }
+          traceLink(this.myPubKeyZ32, "rtc-signal-in", { held: this.streamBlocked });
+          // Seen once only: kept, and answered as soon as nothing blocks the stream any more.
+          if (this.streamBlocked) { this.heldSignal = signal; return; }
+          this.handleRtcSignal(signal);
         },
         onDiscoveryError: error => events.onDiscoveryError?.(error),
         onStatus: (status) => events.onStatus?.(status),
@@ -298,6 +296,7 @@ export class GhostLink {
       },
       onClose: () => { if (!this.activeBinding) this.detach(); },
       onState: (state) => {
+        traceLink(this.myPubKeyZ32, "datalink", { state });
         if (this.activeBinding) return;
         events.onDataLinkState?.(state);
         if (state === "idle") this.rejectWaiters(new GhostlyHttpError("unreachable", "Could not connect to the peer"));
@@ -326,6 +325,57 @@ export class GhostLink {
 
   get myPubKeyZ32(): string {
     return this.session.identity.pubKeyZ32;
+  }
+
+  private handleRtcSignal(signal: string): void {
+    const options = this.options, credentials = options.pairing?.credentials;
+    const verified = options.params.profile ? verifyPairedSignal(signal, options.params.peerPubKeyZ32,
+      this.myPubKeyZ32, credentials?.peerKey, credentials?.requireSignedSignals) : signal;
+    if (verified) void this.dataLink.handleSignal(verified);
+    else if (credentials?.requireSignedSignals && !this.isDataLinkOpen) {
+      // Only a valid signature from another key establishes a mismatch.
+      // Malformed or forged traffic cannot claim a new contact identity.
+      const keyMismatch = !!credentials.peerKey && !!verifyPairedSignal(signal,
+        options.params.peerPubKeyZ32, this.myPubKeyZ32, undefined, true);
+      this.securityRejected = true;
+      options.events?.onPairingState?.({ status: "error", keyMismatch, error: keyMismatch
+        ? "This connection uses a different participation key. The saved contact has not been replaced; use a fresh invitation for a new contact."
+        : "Ignored an unauthenticated discovery signal. Keep both peers on the updated version; the saved key has not been replaced.",
+      });
+    }
+  }
+
+  /**
+   * Leaving DHT-only takes both sides: each is blocked from a live link until it has seen the other one
+   * leave too. The moment it is not, the link is dialled or answered at once: the wait between failed
+   * attempts starts over, the contact's offer (or its presence) is looked for fast, and an offer that
+   * came in while blocked is answered now instead of timing out on the contact's side (90 s, then its
+   * backoff) before it offers again.
+   */
+  private streamBlockChanged(): void {
+    const blocked = this.streamBlocked, was = this.streamWasBlocked;
+    this.streamWasBlocked = blocked;
+    if (blocked || !was) return;
+    traceLink(this.myPubKeyZ32, "unblocked", { held: !!this.heldSignal });
+    this.autoConnectFailures = 0;
+    this.lastAutoConnectAt = 0;
+    this.session.expectPeer();
+    const held = this.heldSignal;
+    this.heldSignal = null;
+    if (held) this.handleRtcSignal(held);
+  }
+
+  /**
+   * A DHT-only contact runs no link session, so it does not advertise itself on the link's key: a fresh
+   * packet there that does is it leaving DHT-only. Its mailbox, which says so, is read now rather than at
+   * the next poll.
+   */
+  private peerMayHaveLeftDht(presence: PeerPresence): void {
+    if (!this.dht || this.dht.peerMode !== "dht" || this.deliveryMode === "dht" || !presence.online) return;
+    if (Date.now() - presence.lastPacketAt >= EXPECT_PEER_MS || presence.lastPacketAt === this.leftDhtSeenFor) return;
+    this.leftDhtSeenFor = presence.lastPacketAt;
+    traceLink(this.myPubKeyZ32, "peer-link-packet", { age: Date.now() - presence.lastPacketAt });
+    this.dht.refresh();
   }
 
   get isDataLinkOpen(): boolean {
@@ -379,13 +429,20 @@ export class GhostLink {
   }
   async setDeliveryMode(mode: DeliveryMode): Promise<void> {
     if (!this.dht) throw new Error("DHT delivery is unavailable for this conversation.");
+    traceLink(this.myPubKeyZ32, "set-mode", { mode, peerMode: this.dht.peerMode, dials: this.myPubKeyZ32 < this.options.params.peerPubKeyZ32 });
     this.deliveryMode = mode;
-    if (mode === "dht") this.disconnect();
+    // Someone chose this just now: attempts that failed before are no reason to wait.
+    this.autoConnectFailures = 0;
+    this.lastAutoConnectAt = 0;
+    if (mode === "dht") { this.disconnect(); this.heldSignal = null; }
+    // The link session runs before the contact can learn the new method (from the envelope setMode publishes).
+    else this.session.start();
     await this.dht.setMode(mode);
     if (mode === "dht") {
       await this.session.stop(false);
       await Promise.allSettled([...this.endpoints.keys()].map(t => this.releaseEndpoint(t)));
-    } else this.session.start();
+    }
+    this.streamBlockChanged();
     this.emitDeliveryState();
   }
   start(): void {
@@ -680,7 +737,8 @@ export class GhostLink {
       return;
     }
     const wait = Math.min(AUTO_CONNECT_RETRY_MS * 2 ** this.autoConnectFailures, AUTO_CONNECT_MAX_RETRY_MS);
-    if (Date.now() - this.lastAutoConnectAt < wait) return;
+    if (Date.now() - this.lastAutoConnectAt < wait) { traceLink(this.myPubKeyZ32, "dial-backoff", { failures: this.autoConnectFailures, left: wait - (Date.now() - this.lastAutoConnectAt) }); return; }
+    traceLink(this.myPubKeyZ32, "dial", { failures: this.autoConnectFailures });
     this.lastAutoConnectAt = Date.now();
     this.autoConnectFailures++;
     void this.dial().catch(() => {});
@@ -976,6 +1034,7 @@ export class GhostLink {
           // (the contact reloaded, or came back) is dialled again as soon as the contact is seen.
           this.autoConnectFailures = 0;
           this.lastAutoConnectAt = 0;
+          traceLink(this.myPubKeyZ32, "paired-ready");
           this.startLiveness(channel);
           for (const waiter of this.openWaiters.splice(0)) waiter.resolve();
           this.options.events?.onPresence?.(this.presence);

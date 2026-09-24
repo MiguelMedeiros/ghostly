@@ -537,7 +537,7 @@ npm run e2e:matrix -- --docs                # and write the table below
 What the first full run found (2026-09-24, dev at `8fd41d4`, a local mint and MinIO, the regtest stacks down):
 
 - **Restoring a backup in the extension leads nowhere.** The extension has one profile only, and the restore adds a new profile it cannot switch to, so the restored chats are out of reach (on the web, Ghostly switches to the restored profile). This is all 20 failures: every scenario where B is the extension and restores.
-- **Leaving DHT-only after the contact reloaded is slow to go live again.** WebRTC came back after about 70 s in one repro, and not within 3 minutes once (`mx-656deae3`, which passed when run again).
+- **Leaving DHT-only after the contact reloaded was slow to go live again.** WebRTC came back after about 70 s in one repro, and not within 3 minutes once (`mx-656deae3`, which passed when run again). Fixed since. Each side learned the other's switch only at its next 30 s mailbox read, and the switch itself could wait for that read before it went out. An offer that arrived while one side was still blocked was dropped for good, so the dialler waited out its 90 s connect timeout. Measured with `E2E_DHT_BACK_RUNS=20 npx playwright test e2e/web/dht-back-timing.spec.ts`: 33–128 s before, seconds after (see [DHT delivery](DHT-DELIVERY.md)).
 - A message sent while the contact's old session is still closing ends "Delivery unconfirmed" with a Retry button. It is not sent again by itself once the link is back.
 - The harness had to learn a few things the app does on purpose:
   - NIP-07 is never offered in the extension.

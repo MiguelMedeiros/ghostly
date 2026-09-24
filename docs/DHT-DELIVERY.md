@@ -8,6 +8,8 @@ A modern invitation creates the same conversation, participation identity, durab
 
 DHT-only does not register native endpoints, start stream discovery, dial WebRTC/Iroh/HyperDHT, or upgrade automatically. Stream fallback between those three transports remains a separate preference. Changing delivery mode preserves the conversation and accepted pending message IDs.
 
+Either side being DHT-only keeps both off live streams, so leaving it takes both, and each learns the other's choice from its envelopes. The mailbox is read every 4 s while this side is DHT-only and every 30 s otherwise. When the delivery mode changes, the new mode goes out in an envelope at once, not after the usual spacing between publications. After this side leaves DHT-only, it reads a contact that is still DHT-only every 4 s for two more minutes. A DHT-only contact runs no stream discovery, so as soon as it advertises itself on the link's Pkarr record again, its mailbox is read right away. Once neither side is blocked, the link is dialled or answered at once. A connection offer that came in while blocked is answered then, the wait between failed attempts starts over, and the side that does not dial watches fast for the offer. Once both sides have left, the stream is back in seconds rather than after a timed-out offer.
+
 When streams are preferred but unavailable, short text may use DHT only after the contact is authenticated and has advertised DHT support. The recipient can still prefer streams. A security rejection must not trigger this fallback. First contact without any stream requires the explicit DHT invitation mode.
 
 ## Invitation bootstrap and encryption
