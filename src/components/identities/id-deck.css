@@ -1,0 +1,70 @@
+/* The identities' ID cards (identities/IdCardFace.tsx) in their deck (IdentityProofsSection.tsx; the stack, the track, the lift
+   and the glow are deck/deck.css). The wallet's payment cards are dark and plain; an ID card is laminated: a band
+   along the top in its provider's ink, a guilloche behind the fields, a photo slot, a hologram seal and the
+   machine-readable line along the bottom. Sizes follow the card's width (--card-w), like the wallet's. */
+.id-card-face{--seal-eye:#10131f;--pad:clamp(10px,calc(var(--card-w) * .05),18px);position:relative;display:grid;grid-template-columns:auto minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto;grid-template-areas:"band band" "photo fields" "mrz mrz";column-gap:clamp(10px,calc(var(--card-w) * .045),16px);row-gap:clamp(5px,calc(var(--card-w) * .022),9px);
+ box-sizing:border-box;width:100%;height:100%;border-radius:clamp(12px,calc(var(--card-w) * .05),18px);padding:0 var(--pad) clamp(7px,calc(var(--card-w) * .03),11px);overflow:hidden;color:#fff;text-align:left;
+ background:
+  radial-gradient(120% 80% at 100% 0%,rgba(var(--card-rgb),.22),transparent 60%),
+  repeating-radial-gradient(circle at 115% 120%,transparent 0 9px,rgba(var(--card-rgb),.07) 9px 10px),
+  linear-gradient(160deg,color-mix(in srgb,rgb(var(--card-rgb)) 22%,#101522),#0b0f19 70%);
+ border:1px solid rgba(var(--card-rgb),.35);box-shadow:0 30px 60px -30px rgba(0,0,0,.9);transition:border-color .4s}
+/* The lamination: a soft gloss across the top left, over everything but the sheen. */
+.id-card-face::before{content:"";position:absolute;inset:0;pointer-events:none;border-radius:inherit;background:linear-gradient(125deg,rgba(255,255,255,.1),rgba(255,255,255,0) 38%);z-index:1}
+
+/* Each provider's ink, lighter than its brand colour where that is dark, so it reads on the card. */
+.id-card-nostr{--card-rgb:176,128,245}
+.id-card-domain{--card-rgb:56,189,214}
+.id-card-openpgp{--card-rgb:106,160,235}
+.id-card-bitcoin{--card-rgb:247,147,26}
+.id-card-ssh,.id-card-oidc,.id-card-key,.id-card-attested{--card-rgb:160,174,196}
+.id-card-ssh-github,.id-card-oidc-apple{--card-rgb:214,219,228}
+.id-card-ssh-gitlab,.id-card-oidc-gitlab{--card-rgb:252,125,60}
+.id-card-oidc-google{--card-rgb:98,152,245}
+.id-card-oidc-microsoft{--card-rgb:40,176,240}
+.id-card-oidc-twitch{--card-rgb:170,124,255}
+.id-card-add{--card-rgb:0,196,154}
+
+.id-card-band{grid-area:band;display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 calc(var(--pad) * -1);padding:clamp(6px,calc(var(--card-w) * .026),10px) var(--pad);min-width:0;
+ background:linear-gradient(90deg,rgba(var(--card-rgb),.34),rgba(var(--card-rgb),.12));border-bottom:1px solid rgba(var(--card-rgb),.3)}
+.id-card-issuer{font-size:clamp(8px,calc(var(--card-w) * .026),10px);font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:rgba(255,255,255,.85);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.id-card-status{display:inline-flex;align-items:center;gap:4px;flex-shrink:0;border-radius:999px;padding:1px 7px;font-size:clamp(9px,calc(var(--card-w) * .028),11px);font-weight:600;white-space:nowrap;background:rgba(0,0,0,.35);color:#7ee2b8;transition:opacity .4s}
+.id-card-face[data-status=expiring] .id-card-status{color:#fbbf24}
+.id-card-face[data-status=expired] .id-card-status,.id-card-face[data-status=failed] .id-card-status{color:#fca5a5}
+.id-card-face[data-status=revoking] .id-card-status{color:rgba(255,255,255,.75)}
+.id-card-mark-end{display:none}
+
+/* The photo slot: portrait, framed, with the identity's picture or its provider's mark. */
+.id-card-photo{grid-area:photo;position:relative;align-self:start;display:grid;place-items:center;width:clamp(56px,calc(var(--card-w) * .24),88px);aspect-ratio:3/4;border-radius:clamp(6px,calc(var(--card-w) * .024),9px);
+ background:linear-gradient(160deg,rgba(255,255,255,.14),rgba(255,255,255,.04));border:1px solid rgba(255,255,255,.18);box-shadow:inset 0 0 0 3px rgba(0,0,0,.18);color:rgb(var(--card-rgb))}
+.id-card-photo>img{width:100%;height:100%;object-fit:cover;border-radius:inherit}
+.id-card-photo-badge{position:absolute;right:-6px;bottom:-6px;display:grid;border-radius:7px;box-shadow:0 0 0 2px #0b0f19}
+
+.id-card-fields{grid-area:fields;display:grid;align-content:start;gap:1px;min-width:0}
+.id-card-provider{font-size:clamp(14px,calc(var(--card-w) * .055),20px);font-weight:700;letter-spacing:-.01em;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.id-card-name{font-size:clamp(11px,calc(var(--card-w) * .036),13px);color:rgba(255,255,255,.88);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.id-card-subject{margin-bottom:2px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(10px,calc(var(--card-w) * .034),12.5px);letter-spacing:.02em;color:rgb(var(--card-rgb));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.id-card-field{font-size:clamp(9px,calc(var(--card-w) * .03),11px);line-height:1.35;color:rgba(255,255,255,.7);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.id-card-mrz{grid-area:mrz;min-width:0;overflow:hidden;white-space:nowrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(8px,calc(var(--card-w) * .027),10px);letter-spacing:.14em;color:rgba(255,255,255,.3)}
+
+/* The hologram seal: a disc of shifting colour with the ghost pressed into it, where the wallet's cards have a chip.
+   It is the deck's ghost (deck/motion.ts peeks it in as the card comes up). */
+.id-card-seal{position:absolute;right:var(--pad);bottom:clamp(20px,calc(var(--card-w) * .08),30px);display:grid;place-items:center;width:clamp(26px,calc(var(--card-w) * .105),40px);aspect-ratio:1;border-radius:50%;opacity:.85;pointer-events:none;color:rgba(10,14,24,.55);z-index:2;
+ background:conic-gradient(from 200deg,#8fd3ff,#c6a5ff,#ffb3d9,#ffe29a,#9ff5c9,#8fd3ff);box-shadow:inset 0 0 0 2px rgba(255,255,255,.35),0 2px 8px -2px rgba(0,0,0,.6);mix-blend-mode:screen}
+.id-card-seal>svg{width:58%;height:auto}
+.id-card-sheen{z-index:3}
+
+/* The blank card that adds an identity: dashed, in the app's accent. */
+.id-card-blank{border-style:dashed;background:radial-gradient(120% 80% at 100% 0%,rgba(var(--card-rgb),.16),transparent 60%),linear-gradient(160deg,#121826,#0b0f19 70%)}
+.id-card-blank .id-card-photo{border-style:dashed}
+
+/* In the stack, a card under the chosen one shows its strip: no status there, and one after the chosen one shows its
+   provider's mark in the band's trailing end, the part that shows. */
+.id-deck[data-mode=stack] .deck-card:not([data-active=true]) .id-card-status{opacity:0;position:absolute}
+.id-deck[data-mode=stack] .id-card-face[data-after=true] .id-card-mark-end{display:grid;margin-left:auto}
+
+/* The marks row under the deck: each card's provider on a 14px tile, the size of the wallet's marks. */
+.id-deck-marks span.id-deck-mark{display:grid;place-items:center;width:14px;height:14px;border-radius:4px;overflow:hidden;opacity:1;transition:none;transform:none;color:#fff}
+.id-deck-marks span.id-deck-mark-plain{color:inherit}
+.id-deck-marks .id-deck-mark svg{width:10px;height:10px}

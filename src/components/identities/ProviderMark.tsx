@@ -1,20 +1,12 @@
-import { providerForIssuer } from "@ghostly/browser/proofs/oidc/providers";
 import { providerOf } from "../../lib/identities";
-import { PROVIDER_ICONS } from "./ProviderIcons";
-
-/** The provider's icon; for an OpenID Connect proof whose subject names a known provider, that provider's. */
-function iconFor(provider: string, subject?: string) {
-  const oidc = provider === "oidc" && subject ? providerForIssuer(subject)?.id : undefined;
-  const key = oidc ? `oidc:${oidc}` : provider;
-  return PROVIDER_ICONS[key] ? { key, ...PROVIDER_ICONS[key] } : undefined;
-}
+import { providerIcon } from "./ProviderIcons";
 
 /**
  * An identity provider's mark on a tile (ProviderIcons.tsx); anything unknown gets a key (self-custodied) or
  * a badge (attested). `subject` lets an "Account at a provider" proof show Google's, Apple's… mark.
  */
 export function ProviderMark({ provider, subject, small = false }: { provider: string; subject?: string; small?: boolean }) {
-  const icon = iconFor(provider, subject);
+  const icon = providerIcon(provider, subject);
   const box = small ? "h-5 w-5 rounded-md" : "h-10 w-10 rounded-xl";
   // forced-color-adjust-none: in a forced-colours (high-contrast) mode the tile keeps its colour, so a white mark stays visible.
   if (icon) return <span aria-hidden="true" data-icon={icon.key} className={`inline-flex shrink-0 items-center justify-center overflow-hidden forced-color-adjust-none ${box} ${icon.tile}`}>{icon.mark(Math.round((small ? 20 : 40) * (icon.fill ?? 0.6)))}</span>;

@@ -1,23 +1,8 @@
-/* The wallet deck (components/WalletDeck.tsx). The deck wears the chosen card's colour class (wallet-cards.css sets
-   --card-rgb per wallet), so the glow behind it and the arrows' marks take that card's ink. On the wallet page the
-   deck takes the whole column (the page's container), wider than the panel below it; in the chat it keeps to its box. */
-.wallet-deck{--deck-ease:cubic-bezier(.22,1,.36,1);--deck-spring:cubic-bezier(.34,1.45,.64,1);--bleed:min(100cqw,960px);position:relative;display:grid;gap:10px;isolation:isolate;width:var(--bleed);margin-inline:calc((var(--bleed) - 100%) / -2)}
-/* The chosen card settles like a spring: past its place and back (walletDeckMotion.ts adds the swing on top). */
-@supports(transition-timing-function:linear(0,1)){.wallet-deck{--deck-spring:linear(0,.132,.404,.68,.893,1.025,1.084,1.094,1.076,1.05,1.025,1.006,.996,.991,.991,.993,.996,.998,1,1.001,1.001,1)}}
-.wallet-deck.wallet-deck-compact{width:100%;margin-inline:0;gap:6px}
-.wallet-deck-glow{position:absolute;left:0;right:0;top:-12%;height:124%;z-index:-1;pointer-events:none;background:rgb(var(--card-rgb));opacity:.13;-webkit-mask-image:radial-gradient(ellipse closest-side at 50% 50%,#000 0%,rgba(0,0,0,.55) 40%,transparent 100%);mask-image:radial-gradient(ellipse closest-side at 50% 50%,#000 0%,rgba(0,0,0,.55) 40%,transparent 100%);transition:background-color .6s var(--deck-ease)}
-.wallet-deck-compact .wallet-deck-glow{opacity:.09}
-.wallet-deck-track{position:relative;outline:none}
-
-/* A card's button carries no look of its own: the face does. */
-.wallet-deck-card{display:block;padding:0;border:0;background:none;color:#fff;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
+/* The wallet's cards (components/WalletDeck.tsx): the face of a payment card, on the wallet page, in the chat's deck
+   and on the front of the chat's flipping card. The deck around them (stack, track, lift, glow, arrows) is
+   deck/deck.css; wallet-cards.css sets each wallet's --card-rgb. */
 .wallet-deck-face{--ghost-eye:#141630;position:relative;display:grid;grid-template-rows:auto 1fr auto;grid-template-columns:1fr auto;justify-items:start;box-sizing:border-box;width:100%;height:100%;border-radius:clamp(12px,calc(var(--card-w) * .056),20px);padding:clamp(11px,calc(var(--card-w) * .056),20px) clamp(13px,calc(var(--card-w) * .061),22px);overflow:hidden;color:#fff;text-align:left;
  background:radial-gradient(circle at 85% 10%,rgba(var(--card-rgb),.3),transparent 55%),linear-gradient(135deg,var(--from,#0f3b44),var(--to,#0b1f2a));border:1px solid rgba(var(--card-rgb),.35);box-shadow:0 30px 60px -30px rgba(0,0,0,.9);transition:border-color .4s}
-.wallet-deck-face::after{content:"";position:absolute;inset:-1px;border-radius:inherit;pointer-events:none;opacity:0;box-shadow:0 0 60px -14px rgba(var(--card-rgb),.65),0 50px 80px -30px rgba(0,0,0,.9);transition:opacity .6s var(--deck-ease)}
-.wallet-deck-card[data-active=true] .wallet-deck-face{border-color:rgba(var(--card-rgb),.75)}
-.wallet-deck-card[data-active=true] .wallet-deck-face::after{opacity:1}
-.wallet-deck-card:focus-visible{outline:none}
-.wallet-deck-card:focus-visible .wallet-deck-face{outline:2px solid #fff;outline-offset:4px}
 /* Each wallet's card colours, on whatever wears its class (the nearest one wins: a card's own over the deck's). */
 .wallet-card-cashu{--from:#0f3b44;--to:#0b1f2a}
 .wallet-card-lightning{--from:#4a3510;--to:#1f1a0e}
@@ -35,50 +20,12 @@
 .wallet-deck-card-name{font-size:clamp(16px,calc(var(--card-w) * .066),24px);font-weight:700;letter-spacing:-.01em;line-height:1.15}
 .wallet-deck-card-balance{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(11px,calc(var(--card-w) * .036),13px);letter-spacing:.04em;color:rgba(255,255,255,.88);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .wallet-deck-card-detail{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(10px,calc(var(--card-w) * .031),11px);letter-spacing:.04em;color:rgba(255,255,255,.6);overflow-wrap:anywhere}
-/* The light that crosses a card as it comes up, in its ink (walletDeckMotion.ts moves it; at rest it is off the card). */
-.wallet-deck-card-sheen{position:absolute;inset:0;pointer-events:none;opacity:0;mix-blend-mode:screen;
- background:linear-gradient(105deg,transparent 28%,rgba(var(--card-rgb),.28) 42%,rgba(255,255,255,.34) 50%,rgba(var(--card-rgb),.28) 58%,transparent 72%)}
 .wallet-deck-card-chip{grid-row:3;grid-column:2;align-self:end;justify-self:end;width:clamp(24px,calc(var(--card-w) * .1),36px);height:clamp(18px,calc(var(--card-w) * .075),27px);border-radius:6px;background:linear-gradient(135deg,rgba(255,255,255,.35),rgba(255,255,255,.08))}
-/* A card that cannot be used here still comes up, greyed, to say why. */
-.wallet-deck-card[data-blocked=true]{cursor:not-allowed}
-.wallet-deck-card[data-blocked=true] .wallet-deck-face{filter:grayscale(.75)}
+/* A card that cannot be used here says why, over its corner. */
 .wallet-deck-card[data-blocked=true] .wallet-deck-card-status{color:#fff;background:rgba(0,0,0,.45);border-radius:999px;padding:2px 8px;white-space:normal;text-align:right;max-width:70%}
 
-/* A mouse: the stack. Each button is the strip of its card that shows (walletStack.ts); the face is the whole card,
-   placed from its button. Cards keep their places: the chosen one lifts and comes to the top, the others sink and dim
-   by their distance, each shrinking toward the edge that shows so that edge stays put. */
-.wallet-deck[data-mode=stack] .wallet-deck-track{height:var(--track-h)}
-.wallet-deck[data-mode=stack] .wallet-deck-card{position:absolute;left:var(--bl);top:0;width:var(--bw);height:var(--track-h)}
-.wallet-deck[data-mode=stack] .wallet-deck-face{position:absolute;left:var(--fl);top:var(--ft);width:var(--card-w);height:var(--card-h);pointer-events:none;transform-origin:var(--origin);
- transform:translate3d(0,var(--y),0) scale(var(--s));filter:brightness(var(--b));
- transition:transform .45s var(--deck-ease),transform-origin .45s var(--deck-ease),filter .45s var(--deck-ease),border-color .4s;will-change:transform}
-.wallet-deck[data-mode=stack] .wallet-deck-card[data-active=true] .wallet-deck-face{transition-duration:.6s,.45s,.35s,.4s;transition-timing-function:var(--deck-spring),var(--deck-ease),var(--deck-ease),ease}
-.wallet-deck[data-mode=stack] .wallet-deck-card[data-blocked=true] .wallet-deck-face{filter:brightness(var(--b)) grayscale(.75)}
+/* In the stack, the cards under the chosen one show their strip only: no status or ghost there, and a card after
+   the chosen one shows its mark on the trailing edge that shows. */
 .wallet-deck[data-mode=stack] .wallet-deck-card:not([data-active=true]) .wallet-deck-card-status{opacity:0}
 .wallet-deck[data-mode=stack] .wallet-deck-face[data-after=true] .wallet-deck-card-glyph-end{display:grid}
 .wallet-deck[data-mode=stack] .wallet-deck-card:not([data-active=true]) .wallet-deck-card-ghost{opacity:0}
-@media(hover:hover){.wallet-deck[data-mode=stack] .wallet-deck-card:hover:not([data-active=true]) .wallet-deck-face{filter:brightness(1)}}
-
-/* A finger: a snapping track. The chosen card is the one at rest in the centre. */
-.wallet-deck[data-mode=track] .wallet-deck-track{display:flex;gap:12px;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;padding:10px calc(var(--deck-w) * .12);scrollbar-width:none;-webkit-overflow-scrolling:touch}
-.wallet-deck[data-mode=track] .wallet-deck-track::-webkit-scrollbar{display:none}
-.wallet-deck[data-mode=track] .wallet-deck-card{flex:0 0 var(--card-w);aspect-ratio:1.586;scroll-snap-align:center;scale:.94;filter:brightness(.85);transition:scale .4s var(--deck-ease),filter .4s var(--deck-ease)}
-.wallet-deck[data-mode=track] .wallet-deck-card[data-active=true]{scale:1;filter:none;transition-duration:.55s,.3s;transition-timing-function:var(--deck-spring),var(--deck-ease)}
-.wallet-deck[data-mode=track] .wallet-deck-face::after{box-shadow:0 0 40px -10px rgba(var(--card-rgb),.6),0 20px 40px -24px rgba(0,0,0,.9)}
-
-/* Under the deck: the arrows, and a mark per card with the chosen one lit. */
-.wallet-deck-nav{display:flex;align-items:center;justify-content:center;gap:10px}
-.wallet-deck-arrow{display:grid;place-items:center;width:30px;height:30px;border-radius:999px;border:1px solid var(--theme-border-bright);background:var(--theme-surface-alt,transparent);color:var(--theme-text-secondary);cursor:pointer;transition:color .2s,border-color .2s,background-color .2s}
-.wallet-deck-arrow:hover{color:rgb(var(--card-rgb));border-color:rgba(var(--card-rgb),.6)}
-.wallet-deck-arrow:focus-visible{outline:2px solid rgb(var(--card-rgb));outline-offset:2px}
-.wallet-deck-marks{position:relative;display:flex;align-items:center;gap:8px}
-.wallet-deck-marks span{display:grid;place-items:center;color:var(--theme-text-muted);opacity:.55;transition:color .3s,opacity .3s,transform .45s var(--deck-spring)}
-.wallet-deck-marks span svg{width:14px;height:14px}
-/* A bar under the lit mark slides to the next one (each mark is 14px wide, 8px apart). */
-.wallet-deck-marks::after{content:"";position:absolute;left:3px;bottom:-6px;width:8px;height:2px;border-radius:2px;background:rgb(var(--card-rgb));translate:calc(var(--mark-i,0) * 22px) 0;transition:translate .5s var(--deck-spring),background-color .4s}
-.wallet-deck-marks span[data-on=true]{color:rgb(var(--card-rgb));opacity:1;transform:scale(1.25)}
-
-/* Reduced motion: the final frame, at once. Everything still stacks, snaps and selects. */
-@media(prefers-reduced-motion:reduce){.wallet-deck-card,.wallet-deck-face,.wallet-deck-face::after,.wallet-deck-glow,.wallet-deck-marks span,.wallet-deck-marks::after{transition:none!important}.wallet-deck-card-sheen{display:none}.wallet-deck-track{scroll-behavior:auto}}
-:root[data-reduce-motion=true] .wallet-deck-card,:root[data-reduce-motion=true] .wallet-deck-face,:root[data-reduce-motion=true] .wallet-deck-face::after,:root[data-reduce-motion=true] .wallet-deck-glow,:root[data-reduce-motion=true] .wallet-deck-marks span,:root[data-reduce-motion=true] .wallet-deck-marks::after{transition:none!important}
-:root[data-reduce-motion=true] .wallet-deck-card-sheen{display:none}
