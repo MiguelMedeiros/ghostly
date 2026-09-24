@@ -386,6 +386,8 @@ export class GroupSession {
   private async receiveMessage(from: string, raw: unknown): Promise<void> {
     if (!isMessageFrame(raw) || raw.s !== from || raw.s === this.myKey) return;
     if (raw.e > this.epoch) { this.park(from, raw); return; }
+    // Its replay window is gone (markSeen), even if a sparse set of secrets still holds its secret.
+    if (raw.e < this.epoch - GROUP_LIMITS.secrets) return;
     const commit = this.state.chain[raw.e];
     // Not from a member of that epoch, or from before I was one: nothing to read, nothing to ask for.
     if (!commit || !rosterHas(commit.m, raw.s) || !rosterHas(commit.m, this.myKey)) return;
@@ -452,7 +454,8 @@ export class GroupSession {
       // Known, or a different history of the same epoch: that is a fork, and nothing here picks a winner.
       const known = this.state.chain[e];
       const result = verifyCommit(raw, this.state.chain[e - 1] ?? null, this.id);
-      if ("error" in result) return;
+      // Evidence of a fork must come from whoever signed my commit for that epoch; at epoch 0 anyone can sign a genesis.
+      if ("error" in result || result.commit.by !== known.by) return;
       if (commitHash(result.commit) !== commitHash(known)) await this.fork(`Member ${from.slice(0, 8)} holds a different membership history for epoch ${e}`);
       return;
     }

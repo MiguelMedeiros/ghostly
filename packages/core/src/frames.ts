@@ -256,7 +256,8 @@ function isEndpoint(value: unknown): value is WireEndpoint {
 
 /** Returns null for anything malformed; callers drop the frame. */
 export function decodeControl(text: string): ControlFrame | null {
-  if (text.length > LIMITS.maxControlFrameBytes) return null;
+  // A character is at least one byte: the cheap check first, then the real one.
+  if (text.length > LIMITS.maxControlFrameBytes || utf8Encode(text).length > LIMITS.maxControlFrameBytes) return null;
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -272,10 +273,10 @@ export function decodeControl(text: string): ControlFrame | null {
       return { t: "hello", v: f.v, svc: f.svc, nick: sanitizeNick(f.nick) };
     case "m":
       if (typeof f.ts !== "number" || typeof f.m !== "string") return null;
-      if (f.m.length > LIMITS.maxChatMessageBytes) return null;
+      if (utf8Encode(f.m).length > LIMITS.maxChatMessageBytes) return null;
       return { t: "m", ts: f.ts, m: f.m };
     case "call":
-      if (typeof f.s !== "string" || f.s.length > LIMITS.maxChatMessageBytes) return null;
+      if (typeof f.s !== "string" || utf8Encode(f.s).length > LIMITS.maxChatMessageBytes) return null;
       return { t: "call", s: f.s };
     case "svc":
       return { t: "svc", svc: f.svc };
