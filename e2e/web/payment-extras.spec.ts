@@ -37,8 +37,9 @@ async function fund(p: Peer, sats: number): Promise<void> {
   await expect(p.page.getByTestId("wallet-paid")).toBeVisible();
 }
 
-const balanceOf = async (page: Page, testId: "wallet-test-balance" | "wallet-balance") =>
-  Number(((await page.getByTestId(testId).textContent()) ?? "").replace(/,/g, "").match(/(\d+)/)![1]);
+/** The Cashu panel's balance: in Testnet, every sat there is a test sat (the page's badge says so). */
+const balanceOf = async (page: Page) =>
+  Number(((await page.getByTestId("wallet-balance").textContent()) ?? "").replace(/,/g, "").match(/(\d+)/)![1]);
 
 /** Opens the composer, fills it and stops at the review. */
 async function prepareSend(p: Peer, sats: number, memo?: string) {
@@ -118,7 +119,7 @@ test("a payment the contact refuses comes back, and is never shown as paid", { t
   await row.getByRole("button", { name: "Make primary" }).click();
   await expect(alice.page.getByTestId("mint-row").first()).toContainText(own.replace(/^https?:\/\//, ""));
   await fund(alice, 60);
-  await expect.poll(() => balanceOf(alice.page, "wallet-test-balance")).toBe(60);
+  await expect.poll(() => balanceOf(alice.page)).toBe(60);
   for (const p of [alice, bob]) await openChat(p);
 
   const review = await prepareSend(alice, 21);
@@ -147,8 +148,8 @@ test("a payment the contact refuses comes back, and is never shown as paid", { t
 
   // The sats are Alice's again, less the mint's fee for swapping them twice.
   await openWallet(alice, "cashu");
-  await expect.poll(() => balanceOf(alice.page, "wallet-test-balance")).toBeGreaterThanOrEqual(56);
-  expect(await balanceOf(alice.page, "wallet-test-balance")).toBeLessThan(60);
+  await expect.poll(() => balanceOf(alice.page)).toBeGreaterThanOrEqual(56);
+  expect(await balanceOf(alice.page)).toBeLessThan(60);
   await alice.page.getByTestId("wallet-history").click();
   await expect(alice.page.getByTestId("wallet-tx").filter({ hasText: "Took a payment back" })).toHaveCount(1);
   await expect(alice.page.getByTestId("wallet-tx").filter({ hasText: "Sent ecash" })).toHaveCount(1);
@@ -158,7 +159,7 @@ test("a contact who turns Cashu off stops a reviewed payment before anything is 
   const [alice, bob] = await chatting(peer, "off-alice", "off-bob");
   for (const p of [alice, bob]) await testMint(p);
   await fund(alice, 50);
-  await expect.poll(() => balanceOf(alice.page, "wallet-test-balance")).toBe(50);
+  await expect.poll(() => balanceOf(alice.page)).toBe(50);
   await openChat(alice);
   await openChat(bob);
   const review = await prepareSend(alice, 21);
@@ -188,7 +189,7 @@ test("ecash the contact never picks up can be taken back", { tag: ["@feature:pay
   const [alice, bob] = await chatting(peer, "unredeemed-alice", "unredeemed-bob");
   for (const p of [alice, bob]) await testMint(p);
   await fund(alice, 50);
-  await expect.poll(() => balanceOf(alice.page, "wallet-test-balance")).toBe(50);
+  await expect.poll(() => balanceOf(alice.page)).toBe(50);
   for (const p of [alice, bob]) await openChat(p);
   // Bob's wallet cannot reach the mint to redeem: the token stays unspent, and Alice's payment waits.
   await bob.context.route(/^https:\/\/testnut\.cashu\.space\/v1\/swap/, () => new Promise<void>(() => {}));
@@ -201,7 +202,7 @@ test("ecash the contact never picks up can be taken back", { tag: ["@feature:pay
   await sent.getByRole("button", { name: "Take it back" }).click();
   await expect(sent.getByTestId("payment-state")).toHaveText(/^Taken back/);
   await openWallet(alice, "cashu");
-  await expect.poll(() => balanceOf(alice.page, "wallet-test-balance")).toBeGreaterThanOrEqual(47);
+  await expect.poll(() => balanceOf(alice.page)).toBeGreaterThanOrEqual(47);
 });
 
 test("a Lightning invoice pasted into the chat is a card with a QR code to hide and a Copy button", { tag: ["@feature:payments.lightning.invoice-card"] }, async ({ peer }) => {
