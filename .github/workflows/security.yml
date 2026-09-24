@@ -14,6 +14,12 @@ on:
 permissions:
   contents: read
 
+# As in ci.yml: a new push to a pull request cancels the run it supersedes; pushes, the morning scan and manual
+# runs each get a group of their own and are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   dependencies:
     name: Dependency advisories (OSV)
