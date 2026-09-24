@@ -51,9 +51,18 @@ export interface BrowserHost {
    * already does it (a web page); the desktop app and the extension have to hand it to the system.
    */
   openPaymentLink?(uri: string): Promise<void>;
+  /**
+   * Hands a link to the system's share sheet, pointing at `anchor` (the button, in CSS pixels).
+   * Resolves to false where the platform has no sheet to show; left out where the page's own Web
+   * Share API is the way (a web page).
+   */
+  shareText?(text: string, anchor?: ShareAnchor): Promise<boolean>;
   /** Signing in with an OpenID Connect provider for an identity proof. Left out where the platform cannot. */
   oidc?: OidcHost;
 }
+
+/** Where a share sheet points: the button that opened it, in CSS pixels from the page's top left. */
+export interface ShareAnchor { x: number; y: number; width: number; height: number }
 
 export interface OidcHost {
   platform: OidcPlatform;

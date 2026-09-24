@@ -112,6 +112,8 @@ export function createDesktopHost(version: string) {
     oidc: desktopOidc,
     // A WebView cannot hand a lightning: or bitcoin: link to the system; Rust does, for those two schemes only.
     openPaymentLink: (uri) => invoke("open_payment_link", { url: uri }),
+    // WKWebView has no Web Share API; the system's share sheet is shown by Rust (macOS; elsewhere false: the page copies).
+    shareText: (text, anchor) => invoke<boolean>("share_text", { text, anchor }),
     // There is nothing to ask: the user typed the address, and Rust only ever reaches loopback.
     requestLocalAccess: async () => true,
     async openService(peerPubKeyZ32, serviceId) {

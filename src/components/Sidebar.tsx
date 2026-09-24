@@ -243,7 +243,7 @@ export function Sidebar() {
         </div>
       </div>
       <UpdateBanner />
-      {showNewGroup && <NewGroupDialog onClose={() => setShowNewGroup(false)} onCreated={id => { setShowNewGroup(false); navigate(groupPath(id)); }} />}
+      {showNewGroup && <NewGroupDialog onClose={() => setShowNewGroup(false)} onCreated={id => { setShowNewGroup(false); navigate(groupPath(id), { state: { share: "created" } }); }} />}
       {showNewChat && <JoinDialog onClose={() => setShowNewChat(false)} onJoin={keys => {setShowNewChat(false); navigate(chatPath(ensureSession(keys))); refreshSessions();}}
         onJoinGroup={async link => { const { groupId } = await engine.call("joinGroupByLink", { link }); setShowNewChat(false); navigate(groupPath(groupId)); }} />}
 

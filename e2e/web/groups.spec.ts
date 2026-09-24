@@ -65,6 +65,9 @@ test("four people: create, invite, everyone reads everyone, catch-up, removal, a
   await alice.page.getByTestId("new-group").click();
   await alice.page.getByTestId("new-group-name").fill("Ghosts");
   await alice.page.getByTestId("new-group-create").click();
+  // A new group opens on its link; this one fills up from contacts.
+  await expect(alice.page.getByTestId("group-share-dialog")).toBeVisible();
+  await alice.page.getByTestId("group-share-done").click();
   await expect(alice.page.getByTestId("group-name")).toHaveText("Ghosts");
   await expect(alice.page.getByTestId("group-event").first()).toContainText("Group created");
   // The honest note is in the members panel.

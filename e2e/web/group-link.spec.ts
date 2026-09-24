@@ -41,14 +41,13 @@ test("strangers join a group through its link, and a replaced link reaches nobod
   await alice.page.getByTestId("new-group-create").click();
   await expect(alice.page.getByTestId("group-name")).toHaveText("Open ghosts");
 
-  // The admin turns the link on in the members panel.
-  await alice.page.getByTestId("group-members").click();
-  await alice.page.getByTestId("group-link-enable").click();
-  const field = alice.page.getByTestId("group-link-url");
-  await expect(field).toHaveValue(/#\/join\/group1\//);
-  const url = await field.inputValue();
+  // The new group opens on its link, already on.
+  const shareDialog = alice.page.getByTestId("group-share-dialog");
+  await expect(shareDialog.getByTestId("group-link-url")).toHaveValue(/#\/join\/group1\//);
+  const url = await shareDialog.getByTestId("group-link-url").inputValue();
   expect(url.startsWith(new URL(alice.page.url()).origin)).toBe(true);
-  await alice.page.keyboard.press("Escape");
+  await shareDialog.getByTestId("group-share-done").click();
+  const field = alice.page.getByTestId("group-link-url");
 
   // Bob opens it. The address loses the link at once; the group waits for Alice's app, then lets him in.
   await bob.page.goto(url);

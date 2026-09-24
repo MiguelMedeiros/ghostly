@@ -36,6 +36,7 @@
     "allow-updater-can-install",
     "allow-open-project-link",
     "allow-open-payment-link",
+    "allow-share-text",
     "allow-oidc-loopback-start",
     "allow-oidc-loopback-wait",
     "allow-oidc-loopback-cancel",

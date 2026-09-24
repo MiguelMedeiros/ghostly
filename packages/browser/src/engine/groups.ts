@@ -97,7 +97,7 @@ export class Groups {
   }
 
   views(): GroupView[] {
-    return [...this.stored.values()].filter(group => !group.left).map(group => {
+    return [...this.stored.values()].filter(group => !group.left && (group.invitation || this.sessions.has(group.id))).map(group => {
       const session = this.sessions.get(group.id);
       const edges = this.host.edges(group.id);
       // A chat stays in `contacts` after its member is removed or leaves (the removal notice goes over it): only a member still in the roster counts.
@@ -459,9 +459,10 @@ export class Groups {
         const viaLink = !!group.invitation.entry;
         // An entry session is not a contact chat: once in, the edges carry everything.
         const member: StoredGroup = { id: g, createdAt: group.createdAt, state: joined.state, contacts: viaLink ? {} : { [group.invitation.admin]: linkId } };
+        // Attached before anything awaits: the list must never see a member row without its session.
         this.stored.set(g, member);
-        await this.store.putGroup(member);
         this.attach(joined.state);
+        await this.store.putGroup(member);
         if (!viaLink) await this.sessions.get(g)!.setNick(group.invitation.admin, this.host.contactName(linkId));
         await this.event(g, "joined", `You joined. ${GROUP_READ_NOTE}`, Date.now(), joined.state.chain.length - 1);
         if (viaLink) { this.lastKnock.delete(g); await this.host.closeEdge(linkId); }

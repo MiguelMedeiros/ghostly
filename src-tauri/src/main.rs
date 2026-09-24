@@ -11,6 +11,7 @@ mod oidc;
 mod paired_transport;
 mod pkarr_client;
 mod records;
+mod share;
 mod types;
 mod viewer;
 
@@ -97,6 +98,7 @@ fn main() {
             commands::updater_can_install,
             commands::open_project_link,
             commands::open_payment_link,
+            share::share_text,
             oidc::oidc_loopback_start,
             oidc::oidc_loopback_wait,
             oidc::oidc_loopback_cancel,

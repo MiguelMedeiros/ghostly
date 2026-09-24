@@ -1,3 +1,4 @@
+import { decodeGroupEntryLink, groupEntryUrl } from "@ghostly/core";
 import { getPrefix } from "./storage";
 import { publicKeyLabel } from "./publicKeyLabel";
 
@@ -21,4 +22,16 @@ export function groupReadAt(groupId: string): number {
 }
 export function markGroupRead(groupId: string, at = Date.now()): void {
   try { localStorage.setItem(`${getPrefix()}group_read_${groupId}`, String(at)); } catch { /* private mode: nothing is remembered */ }
+}
+
+/** The web app opens a group's link; the extension and desktop hand out the public app's address, which they also accept pasted. */
+const PUBLIC_APP = "https://app.ghostly.tools";
+function linkOrigin(): string {
+  return /^https?:$/.test(window.location.protocol) ? window.location.origin : PUBLIC_APP;
+}
+
+/** The address a group's link opens, or "" while it is off. */
+export function groupLinkUrl(group: { entryLink?: string }): string {
+  const link = group.entryLink ? decodeGroupEntryLink(group.entryLink) : null;
+  return link ? groupEntryUrl(linkOrigin(), link) : "";
 }

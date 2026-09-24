@@ -281,6 +281,11 @@ export interface ServicesPlatform {
    * itself (the desktop app, the extension). Null where a plain link does it: the caller leaves the link alone.
    */
   openPaymentLink(uri: string): Promise<void> | null;
+  /**
+   * The system's share sheet for a link, where the platform has to show it itself (the desktop app).
+   * Null where it does not: the page uses the Web Share API, or copies. Resolves to false when no sheet was shown.
+   */
+  shareText(text: string, anchor?: { x: number; y: number; width: number; height: number }): Promise<boolean> | null;
   /** Largest file that can be sent, in bytes. */
   maxFileBytes: number;
   /** Starts sending and returns what to show in the chat. Progress comes through `getTransfer`. */

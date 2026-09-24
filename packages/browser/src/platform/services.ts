@@ -59,6 +59,10 @@ export const servicesPlatform: ServicesPlatform | null = {
     const open = getBrowserHost().openPaymentLink;
     return open ? open(uri) : null;
   },
+  shareText(text, anchor) {
+    const share = getBrowserHost().shareText;
+    return share ? share(text, anchor) : null;
+  },
   get features() {
     return getBrowserHost().features;
   },

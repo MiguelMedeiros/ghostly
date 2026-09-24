@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupView, StoredMessage } from "@ghostly/browser/shared/types";
 import { MessageBubble } from "../components/MessageBubble";
@@ -7,6 +7,7 @@ import { MessageInput } from "../components/MessageInput";
 import { GroupMembersDialog } from "../components/GroupMembersDialog";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { LeaveGroupDialog } from "../components/LeaveGroupDialog";
+import { GroupShareDialog } from "../components/GroupLinkPanel";
 import { useOutsideDismiss } from "../hooks/useDismiss";
 import { markGroupRead, memberName } from "../lib/groups";
 import type { ChatMessage } from "../lib/types";
@@ -41,6 +42,14 @@ export function GroupChat() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmForget, setConfirmForget] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
+  // A new group opens on its link (the sidebar says so in the navigation's state); the header's Share link opens it again.
+  const location = useLocation();
+  const [sharing, setSharing] = useState<"" | "created" | "share">("");
+  useEffect(() => {
+    if ((location.state as { share?: string } | null)?.share !== "created") return;
+    setSharing("created");
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.state, location.pathname, navigate]);
   const [error, setError] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
   const { settings } = useSettings();
@@ -77,6 +86,13 @@ export function GroupChat() {
     : group.invitation ? `Invitation from ${group.invitation.contact || "a contact"}`
     : group.status === "active" ? `${group.members.length} member${group.members.length === 1 ? "" : "s"} · ${reachable} of ${others.length} reachable`
     : group.statusReason ?? group.status;
+  const canShare = group.isAdmin && group.status === "active";
+  const openShare = async () => {
+    setError("");
+    // The link may be off: sharing it turns it on.
+    if (!group.entryLink) { try { await engine.call("enableGroupLink", { groupId }); } catch (e) { setError(e instanceof Error ? e.message : "Could not turn the link on"); return; } }
+    setSharing("share");
+  };
   const act = async (action: () => Promise<unknown>) => {
     setMenuOpen(false); setError("");
     try { await action(); } catch (e) { setError(e instanceof Error ? e.message : "That did not work"); }
@@ -98,6 +114,11 @@ export function GroupChat() {
           </div>
         </div>
         <div className="flex items-center gap-1">
+          {canShare && <button onClick={() => void openShare()} data-testid="group-share" title="Share the group's link" aria-label="Share link"
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-accent/15 px-3 text-sm font-semibold text-accent hover:bg-accent/25 max-md:min-h-11 max-md:px-2.5">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
+            <span className="max-[480px]:hidden">Share link</span>
+          </button>}
           <div className="relative" ref={menuRef}>
             <button onClick={() => setMenuOpen(!menuOpen)} className="p-2 max-md:p-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer" title="Options" data-testid="group-options">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1" /><circle cx="12" cy="5" r="1" /><circle cx="12" cy="19" r="1" /></svg>
@@ -116,24 +137,34 @@ export function GroupChat() {
       {(error || (group.status && group.status !== "active")) && <div role="status" data-testid="group-notice" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
         {error || group.statusReason}
       </div>}
-      {joiningByLink && !error && <div role="status" data-testid="group-joining" className="flex items-center gap-3 px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
-        <span className="flex-1">{group.invitation!.admin ? "The admin's app answered: getting the group's keys…" : "Waiting for the admin's app to let you in. It happens on its own when their app is open; you can leave this page."}</span>
-        <button onClick={() => { void engine.call("forgetGroup", { groupId }).catch(() => {}); navigate("/"); }} data-testid="group-joining-cancel" className="shrink-0 rounded px-2 py-1 text-xs text-danger hover:bg-danger/10">Cancel</button>
-      </div>}
 
-      <div className="flex-1 overflow-y-auto chat-wallpaper">
+
+      {joiningByLink ? <div className="flex flex-1 items-center justify-center overflow-y-auto chat-wallpaper px-4">
+        <div role="status" data-testid="group-joining" className="w-full max-w-sm rounded-2xl border border-border bg-sidebar-bg/95 p-6 text-center shadow-xl">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-accent/15 text-accent">
+            <svg className="animate-spin" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.22-8.56" /></svg>
+          </div>
+          <h2 className="mt-4 text-base font-semibold text-text-primary">{group.invitation!.admin ? `Joining ${group.name || "the group"}…` : "Waiting to be let in"}</h2>
+          <p className="mt-2 text-sm leading-relaxed text-text-muted">{group.invitation!.admin
+            ? "The admin's app answered: getting the group's keys. You are in in a moment."
+            : "Waiting for the admin's app to let you in. It happens on its own as soon as their app is open: you can leave this page and come back."}</p>
+          <button onClick={() => { void engine.call("forgetGroup", { groupId }).catch(() => {}); navigate("/"); }} data-testid="group-joining-cancel"
+            className="mt-4 rounded px-2 py-1 text-xs text-text-muted hover:bg-danger/10 hover:text-danger">Cancel joining</button>
+        </div>
+      </div> : <div className="flex-1 overflow-y-auto chat-wallpaper">
         <div className="max-w-3xl mx-auto py-3">
           {messages.map(m => m.event
             ? <div key={m.id} data-testid="group-event" className="flex justify-center mb-3.5 px-6"><span className="rounded-lg bg-surface-alt/90 px-3 py-1.5 text-center text-[11px] text-text-muted">{eventText(m, group)}</span></div>
             : <MessageBubble key={m.id} message={toChatMessage(m, group)} peerAck={Number.MAX_SAFE_INTEGER} />)}
           <div ref={bottomRef} />
         </div>
-      </div>
+      </div>}
 
-      <MessageInput draftId={`group:${groupId}`} key={groupId} onSend={send} disabled={!group.canSend} maxLength={16_384}
-        fileUnavailable="Files are not part of groups yet" paymentsUnavailable="Payments are not part of groups yet" />
+      {!joiningByLink && <MessageInput draftId={`group:${groupId}`} key={groupId} onSend={send} disabled={!group.canSend} maxLength={16_384}
+        fileUnavailable="Files are not part of groups yet" paymentsUnavailable="Payments are not part of groups yet" />}
 
       {showMembers && <GroupMembersDialog group={group} onClose={() => setShowMembers(false)} />}
+      {sharing && group.entryLink && <GroupShareDialog group={group} created={sharing === "created"} onClose={() => setSharing("")} />}
       {confirmLeave && <LeaveGroupDialog group={group} onClose={() => setConfirmLeave(false)}
         onConfirm={async () => { await engine.call("leaveGroup", { groupId }); setConfirmLeave(false); navigate("/"); }} />}
       {confirmForget && <DeleteChatDialog name={group.name} onClose={() => setConfirmForget(false)}
