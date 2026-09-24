@@ -92,10 +92,11 @@ export class ArkWallet {
   setMode(mode:WalletMode):Promise<void> {
     this.gate.switching(mode);
     return this.serial(async()=>{
-    this.mode=mode;
+    this.mode=mode;this.gate.entered(mode);
     const current=this.saved;
     if(!current || arkMode(current.config.network)===mode){if(!current)await this.loadParked(mode);return;}
-    clearTimeout(this.retry);await this.lock();
+    // The old wallet's closing may wait on its network: it finishes on its own, the switch goes on.
+    clearTimeout(this.retry);void this.lock().catch(()=>{});
     const parked=await wrap<StoredArk|undefined>((await store(STORES.settings,"readonly")).get(`arkWallet-mode-${mode}`));
     await transact([STORES.settings],stores=>{
       stores[STORES.settings].put(current,`arkWallet-mode-${arkMode(current.config.network)}`);
@@ -149,13 +150,15 @@ export class ArkWallet {
     this.saved=saved;
     this.view={configured:true,locked:true,automatic:true,balance:0,network:config.network,provider:config.provider};this.changed();
   });}
-  async refresh() {
+  /** A mode switch ends it where it is: the wallet being left needs no balance, and the switch does not wait for its explorer. */
+  async refresh() {await this.poll().catch(error=>{if(!(error instanceof ModeChanged))throw error;});}
+  private async poll() {
     clearTimeout(this.timer);
     const adapter=this.adapter;
     if(!adapter)return;
     // Each part on its own: an address to receive on is useful even while the balance cannot be read.
     const failed:string[]=[];
-    const read=async<T>(what:string,work:()=>Promise<T>,previous:T):Promise<T>=>{try{return await work();}catch(error){failed.push(what);console.warn(`Ark ${what}:`,error instanceof Error?error.message:error);return previous;}};
+    const read=async<T>(what:string,work:()=>Promise<T>,previous:T):Promise<T>=>{try{return await this.gate.within(work());}catch(error){if(error instanceof ModeChanged)throw error;failed.push(what);console.warn(`Ark ${what}:`,error instanceof Error?error.message:error);return previous;}};
     const address=await read("address",()=>adapter.address(),this.view.address);
     // Both addresses are this wallet's own; the rest asks an explorer, which can take a while.
     const boardingAddress=await read("boarding address",()=>adapter.boardingAddress(),this.view.boardingAddress);
@@ -182,7 +185,7 @@ export class ArkWallet {
     const saved=this.saved!;
     const intents=await wrap<SavedIntent[]>((await store(STORES.intents,"readonly")).getAll());
     if(intents.some(i=>i.review.method==="arkade"))throw new Error(refusal);
-    if(this.adapter && await this.adapter.balance()>0)throw new Error(refusal);
+    if(this.adapter && await this.gate.within(this.adapter.balance())>0)throw new Error(refusal);
     await this.lock();
     return saved;
   }

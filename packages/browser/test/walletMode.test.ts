@@ -100,6 +100,19 @@ it("a mode switch ends the wait for a wallet of the other mode, and what arrives
   await expect(gate.within(Promise.reject(new Error("offline")))).rejects.toThrow("offline");
 });
 
+it("a wait that starts after a switch was asked for, but before the owner applied it, ends at once", async () => {
+  const gate = new ModeGate();
+  gate.entered("mainnet");
+  gate.switching("testnet"); // Queued behind the Mainnet wallet's work: that work is still running.
+  const late = deferred<{ dispose: () => void }>();
+  await expect(gate.within(late.promise, (a) => a.dispose())).rejects.toBeInstanceOf(ModeChanged);
+  const dispose = vi.fn();
+  late.resolve({ dispose });
+  await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce());
+  gate.entered("testnet"); // The switch reached the front of the queue.
+  await expect(gate.within(Promise.resolve("testnet work"))).resolves.toBe("testnet work");
+});
+
 for (const kind of ["ark", "usdt"] as const) {
   it(`${kind}: switching modes does not wait for a Mainnet wallet still connecting to a slow network`, async () => {
     await openDb();
@@ -132,6 +145,51 @@ for (const kind of ["ark", "usdt"] as const) {
       expect(wallet.adapter).toBeUndefined();
     } finally {
       connect.mockRestore();
+    }
+  });
+}
+
+for (const kind of ["ark", "usdt"] as const) {
+  it(`${kind}: switching modes does not wait for a Mainnet balance the explorer never answers`, async () => {
+    await openDb();
+    await transact([STORES.settings], (s) => { for (const key of ["arkWallet", "usdtWallet", "arkWallet-mode-mainnet", "usdtWallet-mode-mainnet", "arkWallet-mode-testnet", "usdtWallet-mode-testnet"]) s[STORES.settings].delete(key); });
+    const deviceKey = newDeviceKey();
+    const seed = await sealSeed(generateMnemonic(wordlist), deviceKey);
+    const stored = kind === "ark"
+      ? { config: { network: "bitcoin", provider: "https://arkade.computer", explorer: "https://mempool.space/api", serverKey: "k", walletId: "w-hang" }, seed, deviceKey }
+      : { config: { network: "ethereum", chainId: 1, provider: "https://ethereum.publicnode.com", token: "0x", decimals: 6 }, seed, deviceKey };
+    await transact([STORES.settings], (s) => s[STORES.settings].put(stored, `${kind}Wallet`));
+    // Connected, with an address of its own, but every question to mempool.space (or the RPC) hangs.
+    const never = () => new Promise<never>(() => {});
+    const dispose = vi.fn(async () => {});
+    const adapter = kind === "ark"
+      ? { config: stored.config, address: async () => "ark1me", boardingAddress: async () => "bc1pme", balance: vi.fn(never), incoming: never, recoverable: never, dispose }
+      : { config: stored.config, address: async () => "0xme", balances: vi.fn(never), dispose };
+    const connect = vi.spyOn(kind === "ark" ? ArkadeAdapter : UsdtAdapter, "connect").mockResolvedValue(adapter as never);
+    const wallet = kind === "ark" ? new ArkWallet(vi.fn()) : new UsdtWallet(vi.fn());
+    try {
+      await wallet.start();
+      await wallet.setMode("mainnet");
+      const ready = wallet.ensureReady();
+      await vi.waitFor(() => expect("balance" in adapter ? adapter.balance : adapter.balances).toHaveBeenCalled());
+      expect(wallet.adapter, "the Mainnet wallet is open, its balance on the way").toBe(adapter);
+
+      const switched = await Promise.race([wallet.setMode("testnet").then(() => "switched"), new Promise((r) => setTimeout(() => r("stuck"), 500))]);
+      expect(switched).toBe("switched");
+      expect(wallet.adapter).toBeUndefined();
+      expect(wallet.view).toMatchObject({ configured: false, locked: true });
+      expect((await settingsKeys()).filter((k) => k.includes("Wallet"))).toEqual([`${kind}Wallet-mode-mainnet`]);
+      expect(await read(`${kind}Wallet-mode-mainnet`), "parked as it was, not replaced").toEqual(stored);
+      await ready;
+      expect(wallet.view.error, "a switch is not a connection error").toBeUndefined();
+      await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce());
+
+      // And back: the same Mainnet wallet returns.
+      await wallet.setMode("mainnet");
+      expect(await read(`${kind}Wallet`)).toEqual(stored);
+    } finally {
+      connect.mockRestore();
+      await wallet.stop();
     }
   });
 }
