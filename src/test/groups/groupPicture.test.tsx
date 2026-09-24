@@ -43,7 +43,7 @@ describe("a group's picture in the app", () => {
     expect(picture("group-members-avatar").querySelector("img")).toHaveAttribute("src", PICTURE);
     expect(screen.getByText("Change picture")).toBeInTheDocument();
     await user.click(screen.getByTestId("group-picture-remove"));
-    expect(engine.callsTo("setGroupPicture").at(-1)).toEqual({ groupId: "group-1", picture: null });
+    expect(engine.callsTo("setGroupPicture").slice(-1)[0]).toEqual({ groupId: "group-1", picture: null });
   });
 
   it("says what the engine refused", async () => {
