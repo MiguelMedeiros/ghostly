@@ -57,7 +57,7 @@ Unit tests only, measured on 2026-09-24 with `npm run coverage` (gated suites sk
 
 | Package | Lines | Statements | Functions | Branches |
 |---|---:|---:|---:|---:|
-| core (`packages/core`) | 85.57% | 78.02% | 81.27% | 74.34% |
+| core (`packages/core`) | 99.27% | 97.74% | 96.76% | 96.61% |
 | browser (`packages/browser`) — some tests failed | 75.12% | 70.08% | 64.17% | 64.17% |
 | sdk (`packages/sdk`) | n/a | n/a | n/a | n/a |
 | ui (`.`) | 2.87% | 2.52% | 1.97% | 2.25% |
