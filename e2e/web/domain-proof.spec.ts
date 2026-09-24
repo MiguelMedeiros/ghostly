@@ -1,6 +1,6 @@
 import { expect, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
-import { startTestDomain, type TestDomain } from "../support/domain";
+import { DOMAIN_SLOTS, startTestDomain, type TestDomain } from "../support/domain";
 
 /**
  * Domain identity proofs. The test domain is served by support/domain.ts: a local DNS-over-HTTPS
@@ -30,7 +30,7 @@ async function startDomainProof(peer: Peer, domain: string, signer: "dns" | "htt
 }
 
 let site: TestDomain;
-test.beforeEach(async ({}, info) => { site = await startTestDomain(info.parallelIndex % 44); });
+test.beforeEach(async ({}, info) => { site = await startTestDomain(info.parallelIndex % DOMAIN_SLOTS); });
 test.afterEach(async () => { await site.close(); });
 
 test("a domain proven by a DNS TXT record is verified by the one contact it is shared with, and not once the record is gone", { tag: ["@feature:proofs.domain.dns", "@feature:proofs.share"] }, async ({ peer }) => {

@@ -654,16 +654,18 @@ mod tests {
         assert_eq!(request(bad).await.unwrap_err(), "Unknown stream mode");
     }
 
-    /// Against the regtest stack of e2e/support/lnd-regtest (GHOSTLY_LND_REGTEST=1): Alice's node, its own
-    /// self-signed certificate pinned, reached at 127.0.0.1. Nothing is printed.
+    /// Against e2e/infra (npm run e2e:infra:up, GHOSTLY_LND_REGTEST=1): Alice's node of the LND suite, its own
+    /// self-signed certificate pinned, at GHOSTLY_LND_ALICE_URL (e2e/infra/env.mjs). Nothing is printed.
     #[tokio::test]
     async fn a_regtest_node_answers_through_its_pinned_certificate() {
         if std::env::var("GHOSTLY_LND_REGTEST").as_deref() != Ok("1") {
             return;
         }
+        let node = std::env::var("GHOSTLY_LND_ALICE_URL")
+            .unwrap_or_else(|_| "https://127.0.0.1:47030".to_string());
         let exec = |args: &[&str]| {
             let out = std::process::Command::new("docker")
-                .args(["exec", "ghostly-lnd-alice"])
+                .args(["exec", "ghostly-e2e-lnd-alice"])
                 .args(args)
                 .output()
                 .unwrap();
@@ -673,7 +675,7 @@ mod tests {
         let macaroon = exec(&["cat", "/root/.lnd/ghostly-scoped.macaroon.hex"]);
         let pem = exec(&["cat", "/root/.lnd/tls.cert"]);
         let b64: String = pem.lines().filter(|l| !l.starts_with("-----")).collect();
-        let mut info = call("https://127.0.0.1:44710", None, "/v1/getinfo", None, 10_000);
+        let mut info = call(&node, None, "/v1/getinfo", None, 10_000);
         info.macaroon = macaroon.clone();
         info.certificate = Some(b64.clone());
         let answer = request(info).await.unwrap();
@@ -689,13 +691,7 @@ mod tests {
             "/v2/router/track/{}%3D?no_inflight_updates=false",
             "A".repeat(43)
         );
-        let mut track = call(
-            "https://127.0.0.1:44710",
-            None,
-            &path,
-            Some("first"),
-            10_000,
-        );
+        let mut track = call(&node, None, &path, Some("first"), 10_000);
         track.macaroon = macaroon.clone();
         track.certificate = Some(b64);
         let answer = request(track).await.unwrap();
@@ -706,13 +702,7 @@ mod tests {
         );
 
         let (other, _) = certificate();
-        let mut wrong = call(
-            "https://127.0.0.1:44710",
-            Some(&other),
-            "/v1/getinfo",
-            None,
-            10_000,
-        );
+        let mut wrong = call(&node, Some(&other), "/v1/getinfo", None, 10_000);
         wrong.macaroon = macaroon;
         assert!(request(wrong).await.unwrap_err().contains("certificate"));
     }

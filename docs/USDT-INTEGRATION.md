@@ -32,14 +32,15 @@ The wallet uses safe-integer token units and gas wei, not unbounded transaction 
 
 ## Reproduce local validation
 
-Use a disposable Anvil instance bound to `127.0.0.1:43210`, chain 31337, mining every second. The fixture setup refuses any other chain and requires explicit opt-in.
+The end-to-end environment (`e2e/infra`, see `e2e/README.md`) runs a disposable Anvil on `127.0.0.1:47070`, chain 31337, mining every second — the web app's "Local test chain" — and deploys the fixture there. The fixture setup refuses any other chain.
 
 ```sh
-GHOSTLY_USDT_LOCAL=1 node e2e/support/setup-usdt.mjs
-GHOSTLY_USDT_LOCAL=1 npm test --workspace @ghostly/browser -- test/usdt.integration.test.ts
-GHOSTLY_USDT_LOCAL=1 E2E_WEB_URL=http://localhost:4192 npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/usdt-wallet.spec.ts --workers=1
+npm run e2e:infra:up        # Anvil, the contract deployed (e2e/support/usdt-local.mjs ready), .env.e2e written
+set -a; . ./.env.e2e; set +a
+npm test --workspace @ghostly/browser -- test/usdt.integration.test.ts
+npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/usdt-wallet.spec.ts
 ```
 
-Setup compiles the test-only `TestUSDT.sol` and saves its address in `/tmp/ghostly-usdt-local.json`. The contract's unrestricted mint and blocking controls are solely disposable local test fixtures. Do not deploy this fixture as a real asset.
+Setup compiles the test-only `TestUSDT.sol` and deploys it as the first contract of Anvil's first account, so its address is the same on every fresh chain (`GHOSTLY_USDT_TOKEN`, `e2e/infra/env.mjs`). The contract's unrestricted mint and blocking controls are solely disposable local test fixtures. Do not deploy this fixture as a real asset.
 
 Official references: [WDK EVM configuration](https://docs.wdk.tether.io/sdk/wallet-modules/wallet-evm/configuration/), [WDK transaction submission](https://docs.wdk.tether.io/sdk/wallet-modules/wallet-evm/guides/send-transactions/), [Tether supported protocols](https://tether.to/en/supported-protocols/).

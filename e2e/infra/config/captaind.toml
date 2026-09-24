@@ -86,5 +86,5 @@ max_connections = 10
 
 [bitcoind]
 url = "http://bitcoind:18443"
-rpc_user = "second"
-rpc_pass = "ark"
+rpc_user = "ghostly"
+rpc_pass = "regtest"

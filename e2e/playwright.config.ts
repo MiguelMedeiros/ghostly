@@ -1,5 +1,13 @@
 import { defineConfig, devices } from "@playwright/test";
-import { OIDC_TEST_ISSUER } from "./support/oidcIssuer";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+
+// The end-to-end environment's variables (npm run e2e:infra:up writes them; see e2e/infra/env.mjs). Loaded
+// before anything reads the environment; a variable the shell already set wins.
+const infraEnv = join(import.meta.dirname, "..", ".env.e2e");
+if (existsSync(infraEnv)) process.loadEnvFile(infraEnv);
+
+const { OIDC_TEST_ISSUER } = await import("./support/oidcIssuer");
 
 /**
  * End-to-end tests for Ghostly: real browsers, the shipped build, no servers.
@@ -11,9 +19,10 @@ import { OIDC_TEST_ISSUER } from "./support/oidcIssuer";
  *   npm run e2e -- --grep-invert @network
  *   E2E_WEB_URL=https://app.ghostly.tools npm run e2e -- --project web   # a deployed app
  *   npm run e2e:ui                    # watch and debug
+ *   npm run e2e:full                  # every gated suite too, against e2e/infra (see e2e/README.md)
  */
 const deployed = process.env.E2E_WEB_URL;
-const port = 4173;
+const port = Number(process.env.E2E_WEB_PORT || 4173);
 
 export default defineConfig({
   testDir: ".",

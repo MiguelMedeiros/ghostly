@@ -1,0 +1,286 @@
+# Everything the gated end-to-end suites talk to, in one disposable project: worthless regtest coins, test
+# tokens and throwaway keys, nothing public. Driven by e2e/infra/infra.mjs (npm run e2e:infra:up / :down /
+# :reset, npm run e2e:full); the endpoints it publishes are listed in e2e/infra/env.mjs.
+#
+# One regtest chain (bitcoind + an Esplora) under every Bitcoin service. Each suite keeps nodes of its own on
+# it — the LND, WebLN and NWC tests assert exact channel balances, so they must not share a node while they
+# run in parallel — and the Lightning nodes of different implementations can still reach each other.
+#
+# Host ports stay in 47000-47199, all on 127.0.0.1; containers are ghostly-e2e-*. Ports are fixed on purpose:
+# the web app's Regtest options name them.
+name: ghostly-e2e
+
+x-lnd: &lnd
+  image: lightninglabs/lnd:v0.19.3-beta
+  restart: on-failure
+  # Shared by every LND node; each adds its alias, its TLS name and (for the REST suites) the web app's origin.
+  entrypoint: ["lnd", "--noseedbackup", "--bitcoin.regtest", "--bitcoin.node=bitcoind",
+    "--bitcoind.rpchost=bitcoind:18443", "--bitcoind.rpcuser=ghostly", "--bitcoind.rpcpass=regtest",
+    "--bitcoind.zmqpubrawblock=tcp://bitcoind:28332", "--bitcoind.zmqpubrawtx=tcp://bitcoind:28333",
+    "--listen=0.0.0.0:9735", "--rpclisten=0.0.0.0:10009", "--restlisten=0.0.0.0:8080",
+    "--bitcoin.defaultchanconfs=1", "--trickledelay=500"]
+  depends_on: { bitcoind: { condition: service_healthy } }
+  healthcheck:
+    test: ["CMD-SHELL", "lncli --network=regtest getinfo >/dev/null 2>&1 || exit 1"]
+    interval: 3s
+    retries: 60
+
+x-cln: &cln
+  image: elementsproject/lightningd:v26.06.8
+  restart: on-failure
+  environment: { LIGHTNINGD_NETWORK: regtest }
+  depends_on: { bitcoind: { condition: service_healthy } }
+  command: ["--bitcoin-rpcconnect=bitcoind", "--bitcoin-rpcport=18443", "--bitcoin-rpcuser=ghostly",
+    "--bitcoin-rpcpassword=regtest", "--bind-addr=0.0.0.0:9735", "--bind-addr=ws:0.0.0.0:9740",
+    "--dev-bitcoind-poll=1", "--developer", "--dev-fast-gossip", "--disable-plugin=cln-grpc"]
+  healthcheck:
+    test: ["CMD-SHELL", "lightning-cli --network=regtest getinfo >/dev/null 2>&1 || exit 1"]
+    interval: 3s
+    retries: 60
+
+x-hub: &hub
+  image: ghcr.io/getalby/hub:v1.24.0
+  restart: on-failure
+  environment: &hub-env
+    WORK_DIR: /data
+    PORT: "8080"
+    NETWORK: regtest
+    RELAY: ws://nwc-relay:7777
+    LN_BACKEND_TYPE: LND
+    LND_CERT_FILE: /lnd/tls.cert
+    LND_MACAROON_FILE: /lnd/data/chain/bitcoin/regtest/admin.macaroon
+    # A test-only password guarding worthless regtest coins; it lets the hub restart without a manual unlock.
+    AUTO_UNLOCK_PASSWORD: ghostly-nwc-regtest
+    ENABLE_ADVANCED_SETUP: "false"
+    SEND_EVENTS_TO_ALBY: "false"
+    AUTO_LINK_ALBY_ACCOUNT: "false"
+    HIDE_UPDATE_BANNER: "true"
+    LOG_TO_FILE: "false"
+
+services:
+  # ── The chain ────────────────────────────────────────────────────────────────────────────────────────────
+  # e2e/infra/infra.mjs makes the "miner" wallet before anything else starts; -wallet loads it again after a restart.
+  bitcoind:
+    image: bitcoin/bitcoin:31.0
+    container_name: ghostly-e2e-bitcoind
+    command: ["bitcoind", "-regtest", "-printtoconsole", "-server", "-txindex", "-fallbackfee=0.0001",
+      "-rpcbind=0.0.0.0", "-rpcallowip=0.0.0.0/0", "-rpcuser=ghostly", "-rpcpassword=regtest",
+      "-rpcworkqueue=512", "-rpcthreads=32", "-whitelist=0.0.0.0/0", "-wallet=miner",
+      "-zmqpubrawblock=tcp://0.0.0.0:28332", "-zmqpubrawtx=tcp://0.0.0.0:28333"]
+    ports: ["127.0.0.1:47001:18443"]
+    healthcheck:
+      test: ["CMD-SHELL", "bitcoin-cli -regtest -rpcuser=ghostly -rpcpassword=regtest getblockchaininfo >/dev/null || exit 1"]
+      interval: 2s
+      retries: 30
+
+  # The Esplora API every browser wallet and the Ark servers read the chain from (electrs, CORS open).
+  esplora:
+    image: mempool/electrs:v3.3.0
+    container_name: ghostly-e2e-esplora
+    restart: on-failure
+    command: ["--network", "regtest", "--daemon-rpc-addr", "bitcoind:18443", "--cookie", "ghostly:regtest",
+      "--jsonrpc-import", "--db-dir", "/tmp/electrs", "--http-addr", "0.0.0.0:3000",
+      "--electrum-rpc-addr", "0.0.0.0:50001", "--cors", "*"]
+    ports: ["127.0.0.1:47002:3000"]
+    depends_on: { bitcoind: { condition: service_healthy } }
+
+  # ── Ark (Arkade's arkd) ──────────────────────────────────────────────────────────────────────────────────
+  # arkd + its wallet service, which keeps its UTXOs through NBXplorer (on Postgres). The recipe is
+  # ArkLabsHQ/arkade-regtest's, minus its explorer UIs, Lightning and delegators.
+  ark-postgres:
+    image: postgres:16
+    container_name: ghostly-e2e-ark-postgres
+    environment: { POSTGRES_HOST_AUTH_METHOD: trust, POSTGRES_DB: nbxplorer }
+    healthcheck:
+      # Over TCP: the image's first-boot server listens on the socket only, and is not the one that stays.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d nbxplorer"]
+      interval: 2s
+      retries: 30
+
+  ark-nbxplorer:
+    image: nicolasdorier/nbxplorer:2.6.7
+    container_name: ghostly-e2e-ark-nbxplorer
+    restart: on-failure
+    environment:
+      NBXPLORER_NETWORK: regtest
+      NBXPLORER_CHAINS: btc
+      NBXPLORER_BTCRPCURL: http://bitcoind:18443/
+      NBXPLORER_BTCNODEENDPOINT: bitcoind:18444
+      NBXPLORER_BTCRPCUSER: ghostly
+      NBXPLORER_BTCRPCPASSWORD: regtest
+      NBXPLORER_BIND: 0.0.0.0:32838
+      NBXPLORER_TRIMEVENTS: 10000
+      NBXPLORER_POSTGRES: "User ID=postgres;Host=ark-postgres;Port=5432;Application Name=nbxplorer;MaxPoolSize=20;Database=nbxplorer"
+      NBXPLORER_EXPOSERPC: 1
+      NBXPLORER_NOAUTH: 1
+    depends_on: { bitcoind: { condition: service_healthy }, ark-postgres: { condition: service_healthy } }
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/32838'"]
+      interval: 3s
+      retries: 60
+
+  ark-wallet:
+    image: ghcr.io/arkade-os/arkd-wallet:v0.9.16
+    container_name: ghostly-e2e-ark-wallet
+    restart: on-failure
+    environment:
+      ARKD_WALLET_NBXPLORER_URL: http://ark-nbxplorer:32838
+      ARKD_WALLET_NETWORK: regtest
+      # A known regtest signer key (arkd's own e2e default), so the wallet does not make one of its own.
+      ARKD_WALLET_SIGNER_KEY: afcd3fa10f82a05fddc9574fdb13b3991b568e89cc39a72ba4401df8abef35f0
+    depends_on: { ark-nbxplorer: { condition: service_healthy } }
+
+  arkd:
+    image: ghcr.io/arkade-os/arkd:v0.9.16
+    container_name: ghostly-e2e-arkd
+    restart: on-failure
+    environment:
+      ARKD_NO_TLS: "true"
+      ARKD_NO_MACAROONS: "true"
+      ARKD_WALLET_ADDR: ark-wallet:6060
+      ARKD_ESPLORA_URL: http://esplora:3000
+      ARKD_VTXO_MIN_AMOUNT: 1
+      ARKD_DB_TYPE: sqlite
+      ARKD_EVENT_DB_TYPE: badger
+      ARKD_LIVE_STORE_TYPE: inmemory
+      ARKD_UNLOCKER_TYPE: env
+      ARKD_UNLOCKER_PASSWORD: secret
+      ARKD_VTXO_TREE_EXPIRY: 180
+      ARKD_UNILATERAL_EXIT_DELAY: 5
+      ARKD_PUBLIC_UNILATERAL_EXIT_DELAY: 5
+      ARKD_BOARDING_EXIT_DELAY: 180
+      ARKD_CHECKPOINT_EXIT_DELAY: 5
+      ARKD_SESSION_DURATION: 30
+      ARKD_ROUND_MIN_PARTICIPANTS_COUNT: 1
+      ARKD_LOG_LEVEL: 4
+    ports: ["127.0.0.1:47010:7070", "127.0.0.1:47011:7071"]
+    depends_on: [ark-wallet, esplora]
+
+  # ── Bark (Second's Ark) ──────────────────────────────────────────────────────────────────────────────────
+  # captaind, without Lightning; published for amd64 only (emulated on Apple silicon).
+  bark-captaind:
+    image: secondark/captaind:0.7.1
+    platform: linux/amd64
+    container_name: ghostly-e2e-bark-captaind
+    restart: on-failure
+    environment: { CAPTAIND_CONFIG: /config/captaind.toml }
+    entrypoint: ["/bin/sh", "/config/start.sh"]
+    volumes: ["./config/captaind.toml:/config/captaind.toml:ro", "./config/captaind-start.sh:/config/start.sh:ro", "bark-captaind:/data/captaind", "bark-postgres:/var/lib/postgresql/data"]
+    ports: ["127.0.0.1:47020:3535"]
+    depends_on: { bitcoind: { condition: service_healthy } }
+
+  # A funder wallet (bark CLI) that boards regtest coins and pays the test wallets over Ark.
+  bark-funder:
+    image: secondark/bark:0.7.1
+    container_name: ghostly-e2e-bark-funder
+    entrypoint: ["sleep", "infinity"]
+    depends_on: [bark-captaind]
+
+  # ── Lightning: LND, for the LND source (the web app calls REST from any origin it is served on) ──────────
+  lnd-alice:
+    <<: *lnd
+    container_name: ghostly-e2e-lnd-alice
+    command: ["--alias=ghostly-alice", "--tlsextradomain=lnd-alice",
+"--restcors=*"]
+    ports: ["127.0.0.1:47030:8080"]
+  lnd-bob:
+    <<: *lnd
+    container_name: ghostly-e2e-lnd-bob
+    command: ["--alias=ghostly-bob", "--tlsextradomain=lnd-bob",
+"--restcors=*"]
+    ports: ["127.0.0.1:47031:8080"]
+
+  # ── Lightning: LND behind the browser wallets (WebLN, reached from the test process) ─────────────────────
+  webln-alice:
+    <<: *lnd
+    container_name: ghostly-e2e-webln-alice
+    command: ["--alias=ghostly-webln-alice", "--tlsextradomain=webln-alice"]
+    ports: ["127.0.0.1:47040:8080"]
+  webln-bob:
+    <<: *lnd
+    container_name: ghostly-e2e-webln-bob
+    command: ["--alias=ghostly-webln-bob", "--tlsextradomain=webln-bob"]
+    ports: ["127.0.0.1:47041:8080"]
+
+  # ── Lightning: Core Lightning (Commando over a websocket) ────────────────────────────────────────────────
+  cln-alice:
+    <<: *cln
+    container_name: ghostly-e2e-cln-alice
+    ports: ["127.0.0.1:47050:9740"]
+  cln-bob:
+    <<: *cln
+    container_name: ghostly-e2e-cln-bob
+    ports: ["127.0.0.1:47051:9740"]
+
+  # ── Lightning: Nostr Wallet Connect (an Alby Hub on an LND node each, over a local strfry relay) ─────────
+  nwc-relay:
+    image: ghcr.io/hoytech/strfry@sha256:36f1886d185a88ca57c66ebe52e6e9e8428dac2486eea0a5d50ff934f18b60c3
+    container_name: ghostly-e2e-nwc-relay
+    restart: on-failure
+    volumes: ["./config/strfry.conf:/etc/strfry.conf:ro", "nwc-relay:/app/strfry-db"]
+    ports: ["127.0.0.1:47060:7777"]
+  nwc-lnd-alice:
+    <<: *lnd
+    container_name: ghostly-e2e-nwc-lnd-alice
+    command: ["--alias=alice", "--tlsextradomain=nwc-lnd-alice"]
+    volumes: ["nwc-lnd-alice:/root/.lnd"]
+    ports: ["127.0.0.1:47061:8080"]
+  nwc-lnd-bob:
+    <<: *lnd
+    container_name: ghostly-e2e-nwc-lnd-bob
+    command: ["--alias=bob", "--tlsextradomain=nwc-lnd-bob"]
+    volumes: ["nwc-lnd-bob:/root/.lnd"]
+    ports: ["127.0.0.1:47062:8080"]
+  nwc-hub-alice:
+    <<: *hub
+    container_name: ghostly-e2e-nwc-hub-alice
+    environment: { <<: *hub-env, LND_ADDRESS: "nwc-lnd-alice:10009" }
+    volumes: ["nwc-hub-alice:/data", "nwc-lnd-alice:/lnd:ro"]
+    ports: ["127.0.0.1:47063:8080"]
+    depends_on: { nwc-lnd-alice: { condition: service_healthy }, nwc-relay: { condition: service_started } }
+  nwc-hub-bob:
+    <<: *hub
+    container_name: ghostly-e2e-nwc-hub-bob
+    environment: { <<: *hub-env, LND_ADDRESS: "nwc-lnd-bob:10009" }
+    volumes: ["nwc-hub-bob:/data", "nwc-lnd-bob:/lnd:ro"]
+    ports: ["127.0.0.1:47064:8080"]
+    depends_on: { nwc-lnd-bob: { condition: service_healthy }, nwc-relay: { condition: service_started } }
+
+  # ── USDT: a local EVM chain (31337) the test token is deployed on ────────────────────────────────────────
+  anvil:
+    image: ghcr.io/foundry-rs/foundry@sha256:043752653d5be351c71709091b3db97c4421c907eb40ea294195e7f532aadf46
+    container_name: ghostly-e2e-anvil
+    entrypoint: ["anvil"]
+    command: ["--host", "0.0.0.0", "--chain-id", "31337", "--block-time", "1", "--silent"]
+    ports: ["127.0.0.1:47070:8545"]
+
+  # ── S3 (held messages, profile backups) ─────────────────────────────────────────────────────────────────
+  # RustFS, an S3 server in MinIO's mould: MinIO no longer publishes images anyone can pull. The browser calls
+  # it directly, so CORS is open (a throwaway server on 127.0.0.1).
+  s3:
+    image: rustfs/rustfs:1.0.0
+    container_name: ghostly-e2e-s3
+    environment: { RUSTFS_ACCESS_KEY: ghostly-e2e, RUSTFS_SECRET_KEY: ghostly-e2e-worthless, RUSTFS_CORS_ALLOWED_ORIGINS: "*" }
+    ports: ["127.0.0.1:47080:9000"]
+
+  # ── Cashu: the test mint (fake Lightning backend: its invoices pay themselves), as CI runs it ────────────
+  mint:
+    image: cashubtc/mintd:0.17.7
+    container_name: ghostly-e2e-mint
+    environment:
+      CDK_MINTD_LN_BACKEND: fakewallet
+      CDK_MINTD_LISTEN_HOST: 0.0.0.0
+      CDK_MINTD_LISTEN_PORT: "3338"
+      CDK_MINTD_MNEMONIC: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+      CDK_MINTD_MINT_NAME: Ghostly test mint
+      CDK_MINTD_INPUT_FEE_PPK: "100"
+    ports: ["127.0.0.1:47090:3338"]
+
+volumes:
+  bark-captaind:
+  bark-postgres:
+  nwc-relay:
+  nwc-lnd-alice:
+  nwc-lnd-bob:
+  nwc-hub-alice:
+  nwc-hub-bob:

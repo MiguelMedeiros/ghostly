@@ -1,6 +1,5 @@
 import 'fake-indexeddb/auto';
 import { test, expect, vi } from 'vitest';
-import { execFileSync } from 'node:child_process';
 import { generateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { Wallet, MnemonicIdentity, ArkNote, RestArkProvider, InMemoryWalletRepository, InMemoryContractRepository } from '@arkade-os/sdk';
@@ -11,19 +10,18 @@ import { intentRepository } from '../src/engine/paymentAdapters/persistence';
 import {sealSeed} from '../src/engine/paymentAdapters/persistence';
 import {ArkWallet} from '../src/engine/paymentAdapters/arkWallet';
 import {STORES,transact} from '../src/shared/idb';
+import { ARK_REGTEST, note as arkNote } from '../../../e2e/support/ark-regtest/regtest.mjs';
 // covers-gated: wallet.ark.send, wallet.ark.backup, payments.chat.reconcile
 const enabled=process.env.GHOSTLY_ARK_REGTEST==='1';
 test.skipIf(!enabled)('real regtest Ark transfer and read-only receipt reconciliation',async()=>{
- const provider='http://127.0.0.1:43010';
+ const provider=ARK_REGTEST.server;
  const info=await new RestArkProvider(provider).getInfo();
- const config={network:'regtest' as const,provider,explorer:'http://127.0.0.1:43000/api',serverKey:info.signerPubkey,walletId:crypto.randomUUID()};
+ const config={network:'regtest' as const,provider,explorer:ARK_REGTEST.esplora,serverKey:info.signerPubkey,walletId:crypto.randomUUID()};
  const storage=()=>({walletRepository:new InMemoryWalletRepository(),contractRepository:new InMemoryContractRepository()});
  const aliceMnemonic=generateMnemonic(wordlist);
  const aliceStorage=storage();
  const funder=await Wallet.create({identity:MnemonicIdentity.fromMnemonic(aliceMnemonic,{isMainnet:false}),arkServerUrl:provider,esploraUrl:config.explorer,settlementConfig:false,walletMode:"hd",storage:aliceStorage});
- const noteOutput=execFileSync('node',['/tmp/ghostly-ark-regtest-20260922/regtest.mjs','arkd','note','--amount','10000'],{encoding:'utf8',stdio:'pipe'});
- const note=noteOutput.match(/arknote[a-zA-Z0-9]+/)?.[0];
- if(!note)throw new Error('Regtest faucet returned no credit note');
+ const note=arkNote(10000);
  await funder.settle({inputs:[ArkNote.fromString(note)],outputs:[{address:await funder.getAddress(),amount:9900n}]});
  await funder.dispose();
  const alice=await ArkadeAdapter.connect(config,aliceMnemonic,aliceStorage);
@@ -72,12 +70,12 @@ test.skipIf(!enabled)('real regtest Ark transfer and read-only receipt reconcili
    await transact([STORES.settings],stores=>{stores[STORES.settings].put({config:bobConfig,seed},'arkWallet');});
    const pending={...saved!,review:{...saved!.review,id:crypto.randomUUID(),state:'pending' as const}};
    await intentRepository.put(pending);
-   const owner=new ArkWallet(()=>{});await owner.start();
+   const owner=new ArkWallet(()=>{});await owner.start();await owner.setMode('testnet');
    const encrypted=await owner.exportBackup(password);
    expect(encrypted).not.toContain(bobMnemonic);
    // Isolated fake IndexedDB fixture only: simulate a new device's empty profile.
    await transact([STORES.settings,STORES.intents],stores=>{stores[STORES.settings].delete('arkWallet');stores[STORES.intents].clear();});
-   const restoredOwner=new ArkWallet(()=>{});await restoredOwner.start();
+   const restoredOwner=new ArkWallet(()=>{});await restoredOwner.start();await restoredOwner.setMode('testnet');
    await expect(restoredOwner.restoreBackup(encrypted,'wrong password')).rejects.toThrow('unlock');
    await restoredOwner.restoreBackup(encrypted,password);
    expect(restoredOwner.view.locked).toBe(true);

@@ -1,15 +1,16 @@
 import { execFileSync } from "node:child_process";
+import { BDK_REGTEST } from "../support/bdk-regtest/regtest.mjs";
 import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
 
 /**
  * The BDK wallet (bitcoindevkit in WebAssembly) as the on-chain Bitcoin source, Testnet only:
  *  - offline: the picker offers it in Testnet only, a new wallet shows its 12 words once, a bad phrase or an
  *    unreachable Esplora server is refused before anything is saved, and the chat shows the Bitcoin card;
- *  - GHOSTLY_BDK_REGTEST=1: two wallets on a local regtest chain (e2e/support/bdk-regtest) — funded, a Send
+ *  - GHOSTLY_BDK_REGTEST=1: two wallets on e2e/infra's regtest chain (e2e/support/bdk-regtest) — funded, a Send
  *    from the wallet page, a Send and a Request paid in the chat, balances and txids checked on both sides.
  */
 
-const ESPLORA = "http://127.0.0.1:44202";
+const ESPLORA = BDK_REGTEST.esplora;
 const panel = (p: Peer) => p.page.getByTestId("bitcoin-wallet");
 
 async function chooseBdk(p: Peer) {
@@ -35,8 +36,8 @@ test("the BDK wallet is offered in Testnet only, shows a new wallet's words once
   // Regtest has no public server.
   await form.getByTestId("provider-save").click();
   await expect(panel(alice).getByTestId("onchain-source-error")).toContainText("Regtest needs the address of your own Esplora server");
-  // A server that does not answer: nothing is saved.
-  await form.getByLabel("Esplora server").fill("http://127.0.0.1:44298");
+  // A server that does not answer (nothing listens on port 1): nothing is saved.
+  await form.getByLabel("Esplora server").fill("http://127.0.0.1:1");
   await form.getByTestId("provider-save").click();
   await expect(panel(alice).getByTestId("onchain-source-error")).toContainText("the Esplora server did not answer", { timeout: 30_000 });
   await expect(panel(alice).getByTestId("onchain-source-current")).toContainText("No source");
@@ -61,7 +62,7 @@ test("the chat offers on-chain Bitcoin, off until a source is set up", { tag: ["
 });
 
 test("BDK on regtest: funded, a Send from the wallet, a Send and a Request paid in the chat", { tag: ["@gated", "@feature:wallet.onchain.bdk.send", "@feature:payments.bitcoin.send", "@feature:wallet.onchain.sources"] }, async ({ peer }) => {
-  test.skip(process.env.GHOSTLY_BDK_REGTEST !== "1", "Requires the local BDK regtest stack (e2e/support/bdk-regtest)");
+  test.skip(process.env.GHOSTLY_BDK_REGTEST !== "1", "Requires e2e/infra (npm run e2e:infra:up) and GHOSTLY_BDK_REGTEST=1");
   test.setTimeout(8 * 60_000);
   const regtest = (...args: string[]) => execFileSync(process.execPath, ["e2e/support/bdk-regtest/regtest.mjs", ...args], { encoding: "utf8", stdio: "pipe" }).trim();
   regtest("ready");

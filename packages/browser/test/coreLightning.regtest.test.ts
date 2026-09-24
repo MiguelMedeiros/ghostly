@@ -10,7 +10,7 @@ import { describeLightningProvider } from "./helpers/providerContract";
 // covers-gated: wallet.lightning.cln.connect, wallet.lightning.cln.pay, wallet.lightning.provider-contract
 
 /**
- * Against real Core Lightning nodes on regtest (e2e/support/cln-regtest): alice is the source under test,
+ * Against real Core Lightning nodes on regtest (e2e/infra, driven by e2e/support/cln-regtest): alice is the source under test,
  * bob the counterpart on the other end of their channel. Worthless coins; runes are made fresh and never
  * printed. Skipped unless GHOSTLY_CLN_REGTEST=1.
  */

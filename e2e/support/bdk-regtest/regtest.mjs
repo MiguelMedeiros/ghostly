@@ -1,31 +1,20 @@
 #!/usr/bin/env node
-// Drives the disposable BDK regtest stack in docker-compose.yml: worthless coins only.
+// Drives the on-chain part of e2e/infra for the BDK tests: the regtest chain and its Esplora, worthless coins only.
 //   node e2e/support/bdk-regtest/regtest.mjs ready                 a miner wallet with coins, Esplora caught up
 //   node e2e/support/bdk-regtest/regtest.mjs send <addr> <sats>    the miner pays an address and mines a block
 //   node e2e/support/bdk-regtest/regtest.mjs address               an address of the miner's (someone else's)
 //   node e2e/support/bdk-regtest/regtest.mjs mine [blocks]
 //   node e2e/support/bdk-regtest/regtest.mjs tx <txid>             bitcoind's view of a transaction (evidence)
-import { execFileSync } from "node:child_process";
+import { endpoints } from "../../infra/env.mjs";
+import { cli, ensureMiner, esploraSynced, mine, miner } from "../../infra/chain.mjs";
 
-export const BDK_REGTEST = { esplora: "http://127.0.0.1:44202" };
-const cli = (...args) => execFileSync("docker", ["exec", "ghostly-bdk-bitcoind", "bitcoin-cli", "-regtest", "-rpcuser=ghostly", "-rpcpassword=bdk", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-const miner = (...args) => cli("-rpcwallet=miner", ...args);
-const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+export { mine };
+export const BDK_REGTEST = { esplora: endpoints.esplora };
 
 /** Resolves once the Esplora server has indexed bitcoind's tip. */
-export async function synced() {
-  const height = cli("getblockcount");
-  for (let i = 0; i < 60; i++) {
-    const tip = await fetch(`${BDK_REGTEST.esplora}/blocks/tip/height`).then((r) => r.text()).catch(() => "");
-    if (tip === height) return Number(height);
-    await wait(500);
-  }
-  throw new Error(`Esplora did not reach height ${height}`);
-}
-export function mine(blocks = 1) { miner("generatetoaddress", String(blocks), miner("getnewaddress")); }
+export const synced = () => esploraSynced(BDK_REGTEST.esplora);
 export async function ready() {
-  if (!JSON.parse(cli("listwallets")).includes("miner")) { try { cli("loadwallet", "miner"); } catch { cli("createwallet", "miner"); } }
-  if (Number(miner("getbalance")) < 50) mine(101);
+  ensureMiner();
   return { ...BDK_REGTEST, height: await synced(), miner: Number(miner("getbalance")) };
 }
 /** Pays an address and confirms it; returns the txid. */

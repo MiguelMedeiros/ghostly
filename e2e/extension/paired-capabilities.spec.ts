@@ -17,6 +17,8 @@ test("paired extension and web exchange verified files and local-mint sats", { t
   }
   for (const p of [ext, web]) {
     await openWallet(p, "cashu");
+    // A mint on this machine holds test sats: it is listed in the Testnet mode only, like web/paired-capabilities.
+    await p.page.getByTestId("wallet-mode").getByRole("radio", { name: "Testnet" }).click();
     await p.page.getByTestId("wallet-mint-url").fill(process.env.E2E_MINT_URL!); await p.page.getByTestId("wallet-add-mint").click();
     await expect(p.page.getByTestId("wallet-mint-url")).toHaveValue("");
     await p.page.getByTestId("mint-row").filter({ hasText: "127.0.0.1" }).getByRole("button", { name: "Make primary", exact: true }).click();

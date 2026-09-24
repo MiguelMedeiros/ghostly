@@ -9,7 +9,7 @@ import { nodeBdk } from "./helpers/bdkNode";
 
 /**
  * The BDK provider against a real regtest chain: bitcoind + electrs (Esplora) from
- * e2e/support/bdk-regtest (see e2e/README.md). Worthless coins; skipped unless GHOSTLY_BDK_REGTEST=1.
+ * e2e/infra (npm run e2e:infra:up; e2e/support/bdk-regtest drives it, see e2e/README.md). Worthless coins; skipped unless GHOSTLY_BDK_REGTEST=1.
  */
 const enabled = process.env.GHOSTLY_BDK_REGTEST === "1";
 // @ts-expect-error A plain .mjs script, shared with the e2e tests.
@@ -29,4 +29,4 @@ if (enabled) {
       },
     };
   }, { timeout: 30_000 });
-} else it.skip("BDK (regtest): set GHOSTLY_BDK_REGTEST=1 with e2e/support/bdk-regtest running", () => {});
+} else it.skip("BDK (regtest): set GHOSTLY_BDK_REGTEST=1 with e2e/infra up", () => {});

@@ -9,20 +9,20 @@ import { PaymentCoordinator } from "../src/engine/paymentAdapters/coordinator";
 import { intentRepository } from "../src/engine/paymentAdapters/persistence";
 import type { CashuWallet } from "../src/engine/wallet";
 import { describeOnchainProvider } from "./helpers/providerContract";
+import { endpoints } from "../../../e2e/infra/env.mjs";
 // covers-gated: wallet.onchain.bitcoind, wallet.onchain.provider-contract, payments.chat.reconcile
 
 /**
- * The Bitcoin Core source against a real regtest bitcoind (see e2e/README.md, "Bitcoin Core on regtest"):
+ * The Bitcoin Core source against a real regtest bitcoind (see e2e/README.md, "Bitcoin Core on regtest"): e2e/infra's
+ * by default (npm run e2e:infra:up), or any other through GHOSTLY_BITCOIND_RPC_URL / _USER / _PASSWORD.
  *
- *   GHOSTLY_BITCOIND_REGTEST=1 GHOSTLY_BITCOIND_RPC_PASSWORD=… npx vitest run test/bitcoind.regtest.test.ts
+ *   GHOSTLY_BITCOIND_REGTEST=1 npx vitest run test/bitcoind.regtest.test.ts
  *
  * Node has no CORS, so this reaches the node with `fetch`, standing in for the Tauri command (which has
  * Rust tests of its own). Each run makes wallets of its own; nothing is ever unloaded or stopped.
  */
 const enabled = process.env.GHOSTLY_BITCOIND_REGTEST === "1";
-const URL = process.env.GHOSTLY_BITCOIND_RPC_URL ?? "http://127.0.0.1:44301";
-const USER = process.env.GHOSTLY_BITCOIND_RPC_USER ?? "ghostly";
-const PASSWORD = process.env.GHOSTLY_BITCOIND_RPC_PASSWORD ?? "";
+const { url: URL, user: USER, password: PASSWORD } = endpoints.bitcoind;
 const run = crypto.randomUUID().slice(0, 8);
 
 /** What `bitcoind_rpc` does, over fetch: the same failure kinds. */

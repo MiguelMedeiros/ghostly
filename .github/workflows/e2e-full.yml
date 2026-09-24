@@ -1,0 +1,77 @@
+name: E2E (full)
+
+# Every end-to-end suite, the gated ones included, against e2e/infra: one Docker Compose project with a regtest
+# chain, Ark and Bark servers, LND and Core Lightning nodes, Alby Hubs, Anvil, an S3 server and the Cashu test mint —
+# worthless coins and throwaway keys, all on this runner, so no secrets. `npm run e2e:full` brings it up, funds
+# it, runs the gated vitest contracts and the web and extension suites, and takes it down (see e2e/README.md).
+# Breez's hosted regtest is not part of it: its faucet needs a reCAPTCHA, so those suites are skipped here.
+# Nightly on dev and by hand; not on pull requests, on purpose: it takes far longer than a merge should wait.
+# Measured on ubuntu-24.04 (2026-09-24): about 42 minutes — the environment up and funded in under a minute,
+# the vitest contracts in 37 s, Playwright (2 workers, one retry) in 39 minutes.
+on:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+    inputs:
+      playwright_args:
+        description: "Only some of it, e.g. --project=web e2e/web/wallet-lnd.spec.ts (empty: everything)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-full
+  cancel-in-progress: false
+
+jobs:
+  e2e-full:
+    name: End-to-end, gated suites included
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # A scheduled run tests dev, the default branch; a manual one, the branch it was started on.
+          ref: ${{ github.event_name == 'schedule' && 'dev' || github.ref }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # Before the clock of the run itself: a slow registry is not a slow test.
+      - name: Pull the environment's images
+        run: |
+          for attempt in 1 2 3; do
+            docker compose -p ghostly-e2e -f e2e/infra/docker-compose.yml pull --quiet && exit 0
+            echo "pull failed (attempt $attempt), retrying"; sleep 15
+          done
+          exit 1
+
+      - name: Run everything
+        env:
+          PLAYWRIGHT_ARGS: ${{ inputs.playwright_args }}
+        # PLAYWRIGHT_ARGS is split on spaces on purpose: it is a list of arguments.
+        run: npm run e2e:full -- -- $PLAYWRIGHT_ARGS
+
+      - name: Upload report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report-full
+          path: |
+            playwright-report
+            test-results
+          retention-days: 14

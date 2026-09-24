@@ -21,7 +21,16 @@ export interface PeerOptions {
   ignoreHTTPSErrors?: boolean;
   /** Talks to the public Pkarr relays themselves instead of the test's relay (measurements only: the suite stays offline). */
   realRelays?: boolean;
+  /**
+   * Refuses the public Mainnet services the automatic wallets reach on their own (see `MAINNET_SERVICES`), at once:
+   * a test that moves test coins only then never waits on them — a Mainnet wallet still busy with a slow server
+   * holds the switch to Testnet behind it.
+   */
+  offlineMainnet?: boolean;
 }
+
+/** Where the Mainnet Ark and USDT wallets a new profile makes by itself go: the Ark server, its explorer, the Ethereum RPC. */
+export const MAINNET_SERVICES = [/^https:\/\/arkade\.computer\//, /^https:\/\/mempool\.space\/api\//, /^https:\/\/ethereum\.publicnode\.com/];
 
 type Fixtures = {
   relay: LocalRelay;
@@ -40,6 +49,7 @@ export async function openPeer(browser: Browser, relay: LocalRelay, baseURL: str
   if (!options.realRelays) await relay.attach(context);
   await attachMint(context);
   await stubGifServices(context);
+  if (options.offlineMainnet) for (const service of MAINNET_SERVICES) await context.route(service, (route) => route.abort("connectionrefused"));
   const page = await context.newPage();
   page.on("pageerror", (error) => console.log(`  [${name}] ${error.message}`));
   await page.goto("/");

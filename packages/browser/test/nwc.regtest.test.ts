@@ -7,7 +7,7 @@ import { describeLightningProvider } from "./helpers/providerContract";
 
 /**
  * NWC against a real wallet service: Alby Hub in front of a regtest LND node, and a second node on the
- * other end of a channel (e2e/support/nwc-regtest, see e2e/README.md). Worthless coins; skipped unless
+ * other end of a channel (e2e/infra and e2e/support/nwc-regtest, see e2e/README.md). Worthless coins; skipped unless
  * GHOSTLY_NWC_REGTEST=1, and it never starts or stops the stack. No URI is printed.
  */
 const enabled = process.env.GHOSTLY_NWC_REGTEST === "1";

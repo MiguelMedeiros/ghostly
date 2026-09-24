@@ -1,33 +1,31 @@
 #!/usr/bin/env node
-// Drives the disposable NWC regtest stack in docker-compose.yml: worthless coins only.
+// Drives the NWC part of e2e/infra (two LND nodes, an Alby Hub on each, a strfry relay): worthless coins only.
 //   node e2e/support/nwc-regtest/regtest.mjs ready                 mine, fund both LND nodes, open alice -> bob, start both hubs
 //   node e2e/support/nwc-regtest/regtest.mjs balances              channel balances of both nodes, in sats
 //   node e2e/support/nwc-regtest/regtest.mjs mine [blocks]
 //   node e2e/support/nwc-regtest/regtest.mjs invoice <alice|bob> <sats> [memo]   an invoice straight from that LND node
 //   node e2e/support/nwc-regtest/regtest.mjs pay <alice|bob> <bolt11>            that LND node pays it directly
 // Pairing URIs come only from the module (`nwcUri`), never from the CLI: they carry a spending secret.
-import { execFileSync } from "node:child_process";
+import { endpoints } from "../../infra/env.mjs";
+import { ensureMiner, mine, miner, retry, run, wait } from "../../infra/chain.mjs";
 
+export { mine };
 export const NWC_REGTEST = {
-  /** The relay as the host (browser, Node test) reaches it; the hubs reach it as ws://relay:7777. */
-  relay: "ws://127.0.0.1:44502",
-  bitcoindRpc: "http://127.0.0.1:44501",
-  lndRest: { alice: "https://127.0.0.1:44511", bob: "https://127.0.0.1:44512" },
-  hub: { alice: "http://127.0.0.1:44521", bob: "http://127.0.0.1:44522" },
+  /** The relay as the host (browser, Node test) reaches it; the hubs reach it as ws://nwc-relay:7777. */
+  relay: endpoints.nwc.relay,
+  bitcoindRpc: endpoints.bitcoind.url,
+  lndRest: endpoints.nwc.lnd,
+  hub: endpoints.nwc.hub,
   channel: { capacity: 1_000_000, push: 400_000 },
 };
-const INNER_RELAY = "ws://relay:7777";
-// Test-only, guards worthless regtest coins; it matches AUTO_UNLOCK_PASSWORD in docker-compose.yml.
+const INNER_RELAY = "ws://nwc-relay:7777";
+// Test-only, guards worthless regtest coins; it matches AUTO_UNLOCK_PASSWORD in e2e/infra/docker-compose.yml.
 const HUB_PASSWORD = "ghostly-nwc-regtest";
 const SCOPES = ["pay_invoice", "make_invoice", "lookup_invoice", "get_balance", "get_info"];
 const WHO = ["alice", "bob"];
 
-const run = (container, args) => execFileSync("docker", ["exec", container, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-const cli = (...args) => run("ghostly-nwc-bitcoind", ["bitcoin-cli", "-regtest", "-rpcuser=nwc", "-rpcpassword=regtest", ...args]);
-const miner = (...args) => cli("-rpcwallet=miner", ...args);
-const lncli = (who, ...args) => JSON.parse(run(`ghostly-nwc-lnd-${side(who)}`, ["lncli", "--network", "regtest", ...args]));
+const lncli = (who, ...args) => JSON.parse(run(`nwc-lnd-${side(who)}`, ["lncli", "--network", "regtest", ...args]));
 const json = (text) => JSON.parse(text);
-const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function side(who) {
   if (!WHO.includes(who)) throw new Error(`who must be "alice" or "bob", not ${JSON.stringify(who)}`);
@@ -40,15 +38,6 @@ async function until(what, check, { tries = 60, every = 1000 } = {}) {
     await wait(every);
   }
   throw new Error(`Timed out waiting for ${what}`);
-}
-
-export function mine(blocks = 1) { miner("generatetoaddress", String(blocks), miner("getnewaddress")); }
-
-function ensureMiner() {
-  if (!json(cli("listwallets")).includes("miner")) {
-    try { cli("loadwallet", "miner"); } catch { cli("createwallet", "miner"); }
-  }
-  if (Number(miner("getbalance")) < 50) mine(101);
 }
 
 const synced = (who) => until(`${who} to sync`, () => lncli(who, "getinfo").synced_to_chain, { tries: 90 });
@@ -68,9 +57,10 @@ function aliceChannel(bobKey) {
 async function ensureChannel(bobKey) {
   const pending = () => lncli("alice", "pendingchannels").pending_open_channels.some((p) => p.channel.remote_node_pub === bobKey);
   if (!aliceChannel(bobKey) && !pending()) {
-    try { lncli("alice", "connect", `${bobKey}@lnd-bob:9735`); } catch (e) { if (!/already connected/.test(String(e.stderr))) throw e; }
+    try { lncli("alice", "connect", `${bobKey}@nwc-lnd-bob:9735`); } catch (e) { if (!/already connected/.test(String(e.stderr))) throw e; }
     const { capacity, push } = NWC_REGTEST.channel;
-    lncli("alice", "openchannel", "--node_key", bobKey, "--local_amt", String(capacity), "--push_amt", String(push));
+    const bothSynced = async () => { await synced("alice"); await synced("bob"); };
+    await retry("opening alice's channel", () => lncli("alice", "openchannel", "--node_key", bobKey, "--local_amt", String(capacity), "--push_amt", String(push)), { before: bothSynced });
   }
   await until("the channel to open", () => {
     if (aliceChannel(bobKey)?.active) return true;

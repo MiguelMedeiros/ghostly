@@ -8,7 +8,7 @@ import {useRun} from './wallet/run';
 import {ButtonGroup,InputGroup,Truncate} from './layout';
 
 type Network='ethereum'|'sepolia'|'evm-local';
-const RPC:Record<Network,string>={ethereum:'https://ethereum.publicnode.com',sepolia:'https://ethereum-sepolia-rpc.publicnode.com','evm-local':'http://127.0.0.1:43210'};
+const RPC:Record<Network,string>={ethereum:'https://ethereum.publicnode.com',sepolia:'https://ethereum-sepolia-rpc.publicnode.com','evm-local':'http://127.0.0.1:47070'};
 const TOKEN:Record<Network,string>={ethereum:ETHEREUM_USDT,sepolia:SEPOLIA_TEST_USDT,'evm-local':''};
 const PLACE:Record<Network,string>={ethereum:'Ethereum',sepolia:'Sepolia','evm-local':'this local chain'};
 export function UsdtWalletPanel({wallet,state}:{wallet:WalletPlatform;state:WalletState}) {

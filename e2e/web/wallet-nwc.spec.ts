@@ -5,7 +5,7 @@ import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, ty
  * Lightning through Nostr Wallet Connect: the person pastes a wallet's `nostr+walletconnect://` URI as the
  * Lightning source of the Testnet mode, and invoices are made and paid by that wallet over its relay.
  *  - Always: a fake NWC wallet service on a relay in this test process (regtest sats in memory, no network).
- *  - GHOSTLY_NWC_REGTEST=1: two Alby Hubs on two regtest LND nodes with a channel (e2e/support/nwc-regtest):
+ *  - GHOSTLY_NWC_REGTEST=1: two Alby Hubs on two regtest LND nodes with a channel (e2e/infra, e2e/support/nwc-regtest):
  *    each person connects their own, and a request in the chat is paid over real Lightning.
  */
 
@@ -26,7 +26,10 @@ async function useNwc(p: Peer, uri: string) {
 /** The balance the Lightning card shows for its source, in sats. */
 async function lightningBalance(p: Peer): Promise<number> {
   await openWallet(p, "lightning");
-  const text = await p.page.getByTestId("wallet-balance").innerText();
+  const shown = p.page.getByTestId("wallet-balance");
+  // Once the wallet has answered: before that the card has no number, and a NaN compares with nothing.
+  await expect(shown).toHaveText(/^\s*[\d,]+/, { timeout: 60_000 });
+  const text = await shown.innerText();
   // "576,410 test sats · <source>": the leading number only.
   return Number(text.trim().match(/^[\d,]+/)?.[0].replaceAll(",", "") ?? NaN);
 }
@@ -91,7 +94,7 @@ test.describe("NWC with a fake wallet service", () => {
 });
 
 test.describe("NWC on regtest Lightning", () => {
-  test.skip(process.env.GHOSTLY_NWC_REGTEST !== "1", "needs the NWC regtest stack: GHOSTLY_NWC_REGTEST=1, see e2e/README.md");
+  test.skip(process.env.GHOSTLY_NWC_REGTEST !== "1", "Requires e2e/infra (npm run e2e:infra:up) and GHOSTLY_NWC_REGTEST=1");
   test.describe.configure({ timeout: 180_000 });
 
   test("two people on their own NWC wallets: a request in the chat is paid over the channel", { tag: ["@gated", "@feature:wallet.lightning.nwc.connect", "@feature:wallet.lightning.nwc.pay", "@feature:payments.lightning.request"] }, async ({ peer }) => {
@@ -124,7 +127,8 @@ test.describe("NWC on regtest Lightning", () => {
     // Reviewed as a Lightning payment through her own NWC wallet, then approved.
     const review = request.getByTestId("payment-review");
     await expect(review).toContainText("Pay 2,100 test sats over Lightning");
-    await expect(review).toContainText(/Through .* via 127\.0\.0\.1:44502/);
+    const relay = new URL(regtest.NWC_REGTEST.relay).host.replace(/\./g, "\\.");
+    await expect(review).toContainText(new RegExp(`Through .* via ${relay}`));
     await review.getByRole("button", { name: "Approve payment" }).click();
     await expect(request.getByTestId("payment-state")).toHaveText("Paid", { timeout: 90_000 });
     // Bob's app sees it paid through his own wallet, not on Alice's word.

@@ -13,7 +13,7 @@ const NETWORKS: Record<Network, { label: string; provider: string; explorer: str
  bitcoin: { label: "Bitcoin", provider: "https://arkade.computer", explorer: "https://mempool.space/api" },
  mutinynet: { label: "Mutinynet", provider: "https://mutinynet.arkade.sh", explorer: "https://mutinynet.com/api" },
  signet: { label: "Signet", provider: "https://signet.arkade.sh", explorer: "https://mempool.space/signet/api" },
- regtest: { label: "Regtest", provider: "http://127.0.0.1:43010", explorer: "http://127.0.0.1:43000/api" },
+ regtest: { label: "Regtest", provider: "http://127.0.0.1:47010", explorer: "http://127.0.0.1:47002" },
 };
 /** Ark payments cost nothing today; the cap only stops a surprise, and the review shows the real fee. */
 const feeCap = (amount: number) => Math.max(100, Math.ceil(amount / 100));
