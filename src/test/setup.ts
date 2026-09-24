@@ -16,6 +16,8 @@ beforeEach(() => {
   // Settings, the chosen payment card and the rest of what the UI keeps live in this origin's storage.
   localStorage.clear();
   delete document.documentElement.dataset.reduceMotion;
+  document.documentElement.removeAttribute("lang");
+  document.documentElement.removeAttribute("dir");
   fakeEngine.reset();
 });
 

@@ -29,3 +29,19 @@ test("Desktop opens, with the peer Rust backs behind it", { tag: ["@feature:desk
   await app.click('[data-testid="account-services"]');
   await expect.poll(() => app.text('[data-testid="add-service"]')).toContain("Share a local service");
 });
+
+test("the webview's <html lang> and <html dir> follow the language", { tag: ["@feature:app.i18n"] }, async ({ app }) => {
+  await expect.poll(() => app.text('[title="New Chat"]')).not.toBeNull();
+  await expect.poll(() => app.attribute("html", "lang")).toBe("en");
+  await expect.poll(() => app.attribute("html", "dir")).toBe("ltr");
+
+  await app.click('[title="Settings"]');
+  await app.click('select option[value="ar"]');
+  await expect.poll(() => app.attribute("html", "lang")).toBe("ar");
+  await expect.poll(() => app.attribute("html", "dir")).toBe("rtl");
+
+  // The profile outlives the test: leave it in English for the next one.
+  await app.click('select option[value="en"]');
+  await expect.poll(() => app.attribute("html", "lang")).toBe("en");
+  await expect.poll(() => app.attribute("html", "dir")).toBe("ltr");
+});

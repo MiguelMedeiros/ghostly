@@ -346,7 +346,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   return (
     <div className="flex-1 flex flex-col h-full bg-chat-bg">
       {/* Chat Header */}
-      <div className="h-14 header-safe flex items-center justify-between px-4 max-md:pl-1 max-md:pr-1 bg-panel-header border-b border-border shrink-0">
+      <div className="h-14 header-safe flex items-center justify-between px-4 max-md:ps-1 max-md:pe-1 bg-panel-header border-b border-border shrink-0">
         <div className="flex items-center gap-3 max-md:gap-1.5 min-w-0">
           <button
             onClick={() => navigate("/")}
@@ -361,11 +361,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           <div className="relative w-10 h-10 rounded-full bg-surface-hover flex items-center justify-center shrink-0">
             <PeerAvatar peerPubKey={params?.peerPubKeyB64} label={displayName || t("common.anonymous")} testId="chat-avatar" />
             {inviteCode && !pairedReady && (
-              <span className="absolute -bottom-0.5 -right-0.5 w-[16px] h-[16px] flex items-center justify-center rounded-full text-[8px] bg-accent text-[#111b21] z-10 group/star">
+              <span className="absolute -bottom-0.5 -end-0.5 w-[16px] h-[16px] flex items-center justify-center rounded-full text-[8px] bg-accent text-[#111b21] z-10 group/star">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
                 </svg>
-                <span className="absolute top-1/2 -translate-y-1/2 left-full ml-2 px-2 py-1 bg-surface-alt text-text-primary text-[10px] rounded whitespace-nowrap opacity-0 group-hover/star:opacity-100 transition-opacity pointer-events-none shadow-lg border border-border">
+                <span className="absolute top-1/2 -translate-y-1/2 start-full ms-2 px-2 py-1 bg-surface-alt text-text-primary text-[10px] rounded whitespace-nowrap opacity-0 group-hover/star:opacity-100 transition-opacity pointer-events-none shadow-lg border border-border">
                   You created this chat
                 </span>
               </span>
@@ -405,7 +405,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                     strokeWidth="2"
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    className="inline ml-1.5 text-text-muted opacity-0 group-hover:opacity-100"
+                    className="inline ms-1.5 text-text-muted opacity-0 group-hover:opacity-100"
                   >
                     <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                     <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
@@ -435,7 +435,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               </button>
               {connectionOpen && (
                 <div id={`connection-details-${sessionId}`} role="region" aria-label="Connection details"
-                  className="absolute left-0 top-full z-50 mt-2 w-80 max-w-[75vw] rounded-lg border border-border bg-surface-alt p-4 shadow-xl space-y-3">
+                  className="absolute start-0 top-full z-50 mt-2 w-80 max-w-[75vw] rounded-lg border border-border bg-surface-alt p-4 shadow-xl space-y-3">
                   <TechInfoRow label="Connection" value={statusLabel} />
                   {techInfo?.myPubKey && <TechInfoRow label="You" value={techInfo.myPubKey} mono copyable />}
                   <TechInfoRow label="Peer" value={params.peerPubKeyB64} mono copyable />
@@ -525,9 +525,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               </svg>
             </button>
             {menuOpen && (
-              <div data-testid="chat-options-menu" className="absolute right-0 top-full mt-1 bg-surface-alt border border-border rounded-lg shadow-lg py-1 min-w-[160px] z-50 animate-fade-in">
+              <div data-testid="chat-options-menu" className="absolute end-0 top-full mt-1 bg-surface-alt border border-border rounded-lg shadow-lg py-1 min-w-[160px] z-50 animate-fade-in">
                 <button onClick={() => { setSessionPinned(sessionId, !isSessionPinned(sessionId)); setMenuOpen(false); }}
-                  className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors">
+                  className="w-full px-3 py-2 max-md:min-h-11 text-start text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors">
                   <PinIcon active={isSessionPinned(sessionId)} />{isSessionPinned(sessionId) ? "Unpin chat" : "Pin chat"}
                 </button>
                 {inviteCode && !pairedReady && (
@@ -536,7 +536,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                       handleCopyCode(inviteCode);
                       setMenuOpen(false);
                     }}
-                    className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors"
+                    className="w-full px-3 py-2 max-md:min-h-11 text-start text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors"
                   >
                     {codeCopied ? (
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent">
@@ -553,28 +553,28 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 )}
                 {platform?.wallet && platform.getPeer(params.peerPubKeyB64) && (
                   <button data-testid="chat-payments-open" onClick={() => { setShowPayments(true); setMenuOpen(false); }}
-                    className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors">
+                    className="w-full px-3 py-2 max-md:min-h-11 text-start text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>
                     Payments…
                   </button>
                 )}
                 {paired && platform?.getPeer(params.peerPubKeyB64) && (
                   <button data-testid="chat-hold-open" onClick={() => { setShowHold(true); setMenuOpen(false); }}
-                    className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors">
+                    className="w-full px-3 py-2 max-md:min-h-11 text-start text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 8v13H3V8" /><path d="M1 3h22v5H1z" /><path d="M10 12h4" /></svg>
                     Hold messages…
                   </button>
                 )}
                 {paired && (
                   <button data-testid="chat-identities-open" onClick={() => { setShowIdentities(true); setMenuOpen(false); }}
-                    className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors">
+                    className="w-full px-3 py-2 max-md:min-h-11 text-start text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" /><path d="m9 12 2 2 4-4" /></svg>
                     Identities…
                   </button>
                 )}
                 {platform && platform.getPeer(params.peerPubKeyB64) && (
                   <button data-testid="chat-services-open" onClick={() => { setShowServices(true); setMenuOpen(false); }}
-                    className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors">
+                    className="w-full px-3 py-2 max-md:min-h-11 text-start text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>
                     Services…
                   </button>
@@ -584,7 +584,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                     forceRefresh();
                     setMenuOpen(false);
                   }}
-                  className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors"
+                  className="w-full px-3 py-2 max-md:min-h-11 text-start text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="23 4 23 10 17 10" />
@@ -599,7 +599,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                     setShowTechInfo(true);
                     setMenuOpen(false);
                   }}
-                  className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors"
+                  className="w-full px-3 py-2 max-md:min-h-11 text-start text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="12" r="10" />
@@ -611,7 +611,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 <div className="border-t border-border my-1" />
                   <button
                     onClick={() => {setConfirmDelete(true); setMenuOpen(false);}}
-                    className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-danger hover:bg-surface-hover flex items-center gap-2 transition-colors"
+                    className="w-full px-3 py-2 max-md:min-h-11 text-start text-sm text-danger hover:bg-surface-hover flex items-center gap-2 transition-colors"
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M3 6h18" />
@@ -834,13 +834,13 @@ function TechInfoRow({ label, value, mono, copyable }: { label: string; value: s
       {copyable ? (
         <button
           onClick={handleCopy}
-          className={`text-right break-all bg-transparent border-none p-0 cursor-pointer hover:text-accent transition-colors ${mono ? "font-mono" : ""} ${copied ? "text-accent" : "text-text-secondary"}`}
+          className={`text-end break-all bg-transparent border-none p-0 cursor-pointer hover:text-accent transition-colors ${mono ? "font-mono" : ""} ${copied ? "text-accent" : "text-text-secondary"}`}
           title="Click to copy"
         >
           {copied ? "Copied!" : value}
         </button>
       ) : (
-        <span className={`text-text-secondary text-right break-all ${mono ? "font-mono" : ""}`}>
+        <span className={`text-text-secondary text-end break-all ${mono ? "font-mono" : ""}`}>
           {value}
         </span>
       )}

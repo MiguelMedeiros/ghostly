@@ -8,6 +8,8 @@ import { webHost } from "./host";
 import { setDatabaseName } from "@ghostly/browser/shared/idb";
 import { setStorageProfile } from "../../src/lib/storage";
 import { activeProfileId, namespaceOf } from "../../src/lib/profiles";
+import { loadSettings } from "../../src/lib/settings";
+import { applyDocumentLanguage } from "../../src/lib/documentLanguage";
 
 // The same UI and the same peer as the extension; only the host differs.
 const root = createRoot(document.getElementById("root")!);
@@ -16,10 +18,12 @@ const root = createRoot(document.getElementById("root")!);
 // default profile keeps the original names, so nothing existing moves.
 const profile = namespaceOf(activeProfileId());
 if (profile) { setStorageProfile(profile); setDatabaseName(`ghostly_${profile}`); }
+// The profile's language on <html> before anything is painted (the I18nProvider keeps it in step from then on).
+applyDocumentLanguage(loadSettings().language);
 
 await becomeThePeer(profile ? `ghostly-peer-${profile}` : "ghostly-peer", () =>
   root.render(
-    <div style={{ height: "100vh", display: "grid", placeItems: "center", background: "#0b141a", color: "#8696a0", font: "15px system-ui", textAlign: "center", padding: 24 }}>
+    <div lang="en" style={{ height: "100vh", display: "grid", placeItems: "center", background: "#0b141a", color: "#8696a0", font: "15px system-ui", textAlign: "center", padding: 24 }}>
       <div>
         <div style={{ fontSize: 48 }}>👻</div>
         <p>Ghostly is already open in another tab.</p>

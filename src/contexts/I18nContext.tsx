@@ -1,11 +1,13 @@
 import {
   createContext,
   useContext,
+  useLayoutEffect,
   useMemo,
   type ReactNode,
 } from "react";
 import { useSettings } from "./SettingsContext";
 import type { Language } from "../lib/settings";
+import { applyDocumentLanguage, textDirection } from "../lib/documentLanguage";
 
 import en from "../locales/en.json";
 import pt from "../locales/pt.json";
@@ -65,7 +67,12 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const { settings } = useSettings();
   const language = settings.language;
 
-  const dir = language === "ar" ? "rtl" : "ltr";
+  const dir = textDirection(language);
+
+  // A layout effect: the new language and direction are on <html> before the screen repaints in them.
+  useLayoutEffect(() => {
+    applyDocumentLanguage(language);
+  }, [language]);
 
   const t = useMemo(() => {
     const currentTranslations = translations[language] || translations.en;

@@ -95,7 +95,7 @@ function TailSvg({ side }: { side: "left" | "right" }) {
   const color = side === "right" ? "#005c4b" : "#202c33";
   if (side === "right") {
     return (
-      <span className="absolute top-0 -right-[8px] block w-[8px] h-[13px] overflow-hidden">
+      <span className="absolute top-0 -end-[8px] rtl:-scale-x-100 block w-[8px] h-[13px] overflow-hidden">
         <svg viewBox="0 0 8 13" width="8" height="13" className="block">
           <path d="M5 0H0V13C0 13 1.8 8.5 5 4.5C6.4 2.7 8 1 8 1L5 0Z" fill={color} />
         </svg>
@@ -103,7 +103,7 @@ function TailSvg({ side }: { side: "left" | "right" }) {
     );
   }
   return (
-    <span className="absolute top-0 -left-[8px] block w-[8px] h-[13px] overflow-hidden">
+    <span className="absolute top-0 -start-[8px] rtl:-scale-x-100 block w-[8px] h-[13px] overflow-hidden">
       <svg viewBox="0 0 8 13" width="8" height="13" className="block">
         <path d="M3 0H8V13C8 13 6.2 8.5 3 4.5C1.6 2.7 0 1 0 1L3 0Z" fill={color} />
       </svg>
@@ -140,7 +140,7 @@ function CallEventIcon({ type, hasVideo }: { type: string; hasVideo?: boolean })
   const isIncoming = type === "call_received" || type === "call_missed";
   
   return (
-    <span className="inline-flex items-center justify-center mr-2">
+    <span className="inline-flex items-center justify-center me-2">
       {isVideo ? (
         <svg
           width="16"
@@ -181,7 +181,7 @@ function CallEventIcon({ type, hasVideo }: { type: string; hasVideo?: boolean })
           strokeWidth="3"
           strokeLinecap="round"
           strokeLinejoin="round"
-          className={`ml-[-4px] mt-[6px] ${isMissed ? "text-danger" : "text-accent"}`}
+          className={`ms-[-4px] mt-[6px] ${isMissed ? "text-danger" : "text-accent"}`}
         >
           <line x1="17" y1="7" x2="7" y2="17" />
           <polyline points="17 17 7 17 7 7" />
@@ -197,7 +197,7 @@ function CallEventIcon({ type, hasVideo }: { type: string; hasVideo?: boolean })
           strokeWidth="3"
           strokeLinecap="round"
           strokeLinejoin="round"
-          className="ml-[-4px] mt-[6px] text-accent"
+          className="ms-[-4px] mt-[6px] text-accent"
         >
           <line x1="7" y1="17" x2="17" y2="7" />
           <polyline points="7 7 17 7 17 17" />
@@ -253,7 +253,7 @@ function MessageActions({ onDelete, align }: { onDelete: () => void; align: "lef
           data-testid="message-delete-menu"
           // No `translate` of its own: the fade-in animation sets `transform`.
           className={`absolute z-20 bottom-full mb-1 w-[210px] p-3 rounded-lg bg-surface border border-border shadow-lg animate-fade-in ${
-            align === "left" ? "left-0" : "right-0"
+            align === "left" ? "start-0" : "end-0"
           }`}
         >
           <p className="m-0 mb-2 text-[11px] leading-snug text-text-muted">{t("chat.deleteMessageHint")}</p>
@@ -366,7 +366,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
   const bigEmoji = contentType === "text" && isOnlyEmojis(message.text);
 
   const timestampEl = (
-    <span className="msg-meta inline-flex items-center gap-[3px] float-right relative top-[4px] ml-[8px] select-none">
+    <span className="msg-meta inline-flex items-center gap-[3px] float-end relative top-[4px] ms-[8px] select-none">
       <span className="text-[11px] leading-none text-[hsla(0,0%,100%,0.45)]">
         {time}
       </span>
@@ -383,8 +383,8 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
       <div
         className={`relative max-w-[85%] min-w-[80px] ${
           isMe
-            ? "rounded-tl-[7.5px] rounded-bl-[7.5px] rounded-br-[7.5px]"
-            : "rounded-tr-[7.5px] rounded-bl-[7.5px] rounded-br-[7.5px]"
+            ? "rounded-ss-[7.5px] rounded-es-[7.5px] rounded-ee-[7.5px]"
+            : "rounded-se-[7.5px] rounded-es-[7.5px] rounded-ee-[7.5px]"
         } ${
           contentType === "image"
             ? "p-[3px] pb-[3px]"
@@ -427,7 +427,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
           // a contact's picture waits for a click.
           <div className="clearfix">
             <button type="button" data-testid="image-reveal" onClick={() => setRevealed(true)}
-              className="text-sm text-accent underline decoration-dotted cursor-pointer break-all text-left">
+              className="text-sm text-accent underline decoration-dotted cursor-pointer break-all text-start">
               Show picture · {hostOf(message.text.trim())}
             </button>
             {timestampEl}
@@ -442,7 +442,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
               loading="lazy"
               onError={() => setImgError(true)}
             />
-            <span className="absolute bottom-[4px] right-[6px] inline-flex items-center gap-[3px] bg-[rgba(11,20,26,0.55)] rounded-full px-[6px] py-[3px]">
+            <span className="absolute bottom-[4px] end-[6px] inline-flex items-center gap-[3px] bg-[rgba(11,20,26,0.55)] rounded-full px-[6px] py-[3px]">
               <span className="text-[11px] leading-none text-[hsla(0,0%,100%,0.9)]">
                 {time}
               </span>

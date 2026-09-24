@@ -115,6 +115,12 @@ class Driver {
     return element === null ? null : ((await this.call("GET", `/element/${element}/text`)) as string);
   }
 
+  /** An attribute of the first match, or null when there is no match (or no such attribute) yet. */
+  async attribute(selector: string, name: string): Promise<string | null> {
+    const element = await this.find(selector);
+    return element === null ? null : ((await this.call("GET", `/element/${element}/attribute/${name}`)) as string | null);
+  }
+
   /** Throws when nothing matches: a click is not something to be vague about. */
   async click(selector: string): Promise<void> {
     const element = await this.find(selector);
@@ -131,7 +137,7 @@ class Driver {
   }
 }
 
-export type DesktopApp = Pick<Driver, "text" | "click" | "title">;
+export type DesktopApp = Pick<Driver, "text" | "click" | "title" | "attribute">;
 
 /** `tauri-driver`, and the app it opens, for the length of one test. */
 async function openDesktop(): Promise<{ app: Driver; stop: () => Promise<void> }> {
