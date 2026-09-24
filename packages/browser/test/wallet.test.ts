@@ -3,6 +3,7 @@ import { Amount, MintOperationError, type Proof } from "@cashu/cashu-ts";
 import { CashuWallet, MINT_TIMEOUT_MS } from "../src/engine/wallet";
 import type { PendingMelt, StoredPayment, StoredProof, StoredQuote, WalletTx } from "../src/shared/types";
 import { failures, mint, resetDb, rows, seed } from "./fakes";
+// covers: wallet.cashu.receive-lightning, wallet.cashu.pay-invoice, payments.cashu.send
 
 vi.mock("../src/shared/idb", async () => (await import("./fakes")).idbModule);
 vi.mock("@cashu/cashu-ts", async (importOriginal) => ({

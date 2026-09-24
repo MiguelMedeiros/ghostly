@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createLink, decodeInviteCode, encodeInviteCode } from "../src/invite";
+// covers: invite.formats
 
 describe("versioned pair bootstrap", () => {
   it("roundtrips an explicit profile without changing legacy invites", () => {

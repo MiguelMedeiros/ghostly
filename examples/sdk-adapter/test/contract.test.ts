@@ -3,6 +3,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { describeIdentityProof, describeLightningProvider, fakeInvoice } from "@ghostly/sdk/testing";
 import { exampleSchnorr, schnorrSign, schnorrSubject } from "../src/identity";
 import { PaperLightning, paperLightning } from "../src/lightning";
+// covers: sdk.package, wallet.lightning.provider-contract, proofs.contract
 
 /** The contract suites from the SDK, against the example adapters. Provider-specific tests go next to these. */
 describeLightningProvider("Paper Lightning", async () => {

@@ -32,7 +32,7 @@ async function stubGitHub(peer: Peer, published: Map<string, string[]>, asked: s
 let keys: TestSshKey[] = [];
 test.afterEach(() => { for (const k of keys) k.dispose(); keys = []; });
 
-test("an SSH key proves a GitHub account, shared with one contact only, and a removed key stops counting", async ({ peer }) => {
+test("an SSH key proves a GitHub account, shared with one contact only, and a removed key stops counting", { tag: ["@feature:proofs.recheck", "@feature:proofs.ssh.github", "@feature:proofs.share"] }, async ({ peer }) => {
   const [mine, other] = keys = [testSshKey(), testSshKey("ecdsa")];
   const published = new Map([["octo-cat", [other.publicKey, mine.publicKey]]]);
   const asked: string[] = [];
@@ -103,7 +103,7 @@ test("an SSH key proves a GitHub account, shared with one contact only, and a re
   expect(asked.filter(a => a.startsWith("ssh-carol") || a.includes("UNEXPECTED"))).toEqual([]);
 });
 
-test("a bare SSH key is proven on the device, and another key's signature is refused", async ({ peer }) => {
+test("a bare SSH key is proven on the device, and another key's signature is refused", { tag: ["@feature:proofs.ssh", "@feature:proofs.share"] }, async ({ peer }) => {
   const [mine, other] = keys = [testSshKey("ecdsa"), testSshKey()];
   const [alice, bob] = await Promise.all([peer("sshk-alice"), peer("sshk-bob")]);
   const asked: string[] = [];

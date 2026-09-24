@@ -40,7 +40,7 @@ async function createChat(page: Page): Promise<string> {
   return await copyInvite(page);
 }
 
-test("opens on the home screen", async ({ peer }) => {
+test("opens on the home screen", { tag: ["@feature:app.home"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await expect(page.getByText("Private, ephemeral messaging.")).toBeVisible();
   await expect(page.getByText("It's quiet here...")).toBeVisible();
@@ -48,14 +48,14 @@ test("opens on the home screen", async ({ peer }) => {
   await expect(page.getByTestId("platform-notice")).toContainText("Pocket money only");
 });
 
-test("a web page says plainly what it cannot do", async ({ peer }) => {
+test("a web page says plainly what it cannot do", { tag: ["@feature:app.web-limits", "@feature:services.web-unavailable"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await page.getByTestId("account-services").click();
   await expect(page.getByTestId("add-service")).toHaveCount(0);
   await expect(page.getByText("needs the Ghostly browser extension or desktop app").first()).toBeVisible();
 });
 
-test("a second tab stays out of the way: one peer per browser", async ({ peer }) => {
+test("a second tab stays out of the way: one peer per browser", { tag: ["@feature:app.single-peer-per-browser"] }, async ({ peer }) => {
   const { context } = await peer("alice");
   const second = await context.newPage();
   await second.goto("/");
@@ -63,7 +63,7 @@ test("a second tab stays out of the way: one peer per browser", async ({ peer })
   await expect(second.getByTitle("New Chat")).toHaveCount(0);
 });
 
-test("creating a chat shows an invite code, the options menu copies it", async ({ peer }) => {
+test("creating a chat shows an invite code, the options menu copies it", { tag: ["@feature:invite.create"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   const invite = await createChat(page);
   // A new chat is a paired one: `pair1/<seed>/<peer public key>/<encryption key>`.
@@ -84,7 +84,7 @@ test("creating a chat shows an invite code, the options menu copies it", async (
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(invite);
 });
 
-test("a bad invite code is refused", async ({ peer }) => {
+test("a bad invite code is refused", { tag: ["@feature:invite.invalid"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await page.getByRole("button", { name: "Join chat", exact: true }).first().click();
   await manualFallback(page);
@@ -93,7 +93,7 @@ test("a bad invite code is refused", async ({ peer }) => {
   await expect(page.getByText("Invalid invite. Ask for a new one.")).toBeVisible();
 });
 
-test("chats can be named and found", async ({ peer }) => {
+test("chats can be named and found", { tag: ["@feature:chats.list.rename", "@feature:chats.list.search"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await createChat(page);
   await page.getByTitle("Click to set a name").click();
@@ -115,7 +115,7 @@ test("chats can be named and found", async ({ peer }) => {
   await expect(page.getByText("Anonymous")).toBeVisible();
 });
 
-test("tech info shows the keys of the chat", async ({ peer }) => {
+test("tech info shows the keys of the chat", { tag: ["@feature:app.tech-info"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await createChat(page);
   await page.getByTitle("Options").click();
@@ -124,7 +124,7 @@ test("tech info shows the keys of the chat", async ({ peer }) => {
   await expect(page.getByText("My Key")).toBeVisible();
 });
 
-test("one chat can be deleted, from the chat or from the list", async ({ peer }) => {
+test("one chat can be deleted, from the chat or from the list", { tag: ["@feature:chats.list.delete"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await createChat(page);
   await page.getByTitle("Options").click();
@@ -146,7 +146,7 @@ test("one chat can be deleted, from the chat or from the list", async ({ peer })
 
 // Regression: "Delete all chats" used to remove the marker of the one-time import of the
 // peer's links, so the next reconcile brought every chat back, empty. It also took the settings.
-test("deleted chats stay deleted, settings stay", async ({ peer }) => {
+test("deleted chats stay deleted, settings stay", { tag: ["@feature:chats.list.delete-all"] }, async ({ peer }) => {
   test.slow();
   const { page } = await peer("alice");
   await page.evaluate(() => localStorage.setItem("ghostly_app_settings", JSON.stringify({ theme: "purple", mode: "dark", language: "en" })));
@@ -173,7 +173,7 @@ test("deleted chats stay deleted, settings stay", async ({ peer }) => {
   expect(await page.evaluate(() => localStorage.getItem("ghostly_app_settings"))).toContain("purple");
 });
 
-test("clear all data leaves nothing behind", async ({ peer }) => {
+test("clear all data leaves nothing behind", { tag: ["@feature:app.clear-data"] }, async ({ peer }) => {
   test.slow();
   const { page } = await peer("alice");
   await createChat(page);

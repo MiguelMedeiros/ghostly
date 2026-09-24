@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
 import { expect, it, vi } from "vitest";
 import { GhostlyNode } from "../src/engine/node";
+// covers: profiles.picture, profiles.picture.sanitize
 
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0, 128, 0, 128, 0x03, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1, 0xff, 0xda, 0x00, 0x02, 0xff, 0xd9]);
 const PICTURE = "data:image/jpeg;base64," + btoa(String.fromCharCode(...JPEG));

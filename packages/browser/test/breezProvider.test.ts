@@ -13,6 +13,7 @@ import { fakeInvoice } from "../src/engine/paymentAdapters/providers/testing";
 import { NothingSpentError } from "../src/engine/paymentAdapters/providers/types";
 import { describeLightningProvider } from "./helpers/providerContract";
 import { FakeBreezNetwork } from "./helpers/fakeBreez";
+// covers: wallet.lightning.breez.connect, wallet.lightning.breez.pay, wallet.lightning.provider-contract
 
 const phrase = () => generateMnemonic(wordlist);
 let net: FakeBreezNetwork;

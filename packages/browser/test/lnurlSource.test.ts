@@ -7,6 +7,7 @@ import { cashuMint, CASHU_MINT_SOURCE } from "../src/engine/paymentAdapters/prov
 import { LightningService, type LightningEvents } from "../src/engine/paymentAdapters/providers/lightningService";
 import { FakeLightningProvider, fakeLightning } from "../src/engine/paymentAdapters/providers/testing";
 import { testInvoice } from "../../core/test/invoice";
+// covers: wallet.lnurl.address, wallet.lnurl.protocol
 
 /**
  * A Lightning address through the engine's Lightning service: resolved once, an invoice fetched for the

@@ -2,6 +2,7 @@ import {describe,it,expect,vi} from 'vitest';
 import {createIdentity} from '../src/identity';
 import {PeerProofs,PROOF_ADAPTERS,emptyProofLedger,isProofAdapter,proofStatement,verifyPeerProof,type ProofChallenge} from '../src/peerProofs';
 import {ringClaims,ringAuthorization,ringEvidence,verifyRingEvidence,inspectRingStatement,sealRing,openRing,ringChannel} from '../src/pubkyRing';
+// covers: core.ring-link, proofs.peer-proofs
 const root=createIdentity(),delegate=createIdentity();
 function challenge():ProofChallenge {const now=Math.floor(Date.now()/1000);return {adapter:'pubky-ring',externalKey:root.pubKeyZ32,subject:createIdentity().pubKeyZ32,audience:createIdentity().pubKeyZ32,context:'a'.repeat(64),session:'b'.repeat(64),nonce:'Z'.repeat(43),issuedAt:now,expiresAt:now+600};}
 function evidence(c:ProofChallenge){const statement=proofStatement(c);return ringEvidence(ringAuthorization(ringClaims(statement,root.pubKeyZ32,delegate.pubKeyZ32,c.issuedAt,c.expiresAt),root.seed),statement,delegate.seed);}

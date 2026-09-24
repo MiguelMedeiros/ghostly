@@ -5,7 +5,7 @@ import { expect, test } from "../support/extension";
  * The BDK wallet in the extension, where the engine runs in an offscreen document: its WebAssembly loads
  * there, syncs from the local regtest Esplora, signs and broadcasts. GHOSTLY_BDK_REGTEST=1 only (see e2e/README.md).
  */
-test("BDK on regtest in the extension: a wallet that receives and sends", async ({ extensionPeer }) => {
+test("BDK on regtest in the extension: a wallet that receives and sends", { tag: ["@gated", "@feature:wallet.onchain.bdk.send", "@feature:extension.engine"] }, async ({ extensionPeer }) => {
   test.skip(process.env.GHOSTLY_BDK_REGTEST !== "1", "Requires the local BDK regtest stack (e2e/support/bdk-regtest)");
   test.setTimeout(5 * 60_000);
   const regtest = (...args: string[]) => execFileSync(process.execPath, ["e2e/support/bdk-regtest/regtest.mjs", ...args], { encoding: "utf8", stdio: "pipe" }).trim();

@@ -133,6 +133,7 @@ pub async fn read_frame(recv: &mut iroh::endpoint::RecvStream) -> Result<Vec<u8>
 
 #[cfg(test)]
 mod tests {
+    // covers: transport.iroh
     use super::*;
     #[tokio::test]
     async fn real_quic_frames_exporter_and_reconnect() {

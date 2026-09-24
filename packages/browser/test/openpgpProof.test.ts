@@ -6,6 +6,7 @@ import {
   PGP_LIMITS, assertSignableStatement, fetchKeyFromKeyserver, formatFingerprint, keyserverVerifiedEmails,
   preparePgpEvidence, readPgpPublicKey, verifyPgpEvidence, type PgpEvidence,
 } from '../src/proofs/openpgp';
+// covers: proofs.openpgp, proofs.openpgp.keyserver
 
 // Vectors made by a real GnuPG: see test/vectors/openpgp/generate.sh. Test keys only.
 const dir = new URL('./vectors/openpgp/', import.meta.url);

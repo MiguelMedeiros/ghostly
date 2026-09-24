@@ -23,7 +23,7 @@ async function unlock(page: Page, password: string): Promise<void> {
   await expect(locked(page)).toHaveCount(0);
 }
 
-test("lock screen: a reload stays locked, the password can be changed, and the lock turned off", async ({ peer }) => {
+test("lock screen: a reload stays locked, the password can be changed, and the lock turned off", { tag: ["@feature:settings.lock.now", "@feature:settings.lock.password", "@feature:settings.lock.startup"] }, async ({ peer }) => {
   const { page } = await peer("lock");
   await setLock(page, "first secret");
 
@@ -73,7 +73,7 @@ test("lock screen: a reload stays locked, the password can be changed, and the l
   await expect(lockSwitch).toHaveAttribute("aria-checked", "false");
 });
 
-test("profiles and the lock: a new profile is locked too, and deleting a locked one takes its password", async ({ peer }) => {
+test("profiles and the lock: a new profile is locked too, and deleting a locked one takes its password", { tag: ["@feature:profiles.lock", "@feature:profiles.create", "@feature:profiles.switch", "@feature:profiles.delete"] }, async ({ peer }) => {
   const { page } = await peer("lock-profiles");
   await setLock(page, "shared secret");
 

@@ -32,7 +32,7 @@ async function lonelyLegacyChat(peer: Peer): Promise<void> {
   await expect(peer.page.getByPlaceholder("Message…")).toBeEnabled();
 }
 
-test("the unread count shows what came in while away, and clears once the chat is opened", async ({ peer }) => {
+test("the unread count shows what came in while away, and clears once the chat is opened", { tag: ["@feature:app.attention.unread"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await link(alice, bob);
   await connect(alice, bob);
@@ -66,7 +66,7 @@ test("the unread count shows what came in while away, and clears once the chat i
   await expect(unreadBadge(rows(alice.page))).toHaveCount(0);
 });
 
-test("naming a chat: Escape cancels the edit, leaving the field saves it", async ({ peer }) => {
+test("naming a chat: Escape cancels the edit, leaving the field saves it", { tag: ["@feature:chats.list.rename"] }, async ({ peer }) => {
   const alice = await peer("alice");
   await alice.page.getByTitle("New Chat").click();
   await expect(alice.page.getByText("Invite your contact", { exact: true })).toBeVisible();
@@ -102,7 +102,7 @@ test("naming a chat: Escape cancels the edit, leaving the field saves it", async
   await expect(name).toHaveText("Haunted house on the hill, Sal");
 });
 
-test("a web address in a message is a link to a new tab that gets neither the opener nor the referrer", async ({ peer }) => {
+test("a web address in a message is a link to a new tab that gets neither the opener nor the referrer", { tag: ["@feature:chat.paired.links"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await link(alice, bob);
   await connect(alice, bob);
@@ -132,7 +132,7 @@ test("a web address in a message is a link to a new tab that gets neither the op
   await tab.close();
 });
 
-test("javascript:, data: and other non-web addresses never become links or pictures", async ({ peer }) => {
+test("javascript:, data: and other non-web addresses never become links or pictures", { tag: ["@feature:chat.paired.links"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await link(alice, bob);
   await connect(alice, bob);
@@ -174,7 +174,7 @@ test("javascript:, data: and other non-web addresses never become links or pictu
 });
 
 // A contact's picture tells its server this device's address when it loads: it waits for a click.
-test("a picture address sent over https shows once asked for, and the server hears nothing before", async ({ peer }) => {
+test("a picture address sent over https shows once asked for, and the server hears nothing before", { tag: ["@feature:chat.paired.image-links"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await link(alice, bob);
   await connect(alice, bob);
@@ -209,7 +209,7 @@ test("a picture address sent over https shows once asked for, and the server hea
 });
 
 // A picture address over plain http is never embedded or fetched: it is only a link.
-test("a picture address over plain http is not fetched", async ({ peer }) => {
+test("a picture address over plain http is not fetched", { tag: ["@feature:chat.paired.image-links"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await link(alice, bob);
   await connect(alice, bob);
@@ -225,7 +225,7 @@ test("a picture address over plain http is not fetched", async ({ peer }) => {
   expect(fetched).toEqual([]);
 });
 
-test("double-clicking a received message shows how it came, again hides it", async ({ peer }) => {
+test("double-clicking a received message shows how it came, again hides it", { tag: ["@feature:chat.paired.message-details"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await linkLegacy(alice, bob);
   await connect(alice, bob);
@@ -247,7 +247,7 @@ test("double-clicking a received message shows how it came, again hides it", asy
   await expect(chat(alice).getByText("dir:", { exact: true })).toHaveCount(0);
 });
 
-test("a legacy chat before its data link: an overlong text is refused and the draft is kept", async ({ peer }) => {
+test("a legacy chat before its data link: an overlong text is refused and the draft is kept", { tag: ["@feature:chat.legacy.limits"] }, async ({ peer }) => {
   const alice = await peer("alice");
   await lonelyLegacyChat(alice);
   const box = alice.page.getByPlaceholder("Message…");
@@ -275,7 +275,7 @@ test("a legacy chat before its data link: an overlong text is refused and the dr
 });
 
 // A refused text is not kept: no bubble that never left, and no duplicate when the draft is sent again.
-test("a legacy chat before its data link: a refused text leaves no bubble behind", async ({ peer }) => {
+test("a legacy chat before its data link: a refused text leaves no bubble behind", { tag: ["@feature:chat.legacy.limits"] }, async ({ peer }) => {
   const alice = await peer("alice");
   await lonelyLegacyChat(alice);
   const box = alice.page.getByPlaceholder("Message…");
@@ -288,7 +288,7 @@ test("a legacy chat before its data link: a refused text leaves no bubble behind
   await expect(chat(alice).getByText(long)).toHaveCount(0);
 });
 
-test("a file over the platform's limit is refused before anything is sent", async ({ peer }, testInfo) => {
+test("a file over the platform's limit is refused before anything is sent", { tag: ["@feature:files.size-limit"] }, async ({ peer }, testInfo) => {
   const alice = await peer("alice");
   await lonelyLegacyChat(alice);
   // A sparse file: 100 MB + 1 byte on paper, nothing on disk.
@@ -306,7 +306,7 @@ test("a file over the platform's limit is refused before anything is sent", asyn
   await expect(alice.page.getByTestId("file-bubble")).toHaveCount(0);
 });
 
-test("Tech Info copies the keys it shows, and shows only a preview of the encryption key", async ({ peer }) => {
+test("Tech Info copies the keys it shows, and shows only a preview of the encryption key", { tag: ["@feature:app.tech-info"] }, async ({ peer }) => {
   const alice = await peer("alice");
   await alice.page.getByTitle("New Chat").click();
   const invite = await copyInvite(alice.page);

@@ -4,6 +4,7 @@ import { createLink } from "../src/invite";
 import { createIdentity } from "../src/identity";
 import { RelayTransport } from "../src/relay";
 import type { PairingCredentials } from "../src/pairedSession";
+// covers-gated: chat.dht.delivery, chat.dht.offline, core.relay-client
 
 it.skipIf(process.env.TEST_DHT_NETWORK !== "1")("publishes an encrypted disposable text through public relays, late receiver and signed receipt", async () => {
   const invitation = createLink();

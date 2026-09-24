@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { schnorr } from '@noble/curves/secp256k1.js';
 import { createIdentity } from '../src/identity';
 import { PeerProofs, emptyProofLedger, nostrProofTemplate, proofHash, verifyNostrProof, type ProofChallenge, type ProofLedger, type NostrProofEvent } from '../src/peerProofs';
+// covers: proofs.peer-proofs
 
 const hex = (b: Uint8Array) => Array.from(b, x => x.toString(16).padStart(2,'0')).join('');
 const bytes = (s: string) => Uint8Array.from(s.match(/../g)!, x => parseInt(x,16));

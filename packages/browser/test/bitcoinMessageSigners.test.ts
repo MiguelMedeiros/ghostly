@@ -4,6 +4,7 @@ import { RawWitness, utils } from "@scure/btc-signer";
 import { describe, expect, it } from "vitest";
 import { guidesFor } from "../src/proofs/bitcoinWallets";
 import { REGTEST, SIGNET, testBitcoinWallet, type TestNet, type TestScript } from "./helpers/bitcoinSign";
+// covers: proofs.bitcoin
 
 // Own BIP-322 signatures on test-network addresses, made by an independent signer (helpers/bitcoinSign.ts).
 

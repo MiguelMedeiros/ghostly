@@ -126,6 +126,8 @@ Security flaws are the exception: never a public issue or pull request for one (
    ```bash
    npm run lint
    npm run typecheck
+   npm test
+   npm run test:map    # every feature in e2e/features.json has a test: docs/TESTING.md
    npm run test:e2e
    npm run check:desktop-bundle
    npm run tauri dev

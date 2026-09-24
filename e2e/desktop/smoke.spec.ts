@@ -9,7 +9,7 @@ import { test, expect } from "../support/desktop";
  * replaced by a browser stand-in and nobody notices. Everything asserted here
  * can only be true when the Desktop wiring survived that swap.
  */
-test("Desktop opens, with the peer Rust backs behind it", async ({ app }) => {
+test("Desktop opens, with the peer Rust backs behind it", { tag: ["@feature:desktop.boot"] }, async ({ app }) => {
   // The window is there before the page is: everything here is waited for.
   await expect.poll(() => app.title()).toContain("Ghostly");
 

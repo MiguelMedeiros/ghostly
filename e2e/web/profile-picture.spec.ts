@@ -20,7 +20,7 @@ async function photoWithExif(peer: Peer): Promise<Buffer> {
 const decoded = (peer: Peer, testId: string) =>
   chat(peer).page().getByTestId(testId).first().evaluate((img: HTMLImageElement) => atob(img.src.split(",")[1]));
 
-test("a profile picture goes to paired contacts, without anything of the file, and can be removed", async ({ peer }) => {
+test("a profile picture goes to paired contacts, without anything of the file, and can be removed", { tag: ["@feature:profiles.picture", "@feature:profiles.picture.sanitize"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await link(alice, bob);
   await connect(alice, bob);
@@ -60,7 +60,7 @@ test("a profile picture goes to paired contacts, without anything of the file, a
   await expect(bob.page.getByTestId("chat-row-avatar")).toHaveCount(0);
 });
 
-test("a picture set while a contact is away reaches them when they come back", async ({ peer }) => {
+test("a picture set while a contact is away reaches them when they come back", { tag: ["@feature:profiles.picture"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await link(alice, bob);
   await connect(alice, bob);

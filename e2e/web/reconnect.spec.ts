@@ -3,7 +3,7 @@ import { chat, connect, expect, link, say, test } from "../support/fixtures";
 // A contact whose app stops answering (a laptop asleep, an app frozen in the background) while the
 // connection still looks open: the other side notices from its pings, and both reconnect on their own
 // once the contact is back, without pressing anything.
-test("a connection that silently stops answering is noticed, and comes back by itself", async ({ peer }) => {
+test("a connection that silently stops answering is noticed, and comes back by itself", { tag: ["@feature:core.liveness", "@feature:chat.paired.reconnect", "@feature:chat.paired.status"] }, async ({ peer }) => {
   test.setTimeout(5 * 60_000);
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await link(alice, bob);

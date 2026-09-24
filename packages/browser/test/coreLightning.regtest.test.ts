@@ -7,6 +7,7 @@ import { CommandoClient, CommandoError, type SocketFactory } from "../src/engine
 import { CoreLightning, checkRune } from "../src/engine/paymentAdapters/providers/coreLightning";
 import { NothingSpentError } from "../src/engine/paymentAdapters/providers/types";
 import { describeLightningProvider } from "./helpers/providerContract";
+// covers-gated: wallet.lightning.cln.connect, wallet.lightning.cln.pay, wallet.lightning.provider-contract
 
 /**
  * Against real Core Lightning nodes on regtest (e2e/support/cln-regtest): alice is the source under test,

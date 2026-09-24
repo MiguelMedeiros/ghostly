@@ -8,6 +8,7 @@ import { CLN_METHODS, CoreLightning, checkRune, coreLightning, runeRestrictions,
 import { fakeInvoice } from "../src/engine/paymentAdapters/providers/testing";
 import { NothingSpentError, type ProviderSettings } from "../src/engine/paymentAdapters/providers/types";
 import { describeLightningProvider } from "./helpers/providerContract";
+// covers: wallet.lightning.cln.connect, wallet.lightning.cln.pay, wallet.lightning.provider-contract
 
 const random = (n: number) => crypto.getRandomValues(new Uint8Array(n));
 /** A rune as Core Lightning encodes one: 32 bytes of hash state, then its restrictions. */

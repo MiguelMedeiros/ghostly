@@ -3,6 +3,7 @@ import { createLink, encodeInviteCode } from "@ghostly/core";
 import { parseInvite, buildInviteUrl, chatPath } from "../../../src/lib/url";
 import { findMoney } from "../../../src/lib/money";
 import { formatFileSize } from "../../../src/lib/format";
+// covers: invite.invalid, invite.link, payments.cashu.token-card, payments.lightning.invoice-card, files.size-label
 
 const INVOICE = "lnbc21u1p42mkf2dqqpp56q3d9mfahf0974jqwy0yyfrg7zxksgxk7ufcc084yydhfx43daqqsp59g4z52329g4z52329g4z52329g4z52329g4z52329g4z52329g4q9qrsgqcqzyskhkhqar4dqgqfmarvdttr8x2nrp4txtamfupfftrnn4hmrp7s8ayen7hp2ye58jq8zu65rch9eplpxkhf3pf2nvuynhqxvkw5f7a2vgq486x8x";
 

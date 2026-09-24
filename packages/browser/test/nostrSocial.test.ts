@@ -5,6 +5,7 @@ import {
   followHints, followsTemplate, mutedBecause, newestOf, noteTemplate, normalizePubkey, parseFollows, parseMuteList, parseNote, parseProfile, plainText, profileTemplate, MAX_NOTE_LENGTH,
 } from "../src/nostr/social";
 import { nodeSocket, TestNostrRelay } from "./helpers/nostrRelay";
+// covers: nostr.social.profile, nostr.social.follows, nostr.social.notes, nostr.social.publish
 
 const now = Math.floor(Date.now() / 1000);
 const alice = generateSecretKey(), bob = generateSecretKey(), carol = generateSecretKey();

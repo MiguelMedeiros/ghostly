@@ -2,6 +2,7 @@ import { expect, it, vi } from "vitest";
 import { Interface, Wallet, keccak256 } from "ethers";
 import { SEPOLIA_TEST_USDT, SEPOLIA_TEST_USDT_FAUCET, TEST_USDT_FAUCET_AMOUNT, ETHEREUM_USDT } from "@ghostly/core";
 import { UsdtAdapter } from "../src/engine/paymentAdapters/usdt";
+// covers: wallet.usdt.faucet
 
 const faucet = new Interface(["function mint(address token,address to,uint256 amount) returns (uint256)"]);
 function adapter(config: object, gas = "1000000000000000000") {

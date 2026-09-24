@@ -3,6 +3,7 @@ import { GhostLink, type GhostLinkEvents } from "../src/ghostlink";
 import { createLink } from "../src/invite";
 import { createIdentity } from "../src/identity";
 import { createChannelPair } from "./helpers";
+// covers: core.capabilities, groups.protocol.link-frames
 
 /** Two paired links attached to the two ends of one in-memory channel, as if WebRTC had opened it. */
 function attachedPair(events: [GhostLinkEvents, GhostLinkEvents], groups: [boolean, boolean]) {

@@ -24,6 +24,7 @@ import {
   type LocalRequest,
 } from "../src";
 import { createChannelPair } from "./helpers";
+// covers: services.http, core.frames, transport.webrtc, payments.chat.frames
 
 describe("local targets", () => {
   it("accepts loopback only", () => {

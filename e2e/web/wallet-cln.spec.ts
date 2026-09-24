@@ -37,7 +37,7 @@ const balance = async (p: Peer) => {
   return Number(text.replace(/[^\d]/g, "") || NaN);
 };
 
-test("a Core Lightning node as the Lightning source: an invoice paid into it, and an invoice paid from it", async ({ peer }) => {
+test("a Core Lightning node as the Lightning source: an invoice paid into it, and an invoice paid from it", { tag: ["@gated", "@feature:wallet.lightning.cln.connect", "@feature:wallet.lightning.cln.pay"] }, async ({ peer }) => {
   const alice = await peer("cln-source");
   await useNode(alice, "alice");
   const page = alice.page;
@@ -66,7 +66,7 @@ test("a Core Lightning node as the Lightning source: an invoice paid into it, an
   await expect.poll(() => balance(alice), { timeout: 30_000 }).toBe(start + 150 - 70);
 });
 
-test("a chat request paid over Lightning, from one person's node to the other's", async ({ peer }) => {
+test("a chat request paid over Lightning, from one person's node to the other's", { tag: ["@gated", "@feature:wallet.lightning.cln.connect", "@feature:wallet.lightning.cln.pay", "@feature:payments.lightning.request"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("cln-chat-alice"), peer("cln-chat-bob")]);
   await link(alice, bob);
   await connect(alice, bob);

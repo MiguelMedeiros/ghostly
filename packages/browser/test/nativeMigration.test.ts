@@ -5,6 +5,7 @@ import { GhostLink, createIdentity, createLink, type PairingState, type NativeEn
 import { db } from "../src/engine/db";
 import { Outbox } from "../src/engine/outbox";
 import { nativePeer } from "./helpers/nativePeer";
+// covers-gated: transport.iroh, transport.hyperdht, transport.switch, transport.preference, chat.paired.receipts, files.paired.send
 
 it.skipIf(process.env.TEST_NATIVE !== "1")("migrates real Iroh to real HyperDHT with stable participation, durable receipts and deduplication", async () => {
   // Local UDP discovery avoids making public relay uptime a test prerequisite.

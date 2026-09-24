@@ -4,6 +4,7 @@ import { STORES, openDb, transact, wrap } from "../src/shared/idb";
 import { setStorageProfile } from "../../../src/lib/storage";
 import { listProfiles } from "../../../src/lib/profiles";
 import { createProfileBackup, restoreProfileBackup } from "../../../src/lib/profileBackup";
+// covers: backup.profile.file, backup.passphrase-rules, backup.envelope, profiles.delete, profiles.lock
 
 class FakeStorage {
   entries = new Map<string, string>();

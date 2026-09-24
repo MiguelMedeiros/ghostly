@@ -51,7 +51,7 @@ async function accept(peer: Peer, groupName: string): Promise<void> {
 /** The header says how many of the other members are reachable over their edges. */
 const reachable = (peer: Peer, n: number, of: number) => expect(peer.page.getByTestId("group-members")).toContainText(`${n} of ${of} reachable`, { timeout: 120_000 });
 
-test("four people: create, invite, everyone reads everyone, catch-up, removal, admin change, rotation", async ({ peer }) => {
+test("four people: create, invite, everyone reads everyone, catch-up, removal, admin change, rotation", { tag: ["@feature:groups.create", "@feature:groups.invite", "@feature:groups.send", "@feature:groups.catch-up", "@feature:groups.remove-member", "@feature:groups.admin-change", "@feature:groups.rotate", "@feature:groups.leave"] }, async ({ peer }) => {
   test.setTimeout(12 * 60_000);
   const [alice, bob, carol, dave] = await Promise.all([peer("alice"), peer("bob"), peer("carol"), peer("dave")]);
   await Promise.all([setName(alice, "Alice"), setName(bob, "Bob"), setName(carol, "Carol"), setName(dave, "Dave")]);

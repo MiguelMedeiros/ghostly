@@ -15,6 +15,7 @@ import {
   type FrameChannel,
 } from "../src";
 import { createChannelPair } from "./helpers";
+// covers: files.legacy.send
 
 function setup(accept: boolean | string = true) {
   const [senderSide, receiverSide] = createChannelPair();

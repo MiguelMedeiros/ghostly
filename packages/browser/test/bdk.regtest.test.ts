@@ -5,6 +5,7 @@ import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { BdkOnchain } from "../src/engine/paymentAdapters/providers/bdk";
 import { describeOnchainProvider } from "./helpers/providerContract";
 import { nodeBdk } from "./helpers/bdkNode";
+// covers-gated: wallet.onchain.bdk.send, wallet.onchain.provider-contract
 
 /**
  * The BDK provider against a real regtest chain: bitcoind + electrs (Esplora) from

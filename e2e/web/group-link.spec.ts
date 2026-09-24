@@ -26,7 +26,7 @@ async function say(peer: Peer, text: string): Promise<void> {
   await expect(wallpaper(peer).getByText(text, { exact: true })).toBeVisible();
 }
 
-test("strangers join a group through its link, and a replaced link reaches nobody", async ({ peer }) => {
+test("strangers join a group through its link, and a replaced link reaches nobody", { tag: ["@feature:groups.link.enable", "@feature:groups.link.join", "@feature:groups.link.replace", "@feature:groups.create", "@feature:groups.send"] }, async ({ peer }) => {
   test.setTimeout(8 * 60_000);
   const [alice, bob, carol, dave] = await Promise.all([peer("alice"), peer("bob"), peer("carol"), peer("dave")]);
   await Promise.all([setName(alice, "Alice"), setName(bob, "Bob"), setName(carol, "Carol")]);

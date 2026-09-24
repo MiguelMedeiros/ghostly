@@ -3,6 +3,7 @@ import { expect, it, vi } from "vitest";
 import { GhostLink, createIdentity, type NativeEndpoint, type NativeTransport } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
+// covers: transport.native-pool
 
 it("bounds native listeners, restores saved identities and never evicts a busy endpoint", async () => {
   await db.putSettings({ online:true, nick:"", relays:[], iceServers:[], mints:[], mintsInitialized:true });

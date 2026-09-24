@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createIdentity, PeerProofs, emptyProofLedger, verifyPeerProof, type ProofAdapter, type ProofChallenge, type ProofLedger } from '@ghostly/core';
 import { importLocalSigner, disposableImportSecret } from '../src/proofs/imported';
 import { db } from '../src/engine/db';
+// covers: proofs.pubky, proofs.keet, proofs.peer-proofs
 
 function pair() {
   const keys=[createIdentity().pubKeyZ32,createIdentity().pubKeyZ32];

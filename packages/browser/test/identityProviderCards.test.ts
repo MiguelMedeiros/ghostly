@@ -3,6 +3,7 @@ import { IDENTITY_PROVIDERS } from "../src/proofs/registry";
 import { FAKE_IDENTITY_PROVIDERS } from "../src/proofs/testing";
 import { bitcoin } from "../src/proofs/providers/bitcoin";
 import { oidc } from "../src/proofs/providers/oidc";
+// covers: proofs.picker
 
 /**
  * Profile → Identities shows each provider as a card to recognize at a glance (mark, name, category, one

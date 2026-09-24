@@ -5,6 +5,7 @@ import { nostr } from "../src/proofs/providers/nostr";
 import { signNostr } from "./helpers/nostrSign";
 import type { IdentityFetch } from "../src/proofs/contract";
 import { describeIdentityProof } from "./helpers/identityProofContract";
+// covers: proofs.contract, proofs.nostr
 
 const hex = (b: Uint8Array) => Array.from(b, x => x.toString(16).padStart(2, "0")).join("");
 

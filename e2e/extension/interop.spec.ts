@@ -5,7 +5,7 @@ import { chat, connect, linkLegacy, say } from "../support/fixtures";
 import { expect, test } from "../support/extension";
 
 /** Same protocol, same UI, different hosts: the extension and a plain web page. */
-test("the extension and the web app chat, share files and call", async ({ extensionPeer, webPeer }, testInfo) => {
+test("the extension and the web app chat, share files and call", { tag: ["@client:extension", "@client:web", "@feature:extension.interop", "@feature:files.legacy.send", "@feature:calls.video"] }, async ({ extensionPeer, webPeer }, testInfo) => {
   const [ext, web] = await Promise.all([extensionPeer("extension"), webPeer("web")]);
   await linkLegacy(web, ext);
   await connect(web, ext);

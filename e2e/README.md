@@ -108,6 +108,8 @@ Not on pull requests: at about four minutes it would hold up every merge. `npm r
 
 For Desktop, use `test` and `app` from `support/desktop.ts`: `app.text(selector)` returns null until something matches, so wait with `expect.poll`. For the browser clients, use `test` and `peer` from `support/fixtures.ts` (or `extensionPeer` / `webPeer` from `support/extension.ts`), `link(a, b)` to put two people in a chat and `connect(a, b)` to wait for the peer-to-peer link. Look for text in the conversation with `chat(peer)`, since the chat list previews the last message too. Prefer what a person sees (titles, labels, text); add a `data-testid` to the app when there is nothing else to hold on to.
 
+Say what it covers: `{ tag: ["@feature:<id>"] }` with ids from [`features.json`](features.json), plus `"@gated"` when it needs infrastructure that is not always there. `npm run test:map` checks the tags on every pull request; see [docs/TESTING.md](../docs/TESTING.md).
+
 ### Held messages on a local S3 server
 
 `profile-backup.spec.ts` and `store-forward.spec.ts` need an S3-compatible server on `127.0.0.1` and its keys in the environment; any MinIO will do, in a container named `ghostly-saf-*` (never print the keys):

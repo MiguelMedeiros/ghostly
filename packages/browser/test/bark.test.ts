@@ -9,6 +9,7 @@ import { PaymentCoordinator } from "../src/engine/paymentAdapters/coordinator";
 import { intentRepository } from "../src/engine/paymentAdapters/persistence";
 import { STORES, openDb, store, transact, wrap } from "../src/shared/idb";
 import { FakeBarkServer } from "./helpers/fakeBark";
+// covers: wallet.bark.mainnet-off, wallet.bark.create, wallet.bark.send, wallet.bark.backup, payments.chat.reconcile
 
 const provider = "https://ark.signet.2nd.dev", explorer = "https://esplora.signet.2nd.dev";
 let server: FakeBarkServer;

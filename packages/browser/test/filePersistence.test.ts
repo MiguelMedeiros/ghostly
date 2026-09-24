@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
 import { expect, it, vi } from "vitest";
 import { fileStore } from "../src/shared/idb";
+// covers: files.persistence, storage.indexeddb
 
 it("does not report durable success when the write request succeeds but its transaction aborts", async () => {
   const original = IDBObjectStore.prototype.put;

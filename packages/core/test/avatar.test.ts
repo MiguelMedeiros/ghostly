@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import { MAX_AVATAR_LENGTH, jpegSize, sanitizeAvatar } from "../src/avatar";
+// covers: profiles.picture.sanitize
 
 /** Just enough JPEG for its header: SOI, an APP0 segment, a baseline frame header, then scan data. */
 function jpeg(width: number, height: number, marker = 0xc0, padding = 0): Uint8Array {

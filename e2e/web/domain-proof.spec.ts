@@ -33,7 +33,7 @@ let site: TestDomain;
 test.beforeEach(async ({}, info) => { site = await startTestDomain(info.parallelIndex % 44); });
 test.afterEach(async () => { await site.close(); });
 
-test("a domain proven by a DNS TXT record is verified by the one contact it is shared with, and not once the record is gone", async ({ peer }) => {
+test("a domain proven by a DNS TXT record is verified by the one contact it is shared with, and not once the record is gone", { tag: ["@feature:proofs.domain.dns", "@feature:proofs.share"] }, async ({ peer }) => {
   const [alice, bob, carol] = await Promise.all([peer("dom-alice"), peer("dom-bob"), peer("dom-carol")]);
   for (const p of [alice, bob, carol]) await site.attach(p.context);
   await pair(alice, bob);
@@ -97,7 +97,7 @@ test("a domain proven by a DNS TXT record is verified by the one contact it is s
   await expect(received).toHaveAttribute("data-status", "verified");
 });
 
-test("a domain proven by /.well-known/ghostly.json is fetched from the domain itself, and fails once the file is gone", async ({ peer }) => {
+test("a domain proven by /.well-known/ghostly.json is fetched from the domain itself, and fails once the file is gone", { tag: ["@feature:proofs.domain.https", "@feature:proofs.share"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("domf-alice"), peer("domf-bob")]);
   for (const p of [alice, bob]) await site.attach(p.context);
   await pair(alice, bob);
@@ -133,7 +133,7 @@ test("a domain proven by /.well-known/ghostly.json is fetched from the domain it
   await expect(received).toContainText("was not found");
 });
 
-test("the resolver that checks domain proofs is the person's choice, says what it learns, and is kept", async ({ peer }) => {
+test("the resolver that checks domain proofs is the person's choice, says what it learns, and is kept", { tag: ["@feature:proofs.domain.resolver"] }, async ({ peer }) => {
   const { page } = await peer("dom-settings");
   await page.goto("/#/settings");
   const resolver = page.getByTestId("doh-resolver");

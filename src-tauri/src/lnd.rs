@@ -345,6 +345,8 @@ async fn read(
 
 #[cfg(test)]
 mod tests {
+    // covers: wallet.lightning.lnd.connect, wallet.lightning.lnd.pay
+    // covers-gated: wallet.lightning.lnd.connect
     use super::*;
     use std::sync::Arc;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};

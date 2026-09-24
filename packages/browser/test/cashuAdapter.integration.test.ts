@@ -7,6 +7,7 @@ import { PaymentCoordinator } from '../src/engine/paymentAdapters/coordinator';
 import { intentRepository } from '../src/engine/paymentAdapters/persistence';
 import { STORES,transact } from '../src/shared/idb';
 import { TEST_MINT } from '../src/shared/mints';
+// covers-gated: payments.cashu.send, payments.chat.review, payments.chat.reconcile
 
 test.skipIf(process.env.GHOSTLY_CASHU_TEST!=='1')('disposable test-mint funds use reviewed Cashu adapter and mint-confirmed redemption',async()=>{
  const faucet=new Wallet(TEST_MINT,{unit:'sat'});await faucet.loadMint();

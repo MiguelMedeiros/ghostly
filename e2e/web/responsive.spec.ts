@@ -66,7 +66,7 @@ async function expectTidy(page: Page, root: string, what: string): Promise<void>
 }
 
 for (const width of WIDTHS) {
-  test(`the right-hand pages hold together: ${width.name}`, async ({ peer }) => {
+  test(`the right-hand pages hold together: ${width.name}`, { tag: ["@feature:app.responsive"] }, async ({ peer }) => {
     const { page } = await peer("alice", "mobile" in width ? { mobile: true } : { viewport: width.viewport });
 
     await page.goto("/#/wallet");
@@ -112,7 +112,7 @@ for (const width of WIDTHS) {
   });
 }
 
-test("the page keeps a phone's width however wide the chat list is dragged", async ({ peer }) => {
+test("the page keeps a phone's width however wide the chat list is dragged", { tag: ["@feature:app.sidebar-resize", "@feature:app.responsive"] }, async ({ peer }) => {
   const { page } = await peer("alice", { viewport: { width: 900, height: 900 } });
   await page.goto("/#/wallet");
   const handle = (await page.getByTestId("sidebar-resize").boundingBox())!;

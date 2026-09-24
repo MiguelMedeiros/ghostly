@@ -2,7 +2,7 @@ import { copyInvite } from "../support/clipboard";
 import {test,expect} from "../support/fixtures";
 import {setClipboard} from "../support/clipboard";
 
-test("clipboard joins once from the explicit action",async({peer})=>{
+test("clipboard joins once from the explicit action",{tag:["@feature:invite.clipboard"]},async({peer})=>{
  const a=await peer("clipboard-owner"),b=await peer("clipboard-guest");
  await a.page.getByTitle("New Chat").click();
  const invite=await copyInvite(a.page);
@@ -16,7 +16,7 @@ test("clipboard joins once from the explicit action",async({peer})=>{
  expect(count).toBe(1);
 });
 
-for(const value of [null,"","not-an-invite"]) test(`clipboard fallback is editable: ${value === null ? "denied" : value === "" ? "empty" : "invalid"}`,async({peer})=>{
+for(const value of [null,"","not-an-invite"]) test(`clipboard fallback is editable: ${value === null ? "denied" : value === "" ? "empty" : "invalid"}`,{tag:["@feature:invite.clipboard","@feature:invite.invalid"]},async({peer})=>{
  const {page}=await peer("clipboard-fallback");
  await setClipboard(page,value);
  await page.getByRole("button",{name: "Join chat", exact: true}).first().click();
@@ -41,7 +41,7 @@ for(const value of [null,"","not-an-invite"]) test(`clipboard fallback is editab
  await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
-test("closing Join cancels a pending clipboard read and duplicate requests",async({peer})=>{
+test("closing Join cancels a pending clipboard read and duplicate requests",{tag:["@feature:invite.clipboard"]},async({peer})=>{
  const a=await peer("late-owner"),b=await peer("late-guest");
  await a.page.getByTitle("New Chat").click();
  const invite=await copyInvite(a.page);
@@ -55,7 +55,7 @@ test("closing Join cancels a pending clipboard read and duplicate requests",asyn
  await expect(b.page.getByPlaceholder("Message…")).toHaveCount(0);
 });
 
-test("closing Join discards an image decoded late",async({peer})=>{
+test("closing Join discards an image decoded late",{tag:["@feature:invite.qr.image"]},async({peer})=>{
  const a=await peer("image-owner"),b=await peer("image-cancel",{mobile:true});
  await a.page.getByTitle("New Chat").click();
  const qr=await a.page.getByTestId("invite-qr").screenshot();

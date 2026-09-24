@@ -28,6 +28,7 @@ import {
   type ServiceAd,
 } from "../src";
 import { RUST_FIXTURE } from "./fixtures";
+// covers: core.crypto, core.records, invite.formats, cli.interop, payments.bitcoin.send, payments.bark.send, payments.targets, payments.chat.frames
 
 describe("identity", () => {
   it("derives the same z-base-32 address as the Rust client", () => {

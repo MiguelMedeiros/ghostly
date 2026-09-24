@@ -8,6 +8,7 @@ import { verifyIdentity } from "../src/proofs/verify";
 import type { ExternalToolSigner, IdentityProofProvider, VerifyContext } from "../src/proofs/contract";
 import { describeIdentityProof } from "./helpers/identityProofContract";
 import { fingerprints as fpr, hasGpg, TestGpg, vector } from "./helpers/gpg";
+// covers: proofs.openpgp, proofs.openpgp.keyserver, proofs.contract
 
 // Test keys made by GnuPG (test/vectors/openpgp/generate.sh), used here to sign statements built at run time.
 const secret = (name: string) => pgp.readPrivateKey({ armoredKey: vector(`${name}.sec.asc`) });

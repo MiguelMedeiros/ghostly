@@ -11,6 +11,7 @@ import { intentRepository } from '../src/engine/paymentAdapters/persistence';
 import {sealSeed} from '../src/engine/paymentAdapters/persistence';
 import {ArkWallet} from '../src/engine/paymentAdapters/arkWallet';
 import {STORES,transact} from '../src/shared/idb';
+// covers-gated: wallet.ark.send, wallet.ark.backup, payments.chat.reconcile
 const enabled=process.env.GHOSTLY_ARK_REGTEST==='1';
 test.skipIf(!enabled)('real regtest Ark transfer and read-only receipt reconciliation',async()=>{
  const provider='http://127.0.0.1:43010';

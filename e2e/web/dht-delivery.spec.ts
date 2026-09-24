@@ -32,7 +32,7 @@ async function mode(peer:Peer,dht:boolean) {
 async function noStreams(peers:Peer[]) { for(const p of peers) expect(await p.page.evaluate(()=>Number(localStorage.getItem("qa-stream-dials")??0))).toBe(0); }
 const received=(p:Peer)=>chat(p).getByText("Received by peer",{exact:true});
 
-test("DHT-only starts from an invite without streams, preserves drafts and receipts across reload",async({peer,relay})=>{
+test("DHT-only starts from an invite without streams, preserves drafts and receipts across reload",{ tag: ["@feature:chat.dht.send", "@feature:invite.dht"] },async({peer,relay})=>{
   const a=await peer("dht-first"),b=await peer("dht-second");
   await watchStreams(a);await watchStreams(b);
   await join(b,await createDht(a));
@@ -50,7 +50,7 @@ test("DHT-only starts from an invite without streams, preserves drafts and recei
   await expect(a.page.getByRole("button",{name:"Send a file",exact:true})).toBeDisabled();
 });
 
-test("DHT published while contact is away survives sender restart and is received once when contact returns",async({peer})=>{
+test("DHT published while contact is away survives sender restart and is received once when contact returns",{ tag: ["@feature:chat.dht.offline"] },async({peer})=>{
   const a=await peer("dht-away-sender"),b=await peer("dht-away-reader");await watchStreams(a);await watchStreams(b);
   await join(b,await createDht(a));for(const p of[a,b])await expect(p.page.getByPlaceholder("Message…")).toBeEnabled();
   const returnTo=b.page.url();await b.page.goto("about:blank");
@@ -61,7 +61,7 @@ test("DHT published while contact is away survives sender restart and is receive
   await b.page.reload();await expect(chat(b).getByText("Waiting in the DHT mailbox",{exact:true})).toHaveCount(1);await noStreams([a,b]);
 });
 
-test("DHT and live delivery share history; offline text fallback is independent of strict stream fallback",async({peer})=>{
+test("DHT and live delivery share history; offline text fallback is independent of strict stream fallback",{ tag: ["@feature:chat.dht.fallback"] },async({peer})=>{
   const a=await peer("dht-migrate-a"),b=await peer("dht-migrate-b");await join(b,await createDht(a));
   await expect(a.page.getByPlaceholder("Message…")).toBeEnabled();await say(a,"Before migration");await expect(chat(b).getByText("Before migration",{exact:true})).toBeVisible();await expect(received(a)).toHaveCount(1);
   await mode(b,false);await mode(a,false);
@@ -78,7 +78,7 @@ test("DHT and live delivery share history; offline text fallback is independent 
   for(const p of[a,b]) for(const text of["Before migration","After migration","Offline delivery after stream","Back to DHT"])await expect(chat(p).getByText(text,{exact:true})).toHaveCount(1);
 });
 
-test("DHT network publication failures are visible and never claimed as receipt",async({peer})=>{
+test("DHT network publication failures are visible and never claimed as receipt",{ tag: ["@feature:chat.dht.errors"] },async({peer})=>{
   const a=await peer("dht-publish-errors"),b=await peer("dht-publish-peer");await join(b,await createDht(a));
   await expect(a.page.getByPlaceholder("Message…")).toBeEnabled();
   await a.context.route(LocalRelay.pattern,route=>route.request().method()==="PUT"?route.fulfill({status:503,headers:{"access-control-allow-origin":"*"}}):route.fallback());
@@ -88,7 +88,7 @@ test("DHT network publication failures are visible and never claimed as receipt"
   await expect(received(a)).toHaveCount(0);
 });
 
-test("a changed DHT participation key is rejected without replacing the saved contact",async({peer})=>{
+test("a changed DHT participation key is rejected without replacing the saved contact",{ tag: ["@feature:chat.dht.key-change", "@feature:core.peer-keys"] },async({peer})=>{
   const a=await peer("dht-pinned"),b=await peer("dht-changed");await join(b,await createDht(a));
   await expect(a.page.getByPlaceholder("Message…")).toBeEnabled();
   await say(a,"Before the identity change");await expect(chat(b).getByText("Before the identity change",{exact:true})).toBeVisible();await expect(received(a)).toHaveCount(1);

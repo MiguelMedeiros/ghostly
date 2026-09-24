@@ -3,6 +3,7 @@ import { decodeBolt11 } from "@ghostly/core";
 import { NoAnswer, NwcLightning } from "../src/engine/paymentAdapters/providers/nwc";
 import { NothingSpentError } from "../src/engine/paymentAdapters/providers/types";
 import { describeLightningProvider } from "./helpers/providerContract";
+// covers-gated: wallet.lightning.nwc.pay, wallet.lightning.provider-contract
 
 /**
  * NWC against a real wallet service: Alby Hub in front of a regtest LND node, and a second node on the

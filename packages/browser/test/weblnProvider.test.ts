@@ -11,6 +11,7 @@ import { NothingSpentError } from "../src/engine/paymentAdapters/providers/types
 import { findWebln, provesPayment, webln, WeblnLightning, type WebLNProvider } from "../src/engine/paymentAdapters/providers/webln";
 import { FakeWebln, FakeWeblnLedger, type FakeWeblnOptions } from "./helpers/fakeWebln";
 import { describeLightningProvider } from "./helpers/providerContract";
+// covers: wallet.lightning.webln.connect, wallet.lightning.webln.pay, wallet.lightning.provider-contract
 
 beforeEach(async () => { await transact([STORES.settings], (s) => { s[STORES.settings].clear(); }); });
 

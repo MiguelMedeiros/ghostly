@@ -7,6 +7,7 @@ import {
   signalHasVideo,
   type CallSignal,
 } from "../src";
+// covers: calls.signal
 
 const NOW = 1_760_000_000_000;
 const FINGERPRINT = Array.from({ length: 32 }, (_, i) => (i * 7).toString(16).padStart(2, "0").toUpperCase()).join(":");

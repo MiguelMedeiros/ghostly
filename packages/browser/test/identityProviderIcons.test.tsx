@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { IDENTITY_PROVIDERS } from '../src/proofs/registry';
 import { OIDC_PROVIDERS } from '../src/proofs/oidc/providers';
 import { PROVIDER_ICONS } from '../../../src/components/identities/ProviderIcons';
+// covers: proofs.picker
 
 /**
  * Profile → Identities shows one mark per provider (src/components/identities/ProviderIcons.tsx).

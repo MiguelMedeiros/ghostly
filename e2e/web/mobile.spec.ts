@@ -1,6 +1,6 @@
 import { chat, connect, expect, link, say, test } from "../support/fixtures";
 
-test("on a phone: tabs for chats, wallet, sharing and settings", async ({ peer }) => {
+test("on a phone: tabs for chats, wallet, sharing and settings", { tag: ["@feature:app.mobile-layout"] }, async ({ peer }) => {
   const { page } = await peer("alice", { mobile: true });
   const tabs = page.getByTestId("mobile-tabs");
   await expect(tabs).toBeVisible();
@@ -23,7 +23,7 @@ test("on a phone: tabs for chats, wallet, sharing and settings", async ({ peer }
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
 
-test("on a phone: a chat is a screen of its own", async ({ peer }) => {
+test("on a phone: a chat is a screen of its own", { tag: ["@feature:app.mobile-layout", "@feature:chat.paired.send"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice", { mobile: true }), peer("bob")]);
   await link(alice, bob);
   await connect(alice, bob);
@@ -43,7 +43,7 @@ test("on a phone: a chat is a screen of its own", async ({ peer }) => {
   await expect(alice.page.getByText("boo on the small screen")).toBeVisible();
 });
 
-test("on a wide screen the wallet and services are pages beside the list", async ({ peer }) => {
+test("on a wide screen the wallet and services are pages beside the list", { tag: ["@feature:app.navigation", "@feature:app.mobile-layout"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await expect(page.getByTestId("mobile-tabs")).toHaveCount(0);
   await page.getByTestId("wallet-chip").click();

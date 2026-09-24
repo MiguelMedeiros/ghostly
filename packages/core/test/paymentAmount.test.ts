@@ -1,5 +1,6 @@
 import {describe,expect,it} from 'vitest';
 import {parsePaymentAmount,formatPaymentAmount,validatePaymentTarget,assertTokenUnits,assertWholeSats,ETHEREUM_USDT,SEPOLIA_TEST_USDT} from '../src/paymentIntent';
+// covers: payments.amounts, payments.targets
 it('represents six-decimal USDT and wei exactly without floating point rounding',()=>{
  expect(parsePaymentAmount('1.000001',6)).toBe(1000001);
  expect(formatPaymentAmount(1000001,6)).toBe('1.000001');

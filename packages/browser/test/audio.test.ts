@@ -1,4 +1,5 @@
 import {afterEach, expect, it, vi} from "vitest";
+// covers: app.attention.sounds
 vi.mock("../../../src/lib/settings",()=>({loadSettings:()=>({notifications:{soundEnabled:enabled}})}));
 let enabled=true;
 afterEach(()=>{vi.unstubAllGlobals();vi.useRealTimers();vi.resetModules();enabled=true;});

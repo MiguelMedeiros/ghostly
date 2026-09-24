@@ -4,6 +4,7 @@ import { createIdentity, emptyProofLedger } from '@ghostly/core';
 import { GhostlyNode } from '../src/engine/node';
 import { db } from '../src/engine/db';
 import type { StoredLink } from '../src/shared/types';
+// covers: profiles.public, proofs.peer-proofs, chat.paired.storage
 
 describe('Ghostly-only release', () => {
   it('hides preserved external data, rejects proof RPCs, and retains local names, pins and history', async () => {

@@ -74,7 +74,7 @@ test.use({ trace: "off", screenshot: "off", video: "off" });
 test.describe("wallet backups", { tag: "@network" }, () => {
   test.describe.configure({ retries: 2 });
 
-  test("Ark: the phrase shows on request, and the backup file is sealed", async ({ peer }) => {
+  test("Ark: the phrase shows on request, and the backup file is sealed", { tag: ["@feature:wallet.ark.backup"] }, async ({ peer }) => {
     const alice = await peer("ark-backup");
     const panel = await ready(alice, "arkade");
     const words = await phraseWords(panel, "ark");
@@ -85,7 +85,7 @@ test.describe("wallet backups", { tag: "@network" }, () => {
     expect((await phraseWords(panel, "ark")).join(" ") === words.join(" "), "the same phrase").toBe(true);
   });
 
-  test("USDT: the phrase shows on request, and the backup file is sealed", async ({ peer }) => {
+  test("USDT: the phrase shows on request, and the backup file is sealed", { tag: ["@feature:wallet.usdt.backup"] }, async ({ peer }) => {
     const alice = await peer("usdt-backup");
     const panel = await ready(alice, "usdt");
     const words = await phraseWords(panel, "usdt");
@@ -95,14 +95,14 @@ test.describe("wallet backups", { tag: "@network" }, () => {
     expect((await phraseWords(panel, "usdt")).join(" ") === words.join(" "), "the same phrase").toBe(true);
   });
 
-  test("the two wallets have phrases of their own", async ({ peer }) => {
+  test("the two wallets have phrases of their own", { tag: ["@feature:wallet.usdt.backup", "@feature:wallet.ark.backup"] }, async ({ peer }) => {
     const alice = await peer("two-phrases");
     const ark = await phraseWords(await ready(alice, "arkade"), "ark");
     const usdt = await phraseWords(await ready(alice, "usdt"), "usdt");
     expect(ark.join(" ") === usdt.join(" "), "one phrase for both wallets").toBe(false);
   });
 
-  test("Ark on-chain receive shows a Bitcoin boarding address", async ({ peer }) => {
+  test("Ark on-chain receive shows a Bitcoin boarding address", { tag: ["@feature:wallet.ark.boarding"] }, async ({ peer }) => {
     const alice = await peer("ark-boarding");
     // The explorer (mempool.space) is often slow to answer from CI and from here; it only reads the
     // on-chain balance. It answers "nothing there" at once, so the test is about the address.
@@ -128,7 +128,7 @@ test.describe("wallet backups", { tag: "@network" }, () => {
   });
 
   // The boarding address is this wallet's own: it shows before the explorer answers, however slow.
-  test("the boarding address does not wait for a slow explorer", async ({ peer }) => {
+  test("the boarding address does not wait for a slow explorer", { tag: ["@feature:wallet.ark.boarding"] }, async ({ peer }) => {
     const alice = await peer("ark-boarding-slow");
     // mempool.space never answers.
     await alice.context.route(/^https:\/\/mempool\.space\//, () => new Promise<void>(() => {}));

@@ -52,7 +52,7 @@ const mediaState = (p: Peer) =>
     return { taken: tracks.length, live: tracks.filter((t) => t.readyState === "live").length };
   });
 
-test("the caller hangs up while it rings: the ringing stops and no call starts", async ({ peer }) => {
+test("the caller hangs up while it rings: the ringing stops and no call starts", { tag: ["@feature:calls.cancel", "@feature:calls.audio"] }, async ({ peer }) => {
   const [alice, bob] = await linked(peer);
   await alice.page.getByTitle("Video call").click();
   await expect(alice.page.getByText("Calling...")).toBeVisible();
@@ -83,7 +83,7 @@ test("the caller hangs up while it rings: the ringing stops and no call starts",
  * A chat is loaded only while it is on screen or on a call; a call offer for another chat loads it off
  * screen, and its ring is drawn over whatever page is open.
  */
-test("a call rings while you are in Settings, and answering takes you to it", async ({ peer }) => {
+test("a call rings while you are in Settings, and answering takes you to it", { tag: ["@feature:calls.ring-elsewhere"] }, async ({ peer }) => {
   const [alice, bob] = await linked(peer);
   await bob.page.getByTitle("Settings").click();
   await expect(bob.page.getByRole("heading", { name: "Settings" })).toBeVisible();
@@ -99,7 +99,7 @@ test("a call rings while you are in Settings, and answering takes you to it", as
   for (const p of [alice, bob]) await noCall(p);
 });
 
-test("a call placed while you are in Settings rings once you are back in the chat", async ({ peer }) => {
+test("a call placed while you are in Settings rings once you are back in the chat", { tag: ["@feature:calls.ring-elsewhere", "@feature:calls.mini-window"] }, async ({ peer }) => {
   const [alice, bob] = await linked(peer);
   await bob.page.getByTitle("Settings").click();
   await expect(bob.page.getByRole("heading", { name: "Settings" })).toBeVisible();
@@ -122,7 +122,7 @@ test("a call placed while you are in Settings rings once you are back in the cha
   for (const p of [alice, bob]) await noCall(p);
 });
 
-test("declining leaves neither side on a call", async ({ peer }) => {
+test("declining leaves neither side on a call", { tag: ["@feature:calls.decline"] }, async ({ peer }) => {
   const [alice, bob] = await linked(peer);
   await alice.page.getByTitle("Video call").click();
   await expect(bob.page.getByText("Incoming video call...")).toBeVisible();
@@ -141,7 +141,7 @@ test("declining leaves neither side on a call", async ({ peer }) => {
   for (const p of [alice, bob]) await noCall(p);
 });
 
-test("a call nobody answers can be cancelled, and lets go of the camera", async ({ peer }) => {
+test("a call nobody answers can be cancelled, and lets go of the camera", { tag: ["@feature:calls.cancel"] }, async ({ peer }) => {
   const [alice, bob] = await linked(peer);
   await trackMedia(alice);
   // Nobody is there to answer.

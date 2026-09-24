@@ -8,6 +8,7 @@ import { verifyIdentity } from "../src/proofs/verify";
 import core from "../../core/test/fixtures/bitcoin-core-signmessage.json";
 import { describeIdentityProof } from "./helpers/identityProofContract";
 import { MAINNET, REGTEST, SIGNET, testBitcoinWallet, type TestNet, type TestScript } from "./helpers/bitcoinSign";
+// covers: proofs.bitcoin, proofs.contract
 
 // The shared contract, once per signature format and network the provider accepts.
 const cases: [string, TestScript, TestNet, "simple" | "full" | "legacy"][] = [

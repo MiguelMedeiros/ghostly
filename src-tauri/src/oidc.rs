@@ -251,6 +251,7 @@ pub fn oidc_loopback_cancel(state: tauri::State<'_, OidcState>, port: u16) -> Re
 
 #[cfg(test)]
 mod tests {
+    // covers: proofs.oidc.callback.desktop
     use super::*;
 
     const STATE: &str = "d.1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";

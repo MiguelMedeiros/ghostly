@@ -1,6 +1,7 @@
 import {expect,it} from "vitest";
 import {contactStatus} from "../../../src/lib/contactStatus";
 import type {PeerLinkState} from "../../../src/lib/platform";
+// covers: chat.paired.status
 const live={dataLink:"open",online:true,services:null,pairing:{status:"ready",transport:"webrtc/1"}} as PeerLinkState;
 it("uses an authenticated open channel, never successful discovery alone, for Connected",()=>{
   expect(contactStatus(live,true,"online")).toBe("Connected");

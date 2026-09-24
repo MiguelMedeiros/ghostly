@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import { iceServerProblem } from "../src/shared/ice";
+// covers: settings.network.turn
 
 it("takes TURN and STUN addresses a browser can use, and says what is wrong with the rest", () => {
   for (const server of [

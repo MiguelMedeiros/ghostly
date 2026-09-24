@@ -5,6 +5,7 @@ import {
 import { edgeParams } from "../src/groupCrypto";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import { fromBase64Url } from "../src/bytes";
+// covers: groups.protocol.entry
 
 const g = "AbCdEfGhIjKlMnOpQrStUv";
 const host = createIdentity();

@@ -1,6 +1,7 @@
 import { describe,it,expect,vi } from 'vitest';
 import type { PaymentAdapter, PaymentTarget } from '@ghostly/core';
 import { PaymentCoordinator, type SavedIntent, type IntentRepository } from '../src/engine/paymentAdapters/coordinator';
+// covers: payments.chat.reconcile, payments.chat.review
 const target=():PaymentTarget=>({method:'arkade',network:'regtest',provider:'http://127.0.0.1:43010',asset:'BTC',unit:'sat',address:'test destination',expiresAt:Date.now()+60000});
 function fixture(){
  const records=new Map<string,SavedIntent>();

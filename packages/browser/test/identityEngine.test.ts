@@ -7,6 +7,7 @@ const createIdentityFromSeed = (seed: Uint8Array) => identityFromSeed(seed).pubK
 import { IdentityProofs, type IdentityLinkHost } from "../src/engine/identities";
 import { fakeKey, fakeKeySign, fakeKeySubject, fakeRecord } from "../src/proofs/testing";
 import type { IdentityProofProvider } from "../src/proofs/contract";
+// covers: proofs.share, proofs.withdraw, proofs.revoke, proofs.expiry, proofs.binding, proofs.contract
 
 /** Two engines' identity modules joined by an in-memory channel, the way two paired chats are. */
 function pair() {

@@ -8,6 +8,7 @@ import { createLink } from "../src/invite";
 import { DhtDelivery, DHT_MESSAGE_TTL, emptyDhtDeliveryState, type DhtDeliveryState } from "../src/dhtDelivery";
 import { createRelayPayload, parseRelayPayload, type SignedPacket } from "../src/pkarr";
 import type { PairingCredentials } from "../src/pairedSession";
+// covers: chat.dht.delivery, chat.dht.send, chat.dht.offline, chat.dht.fallback, chat.dht.errors, chat.dht.key-change
 
 function setup() {
   const link = createLink(), params = [link.mine,link.invite];

@@ -5,7 +5,7 @@ import { expect, test } from "../support/fixtures";
 // Offline: no S3, no second peer.
 const PASSPHRASE = "a file backup passphrase";
 
-test("a profile goes to a file and comes back as a new profile, only with its passphrase", async ({ peer }) => {
+test("a profile goes to a file and comes back as a new profile, only with its passphrase", { tag: ["@feature:backup.profile.file", "@feature:backup.passphrase-rules", "@feature:backup.envelope", "@feature:profiles.switch"] }, async ({ peer }) => {
   const { page } = await peer("backup-file");
 
   // A profile worth keeping: a name of its own, a chat and a nickname.

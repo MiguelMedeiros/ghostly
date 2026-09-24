@@ -1,5 +1,6 @@
 import { FakeLightningProvider, FakeOnchainProvider, fakeAddress, fakeInvoice } from "../src/engine/paymentAdapters/providers/testing";
 import { describeLightningProvider, describeOnchainProvider } from "./helpers/providerContract";
+// covers: wallet.lightning.provider-contract, wallet.onchain.provider-contract
 
 // The fakes pass the same contract every real provider has to pass: that is what makes them good stand-ins.
 describeLightningProvider("Fake Lightning", async () => {

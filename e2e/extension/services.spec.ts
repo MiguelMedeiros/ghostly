@@ -7,7 +7,7 @@ import { expect, test } from "../support/extension";
  * contact opens it over WebRTC on a virtual origin, and it is gone the moment
  * the peer stops sharing or closes Ghostly.
  */
-test("a local web app, shared with a contact and opened over WebRTC", async ({ extensionPeer }) => {
+test("a local web app, shared with a contact and opened over WebRTC", { tag: ["@feature:services.add", "@feature:services.share", "@feature:services.open", "@feature:services.stop", "@feature:services.http"] }, async ({ extensionPeer }) => {
   test.setTimeout(8 * 60_000);
   const atlas = await startAtlas();
   try {

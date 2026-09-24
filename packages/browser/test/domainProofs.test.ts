@@ -4,6 +4,7 @@ import {
   assertDomainRecord, assertNip05, clearDomainCache, dohQuery, lookupDomain, type DomainFetch,
 } from '../src/proofs/domain';
 import { answerDoh, queryFromUrl, type Zone } from './helpers/dohZone';
+// covers: proofs.domain.dns, proofs.domain.https, proofs.domain.resolver
 
 const hex = (b: Uint8Array) => Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
 const record = (): DomainRecord => ({ key: createIdentity().pubKeyZ32, proof: hex(crypto.getRandomValues(new Uint8Array(32))) });

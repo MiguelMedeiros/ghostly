@@ -210,6 +210,7 @@ pub fn forget_window(app: &AppHandle, label: &str) {
 /// be that origin, or its contact would be serving code into another one.
 #[cfg(test)]
 mod tests {
+    // covers: services.desktop-viewer
     use super::*;
     use tauri::test::{mock_builder, MockRuntime};
 

@@ -12,7 +12,7 @@ async function useFakeIdentities(peer: Peer) {
   await expect(peer.page.getByTitle("New Chat")).toBeVisible();
 }
 
-test("every kind of signer: a pasted signature and a provider's attestation, both verified by the contact", async ({ peer }) => {
+test("every kind of signer: a pasted signature and a provider's attestation, both verified by the contact", { tag: ["@feature:proofs.unverifiable", "@feature:proofs.share", "@feature:proofs.binding"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("idk-alice"), peer("idk-bob")]);
   await useFakeIdentities(alice);
   await pair(alice, bob);

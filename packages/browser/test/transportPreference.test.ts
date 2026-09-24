@@ -4,6 +4,7 @@ import { createIdentity, type NativeEndpoint, type NativeTransport, type PairedT
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import type { StoredLink } from "../src/shared/types";
+// covers: transport.preference
 
 it.each([[false, "missing"], [false, "failed"], [false, "pending"], [true, "missing"], [true, "failed"]] as const)("saves preferences without a remote handshake (paired: %s, discovery: %s)", async (paired, discovery) => {
   const row: StoredLink = { id: `preference-${paired}`, profile: "paired-chat/1", createdAt: 1,

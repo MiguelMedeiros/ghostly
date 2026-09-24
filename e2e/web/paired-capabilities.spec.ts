@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { chat, expect, openChat, openWallet, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 
-test("paired chat: files, real WebRTC, local mint send/request and persistence", async ({ peer }) => {
+test("paired chat: files, real WebRTC, local mint send/request and persistence", { tag: ["@feature:chat.paired.pair", "@feature:transport.webrtc", "@feature:files.paired.send", "@feature:files.persistence", "@feature:chat.paired.storage", "@feature:wallet.cashu.receive-lightning", "@feature:payments.chat.review", "@feature:payments.cashu.send", "@feature:payments.cashu.request", "@feature:wallet.history"] }, async ({ peer }) => {
   test.skip(!process.env.E2E_MINT_URL?.startsWith("http://127.0.0.1:"), "Requires an explicitly local fake mint");
   const [alice, bob] = await Promise.all([peer("paired-alice"), peer("paired-bob")]);
   await pair(alice, bob);

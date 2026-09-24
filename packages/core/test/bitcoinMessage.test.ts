@@ -4,6 +4,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { describe, expect, it } from "vitest";
 import { concatBytes, hash160, legacyMessageHash, toBase64, verifyBitcoinMessage } from "../src";
 import core from "./fixtures/bitcoin-core-signmessage.json";
+// covers: proofs.bitcoin
 
 const testnet = (address: string, message: string, signature: string) => verifyBitcoinMessage({ address, message, signature, network: "testnet" });
 

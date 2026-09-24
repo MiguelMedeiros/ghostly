@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { mayReach } from "../src/engine/serviceAccess";
 import type { StoredService } from "../src/shared/types";
+// covers: services.http, services.share
 
 const base: StoredService = { id: "atlas", name: "Atlas", target: "http://localhost:3400", enabled: true, createdAt: 0 };
 const alice = "mw5tk8941qa71k7ndjsu3xdftuc7aced7xbm37empy4m31xq76dy";

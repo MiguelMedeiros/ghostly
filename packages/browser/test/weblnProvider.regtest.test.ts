@@ -4,6 +4,7 @@ import { NothingSpentError } from "../src/engine/paymentAdapters/providers/types
 import { WeblnLightning } from "../src/engine/paymentAdapters/providers/webln";
 import { LndRest, lndWebln } from "./helpers/lndWebln";
 import { describeLightningProvider } from "./helpers/providerContract";
+// covers-gated: wallet.lightning.webln.pay, wallet.lightning.provider-contract
 
 /**
  * The WebLN provider against a real regtest Lightning node: a WebLN wallet in front of LND "alice", and

@@ -25,7 +25,7 @@ async function keepOffline(peer: Peer): Promise<void> {
   await peer.context.route(/^https?:\/\/relay\.example\.org\//, (route) => route.abort());
 }
 
-test("a TURN server is kept across a reload, and removed by clearing its address", async ({ peer }) => {
+test("a TURN server is kept across a reload, and removed by clearing its address", { tag: ["@feature:settings.network.turn", "@feature:settings.network.relays"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await page.goto("/#/settings");
   const form = network(page);
@@ -64,7 +64,7 @@ test("a TURN server is kept across a reload, and removed by clearing its address
   await expect(form.turnCredential).toHaveValue("");
 });
 
-test("relays: only http(s) addresses are kept, normalized and without duplicates", async ({ peer }) => {
+test("relays: only http(s) addresses are kept, normalized and without duplicates", { tag: ["@feature:settings.network.relays"] }, async ({ peer }) => {
   const alice = await peer("alice");
   await keepOffline(alice);
   const { page } = alice;
@@ -92,7 +92,7 @@ test("relays: only http(s) addresses are kept, normalized and without duplicates
 });
 
 // A list with nothing usable in it would leave this browser unable to reach anyone: refused.
-test("relays: a list with no valid address is refused, and the relays stay", async ({ peer }) => {
+test("relays: a list with no valid address is refused, and the relays stay", { tag: ["@feature:settings.network.relays"] }, async ({ peer }) => {
   const alice = await peer("alice");
   await keepOffline(alice);
   const { page } = alice;
@@ -108,7 +108,7 @@ test("relays: a list with no valid address is refused, and the relays stay", asy
 
 // A TURN address WebRTC refuses would make every connection of this browser fail: the form says
 // why and keeps the old setting.
-test("a TURN address WebRTC cannot use is refused, and chats still connect", async ({ peer }) => {
+test("a TURN address WebRTC cannot use is refused, and chats still connect", { tag: ["@feature:settings.network.turn", "@feature:chat.paired.send"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await alice.page.goto("/#/settings");
   const form = network(alice.page);

@@ -41,7 +41,7 @@ async function historyUrls(page: Page): Promise<string[]> {
   return urls;
 }
 
-test("an invite link loaded afresh stores the chat, and its keys leave the address bar and the history", async ({ peer }) => {
+test("an invite link loaded afresh stores the chat, and its keys leave the address bar and the history", { tag: ["@feature:invite.link", "@feature:chat.paired.pair", "@feature:chat.paired.send"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   const invite = await newInvite(alice);
   const { seed, encKey } = secrets(invite);
@@ -74,7 +74,7 @@ test("an invite link loaded afresh stores the chat, and its keys leave the addre
 });
 
 // The link is taken after the router listens, so a link opened in a new tab lands in its chat.
-test("an invite link loaded afresh opens its chat at once", async ({ peer }) => {
+test("an invite link loaded afresh opens its chat at once", { tag: ["@feature:invite.link"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   const invite = await newInvite(alice);
   await bob.page.goto("about:blank");
@@ -83,7 +83,7 @@ test("an invite link loaded afresh opens its chat at once", async ({ peer }) => 
   await expect(bob.page).toHaveURL(/#\/chat\/[0-9a-f]+$/);
 });
 
-test("an invite link opened inside a running app is taken the same way", async ({ peer }) => {
+test("an invite link opened inside a running app is taken the same way", { tag: ["@feature:invite.link", "@feature:chat.paired.send"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   const invite = await newInvite(alice);
   const { seed } = secrets(invite);
@@ -107,7 +107,7 @@ test("an invite link opened inside a running app is taken the same way", async (
   await expect(chat(bob).getByText("one chat, not two")).toBeVisible();
 });
 
-test("a link that is not an invite creates nothing and ends on the home screen", async ({ peer }) => {
+test("a link that is not an invite creates nothing and ends on the home screen", { tag: ["@feature:invite.invalid", "@feature:invite.link"] }, async ({ peer }) => {
   const bob = await peer("bob");
   for (const bad of ["not-an-invite", "pair1", "%E2%98%A0", "..%2F..%2Fsettings"]) {
     await bob.page.goto(`/#/chat/${bad}`);
@@ -119,7 +119,7 @@ test("a link that is not an invite creates nothing and ends on the home screen",
 });
 
 // A broken link says so, like the join dialog does.
-test("a link that is not an invite says so", async ({ peer }) => {
+test("a link that is not an invite says so", { tag: ["@feature:invite.invalid"] }, async ({ peer }) => {
   const bob = await peer("bob");
   await bob.page.goto("about:blank");
   await bob.page.goto("/#/chat/not-an-invite");
@@ -127,7 +127,7 @@ test("a link that is not an invite says so", async ({ peer }) => {
 });
 
 // A damaged link is not a chat address either: it leaves the address and the history, keys and all.
-test("a damaged invite link creates nothing and does not keep its keys in the address", async ({ peer }) => {
+test("a damaged invite link creates nothing and does not keep its keys in the address", { tag: ["@feature:invite.invalid", "@feature:invite.link"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   const invite = await newInvite(alice);
   const { seed } = secrets(invite);
@@ -142,7 +142,7 @@ test("a damaged invite link creates nothing and does not keep its keys in the ad
 });
 
 // Keys a stored chat already has, in another invite format, are refused without taking the app down.
-test("the keys of a chat already here, in another invite format, do not take the app down", async ({ peer }) => {
+test("the keys of a chat already here, in another invite format, do not take the app down", { tag: ["@feature:invite.invalid", "@feature:invite.link"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await link(alice, bob);
   await bob.page.goto("/#/");

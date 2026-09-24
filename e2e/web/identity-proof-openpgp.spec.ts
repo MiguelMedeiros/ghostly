@@ -43,7 +43,7 @@ async function refused(peer: Peer, fingerprint: string, paste: (statement: strin
   await expect(add).toHaveCount(0);
 }
 
-test("an OpenPGP key signed with gpg: refused when it should be, then shared with one contact only", async ({ peer }) => {
+test("an OpenPGP key signed with gpg: refused when it should be, then shared with one contact only", { tag: ["@feature:proofs.openpgp", "@feature:proofs.share"] }, async ({ peer }) => {
   const [alice, bob, carol] = await Promise.all([peer("pgp-alice"), peer("pgp-bob"), peer("pgp-carol")]);
   await pair(alice, bob);
   const withBob = await chatId(alice);

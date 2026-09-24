@@ -2,7 +2,7 @@ import {readFileSync} from 'node:fs';
 import {Interface} from 'ethers';
 import {chat,connect,expect,link,openChat,openWallet,test,useTestnet,type Peer} from '../support/fixtures';
 
-test('WDK local token request, approval and confirmed receipt across two peers',async({peer},testInfo)=>{
+test('WDK local token request, approval and confirmed receipt across two peers',{tag:['@gated','@feature:payments.usdt.send','@feature:payments.chat.review']},async({peer},testInfo)=>{
  test.skip(process.env.GHOSTLY_USDT_LOCAL!=='1','Requires disposable Anvil chain 31337');
  const config=JSON.parse(readFileSync('/tmp/ghostly-usdt-local.json','utf8'));
  let id=0;
@@ -68,7 +68,7 @@ test('WDK local token request, approval and confirmed receipt across two peers',
  await expect(panel(alice).getByTestId('usdt-balance')).toHaveText('9.25 TEST-USDT',{timeout:30000});
 });
 
-test('wallet cards fit a narrow screen, keep keyboard focus and respect reduced motion',async({peer},testInfo)=>{
+test('wallet cards fit a narrow screen, keep keyboard focus and respect reduced motion',{tag:['@feature:wallet.deck']},async({peer},testInfo)=>{
  const p=await peer('wallet-cards-mobile',{mobile:true,viewport:{width:390,height:844}});
  await p.page.emulateMedia({reducedMotion:'reduce'});
  await p.page.goto('/#/wallet');
@@ -85,7 +85,7 @@ test('wallet cards fit a narrow screen, keep keyboard focus and respect reduced 
  await p.page.screenshot({path:testInfo.outputPath('wallet-cards-mobile.png'),fullPage:true});
 });
 
-test('Testnet has its own USDT wallet, and Mainnet gets the same one back',{tag:'@network'},async({peer})=>{
+test('Testnet has its own USDT wallet, and Mainnet gets the same one back',{tag:['@network','@feature:wallet.usdt.create','@feature:wallet.mode']},async({peer})=>{
  // Sepolia's public RPC can take a minute to answer a new wallet.
  test.setTimeout(4*60_000);
  const p=await peer('usdt-network-back');

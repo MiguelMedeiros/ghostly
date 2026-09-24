@@ -35,7 +35,7 @@ test.describe("wallet", { tag: "@network" }, () => {
     return (await peer.page.getByTestId("wallet-invoice").textContent())!.trim();
   }
 
-  test("Lightning in, ecash between two people, requests, history and fees", async ({ peer }, testInfo) => {
+  test("Lightning in, ecash between two people, requests, history and fees", { tag: ["@feature:wallet.cashu.receive-lightning", "@feature:payments.cashu.send", "@feature:payments.cashu.request", "@feature:payments.chat.review", "@feature:wallet.history"] }, async ({ peer }, testInfo) => {
     const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
     await link(alice, bob);
     await connect(alice, bob);
@@ -96,7 +96,7 @@ test.describe("wallet", { tag: "@network" }, () => {
     await expect(alice.page.getByTestId("mint-fees").filter({ hasText: "0.1 sat per proof" })).toBeVisible();
   });
 
-  test("test-mint ecash reaches a contact who never turned test sats on", async ({ peer }) => {
+  test("test-mint ecash reaches a contact who never turned test sats on", { tag: ["@feature:payments.cashu.test-sats", "@feature:payments.cashu.send"] }, async ({ peer }) => {
     const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
     await link(alice, bob);
     await connect(alice, bob);
@@ -122,7 +122,7 @@ test.describe("wallet", { tag: "@network" }, () => {
     await expect(bob.page.getByTestId("wallet-test-balance")).toHaveText(/^10 test sats/);
   });
 
-  test("an invoice pasted into the chat is a card that can be paid", async ({ peer }) => {
+  test("an invoice pasted into the chat is a card that can be paid", { tag: ["@feature:payments.lightning.invoice-card"] }, async ({ peer }) => {
     const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
     await link(alice, bob);
     await connect(alice, bob);
@@ -148,7 +148,7 @@ test.describe("wallet", { tag: "@network" }, () => {
     await expect(card.getByTestId("invoice-paid")).toBeVisible();
   });
 
-  test("an ecash token pasted into the chat can be redeemed", async ({ peer }) => {
+  test("an ecash token pasted into the chat can be redeemed", { tag: ["@feature:payments.cashu.token-card"] }, async ({ peer }) => {
     const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
     await link(alice, bob);
     await connect(alice, bob);

@@ -11,6 +11,7 @@ import { clearDomainCache } from "../src/proofs/domain";
 import { describeIdentityProof } from "./helpers/identityProofContract";
 import { answerDoh, queryFromUrl, type Zone } from "./helpers/dohZone";
 import { signNostr } from "./helpers/nostrSign";
+// covers: proofs.domain.dns, proofs.domain.https, proofs.contract
 
 const hex = (b: Uint8Array) => Array.from(b, x => x.toString(16).padStart(2, "0")).join("");
 const recordFor = (s: IdentityStatement): DomainRecord => ({ key: s.binding.key, proof: s.id });

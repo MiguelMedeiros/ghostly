@@ -2,7 +2,7 @@ import { expect, openWallet, test } from "../support/fixtures";
 
 // A brand-new profile, no setup: every wallet can receive right away. Talks to the real default
 // providers (a Cashu mint, arkade.computer, an Ethereum RPC) but never moves funds.
-test("a new profile has every wallet ready to receive, and they reopen without asking anything", async ({ peer }, testInfo) => {
+test("a new profile has every wallet ready to receive, and they reopen without asking anything", { tag: ["@feature:wallet.ready", "@feature:wallet.ark.create", "@feature:wallet.usdt.create"] }, async ({ peer }, testInfo) => {
   const alice = await peer("wallets-ready");
   const page = alice.page;
   const card = (id: string) => page.getByTestId(`wallet-card-${id}`);

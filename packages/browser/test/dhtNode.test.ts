@@ -3,6 +3,7 @@ import { expect, it, vi } from "vitest";
 import { createIdentity, createLink, createRelayPayload, DhtDelivery, parseRelayPayload, type SignedPacket } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
+// covers: chat.dht.send, chat.dht.delivery, core.text-limits, core.peer-keys
 
 it("persists a new DHT-only conversation, rejects invalid drafts before history, delivers and restores its pin without native allocation", async () => {
   await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });

@@ -17,7 +17,7 @@ async function linked(peer: (name: string) => Promise<Peer>): Promise<[Peer, Pee
   return [alice, bob];
 }
 
-test("video call: camera, mute, screen share, hang up", async ({ peer }) => {
+test("video call: camera, mute, screen share, hang up", { tag: ["@feature:calls.video", "@feature:calls.screen-share"] }, async ({ peer }) => {
   const [alice, bob] = await linked(peer);
   await alice.page.getByTitle("Video call").click();
   await expect(bob.page.getByText("Incoming video call...")).toBeVisible();
@@ -45,7 +45,7 @@ test("video call: camera, mute, screen share, hang up", async ({ peer }) => {
   await expect(bob.page.getByTitle("End call")).toHaveCount(0);
 });
 
-test("your own picture moves, resizes and stays inside the window", async ({ peer }) => {
+test("your own picture moves, resizes and stays inside the window", { tag: ["@feature:calls.self-view"] }, async ({ peer }) => {
   const [alice, bob] = await linked(peer);
   await alice.page.getByTitle("Video call").click();
   await bob.page.getByTitle("Accept video call").click();
@@ -88,7 +88,7 @@ test("your own picture moves, resizes and stays inside the window", async ({ pee
   expect(Math.round(reset.width), "a double click puts it back").toBe(Math.round(before.width));
 });
 
-test("a call in a small window leaves the chat usable", async ({ peer }) => {
+test("a call in a small window leaves the chat usable", { tag: ["@feature:calls.mini-window"] }, async ({ peer }) => {
   const [alice, bob] = await linked(peer);
   await alice.page.getByTitle("Video call").click();
   await bob.page.getByTitle("Accept video call").click();
@@ -115,7 +115,7 @@ test("a call in a small window leaves the chat usable", async ({ peer }) => {
   await expect(bob.page.getByTitle("End call")).toHaveCount(0);
 });
 
-test("audio call, and a call that is declined", async ({ peer }) => {
+test("audio call, and a call that is declined", { tag: ["@feature:calls.audio", "@feature:calls.decline"] }, async ({ peer }) => {
   const [alice, bob] = await linked(peer);
   await bob.page.getByTitle("Audio call").click();
   await expect(alice.page.getByText("Incoming audio call...")).toBeVisible();
@@ -134,7 +134,7 @@ test("audio call, and a call that is declined", async ({ peer }) => {
   await expect(alice.page.getByTitle("End call")).toHaveCount(0);
 });
 
-test("a call can start as a screen share", async ({ peer }) => {
+test("a call can start as a screen share", { tag: ["@feature:calls.screen-share"] }, async ({ peer }) => {
   const [alice, bob] = await linked(peer);
   await alice.page.getByTestId("call-screen").click();
   await bob.page.getByTitle("Accept video call").click();
@@ -145,7 +145,7 @@ test("a call can start as a screen share", async ({ peer }) => {
   await expect(bob.page.getByTitle("End call")).toHaveCount(0);
 });
 
-test("an audio call grows a camera and a screen, without calling again", async ({ peer }) => {
+test("an audio call grows a camera and a screen, without calling again", { tag: ["@feature:calls.upgrade", "@feature:calls.screen-share"] }, async ({ peer }) => {
   const [alice, bob] = await linked(peer);
   await alice.page.getByTitle("Audio call").click();
   await expect(bob.page.getByText("Incoming audio call...")).toBeVisible();
@@ -183,7 +183,7 @@ test("an audio call grows a camera and a screen, without calling again", async (
   await expect(bob.page.getByTitle("End call")).toHaveCount(0);
 });
 
-test("a screen share that starts as one goes back to voice when it stops", async ({ peer }) => {
+test("a screen share that starts as one goes back to voice when it stops", { tag: ["@feature:calls.screen-share"] }, async ({ peer }) => {
   const [alice, bob] = await linked(peer);
   await alice.page.getByTestId("call-screen").click();
   await bob.page.getByTitle("Accept video call").click();
@@ -200,7 +200,7 @@ test("a screen share that starts as one goes back to voice when it stops", async
   await expect(bob.page.getByTitle("End call")).toHaveCount(0);
 });
 
-test("a call follows you out of the chat and into Settings", async ({ peer }) => {
+test("a call follows you out of the chat and into Settings", { tag: ["@feature:calls.mini-window"] }, async ({ peer }) => {
   const [alice, bob] = await linked(peer);
   await alice.page.getByTitle("Video call").click();
   await bob.page.getByTitle("Accept video call").click();
@@ -237,7 +237,7 @@ test("a call follows you out of the chat and into Settings", async ({ peer }) =>
   await expect(alice.page.getByTestId("invite-card"), "and leaves you where you were").toBeVisible();
 });
 
-test("the lock screen covers a call it keeps going", async ({ peer }) => {
+test("the lock screen covers a call it keeps going", { tag: ["@feature:calls.lock"] }, async ({ peer }) => {
   const [alice, bob] = await linked(peer);
   await alice.page.getByTitle("Video call").click();
   await bob.page.getByTitle("Accept video call").click();

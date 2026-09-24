@@ -7,6 +7,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { linkView } from "./fakeEngine";
 import { renderApp } from "./render";
+// covers: chat.paired.reconnect, app.i18n
 
 /** The harness itself: the UI reaches the fake engine through the web app's platform modules. */
 describe("component test harness", () => {

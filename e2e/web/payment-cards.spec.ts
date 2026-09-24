@@ -5,7 +5,7 @@ import { connect, expect, link, test } from "../support/fixtures";
  * comes up and says what it would do. The card clicked turns over, and its back is where the amount and what it
  * is for are written. A card that cannot be used here comes up to say why, and does not turn over.
  */
-test("the chat's payment cards: flip through them, turn one over, and back to the cards", async ({ peer }) => {
+test("the chat's payment cards: flip through them, turn one over, and back to the cards", { tag: ["@feature:payments.chat.cards"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice", { viewport: { width: 1280, height: 900 } }), peer("bob")]);
   await link(alice, bob);
   await connect(alice, bob);
@@ -80,7 +80,7 @@ test("the chat's payment cards: flip through them, turn one over, and back to th
   await expect(card("lightning")).toHaveAttribute("aria-checked", "true");
 });
 
-test("on a phone the payment cards are a track, and a tap turns one over", async ({ peer }) => {
+test("on a phone the payment cards are a track, and a tap turns one over", { tag: ["@feature:payments.chat.cards"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice", { mobile: true }), peer("bob")]);
   await link(alice, bob);
   await connect(alice, bob);

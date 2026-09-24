@@ -8,6 +8,7 @@ import { newBdkPhrase } from "../src/engine/paymentAdapters/providers/bdkPhrase"
 import { describeOnchainProvider } from "./helpers/providerContract";
 import { FakeEsplora } from "./helpers/fakeEsplora";
 import { nodeBdk } from "./helpers/bdkNode";
+// covers: wallet.onchain.bdk.create, wallet.onchain.bdk.send, wallet.onchain.provider-contract
 
 vi.setConfig({ testTimeout: 30_000 });
 const ABANDON = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";

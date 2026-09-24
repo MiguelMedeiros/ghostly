@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { paymentUri, qrText, satsToBtc } from "../src";
+// covers: payments.uri, payments.external
 
 const INVOICE = "lnbc210n1p4tgljxdqqpp5cy0xj543cj0zcj5r2zhdmpgztxsxlzf7c6yw898qnpuznly8ss6q";
 

@@ -9,6 +9,7 @@ import { PaymentCoordinator } from "../src/engine/paymentAdapters/coordinator";
 import { intentRepository } from "../src/engine/paymentAdapters/persistence";
 import type { CashuWallet } from "../src/engine/wallet";
 import { describeOnchainProvider } from "./helpers/providerContract";
+// covers-gated: wallet.onchain.bitcoind, wallet.onchain.provider-contract, payments.chat.reconcile
 
 /**
  * The Bitcoin Core source against a real regtest bitcoind (see e2e/README.md, "Bitcoin Core on regtest"):

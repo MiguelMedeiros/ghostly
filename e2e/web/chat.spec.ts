@@ -9,7 +9,7 @@ async function setNickname(peer: Peer, nick: string): Promise<void> {
   await peer.page.goto("/#/");
 }
 
-test("two people chat: relay discovery, then peer-to-peer messages", async ({ peer, relay }) => {
+test("two people chat: relay discovery, then peer-to-peer messages", { tag: ["@feature:chat.paired.pair", "@feature:chat.paired.send", "@feature:chat.paired.receipts", "@feature:chat.paired.nickname-sync", "@feature:chat.paired.status", "@feature:transport.webrtc"] }, async ({ peer, relay }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await setNickname(alice, "Casper");
   await setNickname(bob, "Slimer");
@@ -52,7 +52,7 @@ test("two people chat: relay discovery, then peer-to-peer messages", async ({ pe
   await expect(bob.page.getByText("Casper")).toBeVisible();
 });
 
-test("compatibility chat delivers through the relay while the other side is away", async ({ peer }) => {
+test("compatibility chat delivers through the relay while the other side is away", { tag: ["@feature:chat.legacy.send"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await linkLegacy(alice, bob);
   await connect(alice, bob);
@@ -69,7 +69,7 @@ test("compatibility chat delivers through the relay while the other side is away
   await expect(chat(bob).getByText("still here")).toBeVisible();
 });
 
-test("emoji and GIFs", async ({ peer }) => {
+test("emoji and GIFs", { tag: ["@feature:chat.paired.emoji", "@feature:chat.paired.gifs"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await link(alice, bob);
   await connect(alice, bob);
@@ -106,7 +106,7 @@ test("emoji and GIFs", async ({ peer }) => {
   await alice.page.getByRole("button",{name:"Close GIF picker"}).click();
 });
 
-test("files, peer to peer, arrive intact", async ({ peer }, testInfo) => {
+test("files, peer to peer, arrive intact", { tag: ["@feature:files.paired.send", "@feature:files.paired.images"] }, async ({ peer }, testInfo) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await link(alice, bob);
   await connect(alice, bob);
@@ -147,7 +147,7 @@ function storedFiles(peer: Peer): Promise<number> {
 /** The row one message is in, delete button and all. */
 const message = (peer: Peer, text: string) => chat(peer).locator(".group").filter({ hasText: text });
 
-test("a deleted message is gone for good, and gone only here", async ({ peer }) => {
+test("a deleted message is gone for good, and gone only here", { tag: ["@feature:chat.paired.delete-message"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await link(alice, bob);
   await connect(alice, bob);
