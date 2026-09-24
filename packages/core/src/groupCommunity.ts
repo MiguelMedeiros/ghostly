@@ -1,10 +1,10 @@
 import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { concatBytes, fromBase64Url, randomBytes, toBase64Url, utf8Encode } from "./bytes";
+import { concatBytes, fromBase64Url, randomBytes, toBase64Url, utf8Decode, utf8Encode } from "./bytes";
 import { identityFromSeedB64, publicKeyFromZ32, sign, verify } from "./identity";
 import { sanitizeNick } from "./text";
 import {
-  confirmationMatches, confirmationTag, decryptText, encryptText, epochKeys, newEpochSecret, openSecret, sealSecret, sha256Hex,
+  confirmationMatches, confirmationTag, decryptText, encryptText, epochKeys, newEpochSecret, openPair, openSecret, sealPair, sealSecret, sha256Hex,
   type SealedSecret,
 } from "./groupCrypto";
 import { GROUP_ID, MEMBER_KEY, rosterAdmin, rosterHas, sortRoster, type GroupRole, type Roster } from "./groupCommits";
@@ -39,6 +39,12 @@ export const COMMUNITY_LIMITS = {
   members: 256,
   chain: 2048,
   textBytes: 16 * 1024,
+  /**
+   * An application frame the group carries (`x`: a payment note, a request to the group) or one member's
+   * payload for another (`p`: a payment between the two), as JSON. Room for a Cashu token of many proofs,
+   * sealed twice (to the member, then to the epoch) within a frame.
+   */
+  appBytes: 8 * 1024,
   /** Frames from everyone kept for whoever was away. */
   store: 256,
   storeBytes: 1024 * 1024,
@@ -264,6 +270,13 @@ export interface CommunityState {
 }
 
 export interface CommunityIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string }
+/**
+ * What an application sends through the group rather than as text: `frame` for everyone in the epoch (the group
+ * reads it, as it reads text), or, in `pair`, a payload only `to` can open. Delivered once, like a message: the
+ * frame identity (sender, epoch, commit, sequence) deduplicates it across hubs and catch-ups.
+ */
+export interface CommunityIncomingApp { id: string; sender: string; epoch: number; timestamp: number; frame: Record<string, unknown> }
+export interface CommunityIncomingPair { id: string; sender: string; epoch: number; timestamp: number; payload: Record<string, unknown> }
 
 export interface CommunitySessionHooks {
   save(state: CommunityState): Promise<void>;
@@ -274,6 +287,10 @@ export interface CommunitySessionHooks {
   /** To one member, wherever they are: over their edge if I have it, else to the hubs with `to`. */
   addressed(to: string, frame: CommunitySecretFrame | CommunityEntryFrame): void;
   message(message: CommunityIncomingMessage): Promise<void> | void;
+  /** An application frame for the group (see `sendApp`). */
+  app?(message: CommunityIncomingApp): Promise<void> | void;
+  /** A payload another member sealed to me (see `sendPair`). Payloads to others are carried, never opened. */
+  pair?(message: CommunityIncomingPair): Promise<void> | void;
   changed(): void;
   /** The group's picture changed (set, replaced or removed), by `by`. */
   metaChanged?(by: string, picture: string | undefined): void;
@@ -288,12 +305,21 @@ const secretAad = (g: string, h: string, member: string) => JSON.stringify(["gho
 const rvAad = (g: string, member: string) => JSON.stringify(["ghostly-group/2 rendezvous", g, member]);
 const entryAad = (g: string, member: string) => JSON.stringify(["ghostly-group/2 entry", g, member]);
 const messageAad = (f: Pick<CommunityMessageFrame, "g" | "e" | "h" | "s" | "n" | "ts">) => JSON.stringify([f.g, f.e, f.h, f.s, f.n, f.ts]);
+/** A pair payload is bound to the frame that carries it, and to whom it is for. */
+const pairAad = (f: Pick<CommunityMessageFrame, "g" | "e" | "h" | "s" | "n" | "ts">, to: string) => JSON.stringify(["ghostly-group/2 pair", f.g, f.e, f.h, f.s, f.n, f.ts, to]);
+const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const messageSigned = (f: Omit<CommunityMessageFrame, "sig" | "t" | "v">) => utf8Encode(JSON.stringify(["ghostly-group/2 msg", f.g, f.e, f.h, f.s, f.n, f.ts, f.nn, f.c]));
 export const communityMessageId = (sender: string, epoch: number, h: string, seq: number) => `${sender}:${epoch}:${h}:${seq}`;
 const seenKey = (e: number, h: string) => `${e}:${h}`;
 
 function isSealed(v: unknown): v is SealedSecret {
   return !!v && typeof v === "object" && ["e", "n", "c"].every(k => typeof (v as Record<string, unknown>)[k] === "string" && B64.test((v as Record<string, string>)[k]) && (v as Record<string, string>)[k].length <= 128);
+}
+/** A pair payload's box: an ephemeral key, a nonce and a ciphertext of at most `appBytes` sealed. */
+const MAX_PAIR_BOX = Math.ceil((COMMUNITY_LIMITS.appBytes + 16) * 4 / 3) + 4;
+function isPairBox(v: Record<string, unknown>): v is Record<string, unknown> & SealedSecret & { to: string } {
+  return typeof v.to === "string" && MEMBER_KEY.test(v.to) && typeof v.e === "string" && v.e.length === 43 && B64.test(v.e) &&
+    typeof v.n === "string" && v.n.length === 32 && B64.test(v.n) && typeof v.c === "string" && v.c.length <= MAX_PAIR_BOX && B64.test(v.c);
 }
 function isMessageFrame(v: unknown): v is CommunityMessageFrame {
   if (!v || typeof v !== "object") return false;
@@ -828,24 +854,67 @@ export class CommunitySession {
       const trimmed = text.trim();
       if (!trimmed) return { error: "Nothing to send" };
       if (utf8Encode(trimmed).length > COMMUNITY_LIMITS.textBytes) return { error: "Message exceeds 16 KiB" };
-      const h = this.topHash, secret = this.state.secrets[h];
-      if (!secret) return { error: "This epoch's key has not arrived yet. Wait for a member to catch you up." };
-      if (this.state.seqH !== h) { this.state.seq = 0; this.state.seqH = h; }
-      const n = this.state.seq++;
-      const header = { g: this.id, e: this.epoch, h: shortHash(h), s: this.myKey, n, ts: now };
-      const clean = sanitizeNick(nick);
-      const payload = JSON.stringify(clean ? { text: trimmed, nick: clean } : { text: trimmed });
-      const { n: nn, c } = encryptText(epochKeys(fromBase64Url(secret), this.id, this.epoch).message, messageAad(header), payload);
-      const unsigned = { ...header, nn, c };
-      const frame: CommunityMessageFrame = { t: "group-msg", v: 2, ...unsigned, sig: toBase64Url(sign(messageSigned(unsigned), this.identity.seed)) };
-      this.markSeen(frame);
-      this.keep(frame);
-      const id = communityMessageId(this.myKey, header.e, header.h, n);
-      await this.hooks.message({ id, sender: this.myKey, epoch: header.e, seq: n, timestamp: now, text: trimmed });
+      const sent = await this.sendPayload(() => ({ text: trimmed }), nick, now);
+      if ("error" in sent) return sent;
+      await this.hooks.message({ id: sent.id, sender: this.myKey, epoch: sent.frame.e, seq: sent.frame.n, timestamp: now, text: trimmed });
       await this.persist();
-      this.hooks.broadcast(frame);
-      return { id };
+      this.hooks.broadcast(sent.frame);
+      return { id: sent.id };
     });
+  }
+
+  /**
+   * An application frame to everyone in the group (a note about a payment, a request anyone may pay): sealed to
+   * the epoch like text, signed, kept and caught up like text, and handed to the other members' `app` hook
+   * instead of their history.
+   */
+  sendApp(frame: Record<string, unknown>, nick?: string, now = Date.now()): Promise<{ id: string } | { error: string }> {
+    return this.serialize(async () => {
+      if (!this.isMember) return { error: this.state.statusReason ?? "You are not in this group" };
+      if (!isObject(frame) || utf8Encode(JSON.stringify(frame)).length > COMMUNITY_LIMITS.appBytes) return { error: "Too large for the group" };
+      const sent = await this.sendPayload(() => ({ x: frame }), nick, now);
+      if ("error" in sent) return sent;
+      await this.persist();
+      this.hooks.broadcast(sent.frame);
+      return { id: sent.id };
+    });
+  }
+
+  /**
+   * A payload for one member only (`to`), carried by the group like any frame: every hub relays it and every
+   * member keeps it for whoever was away, but only `to` can open it, and only I can have made it (see
+   * `sealPair`). The group learns that I sent `to` something, and when; not what.
+   */
+  sendPair(to: string, payload: Record<string, unknown>, nick?: string, now = Date.now()): Promise<{ id: string } | { error: string }> {
+    return this.serialize(async () => {
+      if (!this.isMember) return { error: this.state.statusReason ?? "You are not in this group" };
+      if (to === this.myKey || !rosterHas(this.roster, to)) return { error: "Not a member of this group" };
+      if (!isObject(payload)) return { error: "Nothing to send" };
+      const plain = utf8Encode(JSON.stringify(payload));
+      if (plain.length > COMMUNITY_LIMITS.appBytes) return { error: "Too large for the group" };
+      const sent = await this.sendPayload(header => ({ p: { to, ...sealPair(this.identity.seed, this.myKey, to, plain, pairAad(header, to)) } }), nick, now);
+      if ("error" in sent) return sent;
+      await this.persist();
+      this.hooks.broadcast(sent.frame);
+      return { id: sent.id };
+    });
+  }
+
+  /** Seals, signs and keeps a frame under the current epoch (the caller holds the queue, persists and broadcasts). */
+  private async sendPayload(body: (header: Pick<CommunityMessageFrame, "g" | "e" | "h" | "s" | "n" | "ts">) => Record<string, unknown>, nick: string | undefined, now: number): Promise<{ id: string; frame: CommunityMessageFrame } | { error: string }> {
+    const h = this.topHash, secret = this.state.secrets[h];
+    if (!secret) return { error: "This epoch's key has not arrived yet. Wait for a member to catch you up." };
+    if (this.state.seqH !== h) { this.state.seq = 0; this.state.seqH = h; }
+    const n = this.state.seq++;
+    const header = { g: this.id, e: this.epoch, h: shortHash(h), s: this.myKey, n, ts: now };
+    const clean = sanitizeNick(nick);
+    const payload = JSON.stringify(clean ? { ...body(header), nick: clean } : body(header));
+    const { n: nn, c } = encryptText(epochKeys(fromBase64Url(secret), this.id, this.epoch).message, messageAad(header), payload);
+    const unsigned = { ...header, nn, c };
+    const frame: CommunityMessageFrame = { t: "group-msg", v: 2, ...unsigned, sig: toBase64Url(sign(messageSigned(unsigned), this.identity.seed)) };
+    this.markSeen(frame);
+    this.keep(frame);
+    return { id: communityMessageId(this.myKey, header.e, header.h, n), frame };
   }
 
   private keep(frame: CommunityMessageFrame): void {
@@ -933,15 +1002,28 @@ export class CommunitySession {
     if (!secret) { this.park(from, raw); return true; }
     const payload = decryptText(epochKeys(fromBase64Url(secret), this.id, raw.e).message, messageAad(raw), raw.nn, raw.c);
     if (payload === null) return false;
-    let text: string, nick: string | undefined;
-    try {
-      const parsed = JSON.parse(payload) as { text?: unknown; nick?: unknown };
-      if (typeof parsed.text !== "string") return false;
-      text = parsed.text.slice(0, COMMUNITY_LIMITS.textBytes);
-      nick = typeof parsed.nick === "string" ? sanitizeNick(parsed.nick) : undefined;
-    } catch { return false; }
+    let parsed: { text?: unknown; nick?: unknown; x?: unknown; p?: unknown };
+    try { parsed = JSON.parse(payload) as typeof parsed; } catch { return false; }
+    if (!isObject(parsed)) return false;
+    const text = typeof parsed.text === "string" ? parsed.text.slice(0, COMMUNITY_LIMITS.textBytes) : undefined;
+    // Exactly one of: text, an application frame for the group, a payload for one member.
+    if ([text !== undefined, isObject(parsed.x), isObject(parsed.p)].filter(Boolean).length !== 1) return false;
+    const nick = typeof parsed.nick === "string" ? sanitizeNick(parsed.nick) : undefined;
     if (nick && this.state.nicks[raw.s] !== nick) { this.state.nicks[raw.s] = nick; this.hooks.changed(); }
-    await this.hooks.message({ id: communityMessageId(raw.s, raw.e, raw.h, raw.n), sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text });
+    const id = communityMessageId(raw.s, raw.e, raw.h, raw.n);
+    if (text !== undefined) await this.hooks.message({ id, sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text });
+    else if (isObject(parsed.x)) await this.hooks.app?.({ id, sender: raw.s, epoch: raw.e, timestamp: raw.ts, frame: parsed.x });
+    else {
+      // Someone else's is carried and kept for them, never opened; mine opens only if its sender sealed it to me here.
+      const box = parsed.p as Record<string, unknown>;
+      if (!isPairBox(box)) return false;
+      if (box.to === this.myKey) {
+        const plain = openPair(this.identity.seed, this.myKey, raw.s, box, pairAad(raw, this.myKey));
+        let opened: unknown = null;
+        try { opened = plain && plain.length <= COMMUNITY_LIMITS.appBytes ? JSON.parse(utf8Decode(plain)) : null; } catch { /* not JSON: dropped */ }
+        if (isObject(opened)) await this.hooks.pair?.({ id, sender: raw.s, epoch: raw.e, timestamp: raw.ts, payload: opened });
+      }
+    }
     this.markSeen(raw);
     this.keep(raw);
     // The message itself is stored already; what changed here (seen, store) is saved in a batch.

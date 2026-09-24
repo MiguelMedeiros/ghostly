@@ -4,5 +4,7 @@
   "storage.local": "The local file storage adapter (WISP 1001) is exercised only through backup.profile.file, never on its own",
   "core.dht-direct": "src-tauri/src/pkarr_client.rs is tested against an in-process relay (commands.rs); nothing reaches the Mainline DHT over UDP",
   "desktop.bundle-wiring": "Guarded by npm run check:desktop-bundle in PR CI, a build assertion the test map does not read",
-  "desktop.notifications": "Native notifications need the Desktop harness (Linux only) and no spec drives them"
+  "desktop.notifications": "Native notifications need the Desktop harness (Linux only) and no spec drives them",
+  "groups.community.payments.member": "In progress on this branch: the engine and the three-browser e2e come next",
+  "groups.community.payments.group-request": "In progress on this branch: the engine and the three-browser e2e come next"
 }
