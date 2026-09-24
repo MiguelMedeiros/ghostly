@@ -5,6 +5,7 @@ import type { PaymentReview } from "@ghostly/core";
 import { CashuWallet, type CashuPrepared } from "../src/engine/wallet";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
 import type { StoredPayment, StoredProof, WalletTx } from "../src/shared/types";
+// covers: payments.chat.review, payments.cashu.send, payments.chat.reconcile
 
 /**
  * The reviewed Cashu payment (prepare, approve, execute, recover) on real IndexedDB semantics: it reserves

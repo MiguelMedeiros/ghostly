@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PaymentReview, PaymentTarget } from "@ghostly/core";
 import { ArkadeAdapter, type ArkPrepared as Prepared } from "../src/engine/paymentAdapters/arkade";
 import { PaymentCoordinator, type IntentRepository, type SavedIntent } from "../src/engine/paymentAdapters/coordinator";
+// covers: payments.arkade.send, payments.arkade.request, payments.chat.reconcile, wallet.ark.send
 
 /**
  * A scripted stand-in for the part of @arkade-os/sdk the adapter touches. Transactions are JSON inside base64

@@ -11,6 +11,7 @@ import { ProviderSources } from "../src/engine/paymentAdapters/providers/sources
 import { FakeLightningProvider, fakeInvoice, fakeLightning } from "../src/engine/paymentAdapters/providers/testing";
 import type { ProviderDescriptor, ProviderNetwork } from "../src/engine/paymentAdapters/providers/types";
 import { testInvoice } from "../../core/test/invoice";
+// covers: wallet.lightning.sources, wallet.onchain.sources, wallet.mode
 
 /**
  * The engine's Lightning service and the per-mode sources under it: what reaches a contact is the invoice

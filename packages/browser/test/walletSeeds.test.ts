@@ -13,6 +13,7 @@ import { intentRepository, sealSeed } from "../src/engine/paymentAdapters/persis
 import type { SavedIntent } from "../src/engine/paymentAdapters/coordinator";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
 import { FakeBarkServer } from "./helpers/fakeBark";
+// covers: wallet.ready, wallet.mode, wallet.usdt.create, wallet.usdt.backup, wallet.ark.create, wallet.ark.backup, wallet.bark.backup
 
 /**
  * The seed handling of the Ark, USDT and Bark wallets: locked wallets, wrong passwords, restores, and the

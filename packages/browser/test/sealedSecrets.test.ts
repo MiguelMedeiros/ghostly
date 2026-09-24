@@ -5,6 +5,7 @@ import { intentRepository, newDeviceKey, sealSeed, unsealSeed, type EncryptedSee
 import type { SavedIntent } from "../src/engine/paymentAdapters/coordinator";
 import { redact } from "../src/engine/paymentAdapters/providers/types";
 import { STORES, transact } from "../src/shared/idb";
+// covers: payments.chat.reconcile, wallet.ark.backup, wallet.usdt.backup
 
 /**
  * PBKDF2 at 600,000 rounds costs about a second per call on a loaded machine. The derivation is run with

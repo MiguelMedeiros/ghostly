@@ -3,6 +3,7 @@ import { HDNodeWallet, Interface, Transaction, getAddress, keccak256 } from "eth
 import { ETHEREUM_USDT, PaymentPreflightError, type PaymentReview, type PaymentTarget } from "@ghostly/core";
 import { UsdtAdapter, type UsdtConfig, type UsdtPrepared } from "../src/engine/paymentAdapters/usdt";
 import { PaymentCoordinator, type IntentRepository, type SavedIntent } from "../src/engine/paymentAdapters/coordinator";
+// covers: payments.usdt.send, payments.chat.reconcile, payments.amounts, wallet.usdt.send
 
 // WDK derives the account from the seed and relays through the adapter's own RPC; this stand-in does the same with ethers.
 vi.mock("@tetherto/wdk-wallet-evm", () => ({

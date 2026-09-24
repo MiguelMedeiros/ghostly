@@ -9,6 +9,7 @@ import { intentRepository } from "../src/engine/paymentAdapters/persistence";
 import { cashuMint, CASHU_MINT_SOURCE } from "../src/engine/paymentAdapters/providers/cashuMint";
 import { FakeLightningProvider, FakeOnchainProvider, fakeAddress, fakeInvoice, fakeLightning, fakeOnchain } from "../src/engine/paymentAdapters/providers/testing";
 import type { StoredLink, StoredPayment } from "../src/shared/types";
+// covers: payments.chat.review, payments.chat.method-off, payments.chat.reconcile, wallet.mode, wallet.onchain.sources, wallet.cashu.mint.manage, wallet.cashu.export
 
 /** A connected contact, as far as the engine's payment paths look at it. */
 function stubLink(overrides: Record<string, unknown> = {}) {

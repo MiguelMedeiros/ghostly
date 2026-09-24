@@ -1,4 +1,5 @@
 import { beforeEach, expect, it, vi } from "vitest";
+// covers: wallet.bark.create
 
 /** The WebAssembly SDK, reduced to the calls barkSdk.ts makes. */
 const bark = vi.hoisted(() => ({

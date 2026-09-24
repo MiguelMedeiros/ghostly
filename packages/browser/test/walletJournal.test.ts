@@ -4,6 +4,7 @@ import { CashuWallet, assertAmount, normalizeMintUrl } from "../src/engine/walle
 import { TEST_MINT } from "../src/shared/mints";
 import type { PendingMelt, StoredPayment, StoredProof, StoredQuote, WalletTx } from "../src/shared/types";
 import { FakeWallet, failures, mint, resetDb, rows, seed as seedRows } from "./fakes";
+// covers: wallet.cashu.mint.add, wallet.cashu.receive-lightning, wallet.cashu.pay-invoice, wallet.cashu.receive-token, wallet.cashu.test-sats, wallet.history
 
 /** What the scripted mint answers beyond `mint` in fakes.ts: its keys and info, and melt quotes. */
 const extra = vi.hoisted(() => ({

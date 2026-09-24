@@ -5,6 +5,7 @@ import { CashuMintLightning, cashuMint } from "../src/engine/paymentAdapters/pro
 import { describeLightningProvider } from "../src/engine/paymentAdapters/providers/contractSuite";
 import { fakeInvoice } from "../src/engine/paymentAdapters/providers/testing";
 import { isNothingSpentError } from "../src/engine/paymentAdapters/providers/types";
+// covers: wallet.lightning.provider-contract, wallet.lightning.cashu-mint.receive, wallet.lightning.cashu-mint.pay
 
 /**
  * The Cashu mints as a Lightning source run the same contract as every other provider, against a scripted

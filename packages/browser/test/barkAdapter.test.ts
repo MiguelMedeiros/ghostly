@@ -2,6 +2,7 @@ import { beforeEach, expect, it } from "vitest";
 import type { PaymentReview, PaymentTarget } from "@ghostly/core";
 import { BarkAdapter, barkTiming, type BarkConfig } from "../src/engine/paymentAdapters/bark";
 import { FakeBarkServer } from "./helpers/fakeBark";
+// covers: payments.bark.send, wallet.bark.send
 
 const provider = "https://ark.signet.2nd.dev", explorer = "https://esplora.signet.2nd.dev";
 const MNEMONIC = "abandon ".repeat(11) + "about";

@@ -7,6 +7,7 @@ import { S3Store, validateS3Config, type S3Config } from "../src/backup/s3";
 import { createdFromName, heldName, manifestName, newSpace } from "../src/backup/storage";
 import { decodeBackup, encodeBackup, restoreArkDatabase, snapshotArkDatabase, type ArkDatabaseSnapshot } from "../src/engine/paymentAdapters/backup";
 import { wrap } from "../src/shared/idb";
+// covers: backup.envelope, backup.passphrase-rules, backup.database-snapshot, storage.s3, wallet.ark.backup
 
 /** PBKDF2 at the real 600,000 rounds is slow on a loaded machine: run fewer, record what was asked. */
 const asked: number[] = [];
