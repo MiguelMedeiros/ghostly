@@ -63,8 +63,8 @@ The implementation column is independent of document status. Existing features c
 | [701](701-http-services.md) | HTTP Local Service Profile | Draft | Legacy desktop/extension hosting; web viewer where supported; not paired hosted HTTP. |
 | [800](800-invite-join.md) | Invite and Join | Draft | Existing bearer invite; admission protocol proposed |
 | [801](801-invitation-profiles.md) | Implemented Invitation Profiles | Draft | Current modern pair1/pair2d creation plus legacy imports. |
-| [900](900-group-sessions.md) | Group Session Negotiation | Draft | Contract of the first profile; core protocol implemented |
-| [Group Mesh · 9xx planned](9xx-group-mesh.md) | Group Mesh Distribution Profile | Draft | `group-mesh/1`: core protocol with unit tests; engine and UI in the next increment |
+| [900](900-group-sessions.md) | Group Session Negotiation | Draft | Contract of the first profile; implemented as `group-mesh/1`, text only |
+| [Group Mesh · 9xx planned](9xx-group-mesh.md) | Group Mesh Distribution Profile | Draft | `group-mesh/1`: core, engine and UI; unit and four-browser e2e; web, extension and desktop |
 | [GossipSub · 9xx planned](901-gossipsub.md) | GossipSub Transport | Draft | Proposed; no adapter found |
 | [1000](1000-storage.md) | Storage Contract | Draft | Experimental: object contract, naming and adapter rules |
 | [1001](1001-local-storage.md) | Local File Storage | Draft | Experimental adapter |
@@ -77,7 +77,7 @@ Dependencies in headers describe the candidate modular design. Conditional depen
 1. **00–03, 100–101:** review process/Core/key lifecycle, then capability/transport agreement and the WebRTC binding. Exit: exact profiles and two independent implementations with downgrade, invite and reconnect tests.
 2. **102–103:** demonstrate interchangeable data adapters using the same application capability. Exit: measured supported platforms, endpoint authentication and policy-respecting failure/fallback; not just sockets connecting.
 3. **300–302:** demonstrate optional external proofs and no-proof sessions. Exit: independent verification, replay/rotation tests and explicit correlation tradeoffs. Keet remains gated by API feasibility in 303.
-4. **Groups are documented now, implementation later:** 800, 900 and 901 remain review drafts. The authorized implementation sequence is the paired-chat base, then Iroh, then HyperDHT/Holepunch. The subsequently authorized proof sequence is Nostr, then Pubky, then Keet in 1:1 sessions. Nostr and explicit Pubky/Keet-compatible local imports are implemented experimentally; external Pubky/Keet signer bridges remain blocked. Group implementation still needs its own scope decision.
+4. **Groups:** 800 and 901 remain review drafts; 900 has its first profile, the [group mesh](9xx-group-mesh.md), implemented for text between up to eight members. The authorized implementation sequence was the paired-chat base, then Iroh, then HyperDHT/Holepunch. The subsequently authorized proof sequence is Nostr, then Pubky, then Keet in 1:1 sessions. Nostr and explicit Pubky/Keet-compatible local imports are implemented experimentally; external Pubky/Keet signer bridges remain blocked. Group implementation still needs its own scope decision.
 
 400, 500, 600, 700 and 200/201/203 document existing application capabilities and their modular evolution. These milestones do not promise implementation dates or claim that all adapters exist. Group security, topology and abuse limits must be validated before release claims.
 

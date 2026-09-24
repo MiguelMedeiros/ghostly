@@ -7,6 +7,7 @@ import { Settings } from "./pages/Settings";
 import { Services } from "./pages/Services";
 import { Profile } from "./pages/Profile";
 import { Wallet } from "./pages/Wallet";
+import { GroupChat } from "./pages/GroupChat";
 import { SettingsProvider } from "./contexts/SettingsContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { I18nProvider } from "./contexts/I18nContext";
@@ -105,6 +106,7 @@ export function Root() {
                     <Route element={<App />}>
                       <Route path="/" element={<Home />} />
                       <Route path="/chat/*" element={<ChatRoute />} />
+                      <Route path="/group/:groupId" element={<GroupChat />} />
                       <Route path="/settings" element={<Settings />} />
                       <Route path="/wallet" element={<Wallet />} />
                       <Route path="/services" element={<Services />} />

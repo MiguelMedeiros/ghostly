@@ -13,7 +13,7 @@ export function setDatabaseName(name: string): void {
 export function databaseName(): string {
   return dbName;
 }
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 
 export const STORES = {
   links: "links",
@@ -27,6 +27,8 @@ export const STORES = {
   walletTx: "walletTx",
   melts: "melts",
   intents: "paymentIntents",
+  /** Private groups (WISP 900): membership chain, epoch secrets and my own recent messages, by group id. */
+  groups: "groups",
 } as const;
 
 /**
@@ -72,6 +74,8 @@ export function openDb(): Promise<IDBDatabase> {
       if (!has(STORES.files)) {
         db.createObjectStore(STORES.files, { keyPath: "id" }).createIndex("byLink", "linkId");
       }
+      // v7: private groups.
+      if (!has(STORES.groups)) db.createObjectStore(STORES.groups, { keyPath: "id" });
     };
     request.onsuccess = () => {
       // Let the other context upgrade the schema instead of blocking it.
@@ -93,7 +97,7 @@ export function openDb(): Promise<IDBDatabase> {
  */
 export async function clearChatData(): Promise<void> {
   if (typeof indexedDB === "undefined") return;
-  const names = [STORES.links, STORES.messages, STORES.files, STORES.services];
+  const names = [STORES.links, STORES.messages, STORES.files, STORES.services, STORES.groups];
   const tx = (await openDb()).transaction(names, "readwrite");
   for (const name of names) tx.objectStore(name).clear();
   await new Promise<void>((resolve, reject) => {

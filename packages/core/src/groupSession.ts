@@ -38,6 +38,9 @@ export const GROUP_LIMITS = {
   chainPiece: 24,
 } as const;
 
+/** What every member should know about who can read what, in the words the apps show. */
+export const GROUP_READ_NOTE = `Everyone in the group can read everything sent while they are a member. Someone removed keeps what they already received and cannot read what comes after; someone who joins later cannot read what came before. Messages go directly to each member; whoever was away gets the last ${GROUP_LIMITS.outlog} messages from each member when they meet again.`;
+
 export interface GroupMessageFrame { t: "group-msg"; g: string; e: number; s: string; n: number; ts: number; nn: string; c: string; sig: string }
 export interface GroupCommitFrame { t: "group-commit"; g: string; commit: GroupCommit; secret?: SealedSecret }
 export interface GroupSyncFrame { t: "group-sync"; g: string; e: number; h: string; have: Record<string, Record<string, number>>; secrets: number[] }
@@ -296,6 +299,16 @@ export class GroupSession {
       this.out("left", "You left this group");
       await this.persist();
       if (admin && admin !== this.myKey) this.hooks.send(admin, { t: "group-leave", g: this.id });
+      this.hooks.changed();
+    });
+  }
+
+  /** Told out of band (the admin's contact chat) that I was removed, before or instead of the commit. */
+  markRemoved(): Promise<void> {
+    return this.serialize(async () => {
+      if (this.state.status !== "active") return;
+      this.out("removed", "You were removed from this group");
+      await this.persist();
       this.hooks.changed();
     });
   }
