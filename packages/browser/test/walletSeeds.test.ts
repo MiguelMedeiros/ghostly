@@ -13,6 +13,7 @@ import { intentRepository, sealSeed } from "../src/engine/paymentAdapters/persis
 import type { SavedIntent } from "../src/engine/paymentAdapters/coordinator";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
 import { FakeBarkServer } from "./helpers/fakeBark";
+import { phraseLeaks, TEST_PHRASE } from "./helpers/phraseLeaks";
 // covers: wallet.ready, wallet.mode, wallet.usdt.create, wallet.usdt.backup, wallet.ark.create, wallet.ark.backup, wallet.bark.backup
 
 /**
@@ -29,6 +30,8 @@ const fx = vi.hoisted(() => ({
   info: { network: "bitcoin", signerPubkey: `02${"ab".repeat(32)}` },
   adapters: [] as { mnemonic: string; dispose: ReturnType<typeof import("vitest").vi.fn> }[],
 }));
+// The wallets draw their own phrase; a test that looks for it in a file has them draw TEST_PHRASE.
+vi.mock("@scure/bip39", async (original) => { const bip39 = await original<typeof import("@scure/bip39")>(); return { ...bip39, generateMnemonic: vi.fn(bip39.generateMnemonic) }; });
 vi.mock("@arkade-os/sdk", async (original) => ({ ...(await original<object>()), RestArkProvider: class { getInfo = async () => fx.info; } }));
 vi.mock("../src/engine/paymentAdapters/arkade", () => ({
   ARK_NETWORKS: ["bitcoin", "mutinynet", "signet", "regtest"],
@@ -214,14 +217,16 @@ describe("the USDT wallet's seed", () => {
   });
 
   it("its backup file is sealed with the chosen password, carries its payments, and restores the same phrase", async () => {
+    vi.mocked(generateMnemonic).mockReturnValueOnce(TEST_PHRASE);
     const wallet = new UsdtWallet(() => {}); await wallet.start(); await wallet.ensureReady();
     const mnemonic = connected(UsdtAdapter.connect);
+    expect(mnemonic).toBe(TEST_PHRASE);
     const paid = intent();
     await intentRepository.put(paid);
     await intentRepository.put(intent({ method: "arkade", network: "bitcoin" }));
     await expect(wallet.exportBackup("short")).rejects.toThrow("Use at least 12 characters for the backup password");
     const file = await wallet.exportBackup(CHOSEN);
-    expect(file).not.toContain(mnemonic.split(" ")[0] + " ");
+    expect(phraseLeaks(file)).toEqual([]);
     expect(JSON.parse(file)).toMatchObject({ format: "ghostly-usdt-encrypted", version: 1 });
     await wallet.stop();
 

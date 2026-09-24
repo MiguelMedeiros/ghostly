@@ -9,7 +9,11 @@ import { PaymentCoordinator } from "../src/engine/paymentAdapters/coordinator";
 import { intentRepository } from "../src/engine/paymentAdapters/persistence";
 import { STORES, openDb, store, transact, wrap } from "../src/shared/idb";
 import { FakeBarkServer } from "./helpers/fakeBark";
+import { phraseLeaks, TEST_PHRASE } from "./helpers/phraseLeaks";
 // covers: wallet.bark.mainnet-off, wallet.bark.create, wallet.bark.send, wallet.bark.backup, payments.chat.reconcile
+
+// The wallet draws its own phrase; a test that looks for it in storage has it draw TEST_PHRASE.
+vi.mock("@scure/bip39", async (original) => { const bip39 = await original<typeof import("@scure/bip39")>(); return { ...bip39, generateMnemonic: vi.fn(bip39.generateMnemonic) }; });
 
 const provider = "https://ark.signet.2nd.dev", explorer = "https://esplora.signet.2nd.dev";
 let server: FakeBarkServer;
@@ -147,13 +151,15 @@ describe("the Bark wallet", () => {
 
   it("Testnet makes a signet wallet by itself, pins the server key, and keeps each mode's wallet apart", async () => {
     const wallet = make();
+    vi.mocked(generateMnemonic).mockReturnValueOnce(TEST_PHRASE);
     await wallet.start(); await wallet.setMode("testnet");
     await wallet.ensureReady();
+    expect((await wallet.backup()).mnemonic).toBe(TEST_PHRASE);
     expect(wallet.view).toMatchObject({ configured: true, locked: false, network: "signet", provider: TESTNET_BARK.provider, balance: 0 });
     expect(wallet.view.address).toMatch(/^tark1p/);
     const saved = await wrap<{ config: BarkConfig; seed: unknown; deviceKey: string }>((await store(STORES.settings, "readonly")).get("barkWallet"));
     expect(saved.config).toMatchObject({ network: "signet", serverKey: server.key });
-    expect(JSON.stringify(saved), "the phrase is sealed, never stored as text").not.toContain((await wallet.backup()).mnemonic.split(" ")[0] + " ");
+    expect(phraseLeaks(JSON.stringify(saved)), "the phrase is sealed, never stored as text").toEqual([]);
 
     await wallet.setMode("mainnet");
     expect(await settingsKeys()).toEqual(["barkWallet-mode-testnet"]);
@@ -198,12 +204,14 @@ describe("the Bark wallet", () => {
 
   it("an encrypted backup restores the phrase, the server and the payments into a fresh profile", async () => {
     const wallet = make();
+    vi.mocked(generateMnemonic).mockReturnValueOnce(TEST_PHRASE);
     await wallet.start(); await wallet.setMode("testnet"); await wallet.ensureReady();
     const { mnemonic, config: original } = await wallet.backup();
     await intentRepository.put({ review: { ...review(target("tark1psrvx"), 5, 0), state: "submitted" }, prepared: { address: "tark1psrvx", amount: 5, fee: 0, after: 0 } });
     await expect(wallet.exportBackup("short")).rejects.toThrow("12 characters");
     const file = await wallet.exportBackup("correct horse battery");
-    expect(file).not.toContain(mnemonic.split(" ")[0] + " ");
+    expect(mnemonic).toBe(TEST_PHRASE);
+    expect(phraseLeaks(file)).toEqual([]);
     await wallet.stop();
 
     await transact([STORES.settings, STORES.intents], (s) => { s[STORES.settings].clear(); s[STORES.intents].clear(); });

@@ -53,19 +53,28 @@ async function downloadBackup(page: Page, panel: Locator, name: "Ark" | "USDT"):
   return { file: download.suggestedFilename(), text };
 }
 
-/** The file is sealed: neither the phrase nor any run of its words is in it. Compared here, never printed. */
+/**
+ * The file is sealed: neither the phrase nor any run of its words is in it. Compared here, never printed.
+ *
+ * The phrase is the app's own, random, so single words are not looked for in the text: the file's keys
+ * ("version", "vault", "salt") are BIP-39 words themselves. Instead the file must be nothing but its
+ * envelope, whose only text is the format, around bytes; the phrase can then only be in the bytes.
+ */
 function expectSealed(text: string, words: string[], format: string): void {
-  const envelope = JSON.parse(text) as Record<string, unknown>;
+  const envelope = JSON.parse(text) as { format: unknown; version: unknown; vault: Record<string, unknown> };
+  expect(Object.keys(envelope).sort()).toEqual(["format", "vault", "version"]);
   expect(envelope.format).toBe(format);
   expect(envelope.version).toBe(1);
-  expect(typeof envelope.vault === "string" || (typeof envelope.vault === "object" && envelope.vault !== null)).toBe(true);
-  const lower = text.toLowerCase();
-  expect(lower.includes(words.join(" ")), "the phrase is not in the file").toBe(false);
-  const pairs = words.slice(1).filter((w, i) => new RegExp(`(^|[^a-z])${words[i]}[^a-z]{1,4}${w}([^a-z]|$)`).test(lower));
-  expect(pairs.length, "no two words of the phrase follow each other in the file").toBe(0);
-  // Encrypted bytes can spell a short word now and then; a phrase in the clear would show most of them.
-  const loose = words.filter((w) => new RegExp(`(^|[^a-z])${w}([^a-z]|$)`).test(lower));
-  expect(loose.length, "the words of the phrase are not in the file").toBeLessThan(3);
+  expect(Object.keys(envelope.vault).sort()).toEqual(["ciphertext", "iv", "salt", "version"]);
+  expect(envelope.vault.version).toBe(1);
+  const isBytes = (v: unknown) => Array.isArray(v) && v.length > 0 && v.every((b) => Number.isInteger(b) && b >= 0 && b <= 255);
+  expect([envelope.vault.salt, envelope.vault.iv, envelope.vault.ciphertext].every(isBytes), "salt, nonce and ciphertext are bytes").toBe(true);
+  const bytes = Buffer.from(envelope.vault.ciphertext as number[]).toString("latin1").toLowerCase();
+  for (const where of [text.toLowerCase(), bytes]) {
+    expect(where.includes(words.join(" ")), "the phrase is not in the file").toBe(false);
+    const pairs = words.slice(1).filter((w, i) => new RegExp(`(^|[^a-z])${words[i]}[^a-z]{1,4}${w}([^a-z]|$)`).test(where));
+    expect(pairs.length, "no two words of the phrase follow each other in the file").toBe(0);
+  }
 }
 
 // A failure must not keep the phrase on disk: no trace, screenshot or video of these pages.

@@ -8,6 +8,7 @@ import { newBdkPhrase } from "../src/engine/paymentAdapters/providers/bdkPhrase"
 import { describeOnchainProvider } from "./helpers/providerContract";
 import { FakeEsplora } from "./helpers/fakeEsplora";
 import { nodeBdk } from "./helpers/bdkNode";
+import { phraseLeaks, TEST_PHRASE } from "./helpers/phraseLeaks";
 // covers: wallet.onchain.bdk.create, wallet.onchain.bdk.send, wallet.onchain.provider-contract
 
 vi.setConfig({ testTimeout: 30_000 });
@@ -81,14 +82,14 @@ describe("the BDK wallet", () => {
   });
 
   it("stores its state without the phrase or a private key, and keeps its addresses across a restart", async () => {
-    const phrase = newBdkPhrase(), s = settings({}, phrase);
+    const s = settings({}, TEST_PHRASE);
     const first = await open(s);
     const shown = [await first.receiveAddress(), await first.receiveAddress()];
     await first.close();
     const saved = JSON.stringify(await wrap((await store(STORES.settings, "readonly")).getAll()));
     expect(saved).toContain("tpub");
     expect(saved).not.toMatch(/tprv|xprv/);
-    for (const word of new Set(phrase.split(" "))) expect(saved).not.toContain(` ${word} `);
+    expect(phraseLeaks(saved)).toEqual([]);
     const again = await open(s);
     expect(shown).not.toContain(await again.receiveAddress());
   });

@@ -5,7 +5,7 @@ import { STORES, store, wrap } from "../src/shared/idb";
 
 const createIdentityFromSeed = (seed: Uint8Array) => identityFromSeed(seed).pubKeyZ32;
 import { IdentityProofs, type IdentityLinkHost } from "../src/engine/identities";
-import { fakeKey, fakeKeySign, fakeKeySubject, fakeRecord } from "../src/proofs/testing";
+import { fakeKey, fakeKeyring, fakeKeySign, fakeKeySubject, fakeRecord } from "../src/proofs/testing";
 import type { IdentityProofProvider } from "../src/proofs/contract";
 // covers: proofs.share, proofs.withdraw, proofs.revoke, proofs.expiry, proofs.binding, proofs.contract
 
@@ -48,7 +48,11 @@ describe("identity proofs in the engine", () => {
     expect(engines.a.views()).toEqual([]);
     const view = await engines.a.complete({ draftId, evidence: fakeKeySign(identityStatement(binding)) });
     expect(view).toMatchObject({ provider: "fake-key", subject: fakeKeySubject(), sharedWith: 0, verified: { source: "Test signature (Ed25519)" } });
-    expect(JSON.stringify(engines.a.views())).not.toContain("seed");
+    // Neither a "seed" field nor the signer's secret key, in any encoding. (Not the bare letters "seed":
+    // the random keys and signatures in a view spell them now and then.)
+    const shown = JSON.stringify(engines.a.views()), secret = Buffer.from(fakeKeyring.seed);
+    expect(shown).not.toContain('"seed"');
+    for (const encoded of [secret.toString("hex"), secret.toString("base64url"), secret.toString("base64"), [...secret].join(",")]) expect(shown).not.toContain(encoded);
   });
 
   it("refuses unknown providers, bad subjects and validity beyond the provider's limit", () => {
