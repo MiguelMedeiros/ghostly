@@ -421,6 +421,8 @@ export class HttpHost {
     } catch (error) {
       clearTimeout(timeout);
       if (!this.isCurrent(stream)) return;
+      // Read before end(), which aborts the signal itself.
+      const timedOut = stream.abort.signal.aborted;
       this.end(stream);
       if (headersSent) {
         try {
@@ -428,7 +430,7 @@ export class HttpHost {
         } catch {
           // channel already closed
         }
-      } else if (stream.abort.signal.aborted && (error as Error)?.name === "AbortError") {
+      } else if (timedOut && (error as Error)?.name === "AbortError") {
         this.fail(frame.id, 504, "timeout", "The local service did not answer in time.");
       } else {
         this.fail(frame.id, 502, "unreachable", "The local service is not reachable.");
