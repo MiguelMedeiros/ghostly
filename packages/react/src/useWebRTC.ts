@@ -555,7 +555,10 @@ export function useWebRTC({
   }, [incomingCallSignal, handleAnswer, hangUp, updateCallState, setFastPoll, addCallEventMessage, applyRemotePicture]);
 
   useEffect(() => {
+    const attempts = attemptRef;
     return () => {
+      // A start or an answer still waiting for the microphone or for ICE is cancelled, as a hang-up cancels it.
+      attempts.current++;
       if (hangupTimerRef.current) clearTimeout(hangupTimerRef.current);
 
       if (localStreamRef.current) {
