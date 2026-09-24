@@ -47,15 +47,16 @@ function makeLink(params: LinkParams, side: Side): GhostLink {
  * put raw frames on the wire exactly as the other side's app would, so what one side makes of
  * arbitrary peer input can be observed.
  */
-function linkedPair(sides: [Side, Side] = [{}, {}], drop?: (data: string | Uint8Array) => boolean) {
+function linkedPair(sides: [Side, Side] = [{}, {}], drop?: (data: string | Uint8Array) => boolean,
+  rewrite?: (data: string | Uint8Array) => string | Uint8Array) {
   const invitation = createLink();
   const onMessageA = vi.fn(), onMessageB = vi.fn();
   const a = makeLink(invitation.mine, { ...sides[0], events: { onMessage: onMessageA, ...sides[0].events } });
   const b = makeLink(invitation.invite, { ...sides[1], events: { onMessage: onMessageB, ...sides[1].events } });
   const [ca, cb] = createChannelPair();
-  if (drop) for (const channel of [ca, cb]) {
+  if (drop || rewrite) for (const channel of [ca, cb]) {
     const send = channel.send.bind(channel);
-    channel.send = data => { if (!drop(data)) send(data); };
+    channel.send = data => { if (!drop?.(data)) send(rewrite ? rewrite(data) : data); };
   }
   (a as unknown as Internal).attach(ca);
   (b as unknown as Internal).attach(cb);
@@ -254,6 +255,31 @@ describe("paired session teardown", () => {
     expect(t.a.isDataLinkOpen).toBe(true);
     await vi.advanceTimersByTimeAsync(LIVENESS_PING_MS);
     expect(t.a.isDataLinkOpen).toBe(false);
+  });
+
+  it("a peer that said it answers pings and freezes before the first one is disconnected all the same", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    const t = linkedPair();
+    await t.ready();
+    t.cb.onMessage = null; // B's app stops right after the open, before any ping went out
+    await vi.advanceTimersByTimeAsync(LIVENESS_PING_MS * LIVENESS_MISSED_PINGS);
+    expect(t.a.isDataLinkOpen).toBe(true);
+    await vi.advanceTimersByTimeAsync(LIVENESS_PING_MS);
+    expect(t.a.isDataLinkOpen).toBe(false);
+  });
+
+  it("an older app, whose offer does not say it answers pings, is not cut off for staying silent from the open", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    const unsaid = (data: string | Uint8Array) => {
+      if (typeof data !== "string" || !data.startsWith('{"t":"pair-offer"')) return data;
+      const { extensions: _, ...offer } = JSON.parse(data) as Record<string, unknown>;
+      return JSON.stringify(offer);
+    };
+    const t = linkedPair(undefined, undefined, unsaid);
+    await t.ready();
+    t.cb.onMessage = null;
+    await vi.advanceTimersByTimeAsync(LIVENESS_PING_MS * 20);
+    expect(t.a.isDataLinkOpen).toBe(true);
   });
 
   it("a ping that cannot be sent drops the session at once", async () => {

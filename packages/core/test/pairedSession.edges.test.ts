@@ -172,6 +172,30 @@ describe("paired session: offers a peer may not make", () => {
     await vi.waitFor(() => expect(h.sent.some(f => f.startsWith('{"t":"pair-proof"'))).toBe(true));
   });
 
+  it("says in its offer that it answers pings, outside the capabilities and the transcript", async () => {
+    const h = lone();
+    const own = JSON.parse(await vi.waitFor(() => { const f = h.sent.find(x => x.includes("pair-offer")); expect(f).toBeDefined(); return f!; }));
+    expect(own.extensions).toEqual(["ping/1"]);
+    expect(own.capabilities).not.toContain("ping/1");
+  });
+
+  it.each<[string, unknown, boolean]>([
+    ["says it answers pings", ["ping/1"], true],
+    ["says only something else", ["later/1"], false],
+    ["says nothing (an older app)", undefined, false],
+    ["sends a malformed list", "ping/1", false],
+    ["sends a list with a bad entry", ["ping/1", 7], false],
+  ])("reads whether a peer that %s answers pings, and never fails the offer over it", async (_, extensions, answers) => {
+    const { a, b } = pair({ trustOnFirstUse: true }, { trustOnFirstUse: true }, (frame, send) => {
+      if (!frame.startsWith('{"t":"pair-offer"')) return send(frame);
+      const { extensions: __, ...rest } = JSON.parse(frame) as Record<string, unknown>;
+      send(JSON.stringify(extensions === undefined ? rest : { ...rest, extensions }));
+    });
+    await vi.waitFor(() => { expect(a.state.status).toBe("ready"); expect(b.state.status).toBe("ready"); });
+    expect(a.peerAnswersPings).toBe(answers);
+    expect(b.peerAnswersPings).toBe(true);
+  });
+
   it("fails on its own key reflected back as the peer's", async () => {
     const h = lone();
     const own = JSON.parse(await vi.waitFor(() => { const f = h.sent.find(x => x.includes("pair-offer")); expect(f).toBeDefined(); return f!; }));

@@ -33,6 +33,8 @@ interface Offer {
   versions: number[];
   transports: string[];
   capabilities: string[];
+  /** Absent in apps that do not send it; see `OFFER_EXTENSIONS`. */
+  extensions?: string[];
   key: string;
   nonce: string;
 }
@@ -77,6 +79,14 @@ export interface PairedSessionOptions {
  */
 export type PaymentMethodName = "cashu" | "lightning" | "arkade" | "usdt" | "bark" | "bitcoin";
 
+/**
+ * What this app does that grants nothing, said outside `capabilities`: apps before 0.5 accept at most 16
+ * of those, and a full offer is already there. The field is not in the transcript (an app that does not
+ * know it could not sign it), so nothing that needs authenticating may go here; the DTLS binding of the
+ * transcript still ties it to this connection. `ping/1`: this app answers `paired-ping`, from the open.
+ */
+const OFFER_EXTENSIONS = ["ping/1"];
+
 const MAX_HANDSHAKE_BYTES = 4096;
 const KEY = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;
 const NONCE = /^[A-Za-z0-9_-]{43}$/;
@@ -90,7 +100,9 @@ function parseOffer(v: Record<string, unknown>): Offer | null {
     !v.versions.every(n => Number.isSafeInteger(n) && n > 0) || new Set(v.versions).size !== v.versions.length ||
     !isList(v.transports) || !isList(v.capabilities, 32) || typeof v.key !== "string" || !KEY.test(v.key) ||
     typeof v.nonce !== "string" || !NONCE.test(v.nonce)) return null;
-  return { t: "pair-offer", versions: v.versions, transports: v.transports, capabilities: v.capabilities, key: v.key, nonce: v.nonce };
+  // Optional and new: one this app cannot read counts as none said, rather than failing the offer.
+  const extensions = isList(v.extensions, 32) ? v.extensions : undefined;
+  return { t: "pair-offer", versions: v.versions, transports: v.transports, capabilities: v.capabilities, ...(extensions && { extensions }), key: v.key, nonce: v.nonce };
 }
 const offerTuple = (o: Offer) => [o.key, o.nonce, o.versions, o.transports, o.capabilities];
 
@@ -117,7 +129,7 @@ export class PairedSession {
     this.identity = identityFromSeedB64(options.credentials.seedB64);
     this.transport = options.binding?.transport ?? "webrtc/1";
     this.offer = { t: "pair-offer", versions: [1], transports: options.transports ?? [this.transport], capabilities: ["chat/1", "signed-signal/1", ...(options.trustOnFirstUse ? ["tofu/1"] : []), ...(options.filesSupport ? ["files/2"] : []), ...(options.paymentsSupport && (options.cashuPaymentsSupport !== false || options.lightningPaymentsSupport !== false) ? ["payments/1"] : []), ...(options.paymentsSupport && options.cashuPaymentsSupport !== false ? ["payments-cashu/1"] : []), ...(options.paymentsSupport && options.lightningPaymentsSupport !== false ? ["payments-lightning/1"] : []), ...(options.arkPaymentsSupport && options.paymentsSupport ? ["payments-arkade/1"] : []), ...(options.usdtPaymentsSupport && options.paymentsSupport ? ["payments-usdt/1"] : []), ...(options.barkPaymentsSupport && options.paymentsSupport ? ["payments-bark/1"] : []), ...(options.transportSwitchSupport ? ["transport-switch/1"] : []), ...(options.holdSupport ? [HOLD_CAPABILITY] : []), ...(options.proofSupport ? PROOF_ADAPTERS.map(proofCapability) : []), ...(options.identitySupport ? [IDENTITY_PROOF_CAPABILITY] : []), ...(options.allowFallback ? ["transport-fallback/1"] : [])],
-      key: this.identity.pubKeyZ32, nonce: toBase64Url(randomBytes(32)) };
+      extensions: OFFER_EXTENSIONS, key: this.identity.pubKeyZ32, nonce: toBase64Url(randomBytes(32)) };
   }
 
   supports(capability: "files/2" | "payments/1" | "payments-arkade/1" | "payments-usdt/1" | "payments-bark/1" | typeof HOLD_CAPABILITY): boolean { return this.state.status === "ready" && this.offer.capabilities.includes(capability) && !!this.peer?.capabilities.includes(capability); }
@@ -146,6 +158,8 @@ export class PairedSession {
   /** Both offers carry `identity-proof/1`. */
   get identitySupport(): boolean { return this.state.status === "ready" && this.offer.capabilities.includes(IDENTITY_PROOF_CAPABILITY) && !!this.peer?.capabilities.includes(IDENTITY_PROOF_CAPABILITY); }
   get peerTransports(): readonly string[] { return this.peer?.transports ?? []; }
+  /** The peer said in its offer that it answers pings, so its silence from the open means it stopped. */
+  get peerAnswersPings(): boolean { return !!this.peer?.extensions?.includes("ping/1"); }
   get peerAllowsFallback(): boolean { return this.peer?.capabilities.includes("transport-fallback/1") ?? false; }
 
   start(): void {

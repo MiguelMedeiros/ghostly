@@ -1043,7 +1043,7 @@ export class GhostLink {
           this.autoConnectFailures = 0;
           this.lastAutoConnectAt = 0;
           traceLink(this.myPubKeyZ32, "paired-ready");
-          this.startLiveness(channel);
+          this.startLiveness(channel, paired.peerAnswersPings);
           for (const waiter of this.openWaiters.splice(0)) waiter.resolve();
           this.options.events?.onPresence?.(this.presence);
         },
@@ -1205,9 +1205,14 @@ export class GhostLink {
     for (const waiter of this.openWaiters.splice(0)) waiter.resolve();
   }
 
-  /** Pings the paired peer; a session that stopped answering is closed, so it can be dialled again. */
-  private startLiveness(channel: FrameChannel): void {
+  /**
+   * Pings the paired peer; a session that stopped answering is closed, so it can be dialled again. A peer
+   * that said in its offer that it answers pings counts from the open; any other counts once it answered
+   * one (an app that never does is never cut off for it).
+   */
+  private startLiveness(channel: FrameChannel, peerAnswersPings = false): void {
     this.stopLiveness();
+    this.peerAnswersPings = peerAnswersPings;
     this.livenessTimer = setInterval(() => {
       if (this.channel !== channel) { this.stopLiveness(); return; }
       if (this.peerAnswersPings && this.unansweredPings >= LIVENESS_MISSED_PINGS) { this.dropDeadSession(channel); return; }
