@@ -40,8 +40,8 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   const who = contact || "your contact";
   /** Why a card cannot be used in this chat: not set up, off here, or off for the contact. */
   const unavailable = (card: Pick<WalletCard, "name" | "ready" | "balance" | "status"> & { id: ChatRail }) => {
-    // A card with nothing to connect to yet says so; one on its way says where it is ("Ark is connecting…").
-    if (!card.ready) return card.status === "Set up" ? `${card.name} is not set up yet` : `${card.name} is ${card.balance.toLowerCase()}`;
+    // A card with nothing to connect to yet (no mint, no source) says so; one on its way says where it is ("Ark is connecting…").
+    if (!card.ready) return card.status === "Set up" || card.status === "Shared balance" ? `${card.name} is not set up yet` : `${card.name} is ${card.balance.toLowerCase()}`;
     if (peer?.paymentMethods && !peer.paymentMethods[card.id]) return `${card.name} is off in this chat`;
     if (peer?.dataLink === "open" && peer.capabilities?.methods && !peer.capabilities.methods[card.id]) return `Your contact does not accept ${card.name} in this chat`;
     return undefined;

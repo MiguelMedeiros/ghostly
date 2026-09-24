@@ -39,6 +39,16 @@ it("says a Cashu card without a mint has to be set up, not that it holds 0 sats"
   expect(cashu.getAttribute("title")).toMatch(/set up/i);
 });
 
+it("says Lightning through the Cashu mints has to be set up when there is no mint", () => {
+  open(everyWallet({ mints: [], balance: 0, lightning: undefined }));
+  expect(screen.getByTestId("payment-card-lightning").getAttribute("title")).toBe("Lightning is not set up yet");
+});
+
+it("still says where a card on its way is", () => {
+  open(everyWallet({ ark: undefined }));
+  expect(screen.getByTestId("payment-card-arkade").getAttribute("title")).toBe("Ark is connecting…");
+});
+
 it("says a Bitcoin card without a source has to be set up", () => {
   open(everyWallet({ bitcoin: undefined }));
   expect(screen.getByTestId("payment-card-bitcoin").getAttribute("title")).toMatch(/set up/i);
