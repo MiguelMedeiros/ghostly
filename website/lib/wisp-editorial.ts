@@ -292,8 +292,20 @@ export const editorial: Record<string, Entry> = {
     },
     level: "released",
     note: {
-      en: "Today through the Cashu mint. Direct node and wallet providers (NWC, LND, Core Lightning…) are being built.",
-      "pt-br": "Hoje por meio do mint Cashu. Provedores diretos de nó e carteira (NWC, LND, Core Lightning…) estão sendo construídos.",
+      en: "Through the Cashu mints in the current release. In the next one the Lightning source can also be your own node or wallet: NWC, LND, Core Lightning, a browser wallet (WebLN, web app only) or Breez on a local regtest.",
+      "pt-br": "Pelos mints Cashu na versão atual. Na próxima, a fonte Lightning também pode ser seu próprio nó ou carteira: NWC, LND, Core Lightning, uma carteira do navegador (WebLN, só no app web) ou Breez num regtest local.",
+    },
+    feature: inApp("wallets", "Wallets", "Carteiras"),
+  },
+  "204-bark": {
+    benefit: {
+      en: "A second Ark provider — Second's Bark — beside Arkade, so Ark isn't tied to one implementation.",
+      "pt-br": "Um segundo provedor de Ark — o Bark, da Second — ao lado do Arkade, para o Ark não depender de uma implementação.",
+    },
+    level: "development",
+    note: {
+      en: "Experimental, test networks only (Second's signet server or a local regtest); Mainnet makes no Bark wallet yet. Not interchangeable with Arkade: its own payment method and capability.",
+      "pt-br": "Experimental, só em redes de teste (o servidor signet da Second ou um regtest local); a Mainnet ainda não cria carteira Bark. Não é intercambiável com o Arkade: método e capacidade próprios.",
     },
     feature: inApp("wallets", "Wallets", "Carteiras"),
   },
@@ -302,10 +314,10 @@ export const editorial: Record<string, Entry> = {
       en: "Optionally prove to one contact that you control an outside identity — never required.",
       "pt-br": "Provar, se quiser, a um contato que você controla uma identidade externa — nunca obrigatório.",
     },
-    level: "planned",
+    level: "development",
     note: {
-      en: "Deferred by a release decision (2026-09-21). Earlier experiments are kept, disabled.",
-      "pt-br": "Adiado por decisão de release (21/09/2026). Experimentos anteriores estão guardados, desativados.",
+      en: "Rebuilt on 2026-09-23: a proof is made once in Profile → Identities, shared per chat only when you choose, withdrawable and revocable through a DHT record. Web, desktop and extension; not the CLI.",
+      "pt-br": "Refeito em 23/09/2026: a prova é feita uma vez em Perfil → Identidades, compartilhada por chat só quando você quiser, retirável e revogável por um registro na DHT. Web, desktop e extensão; não a CLI.",
     },
   },
   "301-nostr": {
@@ -313,10 +325,70 @@ export const editorial: Record<string, Entry> = {
       en: "An optional Nostr proof, and where a signer's authority ends.",
       "pt-br": "Uma prova Nostr opcional, e onde termina a autoridade de um signer.",
     },
-    level: "planned",
+    level: "development",
     note: {
-      en: "Deferred with the other external proofs. Not a transport.",
-      "pt-br": "Adiado junto com as outras provas externas. Não é um transporte.",
+      en: "Signed once with a NIP-07 browser extension (web app, desktop) or a NIP-46 remote signer. A proof, not a transport, and not permission to publish.",
+      "pt-br": "Assinada uma vez com uma extensão NIP-07 (app web, desktop) ou um signer remoto NIP-46. Uma prova, não um transporte, nem permissão para publicar.",
+    },
+  },
+  "3xx-domain": {
+    group: "identity",
+    benefit: {
+      en: "Show a contact that you control a domain, with a DNS record or a file on your site.",
+      "pt-br": "Mostrar a um contato que você controla um domínio, com um registro DNS ou um arquivo no seu site.",
+    },
+    level: "development",
+    note: {
+      en: "Experimental. Looked up through a DNS-over-HTTPS resolver the contact chooses and re-checked after a day, so removing the record withdraws the proof. Number not yet assigned.",
+      "pt-br": "Experimental. Consultada por um resolvedor DNS-over-HTTPS que o contato escolhe e reverificada depois de um dia, então remover o registro retira a prova. Número ainda não atribuído.",
+    },
+  },
+  "3xx-openpgp": {
+    group: "identity",
+    benefit: {
+      en: "Sign the statement once with your own gpg — a YubiKey works unchanged — and the contact verifies it locally.",
+      "pt-br": "Assinar a declaração uma vez com o seu próprio gpg — uma YubiKey funciona igual — e o contato verifica localmente.",
+    },
+    level: "development",
+    note: {
+      en: "Holding a key proves nothing about the name or email in its user ID, and the app says so. Number not yet assigned.",
+      "pt-br": "Ter a chave não prova nada sobre o nome ou e-mail do user ID, e o app diz isso. Número ainda não atribuído.",
+    },
+  },
+  "3xx-bitcoin": {
+    group: "identity",
+    benefit: {
+      en: "Prove you hold the key behind a Bitcoin address with one BIP-322 signature from your wallet.",
+      "pt-br": "Provar que você tem a chave de um endereço Bitcoin com uma assinatura BIP-322 da sua carteira.",
+    },
+    level: "development",
+    note: {
+      en: "Experimental. Checked on the device with no blockchain lookup; proves no balance, past payment or willingness to pay. Number not yet assigned.",
+      "pt-br": "Experimental. Verificada no aparelho, sem consultar a blockchain; não prova saldo, pagamento passado nem disposição para pagar. Número ainda não atribuído.",
+    },
+  },
+  "3xx-ssh": {
+    group: "identity",
+    benefit: {
+      en: "An SSH key signs once with ssh-keygen; a GitHub or GitLab account counts through the keys it publishes.",
+      "pt-br": "Uma chave SSH assina uma vez com ssh-keygen; uma conta GitHub ou GitLab conta pelas chaves que publica.",
+    },
+    level: "development",
+    note: {
+      en: "Experimental. Never grants a server login. Number not yet assigned.",
+      "pt-br": "Experimental. Nunca dá acesso a servidor nenhum. Número ainda não atribuído.",
+    },
+  },
+  "3xx-oidc-proofs": {
+    group: "identity",
+    benefit: {
+      en: "Show a contact that an account at Google, Microsoft, Apple, GitLab or Twitch signed in for this conversation.",
+      "pt-br": "Mostrar a um contato que uma conta no Google, Microsoft, Apple, GitLab ou Twitch fez login para esta conversa.",
+    },
+    level: "development",
+    note: {
+      en: "Attested by the provider, not a key you hold; the contact trusts that company. Merged, but not offered until the maintainer registers Ghostly's OAuth clients. Number not yet assigned.",
+      "pt-br": "Atestada pelo provedor, não por uma chave sua; o contato confia nessa empresa. Integrada, mas só oferecida quando o mantenedor registrar os clientes OAuth do Ghostly. Número ainda não atribuído.",
     },
   },
   "302-pubky": {

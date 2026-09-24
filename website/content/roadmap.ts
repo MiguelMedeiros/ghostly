@@ -63,9 +63,10 @@ const en = {
         { text: "Ark via Arkade and USDT via Tether WDK, experimental", level: "development" },
       ],
       next: [
-        { text: "Lightning and on-chain provider contracts", level: "building" },
-        { text: "Ark via Bark", level: "building" },
-        { text: "BDK, Bitcoin Core RPC, Breez SDK, NWC, WebLN, LND, Core Lightning", level: "building" },
+        { text: "Your own Lightning source: NWC, LND, Core Lightning, a browser wallet (WebLN), Breez on a local regtest", level: "development" },
+        { text: "Ark via Bark, test networks only", level: "development" },
+        { text: "On-chain bitcoin in a chat: a BDK wallet (test networks) or Bitcoin Core (desktop)", level: "development" },
+        { text: "Mainnet for Bark, Breez and BDK once reviewed with real money in mind", level: "planned" },
         { text: "Spark, Fedimint, Liquid and other rails", level: "planned" },
       ],
       gate: "Disposable-network settlement, fee limits, unknown-result reconciliation, and recovery or exit tested before any mainnet claim.",
@@ -108,11 +109,13 @@ const en = {
       n: "05",
       title: "Bring an identity — only if you want",
       why: "Nobody needs a public identity to talk. Proofs are optional, several can coexist, and you choose what each contact sees.",
-      now: [{ text: "External proofs and profile lookup deferred by a release decision; earlier experiments kept, disabled", level: "planned" }],
+      now: [
+        { text: "Proofs made once and shared per chat: Nostr, a domain, an OpenPGP or SSH key, a Bitcoin address", level: "development" },
+        { text: "Accounts at Google, Microsoft, Apple, GitLab or Twitch, attested by the provider — merged, not offered until clients are registered", level: "development" },
+      ],
       next: [
-        { text: "Optional proofs: Nostr first, then others", level: "planned" },
+        { text: "Hardware signers and passkeys", level: "planned" },
         { text: "Pubky and Keet", level: "research" },
-        { text: "PGP, SSH, hardware signers, passkeys, Bitcoin address proofs", level: "planned" },
         { text: "Profiles, social graph, posts and publishing — each a separate step", level: "planned" },
       ],
       gate: "Sessions without any proof still work. Proving a key never implies importing a graph or permission to publish.",
@@ -230,9 +233,10 @@ const ptBr: RoadmapCopy = {
         { text: "Ark via Arkade e USDT via Tether WDK, experimentais", level: "development" },
       ],
       next: [
-        { text: "Contratos de provedores Lightning e on-chain", level: "building" },
-        { text: "Ark via Bark", level: "building" },
-        { text: "BDK, Bitcoin Core RPC, Breez SDK, NWC, WebLN, LND, Core Lightning", level: "building" },
+        { text: "Sua própria fonte Lightning: NWC, LND, Core Lightning, uma carteira do navegador (WebLN), Breez num regtest local", level: "development" },
+        { text: "Ark via Bark, só em redes de teste", level: "development" },
+        { text: "Bitcoin on-chain no chat: uma carteira BDK (redes de teste) ou o Bitcoin Core (desktop)", level: "development" },
+        { text: "Mainnet para Bark, Breez e BDK depois de revisados pensando em dinheiro de verdade", level: "planned" },
         { text: "Spark, Fedimint, Liquid e outros trilhos", level: "planned" },
       ],
       gate: "Liquidação em rede descartável, limites de taxa, reconciliação de resultado desconhecido e recuperação ou saída testadas antes de qualquer promessa em mainnet.",
@@ -275,11 +279,13 @@ const ptBr: RoadmapCopy = {
       n: "05",
       title: "Traga uma identidade — só se quiser",
       why: "Ninguém precisa de identidade pública para conversar. Provas são opcionais, várias podem coexistir e você escolhe o que cada contato vê.",
-      now: [{ text: "Provas externas e busca de perfis adiadas por decisão de release; experimentos anteriores guardados, desativados", level: "planned" }],
+      now: [
+        { text: "Provas feitas uma vez e compartilhadas por chat: Nostr, um domínio, uma chave OpenPGP ou SSH, um endereço Bitcoin", level: "development" },
+        { text: "Contas no Google, Microsoft, Apple, GitLab ou Twitch, atestadas pelo provedor — integradas, mas só oferecidas quando os clientes forem registrados", level: "development" },
+      ],
       next: [
-        { text: "Provas opcionais: Nostr primeiro, depois outras", level: "planned" },
+        { text: "Signers de hardware e passkeys", level: "planned" },
         { text: "Pubky e Keet", level: "research" },
-        { text: "PGP, SSH, signers de hardware, passkeys, provas de endereço Bitcoin", level: "planned" },
         { text: "Perfis, grafo social, posts e publicação — cada um um passo separado", level: "planned" },
       ],
       gate: "Sessões sem nenhuma prova continuam funcionando. Provar uma chave nunca implica importar um grafo nem permissão para publicar.",
@@ -352,10 +358,14 @@ const ptBr: RoadmapCopy = {
 export const roadmap: Localized<RoadmapCopy> = { en, "pt-br": ptBr };
 
 /**
- * Candidate status in the site's levels. The adapter roadmap predates today's
- * work; the coordinating update (2026-09-23) moves these into "being built".
+ * Candidate status in the site's levels. The adapter roadmap predates the
+ * wallet-source and identity-proof work merged on dev on 2026-09-23, so those
+ * candidates are pinned to "development" here; nothing is being built outside
+ * dev at the time of writing.
  */
-const BUILDING = new Set([
+const BUILDING = new Set<string>([]);
+const DEVELOPMENT = new Set([
+  // Wallet sources merged on dev (2026-09-23)
   "candidate-ark-via-bark",
   "candidate-bitcoin-on-chain",
   "candidate-lnd",
@@ -364,6 +374,14 @@ const BUILDING = new Set([
   "candidate-webln",
   "candidate-bitcoin-core-rpc",
   "candidate-bdk",
+  "candidate-esplora",
+  // Identity proofs merged on dev (2026-09-23)
+  "candidate-proof",
+  "candidate-nostr",
+  "candidate-openpgp-pgp",
+  "candidate-ssh",
+  "candidate-bitcoin-address-proof",
+  "candidate-github",
 ]);
 const RELEASED = new Set([
   "candidate-pkarr-mainline-dht",
@@ -373,6 +391,7 @@ const RELEASED = new Set([
 ]);
 export function candidateLevel(id: string, status: string): Level {
   if (BUILDING.has(id)) return "building";
+  if (DEVELOPMENT.has(id)) return "development";
   if (RELEASED.has(id)) return "released";
   if (status.startsWith("Current") || status.startsWith("In development")) return "development";
   if (/research/i.test(status)) return "research";

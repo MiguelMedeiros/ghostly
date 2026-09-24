@@ -248,9 +248,10 @@
   background: var(--bg-2);
 }
 .tl-grid {
+  --tl-cols: 5;
   display: grid;
-  grid-template-columns: 170px repeat(5, minmax(185px, 1fr));
-  min-width: 1100px;
+  grid-template-columns: 170px repeat(var(--tl-cols), minmax(185px, 1fr));
+  min-width: calc(170px + var(--tl-cols) * 186px);
 }
 .tl-row {
   display: contents;

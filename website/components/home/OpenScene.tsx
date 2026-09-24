@@ -6,6 +6,7 @@ import { SceneFrame, useScene, type SceneStep } from "@/components/story/SceneFr
 import { Ghost } from "@/components/ghost/Ghost";
 import { Stage, useStep } from "./stage";
 
+/** One colour per layer, bottom to top. */
 const COLORS = ["#22d3ee", "#60a5fa", "#a78bfa", "#fbbf24", "#4ade80"];
 type Layout = { cx: number; cy: number; W: number; D: number; H: number; gap: number; ghost: number };
 const L: Layout = { cx: 760, cy: 560, W: 210, D: 84, H: 22, gap: 92, ghost: 120 };
@@ -85,7 +86,8 @@ function Visual({ layers }: { layers: string[] }) {
   );
 }
 
-/** In portrait the layer names live in the caption sheet, revealed with their slabs. */
+/** In portrait the picture has no room for labels beside the slabs: the layer names live in
+ *  the caption sheet instead, each row lit as its slab arrives (a compact two-column list). */
 function Legend({ layers }: { layers: string[] }) {
   const { p, n, portrait } = useScene();
   if (!portrait) return null;
@@ -129,15 +131,18 @@ export function OpenScene({
   catalogHref: string;
 }) {
   return (
-    <SceneFrame id="open" chapter="open" eyebrow={eyebrow} label={label} steps={steps} stills={[0.3, 0.9]} copyAt="left" length={90} visual={<Visual layers={layers} />}>
+    <SceneFrame id="open" chapter="open" eyebrow={eyebrow} label={label} steps={steps} stills={[0.3, 0.9]} copyAt="left" length={90} seams={false} visual={<Visual layers={layers} />}>
       <Legend layers={layers} />
-      <div className="open-actions">
-        <Link className="btn btn--primary" href={devHref}>
-          {cta} →
-        </Link>
-        <Link className="btn" href={catalogHref}>
-          {catalog}
-        </Link>
+      {/* On phones the panel is a sheet over the picture; the buttons follow the chapter instead (HomePage). */}
+      <div className="open-sheet-only">
+        <div className="open-actions">
+          <Link className="btn btn--primary" href={devHref}>
+            {cta} →
+          </Link>
+          <Link className="btn" href={catalogHref}>
+            {catalog}
+          </Link>
+        </div>
       </div>
     </SceneFrame>
   );

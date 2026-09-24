@@ -11,7 +11,7 @@
   --line-2: #2b3b52;
   --text: #e8edf5;
   --muted: #a3b0c2;
-  --dim: #6b7a90;
+  --dim: #7a8aa6;
   --cyan: #22d3ee;
   --green: #00a884;
   --mint: #4ade80;
@@ -66,7 +66,7 @@ body {
 ::selection {
   background: rgba(34, 211, 238, 0.3);
 }
-:where(a, button, summary, input, select, [tabindex]):focus-visible {
+:where(a, button, summary, input, select, pre, [tabindex]):focus-visible {
   outline: 2px solid var(--cyan);
   outline-offset: 3px;
   border-radius: 6px;
@@ -453,6 +453,7 @@ body {
   flex-direction: column;
   gap: 4px;
   padding: 16px;
+  min-height: calc(100vh - var(--nav-h));
   min-height: calc(100svh - var(--nav-h));
   background: var(--bg);
   border-top: 1px solid var(--line);
@@ -526,6 +527,10 @@ body {
   display: block;
   overflow: visible;
   filter: drop-shadow(0 0 18px color-mix(in srgb, var(--ghost) 45%, transparent));
+}
+/* The halo ghosts draw their own glow; a filter on top would double the cost for nothing. */
+.ghost--halo {
+  filter: none;
 }
 .ghost--float {
   animation: ghost-bob 4.2s ease-in-out infinite;
@@ -613,7 +618,9 @@ body {
 .act-backdrop {
   position: sticky;
   top: 0;
+  height: 100vh;
   height: 100svh;
+  margin-bottom: -100vh;
   margin-bottom: -100svh;
   z-index: 0;
   pointer-events: none;
@@ -633,9 +640,8 @@ body {
   position: relative;
   z-index: 1;
 }
-.act[data-inview="false"] .stage-bob,
-.act[data-inview="false"] .dht-node,
-.act[data-inview="false"] .ghost-eyes--blink {
+/* Idle loops rest while their act, scene or section is off screen. */
+[data-inview="false"] :is(.stage-bob, .dht-node, .ghost-eyes--blink, .ghost-mouth-talk, .act-caret, .particles span, .bg-grid, .ghost--float, .text-gradient-animated, .zzz span) {
   animation-play-state: paused;
 }
 .act-bubble {
@@ -684,16 +690,11 @@ body {
 .stage-bob {
   animation: ghost-bob 4.2s ease-in-out infinite;
 }
-.scene[data-inview="false"] .stage-bob,
-.scene[data-inview="false"] .dht-node,
-.scene[data-inview="false"] .ghost-eyes--blink {
-  animation-play-state: paused;
-}
 .key-light {
   mix-blend-mode: screen;
 }
 /* In the story the act draws the actors; a scene's own ghosts only carry the stills. */
-html.js .act:not(.act--static) .scene-actors-static {
+html.js:not(.calm) .act:not(.act--static) .scene-actors-static {
   display: none;
 }
 
@@ -838,6 +839,32 @@ html.js .act:not(.act--static) .scene-actors-static {
   }
 }
 
+/* Short phones: the caption sheet must leave the action zone (stage y ≤ 480) visible. */
+@media (max-width: 860px) and (max-height: 720px) {
+  .scene-copy,
+  .scene[data-copy] .scene-copy {
+    padding: 26px 16px 14px;
+    gap: 8px;
+  }
+  .scene-step {
+    gap: 6px;
+  }
+  .scene-step .h-scene {
+    font-size: clamp(22px, 6vw, 26px);
+  }
+  .scene-step .body {
+    font-size: 15px;
+    line-height: 1.4;
+  }
+  .scene-step .note {
+    font-size: 13px;
+    line-height: 1.35;
+  }
+  .scene-progress button {
+    height: 34px;
+  }
+}
+
 /* Reduced motion or no scripts: an illustrated article, one still per step. */
 .scene--static {
   padding-block: 64px 24px;
@@ -850,11 +877,10 @@ html.js .act:not(.act--static) .scene-actors-static {
   display: grid;
   gap: 40px;
 }
+/* One still above its paragraph: the stage keeps the column's width, the title sits beside the body. */
 .scene-static-step {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
-  gap: 32px;
-  align-items: center;
+  gap: 24px;
 }
 .scene-static-figure {
   margin: 0;
@@ -870,7 +896,12 @@ html.js .act:not(.act--static) .scene-actors-static {
 }
 .scene-static-copy {
   display: grid;
-  gap: 12px;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 10px 48px;
+  align-items: start;
+}
+.scene-static-copy .h-scene {
+  grid-row: 1 / span 2;
 }
 .scene-static-copy .body {
   color: var(--muted);
@@ -879,19 +910,48 @@ html.js .act:not(.act--static) .scene-actors-static {
   padding-top: 8px;
 }
 @media (max-width: 860px) {
-  .scene-static-step {
+  .scene-static-copy {
     grid-template-columns: 1fr;
   }
+  .scene-static-copy .h-scene {
+    grid-row: auto;
+  }
+  /* The portrait stage is 390 × 844 with the action in y 70–550: show that band, not a 1.6 slice through the ghosts. */
+  .scene-static-figure {
+    aspect-ratio: 390 / 480;
+  }
+  .scene-static-figure .stage {
+    height: auto;
+    margin-top: -17.95%;
+  }
 }
-/* Without scripts the story layout collapses into the same article shape. */
-html:not(.js) .act-backdrop {
+/* Phones: the still bleeds to the viewport edge so the 390-unit stage renders 1:1 (its 11-unit labels at 11px). */
+@media (max-width: 640px) {
+  .scene-static-figure {
+    margin-inline: -16px;
+    border-radius: 0;
+    border-inline-width: 0;
+  }
+}
+/* Portrait tablets: a phone-shaped still at phone size, not a 720px-wide slab of ghosts. */
+@media (min-width: 641px) and (max-width: 860px) {
+  .scene-static-figure {
+    width: 100%;
+    max-width: 460px;
+    margin-inline: auto;
+  }
+}
+/* Without scripts, or with reduced motion before hydration, the story layout
+   collapses into the same article shape: the reader gets the article at first
+   paint instead of a film that shrinks by thousands of pixels once scripts run. */
+html:where(:not(.js), .calm) .act-backdrop {
   display: none;
 }
-html:not(.js) .scene {
+html:where(:not(.js), .calm) .scene:not(.scene--static) {
   height: auto !important;
   padding-block: 48px;
 }
-html:not(.js) .scene .scene-sticky {
+html:where(:not(.js), .calm) .scene .scene-sticky {
   position: relative;
   height: auto;
   display: grid;
@@ -900,33 +960,33 @@ html:not(.js) .scene .scene-sticky {
   margin-inline: auto;
   padding-inline: 24px;
 }
-html:not(.js) .scene .scene-visual {
+html:where(:not(.js), .calm) .scene .scene-visual {
   position: relative;
   aspect-ratio: 1.6;
   border-radius: 20px;
   overflow: hidden;
   border: 1px solid var(--line);
 }
-html:not(.js) .scene-wash {
+html:where(:not(.js), .calm) .scene-wash {
   display: none;
 }
-html:not(.js) .scene .scene-copy,
-html:not(.js) .scene[data-copy] .scene-copy {
+html:where(:not(.js), .calm) .scene .scene-copy,
+html:where(:not(.js), .calm) .scene[data-copy] .scene-copy {
   position: static;
   width: auto;
   transform: none;
   padding: 0;
   background: none;
 }
-html:not(.js) .scene .scene-steps {
+html:where(:not(.js), .calm) .scene .scene-steps {
   gap: 26px;
 }
-html:not(.js) .scene .scene-step {
+html:where(:not(.js), .calm) .scene .scene-step {
   grid-area: auto;
   opacity: 1;
   transform: none;
 }
-html:not(.js) .scene .scene-progress {
+html:where(:not(.js), .calm) .scene .scene-progress {
   display: none;
 }
 

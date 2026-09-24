@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Shell } from "@/components/site/Shell";
 import { Act } from "@/components/story/Act";
 import { Statement } from "@/components/story/Statement";
@@ -66,6 +67,17 @@ export function HomePage({ locale }: { locale: Locale }) {
         devHref={href(locale, "/developers")}
         catalogHref={href(locale, "/developers/catalog")}
       />
+      {/* Phones: the chapter's buttons after the picture instead of in the sheet over it. */}
+      <div className="wrap open-after">
+        <div className="open-actions">
+          <Link className="btn btn--primary" href={href(locale, "/developers")}>
+            {t.open.cta} →
+          </Link>
+          <Link className="btn" href={href(locale, "/developers/catalog")}>
+            {t.open.catalog}
+          </Link>
+        </div>
+      </div>
       <Finale t={t.finale} />
     </Shell>
   );

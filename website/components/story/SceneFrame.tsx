@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import { motion, motionValue, useInView, useMotionValueEvent, useScroll, useTransform, type MotionValue } from "motion/react";
 import { useCalm } from "@/lib/useCalm";
 import { EXIT, orientationOf, stepAt, stepOf, usePortrait, type Camera } from "@/components/home/stage";
-import { BLOCKING, ROOMS, valueAt, type Chapter } from "./poses";
+import { BLOCKING, ROOMS, STAGE, valueAt, type Chapter } from "./poses";
 
 /**
  * A chapter of the story: a full-bleed stage that holds the screen while its
@@ -57,6 +57,7 @@ export function SceneFrame({
   copyAt = "left",
   length = 70,
   label,
+  seams = true,
   children,
 }: {
   id: string;
@@ -70,6 +71,8 @@ export function SceneFrame({
   /** Scroll length per step, in viewport heights. */
   length?: number;
   label?: string;
+  /** Inside an act the picture and copy fade at both ends so the hand-off happens on the bare backdrop; a chapter on its own keeps them. */
+  seams?: boolean;
   children?: React.ReactNode;
 }) {
   const ref = useRef<HTMLElement>(null);
@@ -101,7 +104,7 @@ export function SceneFrame({
   // no clicks.
   const enter = useTransform(p, [0, 0.04], [0, 1]);
   const leave = useTransform(p, [EXIT - 0.04, EXIT], [1, 0]);
-  const furniture = useTransform([enter, leave], ([a, b]) => Math.min(a as number, b as number));
+  const furniture = useTransform([enter, leave], ([a, b]) => (seams ? Math.min(a as number, b as number) : 1));
   const [hidden, setHidden] = useState(false);
   useMotionValueEvent(furniture, "change", (v) => setHidden(v < 0.05));
   const state = useMemo<SceneState>(() => ({ p, step, n, still: false, portrait, camera, focus }), [p, step, n, portrait, camera, focus]);
@@ -196,9 +199,10 @@ export function SceneFrame({
 function StaticFigure({ state, at, chapter, portrait, children }: { state: SceneState; at: number; chapter: Chapter; portrait: boolean; children: React.ReactNode }) {
   const [p] = useState(() => motionValue(at));
   const b = BLOCKING[orientationOf(portrait)][chapter];
-  const scale = useTransform(p, () => 1);
-  const fx = useTransform(p, (v) => valueAt(b.focus, v)[0]);
-  const fy = useTransform(p, (v) => valueAt(b.focus, v)[1]);
+  // A landscape still is a whole stage in a figure: a slight push about the centre keeps the safe area and lifts the labels above 11px.
+  const scale = useTransform(p, (): number => (portrait ? 1 : 1.1));
+  const fx = useTransform(p, (v): number => (portrait ? valueAt(b.focus, v)[0] : STAGE.landscape.w / 2));
+  const fy = useTransform(p, (v): number => (portrait ? valueAt(b.focus, v)[1] : STAGE.landscape.h / 2));
   const value = useMemo<SceneState>(() => ({ ...state, p, camera: { scale, fx, fy }, focus: { x: fx, y: fy } }), [state, p, scale, fx, fy]);
   return (
     <SceneContext.Provider value={value}>

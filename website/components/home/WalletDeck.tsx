@@ -25,6 +25,12 @@ const LOOK: Record<string, { from: string; to: string; ink: string; glyph: React
     ink: "#a5b4fc",
     glyph: <path d="M12 3 3 20h18zM7.5 15h9" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />,
   },
+  bark: {
+    from: "#173a2e",
+    to: "#0c1d18",
+    ink: "#6ee7b7",
+    glyph: <path d="M12 3 3 20h18zM9 20c1-3 2-4.5 3-4.5s2 1.5 3 4.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />,
+  },
   usdt: {
     from: "#0f4034",
     to: "#0a1f1a",

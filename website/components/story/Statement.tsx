@@ -1,32 +1,35 @@
 "use client";
 
 import { useRef } from "react";
-import { motion, useScroll, useTransform } from "motion/react";
+import { motion, useScroll, useTransform, type MotionValue } from "motion/react";
 import { useCalm } from "@/lib/useCalm";
 import "@/app/statement.css";
 
 /**
- * A second of silence between the acts: one sentence gets the whole screen,
- * revealed word by word as it scrolls into place. It repeats a verified line
- * from the story, so it is hidden from readers who already have the copy.
+ * A second of silence between the acts: one sentence gets the whole screen.
+ * Each word fades in, un-blurs and rises into place as the block scrolls up
+ * (p .15–.5 of the section), the accent word landing last; the sentence then
+ * holds and fades as it leaves. It repeats a verified line from the story,
+ * so it is hidden from readers who already have the copy.
  */
 export function Statement({ before, accent, after }: { before: string; accent: string; after: string }) {
   const ref = useRef<HTMLElement>(null);
   const calm = useCalm();
   const { scrollYProgress } = useScroll({ target: ref, offset: ["start end", "end start"] });
-  const fade = useTransform(scrollYProgress, [0.78, 0.95], [1, 0]);
+  const fade = useTransform(scrollYProgress, (v) => 1 - clamp01((v - FADE[0]) / (FADE[1] - FADE[0])));
   const words = [
     ...before.trim().split(/\s+/).map((w) => ({ w, accent: false })),
     ...accent.trim().split(/\s+/).map((w) => ({ w, accent: true })),
     ...after.trim().split(/\s+/).map((w) => ({ w, accent: false })),
-  ];
+  ].filter((item) => item.w.length > 0);
+  const slots = schedule(words);
 
   return (
     <section ref={ref} className="statement" aria-hidden="true" data-static={calm}>
       <div className="statement-sticky">
-        <motion.p className="wrap statement-text" style={calm ? { opacity: 1 } : { opacity: fade }}>
+        <motion.p className="wrap statement-text" style={calm ? undefined : { opacity: fade }}>
           {words.map((item, i) => (
-            <Word key={i} p={scrollYProgress} i={i} n={words.length} accent={item.accent} calm={calm}>
+            <Word key={i} p={scrollYProgress} start={slots[i].start} end={slots[i].end} accent={item.accent} calm={calm}>
               {item.w}
             </Word>
           ))}
@@ -36,19 +39,65 @@ export function Statement({ before, accent, after }: { before: string; accent: s
   );
 }
 
-function Word({ p, i, n, accent, calm, children }: { p: ReturnType<typeof useScroll>["scrollYProgress"]; i: number; n: number; accent: boolean; calm: boolean; children: string }) {
-  // Each word gets its own slice of the .15–.55 window, in order.
-  const start = 0.15 + (0.4 * i) / n;
-  const end = start + 0.4 / n + 0.08;
-  const clip = useTransform(p, [start, end], ["inset(0 0 100% 0)", "inset(0 0 0% 0)"]);
-  const y = useTransform(p, [start, end], ["0.35em", "0em"]);
+/** The plain words stagger in reading order; the accent word(s) land last, with a longer beat. */
+const REVEAL = [0.15, 0.5] as const;
+const PLAIN_LAST_START = 0.33;
+const PLAIN_DURATION = 0.07;
+const ACCENT_START = 0.4;
+const ACCENT_STAGGER = 0.02;
+// The pin releases at p .63 (170vh section); the sentence is gone before its top reaches the nav.
+const FADE = [0.64, 0.75] as const;
+
+function schedule(words: { accent: boolean }[]): { start: number; end: number }[] {
+  const plain = words.filter((w) => !w.accent).length;
+  const accents = words.length - plain;
+  if (words[0]?.accent) {
+    // The accent opens the sentence (pt-BR "Não há …"): reading order, the accent with the longer beat first.
+    const accentEnd = REVEAL[0] + 0.14;
+    const plainStart = accentEnd - 0.04;
+    const plainStep = plain > 1 ? (REVEAL[1] - PLAIN_DURATION - plainStart) / (plain - 1) : 0;
+    let pi = 0;
+    let ai = 0;
+    return words.map((w) => {
+      if (w.accent) return { start: round(REVEAL[0] + ACCENT_STAGGER * ai++), end: round(accentEnd) };
+      const start = plainStart + plainStep * pi++;
+      return { start: round(start), end: round(start + PLAIN_DURATION) };
+    });
+  }
+  const plainStep = plain > 1 ? (PLAIN_LAST_START - REVEAL[0]) / (plain - 1) : 0;
+  const accentDuration = REVEAL[1] - ACCENT_START - ACCENT_STAGGER * Math.max(0, accents - 1);
+  let pi = 0;
+  let ai = 0;
+  return words.map((w) => {
+    if (w.accent) {
+      const start = ACCENT_START + ACCENT_STAGGER * ai++;
+      return { start: round(start), end: round(start + accentDuration) };
+    }
+    const start = REVEAL[0] + plainStep * pi++;
+    return { start: round(start), end: round(start + PLAIN_DURATION) };
+  });
+}
+
+function Word({ p, start, end, accent, calm, children }: { p: MotionValue<number>; start: number; end: number; accent: boolean; calm: boolean; children: string }) {
+  const k = useTransform(p, (v) => clamp01((v - start) / (end - start)));
+  const opacity = useTransform(k, (t) => round(t));
+  const filter = useTransform(k, (t) => (t >= 1 ? "none" : `blur(${(8 * (1 - easeOut(t))).toFixed(2)}px)`));
+  const y = useTransform(k, (t) => `${(0.35 * (1 - easeOut(t))).toFixed(3)}em`);
   return (
     <>
-      <span className="statement-word">
-        <motion.span className={accent ? "accent" : undefined} style={calm ? { clipPath: "inset(0 0 0% 0)", y: 0 } : { clipPath: clip, y }}>
-          {children}
-        </motion.span>
-      </span>{" "}
+      <motion.span className={accent ? "statement-word accent" : "statement-word"} style={calm ? undefined : { opacity, filter, y }}>
+        {children}
+      </motion.span>{" "}
     </>
   );
+}
+
+function clamp01(v: number): number {
+  return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+function easeOut(t: number): number {
+  return 1 - (1 - t) * (1 - t);
+}
+function round(v: number): number {
+  return Math.round(v * 1000) / 1000;
 }

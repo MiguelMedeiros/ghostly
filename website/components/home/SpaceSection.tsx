@@ -18,8 +18,9 @@ const THEMES = [
 
 /**
  * The chapter's one idea, then my things laid out on a desk: the Profile page
- * in a window on the left, three features on a quiet rail on the right, and
- * the wallet deck as a set piece on a full-bleed band below.
+ * in a window on the left, three features on a quiet rail on the right (one
+ * sentence, a visual, a caption-sized honesty note), and the wallet deck as a
+ * set piece on a full-bleed band below.
  */
 export function SpaceSection({ t, w, locale, shotLabel }: { t: HomeCopy["space"]; w: HomeCopy["wallets"]; locale: Locale; shotLabel: string }) {
   return (
@@ -65,7 +66,7 @@ export function SpaceSection({ t, w, locale, shotLabel }: { t: HomeCopy["space"]
                     </div>
                   ))}
                 </div>
-                <p className="note">{t.profiles.note}</p>
+                <p className="caption sp-note">{t.profiles.note}</p>
               </article>
 
               <article className="sp-feature">
@@ -99,7 +100,7 @@ export function SpaceSection({ t, w, locale, shotLabel }: { t: HomeCopy["space"]
                     </ul>
                   </div>
                 </div>
-                <p className="note">{t.backup.note}</p>
+                <p className="caption sp-note">{t.backup.note}</p>
               </article>
 
               <article className="sp-feature">

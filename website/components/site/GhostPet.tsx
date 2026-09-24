@@ -151,7 +151,7 @@ export function GhostPet({ label = "Hide the ghost" }: { label?: string }) {
           </g>
         )}
       </svg>
-      <button type="button" className="pet-hide" onClick={() => setVisible(false)} aria-label={label}>
+      <button type="button" className="pet-hide" tabIndex={-1} onClick={() => setVisible(false)} aria-label={label}>
         ×
       </button>
     </div>

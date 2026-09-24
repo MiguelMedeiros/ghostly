@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useInView } from "motion/react";
 import { useCalm } from "@/lib/useCalm";
 import { Ghost, GhostMark, type GhostMood } from "@/components/ghost/Ghost";
 import { Icon } from "@/components/site/icons";
@@ -56,7 +57,10 @@ function Words({ text, className = "", from = 0 }: { text: string; className?: s
  */
 export function Finale({ t }: { t: HomeCopy["finale"] }) {
   const reduce = useCalm();
+  const sectionRef = useRef<HTMLElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  // Idle loops (the rising ghosts, the title's gradient) rest while the section is off screen.
+  const inView = useInView(sectionRef, { margin: "20% 0px 20% 0px" });
   const played = useRef(false);
   const [state, setState] = useState<State>("idle");
   const [step, setStep] = useState(-1);
@@ -165,7 +169,7 @@ export function Finale({ t }: { t: HomeCopy["finale"] }) {
   const speaker = (side: string) => (side === "boo" ? "Boo" : "Casper");
 
   return (
-    <section className="section fin" id="download" data-state={state} data-step={step} data-poof={poof}>
+    <section ref={sectionRef} className="section fin" id="download" data-state={state} data-step={step} data-poof={poof} data-inview={inView}>
       <Particles count={18} tone="mix" />
       <div className="wrap fin-inner">
         <span className="eyebrow fin-eyebrow">{t.eyebrow}</span>
@@ -177,7 +181,7 @@ export function Finale({ t }: { t: HomeCopy["finale"] }) {
                 {lastLine("boo")}
               </div>
               <div className="fin-body">
-                <Ghost who="boo" size={150} mood={booMood} look={booLook} />
+                <Ghost who="boo" size={150} mood={booMood} look={booLook} float={false} />
               </div>
             </div>
             <div className="fin-actor fin-actor--casper" style={{ ["--k" as string]: -k }}>
@@ -185,7 +189,7 @@ export function Finale({ t }: { t: HomeCopy["finale"] }) {
                 {lastLine("casper")}
               </div>
               <div className="fin-body">
-                <Ghost who="casper" size={150} mood={casperMood} look={casperLook} phase={1} />
+                <Ghost who="casper" size={150} mood={casperMood} look={casperLook} float={false} phase={1} />
               </div>
               {/* Siblings of the body, so they keep rising while it shrinks to nothing. */}
               {[0, 1, 2].map((i) => (

@@ -20,10 +20,14 @@ export function Hero({ t }: { t: HomeCopy["hero"] }) {
   const calm = useCalm();
   const portrait = usePortrait();
   const { scrollYProgress } = useScroll({ target: ref, offset: ["start start", "end start"] });
-  // On phones the copy sits in the lower half, where Boo will glide: it leaves before he moves (poses.ts P.hero).
-  const range = portrait ? [0.1, 0.4] : [0.2, 0.7];
-  const y = useTransform(scrollYProgress, range, [0, -48]);
-  const opacity = useTransform(scrollYProgress, range, [1, 0]);
+  // On phones the copy scrolls up under Boo, so it leaves early (poses.ts P.hero holds him until 0.5).
+  // Function form on purpose: motion turns array ranges into native scroll animations fixed at mount.
+  const fade = (v: number) => {
+    const [a, b] = portrait ? [0.05, 0.25] : [0.2, 0.7];
+    return 1 - Math.max(0, Math.min(1, (v - a) / (b - a)));
+  };
+  const y = useTransform(scrollYProgress, (v) => -48 * (1 - fade(v)));
+  const opacity = useTransform(scrollYProgress, fade);
 
   return (
     <section ref={ref} className="hero" id="hero">

@@ -6,8 +6,13 @@
 /* ── Room ─────────────────────────────────────────── */
 .nx {
   position: relative;
-  background: var(--room-read);
+  /* Act II ends on its black room; the reading room fades in over the first 120px instead of a hard band. */
+  background: linear-gradient(to bottom, var(--room-alive), var(--room-read) 120px);
   padding-block: clamp(88px, 12vw, 160px) clamp(72px, 9vw, 120px);
+}
+/* The article (no scripts, reduced motion) has no black room before it: fade in from the page instead. */
+html:where(:not(.js), .calm) .nx {
+  background: linear-gradient(to bottom, var(--bg), var(--room-read) 120px);
 }
 .nx::before {
   content: "";
@@ -251,9 +256,21 @@ html.js .nx-line[data-drawn="true"] path {
   .nx-row-media {
     display: none;
   }
-  /* Without scripts nothing swaps, so every row keeps its picture. */
+  /* Without scripts nothing swaps, so every row keeps its picture and the stacked layout stays. */
   html:not(.js) .nx-row-media {
     display: grid;
+  }
+  html:not(.js) .nx-stage {
+    display: none;
+  }
+  html:not(.js) .nx-body {
+    display: block;
+  }
+  html:not(.js) .nx-item {
+    min-height: 0;
+  }
+  html:not(.js) .nx-list {
+    gap: clamp(56px, 8vw, 96px);
   }
   .nx-stage {
     display: block;
@@ -434,5 +451,15 @@ html.js .nx-line[data-drawn="true"] path {
   .nx-legend-strip .nx-legend-list .level,
   .nx-legend-strip .nx-legend-draft .chip {
     top: 0;
+  }
+}
+/* Up to 1200px the seven columns squeeze every note into five or six lines: use
+   three help columns on two rows instead, the title down the left of both. */
+@media (min-width: 861px) and (max-width: 1200px) {
+  .nx-legend-strip {
+    grid-template-columns: minmax(96px, auto) repeat(3, minmax(0, 1fr));
+  }
+  .nx-legend-strip .nx-legend-title {
+    grid-row: span 2;
   }
 }

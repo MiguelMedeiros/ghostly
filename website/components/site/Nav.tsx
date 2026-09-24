@@ -48,6 +48,15 @@ export function Nav({ locale }: { locale: Locale }) {
     if (menu.current) menu.current.open = false;
   }, [pathname]);
 
+  // Escape closes it and hands focus back to its button.
+  const onMenuKeyDown = (e: React.KeyboardEvent<HTMLDetailsElement>) => {
+    const el = menu.current;
+    if (e.key !== "Escape" || !el?.open) return;
+    e.preventDefault();
+    el.open = false;
+    el.querySelector("summary")?.focus();
+  };
+
   const links = [
     { href: href(locale, "/#story"), label: t.story, match: null },
     { href: href(locale, "/developers"), label: t.developers, match: /^\/developers$/ },
@@ -75,7 +84,7 @@ export function Nav({ locale }: { locale: Locale }) {
           <a className="btn btn--primary nav-cta" href={APP_URL}>
             {t.open}
           </a>
-          <details className="nav-menu" ref={menu}>
+          <details className="nav-menu" ref={menu} onKeyDown={onMenuKeyDown}>
             <summary aria-label={t.menu}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                 <path d="M4 7h16M4 12h16M4 17h16" strokeLinecap="round" />

@@ -1,6 +1,6 @@
 "use client";
 
-import { useId } from "react";
+import { memo, useId } from "react";
 import { motion, type MotionValue } from "motion/react";
 import { useCalm } from "@/lib/useCalm";
 
@@ -74,7 +74,7 @@ function isMotionLook(look: Look): look is { x: MotionValue<number>; y: MotionVa
   return typeof look.x !== "number";
 }
 
-export function Ghost({
+export const Ghost = memo(function Ghost({
   who = "boo",
   color,
   mood = "happy",
@@ -193,7 +193,7 @@ export function Ghost({
       </g>
     </svg>
   );
-}
+});
 
 /** The original 24px mark (logo, bullets, tiny ghosts). */
 export function GhostMark({ className = "", title }: { className?: string; title?: string }) {

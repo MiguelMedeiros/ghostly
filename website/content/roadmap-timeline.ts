@@ -91,9 +91,8 @@ const en: Timeline = {
       title: "Payments",
       items: {
         now: ["Cashu wallet", "Lightning through the mint"],
-        next: ["Ark via Arkade (experimental)", "USDT via Tether WDK (experimental)", "Testnet mode for every wallet"],
-        building: ["Lightning & on-chain provider contracts", "Ark via Bark", "BDK · Bitcoin Core RPC · Breez", "NWC · WebLN · LND · Core Lightning"],
-        planned: ["Spark, Fedimint, Liquid and other rails"],
+        next: ["Ark via Arkade (experimental)", "USDT via Tether WDK (experimental)", "Testnet mode for every wallet", "Lightning sources: NWC · LND · Core Lightning · WebLN · Breez (regtest only)", "Ark via Bark (test networks)", "On-chain: BDK (test networks) · Bitcoin Core (desktop)"],
+        planned: ["Mainnet for Bark, Breez and BDK", "Spark, Fedimint, Liquid and other rails"],
       },
     },
     {
@@ -111,7 +110,8 @@ const en: Timeline = {
       color: "#f472b6",
       title: "Identity (optional)",
       items: {
-        planned: ["Optional proofs: Nostr first", "PGP, SSH, hardware signers, passkeys"],
+        next: ["Proofs made once, shared per chat: Nostr · domain · OpenPGP · SSH · Bitcoin address", "OpenID accounts (Google, Microsoft, Apple, GitLab, Twitch) — once clients are registered"],
+        planned: ["Hardware signers, passkeys"],
         later: ["Profiles, social graph and posts", { text: "Pubky and Keet", level: "research" }],
       },
     },
@@ -194,9 +194,8 @@ const ptBr: Timeline = {
       title: "Pagamentos",
       items: {
         now: ["Carteira Cashu", "Lightning pelo mint"],
-        next: ["Ark via Arkade (experimental)", "USDT via Tether WDK (experimental)", "Modo Testnet para todas as carteiras"],
-        building: ["Contratos de provedores Lightning e on-chain", "Ark via Bark", "BDK · Bitcoin Core RPC · Breez", "NWC · WebLN · LND · Core Lightning"],
-        planned: ["Spark, Fedimint, Liquid e outros trilhos"],
+        next: ["Ark via Arkade (experimental)", "USDT via Tether WDK (experimental)", "Modo Testnet para todas as carteiras", "Fontes Lightning: NWC · LND · Core Lightning · WebLN · Breez (só regtest)", "Ark via Bark (redes de teste)", "On-chain: BDK (redes de teste) · Bitcoin Core (desktop)"],
+        planned: ["Mainnet para Bark, Breez e BDK", "Spark, Fedimint, Liquid e outros trilhos"],
       },
     },
     {
@@ -214,7 +213,8 @@ const ptBr: Timeline = {
       color: "#f472b6",
       title: "Identidade (opcional)",
       items: {
-        planned: ["Provas opcionais: Nostr primeiro", "PGP, SSH, signers de hardware, passkeys"],
+        next: ["Provas feitas uma vez, compartilhadas por chat: Nostr · domínio · OpenPGP · SSH · endereço Bitcoin", "Contas OpenID (Google, Microsoft, Apple, GitLab, Twitch) — quando os clientes forem registrados"],
+        planned: ["Signers de hardware, passkeys"],
         later: ["Perfis, grafo social e posts", { text: "Pubky e Keet", level: "research" }],
       },
     },

@@ -3,6 +3,7 @@
 /* ── Hero: Act 0 ── */
 .hero {
   position: relative;
+  min-height: 100vh;
   min-height: 100svh;
   display: grid;
   align-items: center;
@@ -90,7 +91,7 @@
   justify-items: center;
   gap: 10px;
 }
-html.js .act:not(.act--static) .hero-still {
+html.js:not(.calm) .act:not(.act--static) .hero-still {
   display: none;
 }
 .bubble {
@@ -105,11 +106,6 @@ html.js .act:not(.act--static) .hero-still {
   background: rgba(34, 211, 238, 0.14);
   color: var(--cyan);
   border-bottom-left-radius: 5px;
-}
-.bubble--casper {
-  background: rgba(74, 222, 128, 0.14);
-  color: var(--mint);
-  border-bottom-right-radius: 5px;
 }
 @media (max-width: 860px) {
   .hero {
@@ -152,11 +148,35 @@ html.js .act:not(.act--static) .hero-still {
   gap: 12px;
   margin-top: 8px;
 }
-.open-legend {
+/* The open chapter's buttons: in the copy panel on wide screens; on phones the sheet
+   keeps only the copy and the layer legend, and the buttons follow the chapter. */
+.open-after {
   display: grid;
-  gap: 6px;
+  gap: 22px;
+  justify-items: start;
+  padding-block: 8px 40px;
+  background: var(--room-open);
+}
+@media (max-width: 860px) {
+  .open-sheet-only,
+  .scene-static-extra:has(> .open-sheet-only:only-child) {
+    display: none;
+  }
+}
+@media (min-width: 861px) {
+  .open-after {
+    display: none;
+  }
+}
+/* Phones only (the wide picture names its slabs itself): the layer legend sits in the sheet
+   under the copy, two or three names per row, so the sheet stays about 330px tall and the
+   whole stack of slabs remains in view above it. */
+.open-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
   font-family: var(--font-jetbrains), ui-monospace, monospace;
-  font-size: 13px;
+  font-size: 12px;
 }
 .open-legend li {
   display: flex;

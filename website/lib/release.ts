@@ -6,6 +6,10 @@ export const VERSION = "0.4.0";
 
 const BASE = "https://github.com/MiguelMedeiros/ghostly/releases";
 
+/** Every release, for the footer. */
+export const RELEASES_URL = BASE;
+
+/** The release the site offers, for the finale. */
 export const RELEASE_URL = `${BASE}/tag/v${VERSION}`;
 
 const asset = (name: string) => `${BASE}/download/v${VERSION}/${name}`;

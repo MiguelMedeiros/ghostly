@@ -21,8 +21,8 @@ type Shot = {
   mobile?: string;
 };
 
-// Real screens. Current ones are from the development build; two come from an
-// earlier release because this build can't show them from the web client.
+// Real screens. Current ones are from the development build; the call comes from
+// an earlier build because this one can't show a call from the web client.
 // Each crop zooms into the detail its caption names so the UI text stays legible.
 const SHOTS: Record<string, Shot> = {
   chat: {
@@ -50,9 +50,9 @@ const SHOTS: Record<string, Shot> = {
     from: "old",
     width: 1400,
     height: 1123,
-    // The call band: the avatar, the name and the mic / hang-up controls. The header
-    // sits too far above the controls to share a 16:10 frame with them at a legible size.
-    crop: { x: 0.115, y: 0.37, w: 0.77 },
+    // The call band: the avatar, the name and the mic / hang-up controls fill the frame;
+    // the header sits too far above the controls to share a 16:10 frame with them.
+    crop: { x: 0.145, y: 0.405, w: 0.71 },
   },
   sats: {
     src: "/screenshots/current/wallet-mainnet.webp",
@@ -64,13 +64,13 @@ const SHOTS: Record<string, Shot> = {
     crop: { x: 0.355, y: 0.075, w: 0.625 },
   },
   services: {
-    src: "/screenshots/current/app-friend-app.webp",
-    alt: "A contact's photo gallery, served from their computer, opened in the desktop app",
-    from: "old",
-    width: 1400,
-    height: 1123,
-    // The gallery header and first rows; the browser's own title bar stays above the crop.
-    crop: { x: 0.03, y: 0.045, w: 0.94 },
+    src: "/screenshots/current/services-chat.webp",
+    alt: "Choosing which of your apps a contact can open, in the development build",
+    from: "dev",
+    width: 2560,
+    height: 1640,
+    // The "Apps with Casper" sheet over the chat, the bubble above it kept whole.
+    crop: { x: 0.275, y: 0.26, w: 0.45 },
   },
 };
 
@@ -106,7 +106,7 @@ function Bar() {
 export function NextSection({ t, locale }: { t: HomeCopy["next"]; locale: Locale }) {
   const gradId = useId().replace(/:/g, "");
   const headRef = useRef<HTMLDivElement>(null);
-  const itemRefs = useRef<(HTMLLIElement | null)[]>([]);
+  const copyRefs = useRef<(HTMLDivElement | null)[]>([]);
   const activeRef = useRef(0);
   const [active, setActive] = useState(0);
   const [dir, setDir] = useState<1 | -1>(1);
@@ -142,35 +142,47 @@ export function NextSection({ t, locale }: { t: HomeCopy["next"]; locale: Locale
     return () => io.disconnect();
   }, []);
 
-  // One observer on the captions picks which screen the window shows.
+  // Which screen the window shows: the item whose copy crosses the middle of the
+  // viewport, so the reader never sees one item's words beside the next item's
+  // picture. A thin observer band at the centre catches the crossings; a second
+  // observer on the whole viewport catches jumps (anchors, flings) that skip the
+  // band, and then the copy nearest the middle wins.
   useEffect(() => {
     const mq = window.matchMedia(WIDE);
-    let io: IntersectionObserver | null = null;
+    let observers: IntersectionObserver[] = [];
+    const stop = () => {
+      observers.forEach((io) => io.disconnect());
+      observers = [];
+    };
     const start = () => {
-      io?.disconnect();
-      io = null;
+      stop();
       if (!mq.matches) return;
-      const els = itemRefs.current.filter((el): el is HTMLLIElement => !!el);
-      io = new IntersectionObserver(
-        (entries) => {
-          for (const e of entries) {
-            if (!e.isIntersecting) continue;
-            const i = els.indexOf(e.target as HTMLLIElement);
-            if (i < 0 || i === activeRef.current) continue;
-            setDir(i > activeRef.current ? 1 : -1);
-            activeRef.current = i;
-            setActive(i);
+      const els = copyRefs.current.filter((el): el is HTMLDivElement => !!el);
+      const pick = () => {
+        const mid = window.innerHeight / 2;
+        let best = -1;
+        let bestDistance = Infinity;
+        els.forEach((el, i) => {
+          const r = el.getBoundingClientRect();
+          const d = r.top <= mid && r.bottom >= mid ? -1 : Math.min(Math.abs(r.top - mid), Math.abs(r.bottom - mid));
+          if (d < bestDistance) {
+            best = i;
+            bestDistance = d;
           }
-        },
-        { threshold: 0.5 },
-      );
-      els.forEach((el) => io!.observe(el));
+        });
+        if (best < 0 || best === activeRef.current) return;
+        setDir(best > activeRef.current ? 1 : -1);
+        activeRef.current = best;
+        setActive(best);
+      };
+      observers = [new IntersectionObserver(pick, { rootMargin: "-45% 0px -45% 0px", threshold: 0 }), new IntersectionObserver(pick, { threshold: 0 })];
+      observers.forEach((io) => els.forEach((el) => io.observe(el)));
     };
     start();
     mq.addEventListener("change", start);
     return () => {
       mq.removeEventListener("change", start);
-      io?.disconnect();
+      stop();
     };
   }, []);
 
@@ -205,15 +217,7 @@ export function NextSection({ t, locale }: { t: HomeCopy["next"]; locale: Locale
             {items.map((item, i) => {
               const shot = SHOTS[item.id];
               return (
-                <li
-                  key={item.id}
-                  id={`next-${item.id}`}
-                  className="nx-item"
-                  data-active={i === active}
-                  ref={(el) => {
-                    itemRefs.current[i] = el;
-                  }}
-                >
+                <li key={item.id} id={`next-${item.id}`} className="nx-item" data-active={i === active}>
                   <figure className="nx-row-media">
                     <div className="nx-win nx-win--light">
                       <Bar />
@@ -223,14 +227,19 @@ export function NextSection({ t, locale }: { t: HomeCopy["next"]; locale: Locale
                           <img className="nx-shot" src={shot.src} alt={shot.alt} loading="lazy" decoding="async" width={shot.width} height={shot.height} />
                         </div>
                       ) : (
-                        <pre className="nx-term" aria-label="Example CLI session">
+                        <pre className="nx-term" aria-label="Example CLI session" tabIndex={0}>
                           <code>{CLI}</code>
                         </pre>
                       )}
                     </div>
                     <figcaption className="caption">{honesty(item.id)}</figcaption>
                   </figure>
-                  <div className="nx-copy">
+                  <div
+                    className="nx-copy"
+                    ref={(el) => {
+                      copyRefs.current[i] = el;
+                    }}
+                  >
                     <h3 className="h-card nx-title">{item.title}</h3>
                     <p className="body">{item.body}</p>
                     <div className="nx-badges">

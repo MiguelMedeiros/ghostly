@@ -38,9 +38,20 @@ Two acts, one continuous take each. Every chapter reads its coordinates from
 so the exit pose of one chapter is the entry pose of the next by construction.
 Inside a chapter, beats are placed with `useStep(p, step, n, [from, to], [a, b])`
 from `components/home/stage.tsx`: a range inside one step, in step units, so
-copy and picture stay in sync when a step's text changes. With reduced motion,
-or without scripts, the same components render an illustrated article — one
-still per step (`stills` on each scene) — and the act backdrop is not drawn.
+copy and picture stay in sync when a step's text changes. A chapter's picture
+and copy fade in over p 0–.04 and out over p .90–.94, so the glide between two
+chapters happens on the bare backdrop (`seams={false}` keeps them for a chapter
+outside an act). The copy sits on a full-height wash, never a boxed panel. With
+reduced motion, or without scripts, the same components render an illustrated
+article — one still per step (`stills` on each scene) — and the act backdrop is
+not drawn; the layout script in `app/layout.tsx` flags `html.calm` and
+`html[data-orient]` before hydration so CSS carries that layout at first paint.
+
+Two motion traps worth knowing: motion scales SVG groups about their own
+bounding box, so any scaled `motion.g` positioned by its top-left spreads
+`VIEW_BOX_ORIGIN` into its style; and `useTransform(scroll, [range], [out])`
+becomes a native scroll-linked animation fixed at mount, so a range that depends
+on state (orientation, locale) must use the function form.
 
 Debug helpers, not shipped: `.shots.mjs` (screenshots of any page at scroll
 fractions), `.spine.mjs` (each chapter at chosen sub-progress values),

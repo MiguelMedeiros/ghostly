@@ -25,16 +25,18 @@ function Chip({ item, phase, color, locale, lane }: { item: Item; phase: Phase; 
  */
 export function Timeline({ locale }: { locale: Locale }) {
   const t = timeline[locale];
+  // A stage nobody has anything in (today: "being built", with everything merged) is left out.
+  const phases = PHASES.filter((p) => t.lanes.some((lane) => lane.items[p]?.length));
   return (
     <div className="tl">
       <div className="tl-wide" role="region" aria-label={t.phases.now.title} tabIndex={0}>
-        <div className="tl-grid">
+        <div className="tl-grid" style={{ "--tl-cols": phases.length } as React.CSSProperties}>
           <div className="tl-corner" />
-          {PHASES.map((p, i) => (
+          {phases.map((p, i) => (
             <div key={p} className="tl-phase" data-phase={p} data-level={PHASE_LEVEL[p]}>
               <div className="tl-node-row">
                 <span className="tl-node" />
-                {i < PHASES.length - 1 && <span className="tl-line" data-future={i > 0} />}
+                {i < phases.length - 1 && <span className="tl-line" data-future={i > 0} />}
               </div>
               {p === "now" && (
                 <div className="tl-here" aria-hidden="true">
@@ -52,7 +54,7 @@ export function Timeline({ locale }: { locale: Locale }) {
                 <span className="tl-lane-dot" />
                 {lane.title}
               </div>
-              {PHASES.map((p) => (
+              {phases.map((p) => (
                 <div key={p} className="tl-cell" data-phase={p}>
                   {lane.items[p]?.length ? (
                     <ul>
@@ -71,7 +73,7 @@ export function Timeline({ locale }: { locale: Locale }) {
       </div>
 
       <ol className="tl-narrow">
-        {PHASES.map((p) => {
+        {phases.map((p) => {
           const items = t.lanes.flatMap((lane) => (lane.items[p] ?? []).map((item) => ({ item, lane })));
           return (
             <li key={p} className="tl-stage" data-phase={p} data-level={PHASE_LEVEL[p]}>

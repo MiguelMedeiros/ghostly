@@ -1,8 +1,9 @@
 /* The statement between the acts. Owned by components/story/Statement.tsx. */
 
 .statement {
-  height: 130vh;
-  background: #030507;
+  height: 170vh;
+  /* Act I ends on the DHT room (--room-dht); the black arrives over the first 14vh instead of as a hard edge. */
+  background: linear-gradient(to bottom, var(--room-dht, #070a1f) 0, #030507 14vh) #030507;
 }
 .statement[data-static="true"] {
   height: auto;
@@ -11,6 +12,7 @@
 .statement-sticky {
   position: sticky;
   top: 0;
+  height: 100vh;
   height: 100svh;
   display: grid;
   align-items: center;
@@ -29,9 +31,24 @@
 }
 .statement-word {
   display: inline-block;
-  overflow: hidden;
-}
-.statement-word > span {
-  display: inline-block;
 }
 
+/* Without scripts, or with reduced motion before hydration (the layout script
+   adds html.js and html.calm), the sentence simply reads: no sticky void, every
+   word in place. Motion writes inline styles, hence the !important. */
+html:where(:not(.js), .calm) .statement {
+  height: auto;
+  padding-block: 18vh;
+}
+html:where(:not(.js), .calm) .statement-sticky {
+  position: static;
+  height: auto;
+}
+html:where(:not(.js), .calm) .statement-text {
+  opacity: 1 !important;
+}
+html:where(:not(.js), .calm) .statement-word {
+  opacity: 1 !important;
+  filter: none !important;
+  transform: none !important;
+}

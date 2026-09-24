@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Ghost, GhostMark } from "@/components/ghost/Ghost";
 import { href, type Locale } from "@/lib/i18n";
-import { RELEASE_URL } from "@/lib/release";
+import { RELEASES_URL } from "@/lib/release";
 import { shell, APP_URL, REPO_URL } from "@/content/shell";
 import { Particles } from "./Particles";
 
@@ -30,7 +30,7 @@ export function SiteFooter({ locale = "en" }: { locale?: Locale }) {
       title: t.project,
       links: [
         { label: t.links.github, href: REPO_URL },
-        { label: t.links.releases, href: RELEASE_URL },
+        { label: t.links.releases, href: RELEASES_URL },
         { label: t.links.security, href: href(locale, "/developers/wisps/security") },
         { label: t.links.contributing, href: href(locale, "/developers/wisps/contributing") },
       ],
