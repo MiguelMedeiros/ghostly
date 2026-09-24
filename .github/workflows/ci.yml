@@ -131,6 +131,11 @@ jobs:
       - name: Test (src-tauri)
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
+      # The Iroh framing, limits and reconnects, on loopback: seconds, and the
+      # dependencies are already built for src-tauri.
+      - name: Test (native-transports)
+        run: cargo test --manifest-path native-transports/Cargo.toml
+
   # ============================================
   # CLI - Rust
   # ============================================
