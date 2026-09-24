@@ -1,6 +1,6 @@
 import {test,expect} from "../support/fixtures";
 
-test("notification permission is explicit and independent of persistent sound preference",async({peer})=>{
+test("notification permission is explicit and independent of persistent sound preference",{ tag: ["@feature:app.attention.notifications", "@feature:app.attention.sounds"] },async({peer})=>{
  const {page}=await peer("preferences");
  await page.addInitScript(()=>{
   class Notice {static permission="default";static async requestPermission(){localStorage.setItem("qa-permission", "requested");this.permission="granted";return "granted";}}
@@ -16,7 +16,7 @@ test("notification permission is explicit and independent of persistent sound pr
  await notice.click();await page.reload();await expect(sound).not.toBeChecked();await expect(notice).not.toBeChecked();
 });
 
-test("creation marker survives the first offline message and reload",async({peer})=>{
+test("creation marker survives the first offline message and reload",{ tag: ["@feature:chats.created-marker"] },async({peer})=>{
  const {page}=await peer("created");
  await page.getByTitle("New Chat").click();await page.getByRole("radio",{name:"Text only",exact:true}).click();
  const marker=page.getByTestId("chat-created");await expect(marker).toHaveCount(1);
@@ -27,7 +27,7 @@ test("creation marker survives the first offline message and reload",async({peer
  await page.reload();await expect(marker).toHaveCount(1);await expect(marker.locator("time")).toHaveAttribute("datetime",initial!);
 });
 
-test("background notices are private and live messages do not replay after reload",async({peer})=>{
+test("background notices are private and live messages do not replay after reload",{ tag: ["@feature:app.attention.notifications"] },async({peer})=>{
  const {pair}=await import("../support/paired");const {say,chat}=await import("../support/fixtures");
  const host=await peer("host"),guest=await peer("guest");
  await guest.page.addInitScript(()=>{
@@ -55,7 +55,7 @@ test("background notices are private and live messages do not replay after reloa
 });
 
 for(const permission of ["denied","unavailable"]){
- test(`notifications honestly expose ${permission}`,async({peer})=>{
+ test(`notifications honestly expose ${permission}`,{ tag: ["@feature:app.attention.notifications"] },async({peer})=>{
   const {page}=await peer(permission);
   await page.addInitScript(value=>{Object.defineProperty(window,"Notification",{value:value==="unavailable"?undefined:class {static permission="denied";static async requestPermission(){return "denied";}}});},permission);
   await page.goto("/#/settings");await page.reload();

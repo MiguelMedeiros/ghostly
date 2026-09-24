@@ -8,6 +8,7 @@ import { buildLinkRecords } from "../src/records";
 import { signPairedSignal } from "../src/pairedSignal";
 import { createChannelPair } from "./helpers";
 import type { BoundChannel, NativeEndpoint } from "../src/pairedTransports";
+// covers: chat.paired.session, chat.paired.status, core.peer-keys, transport.preference, chat.dht.send
 
 describe("paired profile policy boundaries", () => {
   it("retains a real discovery read error until reading recovers", async () => {

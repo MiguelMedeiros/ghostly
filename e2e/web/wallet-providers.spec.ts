@@ -45,7 +45,7 @@ const testSats = (p: Peer) => p.page.getByTestId("wallet-test-balance");
 test.describe("Cashu and Lightning", { tag: "@network" }, () => {
   test.describe.configure({ retries: 2 });
 
-  test("Cashu: in over Lightning, a Send in the chat, and a Request paid in the chat", async ({ peer }) => {
+  test("Cashu: in over Lightning, a Send in the chat, and a Request paid in the chat", { tag: ["@feature:wallet.cashu.receive-lightning", "@feature:payments.cashu.send", "@feature:payments.cashu.request", "@feature:payments.chat.review"] }, async ({ peer }) => {
     const [alice, bob] = await twoInTestnet(peer, ["cashu-alice", "cashu-bob"]);
     await receiveOverLightning(alice, 100);
     await expect(testSats(alice)).toHaveText(/^100 test sats/);
@@ -72,7 +72,7 @@ test.describe("Cashu and Lightning", { tag: "@network" }, () => {
   // A test mint marks its own invoices paid by itself: one peer paying the other's invoice at the same
   // mint proves nothing (the mint refuses it as already paid). So each side is tested on its own: in, an
   // invoice of this wallet paid by the test mint; out, the wallet paying an invoice the mint does not own.
-  test("Lightning: in through an invoice, out by paying someone else's invoice from Send", async ({ peer }) => {
+  test("Lightning: in through an invoice, out by paying someone else's invoice from Send", { tag: ["@feature:wallet.lightning.cashu-mint.receive", "@feature:wallet.lightning.cashu-mint.pay", "@feature:wallet.cashu.receive-lightning"] }, async ({ peer }) => {
     const [alice, bob] = await twoInTestnet(peer, ["ln-alice", "ln-bob"]);
     await receiveOverLightning(alice, 100);
     await expect(testSats(alice)).toHaveText(/^100 test sats/);
@@ -99,7 +99,7 @@ test.describe("Cashu and Lightning", { tag: "@network" }, () => {
   });
 });
 
-test("Ark: in, a Send from the wallet, a Send in the chat and a Request paid in the chat", async ({ peer }) => {
+test("Ark: in, a Send from the wallet, a Send in the chat and a Request paid in the chat", { tag: ["@gated", "@feature:wallet.ark.send", "@feature:payments.arkade.send", "@feature:payments.arkade.request"] }, async ({ peer }) => {
   test.skip(process.env.GHOSTLY_ARK_REGTEST !== "1", "Requires the local Ark regtest stack");
   test.setTimeout(6 * 60_000);
   const mnemonic = execFileSync(process.execPath, ["--experimental-eventsource", "e2e/support/fund-ark.mjs"], { encoding: "utf8", stdio: "pipe" }).trim();
@@ -162,7 +162,7 @@ test("Ark: in, a Send from the wallet, a Send in the chat and a Request paid in 
   expect(await sats()).toBeLessThanOrEqual(400);
 });
 
-test("Bark: in over Ark and on-chain, a Send from the wallet, a Send in the chat and a Request paid in the chat", async ({ peer }) => {
+test("Bark: in over Ark and on-chain, a Send from the wallet, a Send in the chat and a Request paid in the chat", { tag: ["@gated", "@feature:wallet.bark.send", "@feature:payments.bark.send"] }, async ({ peer }) => {
   test.skip(process.env.GHOSTLY_BARK_REGTEST !== "1", "Requires the local Bark regtest stack (e2e/support/bark-regtest)");
   test.setTimeout(6 * 60_000);
   const regtest = (...args: string[]) => execFileSync(process.execPath, ["e2e/support/bark-regtest/regtest.mjs", ...args], { encoding: "utf8", stdio: "pipe" }).trim();
@@ -238,7 +238,7 @@ test("Bark: in over Ark and on-chain, a Send from the wallet, a Send in the chat
   console.log("Bark regtest evidence:", JSON.stringify({ funded, onchainTxid, boarded, walletSend, alice: await sats(alice), bob: await sats(bob), funder: JSON.parse(regtest("balance")).spendable_sat }));
 });
 
-test("USDT: in, a Send from the wallet, a Send in the chat and a Request paid in the chat", async ({ peer }) => {
+test("USDT: in, a Send from the wallet, a Send in the chat and a Request paid in the chat", { tag: ["@gated", "@feature:wallet.usdt.send", "@feature:payments.usdt.send"] }, async ({ peer }) => {
   test.skip(process.env.GHOSTLY_USDT_LOCAL !== "1", "Requires a disposable local EVM chain 31337");
   test.setTimeout(6 * 60_000);
   const config = JSON.parse(readFileSync("/tmp/ghostly-usdt-local.json", "utf8"));

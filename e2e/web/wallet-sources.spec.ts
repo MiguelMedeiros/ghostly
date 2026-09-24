@@ -6,7 +6,7 @@ import { expect, openWallet, test, useFakeProviders, useTestnet } from "../suppo
  * run the same picker with their own form, and their own gated e2e (see e2e/README.md).
  */
 
-test("the Lightning card starts on the Cashu mints and offers only what this mode can run", async ({ peer }) => {
+test("the Lightning card starts on the Cashu mints and offers only what this mode can run", { tag: ["@feature:wallet.lightning.sources"] }, async ({ peer }) => {
   const alice = await peer("sources-default");
   await openWallet(alice, "lightning");
   const source = alice.page.getByTestId("lightning-source");
@@ -23,7 +23,7 @@ test("the Lightning card starts on the Cashu mints and offers only what this mod
   }
 });
 
-test("a Lightning source is picked per mode: invoices go through it, and Mainnet keeps its own", async ({ peer }) => {
+test("a Lightning source is picked per mode: invoices go through it, and Mainnet keeps its own", { tag: ["@feature:wallet.lightning.sources"] }, async ({ peer }) => {
   const alice = await peer("sources-lightning");
   await useFakeProviders(alice);
   await useTestnet(alice);
@@ -64,7 +64,7 @@ test("a Lightning source is picked per mode: invoices go through it, and Mainnet
   await expect(page.getByTestId("wallet-card-lightning")).toContainText("Invoices via Cashu");
 });
 
-test("the Bitcoin card says no source is configured, and pays on-chain through one once it is", async ({ peer }) => {
+test("the Bitcoin card says no source is configured, and pays on-chain through one once it is", { tag: ["@feature:wallet.onchain.sources"] }, async ({ peer }) => {
   const alice = await peer("sources-bitcoin");
   await openWallet(alice, "bitcoin");
   const page = alice.page, panel = page.getByTestId("bitcoin-wallet");

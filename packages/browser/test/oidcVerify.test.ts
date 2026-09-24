@@ -4,6 +4,7 @@ import { JwksCache, JWKS_MAX_BYTES, REFETCH_INTERVAL_MS } from '../src/proofs/oi
 import { OIDC_PROVIDERS, audiences, issuerFor, oidcProvider, oidcProviders, testProvider, type OidcProvider } from '../src/proofs/oidc/providers';
 import { verifyIdToken, MAX_ID_TOKEN_LENGTH } from '../src/proofs/oidc/verify';
 import { forgeToken, jwksServer, nonceFor, signToken, testKey, type TestKey } from './helpers/oidcIssuer';
+// covers: proofs.oidc, proofs.oidc.nonce
 
 // Key generation is CPU-bound; give a loaded machine room.
 vi.setConfig({ testTimeout: 60_000 });

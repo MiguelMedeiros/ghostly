@@ -14,7 +14,7 @@ function errors(p: Peer): string[] {
   return seen;
 }
 
-test("the Services page on the web explains sharing needs the extension, and offers no add", async ({ peer }) => {
+test("the Services page on the web explains sharing needs the extension, and offers no add", { tag: ["@feature:services.web-unavailable", "@feature:app.web-limits"] }, async ({ peer }) => {
   const alice = await peer("services-web");
   const thrown = errors(alice);
   await alice.page.getByTestId("account-services").click();
@@ -35,7 +35,7 @@ test("the Services page on the web explains sharing needs the extension, and off
   expect(thrown).toEqual([]);
 });
 
-test("a paired chat's Services… dialog on the web explains the same, and closes", async ({ peer }) => {
+test("a paired chat's Services… dialog on the web explains the same, and closes", { tag: ["@feature:services.web-unavailable", "@feature:app.web-limits", "@feature:app.popovers"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("svc-dialog-alice"), peer("svc-dialog-bob")]);
   const thrown = [...[alice, bob].map(errors)];
   await pair(alice, bob);
@@ -76,7 +76,7 @@ test("a paired chat's Services… dialog on the web explains the same, and close
   expect(thrown.flat()).toEqual([]);
 });
 
-test("an older chat's apps strip on the web: Manage opens the same explanation", async ({ peer }) => {
+test("an older chat's apps strip on the web: Manage opens the same explanation", { tag: ["@feature:services.web-unavailable", "@feature:app.web-limits"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("svc-strip-alice"), peer("svc-strip-bob")]);
   const thrown = [...[alice, bob].map(errors)];
   await linkLegacy(alice, bob);
@@ -102,7 +102,7 @@ test("an older chat's apps strip on the web: Manage opens the same explanation",
 });
 
 /** The menu item that opened the dialog is gone once it opens: focus moves into the dialog, so Escape works. */
-test("Escape closes a chat's Services… dialog", async ({ peer }) => {
+test("Escape closes a chat's Services… dialog", { tag: ["@feature:app.popovers"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("svc-escape-alice"), peer("svc-escape-bob")]);
   await pair(alice, bob);
   await alice.page.getByTitle("Options").click();

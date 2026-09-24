@@ -8,7 +8,7 @@ import { expect, test } from "../support/fixtures";
 
 const NEWER = JSON.stringify({ version: "9.9.9", build: "newer" });
 
-test("offers the new version, and reloads into it when asked", async ({ peer }) => {
+test("offers the new version, and reloads into it when asked", { tag: ["@feature:app.updates.web"] }, async ({ peer }) => {
   const { page } = await peer("alice");
 
   let serving = NEWER;
@@ -26,7 +26,7 @@ test("offers the new version, and reloads into it when asked", async ({ peer }) 
   await expect(banner).toBeHidden();
 });
 
-test("put aside, it stays aside", async ({ peer }) => {
+test("put aside, it stays aside", { tag: ["@feature:app.updates.web"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await page.route("**/version.json", (route) => route.fulfill({ contentType: "application/json", body: NEWER }));
   await page.reload();
@@ -41,7 +41,7 @@ test("put aside, it stays aside", async ({ peer }) => {
   await expect(banner).toBeHidden();
 });
 
-test("nothing is asked once the check is turned off", async ({ peer }) => {
+test("nothing is asked once the check is turned off", { tag: ["@feature:app.updates.web"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await page.goto("/#/settings");
 

@@ -15,6 +15,7 @@ import { describeOnchainProvider } from "./helpers/providerContract";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { p2pkh } from "@scure/btc-signer";
 import { MockBitcoind, REGTEST } from "./helpers/mockBitcoind";
+// covers: wallet.onchain.bitcoind, wallet.onchain.provider-contract, payments.chat.reconcile
 
 const CONFIG = { url: "http://127.0.0.1:18443", wallet: "ghostly", user: "u", password: "test-only-password" };
 const connect = (node: MockBitcoind, transport: BitcoindTransport = node.transport) => BitcoindOnchain.connect(CONFIG, "testnet", transport);

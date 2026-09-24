@@ -1,7 +1,7 @@
 import { manualFallback } from "../support/clipboard";
 import {test,expect} from "../support/fixtures";
 test.setTimeout(30000);
-test("delete dialog cancels safely and keeps its target through a reorder",async({peer})=>{
+test("delete dialog cancels safely and keeps its target through a reorder",{ tag: ["@feature:chats.list.delete", "@feature:app.popovers"] },async({peer})=>{
   const {page}=await peer("delete-dialog");
   await page.getByRole("button",{name:"New chat",exact:true}).click();const first=page.url().split('/').at(-1)!;
   await page.getByRole("button",{name:"New chat",exact:true}).click();const selected=page.url();
@@ -26,7 +26,7 @@ test("delete dialog cancels safely and keeps its target through a reorder",async
   await expect(page.getByRole("button",{name:"Delete chat",exact:true})).toHaveCount(0);
 });
 
-for(const mobile of [false,true]) test(`popup outside gestures close safely (mobile=${mobile})`,async({peer})=>{
+for(const mobile of [false,true]) test(`popup outside gestures close safely (mobile=${mobile})`,{ tag: ["@feature:app.popovers"] },async({peer})=>{
   const {page}=await peer(`dismiss-${mobile}`,{mobile});
   await page.getByRole("button",{name: "Join chat", exact: true}).first().click();
   const dialog=page.getByRole("dialog",{name:"Join a chat"});
@@ -45,7 +45,7 @@ for(const mobile of [false,true]) test(`popup outside gestures close safely (mob
   }
 });
 
-test("connection details open by keyboard and dismiss without changing the chat", async ({peer}) => {
+test("connection details open by keyboard and dismiss without changing the chat", { tag: ["@feature:chat.paired.status", "@feature:app.popovers"] }, async ({peer}) => {
   const {page} = await peer("connection-details");
   await page.getByRole("button", {name:"New chat", exact:true}).click();
   const route = page.url();

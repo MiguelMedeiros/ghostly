@@ -6,7 +6,7 @@ import { pair } from "../support/paired";
 
 const countChats = (page: import("@playwright/test").Page) => page.evaluate(() => Object.entries(localStorage).filter(([key, value]) => {try {return key.startsWith("ghostly_") && !!JSON.parse(value).mySeedB64;} catch {return false;}}).length);
 
-test("New shows a real QR; Join decodes its image once and preserves a single conversation", async ({ peer }) => {
+test("New shows a real QR; Join decodes its image once and preserves a single conversation", { tag: ["@feature:invite.qr.show", "@feature:invite.qr.image"] }, async ({ peer }) => {
   const a = await peer("qr-owner"), b = await peer("qr-reader");
   await a.page.getByRole("button", {name: "New chat", exact: true}).click();
   await expect(a.page.getByPlaceholder("Paste invite…")).toHaveCount(0);
@@ -22,7 +22,7 @@ test("New shows a real QR; Join decodes its image once and preserves a single co
   await expect(a.page.locator(".chat-wallpaper").getByText("QR image roundtrip", {exact: true})).toBeVisible();
 });
 
-test("Join camera decodes real QR frames, stops tracks, and rejects invalid input", async ({ peer }) => {
+test("Join camera decodes real QR frames, stops tracks, and rejects invalid input", { tag: ["@feature:invite.qr.camera", "@feature:invite.invalid"] }, async ({ peer }) => {
   const a = await peer("camera-owner"), b = await peer("camera-reader");
   await a.page.getByTitle("New Chat").click();
   const image = (await a.page.getByTestId("invite-qr").screenshot()).toString("base64");
@@ -46,7 +46,7 @@ test("Join camera decodes real QR frames, stops tracks, and rejects invalid inpu
   expect(await b.page.evaluate(() => (window as unknown as {qaCamera:MediaStream}).qaCamera.getTracks().every(t=>t.readyState === "ended"))).toBe(true);
 });
 
-test("Join camera permission and cancellation keep paste available and release a late camera", async ({ peer }) => {
+test("Join camera permission and cancellation keep paste available and release a late camera", { tag: ["@feature:invite.qr.camera"] }, async ({ peer }) => {
   const {page} = await peer("camera-errors");
   await page.evaluate(() => Object.defineProperty(navigator.mediaDevices, "getUserMedia", { configurable:true, value: async () => {throw new DOMException("denied", "NotAllowedError");} }));
   await page.getByRole("button", {name: "Join chat", exact: true}).first().click();
@@ -67,7 +67,7 @@ test("Join camera permission and cancellation keep paste available and release a
   expect(await countChats(page)).toBe(0);
 });
 
-test("header connection popover, four desktop destinations and resizing preserve a multiline draft", async ({peer}, testInfo) => {
+test("header connection popover, four desktop destinations and resizing preserve a multiline draft", { tag: ["@feature:chat.paired.status", "@feature:chat.paired.draft", "@feature:app.sidebar-resize"] }, async ({peer}, testInfo) => {
   const a=await peer("layout-owner"), b=await peer("layout-guest");
   await pair(a,b);
   const box=a.page.getByPlaceholder("Message…");
@@ -107,7 +107,7 @@ test("header connection popover, four desktop destinations and resizing preserve
   await a.page.getByTestId("account-settings").click(); await expect(a.page).toHaveURL(/settings/);
 });
 
-test("mobile keeps its footer and compact header, with multiline text and QR inside the viewport", async ({peer},testInfo)=>{
+test("mobile keeps its footer and compact header, with multiline text and QR inside the viewport", { tag: ["@feature:app.mobile-layout", "@feature:chat.paired.draft"] }, async ({peer},testInfo)=>{
   const a=await peer("mobile-owner",{mobile:true}),b=await peer("mobile-guest",{mobile:true});
   await a.page.getByTitle("New Chat").click();
   const card=await a.page.getByTestId("invite-card").boundingBox(); expect(card!.x).toBeGreaterThanOrEqual(0);expect(card!.x+card!.width).toBeLessThanOrEqual(390);
@@ -127,7 +127,7 @@ test("mobile keeps its footer and compact header, with multiline text and QR ins
   await a.page.keyboard.press("Escape"); await expect(a.page.getByPlaceholder("Message…")).toHaveValue("Line one\nLine two");
 });
 
-test("new DHT invite QR preserves delivery mode from creation through Join", async ({peer})=>{
+test("new DHT invite QR preserves delivery mode from creation through Join", { tag: ["@feature:invite.dht", "@feature:invite.qr.image"] }, async ({peer})=>{
   const a=await peer("dht-qr-owner"),b=await peer("dht-qr-reader");
   await a.page.getByTitle("New Chat").click();
   await a.page.getByRole("radio",{name:"Text only",exact:true}).click();
@@ -144,7 +144,7 @@ test("new DHT invite QR preserves delivery mode from creation through Join", asy
   await b.page.keyboard.press("Escape");
 });
 
-test("home actions have equal sizes and enabled controls signal clicks", async ({peer}, testInfo) => {
+test("home actions have equal sizes and enabled controls signal clicks", { tag: ["@feature:app.home"] }, async ({peer}, testInfo) => {
   for (const mobile of [false, true]) {
     const p = await peer(`action-affordances-${mobile}`, {mobile});
     const actions = p.page.getByTestId("home-chat-actions").getByRole("button");
@@ -178,7 +178,7 @@ test("home actions have equal sizes and enabled controls signal clicks", async (
 });
 
 for (const unavailable of ["none", "read", "publish", "network", "publication-network"] as const) {
-  test(`new chat distinguishes absent contact from discovery ${unavailable} failure`, async ({peer}) => {
+  test(`new chat distinguishes absent contact from discovery ${unavailable} failure`, { tag: ["@feature:invite.discovery-errors"] }, async ({peer}) => {
     const {page, context} = await peer(`new-discovery-${unavailable}`);
     let reads = 0;
     await context.route(/^https:\/\/pkarr\.pubky\.(org|app)\//, route => {

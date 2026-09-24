@@ -9,6 +9,7 @@ import { OIDC_PROVIDERS, testProvider, type OidcProvider } from '../src/proofs/o
 import { verifyIdentity } from '../src/proofs/verify';
 import { signToken, testKey, type TestKey } from './helpers/oidcIssuer';
 import { describeIdentityProof } from './helpers/identityProofContract';
+// covers: proofs.oidc, proofs.contract
 
 // Key generation is CPU-bound; give a loaded machine room.
 vi.setConfig({ testTimeout: 60_000 });

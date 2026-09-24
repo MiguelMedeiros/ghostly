@@ -3,6 +3,7 @@ import { beforeEach, expect, test, vi } from 'vitest';
 import { STORES, store, transact, wrap } from '../src/shared/idb';
 import { intentRepository } from '../src/engine/paymentAdapters/persistence';
 import type { SavedIntent } from '../src/engine/paymentAdapters/coordinator';
+// covers: wallet.ready, wallet.mode, wallet.ark.create, wallet.ark.backup, wallet.usdt.create, wallet.usdt.backup
 
 // Providers are faked: these tests cover setup and custody rules, never a network.
 const funds = new Map<string, number>();

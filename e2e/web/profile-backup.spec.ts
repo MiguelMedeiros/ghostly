@@ -8,7 +8,7 @@ const endpoint = process.env.GHOSTLY_S3_ENDPOINT ?? "";
 const credentials = { region: "us-east-1", accessKeyId: process.env.GHOSTLY_S3_KEY ?? "", secretAccessKey: process.env.GHOSTLY_S3_SECRET ?? "" };
 const bucket = `ghostly-e2e-${Date.now()}`;
 
-test("a whole profile goes to S3 and to a file, and each comes back as a new profile", async ({ peer }) => {
+test("a whole profile goes to S3 and to a file, and each comes back as a new profile", { tag: ["@feature:backup.profile.s3", "@feature:backup.profile.file", "@feature:backup.passphrase-rules", "@gated"] }, async ({ peer }) => {
   test.skip(!endpoint.startsWith("http://127.0.0.1:"), "Requires a disposable local S3 server");
   test.setTimeout(4 * 60_000);
   const url = new URL(`${endpoint}/${bucket}`);

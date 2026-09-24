@@ -9,6 +9,7 @@ import {UsdtWallet} from '../src/engine/paymentAdapters/usdtWallet';
 import {PaymentCoordinator} from '../src/engine/paymentAdapters/coordinator';
 import {intentRepository} from '../src/engine/paymentAdapters/persistence';
 import {STORES,transact} from '../src/shared/idb';
+// covers-gated: wallet.usdt.create, wallet.usdt.send, wallet.usdt.backup, payments.chat.reconcile
 const enabled=process.env.GHOSTLY_USDT_LOCAL==='1';
 
 test.skipIf(!enabled)('WDK signs locally, sends a real local ERC20 transaction and recovers its saved bytes without a second spend',async()=>{

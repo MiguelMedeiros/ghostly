@@ -2,6 +2,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { ensureSession, listSessions, ownsKey, setStorageProfile } from "../../../src/lib/storage";
 import { clearAllData, loadSettings } from "../../../src/lib/settings";
 import { activeProfileId, createProfile, listProfiles, renameProfile, switchProfile, themeOf } from "../../../src/lib/profiles";
+// covers: profiles.create, profiles.switch, app.clear-data
 
 vi.mock("@ghostly/browser/shared/idb", () => ({ clearChatData: vi.fn(async () => {}) }));
 

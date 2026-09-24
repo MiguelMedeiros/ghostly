@@ -5,6 +5,7 @@ import type { CashuWallet } from "../src/engine/wallet";
 import type { StoredPayment } from "../src/shared/types";
 import { fakeAddress } from "../src/engine/paymentAdapters/providers/testing";
 import { resetDb, rows, seed } from "./fakes";
+// covers: payments.bitcoin.send, payments.bitcoin.offer
 vi.mock("../src/shared/idb", async () => (await import("./fakes")).idbModule);
 beforeEach(() => resetDb());
 

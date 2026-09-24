@@ -55,7 +55,7 @@ async function prepareSend(p: Peer, sats: number, memo?: string) {
 
 const bubble = (p: Peer, text: string | RegExp) => chat(p).getByTestId("payment-bubble").filter({ hasText: text });
 
-test("a request's memo shows on both sides, and test-mint payments say test sats", async ({ peer }) => {
+test("a request's memo shows on both sides, and test-mint payments say test sats", { tag: ["@feature:payments.chat.memo", "@feature:payments.cashu.test-sats", "@feature:payments.cashu.send", "@feature:payments.chat.review"] }, async ({ peer }) => {
   const [alice, bob] = await chatting(peer, "memo-alice", "memo-bob");
   for (const p of [alice, bob]) await testMint(p);
   await fund(alice, 100);
@@ -89,7 +89,7 @@ test("a request's memo shows on both sides, and test-mint payments say test sats
 });
 
 // The composer's "What for?" goes with a direct send: it is kept on the review and sent with the ecash.
-test("a sent payment's memo shows in both bubbles", async ({ peer }) => {
+test("a sent payment's memo shows in both bubbles", { tag: ["@feature:payments.chat.memo", "@feature:payments.cashu.send"] }, async ({ peer }) => {
   const [alice, bob] = await chatting(peer, "send-memo-alice", "send-memo-bob");
   for (const p of [alice, bob]) await testMint(p);
   await fund(alice, 100);
@@ -104,7 +104,7 @@ test("a sent payment's memo shows in both bubbles", async ({ peer }) => {
   }
 });
 
-test("a payment the contact refuses comes back, and is never shown as paid", async ({ peer }) => {
+test("a payment the contact refuses comes back, and is never shown as paid", { tag: ["@feature:payments.chat.refused", "@feature:wallet.cashu.mint.add", "@feature:wallet.cashu.mint.manage", "@feature:wallet.history"] }, async ({ peer }) => {
   const [alice, bob] = await chatting(peer, "refused-alice", "refused-bob");
   // Both are in Testnet, where Bob's test mint is the public one. Alice keeps her test sats at a mint
   // Bob has not chosen: the local mint under its own address (a mint on this machine belongs to Testnet
@@ -154,7 +154,7 @@ test("a payment the contact refuses comes back, and is never shown as paid", asy
   await expect(alice.page.getByTestId("wallet-tx").filter({ hasText: "Sent ecash" })).toHaveCount(1);
 });
 
-test("a contact who turns Cashu off stops a reviewed payment before anything is spent", async ({ peer }) => {
+test("a contact who turns Cashu off stops a reviewed payment before anything is spent", { tag: ["@feature:payments.chat.method-off", "@feature:payments.chat.review"] }, async ({ peer }) => {
   const [alice, bob] = await chatting(peer, "off-alice", "off-bob");
   for (const p of [alice, bob]) await testMint(p);
   await fund(alice, 50);
@@ -184,7 +184,7 @@ test("a contact who turns Cashu off stops a reviewed payment before anything is 
 });
 
 // Every send from the chat is reviewed; ecash the contact never picks up can still be taken back.
-test("ecash the contact never picks up can be taken back", async ({ peer }) => {
+test("ecash the contact never picks up can be taken back", { tag: ["@feature:payments.cashu.reclaim"] }, async ({ peer }) => {
   const [alice, bob] = await chatting(peer, "unredeemed-alice", "unredeemed-bob");
   for (const p of [alice, bob]) await testMint(p);
   await fund(alice, 50);
@@ -204,7 +204,7 @@ test("ecash the contact never picks up can be taken back", async ({ peer }) => {
   await expect.poll(() => balanceOf(alice.page, "wallet-test-balance")).toBeGreaterThanOrEqual(47);
 });
 
-test("a Lightning invoice pasted into the chat is a card with a QR code to hide and a Copy button", async ({ peer }) => {
+test("a Lightning invoice pasted into the chat is a card with a QR code to hide and a Copy button", { tag: ["@feature:payments.lightning.invoice-card"] }, async ({ peer }) => {
   const [alice, bob] = await chatting(peer, "invoice-alice", "invoice-bob");
   // An invoice from the mint, made outside Ghostly and pasted as text.
   const { Wallet } = await import("@cashu/cashu-ts");

@@ -12,7 +12,7 @@ async function fits(page:Page){
  expect(picker!.height).toBeLessThanOrEqual(panel!.height+2);
 }
 
-test("emoji popover follows the composer across sidebar and viewport changes",async({peer},info)=>{
+test("emoji popover follows the composer across sidebar and viewport changes",{ tag: ["@feature:app.emoji-picker", "@feature:chat.paired.emoji"] },async({peer},info)=>{
  const {page}=await peer("emoji desktop");await page.getByTitle("New Chat").click();await page.getByRole("radio",{name:"Text only",exact:true}).click();
  const trigger=page.getByTitle("Emoji",{exact:true});await trigger.click();await fits(page);
  const triggerBox=await trigger.boundingBox(),panel=await page.getByTestId("emoji-popover").boundingBox();
@@ -35,7 +35,7 @@ test("emoji popover follows the composer across sidebar and viewport changes",as
  await trigger.click();await page.getByPlaceholder("Message…").click();await expect(page.getByTestId("emoji-popover")).toHaveCount(0);
 });
 
-test("mobile emoji sheet stays visible and supports touch selection and dismissal",async({peer},info)=>{
+test("mobile emoji sheet stays visible and supports touch selection and dismissal",{ tag: ["@feature:app.emoji-picker", "@feature:chat.paired.emoji"] },async({peer},info)=>{
  const {page}=await peer("emoji phone",{mobile:true,viewport:{width:390,height:844}});
  await page.getByTitle("New Chat").click();await page.getByRole("radio",{name:"Text only",exact:true}).click();await page.getByTitle("Emoji",{exact:true}).tap();await fits(page);
  await page.locator("em-emoji-picker").getByRole("searchbox").fill("ghost");

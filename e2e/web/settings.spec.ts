@@ -4,7 +4,7 @@ import { expect, test } from "../support/fixtures";
 
 const version = JSON.parse(readFileSync(join(import.meta.dirname, "..", "..", "web", "package.json"), "utf8")).version;
 
-test("shows the version being released", async ({ peer }) => {
+test("shows the version being released", { tag: ["@feature:app.version"] }, async ({ peer }) => {
   test.skip(!!process.env.E2E_WEB_URL, "a deployed app may be on another version");
   const { page } = await peer("alice");
   await page.getByTitle("Settings").click();
@@ -12,7 +12,7 @@ test("shows the version being released", async ({ peer }) => {
   await expect(page.getByText(version, { exact: true })).toBeVisible();
 });
 
-test("the nickname is kept, and can be made up", async ({ peer }) => {
+test("the nickname is kept, and can be made up", { tag: ["@feature:settings.nickname"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await page.goto("/#/settings");
   const nick = page.getByPlaceholder("Enter your nickname...");
@@ -25,7 +25,7 @@ test("the nickname is kept, and can be made up", async ({ peer }) => {
   await expect(nick).not.toHaveValue("");
 });
 
-test("color theme and mode apply at once and survive a reload", async ({ peer }) => {
+test("color theme and mode apply at once and survive a reload", { tag: ["@feature:app.theme"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await page.goto("/#/settings");
   const html = page.locator("html");
@@ -42,7 +42,7 @@ test("color theme and mode apply at once and survive a reload", async ({ peer })
   await expect(html).toHaveAttribute("data-theme", "dark");
 });
 
-test("the language changes the interface", async ({ peer }) => {
+test("the language changes the interface", { tag: ["@feature:app.i18n"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await page.goto("/#/settings");
   await page.locator("select").first().selectOption("pt");
@@ -54,7 +54,7 @@ test("the language changes the interface", async ({ peer }) => {
   await expect(page.getByTitle("New Chat")).toBeVisible();
 });
 
-test("reduce motion is a switch", async ({ peer }) => {
+test("reduce motion is a switch", { tag: ["@feature:app.reduce-motion", "@feature:app.attention.sounds"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await page.goto("/#/settings");
   const reduce = page.getByRole("switch", { name: "Reduce motion" });
@@ -70,7 +70,7 @@ test("reduce motion is a switch", async ({ peer }) => {
   await expect(sounds).toHaveAttribute("aria-checked", "false");
 });
 
-test("lock screen: a password locks the app, only it unlocks it", async ({ peer }) => {
+test("lock screen: a password locks the app, only it unlocks it", { tag: ["@feature:settings.lock.now", "@feature:settings.lock.password"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await page.goto("/#/settings");
   await page.getByRole("switch", { name: "Lock Screen" }).click();
@@ -112,7 +112,7 @@ test("lock screen: a password locks the app, only it unlocks it", async ({ peer 
   await expect(page.getByRole("button", { name: "Lock Now" })).toHaveCount(0);
 });
 
-test("lock screen: locks by itself after the chosen idle time", async ({ peer }) => {
+test("lock screen: locks by itself after the chosen idle time", { tag: ["@feature:settings.lock.idle"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await page.clock.install();
   await page.goto("/#/settings");
@@ -129,7 +129,7 @@ test("lock screen: locks by itself after the chosen idle time", async ({ peer })
   await expect(page.getByText("Ghostly is locked")).toBeVisible();
 });
 
-test("network: relays can be changed and reset", async ({ peer }) => {
+test("network: relays can be changed and reset", { tag: ["@feature:settings.network.relays"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await page.goto("/#/settings");
   const relays = page.getByTestId("network-relays");

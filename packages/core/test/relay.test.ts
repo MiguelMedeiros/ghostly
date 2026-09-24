@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { RelayTransport, createIdentity, createRelayPayload } from "../src";
+// covers: core.relay-client
 
 describe("relay transport", () => {
   const id = createIdentity();

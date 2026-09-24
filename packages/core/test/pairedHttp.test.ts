@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import { parseLocalTarget, utf8Decode, type FrameChannel, type LocalFetch } from "../src";
 import { PairedHttp } from "../src/pairedHttp";
 import { createChannelPair } from "./helpers";
+// covers: services.http
 
 /** Two sides of a paired session: only text application frames cross, as on the real channel. */
 function paired(localFetch: LocalFetch, services: Record<string, string>) {

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { db } from "../src/engine/db";
 import { Outbox } from "../src/engine/outbox";
 import type { StoredMessage } from "../src/shared/types";
+// covers: chat.paired.offline-send, chat.paired.receipts, chat.dht.send
 
 afterEach(() => vi.useRealTimers());
 let serial = 0;

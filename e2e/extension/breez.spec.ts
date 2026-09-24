@@ -7,7 +7,7 @@ import { expect, test } from "../support/extension";
  * offscreen document: a wallet made there, an invoice of it paid from outside, and one of the outside
  * wallet's paid back. Breez's hosted regtest; GHOSTLY_BREEZ_TESTNET=1, see e2e/README.md.
  */
-test("Breez runs in the extension's offscreen document: in and out on regtest", { tag: "@network" }, async ({ extensionPeer }) => {
+test("Breez runs in the extension's offscreen document: in and out on regtest", { tag: ["@network", "@gated", "@feature:wallet.lightning.breez.connect", "@feature:wallet.lightning.breez.pay", "@feature:extension.engine"] }, async ({ extensionPeer }) => {
   test.skip(!BREEZ_TESTNET, "GHOSTLY_BREEZ_TESTNET=1 runs it (Breez's hosted regtest, see e2e/README.md)");
   test.setTimeout(6 * 60_000);
   const other = await counterpart();

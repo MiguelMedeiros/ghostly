@@ -2,7 +2,7 @@ import { expect, test } from "../support/fixtures";
 
 // Local profiles (WISP 04): each one keeps its own chats, settings and look, and switching restarts the
 // app as the other profile.
-test("profiles keep chats and settings apart, each in its own color", async ({ peer }) => {
+test("profiles keep chats and settings apart, each in its own color", { tag: ["@feature:profiles.create", "@feature:profiles.switch", "@feature:profiles.delete", "@feature:profiles.name-optional", "@feature:settings.nickname", "@feature:app.theme"] }, async ({ peer }) => {
   const { page } = await peer("profiles");
   const theme = () => page.evaluate(() => document.documentElement.getAttribute("data-color-theme"));
 

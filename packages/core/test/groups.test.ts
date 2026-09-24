@@ -4,6 +4,7 @@ import { fromBase64Url, toBase64Url } from "../src/bytes";
 import { confirmationMatches, confirmationTag, decryptText, edgeParams, encryptText, epochKeys, newEpochSecret, openSecret, sealSecret } from "../src/groupCrypto";
 import { commitHash, commitUntaggedHash, signCommit, verifyChain, verifyCommit, type GroupCommit, type Roster } from "../src/groupCommits";
 import { GROUP_LIMITS, GroupSession, groupMessageId, type GroupEdgeFrame, type GroupIncomingMessage, type GroupMessageFrame, type GroupState } from "../src/groupSession";
+// covers: groups.protocol.crypto, groups.protocol.commits, groups.create, groups.invite, groups.send, groups.catch-up, groups.remove-member, groups.admin-change, groups.rotate, groups.leave
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 

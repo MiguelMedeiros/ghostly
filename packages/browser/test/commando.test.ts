@@ -5,6 +5,7 @@ import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, concatBytes, hexToBytes, utf8ToBytes } from "@noble/hashes/utils.js";
 import { CommandoClient, CommandoError, CommandoTransportError, MESSAGE, NoiseInitiator, NoiseTransport, ecdh, type SocketLike } from "../src/engine/paymentAdapters/providers/commando";
+// covers: wallet.lightning.cln.commando, wallet.lightning.cln.connect, wallet.lightning.cln.pay
 
 const h = (hex: string) => hexToBytes(hex.replace(/^0x/, ""));
 

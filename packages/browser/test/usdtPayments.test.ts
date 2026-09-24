@@ -4,6 +4,7 @@ import {PaymentDesk} from '../src/engine/payments';
 import type {CashuWallet} from '../src/engine/wallet';
 import type {UsdtWallet} from '../src/engine/paymentAdapters/usdtWallet';
 import {resetDb,seed} from './fakes';
+// covers: payments.usdt.send
 vi.mock('../src/shared/idb',async()=> (await import('./fakes')).idbModule);
 beforeEach(()=>resetDb());
 const target=():PaymentTarget=>({method:'usdt',network:'evm-local',chainId:31337,asset:'TEST-USDT',unit:'token-base',decimals:6,token:'0x'+'1'.repeat(40),address:'0x'+'2'.repeat(40),provider:'http://127.0.0.1:43210',issuedAt:Date.now(),expiresAt:Date.now()+60000});

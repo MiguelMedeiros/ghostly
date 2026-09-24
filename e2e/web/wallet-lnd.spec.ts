@@ -49,7 +49,7 @@ async function payFromCard(p: Peer, request: string, sats: number) {
   await expect(p.page.getByTestId("wallet-notice")).toHaveText("Paid.", { timeout: 60_000 });
 }
 
-test("LND: a node per person, invoices in and out through the card, a chat request paid, balances on both nodes", async ({ peer }) => {
+test("LND: a node per person, invoices in and out through the card, a chat request paid, balances on both nodes", { tag: ["@gated", "@feature:wallet.lightning.lnd.connect", "@feature:wallet.lightning.lnd.pay", "@feature:payments.lightning.request"] }, async ({ peer }) => {
   test.setTimeout(240_000);
   const [alice, bob] = await Promise.all([peer("lnd-alice", { ignoreHTTPSErrors: true }), peer("lnd-bob", { ignoreHTTPSErrors: true })]);
   await link(alice, bob);

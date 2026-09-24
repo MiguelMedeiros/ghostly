@@ -6,6 +6,7 @@ import { IDENTITY_PROVIDERS } from "../src/proofs/registry";
 import { verifyIdentity } from "../src/proofs/verify";
 import { describeIdentityProof } from "./helpers/identityProofContract";
 import { sshTestKey } from "./helpers/sshKeygen";
+// covers: proofs.ssh, proofs.ssh.github, proofs.ssh.gitlab, proofs.contract
 
 // Keys come from the real ssh-keygen, the tool the instructions tell people to run.
 const mine = sshTestKey(), other = sshTestKey("ecdsa"), stranger = sshTestKey(), rsa = sshTestKey("rsa");

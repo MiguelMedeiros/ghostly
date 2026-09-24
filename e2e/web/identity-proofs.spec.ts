@@ -29,7 +29,7 @@ async function identities(peer: Peer) {
 }
 const close = (peer: Peer) => peer.page.getByTestId("chat-identities").getByRole("button", { name: "Close" }).click();
 
-test("a Nostr identity is proven once, shared with one contact only, withdrawn, and expires", async ({ peer }) => {
+test("a Nostr identity is proven once, shared with one contact only, withdrawn, and expires", { tag: ["@feature:proofs.nostr", "@feature:proofs.share", "@feature:proofs.withdraw", "@feature:proofs.expiry"] }, async ({ peer }) => {
   const [alice, bob, carol] = await Promise.all([peer("idp-alice"), peer("idp-bob"), peer("idp-carol")]);
   const pubkey = await injectNostrSigner(alice);
 
@@ -107,7 +107,7 @@ test("a Nostr identity is proven once, shared with one contact only, withdrawn, 
   await expect(bob.page.getByTestId("chat-identity-badges")).toHaveCount(0);
 });
 
-test("removing a proof revokes it for a contact the person never reconnects to", async ({ peer, relay }) => {
+test("removing a proof revokes it for a contact the person never reconnects to", { tag: ["@feature:proofs.nostr", "@feature:proofs.revoke"] }, async ({ peer, relay }) => {
   const [alice, carol] = await Promise.all([peer("idr-alice"), peer("idr-carol")]);
   await injectNostrSigner(alice);
   await pair(alice, carol);

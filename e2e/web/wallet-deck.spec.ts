@@ -31,7 +31,7 @@ const place = (page: Page, id: string) => card(page, id).evaluate((el) => (el as
 const strips = (page: Page) => page.evaluate((ids) => ids.map((id) => { const r = document.querySelector(`[data-testid=wallet-card-${id}]`)!.getBoundingClientRect(); return { left: r.left, right: r.right }; }), [...CARDS]);
 const tiled = (s: { left: number; right: number }[]) => s.every((strip, i) => strip.right > strip.left && (i === 0 || Math.abs(strip.left - s[i - 1].right) <= 1));
 
-test("with a mouse the cards are a stack: resting on one brings it up, and its panel follows", async ({ peer }) => {
+test("with a mouse the cards are a stack: resting on one brings it up, and its panel follows", { tag: ["@feature:wallet.deck"] }, async ({ peer }) => {
   const { page } = await peer("alice", { viewport: { width: 1280, height: 900 } });
   await page.goto("/#/wallet");
   await expect(deck(page)).toHaveAttribute("data-mode", "stack");
@@ -93,7 +93,7 @@ test("with a mouse the cards are a stack: resting on one brings it up, and its p
   await chosen(page, "usdt");
 });
 
-test("on a phone the cards are a snapping track: a swipe chooses the card that comes to rest in the centre", async ({ peer }) => {
+test("on a phone the cards are a snapping track: a swipe chooses the card that comes to rest in the centre", { tag: ["@feature:wallet.deck"] }, async ({ peer }) => {
   const { page, context } = await peer("alice", { mobile: true });
   await page.goto("/#/wallet");
   await expect(deck(page)).toHaveAttribute("data-mode", "track");
@@ -131,7 +131,7 @@ test("on a phone the cards are a snapping track: a swipe chooses the card that c
   expect(await page.evaluate(() => { const body = document.querySelector("[data-page-body]")!; return body.scrollWidth <= body.clientWidth + 1; })).toBe(true);
 });
 
-test("a desktop column squeezed by the chat list keeps the stack, and every card can still be reached", async ({ peer }) => {
+test("a desktop column squeezed by the chat list keeps the stack, and every card can still be reached", { tag: ["@feature:wallet.deck", "@feature:app.sidebar-resize"] }, async ({ peer }) => {
   const { page } = await peer("alice", { viewport: { width: 1100, height: 900 } });
   await page.goto("/#/wallet");
   const handle = (await page.getByTestId("sidebar-resize").boundingBox())!;
@@ -174,7 +174,7 @@ const atRest = (page: Page) => page.evaluate(() => [...document.querySelectorAll
   return face.getAnimations().every((a) => a instanceof CSSTransition) && ["none", "0deg"].includes(style.rotate) && ["none", "0px", "0px 0px"].includes(style.translate);
 }));
 
-test("changing the card swings the new one up and tucks the old one back, and quick changes all settle", async ({ peer }) => {
+test("changing the card swings the new one up and tucks the old one back, and quick changes all settle", { tag: ["@feature:wallet.deck"] }, async ({ peer }) => {
   const { page } = await peer("alice", { viewport: { width: 1280, height: 900 } });
   await page.goto("/#/wallet");
   await chosen(page, "cashu");
@@ -196,7 +196,7 @@ test("changing the card swings the new one up and tucks the old one back, and qu
   expect(tiled(await strips(page))).toBe(true);
 });
 
-test("on a phone the card that settles in the centre swings too", async ({ peer }) => {
+test("on a phone the card that settles in the centre swings too", { tag: ["@feature:wallet.deck"] }, async ({ peer }) => {
   const { page } = await peer("alice", { mobile: true });
   await page.goto("/#/wallet");
   await expect(deck(page)).toHaveAttribute("data-mode", "track");
@@ -209,7 +209,7 @@ test("on a phone the card that settles in the centre swings too", async ({ peer 
   await expect.poll(() => atRest(page)).toBe(true);
 });
 
-test("with reduced motion the deck still stacks, chooses and follows, without a transition", async ({ peer }) => {
+test("with reduced motion the deck still stacks, chooses and follows, without a transition", { tag: ["@feature:wallet.deck"] }, async ({ peer }) => {
   const { page } = await peer("alice", { viewport: { width: 1280, height: 900 } });
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/#/wallet");

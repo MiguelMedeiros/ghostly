@@ -8,7 +8,7 @@ import { expect, test } from "@playwright/test";
  */
 const STATE = "A".repeat(43);
 
-test("hands the answer to the waiting tab over a same-origin channel and clears it from the address", async ({ context, baseURL }) => {
+test("hands the answer to the waiting tab over a same-origin channel and clears it from the address", { tag: ["@feature:proofs.oidc.callback.web"] }, async ({ context, baseURL }) => {
   const tab = await context.newPage();
   await tab.goto(`${baseURL}/oidc-callback.html`);
   const received = tab.evaluate(() => new Promise<unknown>((resolve) => {
@@ -22,7 +22,7 @@ test("hands the answer to the waiting tab over a same-origin channel and clears 
   if (!popup.isClosed()) await expect.poll(() => popup.url()).toBe(`${baseURL}/oidc-callback.html`);
 });
 
-test("forwards a desktop sign-in to 127.0.0.1 on the port its state names, and nowhere else", async ({ page, baseURL }) => {
+test("forwards a desktop sign-in to 127.0.0.1 on the port its state names, and nowhere else", { tag: ["@feature:proofs.oidc.callback.desktop"] }, async ({ page, baseURL }) => {
   const forwarded: string[] = [];
   await page.route("http://127.0.0.1:50123/**", (route) => {
     forwarded.push(route.request().url());

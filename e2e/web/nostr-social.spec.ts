@@ -33,7 +33,7 @@ async function useTestRelay(peer: Peer) {
   await expect(relays).toHaveValue(NOSTR_TEST_RELAY);
 }
 
-test("a contact's profile, follows and notes load only on request from the person's relays; nothing loads without the shared proof; publication goes through the person's own signer", async ({ peer }) => {
+test("a contact's profile, follows and notes load only on request from the person's relays; nothing loads without the shared proof; publication goes through the person's own signer", { tag: ["@feature:nostr.social.profile", "@feature:nostr.social.follows", "@feature:nostr.social.notes", "@feature:nostr.social.no-proof", "@feature:nostr.social.publish", "@feature:proofs.nostr", "@feature:proofs.share"] }, async ({ peer }) => {
   test.setTimeout(6 * 60_000);
   const relay = new LocalNostrRelay();
   const [alice, bob, carol] = await Promise.all([peer("ns-alice"), peer("ns-bob"), peer("ns-carol")]);

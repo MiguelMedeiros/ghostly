@@ -2,6 +2,7 @@ import {afterEach,describe,expect,it,vi} from 'vitest';
 import {base64urlnopad} from '@scure/base';
 import {createIdentity,ringChannel,sealRing,openRing,ringClaims,ringAuthorization,proofStatement,verifyPeerProof,type ProofChallenge} from '@ghostly/core';
 import {withPubkyRing} from '../src/proofs/ring';
+// covers: core.ring-link, proofs.peer-proofs
 afterEach(()=>{vi.unstubAllGlobals();vi.useRealTimers();});
 function relay(){
  const messages=new Map<string,Uint8Array>(),waiters=new Map<string,(r:Response)=>void>();

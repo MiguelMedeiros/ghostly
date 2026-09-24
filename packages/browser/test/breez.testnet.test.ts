@@ -4,6 +4,7 @@ import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { BreezLightning } from "../src/engine/paymentAdapters/providers/breez";
 import { BREEZ_TESTNET, counterpart, nodeBreezSdk, type Counterpart } from "../../../e2e/support/breez";
 import { describeLightningProvider } from "./helpers/providerContract";
+// covers-gated: wallet.lightning.breez.pay, wallet.lightning.provider-contract
 
 /**
  * The Breez source against Breez's real regtest (hosted by Breez and Lightspark: no API key, worthless

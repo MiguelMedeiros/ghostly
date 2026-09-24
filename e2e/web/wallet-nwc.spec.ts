@@ -36,7 +36,7 @@ test.describe("NWC with a fake wallet service", () => {
   test.beforeAll(async () => { relay = await TestRelay.start(); });
   test.afterAll(async () => { await relay.close(); });
 
-  test("a wallet connected by its URI receives and pays through its relay", async ({ peer }) => {
+  test("a wallet connected by its URI receives and pays through its relay", { tag: ["@feature:wallet.lightning.nwc.connect", "@feature:wallet.lightning.nwc.pay"] }, async ({ peer }) => {
     const [mine, other] = [await FakeNwcWallet.start(relay.url, { alias: "Fake hub", balance: 5_000 }), await FakeNwcWallet.start(relay.url)];
     try {
       const alice = await peer("nwc-fake");
@@ -70,7 +70,7 @@ test.describe("NWC with a fake wallet service", () => {
     } finally { await mine.close(); await other.close(); }
   });
 
-  test("a URI that is not one, or a wallet on real Bitcoin, is refused before anything is saved", async ({ peer }) => {
+  test("a URI that is not one, or a wallet on real Bitcoin, is refused before anything is saved", { tag: ["@feature:wallet.lightning.nwc.connect"] }, async ({ peer }) => {
     const mainnet = await FakeNwcWallet.start(relay.url, { network: "mainnet" });
     try {
       const alice = await peer("nwc-refused");
@@ -94,7 +94,7 @@ test.describe("NWC on regtest Lightning", () => {
   test.skip(process.env.GHOSTLY_NWC_REGTEST !== "1", "needs the NWC regtest stack: GHOSTLY_NWC_REGTEST=1, see e2e/README.md");
   test.describe.configure({ timeout: 180_000 });
 
-  test("two people on their own NWC wallets: a request in the chat is paid over the channel", async ({ peer }) => {
+  test("two people on their own NWC wallets: a request in the chat is paid over the channel", { tag: ["@gated", "@feature:wallet.lightning.nwc.connect", "@feature:wallet.lightning.nwc.pay", "@feature:payments.lightning.request"] }, async ({ peer }) => {
     const regtest = await import("../support/nwc-regtest/regtest.mjs");
     await regtest.ready();
     const [aliceUri, bobUri] = [await regtest.nwcUri("alice", { fresh: true }), await regtest.nwcUri("bob", { fresh: true })];

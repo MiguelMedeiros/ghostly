@@ -5,7 +5,7 @@ import { expect, test } from "../support/fixtures";
  * name, the category, one line). What it proves and what it does not is a click away: "About" on the card,
  * without starting, and at the top of the panel the card opens. A caveat never depends on hover.
  */
-test("a kind of identity is recognized at a glance, and its caveats are one click away", async ({ peer }) => {
+test("a kind of identity is recognized at a glance, and its caveats are one click away", { tag: ["@feature:proofs.picker"] }, async ({ peer }) => {
   const alice = await peer("idpk-alice");
   await alice.page.evaluate(() => { location.hash = "#/profile"; });
   await alice.page.getByTestId("identity-add").click();
@@ -51,7 +51,7 @@ test("a kind of identity is recognized at a glance, and its caveats are one clic
   await expect(add.getByTestId("add-identity-card-ssh-github").getByTestId("identity-about-limits")).toContainText("Does not prove a GitHub login");
 });
 
-test("the picker holds together on a phone: the category goes under the name, the targets stay big", async ({ peer }) => {
+test("the picker holds together on a phone: the category goes under the name, the targets stay big", { tag: ["@feature:proofs.picker"] }, async ({ peer }) => {
   const alice = await peer("idpk-phone", { mobile: true });
   await alice.page.evaluate(() => { location.hash = "#/profile"; });
   await alice.page.getByTestId("identity-add").click();

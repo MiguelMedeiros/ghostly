@@ -5,6 +5,7 @@ import type { IdentityDisplay } from "@ghostly/core";
 import { NostrSocial, effectiveNostrSettings, type NostrSocialHost } from "../src/engine/nostrSocial";
 import type { NostrContactCache, NostrSocialSettings } from "../src/nostr/types";
 import { nodeSocket, TestNostrRelay } from "./helpers/nostrRelay";
+// covers: nostr.social.profile, nostr.social.follows, nostr.social.notes, nostr.social.no-proof, nostr.social.publish
 
 const now = Math.floor(Date.now() / 1000);
 const alice = generateSecretKey(), bob = generateSecretKey(), carol = generateSecretKey();

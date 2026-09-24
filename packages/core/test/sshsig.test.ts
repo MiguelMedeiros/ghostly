@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { fromBase64, toBase64, utf8Encode } from '../src/bytes';
 import { parseSshPublicKey, parseSshSignature, sameSshKey, sshKeyDigestHex, sshSignCommand, SshSigError, verifySshSignature, SSHSIG_MAX_ARMOR } from '../src/sshsig';
 import fixture from './fixtures/sshsig/sshsig-vectors.json';
+// covers: proofs.ssh
 
 // Every vector was made by a real ssh-keygen (see fixtures/sshsig/generate.sh);
 // the security-key ones through OpenSSH's own software authenticator.

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { stackLayout, stackStrips, stepCard, stripAt } from '../../../src/components/walletStack';
+// covers: wallet.deck, payments.chat.cards
 
 describe('the wallet stack', () => {
   it('keeps every card in its own place, inside the deck', () => {

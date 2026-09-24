@@ -36,7 +36,7 @@ const s3 = async (method: string, path: string, body?: Buffer) => {
   return fetch(url, { method, headers: await signS3({ method, url, body: body ? new Uint8Array(body) : undefined }, credentials), body: body as BodyInit | undefined });
 };
 
-test("text, a picture and a request held for an away contact arrive in order; a changed item is refused; an expired one is dropped", async ({ peer }) => {
+test("text, a picture and a request held for an away contact arrive in order; a changed item is refused; an expired one is dropped", { tag: ["@feature:delivery.hold.storage", "@gated", "@feature:delivery.hold.enable", "@feature:delivery.hold.text", "@feature:delivery.hold.picture", "@feature:delivery.hold.request", "@feature:delivery.hold.tamper", "@feature:delivery.hold.expiry"] }, async ({ peer }) => {
   test.skip(!endpoint.startsWith("http://127.0.0.1:"), "Requires a disposable local S3 server");
   test.setTimeout(6 * 60_000);
   expect((await s3("PUT", "")).ok, "test bucket").toBe(true);
@@ -143,7 +143,7 @@ test("text, a picture and a request held for an away contact arrive in order; a 
   await expect(chat(bob).getByText("nobody will read this in time")).toHaveCount(0);
 });
 
-test("a contact whose app does not hold is unaffected: nothing is held, offline text still goes the old way", async ({ peer }) => {
+test("a contact whose app does not hold is unaffected: nothing is held, offline text still goes the old way", { tag: ["@feature:delivery.hold.legacy-peer", "@feature:delivery.hold.enable", "@feature:chat.paired.offline-send"] }, async ({ peer }) => {
   const [carol, dave] = await Promise.all([peer("carol"), peer("dave")]);
   await link(carol, dave);
   await connect(carol, dave);

@@ -4,6 +4,7 @@ import { OIDC_PROVIDERS, testProvider, type OidcProvider } from '../src/proofs/o
 import { authorizationRequest, callbackParams, completeSignIn, scopeFor, signInForProof, type OidcWindow } from '../src/proofs/oidc/flow';
 import { routeCallback } from '../src/proofs/oidc/popup';
 import { signToken, testKey } from './helpers/oidcIssuer';
+// covers: proofs.oidc, proofs.oidc.nonce, proofs.oidc.callback.web, proofs.oidc.callback.desktop
 
 // Key generation is CPU-bound; give a loaded machine room.
 vi.setConfig({ testTimeout: 60_000 });

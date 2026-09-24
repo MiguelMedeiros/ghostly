@@ -6,6 +6,7 @@ import { createRelayPayload, parseRelayPayload } from "../src/pkarr";
 import { HOLD_LIMITS, HoldKeys, HoldRefusedError, newHoldMailbox, readManifest, type HoldPointer } from "../src/storeForward";
 import { PairedSession, type PairedSessionOptions } from "../src/pairedSession";
 import { createChannelPair } from "./helpers";
+// covers: delivery.hold.protocol, delivery.hold.tamper, delivery.hold.enable, delivery.hold.legacy-peer, core.capabilities
 
 /** Alice invited Bob; both pinned each other's participation key. */
 function pairKeys() {

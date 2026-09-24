@@ -6,6 +6,7 @@ import {
   receivedIdentityStatus, revokesIdentity, identityRevocationValue, IDENTITY_REVOCATION_LABEL, signIdentityPresentation, verifyIdentityPresentation, IDENTITY_CHALLENGE_WINDOW,
   type IdentityBinding, type IdentityLedger, type IdentityStatement, type LocalIdentityProof, type VerifiedIdentity,
 } from "../src/identityProofs";
+// covers: proofs.binding, proofs.share, proofs.withdraw, proofs.revoke, proofs.expiry
 
 const binding: IdentityBinding = {
   v: 1, provider: "nostr", subject: "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d",

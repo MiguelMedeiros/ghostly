@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ONCHAIN_PROVIDER, isBitcoinAddress, validatePaymentTarget, type BitcoinNetwork } from "../src";
+// covers: core.bitcoin-address, payments.targets
 
 // BIP 173 / BIP 350 test vectors, and well-known base58 addresses.
 const VALID: [string, BitcoinNetwork[]][] = [

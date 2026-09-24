@@ -3,6 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it, vi } from "vitest";
 import { PairingBanner } from "../../../src/components/PairingBanner";
+// covers: chat.paired.status, chat.paired.verify, invite.discovery-errors
 
 const { client } = vi.hoisted(() => ({ client: { state: { settings: { online: true }, links: [] as unknown[] } } }));
 vi.mock("@ghostly/browser/platform/engine", () => ({ engine: client }));

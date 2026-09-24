@@ -6,6 +6,7 @@ import { build } from 'vite';
 import Module, { createRequire } from 'node:module';
 import { expect, it } from 'vitest';
 import IdentityKey from 'keet-identity-key';
+// covers: core.keet-identity, proofs.keet
 
 it('the one-line browser Buffer compatibility patch preserves the upstream Keet derivation', async () => {
   const require = createRequire(import.meta.url);

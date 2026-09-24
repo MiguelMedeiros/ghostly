@@ -6,7 +6,7 @@ import { pair } from "../support/paired";
  * A paired chat, the kind every new chat is: an app is added on the Services page, granted to one
  * contact from the chat, and opened by that contact through the authenticated paired session.
  */
-test("a local web app shared in a paired chat, from the chat itself", async ({ extensionPeer }) => {
+test("a local web app shared in a paired chat, from the chat itself", { tag: ["@feature:services.add", "@feature:services.share", "@feature:services.open", "@feature:services.stop", "@feature:services.http"] }, async ({ extensionPeer }) => {
   test.setTimeout(8 * 60_000);
   const atlas = await startAtlas();
   try {

@@ -3,6 +3,7 @@ import { S3Store, signS3, validateS3Config } from "../src/backup/s3";
 import { backupName, createdFromName } from "../src/backup/storage";
 import { decode, encode } from "../src/backup/codec";
 import { open, seal } from "../src/backup/envelope";
+// covers: storage.s3, backup.envelope, backup.passphrase-rules, delivery.hold.protocol
 
 it("signs S3 requests exactly as AWS documents (SigV4 GET object example)", async () => {
   const headers = await signS3(

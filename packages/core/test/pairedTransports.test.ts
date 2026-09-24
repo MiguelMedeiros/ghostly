@@ -3,6 +3,7 @@ import { createIdentity } from "../src/identity";
 import { PairedSession } from "../src/pairedSession";
 import { rankTransports, transportOrder, type NativeBinding, type PairedTransport } from "../src/pairedTransports";
 import { createChannelPair } from "./helpers";
+// covers: transport.switch, transport.preference, transport.iroh
 
 const sessions: PairedSession[] = [];
 afterEach(() => sessions.splice(0).forEach(session => session.stop()));

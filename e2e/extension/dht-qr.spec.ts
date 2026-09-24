@@ -2,7 +2,7 @@ import { copyInvite } from "../support/clipboard";
 import { test, expect } from "../support/extension";
 import { chat, say } from "../support/fixtures";
 
-test("extension joins the real DHT QR and exchanges text with a web peer over the relay", async ({webPeer,extensionPeer})=>{
+test("extension joins the real DHT QR and exchanges text with a web peer over the relay", { tag: ["@feature:invite.qr.image", "@feature:invite.dht", "@feature:chat.dht.send", "@feature:extension.interop"] }, async ({webPeer,extensionPeer})=>{
   const a=await webPeer("web-dht-qr"),b=await extensionPeer("extension-dht-qr");
   await a.page.getByTitle("New Chat").click();
   await a.page.getByRole("radio",{name:"Text only",exact:true}).click();

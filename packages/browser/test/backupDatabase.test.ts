@@ -3,6 +3,7 @@ import { expect, it } from "vitest";
 import { databaseExists, restoreDatabase, snapshotDatabase, type DatabaseSnapshot } from "../src/backup/database";
 import { restoreArkDatabase, snapshotArkDatabase, type ArkDatabaseSnapshot } from "../src/engine/paymentAdapters/backup";
 import { wrap } from "../src/shared/idb";
+// covers: backup.database-snapshot, backup.envelope, wallet.ark.backup
 
 async function make(name: string, version: number, build: (db: IDBDatabase, tx: IDBTransaction) => void) {
   const request = indexedDB.open(name, version);

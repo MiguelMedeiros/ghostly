@@ -3,6 +3,7 @@ import { createIdentity, nostrProofTemplate, verifyNostrProof, type ProofChallen
 import { parseProofBunker, withNostrSigner } from '../src/proofs/nostr';
 // @ts-expect-error Native fixture is deliberately directly executable JavaScript.
 import { startTestBunker } from './helpers/nostrBunker.mjs';
+// covers: nostr.signer, proofs.nostr
 
 describe('external Nostr signers', () => {
   it('uses an actual NIP-46 websocket exchange with distinct remote-signer/user keys and independently verifies the signed proof', async () => {

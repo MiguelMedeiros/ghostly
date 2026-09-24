@@ -1,7 +1,7 @@
 import {test,expect} from "../support/fixtures";
 import {copyInvite} from "../support/clipboard";
 
-for(const mobile of [false,true]) test(`invite actions preserve full live and DHT codes (mobile=${mobile})`,async({peer})=>{
+for(const mobile of [false,true]) test(`invite actions preserve full live and DHT codes (mobile=${mobile})`,{tag:["@feature:invite.delivery-mode", "@feature:invite.share", "@feature:invite.create","@feature:app.popovers"]},async({peer})=>{
  const {page}=await peer("invite-actions",{mobile});
  await page.evaluate(()=>Object.defineProperty(navigator,"share",{configurable:true,value:async(data:ShareData)=>{Object.assign(window,{qaShare:data});}}));
  await page.getByTitle("New Chat").click();
@@ -27,7 +27,7 @@ for(const mobile of [false,true]) test(`invite actions preserve full live and DH
  }
 });
 
-test("copy failures never report success; legacy copy fallback preserves the invite",async({peer})=>{
+test("copy failures never report success; legacy copy fallback preserves the invite",{tag:["@feature:invite.copy"]},async({peer})=>{
  const {page}=await peer("invite-errors");
  await page.getByTitle("New Chat").click();
  const expected=await copyInvite(page);

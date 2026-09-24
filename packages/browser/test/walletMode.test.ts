@@ -11,6 +11,7 @@ import { UsdtAdapter } from "../src/engine/paymentAdapters/usdt";
 import { newDeviceKey, sealSeed } from "../src/engine/paymentAdapters/persistence";
 import { generateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
+// covers: wallet.mode, wallet.cashu.test-sats, wallet.usdt.create, wallet.ark.recover
 
 const settingsKeys = async () => (await wrap((await store(STORES.settings, "readonly")).getAllKeys())).map(String).sort();
 const read = async (key: string) => wrap((await store(STORES.settings, "readonly")).get(key));

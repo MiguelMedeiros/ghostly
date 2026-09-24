@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { PairedFiles } from "../src/pairedFiles";
 import { LIMITS, type FrameChannel } from "../src/frames";
 import type { FileSink } from "../src/files";
+// covers: files.paired.send
 const file = { id: "abcdefgh12345678", name: "test.bin", mime: "application/octet-stream", size: 70001, timestamp: 10 };
 async function* source(size = file.size) { yield new Uint8Array(size).fill(123); }
 function setup(sink?: FileSink | null, mutate?: (frame: string) => string) {

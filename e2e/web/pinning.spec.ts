@@ -1,5 +1,5 @@
 import {test,expect} from "../support/fixtures";
-test("pin from list does not switch chat, survives reload, and unpins from Options",async({peer})=>{
+test("pin from list does not switch chat, survives reload, and unpins from Options",{tag:["@feature:chats.list.pin"]},async({peer})=>{
   const {page}=await peer("pinning");
   await page.getByRole("button",{name:"New chat",exact:true}).click();
   const older=page.url();

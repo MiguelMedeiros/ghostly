@@ -3,6 +3,7 @@ import { GhostLink, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS } from "../src/ghost
 import { LinkSession, RELAY_POLL_INTERVALS, AWAITING_PEER_MS } from "../src/link";
 import { createLink } from "../src/invite";
 import { createIdentity } from "../src/identity";
+// covers: core.liveness, chat.paired.reconnect
 
 afterEach(() => { vi.useRealTimers(); });
 

@@ -11,6 +11,7 @@ import { fakeInvoice } from "../src/engine/paymentAdapters/providers/testing";
 import { NothingSpentError } from "../src/engine/paymentAdapters/providers/types";
 import { FakeNwcWallet, TestRelay, type FakeNwcOptions } from "./helpers/fakeNwc";
 import { describeLightningProvider } from "./helpers/providerContract";
+// covers: wallet.lightning.nwc.connect, wallet.lightning.nwc.pay, wallet.lightning.provider-contract
 
 let relay: TestRelay;
 const opened: { close(): Promise<void> }[] = [];

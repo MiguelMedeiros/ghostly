@@ -109,6 +109,7 @@ fn main() {
 /// showing a contact's app must not reach a single command.
 #[cfg(test)]
 mod tests {
+    // covers: services.desktop-viewer
     use super::*;
     use tauri::ipc::{CallbackFn, InvokeBody};
     use tauri::test::{get_ipc_response, mock_builder, MockRuntime, INVOKE_KEY};

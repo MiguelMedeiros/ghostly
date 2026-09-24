@@ -10,6 +10,7 @@ import { onAdaptersChanged, pluginProblems, registerAdapters, registeredPlugins,
 import type { IdentityProofProvider } from "../src/proofs/contract";
 import { IDENTITY_PROVIDERS, identityProviders } from "../src/proofs/registry";
 import { fakeKey } from "../src/proofs/testing";
+// covers: sdk.registry, sdk.plugin.bundled, wallet.lightning.provider-contract, wallet.onchain.provider-contract
 
 /**
  * Adapters from outside the app: what `registerAdapters` accepts, what it refuses, and where the

@@ -2,6 +2,7 @@ import {createRingInputRouter} from '../src/ringInput';
 import {describe,it,expect,vi} from 'vitest';
 import {createIdentity} from '../src/identity';
 import {createRingLink,isRingLink,parseRingLink} from '../src/ringLink';
+// covers: core.ring-link
 const now=1800000000,delegate=createIdentity().pubKeyZ32,secret=crypto.getRandomValues(new Uint8Array(32));
 const request=createRingLink(secret,delegate,now+180);
 describe('Ghostly request generated for actual Ring parser',()=>{

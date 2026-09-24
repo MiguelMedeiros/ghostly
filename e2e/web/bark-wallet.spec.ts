@@ -7,7 +7,7 @@ import { connect, expect, link, openChat, openWallet, test, useTestnet, type Pee
  */
 const panel = (p: Peer) => p.page.getByTestId("bark-wallet");
 
-test("Bark is not on Mainnet yet, and says so instead of making a wallet", async ({ peer }) => {
+test("Bark is not on Mainnet yet, and says so instead of making a wallet", { tag: ["@feature:wallet.bark.mainnet-off"] }, async ({ peer }) => {
   const alice = await peer("bark-mainnet");
   await openWallet(alice, "bark");
   await expect(alice.page.getByTestId("wallet-card-bark")).toContainText("Testnet only");
@@ -18,7 +18,7 @@ test("Bark is not on Mainnet yet, and says so instead of making a wallet", async
 test.describe("on Second's signet server", { tag: "@network" }, () => {
   test.describe.configure({ retries: 1 });
 
-  test("Testnet opens a Bark wallet on signet by itself: an address to receive, a balance, a recovery phrase", async ({ peer }) => {
+  test("Testnet opens a Bark wallet on signet by itself: an address to receive, a balance, a recovery phrase", { tag: ["@feature:wallet.bark.create"] }, async ({ peer }) => {
     const alice = await peer("bark-signet");
     await useTestnet(alice);
     await openWallet(alice, "bark");
@@ -30,7 +30,7 @@ test.describe("on Second's signet server", { tag: "@network" }, () => {
     await expect(panel(alice).getByTestId("bark-recovery")).toHaveText(/^(\w+ ){11}\w+$/);
   });
 
-  test("a chat offers Bark only when both sides allow it, and shows each side's choice", async ({ peer }) => {
+  test("a chat offers Bark only when both sides allow it, and shows each side's choice", { tag: ["@feature:payments.bark.offer", "@feature:payments.chat.methods"] }, async ({ peer }) => {
     test.setTimeout(4 * 60_000);
     const [alice, bob] = await Promise.all([peer("bark-n-alice"), peer("bark-n-bob")]);
     await link(alice, bob);

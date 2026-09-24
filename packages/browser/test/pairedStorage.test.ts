@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createIdentity } from "@ghostly/core";
 import { db } from "../src/engine/db";
 import type { StoredLink } from "../src/shared/types";
+// covers: chat.paired.verify, chat.paired.storage, core.peer-keys, proofs.peer-proofs
 
 function link(id:string):StoredLink {
   return {id,seedB64:createIdentity().seedB64,peerPubKeyZ32:createIdentity().pubKeyZ32,encKeyB64:createIdentity().seedB64,

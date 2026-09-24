@@ -45,6 +45,10 @@ jobs:
       - name: TypeScript check
         run: npm run typecheck
 
+      # Runs no test: reads e2e/features.json and what every test says it covers (docs/TESTING.md).
+      - name: Test map (every feature has a test)
+        run: npm run test:map
+
       - name: Protocol tests (packages/core)
         run: npm test
 

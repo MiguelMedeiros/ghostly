@@ -23,3 +23,6 @@ dist-e2e
 # The SDK example installs @ghostly/sdk from a tarball packed on the spot (scripts/sdk-example.mjs)
 /examples/*/vendor/
 /examples/*/package-lock.json
+
+# Unit test coverage (npm run coverage)
+/coverage/

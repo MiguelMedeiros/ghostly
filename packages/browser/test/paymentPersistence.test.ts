@@ -2,6 +2,7 @@ import 'fake-indexeddb/auto';
 import { expect, test } from 'vitest';
 import { intentRepository, sealSeed, unsealSeed } from '../src/engine/paymentAdapters/persistence';
 import type { SavedIntent } from '../src/engine/paymentAdapters/coordinator';
+// covers: payments.chat.reconcile
 
 function intent(requestId=crypto.randomUUID()):SavedIntent {
  return {review:{id:crypto.randomUUID(),requestId,linkId:'peer',payee:'peer',method:'arkade',network:'regtest',provider:'http://127.0.0.1:43010',asset:'BTC',unit:'sat',address:'fixture',expiresAt:Date.now()+60000,createdAt:Date.now(),amount:10,fee:0,feeCap:0,state:'pending'},prepared:{}};

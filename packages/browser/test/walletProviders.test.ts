@@ -14,6 +14,7 @@ import { offeredIn } from "../src/engine/paymentAdapters/providers/registry";
 import { PaymentCoordinator } from "../src/engine/paymentAdapters/coordinator";
 import { intentRepository } from "../src/engine/paymentAdapters/persistence";
 import { GhostlyNode } from "../src/engine/node";
+// covers: wallet.lightning.sources, wallet.lightning.provider-contract, wallet.lightning.cashu-mint.receive, wallet.lightning.cashu-mint.pay, wallet.onchain.sources, payments.chat.reconcile
 
 const settings = async () => wrap<unknown[]>((await store(STORES.settings, "readonly")).getAll());
 const keys = async () => (await wrap((await store(STORES.settings, "readonly")).getAllKeys())).map(String).sort();

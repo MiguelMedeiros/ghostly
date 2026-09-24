@@ -13,6 +13,8 @@ import { NothingSpentError, type ProviderHost } from "../src/engine/paymentAdapt
 import { LIGHTNING_PROVIDERS, offeredIn } from "../src/engine/paymentAdapters/providers/registry";
 import { describeLightningProvider } from "./helpers/providerContract";
 import { ADMIN, FakeLndNode, bakeMacaroon } from "./helpers/fakeLnd";
+// covers: wallet.lightning.lnd.connect, wallet.lightning.lnd.pay, wallet.lightning.provider-contract
+// covers-gated: wallet.lightning.lnd.connect, wallet.lightning.lnd.pay
 
 const SCOPED = bakeMacaroon(["info:read", "invoices:read", "invoices:write", "offchain:read", "offchain:write"]);
 const full = { receive: true, send: true, balance: true };

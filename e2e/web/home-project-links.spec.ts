@@ -1,5 +1,5 @@
 import {test,expect} from "../support/fixtures";
-test("project links open outside the app without leaving Home", async ({peer}) => {
+test("project links open outside the app without leaving Home", { tag: ["@feature:app.project-links"] }, async ({peer}) => {
   const {page} = await peer("home-project-links");
   const home = page.url();
   await page.context().route("https://github.com/**",route=>route.fulfill({body:"Project destination"}));

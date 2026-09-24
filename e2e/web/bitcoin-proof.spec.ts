@@ -18,7 +18,7 @@ async function identities(peer: Peer) {
 }
 const close = (peer: Peer) => peer.page.getByTestId("chat-identities").getByRole("button", { name: "Close" }).click();
 
-test("a Bitcoin address proof: verified by the contact it is shared with, absent for another", async ({ peer }) => {
+test("a Bitcoin address proof: verified by the contact it is shared with, absent for another", { tag: ["@feature:proofs.bitcoin", "@feature:proofs.share"] }, async ({ peer }) => {
   const [alice, bob, carol] = await Promise.all([peer("btc-alice"), peer("btc-bob"), peer("btc-carol")]);
   await pair(alice, bob);
   const withBob = await chatId(alice);

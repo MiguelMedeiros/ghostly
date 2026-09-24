@@ -3,6 +3,7 @@ import * as sdk from "../src/index";
 import * as fakes from "../src/fakes";
 import * as testing from "../src/testing";
 import * as core from "../src/core";
+// covers: sdk.package
 
 /** The public surface, by name: a name that leaves here is a breaking change (docs/SDK.md, "Versioning"). */
 const SURFACE = [

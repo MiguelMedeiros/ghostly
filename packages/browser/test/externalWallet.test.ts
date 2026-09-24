@@ -5,6 +5,7 @@ import type { CashuWallet } from "../src/engine/wallet";
 import type { ArkWallet } from "../src/engine/paymentAdapters/arkWallet";
 import type { StoredPayment } from "../src/shared/types";
 import { resetDb, rows, seed } from "./fakes";
+// covers: payments.external
 
 vi.mock("../src/shared/idb", async () => (await import("./fakes")).idbModule);
 

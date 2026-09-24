@@ -25,7 +25,7 @@ async function addAccountProof(page: Page, issuer: LocalOidcIssuer, signer = "oi
   return add;
 }
 
-test("a provider-attested account is verified by the contact it is shared with, and by nobody else", async ({ peer }) => {
+test("a provider-attested account is verified by the contact it is shared with, and by nobody else", { tag: ["@feature:proofs.oidc", "@feature:proofs.share"] }, async ({ peer }) => {
   const issuer = new LocalOidcIssuer();
   const [alice, bob, carol] = await Promise.all([peer("oidc-alice"), peer("oidc-bob"), peer("oidc-carol")]);
   await Promise.all([alice, bob, carol].map((p: Peer) => issuer.attach(p.context)));
@@ -70,7 +70,7 @@ test("a provider-attested account is verified by the contact it is shared with, 
   await expect(carol.page.getByTestId("chat-identity-received")).toHaveCount(0);
 });
 
-test("a token the provider signed for another nonce is refused and nothing is saved", async ({ peer }) => {
+test("a token the provider signed for another nonce is refused and nothing is saved", { tag: ["@feature:proofs.oidc.nonce"] }, async ({ peer }) => {
   const issuer = new LocalOidcIssuer();
   const alice = await peer("oidc-wrong-nonce");
   await issuer.attach(alice.context);

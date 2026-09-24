@@ -5,6 +5,7 @@ import { GhostLink, createIdentity, createLink, type PairingState } from "@ghost
 import { db } from "../src/engine/db";
 import { Outbox } from "../src/engine/outbox";
 import { nativePeer } from "./helpers/nativePeer";
+// covers-gated: transport.iroh, chat.paired.reconnect, chat.paired.offline-send, core.peer-keys
 
 it.skipIf(process.env.TEST_NATIVE !== "1")("real Iroh peers preserve pins, history and retry IDs through reconnect", async () => {
   const binary = resolve("../../target/debug/examples/iroh-peer");

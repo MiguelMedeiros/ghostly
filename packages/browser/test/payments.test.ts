@@ -4,6 +4,7 @@ import { PaymentDesk } from "../src/engine/payments";
 import type { CashuWallet } from "../src/engine/wallet";
 import type { PendingMelt, StoredPayment } from "../src/shared/types";
 import { resetDb, rows, seed } from "./fakes";
+// covers: payments.cashu.send, payments.cashu.request, payments.cashu.reclaim, payments.cashu.test-sats, payments.lightning.request, payments.chat.methods, payments.chat.refused, payments.chat.reconcile, payments.arkade.send
 
 vi.mock("../src/shared/idb", async () => (await import("./fakes")).idbModule);
 

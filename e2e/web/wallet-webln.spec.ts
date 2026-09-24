@@ -56,7 +56,7 @@ async function requestPaidInChat(alice: Peer, bob: Peer, sats: number, aliceSour
   await expect(chat(bob).getByTestId("payment-bubble").filter({ hasText: "You requested" }).last().getByTestId("payment-state")).toHaveText("Paid", { timeout: 60_000 });
 }
 
-test("the browser wallet is offered on the web, and says when there is none or it refuses", async ({ peer }) => {
+test("the browser wallet is offered on the web, and says when there is none or it refuses", { tag: ["@feature:wallet.lightning.webln.connect"] }, async ({ peer }) => {
   const alice = await peer("webln-missing");
   const source = await lightningCard(alice);
   await expect(source.getByTestId("lightning-source-select").locator("option", { hasText: "Browser wallet (WebLN)" })).toHaveCount(1);
@@ -75,7 +75,7 @@ test("the browser wallet is offered on the web, and says when there is none or i
   await expect(source.getByTestId("lightning-source-current")).toContainText("Cashu mints");
 });
 
-test("a browser wallet as the Lightning source: invoices, payments reviewed first, and a refused prompt spends nothing", async ({ peer }) => {
+test("a browser wallet as the Lightning source: invoices, payments reviewed first, and a refused prompt spends nothing", { tag: ["@feature:wallet.lightning.webln.pay"] }, async ({ peer }) => {
   const alice = await peer("webln-fake");
   const ledger = new FakeWeblnLedger();
   const wallet = new FakeWebln(ledger, { alias: "Alice's Alby" }), stranger = new FakeWebln(ledger);
@@ -107,7 +107,7 @@ test("a browser wallet as the Lightning source: invoices, payments reviewed firs
   expect(stranger.balance).toBe(100_030);
 });
 
-test("a chat request paid between two browser wallets: Lightning only, reviewed in the bubble", async ({ peer }) => {
+test("a chat request paid between two browser wallets: Lightning only, reviewed in the bubble", { tag: ["@feature:wallet.lightning.webln.pay", "@feature:payments.lightning.request"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("webln-chat-alice"), peer("webln-chat-bob")]);
   const ledger = new FakeWeblnLedger();
   const aliceWallet = new FakeWebln(ledger, { alias: "Alice's wallet" }), bobWallet = new FakeWebln(ledger, { alias: "Bob's wallet" });
@@ -124,7 +124,7 @@ test.describe("on a regtest Lightning network", () => {
   test.skip(process.env.GHOSTLY_WEBLN_REGTEST !== "1", "needs the WebLN regtest stack (e2e/README.md) and GHOSTLY_WEBLN_REGTEST=1");
   test.describe.configure({ timeout: 240_000 });
 
-  test("each person's browser wallet in front of their own node: pay, receive, and a request paid in the chat", async ({ peer }) => {
+  test("each person's browser wallet in front of their own node: pay, receive, and a request paid in the chat", { tag: ["@gated", "@feature:wallet.lightning.webln.pay", "@feature:payments.lightning.request"] }, async ({ peer }) => {
     const [alice, bob] = await Promise.all([peer("webln-alice"), peer("webln-bob")]);
     const aliceNode = lndWebln("alice"), bobNode = lndWebln("bob");
     const balances = async () => ({ alice: await aliceNode.lnd.channelBalance(), bob: await bobNode.lnd.channelBalance() });

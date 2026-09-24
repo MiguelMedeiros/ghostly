@@ -10,7 +10,7 @@ test.describe("wallet badge", { tag: "@network" }, () => {
     await expect(peer.page.getByTestId("wallet-test-balance")).toBeVisible();
   }
 
-  test("what came in while the wallet was closed shows on its icon, and goes once it is opened", async ({ peer }, testInfo) => {
+  test("what came in while the wallet was closed shows on its icon, and goes once it is opened", { tag: ["@feature:wallet.badge", "@feature:payments.cashu.send"] }, async ({ peer }, testInfo) => {
     const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
     await link(alice, bob);
     await connect(alice, bob);

@@ -4,6 +4,7 @@ import { HoldEngine, emptyHoldState, type HoldHost } from "../src/engine/hold";
 import { presignS3 } from "../src/backup/s3";
 import type { HoldStore, StoredBackup } from "../src/backup/storage";
 import type { HoldState, StoredLink } from "../src/shared/types";
+// covers: delivery.hold.enable, delivery.hold.text, delivery.hold.picture, delivery.hold.request, delivery.hold.tamper, delivery.hold.expiry, delivery.hold.protocol
 
 /**
  * A bucket in memory that hands out presigned addresses the way S3 does, and a relay in memory: two

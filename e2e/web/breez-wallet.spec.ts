@@ -12,7 +12,7 @@ import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, ty
 const source = (p: Peer) => p.page.getByTestId("lightning-source");
 const form = (p: Peer) => source(p).getByTestId("provider-form-breez");
 
-test("Breez is offered in Testnet only, and its form makes or restores a wallet", async ({ peer }) => {
+test("Breez is offered in Testnet only, and its form makes or restores a wallet", { tag: ["@feature:wallet.lightning.breez.connect"] }, async ({ peer }) => {
   const alice = await peer("breez-form");
   await openWallet(alice, "lightning");
   await expect(source(alice).getByTestId("lightning-source-select").locator("option")).not.toContainText([/Breez/]);
@@ -59,7 +59,7 @@ test.describe("on Breez's regtest", { tag: "@network" }, () => {
     await expect(balance(p)).toHaveText(/^0\s*test sats/, { timeout: 30_000 });
   }
 
-  test("in from another wallet, out to it from Send, and a Request paid in the chat, with both balances", async ({ peer }) => {
+  test("in from another wallet, out to it from Send, and a Request paid in the chat, with both balances", { tag: ["@feature:wallet.lightning.breez.pay", "@feature:wallet.lightning.breez.connect", "@gated"] }, async ({ peer }) => {
     test.setTimeout(8 * 60_000);
     const [alice, bob] = await Promise.all([peer("breez-alice"), peer("breez-bob")]);
     await link(alice, bob);

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createIdentity } from "../src/identity";
 import { PairedSession, type PairingCredentials, type PairedSessionOptions } from "../src/pairedSession";
 import { createChannelPair } from "./helpers";
+// covers: chat.paired.session, core.capabilities, core.version, core.peer-keys, chat.paired.verify, chat.paired.reconnect, payments.chat.methods, payments.bark.offer
 
 const active: PairedSession[] = [];
 afterEach(() => { active.splice(0).forEach(s => s.stop()); });

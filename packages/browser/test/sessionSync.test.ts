@@ -1,6 +1,7 @@
 import { expect, it, vi } from "vitest";
 import { toChatMessage } from "../src/platform/sync";
 vi.mock("../src/platform/engine", () => ({ engine: {} }));
+// covers: chat.paired.join-notice
 
 it("attributes each join announcement to its actual sender", () => {
   const common = { linkId: "chat", text: "👋 Casper joined", timestamp: 1, via: "datalink" as const };

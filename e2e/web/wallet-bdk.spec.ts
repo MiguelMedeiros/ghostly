@@ -18,7 +18,7 @@ async function chooseBdk(p: Peer) {
   return panel(p).getByTestId("provider-form-bdk");
 }
 
-test("the BDK wallet is offered in Testnet only, shows a new wallet's words once, and refuses what it cannot use", async ({ peer }) => {
+test("the BDK wallet is offered in Testnet only, shows a new wallet's words once, and refuses what it cannot use", { tag: ["@feature:wallet.onchain.bdk.create"] }, async ({ peer }) => {
   const alice = await peer("bdk-offline");
   await openWallet(alice, "bitcoin");
   // Mainnet: not offered (no provider runs there yet).
@@ -51,7 +51,7 @@ test("the BDK wallet is offered in Testnet only, shows a new wallet's words once
   await expect(panel(alice).getByTestId("onchain-source-error")).not.toContainText("twelve valid");
 });
 
-test("the chat offers on-chain Bitcoin, off until a source is set up", async ({ peer }) => {
+test("the chat offers on-chain Bitcoin, off until a source is set up", { tag: ["@feature:payments.bitcoin.offer"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("bdk-chat-a"), peer("bdk-chat-b")]);
   await link(alice, bob);
   await connect(alice, bob);
@@ -60,7 +60,7 @@ test("the chat offers on-chain Bitcoin, off until a source is set up", async ({ 
   await expect(alice.page.getByTestId("payment-card-bitcoin")).toHaveAttribute("title", /Bitcoin is no source/);
 });
 
-test("BDK on regtest: funded, a Send from the wallet, a Send and a Request paid in the chat", async ({ peer }) => {
+test("BDK on regtest: funded, a Send from the wallet, a Send and a Request paid in the chat", { tag: ["@gated", "@feature:wallet.onchain.bdk.send", "@feature:payments.bitcoin.send", "@feature:wallet.onchain.sources"] }, async ({ peer }) => {
   test.skip(process.env.GHOSTLY_BDK_REGTEST !== "1", "Requires the local BDK regtest stack (e2e/support/bdk-regtest)");
   test.setTimeout(8 * 60_000);
   const regtest = (...args: string[]) => execFileSync(process.execPath, ["e2e/support/bdk-regtest/regtest.mjs", ...args], { encoding: "utf8", stdio: "pipe" }).trim();

@@ -5,6 +5,7 @@ import type { CashuWallet } from "../src/engine/wallet";
 import type { BarkWallet } from "../src/engine/paymentAdapters/barkWallet";
 import type { StoredPayment } from "../src/shared/types";
 import { resetDb, rows, seed } from "./fakes";
+// covers: payments.bark.offer, payments.bark.send
 vi.mock("../src/shared/idb", async () => (await import("./fakes")).idbModule);
 beforeEach(() => resetDb());
 

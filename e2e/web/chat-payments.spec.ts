@@ -2,7 +2,7 @@ import { chat, connect, expect, link, say, test, type Peer } from "../support/fi
 
 // Each chat chooses its own ways of paying. A way works only when both sides allow it,
 // and the contact's app learns the choice from the next handshake.
-test("each chat allows its own ways of paying", async ({ peer }) => {
+test("each chat allows its own ways of paying", { tag: ["@feature:payments.chat.methods"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await link(alice, bob);
   await connect(alice, bob);

@@ -255,6 +255,7 @@ pub fn open_project_link(url: String) -> Result<(), String> {
 
 #[cfg(test)]
 mod project_link_tests {
+    // covers: app.project-links, desktop.payment-links
     #[test]
     fn rejects_links_outside_the_project_before_launching_anything() {
         for url in [

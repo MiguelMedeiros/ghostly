@@ -1,5 +1,6 @@
 import {afterEach, beforeEach, expect, it, vi} from "vitest";
 import {isSessionPinned, setSessionPinned, setStorageProfile, saveSession, listSessions, deleteSession, loadSession} from "../../../src/lib/storage";
+// covers: chats.list.pin
 const values = new Map<string,string>();
 beforeEach(() => {
   values.clear(); setStorageProfile("");

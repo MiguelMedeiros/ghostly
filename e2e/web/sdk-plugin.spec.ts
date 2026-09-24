@@ -8,7 +8,7 @@ const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "
  * this build with GHOSTLY_PLUGINS (playwright.config.ts). The gate of docs/wisps/ADAPTER-ROADMAP.md:
  * an independently authored adapter, in the pickers, doing its job. Nothing here reaches a network.
  */
-test("a plugin's Lightning source and identity proof show in the pickers and work", async ({ peer }) => {
+test("a plugin's Lightning source and identity proof show in the pickers and work", { tag: ["@feature:sdk.plugin.lightning", "@feature:sdk.plugin.identity"] }, async ({ peer }) => {
   const alice = await peer("sdk-plugin");
   const page = alice.page;
   await openWallet(alice, "lightning");

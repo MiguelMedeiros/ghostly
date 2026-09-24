@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { checkVersionFeed } from "../src/updateFeed";
+// covers: app.updates.extension
 
 const answer = (body: string, status = 200) => vi.stubGlobal("fetch", vi.fn(async () => new Response(body, { status })));
 afterEach(() => vi.unstubAllGlobals());

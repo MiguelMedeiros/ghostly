@@ -6,6 +6,7 @@ import {
   requestLnurlInvoice, resolveLightningDestination, type LightningDestination,
 } from "../src";
 import { testInvoice } from "./invoice";
+// covers: wallet.lnurl.protocol
 
 const METADATA = JSON.stringify([["text/plain", "Pay alice"], ["text/identifier", "alice@ln.example.com"]]);
 const PARAMS = { tag: "payRequest", callback: "https://ln.example.com/lnurlp/alice/callback", minSendable: 1000, maxSendable: 100_000_000, metadata: METADATA, commentAllowed: 64 };

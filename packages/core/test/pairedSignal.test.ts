@@ -4,6 +4,7 @@ import { fitSignedPairedSignal, signPairedSignal, verifyPairedSignal } from "../
 
 import { LinkSession } from "../src/link";
 import { createLink } from "../src/invite";
+// covers: chat.paired.session, transport.webrtc, core.peer-keys
 
 const owner = createIdentity(), attacker = createIdentity();
 const from = createIdentity().pubKeyZ32, to = createIdentity().pubKeyZ32;

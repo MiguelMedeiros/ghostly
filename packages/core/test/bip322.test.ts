@@ -5,6 +5,7 @@ import {
 } from "../src";
 import basic from "./fixtures/bip322/basic-test-vectors.json";
 import generated from "./fixtures/bip322/generated-test-vectors.json";
+// covers: proofs.bitcoin, core.bitcoin-address
 
 // The official BIP-322 vectors, version 2.0.0 (bitcoin/bips@4061a54418f62a5a1ae44f4604e56373329bfad3),
 // copied as they are into fixtures/bip322/. Their private keys are the BIP's public test keys; none is used here.

@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
 
 // Opt-in, local regtest only. Every profile and seed belongs to this test.
-test("Ark request, explicit approval and receipt in the chat", async ({ peer }, testInfo) => {
+test("Ark request, explicit approval and receipt in the chat", { tag: ["@feature:payments.arkade.request", "@feature:payments.arkade.send", "@feature:payments.chat.review", "@gated"] }, async ({ peer }, testInfo) => {
   test.skip(process.env.GHOSTLY_ARK_REGTEST !== "1", "Requires the local Ark regtest stack");
   const mnemonic = execFileSync(process.execPath, ["--experimental-eventsource", "e2e/support/fund-ark.mjs"], { encoding: "utf8", stdio: "pipe" }).trim();
 

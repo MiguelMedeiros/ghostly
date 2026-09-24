@@ -7,7 +7,7 @@ import { pair } from "../support/paired";
  * page's "From your contacts" opens it, and removing the app on the sharing
  * side takes it away from both places.
  */
-test("the contact opens a shared app from Services, and it is gone once removed", async ({ extensionPeer }) => {
+test("the contact opens a shared app from Services, and it is gone once removed", { tag: ["@feature:services.add", "@feature:services.share", "@feature:services.open", "@feature:services.stop"] }, async ({ extensionPeer }) => {
   test.setTimeout(8 * 60_000);
   const atlas = await startAtlas();
   try {

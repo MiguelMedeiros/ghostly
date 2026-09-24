@@ -24,7 +24,7 @@ test.describe("another wallet", { tag: "@network" }, () => {
     return (await peer.page.getByTestId("wallet-invoice").textContent())!.trim();
   }
 
-  test("a request is paid with another wallet, and the bubble turns Paid by itself on both sides", async ({ peer }) => {
+  test("a request is paid with another wallet, and the bubble turns Paid by itself on both sides", { tag: ["@feature:payments.external", "@feature:wallet.lightning.cashu-mint.receive"] }, async ({ peer }) => {
     const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
     await link(alice, bob);
     await connect(alice, bob);
@@ -82,7 +82,7 @@ test.describe("another wallet", { tag: "@network" }, () => {
     await expect(bubble(alice).getByTestId("payment-pay"), "nothing left to pay").toHaveCount(0);
   });
 
-  test("a Lightning address is resolved against a local server and paid through the Cashu source", async ({ peer }) => {
+  test("a Lightning address is resolved against a local server and paid through the Cashu source", { tag: ["@feature:payments.lnurl.card", "@feature:wallet.lnurl.address"] }, async ({ peer }) => {
     const server = new LocalLnurlServer(45911);
     server.names.set("shop", { description: "Coffee at the shop", minSat: 5, maxSat: 500, commentAllowed: 40 });
     server.names.set("fixed", { description: "One ticket", minSat: 12, maxSat: 12 });

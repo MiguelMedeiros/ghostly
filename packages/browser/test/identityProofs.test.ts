@@ -10,6 +10,7 @@ import type { IdentityProofProvider, InAppSigner, VerifyContext } from "../src/p
 import { signNostr } from "./helpers/nostrSign";
 // @ts-expect-error Native fixture is deliberately directly executable JavaScript.
 import { startTestBunker } from "./helpers/nostrBunker.mjs";
+// covers: proofs.contract, proofs.nostr, nostr.signer
 
 const hex = (b: Uint8Array) => Array.from(b, x => x.toString(16).padStart(2, "0")).join("");
 const ctx = (): VerifyContext => ({ now: Math.floor(Date.now() / 1000), signal: new AbortController().signal, fetch: async () => { throw new Error("no network"); } });

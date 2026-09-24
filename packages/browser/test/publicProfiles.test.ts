@@ -6,6 +6,7 @@ import { WebSocket } from 'ws';
 import { db } from '../src/engine/db';
 import { currentProfileProof, selectedProfile, nostrMetadata, pubkyMetadata, profileName, safeAvatarUrl, boundedBytes, rasterDimensions, cacheAvatar, readNostrProfile, lookupPublicProfile, type PublicProfile } from '../src/profiles/public';
 import { startTestBunker } from './helpers/nostrBunker.mjs';
+// covers: profiles.public, profiles.picture.sanitize
 
 afterEach(()=>vi.unstubAllGlobals());
 const now=Date.now();

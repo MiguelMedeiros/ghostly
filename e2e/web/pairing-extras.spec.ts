@@ -29,7 +29,7 @@ async function linked(peer: (name: string) => Promise<Peer>, names: [string, str
   return [alice, bob];
 }
 
-test("the connection popover opens and closes by click, Escape and a click outside", async ({ peer }) => {
+test("the connection popover opens and closes by click, Escape and a click outside", { tag: ["@feature:chat.paired.status", "@feature:app.popovers"] }, async ({ peer }) => {
   const [alice] = await linked(peer, ["popover-alice", "popover-bob"]);
   const menu = popover(alice);
   await expect(menu).toBeHidden();
@@ -65,7 +65,7 @@ test("the connection popover opens and closes by click, Escape and a click outsi
   await expect(alice.page.getByPlaceholder("Message…")).toBeEnabled();
 });
 
-test("the header shows only an icon, as big as the call buttons; a tooltip names the state", async ({ peer }) => {
+test("the header shows only an icon, as big as the call buttons; a tooltip names the state", { tag: ["@feature:chat.paired.status"] }, async ({ peer }) => {
   const [alice] = await linked(peer, ["icon-alice", "icon-bob"]);
   const tip = alice.page.getByRole("tooltip");
   await expect(trigger(alice)).toHaveText("");
@@ -102,7 +102,7 @@ test("the header shows only an icon, as big as the call buttons; a tooltip names
   await expect(trigger(alice)).toBeFocused();
 });
 
-test("verifying shows one code on both sides, and each side confirms for itself", async ({ peer }) => {
+test("verifying shows one code on both sides, and each side confirms for itself", { tag: ["@feature:chat.paired.verify", "@feature:chat.paired.send"] }, async ({ peer }) => {
   const [alice, bob] = await linked(peer, ["code-alice", "code-bob"]);
   for (const p of [alice, bob]) {
     await trigger(p).click();
@@ -135,7 +135,7 @@ test("verifying shows one code on both sides, and each side confirms for itself"
   await expect(chat(alice).getByText("verified and still talking")).toBeVisible();
 });
 
-test("offline, the popover says so; the contact is offered Reconnect, and the chat comes back", async ({ peer }) => {
+test("offline, the popover says so; the contact is offered Reconnect, and the chat comes back", { tag: ["@feature:app.offline-switch", "@feature:chat.paired.status", "@feature:chat.paired.reconnect", "@feature:chat.paired.send"] }, async ({ peer }) => {
   const [alice, bob] = await linked(peer, ["offline-alice", "offline-bob"]);
 
   await setOnline(alice, false);
@@ -174,7 +174,7 @@ test("offline, the popover says so; the contact is offered Reconnect, and the ch
   await expect(chat(bob).getByText("back again!")).toBeVisible();
 });
 
-test("Reconnect after the contact reloads: the link returns and messages flow", async ({ peer }) => {
+test("Reconnect after the contact reloads: the link returns and messages flow", { tag: ["@feature:chat.paired.reconnect", "@feature:chat.paired.send"] }, async ({ peer }) => {
   const [alice, bob] = await linked(peer, ["reload-alice", "reload-bob"]);
   await alice.page.reload();
   await expect(alice.page.getByPlaceholder("Message…")).toBeVisible();

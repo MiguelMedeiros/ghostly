@@ -3,6 +3,7 @@ import { parseSshPublicKey } from '@ghostly/core';
 import type { IdentityFetch } from '../src/proofs/contract';
 import { checkSshForge, validForgeLogin } from '../src/proofs/sshForges';
 import fixture from '../../core/test/fixtures/sshsig/sshsig-vectors.json';
+// covers: proofs.ssh.github, proofs.ssh.gitlab
 
 const mine = parseSshPublicKey(fixture.vectors.find(v => v.name === 'ed25519')!.publicKey);
 const other = parseSshPublicKey(fixture.vectors.find(v => v.name === 'rsa-2048')!.publicKey);

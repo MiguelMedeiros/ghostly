@@ -246,6 +246,7 @@ pub async fn call(
 
 #[cfg(test)]
 mod tests {
+    // covers: wallet.onchain.bitcoind
     use super::*;
     use std::io::{Read, Write};
     use std::net::TcpListener;
