@@ -13,6 +13,7 @@ import { fakeInvoice } from "../src/engine/paymentAdapters/providers/testing";
 import { NothingSpentError } from "../src/engine/paymentAdapters/providers/types";
 import { describeLightningProvider } from "./helpers/providerContract";
 import { FakeBreezNetwork } from "./helpers/fakeBreez";
+import { phraseLeaks, TEST_PHRASE } from "./helpers/phraseLeaks";
 // covers: wallet.lightning.breez.connect, wallet.lightning.breez.pay, wallet.lightning.provider-contract
 
 const phrase = () => generateMnemonic(wordlist);
@@ -67,7 +68,7 @@ describe("the Breez descriptor", () => {
   });
 
   it("connects on regtest in Testnet, on Mainnet in Mainnet, with a storage that says nothing about the seed", async () => {
-    const mnemonic = phrase();
+    const mnemonic = TEST_PHRASE;
     const descriptor = breezDescriptor(async () => net.sdk);
     const host = { platform: "web" as const, cashu: {} as CashuWallet, signal: new AbortController().signal };
     const testnet = await descriptor.create({ config: {}, secrets: { mnemonic: mnemonic.toUpperCase() } }, { ...host, mode: "testnet" });
@@ -81,8 +82,7 @@ describe("the Breez descriptor", () => {
     const [a, b] = net.connects.map((c) => c.storage);
     expect(a).toMatch(/^ghostly-breez-regtest-[0-9a-f]{16}$/);
     expect(b).toMatch(/^ghostly-breez-mainnet-[0-9a-f]{16}$/);
-    // Only the hex part can leak: the prefix legitimately contains BIP39 words ("ghost", "main").
-    for (const word of mnemonic.split(" ")) expect(a.slice("ghostly-breez-regtest-".length)).not.toContain(word);
+    expect([...phraseLeaks(a), ...phraseLeaks(b)]).toEqual([]);
     await testnet.close(); await mainnet.close();
   });
 
@@ -226,11 +226,11 @@ describe("Breez as the engine's Lightning source", () => {
     const descriptor = breezDescriptor(async () => net.sdk);
     const lightning = new LightningService(() => [cashuMint, descriptor], () => ({ platform: "extension", cashu }), events, CASHU_MINT_SOURCE);
     await lightning.start("testnet");
-    const mnemonic = phrase();
+    const mnemonic = TEST_PHRASE;
     await lightning.sources.set(BREEZ_SOURCE, { mnemonic, apiKey: "" });
     expect(lightning.view).toMatchObject({ providerId: BREEZ_SOURCE, status: "ready", network: "regtest", secrets: ["mnemonic", "apiKey"] });
     const stored = JSON.stringify(await wrap((await store(STORES.settings, "readonly")).getAll()));
-    for (const word of mnemonic.split(" ")) expect(stored).not.toMatch(new RegExp(`\\b${word}\\b`));
+    expect(phraseLeaks(stored)).toEqual([]);
     net.wallets.get(breezStorage("regtest", mnemonic))!.balance = 500;
 
     const quote = await lightning.quote(await invoiceOf(50));

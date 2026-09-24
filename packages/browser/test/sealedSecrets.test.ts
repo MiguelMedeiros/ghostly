@@ -1,10 +1,13 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PaymentReview } from "@ghostly/core";
+import { mnemonicToEntropy, mnemonicToSeedSync, validateMnemonic } from "@scure/bip39";
+import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { intentRepository, newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "../src/engine/paymentAdapters/persistence";
 import type { SavedIntent } from "../src/engine/paymentAdapters/coordinator";
 import { redact } from "../src/engine/paymentAdapters/providers/types";
 import { STORES, transact } from "../src/shared/idb";
+import { phraseLeaks, TEST_PHRASE } from "./helpers/phraseLeaks";
 // covers: payments.chat.reconcile, wallet.ark.backup, wallet.usdt.backup
 
 /**
@@ -22,7 +25,7 @@ function fastKdf() {
 beforeEach(() => { asked.length = 0; fastKdf(); });
 afterEach(() => { vi.restoreAllMocks(); });
 
-const SEED = "abandon ability able about above absent absorb abstract absurd abuse access accident";
+const SEED = TEST_PHRASE;
 
 describe("a wallet seed sealed under a password", () => {
   it("opens only with its password, with a fresh salt and nonce each time, and never shows the seed", async () => {
@@ -33,8 +36,8 @@ describe("a wallet seed sealed under a password", () => {
     expect(one.iv).toHaveLength(12);
     expect(one.salt).not.toEqual(two.salt);
     expect(one.iv).not.toEqual(two.iv);
-    expect(JSON.stringify(one)).not.toContain("abandon");
-    expect(new TextDecoder().decode(new Uint8Array(one.ciphertext))).not.toContain("abandon");
+    expect(phraseLeaks(JSON.stringify(one))).toEqual([]);
+    expect(phraseLeaks(new TextDecoder().decode(new Uint8Array(one.ciphertext)))).toEqual([]);
     expect(await unsealSeed(one, "correct horse battery")).toBe(SEED);
     expect(asked.every((n) => n === 600_000), "the key costs 600,000 PBKDF2-SHA256 rounds").toBe(true);
   });
@@ -152,5 +155,30 @@ describe("an error message fit to show and store", () => {
     // A secret longer than the message's first 300 characters is still blanked before the cut.
     const long = "s".repeat(400);
     expect(redact(new Error(`key ${long}`), { long })).toBe("key •••");
+  });
+});
+
+describe("the check that a recovery phrase is not stored (helpers/phraseLeaks)", () => {
+  it("uses a valid phrase none of whose words is in the structure around a sealed secret", async () => {
+    expect(validateMnemonic(TEST_PHRASE, wordlist)).toBe(true);
+    const envelope = JSON.stringify({ format: "ghostly-bark-encrypted", version: 1, vault: await sealSeed(TEST_PHRASE, "correct horse battery") });
+    const settings = JSON.stringify([{ providerId: "breez", config: {}, secrets: ["mnemonic", "apiKey"], sealed: { version: 1, salt: "c2FsdA", iv: "aXY" }, network: "regtest", main: "ghost", state: "ready" }]);
+    for (const text of [envelope, settings, "ghostly-breez-regtest-0123456789abcdef", "ghostly-breez-mainnet-fedcba9876543210"]) expect(phraseLeaks(text)).toEqual([]);
+  });
+
+  it("finds the phrase in every shape it could be stored in", () => {
+    const words = TEST_PHRASE.split(" ");
+    const entropy = mnemonicToEntropy(TEST_PHRASE, wordlist), seed = mnemonicToSeedSync(TEST_PHRASE);
+    expect(phraseLeaks(JSON.stringify({ mnemonic: TEST_PHRASE.toUpperCase() }))).toContain("the phrase");
+    expect(phraseLeaks(JSON.stringify(words))).toContain("the phrase");
+    expect(phraseLeaks(words.join("\n"))).toContain("the phrase");
+    expect(phraseLeaks(`{"words":"${words[3]} ${words[4]}"}`)).toEqual(["words 4 and 5 in a row", "word 4", "word 5"]);
+    expect(phraseLeaks(`{"last":"${words[11]}"}`)).toEqual(["word 12"]);
+    expect(phraseLeaks(`{"hint":"${words[0]}s"}`), "a word inside a longer one is not that word").toEqual([]);
+    expect(phraseLeaks(Buffer.from(entropy).toString("hex").toUpperCase())).toEqual(["the entropy as hex"]);
+    expect(phraseLeaks(JSON.stringify({ entropy: [...entropy] }))).toContain("the entropy as a byte list");
+    expect(phraseLeaks(JSON.stringify({ seed }))).toContain("the seed as a Uint8Array");
+    expect(phraseLeaks(Buffer.from(seed).toString("base64"))).toContain("the seed as base64");
+    expect(phraseLeaks(Buffer.from(seed).toString("base64url"))).toContain("the seed as base64url");
   });
 });
