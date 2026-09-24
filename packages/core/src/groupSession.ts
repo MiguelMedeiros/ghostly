@@ -9,6 +9,10 @@ import {
   GROUP_ID, MEMBER_KEY, MAX_GROUP_CHAIN, commitHash, commitUntaggedHash, expectedRoster, rosterAdmin, rosterHas, signCommit, verifyChain, verifyCommit, verifyCommitSignature,
   type CommitKind, type GroupCommit, type GroupRole, type Roster,
 } from "./groupCommits";
+import {
+  encodeGroupMetaBody, groupMetaNewer, groupMetaPicture, groupMetaTag, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
+  type GroupMeta, type GroupMetaFrame,
+} from "./groupMeta";
 
 /**
  * One member's view of a `group-mesh/1` group: the membership chain, the epoch
@@ -43,7 +47,8 @@ export const GROUP_READ_NOTE = `Everyone in the group can read everything sent w
 
 export interface GroupMessageFrame { t: "group-msg"; g: string; e: number; s: string; n: number; ts: number; nn: string; c: string; sig: string }
 export interface GroupCommitFrame { t: "group-commit"; g: string; commit: GroupCommit; secret?: SealedSecret }
-export interface GroupSyncFrame { t: "group-sync"; g: string; e: number; h: string; have: Record<string, Record<string, number>>; secrets: number[] }
+/** `mt`: which metadata statement I hold (`groupMetaTag`); apps without metadata leave it out. */
+export interface GroupSyncFrame { t: "group-sync"; g: string; e: number; h: string; have: Record<string, Record<string, number>>; secrets: number[]; mt?: string }
 export interface GroupSecretsFrame { t: "group-secrets"; g: string; secrets: { e: number; s: SealedSecret }[] }
 export interface GroupLeaveFrame { t: "group-leave"; g: string }
 export interface GroupInviteFrame { t: "group-invite"; g: string; name: string; admin: string; e: number; n: number }
@@ -52,7 +57,7 @@ export interface GroupDeclineFrame { t: "group-decline"; g: string }
 export interface GroupChainFrame { t: "group-chain"; g: string; commits: GroupCommit[] }
 export interface GroupWelcomeFrame { t: "group-welcome"; g: string; name: string; commits: GroupCommit[]; secrets: { e: number; s: SealedSecret }[] }
 export interface GroupRemovedFrame { t: "group-removed"; g: string }
-export type GroupEdgeFrame = GroupMessageFrame | GroupCommitFrame | GroupSyncFrame | GroupSecretsFrame | GroupLeaveFrame;
+export type GroupEdgeFrame = GroupMessageFrame | GroupCommitFrame | GroupSyncFrame | GroupSecretsFrame | GroupLeaveFrame | GroupMetaFrame;
 export type GroupAdmissionFrame = GroupInviteFrame | GroupAcceptFrame | GroupDeclineFrame | GroupChainFrame | GroupWelcomeFrame | GroupRemovedFrame;
 
 export type GroupStatus = "active" | "left" | "removed" | "forked";
@@ -78,6 +83,8 @@ export interface GroupState {
   seen: Record<string, Record<string, { high: number; window: number[] }>>;
   /** Names members announced on their edges. */
   nicks: Record<string, string>;
+  /** The group's metadata (its picture), as the admin last signed it and I accepted it. */
+  meta?: GroupMeta;
 }
 
 export interface GroupIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string }
@@ -90,6 +97,8 @@ export interface GroupSessionHooks {
   message(message: GroupIncomingMessage): Promise<void> | void;
   /** Roster, epoch or status changed. */
   changed(): void;
+  /** The group's picture changed (set, replaced or removed), by `by`. */
+  metaChanged?(by: string, picture: string | undefined): void;
 }
 
 const MAX_TEXT_BOX = Math.ceil((GROUP_LIMITS.textBytes + 16) * 4 / 3) + 4;
@@ -121,6 +130,8 @@ export class GroupSession {
   /** When each member was last asked to catch me up, so a stream of unreadable frames is one question, not a loop. */
   private asked = new Map<string, number>();
   private queue = Promise.resolve();
+  /** One metadata frame that names a commit or an epoch I do not have yet: tried again when the chain moves. */
+  private pendingMeta: { from: string; frame: unknown } | undefined;
 
   constructor(state: GroupState, private readonly hooks: GroupSessionHooks) {
     this.state = state;
@@ -187,6 +198,8 @@ export class GroupSession {
   /** Members other than me, in the current roster. */
   get others(): string[] { return this.roster.map(([k]) => k).filter(k => k !== this.myKey); }
   role(key: string): GroupRole | undefined { return this.roster.find(([k]) => k === key)?.[1]; }
+  /** The group's picture, if it has one. */
+  get picture(): string | undefined { return groupMetaPicture(this.state.meta); }
   /** Epochs whose messages this member can still read. */
   get readableEpochs(): number[] { return Object.keys(this.state.secrets).map(Number).sort((a, b) => a - b); }
   /** How many messages, per sender, are known to be missing in the current epoch. */
@@ -354,7 +367,7 @@ export class GroupSession {
       have[sender] = {};
       for (const [e, entry] of Object.entries(epochs)) have[sender][e] = entry.high;
     }
-    return { t: "group-sync", g: this.id, e: this.epoch, h: commitHash(this.top), have, secrets: this.readableEpochs };
+    return { t: "group-sync", g: this.id, e: this.epoch, h: commitHash(this.top), have, secrets: this.readableEpochs, mt: groupMetaTag(this.state.meta) };
   }
 
   setNick(key: string, nick: string | undefined): Promise<void> {
@@ -378,6 +391,7 @@ export class GroupSession {
         case "group-commit": return this.receiveCommit(from, raw as GroupCommitFrame);
         case "group-sync": return this.receiveSync(from, raw as GroupSyncFrame);
         case "group-secrets": return this.receiveSecrets(raw as GroupSecretsFrame);
+        case "group-meta": return this.receiveMeta(from, raw);
         case "group-leave": if (this.isAdmin && rosterHas(this.roster, from) && from !== this.myKey) await this.commit("remove", from, Date.now()); return;
       }
     });
@@ -439,6 +453,7 @@ export class GroupSession {
   }
 
   private async replayWaiting(): Promise<void> {
+    await this.metaFollowsChain();
     const ready = this.waiting.filter(w => w.frame.e <= this.epoch && !!this.state.secrets[w.frame.e]);
     if (!ready.length) return;
     this.waiting = this.waiting.filter(w => !ready.includes(w));
@@ -517,7 +532,7 @@ export class GroupSession {
 
   private async receiveSync(from: string, frame: GroupSyncFrame): Promise<void> {
     if (!rosterHas(this.roster, from) || !Number.isSafeInteger(frame.e) || frame.e < 0 || typeof frame.h !== "string") return;
-    if (frame.e > this.epoch) { this.ask(from); return; }
+    if (frame.e > this.epoch) { this.ask(from); this.offerMeta(from, frame.mt); return; }
     if (frame.h !== commitHash(this.state.chain[frame.e])) {
       // A claim is not a fork: they get my commit for that epoch, and fork on it if their own is validly signed and different.
       this.hooks.send(from, { t: "group-commit", g: this.id, commit: this.state.chain[frame.e] });
@@ -539,6 +554,75 @@ export class GroupSession {
       const high = have[sent.e];
       if (rosterHas(this.state.chain[sent.e].m, from) && (!Number.isSafeInteger(high) || (high as number) < sent.n)) this.hooks.send(from, sent);
     }
+    // The group's picture, when theirs is older (after the commits and secrets above, which it may need).
+    this.offerMeta(from, frame.mt);
+  }
+
+  // -- metadata (WISP 9xx § Metadata) ---------------------------------------
+
+  /** Sets (or, with null, removes) the group's picture: only the admin, signed under the current commit. */
+  setPicture(picture: string | null, now = Date.now()): Promise<void> {
+    return this.serialize(async () => {
+      if (this.state.status !== "active") throw new Error("You are no longer in this group");
+      if (!this.isAdmin) throw new Error("Only the admin can change the group's picture");
+      await this.publishMeta(encodeGroupMetaBody({ pic: picture ?? undefined }), now);
+    });
+  }
+
+  /** Signs a body under my current commit, keeps it and sends it to every member. Inside `serialize`. */
+  private async publishMeta(body: string, now: number): Promise<void> {
+    const before = this.state.meta;
+    const meta = signGroupMeta({ g: this.id, e: this.epoch, h: commitHash(this.top), r: (before?.r ?? 0) + 1, ts: now }, body, this.identity.seed, this.myKey);
+    this.state.meta = meta;
+    await this.persist();
+    const secret = this.secret(this.epoch);
+    if (secret) {
+      const frame = wrapGroupMeta(meta, this.epoch, epochKeys(secret, this.id, this.epoch).message);
+      for (const key of this.others) this.hooks.send(key, frame);
+    }
+    if (before?.d !== meta.d) this.hooks.metaChanged?.(this.myKey, this.picture);
+    this.hooks.changed();
+  }
+
+  /** My statement, to a member whose sync says it holds an older one (or none); nothing to an app that says nothing. */
+  private offerMeta(to: string, theirTag: unknown): void {
+    const meta = this.state.meta, theirs = parseGroupMetaTag(theirTag);
+    if (!meta || theirs === null || !groupMetaNewer(meta, theirs) || !rosterHas(this.roster, to)) return;
+    const secret = this.secret(this.epoch);
+    if (secret) this.hooks.send(to, wrapGroupMeta(meta, this.epoch, epochKeys(secret, this.id, this.epoch).message));
+  }
+
+  /**
+   * A metadata statement: kept when it is newer than mine, its commit is on my chain, its signer was
+   * the admin of that commit and is the admin now, its signature holds, and it opens under the epoch
+   * it names into metadata Ghostly shows. One naming what I do not have yet waits for the chain.
+   */
+  private async receiveMeta(from: string, raw: unknown): Promise<void> {
+    const frame = parseGroupMetaFrame(raw);
+    if (!frame || frame.statement.g !== this.id || typeof frame.k !== "number" || !rosterHas(this.roster, from)) return;
+    const s = frame.statement;
+    if (!groupMetaNewer(s, this.state.meta)) return;
+    if (s.e > this.epoch || frame.k > this.epoch) { this.pendingMeta = { from, frame: raw }; this.ask(from); return; }
+    const commit = this.state.chain[s.e];
+    if (commitHash(commit) !== s.h || rosterAdmin(commit.m) !== s.by || this.admin !== s.by || !verifyGroupMetaSignature(s)) return;
+    const secret = this.secret(frame.k);
+    if (!secret) { this.pendingMeta = { from, frame: raw }; this.ask(from); return; }
+    const opened = openGroupMeta(frame, epochKeys(secret, this.id, frame.k).message);
+    if (!opened) return;
+    const before = this.state.meta;
+    this.state.meta = opened.meta;
+    await this.persist();
+    if (before?.d !== opened.meta.d) this.hooks.metaChanged?.(s.by, opened.body.pic);
+    this.hooks.changed();
+  }
+
+  /** After the chain or my secrets moved: the waiting statement, and, if I became the admin, the picture signed again as mine. */
+  private async metaFollowsChain(): Promise<void> {
+    const pending = this.pendingMeta;
+    this.pendingMeta = undefined;
+    if (pending) await this.receiveMeta(pending.from, pending.frame);
+    // Joiners accept only the current admin's statement: a new admin signs the picture again.
+    if (this.isAdmin && this.state.meta && this.state.meta.by !== this.myKey) await this.publishMeta(this.state.meta.body, Date.now());
   }
 
   private async fork(reason: string): Promise<void> {

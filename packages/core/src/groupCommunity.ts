@@ -8,6 +8,10 @@ import {
   type SealedSecret,
 } from "./groupCrypto";
 import { GROUP_ID, MEMBER_KEY, rosterAdmin, rosterHas, sortRoster, type GroupRole, type Roster } from "./groupCommits";
+import {
+  encodeGroupMetaBody, groupMetaNewer, groupMetaPicture, groupMetaTag, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
+  type GroupMeta, type GroupMetaFrame,
+} from "./groupMeta";
 
 /**
  * `group-community/1` (WISP 9xx · Group Community): a group whose link is the way in, for hundreds
@@ -213,7 +217,7 @@ export interface CommunityCommitFrame { t: "group-commit"; v: 2; g: string; comm
 export interface CommunitySecretFrame { t: "group-secret"; v: 2; g: string; to: string; h: string; s: SealedSecret }
 export interface CommunitySecretsFrame { t: "group-secrets"; v: 2; g: string; secrets: { h: string; s: SealedSecret }[] }
 /** `loc`: hashes of my branch at 1, 2, 4, 8… commits back from my tip, so whoever is on another branch finds where we part. */
-export interface CommunitySyncFrame { t: "group-sync"; v: 2; g: string; e: number; h: string; loc?: string[]; have: Record<string, Record<string, number>>; secrets: string[] }
+export interface CommunitySyncFrame { t: "group-sync"; v: 2; g: string; e: number; h: string; loc?: string[]; have: Record<string, Record<string, number>>; secrets: string[]; mt?: string }
 export interface CommunityLeaveFrame { t: "group-leave"; v: 2; g: string; s: string; ls: string }
 /** The seed of the link's current entry key, sealed to one member: after a `link` commit, or at a sync. */
 export interface CommunityEntryFrame { t: "group-entry"; v: 2; g: string; to: string; x: string; s: SealedSecret }
@@ -223,7 +227,7 @@ export interface CommunityWelcomeFrame {
   t: "group-welcome"; v: 2; g: string; name: string; commits: CommunityCommit[];
   secrets: { h: string; s: SealedSecret }[]; rv: SealedSecret; entry: SealedSecret;
 }
-export type CommunityFrame = CommunityMessageFrame | CommunityCommitFrame | CommunitySecretFrame | CommunitySecretsFrame | CommunitySyncFrame | CommunityLeaveFrame | CommunityEntryFrame;
+export type CommunityFrame = CommunityMessageFrame | CommunityCommitFrame | CommunitySecretFrame | CommunitySecretsFrame | CommunitySyncFrame | CommunityLeaveFrame | CommunityEntryFrame | GroupMetaFrame;
 
 export type CommunityStatus = "active" | "left" | "removed" | "forked" | "lost";
 
@@ -255,6 +259,8 @@ export interface CommunityState {
   store: CommunityMessageFrame[];
   /** Leave requests waiting for a member to commit them. */
   pendingLeaves: { s: string; ls: string }[];
+  /** The group's metadata (its picture), as the admin last signed it and I accepted it. */
+  meta?: GroupMeta;
 }
 
 export interface CommunityIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string }
@@ -269,6 +275,8 @@ export interface CommunitySessionHooks {
   addressed(to: string, frame: CommunitySecretFrame | CommunityEntryFrame): void;
   message(message: CommunityIncomingMessage): Promise<void> | void;
   changed(): void;
+  /** The group's picture changed (set, replaced or removed), by `by`. */
+  metaChanged?(by: string, picture: string | undefined): void;
   /** A frame that waited here (a commit ahead of its parent) and is now placed: a hub passes it on. */
   relay?(frame: CommunityFrame): void;
   /** The engine's clock, for how often a member is asked for what I lack (defaults to Date.now). */
@@ -315,6 +323,8 @@ export class CommunitySession {
   private asked = new Map<string, number>();
   private queue = Promise.resolve();
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
+  /** One metadata frame naming a commit or a secret I do not have yet: tried again when the chain or my secrets move. */
+  private pendingMeta: { from: string; frame: unknown } | undefined;
 
   constructor(state: CommunityState, private readonly hooks: CommunitySessionHooks) {
     this.state = state;
@@ -405,6 +415,8 @@ export class CommunitySession {
   /** The entry key of the group's link, or "" when it is off. */
   get entryKey(): string { return this.state.entry.key; }
   role(key: string): GroupRole | undefined { return this.roster.find(([k]) => k === key)?.[1]; }
+  /** The group's picture, if it has one. */
+  get picture(): string | undefined { return groupMetaPicture(this.state.meta); }
   /** Members of any epoch in the window: whom a frame may come from. */
   isRecentMember(key: string): boolean {
     for (const roster of this.rosters.values()) if (rosterHas(roster, key)) return true;
@@ -853,7 +865,7 @@ export class CommunitySession {
     const secrets = this.state.chain.slice(-COMMUNITY_LIMITS.window - 1).map(c => communityCommitHash(c)).filter(h => this.state.secrets[h]).map(shortHash);
     const loc: string[] = [];
     for (let back = 1; back < this.state.chain.length && loc.length < 12; back *= 2) loc.push(communityCommitHash(this.state.chain[this.state.chain.length - 1 - back]));
-    return { t: "group-sync", v: 2, g: this.id, e: this.epoch, h: this.topHash, loc, have, secrets };
+    return { t: "group-sync", v: 2, g: this.id, e: this.epoch, h: this.topHash, loc, have, secrets, mt: groupMetaTag(this.state.meta) };
   }
 
   // -- frames from others --------------------------------------------------------------------------
@@ -886,6 +898,7 @@ export class CommunitySession {
           return false;
         }
         case "group-sync": await this.receiveSync(from, frame as unknown as CommunitySyncFrame); return false;
+        case "group-meta": return this.receiveMeta(from, raw);
         case "group-leave": return this.receiveLeave(frame);
         case "group-entry": {
           if (frame.to !== this.myKey || !isSealed(frame.s) || frame.x !== this.currentEntryKey()) return false;
@@ -974,6 +987,7 @@ export class CommunitySession {
   }
 
   private async replayWaiting(): Promise<void> {
+    await this.metaFollowsChain();
     const ready = this.waiting.filter(w => { const found = this.commitByShort(w.frame.e, w.frame.h); return !!found && !!this.state.secrets[found.hash]; });
     if (!ready.length) return;
     this.waiting = this.waiting.filter(w => !ready.includes(w));
@@ -1023,6 +1037,8 @@ export class CommunitySession {
     if (rosterHas(this.roster, from)) { const entry = this.entryFrame(from); if (entry) this.hooks.direct(from, entry); }
     // Pending leaves travel too, so whoever commits next can.
     for (const request of this.state.pendingLeaves) this.hooks.direct(from, { t: "group-leave", v: 2, g: this.id, ...request });
+    // The group's picture, when theirs is older (after the commits and secrets above, which it may need).
+    this.offerMeta(from, frame.mt);
     // And where I am, so they can hand me what I lack (asked once in a while, not in a loop).
     this.ask(from);
   }
@@ -1058,6 +1074,82 @@ export class CommunitySession {
       await this.persist();
       this.hooks.changed();
     });
+  }
+
+  // -- metadata (WISP 9xx § Metadata) ------------------------------------------------------------
+
+  /** Sets (or, with null, removes) the group's picture: only the admin, signed under the current commit. */
+  setPicture(picture: string | null, now = Date.now()): Promise<void> {
+    return this.serialize(async () => {
+      this.requireMember();
+      if (!this.isAdmin) throw new Error("Only the admin can change the group's picture");
+      await this.publishMeta(encodeGroupMetaBody({ pic: picture ?? undefined }), now);
+    });
+  }
+
+  /** Signs a body under my current commit, keeps it and sends it to everyone (hubs relay it). Inside `serialize`. */
+  private async publishMeta(body: string, now: number): Promise<void> {
+    const before = this.state.meta;
+    const meta = signGroupMeta({ g: this.id, e: this.epoch, h: this.topHash, r: (before?.r ?? 0) + 1, ts: now }, body, this.identity.seed, this.myKey);
+    this.state.meta = meta;
+    await this.persist();
+    const frame = this.metaFrame();
+    if (frame) this.hooks.broadcast(frame);
+    if (before?.d !== meta.d) this.hooks.metaChanged?.(this.myKey, this.picture);
+    this.hooks.changed();
+  }
+
+  /** My statement sealed under my current epoch, when I hold its secret. */
+  private metaFrame(): GroupMetaFrame | null {
+    const meta = this.state.meta, secret = this.state.secrets[this.topHash];
+    return meta && secret ? wrapGroupMeta(meta, this.topHash, epochKeys(fromBase64Url(secret), this.id, this.epoch).message, true) : null;
+  }
+
+  /** My statement, to a member whose sync says it holds an older one (or none); nothing to an app that says nothing. */
+  private offerMeta(to: string, theirTag: unknown): void {
+    const meta = this.state.meta, theirs = parseGroupMetaTag(theirTag);
+    if (!meta || theirs === null || !groupMetaNewer(meta, theirs) || !this.isMember || !rosterHas(this.roster, to)) return;
+    const frame = this.metaFrame();
+    if (frame) this.hooks.direct(to, frame);
+  }
+
+  /**
+   * A metadata statement (from its author's edge or a hub's): kept when it is newer than mine, its
+   * commit is on my main branch, its signer was the admin after that commit and is the admin now,
+   * its signature holds, and it opens under the epoch it names into metadata Ghostly shows. Returns
+   * whether it was new, so a hub relays it. One naming what I do not have yet waits for the chain.
+   */
+  private async receiveMeta(from: string, raw: unknown): Promise<boolean> {
+    const frame = parseGroupMetaFrame(raw);
+    if (!frame || frame.statement.g !== this.id || typeof frame.k !== "string" || !this.isRecentMember(from)) return false;
+    const s = frame.statement;
+    if (!groupMetaNewer(s, this.state.meta)) return false;
+    const at = this.mainIndex.get(s.h);
+    if (at === undefined) {
+      if (s.e >= this.epoch - COMMUNITY_LIMITS.window) { this.pendingMeta = { from, frame: raw }; this.ask(from); }
+      return false;
+    }
+    if (at !== s.e || rosterAdmin(this.rosterAt(s.h) ?? []) !== s.by || this.admin !== s.by || !verifyGroupMetaSignature(s)) return false;
+    // The epoch it is sealed under: a commit I know and hold the secret of, or one that may still come.
+    const secret = this.state.secrets[frame.k], sealedUnder = this.known.get(frame.k);
+    if (!secret || !sealedUnder) { this.pendingMeta = { from, frame: raw }; this.ask(from); return false; }
+    const opened = openGroupMeta(frame, epochKeys(fromBase64Url(secret), this.id, sealedUnder.e).message);
+    if (!opened) return false;
+    const before = this.state.meta;
+    this.state.meta = opened.meta;
+    await this.persist();
+    if (before?.d !== opened.meta.d) this.hooks.metaChanged?.(s.by, opened.body.pic);
+    this.hooks.changed();
+    return true;
+  }
+
+  /** After the chain or my secrets moved: the waiting statement, and, if I became the admin, the picture signed again as mine. */
+  private async metaFollowsChain(): Promise<void> {
+    const pending = this.pendingMeta;
+    this.pendingMeta = undefined;
+    if (pending && await this.receiveMeta(pending.from, pending.frame)) this.hooks.relay?.(pending.frame as GroupMetaFrame);
+    // Joiners accept only the current admin's statement: a new admin signs the picture again.
+    if (this.isAdmin && this.state.meta && this.state.meta.by !== this.myKey) await this.publishMeta(this.state.meta.body, this.hooks.clock?.() ?? Date.now());
   }
 
   private async fork(reason: string): Promise<void> {

@@ -6,7 +6,7 @@ import {
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { db } from "./db";
 import { traceJoin } from "./joinTrace";
-import { COMMUNITY_TIMINGS, Communities, type CommunityTimings } from "./community";
+import { COMMUNITY_TIMINGS, Communities, pictureText, type CommunityTimings } from "./community";
 
 /** What the engine gives the groups: its links, its storage and its state emitter. */
 export interface GroupsHost {
@@ -142,7 +142,7 @@ export class Groups {
       const nicks = session.state.nicks;
       const entry = session.isAdmin ? this.entryOf(group) : undefined;
       return { ...base, name: session.name, status: session.status, statusReason: session.state.statusReason, epoch: session.epoch, myKey: session.myKey, isAdmin: session.isAdmin,
-        ...(entry ? { entryLink: encodeGroupEntryLink(entry.link) } : {}),
+        ...(entry ? { entryLink: encodeGroupEntryLink(entry.link) } : {}), ...(session.picture ? { picture: session.picture } : {}),
         canSend: session.status === "active" && session.readableEpochs.includes(session.epoch),
         members: session.roster.map(([key, role]) => {
           const edge = edges.get(key);
@@ -277,6 +277,11 @@ export class Groups {
 
   makeAdmin(groupId: string, key: string): Promise<void> { return this.isCommunity(groupId) ? this.communities.makeAdmin(groupId, key) : this.session(groupId).transferAdmin(key); }
   rotate(groupId: string): Promise<void> { return this.isCommunity(groupId) ? this.communities.rotate(groupId) : this.session(groupId).rotate(); }
+  /** The admin sets or removes the group's picture; every member gets it over the edges (WISP 9xx § Metadata). */
+  async setPicture(groupId: string, picture: string | null): Promise<void> {
+    if (this.isCommunity(groupId)) return this.communities.setPicture(groupId, picture);
+    await this.session(groupId).setPicture(picture);
+  }
 
   async forget(groupId: string): Promise<void> {
     if (this.isCommunity(groupId)) return this.communities.forget(groupId);
@@ -641,6 +646,7 @@ export class Groups {
         this.lastMessageAt.set(state.id, Math.max(this.lastMessageAt.get(state.id) ?? 0, m.timestamp));
       },
       changed: () => { void this.membershipChanged(state.id); },
+      metaChanged: (by, picture) => { void this.pictureChanged(state.id, session, by, picture); },
     });
     this.sessions.set(state.id, session);
     this.lastRoster.set(state.id, session.roster);
@@ -662,6 +668,12 @@ export class Groups {
       if (top.k === "rotate") await this.event(groupId, "rotated", "Keys rotated: a fresh epoch", when, top.e);
     }
     this.reconcileEdges(groupId);
+    this.host.emit();
+  }
+
+  private async pictureChanged(groupId: string, session: GroupSession, by: string, picture: string | undefined): Promise<void> {
+    const name = by === session.myKey ? "You" : session.state.nicks[by] ?? `Member ${by.slice(0, 8)}`;
+    await this.event(groupId, "picture", pictureText(name, !!picture), Date.now(), session.epoch, by);
     this.host.emit();
   }
 
