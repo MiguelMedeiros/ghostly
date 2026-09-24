@@ -118,3 +118,16 @@ mod mac {
             .map_err(|_| "Notification delivery unavailable".to_string())?
     }
 }
+
+/// Off macOS the notification plugin decides, and nothing is shown from here.
+#[cfg(all(test, not(target_os = "macos")))]
+mod tests {
+    #[tokio::test]
+    async fn leaves_permission_and_display_to_the_plugin() {
+        assert_eq!(super::native_notification_permission(true).await, Ok(None));
+        assert_eq!(
+            super::native_private_notification("1".into(), "a message".into()).await,
+            Ok(false)
+        );
+    }
+}

@@ -16,11 +16,16 @@ pub struct GhostClient {
 
 impl GhostClient {
     pub fn new() -> Self {
-        Self {
-            client: Client::builder()
+        Self::with_client(
+            Client::builder()
                 .build()
                 .expect("Failed to create pkarr client"),
-        }
+        )
+    }
+
+    /// Over a Pkarr client of the caller's making: other relays, no DHT.
+    pub fn with_client(client: Client) -> Self {
+        Self { client }
     }
 
     pub async fn send(

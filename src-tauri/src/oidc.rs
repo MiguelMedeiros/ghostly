@@ -353,3 +353,234 @@ mod tests {
         ));
     }
 }
+
+/// The commands around `serve`: where they listen, what they refuse before a
+/// browser opens, and how a wait ends.
+#[cfg(test)]
+mod command_tests {
+    use super::*;
+    use tauri::test::{mock_builder, MockRuntime};
+    use tauri::Manager;
+
+    const STATE: &str = "d.1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    const AUTHORIZE: &str = "https://accounts.example/authorize?client_id=a&redirect_uri=b";
+
+    fn app() -> tauri::App<MockRuntime> {
+        mock_builder()
+            .manage(OidcState::default())
+            .build(tauri::generate_context!(test = true))
+            .expect("app")
+    }
+
+    fn exchange(port: u16, raw: &[u8]) -> String {
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let _ = stream.write_all(raw);
+        let mut out = String::new();
+        let _ = stream.read_to_string(&mut out);
+        out
+    }
+
+    #[test]
+    fn listens_on_loopback_for_one_sign_in_at_a_time() {
+        let app = app();
+        let first = oidc_loopback_start(app.state()).unwrap();
+        let state = app.state::<OidcState>();
+        let first_cancelled = {
+            let pending = state.0.lock().unwrap();
+            let entry = &pending[&first];
+            let address = entry.listener.as_ref().unwrap().local_addr().unwrap();
+            assert!(address.ip().is_loopback() && address.is_ipv4(), "{address}");
+            assert_eq!(address.port(), first);
+            entry.cancelled.clone()
+        };
+
+        let second = oidc_loopback_start(app.state()).unwrap();
+        assert_ne!(first, second);
+        assert!(
+            first_cancelled.load(Ordering::SeqCst),
+            "the abandoned one stops"
+        );
+        let pending = state.0.lock().unwrap();
+        assert_eq!(pending.keys().copied().collect::<Vec<_>>(), [second]);
+        drop(pending);
+        // Its port closed with it.
+        assert!(TcpStream::connect(("127.0.0.1", first)).is_err());
+    }
+
+    #[tokio::test]
+    async fn refuses_before_any_browser_opens() {
+        let app = app();
+        let port = oidc_loopback_start(app.state()).unwrap();
+        let wait = |url: &str, state: &str, port: u16| {
+            oidc_loopback_wait(app.state(), port, url.into(), state.into())
+        };
+        for url in [
+            "https://accounts.example/authorize?client_id=a",
+            "https://accounts.example/authorize#redirect_uri=b",
+            "http://accounts.example/authorize?redirect_uri=b",
+            "file:///etc/passwd?redirect_uri=b",
+            "ghostly://x?redirect_uri=b",
+            "not a url",
+        ] {
+            assert_eq!(
+                wait(url, STATE, port).await.unwrap_err(),
+                "Not a sign-in address",
+                "{url}"
+            );
+        }
+        for state in ["", &STATE[..42], &"A".repeat(65)] {
+            assert_eq!(
+                wait(AUTHORIZE, state, port).await.unwrap_err(),
+                "Invalid sign-in state"
+            );
+        }
+        assert_eq!(
+            wait(AUTHORIZE, STATE, port.wrapping_add(1))
+                .await
+                .unwrap_err(),
+            "No sign-in is waiting on this port"
+        );
+        // One wait per listener: a second caller cannot take it over.
+        app.state::<OidcState>()
+            .0
+            .lock()
+            .unwrap()
+            .get_mut(&port)
+            .unwrap()
+            .listener
+            .take();
+        assert_eq!(
+            wait(AUTHORIZE, STATE, port).await.unwrap_err(),
+            "This sign-in is already waiting"
+        );
+    }
+
+    #[test]
+    fn cancelling_ends_a_wait_in_progress_and_closes_the_port() {
+        let app = app();
+        let port = oidc_loopback_start(app.state()).unwrap();
+        // What `oidc_loopback_wait` does once the browser is open.
+        let state = app.state::<OidcState>();
+        let (listener, cancelled) = {
+            let mut pending = state.0.lock().unwrap();
+            let entry = pending.get_mut(&port).unwrap();
+            (entry.listener.take().unwrap(), entry.cancelled.clone())
+        };
+        let waiting = std::thread::spawn(move || {
+            let result = serve(
+                &listener,
+                STATE,
+                Instant::now() + Duration::from_secs(30),
+                &cancelled,
+            );
+            drop(listener);
+            result
+        });
+        std::thread::sleep(Duration::from_millis(100));
+        oidc_loopback_cancel(app.state(), port).unwrap();
+        assert_eq!(waiting.join().unwrap().unwrap_err(), "Sign-in cancelled");
+        assert!(app.state::<OidcState>().0.lock().unwrap().is_empty());
+        assert!(TcpStream::connect(("127.0.0.1", port)).is_err());
+        // Cancelling what is not there is fine.
+        oidc_loopback_cancel(app.state(), port).unwrap();
+    }
+
+    #[test]
+    fn survives_junk_and_takes_exactly_one_answer() {
+        let listener = crate::test_support::listener();
+        let port = listener.local_addr().unwrap().port();
+        let host = format!("127.0.0.1:{port}");
+        let cancelled = AtomicBool::new(false);
+        let client = std::thread::spawn(move || {
+            // Too big, headers or body: the connection is dropped, the wait goes on.
+            let huge = format!(
+                "GET /oidc-callback HTTP/1.1\r\nHost: {host}\r\nX: {}\r\n\r\n",
+                "a".repeat(MAX_REQUEST)
+            );
+            assert_eq!(exchange(port, huge.as_bytes()), "");
+            let big_body = format!(
+                "POST /oidc-callback HTTP/1.1\r\nHost: {host}\r\nContent-Length: {}\r\n\r\n",
+                MAX_REQUEST
+            );
+            assert_eq!(exchange(port, big_body.as_bytes()), "");
+            // Not HTTP at all, or cut short.
+            assert_eq!(exchange(port, b"\xff\xfe\r\n\r\n"), "");
+            assert_eq!(exchange(port, b"POST /oidc-callback HTTP/1.1\r\n"), "");
+            // No Host, or a name that only resolves here.
+            for head in [
+                "POST /oidc-callback HTTP/1.1\r\nContent-Length: 0\r\n\r\n".to_string(),
+                format!("POST /oidc-callback HTTP/1.1\r\nHost: localhost:{port}\r\nContent-Length: 0\r\n\r\n"),
+            ] {
+                assert!(exchange(port, head.as_bytes()).starts_with("HTTP/1.1 400"));
+            }
+            for (method, path) in [
+                ("PUT", "/oidc-callback"),
+                ("GET", "/"),
+                ("POST", "/oidc-callback/x"),
+            ] {
+                let head = format!(
+                    "{method} {path} HTTP/1.1\r\nHost: {host}\r\nContent-Length: 0\r\n\r\n"
+                );
+                assert!(
+                    exchange(port, head.as_bytes()).starts_with("HTTP/1.1 404"),
+                    "{method} {path}"
+                );
+            }
+            let page = exchange(
+                port,
+                format!("GET /oidc-callback?code=x HTTP/1.1\r\nHost: {host}\r\n\r\n").as_bytes(),
+            );
+            for header in [
+                "Cache-Control: no-store",
+                "Referrer-Policy: no-referrer",
+                "Content-Security-Policy: default-src 'none'",
+                "connect-src 'self'",
+            ] {
+                assert!(page.contains(header), "{header}");
+            }
+            assert!(page.contains("history.replaceState"));
+            let answer = format!("?code=c&state={STATE}");
+            let post = format!(
+                "POST /oidc-callback HTTP/1.1\r\nHost: {host}\r\nContent-Length: {}\r\n\r\n{answer}",
+                answer.len()
+            );
+            assert!(exchange(port, post.as_bytes()).starts_with("HTTP/1.1 200"));
+        });
+        let answer = serve(
+            &listener,
+            STATE,
+            Instant::now() + Duration::from_secs(20),
+            &cancelled,
+        )
+        .unwrap();
+        client.join().unwrap();
+        assert_eq!(answer, format!("?code=c&state={STATE}"));
+        drop(listener);
+        assert!(
+            TcpStream::connect(("127.0.0.1", port)).is_err(),
+            "one answer, then the port is gone"
+        );
+    }
+
+    #[test]
+    fn takes_the_state_from_the_fragment_before_the_query() {
+        assert_eq!(
+            state_of("?state=query#state=fragment").as_deref(),
+            Some("fragment")
+        );
+        assert_eq!(state_of("#a=1&state=x%2By").as_deref(), Some("x+y"));
+        assert_eq!(state_of(""), None);
+    }
+
+    #[test]
+    fn a_loopback_provider_is_only_for_debug_builds() {
+        let local = "http://127.0.0.1:47501/authorize?redirect_uri=b";
+        assert_eq!(is_allowed_authorize_url(local), cfg!(debug_assertions));
+        assert!(!is_allowed_authorize_url(
+            "http://192.168.0.2/authorize?redirect_uri=b"
+        ));
+    }
+}

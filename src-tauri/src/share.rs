@@ -14,8 +14,8 @@ pub struct Anchor {
 /// 4 KiB, and only from the main window. Resolves to false where there is no sheet to show (Linux,
 /// Windows): the page then copies the link instead.
 #[tauri::command]
-pub fn share_text(
-    window: tauri::WebviewWindow,
+pub fn share_text<R: tauri::Runtime>(
+    window: tauri::WebviewWindow<R>,
     text: String,
     anchor: Option<Anchor>,
 ) -> Result<bool, String> {
@@ -77,5 +77,48 @@ mod mac {
             NSSharingServicePicker::initWithItems(NSSharingServicePicker::alloc(), &items)
         };
         picker.showRelativeToRect_ofView_preferredEdge(rect, view, NSRectEdge::MinY);
+    }
+}
+
+/// What reaches the share sheet: text only, bounded, no control characters.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tauri::test::{mock_builder, MockRuntime};
+    use tauri::WebviewWindowBuilder;
+
+    fn window() -> (tauri::App<MockRuntime>, tauri::WebviewWindow<MockRuntime>) {
+        let app = mock_builder()
+            .build(tauri::generate_context!(test = true))
+            .expect("app");
+        let window = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        (app, window)
+    }
+
+    #[test]
+    fn refuses_empty_oversized_or_control_text_before_any_sheet() {
+        let (_app, window) = window();
+        for text in [
+            String::new(),
+            "a".repeat(4097),
+            "https://ghostly.tools/g#x\n".into(),
+            "tab\there".into(),
+            "nul\0".into(),
+        ] {
+            assert_eq!(
+                share_text(window.clone(), text, None).unwrap_err(),
+                "Nothing to share"
+            );
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn elsewhere_there_is_no_sheet_and_the_page_copies() {
+        let (_app, window) = window();
+        let longest = "a".repeat(4096);
+        assert_eq!(share_text(window, longest, None), Ok(false));
     }
 }

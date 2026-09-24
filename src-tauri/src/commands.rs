@@ -177,8 +177,8 @@ pub async fn lnd_request(
 }
 
 #[tauri::command]
-pub fn open_service_window(
-    app: tauri::AppHandle,
+pub fn open_service_window<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     peer: String,
     service: String,
     title: String,
@@ -187,7 +187,11 @@ pub fn open_service_window(
 }
 
 #[tauri::command]
-pub fn service_respond(app: tauri::AppHandle, id: u64, response: ServiceResponse) {
+pub fn service_respond<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    id: u64,
+    response: ServiceResponse,
+) {
     viewer::respond(&app, id, response);
 }
 
@@ -209,15 +213,19 @@ pub fn updater_can_install() -> bool {
 /// web page.
 #[tauri::command]
 pub fn open_payment_link(url: String) -> Result<(), String> {
+    if !is_payment_link(&url) {
+        return Err("Not a payment link".into());
+    }
+    launch(&url)
+}
+
+fn is_payment_link(url: &str) -> bool {
     let scheme_ok = url.starts_with("lightning:") || url.starts_with("bitcoin:");
     let chars_ok = url.len() <= 4096
         && url
             .bytes()
             .all(|c| c.is_ascii_alphanumeric() || b"?=&%.:_-".contains(&c));
-    if !scheme_ok || !chars_ok {
-        return Err("Not a payment link".into());
-    }
-    launch(&url)
+    scheme_ok && chars_ok
 }
 
 /// Opens a URL with the system's handler for it. Callers decide what may be opened.
@@ -236,10 +244,17 @@ fn launch(url: &str) -> Result<(), String> {
 /// Open only Ghostly's repository/release pages, in the system browser.
 #[tauri::command]
 pub fn open_project_link(url: String) -> Result<(), String> {
+    if !is_project_link(&url) {
+        return Err("Not a Ghostly project link".into());
+    }
+    launch(&url)
+}
+
+fn is_project_link(url: &str) -> bool {
     let root = "https://github.com/MiguelMedeiros/ghostly";
-    if url != root
-        && url != format!("{root}/releases")
-        && !url
+    url == root
+        || url == format!("{root}/releases")
+        || url
             .strip_prefix(&format!("{root}/releases/tag/"))
             .is_some_and(|tag| {
                 !tag.is_empty()
@@ -247,10 +262,6 @@ pub fn open_project_link(url: String) -> Result<(), String> {
                         .bytes()
                         .all(|c| c.is_ascii_alphanumeric() || b".-_".contains(&c))
             })
-    {
-        return Err("Not a Ghostly project link".into());
-    }
-    launch(&url)
 }
 
 #[cfg(test)]
@@ -282,5 +293,365 @@ mod project_link_tests {
         ] {
             assert!(super::open_payment_link(url.into()).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{pkarr_client, pkarr_relay, Relay};
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine;
+    use tauri::test::{mock_builder, MockRuntime};
+    use tauri::Manager;
+
+    #[test]
+    fn payment_links_are_lightning_or_bitcoin_uris_made_of_payment_characters() {
+        let longest = format!("lightning:{}", "a".repeat(4096 - "lightning:".len()));
+        for url in [
+            "lightning:lnbc2500u1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypq",
+            "bitcoin:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq?amount=0.0001&label=Coffee%20shop&lightning=lnbc1x",
+            "bitcoin:BC1QAR0SRRR7XFKVY5L643LYDNW9RE59GTZZWF5MDQ?ark=tark1q",
+            longest.as_str(),
+            // Nothing after the scheme opens only the wallet (the extension asks for one character more).
+            "lightning:",
+        ] {
+            assert!(is_payment_link(url), "{url}");
+        }
+        let too_long = format!("{longest}a");
+        for url in [
+            too_long.as_str(),
+            "lightning:lnbc1/../x",
+            "bitcoin:bc1q#fragment",
+            "bitcoin:bc1q x",
+            "bitcoin:bc1q\n",
+            "lightning:lnbc1;open -a Calculator",
+            "bitcoin:bc1q+x",
+            "bitcoin:bc1q@evil.example",
+            "lightning:lnbc1'\"",
+            " lightning:lnbc1",
+            "web+lightning:lnbc1",
+            "lightningx:lnbc1",
+            "lightning:lnbç",
+        ] {
+            assert!(!is_payment_link(url), "{url}");
+        }
+    }
+
+    #[test]
+    fn project_links_are_the_repository_its_releases_or_one_tag() {
+        let root = "https://github.com/MiguelMedeiros/ghostly";
+        for url in [
+            root.to_string(),
+            format!("{root}/releases"),
+            format!("{root}/releases/tag/v0.4.0"),
+            format!("{root}/releases/tag/ghostly-v1.2_3"),
+        ] {
+            assert!(is_project_link(&url), "{url}");
+        }
+        for url in [
+            format!("{root}/"),
+            format!("{root}/releases/"),
+            format!("{root}/releases/tag/"),
+            format!("{root}/releases/tag/v1/x"),
+            format!("{root}/releases/tag/v1%2F..%2Fx"),
+            format!("{root}/issues"),
+            format!("{root}#x"),
+            "http://github.com/MiguelMedeiros/ghostly".into(),
+            "https://GITHUB.com/MiguelMedeiros/ghostly".into(),
+            "https://github.com/MiguelMedeiros/ghostly2".into(),
+        ] {
+            assert!(!is_project_link(&url), "{url}");
+        }
+    }
+
+    #[test]
+    fn a_seed_is_32_bytes_of_base64url_and_gives_its_public_key_back() {
+        let pair = create_keypair().unwrap();
+        assert_eq!(pair.pub_key_z32.len(), 52);
+        assert_eq!(
+            get_public_key(pair.seed_b64.clone()).unwrap(),
+            pair.pub_key_z32
+        );
+        assert_ne!(create_keypair().unwrap().seed_b64, pair.seed_b64);
+        for seed in [
+            String::new(),
+            "not base64!".into(),
+            crypto::to_base64_url(&[1; 31]),
+            crypto::to_base64_url(&[1; 33]),
+            STANDARD.encode([1u8; 32]),
+        ] {
+            assert!(get_public_key(seed.clone()).is_err(), "{seed}");
+        }
+    }
+
+    #[test]
+    fn text_is_sealed_under_a_32_byte_key_and_only_that_key_opens_it() {
+        let key = generate_enc_key();
+        assert_eq!(crypto::from_base64_url(&key).unwrap().len(), 32);
+        assert_ne!(key, generate_enc_key());
+
+        let sealed = encrypt_text("olá 👻".into(), key.clone()).unwrap();
+        assert_ne!(
+            sealed,
+            encrypt_text("olá 👻".into(), key.clone()).unwrap(),
+            "a fresh nonce every time"
+        );
+        assert_eq!(decrypt_text(sealed.clone(), key.clone()).unwrap(), "olá 👻");
+        assert!(decrypt_text(sealed.clone(), generate_enc_key()).is_err());
+
+        let mut tampered = STANDARD.decode(&sealed).unwrap();
+        tampered[30] ^= 1;
+        assert!(decrypt_text(STANDARD.encode(tampered), key.clone()).is_err());
+        assert_eq!(
+            decrypt_text(STANDARD.encode([0u8; 24]), key.clone()).unwrap_err(),
+            "Invalid ciphertext: too short"
+        );
+        assert!(decrypt_text("%%%".into(), key.clone()).is_err());
+        assert!(encrypt_text("x".into(), crypto::to_base64_url(&[0; 16]))
+            .unwrap_err()
+            .contains("Invalid key length"));
+        assert!(encrypt_text("x".into(), "not a key!".into()).is_err());
+    }
+
+    #[test]
+    fn the_profile_comes_from_the_environment() {
+        std::env::set_var("GHOSTLY_PROFILE", "wallets-a");
+        assert_eq!(get_profile(), "wallets-a");
+        std::env::remove_var("GHOSTLY_PROFILE");
+        assert_eq!(get_profile(), "");
+    }
+
+    #[test]
+    fn the_updater_replaces_only_installs_it_owns() {
+        if cfg!(target_os = "linux") {
+            std::env::remove_var("APPIMAGE");
+            assert!(
+                !updater_can_install(),
+                "a .deb or .rpm belongs to its package manager"
+            );
+            std::env::set_var("APPIMAGE", "/tmp/Ghostly.AppImage");
+            assert!(updater_can_install());
+            std::env::remove_var("APPIMAGE");
+        } else {
+            assert!(updater_can_install());
+        }
+    }
+
+    fn app(relay: &Relay) -> tauri::App<MockRuntime> {
+        mock_builder()
+            .manage(AppState {
+                pkarr_client: pkarr_client(relay),
+            })
+            .build(tauri::generate_context!(test = true))
+            .expect("app")
+    }
+
+    fn record(label: &str, value: &str, ttl: Option<u32>) -> RecordInput {
+        RecordInput {
+            label: label.into(),
+            value: value.into(),
+            ttl,
+        }
+    }
+
+    #[tokio::test]
+    async fn records_are_signed_published_and_resolved_as_given() {
+        let relay = pkarr_relay().await;
+        let app = app(&relay);
+        let pair = create_keypair().unwrap();
+        publish_records(
+            app.state(),
+            pair.seed_b64.clone(),
+            vec![
+                record("_ghostly", "v=1", None),
+                record("_svc", &"x".repeat(200), Some(60)),
+            ],
+        )
+        .await
+        .unwrap();
+        assert!(relay
+            .packets
+            .lock()
+            .unwrap()
+            .contains_key(&pair.pub_key_z32));
+
+        let packet = resolve_records(app.state(), pair.pub_key_z32.clone())
+            .await
+            .unwrap()
+            .expect("the packet");
+        let records: Vec<_> = packet
+            .records
+            .iter()
+            .map(|r| (r.label.as_str(), r.value.len(), r.ttl))
+            .collect();
+        assert_eq!(records, [("_ghostly", 3, 300), ("_svc", 200, 60)]);
+        assert!(packet.timestamp_micros.parse::<u64>().unwrap() > 0);
+
+        // Nobody published under this key: nothing, not an error.
+        let stranger = create_keypair().unwrap().pub_key_z32;
+        assert!(resolve_records(app.state(), stranger)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(resolve_records(app.state(), "not-a-key".into())
+            .await
+            .unwrap_err()
+            .contains("Invalid public key"));
+    }
+
+    #[tokio::test]
+    async fn a_bad_seed_or_record_never_reaches_the_relay() {
+        let relay = pkarr_relay().await;
+        let app = app(&relay);
+        let short = crypto::to_base64_url(&[7; 31]);
+        assert_eq!(
+            publish_records(app.state(), short.clone(), vec![])
+                .await
+                .unwrap_err(),
+            "Seed must be exactly 32 bytes"
+        );
+        let seed = create_keypair().unwrap().seed_b64;
+        assert!(publish_records(
+            app.state(),
+            seed.clone(),
+            vec![record(&"a".repeat(64), "v", None)]
+        )
+        .await
+        .unwrap_err()
+        .contains("Name error"));
+        // More than a signed packet holds (1000 bytes of DNS).
+        assert!(publish_records(
+            app.state(),
+            seed,
+            (0..8)
+                .map(|i| record(&format!("_r{i}"), &"v".repeat(200), None))
+                .collect()
+        )
+        .await
+        .unwrap_err()
+        .contains("Sign error"));
+        let key = generate_enc_key();
+        assert!(
+            publish_messages(app.state(), short, vec![], key.clone(), 0, None, None)
+                .await
+                .is_err()
+        );
+        assert!(relay.requests.lock().unwrap().is_empty());
+    }
+
+    fn message(t: i64, m: &str) -> CompactMessage {
+        CompactMessage { t, m: m.into() }
+    }
+
+    #[tokio::test]
+    async fn messages_round_trip_with_their_ack_nick_and_call_signal() {
+        let relay = pkarr_relay().await;
+        let app = app(&relay);
+        let alice = create_keypair().unwrap();
+        let key = generate_enc_key();
+        let kept = publish_messages(
+            app.state(),
+            alice.seed_b64.clone(),
+            vec![message(2_000, "second"), message(1_000, "first")],
+            key.clone(),
+            77,
+            Some("Alice".into()),
+            Some("offer".into()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(kept, 2);
+
+        let batch = resolve_messages(app.state(), alice.pub_key_z32.clone(), key.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        let texts: Vec<_> = batch
+            .messages
+            .iter()
+            .map(|m| (m.text.as_str(), m.timestamp, m.nick.as_deref()))
+            .collect();
+        assert_eq!(
+            texts,
+            [
+                ("first", 1_000, Some("Alice")),
+                ("second", 2_000, Some("Alice"))
+            ]
+        );
+        assert_eq!(
+            (batch.latest_timestamp, batch.peer_ack, batch.message_count),
+            (2_000, 77, 2)
+        );
+        assert_eq!(batch.call_signal.as_deref(), Some("offer"));
+        let mut names = batch.raw_record_names.clone();
+        names.sort();
+        assert_eq!(names, ["_ack", "_call", "_msgs", "_nick", "_ts"]);
+
+        // Under another key the records are there and say nothing.
+        let stranger = resolve_messages(app.state(), alice.pub_key_z32, generate_enc_key())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(stranger.messages.is_empty());
+        assert_eq!((stranger.call_signal, stranger.peer_ack), (None, 77));
+    }
+
+    #[tokio::test]
+    async fn a_batch_keeps_the_newest_messages_that_fit_one_record() {
+        let relay = pkarr_relay().await;
+        let app = app(&relay);
+        let alice = create_keypair().unwrap();
+        let key = generate_enc_key();
+        let many: Vec<_> = (1..=30)
+            .map(|i| message(i, &format!("message number {i:02} {}", "x".repeat(20))))
+            .collect();
+        let kept = publish_messages(
+            app.state(),
+            alice.seed_b64.clone(),
+            many,
+            key.clone(),
+            0,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(kept > 0 && kept < 30, "{kept}");
+        let batch = resolve_messages(app.state(), alice.pub_key_z32.clone(), key.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        let first = 30 - kept as i64 + 1;
+        assert_eq!(
+            batch
+                .messages
+                .iter()
+                .map(|m| m.timestamp)
+                .collect::<Vec<_>>(),
+            (first..=30).collect::<Vec<_>>(),
+            "the oldest are dropped"
+        );
+        assert!(!batch.raw_record_names.contains(&"_ack".to_string()));
+        assert_eq!(batch.message_count, kept);
+
+        // One message too long for a record is cut to its first 400 characters.
+        let kept = publish_messages(
+            app.state(),
+            alice.seed_b64,
+            vec![message(99, &"y".repeat(2_000))],
+            key.clone(),
+            0,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(kept, 1);
+        let batch = resolve_messages(app.state(), alice.pub_key_z32, key)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(batch.messages[0].text, "y".repeat(400));
     }
 }

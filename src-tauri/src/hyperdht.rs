@@ -38,8 +38,8 @@ pub struct Started {
 }
 
 #[tauri::command]
-pub async fn paired_hyperdht_start(
-    app: tauri::AppHandle,
+pub async fn paired_hyperdht_start<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, HyperState>,
     seed_b64: String,
     events: Channel<Value>,
@@ -252,4 +252,206 @@ pub fn paired_hyperdht_close(
 #[tauri::command]
 pub fn paired_hyperdht_stop(state: State<'_, HyperState>, endpoint_id: u64) {
     state.peers.lock().unwrap().remove(&endpoint_id);
+}
+
+/// What the bridge refuses, and exactly what it forwards to the runtime. The
+/// runtime itself (Node and sidecar.mjs) is played by a queue here.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tauri::test::{mock_builder, MockRuntime};
+
+    const KEY: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789ABCDEF";
+
+    fn app() -> tauri::App<MockRuntime> {
+        mock_builder()
+            .manage(HyperState::default())
+            .build(tauri::generate_context!(test = true))
+            .expect("app")
+    }
+
+    /// A runtime that only queues what it is sent.
+    fn runtime(app: &tauri::App<MockRuntime>, capacity: usize) -> (u64, mpsc::Receiver<Request>) {
+        let state = app.state::<HyperState>();
+        let id = state.next.fetch_add(1, Ordering::Relaxed) + 1;
+        let (tx, rx) = mpsc::channel(capacity);
+        state.peers.lock().unwrap().insert(
+            id,
+            Peer {
+                tx,
+                descriptor: json!({"publicKey": KEY}),
+            },
+        );
+        (id, rx)
+    }
+
+    #[tokio::test]
+    async fn refuses_a_bad_seed_or_a_ninth_endpoint_before_starting_anything() {
+        let app = app();
+        let channel = || Channel::new(|_| Ok(()));
+        for seed in ["", "not base64!", &"A".repeat(42), &"A".repeat(44)] {
+            assert_eq!(
+                paired_hyperdht_start(app.handle().clone(), app.state(), seed.into(), channel())
+                    .await
+                    .err()
+                    .unwrap(),
+                "Invalid transport seed"
+            );
+        }
+        let _runtimes: Vec<_> = (0..8).map(|_| runtime(&app, 1)).collect();
+        use base64::Engine;
+        let seed = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode([1u8; 32]);
+        assert_eq!(
+            paired_hyperdht_start(app.handle().clone(), app.state(), seed, channel())
+                .await
+                .err()
+                .unwrap(),
+            "Native endpoint limit reached"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_address_is_a_64_hex_public_key_and_nothing_else_is_forwarded() {
+        let app = app();
+        let (id, mut rx) = runtime(&app, 4);
+        for descriptor in [
+            json!({}),
+            json!({"publicKey": 7}),
+            json!({"publicKey": &KEY[1..]}),
+            json!({"publicKey": format!("{KEY}0")}),
+            json!({"publicKey": KEY.replace('0', "g")}),
+            json!("0123"),
+        ] {
+            assert_eq!(
+                paired_hyperdht_connect(app.state(), id, descriptor.clone())
+                    .await
+                    .unwrap_err(),
+                "Invalid HyperDHT address",
+                "{descriptor}"
+            );
+        }
+        assert!(rx.try_recv().is_err());
+
+        let connecting = tokio::spawn({
+            let handle = app.handle().clone();
+            async move {
+                let state = handle.state::<HyperState>();
+                paired_hyperdht_connect(
+                    state,
+                    id,
+                    json!({"publicKey": KEY, "relayThrough": "evil", "host": "10.0.0.1"}),
+                )
+                .await
+            }
+        });
+        let request = rx.recv().await.unwrap();
+        assert_eq!(
+            request.value,
+            json!({"type": "connect", "descriptor": {"publicKey": KEY}})
+        );
+        request.reply.unwrap().send(Ok(json!(42))).unwrap();
+        assert_eq!(connecting.await.unwrap(), Ok(42));
+    }
+
+    #[tokio::test]
+    async fn a_connection_answer_must_be_an_id_from_a_live_runtime() {
+        let app = app();
+        let (id, mut rx) = runtime(&app, 4);
+        let connect = || {
+            let handle = app.handle().clone();
+            tokio::spawn(async move {
+                paired_hyperdht_connect(handle.state::<HyperState>(), id, json!({"publicKey": KEY}))
+                    .await
+            })
+        };
+        let pending = connect();
+        rx.recv()
+            .await
+            .unwrap()
+            .reply
+            .unwrap()
+            .send(Ok(json!("seven")))
+            .unwrap();
+        assert_eq!(
+            pending.await.unwrap().unwrap_err(),
+            "Invalid native connection ID"
+        );
+
+        let pending = connect();
+        rx.recv()
+            .await
+            .unwrap()
+            .reply
+            .unwrap()
+            .send(Err("peer not found".into()))
+            .unwrap();
+        assert_eq!(pending.await.unwrap().unwrap_err(), "peer not found");
+
+        let pending = connect();
+        drop(rx.recv().await.unwrap());
+        assert_eq!(
+            pending.await.unwrap().unwrap_err(),
+            "Native runtime stopped"
+        );
+    }
+
+    #[tokio::test]
+    async fn frames_are_bounded_and_forwarded_as_they_are() {
+        let app = app();
+        let (id, mut rx) = runtime(&app, 1);
+        for text in [String::new(), "x".repeat(60 * 1024 + 1)] {
+            assert_eq!(
+                paired_hyperdht_send(app.state(), id, 3, text).unwrap_err(),
+                "Frame exceeds transport budget"
+            );
+        }
+        paired_hyperdht_send(app.state(), id, 3, "x".repeat(60 * 1024)).unwrap();
+        // The queue is bounded: a runtime that stopped reading makes sends fail, not pile up.
+        assert_eq!(
+            paired_hyperdht_send(app.state(), id, 3, "more".into()).unwrap_err(),
+            "Native command queue full"
+        );
+        let sent = rx.recv().await.unwrap();
+        assert_eq!(sent.value["type"], "send");
+        assert_eq!(sent.value["id"], 3);
+        assert_eq!(sent.value["text"].as_str().unwrap().len(), 60 * 1024);
+        assert!(sent.reply.is_none());
+
+        paired_hyperdht_close(app.state(), id, 3).unwrap();
+        assert_eq!(
+            rx.recv().await.unwrap().value,
+            json!({"type": "close", "id": 3})
+        );
+    }
+
+    #[tokio::test]
+    async fn a_stopped_or_unknown_endpoint_is_closed() {
+        let app = app();
+        let (id, _rx) = runtime(&app, 1);
+        assert_eq!(
+            paired_hyperdht_address(app.state(), id).unwrap(),
+            json!({"publicKey": KEY})
+        );
+        paired_hyperdht_stop(app.state(), id);
+        paired_hyperdht_stop(app.state(), id);
+        let closed = "HyperDHT endpoint closed";
+        assert_eq!(
+            paired_hyperdht_address(app.state(), id).unwrap_err(),
+            closed
+        );
+        assert_eq!(
+            paired_hyperdht_send(app.state(), id, 1, "x".into()).unwrap_err(),
+            closed
+        );
+        assert_eq!(
+            paired_hyperdht_close(app.state(), id, 1).unwrap_err(),
+            closed
+        );
+        assert_eq!(
+            paired_hyperdht_connect(app.state(), id, json!({"publicKey": KEY}))
+                .await
+                .unwrap_err(),
+            closed
+        );
+    }
 }
