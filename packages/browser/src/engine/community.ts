@@ -7,9 +7,9 @@ import {
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import type { GroupStore, GroupsHost } from "./groups";
 
-
 /** The line a change of a group's picture leaves in its history (both profiles). */
 export const pictureText = (name: string, set: boolean) => `${name} ${set ? "changed" : "removed"} the group's picture`;
+
 /**
  * Community groups (`group-community/1`, WISP 9xx · Group Community): a link anyone can open, any
  * member lets people in, and online members elect a few hubs through a sealed Pkarr beacon. A hub
