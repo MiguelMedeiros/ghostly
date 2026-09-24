@@ -3,6 +3,7 @@ import { useState, useRef, useEffect, useCallback, type ReactNode } from "react"
 import { EmojiPicker } from "./EmojiPicker";
 import { GifPicker } from "./GifPicker";
 import { PaymentComposer } from "./PaymentComposer";
+import { ComposerIdentityButton, ComposerIdentityPicker } from "./identities/ComposerIdentities";
 
 interface MessageInputProps {
   draftId?: string;
@@ -26,6 +27,8 @@ interface MessageInputProps {
   };
   /** A composer of its own for ⚡ instead of the chat's (a group chooses whom to pay first). */
   paymentComposer?: (close: () => void) => ReactNode;
+  /** A paired chat: which of this profile's identities its contact sees, next to ⚡. */
+  identities?: { peerKey: string; contact: string };
 }
 
 const DEFAULT_MAX = 500;
@@ -41,10 +44,13 @@ export function MessageInput({
   onSendFile,
   payments,
   paymentComposer,
+  identities,
   fileUnavailable,
   paymentsUnavailable,
 }: MessageInputProps) {
   const [showPayment, setShowPayment] = useState(false);
+  const [showIdentities, setShowIdentities] = useState(false);
+  const identitiesButtonRef = useRef<HTMLButtonElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState(() => draftId ? getSessionDraft(draftId) : "");
   const emojiButtonRef = useRef<HTMLButtonElement>(null);
@@ -140,6 +146,7 @@ export function MessageInput({
   const closeAll = () => {
     setShowEmoji(false);
     setShowGif(false);
+    setShowIdentities(false);
   };
 
   const toggleEmoji = () => {
@@ -247,7 +254,7 @@ export function MessageInput({
 
           {(payments || paymentComposer) && (
             <button
-              onClick={() => setShowPayment((v) => !v)}
+              onClick={() => { setShowIdentities(false); setShowPayment((v) => !v); }}
               disabled={disabled || !!paymentsUnavailable}
               data-testid="payment-button"
               className={`w-9 h-9 max-md:w-10 max-md:h-11 flex items-center justify-center rounded-full transition-colors cursor-pointer border-none ${
@@ -262,6 +269,11 @@ export function MessageInput({
                 <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
               </svg>
             </button>
+          )}
+
+          {identities && (
+            <ComposerIdentityButton peerKey={identities.peerKey} buttonRef={identitiesButtonRef} open={showIdentities}
+              onToggle={() => { setShowPayment(false); setShowIdentities((v) => !v); }} />
           )}
 
           {onSendFile && (
@@ -349,6 +361,11 @@ export function MessageInput({
             onRequest={payments.onRequest}
             onClose={() => setShowPayment(false)}
           />
+        )}
+
+        {showIdentities && identities && (
+          <ComposerIdentityPicker peerKey={identities.peerKey} contact={identities.contact} anchorRef={identitiesButtonRef}
+            onClose={() => setShowIdentities(false)} />
         )}
 
         {showGif && (
