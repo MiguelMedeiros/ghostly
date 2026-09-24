@@ -1,10 +1,10 @@
-import { useNavigate } from "react-router-dom";
 import { useI18n } from "../../contexts/I18nContext";
 import { categoryLabel, chatsByPeer, contactName, currentStatus, dateTime, providerLabel, RECEIVED_STATUS, shortSubject, useEngineState } from "../../lib/identities";
 import { contactTag } from "../../lib/publicKeyLabel";
 import { chatPath } from "../../lib/url";
 import { Button, Row, Section } from "../wallet/ui";
 import { ProviderMark, StatusPill } from "./ProviderMark";
+import { useAppNavigation } from "../../hooks/useAppNavigation";
 
 /** What needs a look comes first: a revoked or unconfirmed proof, then the verified ones, then the rest. */
 const ORDER: Record<string, number> = { revoked: 0, unconfirmed: 0, verified: 1 };
@@ -15,7 +15,7 @@ const ORDER: Record<string, number> = { revoked: 0, unconfirmed: 0, verified: 1 
  */
 export function ContactIdentitiesSection() {
   const state = useEngineState();
-  const navigate = useNavigate();
+  const nav = useAppNavigation();
   const { t } = useI18n();
   const links = (state?.links ?? []).filter(link => link.identities?.received.length);
   const chats = links.length ? chatsByPeer() : new Map();
@@ -33,7 +33,7 @@ export function ContactIdentitiesSection() {
             <span>{providerLabel(r.provider)} · <span className="font-mono break-all" title={r.subject}>{shortSubject(r.provider, r.subject)}</span></span>
             <span className="block">{categoryLabel(r.provider, r.verified.attester)} · checked {dateTime(r.checkedAt)}</span>
           </>}>
-          {chat && <Button data-testid="identity-received-open" onClick={() => navigate(chatPath(chat.id))}>Open chat</Button>}
+          {chat && <Button data-testid="identity-received-open" onClick={() => nav.conversation(chatPath(chat.id))}>Open chat</Button>}
         </Row>
       ))}
     </Section>

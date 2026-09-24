@@ -9,7 +9,7 @@ import { NewGroupDialog } from "./NewGroupDialog";
 import { groupPath, groupRouteId } from "../lib/groups";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useOutsideDismiss } from "../hooks/useDismiss";
-import { useNavigate, useLocation, Link } from "react-router-dom";
+import { useLocation, Link } from "react-router-dom";
 import { JoinDialog } from "./JoinDialog";
 import { useBackgroundPoller } from "../hooks/useBackgroundPoller";
 import { useI18n } from "../contexts/I18nContext";
@@ -29,6 +29,7 @@ import {
 import { createPairedChat } from "../lib/pairedChat";
 import { chatPath } from "../lib/url";
 import type { ChatSession } from "../lib/types";
+import { useAppNavigation } from "../hooks/useAppNavigation";
 
 const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
 const engineSnapshot = () => engine.state;
@@ -40,7 +41,7 @@ const DEFAULT_WIDTH = 420;
 const MIN_PAGE_WIDTH = 320;
 
 export function Sidebar() {
-  const navigate = useNavigate();
+  const nav = useAppNavigation();
   const location = useLocation();
   const { t } = useI18n();
   const isMobile = useIsMobile();
@@ -149,7 +150,7 @@ export function Sidebar() {
       <div className="sidebar-header h-14 header-safe shrink-0 flex items-center justify-between px-4 bg-panel-header">
         {/* The brand; in Testnet a small badge sits under the wordmark, out of the header's row, so it never takes the buttons' width. */}
         <div className="relative flex shrink-0 items-center">
-        <Link to="/" aria-label="Go home" title="Go home" className="sidebar-home flex items-center gap-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+        <Link to="/" onClick={(e) => { e.preventDefault(); nav.home(); }} aria-label="Go home" title="Go home" className="sidebar-home flex items-center gap-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
           <svg width="28" height="28" viewBox="0 0 64 64" className="shrink-0">
             <g transform="translate(12, 8)">
               <path d="M20 4C10.059 4 2 12.059 2 22v18c0 1.5 1.2 2 2 1.2l4-3.2 4 3.2c.8.6 1.6.6 2.4 0L18 38l3.6 3.2c.8.6 1.6.6 2.4 0L28 38l4 3.2c.8.8 2 .3 2-1.2V22C34 12.059 25.941 4 20 4z" fill="currentColor" className="text-accent"/>
@@ -163,7 +164,7 @@ export function Sidebar() {
         </Link>
         {/* Wherever the app is, it says when its wallets are on test networks: nothing there is money. */}
         {walletMode === "testnet" && (
-          <Link to="/wallet" data-testid="testnet-badge" title="Wallets are on test networks: test coins, worth nothing"
+          <Link to="/wallet" onClick={(e) => { e.preventDefault(); nav.place("/wallet"); }} data-testid="testnet-badge" title="Wallets are on test networks: test coins, worth nothing"
             className="absolute start-9 top-[calc(50%+3px)] rounded-full border border-amber-500/60 bg-amber-500/15 px-1.5 py-px text-[9px] font-bold uppercase leading-[12px] tracking-wider text-amber-500 hover:bg-amber-500/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500">
             Testnet
           </Link>
@@ -172,13 +173,13 @@ export function Sidebar() {
         <div className="grid shrink-0 grid-cols-2 items-stretch gap-1 whitespace-nowrap" data-testid="sidebar-chat-actions">
           {/* New: one click is a chat, as always; the arrow beside it also offers a group. */}
           <div ref={newMenuRef} role="group" aria-label={t("sidebar.new")} data-testid="sidebar-new" className="sidebar-new-split relative flex min-w-0">
-            <button onClick={() => navigate(chatPath(createPairedChat()))} aria-label={t("sidebar.startChat")} title={t("sidebar.newChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 flex-1 items-center justify-center gap-1 rounded-s-lg bg-accent p-2 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8"/></svg><span className="sidebar-action-label">{t("sidebar.new")}</span></button>
+            <button onClick={() => nav.conversation(chatPath(createPairedChat()))} aria-label={t("sidebar.startChat")} title={t("sidebar.newChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 flex-1 items-center justify-center gap-1 rounded-s-lg bg-accent p-2 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8"/></svg><span className="sidebar-action-label">{t("sidebar.new")}</span></button>
             <button onClick={() => setNewMenuOpen(open => !open)} aria-haspopup="true" aria-expanded={newMenuOpen} aria-controls="sidebar-new-menu" aria-label="Create a group or a chat" title="Create a group or a chat" data-testid="sidebar-new-more"
               className="inline-flex min-h-10 w-6 shrink-0 items-center justify-center rounded-e-lg border-s border-panel-header/25 bg-accent text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header">
               <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${newMenuOpen ? "rotate-180" : ""}`}><path d="m6 9 6 6 6-6"/></svg>
             </button>
             {newMenuOpen && <div id="sidebar-new-menu" data-testid="sidebar-new-menu" className="absolute end-0 top-full z-50 mt-1 min-w-[220px] rounded-lg border border-border bg-surface-alt py-1 shadow-lg animate-fade-in">
-              <button onClick={() => { setNewMenuOpen(false); navigate(chatPath(createPairedChat())); }} className="flex w-full items-center gap-3 px-3 py-2 text-start text-sm text-text-primary hover:bg-surface-hover max-md:min-h-11 focus-visible:outline-none focus-visible:bg-surface-hover">
+              <button onClick={() => { setNewMenuOpen(false); nav.conversation(chatPath(createPairedChat())); }} className="flex w-full items-center gap-3 px-3 py-2 text-start text-sm text-text-primary hover:bg-surface-hover max-md:min-h-11 focus-visible:outline-none focus-visible:bg-surface-hover">
                 <svg aria-hidden="true" width="16" height="16" className="shrink-0 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8"/></svg>
                 <span><span className="block">Chat</span><span className="block text-xs text-text-muted">One person, with an invite</span></span>
               </button>
@@ -192,9 +193,9 @@ export function Sidebar() {
         </div>
       </div>
       <UpdateBanner />
-      {showNewGroup && <NewGroupDialog onClose={() => setShowNewGroup(false)} onCreated={id => { setShowNewGroup(false); navigate(groupPath(id), { state: { share: "created" } }); }} />}
-      {showNewChat && <JoinDialog onClose={() => setShowNewChat(false)} onJoin={keys => {setShowNewChat(false); navigate(chatPath(ensureSession(keys))); refreshSessions();}}
-        onJoinGroup={async link => { const { groupId } = await engine.call("joinGroupByLink", { link }); setShowNewChat(false); navigate(groupPath(groupId)); }} />}
+      {showNewGroup && <NewGroupDialog onClose={() => setShowNewGroup(false)} onCreated={id => { setShowNewGroup(false); nav.conversation(groupPath(id), { share: "created" }); }} />}
+      {showNewChat && <JoinDialog onClose={() => setShowNewChat(false)} onJoin={keys => {setShowNewChat(false); nav.conversation(chatPath(ensureSession(keys))); refreshSessions();}}
+        onJoinGroup={async link => { const { groupId } = await engine.call("joinGroupByLink", { link }); setShowNewChat(false); nav.conversation(groupPath(groupId)); }} />}
 
       {/* Search */}
       <div className="px-3 py-2 bg-sidebar-bg">
@@ -224,7 +225,7 @@ export function Sidebar() {
       {/* Chat List */}
       <div className="flex-1 overflow-y-auto">
         {groups.filter(g => !search || g.name.toLowerCase().includes(search.toLowerCase())).map(group => (
-          <GroupRow key={group.id} group={group} density={density} active={activeGroupId === group.id} onOpen={() => { navigate(groupPath(group.id)); setConfirmDeleteId(null); }} />
+          <GroupRow key={group.id} group={group} density={density} active={activeGroupId === group.id} onOpen={() => { nav.conversation(groupPath(group.id)); setConfirmDeleteId(null); }} />
         ))}
         {filtered.length === 0 && sessions.length === 0 && groups.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full px-8 text-center">
@@ -273,7 +274,7 @@ export function Sidebar() {
               pinned={isSessionPinned(session.id)}
               syncing={syncingSessions.has(session.id)}
               creator={isCreator}
-              onOpen={() => { markSessionAsRead(session.id); navigate(path); setConfirmDeleteId(null); }}
+              onOpen={() => { markSessionAsRead(session.id); nav.conversation(path); setConfirmDeleteId(null); }}
               onTogglePin={() => setSessionPinned(session.id, !isSessionPinned(session.id))}
               onDelete={(e) => handleDelete(session.id, e)}
               deleteLabel={t("sidebar.deleteChat")}
@@ -285,7 +286,7 @@ export function Sidebar() {
       {confirmDeleteId && <DeleteChatDialog
         name={(() => { const target=sessions.find(s=>s.id===confirmDeleteId); return `${target?.label || target?.nick || t("common.unnamedContact", { key: contactTag(target?.peerPubKeyB64 ?? confirmDeleteId) })} · ${publicKeyLabel(target?.peerPubKeyB64 ?? confirmDeleteId)}`; })()}
         onClose={() => setConfirmDeleteId(null)}
-        onConfirm={() => { const id=confirmDeleteId; deleteSession(id); setConfirmDeleteId(null); refreshSessions(); window.dispatchEvent(new Event("session-updated")); if(activeSessionId===id) navigate("/"); }} />}
+        onConfirm={() => { const id=confirmDeleteId; deleteSession(id); setConfirmDeleteId(null); refreshSessions(); window.dispatchEvent(new Event("session-updated")); if(activeSessionId===id) nav.home(); }} />}
       {!isMobile && <AccountBar />}
 
       {/* Resize Handle */}

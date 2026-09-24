@@ -33,6 +33,7 @@
   "features": [
     {"id":"app.home","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Home screen: New / Join actions, brand returns home"},
     {"id":"app.navigation","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Wallet, Identities, Services, Profile and Settings are routes beside the list; old routes redirect (#/share → #/services)"},
+    {"id":"app.navigation.back","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"A page's Back goes home (a sub-page's up to its parent), never through the history; places replace each other; a deep link gets home under it"},
     {"id":"app.offline-switch","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Ghostly's own Online/Offline switch: offline disables sending, the contact is offered Reconnect"},
     {"id":"app.single-peer-per-browser","wisp":null,"kind":"feature","clients":["web"],"infra":[],"title":"A second tab stays out of the way: one peer per browser"},
     {"id":"app.web-limits","wisp":null,"kind":"feature","clients":["web"],"infra":[],"title":"The web app says plainly what it cannot do (services, native transports)"},

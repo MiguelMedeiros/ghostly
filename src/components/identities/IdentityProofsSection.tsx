@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { IdentityProofView, LinkView } from "@ghostly/browser/shared/types";
 import { Block, Button, Notice, Row } from "../wallet/ui";
@@ -13,6 +12,7 @@ import { AddIdentityDialog } from "./AddIdentityDialog";
 import { AddIdCardFace, IdCardFace, IdCardMark } from "./IdCardFace";
 import { idCard, idCardTone, type IdCardContent } from "./idCard";
 import { ProviderMark, StatusPill } from "./ProviderMark";
+import { useAppNavigation } from "../../hooks/useAppNavigation";
 
 /** The last card: a blank one that adds an identity. */
 const ADD = "add";
@@ -29,7 +29,7 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 export function IdentityProofsSection() {
   const state = useEngineState();
   const { t } = useI18n();
-  const navigate = useNavigate();
+  const nav = useAppNavigation();
   const proofs = state?.identityProofs ?? [];
   const [adding, setAdding] = useState(false);
   const [chosen, setChosen] = useState<string>();
@@ -109,7 +109,7 @@ export function IdentityProofsSection() {
                   : sharedIn.map(({ link, status, chat }) => (
                     <div key={link.id} data-testid="identity-shared-chat" className="flex flex-wrap items-center gap-x-3 gap-y-2">
                       <p className="flex-[1_1_10rem] min-w-0 text-sm text-text-primary">{nameOf(link)} <span className="text-xs text-text-muted">· {SHARED_STATUS[status]}</span></p>
-                      {chat && <Button onClick={() => navigate(chatPath(chat.id))}>Open chat</Button>}
+                      {chat && <Button onClick={() => nav.conversation(chatPath(chat.id))}>Open chat</Button>}
                       {status !== "withdrawal-pending" && <Button data-testid="identity-shared-stop" disabled={!!busy} onClick={() => act(link.id, () => engine.call("withdrawIdentityProof", { linkId: link.id, id: p.id }))}>Stop sharing</Button>}
                     </div>
                   ))}

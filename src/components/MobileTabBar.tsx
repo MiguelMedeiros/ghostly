@@ -1,4 +1,4 @@
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { useI18n } from "../contexts/I18nContext";
 import { useIdentityAttention } from "../lib/identities";
 import { IdentitiesIcon } from "./identities/IdentitiesIcon";
@@ -7,6 +7,7 @@ import { useMyAvatar } from "../hooks/useAvatars";
 import { ProfileBadge } from "./ProfileBadge";
 import { ProfileSwitcherMenu } from "./ProfileSwitcher";
 import { SWITCHER_SHORTCUT, useLongPress, useProfileGlances, useProfileSwitcher } from "../hooks/useProfileSwitcher";
+import { useAppNavigation } from "../hooks/useAppNavigation";
 
 const icon = { width: 24, height: 24, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -63,7 +64,7 @@ const TABS = [
  * active profile's picture on its icon, and holding Settings opens the account switcher.
  */
 export function MobileTabBar() {
-  const navigate = useNavigate();
+  const nav = useAppNavigation();
   const { pathname } = useLocation();
   const { t } = useI18n();
   const identityAttention = useIdentityAttention();
@@ -85,7 +86,7 @@ export function MobileTabBar() {
           return (
             <button
               key={tab.path}
-              onClick={() => navigate(tab.path, { replace: true })}
+              onClick={() => nav.place(tab.path)}
               {...(account ? { ...longPress, "data-switcher-opener": "", "aria-haspopup": "menu" as const, "aria-expanded": switcher.open, "aria-keyshortcuts": SWITCHER_SHORTCUT } : {})}
               aria-current={active ? "page" : undefined}
               aria-label={label}

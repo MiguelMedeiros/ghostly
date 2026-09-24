@@ -142,16 +142,17 @@ describe("Truncate", () => {
 });
 
 describe("Page", () => {
-  it("goes back where the user came from", async () => {
-    // Two entries in the router's history: the chat list, then the wallet opened from it.
+  it("goes home, not back where the user came from", async () => {
+    // The chat list, a chat, then the wallet opened from it: Back skips the chat (src/test/app/navigation.test.tsx).
     const { user } = renderApp(<Routes>
-      <Route path="/" element={<Link to="/wallet">Open wallet</Link>} />
+      <Route path="/" element={<p>Chat list</p>} />
+      <Route path="/chat/s1" element={<Link to="/wallet">Open wallet</Link>} />
       <Route path="/wallet" element={<Page title="Wallet"><p>Body</p></Page>} />
-    </Routes>);
+    </Routes>, { route: "/chat/s1" });
     await user.click(screen.getByRole("link", { name: "Open wallet" }));
     expect(screen.getByRole("heading", { level: 1, name: "Wallet" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Back" }));
-    expect(screen.getByRole("link", { name: "Open wallet" })).toBeInTheDocument();
+    expect(screen.getByText("Chat list")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Wallet" })).not.toBeInTheDocument();
   });
 

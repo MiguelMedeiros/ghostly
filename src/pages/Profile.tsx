@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { InputGroup, LinkRow, Page } from "../components/layout";
 import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
@@ -14,6 +14,7 @@ import { DeleteProfileDialog } from "../components/DeleteProfileDialog";
 import { ProfileBadge } from "../components/ProfileBadge";
 import { setMyAvatar, setShareProfile, useMyAvatar, useShareProfile } from "../hooks/useAvatars";
 import { avatarFromFile } from "../lib/avatarImage";
+import { useAppNavigation } from "../hooks/useAppNavigation";
 
 /** Profiles change outside React (another component, another tab); re-read them when they do. */
 function useProfiles() {
@@ -31,7 +32,7 @@ function useProfiles() {
  * it, its backups, and the other profiles on this device.
  */
 export function Profile() {
-  const navigate = useNavigate();
+  const nav = useAppNavigation();
   const { t } = useI18n();
   const { settings, updateColorTheme, updateColorScheme, updateDefaultNickname, randomizeNickname } = useSettings();
   const platform = useServicesPlatform();
@@ -101,11 +102,11 @@ export function Profile() {
       <Section title="In this profile" testId="profile-links">
         {/* Identities have a page of their own; this row is the way there from what used to hold them. */}
         <LinkRow testId="profile-identities-link" label={<span className="inline-flex items-center gap-2">{t("tabs.identities")}{identityAttention && <><span className="nav-dot-inline" aria-hidden="true" /><span className="sr-only">, {t("identities.attention")}</span></>}</span>}
-          value={identities ? identities : undefined} onClick={() => navigate("/identities")} />
-        <LinkRow label="Chats" value={`${chats} ${chats === 1 ? "chat" : "chats"}`} onClick={() => navigate("/")} />
-        <LinkRow label="Wallets" value={wallet ? `${wallet.balance.toLocaleString()} sats` : undefined} onClick={() => navigate("/wallet")} />
-        <LinkRow label="Services" value={services.length ? services.length : undefined} onClick={() => navigate("/services")} />
-        <LinkRow label="Settings" onClick={() => navigate("/settings")} />
+          value={identities ? identities : undefined} onClick={() => nav.open("/identities")} />
+        <LinkRow label="Chats" value={`${chats} ${chats === 1 ? "chat" : "chats"}`} onClick={nav.home} />
+        <LinkRow label="Wallets" value={wallet ? `${wallet.balance.toLocaleString()} sats` : undefined} onClick={() => nav.open("/wallet")} />
+        <LinkRow label="Services" value={services.length ? services.length : undefined} onClick={() => nav.open("/services")} />
+        <LinkRow label="Settings" onClick={() => nav.open("/settings")} />
       </Section>
 
       <ProfileBackups canSwitch={canSwitch} />

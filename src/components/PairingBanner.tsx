@@ -1,4 +1,5 @@
 import { useOutsideDismiss } from "../hooks/useDismiss";
+import { useAppNavigation } from "../hooks/useAppNavigation";
 import { Link } from "react-router-dom";
 import type { PairedTransport } from "@ghostly/core";
 import { useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
@@ -25,6 +26,7 @@ export function PairingBanner({ peerKey }: { peerKey: string }) {
   const state = useSyncExternalStore(subscribe, snapshot);
   const link = state?.links.find(l => l.peerPubKeyZ32 === peerKey), pair = link?.pairing;
   const [menuOpen, setMenuOpen] = useState(false);
+  const nav = useAppNavigation();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false), [comparing, setComparing] = useState(false);
   const root = useRef<HTMLDetailsElement>(null), trigger = useRef<HTMLElement>(null);
@@ -67,7 +69,7 @@ export function PairingBanner({ peerKey }: { peerKey: string }) {
         <span>{label}</span>
       </div>
       {failure && <p role="alert" className="mt-2 break-words text-danger">{failure}</p>}
-      {discoveryFailure && <p className="mt-2 text-[11px]" data-testid="discovery-help">{awaitingJoin && "No contact yet. "}Discovery will retry automatically. You can still share this invite or choose a delivery mode. If this persists, check your internet connection or <Link className={`text-accent underline ${focus}`} to="/settings">review relay settings</Link>. DHT-only also needs discovery.</p>}
+      {discoveryFailure && <p className="mt-2 text-[11px]" data-testid="discovery-help">{awaitingJoin && "No contact yet. "}Discovery will retry automatically. You can still share this invite or choose a delivery mode. If this persists, check your internet connection or <Link className={`text-accent underline ${focus}`} to="/settings" onClick={(e) => { e.preventDefault(); nav.open("/settings"); }}>review relay settings</Link>. DHT-only also needs discovery.</p>}
       {!dht && ready && preferred !== pair?.transport && <p className="mt-1 text-[11px]">Preferred: {name(preferred)}</p>}
       <label className="connection-switch-row mt-3 flex min-h-11 items-center justify-between gap-3 rounded-lg bg-surface-hover px-2.5">
         <span className="flex items-center gap-2 text-text-primary"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="m3 7 9-4 9 4-9 4Z M3 12l9 4 9-4 M3 17l9 4 9-4"/></svg>DHT only</span>
