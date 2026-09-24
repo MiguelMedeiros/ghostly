@@ -198,6 +198,10 @@ build on port 47300 (`MATRIX_WEB_PORT`), and its test domain uses 47320-47399.
 
 - Before every release: the `Release` workflow runs them first, and neither the draft release nor the web image is made unless they pass. Desktop is a job of its own there, so a Rust build never holds up the browser tests.
 - By hand: Actions → E2E → Run workflow, optionally with the URL of a deployed web app, or `npm run test:e2e` locally.
+- Everything, gated suites included: nightly on `dev` and by hand, Actions → E2E (full), which runs
+  `npm run e2e:full`. On `ubuntu-24.04` it took about 42 minutes on 2026-09-24: the environment up and funded in
+  53 s, the vitest contracts in 37 s, Playwright (2 workers, one retry) in 39 minutes — well inside a runner's
+  six hours and the workflow's 150-minute cap. On a 14-core Mac with 7 workers, about 22–28 minutes.
 
 Not on pull requests: at about four minutes it would hold up every merge. `npm run check:desktop-bundle` is the exception — it is fast enough to run there.
 
