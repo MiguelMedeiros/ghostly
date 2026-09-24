@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "../support/fixtures";
+import { swipe } from "../support/swipe";
 
 /**
  * The wallet cards are a deck. With a mouse they are a stack, each card in its own place, and the one the pointer
@@ -101,10 +102,9 @@ test("on a phone the cards are a snapping track: a swipe chooses the card that c
   expect(await offCentre(page, "cashu")).toBeLessThan(3);
   await expect(deck(page).locator(".wallet-deck-marks span[data-on=true]")).toHaveCount(1);
 
-  // A finger flicks the track to the left: the next card settles in the centre and becomes the chosen one.
-  const track = (await page.locator(".wallet-deck-track").boundingBox())!;
-  const cdp = await context.newCDPSession(page);
-  await cdp.send("Input.synthesizeScrollGesture", { x: track.x + track.width / 2, y: track.y + track.height / 2, xDistance: -Math.round(track.width * 0.6), yDistance: 0, gestureSourceType: "touch", speed: 1500 });
+  // A finger drags the track to the left, past half a card, and lets go: the next card settles in the centre and
+  // becomes the chosen one.
+  await swipe(context, page.locator(".wallet-deck-track"), -0.6);
   await chosen(page, "lightning");
   await expect.poll(() => offCentre(page, "lightning")).toBeLessThan(3);
 
@@ -126,6 +126,11 @@ test("on a phone the cards are a snapping track: a swipe chooses the card that c
   await page.keyboard.press("End");
   await chosen(page, "usdt");
   await expect.poll(() => offCentre(page, "usdt")).toBeLessThan(3);
+  // Two keys faster than the track scrolls: the end of the first, cut off on its way, does not choose its card.
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("ArrowLeft");
+  await expect.poll(() => offCentre(page, "bark")).toBeLessThan(3);
+  await chosen(page, "bark");
   // Nothing scrolls sideways but the track itself.
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(await page.evaluate(() => { const body = document.querySelector("[data-page-body]")!; return body.scrollWidth <= body.clientWidth + 1; })).toBe(true);

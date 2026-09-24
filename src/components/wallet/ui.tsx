@@ -67,7 +67,7 @@ export function Actions({ value, onChange, actions = ["receive", "send"] }: { va
 export function Address({ value, qr, uri, testId, note, actions }: { value: string | undefined; qr?: string; uri?: string; testId: string; note?: ReactNode; actions?: ReactNode }) {
   // Never a QR code or a Copy button for an address that is not there yet: someone could share it.
   if (!value) return <Notice testId={`${testId}-pending`}>Getting an address… It shows up here once the provider answers.</Notice>;
-  return <PayExternally uri={uri ?? qr ?? value} value={value} testId={testId} note={note} actions={actions} />;
+  return <PayExternally uri={uri ?? qr ?? value} value={value} testId={testId} note={note} actions={actions} label="Receiving address" />;
 }
 
 /** A large amount field: what matters most when paying is the number. */

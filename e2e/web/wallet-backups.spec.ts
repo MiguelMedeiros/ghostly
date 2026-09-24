@@ -127,8 +127,8 @@ test.describe("wallet backups", { tag: "@network" }, () => {
     await expect(address.or(panel.getByTestId("ark-boarding-address-pending"))).toBeVisible();
     await expect(address).toHaveText(/^\s*(bc1|tb1|bcrt1)[02-9ac-hj-np-z]{8,87}\s*$/, { timeout: 60_000 });
     await expect(panel.getByTestId("ark-boarding-address-pending")).toHaveCount(0);
-    // The QR code of that same address (PayExternally names its QR by `<testId>-qr`).
-    await expect(panel.getByTestId("ark-boarding-address-qr").getByRole("img", { name: "Payment QR code" })).toBeVisible();
+    // The QR code of that same address, named as this wallet's own address (PayExternally names its box `<testId>-qr`).
+    await expect(panel.getByTestId("ark-boarding-address-qr").getByRole("img", { name: "Receiving address" })).toBeVisible();
     await expect(panel.getByText("Send from any Bitcoin wallet.", { exact: false })).toBeVisible();
     // Mainnet by default: a real Bitcoin address, and a Taproot one.
     await expect(address).toHaveText(/^\s*bc1p/);
