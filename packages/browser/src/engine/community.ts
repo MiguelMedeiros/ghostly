@@ -6,6 +6,7 @@ import {
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import type { GroupStore, GroupsHost } from "./groups";
+import { traceJoin } from "./joinTrace";
 
 /** The line a change of a group's picture leaves in its history (both profiles). */
 export const pictureText = (name: string, set: boolean) => `${name} ${set ? "changed" : "removed"} the group's picture`;
@@ -206,6 +207,7 @@ export class Communities {
     this.stored.set(link.g, group);
     await this.store.putGroup(group);
     this.host.emit();
+    traceJoin(link.g, "join.start");
     void this.knock(group, since).catch(() => {});
   }
 
@@ -335,7 +337,7 @@ export class Communities {
         else if (now >= live.hubCandidateAt) {
           live.hubCandidateAt = 0;
           await this.readBeacon(groupId, live, now);
-          if (want()) { live.forceHub = false; live.hub = true; live.hubSince = now; live.emptySince = now; await this.publishBeacon(groupId, live, now, true); }
+          if (want()) { live.forceHub = false; live.hub = true; live.hubSince = now; live.emptySince = now; await this.publishBeacon(groupId, live, now, true); traceJoin(groupId, "hub.elected"); }
         }
       } else live.hubCandidateAt = 0;
     }
@@ -449,6 +451,7 @@ export class Communities {
     const keys = lobbyKeys(live.session.state.rv, groupId, hub);
     const existing = readLobby(keys, (await this.host.resolve(keys.identity.pubKeyZ32)) ?? []);
     await this.host.publish(keys.identity, lobbyRecords(keys, mergeLobby(existing, { key: live.session.myKey, ts: now }, now)));
+    traceJoin(groupId, "lobby.written");
   }
 
   private async pollLobby(groupId: string, live: Live, now: number): Promise<void> {
@@ -461,6 +464,7 @@ export class Communities {
       // Someone is asking: not the moment to step down.
       live.emptySince = now;
       if (!live.members.has(key) && live.members.size >= COMMUNITY_TOPOLOGY.hubCapacity) continue;
+      if (!live.members.has(key)) traceJoin(groupId, "lobby.seen", { age: now - ts });
       live.members.set(key, Math.max(live.members.get(key) ?? 0, now));
     }
   }
@@ -522,6 +526,7 @@ export class Communities {
       if (order[turn] !== s.myKey || !early || (waited >= KNOCK_SLOT_MS && !stillKnocking)) continue;
       if (live.pendingEntries.size >= MAX_PENDING_ENTRIES) break;
       live.pendingEntries.set(key, now);
+      traceJoin(groupId, "knock.seen", { age: now - ts, turn });
       try { await this.host.openEntry(link, "host", s.state.entry.seedB64, key); } catch { live.pendingEntries.delete(key); }
     }
     for (const [key, { first }] of live.knocksSeen) if (now - first > 2 * KNOCK_TTL_MS) live.knocksSeen.delete(key);
@@ -541,8 +546,10 @@ export class Communities {
     this.lastKnock.set(group.id, now);
     const me = identityFromSeedB64(joining.seedB64).pubKeyZ32;
     const link = knockShard({ g: group.id, host: joining.host }, me), identity = knockIdentity(link);
+    const started = Date.now();
     const existing = readKnocks(link, (await this.host.resolve(identity.pubKeyZ32)) ?? []);
     await this.host.publish(identity, knockRecords(link, mergeKnocks(existing, { key: me, ts: now }, now)));
+    traceJoin(group.id, "knock.published", { ms: Date.now() - started });
   }
 
   private async closeEntries(groupId: string): Promise<void> {
@@ -557,7 +564,7 @@ export class Communities {
   entryReady(groupId: string, linkId: string, peer: string): boolean {
     const live = this.live.get(groupId);
     if (!live?.pendingEntries.has(peer) || !live.session.isMember) return false;
-    try { this.host.sendOnLink(linkId, live.session.inviteFrame()); } catch { /* it closed */ }
+    try { this.host.sendOnLink(linkId, live.session.inviteFrame()); traceJoin(groupId, "invite.sent"); } catch { /* it closed */ }
     return true;
   }
 
@@ -576,6 +583,7 @@ export class Communities {
         joining.inviter = frame.admin;
         joining.name = typeof frame.name === "string" ? frame.name.slice(0, 48) : joining.name;
         joining.pieces = [];
+        traceJoin(g, "invite.received");
         await this.store.putGroup(group);
         this.host.sendOnLink(linkId, { t: "group-accept", v: 2, g, key: identityFromSeedB64(joining.seedB64).pubKeyZ32 });
         this.host.emit();
@@ -590,6 +598,7 @@ export class Communities {
         try { welcome = rosterHas(live.session.roster, peer) ? await live.session.rewelcome(peer) : await live.session.admit(peer); }
         catch { live.pendingEntries.delete(peer); await this.host.closeEdge(linkId); return; }
         for (const piece of welcome) { try { this.host.sendOnLink(linkId, piece); } catch { /* the joiner knocks again */ } }
+        traceJoin(g, "welcome.sent");
         live.pendingEntries.delete(peer);
         live.knocksSeen.delete(peer);
         live.lingering.set(linkId, this.now() + ENTRY_LINGER_MS);
@@ -608,6 +617,7 @@ export class Communities {
         if (!joining || joining.linkId !== linkId || !joining.inviter) return;
         const joined = CommunitySession.join({ g, host: joining.host }, joining.pieces, frame, joining.seedB64);
         if ("error" in joined) { joining.pieces = []; return; }
+        traceJoin(g, "welcome.received");
         const again = !!this.live.get(g);
         // Whatever entry sessions this device still ran for the group (as a door before it lost its place) go.
         for (const [, id] of this.host.entries(g)) if (id !== linkId) await this.host.closeEdge(id);
