@@ -275,8 +275,8 @@ export function Finale({ t }: { t: HomeCopy["finale"] }) {
                 </h4>
                 <p className="fin-card-body">{t.extension.body}</p>
               </div>
-              <a className="btn fin-dl" href={DOWNLOADS.extensionZip}>
-                <Icon name="download" /> {t.extension.cta} <span className="fin-dl-ext">.zip</span>
+              <a className="btn fin-dl" href={DOWNLOADS.chromeStore}>
+                <Icon name="globe" /> {t.extension.cta} <span className="fin-dl-ext">Web Store</span>
               </a>
             </div>
             <div className="card fin-card fin-card--wide">
