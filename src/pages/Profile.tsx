@@ -9,9 +9,7 @@ import { COLOR_THEME_OPTIONS, type ColorScheme } from "../lib/settings";
 import { createProfile, currentProfile, listProfiles, renameProfile, switchProfile, THEME_COLOR, type ProfileEntry } from "../lib/profiles";
 import { Block, Button, Notice, Row, Section, Segmented, input } from "../components/wallet/ui";
 import { ProfileBackups } from "../components/ProfileBackups";
-import { IdentityProofsSection } from "../components/identities/IdentityProofsSection";
-import { NostrSection } from "../components/nostr/NostrSection";
-import { useEngineState } from "../lib/identities";
+import { useEngineState, useIdentityAttention } from "../lib/identities";
 import { DeleteProfileDialog } from "../components/DeleteProfileDialog";
 import { ProfileBadge } from "../components/ProfileBadge";
 import { setMyAvatar, useMyAvatar } from "../hooks/useAvatars";
@@ -29,9 +27,9 @@ function useProfiles() {
 }
 
 /** A row that is a link: label, value, chevron. */
-function LinkRow({ label, value, onClick }: { label: string; value?: ReactNode; onClick: () => void }) {
+function LinkRow({ label, value, onClick, testId }: { label: ReactNode; value?: ReactNode; onClick: () => void; testId?: string }) {
   return (
-    <button type="button" onClick={onClick} className="w-full flex items-center gap-3 px-4 py-3 min-h-12 text-left hover:bg-surface-alt transition-colors cursor-pointer first:rounded-t-xl last:rounded-b-xl">
+    <button type="button" data-testid={testId} onClick={onClick} className="w-full flex items-center gap-3 px-4 py-3 min-h-12 text-left hover:bg-surface-alt transition-colors cursor-pointer first:rounded-t-xl last:rounded-b-xl">
       <span className="flex-1 min-w-0 truncate text-sm text-text-primary">{label}</span>
       {value !== undefined && <span className="shrink-0 whitespace-nowrap text-sm text-text-muted tabular-nums">{value}</span>}
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" className="shrink-0 text-text-muted" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
@@ -50,9 +48,8 @@ export function Profile() {
   const platform = useServicesPlatform();
   const { current, all } = useProfiles();
   const myAvatar = useMyAvatar();
-  const engineState = useEngineState();
-  // The Nostr layer is shown once it has anything to show: a Nostr key of this profile, or a contact's.
-  const showNostr = !!engineState && (engineState.nostr.own.length > 0 || engineState.links.some(l => l.nostr?.length));
+  const identities = useEngineState()?.identityProofs.length ?? 0;
+  const identityAttention = useIdentityAttention();
   const [name, setName] = useState(current.name);
   const [creating, setCreating] = useState(false), [newName, setNewName] = useState("");
   const [deleting, setDeleting] = useState<ProfileEntry | null>(null);
@@ -103,10 +100,10 @@ export function Profile() {
         </Row>
       </Section>
 
-      <IdentityProofsSection />
-      {showNostr && <NostrSection />}
-
       <Section title="In this profile" testId="profile-links">
+        {/* Identities have a page of their own; this row is the way there from what used to hold them. */}
+        <LinkRow testId="profile-identities-link" label={<span className="inline-flex items-center gap-2">{t("tabs.identities")}{identityAttention && <><span className="nav-dot-inline" aria-hidden="true" /><span className="sr-only">, {t("identities.attention")}</span></>}</span>}
+          value={identities ? identities : undefined} onClick={() => navigate("/identities")} />
         <LinkRow label="Chats" value={`${chats} ${chats === 1 ? "chat" : "chats"}`} onClick={() => navigate("/")} />
         <LinkRow label="Wallets" value={wallet ? `${wallet.balance.toLocaleString()} sats` : undefined} onClick={() => navigate("/wallet")} />
         <LinkRow label="Services" value={services.length ? services.length : undefined} onClick={() => navigate("/services")} />

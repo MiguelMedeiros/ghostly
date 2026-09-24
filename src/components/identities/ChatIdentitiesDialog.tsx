@@ -48,11 +48,16 @@ export function ChatIdentitiesDialog({ peerKey, name, onClose }: { peerKey: stri
         </section>
 
         <section className="space-y-2" data-testid="chat-identities-mine">
-          <h3 className="text-xs font-medium text-text-muted">Yours, for this contact</h3>
+          <div className="flex flex-wrap items-center justify-between gap-x-3">
+            <h3 className="text-xs font-medium text-text-muted">Yours, for this contact</h3>
+            {/* Adding, renewing and removing happen on the Identities page; this dialog only shares. */}
+            <button type="button" data-testid="chat-identities-manage" onClick={() => { onClose(); navigate("/identities"); }}
+              className="min-h-10 text-xs text-accent hover:underline cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded">All your identities</button>
+          </div>
           {!link?.identities ? <Notice>Identities can be shared in paired chats only.</Notice>
             : connected && !ids?.support ? <Notice testId="chat-identities-unsupported">{name}’s app cannot receive identities yet.</Notice> : null}
           {mine.length === 0 ? (
-            <div className="flex flex-wrap items-center gap-3"><p className="flex-1 min-w-[12rem] text-xs text-text-muted">You have no identities in this profile yet.</p><Button onClick={() => { onClose(); navigate("/profile"); }}>Add in Profile</Button></div>
+            <div className="flex flex-wrap items-center gap-3"><p className="flex-1 min-w-[12rem] text-xs text-text-muted">You have no identities in this profile yet.</p><Button onClick={() => { onClose(); navigate("/identities"); }}>Add an identity</Button></div>
           ) : mine.map(p => {
             const shared = ids?.shared.find(s => s.id === p.id);
             const on = !!shared && shared.status !== "withdrawn" && shared.status !== "withdrawal-pending";

@@ -6,7 +6,7 @@ import { oidc } from "../src/proofs/providers/oidc";
 // covers: proofs.picker
 
 /**
- * Profile → Identities shows each provider as a card to recognize at a glance (mark, name, category, one
+ * Identities shows each provider as a card to recognize at a glance (mark, name, category, one
  * short line) and keeps the explanation for the details view. The descriptor is the source of both, so a
  * provider added later follows the same shape.
  */

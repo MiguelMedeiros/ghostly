@@ -733,11 +733,20 @@ em-emoji-picker {
 
 /* AccountBar is desktop-only. Container rules follow the resizable sidebar. */
 .account-footer { container-type: inline-size; }
-.account-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 7px 8px; height: 64px; }
+/* One even column per place, however many this client shows (Services needs a platform, the wallet a wallet). */
+.account-actions { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; padding: 7px 8px; height: 64px; }
 .account-action { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-width: 0; border-radius: 8px; cursor: pointer; color: var(--theme-text-secondary); }
 .account-action:hover, .account-action[aria-expanded="true"], .account-action[aria-current="page"] { background: var(--theme-surface-hover); color: var(--theme-accent); }
 .account-action:focus-visible { outline: 2px solid var(--theme-accent); outline-offset: -2px; }
-.account-label { font-size: 10px; line-height: 12px; }
+.account-label { font-size: 10px; line-height: 12px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A label that would be cut at this width hides with the others; the icon, its tooltip and its name stay. It keeps
+   its line, so the icons stay level with the wallet's, whose balance is a value and stays. */
+.account-actions[data-compact] .account-label { visibility: hidden; }
+/* Something to look at behind an icon (Identities): a dot on its corner, ringed in the bar's color like the wallet's count. */
+.nav-dot { position: absolute; top: -2px; right: -3px; width: 9px; height: 9px; border-radius: 999px; background: var(--theme-accent);
+  box-shadow: 0 0 0 2px var(--theme-sidebar-bg); animation: wallet-new-in 0.45s cubic-bezier(.2,1.6,.4,1) both; }
+.nav-dot-tab { box-shadow: 0 0 0 2px var(--theme-panel-header); }
+.nav-dot-inline { display: inline-block; width: 8px; height: 8px; border-radius: 999px; background: var(--theme-accent); flex-shrink: 0; }
 .account-wallet-label { display: block; white-space: nowrap; line-height: 12px; }
 /* Sats that came in while the wallet was closed: a count on the wallet icon, ringed in the bar's color. */
 .wallet-new { position: absolute; top: -7px; left: 14px; min-width: 18px; height: 16px; padding: 0 5px; border-radius: 999px; display: grid; place-items: center;
@@ -745,7 +754,7 @@ em-emoji-picker {
   background: var(--theme-accent); color: #111b21; box-shadow: 0 0 0 2px var(--theme-sidebar-bg); animation: wallet-new-in 0.45s cubic-bezier(.2,1.6,.4,1) both; }
 .wallet-new-test { background: var(--theme-sidebar-bg); color: var(--theme-accent); box-shadow: inset 0 0 0 1.5px var(--theme-accent), 0 0 0 2px var(--theme-sidebar-bg); }
 @keyframes wallet-new-in { from { transform: scale(0.3); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .wallet-new { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .wallet-new, .nav-dot { animation: none; } }
 .account-balance { font-variant-numeric: tabular-nums; }
 .account-action > svg, .account-action > span:first-child { flex-shrink: 0; }
 

@@ -464,7 +464,7 @@ export interface LinkHoldView {
   error?: string;
 }
 
-/** A proof of this profile (Profile → Identities). */
+/** A proof of this profile (Identities). */
 export interface IdentityProofView {
   id: string;
   provider: string;

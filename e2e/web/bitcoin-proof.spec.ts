@@ -28,8 +28,8 @@ test("a Bitcoin address proof: verified by the contact it is shared with, absent
   const wallet = testBitcoinWallet("p2wpkh"), stranger = testBitcoinWallet("p2wpkh");
   expect(wallet.address).toMatch(/^tb1q/);
 
-  // Profile → Identities → Bitcoin address, signed in "Sparrow".
-  await go(alice, "#/profile");
+  // Identities → Bitcoin address, signed in "Sparrow".
+  await go(alice, "#/identities");
   await alice.page.getByTestId("identity-add").click();
   const add = alice.page.getByTestId("add-identity");
   await add.getByTestId("add-identity-bitcoin").click();

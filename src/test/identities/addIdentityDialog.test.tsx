@@ -39,7 +39,7 @@ function configureOidc() {
   return () => { Object.assign(OIDC_PROVIDERS.google, { clientIds: saved.google }); Object.assign(OIDC_PROVIDERS.microsoft, { clientIds: saved.microsoft }); delete (fakeEngine as BrowserHost).oidc; };
 }
 
-/** Profile → Identities → Add an identity. */
+/** Identities → Add an identity. */
 describe("AddIdentityDialog", () => {
   let restore: (() => void) | undefined;
   afterEach(() => { restore?.(); restore = undefined; });

@@ -29,10 +29,11 @@ export function ProviderMark({ provider, subject, small = false }: { provider: s
   );
 }
 
-/** A small pill: "Verified" in the accent colour with a tick, anything else muted. */
-export function StatusPill({ children, ok = false, testId }: { children: React.ReactNode; ok?: boolean; testId?: string }) {
+/** A small pill: "Verified" in the accent colour with a tick, a warning (expiring soon) in amber, anything else muted. */
+export function StatusPill({ children, ok = false, warn = false, testId }: { children: React.ReactNode; ok?: boolean; warn?: boolean; testId?: string }) {
+  const tone = ok ? "bg-accent/10 text-accent" : warn ? "bg-amber-500/15 text-amber-500" : "bg-text-muted/10 text-text-muted";
   return (
-    <span data-testid={testId} className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium ${ok ? "bg-accent/10 text-accent" : "bg-text-muted/10 text-text-muted"}`}>
+    <span data-testid={testId} className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium ${tone}`}>
       {ok && <svg aria-hidden="true" width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="m3 8 3 3 7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>}
       {children}
     </span>

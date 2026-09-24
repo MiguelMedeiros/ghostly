@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import { expect, test } from "../support/fixtures";
 
 /**
- * The pages beside the chat list (Wallet, Services, Settings, Profile) at every width they are shown at:
+ * The pages beside the chat list (Wallet, Services, Settings, Profile, Identities) at every width they are shown at:
  * a wide desktop, a desktop narrowing down to two tight columns, and a phone. On a desktop the page's
  * column can be as narrow as a phone, so nothing here may depend on the window's width.
  *
@@ -103,14 +103,64 @@ for (const width of WIDTHS) {
     }
     await page.getByTestId("profile-new").click();
     await expectTidy(page, "[data-testid=profile-page]", "Profile, a new profile");
+
+    await page.goto("/#/identities");
+    await expect(page.getByTestId("identities-page")).toBeVisible();
+    await expectTidy(page, "[data-testid=identities-page]", "Identities");
     // Adding an identity: the dialog holds together too (Nostr, remote signer: no extension in this page).
     await page.getByTestId("identity-add").click();
-    await expectTidy(page, "[data-testid=add-identity]", "Profile, choosing an identity");
+    await expectTidy(page, "[data-testid=add-identity]", "Identities, choosing an identity");
     await page.getByTestId("add-identity-nostr").click();
     await expect(page.getByTestId("add-identity-field-bunker")).toBeVisible();
-    await expectTidy(page, "[data-testid=add-identity]", "Profile, adding an identity");
+    await expectTidy(page, "[data-testid=add-identity]", "Identities, adding an identity");
+    await page.getByRole("button", { name: "Close" }).click();
+
+    // Five places under the list (or in the phone's tab bar): each one inside the bar and easy to tap, and a
+    // label is shown whole or not at all.
+    await expect(await navProblems(page)).toEqual([]);
   });
 }
+
+/** What is wrong with the account bar (desktop) or the tab bar (phone): items outside it, too small to tap, cut labels. */
+async function navProblems(page: Page): Promise<string[]> {
+  const bar = page.getByTestId("account-bar").or(page.getByTestId("mobile-tabs"));
+  await expect(bar).toBeVisible();
+  return bar.evaluate((nav) => {
+    const problems: string[] = [];
+    const edge = nav.getBoundingClientRect();
+    const items = [...nav.querySelectorAll("button")];
+    if (items.length !== 5) problems.push(`${items.length} items, not 5`);
+    for (const item of items) {
+      const r = item.getBoundingClientRect(), name = item.getAttribute("aria-label") ?? item.textContent;
+      if (r.width < 40 || r.height < 40) problems.push(`${name} is ${Math.round(r.width)}×${Math.round(r.height)}`);
+      if (r.left < edge.left - 1 || r.right > edge.right + 1) problems.push(`${name} sticks out of the bar`);
+      for (const label of item.querySelectorAll<HTMLElement>(".account-label, .truncate")) {
+        if (label.offsetWidth > 0 && getComputedStyle(label).visibility !== "hidden" && label.scrollWidth > label.clientWidth + 1) problems.push(`${name}: the label "${label.textContent}" is cut`);
+      }
+    }
+    return problems;
+  });
+}
+
+test("the account bar keeps its five places at the list's narrowest", { tag: ["@feature:app.sidebar-resize", "@feature:app.responsive", "@feature:proofs.page"] }, async ({ peer }) => {
+  const { page } = await peer("alice", { viewport: { width: 1440, height: 900 } });
+  await page.goto("/#/identities");
+  const handle = (await page.getByTestId("sidebar-resize").boundingBox())!;
+  await page.mouse.move(handle.x + 1, handle.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(0, handle.y + 100, { steps: 5 });
+  await page.mouse.up();
+  expect(Math.round((await page.getByTestId("account-bar").boundingBox())!.width)).toBeLessThanOrEqual(281);
+  expect(await navProblems(page)).toEqual([]);
+  await expectTidy(page, "[data-testid=identities-page]", "Identities beside the narrowest list");
+  // In Portuguese too, whose labels are longer.
+  await page.getByTestId("account-settings").click();
+  await page.getByRole("combobox", { name: "Language" }).selectOption("pt");
+  await expect(page.getByTestId("account-identities")).toHaveAccessibleName("Identidades");
+  expect(await navProblems(page)).toEqual([]);
+  // "Configurações" does not fit in a fifth of 280px: the labels step aside together, the icons stay.
+  await expect(page.getByRole("navigation", { name: "Account" })).toHaveAttribute("data-compact", "true");
+});
 
 test("the page keeps a phone's width however wide the chat list is dragged", { tag: ["@feature:app.sidebar-resize", "@feature:app.responsive"] }, async ({ peer }) => {
   const { page } = await peer("alice", { viewport: { width: 900, height: 900 } });

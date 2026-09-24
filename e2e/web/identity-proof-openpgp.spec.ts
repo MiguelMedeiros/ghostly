@@ -20,7 +20,7 @@ async function identities(peer: Peer) {
 }
 const close = (peer: Peer) => peer.page.getByTestId("chat-identities").getByRole("button", { name: "Close" }).click();
 
-/** Profile → Identities → OpenPGP with the plain gpg signer, up to the paste; returns the dialog and the statement. */
+/** Identities → OpenPGP with the plain gpg signer, up to the paste; returns the dialog and the statement. */
 async function startPgp(peer: Peer, fingerprint: string) {
   await peer.page.getByTestId("identity-add").click();
   const add = peer.page.getByTestId("add-identity");
@@ -48,7 +48,7 @@ test("an OpenPGP key signed with gpg: refused when it should be, then shared wit
   await pair(alice, bob);
   const withBob = await chatId(alice);
   await pair(alice, carol);
-  await go(alice, "#/profile");
+  await go(alice, "#/identities");
 
   // Each refused before anything is saved.
   await refused(alice, fpr.alice, () => `${gpg.clearsign(fpr.alice, "Some other statement")}\n${gpg.exportKey(fpr.alice)}`, /signs different text/);

@@ -10,7 +10,7 @@ import { registeredIdentityProviders, reserveAdapterIds } from "../plugins/regis
 
 /**
  * Every identity-proof provider built into Ghostly. Adding one is adding its module under `providers/`
- * and ONE line here; see PROOFS.md. The order is the order of the picker in Profile → Identities. A
+ * and ONE line here; see PROOFS.md. The order is the order of the picker on the Identities page. A
  * provider written outside the app registers through `plugins/registry.ts` (the SDK) and comes after.
  */
 export const IDENTITY_PROVIDERS: readonly IdentityProofProvider[] = [

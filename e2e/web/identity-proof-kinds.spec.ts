@@ -17,7 +17,7 @@ test("every kind of signer: a pasted signature and a provider's attestation, bot
   await useFakeIdentities(alice);
   await pair(alice, bob);
   const chatHash = await alice.page.evaluate(() => location.hash);
-  await alice.page.evaluate(() => { location.hash = "#/profile"; });
+  await alice.page.evaluate(() => { location.hash = "#/identities"; });
 
   // external-tool: the statement is shown to copy, signed outside Ghostly, pasted back.
   const seed = ed25519.utils.randomSecretKey();

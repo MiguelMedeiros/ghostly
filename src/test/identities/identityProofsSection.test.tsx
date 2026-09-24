@@ -10,11 +10,11 @@ import { DAY, now, proofView } from "./views";
 
 const rows = () => screen.getAllByTestId("identity-proof");
 
-/** Profile → Identities: the proofs this profile holds. */
+/** Identities → Yours: the proofs this profile holds. */
 describe("IdentityProofsSection", () => {
   it("explains what identities are while there are none, and offers to add one", async () => {
     const { user } = renderApp(<IdentityProofsSection />);
-    expect(screen.getByTestId("profile-identities")).toHaveTextContent("Prove that you hold a Nostr key or another identity");
+    expect(screen.getByTestId("identities-mine")).toHaveTextContent("Prove that you hold a Nostr key or another identity");
     expect(screen.queryByTestId("identity-proof")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("identity-add"));
     expect(screen.getByRole("dialog", { name: "Add an identity" })).toBeInTheDocument();

@@ -1,5 +1,7 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { useI18n } from "../contexts/I18nContext";
+import { useIdentityAttention } from "../lib/identities";
+import { IdentitiesIcon } from "./identities/IdentitiesIcon";
 
 const icon = { width: 24, height: 24, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -23,6 +25,11 @@ const TABS = [
     ),
   },
   {
+    path: "/identities",
+    label: "tabs.identities",
+    icon: <IdentitiesIcon size={24} />,
+  },
+  {
     path: "/services",
     label: "tabs.services",
     icon: (
@@ -44,27 +51,38 @@ const TABS = [
   },
 ] as const;
 
-/** Phone navigation: the four places the sidebar stacks on a wide screen. */
+/**
+ * Phone navigation: the places the sidebar's account bar holds on a wide screen, five at most (a 320px phone
+ * gives each 64px). Identities is one: it is where a proof about to expire is noticed, and its dot must be
+ * seen. Profile is left out, set up once and rarely visited.
+ */
 export function MobileTabBar() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { t } = useI18n();
+  const identityAttention = useIdentityAttention();
 
   return (
     <nav className="shrink-0 flex bg-panel-header border-t border-border pb-safe" data-testid="mobile-tabs">
       {TABS.map((tab) => {
         const active = pathname === tab.path;
+        const dot = tab.path === "/identities" && identityAttention;
         return (
           <button
             key={tab.path}
             onClick={() => navigate(tab.path, { replace: true })}
             aria-current={active ? "page" : undefined}
-            className={`flex-1 min-h-14 flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-colors ${
+            aria-label={dot ? `${t(tab.label)}, ${t("identities.attention")}` : undefined}
+            data-testid={`mobile-tab-${tab.path.slice(1) || "chats"}`}
+            className={`flex-1 min-w-0 min-h-14 px-0.5 flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-colors ${
               active ? "text-accent" : "text-text-muted"
             }`}
           >
-            {tab.icon}
-            <span className="text-[11px] font-medium leading-none">{t(tab.label)}</span>
+            <span className="relative flex">
+              {tab.icon}
+              {dot && <span data-testid="identities-attention" aria-hidden="true" className="nav-dot nav-dot-tab" />}
+            </span>
+            <span className="max-w-full truncate text-[11px] font-medium leading-none">{t(tab.label)}</span>
           </button>
         );
       })}
