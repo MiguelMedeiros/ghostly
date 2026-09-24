@@ -465,7 +465,9 @@ export class GhostlyNode implements EngineImplementation {
       const live = this.links.get(linkId);
       if (!live?.stored.group) return;
       this.links.delete(linkId);
-      await live.link?.stop(true);
+      // An entry session is over once the admission is (or was given up): nobody waits on it, so it goes
+      // without a last packet saying so, which would only spend two of the relays' requests at a busy moment.
+      await live.link?.stop(!live.stored.groupEntry);
       await db.deleteLink(linkId);
     },
     edgeNick: linkId => this.links.get(linkId)?.presence.nick || undefined,

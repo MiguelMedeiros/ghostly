@@ -13,6 +13,8 @@ interface Edge {
   g: string; me: string; peer: string; kind: "edge" | "host" | "guest"; announced: boolean;
   /** With a `NetworkModel`: when this side opened it, polls fast until, last polled, polls that found the other side, up since. */
   openedAt: number; fastUntil: number; lastPoll: number; polls: number; upAt?: number; wasUp?: boolean;
+  /** An edge opened expecting the other side at once. */
+  expected?: boolean;
 }
 
 /**
@@ -47,8 +49,9 @@ export interface Peer {
   nick: string;
   /** Frames and bytes this peer sent. */
   sent: { frames: number; bytes: number };
-  /** Pkarr requests (with a `NetworkModel`): when each was made, and how many the budget refused. */
+  /** Pkarr requests (with a `NetworkModel`): when each was made (the background ones also on their own), and how many the budget refused. */
   spent: number[];
+  spentBackground: number[];
   refused: number;
 }
 
@@ -67,6 +70,8 @@ export class CommunityWorld {
   readonly pkarr = new Map<string, GhostRecord[]>();
   now = Date.now();
   pkarrOps = 0;
+  /** Sees every Pkarr request an app makes (tests counting what a door reads). */
+  onPkarr: ((peer: Peer, op: "resolve" | "publish", key: string, background: boolean) => void) | null = null;
   /** Cuts the network in parts: links (and Pkarr reads) only work within one part. */
   part: ((peer: Peer) => number) | null = null;
   private sameSide(a: Peer, b: Peer): boolean { return !this.part || this.part(a) === this.part(b); }
@@ -80,8 +85,9 @@ export class CommunityWorld {
   private spend(peer: Peer, cost: number, background = false): boolean {
     if (!this.network) return true;
     peer.spent = peer.spent.filter(at => this.now - at < 60_000);
-    if (peer.spent.length + cost > (background ? this.network.backgroundPerMinute : this.network.budgetPerMinute)) { peer.refused++; return false; }
-    for (let i = 0; i < cost; i++) peer.spent.push(this.now);
+    peer.spentBackground = peer.spentBackground.filter(at => this.now - at < 60_000);
+    if (peer.spent.length + cost > this.network.budgetPerMinute || (background && peer.spentBackground.length + cost > this.network.backgroundPerMinute)) { peer.refused++; return false; }
+    for (let i = 0; i < cost; i++) { peer.spent.push(this.now); if (background) peer.spentBackground.push(this.now); }
     return true;
   }
   private opened(g: string, me: string, other: string, kind: Edge["kind"], expect: boolean): Edge {
@@ -92,7 +98,7 @@ export class CommunityWorld {
   add(name: string, extra?: (peer: Peer) => Partial<GroupsHost>): Peer {
     const links = new Map<string, Edge>();
     const messages: StoredMessage[] = [];
-    const peer: Peer = { name, groups: null as unknown as Groups, store: memoryStore(messages), messages, links, online: true, nick: name, sent: { frames: 0, bytes: 0 }, spent: [], refused: 0 };
+    const peer: Peer = { name, groups: null as unknown as Groups, store: memoryStore(messages), messages, links, online: true, nick: name, sent: { frames: 0, bytes: 0 }, spent: [], spentBackground: [], refused: 0 };
     const host: GroupsHost = {
       sendOnLink: (linkId, frame) => {
         const edge = links.get(linkId), there = edge && this.counterpart(edge);
@@ -110,7 +116,7 @@ export class CommunityWorld {
       entries: g => new Map([...links].filter(([, e]) => e.g === g && e.kind !== "edge").map(([id, e]) => [e.peer, id])),
       openEdge: async (state, other, expect) => {
         const me = identityFromSeedB64(state.seedB64).pubKeyZ32, id = `edge:${name}:${state.id}:${other}`;
-        if (!links.has(id)) links.set(id, this.opened(state.id, me, other, "edge", !!expect));
+        if (!links.has(id)) links.set(id, { ...this.opened(state.id, me, other, "edge", !!expect), expected: !!expect });
         return id;
       },
       closeEdge: async linkId => { links.delete(linkId); },
@@ -125,11 +131,13 @@ export class CommunityWorld {
       },
       publish: async (identity, records, background) => {
         this.pkarrOps++;
+        this.onPkarr?.(peer, "publish", identity.pubKeyZ32, !!background);
         if (!this.spend(peer, 2, background)) throw new Error("Discovery request budget reached; retry shortly");
         if (peer.online) this.pkarr.set(identity.pubKeyZ32, structuredClone(records));
       },
       resolve: async (key, background) => {
         this.pkarrOps++;
+        this.onPkarr?.(peer, "resolve", key, !!background);
         if (!this.spend(peer, 1, background)) throw new Error("No Pkarr relay reachable");
         return peer.online ? structuredClone(this.pkarr.get(key) ?? null) : null;
       },
@@ -139,6 +147,8 @@ export class CommunityWorld {
       ...extra?.(peer),
     };
     peer.groups = new Groups(host, peer.store, undefined, this.timings, this.random);
+    // On the world's clock from the start: what it does before its first tick (a knock) is timed like the rest.
+    void peer.groups.tick(this.now);
     this.peers.set(name, peer);
     return peer;
   }

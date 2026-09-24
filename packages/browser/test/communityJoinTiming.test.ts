@@ -66,8 +66,8 @@ describe("a join through a community's link, timed on a network that costs what 
       rows.push(await timeJoin(world, world.add("bob"), [alice], id, link));
     }
     const d = report("one member open a while", rows);
-    expect(d.member.p90).toBeLessThanOrEqual(10);
-    expect(d.edgeUp.p90).toBeLessThanOrEqual(16);
+    expect(d.member.p90).toBeLessThanOrEqual(8);
+    expect(d.edgeUp.p90).toBeLessThanOrEqual(12);
   });
 
   it("the only member's app opens as the link is opened: it is the door at once", async () => {
@@ -86,8 +86,27 @@ describe("a join through a community's link, timed on a network that costs what 
       rows.push(await timeJoin(world, world.add("bob"), [alice], id, link));
     }
     const d = report("the only member opens as the link is opened", rows);
-    expect(d.member.p90).toBeLessThanOrEqual(12);
-    expect(d.edgeUp.p90).toBeLessThanOrEqual(18);
+    expect(d.member.p90).toBeLessThanOrEqual(8);
+    expect(d.edgeUp.p90).toBeLessThanOrEqual(12);
+  });
+
+  it("two people one after the other: the second is let in as fast as the first", async () => {
+    const rows: Timing[] = [];
+    for (let run = 0; run < RUNS; run++) {
+      const world = new CommunityWorld(undefined, RELAY_NETWORK, seeded(run + 1));
+      const alice = world.add("alice");
+      const id = await alice.groups.create("Timing");
+      const link = await alice.groups.enableLink(id);
+      await world.run(3 * 60_000);
+      const bob = world.add("bob");
+      await timeJoin(world, bob, [alice], id, link);
+      // Right after the first is in: the door's links just spent a good part of its budget signaling.
+      await world.run(Math.floor(seeded(run + 99)() * 10) * 500, 500);
+      rows.push(await timeJoin(world, world.add("carol"), [alice, bob], id, link));
+    }
+    const d = report("a second joiner right after the first", rows);
+    expect(d.member.p90).toBeLessThanOrEqual(8);
+    expect(d.edgeUp.p90).toBeLessThanOrEqual(12);
   });
 
   it("several members online: one door answers, in within seconds", async () => {
@@ -111,7 +130,7 @@ describe("a join through a community's link, timed on a network that costs what 
       expect(members.filter(m => [...m.links.values()].some(e => e.kind === "host")).length).toBeLessThanOrEqual(1);
     }
     const d = report("four members online", rows);
-    expect(d.member.p90).toBeLessThanOrEqual(10);
-    expect(d.edgeUp.p90).toBeLessThanOrEqual(16);
+    expect(d.member.p90).toBeLessThanOrEqual(8);
+    expect(d.edgeUp.p90).toBeLessThanOrEqual(12);
   });
 });

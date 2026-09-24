@@ -18,7 +18,8 @@ export const DEFAULT_RELAYS = ["https://pkarr.pubky.org", "https://pkarr.pubky.a
 export const REQUESTS_PER_MINUTE = 30;
 /**
  * Of those, what background requests (`{ background: true }`: periodic looks at shared records, as a
- * community group's hub makes) may spend: the rest is kept for links, whose signaling cannot wait.
+ * community group's hub makes) may spend, counted on their own: the rest is kept for links, whose
+ * signaling cannot wait, and a burst of signaling does not hold the background ones back afterwards.
  */
 export const BACKGROUND_REQUESTS_PER_MINUTE = 20;
 /** A relay that fails at the network level is left alone for this long. */
@@ -50,6 +51,7 @@ export class RelayTransport implements PkarrTransport {
   private readonly networkCooldown = new Map<string, number>();
   private cursor = 0;
   private readonly spent = new Map<string, number[]>();
+  private readonly spentBackground = new Map<string, number[]>();
   /** Timestamp of the last packet sent to each relay, per key: the compare-and-swap value for the next one. */
   private readonly lastPut = new Map<string, bigint>();
 
@@ -144,8 +146,8 @@ export class RelayTransport implements PkarrTransport {
       }
     }
     if (!reachable) {
-      const limit = options.background ? BACKGROUND_REQUESTS_PER_MINUTE : REQUESTS_PER_MINUTE;
-      const resting = this.relays.every((r) => this.isCoolingDown(r, "GET") || (this.spent.get(r)?.length ?? 0) >= limit);
+      const resting = this.relays.every((r) => this.isCoolingDown(r, "GET") || (this.spent.get(r)?.length ?? 0) >= REQUESTS_PER_MINUTE
+        || (!!options.background && (this.spentBackground.get(r)?.length ?? 0) >= BACKGROUND_REQUESTS_PER_MINUTE));
       // Holding back is not an outage: report what is already known.
       if (resting && this.newest.has(pubKeyZ32)) return this.newest.get(pubKeyZ32)!;
       throw new Error("No Pkarr relay reachable");
@@ -170,12 +172,12 @@ export class RelayTransport implements PkarrTransport {
   private take(relay: string, background = false): boolean {
     const now = Date.now();
     const recent = (this.spent.get(relay) ?? []).filter((at) => now - at < 60_000);
-    if (recent.length >= (background ? BACKGROUND_REQUESTS_PER_MINUTE : REQUESTS_PER_MINUTE)) {
-      this.spent.set(relay, recent);
-      return false;
-    }
-    recent.push(now);
+    const recentBackground = (this.spentBackground.get(relay) ?? []).filter((at) => now - at < 60_000);
     this.spent.set(relay, recent);
+    this.spentBackground.set(relay, recentBackground);
+    if (recent.length >= REQUESTS_PER_MINUTE || (background && recentBackground.length >= BACKGROUND_REQUESTS_PER_MINUTE)) return false;
+    recent.push(now);
+    if (background) recentBackground.push(now);
     return true;
   }
 

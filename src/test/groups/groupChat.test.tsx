@@ -83,15 +83,24 @@ describe("GroupChat: joining through a link", () => {
   const steps = () => within(screen.getByTestId("group-joining-steps")).getAllByRole("listitem").map(li => li.getAttribute("data-state"));
 
   it.each([
-    ["knocking", "", "Leaving a knock where the admin's app looks for one", ["current", "todo", "todo"]],
-    ["knocked", "", "Waiting for the admin's app to let you in", ["done", "current", "todo"]],
-    ["answered", "", "The admin's app saw you knock and is connecting to you", ["done", "done", "current"]],
-    ["admitted", ALICE, "getting the group's keys", ["done", "done", "done"]],
+    ["knocking", "", "Leaving a knock where the admin's app looks for one", ["current", "todo", "todo", "todo"]],
+    ["knocked", "", "Waiting for the admin's app to let you in", ["done", "current", "todo", "todo"]],
+    ["answered", "", "The admin's app saw you knock and is connecting to you", ["done", "done", "current", "todo"]],
+    // Let in: what is left is connecting to the members, which the chat itself shows next.
+    ["admitted", ALICE, "getting the group's keys", ["done", "done", "done", "current"]],
   ] as const)("shows the join step by step: %s", (stage, admin, text, states) => {
     openGroup(staged(stage, admin));
     expect(screen.getByTestId("group-joining")).toHaveTextContent(text);
     expect(screen.getByTestId("group-joining-steps")).toHaveAttribute("data-stage", stage);
     expect(steps()).toEqual(states);
+  });
+
+  it("in a community, says a member (any) is answering, then that it connects to the group", () => {
+    const labels = () => within(screen.getByTestId("group-joining-steps")).getAllByRole("listitem").map(li => li.textContent);
+    openGroup({ ...staged("answered"), profile: "community" });
+    expect(screen.getByTestId("group-joining")).toHaveTextContent("A member is letting you in");
+    expect(labels()).toEqual(["✓Knock sent to the group", "✓A member's app is answering", "Let in: getting the group's keys", "Connecting to the group"]);
+    expect(steps()).toEqual(["done", "done", "current", "todo"]);
   });
 
   it("once in, says it is connecting to the members until one is reached", async () => {

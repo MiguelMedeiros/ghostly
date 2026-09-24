@@ -99,6 +99,18 @@ describe("relay transport under pressure", () => {
     await relay.resolve(id.pubKeyZ32);
     expect(requests).toBe(REQUESTS_PER_MINUTE);
   });
+
+  it("counts background requests on their own: a burst of signaling does not hold them back afterwards", async () => {
+    let requests = 0;
+    const relay = new RelayTransport({ relays: ["https://a.test"], fetch: (async () => {
+      requests++; return new Response(createRelayPayload(id, [{ label: "_ts", value: "1" }], 3n) as BodyInit);
+    }) as typeof fetch });
+    // A link's signaling spent most of the minute…
+    for (let i = 0; i < REQUESTS_PER_MINUTE - 5; i++) await relay.resolve(id.pubKeyZ32);
+    // …the background still has what is left of the whole, not nothing.
+    for (let i = 0; i < 10; i++) await relay.resolve(id.pubKeyZ32, { background: true });
+    expect(requests).toBe(REQUESTS_PER_MINUTE);
+  });
 });
 
 describe("relay transport publishing in bursts", () => {
