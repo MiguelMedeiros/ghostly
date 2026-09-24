@@ -17,7 +17,7 @@ async function addAccountProof(page: Page, issuer: LocalOidcIssuer, signer = "oi
   const add = page.getByTestId("add-identity");
   await add.getByTestId("add-identity-oidc").click();
   await add.getByTestId("add-identity-signer").selectOption(signer);
-  await expect(add.getByTestId("add-identity-subject")).toHaveValue(issuer.issuer);
+  await expect(add.getByTestId("add-identity-subject")).toHaveAttribute("data-value", issuer.issuer);
   await add.getByTestId("add-identity-start").click();
   // The provider's page opens in a popup from this click.
   const [popup] = await Promise.all([page.context().waitForEvent("page"), add.getByTestId("add-identity-finish").click()]);

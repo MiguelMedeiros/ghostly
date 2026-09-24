@@ -58,7 +58,7 @@ export function ChatIdentitiesDialog({ peerKey, name, onClose }: { peerKey: stri
             const contactCannot = ids?.contactProviders && !ids.contactProviders.includes(p.provider);
             return (
               <div key={p.id} data-testid="chat-identity-mine" className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-border p-3">
-                <ProviderMark provider={p.provider} />
+                <ProviderMark provider={p.provider} subject={p.verified.subject} />
                 <div className="min-w-0 flex-[1_1_12rem]">
                   <p className="text-sm text-text-primary">{providerLabel(p.provider)} <span className="font-mono text-xs text-text-muted">{shortSubject(p.provider, p.verified.subject)}</span></p>
                   <p className="text-xs text-text-muted" data-testid="chat-identity-mine-status">{expired ? `Expired ${date(p.expiresAt)}` : shared ? SHARED_STATUS[shared.status] : "Not shared"}{shared?.status === "rejected" && shared.error ? `: ${shared.error}` : ""}</p>
@@ -86,7 +86,7 @@ function Received({ r, linkId, busy, act }: { r: ReceivedIdentityView; linkId: s
   return (
     <div data-testid="chat-identity-received" data-provider={r.provider} data-status={r.status} className="rounded-xl border border-border p-3 space-y-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        {avatar ? <img src={avatar} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" /> : <ProviderMark provider={r.provider} />}
+        {avatar ? <img src={avatar} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" /> : <ProviderMark provider={r.provider} subject={r.subject} />}
         <div className="min-w-0 flex-[1_1_10rem]">
           <p className="text-sm text-text-primary">{name ?? providerLabel(r.provider)}{name && <span className="text-xs text-text-muted"> · {providerLabel(r.provider)}</span>}</p>
           {name && <p className="text-[11px] text-text-muted" data-testid="chat-identity-received-name-source">{r.display?.source ?? r.verified.display?.source}</p>}
