@@ -1,7 +1,7 @@
 import { act, screen, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
-import type { GroupMemberView, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
+import type { GroupJoinStage, GroupMemberView, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
 import { GroupChat } from "../../pages/GroupChat";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -77,6 +77,38 @@ describe("GroupChat: joining through a link", () => {
     expect(screen.getByTestId("group-members")).toHaveTextContent("Joining…");
     expect(screen.getByTestId("group-joining")).toHaveTextContent("Joining Friends…");
     expect(screen.getByTestId("group-joining")).toHaveTextContent("The admin's app answered: getting the group's keys.");
+  });
+
+  const staged = (stage: GroupJoinStage, admin = "") => groupView({ canSend: false, invitation: { linkId: "", contact: "", admin, members: 0, accepted: true, viaLink: true, stage } });
+  const steps = () => within(screen.getByTestId("group-joining-steps")).getAllByRole("listitem").map(li => li.getAttribute("data-state"));
+
+  it.each([
+    ["knocking", "", "Leaving a knock where the admin's app looks for one", ["current", "todo", "todo"]],
+    ["knocked", "", "Waiting for the admin's app to let you in", ["done", "current", "todo"]],
+    ["answered", "", "The admin's app saw you knock and is connecting to you", ["done", "done", "current"]],
+    ["admitted", ALICE, "getting the group's keys", ["done", "done", "done"]],
+  ] as const)("shows the join step by step: %s", (stage, admin, text, states) => {
+    openGroup(staged(stage, admin));
+    expect(screen.getByTestId("group-joining")).toHaveTextContent(text);
+    expect(screen.getByTestId("group-joining-steps")).toHaveAttribute("data-stage", stage);
+    expect(steps()).toEqual(states);
+  });
+
+  it("once in, says it is connecting to the members until one is reached", async () => {
+    const joined = stored({ id: "event:1:joined", event: "joined", text: "You joined.", timestamp: Date.now() });
+    const away = [members[0], member({ key: ALICE, nick: "Alice", role: "admin" })];
+    openGroup(active({ members: away }), [joined]);
+    expect(await screen.findByTestId("group-connecting")).toHaveTextContent("Connecting to the members");
+    expect(screen.getByTestId("group-members")).toHaveTextContent("2 members · 0 of 1 reachable");
+    act(() => fakeEngine.update({ groups: [active({ members: [members[0], { ...away[1], online: true }] })] }));
+    expect(screen.queryByTestId("group-connecting")).not.toBeInTheDocument();
+  });
+
+  it("a member of long standing whose members are away is not told it is connecting", async () => {
+    const joined = stored({ id: "event:1:joined", event: "joined", text: "You joined.", timestamp: Date.now() - 60 * 60_000 });
+    openGroup(active({ members: [members[0], member({ key: ALICE, nick: "Alice", role: "admin" })] }), [joined]);
+    expect(await screen.findByTestId("group-members")).toHaveTextContent("0 of 1 reachable");
+    expect(screen.queryByTestId("group-connecting")).not.toBeInTheDocument();
   });
 
   it("cancels the join: forgets the group and goes back to the chat list", async () => {

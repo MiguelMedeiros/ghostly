@@ -3,8 +3,9 @@ import {
   knockIdentity, knockRecords, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature,
   type GhostRecord, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupState, type Identity, type Roster,
 } from "@ghostly/core";
-import type { GroupEvent, GroupView, StoredGroup, StoredMessage } from "../shared/types";
+import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { db } from "./db";
+import { traceJoin } from "./joinTrace";
 
 /** What the engine gives the groups: its links, its storage and its state emitter. */
 export interface GroupsHost {
@@ -16,8 +17,11 @@ export interface GroupsHost {
   contactName(linkId: string): string | undefined;
   /** Member key → edge link id, for the edges of this group that exist. */
   edges(groupId: string): Map<string, string>;
-  /** Creates and starts the edge of a group toward a member; resolves to its link id. */
-  openEdge(state: GroupState, peerMemberKey: string): Promise<string>;
+  /**
+   * Creates and starts the edge of a group toward a member; resolves to its link id. `expectPeer`:
+   * the member is online this very moment (we just met over the admission), so it looks fast for it.
+   */
+  openEdge(state: GroupState, peerMemberKey: string, expectPeer?: boolean): Promise<string>;
   closeEdge(linkId: string): Promise<void>;
   /** The nick the member at the other end of an edge announced. */
   edgeNick(linkId: string): string | undefined;
@@ -28,6 +32,8 @@ export interface GroupsHost {
   openEntry(link: GroupEntryLink, role: "host" | "guest", mySeedB64: string, peer: string): Promise<string>;
   /** Entry sessions of this group that exist: peer key → link id. */
   entries(groupId: string): Map<string, string>;
+  /** The other end of this link is here (its packet is fresh), or a connection with it is under way. */
+  linkSeen?(linkId: string): boolean;
   /** Pkarr, for the knocks under a link's knock identity. */
   publish(identity: Identity, records: GhostRecord[]): Promise<void>;
   resolve(pubKeyZ32: string): Promise<GhostRecord[] | null>;
@@ -45,9 +51,13 @@ export interface GroupStore {
 
 const MESSAGE_LINK = (groupId: string) => `group:${groupId}`;
 
-/** How often a group's link is looked at, and a joiner knocks; `slowKnockMs` once it has waited `patienceMs`. */
-export interface EntryTimings { pollMs: number; knockMs: number; slowKnockMs: number; patienceMs: number }
-const ENTRY_TIMINGS: EntryTimings = { pollMs: 5_000, knockMs: 5_000, slowKnockMs: 20_000, patienceMs: 2 * 60_000 };
+/**
+ * How often a group's link is looked at (`warmPollMs` for `warmMs` after it was handed out or someone
+ * knocked: people open a link in the minutes after it is shared, and in bursts), and a joiner knocks;
+ * `slowKnockMs` once it has waited `patienceMs`.
+ */
+export interface EntryTimings { pollMs: number; warmPollMs: number; warmMs: number; knockMs: number; slowKnockMs: number; patienceMs: number }
+const ENTRY_TIMINGS: EntryTimings = { pollMs: 5_000, warmPollMs: 2_000, warmMs: 10 * 60_000, knockMs: 5_000, slowKnockMs: 20_000, patienceMs: 2 * 60_000 };
 /** Entry sessions the admin runs at once; a joiner who does not finish in time is not answered again for a while. */
 const MAX_PENDING_ENTRIES = 4;
 const ENTRY_TIMEOUT_MS = 3 * 60_000;
@@ -77,7 +87,13 @@ export class Groups {
   /** Admin side: member keys whose entry did not finish, not answered again until then. */
   private readonly refused = new Map<string, number>();
   private readonly lastPoll = new Map<string, number>();
+  /** Admin side: until when a group's link is looked at the warm pace. */
+  private readonly warmUntil = new Map<string, number>();
   private readonly lastKnock = new Map<string, number>();
+  /** Per group, members met over their admission a moment ago: their edge is opened expecting them. */
+  private readonly justMet = new Map<string, Set<string>>();
+  /** Joiner side: groups whose knock is published, for the stage the joiner is shown. */
+  private readonly knocked = new Set<string>();
   private ticking = false;
 
   constructor(private readonly host: GroupsHost, private readonly store: GroupStore = db, private readonly timings: EntryTimings = ENTRY_TIMINGS) {}
@@ -108,7 +124,7 @@ export class Groups {
         const invitation = group.invitation!;
         return { ...base, name: invitation.name, isAdmin: false, members: [], canSend: false,
           invitation: { linkId: invitation.linkId, contact: this.host.contactName(invitation.linkId) ?? "", admin: invitation.admin, members: invitation.n, accepted: !!invitation.seedB64,
-            ...(invitation.entry ? { viaLink: true } : {}) } };
+            ...(invitation.entry ? { viaLink: true, stage: this.joinStage(group) } : {}) } };
       }
       const nicks = session.state.nicks;
       const entry = session.isAdmin ? this.entryOf(group) : undefined;
@@ -248,6 +264,8 @@ export class Groups {
     this.invited.delete(groupId);
     this.lastRoster.delete(groupId);
     this.pendingEntries.delete(groupId);
+    this.knocked.delete(groupId);
+    this.justMet.delete(groupId);
     for (const linkId of [...this.host.edges(groupId).values(), ...this.host.entries(groupId).values()]) await this.host.closeEdge(linkId);
     await this.store.deleteGroup(groupId);
     this.host.emit();
@@ -266,6 +284,8 @@ export class Groups {
       await this.store.putGroup(group);
       this.lastPoll.delete(groupId);
     }
+    // Asked for the link: it is being handed out, and whoever gets it opens it soon.
+    this.warmUntil.set(groupId, Date.now() + this.timings.warmMs);
     this.host.emit();
     return encodeGroupEntryLink(this.entryOf(group)!.link);
   }
@@ -298,6 +318,7 @@ export class Groups {
     this.stored.set(link.g, group);
     await this.store.putGroup(group);
     this.host.emit();
+    traceJoin(link.g, "join.start");
     void this.knock(group).catch(() => {});
     return link.g;
   }
@@ -314,7 +335,9 @@ export class Groups {
         }
         if (group.invitation?.entry && !group.state) {
           const waited = now - group.createdAt, every = waited > this.timings.patienceMs ? this.timings.slowKnockMs : this.timings.knockMs;
-          if (!this.host.linkReady(group.invitation.linkId) && now - (this.lastKnock.get(group.id) ?? 0) >= every) await this.knock(group, now).catch(() => {});
+          // Once the admin's app is on the entry session, knocking only spends the relays' budget its signaling needs.
+          const answered = this.host.linkReady(group.invitation.linkId) || !!this.host.linkSeen?.(group.invitation.linkId);
+          if (!answered && now - (this.lastKnock.get(group.id) ?? 0) >= every) await this.knock(group, now).catch(() => {});
           continue;
         }
         const session = this.sessions.get(group.id);
@@ -327,7 +350,8 @@ export class Groups {
           const linkId = this.host.entries(group.id).get(key);
           if (linkId) await this.host.closeEdge(linkId);
         }
-        if (now - (this.lastPoll.get(group.id) ?? 0) >= this.timings.pollMs) { this.lastPoll.set(group.id, now); await this.answerKnocks(group, session, now).catch(() => {}); }
+        const every = now < (this.warmUntil.get(group.id) ?? 0) ? this.timings.warmPollMs : this.timings.pollMs;
+        if (now - (this.lastPoll.get(group.id) ?? 0) >= every) { this.lastPoll.set(group.id, now); await this.answerKnocks(group, session, now).catch(() => {}); }
       }
       for (const [key, until] of this.refused) if (until <= now) this.refused.delete(key);
     } finally { this.ticking = false; }
@@ -338,9 +362,17 @@ export class Groups {
     const session = this.sessions.get(groupId);
     if (!session?.isAdmin || !this.pendingEntries.get(groupId)?.has(peer)) return;
     try { this.host.sendOnLink(linkId, session.inviteFrame()); } catch { return; }
+    traceJoin(groupId, "invite.sent");
     let set = this.invited.get(groupId);
     if (!set) this.invited.set(groupId, (set = new Set()));
     set.add(linkId);
+  }
+
+  private joinStage(group: StoredGroup): GroupJoinStage {
+    const invitation = group.invitation!;
+    if (invitation.admin) return "admitted";
+    if (this.host.linkReady(invitation.linkId) || this.host.linkSeen?.(invitation.linkId)) return "answered";
+    return this.knocked.has(group.id) ? "knocked" : "knocking";
   }
 
   private entryOf(group: StoredGroup): { link: GroupEntryLink; seedB64: string } | undefined {
@@ -357,13 +389,19 @@ export class Groups {
     const invitation = group.invitation!;
     this.lastKnock.set(group.id, now);
     const link = { g: group.id, host: invitation.entry! }, identity = knockIdentity(link);
+    const started = Date.now();
     const existing = readKnocks(link, (await this.host.resolve(identity.pubKeyZ32)) ?? []);
+    traceJoin(group.id, "knock.read", { ms: Date.now() - started, others: existing.length });
     await this.host.publish(identity, knockRecords(link, mergeKnocks(existing, { key: identityFromSeedB64(invitation.seedB64!).pubKeyZ32, ts: now }, now)));
+    traceJoin(group.id, "knock.published", { ms: Date.now() - started });
+    if (!this.knocked.has(group.id)) { this.knocked.add(group.id); this.host.emit(); }
   }
 
   private async answerKnocks(group: StoredGroup, session: GroupSession, now: number): Promise<void> {
     const entry = this.entryOf(group)!;
+    const started = Date.now();
     const knocks = readKnocks(entry.link, (await this.host.resolve(knockIdentity(entry.link).pubKeyZ32)) ?? []);
+    traceJoin(group.id, "knocks.read", { ms: Date.now() - started, knocks: knocks.length });
     let pending = this.pendingEntries.get(group.id);
     for (const { key, ts } of knocks) {
       if (now - ts > KNOCK_TTL_MS || rosterHas(session.roster, key) || this.refused.has(key) || pending?.has(key) || key === entry.link.host) continue;
@@ -372,6 +410,8 @@ export class Groups {
       if ((pending?.size ?? 0) >= MAX_PENDING_ENTRIES || session.roster.length + contactsInvited + (pending?.size ?? 0) >= 8) break;
       if (!pending) this.pendingEntries.set(group.id, (pending = new Map()));
       pending.set(key, now);
+      this.warmUntil.set(group.id, now + this.timings.warmMs);
+      traceJoin(group.id, "knock.seen", { age: Date.now() - ts });
       try { await this.host.openEntry(entry.link, "host", entry.seedB64, key); } catch { pending.delete(key); }
     }
   }
@@ -398,6 +438,7 @@ export class Groups {
           existing.invitation = { ...existing.invitation, name: frame.name.slice(0, 48), admin: frame.admin, pieces: [],
             e: Number.isSafeInteger(frame.e) ? frame.e as number : 0, n: Number.isSafeInteger(frame.n) ? frame.n as number : 1 };
           await this.store.putGroup(existing);
+          traceJoin(g, "invite.received");
           this.host.sendOnLink(linkId, { t: "group-accept", g, key: identityFromSeedB64(existing.invitation.seedB64!).pubKeyZ32 });
           this.host.emit();
           return;
@@ -426,11 +467,13 @@ export class Groups {
           // The contact's name on our chat is the best name for them until their edge says otherwise.
           await session.setNick(frame.key, this.host.contactName(linkId));
         }
+        this.meet(g, frame.key);
         const welcome = await session.admit(frame.key);
         if (!entryPeer) group.contacts = { ...group.contacts, [frame.key]: linkId };
         await this.store.putGroup(group);
         this.invited.get(g)?.delete(linkId);
         for (const piece of welcome) this.host.sendOnLink(linkId, piece);
+        if (entryPeer) traceJoin(g, "welcome.sent");
         if (entryPeer) {
           this.pendingEntries.get(g)?.delete(entryPeer);
           setTimeout(() => { if (this.host.entries(g).get(entryPeer) === linkId) void this.host.closeEdge(linkId); }, ENTRY_LINGER_MS);
@@ -457,6 +500,7 @@ export class Groups {
         const joined = GroupSession.join({ name: group.invitation.name, admin: group.invitation.admin }, group.invitation.pieces, frame, group.invitation.seedB64);
         if ("error" in joined) { group.invitation.pieces = []; return; }
         const viaLink = !!group.invitation.entry;
+        this.meet(g, group.invitation.admin);
         // An entry session is not a contact chat: once in, the edges carry everything.
         const member: StoredGroup = { id: g, createdAt: group.createdAt, state: joined.state, contacts: viaLink ? {} : { [group.invitation.admin]: linkId } };
         // Attached before anything awaits: the list must never see a member row without its session.
@@ -465,7 +509,8 @@ export class Groups {
         await this.store.putGroup(member);
         if (!viaLink) await this.sessions.get(g)!.setNick(group.invitation.admin, this.host.contactName(linkId));
         await this.event(g, "joined", `You joined. ${GROUP_READ_NOTE}`, Date.now(), joined.state.chain.length - 1);
-        if (viaLink) { this.lastKnock.delete(g); await this.host.closeEdge(linkId); }
+        if (viaLink) traceJoin(g, "welcome.received");
+        if (viaLink) { this.lastKnock.delete(g); this.knocked.delete(g); await this.host.closeEdge(linkId); }
         this.reconcileEdges(g);
         this.host.emit();
         return;
@@ -587,9 +632,20 @@ export class Groups {
       const left = this.stored.get(groupId)?.left;
       const wanted = session?.status === "active" ? new Set(session.others) : left ? new Set([left.admin]) : new Set<string>();
       for (const [key, linkId] of existing) if (!wanted.has(key)) await this.host.closeEdge(linkId);
-      if (session) for (const key of wanted) if (!existing.has(key)) { try { await this.host.openEdge(session.state, key); } catch { /* tried again next time */ } }
+      const met = this.justMet.get(groupId);
+      if (session) for (const key of wanted) if (!existing.has(key)) {
+        const expect = !!met?.delete(key);
+        try { await this.host.openEdge(session.state, key, expect); } catch { /* tried again next time */ }
+      }
       this.host.emit();
     }).catch(() => {});
+  }
+
+  /** The admin and the member it admits were both here a moment ago: the edge between them is expected at once. */
+  private meet(groupId: string, key: string): void {
+    let set = this.justMet.get(groupId);
+    if (!set) this.justMet.set(groupId, (set = new Set()));
+    set.add(key);
   }
 
   /** `member`: whom it is about, so the apps can name them as they are known now, not as they were then. */

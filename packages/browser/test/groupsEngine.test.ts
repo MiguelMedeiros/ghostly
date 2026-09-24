@@ -34,6 +34,8 @@ class World {
   readonly peers = new Map<string, Peer>();
   readonly pkarr = new Map<string, GhostRecord[]>();
   publishes = 0;
+  /** Pkarr reads, per peer. */
+  readonly resolves = new Map<string, number>();
   readonly chats = new Map<string, [string, string]>();
   private queue: (() => Promise<unknown>)[] = [];
 
@@ -79,7 +81,7 @@ class World {
       },
       entries: groupId => new Map([...peer.entries.entries()].filter(([, e]) => e.g === groupId).map(([id, e]) => [e.peer, id])),
       publish: async (identity, records) => { this.publishes++; this.pkarr.set(identity.pubKeyZ32, records); },
-      resolve: async key => this.pkarr.get(key) ?? null,
+      resolve: async key => { this.resolves.set(name, (this.resolves.get(name) ?? 0) + 1); return this.pkarr.get(key) ?? null; },
       edgeNick: () => undefined,
       storeMessage: async message => { if (!peer.messages.some(m => m.id === message.id)) peer.messages.push(message); },
       emit: () => {},
@@ -324,7 +326,34 @@ describe("invitations: what the admission exchange ignores", () => {
 });
 
 describe("the group's link: knocks, pending entries and refusals", () => {
-  const timings: EntryTimings = { pollMs: 1_000, knockMs: 2_000, slowKnockMs: 10_000, patienceMs: 30_000 };
+  const timings: EntryTimings = { pollMs: 1_000, warmPollMs: 1_000, warmMs: 0, knockMs: 2_000, slowKnockMs: 10_000, patienceMs: 30_000 };
+
+  it("the admin's app looks at the link often while it is being handed out or someone just knocked, and less once it is quiet", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t0 = Date.now();
+    const world = new World();
+    const alice = world.add("alice", { ...timings, pollMs: 5_000, warmPollMs: 2_000, warmMs: 60_000 });
+    const groupId = await alice.create("Ghosts");
+    const code = await alice.enableLink(groupId);
+    const looks = () => world.resolves.get("alice") ?? 0;
+    await alice.tick(t0); expect(looks()).toBe(1);
+    await alice.tick(t0 + 1_999); expect(looks()).toBe(1);
+    await alice.tick(t0 + 2_000); expect(looks()).toBe(2); // warm: the link was just handed out
+    // Quiet for the warm minute: back to the slow pace.
+    await alice.tick(t0 + 60_000); expect(looks()).toBe(3);
+    await alice.tick(t0 + 62_000); expect(looks()).toBe(3);
+    await alice.tick(t0 + 65_000); expect(looks()).toBe(4);
+    // Someone knocks: warm again, for the ones who come after.
+    vi.setSystemTime(t0 + 66_000);
+    await world.add("dan").joinByLink(code); await flush();
+    await alice.tick(t0 + 70_000); await world.settle(); expect(looks()).toBe(5);
+    await alice.tick(t0 + 72_000); expect(looks()).toBe(6);
+    // Handing the link out again warms it too.
+    await alice.tick(t0 + 70_000 + 60_000); expect(looks()).toBe(7);
+    vi.setSystemTime(t0 + 131_000);
+    await alice.enableLink(groupId);
+    await alice.tick(t0 + 133_000); expect(looks()).toBe(8);
+  });
 
   it("a joiner knocks at its pace, slower once it has waited long, and not while its entry session is up", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -348,6 +377,28 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     await alice.tick(t0 + 50_000); await world.settle();
     await dan.tick(t0 + 70_000);
     expect(world.publishes).toBe(4);
+  });
+
+  it("a joiner stops knocking as soon as the admin's side of the entry session is seen, before it is up", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t0 = Date.now();
+    const world = new World();
+    const alice = world.add("alice"), dan = world.add("dan", timings);
+    const groupId = await alice.create("Ghosts");
+    await dan.joinByLink(await alice.enableLink(groupId)); await flush();
+    const host = (dan as unknown as { host: GroupsHost }).host;
+    let seen = false;
+    host.linkSeen = () => seen;
+    host.linkReady = () => false;
+    await dan.tick(t0 + 2_000);
+    expect(world.publishes).toBe(2);
+    seen = true;
+    await dan.tick(t0 + 4_000); await dan.tick(t0 + 30_000);
+    expect(world.publishes).toBe(2);
+    // The admin's side went away (it gave up, or its app closed): knock again.
+    seen = false;
+    await dan.tick(t0 + 32_000);
+    expect(world.publishes).toBe(3);
   });
 
   it("an admission that does not finish in time is dropped and that key is not answered again for a while", async () => {

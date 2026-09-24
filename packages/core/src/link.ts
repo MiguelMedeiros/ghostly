@@ -49,6 +49,13 @@ export const RELAY_POLL_INTERVALS: PollIntervals = {
 
 /** Signaling that has not finished by then is not going to; stop polling fast. */
 const FAST_POLL_MAX_MS = 45_000;
+/**
+ * How long a link looks fast when its peer, or the peer's offer, is due any moment. The peer that
+ * dials does so as soon as it sees the other one here, and its offer lands in its packet a moment
+ * after its presence did: without this the side that answers left the offer to a background poll
+ * (30 s on the relays), once on a group's entry session and once more per member edge.
+ */
+export const EXPECT_PEER_MS = 30_000;
 /** A chat whose contact was never seen (an invite just sent) keeps looking at the active pace this long. */
 export const AWAITING_PEER_MS = 10 * 60_000;
 const PUBLISH_RETRY_MS = 4_000;
@@ -188,6 +195,14 @@ export class LinkSession {
   setFastPoll(fast: boolean): void {
     this.fastPollUntil = fast ? Date.now() + FAST_POLL_MAX_MS : 0;
     if (fast) this.pollNow();
+  }
+
+  /** The peer, or its offer, is due any moment: poll fast for `EXPECT_PEER_MS` (never cutting a longer fast window short). */
+  expectPeer(): void {
+    const until = Date.now() + EXPECT_PEER_MS;
+    if (until <= this.fastPollUntil) return;
+    this.fastPollUntil = until;
+    this.pollNow();
   }
 
   /** The data link carries chat and services while it is up. */
