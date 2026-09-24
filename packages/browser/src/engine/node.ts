@@ -443,7 +443,7 @@ export class GhostlyNode implements EngineImplementation {
       link.sendGroupFrame(frame);
     },
     linkReady: (linkId, version = 1) => !!this.links.get(linkId)?.link?.supportsGroupVersion(version),
-    myNick: () => this.settings.nick || undefined,
+    myNick: () => this.sharedNick,
     contactName: linkId => { const stored = this.links.get(linkId)?.stored; return stored?.label || stored?.peerNick || undefined; },
     edges: groupId => this.groupEdges(groupId),
     entries: groupId => {

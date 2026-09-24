@@ -102,8 +102,12 @@ describe("settings", () => {
     await node.updateSettings({ settings: { avatar } }).catch(() => {});
     expect(link.setNick.mock.calls.flat().filter(Boolean)).toEqual([]);
     expect(link.setAvatar.mock.calls.flat().filter(Boolean)).toEqual([]);
+    // Community groups sign their messages with the same shared name: none while off.
+    const groupsHost = (node as unknown as { groups: { host: { myNick(): string | undefined } } }).groups.host;
+    expect(groupsHost.myNick()).toBeUndefined();
     await node.updateSettings({ settings: { shareProfile: true } });
     expect(link.setNick).toHaveBeenLastCalledWith("Ghost 2");
+    expect(groupsHost.myNick()).toBe("Ghost 2");
     // On is the default: it is not stored.
     expect(await db.getSettings()).not.toHaveProperty("shareProfile");
   });
