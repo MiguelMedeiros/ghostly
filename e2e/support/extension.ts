@@ -27,8 +27,8 @@ function prepareExtension(work: string): string {
 }
 
 type Fixtures = {
-  /** Ghostly Browser in a Chromium profile of its own. */
-  extensionPeer: (name: string) => Promise<Peer>;
+  /** Ghostly Browser in a Chromium profile of its own; `ignoreHTTPSErrors` reaches its offscreen engine too. */
+  extensionPeer: (name: string, options?: { ignoreHTTPSErrors?: boolean }) => Promise<Peer>;
   /** Ghostly on the web, for talking to the extension across hosts. */
   webPeer: (name: string) => Promise<Peer>;
 };
@@ -38,10 +38,11 @@ export const test = base.extend<Fixtures>({
     const work = mkdtempSync(join(tmpdir(), "ghostly-e2e-"));
     const extensionDir = prepareExtension(work);
     const opened: Peer[] = [];
-    await use(async (name) => {
+    await use(async (name, options = {}) => {
       const context = await chromium.launchPersistentContext(join(work, name), {
         channel: "chromium",
         headless: !process.env.HEADED,
+        ...(options.ignoreHTTPSErrors ? { ignoreHTTPSErrors: true } : {}),
         viewport: { width: 1280, height: 720 },
         args: [
           `--disable-extensions-except=${extensionDir}`,

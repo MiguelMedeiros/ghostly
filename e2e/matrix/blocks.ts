@@ -19,6 +19,7 @@ import {
 } from "./actors";
 import type { Combination } from "./dimensions";
 import { CARD, type Step } from "./plan";
+import { approve, bubble, chatMethods, INFRA_RAILS, memo } from "./rails";
 import { unmet } from "./requirements";
 import { choose, optionsOf, close } from "../support/select";
 
@@ -457,24 +458,6 @@ async function fundOverLightning(actor: Actor, sats: number): Promise<void> {
   await expect(actor.page.getByTestId("wallet-paid")).toBeVisible({ timeout: 60_000 });
 }
 
-/** Only these methods in this person's chat: a test mint pays a request's own Lightning invoice by itself. */
-async function chatMethods(actor: Actor, off: string[]): Promise<void> {
-  await openChat(actor);
-  await chatOption(actor, "chat-payments-open");
-  const dialog = actor.page.getByTestId("chat-payments");
-  for (const method of off) {
-    const toggle = dialog.getByTestId(`chat-payments-${method}`);
-    if ((await toggle.getAttribute("aria-checked")) !== "false") await toggle.click();
-  }
-  await actor.page.getByTestId("chat-payments-save").click();
-}
-
-/** A note of the scenario's own on a payment: the one thing in its bubble no clock or amount can match by accident. */
-const memo = (actor: Actor, text: string) => actor.page.getByLabel("What for? (optional)").fill(text);
-const bubble = (actor: Actor, text: string) => chatPane(actor).getByTestId("payment-bubble").filter({ hasText: text }).last();
-
-const approve = (scope: import("@playwright/test").Locator) => scope.getByTestId("payment-review").getByRole("button", { name: either("Approve payment") }).click();
-
 async function cashuInChat({ a, b }: World): Promise<void> {
   for (const p of [a, b]) await localMint(p);
   await fundOverLightning(a, 100);
@@ -570,6 +553,7 @@ export const TESTNET: Partial<Record<Combination["rail"], (w: World) => Promise<
   cashu: cashuInChat,
   "ln-mint": lightningThroughMint,
   "ln-webln": lightningThroughWebln,
+  ...INFRA_RAILS,
 };
 
 /** Mainnet: nothing moves; each rail's card says what it can do there, and a chat offers it. */
@@ -602,6 +586,8 @@ export const payments: Block = {
   id: "payments",
   run: async (w) => {
     if (w.combo.wallet === "mainnet") return mainnetUi(w);
+    // Setting a source up, funding it and paying four times on a chain takes minutes of its own.
+    w.info.setTimeout(w.info.timeout + 10 * 60_000);
     for (const p of [w.a, w.b]) await useTestnet(p);
     await TESTNET[w.combo.rail]!(w);
   },

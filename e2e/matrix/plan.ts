@@ -23,8 +23,11 @@ const always = () => true;
 const none = () => [];
 const guest = (c: Combination) => c.client.split("-")[1];
 
-/** Rails with a Testnet payment block in blocks.ts. The others show their Mainnet UI only, for now. */
-export const TESTNET_RAILS: readonly Combination["rail"][] = ["cashu", "ln-mint", "ln-webln"];
+/**
+ * Rails with a Testnet payment block (blocks.ts, rails.ts). Bitcoin Core is the one left: its source is
+ * Desktop only, and the Desktop peer does not drive wallets.
+ */
+export const TESTNET_RAILS: readonly Combination["rail"][] = ["cashu", "ln-mint", "ln-webln", "ln-lnd", "ln-cln", "ln-nwc", "ln-breez", "ark-arkade", "bark", "btc-bdk", "usdt"];
 
 export const CARD: Record<Combination["rail"], string> = {
   cashu: "cashu", "ln-mint": "lightning", "ln-webln": "lightning", "ln-lnd": "lightning", "ln-cln": "lightning", "ln-nwc": "lightning",
@@ -40,6 +43,14 @@ const RAIL_FEATURES: Partial<Record<Combination["rail"], string[]>> = {
   cashu: ["wallet.cashu.mint.add", "wallet.cashu.receive-lightning", "payments.cashu.send", "payments.cashu.request", "payments.chat.review", "payments.chat.method-off"],
   "ln-mint": ["wallet.cashu.mint.add", "wallet.cashu.receive-lightning", "wallet.lightning.cashu-mint.pay", "wallet.lightning.cashu-mint.receive"],
   "ln-webln": ["wallet.lightning.webln.connect", "wallet.lightning.webln.pay", "payments.lightning.request", "payments.chat.review", "payments.chat.method-off"],
+  "ln-lnd": ["wallet.lightning.lnd.connect", "wallet.lightning.lnd.pay", "wallet.lightning.sources", "payments.lightning.request", "payments.chat.review", "payments.chat.method-off"],
+  "ln-cln": ["wallet.lightning.cln.connect", "wallet.lightning.cln.commando", "wallet.lightning.cln.pay", "wallet.lightning.sources", "payments.lightning.request", "payments.chat.review", "payments.chat.method-off"],
+  "ln-nwc": ["wallet.lightning.nwc.connect", "wallet.lightning.nwc.pay", "wallet.lightning.sources", "payments.lightning.request", "payments.chat.review", "payments.chat.method-off"],
+  "ln-breez": ["wallet.lightning.breez.connect", "wallet.lightning.breez.pay", "wallet.lightning.sources", "payments.lightning.request", "payments.chat.review", "payments.chat.method-off"],
+  "ark-arkade": ["payments.arkade.send", "payments.arkade.request", "payments.chat.review"],
+  bark: ["payments.bark.send", "payments.chat.review"],
+  "btc-bdk": ["wallet.onchain.sources", "payments.bitcoin.send", "payments.chat.review"],
+  usdt: ["payments.usdt.send", "payments.chat.review"],
 };
 
 const PROOF_FEATURE: Record<Exclude<Combination["identity"], "none">, string> = {
