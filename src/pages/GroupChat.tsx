@@ -8,6 +8,7 @@ import { GroupMembersDialog } from "../components/GroupMembersDialog";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { LeaveGroupDialog } from "../components/LeaveGroupDialog";
 import { GroupShareDialog } from "../components/GroupLinkPanel";
+import { GroupConnection } from "../components/GroupConnection";
 import { useOutsideDismiss } from "../hooks/useDismiss";
 import { markGroupRead, memberName } from "../lib/groups";
 import type { ChatMessage } from "../lib/types";
@@ -114,6 +115,7 @@ export function GroupChat() {
           </div>
         </div>
         <div className="flex items-center gap-1">
+          {group.status === "active" && <GroupConnection group={group} />}
           {canShare && <button onClick={() => void openShare()} data-testid="group-share" title="Share the group's link" aria-label="Share link"
             className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-accent/15 px-3 text-sm font-semibold text-accent hover:bg-accent/25 max-md:min-h-11 max-md:px-2.5">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
