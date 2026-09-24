@@ -303,6 +303,8 @@ export class GhostlyNode implements EngineImplementation {
     createInvoice: (amount, paymentId) => this.lightning.createInvoice(amount, { paymentId }),
     quote: async (invoice) => { const quote = await this.lightning.quote(invoice); return { ...quote, mint: quote.source === CASHU_MINT_SOURCE ? quote.mint : undefined }; },
     pay: (quote, note, paymentId) => this.lightning.pay(quote.quote, { note, paymentId }),
+    // "I paid": the source and the mints are asked now; the request is paid only once one of them saw it.
+    check: async () => { await Promise.all([this.lightning.reconcile(), this.wallet.checkQuotes()]); },
   }, this.bitcoin);
 
   /** Identity proofs: this profile's, and those shared in each paired chat (WISP 300). */
@@ -1029,10 +1031,16 @@ export class GhostlyNode implements EngineImplementation {
     return via === "cashu" ? this.wallet.quoteInvoice(invoice) : this.lightning.quote(invoice);
   }
 
-  async walletPayQuote({ quote, mint }: { quote: string; mint: string }) {
+  async walletPayQuote({ quote, mint, note }: { quote: string; mint: string; note?: string }) {
     // A quote of the Lightning source, or a melt quote the Cashu card asked the mints for.
-    return { paid: this.lightning.hasQuote(quote) ? await this.lightning.pay(quote) : await this.wallet.payQuote(quote, mint) };
+    return { paid: this.lightning.hasQuote(quote) ? await this.lightning.pay(quote, { note }) : await this.wallet.payQuote(quote, mint, note) };
   }
+
+  /** A Lightning address or LNURL (LUD-16, LUD-06): resolved here, in the engine, so every platform fetches the same way. */
+  lnurlResolve({ text }: { text: string }) { return this.lightning.resolveDestination(text); }
+  lnurlInvoice({ id, amount, comment }: { id: string; amount: number; comment?: string }) { return this.lightning.destinationInvoice(id, amount, comment); }
+
+  checkPayment(params: { linkId: string; paymentId: string }) { return this.desk.checkPayment(params); }
 
   /** Makes a provider this mode's Lightning source, with the values of its form (secrets are sealed). */
   async lightningSetSource({ providerId, values }: { providerId: string; values: Record<string, string> }) { await this.lightning.sources.set(providerId, values); await this.refreshWallet(); }

@@ -1,4 +1,4 @@
-import { decodeBolt11 } from "@ghostly/core";
+import { decodeBolt11, requestLnurlInvoice, resolveLightningDestination, type LnurlPayParams, type LnurlSuccessAction } from "@ghostly/core";
 import { STORES, store, transact, wrap } from "../../../shared/idb";
 import type { WalletMode } from "../../../shared/mints";
 import { CASHU_MINT_SOURCE, CashuMintLightning } from "./cashuMint";
@@ -42,6 +42,23 @@ export interface LightningView extends SourceView {
 }
 /** `mint`: the Cashu mint that will pay, when the source is the mints; otherwise the source's id. */
 export interface LightningQuote { quote: string; mint: string; amount: number; feeReserve: number; source: string }
+/** What a person sees of a resolved Lightning address or LNURL before choosing an amount. Amounts are whole sats. */
+export interface LnurlView {
+  id: string;
+  kind: "address" | "lnurl";
+  /** The address or LNURL, as normalised. */
+  text: string;
+  /** The host that learned of the request. */
+  domain: string;
+  /** The host the invoice is asked from, when it is another. */
+  callbackDomain: string;
+  minSat: number;
+  maxSat: number;
+  /** What the service says the payment is for. */
+  description: string;
+  /** How long a comment may be (LUD-12); 0 when none is taken. */
+  commentAllowed: number;
+}
 /** Who an event is about. `mint`: the Cashu mint it went through, when it did. */
 export interface LightningEventOp { paymentId?: string; providerId: string; mint?: string }
 
@@ -59,6 +76,9 @@ const RANGE = () => IDBKeyRange.bound(PREFIX, `${PREFIX}\uffff`);
 const IN_POLL_MS = 4_000;
 const OUT_POLL_MS = 15_000;
 const RECENT = 20;
+/** Resolved Lightning addresses are kept this long for the amount to be chosen; this many at most. */
+const LNURL_TTL_MS = 10 * 60_000;
+const LNURL_KEPT = 20;
 /** A source that cannot tell its fee beforehand gets this ceiling, the same one chat requests are paid under. */
 export const defaultFeeCap = (amount: number) => Math.max(10, Math.ceil(amount * 0.03));
 
@@ -74,8 +94,10 @@ export class LightningService {
   private passes: Promise<void> = Promise.resolve();
   private stopped = false;
   private recent: LightningOpView[] = [];
+  /** Lightning addresses and LNURLs resolved, until an amount is chosen for them. */
+  private readonly lnurls = new Map<string, { params: LnurlPayParams; at: number }>();
 
-  constructor(descriptors: () => readonly LightningProviderDescriptor[], host: () => Omit<ProviderHost, "mode" | "signal">, private readonly events: LightningEvents, defaultId?: string) {
+  constructor(descriptors: () => readonly LightningProviderDescriptor[], host: () => Omit<ProviderHost, "mode" | "signal">, private readonly events: LightningEvents, defaultId?: string, private readonly options: { fetch?: typeof fetch } = {}) {
     this.sources = new ProviderSources<LightningProvider>({
       kind: "lightning", descriptors, host, defaultId,
       changed: () => { this.schedule(0); events.changed(); },
@@ -117,6 +139,35 @@ export class LightningService {
     // Quotes made before sources carry their chat request themselves.
     this.events.received({ paymentId: op?.paymentId ?? context.paymentId, providerId: op?.providerId ?? CASHU_MINT_SOURCE, mint: context.mint });
     await this.loadRecent(); this.events.changed();
+  }
+
+  // -- Lightning addresses and LNURLs (LUD-16, LUD-06) -----------------------------
+
+  /**
+   * Fetches what a Lightning address or LNURL asks for, and keeps it until an amount is chosen. The
+   * service's domain learns of the request: the caller says so before asking.
+   */
+  async resolveDestination(text: string): Promise<LnurlView> {
+    const params = await resolveLightningDestination(text, { fetch: this.options.fetch });
+    const now = Date.now();
+    for (const [id, entry] of this.lnurls) if (entry.at + LNURL_TTL_MS < now) this.lnurls.delete(id);
+    while (this.lnurls.size >= LNURL_KEPT) this.lnurls.delete(this.lnurls.keys().next().value!);
+    const id = crypto.randomUUID();
+    this.lnurls.set(id, { params, at: now });
+    const { destination, callbackDomain, minSat, maxSat, description, commentAllowed } = params;
+    return { id, kind: destination.kind, text: destination.text, domain: destination.domain, callbackDomain, minSat, maxSat, description, commentAllowed };
+  }
+
+  /**
+   * The invoice for `amountSat` from a resolved destination: checked (the amount, a commitment to what
+   * was shown, not expired, a network of this mode) before it is quoted and paid like any other invoice.
+   */
+  async destinationInvoice(id: string, amountSat: number, comment?: string): Promise<{ invoice: string; successAction?: LnurlSuccessAction; note: string }> {
+    const entry = this.lnurls.get(id);
+    if (!entry || entry.at + LNURL_TTL_MS < Date.now()) { this.lnurls.delete(id); throw new Error("That address was resolved too long ago: check it again"); }
+    const { invoice, successAction } = await requestLnurlInvoice(entry.params, amountSat, comment, { fetch: this.options.fetch });
+    this.checkNetwork(invoice.network);
+    return { invoice: invoice.invoice, successAction, note: entry.params.destination.text };
   }
 
   // -- paying --------------------------------------------------------------------

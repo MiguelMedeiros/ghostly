@@ -1,5 +1,6 @@
 import type { UsdtCreate } from "../engine/paymentAdapters/usdtWallet";
-import type { PaymentReview, PaymentTarget } from "@ghostly/core";
+import type { LnurlSuccessAction, PaymentReview, PaymentTarget } from "@ghostly/core";
+import type { LnurlView } from "../engine/paymentAdapters/providers/lightningService";
 import type { ArkConfig } from "../engine/paymentAdapters/arkade";
 import type { ArkCreate } from "../engine/paymentAdapters/arkWallet";
 import type { BarkCreate } from "../engine/paymentAdapters/barkWallet";
@@ -104,7 +105,14 @@ export interface EngineApi {
   /** A Lightning invoice from the active source (`via: "cashu"`: from the mints, landing as ecash). */
   walletReceiveLightning(params: { amount: number; via?: "cashu" }): { quote: string; invoice: string; expiresAt: number | null; paymentHash?: string; source: string };
   walletQuoteInvoice(params: { invoice: string; via?: "cashu" }): { quote: string; mint: string; amount: number; feeReserve: number; source?: string };
-  walletPayQuote(params: { quote: string; mint: string }): { paid: boolean };
+  /** `note`: what the payment was for, kept with the wallet's own record of it (a Lightning address, for one). */
+  walletPayQuote(params: { quote: string; mint: string; note?: string }): { paid: boolean };
+  /** Reads a Lightning address or LNURL and fetches what it asks for. Its domain learns of the request. */
+  lnurlResolve(params: { text: string }): LnurlView;
+  /** The invoice for `amount` sats from a resolved address, checked before it is quoted. */
+  lnurlInvoice(params: { id: string; amount: number; comment?: string }): { invoice: string; successAction?: LnurlSuccessAction; note: string };
+  /** "I paid it from another wallet": the contact's app looks now. Only its wallet marks the request paid. */
+  checkPayment(params: { linkId: string; paymentId: string }): void;
   /** Makes a provider this mode's Lightning source. `values`: its form; secret fields are sealed, never returned. */
   lightningSetSource(params: { providerId: string; values: Record<string, string> }): void;
   lightningClearSource(): void;

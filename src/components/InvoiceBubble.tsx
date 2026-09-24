@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import type { Bolt11Invoice } from "@ghostly/core";
+import type { Bolt11Invoice, LightningDestination } from "@ghostly/core";
+import { LightningAddressPay } from "./wallet/LightningAddressPay";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import type { CashuInspection } from "../lib/platform";
 import type { MoneyInText } from "../lib/money";
@@ -185,6 +186,28 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
   );
 }
 
+/** A Lightning address or LNURL: resolved and paid through the Lightning source, step by step, when tapped. */
+function LightningAddressCard({ destination, mine, off }: { destination: LightningDestination; mine: boolean; off: boolean }) {
+  const wallet = useServicesPlatform()?.wallet;
+  const [paying, setPaying] = useState(false);
+  const { copied, copy } = useCopy(destination.text);
+  return (
+    <div className="min-w-[230px] max-md:min-w-[min(230px,68vw)] max-w-[min(300px,72vw)] px-1 py-0.5" data-testid="lnurl-bubble">
+      <p className="text-[11px] uppercase tracking-wider text-[hsla(0,0%,100%,0.6)] m-0">{destination.kind === "address" ? "Lightning address" : "LNURL"}</p>
+      <p className="m-0 mt-0.5 leading-tight"><span className="text-accent mr-1">⚡</span><span className="text-[15px] font-semibold break-all" data-testid="lnurl-text">{destination.text}</span></p>
+      <p className="text-[12.5px] leading-snug m-0 mt-1 text-[hsla(0,0%,100%,0.75)]">Pays through {destination.domain}</p>
+      {paying && wallet ? (
+        <div className="mt-2"><LightningAddressPay wallet={wallet} text={destination.text} dense onDone={() => setPaying(false)} /></div>
+      ) : (
+        <div className="flex flex-wrap gap-1.5 mt-2">
+          {wallet && !mine && !off && <button className={button} data-testid="lnurl-pay-open" onClick={() => setPaying(true)}>Pay</button>}
+          <button className={quiet} onClick={copy}>{copied ? "Copied" : "Copy"}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: boolean }) {
   const wallet = useServicesPlatform()?.wallet;
   const [inspection, setInspection] = useState<CashuInspection | null | undefined>(undefined);
@@ -272,12 +295,12 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
 /** `peerPubKey`: the chat it is in, whose choice of ways of paying decides whether it can be paid or redeemed here. */
 export function InvoiceBubble({ money, mine, peerPubKey }: { money: MoneyInText; mine: boolean; peerPubKey?: string }) {
   const allowed = useServicesPlatform()?.getPeer(peerPubKey ?? "")?.paymentMethods;
-  const off = !!allowed && !(money.type === "lightning" ? allowed.lightning : allowed.cashu);
+  const off = !!allowed && !(money.type === "cashu" ? allowed.cashu : allowed.lightning);
   return (
     <>
       {money.rest && <p className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap m-0 mb-1.5">{money.rest}</p>}
-      {money.type === "lightning" ? <LightningCard invoice={money.invoice} mine={mine} off={off} /> : <CashuCard value={money.value} mine={mine} off={off} />}
-      {off && !mine && <p className="text-[11px] text-text-muted mt-1" data-testid="money-off">{money.type === "lightning" ? "Lightning" : "Cashu"} is off in this chat.</p>}
+      {money.type === "lightning" ? <LightningCard invoice={money.invoice} mine={mine} off={off} /> : money.type === "lnurl" ? <LightningAddressCard destination={money.destination} mine={mine} off={off} /> : <CashuCard value={money.value} mine={mine} off={off} />}
+      {off && !mine && <p className="text-[11px] text-text-muted mt-1" data-testid="money-off">{money.type === "cashu" ? "Cashu" : "Lightning"} is off in this chat.</p>}
     </>
   );
 }

@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from "react";
-import { QRCodeSVG } from "qrcode.react";
+import type { ReactNode } from "react";
+import { PayExternally } from "../PayExternally";
 
 /** The same building blocks as Settings, so a wallet's options read like any other option. */
 export { Section, Row, Block } from "../layout/Section";
@@ -60,21 +60,14 @@ export function Actions({ value, onChange, actions = ["receive", "send"] }: { va
   );
 }
 
-/** Where to be paid: a QR code, the text, and one button to copy it. */
-export function Address({ value, qr, testId, note }: { value: string | undefined; qr?: string; testId: string; note?: ReactNode }) {
-  const [copied, setCopied] = useState(false);
+/**
+ * Where to be paid, the same on every card: a QR code, the text, Copy, and a link a wallet on this device
+ * opens (`uri`: `lightning:…`, `bitcoin:…`; `qr` when the code should show something else).
+ */
+export function Address({ value, qr, uri, testId, note, actions }: { value: string | undefined; qr?: string; uri?: string; testId: string; note?: ReactNode; actions?: ReactNode }) {
   // Never a QR code or a Copy button for an address that is not there yet: someone could share it.
   if (!value) return <Notice testId={`${testId}-pending`}>Getting an address… It shows up here once the provider answers.</Notice>;
-  return (
-    <div className="flex flex-wrap gap-4 items-center justify-center">
-      <div className="bg-white rounded-xl p-2.5 shrink-0"><QRCodeSVG value={qr ?? value} size={144} title="Receiving address" /></div>
-      <div className="min-w-0 flex-[1_1_14rem] space-y-2.5">
-        <code className="block break-all select-all bg-surface-alt rounded-lg p-2.5 text-xs text-text-primary font-mono" data-testid={testId}>{value}</code>
-        <Button variant="primary" onClick={() => { void navigator.clipboard.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>{copied ? "Copied" : "Copy"}</Button>
-        {note && <p className="text-xs text-text-muted">{note}</p>}
-      </div>
-    </div>
-  );
+  return <PayExternally uri={uri ?? qr ?? value} value={value} testId={testId} note={note} actions={actions} />;
 }
 
 /** A large amount field: what matters most when paying is the number. */

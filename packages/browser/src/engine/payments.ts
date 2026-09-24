@@ -47,6 +47,8 @@ export interface DeskLightning {
   quote(invoice: string): Promise<{ quote: string; mint?: string; amount: number; feeReserve: number }>;
   /** True once paid, false while pending. Throws only when the sats did not go out. */
   pay(quote: { quote: string; mint?: string }, note: string, paymentId: string): Promise<boolean>;
+  /** Asks the source (and the mints) about our open invoices now: a contact said it paid one from another wallet. */
+  check?(): Promise<void>;
 }
 export const mintLightning = (wallet: CashuWallet): DeskLightning => ({
   createInvoice: (amount, paymentId) => wallet.receiveLightning(amount, paymentId),
@@ -80,6 +82,10 @@ class NoEcashError extends Error {}
 
 const arkSats=(network:string)=>network==="bitcoin"?"sats":"test sats";
 type AskMethod = "arkade" | "usdt" | "bark" | "bitcoin";
+const ENDPOINT_OF: Record<Exclude<AskMethod, "usdt">, string> = { arkade: ENDPOINT.arkade, bark: ENDPOINT.bark, bitcoin: ENDPOINT.bitcoin };
+/** A `pay` frame that carries no receipt, only "I paid this from another wallet: look now". */
+const CHECK_PAYLOAD = JSON.stringify({ check: true });
+const isCheck = (payload: string) => { try { return JSON.parse(payload)?.check === true; } catch { return false; } };
 const RAIL_NAME: Record<AskMethod, string> = { arkade: "Ark", usdt: "USDT", bark: "Bark", bitcoin: "on-chain Bitcoin" };
 /** Both sides allow this way of paying on the open data link. */
 const allows = (link: GhostLink, method: AskMethod) => method === "arkade" ? link.supportsArkPayments : method === "bark" ? link.supportsBarkPayments : method === "bitcoin" ? link.supportsBitcoinPayments : link.supportsUsdtPayments;
@@ -419,6 +425,8 @@ export class PaymentDesk {
   }
 
   private async receivePayment(linkId: string, payment: Payment): Promise<void> {
+    // An invoice sent back is not money: it is the contact saying it paid our invoice from another wallet.
+    if(payment.endpoint[0]===ENDPOINT.bolt11) { await this.receiveCheck(linkId,payment); return; }
     if(payment.endpoint[0]===ENDPOINT.usdt) { await this.receiveUsdt(linkId,payment); return; }
     if(payment.endpoint[0]===ENDPOINT.arkade) { await this.receiveArk(linkId,payment); return; }
     if(payment.endpoint[0]===ENDPOINT.bark) { await this.receiveBark(linkId,payment); return; }
@@ -510,14 +518,16 @@ export class PaymentDesk {
       void Promise.resolve(this.host.onReviewedPaymentResult?.(payment.id)).catch(() => {});
       return;
     }
-    if (!payment || payment.target || payment.linkId !== linkId || payment.state !== "pending") return;
+    if (!payment || payment.linkId !== linkId || payment.state !== "pending") return;
 
     if (payment.kind === "request") {
-      // Only the payee can declare a request paid, and only about a request it sent us.
-      if (payment.direction === "in" && result.ok) await this.save({ ...payment, state: "settled" });
+      // Only the payee can declare a request paid, and only about a request it sent us. It says so once its
+      // own wallet saw the money (its source, its chain, its Ark server), however the request was paid.
+      if (payment.direction === "in" && result.ok) await this.save({ ...payment, state: "settled", lightningPending: undefined });
       return;
     }
-    if (payment.direction !== "out") return;
+    // A payment with a target reconciles through its own adapter, never on the contact's word.
+    if (payment.target || payment.direction !== "out") return;
 
     if (result.ok) {
       await this.save({ ...payment, state: "settled", token: undefined });
@@ -536,8 +546,63 @@ export class PaymentDesk {
   async onLightningPaid(op: { paymentId?: string; mint?: string }): Promise<void> {
     const request = op.paymentId ? this.payments.get(op.paymentId) : undefined;
     if (!request || request.state !== "pending") return;
-    await this.save({ ...request, state: "settled", mint: op.mint });
+    await this.settleRequest(request, { mint: op.mint });
+  }
+
+  /**
+   * A request of ours is paid: our own wallet saw the money. The contact is told, so its bubble turns
+   * Paid by itself, whatever wallet it paid from.
+   */
+  private async settleRequest(request: StoredPayment, extra: Partial<StoredPayment> = {}): Promise<void> {
+    await this.save({ ...this.current(request), ...extra, state: "settled" });
     this.host.getLink(request.linkId)?.sendPaymentResult({ id: request.id, ok: true });
+  }
+
+  // -- paid from another wallet -------------------------------------------------------
+
+  private readonly lastCheck = new Map<string, number>();
+  private readonly lastCheckFrom = new Map<string, number>();
+
+  /**
+   * "I paid it from another wallet": the contact's app is asked to look at its wallet now. Nothing here
+   * marks anything paid; the request settles when the payee's wallet sees the money, with or without this.
+   */
+  async checkPayment(params: { linkId: string; paymentId: string }): Promise<void> {
+    const request = this.payments.get(params.paymentId);
+    if (!request || request.kind !== "request" || request.direction !== "in" || request.linkId !== params.linkId) throw new Error("Unknown payment request");
+    if (request.state !== "pending") return;
+    const endpoint: [string, string] | undefined = request.target
+      ? request.target.method === "usdt" || request.target.method === "cashu" ? undefined : [ENDPOINT_OF[request.target.method], CHECK_PAYLOAD]
+      : request.invoice ? [ENDPOINT.bolt11, request.invoice] : undefined;
+    if (!endpoint) throw new Error("This request cannot be paid from another wallet");
+    const now = Date.now();
+    if (now - (this.lastCheck.get(request.id) ?? 0) < 5_000) return;
+    this.lastCheck.set(request.id, now);
+    const link = this.requireLink(params.linkId);
+    await link.sendPayment({ id: newId(), timestamp: now, requestId: request.id, amount: { value: String(request.amount), asset: UNIT }, endpoint });
+  }
+
+  /**
+   * The contact says it paid one of our requests from another wallet: our wallet is asked now, and it alone
+   * decides. A request already paid is said so again (the first answer may have been lost). Bounded: one
+   * look every 3 seconds per request.
+   */
+  private async receiveCheck(linkId: string, payment: Payment): Promise<void> {
+    const link = this.host.getLink(linkId);
+    const request = payment.requestId ? this.payments.get(payment.requestId) : undefined;
+    if (!link || !request || request.kind !== "request" || request.direction !== "out" || request.linkId !== linkId) return;
+    const rail = request.target ? request.target.method : request.invoice ? "lightning" : undefined;
+    if (!rail || rail === "usdt" || rail === "cashu" || payment.endpoint[0] !== (rail === "lightning" ? ENDPOINT.bolt11 : ENDPOINT_OF[rail])) return;
+    if (request.state === "settled") { link.sendPaymentResult({ id: request.id, ok: true }); return; }
+    const now = Date.now();
+    if (now - (this.lastCheckFrom.get(request.id) ?? 0) < 3_000) return;
+    this.lastCheckFrom.set(request.id, now);
+    try {
+      if (rail === "lightning") await this.lightning.check?.();
+      else if (rail === "bitcoin") await this.reconcileBitcoinReceipts();
+      else if (rail === "bark") await this.reconcileBarkReceipts();
+      else await this.reconcileArkReceipts();
+    } catch { /* the wallet could not be asked right now: the regular checks go on */ }
   }
 
   /** A Lightning payment of a contact's request that was left pending (or unknown) settled. */
@@ -631,6 +696,7 @@ export class PaymentDesk {
     if(request?.linkId===payment.linkId)await this.save({...request,state:"settled"});
   }
   private async receiveArk(linkId:string,payment:Payment):Promise<void> {
+    if(isCheck(payment.endpoint[1])){await this.receiveCheck(linkId,payment);return;}
     const link=this.host.getLink(linkId),request=payment.requestId ? this.payments.get(payment.requestId) : undefined;
     if(!link?.supportsArkPayments || !request?.target || request.linkId!==linkId || request.direction!=="out" || request.kind!=="request")return;
     const existing=this.payments.get(payment.id);
@@ -643,10 +709,24 @@ export class PaymentDesk {
     await this.host.storeMessage({linkId,id:`peer_${payment.timestamp}`,text:`${request.amount} ${arkSats(request.target.network)} on Ark — checking provider`,sender:"peer",timestamp:payment.timestamp,via:"datalink",paymentId:payment.id});
     await this.reconcileArkReceipts();
   }
+  /**
+   * An Ark request is paid when a virtual output of at least the amount reached the address made for it,
+   * whoever sent it: with the contact's receipt (its txid, verified), or without one, through the indexer.
+   */
   async reconcileArkReceipts():Promise<void> {
     if(this.checkingArk || !this.ark?.adapter)return;
     this.checkingArk=true;
     try {
+      for(const request of [...this.payments.values()]) {
+        if(request.kind!=="request" || request.direction!=="out" || request.state!=="pending" || request.target?.method!=="arkade")continue;
+        const adapter=this.ark.adapter;
+        if(!adapter || request.target.provider!==adapter.config.provider || request.target.network!==adapter.config.network)continue;
+        const claimed=new Set([...this.payments.values()].filter(p=>p.target?.method==="arkade" && p.kind==="request" && p.id!==request.id && p.txid).map(p=>p.txid!));
+        const txid=await adapter.received(request.target.address,request.amount,request.createdAt,claimed).catch(()=>undefined);
+        if(!txid)continue;
+        await this.settleRequest(request,{txid});
+        for(const payment of this.payments.values())if(payment.kind==="payment" && payment.direction==="in" && payment.requestId===request.id && payment.state==="pending")await this.save({...payment,state:"settled",txid});
+      }
       for(const payment of this.payments.values()) {
         if(payment.kind!=="payment" || payment.direction!=="in" || payment.state!=="pending" || !payment.txid || payment.target?.method!=="arkade")continue;
         const adapter=this.ark.adapter;
@@ -654,7 +734,7 @@ export class PaymentDesk {
         if(!await adapter.verifyReceipt(payment.txid,payment.target.address,payment.amount).catch(()=>false))continue;
         await this.save({...payment,state:"settled"});
         const request=payment.requestId ? this.payments.get(payment.requestId) : undefined;
-        if(request?.linkId===payment.linkId)await this.save({...request,state:"settled",txid:payment.txid});
+        if(request?.linkId===payment.linkId && request.state==="pending")await this.settleRequest(request,{txid:payment.txid});
       }
     } finally {this.checkingArk=false;}
   }
@@ -671,6 +751,7 @@ export class PaymentDesk {
   }
   /** The contact says it paid one of our Bark requests. Recorded as pending until our own wallet shows it. */
   private async receiveBark(linkId:string,payment:Payment):Promise<void> {
+    if(isCheck(payment.endpoint[1])){await this.receiveCheck(linkId,payment);return;}
     const link=this.host.getLink(linkId),request=payment.requestId ? this.payments.get(payment.requestId) : undefined;
     if(!link?.supportsBarkPayments || request?.target?.method!=="bark" || request.linkId!==linkId || request.direction!=="out" || request.kind!=="request")return;
     const existing=this.payments.get(payment.id);
@@ -697,7 +778,7 @@ export class PaymentDesk {
         const claimed=new Set([...this.payments.values()].filter(p=>p.target?.method==="bark" && p.kind==="request" && p.txid).map(p=>p.txid!));
         const txid=await adapter.received(request.target.address,request.amount,request.createdAt,claimed).catch(()=>undefined);
         if(!txid)continue;
-        await this.save({...this.current(request),state:"settled",txid});
+        await this.settleRequest(request,{txid});
         for(const payment of this.payments.values())if(payment.kind==="payment" && payment.direction==="in" && payment.requestId===request.id && payment.state==="pending")await this.save({...payment,state:"settled",txid});
       }
     } finally {this.checkingBark=false;}
@@ -724,6 +805,7 @@ export class PaymentDesk {
   }
   /** The contact says it paid one of our on-chain requests. Pending until our own wallet sees it confirmed. */
   private async receiveBitcoin(linkId:string,payment:Payment):Promise<void> {
+    if(isCheck(payment.endpoint[1])){await this.receiveCheck(linkId,payment);return;}
     const link=this.host.getLink(linkId),request=payment.requestId ? this.payments.get(payment.requestId) : undefined;
     if(!link?.supportsBitcoinPayments || request?.target?.method!=="bitcoin" || request.linkId!==linkId || request.direction!=="out" || request.kind!=="request")return;
     const existing=this.payments.get(payment.id);
@@ -751,7 +833,7 @@ export class PaymentDesk {
         const receipt=[...this.payments.values()].find(p=>p.kind==="payment" && p.direction==="in" && p.requestId===request.id && p.linkId===request.linkId);
         const seen=await this.bitcoin.received(request.target,request.amount,claimed,receipt?.txid).catch(()=>undefined);
         if(!seen || seen.confirmations<1)continue;
-        await this.save({...this.current(request),state:"settled",txid:seen.txid});
+        await this.settleRequest(request,{txid:seen.txid});
         for(const payment of this.payments.values())if(payment.kind==="payment" && payment.direction==="in" && payment.requestId===request.id && payment.state==="pending")await this.save({...payment,state:"settled",txid:seen.txid});
       }
     } finally {this.checkingBitcoin=false;}

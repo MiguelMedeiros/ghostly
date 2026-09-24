@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-open-payment-link"
+description = "Enables the open_payment_link command without any pre-configured scope."
+commands.allow = ["open_payment_link"]
+
+[[permission]]
+identifier = "deny-open-payment-link"
+description = "Denies the open_payment_link command without any pre-configured scope."
+commands.deny = ["open_payment_link"]

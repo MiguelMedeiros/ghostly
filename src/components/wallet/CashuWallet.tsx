@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { QRCodeSVG } from "qrcode.react";
-import { decodeBolt11, type PaymentReview as Review } from "@ghostly/core";
+import { decodeBolt11, parseLightningDestination, paymentUri, type PaymentReview as Review } from "@ghostly/core";
 import type { WalletPlatform, WalletState } from "../../lib/platform";
 import { useCountUp } from "../../hooks/useCountUp";
 import { PaymentReview } from "../PaymentReview";
-import { Actions, Amount, Block, Button, Notice, Row, Section, input, type Action } from "./ui";
+import { Actions, Address, Amount, Block, Button, Notice, Row, Section, input, type Action } from "./ui";
+import { LightningAddressPay } from "./LightningAddressPay";
 import { useRun } from "./run";
 import { ButtonGroup, InputGroup, Truncate } from "../layout";
 import { SourcePicker } from "./providers/SourcePicker";
@@ -34,7 +34,6 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: Wall
   const [paymentHash, setPaymentHash] = useState<string | undefined>();
   /** Balance when the invoice was created: once it grew by the amount, the invoice was paid. */
   const [balanceBefore, setBalanceBefore] = useState(0);
-  const [copied, setCopied] = useState(false);
   const [payInput, setPayInput] = useState("");
   const [quote, setQuote] = useState<{ quote: string; mint: string; amount: number; feeReserve: number } | null>(null);
   const [notice, setNotice] = useState("");
@@ -57,6 +56,11 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: Wall
     || !!ln?.recent.some((op) => op.direction === "in" && op.paymentHash === paymentHash && op.state === "paid"));
   const isToken = /^cashu[AB]/i.test(payInput.trim());
   const pasted = isToken ? null : decodeBolt11(payInput);
+  /** A Lightning address or LNURL: resolved and paid step by step, through the same source. */
+  const [destination, destinationError] = (() => {
+    if (isToken || pasted) return [null, ""] as const;
+    try { return [parseLightningDestination(payInput)?.text ?? null, ""] as const; } catch (e) { return [null, e instanceof Error ? e.message : String(e)] as const; }
+  })();
 
   const choose = (next: Action) => { setAction(next); setError(""); setNotice(""); setInvoice(null); setQuote(null); };
 
@@ -95,17 +99,10 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: Wall
                 <Button onClick={() => { setInvoice(null); setAmount(""); }}>Done</Button>
               </div>
             ) : invoice ? (
-              <div className="flex flex-wrap gap-4 items-center justify-center">
-                <div className="bg-white rounded-xl p-2.5 shrink-0"><QRCodeSVG value={invoice.toUpperCase()} size={168} /></div>
-                <div className="min-w-0 flex-[1_1_14rem] space-y-2.5">
-                  <p className="text-text-primary text-sm">Invoice for <b>{Number(amount).toLocaleString()} sats</b></p>
-                  <code className="block bg-surface-alt rounded-lg p-2 text-[10px] text-text-muted font-mono break-all max-h-20 overflow-y-auto select-all" data-testid="wallet-invoice">{invoice}</code>
-                  <ButtonGroup>
-                    <Button variant="primary" onClick={() => { void navigator.clipboard.writeText(invoice); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>{copied ? "Copied" : "Copy invoice"}</Button>
-                    <Button onClick={() => setInvoice(null)}>New amount</Button>
-                  </ButtonGroup>
-                  <Notice>Waiting for the payment…</Notice>
-                </div>
+              <div className="space-y-3">
+                <p className="text-text-primary text-sm">Invoice for <b>{Number(amount).toLocaleString()} sats</b></p>
+                <Address value={invoice} uri={paymentUri({ kind: "lightning", invoice })} testId="wallet-invoice" note="Waiting for the payment… Any Lightning wallet can pay it; it is marked paid here once the source sees it."
+                  actions={<button type="button" className="px-3 py-1.5 min-h-9 max-md:min-h-11 rounded-lg text-xs font-bold bg-black/20 hover:bg-black/30 transition-colors cursor-pointer" onClick={() => setInvoice(null)}>New amount</button>} />
               </div>
             ) : (
               <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); void run(async () => { setBalanceBefore(state.balance); const created = await wallet.receiveLightning(Number(amount), rail === "cashu" ? "cashu" : undefined); setPaymentHash(created.paymentHash); setInvoice(created.invoice); }); }}>
@@ -130,7 +127,8 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: Wall
             ) : (
               <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); void run(async () => { if (isToken) { const received = await wallet.receiveToken(payInput); setPayInput(""); setNotice(`Redeemed ${received.toLocaleString()} sats.`); } else setQuote(await wallet.quoteInvoice(payInput, rail === "cashu" ? "cashu" : undefined)); }); }}>
                 <textarea data-testid="wallet-pay-input" className={`${input} font-mono text-xs resize-none`} rows={3} autoFocus
-                  placeholder={rail === "cashu" ? "Paste a Lightning invoice or an ecash token" : "Paste a Lightning invoice"} value={payInput} onChange={(e) => setPayInput(e.target.value)} />
+                  placeholder={rail === "cashu" ? "Paste a Lightning invoice, a Lightning address or an ecash token" : "Paste a Lightning invoice or a Lightning address"} value={payInput} onChange={(e) => setPayInput(e.target.value)} />
+                {destination && <div className="bg-surface-alt rounded-xl p-3 text-text-primary" data-testid="wallet-lnurl"><LightningAddressPay key={destination} wallet={wallet} text={destination} via={rail === "cashu" ? "cashu" : undefined} onDone={() => setPayInput("")} /></div>}
                 {pasted && (
                   <p className="text-text-primary text-sm" data-testid="wallet-pay-preview">
                     <span className="text-accent">⚡</span> <b>{pasted.amountSat === null ? "Any amount" : `${pasted.amountSat.toLocaleString()} sats`}</b>
@@ -138,10 +136,10 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: Wall
                     {pasted.expiresAt * 1000 < Date.now() && <span className="text-danger"> · expired</span>}
                   </p>
                 )}
-                <Button type="submit" variant="primary" className="w-full" disabled={busy || !payInput.trim() || (!isToken && !pasted)}>
+                {!destination && <Button type="submit" variant="primary" className="w-full" disabled={busy || !payInput.trim() || (!isToken && !pasted)}>
                   {busy ? "Working…" : isToken ? "Redeem ecash token" : pasted?.amountSat ? `Pay ${pasted.amountSat.toLocaleString()} sats` : "Pay"}
-                </Button>
-                {payInput.trim() && !isToken && !pasted ? <Notice tone="error">That is not a Lightning invoice.</Notice> : <Notice>Paying a contact? Use ⚡ in the chat.</Notice>}
+                </Button>}
+                {destinationError ? <Notice tone="error">{destinationError}</Notice> : payInput.trim() && !isToken && !pasted && !destination ? <Notice tone="error">That is not a Lightning invoice or a Lightning address.</Notice> : !destination && <Notice>Paying a contact? Use ⚡ in the chat.</Notice>}
               </form>
             )}
           </div>

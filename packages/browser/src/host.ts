@@ -46,6 +46,11 @@ export interface BrowserHost {
   /** Asks the user for access to a local origin, where the platform has such a thing. */
   requestLocalAccess(originPattern: string): Promise<boolean>;
   openService(peerPubKeyZ32: string, serviceId: string): Promise<void>;
+  /**
+   * Opens a `lightning:` or `bitcoin:` link in a wallet on this device. Left out where a plain link
+   * already does it (a web page); the desktop app and the extension have to hand it to the system.
+   */
+  openPaymentLink?(uri: string): Promise<void>;
   /** Signing in with an OpenID Connect provider for an identity proof. Left out where the platform cannot. */
   oidc?: OidcHost;
 }

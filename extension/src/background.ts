@@ -72,6 +72,16 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
     );
     return true;
   }
+  if (message.type === "open-payment-link") {
+    // Only a payment link, and only the characters one is made of: nothing else leaves the extension this way.
+    const uri = typeof message.uri === "string" && /^(lightning|bitcoin):[A-Za-z0-9?=&%.:_-]{1,4096}$/.test(message.uri) ? message.uri : null;
+    if (!uri) { sendResponse({ ok: false, error: "Not a payment link" }); return false; }
+    void chrome.tabs.create({ url: uri }).then(
+      () => sendResponse({ ok: true }),
+      (error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
+    );
+    return true;
+  }
   if (message.type === "open-service") {
     void openViewer(message.peerPubKeyZ32, message.serviceId).then(
       () => sendResponse({ ok: true }),

@@ -204,6 +204,35 @@ pub fn updater_can_install() -> bool {
     }
 }
 
+/// A `lightning:` or `bitcoin:` payment link, handed to whatever wallet the system has for it. Nothing
+/// else: only those two schemes, only the characters a payment URI is made of, and never a file or a
+/// web page.
+#[tauri::command]
+pub fn open_payment_link(url: String) -> Result<(), String> {
+    let scheme_ok = url.starts_with("lightning:") || url.starts_with("bitcoin:");
+    let chars_ok = url.len() <= 4096
+        && url
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || b"?=&%.:_-".contains(&c));
+    if !scheme_ok || !chars_ok {
+        return Err("Not a payment link".into());
+    }
+    launch(&url)
+}
+
+/// Opens a URL with the system's handler for it. Callers decide what may be opened.
+fn launch(url: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let result = std::process::Command::new("open").arg(url).spawn();
+    #[cfg(target_os = "linux")]
+    let result = std::process::Command::new("xdg-open").arg(url).spawn();
+    #[cfg(target_os = "windows")]
+    let result = std::process::Command::new("rundll32")
+        .args(["url.dll,FileProtocolHandler", url])
+        .spawn();
+    result.map(|_| ()).map_err(|e| e.to_string())
+}
+
 /// Open only Ghostly's repository/release pages, in the system browser.
 #[tauri::command]
 pub fn open_project_link(url: String) -> Result<(), String> {
@@ -221,15 +250,7 @@ pub fn open_project_link(url: String) -> Result<(), String> {
     {
         return Err("Not a Ghostly project link".into());
     }
-    #[cfg(target_os = "macos")]
-    let result = std::process::Command::new("open").arg(&url).spawn();
-    #[cfg(target_os = "linux")]
-    let result = std::process::Command::new("xdg-open").arg(&url).spawn();
-    #[cfg(target_os = "windows")]
-    let result = std::process::Command::new("rundll32")
-        .args(["url.dll,FileProtocolHandler", &url])
-        .spawn();
-    result.map(|_| ()).map_err(|e| e.to_string())
+    launch(&url)
 }
 
 #[cfg(test)]
@@ -244,6 +265,21 @@ mod project_link_tests {
             "https://github.com/MiguelMedeiros/ghostly/releases/tag/v1?redirect=evil",
         ] {
             assert!(super::open_project_link(url.into()).is_err());
+        }
+    }
+
+    #[test]
+    fn rejects_payment_links_that_are_not_lightning_or_bitcoin_uris() {
+        for url in [
+            "https://example.com",
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "lightning:lnbc1 ; rm -rf /",
+            "bitcoin:bc1q?label=<script>",
+            "LIGHTNING:LNBC1",
+            "",
+        ] {
+            assert!(super::open_payment_link(url.into()).is_err());
         }
     }
 }

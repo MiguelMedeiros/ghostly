@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { PaymentReview as Review } from "@ghostly/core";
+import { paymentUri, type PaymentReview as Review } from "@ghostly/core";
 import type { WalletPlatform, WalletState } from "../lib/platform";
 import { PaymentReview } from "./PaymentReview";
 import { BackupRows } from "./wallet/BackupRows";
@@ -43,7 +43,7 @@ export function ArkWalletPanel({ wallet, state }: { wallet: WalletPlatform; stat
    <Actions value={action} onChange={setAction} />
    {action === "receive" && <div className="bg-surface rounded-xl p-4 space-y-4 animate-fade-in">
     <Segmented label="Receive on" value={via} onChange={setVia} options={[{ value: "ark", label: "Ark (instant)" }, { value: "onchain", label: "Bitcoin on-chain" }]} />
-    {via === "ark" ? <Address value={ark.address} testId="ark-address" note="Arrives by itself." />
+    {via === "ark" ? <Address value={ark.address} uri={ark.address ? paymentUri({ kind: "ark", address: ark.address }) : undefined} testId="ark-address" note="Arrives by itself." />
      : <Address value={ark.boardingAddress} qr={ark.boardingAddress ? `bitcoin:${ark.boardingAddress}` : undefined} testId="ark-boarding-address" note={network === "regtest" ? "On a local regtest server, deposits are settled into Ark manually." : "Send from any Bitcoin wallet. Once confirmed it moves into Ark by itself; that needs Ghostly open."} />}
    </div>}
    {/* Outputs whose batch expired before renewal are still this wallet's: say so, and bring them back. */}

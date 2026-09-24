@@ -239,6 +239,9 @@ export class CashuWallet {
     return quote;
   }
 
+  /** Asks the mints about the open invoices now, without waiting for the next round. */
+  checkQuotes(): Promise<void> { return this.pollQuotes(); }
+
   /**
    * Invoices are paid by someone else, somewhere else; all we can do is ask the mint. A quote is the only
    * claim on the sats paid to it, so it is dropped only once the mint says it is unpaid and it has expired.

@@ -16,6 +16,8 @@ export interface Bolt11Invoice {
   createdAt: number;
   expiresAt: number;
   description?: string;
+  /** The `h` tag: sha256 of a description the invoice does not carry (LNURL-pay invoices commit to their metadata this way). */
+  descriptionHash?: string;
   paymentHash?: string;
 }
 
@@ -108,6 +110,7 @@ export function decodeBolt11(text: string): Bolt11Invoice | null {
   let expiry = DEFAULT_EXPIRY;
   let description: string | undefined;
   let paymentHash: string | undefined;
+  let descriptionHash: string | undefined;
 
   for (let at = TIMESTAMP_WORDS; at + 3 <= data.length; ) {
     const tag = CHARSET[data[at]];
@@ -122,6 +125,8 @@ export function decodeBolt11(text: string): Bolt11Invoice | null {
       expiry = wordsToInt(field);
     } else if (tag === "p" && length === 52) {
       paymentHash = [...wordsToBytes(field)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    } else if (tag === "h" && length === 52) {
+      descriptionHash = [...wordsToBytes(field)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
     }
   }
 
@@ -133,6 +138,7 @@ export function decodeBolt11(text: string): Bolt11Invoice | null {
     createdAt,
     expiresAt: createdAt + expiry,
     description,
+    descriptionHash,
     paymentHash,
   };
 }
