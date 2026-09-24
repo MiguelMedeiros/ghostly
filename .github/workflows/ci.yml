@@ -7,15 +7,60 @@ on:
     branches: [main, master, dev, "claude/security-auto-**"]
   pull_request:
     branches: [main, master, dev]
+    # ready_for_review: a draft may have skipped the Rust jobs (see `changes`); leaving draft runs everything.
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
+
+# A new push to a pull request cancels the run it supersedes. Anything else (pushes to dev and main, which gate
+# merges and the security autorelease) gets a group of its own: sharing one by ref would still cancel a queued
+# run whenever a third arrives, even without cancel-in-progress.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
 jobs:
+  # ============================================
+  # Which of the Rust jobs a draft pull request needs
+  # ============================================
+  # Drafts get pushed often and mostly touch TypeScript: they skip Tauri and CLI unless the pull request changed
+  # something those jobs build. A skipped job still reports its check (as passing), and CI Success accepts it only
+  # when this job said so. Pushes and ready pull requests always run everything. If the lookup fails, so does this
+  # job, and CI Success with it: nothing is skipped by accident.
+  changes:
+    name: Changed paths
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      rust: ${{ steps.diff.outputs.rust }}
+    steps:
+      - name: Does a Rust job need to run
+        id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
+          FILES_URL: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files
+        run: |
+          if [[ "$DRAFT" != "true" ]]; then
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files=$(gh api --paginate "$FILES_URL" --jq '.[].filename')
+          echo "$files"
+          if grep -qE '^(src-tauri/|cli/|native-transports/|Cargo\.(toml|lock)$|\.github/workflows/ci\.yml$)' <<< "$files"; then
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "rust=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Draft without Rust changes: Tauri Backend and CLI skipped"
+          fi
+
   # ============================================
   # Frontend (src, packages, extension) - React + Vite + TypeScript
   # ============================================
@@ -76,6 +121,8 @@ jobs:
   # ============================================
   tauri:
     name: Tauri Backend (src-tauri)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -141,6 +188,8 @@ jobs:
   # ============================================
   cli:
     name: CLI
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -219,16 +268,25 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-24.04
-    needs: [frontend, tauri, cli, website]
-    if: always()
+    needs: [changes, frontend, tauri, cli, website]
+    # Not always(): that also runs in a run cancelled by a newer push, where it would mark the superseded commit
+    # failed. A failed job still gets here, and fails this one.
+    if: ${{ !cancelled() }}
     steps:
       - name: Check all jobs passed
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          RUST: ${{ needs.changes.outputs.rust }}
+          FRONTEND: ${{ needs.frontend.result }}
+          TAURI: ${{ needs.tauri.result }}
+          CLI: ${{ needs.cli.result }}
+          WEBSITE: ${{ needs.website.result }}
         run: |
-          if [[ "${{ needs.frontend.result }}" != "success" ]] || \
-             [[ "${{ needs.tauri.result }}" != "success" ]] || \
-             [[ "${{ needs.cli.result }}" != "success" ]] || \
-             [[ "${{ needs.website.result }}" != "success" ]]; then
-            echo "One or more jobs failed"
+          # Skipped only counts when `changes` chose to skip the Rust jobs.
+          rust_ok() { [[ "$1" == "success" || ( "$1" == "skipped" && "$RUST" == "false" ) ]]; }
+          if [[ "$CHANGES" != "success" || "$FRONTEND" != "success" || "$WEBSITE" != "success" ]] || \
+             ! rust_ok "$TAURI" || ! rust_ok "$CLI"; then
+            echo "One or more jobs failed: changes=$CHANGES frontend=$FRONTEND tauri=$TAURI cli=$CLI website=$WEBSITE"
             exit 1
           fi
-          echo "All jobs passed!"
+          echo "All jobs passed! (tauri=$TAURI cli=$CLI)"
