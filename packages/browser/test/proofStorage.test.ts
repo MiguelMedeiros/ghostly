@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createIdentity, STORAGE_ROOT, type ProofChallenge } from "@ghostly/core";
 import { readPubkyProof, withPubkyStorage } from "../src/proofs/storage";
+// covers: proofs.pubky
 
 /**
  * The Pubky storage proof (proofs/storage.ts): reading a contact's proof file only at the address

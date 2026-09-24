@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CALLBACK_PATH, OIDC_CHANNEL, popupWindow } from "../src/proofs/oidc/popup";
+// covers: proofs.oidc, proofs.oidc.callback.web
 
 /**
  * The web sign-in window (proofs/oidc/popup.ts): the answer is taken only from this origin's channel,

@@ -4,6 +4,7 @@ import { finalizeEvent, generateSecretKey, getPublicKey } from "nostr-tools/pure
 import { NostrSocial, type NostrSocialHost } from "../src/engine/nostrSocial";
 import type { NostrContactCache, NostrSocialSettings } from "../src/nostr/types";
 import { nodeSocket, TestNostrRelay } from "./helpers/nostrRelay";
+// covers: nostr.social.profile, nostr.social.notes, nostr.social.publish, nostr.social.no-proof
 
 /**
  * The Nostr social layer's consent rules and failure paths (the happy paths are in

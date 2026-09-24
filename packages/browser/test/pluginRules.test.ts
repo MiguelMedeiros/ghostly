@@ -7,6 +7,7 @@ import { onAdaptersChanged, pluginProblems, registerAdapters, registeredPlugins,
 import type { IdentityProofProvider } from "../src/proofs/contract";
 import { IDENTITY_PROVIDERS, identityProvider, identityProviders } from "../src/proofs/registry";
 import { fakeKey, TEST_IDENTITIES_FLAG } from "../src/proofs/testing";
+// covers: sdk.registry, wallet.lightning.provider-contract, wallet.onchain.provider-contract, proofs.contract
 
 /**
  * The rules every adapter list follows, built-in or plugin (adapterPlugins.test.ts has registration):

@@ -5,6 +5,7 @@ import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { STORES, transact } from "../src/shared/idb";
 import type { StoredLink } from "../src/shared/types";
+// covers: settings.nickname, settings.network.relays, settings.network.turn, app.offline-switch, delivery.hold.enable, transport.preference, payments.chat.methods, chats.list.rename, chats.list.delete, chat.paired.delete-message, services.share, services.stop
 
 /** A connected contact: what the engine calls on it, recorded. */
 function stubLink(overrides: Record<string, unknown> = {}) {

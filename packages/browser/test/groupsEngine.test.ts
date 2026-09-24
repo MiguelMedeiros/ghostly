@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Groups, type EntryTimings, type GroupStore, type GroupsHost } from "../src/engine/groups";
 import { createIdentity, identityFromSeedB64, type GhostRecord, type GroupState } from "@ghostly/core";
 import type { StoredGroup, StoredMessage } from "../src/shared/types";
+// covers: groups.invite, groups.remove-member, groups.admin-change, groups.rotate, groups.leave, groups.forget, groups.link.join, groups.link.replace, groups.protocol.entry
 
 /**
  * The group engine's rules beyond the happy path (test/groups.test.ts): who may change the roster,

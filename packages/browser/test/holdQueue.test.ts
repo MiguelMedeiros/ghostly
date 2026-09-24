@@ -4,6 +4,7 @@ import { HoldEngine, emptyHoldState, type HoldHost } from "../src/engine/hold";
 import { presignS3 } from "../src/backup/s3";
 import { manifestName, type HoldStore } from "../src/backup/storage";
 import type { HoldState, StoredLink } from "../src/shared/types";
+// covers: delivery.hold.text, delivery.hold.request, delivery.hold.tamper, delivery.hold.expiry, delivery.hold.protocol
 
 /**
  * Store-and-forward beyond the happy path (test/hold.test.ts): what is removed before pickup, items

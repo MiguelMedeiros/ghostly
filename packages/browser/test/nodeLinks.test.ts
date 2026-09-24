@@ -5,6 +5,7 @@ import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { STORES, fileStore, transact } from "../src/shared/idb";
 import type { StoredLink } from "../src/shared/types";
+// covers: core.peer-keys, chat.paired.send, chat.paired.receipts, chat.paired.nickname-sync, files.paired.send, files.size-limit, files.persistence, delivery.hold.text, delivery.hold.picture, groups.protocol.link-frames
 
 /**
  * GhostLink is replaced by a recorder: the engine builds it with its callbacks, and a test plays the peer by

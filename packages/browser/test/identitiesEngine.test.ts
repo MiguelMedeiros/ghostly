@@ -5,6 +5,7 @@ import { STORES, store, transact, wrap } from "../src/shared/idb";
 import { IdentityProofs, type IdentityLinkHost } from "../src/engine/identities";
 import { fakeKey, fakeKeySign, fakeKeySubject } from "../src/proofs/testing";
 import type { IdentityProofProvider } from "../src/proofs/contract";
+// covers: proofs.revoke, proofs.expiry, proofs.recheck, proofs.binding, profiles.public
 
 // The proof-key seed is sealed with a 600k-iteration PBKDF2 key (identityEngine.test.ts checks that);
 // here a cheap reversible seal keeps the tests fast. It still round-trips through storage.
