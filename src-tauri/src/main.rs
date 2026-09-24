@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod bitcoind_rpc;
+mod clipboard;
 mod commands;
 mod crypto;
 mod hyperdht;
@@ -76,6 +77,7 @@ macro_rules! commands {
             commands::open_project_link,
             commands::open_payment_link,
             share::share_text,
+            clipboard::read_clipboard_text,
             oidc::oidc_loopback_start,
             oidc::oidc_loopback_wait,
             oidc::oidc_loopback_cancel,
@@ -97,6 +99,7 @@ fn main() {
         .manage(paired_transport::TransportState::default())
         .manage(hyperdht::HyperState::default())
         .manage(oidc::OidcState::default())
+        .manage(clipboard::ClipboardSource::system())
         .register_asynchronous_uri_scheme_protocol(viewer::SCHEME, |ctx, request, responder| {
             let app = ctx.app_handle().clone();
             let label = ctx.webview_label().to_string();
@@ -209,7 +212,7 @@ mod tests {
     #[test]
     fn build_rs_capabilities_and_permission_files_name_the_same_commands() {
         let declared: BTreeSet<String> = declared().into_iter().collect();
-        assert_eq!(declared.len(), 36, "{declared:?}");
+        assert_eq!(declared.len(), 37, "{declared:?}");
         let granted: BTreeSet<String> = capability()["permissions"]
             .as_array()
             .unwrap()

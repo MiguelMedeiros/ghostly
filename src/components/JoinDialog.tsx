@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import jsQR from "jsqr";
 import { decodeCommunityLink, decodeGroupEntryLink } from "@ghostly/core";
 import { parseInvite } from "../lib/url";
+import { pasteShortcut, readClipboardText } from "../lib/clipboard";
 import { useI18n } from "../contexts/I18nContext";
 import type { SessionKeys } from "../lib/storage";
 
@@ -70,14 +71,12 @@ export function JoinDialog({ onJoin, onJoinGroup, onClose }: { onJoin(keys: Sess
     stop(); busyRef.current = true; setBusy(true); setError("");
     const current = generation.current;
     try {
-      const value = await navigator.clipboard.readText();
+      // One click: the desktop app reads natively (no WebKit "Paste" callout); a refusal leaves the field and the shortcut.
+      const value = await readClipboardText();
       if (current !== generation.current || closed.current) return;
-      if (!value.trim()) { setError(t("join.empty")); setManual(true); return; }
+      if (value === null) { setError(t("join.clipboardUnavailable", { keys: pasteShortcut() })); setManual(true); return; }
+      if (!value.trim()) { setError(t("join.empty", { keys: pasteShortcut() })); setManual(true); return; }
       accept(value.trim());
-    } catch {
-      if (current === generation.current && !closed.current) {
-        setError(t("join.clipboardUnavailable")); setManual(true);
-      }
     } finally {
       if (current === generation.current && !closed.current) { busyRef.current = false; setBusy(false); }
     }

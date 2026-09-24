@@ -57,6 +57,12 @@ export interface BrowserHost {
    * Share API is the way (a web page).
    */
   shareText?(text: string, anchor?: ShareAnchor): Promise<boolean>;
+  /**
+   * The clipboard's text, read by the platform itself, for a paste button the user just clicked.
+   * Left out where the page's `navigator.clipboard.readText()` is the way (a web page, the
+   * extension); the desktop app reads natively because WKWebView asks for a second click.
+   */
+  readClipboardText?(): Promise<string>;
   /** Signing in with an OpenID Connect provider for an identity proof. Left out where the platform cannot. */
   oidc?: OidcHost;
 }

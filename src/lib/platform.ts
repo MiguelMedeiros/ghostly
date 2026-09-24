@@ -294,6 +294,12 @@ export interface ServicesPlatform {
    * Null where it does not: the page uses the Web Share API, or copies. Resolves to false when no sheet was shown.
    */
   shareText(text: string, anchor?: { x: number; y: number; width: number; height: number }): Promise<boolean> | null;
+  /**
+   * The clipboard's text read by the platform itself (the desktop app), for a paste button the user
+   * just clicked. Null where the page reads it with `navigator.clipboard` instead. Use
+   * `readClipboardText` in `clipboard.ts`, which picks the way and checks the click.
+   */
+  readClipboardText(): Promise<string> | null;
   /** Largest file that can be sent, in bytes. */
   maxFileBytes: number;
   /** Starts sending and returns what to show in the chat. Progress comes through `getTransfer`. */

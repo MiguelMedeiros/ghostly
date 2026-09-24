@@ -36,6 +36,7 @@ const COMMANDS: &[&str] = &[
     "open_project_link",
     "open_payment_link",
     "share_text",
+    "read_clipboard_text",
     "oidc_loopback_start",
     "oidc_loopback_wait",
     "oidc_loopback_cancel",

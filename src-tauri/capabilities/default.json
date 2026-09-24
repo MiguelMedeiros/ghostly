@@ -37,6 +37,7 @@
     "allow-open-project-link",
     "allow-open-payment-link",
     "allow-share-text",
+    "allow-read-clipboard-text",
     "allow-oidc-loopback-start",
     "allow-oidc-loopback-wait",
     "allow-oidc-loopback-cancel",
