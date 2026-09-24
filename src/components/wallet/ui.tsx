@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { PayExternally } from "../PayExternally";
 
 /** The same building blocks as Settings, so a wallet's options read like any other option. */
@@ -72,9 +72,14 @@ export function Address({ value, qr, uri, testId, note, actions }: { value: stri
 
 /** A large amount field: what matters most when paying is the number. */
 export function Amount({ value, onChange, unit, decimals = 0, testId, autoFocus }: { value: string; onChange: (next: string) => void; unit: string; decimals?: number; testId?: string; autoFocus?: boolean }) {
+  // Focused where it is, without scrolling to it (as it mounts, like autoFocus, so a deck that keeps the focus after an
+  // arrow key still gets the last word): the wallet's cards above it stay in view, and a card that comes up
+  // as the pointer passes over it does not move the page under that pointer.
+  const input = useRef<HTMLInputElement>(null);
+  useLayoutEffect(() => { if (autoFocus) input.current?.focus({ preventScroll: true }); }, [autoFocus]);
   return (
     <label className="flex items-baseline gap-2 bg-surface-alt rounded-xl px-4 py-3 border border-border focus-within:ring-2 focus-within:ring-accent">
-      <input data-testid={testId} autoFocus={autoFocus} inputMode={decimals ? "decimal" : "numeric"} placeholder="0" aria-label={`Amount in ${unit}`}
+      <input ref={input} data-testid={testId} inputMode={decimals ? "decimal" : "numeric"} placeholder="0" aria-label={`Amount in ${unit}`}
         className="min-w-0 flex-1 bg-transparent border-none outline-none text-3xl font-semibold text-text-primary placeholder-text-muted tabular-nums"
         value={value} onChange={(e) => onChange(e.target.value.replace(decimals ? /[^0-9.]/g : /\D/g, ""))} />
       <span className="text-text-muted text-sm shrink-0">{unit}</span>

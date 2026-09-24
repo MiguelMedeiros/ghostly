@@ -79,6 +79,7 @@ test("text, a picture and a request held for an away contact arrive in order; a 
   await alice.page.getByTestId("file-input").setInputFiles({ name: "ghost.gif", mimeType: "image/gif", buffer: GIF });
   await expect(held(alice, "ghost.gif").getByText("Held · waiting for your contact")).toBeVisible({ timeout: 30_000 });
   await alice.page.getByTestId("payment-button").click();
+  await alice.page.getByTestId("payment-card-cashu").click();
   await alice.page.getByTestId("payment-amount").fill("10");
   await alice.page.getByTestId("payment-request").click();
   await expect(held(alice, "You requested").getByText("Held · waiting for your contact")).toBeVisible({ timeout: 30_000 });

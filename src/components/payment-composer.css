@@ -1,0 +1,61 @@
+/* The chat's payment composer (PaymentComposer.tsx): the wallet's cards as a stack, then the chosen card turned over.
+   Its back is a card's back: the magnetic stripe, the amount written on it, and what it is for on the signature strip. */
+.payment-composer{display:grid;grid-template-columns:minmax(0,1fr);gap:10px}
+.payment-composer-head{display:flex;align-items:baseline;gap:6px;min-width:0;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--theme-text-secondary)}
+.payment-composer-who{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;letter-spacing:0;text-transform:none;color:var(--theme-text-muted)}
+.payment-composer-hint{margin:0;min-height:2.6em;font-size:11px;line-height:1.3;color:var(--theme-text-muted)}
+.payment-composer-hint[data-blocked=true]{color:#f5b3a8}
+.payment-composer-use{display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 12px;border:0;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;color:#10181d;background:rgb(var(--card-rgb,36,211,194));transition:filter .2s,opacity .2s}
+.payment-composer-use:hover{filter:brightness(1.08)}
+.payment-composer-use:disabled{opacity:.4;cursor:not-allowed;filter:grayscale(.6)}
+.payment-composer-use:focus-visible{outline:2px solid #fff;outline-offset:2px}
+
+/* The turn. Both faces sit in the same place; the card grows from a card's height to what its back holds as it turns. */
+.payment-flip{--flip-ease:cubic-bezier(.22,1,.36,1);position:relative;perspective:1200px;transition:height .52s var(--flip-ease)}
+.payment-flip-card{position:absolute;inset:0;transform-style:preserve-3d;transition:transform .52s var(--flip-ease)}
+.payment-flip[data-flipped=true] .payment-flip-card{transform:rotateY(180deg)}
+.payment-flip-front,.payment-flip-back{position:absolute;top:0;left:0;width:100%;-webkit-backface-visibility:hidden;backface-visibility:hidden}
+.payment-flip-front{height:var(--card-h)}
+.payment-flip-back{transform:rotateY(180deg)}
+/* Once turned, the front is out of the way of clicks and of the accessibility tree's idea of what shows. */
+.payment-flip[data-flipped=true] .payment-flip-front{visibility:hidden;transition:visibility 0s .26s}
+.payment-flip[data-flipped=false] .payment-flip-back{visibility:hidden;transition:visibility 0s .26s}
+
+.payment-back{position:relative;overflow:hidden;border-radius:16px;color:#fff;border:1px solid rgba(var(--card-rgb,36,211,194),.4);
+ background:radial-gradient(circle at 12% 110%,rgba(var(--card-rgb,36,211,194),.18),transparent 55%),linear-gradient(160deg,var(--to,#0b1f2a),#0a0e12);box-shadow:0 24px 50px -28px rgba(0,0,0,.9)}
+.payment-back-stripe{height:30px;margin-top:14px;background:linear-gradient(180deg,#050608,#15181c 55%,#050608)}
+.payment-back-body{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;padding:12px 14px 14px}
+.payment-back-head{display:flex;align-items:center;gap:10px;min-width:0}
+.payment-back-mark{display:grid;color:rgb(var(--card-rgb,36,211,194))}
+.payment-back-mark svg{width:22px;height:22px}
+.payment-back-title{display:grid;min-width:0;flex:1}
+.payment-back-name{font-size:15px;font-weight:700;line-height:1.2}
+.payment-back-meta{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;letter-spacing:.03em;color:rgba(255,255,255,.62);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.payment-back-turn{display:flex;align-items:center;gap:5px;flex:none;padding:5px 9px;border-radius:999px;border:1px solid rgba(var(--card-rgb,36,211,194),.45);background:rgba(0,0,0,.25);color:rgb(var(--card-rgb,36,211,194));font-size:11px;font-weight:600;cursor:pointer}
+.payment-back-turn:hover{background:rgba(var(--card-rgb,36,211,194),.14)}
+.payment-back-turn:focus-visible{outline:2px solid #fff;outline-offset:2px}
+.payment-back-amount{display:flex;align-items:baseline;gap:8px;padding:4px 2px 6px;border-bottom:1px solid rgba(var(--card-rgb,36,211,194),.45);transition:border-color .2s}
+.payment-back-amount:focus-within{border-color:rgb(var(--card-rgb,36,211,194))}
+.payment-back-amount[data-over=true]{border-color:#f0826e}
+.payment-back-amount input{min-width:0;flex:1;border:0;outline:0;background:transparent;color:#fff;caret-color:rgb(var(--card-rgb,36,211,194));font-size:30px;font-weight:650;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.payment-back-amount input::placeholder{color:rgba(255,255,255,.3)}
+.payment-back-amount span{flex:none;font-size:13px;color:rgba(255,255,255,.6)}
+/* The signature strip. */
+.payment-back-memo{width:100%;box-sizing:border-box;padding:9px 11px;border:0;border-radius:6px;outline:0;font-size:13px;font-style:italic;color:#1c1c1c;
+ background:repeating-linear-gradient(-45deg,#f2eee4 0 7px,#e7e0d0 7px 14px)}
+.payment-back-memo::placeholder{color:#6f685a}
+.payment-back-memo:focus-visible{box-shadow:0 0 0 2px rgb(var(--card-rgb,36,211,194))}
+.payment-back-hint{margin:0;font-size:11px;line-height:1.35;color:rgba(255,255,255,.62)}
+.payment-back-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.payment-back-actions button{padding:10px 12px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;transition:filter .2s,opacity .2s}
+.payment-back-actions button:disabled{opacity:.4;cursor:not-allowed}
+.payment-back-actions button:focus-visible{outline:2px solid #fff;outline-offset:2px}
+.payment-back-secondary{border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.08);color:#fff}
+.payment-back-secondary:not(:disabled):hover{background:rgba(255,255,255,.14)}
+.payment-back-primary{border:0;background:rgb(var(--card-rgb,36,211,194));color:#10181d}
+.payment-back-primary:not(:disabled):hover{filter:brightness(1.08)}
+/* The review keeps its own look, on the card's back. */
+.payment-back [data-testid=payment-review]{border-color:rgba(255,255,255,.14);background:rgba(0,0,0,.25)}
+
+@media(prefers-reduced-motion:reduce){.payment-flip,.payment-flip-card{transition:none!important}}
+[data-reduce-motion=true] .payment-flip,[data-reduce-motion=true] .payment-flip-card{transition:none!important}

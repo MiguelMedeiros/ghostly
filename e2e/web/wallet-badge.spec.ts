@@ -27,6 +27,7 @@ test.describe("wallet badge", { tag: "@network" }, () => {
     await expect(alice.page.getByTestId("wallet-new")).toHaveCount(0);
 
     await alice.page.getByTestId("payment-button").click();
+    await alice.page.getByTestId("payment-card-cashu").click();
     await alice.page.getByTestId("payment-amount").fill("21");
     await alice.page.getByTestId("payment-send").click();
     await alice.page.getByTestId("payment-composer").getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();

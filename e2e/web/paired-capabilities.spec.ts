@@ -23,7 +23,7 @@ test("paired chat: files, real WebRTC, local mint send/request and persistence",
   await alice.page.getByTestId("wallet-create-invoice").click();
   await expect(alice.page.getByTestId("wallet-test-balance")).toHaveText(/^100 test sats/);
   for (const p of [alice, bob]) await openChat(p);
-  await alice.page.getByTestId("payment-button").click(); await alice.page.getByTestId("payment-amount").fill("21");
+  await alice.page.getByTestId("payment-button").click(); await alice.page.getByTestId("payment-card-cashu").click(); await alice.page.getByTestId("payment-amount").fill("21");
   await alice.page.getByTestId("payment-send").click();
   // Every send is reviewed first: nothing leaves before the approval.
   await alice.page.getByTestId("payment-composer").getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
@@ -38,7 +38,7 @@ test("paired chat: files, real WebRTC, local mint send/request and persistence",
   await bob.page.getByTestId("chat-payments-open").click();
   await bob.page.getByTestId("chat-payments").getByTestId("chat-payments-lightning").click();
   await bob.page.getByTestId("chat-payments-save").click();
-  await bob.page.getByTestId("payment-button").click(); await bob.page.getByTestId("payment-amount").fill("10"); await bob.page.getByTestId("payment-request").click();
+  await bob.page.getByTestId("payment-button").click(); await bob.page.getByTestId("payment-card-cashu").click(); await bob.page.getByTestId("payment-amount").fill("10"); await bob.page.getByTestId("payment-request").click();
   await alice.page.getByTestId("payment-pay").click();
   await chat(alice).getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
   for (const p of [alice, bob]) await expect(chat(p).getByTestId("payment-bubble").filter({ hasText: "equest" }).getByTestId("payment-state")).toHaveText(/Paid/);

@@ -30,7 +30,8 @@ test("Ark request, explicit approval and receipt in the chat", async ({ peer }, 
   for (const p of [alice, bob]) await openChat(p);
   await bob.page.getByTestId("payment-button").click();
   await bob.page.getByTestId("payment-card-arkade").click();
-  await expect(bob.page.getByTestId("payment-card-arkade")).toHaveAttribute("aria-checked", "true");
+  // The card turns over: its back is where the amount goes.
+  await expect(bob.page.getByTestId("payment-back")).toContainText("Ark");
   await expect(bob.page.getByTestId("payment-send"), "nothing to send yet").toBeDisabled();
   await bob.page.getByTestId("payment-amount").fill("1000");
   await bob.page.getByTestId("payment-request").click();

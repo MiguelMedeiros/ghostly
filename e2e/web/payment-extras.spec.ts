@@ -43,6 +43,7 @@ const balanceOf = async (page: Page, testId: "wallet-test-balance" | "wallet-bal
 /** Opens the composer, fills it and stops at the review. */
 async function prepareSend(p: Peer, sats: number, memo?: string) {
   await p.page.getByTestId("payment-button").click();
+  await p.page.getByTestId("payment-card-cashu").click();
   const composer = p.page.getByTestId("payment-composer");
   await p.page.getByTestId("payment-amount").fill(String(sats));
   if (memo) await composer.getByPlaceholder("What for? (optional)").fill(memo);
@@ -62,6 +63,7 @@ test("a request's memo shows on both sides, and test-mint payments say test sats
 
   // A request with a memo: both bubbles carry it, in test sats.
   await bob.page.getByTestId("payment-button").click();
+  await bob.page.getByTestId("payment-card-cashu").click();
   await bob.page.getByTestId("payment-amount").fill("12");
   await bob.page.getByTestId("payment-composer").getByPlaceholder("What for? (optional)").fill("half the pizza");
   await bob.page.getByTestId("payment-request").click();
