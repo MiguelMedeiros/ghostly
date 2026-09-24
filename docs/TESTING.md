@@ -517,3 +517,129 @@ Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// 
 - `packages/browser/test/shareLink.test.ts`
 
 <!-- test-map:end -->
+
+## Combination matrix
+
+Each feature is tested on its own elsewhere; this section is about the pieces together. `e2e/matrix/` describes the
+dimensions (clients, transport, delivery, wallet, rail and source, identity proof, groups, profile, locale, viewport)
+and their constraints as data, generates the fewest scenarios that put every pair of values together at least once
+(and every client × transport × delivery combination), and runs each one as a whole story: pair, talk both ways,
+send a file, share a proof, pay, go offline and back, restore. A scenario whose infrastructure is not up is skipped
+with the reason, not failed.
+
+```bash
+npm run e2e:matrix                          # every scenario (reads .env.e2e from npm run e2e:infra:up)
+npm run e2e:matrix -- --only <id>           # reproduce one
+npm run e2e:matrix -- --list                # print the matrix
+npm run e2e:matrix -- --docs                # and write the table below
+```
+
+What the first full run found (2026-09-24, dev at `8fd41d4`, a local mint and MinIO, the regtest stacks down):
+
+- **Restoring a backup in the extension leads nowhere.** The extension has one profile only, and the restore adds a new profile it cannot switch to, so the restored chats are out of reach (on the web, Ghostly switches to the restored profile). This is all 20 failures: every scenario where B is the extension and restores.
+- **Leaving DHT-only after the contact reloaded is slow to go live again.** WebRTC came back after about 70 s in one repro, and not within 3 minutes once (`mx-656deae3`, which passed when run again).
+- A message sent while the contact's old session is still closing ends "Delivery unconfirmed" with a Retry button. It is not sent again by itself once the link is back.
+- The harness had to learn a few things the app does on purpose:
+  - NIP-07 is never offered in the extension.
+  - A DHT chat carries one text at a time until its receipt arrives.
+  - The invite card keeps the last delivery choice.
+  - An extension peer only goes away through the Offline switch.
+  - Nicknames travel with messages.
+- Switching the language leaves `<html lang>` unchanged.
+
+Blocks not run in this run: every Testnet payment on LND, Core Lightning, NWC, Breez, Arkade, Bark, BDK and USDT, which need their regtest stacks. The Desktop scenarios need a pairing adapter for the Linux harness.
+
+<!-- matrix:begin (scripts/matrix-docs.mjs writes this section; edit the text above it) -->
+
+Last full run: 2026-09-24.
+
+**82 scenarios**: 57 passed (23 of them with blocks skipped), 20 failed, 5 skipped · 73 min · seed 20260924
+
+| id | clients (A↔B) | transport | delivery | wallet mode | rail · source | identity proof | group | B's profile | B's language | B's screen | result |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `mx-00812e0d` | web-web | webrtc | dht | testnet | ln-breez | domain | link | restored | en | phone | ✅ partial — payments: needs Breez's hosted regtest (GHOSTLY_BREEZ_TESTNET=1) |
+| `mx-01bfacbf` | web-web | webrtc | store-forward | testnet | cashu | ssh | mesh | restored | pt | phone | ✅ |
+| `mx-049fe697` | web-web | webrtc-strict | dht | testnet | ln-mint | domain | mesh | fresh | pt | phone | ✅ |
+| `mx-04ceb838` | web-web | webrtc-strict | store-forward | mainnet | ln-lnd | nostr | mesh | restored | en | desktop | ✅ |
+| `mx-0cbf88d2` | web-web | webrtc-strict | dht | mainnet | usdt | oidc | link | restored | en | desktop | ✅ |
+| `mx-117f3606` | web-web | webrtc-strict | live | testnet | ln-breez | oidc | mesh | fresh | pt | desktop | ✅ partial — payments: needs Breez's hosted regtest (GHOSTLY_BREEZ_TESTNET=1) |
+| `mx-11cbc491` | web-extension | webrtc | dht | mainnet | ln-nwc | nostr | mesh | fresh | pt | desktop | ✅ |
+| `mx-124526e9` | extension-web | webrtc-strict | dht | mainnet | ln-lnd | pgp | none | restored | pt | phone | ✅ |
+| `mx-13ebe93c` | web-web | webrtc-strict | live | mainnet | btc-bdk | domain | none | fresh | en | phone | ✅ |
+| `mx-184f599d` | web-extension | webrtc-strict | store-forward | mainnet | ln-cln | pgp | link | restored | pt | desktop | ❌ the restored profile is the one in use: the extension restores into a profile it cannot switch to |
+| `mx-1935a65f` | extension-web | webrtc-strict | live | testnet | ln-nwc | pgp | none | fresh | en | desktop | ✅ partial — payments: needs the NWC regtest stack (GHOSTLY_NWC_REGTEST=1) |
+| `mx-19d7784b` | desktop-web | webrtc | live | mainnet | cashu | none | none | fresh | en | desktop | ⏭️ needs a Desktop peer (the Linux harness has no pairing adapter yet) |
+| `mx-21e913b7` | extension-extension | webrtc-strict | live | mainnet | ln-lnd | none | mesh | restored | en | desktop | ❌ the restored profile is the one in use: the extension restores into a profile it cannot switch to |
+| `mx-295308fa` | extension-extension | webrtc | dht | mainnet | ln-breez | bitcoin | none | restored | en | phone | ❌ the restored profile is the one in use: the extension restores into a profile it cannot switch to |
+| `mx-301c9017` | extension-web | webrtc | dht | mainnet | ln-mint | ssh | mesh | restored | pt | desktop | ✅ partial — rerun: passed once the group's chat with Carol was made Live (the invite card keeps the last delivery choice) |
+| `mx-33159ca5` | extension-web | webrtc-strict | store-forward | mainnet | btc-bdk | none | mesh | fresh | en | phone | ✅ |
+| `mx-337ad5a9` | web-extension | webrtc-strict | live | testnet | btc-bdk | ssh | link | restored | pt | desktop | ❌ the restored profile is the one in use: the extension restores into a profile it cannot switch to |
+| `mx-341a13bf` | extension-extension | webrtc-strict | live | testnet | bark | none | mesh | restored | en | desktop | ❌ the restored profile is the one in use: the extension restores into a profile it cannot switch to |
+| `mx-3500014e` | web-web | webrtc-strict | dht | mainnet | usdt | domain | none | restored | pt | desktop | ✅ |
+| `mx-3baa1439` | extension-web | webrtc | live | testnet | ark-arkade | pgp | mesh | restored | pt | phone | ✅ partial — payments: needs the Arkade regtest stack (GHOSTLY_ARK_REGTEST=1) |
+| `mx-3d75786a` | extension-web | webrtc-strict | dht | testnet | cashu | bitcoin | link | restored | pt | phone | ✅ |
+| `mx-3f04ec2c` | web-extension | webrtc-strict | store-forward | mainnet | ln-webln | bitcoin | mesh | restored | pt | desktop | ❌ the restored profile is the one in use: the extension restores into a profile it cannot switch to |
+| `mx-3f9f2686` | extension-web | webrtc-strict | dht | mainnet | bark | pgp | none | restored | pt | phone | ✅ |
+| `mx-3fdf6123` | web-extension | webrtc-strict | live | testnet | usdt | pgp | none | fresh | pt | desktop | ✅ partial — payments: needs the local EVM chain with the test token (GHOSTLY_USDT_LOCAL=1) |
+| `mx-41eb51f3` | desktop-web | webrtc-strict | live | mainnet | cashu | none | none | fresh | en | desktop | ⏭️ needs a Desktop peer (the Linux harness has no pairing adapter yet) |
+| `mx-4b821dc6` | desktop-web | native-fallback | live | mainnet | cashu | none | none | fresh | en | desktop | ⏭️ needs a Desktop peer (the Linux harness has no pairing adapter yet) |
+| `mx-5157e729` | web-web | webrtc-strict | store-forward | testnet | ln-cln | domain | mesh | restored | pt | desktop | ✅ partial — payments: needs the Core Lightning regtest stack (GHOSTLY_CLN_REGTEST=1) |
+| `mx-51a33a14` | extension-web | webrtc-strict | dht | testnet | ln-breez | ssh | mesh | restored | pt | desktop | ✅ partial — payments: needs Breez's hosted regtest (GHOSTLY_BREEZ_TESTNET=1) |
+| `mx-55192bc3` | extension-web | webrtc-strict | live | mainnet | ln-webln | none | mesh | fresh | pt | desktop | ✅ |
+| `mx-58b78852` | web-extension | webrtc | live | mainnet | ln-cln | nostr | mesh | restored | pt | phone | ❌ the restored profile is the one in use: the extension restores into a profile it cannot switch to |
+| `mx-5e6df188` | web-web | webrtc-strict | dht | mainnet | cashu | oidc | none | restored | en | phone | ✅ |
+| `mx-645445f7` | web-web | webrtc | dht | testnet | ln-cln | oidc | none | fresh | en | desktop | ✅ partial — payments: needs the Core Lightning regtest stack (GHOSTLY_CLN_REGTEST=1) |
+| `mx-656deae3` | web-web | webrtc-strict | dht | mainnet | bark | oidc | mesh | fresh | en | desktop | ✅ partial — rerun: passed; the first time WebRTC did not come back within 3 min of leaving DHT-only (intermittent) |
+| `mx-68e19e49` | web-web | webrtc | live | testnet | ln-webln | domain | link | fresh | en | phone | ✅ |
+| `mx-6af1a98b` | web-web | webrtc-strict | dht | mainnet | ln-mint | nostr | mesh | fresh | en | desktop | ✅ |
+| `mx-6cd04c4c` | extension-extension | webrtc-strict | dht | mainnet | ln-nwc | bitcoin | mesh | restored | pt | phone | ❌ the restored profile is the one in use: the extension restores into a profile it cannot switch to |
+| `mx-6d3c4d08` | extension-extension | webrtc-strict | dht | mainnet | ln-cln | bitcoin | none | restored | pt | desktop | ❌ the restored profile is the one in use: the extension restores into a profile it cannot switch to |
+| `mx-6d4ae5d2` | extension-extension | webrtc | store-forward | mainnet | btc-bdk | bitcoin | link | fresh | pt | phone | ✅ |
+| `mx-6f03ddb7` | web-extension | webrtc-strict | dht | testnet | ln-nwc | ssh | none | fresh | pt | desktop | ✅ partial — payments: needs the NWC regtest stack (GHOSTLY_NWC_REGTEST=1) |
+| `mx-6f68cb51` | extension-extension | webrtc-strict | dht | mainnet | ln-webln | pgp | none | restored | en | desktop | ❌ the restored profile is the one in use: the extension restores into a profile it cannot switch to |
+| `mx-79a3142e` | extension-extension | webrtc | live | testnet | cashu | pgp | none | fresh | pt | desktop | ✅ |
+| `mx-7af621a3` | web-web | webrtc-strict | store-forward | mainnet | ln-nwc | domain | none | restored | en | desktop | ✅ |
+| `mx-7b7ecf7e` | web-extension | webrtc-strict | store-forward | mainnet | ln-lnd | ssh | mesh | restored | pt | desktop | ❌ the restored profile is the one in use: the extension restores into a profile it cannot switch to |
+| `mx-7cb6de71` | desktop-web | hyperdht-only | live | mainnet | cashu | none | none | fresh | en | desktop | ⏭️ needs a Desktop peer (the Linux harness has no pairing adapter yet) |
+| `mx-7ce4862a` | web-extension | webrtc | store-forward | testnet | usdt | nostr | link | fresh | en | phone | ✅ partial — payments: needs the local EVM chain with the test token (GHOSTLY_USDT_LOCAL=1) |
+| `mx-7e6dfe22` | web-extension | webrtc-strict | store-forward | mainnet | ln-webln | nostr | none | restored | en | phone | ❌ the restored profile is the one in use: the extension restores into a profile it cannot switch to |
+| `mx-7e9761e0` | web-web | webrtc | dht | testnet | btc-bdk | pgp | none | fresh | en | desktop | ✅ partial — payments: needs the BDK regtest stack (GHOSTLY_BDK_REGTEST=1) |
+| `mx-7ff28d43` | desktop-web | iroh-only | live | mainnet | cashu | none | none | fresh | en | desktop | ⏭️ needs a Desktop peer (the Linux harness has no pairing adapter yet) |
+| `mx-80ae853f` | extension-extension | webrtc-strict | store-forward | mainnet | ark-arkade | ssh | none | fresh | en | phone | ✅ |
+| `mx-8107c82d` | web-extension | webrtc-strict | dht | testnet | ln-mint | pgp | link | fresh | en | phone | ✅ |
+| `mx-81f3e761` | extension-web | webrtc | dht | testnet | ln-cln | ssh | mesh | restored | pt | desktop | ✅ partial — payments: needs the Core Lightning regtest stack (GHOSTLY_CLN_REGTEST=1) |
+| `mx-85249bc1` | extension-extension | webrtc-strict | store-forward | mainnet | ln-nwc | none | link | fresh | en | desktop | ✅ |
+| `mx-87b4fede` | web-extension | webrtc-strict | store-forward | testnet | ln-mint | none | none | restored | pt | desktop | ❌ the restored profile is the one in use: the extension restores into a profile it cannot switch to |
+| `mx-87f6b54a` | extension-web | webrtc | store-forward | mainnet | bark | bitcoin | link | restored | pt | phone | ✅ |
+| `mx-9acd4293` | web-extension | webrtc | dht | testnet | ark-arkade | nostr | mesh | restored | en | desktop | ❌ the restored profile is the one in use: the extension restores into a profile it cannot switch to (first attempt: Chromium did not launch in |
+| `mx-9d9c0dda` | extension-extension | webrtc | store-forward | mainnet | ln-mint | pgp | mesh | restored | pt | desktop | ❌ the restored profile is the one in use: the extension restores into a profile it cannot switch to |
+| `mx-9da39cc9` | extension-extension | webrtc-strict | live | mainnet | ln-cln | none | none | fresh | en | phone | ✅ |
+| `mx-a0dc2a7b` | web-web | webrtc | live | testnet | cashu | domain | none | restored | pt | phone | ✅ |
+| `mx-a1e06ffb` | web-extension | webrtc | dht | mainnet | btc-bdk | nostr | mesh | fresh | pt | phone | ✅ |
+| `mx-a5a6a591` | extension-extension | webrtc | live | testnet | ln-lnd | bitcoin | link | fresh | en | desktop | ✅ partial — payments: needs the LND regtest stack (GHOSTLY_LND_REGTEST=1) |
+| `mx-af79be02` | web-extension | webrtc | store-forward | testnet | ln-breez | none | link | fresh | pt | phone | ✅ partial — payments: needs Breez's hosted regtest (GHOSTLY_BREEZ_TESTNET=1) |
+| `mx-afa22259` | web-extension | webrtc | store-forward | testnet | usdt | ssh | none | restored | pt | phone | ❌ the restored profile is the one in use: the extension restores into a profile it cannot switch to |
+| `mx-b0ef6dcb` | web-web | webrtc | dht | testnet | ln-lnd | oidc | none | fresh | pt | phone | ✅ partial — payments: needs the LND regtest stack (GHOSTLY_LND_REGTEST=1) |
+| `mx-b6684fa6` | web-web | webrtc | live | testnet | ln-mint | bitcoin | none | fresh | pt | desktop | ✅ |
+| `mx-b69daf69` | web-web | webrtc-strict | live | mainnet | ln-mint | oidc | mesh | restored | pt | phone | ✅ |
+| `mx-b9a59a32` | web-extension | webrtc-strict | live | testnet | ln-breez | nostr | mesh | fresh | pt | desktop | ✅ partial — payments: needs Breez's hosted regtest (GHOSTLY_BREEZ_TESTNET=1) |
+| `mx-bc34cb3d` | web-web | webrtc-strict | live | mainnet | ark-arkade | bitcoin | none | restored | pt | phone | ✅ |
+| `mx-be9c550d` | web-web | webrtc-strict | live | testnet | ark-arkade | domain | link | fresh | en | phone | ✅ partial — payments: needs the Arkade regtest stack (GHOSTLY_ARK_REGTEST=1) |
+| `mx-beb1331c` | web-web | webrtc | dht | mainnet | ln-lnd | domain | none | fresh | en | phone | ✅ |
+| `mx-bf57a381` | extension-extension | webrtc-strict | live | mainnet | usdt | bitcoin | mesh | restored | pt | desktop | ❌ the restored profile is the one in use: the extension restores into a profile it cannot switch to |
+| `mx-c20b65f4` | web-web | webrtc | dht | mainnet | ln-webln | oidc | none | restored | pt | phone | ✅ |
+| `mx-c9cc118b` | web-web | webrtc | store-forward | testnet | ark-arkade | oidc | mesh | restored | pt | desktop | ✅ partial — payments: needs the Arkade regtest stack (GHOSTLY_ARK_REGTEST=1) |
+| `mx-d0daad6e` | extension-web | webrtc-strict | live | mainnet | ln-webln | ssh | link | restored | pt | desktop | ✅ |
+| `mx-d182760c` | web-web | webrtc | store-forward | testnet | btc-bdk | oidc | none | restored | pt | phone | ✅ partial — payments: needs the BDK regtest stack (GHOSTLY_BDK_REGTEST=1) |
+| `mx-d24c674a` | web-web | webrtc-strict | store-forward | mainnet | bark | domain | mesh | restored | pt | phone | ✅ |
+| `mx-d6f3c59a` | web-web | webrtc | dht | testnet | ark-arkade | none | link | restored | pt | desktop | ✅ partial — payments: needs the Arkade regtest stack (GHOSTLY_ARK_REGTEST=1) |
+| `mx-d905a954` | web-extension | webrtc | live | testnet | bark | nostr | none | restored | pt | phone | ❌ the restored profile is the one in use: the extension restores into a profile it cannot switch to |
+| `mx-e22ae62d` | extension-extension | webrtc | dht | testnet | ln-breez | pgp | mesh | restored | en | desktop | ❌ the restored profile is the one in use: the extension restores into a profile it cannot switch to |
+| `mx-e4f0c268` | web-extension | webrtc-strict | dht | testnet | cashu | nostr | none | restored | pt | phone | ❌ the restored profile is the one in use: the extension restores into a profile it cannot switch to |
+| `mx-e5939806` | extension-web | webrtc-strict | live | testnet | usdt | none | mesh | restored | en | desktop | ✅ partial — payments: needs the local EVM chain with the test token (GHOSTLY_USDT_LOCAL=1) |
+| `mx-ece0bc5f` | web-web | webrtc | store-forward | mainnet | ln-nwc | oidc | link | restored | pt | phone | ✅ |
+| `mx-fab5c587` | web-extension | webrtc | store-forward | mainnet | bark | ssh | none | fresh | en | desktop | ✅ |
+
+Reproduce one: `npm run e2e:matrix -- --only <id>`.
+
+<!-- matrix:end -->

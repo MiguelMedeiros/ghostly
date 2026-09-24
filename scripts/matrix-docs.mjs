@@ -8,11 +8,11 @@
  * is not there yet (or creates the file when nothing else has).
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const summaryPath = join(root, process.argv[2] ?? "test-results/matrix-summary/summary.md");
+const summaryPath = resolve(root, process.argv[2] ?? "test-results/matrix-summary/summary.md");
 const docsPath = join(root, "docs/TESTING.md");
 const BEGIN = "<!-- matrix:begin (scripts/matrix-docs.mjs writes this section; edit the text above it) -->";
 const END = "<!-- matrix:end -->";
