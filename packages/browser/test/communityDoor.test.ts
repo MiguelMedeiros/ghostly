@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { MAX_KNOCKS, decodeCommunityLink, identityFromSeedB64, knockIdentity, lobbyKeys, publicKeyFromZ32, readKnocks, type GroupEntryLink } from "@ghostly/core";
-import { COMMUNITY_TIMINGS, KNOCK_SHARDS } from "../src/engine/community";
+import { MAX_KNOCKS, createIdentity, decodeCommunityLink, entryParams, identityFromSeedB64, knockIdentity, lobbyKeys, publicKeyFromZ32, readKnocks, type GroupEntryLink } from "@ghostly/core";
+import { COMMUNITY_TIMINGS, KNOCK_SHARDS, dialedKey } from "../src/engine/community";
 import { CommunityWorld, RELAY_NETWORK, type Peer } from "./communityWorld";
 // covers: groups.community.join, groups.protocol.community-topology
 
@@ -114,6 +114,20 @@ describe("a community's door", { timeout: 120_000 }, () => {
     for (const other of counts.slice(1)) expect(other).toBeLessThanOrEqual(60_000 / COMMUNITY_TIMINGS.otherHubKnockPollMs / KNOCK_SHARDS + 2);
     // Members that are not hubs read no knocks at all.
     for (const p of everyone.filter(p => !hubs.includes(p))) expect(bells.get(p) ?? 0).toBe(0);
+  });
+
+  it("a joiner's key makes the member's side of the entry session the one that dials, at once", () => {
+    for (let i = 0; i < 24; i++) {
+      const entry = createIdentity(), link = { g: `g${i}`, host: entry.pubKeyZ32 };
+      const me = identityFromSeedB64(dialedKey(link));
+      const joinerSide = entryParams(link, me.seed, me.pubKeyZ32, link.host), memberSide = entryParams(link, entry.seed, entry.pubKeyZ32, me.pubKeyZ32);
+      const joinerKey = identityFromSeedB64(joinerSide.seedB64).pubKeyZ32, memberKey = identityFromSeedB64(memberSide.seedB64).pubKeyZ32;
+      // Both ends derive the same pair of session keys…
+      expect(joinerSide.peerPubKeyZ32).toBe(memberKey);
+      expect(memberSide.peerPubKeyZ32).toBe(joinerKey);
+      // …and the member's is the lower one, which dials (`GhostLink`: only the lower key offers).
+      expect(memberKey < joinerKey).toBe(true);
+    }
   });
 
   it("with no hub at all, a member's app that opens is the door at once, without the random wait", async () => {

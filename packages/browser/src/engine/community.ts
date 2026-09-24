@@ -1,6 +1,6 @@
 import {
   COMMUNITY_LIMITS, COMMUNITY_TOPOLOGY, CommunitySession, GROUP_READ_NOTE_COMMUNITY, KNOCK_TTL_MS, MAX_KNOCKS, MEMBER_KEY,
-  beaconKeys, beaconRecords, createIdentity, decodeCommunityLink, doorHubs, publicKeyFromZ32, encodeCommunityLink, freshHubs, identityFromSeedB64, knockIdentity, knockRecords, lobbyKeys, lobbyRecords, mergeBeacon,
+  beaconKeys, beaconRecords, createIdentity, decodeCommunityLink, doorHubs, entryParams, publicKeyFromZ32, encodeCommunityLink, freshHubs, identityFromSeedB64, knockIdentity, knockRecords, lobbyKeys, lobbyRecords, mergeBeacon,
   mergeKnocks, mergeLobby, pickHubs, rankHubs, readBeacon, readKnocks, readLobby, rosterHas, shouldBeHub,
   type CommunityFrame, type CommunityState, type GroupEntryLink, type Hub, type Roster,
 } from "@ghostly/core";
@@ -111,6 +111,21 @@ const REFUSED_FOR_MS = 10 * 60_000;
 const ENTRY_LINGER_MS = 20_000;
 const RELAYED_KEPT = 4096;
 const MESSAGE_LINK = (groupId: string) => `group:${groupId}`;
+
+/**
+ * A member key for a joiner whose entry session the member's side dials. Of a paired session's two
+ * ends only the lower key dials, and only once it has seen the other; the member's side opens when it
+ * sees the knock, and the joiner has been there since it knocked, so the member's side can dial at
+ * once: two trips through Pkarr instead of three (offer, answer), which on public relays is seconds.
+ * The session's keys derive from both ends' keys (`entryParams`), so the joiner draws keys (two on
+ * average) until its end is the higher one.
+ */
+export function dialedKey(link: GroupEntryLink): string {
+  for (let i = 0; ; i++) {
+    const me = createIdentity(), params = entryParams(link, me.seed, me.pubKeyZ32, link.host);
+    if (identityFromSeedB64(params.seedB64).pubKeyZ32 > params.peerPubKeyZ32 || i >= 32) return me.seedB64;
+  }
+}
 
 /** Per group, in memory: the topology as this device sees and plays it. */
 interface Live {
@@ -262,7 +277,7 @@ export class Communities {
     if (live && live.session.status === "active") return link.g;
     if (existing?.joining && existing.joining.host === link.host) return link.g;
     if (existing) await this.forget(link.g);
-    await this.startJoining(link, createIdentity().seedB64, this.now());
+    await this.startJoining(link, dialedKey(link), this.now());
     return link.g;
   }
 
