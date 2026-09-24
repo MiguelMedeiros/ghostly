@@ -110,6 +110,23 @@ export interface GroupMemberView {
   online: boolean;
   /** Messages of the current epoch known to be missing from this member. */
   missing: number;
+  /** The pairwise edge to this member as the engine sees it: absent for me, and until the edge exists. */
+  edge?: GroupEdgeView;
+}
+
+/** One edge of a group's mesh (WISP 9xx): a paired link toward one member, which carries the group to and from them. */
+export interface GroupEdgeView {
+  linkId: string;
+  /**
+   * `open`: frames flow (the member is reachable). `connecting`: the member answered and the channel is being set up.
+   * `waiting`: nothing heard from the member's app yet. `error`: the last attempt failed (`error` says why).
+   */
+  state: "open" | "connecting" | "waiting" | "error";
+  /** The transport carrying the edge while it is open. Edges only offer WebRTC today. */
+  transport?: PairedTransport;
+  /** When this device last heard from the member on this edge, in ms (0: never). */
+  lastSeenAt: number;
+  error?: string;
 }
 
 export interface GroupView {

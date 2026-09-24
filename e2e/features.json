@@ -183,6 +183,7 @@
     {"id":"groups.link.enable","wisp":"900","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Enable / disable a shareable group link"},
     {"id":"groups.link.join","wisp":"900","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Strangers join a group through its link"},
     {"id":"groups.link.replace","wisp":"900","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"A replaced link reaches nobody"},
+    {"id":"groups.connection","wisp":"900","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"The group header's connection control: each member's edge reachable or not, its transport, last seen"},
     {"id":"groups.protocol.commits","wisp":"900","kind":"protocol","clients":["web","extension","desktop"],"infra":[],"title":"Group commit chain signed by the admin, full roster, fork halts"},
     {"id":"groups.protocol.crypto","wisp":"900","kind":"protocol","clients":["web","extension","desktop"],"infra":[],"title":"Epoch secrets sealed per member (X25519)"},
     {"id":"groups.protocol.entry","wisp":"900","kind":"protocol","clients":["web","extension","desktop"],"infra":[],"title":"group-entry/1 link format and admission"},

@@ -5,7 +5,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { useBackdropDismiss } from "../hooks/useDismiss";
 import { publicKeyLabel } from "../lib/publicKeyLabel";
-import { memberName } from "../lib/groups";
+import { edgeDot, edgeLabel, memberName } from "../lib/groups";
 import { GroupLinkPanel } from "./GroupLinkPanel";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
@@ -44,8 +44,11 @@ export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClo
     {live.isAdmin && live.status === "active" && <GroupLinkPanel group={live} />}
     <ul className="mt-3 max-h-56 space-y-1 overflow-y-auto" data-testid="group-member-list">
       {live.members.map(m => <li key={m.key} data-testid="group-member" data-key={m.key} data-role={m.role} className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-surface-hover">
-        <span role="img" aria-label={m.online ? "reachable" : "not reachable"} className={`h-2 w-2 shrink-0 rounded-full ${m.online ? "bg-green-500" : "bg-text-muted"}`} />
-        <span className="min-w-0 flex-1 truncate text-sm">{memberName(m)}<span className="ml-1.5 font-mono text-[10px] text-text-muted/60">{publicKeyLabel(m.key)}</span></span>
+        <span role="img" aria-label={m.online ? "reachable" : "not reachable"} className={`h-2 w-2 shrink-0 rounded-full ${m.edge || m.me ? edgeDot(m) : m.online ? "bg-accent" : "bg-text-muted"}`} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm">{memberName(m)}<span className="ml-1.5 font-mono text-[10px] text-text-muted/60">{publicKeyLabel(m.key)}</span></span>
+          {!m.me && <span className="block truncate text-[11px] text-text-muted" data-testid="group-member-status">{edgeLabel(m)}</span>}
+        </span>
         {m.role === "admin" && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-accent">admin</span>}
         {m.missing > 0 && <span title="Messages of this epoch that nobody could recover" className="text-[10px] text-amber-500">{m.missing} missing</span>}
         {live.isAdmin && !m.me && <>

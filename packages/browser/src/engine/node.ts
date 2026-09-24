@@ -74,6 +74,7 @@ import { fileStore, type StoredFile } from "../shared/idb";
 import { DEFAULT_MINTS, TEST_MINT, isWorthlessMint, type WalletMode } from "../shared/mints";
 import type {
   EngineState,
+  GroupEdgeView,
   FileTransferView,
   LinkView,
   MessageFile,
@@ -85,6 +86,7 @@ import type {
 } from "../shared/types";
 import { db } from "./db";
 import { Groups } from "./groups";
+import { edgeView } from "./groupEdges";
 import { mayReach } from "./serviceAccess";
 import { Outbox } from "./outbox";
 import { HoldEngine } from "./hold";
@@ -593,8 +595,17 @@ export class GhostlyNode implements EngineImplementation {
       payments: this.desk.views(),
       identityProofs: this.identities.views(),
       nostr: this.nostrSocial.state(),
-      groups: this.groups.views(),
+      groups: this.groups.views().map(group => ({ ...group, members: group.members.map(member => {
+        const edge = member.me ? undefined : this.edgeView(group.id, member.key);
+        return edge ? { ...member, edge } : member;
+      }) })),
     };
+  }
+
+  /** The edge of a group toward one member, as the group page shows it: what carries it and when the member was last heard. */
+  private edgeView(groupId: string, member: string): GroupEdgeView | undefined {
+    for (const live of this.links.values()) if (live.stored.group === groupId && live.stored.groupPeer === member && !live.stored.groupEntry) return edgeView(live);
+    return undefined;
   }
 
   getMessages(linkId: string): Promise<StoredMessage[]> {
@@ -1585,6 +1596,8 @@ export class GhostlyNode implements EngineImplementation {
         onPresence: presence => { live.presence = presence; if (!entry) this.groups.edgeNick(group, peer, presence.nick); this.emitState(); },
         onPairingState: state => { live.pairing = state; this.emitState(); },
         onDataLinkState: state => {
+          // The last moment the member was reachable on it: when it opens, and when it stops being open.
+          if (state === "open" || live.dataLink === "open") live.lastSyncAt = Date.now();
           live.dataLink = state;
           if (state !== "open" && live.pairing?.status !== "error") live.pairing = { status: "connecting" };
           this.emitState();
