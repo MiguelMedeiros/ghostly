@@ -7,6 +7,9 @@ name: E2E (full)
 # Breez's hosted regtest is not part of it: its faucet needs a reCAPTCHA, so those suites are skipped here.
 # Nightly on dev and by hand; not on pull requests, on purpose: it takes far longer than a merge should wait.
 on:
+  # TEMPORARY, removed before merge: measures a run on a GitHub runner from the pull request's branch.
+  push:
+    branches: [feat/e2e-full-infra]
   schedule:
     - cron: "23 3 * * *"
   workflow_dispatch:
