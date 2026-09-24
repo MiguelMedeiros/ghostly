@@ -568,3 +568,26 @@ describe("wrapDataChannel", () => {
     }
   });
 });
+
+describe("decodeControl counts UTF-8 bytes, as its limits are named", () => {
+  // "€" is one UTF-16 unit and three UTF-8 bytes: under a limit in characters, over it in bytes.
+  const euros = (bytes: number) => "€".repeat(Math.floor(bytes / 3) + 1);
+
+  it("drops a frame over the limit in bytes though under it in characters", () => {
+    const text = JSON.stringify({ t: "svc", svc: euros(LIMITS.maxControlFrameBytes) });
+    expect(text.length).toBeLessThan(LIMITS.maxControlFrameBytes);
+    expect(decodeControl(text)).toBeNull();
+  });
+
+  it("drops chat text and a call signal over the chat limit in bytes", () => {
+    const text = euros(LIMITS.maxChatMessageBytes);
+    expect(text.length).toBeLessThan(LIMITS.maxChatMessageBytes);
+    expect(decodeControl(JSON.stringify({ t: "m", ts: 1, m: text }))).toBeNull();
+    expect(decodeControl(JSON.stringify({ t: "call", s: text }))).toBeNull();
+  });
+
+  it("keeps multibyte chat text that fits the limit in bytes", () => {
+    const text = "€".repeat(Math.floor(LIMITS.maxChatMessageBytes / 3));
+    expect(decodeControl(JSON.stringify({ t: "m", ts: 1, m: text }))).toEqual({ t: "m", ts: 1, m: text });
+  });
+});
