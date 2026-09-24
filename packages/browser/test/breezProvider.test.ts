@@ -80,7 +80,8 @@ describe("the Breez descriptor", () => {
     const [a, b] = net.connects.map((c) => c.storage);
     expect(a).toMatch(/^ghostly-breez-regtest-[0-9a-f]{16}$/);
     expect(b).toMatch(/^ghostly-breez-mainnet-[0-9a-f]{16}$/);
-    for (const word of mnemonic.split(" ")) expect(a).not.toContain(word);
+    // Only the hex part can leak: the prefix legitimately contains BIP39 words ("ghost", "main").
+    for (const word of mnemonic.split(" ")) expect(a.slice("ghostly-breez-regtest-".length)).not.toContain(word);
     await testnet.close(); await mainnet.close();
   });
 
