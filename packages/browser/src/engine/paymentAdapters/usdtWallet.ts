@@ -95,12 +95,13 @@ export class UsdtWallet {
   setMode(mode:WalletMode):Promise<void> {
     this.gate.switching(mode);
     return this.serial(async()=>{
-    this.mode=mode;
+    this.mode=mode;this.gate.entered(mode);
     const current=this.saved;
     const parked=await wrap<SavedWallet|undefined>((await store(STORES.settings,'readonly')).get(`usdtWallet-mode-${mode}`));
     if(current && usdtMode(current.config.network)===mode)return;
     if(!current && !parked)return;
-    clearTimeout(this.retry);await this.lock();
+    // The old wallet's closing waits for its queue, maybe on its RPC: it finishes on its own, the switch goes on.
+    clearTimeout(this.retry);void this.lock().catch(()=>{});
     await transact([STORES.settings],s=>{
       if(current)s[STORES.settings].put(current,`usdtWallet-mode-${usdtMode(current.config.network)}`);
       if(parked){s[STORES.settings].put(parked,'usdtWallet');s[STORES.settings].delete(`usdtWallet-mode-${mode}`);}
@@ -112,10 +113,11 @@ export class UsdtWallet {
   /** Shutting down: nothing reconnects afterwards. */
   async stop() {this.stopped=true;await this.serial(()=>this.lock());}
   async lock() {++this.epoch;clearTimeout(this.timer);clearTimeout(this.retry);const adapter=this.adapter;this.adapter=undefined;this.view={...this.view,locked:true};this.changed();await adapter?.dispose();}
+  /** A mode switch ends it where it is: the wallet being left needs no balance, and the switch does not wait for its RPC. */
   async refresh() {
     clearTimeout(this.timer);const adapter=this.adapter;if(!adapter)return;
-    try {const address=await adapter.address(),balances=await adapter.balances();if(adapter!==this.adapter)return;this.view={configured:true,locked:false,automatic:!!this.saved?.deviceKey,...adapter.config,address,...balances};}
-    catch {if(adapter!==this.adapter)return;this.view={...this.view,error:'RPC unavailable. Balance may be stale.'};}
+    try {const address=await this.gate.within(adapter.address()),balances=await this.gate.within(adapter.balances());if(adapter!==this.adapter)return;this.view={configured:true,locked:false,automatic:!!this.saved?.deviceKey,...adapter.config,address,...balances};}
+    catch(error) {if(error instanceof ModeChanged||adapter!==this.adapter)return;this.view={...this.view,error:'RPC unavailable. Balance may be stale.'};}
     this.changed();if(this.adapter)this.timer=setTimeout(()=>void this.refresh(),8000);
   }
   /** Testnet on Sepolia: 1,000 TEST-USDT from Aave's faucet, paid with this wallet's own test ETH. */
@@ -154,7 +156,7 @@ export class UsdtWallet {
   private async retirable(refusal:string):Promise<SavedWallet> {
     const saved=this.saved!;
     if((await intentRepository.list()).some(i=>i.review.method==='usdt'))throw new Error(refusal);
-    if(this.adapter){const {balance,gasBalance}=await this.adapter.balances();if(BigInt(balance)>0n||BigInt(gasBalance)>0n)throw new Error(refusal);}
+    if(this.adapter){const {balance,gasBalance}=await this.gate.within(this.adapter.balances());if(BigInt(balance)>0n||BigInt(gasBalance)>0n)throw new Error(refusal);}
     await this.lock();
     return saved;
   }

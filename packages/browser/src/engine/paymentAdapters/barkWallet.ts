@@ -137,11 +137,12 @@ export class BarkWallet {
   setMode(mode: WalletMode): Promise<void> {
     this.gate.switching(mode);
     return this.serial(async () => {
-      this.mode = mode;
+      this.mode = mode; this.gate.entered(mode);
       const current = this.saved;
       if (current && barkMode(current.config.network) === mode) return;
       const parked = await wrap<StoredBark | undefined>((await store(STORES.settings, "readonly")).get(`barkWallet-mode-${mode}`));
-      clearTimeout(this.retry); await this.lock();
+      // The old wallet's closing may wait on its server: it finishes on its own, the switch goes on.
+      clearTimeout(this.retry); void this.lock().catch(() => {});
       await transact([STORES.settings], (stores) => {
         if (current) stores[STORES.settings].put(current, `barkWallet-mode-${barkMode(current.config.network)}`);
         if (parked) { stores[STORES.settings].put(parked, "barkWallet"); stores[STORES.settings].delete(`barkWallet-mode-${mode}`); }
@@ -155,12 +156,14 @@ export class BarkWallet {
   async stop() { this.stopped = true; await this.serial(() => this.lock()); }
   async lock() { clearTimeout(this.timer); clearTimeout(this.retry); const adapter = this.adapter; this.adapter = undefined; this.view = { ...this.view, locked: true, address: undefined }; this.changed(); await adapter?.dispose(); }
 
-  async refresh() {
+  /** A mode switch ends it where it is: the wallet being left needs no balance, and the switch does not wait for its server. */
+  async refresh() { await this.poll().catch((error) => { if (!(error instanceof ModeChanged)) throw error; }); }
+  private async poll() {
     clearTimeout(this.timer);
     const adapter = this.adapter;
     if (!adapter) return;
     const failed: string[] = [];
-    const read = async <T>(what: string, work: () => Promise<T>, previous: T): Promise<T> => { try { return await work(); } catch (error) { failed.push(what); console.warn(`Bark ${what}:`, error instanceof Error ? error.message : error); return previous; } };
+    const read = async <T>(what: string, work: () => Promise<T>, previous: T): Promise<T> => { try { return await this.gate.within(work()); } catch (error) { if (error instanceof ModeChanged) throw error; failed.push(what); console.warn(`Bark ${what}:`, error instanceof Error ? error.message : error); return previous; } };
     // The address is this wallet's own: show it before asking the server anything.
     const address = await read("address", () => adapter.address(), this.view.address);
     const onchainAddress = this.view.onchainAddress ?? await read("on-chain address", () => adapter.onchainAddress(), undefined);
@@ -223,7 +226,7 @@ export class BarkWallet {
   private async retirable(refusal: string): Promise<StoredBark> {
     const saved = this.saved!;
     if ((await intentRepository.list()).some((i) => i.review.method === "bark")) throw new Error(refusal);
-    if (this.adapter) { const b = await this.adapter.balance(); if (b.spendableSats + b.pendingInRoundSats + b.pendingBoardSats + b.pendingExitSats + b.pendingLightningSendSats + b.claimableLightningReceiveSats > 0) throw new Error(refusal); }
+    if (this.adapter) { const b = await this.gate.within(this.adapter.balance()); if (b.spendableSats + b.pendingInRoundSats + b.pendingBoardSats + b.pendingExitSats + b.pendingLightningSendSats + b.claimableLightningReceiveSats > 0) throw new Error(refusal); }
     await this.lock();
     return saved;
   }
