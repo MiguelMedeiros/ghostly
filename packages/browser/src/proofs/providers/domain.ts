@@ -84,7 +84,9 @@ export const domain: IdentityProofProvider<DomainEvidence> = {
   id: "domain",
   label: "Domain",
   category: "self-custodied",
-  description: "Proves you control a domain name: publish a DNS TXT record or a file on its website, once.",
+  summary: "A DNS record or a file on your site",
+  description: "Proves you control a domain name: publish a DNS TXT record or a file on its website, once. Contacts' apps look it up when you share it and can check again later.",
+  limits: "Does not prove who runs the domain, only that whoever added the proof could publish under it.",
   platforms: ["web", "extension", "desktop"],
   subject: {
     label: "Domain", placeholder: "example.com",

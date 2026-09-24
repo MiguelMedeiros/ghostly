@@ -5,6 +5,7 @@ import { availableSigners } from "@ghostly/browser/proofs/verify";
 import type { IdentityProofProvider, IdentitySigner, SignerContext, SignerInstructions } from "@ghostly/browser/proofs/contract";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
 import { addableProviders, identityPlatform } from "../../lib/identities";
+import { FieldGrid } from "../layout";
 import { Button, Notice, input } from "../wallet/ui";
 import { ProviderMark, StatusPill } from "./ProviderMark";
 
@@ -24,6 +25,8 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
   const platform = identityPlatform();
   // Always the picker first, even with one provider: the flow is the same whatever is registered.
   const [provider, setProvider] = useState<IdentityProofProvider | null>(null);
+  /** The card whose details are open in the picker (reading, not adding). */
+  const [about, setAbout] = useState<string | null>(null);
   const signers = provider ? availableSigners(provider, platform) : [];
   const [signerId, setSignerId] = useState("");
   const signer: IdentitySigner<unknown> | undefined = signers.find(s => s.id === signerId) ?? signers[0];
@@ -118,17 +121,10 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
 
         {!provider ? (
           providers.length ? (
-            <div className="grid gap-2 grid-cols-1 @sm:grid-cols-2" role="list" aria-label="Kinds of identity">
-              {providers.map(p => (
-                <button key={p.id} type="button" role="listitem" data-testid={`add-identity-${p.id}`} onClick={() => choose(p)}
-                  className="flex items-start gap-3 rounded-xl border border-border p-3 text-left hover:bg-surface-alt cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
-                  <ProviderMark provider={p.id} />
-                  <span className="min-w-0">
-                    <span className="flex flex-wrap items-center gap-2"><span className="text-sm text-text-primary">{p.label}</span><StatusPill>{p.category === "provider-attested" ? "Attested by a provider" : "Your own key"}</StatusPill></span>
-                    <span className="block text-xs text-text-muted mt-1">{p.description}</span>
-                  </span>
-                </button>
-              ))}
+            <div role="list" aria-label="Kinds of identity">
+              <FieldGrid min="22rem" max={2}>
+                {providers.map(p => <ProviderCard key={p.id} provider={p} open={about === p.id} onAbout={() => setAbout(about === p.id ? null : p.id)} onChoose={() => choose(p)} />)}
+              </FieldGrid>
             </div>
           ) : <Notice>No kind of identity can be added in this app yet.</Notice>
         ) : pending ? (
@@ -159,12 +155,13 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
           <div className="space-y-4">
             <div className="flex items-center gap-3">
               <ProviderMark provider={provider.id} subject={needsSubject ? subject : undefined} />
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0 flex-1 flex flex-wrap items-center gap-x-2 gap-y-1">
                 <p className="text-sm text-text-primary">{provider.label}</p>
-                <p className="text-xs text-text-muted">{provider.category === "provider-attested" ? "A company vouches that you logged in to this account. Your contacts see who vouches." : "Only the holder of this key can make this proof."}</p>
+                <CategoryPill provider={provider} />
               </div>
               <Button disabled={busy} onClick={() => { setProvider(null); setError(""); }}>Back</Button>
             </div>
+            <ProviderAbout provider={provider} testId="add-identity-about" />
             {signers.length > 1 && (
               <label className="block text-xs text-text-muted">Sign with
                 <select data-testid="add-identity-signer" className={`${input} mt-1`} value={signer?.id} disabled={busy} onChange={e => { setSignerId(e.target.value); setError(""); }}>
@@ -216,6 +213,58 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
         {progress && <Notice testId="add-identity-progress">{progress}</Notice>}
         {error && <Notice tone="error" testId="add-identity-error">{error}</Notice>}
       </div>
+    </div>
+  );
+}
+
+const CategoryPill = ({ provider }: { provider: IdentityProofProvider }) => <StatusPill>{provider.category === "provider-attested" ? "Attested by a provider" : "Your own key"}</StatusPill>;
+
+/**
+ * One kind of identity in the picker: its mark, name, category and one line, to be recognized at a glance.
+ * The card starts adding it; "About" opens the explanation in place, for reading without starting.
+ */
+function ProviderCard({ provider: p, open, onAbout, onChoose }: { provider: IdentityProofProvider; open: boolean; onAbout: () => void; onChoose: () => void }) {
+  const aboutId = `add-identity-about-${p.id}`;
+  return (
+    <div role="listitem" data-testid={`add-identity-card-${p.id}`} className="@container rounded-xl border border-border">
+      <div className="flex items-stretch">
+        <button type="button" data-testid={`add-identity-${p.id}`} onClick={onChoose}
+          className="flex flex-1 min-w-0 items-center gap-3 p-3 min-h-11 text-left rounded-l-xl hover:bg-surface-alt cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent">
+          <ProviderMark provider={p.id} />
+          <span className="min-w-0 flex-1">
+            {/* The category beside the name where the card is wide enough for every name, under it otherwise: never a mix. */}
+            <span className="flex flex-col items-start gap-y-1 @md:flex-row @md:items-center @md:gap-x-2">
+              <span className="text-sm text-text-primary truncate max-w-full">{p.label}</span>
+              <CategoryPill provider={p} />
+            </span>
+            <span data-testid="add-identity-summary" className="block text-xs text-text-muted mt-0.5">{p.summary}</span>
+            {p.subject.options && p.subject.options.length > 0 && (
+              <span className="flex flex-wrap gap-1 mt-1.5">{p.subject.options.map(o => <ProviderMark key={o.value} provider={p.id} subject={o.value} small />)}</span>
+            )}
+          </span>
+        </button>
+        <button type="button" data-testid={`add-identity-about-${p.id}`} aria-label={`About ${p.label}`} aria-expanded={open} aria-controls={aboutId} onClick={onAbout}
+          className={`grid place-items-center w-11 min-h-11 shrink-0 rounded-r-xl hover:bg-surface-alt cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent ${open ? "text-accent" : "text-text-muted hover:text-text-primary"}`}>
+          <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>
+        </button>
+      </div>
+      {open && <div id={aboutId} className="border-t border-border px-3 py-3"><ProviderAbout provider={p} /></div>}
+    </div>
+  );
+}
+
+/** What a proof of this kind shows, what it does not, and who could have made it. Above the form and behind "About". */
+function ProviderAbout({ provider: p, testId = "identity-about" }: { provider: IdentityProofProvider; testId?: string }) {
+  return (
+    <div data-testid={testId} className="space-y-1.5 text-xs">
+      <p className="text-text-secondary">{p.description}</p>
+      {p.limits && (
+        <p data-testid="identity-about-limits" className="flex items-start gap-1.5 text-text-muted">
+          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 mt-0.5"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" /></svg>
+          <span>{p.limits}</span>
+        </p>
+      )}
+      <p className="text-text-muted">{p.category === "provider-attested" ? "A company vouches that you logged in to this account. Your contacts see who vouches." : "Only the holder of this key can make this proof."}</p>
     </div>
   );
 }

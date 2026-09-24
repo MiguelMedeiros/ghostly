@@ -138,8 +138,18 @@ export interface IdentityProofProvider<E = unknown> {
   id: string;
   label: string;
   category: IdentityCategory;
-  /** One sentence for the picker: what is proven and how. */
+  /**
+   * One short line for the picker card, how you make it: "Sign once with your Nostr signer". About 40
+   * characters at most; the card shows nothing else beside the name and the category.
+   */
+  summary: string;
+  /** The details view (opened from the card, shown again above the form): what is proven and how, a sentence or two. */
   description: string;
+  /**
+   * What the proof does NOT show, when a contact could easily assume more ("Does not prove a balance, a past
+   * payment, or that you would pay."). Shown with the description, never hidden behind a hover.
+   */
+  limits?: string;
   platforms: readonly IdentityPlatform[];
   subject: SubjectSpec;
   /** How long one proof may last. The person picks up to `maxDays` (never above 400). */

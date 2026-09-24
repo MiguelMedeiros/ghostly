@@ -73,7 +73,9 @@ export const openpgp: IdentityProofProvider<PgpEvidence> = {
   id: "openpgp",
   label: "OpenPGP key",
   category: "self-custodied",
+  summary: "Sign with gpg and paste the result",
   description: "Proves you hold an OpenPGP key: sign the statement with gpg (a YubiKey works too) and paste the result.",
+  limits: "Holding a key does not prove the names or emails in its user IDs.",
   platforms: ["web", "extension", "desktop"],
   subject: {
     label: "Key fingerprint", placeholder: "40 hex characters, from gpg --fingerprint",

@@ -59,6 +59,7 @@ export const nostr: IdentityProofProvider<NostrEvent> = {
   id: "nostr",
   label: "Nostr",
   category: "self-custodied",
+  summary: "Sign once with your Nostr signer",
   description: "Proves you hold a Nostr key: your signer signs the statement, your key never leaves it.",
   platforms: ["web", "extension", "desktop"],
   subject: {
