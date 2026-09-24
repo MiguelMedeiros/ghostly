@@ -10,6 +10,7 @@ import { ContactIdentitiesPanel } from "../components/identities/ContactIdentiti
 import { IdentityStack } from "../components/identities/ContactMarks";
 import { ChatServicesDialog } from "../components/ChatServicesDialog";
 import { PinIcon } from "../components/PinIcon";
+import { Menu, MenuItem, MenuSeparator } from "../components/Menu";
 import { useI18n } from "../contexts/I18nContext";
 import { InviteCard } from "../components/InviteCard";
 import { PairingBanner } from "../components/PairingBanner";
@@ -309,7 +310,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     setConnectionOpen(false);
   }, [sessionId]);
 
-  useOutsideDismiss(menuRef, menuOpen, () => setMenuOpen(false));
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
   useOutsideDismiss(connectionRef, connectionOpen, () => {
     if (connectionRef.current?.contains(document.activeElement)) connectionButtonRef.current?.focus();
     setConnectionOpen(false);
@@ -517,7 +518,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
             <button
               onClick={() => setMenuOpen(!menuOpen)}
               className="p-2 max-md:p-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer"
-              title="Options"
+              title={t("chat.options")}
+              aria-haspopup="true"
+              aria-expanded={menuOpen}
+              data-testid="chat-options"
             >
               <svg
                 width="18"
@@ -534,104 +538,56 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 <circle cx="12" cy="19" r="1" />
               </svg>
             </button>
-            {menuOpen && (
-              <div data-testid="chat-options-menu" className="absolute end-0 top-full mt-1 bg-surface-alt border border-border rounded-lg shadow-lg py-1 min-w-[160px] z-50 animate-fade-in">
-                <button onClick={() => { setSessionPinned(sessionId, !isSessionPinned(sessionId)); setMenuOpen(false); }}
-                  className="w-full px-3 py-2 max-md:min-h-11 text-start text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors">
-                  <PinIcon active={isSessionPinned(sessionId)} />{isSessionPinned(sessionId) ? "Unpin chat" : "Pin chat"}
-                </button>
-                {inviteCode && !pairedReady && (
-                  <button
-                    onClick={() => {
-                      handleCopyCode(inviteCode);
-                      setMenuOpen(false);
-                    }}
-                    className="w-full px-3 py-2 max-md:min-h-11 text-start text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors"
-                  >
-                    {codeCopied ? (
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent">
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
-                    ) : (
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-                      </svg>
-                    )}
-                    {codeCopied ? "Copied!" : "Copy invite code"}
-                  </button>
-                )}
-                {platform?.wallet && platform.getPeer(params.peerPubKeyB64) && (
-                  <button data-testid="chat-payments-open" onClick={() => { setShowPayments(true); setMenuOpen(false); }}
-                    className="w-full px-3 py-2 max-md:min-h-11 text-start text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>
-                    Payments…
-                  </button>
-                )}
-                {paired && platform?.getPeer(params.peerPubKeyB64) && (
-                  <button data-testid="chat-hold-open" onClick={() => { setShowHold(true); setMenuOpen(false); }}
-                    className="w-full px-3 py-2 max-md:min-h-11 text-start text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 8v13H3V8" /><path d="M1 3h22v5H1z" /><path d="M10 12h4" /></svg>
-                    Hold messages…
-                  </button>
-                )}
-                {paired && (
-                  <button data-testid="chat-identities-open" onClick={() => { setShowIdentities(true); setMenuOpen(false); }}
-                    className="w-full px-3 py-2 max-md:min-h-11 text-start text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" /><path d="m9 12 2 2 4-4" /></svg>
-                    Identities…
-                  </button>
-                )}
-                {platform && platform.getPeer(params.peerPubKeyB64) && (
-                  <button data-testid="chat-services-open" onClick={() => { setShowServices(true); setMenuOpen(false); }}
-                    className="w-full px-3 py-2 max-md:min-h-11 text-start text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>
-                    Services…
-                  </button>
-                )}
-                <button
-                  onClick={() => {
-                    forceRefresh();
-                    setMenuOpen(false);
-                  }}
-                  className="w-full px-3 py-2 max-md:min-h-11 text-start text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="23 4 23 10 17 10" />
-                    <polyline points="1 20 1 14 7 14" />
-                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" />
-                    <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" />
-                  </svg>
-                  Refresh
-                </button>
-                <button
-                  onClick={() => {
-                    setShowTechInfo(true);
-                    setMenuOpen(false);
-                  }}
-                  className="w-full px-3 py-2 max-md:min-h-11 text-start text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary flex items-center gap-2 transition-colors"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10" />
-                    <path d="M12 16v-4" />
-                    <path d="M12 8h.01" />
-                  </svg>
-                  Tech Info
-                </button>
-                <div className="border-t border-border my-1" />
-                  <button
-                    onClick={() => {setConfirmDelete(true); setMenuOpen(false);}}
-                    className="w-full px-3 py-2 max-md:min-h-11 text-start text-sm text-danger hover:bg-surface-hover flex items-center gap-2 transition-colors"
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M3 6h18" />
-                      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-                      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-                    </svg>
-                    {t("sidebar.deleteChat")}
-                  </button>
-              </div>
-            )}
+            <Menu testId="chat-options-menu" open={menuOpen} onClose={closeMenu} anchorRef={menuRef}>
+              <MenuItem onClick={() => { setSessionPinned(sessionId, !isSessionPinned(sessionId)); closeMenu(); }} icon={<PinIcon active={isSessionPinned(sessionId)} />}>
+                {isSessionPinned(sessionId) ? t("chat.menu.unpin") : t("chat.menu.pin")}
+              </MenuItem>
+              {inviteCode && !pairedReady && (
+                <MenuItem onClick={() => { handleCopyCode(inviteCode); closeMenu(); }}
+                  icon={codeCopied
+                    ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent"><polyline points="20 6 9 17 4 12" /></svg>
+                    : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>}>
+                  {codeCopied ? t("common.copied") : t("sidebar.copyInvite")}
+                </MenuItem>
+              )}
+              {platform?.wallet && platform.getPeer(params.peerPubKeyB64) && (
+                <MenuItem testId="chat-payments-open" onClick={() => { setShowPayments(true); closeMenu(); }}
+                  icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>}>
+                  {t("chat.menu.payments")}
+                </MenuItem>
+              )}
+              {paired && platform?.getPeer(params.peerPubKeyB64) && (
+                <MenuItem testId="chat-hold-open" onClick={() => { setShowHold(true); closeMenu(); }}
+                  icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 8v13H3V8" /><path d="M1 3h22v5H1z" /><path d="M10 12h4" /></svg>}>
+                  {t("chat.menu.hold")}
+                </MenuItem>
+              )}
+              {paired && (
+                <MenuItem testId="chat-identities-open" onClick={() => { setShowIdentities(true); closeMenu(); }}
+                  icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" /><path d="m9 12 2 2 4-4" /></svg>}>
+                  {t("chat.menu.identities")}
+                </MenuItem>
+              )}
+              {platform && platform.getPeer(params.peerPubKeyB64) && (
+                <MenuItem testId="chat-services-open" onClick={() => { setShowServices(true); closeMenu(); }}
+                  icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>}>
+                  {t("chat.menu.services")}
+                </MenuItem>
+              )}
+              <MenuItem onClick={() => { forceRefresh(); closeMenu(); }}
+                icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" /><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" /></svg>}>
+                {t("chat.menu.refresh")}
+              </MenuItem>
+              <MenuItem onClick={() => { setShowTechInfo(true); closeMenu(); }}
+                icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" /></svg>}>
+                {t("chat.menu.techInfo")}
+              </MenuItem>
+              <MenuSeparator />
+              <MenuItem danger onClick={() => { setConfirmDelete(true); closeMenu(); }}
+                icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>}>
+                {t("sidebar.deleteChat")}
+              </MenuItem>
+            </Menu>
           </div>
         </div>
       </div>
