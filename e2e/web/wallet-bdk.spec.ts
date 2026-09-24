@@ -57,7 +57,7 @@ test("the chat offers on-chain Bitcoin, off until a source is set up", { tag: ["
   await connect(alice, bob);
   await alice.page.getByTestId("payment-button").click({ timeout: 60_000 });
   await expect(alice.page.getByTestId("payment-card-bitcoin")).toBeDisabled();
-  await expect(alice.page.getByTestId("payment-card-bitcoin")).toHaveAttribute("title", /Bitcoin is no source/);
+  await expect(alice.page.getByTestId("payment-card-bitcoin")).toHaveAttribute("title", /Bitcoin is not set up yet/);
 });
 
 test("BDK on regtest: funded, a Send from the wallet, a Send and a Request paid in the chat", { tag: ["@gated", "@feature:wallet.onchain.bdk.send", "@feature:payments.bitcoin.send", "@feature:wallet.onchain.sources"] }, async ({ peer }) => {

@@ -1,4 +1,4 @@
-import { parsePaymentAmount } from "@ghostly/core";
+import { formatPaymentAmount, parsePaymentAmount } from "@ghostly/core";
 import { useOutsideDismiss } from "../hooks/useDismiss";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import type { WalletPlatform } from "../lib/platform";
@@ -39,8 +39,9 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   const peer = useServicesPlatform()?.getPeer(reviewContext?.peer ?? "");
   const who = contact || "your contact";
   /** Why a card cannot be used in this chat: not set up, off here, or off for the contact. */
-  const unavailable = (card: Pick<WalletCard, "name" | "ready" | "balance"> & { id: ChatRail }) => {
-    if (!card.ready) return `${card.name} is ${card.balance.toLowerCase()}`;
+  const unavailable = (card: Pick<WalletCard, "name" | "ready" | "balance" | "status"> & { id: ChatRail }) => {
+    // A card with nothing to connect to yet (no mint, no source) says so; one on its way says where it is ("Ark is connecting…").
+    if (!card.ready) return card.status === "Set up" || card.status === "Shared balance" ? `${card.name} is not set up yet` : `${card.name} is ${card.balance.toLowerCase()}`;
     if (peer?.paymentMethods && !peer.paymentMethods[card.id]) return `${card.name} is off in this chat`;
     if (peer?.dataLink === "open" && peer.capabilities?.methods && !peer.capabilities.methods[card.id]) return `Your contact does not accept ${card.name} in this chat`;
     return undefined;
@@ -163,7 +164,8 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
     finally { setBusy(null); }
   };
 
-  const spendable = method === "cashu" ? balance : method === "arkade" ? state?.ark?.balance : method === "bark" ? state?.bark?.balance : method === "bitcoin" ? state?.bitcoin?.balance : usdt ? Number(usdt.balance) : undefined;
+  // USDT's balance is in the token's smallest units; the amount is typed in whole tokens.
+  const spendable = method === "cashu" ? balance : method === "arkade" ? state?.ark?.balance : method === "bark" ? state?.bark?.balance : method === "bitcoin" ? state?.bitcoin?.balance : usdt ? Number(formatPaymentAmount(usdt.balance, decimals)) : undefined;
   const tooMuch = spendable !== undefined && value > spendable;
   /** What Send and Request do on this card, with this contact. */
   const how = (id: ChatRail) => id === "cashu"
