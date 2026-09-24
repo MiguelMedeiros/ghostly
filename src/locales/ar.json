@@ -122,6 +122,12 @@
       "light": "فاتح",
       "system": "تلقائي"
     },
+    "chatListDensity": "قائمة المحادثات",
+    "chatListDensityDescription": "المساحة التي تشغلها كل محادثة في القائمة",
+    "chatListDensities": {
+      "compact": "مضغوطة",
+      "comfortable": "مريحة"
+    },
     "language": "اللغة",
     "security": "الأمان",
     "lockScreen": "شاشة القفل",

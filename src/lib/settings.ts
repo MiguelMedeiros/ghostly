@@ -4,6 +4,8 @@ import { registryKey } from "./profiles";
 
 export type ColorScheme = "dark" | "light" | "system";
 export type ColorTheme = "classic" | "monochrome" | "cyan" | "purple";
+/** How tall the chat list's rows are: `compact` (name and last message) or `comfortable` (and the contact's key). */
+export type ChatListDensity = "compact" | "comfortable";
 export type Language = "en" | "pt" | "es" | "fr" | "it" | "zh" | "ja" | "ar";
 
 // Legacy support
@@ -30,6 +32,7 @@ export interface AppSettings {
   defaultNickname: string;
   /** Turns animations off, on top of the system's own preference. */
   reduceMotion: boolean;
+  chatListDensity: ChatListDensity;
   /**
    * Whether this client may ask, now and then, whether a newer version was
    * published. The question is a request that says this device runs Ghostly,
@@ -61,6 +64,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   defaultNickname: "",
   reduceMotion: false,
+  chatListDensity: "compact",
   checkForUpdates: true,
 };
 
@@ -92,6 +96,7 @@ export function loadSettings(): AppSettings {
         ...parsed.notifications,
       },
       defaultNickname: parsed.defaultNickname ?? DEFAULT_SETTINGS.defaultNickname,
+      chatListDensity: parsed.chatListDensity === "comfortable" ? "comfortable" : "compact",
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

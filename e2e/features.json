@@ -121,6 +121,8 @@
     {"id":"chats.list.delete-all","wisp":"400","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Delete all chats: they stay deleted, settings stay"},
     {"id":"chats.list.pin","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Pin a chat from the list (no switch), survives reload, unpin from Options"},
     {"id":"chats.list.key-label","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"A contact or member with no name shows as a shortened public key, both ends kept"},
+    {"id":"chats.list.rows","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"A chat's row is two lines: name and time, then the last message with its delivery mark and the unread count; the key is in the tooltip, hover actions move nothing"},
+    {"id":"settings.chat-list-density","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Settings → Appearance: the chat list Compact (default) or Comfortable (with the key line), kept across reloads"},
     {"id":"chat.paired.pair","wisp":"401","kind":"feature","clients":["web","extension","desktop"],"infra":["pkarr-relay"],"title":"Two people pair from an invite: relay discovery, then peer to peer"},
     {"id":"chat.paired.send","wisp":"401","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Send and receive text over the paired data link"},
     {"id":"chat.paired.receipts","wisp":"401","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Delivery and read receipts (ticks)"},

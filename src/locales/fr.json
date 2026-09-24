@@ -122,6 +122,12 @@
       "light": "Clair",
       "system": "Auto"
     },
+    "chatListDensity": "Liste des discussions",
+    "chatListDensityDescription": "La place de chaque discussion dans la liste",
+    "chatListDensities": {
+      "compact": "Compacte",
+      "comfortable": "Confortable"
+    },
     "language": "Langue",
     "security": "Sécurité",
     "lockScreen": "Écran de Verrouillage",

@@ -122,6 +122,12 @@
       "light": "Claro",
       "system": "Auto"
     },
+    "chatListDensity": "Lista de conversas",
+    "chatListDensityDescription": "Quanto espaço cada conversa ocupa na lista",
+    "chatListDensities": {
+      "compact": "Compacta",
+      "comfortable": "Confortável"
+    },
     "language": "Idioma",
     "security": "Segurança",
     "lockScreen": "Tela de Bloqueio",

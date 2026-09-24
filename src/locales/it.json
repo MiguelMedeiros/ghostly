@@ -122,6 +122,12 @@
       "light": "Chiaro",
       "system": "Auto"
     },
+    "chatListDensity": "Elenco chat",
+    "chatListDensityDescription": "Quanto spazio occupa ogni chat nell'elenco",
+    "chatListDensities": {
+      "compact": "Compatto",
+      "comfortable": "Comodo"
+    },
     "language": "Lingua",
     "security": "Sicurezza",
     "lockScreen": "Schermata di Blocco",

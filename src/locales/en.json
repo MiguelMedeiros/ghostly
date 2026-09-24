@@ -122,6 +122,12 @@
       "light": "Light",
       "system": "Auto"
     },
+    "chatListDensity": "Chat list",
+    "chatListDensityDescription": "How much each chat takes in the list",
+    "chatListDensities": {
+      "compact": "Compact",
+      "comfortable": "Comfortable"
+    },
     "language": "Language",
     "security": "Security",
     "lockScreen": "Lock Screen",

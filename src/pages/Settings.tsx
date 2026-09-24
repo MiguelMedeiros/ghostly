@@ -36,7 +36,7 @@ import { deleteAllSessions, listSessions } from "../lib/storage";
 export function Settings() {
   const navigate = useNavigate();
   const { settings, updateColorScheme, updateColorTheme, updateLanguage, updateLockScreen, updateNotifications, updateDefaultNickname,
-    updateReduceMotion, updateCheckForUpdates, randomizeNickname } =
+    updateReduceMotion, updateChatListDensity, updateCheckForUpdates, randomizeNickname } =
     useSettings();
   const { t } = useI18n();
   const { lock } = useLockScreen();
@@ -276,6 +276,16 @@ export function Settings() {
                   </svg>
                 )}
                 {t(`settings.colorSchemes.${option.value}` as const)}
+              </button>
+            ))}
+          </div>
+        </Row>
+        <Row label={t("settings.chatListDensity")} hint={t("settings.chatListDensityDescription")}>
+          <div role="group" aria-label={t("settings.chatListDensity")} data-testid="chat-list-density" className="flex flex-wrap gap-1 bg-surface-alt rounded-lg p-1">
+            {(["compact", "comfortable"] as const).map((density) => (
+              <button key={density} onClick={() => updateChatListDensity(density)} aria-pressed={settings.chatListDensity === density} data-density={density}
+                className={`px-3 min-h-8 rounded-md text-sm whitespace-nowrap transition-colors cursor-pointer ${settings.chatListDensity === density ? "bg-accent text-white" : "text-text-secondary hover:text-text-primary"}`}>
+                {t(`settings.chatListDensities.${density}` as const)}
               </button>
             ))}
           </div>

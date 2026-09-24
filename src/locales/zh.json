@@ -122,6 +122,12 @@
       "light": "浅色",
       "system": "自动"
     },
+    "chatListDensity": "聊天列表",
+    "chatListDensityDescription": "每个聊天在列表中占用的空间",
+    "chatListDensities": {
+      "compact": "紧凑",
+      "comfortable": "宽松"
+    },
     "language": "语言",
     "security": "安全",
     "lockScreen": "锁屏",
