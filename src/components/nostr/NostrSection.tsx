@@ -10,7 +10,7 @@ import { NostrPublishDialog } from "./NostrPublishDialog";
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /**
- * Profile → Nostr: the relays this app asks (shown, so the person knows who learns what), the two
+ * Identities → Nostr: the relays this app asks (shown, so the person knows who learns what), the two
  * optional capabilities (automatic profiles, publication), and for each Nostr key the person proved, their
  * own profile, follows and mute list, with the actions publication allows: post a note, update the profile.
  */

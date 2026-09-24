@@ -38,8 +38,8 @@ test("a Nostr identity is proven once, shared with one contact only, withdrawn, 
   await pair(alice, carol);
   const withCarol = await chatId(alice);
 
-  // Profile → Identities: signed once by the NIP-07 signer, checked before it is saved.
-  await go(alice, "#/profile");
+  // Identities: signed once by the NIP-07 signer, checked before it is saved.
+  await go(alice, "#/identities");
   await alice.page.getByTestId("identity-add").click();
   const add = alice.page.getByTestId("add-identity");
   await add.getByTestId("add-identity-nostr").click();
@@ -107,12 +107,12 @@ test("a Nostr identity is proven once, shared with one contact only, withdrawn, 
   await expect(bob.page.getByTestId("chat-identity-badges")).toHaveCount(0);
 });
 
-test("removing a proof revokes it for a contact the person never reconnects to", { tag: ["@feature:proofs.nostr", "@feature:proofs.revoke"] }, async ({ peer, relay }) => {
+test("removing a proof revokes it for a contact the person never reconnects to", { tag: ["@feature:proofs.nostr", "@feature:proofs.revoke", "@feature:proofs.page"] }, async ({ peer, relay }) => {
   const [alice, carol] = await Promise.all([peer("idr-alice"), peer("idr-carol")]);
   await injectNostrSigner(alice);
   await pair(alice, carol);
   const withCarol = await chatId(alice);
-  await go(alice, "#/profile");
+  await go(alice, "#/identities");
   await alice.page.getByTestId("identity-add").click();
   await alice.page.getByTestId("add-identity-nostr").click();
   await alice.page.getByTestId("add-identity-start").click();
@@ -127,7 +127,7 @@ test("removing a proof revokes it for a contact the person never reconnects to",
   // Carol's app is closed when Alice removes it: the withdrawal cannot reach her, the revocation goes to Pkarr.
   const carolChat = await chatId(carol);
   await carol.page.goto("about:blank");
-  await go(alice, "#/profile");
+  await go(alice, "#/identities");
   await alice.page.getByTestId("identity-proof-remove").click();
   await alice.page.getByTestId("identity-proof-remove-confirm").click();
   await expect(alice.page.getByTestId("identity-proof")).toHaveCount(0);
@@ -147,4 +147,10 @@ test("removing a proof revokes it for a contact the person never reconnects to",
   await expect(received.getByTestId("chat-identity-received-status")).toHaveText("Revoked by its owner");
   await close(carol);
   await expect(carol.page.getByTestId("chat-identity-badges")).toHaveCount(0);
+
+  // The account bar's Identities carries a dot for it until Carol has seen it on the Identities page.
+  await expect(carol.page.getByTestId("account-identities").getByTestId("identities-attention")).toBeVisible();
+  await carol.page.getByTestId("account-identities").click();
+  await expect(carol.page.getByTestId("identity-received").getByTestId("identity-received-status")).toHaveText("Revoked by its owner");
+  await expect(carol.page.getByTestId("identities-attention")).toHaveCount(0);
 });

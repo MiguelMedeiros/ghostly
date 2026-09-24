@@ -22,9 +22,9 @@ async function identities(peer: Peer) {
 const close = (peer: Peer) => peer.page.getByTestId("chat-identities").getByRole("button", { name: "Close" }).click();
 const now = () => Math.floor(Date.now() / 1000);
 
-/** Profile → Nostr: this app asks the test relay and nothing else. */
+/** Identities → Nostr: this app asks the test relay and nothing else. */
 async function useTestRelay(peer: Peer) {
-  await go(peer, "#/profile");
+  await go(peer, "#/identities");
   const relays = peer.page.getByTestId("nostr-relays");
   await expect(relays).toHaveValue("wss://relay.damus.io\nwss://nos.lol");
   await relays.fill(NOSTR_TEST_RELAY);
@@ -122,7 +122,7 @@ test("a contact's profile, follows and notes load only on request from the perso
   await expect(card.getByTestId("nostr-follow")).toHaveCount(0);
   await expect(card.getByTestId("nostr-unfollow")).toHaveCount(0);
   await close(bob);
-  await go(bob, "#/profile");
+  await go(bob, "#/identities");
   await expect(bob.page.getByTestId("nostr-post")).toHaveCount(0);
   await bob.page.getByTestId("nostr-publish").click();
   await expect(bob.page.getByTestId("nostr-publish")).toHaveAttribute("aria-checked", "true");

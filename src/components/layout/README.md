@@ -1,6 +1,6 @@
 # Layout primitives
 
-The pages beside the chat list (Wallet, Services, Settings, Profile) live in a column whose width
+The pages beside the chat list (Wallet, Identities, Services, Settings, Profile) live in a column whose width
 depends on the window **and** on how wide the chat list is dragged: on a desktop it can be as narrow as a
 phone (the sidebar always leaves it at least 320px). So these pages never ask how wide the *window* is
 (`sm:`, `max-md:`); they size themselves from the space they get. Use these instead of ad-hoc flex rows,

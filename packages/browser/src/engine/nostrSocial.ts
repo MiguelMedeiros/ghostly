@@ -299,7 +299,7 @@ export class NostrSocial {
   // -- publication --------------------------------------------------------------------------------
 
   private requirePublication(subject: string) {
-    if (!this.settings.publish) throw new Error("Publishing on Nostr is off. Turn it on in Profile → Nostr first.");
+    if (!this.settings.publish) throw new Error("Publishing on Nostr is off. Turn it on in Identities → Nostr first.");
     if (!this.host.ownSubjects().includes(subject)) throw new Error("No Nostr identity with this key in your profile");
     this.requireOnline();
   }

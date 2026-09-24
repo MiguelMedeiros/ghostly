@@ -12,7 +12,7 @@ import { pair } from "../support/paired";
  */
 
 async function addAccountProof(page: Page, issuer: LocalOidcIssuer, signer = "oidc-email") {
-  await page.evaluate(() => { location.hash = "#/profile"; });
+  await page.evaluate(() => { location.hash = "#/identities"; });
   await page.getByTestId("identity-add").click();
   const add = page.getByTestId("add-identity");
   await add.getByTestId("add-identity-oidc").click();

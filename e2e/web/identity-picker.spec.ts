@@ -1,13 +1,13 @@
 import { expect, test } from "../support/fixtures";
 
 /**
- * Profile → Identities → Add: each kind of identity is a card to recognize at a glance (its own mark, the
+ * Identities → Add: each kind of identity is a card to recognize at a glance (its own mark, the
  * name, the category, one line). What it proves and what it does not is a click away: "About" on the card,
  * without starting, and at the top of the panel the card opens. A caveat never depends on hover.
  */
 test("a kind of identity is recognized at a glance, and its caveats are one click away", { tag: ["@feature:proofs.picker"] }, async ({ peer }) => {
   const alice = await peer("idpk-alice");
-  await alice.page.evaluate(() => { location.hash = "#/profile"; });
+  await alice.page.evaluate(() => { location.hash = "#/identities"; });
   await alice.page.getByTestId("identity-add").click();
   const add = alice.page.getByTestId("add-identity");
 
@@ -54,7 +54,7 @@ test("a kind of identity is recognized at a glance, and its caveats are one clic
 
 test("the picker holds together on a phone: the category goes under the name, the targets stay big", { tag: ["@feature:proofs.picker"] }, async ({ peer }) => {
   const alice = await peer("idpk-phone", { mobile: true });
-  await alice.page.evaluate(() => { location.hash = "#/profile"; });
+  await alice.page.evaluate(() => { location.hash = "#/identities"; });
   await alice.page.getByTestId("identity-add").click();
   const add = alice.page.getByTestId("add-identity");
   const card = add.getByTestId("add-identity-card-ssh-gitlab");

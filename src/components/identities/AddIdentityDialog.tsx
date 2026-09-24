@@ -16,7 +16,7 @@ const VALIDITY = [7, 30, 90, 180, 365];
 interface Pending { draftId: string; statement: IdentityStatement; instructions?: SignerInstructions }
 
 /**
- * Profile → Identities → Add. Renders any provider from its descriptor: pick the kind of identity, the
+ * Identities → Add. Renders any provider from its descriptor: pick the kind of identity, the
  * signer, the subject and how long it lasts; then the signer's flow by its kind. The engine verifies the
  * evidence exactly as a contact will before anything is saved.
  */

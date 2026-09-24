@@ -221,6 +221,10 @@
     "wallet": "Cartera",
     "share": "Compartir",
     "profile": "Perfil",
-    "services": "Servicios"
+    "services": "Servicios",
+    "identities": "Identidades"
+  },
+  "identities": {
+    "attention": "requiere atención"
   }
 }

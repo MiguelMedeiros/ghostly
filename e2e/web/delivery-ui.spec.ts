@@ -67,7 +67,7 @@ test("Join camera permission and cancellation keep paste available and release a
   expect(await countChats(page)).toBe(0);
 });
 
-test("header connection popover, four desktop destinations and resizing preserve a multiline draft", { tag: ["@feature:chat.paired.status", "@feature:chat.paired.draft", "@feature:app.sidebar-resize"] }, async ({peer}, testInfo) => {
+test("header connection popover, five desktop destinations and resizing preserve a multiline draft", { tag: ["@feature:chat.paired.status", "@feature:chat.paired.draft", "@feature:app.sidebar-resize"] }, async ({peer}, testInfo) => {
   const a=await peer("layout-owner"), b=await peer("layout-guest");
   await pair(a,b);
   const box=a.page.getByPlaceholder("Message…");
@@ -92,7 +92,7 @@ test("header connection popover, four desktop destinations and resizing preserve
     const footer=a.page.getByTestId("account-bar");
     expect((await a.page.getByTestId("sidebar").boundingBox())!.width).toBe(width);
     expect((await footer.boundingBox())!.width).toBeGreaterThanOrEqual(width-1);
-    for(const id of ["account-profile","wallet-chip","account-services","account-settings"]) {
+    for(const id of ["account-profile","wallet-chip","account-identities","account-services","account-settings"]) {
       const action=a.page.getByTestId(id); await expect(action).toBeVisible(); expect((await action.boundingBox())!.width).toBeGreaterThan(44);
     }
     const walletLabel = a.page.locator(".account-wallet-label");

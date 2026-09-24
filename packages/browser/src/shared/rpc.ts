@@ -48,7 +48,7 @@ export interface EngineApi {
   preparePeerProof(params: { linkId: string; externalKey: string; adapter?: ProofAdapter }): ProofChallenge;
   submitPeerProof(params: { linkId: string; challenge: ProofChallenge; event: ProofEvidence }): void;
   withdrawPeerProof(params: { linkId: string; adapter?: ProofAdapter }): void;
-  /** Profile → Identities: a fresh proof key and the statement to sign. */
+  /** Identities: a fresh proof key and the statement to sign. */
   beginIdentityProof(params: { provider: string; subject: string; validityDays?: number }): { draftId: string; binding: import("@ghostly/core").IdentityBinding };
   /** Verifies the evidence (as a contact would) and saves the proof. */
   completeIdentityProof(params: { draftId: string; evidence: unknown }): import("./types").IdentityProofView;

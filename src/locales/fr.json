@@ -221,6 +221,10 @@
     "wallet": "Portefeuille",
     "share": "Partager",
     "profile": "Profil",
-    "services": "Services"
+    "services": "Services",
+    "identities": "Identités"
+  },
+  "identities": {
+    "attention": "demande votre attention"
   }
 }

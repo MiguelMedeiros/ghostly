@@ -17,9 +17,9 @@ async function identities(peer: Peer) {
 }
 const close = (peer: Peer) => peer.page.getByTestId("chat-identities").getByRole("button", { name: "Close" }).click();
 
-/** Profile → Identities → Domain, with one of its publish signers, up to the instructions. */
+/** Identities → Domain, with one of its publish signers, up to the instructions. */
 async function startDomainProof(peer: Peer, domain: string, signer: "dns" | "https") {
-  await go(peer, "#/profile");
+  await go(peer, "#/identities");
   await peer.page.getByTestId("identity-add").click();
   const add = peer.page.getByTestId("add-identity");
   await add.getByTestId("add-identity-domain").click();

@@ -30,7 +30,7 @@ describe("ChatIdentitiesDialog", () => {
     expect(screen.getByRole("dialog", { name: "Identities with Alice" })).toBeInTheDocument();
     expect(screen.getByTestId("chat-identities-none")).toHaveTextContent("Nothing shared by this contact.");
     expect(screen.getByTestId("chat-identities-mine")).toHaveTextContent("You have no identities in this profile yet.");
-    await user.click(screen.getByRole("button", { name: "Add in Profile" }));
+    await user.click(screen.getByRole("button", { name: "Add an identity" }));
     expect(onClose).toHaveBeenCalledOnce();
   });
 

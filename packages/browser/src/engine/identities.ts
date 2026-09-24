@@ -54,7 +54,7 @@ const MAX_PROOFS = 32;
 const now = () => Math.floor(Date.now() / 1000);
 
 /**
- * Identity proofs, engine side: the profile's own proofs (made once, in Profile → Identities) and, per
+ * Identity proofs, engine side: the profile's own proofs (made once, on the Identities page) and, per
  * chat, the `IdentityExchange` that shares them with that contact and checks what the contact shares.
  * Providers come from the registry; their `verify` runs here, through the shared checks.
  */

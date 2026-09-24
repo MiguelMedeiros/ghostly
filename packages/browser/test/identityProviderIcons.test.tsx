@@ -6,7 +6,7 @@ import { PROVIDER_ICONS } from '../../../src/components/identities/ProviderIcons
 // covers: proofs.picker
 
 /**
- * Profile → Identities shows one mark per provider (src/components/identities/ProviderIcons.tsx).
+ * Identities shows one mark per provider (src/components/identities/ProviderIcons.tsx).
  * A provider without one would silently fall back to the generic key, so every registered
  * provider, and every OpenID Connect provider offered inside "Account at a provider", has its own.
  */

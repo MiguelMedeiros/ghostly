@@ -221,6 +221,10 @@
     "wallet": "المحفظة",
     "share": "مشاركة",
     "profile": "الملف الشخصي",
-    "services": "الخدمات"
+    "services": "الخدمات",
+    "identities": "الهويات"
+  },
+  "identities": {
+    "attention": "تحتاج إلى انتباه"
   }
 }

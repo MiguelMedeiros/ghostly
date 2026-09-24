@@ -13,7 +13,7 @@ withdrawing per contact, replay protection, storage, expiry, re-checks and the U
 
 ## The model
 
-1. **Made once, in Profile → Identities.** Ghostly creates a fresh Ed25519 **proof key** for the proof (one
+1. **Made once, on the Identities page.** Ghostly creates a fresh Ed25519 **proof key** for the proof (one
    per proof, so two proofs never link to each other; its seed is sealed with a device key like the wallet
    seeds) and builds the **statement**, which names the
    external identity and authorizes that key. The person has the external identity sign or attest it with

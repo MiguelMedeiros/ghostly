@@ -221,6 +221,10 @@
     "wallet": "钱包",
     "share": "分享",
     "profile": "个人资料",
-    "services": "服务"
+    "services": "服务",
+    "identities": "身份"
+  },
+  "identities": {
+    "attention": "需要处理"
   }
 }

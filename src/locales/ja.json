@@ -221,6 +221,10 @@
     "wallet": "ウォレット",
     "share": "共有",
     "profile": "プロフィール",
-    "services": "サービス"
+    "services": "サービス",
+    "identities": "ID証明"
+  },
+  "identities": {
+    "attention": "要確認"
   }
 }

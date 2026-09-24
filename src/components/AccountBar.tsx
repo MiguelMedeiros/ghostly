@@ -5,12 +5,14 @@ import { useI18n } from "../contexts/I18nContext";
 import { useSettings } from "../contexts/SettingsContext";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { THEME_COLOR, currentProfile, themeOf } from "../lib/profiles";
+import { useIdentityAttention } from "../lib/identities";
+import { IdentitiesIcon } from "./identities/IdentitiesIcon";
 
 
 /**
  * The one fixed row at the foot of the sidebar: who you are, what you hold, and
- * the way into everything else. Profile, wallet, services and Settings are all
- * pages beside the list.
+ * the way into everything else. Profile, wallet, identities, services and Settings
+ * are all pages beside the list.
  */
 /** 21 → "21", 1500 → "1.5k", 2_000_000 → "2M": short enough for a badge on an icon. */
 const compact = (sats: number) => new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(sats);
@@ -51,6 +53,27 @@ export function AccountBar() {
     const observer = new ResizeObserver(fit); observer.observe(button); fit();
     return () => observer.disconnect();
   }, [balanceLabel, wallet]);
+  // Five places in a sidebar that can be 280px wide: when any label would be cut, the labels go (the icons,
+  // their tooltips and names stay), all at once so the row stays even. The balance is a value, not a label: it shrinks instead.
+  const navRef = useRef<HTMLElement>(null);
+  const [labelsHidden, setLabelsHidden] = useState(false);
+  useEffect(() => {
+    const nav = navRef.current;
+    const context = nav && document.createElement("canvas").getContext("2d");
+    if (!nav || !context) return;
+    const fit = () => {
+      const labels = [...nav.querySelectorAll<HTMLElement>(".account-label")];
+      const button = labels[0]?.closest("button");
+      if (!button) return;
+      context.font = `10px ${getComputedStyle(button).fontFamily}`;
+      const available = button.clientWidth - 2;
+      setLabelsHidden(labels.some((label) => context.measureText(label.textContent ?? "").width > available));
+    };
+    const observer = new ResizeObserver(fit); observer.observe(nav); fit();
+    return () => observer.disconnect();
+  }, [t]);
+  const identityAttention = useIdentityAttention();
+  const onIdentities = location.pathname === "/identities";
   const lastBalanceRef = useRef({ real: realBalance, test: testBalance, testnet });
   const online = platform?.isOnline() ?? false;
   const name = settings.defaultNickname;
@@ -76,7 +99,7 @@ export function AccountBar() {
 
   return (
     <div ref={panelRoot} className="account-footer relative border-t border-border bg-sidebar-bg" data-testid="account-bar">
-      <nav aria-label="Account" className="account-actions">
+      <nav ref={navRef} aria-label="Account" className="account-actions" data-compact={labelsHidden || undefined}>
         <button
           data-testid="account-profile"
           onClick={() => navigate(onProfile ? "/" : "/profile")}
@@ -131,6 +154,22 @@ export function AccountBar() {
           </button>
         )}
 
+        <button
+          data-testid="account-identities"
+          onClick={() => navigate(onIdentities ? "/" : "/identities")}
+          aria-label={`${t("tabs.identities")}${identityAttention ? `, ${t("identities.attention")}` : ""}`}
+          aria-current={onIdentities ? "page" : undefined}
+          className="account-action text-text-muted hover:text-text-primary hover:bg-surface-alt"
+          title={t("tabs.identities")}
+        >
+          <span className="relative shrink-0 flex">
+            <IdentitiesIcon />
+            {/* A proof expiring or expired, a contact's revoked or no longer confirmed, one of yours refused. */}
+            {identityAttention && <span data-testid="identities-attention" aria-hidden="true" className="nav-dot" />}
+          </span>
+          <span className="account-label">{t("tabs.identities")}</span>
+        </button>
+
         {platform && (
           <button
             data-testid="account-services"
@@ -162,7 +201,7 @@ export function AccountBar() {
             <circle cx="12" cy="12" r="3" />
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
           </svg>
-          <span className="account-label">Settings</span>
+          <span className="account-label">{t("sidebar.settings")}</span>
         </button>
       </nav>
     </div>

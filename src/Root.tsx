@@ -6,6 +6,7 @@ import { Home } from "./pages/Home";
 import { Settings } from "./pages/Settings";
 import { Services } from "./pages/Services";
 import { Profile } from "./pages/Profile";
+import { Identities } from "./pages/Identities";
 import { Wallet } from "./pages/Wallet";
 import { GroupChat } from "./pages/GroupChat";
 import { SettingsProvider } from "./contexts/SettingsContext";
@@ -150,6 +151,7 @@ export function Root() {
                       <Route path="/wallet" element={<Wallet />} />
                       <Route path="/services" element={<Services />} />
                       <Route path="/profile" element={<Profile />} />
+                      <Route path="/identities" element={<Identities />} />
                       <Route path="/share" element={<Navigate to="/services" replace />} />
                     </Route>
                   </Routes>

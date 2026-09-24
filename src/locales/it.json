@@ -221,6 +221,10 @@
     "wallet": "Portafoglio",
     "share": "Condividi",
     "profile": "Profilo",
-    "services": "Servizi"
+    "services": "Servizi",
+    "identities": "Identità"
+  },
+  "identities": {
+    "attention": "richiede attenzione"
   }
 }

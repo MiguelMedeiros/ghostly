@@ -221,6 +221,10 @@
     "wallet": "Wallet",
     "share": "Share",
     "profile": "Profile",
-    "services": "Services"
+    "services": "Services",
+    "identities": "Identities"
+  },
+  "identities": {
+    "attention": "needs attention"
   }
 }
