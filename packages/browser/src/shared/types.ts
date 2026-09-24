@@ -93,6 +93,12 @@ export interface StoredGroup {
   state?: GroupState;
   /** Member key → the contact chat that invited them (or me): the path for courtesy notices. */
   contacts?: Record<string, string>;
+  /**
+   * I left: the group is gone from the list and its history from the device. What is kept is the
+   * edge to the admin, until the admin's commit removing me arrives or `at` is a week old, so
+   * a leave said while the admin was away still reaches it.
+   */
+  left?: { at: number; admin: string };
 }
 
 export interface GroupMemberView {

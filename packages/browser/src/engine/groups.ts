@@ -1,6 +1,6 @@
 import {
   GroupSession, MAX_GROUP_CHAIN, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
-  knockIdentity, knockRecords, mergeKnocks, readKnocks, rosterHas,
+  knockIdentity, knockRecords, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature,
   type GhostRecord, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupState, type Identity, type Roster,
 } from "@ghostly/core";
 import type { GroupEvent, GroupView, StoredGroup, StoredMessage } from "../shared/types";
@@ -54,6 +54,8 @@ const ENTRY_TIMEOUT_MS = 3 * 60_000;
 const REFUSED_FOR_MS = 10 * 60_000;
 /** The welcome is on its way when the admin sends it; the session stays up a little for it to arrive. */
 const ENTRY_LINGER_MS = 20_000;
+/** How long the tombstone of a group I left waits for the admin to hear it. */
+const LEFT_KEPT_MS = 7 * 24 * 60 * 60_000;
 
 /**
  * Every private group this peer is in, or was invited to: their sessions
@@ -95,7 +97,7 @@ export class Groups {
   }
 
   views(): GroupView[] {
-    return [...this.stored.values()].map(group => {
+    return [...this.stored.values()].filter(group => !group.left).map(group => {
       const session = this.sessions.get(group.id);
       const edges = this.host.edges(group.id);
       const contacts = group.contacts ?? {};
@@ -174,15 +176,57 @@ export class Groups {
     return "error" in result ? { error: result.error } : { error: null };
   }
 
+  /**
+   * The member a leaving admin hands the role to: the first other member whose edge is up, so the
+   * role commit reaches someone who can then remove me. None when nobody else is reachable.
+   */
+  successor(groupId: string): string | undefined {
+    const session = this.sessions.get(groupId);
+    if (!session) return undefined;
+    const edges = this.host.edges(groupId);
+    return session.others.find(key => { const edge = edges.get(key); return !!edge && this.host.linkReady(edge); });
+  }
+
+  /**
+   * Leaves, and the group is gone from this device at once: its row, its history and every edge
+   * but the one to the admin, which stays until the admin's commit removing me comes back (or a
+   * week passes), so a leave said while the admin was away still reaches it. An admin with other
+   * members hands the role to one who is online first; alone, the group simply goes.
+   */
   async leave(groupId: string): Promise<void> {
     const session = this.session(groupId);
     const group = this.stored.get(groupId)!;
-    const admin = session.admin;
+    if (session.status !== "active") return this.forget(groupId);
+    if (session.others.length === 0) { await session.leave(); return this.forget(groupId); }
+    if (session.isAdmin) {
+      const next = this.successor(groupId);
+      if (!next) throw new Error("You are the admin and nobody else in the group is online to take over. Try again when a member is, or make someone the admin first.");
+      await session.transferAdmin(next);
+    }
+    const admin = session.admin!;
+    // The history goes with the row; what stays is a tombstone the list does not show. Written
+    // before anyone is told, so the admin's answer cannot arrive before it and be undone by it.
+    group.left = { at: Date.now(), admin };
+    delete group.entry;
+    this.invited.delete(groupId);
+    this.pendingEntries.delete(groupId);
+    this.lastMessageAt.delete(groupId);
+    await this.store.deleteGroup(groupId);
+    await this.store.putGroup(group);
+    for (const linkId of this.host.entries(groupId).values()) await this.host.closeEdge(linkId);
+    this.host.emit();
     await session.leave();
     // The admin may be off; its contact chat, if that is how I got here, hears it too.
-    const contact = admin && group.contacts?.[admin];
+    const contact = group.contacts?.[admin];
     if (contact) { try { this.host.sendOnLink(contact, { t: "group-leave", g: groupId }); } catch { /* the edge already carried it, or nobody is there */ } }
-    await this.event(groupId, "left", "You left the group", Date.now(), session.epoch + 1);
+    this.reconcileEdges(groupId);
+    this.host.emit();
+  }
+
+  /** The admin heard me: the tombstone of a group I left can go. */
+  private async leaveConfirmed(groupId: string): Promise<void> {
+    if (!this.stored.get(groupId)?.left) return;
+    await this.forget(groupId);
   }
 
   async remove(groupId: string, key: string): Promise<void> {
@@ -263,6 +307,10 @@ export class Groups {
     this.ticking = true;
     try {
       for (const group of [...this.stored.values()]) {
+        if (group.left) {
+          if (now - group.left.at > LEFT_KEPT_MS) await this.forget(group.id);
+          continue;
+        }
         if (group.invitation?.entry && !group.state) {
           const waited = now - group.createdAt, every = waited > this.timings.patienceMs ? this.timings.slowKnockMs : this.timings.knockMs;
           if (!this.host.linkReady(group.invitation.linkId) && now - (this.lastKnock.get(group.id) ?? 0) >= every) await this.knock(group, now).catch(() => {});
@@ -423,8 +471,20 @@ export class Groups {
       case "group-removed": {
         const session = this.sessions.get(g);
         const group = this.stored.get(g);
+        if (group?.left && group.contacts?.[group.left.admin] === linkId) { await this.leaveConfirmed(g); return; }
         if (!session || !group || session.status !== "active" || !session.admin || group.contacts?.[session.admin] !== linkId) return;
         await session.markRemoved();
+        return;
+      }
+      case "group-leave": {
+        // A member I invited from my contacts leaves, and says so on our chat too: its edge may be down.
+        const session = this.sessions.get(g);
+        const group = this.stored.get(g);
+        const member = Object.entries(group?.contacts ?? {}).find(([, id]) => id === linkId)?.[0];
+        if (!session?.isAdmin || !member || member === session.myKey) return;
+        // Its edge may have carried the same leave a moment ago: removed once is enough.
+        if (rosterHas(session.roster, member)) await session.remove(member).catch(() => {});
+        try { this.host.sendOnLink(linkId, { t: "group-removed", g }); } catch { /* the commit reaches it on the edge */ }
         return;
       }
     }
@@ -432,11 +492,31 @@ export class Groups {
 
   /** A `group-*` frame on an edge: from the member the edge is pinned to. */
   async handleEdgeFrame(groupId: string, peerKey: string, frame: unknown): Promise<void> {
+    const left = this.stored.get(groupId)?.left;
+    if (left) {
+      // Only one thing matters to a group I left: the admin's commit that removes me.
+      if (this.removesMe(groupId, peerKey, frame)) await this.leaveConfirmed(groupId);
+      return;
+    }
     await this.sessions.get(groupId)?.handle(peerKey, frame);
+  }
+
+  /** A validly signed commit, by the admin I told, that takes me out of the roster. */
+  private removesMe(groupId: string, from: string, raw: unknown): boolean {
+    const group = this.stored.get(groupId), session = this.sessions.get(groupId);
+    if (!group?.left || !session || from !== group.left.admin || !raw || typeof raw !== "object" || (raw as { t?: unknown }).t !== "group-commit") return false;
+    const commit = verifyCommitSignature((raw as { commit?: unknown }).commit);
+    return !!commit && commit.g === groupId && commit.by === group.left.admin && !rosterHas(commit.m, session.myKey);
   }
 
   /** An edge came up with groups on both sides: both sides say where they are. */
   edgeReady(groupId: string, peerKey: string, linkId: string): void {
+    const left = this.stored.get(groupId)?.left;
+    if (left) {
+      // The admin was away when I left: now it hears it.
+      if (peerKey === left.admin) { try { this.host.sendOnLink(linkId, { t: "group-leave", g: groupId }); } catch { /* next time it opens */ } }
+      return;
+    }
     const session = this.sessions.get(groupId);
     if (!session || session.status !== "active" || !rosterHas(session.roster, peerKey)) return;
     try { this.host.sendOnLink(linkId, session.syncFrame()); } catch { /* it closed again */ }
@@ -502,7 +582,8 @@ export class Groups {
     this.reconciling = this.reconciling.then(async () => {
       const session = this.sessions.get(groupId);
       const existing = this.host.edges(groupId);
-      const wanted = session?.status === "active" ? new Set(session.others) : new Set<string>();
+      const left = this.stored.get(groupId)?.left;
+      const wanted = session?.status === "active" ? new Set(session.others) : left ? new Set([left.admin]) : new Set<string>();
       for (const [key, linkId] of existing) if (!wanted.has(key)) await this.host.closeEdge(linkId);
       if (session) for (const key of wanted) if (!existing.has(key)) { try { await this.host.openEdge(session.state, key); } catch { /* tried again next time */ } }
       this.host.emit();
