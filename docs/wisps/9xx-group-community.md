@@ -4,7 +4,7 @@
 |---|---|
 | Number assignment | 9xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.1 |
+| Revision | 0.2 |
 | Updated | 2026-09-24 |
 | Document kind | Profile |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [400](400-chat.md), [401](401-paired-chat.md), [900](900-group-sessions.md), [9xx · Group Mesh](9xx-group-mesh.md) |
@@ -106,9 +106,13 @@ The joiner checks the whole chain from its genesis, including that the genesis p
 
 A member leaves by sending `{ "t": "group-leave", "v": 2, "g", "s", "ls" }` to its hubs and wiping its secrets; any member other than the leaver commits `leave` (the leaver cannot, since the committer chooses the next secret). An admin leaving first hands the role to a member (a `role` commit, preferably to one it is connected to), then leaves like anyone else; the app needs one edge up to carry the request. The group then goes from the leaver's device at once. The admin removes with `remove`; the removed member is sent the commit without a secret. Both give the remaining members a fresh secret, sealed to each and relayed by the hubs; members who were away get it from whoever they meet.
 
+## Metadata
+
+A community group has the mesh profile's metadata (its picture), with the same statement, body, box and rules ([9xx · Group Mesh § Metadata](9xx-group-mesh.md#metadata)). Here the frame carries `"v": 2`, `h` must be on the member's **main branch** at index `e`, and `k` is the **hash** of the commit whose epoch key seals the body (as messages name their commit), not an epoch number. The signer must be the admin after `h` and the admin now, so a statement is the admin's word whichever member admitted whom. A hub relays a statement it took as new, like any other frame, so members who reach each other only through hubs get it. A member let in by another member while the admin is away gets it at its first sync with whoever let it in. A new admin, including the member an admin hands its role to before leaving, signs it again.
+
 ## Compatibility
 
-`group-mesh/1` groups, their links and their frames are unchanged. Community frames carry `v: 2`; a mesh session ignores them, and an app from before this profile never receives one, since it never announces 2. Community groups are not offered as contact invitations at all.
+`group-mesh/1` groups, their links and their frames are unchanged. Community frames carry `v: 2`; an app from before metadata drops `group-meta` and relays none of it, and members that reach each other only through such a hub get the picture at their next sync with a newer member; a mesh session ignores them, and an app from before this profile never receives one, since it never announces 2. Community groups are not offered as contact invitations at all.
 
 ## Bounds
 
@@ -123,7 +127,7 @@ A member leaves by sending `{ "t": "group-leave", "v": 2, "g", "s", "ls" }` to i
 
 ## Conformance
 
-[`packages/core/test/groupCommunity.test.ts`](../../packages/core/test/groupCommunity.test.ts): the genesis binds the id; each kind's authority and roster arithmetic; derived and fresh secrets, and that a newcomer cannot derive an earlier one; a removed member cannot read the next epoch; races between members converge on one branch on every member whatever the order, losing messages stay readable, a losing newcomer is not a member; two admin commits after the same commit fork; stale branches are refused; catch-up of a member away through a removal from a member that is not the author. [`packages/browser/test/community.test.ts`](../../packages/browser/test/community.test.ts): hub election and step-down, lobbies, relaying and deduplication, admission by a member with the admin never online, and restart. [`e2e/web/group-community.spec.ts`](../../e2e/web/group-community.spec.ts): six browsers that never pair, through one relay and real WebRTC: the admin creates the group and closes its app; three people join through the link, let in by a member; everyone reads everyone by name; a member away while another speaks is caught up after the author has left; the admin returns, is caught up and removes someone, who reads nothing after; a late joiner reads only what comes after it.
+[`packages/core/test/groupCommunity.test.ts`](../../packages/core/test/groupCommunity.test.ts): the genesis binds the id; each kind's authority and roster arithmetic; derived and fresh secrets, and that a newcomer cannot derive an earlier one; a removed member cannot read the next epoch; races between members converge on one branch on every member whatever the order, losing messages stay readable, a losing newcomer is not a member; two admin commits after the same commit fork; stale branches are refused; catch-up of a member away through a removal from a member that is not the author. [`packages/browser/test/community.test.ts`](../../packages/browser/test/community.test.ts): hub election and step-down, lobbies, relaying and deduplication, admission by a member with the admin never online, and restart. [`e2e/web/group-community.spec.ts`](../../e2e/web/group-community.spec.ts): six browsers that never pair, through one relay and real WebRTC: the admin creates the group and closes its app; three people join through the link, let in by a member; everyone reads everyone by name; a member away while another speaks is caught up after the author has left; the admin returns, is caught up and removes someone, who reads nothing after; a late joiner reads only what comes after it. The picture: [`groupMetaSessions.test.ts`](../../packages/core/test/groupMetaSessions.test.ts) and [`groupPicture.test.ts`](../../packages/browser/test/groupPicture.test.ts) (six headless engines with hubs, someone let in while the admin is away, a restart), and [`e2e/web/group-picture.spec.ts`](../../e2e/web/group-picture.spec.ts).
 
 ### What was measured
 

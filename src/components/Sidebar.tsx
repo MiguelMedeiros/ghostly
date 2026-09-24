@@ -9,6 +9,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { NewGroupDialog } from "./NewGroupDialog";
 import { groupPath, groupReadAt, groupRouteId } from "../lib/groups";
+import { GroupAvatar } from "./GroupAvatar";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useOutsideDismiss } from "../hooks/useDismiss";
 import { useNavigate, useLocation, Link } from "react-router-dom";
@@ -57,8 +58,8 @@ function GroupRow({ group, active, onOpen }: { group: GroupView; active: boolean
   return (
     <div data-testid="group-row" data-group={group.id} onClick={onOpen}
       className={`flex items-center gap-3 px-3 py-3 transition-colors group cursor-pointer ${active ? "bg-surface-hover" : "hover:bg-surface-alt"}`}>
-      <div className={`relative w-12 h-12 rounded-full flex items-center justify-center shrink-0 text-accent ${active ? "bg-surface-alt" : "bg-surface-hover"}`}>
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+      <div className="relative shrink-0">
+        <GroupAvatar picture={group.picture} size={48} glyph={22} testId="group-row-avatar" className={active ? "bg-surface-alt" : "bg-surface-hover"} />
         {unread && <span className="absolute -top-0.5 -end-0.5 w-3 h-3 rounded-full bg-accent" />}
       </div>
       <div className="flex-1 min-w-0 py-1">
