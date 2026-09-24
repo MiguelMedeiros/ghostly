@@ -96,6 +96,7 @@ fn main() {
             commands::service_respond,
             commands::updater_can_install,
             commands::open_project_link,
+            commands::open_payment_link,
             oidc::oidc_loopback_start,
             oidc::oidc_loopback_wait,
             oidc::oidc_loopback_cancel,

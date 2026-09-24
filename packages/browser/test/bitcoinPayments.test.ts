@@ -18,6 +18,7 @@ function setup(opts: { bitcoin?: boolean; received?: Received } = {}) {
     sendPaymentRequest: vi.fn(async (frame: Record<string, unknown>) => { sent.push({ kind: "req", frame }); }),
     sendPaymentAsk: vi.fn(async (frame: Record<string, unknown>) => { sent.push({ kind: "ask", frame }); }),
     sendPayment: vi.fn(async (frame: Record<string, unknown>) => { sent.push({ kind: "pay", frame }); }),
+    sendPaymentResult: vi.fn((frame: Record<string, unknown>) => { sent.push({ kind: "res", frame }); }),
   };
   const received = vi.fn<Received>(opts.received ?? (async () => undefined));
   const bitcoin = { requestTarget: vi.fn(async () => target()), received };

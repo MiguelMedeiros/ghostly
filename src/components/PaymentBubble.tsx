@@ -1,4 +1,5 @@
-import { decodeBolt11, formatPaymentAmount, parsePaymentAmount } from "@ghostly/core";
+import { decodeBolt11, formatPaymentAmount, parsePaymentAmount, paymentUri } from "@ghostly/core";
+import { PayExternally } from "./PayExternally";
 import type { PaymentReview as Review } from "@ghostly/core";
 import { PaymentReview } from "./PaymentReview";
 import { useEffect, useRef, useState } from "react";
@@ -27,7 +28,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
   const [feeCap,setFeeCap] = useState<string|null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [copied, setCopied] = useState(false);
+  const [external, setExternal] = useState(false);
 
   // Feedback for what happens while you watch: a payment landing, a request coming in, a confirmation.
   const state = payment?.state;
@@ -78,6 +79,15 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
     : !tokenPayment && (payment.mint ? isWorthlessMint(payment.mint) : payment.mints?.length ? payment.mints.every(isWorthlessMint)
       // A request with only an invoice: its chain says (test mints use lnbc, but they come with their mints).
       : !!payment.invoice && (decodeBolt11(payment.invoice)?.network ?? "bitcoin") !== "bitcoin");
+  /** What another wallet can pay: the request's invoice, or the address it carries. Ecash-only requests have nothing to show. */
+  const externalUri = (() => {
+    try {
+      if (payment.target?.method === "bitcoin") return { uri: paymentUri({ kind: "bitcoin", address: payment.target.address, amountSat: payment.amount, lightning: payment.invoice }), value: payment.target.address };
+      if (payment.target?.method === "arkade" || payment.target?.method === "bark") return { uri: paymentUri({ kind: "ark", address: payment.target.address, amountSat: payment.amount }), value: payment.target.address };
+      if (!payment.target && payment.invoice) return { uri: paymentUri({ kind: "lightning", invoice: payment.invoice }), value: payment.invoice };
+    } catch { /* not something another wallet can open */ }
+    return null;
+  })();
   const button =
     "px-3 py-1.5 bg-accent text-[#111b21] rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
   const quiet = "px-3 py-1.5 bg-black/20 hover:bg-black/30 rounded-lg text-xs font-bold transition-colors cursor-pointer";
@@ -141,18 +151,15 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
           })}>
             {busy ? "Preparing…" : "Review payment"}
           </button>
-          {payment.invoice && (
-            <button
-              className={quiet}
-              title="Pay it from another Lightning wallet"
-              onClick={() => {
-                void navigator.clipboard.writeText(payment.invoice!);
-                setCopied(true);
-                setTimeout(() => setCopied(false), 1500);
-              }}
-            >
-              {copied ? "Copied!" : "Copy invoice"}
+          {externalUri && (
+            <button className={quiet} data-testid="payment-external" aria-expanded={external} title="Scan, copy or open it in a wallet that is not Ghostly" onClick={() => setExternal((open) => !open)}>
+              {external ? "Hide" : "Pay with another wallet"}
             </button>
+          )}
+          {external && externalUri && (
+            <PayExternally uri={externalUri.uri} value={externalUri.value} testId="payment-external" size={128}
+              note={`Paid from any ${payment.target?.method === "bitcoin" ? "Bitcoin" : payment.target ? "Ark" : "Lightning"} wallet. Your contact's wallet marks it paid once it sees the money${payment.target?.method === "bitcoin" ? ", after one confirmation" : ""}.`}
+              onPaid={() => wallet.checkPayment(peerPubKey, payment.id)} />
           )}
         </div>
       )}

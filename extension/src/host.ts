@@ -25,6 +25,11 @@ export const extensionHost: BrowserHost = {
   // Chrome's own prompt, and only from a user gesture.
   requestLocalAccess: (originPattern) => chrome.permissions.request({ origins: [originPattern] }),
 
+  async openPaymentLink(uri) {
+    const reply = await chrome.runtime.sendMessage({ target: "background", type: "open-payment-link", uri } satisfies RuntimeMessage);
+    if (!reply?.ok) throw new Error(reply?.error ?? "Could not open a wallet");
+  },
+
   async openService(peerPubKeyZ32, serviceId) {
     const reply = await chrome.runtime.sendMessage({
       target: "background",

@@ -17,6 +17,7 @@ function setup(opts: { bark?: boolean; received?: (address: string, amount: numb
     sendPaymentRequest: vi.fn(async (frame: Record<string, unknown>) => { sent.push({ kind: "req", frame }); }),
     sendPaymentAsk: vi.fn(async (frame: Record<string, unknown>) => { sent.push({ kind: "ask", frame }); }),
     sendPayment: vi.fn(async (frame: Record<string, unknown>) => { sent.push({ kind: "pay", frame }); }),
+    sendPaymentResult: vi.fn((frame: Record<string, unknown>) => { sent.push({ kind: "res", frame }); }),
   };
   let n = 0;
   const received = vi.fn(opts.received ?? (async () => undefined));

@@ -4,8 +4,8 @@
 |---|---|
 | Candidate number | 200; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-20 |
+| Revision | 0.2 |
+| Updated | 2026-09-24 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [03](03-capabilities.md), [100](100-transports.md) |
 | Implementation | Existing payment frames; generic integration proposed |
@@ -55,6 +55,18 @@ reserved. A payment is settled after one confirmation; a transaction whose input
 failed. There is no chat endpoint for on-chain payments yet: requests, fee policy for small amounts,
 confirmation targets, RBF and reorg handling must be decided before one is proposed.
 
+## Paid from another wallet
+
+A request's endpoint (an invoice, an address) is shown to the payer as a QR code, text and a `lightning:` or
+`bitcoin:` URI (BIP 21, with `lightning=` when both exist and `ark=` for an Ark address), so any wallet can
+pay it. Settlement stays with the payee: its own wallet must see the money (the invoice paid at its source, a
+confirmed transaction on the address, a virtual output on the Ark address), then it marks the request paid and
+sends `pay-res ok`. The payer's client marks its copy paid on that result only, never on the person's word.
+A `pay` frame without a receipt (the request's own invoice, or the payload `{"check":true}` for an address)
+means "I paid it: look now"; the payee bounds how often it looks and answers `ok` again for a request already
+paid. Opening the URI is the client's platform's job (desktop and extension hand it to the system); copy and
+the code are the fallback.
+
 ## Compatibility, privacy and open decisions
 
 Preserve legacy frames/endpoint vocabulary, inspired by Paykit; do not claim Paykit transport integration. Payments and tokens MUST NOT be placed in DHT records or group broadcasts. Group context may identify a payee, but actual payment remains a specifically authorized exchange. Choose generic wallet interface, cancellation/expiry and receipt evidence semantics before Proposed. On-chain, Ark and Spark are possible future extensions without reserved numbers here.
@@ -65,4 +77,4 @@ Disjoint methods, malformed decimal amounts, mismatched request/payee, expired r
 
 ## References
 
-[Payment vocabulary](../../packages/core/src/payments.ts), [frames](../../packages/core/src/frames.ts), [application payment coordinator](../../packages/browser/src/engine/payments.ts), [Cashu](201-cashu.md), [Lightning](203-lightning.md), [wallet providers](../../packages/browser/src/engine/paymentAdapters/PROVIDERS.md).
+[Payment vocabulary](../../packages/core/src/payments.ts), [frames](../../packages/core/src/frames.ts), [application payment coordinator](../../packages/browser/src/engine/payments.ts), [Cashu](201-cashu.md), [Lightning](203-lightning.md), [Lightning addresses](205-lnurl.md), [payment URIs](../../packages/core/src/paymentUri.ts), [wallet providers](../../packages/browser/src/engine/paymentAdapters/PROVIDERS.md).

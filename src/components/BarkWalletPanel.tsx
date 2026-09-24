@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { PaymentReview as Review } from "@ghostly/core";
+import { paymentUri, type PaymentReview as Review } from "@ghostly/core";
 import type { WalletPlatform, WalletState } from "../lib/platform";
 import { PaymentReview } from "./PaymentReview";
 import { BackupRows } from "./wallet/BackupRows";
@@ -42,7 +42,7 @@ export function BarkWalletPanel({ wallet, state }: { wallet: WalletPlatform; sta
    <Actions value={action} onChange={setAction} />
    {action === "receive" && <div className="bg-surface rounded-xl p-4 space-y-4 animate-fade-in">
     <Segmented label="Receive on" value={via} onChange={setVia} options={[{ value: "ark", label: "Bark (instant)" }, { value: "onchain", label: "Bitcoin on-chain" }]} />
-    {via === "ark" ? <Address value={bark.address} testId="bark-address" note="From a Bark wallet on the same server. An Arkade wallet cannot pay it." />
+    {via === "ark" ? <Address value={bark.address} uri={bark.address ? paymentUri({ kind: "ark", address: bark.address }) : undefined} testId="bark-address" note="From a Bark wallet on the same server. An Arkade wallet cannot pay it." />
      : <Address value={bark.onchainAddress} qr={bark.onchainAddress ? `bitcoin:${bark.onchainAddress}` : undefined} testId="bark-onchain-address" note="Send from any Bitcoin wallet, then move it into Ark once it confirms." />}
     {!!bark.onchain && <div className="flex items-center gap-3 rounded-xl bg-yellow-500/10 px-3 py-2" data-testid="bark-onchain">
      <p className="flex-1 text-xs text-yellow-500">{bark.onchain.toLocaleString()} {unit} on-chain, not in Ark yet. Moving them is an on-chain transaction: its fee comes off.</p>

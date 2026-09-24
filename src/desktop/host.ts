@@ -110,6 +110,8 @@ export function createDesktopHost(version: string) {
     node: { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, transport: tauriTransport, pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke },
     onServer: serveServiceWindows,
     oidc: desktopOidc,
+    // A WebView cannot hand a lightning: or bitcoin: link to the system; Rust does, for those two schemes only.
+    openPaymentLink: (uri) => invoke("open_payment_link", { url: uri }),
     // There is nothing to ask: the user typed the address, and Rust only ever reaches loopback.
     requestLocalAccess: async () => true,
     async openService(peerPubKeyZ32, serviceId) {

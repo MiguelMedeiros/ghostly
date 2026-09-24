@@ -49,6 +49,10 @@ export const servicesPlatform: ServicesPlatform | null = {
     if (link) void engine.call("connect", { linkId: link.id }).catch(() => {});
   },
   openService: (peerPubKeyZ32, serviceId) => getBrowserHost().openService(peerPubKeyZ32, serviceId),
+  openPaymentLink(uri) {
+    const open = getBrowserHost().openPaymentLink;
+    return open ? open(uri) : null;
+  },
   get features() {
     return getBrowserHost().features;
   },
@@ -142,7 +146,14 @@ export const servicesPlatform: ServicesPlatform | null = {
     bitcoinClearSource: () => engine.call("bitcoinClearSource"),
     bitcoinReceiveAddress: () => engine.call("bitcoinReceiveAddress"),
     bitcoinRefresh: () => engine.call("bitcoinRefresh"),
-    payQuote: async (quote, mint) => (await engine.call("walletPayQuote", { quote, mint })).paid,
+    payQuote: async (quote, mint, note) => (await engine.call("walletPayQuote", { quote, mint, note })).paid,
+    resolveLightningAddress: (text) => engine.call("lnurlResolve", { text }),
+    lightningAddressInvoice: (id, amount, comment) => engine.call("lnurlInvoice", { id, amount, comment }),
+    async checkPayment(peerPubKeyZ32, paymentId) {
+      const link = engine.linkByPeer(peerPubKeyZ32);
+      if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
+      await engine.call("checkPayment", { linkId: link.id, paymentId });
+    },
     receiveToken: async (token) => (await engine.call("walletReceiveToken", { token })).amount,
     inspectCashu: async (text) => (await engine.call("walletInspectCashu", { text })).inspection,
     exportTokens: () => engine.call("walletExport"),

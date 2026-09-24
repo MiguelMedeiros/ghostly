@@ -143,6 +143,16 @@ export class ArkadeAdapter implements PaymentAdapter<ArkPrepared> {
     }
     return {txid:p.txid,settled:await this.verifyReceipt(p.txid,p.address,p.amount)};
   }
+  /**
+   * A virtual output paying `address` at least `amount`, made after `since` and none of `claimed`: how a
+   * request paid from another Ark wallet is seen, with no receipt from the payer.
+   */
+  async received(address:string,amount:number,since:number,claimed:ReadonlySet<string>):Promise<string|undefined> {
+    const destination=ArkAddress.decode(address);
+    const scripts=[hex(destination.pkScript),hex(destination.subdustPkScript)];
+    const {vtxos}=await this.indexer.getVtxos({scripts});
+    return vtxos.find(v=>/^[a-f0-9]{64}$/.test(v.txid) && v.value>=amount && scripts.includes(v.script) && !claimed.has(v.txid) && v.createdAt.getTime()>=since-60_000)?.txid;
+  }
   async verifyReceipt(txid:string,address:string,amount:number):Promise<boolean> {
     if(!/^[a-f0-9]{64}$/.test(txid))return false;
     const destination=ArkAddress.decode(address);

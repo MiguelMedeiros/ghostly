@@ -153,6 +153,41 @@ wallet is in the page. Connecting calls `enable()` (the wallet's own approval pr
   lookup either finds the payment paid or leaves it pending; without `lookupInvoice` an unknown payment stays
   unknown, and the Lightning card says to check it in the wallet itself.
 
+## Paying from another wallet
+
+Every request a chat carries, and every invoice or address the Wallet page shows to be paid on, can be paid
+by a wallet that is not Ghostly: the payer sees a QR code, the text to copy and a `lightning:` / `bitcoin:`
+link (`packages/core/src/paymentUri.ts`, the `PayExternally` component). Settlement is never taken from the
+payer: the payee's own source decides, the same way it does when the payer pays through Ghostly:
+
+| Rail | The payee sees it paid through | Then |
+|---|---|---|
+| Lightning (`btc-lightning-bolt11`) | its Lightning source's `invoiceStatus` (journaled `in` op), or the Cashu wallet's own mint quotes | the request is `settled` and a `pay-res ok` goes to the payer |
+| On-chain (`btc-onchain/1`) | `OnchainProvider.received(address)` (or `history` with the payer's txid hint), one confirmation | same |
+| Ark (`btc-arkade/1`) | the indexer's virtual outputs on the request's address (`ArkadeAdapter.received`) | same |
+| Bark (`btc-bark/1`) | the Bark wallet's receives on the request's address | same |
+
+The payer's copy of the request settles only on that `pay-res` from the payee, never on its own word.
+"I paid" sends a `pay` frame with no receipt (the invoice itself, or `{"check":true}` for an address) that
+makes the payee's app ask its source now: bounded to one look every few seconds per request, and answered
+again with `ok` when the request was already paid. A source without `lookup` still cannot see an invoice
+paid, as before.
+
+Opening the link is the platform's job where a plain link cannot do it: the desktop app's `open_payment_link`
+command (`lightning:` and `bitcoin:` only), the extension's background page (`chrome.tabs.create`). Copy and
+the QR code are always there as the fallback.
+
+## Lightning addresses and LNURL-pay
+
+Paying `name@domain` (LUD-16) or an `lnurl1…` / `lnurlp://` (LUD-01, LUD-17) is resolving a `payRequest`
+(LUD-06) and paying the invoice it hands out through the **active Lightning source**, with the same review as
+any invoice. The parsing and every check live in `packages/core/src/lnurl.ts`; `LightningService.resolveDestination`
+and `destinationInvoice` do the fetching (bounded, no credentials) and keep a resolution while the amount is
+chosen. The person is told which domain learns of the request before anything is fetched. The invoice must
+be for the exact amount and commit to the metadata shown (`h` = sha256 of it, or the metadata as its
+description). In a browser the service must allow CORS; the error names the domain when it does not.
+Receiving on a Lightning address needs a server the person runs: not provided. See [WISP 205](../../../../../docs/wisps/205-lnurl.md).
+
 ## Testing
 
 - Unit: the fakes in [providers/testing.ts](providers/testing.ts) (`FakeLightningProvider`,

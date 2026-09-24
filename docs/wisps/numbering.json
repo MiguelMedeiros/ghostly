@@ -135,6 +135,15 @@
     "numberAssignment": "defined"
   },
   {
+    "oldId": "205",
+    "id": "205",
+    "oldFile": "205-lnurl.md",
+    "file": "205-lnurl.md",
+    "kind": "Adapter",
+    "displayNumber": "205",
+    "numberAssignment": "defined"
+  },
+  {
     "oldId": "09",
     "id": "300",
     "oldFile": "09-peer-proofs.md",

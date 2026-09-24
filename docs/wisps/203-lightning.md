@@ -4,8 +4,8 @@
 |---|---|
 | Candidate number | 203; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.2 |
-| Updated | 2026-09-23 |
+| Revision | 0.3 |
+| Updated | 2026-09-24 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [200](200-payments.md) |
 | Implementation | Existing invoice integration; Lightning sources (the Cashu mints by default) |
@@ -37,6 +37,22 @@ active source; the wire format does not change.
   request was paid; the request then stays pending on the payee's side.
 
 Implementation guide: [PROVIDERS.md](../../packages/browser/src/engine/paymentAdapters/PROVIDERS.md).
+
+## Paid from another wallet
+
+An invoice a request carries can be paid by any Lightning wallet: the payer's client shows it as a QR code,
+as text and as a `lightning:` link, and nothing more is required of the payer's client. The payee's source
+sees the invoice paid (`invoiceStatus`, or the Cashu wallet's own quote), settles the request and sends
+`pay-res ok`; only then does the payer's copy read Paid. A `pay` frame carrying the request's own invoice and
+no receipt is "I paid it: look now": the payee asks its source at once (bounded), and repeats the `ok` for a
+request already paid. A payer's statement is never settlement. The same holds for the on-chain, Ark and Bark
+requests of [200](200-payments.md#paid-from-another-wallet).
+
+## Lightning addresses
+
+Paying a Lightning address or an LNURL is resolving it to an invoice and paying that invoice through the
+active source, under every rule above. What is checked, and what is not offered (receiving on an address), is
+[205](205-lnurl.md).
 
 ## Candidate adapter
 

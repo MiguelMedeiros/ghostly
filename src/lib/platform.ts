@@ -123,6 +123,22 @@ export interface ChatPayment {
   lightningPending?: boolean;
 }
 
+/** A Lightning address or LNURL, resolved: what the person sees before choosing an amount (whole sats). */
+export interface LightningAddressInfo {
+  id: string;
+  kind: "address" | "lnurl";
+  text: string;
+  /** The host that learned of the request. */
+  domain: string;
+  /** The host the invoice comes from, when it is another. */
+  callbackDomain: string;
+  minSat: number;
+  maxSat: number;
+  description: string;
+  /** How long a comment may be; 0 when none is taken. */
+  commentAllowed: number;
+}
+
 /** What a pasted piece of ecash says about itself, read without contacting any mint. */
 export type CashuInspection =
   | { kind: "token"; amount: number; unit: string; mint: string; memo?: string; accepted: boolean }
@@ -175,8 +191,17 @@ export interface WalletPlatform {
   /** An invoice from the active Lightning source; `via: "cashu"` asks the Cashu mints whatever the source. */
   receiveLightning(amount: number, via?: "cashu"): Promise<{ invoice: string; expiresAt: number | null; paymentHash?: string; source?: string }>;
   quoteInvoice(invoice: string, via?: "cashu"): Promise<{ quote: string; mint: string; amount: number; feeReserve: number; source?: string }>;
-  /** True when paid, false while the payment is pending (or its answer lost). Throws when the sats did not leave. */
-  payQuote(quote: string, mint: string): Promise<boolean>;
+  /** True when paid, false while the payment is pending (or its answer lost). Throws when the sats did not leave. `note`: what it was for, kept with the wallet's record. */
+  payQuote(quote: string, mint: string, note?: string): Promise<boolean>;
+  /**
+   * Reads a Lightning address (`name@domain`) or an LNURL and fetches what it asks for. The address's
+   * domain learns of the request: say so before calling.
+   */
+  resolveLightningAddress(text: string): Promise<LightningAddressInfo>;
+  /** The invoice for `amount` sats from a resolved address, checked (its amount, and that it commits to what was shown). */
+  lightningAddressInvoice(id: string, amount: number, comment?: string): Promise<{ invoice: string; successAction?: { tag: "message" | "url"; message?: string; description?: string; url?: string }; note: string }>;
+  /** "I paid it from another wallet": the contact's app looks at its wallet now. Only that wallet marks the request paid. */
+  checkPayment(peerPubKeyZ32: string, paymentId: string): Promise<void>;
   /** Makes a provider this mode's Lightning source, with the values typed in its form. */
   lightningSetSource(providerId: string, values: Record<string, string>): Promise<void>;
   /** Back to the Cashu mints. */
@@ -229,6 +254,11 @@ export interface ServicesPlatform {
   setChatPaymentMethods(peerPubKeyZ32: string, methods: Partial<Record<PaymentMethodName, boolean>>): Promise<void>;
   connect(peerPubKeyZ32: string): void;
   openService(peerPubKeyZ32: string, serviceId: string): Promise<void>;
+  /**
+   * Opens a `lightning:` or `bitcoin:` link in a wallet on this device, where the platform has to do it
+   * itself (the desktop app, the extension). Null where a plain link does it: the caller leaves the link alone.
+   */
+  openPaymentLink(uri: string): Promise<void> | null;
   /** Largest file that can be sent, in bytes. */
   maxFileBytes: number;
   /** Starts sending and returns what to show in the chat. Progress comes through `getTransfer`. */

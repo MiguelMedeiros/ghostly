@@ -31,6 +31,7 @@ function previewText(text: string): string {
   const money = findMoney(text);
   if (!money) return text;
   if (money.type === "cashu") return "⚡ Ecash";
+  if (money.type === "lnurl") return `⚡ ${money.destination.kind === "address" ? "Lightning address" : "LNURL"} · ${money.destination.text}`;
   return money.invoice.amountSat === null ? "⚡ Lightning invoice" : `⚡ Lightning invoice · ${money.invoice.amountSat.toLocaleString()} sats`;
 }
 
