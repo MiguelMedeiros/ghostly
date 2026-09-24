@@ -1,6 +1,6 @@
 import { formatPaymentAmount, parsePaymentAmount } from "@ghostly/core";
 import { useOutsideDismiss } from "../hooks/useDismiss";
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { WalletPlatform } from "../lib/platform";
 import type { PaymentReview as Review } from "@ghostly/core";
 import { PaymentReview } from "./PaymentReview";
@@ -9,6 +9,8 @@ import { CardDeck, WalletCardFace } from "./WalletDeck";
 import { ONCHAIN_FEE_CAP, walletCards, type WalletCard } from "./walletCardData";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { ComposerSheet, ComposerSheetHead, ForwardArrow } from "./ComposerSheet";
+import { CardFlip, FlipTurnButton } from "./deck/Flip";
+import { useCardFlip } from "./deck/useCardFlip";
 import "./payment-composer.css";
 
 interface PaymentComposerProps {
@@ -34,8 +36,6 @@ const RAIL_KEY = "ghostly-payment-rail";
 /** Cashu fees are per proof: a few sats at most. The review shows the real fee before anything is spent. */
 const CASHU_FEE_CAP = 10;
 const RAILS = ["cashu", "lightning", "arkade", "bark", "bitcoin", "usdt"] as const;
-const FLIP_MS = 520;
-const reducedMotion = () => document.documentElement.dataset.reduceMotion === "true" || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /**
  * Popover over the message input, as a wallet: the cards in a stack, one comes up as the pointer passes over it
@@ -62,9 +62,8 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
     try { const saved = localStorage.getItem(RAIL_KEY); if ((RAILS as readonly string[]).includes(saved ?? "") && allowed(saved as ChatRail)) return saved as ChatRail; } catch { /* storage unavailable */ }
     return RAILS.find(allowed) ?? "cashu";
   });
-  // The cards, then the chosen one turned over. Without a wallet to show, only the back.
-  const [side, setSide] = useState<"cards" | "back">(state && wallet ? "cards" : "back");
-  const [flipped, setFlipped] = useState(!(state && wallet));
+  // The cards, then the chosen one turned over (deck/Flip.tsx). Without a wallet to show, only the back.
+  const { side, flipped, turn, turnBack } = useCardFlip(state && wallet ? "cards" : "back");
   const [review, setReview] = useState<Review | null>(null);
   const [amount, setAmount] = useState("");
   const [memo, setMemo] = useState("");
@@ -92,18 +91,9 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   const use = (next: ChatRail) => {
     setRail(next); setError("");
     try { localStorage.setItem(RAIL_KEY, next); } catch { /* storage unavailable */ }
-    setSide("back");
+    turn();
   };
-  useLayoutEffect(() => {
-    if (side !== "back") return;
-    // Mounted face up, then turned: the turn is a transition from the front.
-    let frame = requestAnimationFrame(() => { frame = requestAnimationFrame(() => setFlipped(true)); });
-    return () => cancelAnimationFrame(frame);
-  }, [side]);
-  const backToCards = () => {
-    setFlipped(false); setError("");
-    setTimeout(() => setSide("cards"), reducedMotion() ? 0 : FLIP_MS);
-  };
+  const backToCards = () => { setError(""); turnBack(); };
   // On the cards, the keyboard starts on the chosen one: arrows move, Enter turns it over. Once turned, on the amount
   // (not as the back mounts: it is still face down then, and a hidden field takes no focus).
   const amountRef = useRef<HTMLInputElement>(null);
@@ -111,19 +101,6 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
     if (side === "cards") containerRef.current?.querySelector<HTMLElement>('[role=radio][tabindex="0"]')?.focus({ preventScroll: true });
     else if (flipped) amountRef.current?.focus({ preventScroll: true });
   }, [side, flipped]);
-
-  // The back grows to what it holds (a review is long); the card follows its height as it turns.
-  const backRef = useRef<HTMLDivElement>(null), flipRef = useRef<HTMLDivElement>(null);
-  const [backHeight, setBackHeight] = useState(0), [cardWidth, setCardWidth] = useState(0);
-  useLayoutEffect(() => {
-    const back = backRef.current, box = flipRef.current;
-    if (!back || !box) return;
-    const measure = () => { setBackHeight(back.offsetHeight); setCardWidth(box.clientWidth); };
-    measure();
-    const observer = new ResizeObserver(measure); observer.observe(back); observer.observe(box);
-    return () => observer.disconnect();
-  }, [side]);
-  const cardHeight = Math.round(cardWidth / 1.586);
 
   const send = async () => {
     setError(""); setBusy("send");
@@ -185,7 +162,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
     : `Send asks ${who}'s app for a ${id === "arkade" ? "fresh Ark" : id === "bark" ? "fresh Bark" : id === "bitcoin" ? "fresh Bitcoin" : "USDT"} address, then shows the payment to approve.${id === "bitcoin" ? " Paid once it confirms on-chain." : ""}`;
 
   const back = (
-    <div ref={backRef} className={`payment-back${card ? ` wallet-card-${card.id}` : ""}`} data-testid="payment-back">
+    <div className={`payment-back${card ? ` wallet-card-${card.id}` : ""}`} data-testid="payment-back">
       <div className="payment-back-stripe" aria-hidden="true" />
       <div className="payment-back-body">
         <div className="payment-back-head">
@@ -195,10 +172,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
             <span className="payment-back-meta">{card ? `${card.balance} · with ${who}` : `With ${who}`}</span>
           </span>
           {cards.length > 0 && !review && (
-            <button type="button" className="payment-back-turn" data-testid="payment-change-card" aria-label="Choose another card" title="Choose another card" onClick={backToCards}>
-              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2.5 2v3.2h3.2" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
-              <span>Cards</span>
-            </button>
+            <FlipTurnButton testId="payment-change-card" label="Choose another card" onClick={backToCards} />
           )}
         </div>
         {review && reviewContext ? <PaymentReview key={review.id} review={review} wallet={reviewContext.wallet} onClose={onClose} /> : <>
@@ -233,7 +207,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
       onKeyDown={(e) => e.key === "Escape" && onClose()}
     >
       {side === "cards" ? <>
-        <ComposerSheetHead title={sendUnavailable ? "Request" : "Pay or request"} who={`with ${who}`} before={onBack && <button type="button" className="payment-back-turn" data-testid="payment-recipient-change" aria-label="Choose someone else" title="Choose someone else" onClick={onBack}>
+        <ComposerSheetHead title={sendUnavailable ? "Request" : "Pay or request"} who={`with ${who}`} before={onBack && <button type="button" className="deck-flip-turn" data-testid="payment-recipient-change" aria-label="Choose someone else" title="Choose someone else" onClick={onBack}>
           <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </button>} />
         <CardDeck compact kind="radios" label="Pay with" name="payment-deck" cards={shown} selected={rail} onSelect={(id) => { setRail(id); setError(""); }} onChoose={use}
@@ -243,14 +217,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
           {card ? `Use ${card.name}` : "Continue"}
           <ForwardArrow />
         </button>
-      </> : card ? (
-        <div ref={flipRef} className="payment-flip" data-flipped={flipped} style={{ "--card-w": `${cardWidth}px`, "--card-h": `${cardHeight}px`, height: flipped ? backHeight : cardHeight } as CSSProperties}>
-          <div className="payment-flip-card">
-            <div className={`payment-flip-front wallet-card-${card.id}`} aria-hidden="true"><WalletCardFace card={card} /></div>
-            <div className="payment-flip-back">{back}</div>
-          </div>
-        </div>
-      ) : <div ref={flipRef}>{back}</div>}
+      </> : card ? <CardFlip className="payment" flipped={flipped} tone={`wallet-card-${card.id}`} front={<WalletCardFace card={card} />} back={back} /> : back}
     </ComposerSheet>
   );
 }

@@ -12,9 +12,10 @@ async function received(peer: Peer) {
 }
 
 /**
- * The composer's identity button, beside ⚡: the profile's identities as ID cards, the way ⚡ shows the ways of
- * paying. With none yet, the blank card adds one there, without leaving the chat; the chosen card's panel shares it,
- * and the contact sees it verified; Stop sharing, and the contact sees it is no longer shared.
+ * The composer's identity button, beside ⚡: the profile's identities as ID cards, step for step as ⚡ pays. With none
+ * yet, the blank card adds one there, without leaving the chat. "Use …" turns the chosen card over, as a payment card
+ * turns; its back shares it and the contact sees it verified, the back says so and the card comes back with the seal.
+ * Turned over again, Stop sharing, and the contact sees it is no longer shared.
  */
 test("an identity is added, shared and withdrawn from the chat's composer", { tag: ["@feature:proofs.composer", "@feature:proofs.share", "@feature:proofs.withdraw"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("cid-alice"), peer("cid-bob")]);
@@ -27,7 +28,7 @@ test("an identity is added, shared and withdrawn from the chat's composer", { ta
   await expect(button).toHaveAttribute("aria-label", "Share identities in this chat");
   await button.click();
   const picker = alice.page.getByTestId("composer-identities");
-  await expect(picker.getByRole("tab")).toHaveCount(1);
+  await expect(picker.getByRole("radio")).toHaveCount(1);
   await expect(picker.getByTestId("composer-identity-add")).toContainText("Add your first identity");
   await expect(picker.getByTestId("composer-identities-empty")).toContainText("No identities yet");
   await picker.getByTestId("composer-identities-add").click();
@@ -38,32 +39,48 @@ test("an identity is added, shared and withdrawn from the chat's composer", { ta
   await expect(add).toHaveCount(0);
   expect(await chatId(alice)).toBe(withBob);
 
-  // The new card comes up chosen, not shared yet.
+  // The new card comes up chosen, not shared yet: one line on what Bob would see, and "Use Nostr" in its colour.
   const nostr = picker.getByTestId("composer-identity").filter({ hasText: "Nostr" });
-  await expect(nostr).toHaveAttribute("aria-selected", "true");
+  await expect(nostr).toHaveAttribute("aria-checked", "true");
   await expect(nostr).toContainText("Not shared with");
   await expect(nostr.getByTestId("id-card-shared")).toHaveCount(0);
-  const panel = picker.getByTestId("composer-identity-panel");
-  const status = panel.getByTestId("composer-identity-status");
-  const share = panel.getByTestId("composer-identity-share");
-  await expect(panel).toContainText("Nostr");
-  await expect(status).toHaveText("Not shared");
+  await expect(picker.getByTestId("composer-identity-hint")).toContainText(/will see your Nostr npub1/);
+  const use = picker.getByTestId("composer-identity-use");
+  await expect(use).toHaveText("Use Nostr");
+  await expect(picker.getByTestId("composer-identity-panel")).toHaveCount(0);
 
-  // Share with this chat: Bob's app verifies it, and the card wears the check seal.
-  await expect(share).toHaveText("Share with this chat");
+  // Use turns it over, like a payment card: the back is what Bob sees, and Share with him.
+  await use.click();
+  await expect(picker).toHaveAttribute("data-side", "back");
+  await expect(picker.locator(".composer-identity-flip")).toHaveAttribute("data-flipped", "true");
+  const back = picker.getByTestId("composer-identity-back");
+  const status = back.getByTestId("composer-identity-status");
+  const share = back.getByTestId("composer-identity-share");
+  await expect(back.getByTestId("composer-identity-sees")).toContainText("Nostr");
+  await expect(status).toHaveText("Not shared");
+  await expect(share).toHaveText(/^Share with /);
+  await expect(share).toBeFocused();
+
+  // Share: the back says it is done (briefly: the UI tests check the line), Bob's app verifies it, and the card comes
+  // back wearing the check seal.
   await share.click();
-  await expect(status).toHaveText("Shared · verified by your contact");
+  await expect(picker).toHaveAttribute("data-side", "cards");
   await expect(nostr.getByTestId("id-card-shared")).toBeVisible();
-  await expect(share).toHaveText("Stop sharing");
+  await expect(nostr).toBeFocused();
   await expect(button.getByTestId("composer-identities-count")).toHaveText("1");
   await expect(bob.page.getByTestId("chat-identity-badges")).toBeVisible();
   let bobs = await received(bob);
   await expect(bobs.row).toHaveAttribute("data-status", "verified");
   await bobs.close();
 
-  // From the same picker, still open: Stop sharing.
+  // From the same picker, still open: turned over again, it is shared and verified; Stop sharing.
+  await expect(picker.getByTestId("composer-identity-hint")).toContainText(/ sees your Nostr npub1/);
+  await use.click();
+  await expect(status).toHaveText("Shared · verified by your contact");
+  await expect(back).toContainText("a copy they kept stays");
+  await expect(share).toHaveText("Stop sharing");
   await share.click();
-  await expect(status).toHaveText("Not shared");
+  await expect(picker).toHaveAttribute("data-side", "cards");
   await expect(nostr.getByTestId("id-card-shared")).toHaveCount(0);
   await expect(button.getByTestId("composer-identities-count")).toHaveCount(0);
   await expect(bob.page.getByTestId("chat-identity-badges")).toHaveCount(0);
@@ -95,11 +112,20 @@ test("an identity is added, shared and withdrawn from the chat's composer", { ta
   const sheet = await picker.boundingBox();
   expect(sheet!.x).toBeGreaterThanOrEqual(0);
   expect(sheet!.x + sheet!.width).toBeLessThanOrEqual(390);
-  // The cards fit the sheet, and so does the action under them.
-  for (const part of [nostr, share]) {
+  // The cards fit the sheet, and so does the action under them; turned over, so does its back.
+  for (const part of [nostr, use]) {
     await expect(part).toBeVisible();
     const box = await part.boundingBox();
     expect(box!.x).toBeGreaterThanOrEqual(0);
     expect(box!.x + box!.width).toBeLessThanOrEqual(390);
   }
+  await use.click();
+  await expect(share).toBeFocused();
+  for (const part of [back, share]) {
+    const box = await part.boundingBox();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+  }
+  const card = await picker.boundingBox();
+  expect(card!.y).toBeGreaterThanOrEqual(0);
 });

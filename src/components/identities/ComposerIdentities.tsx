@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
@@ -7,9 +7,11 @@ import { useOutsideDismiss } from "../../hooks/useDismiss";
 import { addableProviders, daysLeft, date, expiringSoon, providerLabel, SHARED_STATUS, useEngineState, useNewProof } from "../../lib/identities";
 import { ComposerSheet, ComposerSheetHead, ForwardArrow } from "../ComposerSheet";
 import { Deck } from "../deck/Deck";
+import { CardFlip, FlipTurnButton } from "../deck/Flip";
+import { useCardFlip } from "../deck/useCardFlip";
 import { AddIdentityDialog } from "./AddIdentityDialog";
 import { AddIdCardFace, IdCardFace, IdCardMark } from "./IdCardFace";
-import { idCard, idCardTone, type IdCardContent } from "./idCard";
+import { idCard, idCardTone, machineLine, type IdCardContent } from "./idCard";
 import { IdentitiesIcon } from "./IdentitiesIcon";
 import { ProviderMark } from "./ProviderMark";
 import "./composer-identities.css";
@@ -40,13 +42,22 @@ export function ComposerIdentityButton({ peerKey, open, onToggle, buttonRef }: {
 /** The last card: a blank one that adds an identity. */
 const ADD = "add";
 type Entry = { id: string; add?: false; proof: IdentityProofView; card: IdCardContent; on: boolean } | { id: typeof ADD; add: true };
+type Proof = Extract<Entry, { add?: false }>;
+/** How long the back says it is done before the card turns face up again, wearing (or no longer) the seal. */
+export const DONE_MS = 1200;
+
+const lower = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
+/** The identity as a sentence says it: "your OpenPGP key …9F04 4120", "your domain example.com". */
+const spoken = (card: IdCardContent) => `your ${card.attested ? "account" : card.provider === "domain" ? "domain" : card.label} ${card.short}`;
 
 /**
- * Which of this profile's identities this chat's contact sees, as the payment picker shows the ways of paying: the
+ * Which of this profile's identities this chat's contact sees, step for step as the payment picker pays: the
  * identities are ID cards in a stack (the Identities page's cards, on the same deck), a check seal on those shared
- * here. The chosen card's panel says what the contact will see and shares it or stops, through the same engine
- * calls as the chat's Identities dialog; the last card adds one without leaving the chat. Removing an identity
- * happens on the Identities page.
+ * here, and under it one line saying what the chosen one shows the contact and one button in its colour, "Use …".
+ * That turns the card over (deck/Flip.tsx, the payment card's turn): its back is what the contact sees and where it
+ * stands in this chat, with Share or Stop sharing, through the same engine calls as the chat's Identities dialog.
+ * Once done the back says so, then the card turns face up again. The last card adds an identity without leaving the
+ * chat; removing or renewing one happens on the Identities page.
  */
 export function ComposerIdentityPicker({ peerKey, contact, onClose, anchorRef }: { peerKey: string; contact: string; onClose: () => void; anchorRef?: RefObject<HTMLElement | null> }) {
   const state = useEngineState();
@@ -57,22 +68,32 @@ export function ComposerIdentityPicker({ peerKey, contact, onClose, anchorRef }:
   const [chosen, setChosen] = useState<string>();
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(""), [error, setError] = useState("");
-  const ref = useRef<HTMLDivElement>(null);
-  const uid = useId();
-  const titleId = `${uid}title`, panel = { id: `${uid}panel`, tabId: (id: string) => `${uid}tab-${id}` };
+  /** What the back last did, said on it until the card turns face up again. */
+  const [done, setDone] = useState<"shared" | "stopped" | null>(null);
+  const { side, flipped, turn, turnBack } = useCardFlip();
+  const ref = useRef<HTMLDivElement>(null), actionRef = useRef<HTMLButtonElement>(null);
   // While an identity is being added, its dialog is the one on top: a click in it does not close the picker.
   useOutsideDismiss(ref, !adding, onClose, anchorRef);
   useNewProof(state, setChosen);
-  // Keys reach the chosen card as the picker opens (and again after adding one: the dialog replaces the sheet while it
-  // is open, since a phone's sheet sits above any dialog); closing gives the focus back to the button that opened it.
+  // On the cards, the keys start on the chosen one (as the picker opens, after adding one, back from its back): the
+  // dialog replaces the sheet while it is open, since a phone's sheet sits above any dialog. Once a card has turned,
+  // on its action (not as the back mounts: a face-down back takes no focus). Closing gives the focus back to the
+  // button that opened it.
   useEffect(() => {
     if (adding) return;
-    (ref.current?.querySelector<HTMLElement>('[role=tab][tabindex="0"]') ?? ref.current)?.focus({ preventScroll: true });
-  }, [adding]);
+    if (side === "cards") (ref.current?.querySelector<HTMLElement>('[role=radio][tabindex="0"]') ?? ref.current)?.focus({ preventScroll: true });
+    else if (flipped) actionRef.current?.focus({ preventScroll: true });
+  }, [adding, side, flipped]);
   useEffect(() => {
     const anchor = anchorRef?.current;
     return () => { if (anchor?.isConnected) anchor.focus({ preventScroll: true }); };
   }, [anchorRef]);
+  useEffect(() => {
+    if (!done) return;
+    const timer = setTimeout(turnBack, DONE_MS);
+    return () => clearTimeout(timer);
+  }, [done, turnBack]);
+  useEffect(() => { if (side === "cards") setDone(null); }, [side]);
   const now = Math.floor(Date.now() / 1000);
   const connected = link?.dataLink === "open" && link.pairing?.status === "ready";
   const unsupported = connected && !ids?.support;
@@ -82,7 +103,7 @@ export function ComposerIdentityPicker({ peerKey, contact, onClose, anchorRef }:
     if (!link || busy) return;
     setBusy(p.id); setError("");
     void engine.call(on ? "withdrawIdentityProof" : "shareIdentityProof", { linkId: link.id, id: p.id })
-      .catch(e => setError(message(e))).finally(() => setBusy(""));
+      .then(() => setDone(on ? "stopped" : "shared"), e => setError(message(e))).finally(() => setBusy(""));
   };
 
   const entries: Entry[] = [
@@ -96,74 +117,111 @@ export function ComposerIdentityPicker({ peerKey, contact, onClose, anchorRef }:
   ];
   const entry = entries.find(e => e.id === chosen) ?? entries[0];
   const tone = (e: Entry) => (e.add ? "id-card-add" : idCardTone({ provider: e.card.provider, subject: e.card.bound, attested: e.card.attested }));
+  const expired = (e: Entry) => !e.add && !e.on && e.proof.expiresAt <= now;
   /** Why this identity cannot be shared here now. Stopping is always possible. */
   const why = (e: Entry) => {
     if (e.add || e.on) return undefined;
-    if (e.proof.expiresAt <= now) return `Expired ${date(e.proof.expiresAt)}`;
+    if (expired(e)) return `Expired ${date(e.proof.expiresAt)}`;
     if (ids?.contactProviders && !ids.contactProviders.includes(e.proof.provider)) return `${contact}’s app cannot verify ${providerLabel(e.proof.provider)} yet`;
     if (unsupported) return `${contact}’s app cannot receive identities yet`;
     if (!ids) return "Connect to this contact first";
     return undefined;
   };
   const select = (id: string) => { setChosen(id); setError(""); };
+  const use = (id: string) => {
+    if (id === ADD) { setAdding(true); return; }
+    setChosen(id); setError(""); setDone(null); turn();
+  };
+  const backToCards = () => { setError(""); turnBack(); };
+  // The card turned over, while it is still there (an identity removed elsewhere meanwhile gives the cards back).
+  const showing = side === "back" && !entry.add ? entry : undefined;
 
   if (adding) return createPortal(<AddIdentityDialog onClose={() => setAdding(false)} />, document.body);
+  const blocked = why(entry);
   return (
-    <ComposerSheet ref={ref} tabIndex={-1} role="dialog" aria-labelledby={titleId} data-testid="composer-identities" className={`composer-identities ${tone(entry)} focus:outline-none max-h-[70dvh] overflow-y-auto`}>
-      <ComposerSheetHead title="Your identities" titleId={titleId} who={`shown to ${contact} only`} />
-      <Deck<Entry> compact cards={entries} selected={entry.id} onSelect={select} onChoose={id => { if (id === ADD) setAdding(true); }}
-        kind="tabs" panel={panel} label="Your identities" name="composer-identity-deck" className="id-deck" size={{ max: 250, share: .62 }}
-        testId={e => (e.add ? "composer-identity-add" : "composer-identity")} blocked={why}
-        face={(e, { after }) => (e.add ? <AddIdCardFace first={mine.length === 0} /> : <IdCardFace card={e.card} after={after} shared={e.on} />)}
-        mark={e => <IdCardMark provider={e.add ? undefined : e.proof.provider} subject={e.add ? undefined : e.card.bound} />}
-        tone={tone} />
-      <div role="tabpanel" id={panel.id} aria-labelledby={panel.tabId(entry.id)} data-testid="composer-identity-panel" className="composer-identity-panel">
-        {entry.add ? <IdentityToAdd first={mine.length === 0} canAdd={canAdd} onAdd={() => setAdding(true)} />
-          : <IdentityToShare entry={entry} contact={contact} now={now} why={why(entry)} busy={busy} status={ids?.shared.find(s => s.id === entry.id)} onToggle={() => toggle(entry.proof, entry.on)} />}
-      </div>
-      {mine.length > 0 && unsupported && <p className="px-1 m-0 text-[11px] text-text-muted" data-testid="composer-identities-unsupported">{contact}’s app cannot receive identities yet.</p>}
-      {(error || ids?.error) && <p role="alert" className="px-1 m-0 text-xs text-danger" data-testid="composer-identities-error">{error || ids?.error}</p>}
-      {mine.length > 0 && <div className="flex items-center justify-between gap-3 px-1 pt-1 border-t border-border">
-        <p className="m-0 text-[11px] text-text-muted">Stopping tells {contact}; a copy they kept stays.</p>
-        <button type="button" data-testid="composer-identities-manage" onClick={manage}
-          className="min-h-10 shrink-0 text-xs text-accent hover:underline cursor-pointer rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Manage identities</button>
-      </div>}
+    <ComposerSheet ref={ref} tabIndex={-1} role="dialog" aria-label="Your identities" data-testid="composer-identities" data-side={showing ? "back" : "cards"}
+      className={`composer-identities ${tone(entry)} focus:outline-none max-h-[70dvh] overflow-y-auto`}>
+      {showing ? <CardFlip className="composer-identity" flipped={flipped} tone={tone(showing)}
+        front={<IdCardFace card={showing.card} shared={showing.on} />}
+        back={<IdentityBack entry={showing} contact={contact} now={now} busy={busy} done={done} error={error} actionRef={actionRef}
+          status={ids?.shared.find(s => s.id === showing.id)} onToggle={() => toggle(showing.proof, showing.on)} onCards={backToCards} />} />
+      : <>
+        <ComposerSheetHead title="Your identities" who={`shown to ${contact} only`} />
+        <Deck<Entry> compact cards={entries} selected={entry.id} onSelect={select} onChoose={use}
+          kind="radios" label="Your identities" name="composer-identity-deck" className="id-deck" size={{ max: 250, share: .62 }}
+          testId={e => (e.add ? "composer-identity-add" : "composer-identity")} blocked={why}
+          face={(e, { after }) => (e.add ? <AddIdCardFace first={mine.length === 0} /> : <IdCardFace card={e.card} after={after} shared={e.on} />)}
+          mark={e => <IdCardMark provider={e.add ? undefined : e.proof.provider} subject={e.add ? undefined : e.card.bound} />}
+          tone={tone} />
+        {entry.add ? <>
+          <p className="composer-sheet-hint" data-testid={mine.length === 0 ? "composer-identities-empty" : undefined}>
+            {mine.length === 0 ? "No identities yet. " : ""}{canAdd ? "Prove that you hold a Nostr key, a domain or an account, then show it to the contacts you choose, one chat at a time." : "No identity can be added on this device."}
+          </p>
+          {canAdd && <button type="button" data-testid="composer-identities-add" className="composer-sheet-action" onClick={() => setAdding(true)}>{mine.length === 0 ? "Add your first identity" : "Add identity"}<ForwardArrow /></button>}
+        </> : <>
+          <p className="composer-sheet-hint" data-testid="composer-identity-hint" data-blocked={blocked ? true : undefined}>
+            {blocked ?? `${contact} ${entry.on ? "sees" : "will see"} ${spoken(entry.card)}, ${lower(entry.card.category)}, ${lower(entry.card.validity)}.`}
+          </p>
+          {expired(entry)
+            ? <button type="button" data-testid="composer-identity-use" data-action="manage" className="composer-sheet-action" onClick={manage}>Manage<ForwardArrow /></button>
+            : <button type="button" data-testid="composer-identity-use" className="composer-sheet-action" disabled={!!blocked} onClick={() => use(entry.id)}>
+              Use {entry.card.attested ? "this account" : entry.card.label}<ForwardArrow />
+            </button>}
+        </>}
+        {ids?.error && <p role="alert" className="px-1 m-0 text-xs text-danger" data-testid="composer-identities-error">{ids.error}</p>}
+        {mine.length > 0 && <button type="button" data-testid="composer-identities-manage" onClick={manage} className="composer-identities-manage">Manage identities</button>}
+      </>}
     </ComposerSheet>
   );
 }
 
-/** The chosen identity's panel: what the contact sees, where it stands in this chat, and Share or Stop sharing. */
-function IdentityToShare({ entry, contact, now, why, busy, status, onToggle }: { entry: Extract<Entry, { add?: false }>; contact: string; now: number; why?: string; busy: string; status?: Shared; onToggle: () => void }) {
+/**
+ * The chosen identity's card, turned over: what the contact sees (its mark, the identity, who stands behind it and
+ * until when), where it stands in this chat, and Share or Stop sharing. Once done, a line saying so in its place.
+ */
+function IdentityBack({ entry, contact, now, busy, done, error, status, actionRef, onToggle, onCards }: {
+  entry: Proof; contact: string; now: number; busy: string; done: "shared" | "stopped" | null; error: string; status?: Shared;
+  actionRef: RefObject<HTMLButtonElement | null>; onToggle: () => void; onCards: () => void;
+}) {
   const { proof: p, card, on } = entry;
-  const hint = why ?? (status && status.status !== "withdrawn" ? `${SHARED_STATUS[status.status]}${status.status === "rejected" && status.error ? `: ${status.error}` : ""}` : "Not shared");
+  const state = status && status.status !== "withdrawn" ? `${SHARED_STATUS[status.status]}${status.status === "rejected" && status.error ? `: ${status.error}` : ""}` : "Not shared";
   const warn = p.expiresAt > now && expiringSoon(p, now) ? `Expires in ${daysLeft(p.expiresAt, now)} ${daysLeft(p.expiresAt, now) === 1 ? "day" : "days"}` : "";
-  const tone = status?.status === "rejected" || why ? "text-danger" : status?.status === "accepted" && on ? "text-accent" : "text-text-muted";
+  const tone = status?.status === "rejected" ? "text-danger" : status?.status === "accepted" && on ? "text-accent" : undefined;
   const working = busy === p.id;
-  return (<>
-    <div className="composer-identity-sees">
-      <span className="composer-identity-sees-label">What {contact} sees</span>
-      <span className="composer-identity-sees-value"><ProviderMark provider={p.provider} subject={card.bound} small />
-        <span className="min-w-0 truncate"><span className="font-medium text-text-primary">{card.label}</span> <span className="font-mono text-xs" title={card.subject}>{card.short}</span></span></span>
-      <span className="composer-identity-sees-meta">{card.category} · {card.validity}</span>
-    </div>
-    <p className="composer-sheet-hint" data-blocked={why ? true : undefined}>
-      <span data-testid="composer-identity-status" className={why ? undefined : tone}>{hint}</span>
-      {warn && <span data-testid="composer-identity-expiring" className="text-amber-500"> · {warn}</span>}
-    </p>
-    {/* While a call runs the button stays focusable (a disabled button would drop the keyboard's focus). */}
-    <button type="button" data-testid="composer-identity-share" data-variant={on ? "secondary" : undefined} className="composer-sheet-action"
-      disabled={!!why} aria-disabled={!!busy || undefined} aria-busy={working || undefined} onClick={onToggle}>
-      {working ? (on ? "Stopping…" : "Sharing…") : on ? "Stop sharing" : <>Share with this chat<ForwardArrow /></>}
-    </button>
-  </>);
-}
-
-/** The blank card's panel: what adding an identity is, and the way to it. */
-function IdentityToAdd({ first, canAdd, onAdd }: { first: boolean; canAdd: boolean; onAdd: () => void }) {
   return (
-    <div className="grid gap-2.5" data-testid={first ? "composer-identities-empty" : undefined}>
-      <p className="composer-sheet-hint">{first ? "No identities yet. " : ""}{canAdd ? "Prove that you hold a Nostr key, a domain or an account, then show it to the contacts you choose, one chat at a time." : "No identity can be added on this device."}</p>
-      {canAdd && <button type="button" data-testid="composer-identities-add" className="composer-sheet-action" onClick={onAdd}>{first ? "Add your first identity" : "Add identity"}<ForwardArrow /></button>}
+    <div className="id-card-back" data-testid="composer-identity-back">
+      <div className="id-card-back-band">
+        <span className="id-card-back-title">What {contact} sees</span>
+        {!done && <FlipTurnButton testId="composer-identity-change-card" label="Choose another identity" onClick={onCards} />}
+      </div>
+      <div className="id-card-back-body">
+        <div className="id-card-back-sees" data-testid="composer-identity-sees">
+          <ProviderMark provider={p.provider} subject={card.bound} />
+          <span className="id-card-back-who">
+            <span className="id-card-back-name">{card.label}{card.name ? ` · ${card.name}` : ""}</span>
+            <span className="id-card-back-subject" title={card.subject}>{card.short}</span>
+            <span className="id-card-back-meta">{card.category} · {card.validity}</span>
+          </span>
+        </div>
+        {/* Once done, the line saying so stands for it: the engine's state catches up a moment later. */}
+        {!done && <p className="id-card-back-state">
+          <span data-testid="composer-identity-status" className={tone}>{state}</span>
+          {warn && <span data-testid="composer-identity-expiring" className="text-amber-500"> · {warn}</span>}
+        </p>}
+        {done ? <p role="status" className="id-card-back-done" data-testid="composer-identity-done">
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          {done === "shared" ? `Shared with ${contact}` : `${contact} no longer sees it`}
+        </p> : <>
+          {/* While a call runs the button stays focusable (a disabled button would drop the keyboard's focus). */}
+          <button ref={actionRef} type="button" data-testid="composer-identity-share" data-variant={on ? "secondary" : undefined} className="composer-sheet-action"
+            aria-disabled={!!busy || undefined} aria-busy={working || undefined} onClick={onToggle}>
+            {working ? (on ? "Stopping…" : "Sharing…") : on ? "Stop sharing" : <>Share with {contact}<ForwardArrow /></>}
+          </button>
+          {on && <p className="id-card-back-note">Stopping tells {contact}; a copy they kept stays.</p>}
+        </>}
+        {error && <p role="alert" className="m-0 text-xs text-danger" data-testid="composer-identities-error">{error}</p>}
+      </div>
+      <span className="id-card-mrz id-card-back-mrz" aria-hidden="true">{machineLine(card.label, card.subject)}</span>
     </div>
   );
 }
