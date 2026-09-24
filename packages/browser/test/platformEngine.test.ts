@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BrowserHost, EngineConnection } from "../src/host";
 import type { EngineEvent, RpcRequest, RpcResponse } from "../src/shared/rpc";
 import type { EngineState } from "../src/shared/types";
+// covers: extension.engine
 
 /**
  * The page's side of the RPC: a scripted host stands in for the extension port

@@ -1,6 +1,7 @@
 import { IDBFactory } from "fake-indexeddb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StoredLink, StoredMessage } from "../src/shared/types";
+// covers: storage.indexeddb, app.clear-data, profiles.create
 
 /**
  * The peer's IndexedDB database with real IndexedDB semantics (fake-indexeddb):

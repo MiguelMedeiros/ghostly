@@ -5,6 +5,7 @@ import { setBrowserHost, type BrowserHost } from "../src/host";
 import { fileStore } from "../src/shared/idb";
 import { TEST_MINT } from "../src/shared/mints";
 import type { EngineState, LinkView } from "../src/shared/types";
+// covers: services.add, services.share, files.size-limit, wallet.cashu.mint.manage
 
 /** What the shared UI calls, with the peer connection replaced by a recorder. */
 const fake = vi.hoisted(() => ({

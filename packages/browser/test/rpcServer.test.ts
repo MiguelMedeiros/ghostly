@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EngineEvent, RpcRequest, RpcResponse } from "../src/shared/rpc";
+// covers: extension.engine, app.single-peer-per-browser
 
 /**
  * The engine side of the RPC with the peer replaced: what matters here is how

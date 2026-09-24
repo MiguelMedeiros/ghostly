@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatSession } from "../../../src/lib/types";
 import type { LinkView, StoredMessage } from "../src/shared/types";
+// covers: chats.created-marker, chat.paired.join-notice, chat.paired.delete-message, chat.paired.storage
 
 /**
  * Keeping the UI's localStorage sessions and the peer's links in step. The page
