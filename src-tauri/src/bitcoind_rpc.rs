@@ -468,3 +468,187 @@ mod tests {
         assert_eq!(error.kind, "refused");
     }
 }
+
+/// The proxy against a node played by a test server.
+#[cfg(test)]
+mod proxy_tests {
+    use super::*;
+    use crate::test_support::{closed_port, read_request, tokio_listener, Requests};
+    use tokio::io::AsyncWriteExt;
+
+    /// A node answering one request with `reply`; returns its URL and the request it saw.
+    fn node(reply: Vec<u8>) -> (String, Requests) {
+        let listener = tokio_listener();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let seen = Requests::default();
+        let log = seen.clone();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            if let Some(request) = read_request(&mut stream).await {
+                log.lock().unwrap().push(request);
+            }
+            let _ = stream.write_all(&reply).await;
+            let _ = stream.shutdown().await;
+        });
+        (url, seen)
+    }
+
+    fn ok(body: &str) -> Vec<u8> {
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        )
+        .into_bytes()
+    }
+
+    async fn rpc(url: String, method: &str, params: Vec<Value>) -> Result<Value, RpcError> {
+        call(
+            url,
+            "w".into(),
+            "alice".into(),
+            "hunter2-secret".into(),
+            method.into(),
+            params,
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn sends_one_json_rpc_call_with_its_params_to_the_wallet() {
+        let (url, seen) = node(ok(
+            r#"{"result":{"psbt":"cHNidP8"},"error":null,"id":"ghostly"}"#,
+        ));
+        let params = vec![
+            json!([]),
+            json!([{"bcrt1qxyz": 0.1}]),
+            json!(0),
+            json!({"fee_rate": 2}),
+        ];
+        let result = rpc(url, "walletcreatefundedpsbt", params.clone())
+            .await
+            .unwrap();
+        assert_eq!(result, json!({"psbt": "cHNidP8"}));
+
+        let (head, body) = seen.lock().unwrap()[0].clone();
+        let first = head.lines().next().unwrap();
+        assert_eq!(first, "POST /wallet/w HTTP/1.1");
+        assert!(head
+            .to_ascii_lowercase()
+            .contains("content-type: application/json"));
+        let sent: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            sent,
+            json!({"jsonrpc": "1.0", "id": "ghostly", "method": "walletcreatefundedpsbt", "params": params})
+        );
+    }
+
+    #[tokio::test]
+    async fn no_error_carries_the_credentials() {
+        let port = closed_port();
+        let refused = rpc(format!("http://127.0.0.1:{port}"), "getbalances", vec![])
+            .await
+            .unwrap_err();
+        let (url, _) = node(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n".to_vec());
+        let auth = rpc(url, "getbalances", vec![]).await.unwrap_err();
+        assert_eq!(auth.kind, "auth");
+        for error in [refused, auth] {
+            let text = serde_json::to_string(&error).unwrap();
+            assert!(
+                !text.contains("hunter2") && !text.contains("alice"),
+                "{text}"
+            );
+            assert!(!text.contains(&port.to_string()), "{text}");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_answer_that_breaks_off_or_grows_past_the_limit_is_a_transport_error() {
+        let (url, _) = node(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n{\"result\":".to_vec());
+        assert_eq!(
+            rpc(url, "getbalances", vec![]).await.unwrap_err().kind,
+            "transport"
+        );
+
+        // No Content-Length to refuse up front: the limit holds while reading.
+        let listener = tokio_listener();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            read_request(&mut stream).await;
+            let _ = stream
+                .write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
+                .await;
+            let chunk = vec![b' '; 64 * 1024];
+            for _ in 0..=MAX_RESPONSE_BYTES / chunk.len() {
+                let head = format!("{:x}\r\n", chunk.len());
+                if stream.write_all(head.as_bytes()).await.is_err()
+                    || stream.write_all(&chunk).await.is_err()
+                    || stream.write_all(b"\r\n").await.is_err()
+                {
+                    return;
+                }
+            }
+        });
+        let error = rpc(url, "listtransactions", vec![]).await.unwrap_err();
+        assert_eq!(
+            (error.kind, error.message.as_str()),
+            ("transport", "Response too large")
+        );
+    }
+
+    #[test]
+    fn reads_every_shape_of_answer() {
+        assert_eq!(interpret(403, b"").unwrap_err().kind, "auth");
+        // An unknown method: HTTP 404 with a JSON-RPC error.
+        let error = interpret(
+            404,
+            br#"{"result":null,"error":{"code":-32601,"message":"Method not found"},"id":"ghostly"}"#,
+        )
+        .unwrap_err();
+        assert_eq!((error.kind, error.code), ("rpc", Some(-32601)));
+        assert_eq!(
+            interpret(200, br#"{"result":null,"error":null}"#),
+            Ok(Value::Null)
+        );
+        assert_eq!(interpret(200, br#"{"error":null}"#), Ok(Value::Null));
+        let error = interpret(500, br#"{"error":{"code":"x"}}"#).unwrap_err();
+        assert_eq!(
+            (error.kind, error.code, error.message.as_str()),
+            ("rpc", None, "RPC error")
+        );
+        // A 200 that is still an error is an error.
+        assert_eq!(
+            interpret(
+                200,
+                br#"{"error":{"code":-4,"message":"Insufficient funds"}}"#
+            )
+            .unwrap_err()
+            .code,
+            Some(-4)
+        );
+        assert_eq!(
+            interpret(503, br#"{"result":1}"#).unwrap_err().kind,
+            "transport"
+        );
+        assert_eq!(interpret(200, b"").unwrap_err().kind, "transport");
+    }
+
+    #[test]
+    fn keeps_the_node_path_and_takes_ipv6_hosts() {
+        assert_eq!(
+            endpoint("http://[::1]:18443", "w", "getbalances")
+                .unwrap()
+                .to_string(),
+            "http://[::1]:18443/wallet/w"
+        );
+        assert_eq!(
+            endpoint("https://node.example/rpc/", "w", "getbalances")
+                .unwrap()
+                .to_string(),
+            "https://node.example/rpc/wallet/w"
+        );
+        assert!(endpoint("http://", "w", "getbalances").is_err());
+        assert!(endpoint("http://127.0.0.1", ".", "getbalances").is_err());
+        assert!(endpoint("http://127.0.0.1", &"w".repeat(64), "getbalances").is_ok());
+    }
+}

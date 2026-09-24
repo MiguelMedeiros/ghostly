@@ -2,13 +2,7 @@
   "app.updates.desktop": "The Tauri updater needs a signed release feed; the Desktop harness only has a boot smoke test",
   "settings.storage-used": "Nothing asserts the storage figure in Settings; a component test (npm run test:ui) can",
   "storage.local": "The local file storage adapter (WISP 1001) is exercised only through backup.profile.file, never on its own",
-  "core.dht-direct": "src-tauri/src/pkarr_client.rs has no Rust test, and the Desktop smoke test only reads the label in Settings",
+  "core.dht-direct": "src-tauri/src/pkarr_client.rs is tested against an in-process relay (commands.rs); nothing reaches the Mainline DHT over UDP",
   "desktop.bundle-wiring": "Guarded by npm run check:desktop-bundle in PR CI, a build assertion the test map does not read",
-  "desktop.notifications": "Native notifications need the Desktop harness (Linux only) and no spec drives them",
-  "desktop.local-fetch": "Rust local_fetch has no test; services are only e2e-tested in the extension",
-  "desktop.crypto": "The Rust crypto commands have no direct test; parity is only indirect through core's interop-rust suite",
-  "cli.identity": "cli/ has no tests at all",
-  "cli.invite": "cli/ has no tests at all",
-  "cli.send": "cli/ has no tests at all; only the gated interop-rust suite drives the binary",
-  "cli.recv": "cli/ has no tests at all; only the gated interop-rust suite drives the binary"
+  "desktop.notifications": "Native notifications need the Desktop harness (Linux only) and no spec drives them"
 }

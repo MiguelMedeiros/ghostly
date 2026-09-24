@@ -717,3 +717,251 @@ mod tests {
         assert!(request(wrong).await.unwrap_err().contains("certificate"));
     }
 }
+
+/// The same node over plain HTTP on this machine, where the answers can be cut
+/// exactly where a test needs them.
+#[cfg(test)]
+mod http_tests {
+    use super::*;
+    use crate::test_support::{closed_port, read_request, tokio_listener, Requests};
+    use tokio::io::AsyncWriteExt;
+
+    const MACAROON: &str = "0201036c6e6402f801030a10";
+
+    /// A node that writes `parts` one by one (a pause between them), then keeps the connection open.
+    fn node(parts: Vec<Vec<u8>>) -> (String, Requests) {
+        let listener = tokio_listener();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let log = seen.clone();
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let (parts, log) = (parts.clone(), log.clone());
+                tokio::spawn(async move {
+                    if let Some(request) = read_request(&mut stream).await {
+                        log.lock().unwrap().push(request);
+                    }
+                    for part in parts {
+                        if stream.write_all(&part).await.is_err() {
+                            return;
+                        }
+                        let _ = stream.flush().await;
+                        tokio::time::sleep(Duration::from_millis(20)).await;
+                    }
+                    tokio::time::sleep(Duration::from_secs(30)).await;
+                });
+            }
+        });
+        (url, seen)
+    }
+
+    fn unary(body: &str) -> Vec<Vec<u8>> {
+        vec![format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        )
+        .into_bytes()]
+    }
+
+    /// A chunked answer whose chunks are exactly `pieces`.
+    fn chunked(pieces: &[&str]) -> Vec<Vec<u8>> {
+        let mut parts = vec![b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n".to_vec()];
+        for piece in pieces {
+            parts.push(format!("{:x}\r\n{piece}\r\n", piece.len()).into_bytes());
+        }
+        parts
+    }
+
+    fn call(url: &str, method: &str, path: &str, body: Option<&str>) -> LndRequest {
+        LndRequest {
+            url: url.into(),
+            macaroon: MACAROON.into(),
+            certificate: None,
+            method: method.into(),
+            path: path.into(),
+            body: body.map(Into::into),
+            stream: None,
+            timeout_ms: 5_000,
+        }
+    }
+
+    #[tokio::test]
+    async fn posts_json_with_the_macaroon_in_its_header_only() {
+        let (url, seen) = node(unary(r#"{"payment_request":"lnbcrt1"}"#));
+        let answer = request(call(
+            &url,
+            "POST",
+            "/v1/invoices",
+            Some(r#"{"value":"1000"}"#),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(answer.lines, [r#"{"payment_request":"lnbcrt1"}"#]);
+        let (head, body) = seen.lock().unwrap()[0].clone();
+        let head = head.to_ascii_lowercase();
+        assert!(head.starts_with("post /v1/invoices http/1.1"), "{head}");
+        assert!(head.contains(&format!("grpc-metadata-macaroon: {MACAROON}")));
+        assert!(head.contains("content-type: application/json"));
+        assert_eq!(head.matches(MACAROON).count(), 1);
+        assert_eq!(body, br#"{"value":"1000"}"#);
+    }
+
+    #[tokio::test]
+    async fn trims_the_macaroon_and_reads_an_empty_certificate_as_none() {
+        let (url, seen) = node(unary("{}"));
+        let mut padded = call(&url, "GET", "/v1/getinfo", None);
+        padded.macaroon = format!("  {MACAROON}\n");
+        padded.certificate = Some("  ".into());
+        assert_eq!(request(padded).await.unwrap().status, 200);
+        let head = seen.lock().unwrap()[0].0.clone();
+        assert!(head.contains(&format!(": {MACAROON}\r\n")), "{head}");
+    }
+
+    #[tokio::test]
+    async fn refuses_bad_input_before_anything_is_sent() {
+        let (url, seen) = node(unary("{}"));
+        let with = |edit: &dyn Fn(&mut LndRequest)| {
+            let mut request = call(&url, "GET", "/v1/getinfo", None);
+            edit(&mut request);
+            request
+        };
+        let cases: Vec<(LndRequest, &str)> = vec![
+            (
+                with(&|r| r.macaroon = String::new()),
+                "The macaroon must be hex",
+            ),
+            (
+                with(&|r| r.macaroon = "   ".into()),
+                "The macaroon must be hex",
+            ),
+            (
+                with(&|r| r.macaroon = "a".repeat(MAX_MACAROON_HEX + 1)),
+                "The macaroon must be hex",
+            ),
+            (
+                with(&|r| r.certificate = Some("not base64!".into())),
+                "The certificate must be base64 DER",
+            ),
+            (
+                with(&|r| {
+                    r.method = "POST".into();
+                    r.body = Some("x".repeat(MAX_BODY + 1));
+                }),
+                "Request too large",
+            ),
+            (
+                with(&|r| r.path = "/v1/../../admin".into()),
+                "Not an LND REST path",
+            ),
+            (
+                with(&|r| r.path = format!("/v1/{}", "a".repeat(512))),
+                "Not an LND REST path",
+            ),
+            (with(&|r| r.method = "get".into()), "Unsupported method"),
+        ];
+        for (bad, expected) in cases {
+            assert_eq!(request(bad).await.unwrap_err(), expected);
+        }
+        assert!(seen.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn plain_http_only_reaches_this_machine() {
+        for url in [
+            "http://10.0.0.2:8080",
+            "http://node.example:8080",
+            "http://[::ffff:127.0.0.1]:8080",
+        ] {
+            assert_eq!(
+                request(call(url, "GET", "/v1/getinfo", None))
+                    .await
+                    .unwrap_err(),
+                "The node address must be https (http only on this machine)",
+                "{url}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn an_answer_past_the_limit_is_refused() {
+        let body = "x".repeat(MAX_BODY + 1);
+        let (url, _) = node(unary(&body));
+        assert_eq!(
+            request(call(&url, "GET", "/v1/getinfo", None))
+                .await
+                .unwrap_err(),
+            "The node's answer is too large"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_zero_timeout_is_the_shortest_one_not_none() {
+        let (url, _) = node(vec![]);
+        let mut silent = call(&url, "GET", "/v1/getinfo", None);
+        silent.timeout_ms = 0;
+        let started = Instant::now();
+        assert_eq!(
+            request(silent).await.unwrap_err(),
+            "The node did not answer in time"
+        );
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[tokio::test]
+    async fn stream_messages_are_whole_lines_however_the_chunks_cut_them() {
+        let (url, _) = node(chunked(&[
+            "\n{\"result\":{\"status\":\"IN_",
+            "FLIGHT\"}}\n\n{\"result\":{\"status\":\"IN_FLIGHT\"}}\n{\"result\":{\"sta",
+            "tus\":\"SUCCEEDED\"}}\n{\"result\":{\"status\":\"never read\"}}\n",
+        ]));
+        let mut send = call(&url, "POST", "/v2/router/send", Some("{}"));
+        send.stream = Some("final".into());
+        let answer = request(send).await.unwrap();
+        assert_eq!(
+            answer.lines,
+            [
+                r#"{"result":{"status":"IN_FLIGHT"}}"#,
+                r#"{"result":{"status":"IN_FLIGHT"}}"#,
+                r#"{"result":{"status":"SUCCEEDED"}}"#,
+            ]
+        );
+        assert!(!answer.timed_out);
+
+        let (url, _) = node(chunked(&[
+            "{\"result\":{\"status\":\"IN_FLIGHT\"}}\n",
+            "{\"error\":{\"code\":2,\"message\":\"invoice expired\"}}\n",
+        ]));
+        let mut send = call(&url, "POST", "/v2/router/send", Some("{}"));
+        send.stream = Some("final".into());
+        let answer = request(send).await.unwrap();
+        assert_eq!(answer.lines.len(), 2);
+        assert!(answer.lines[1].contains("invoice expired"));
+    }
+
+    #[tokio::test]
+    async fn a_unary_answer_is_one_line_even_when_it_spans_several() {
+        let (url, _) = node(unary("{\n  \"alias\": \"pretty\"\n}\n"));
+        let answer = request(call(&url, "GET", "/v1/getinfo", None))
+            .await
+            .unwrap();
+        assert_eq!(answer.lines, ["{\n  \"alias\": \"pretty\"\n}"]);
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_node_is_named_by_neither_its_address_nor_the_macaroon() {
+        let port = closed_port();
+        let error = request(call(
+            &format!("http://127.0.0.1:{port}"),
+            "GET",
+            "/v1/getinfo",
+            None,
+        ))
+        .await
+        .unwrap_err();
+        assert!(error.starts_with("Could not reach the node"), "{error}");
+        assert!(
+            !error.contains(&port.to_string()) && !error.contains(MACAROON),
+            "{error}"
+        );
+    }
+}

@@ -93,3 +93,183 @@ pub async fn fetch(
         body_b64: STANDARD.encode(body),
     })
 }
+
+/// Only this machine, never a redirect, never more than the limit.
+#[cfg(test)]
+mod tests {
+    // covers: desktop.local-fetch
+    use super::*;
+    use crate::test_support::{closed_port, read_request, respond, tokio_listener, Requests};
+    use tokio::io::AsyncWriteExt;
+
+    /// A server answering every request with `reply`; returns its address and the requests it saw.
+    fn server(reply: Vec<u8>) -> (String, Requests) {
+        let listener = tokio_listener();
+        let address = listener.local_addr().unwrap();
+        let seen = Requests::default();
+        let log = seen.clone();
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                if let Some(request) = read_request(&mut stream).await {
+                    log.lock().unwrap().push(request);
+                }
+                let _ = stream.write_all(&reply).await;
+                let _ = stream.shutdown().await;
+            }
+        });
+        (format!("http://{address}"), seen)
+    }
+
+    #[tokio::test]
+    async fn refuses_every_host_that_is_not_this_machine_before_connecting() {
+        for url in [
+            "http://example.com/",
+            "https://10.0.0.1/",
+            "http://192.168.1.1:8080/",
+            "http://0.0.0.0:47500/",
+            "http://[::ffff:127.0.0.1]:47500/",
+            "http://localhost.evil.example/",
+            "http://127.0.0.1.nip.io/",
+            "http://evil.example#@127.0.0.1/",
+            "ftp://127.0.0.1/",
+            "file:///etc/passwd",
+            "ws://127.0.0.1/",
+            "not a url",
+        ] {
+            let error = fetch(url.into(), "GET".into(), vec![], None)
+                .await
+                .unwrap_err();
+            assert!(
+                error == "Only services on this machine can be shared"
+                    || error.starts_with("Invalid URL"),
+                "{url}: {error}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn forwards_method_path_headers_and_body_and_returns_the_answer() {
+        let (url, seen) = server(
+            b"HTTP/1.1 201 Created\r\nContent-Type: text/plain\r\nX-Two: a\r\nContent-Length: 5\r\n\r\nhello".to_vec(),
+        );
+        let answer = fetch(
+            format!("{url}/api/items?limit=5"),
+            "PATCH".into(),
+            vec![("X-Ghostly".into(), "1".into())],
+            Some(STANDARD.encode(b"{\"a\":1}")),
+        )
+        .await
+        .unwrap();
+        assert_eq!(answer.status, 201);
+        assert!(answer
+            .headers
+            .contains(&("content-type".into(), "text/plain".into())));
+        assert_eq!(STANDARD.decode(answer.body_b64).unwrap(), b"hello");
+
+        let (head, body) = seen.lock().unwrap()[0].clone();
+        assert!(
+            head.starts_with("PATCH /api/items?limit=5 HTTP/1.1"),
+            "{head}"
+        );
+        assert!(head.to_ascii_lowercase().contains("x-ghostly: 1"));
+        assert_eq!(body, b"{\"a\":1}");
+
+        // `localhost` by name is this machine too.
+        let port = url.rsplit(':').next().unwrap();
+        for host in ["localhost", "127.0.0.1"] {
+            assert_eq!(
+                fetch(format!("http://{host}:{port}/"), "GET".into(), vec![], None)
+                    .await
+                    .unwrap()
+                    .status,
+                201
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn never_follows_a_redirect_even_to_this_machine() {
+        let (target, reached) = server(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_vec());
+        let (url, _) = server(
+            format!("HTTP/1.1 302 Found\r\nLocation: {target}/secret\r\nContent-Length: 0\r\n\r\n")
+                .into_bytes(),
+        );
+        let answer = fetch(url, "GET".into(), vec![], None).await.unwrap();
+        assert_eq!(answer.status, 302);
+        assert!(answer
+            .headers
+            .iter()
+            .any(|(name, value)| name == "location" && value.ends_with("/secret")));
+        assert!(reached.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn refuses_a_bad_method_or_body_and_reports_an_unreachable_service() {
+        let (url, seen) = server(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_vec());
+        assert_eq!(
+            fetch(url.clone(), "GE T".into(), vec![], None)
+                .await
+                .unwrap_err(),
+            "Invalid method"
+        );
+        assert!(
+            fetch(url, "POST".into(), vec![], Some("not base64!".into()))
+                .await
+                .unwrap_err()
+                .starts_with("Body:")
+        );
+        assert!(seen.lock().unwrap().is_empty());
+
+        let error = fetch(
+            format!("http://127.0.0.1:{}/", closed_port()),
+            "GET".into(),
+            vec![],
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(error.starts_with("unreachable:"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn stops_reading_past_the_response_limit() {
+        let listener = tokio_listener();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            read_request(&mut stream).await;
+            // No Content-Length: the size is only known by reading.
+            let _ = stream
+                .write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
+                .await;
+            let chunk = vec![b'x'; 1 << 20];
+            for _ in 0..=MAX_RESPONSE_BYTES >> 20 {
+                let head = format!("{:x}\r\n", chunk.len());
+                if stream.write_all(head.as_bytes()).await.is_err()
+                    || stream.write_all(&chunk).await.is_err()
+                    || stream.write_all(b"\r\n").await.is_err()
+                {
+                    return;
+                }
+            }
+            let _ = stream.write_all(b"0\r\n\r\n").await;
+        });
+        assert_eq!(
+            fetch(url, "GET".into(), vec![], None).await.unwrap_err(),
+            "Response too large"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_large_answer_comes_back_whole() {
+        let listener = tokio_listener();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            read_request(&mut stream).await;
+            respond(&mut stream, "200 OK", &[], &vec![b'y'; 1 << 20]).await;
+        });
+        let answer = fetch(url, "GET".into(), vec![], None).await.unwrap();
+        assert_eq!(STANDARD.decode(answer.body_b64).unwrap().len(), 1 << 20);
+    }
+}

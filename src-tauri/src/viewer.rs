@@ -77,7 +77,12 @@ fn is_own_origin(host: Option<&str>, peer: &str, service: &str) -> bool {
     }
 }
 
-pub fn open(app: &AppHandle, peer: String, service: String, title: String) -> Result<(), String> {
+pub fn open<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    peer: String,
+    service: String,
+    title: String,
+) -> Result<(), String> {
     if !is_label_safe(&peer) || !is_label_safe(&service) {
         return Err("Invalid service".into());
     }
@@ -101,7 +106,7 @@ pub fn open(app: &AppHandle, peer: String, service: String, title: String) -> Re
     Ok(())
 }
 
-pub fn respond(app: &AppHandle, id: u64, response: ServiceResponse) {
+pub fn respond<R: tauri::Runtime>(app: &AppHandle<R>, id: u64, response: ServiceResponse) {
     if let Ok(mut pending) = app.state::<ViewerState>().pending.lock() {
         if let Some(sender) = pending.remove(&id) {
             let _ = sender.send(response);
@@ -200,7 +205,7 @@ pub async fn handle<R: tauri::Runtime>(
         })
 }
 
-pub fn forget_window(app: &AppHandle, label: &str) {
+pub fn forget_window<R: tauri::Runtime>(app: &AppHandle<R>, label: &str) {
     if let Ok(mut windows) = app.state::<ViewerState>().windows.lock() {
         windows.remove(label);
     }
@@ -277,5 +282,219 @@ mod tests {
             "atlas"
         ));
         assert!(!is_own_origin(None, PEER, "atlas"));
+    }
+}
+
+/// Opening a viewer, and a request's round trip through the main window.
+#[cfg(test)]
+mod routing_tests {
+    use super::*;
+    use std::sync::mpsc;
+    use tauri::test::{mock_builder, MockRuntime};
+    use tauri::Listener;
+
+    const PEER: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    fn app() -> tauri::App<MockRuntime> {
+        mock_builder()
+            .manage(ViewerState::default())
+            .build(tauri::generate_context!(test = true))
+            .expect("app")
+    }
+
+    fn bind(app: &tauri::App<MockRuntime>, label: &str) {
+        app.state::<ViewerState>()
+            .windows
+            .lock()
+            .unwrap()
+            .insert(label.into(), (PEER.into(), "atlas".into()));
+    }
+
+    /// Every request the main window is asked to carry.
+    fn requests(app: &tauri::App<MockRuntime>) -> mpsc::Receiver<serde_json::Value> {
+        let (tx, rx) = mpsc::channel();
+        app.listen_any(REQUEST_EVENT, move |event| {
+            let _ = tx.send(serde_json::from_str(event.payload()).unwrap());
+        });
+        rx
+    }
+
+    fn request(method: &str, url: &str, body: &[u8]) -> Request<Vec<u8>> {
+        Request::builder()
+            .method(method)
+            .uri(url)
+            .header("content-type", "text/plain")
+            .body(body.to_vec())
+            .unwrap()
+    }
+
+    #[test]
+    fn opens_a_window_of_its_own_only_for_a_valid_contact_and_service() {
+        let app = app();
+        let long = "a".repeat(65);
+        for (peer, service) in [
+            ("", "atlas"),
+            (PEER, ""),
+            ("peer.evil", "atlas"),
+            (PEER, "atlas/x"),
+            (PEER, "at las"),
+            (PEER, "ätlas"),
+            (PEER, "atlas_1"),
+            (long.as_str(), "atlas"),
+        ] {
+            assert_eq!(
+                open(app.handle(), peer.into(), service.into(), "t".into()).unwrap_err(),
+                "Invalid service",
+                "{peer} {service}"
+            );
+        }
+        assert!(app.webview_windows().is_empty());
+
+        open(app.handle(), PEER.into(), "atlas".into(), "Atlas".into()).unwrap();
+        open(app.handle(), PEER.into(), "notes".into(), "Notes".into()).unwrap();
+        let windows = app.webview_windows();
+        let mut labels: Vec<_> = windows.keys().cloned().collect();
+        labels.sort();
+        assert_eq!(labels, ["svc-0", "svc-1"]);
+        assert_eq!(
+            windows["svc-0"].url().unwrap().as_str(),
+            format!("{SCHEME}://atlas.{PEER}/")
+        );
+        let bound = app.state::<ViewerState>().windows.lock().unwrap().clone();
+        assert_eq!(bound["svc-1"], (PEER.to_string(), "notes".to_string()));
+    }
+
+    #[test]
+    fn a_request_is_carried_by_the_main_window_and_its_answer_served() {
+        let app = app();
+        bind(&app, "svc-1");
+        let asked = requests(&app);
+        let pending = tauri::async_runtime::spawn(handle(
+            app.handle().clone(),
+            "svc-1".into(),
+            request(
+                "POST",
+                &format!("{SCHEME}://atlas.{PEER}/api/items?x=1"),
+                b"hi",
+            ),
+        ));
+        let carried = asked.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(carried["peer"], PEER);
+        assert_eq!(carried["service"], "atlas");
+        assert_eq!(carried["method"], "POST");
+        assert_eq!(carried["path"], "/api/items?x=1");
+        assert_eq!(carried["body_b64"], STANDARD.encode(b"hi"));
+        assert!(carried["headers"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!(["content-type", "text/plain"])));
+
+        respond(
+            app.handle(),
+            carried["id"].as_u64().unwrap(),
+            ServiceResponse {
+                status: 201,
+                headers: vec![("x-served-by".into(), "atlas".into())],
+                body_b64: STANDARD.encode(b"created"),
+            },
+        );
+        let response = tauri::async_runtime::block_on(pending).unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        assert_eq!(response.headers()["x-served-by"], "atlas");
+        assert_eq!(response.body(), b"created");
+        assert!(app
+            .state::<ViewerState>()
+            .pending
+            .lock()
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn nobody_answering_is_a_timeout_and_a_late_answer_goes_nowhere() {
+        let app = app();
+        bind(&app, "svc-1");
+        let asked = requests(&app);
+        // Windows and Android spell the same origin this way.
+        let response = tauri::async_runtime::block_on(handle(
+            app.handle().clone(),
+            "svc-1".into(),
+            request("GET", &format!("http://{SCHEME}.atlas.{PEER}/"), b""),
+        ));
+        assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+        let carried = asked.try_recv().unwrap();
+        assert!(carried["body_b64"].is_null());
+        respond(
+            app.handle(),
+            carried["id"].as_u64().unwrap(),
+            ServiceResponse {
+                status: 200,
+                headers: vec![],
+                body_b64: String::new(),
+            },
+        );
+        assert!(app
+            .state::<ViewerState>()
+            .pending
+            .lock()
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn a_malformed_answer_is_a_bad_gateway_or_an_empty_body() {
+        let app = app();
+        bind(&app, "svc-1");
+        let asked = requests(&app);
+        let serve = |answer: ServiceResponse| {
+            let pending = tauri::async_runtime::spawn(handle(
+                app.handle().clone(),
+                "svc-1".into(),
+                request("GET", &format!("{SCHEME}://atlas.{PEER}/"), b""),
+            ));
+            let id = asked.recv_timeout(Duration::from_secs(5)).unwrap()["id"]
+                .as_u64()
+                .unwrap();
+            respond(app.handle(), id, answer);
+            tauri::async_runtime::block_on(pending).unwrap()
+        };
+        let bad_header = serve(ServiceResponse {
+            status: 200,
+            headers: vec![("bad header".into(), "x".into())],
+            body_b64: String::new(),
+        });
+        assert_eq!(bad_header.status(), StatusCode::BAD_GATEWAY);
+        let bad_status = serve(ServiceResponse {
+            status: 1000,
+            headers: vec![],
+            body_b64: String::new(),
+        });
+        assert_eq!(bad_status.status(), StatusCode::BAD_GATEWAY);
+        let bad_body = serve(ServiceResponse {
+            status: 200,
+            headers: vec![],
+            body_b64: "not base64!".into(),
+        });
+        assert_eq!(
+            (bad_body.status(), bad_body.body().len()),
+            (StatusCode::OK, 0)
+        );
+    }
+
+    #[test]
+    fn a_closed_or_unknown_window_is_served_nothing() {
+        let app = app();
+        bind(&app, "svc-1");
+        let asked = requests(&app);
+        forget_window(app.handle(), "svc-1");
+        for label in ["svc-1", "svc-2", "main"] {
+            let response = tauri::async_runtime::block_on(handle(
+                app.handle().clone(),
+                label.into(),
+                request("GET", &format!("{SCHEME}://atlas.{PEER}/"), b""),
+            ));
+            assert_eq!(response.status(), StatusCode::FORBIDDEN, "{label}");
+        }
+        assert!(asked.try_recv().is_err(), "nothing reached the main window");
     }
 }

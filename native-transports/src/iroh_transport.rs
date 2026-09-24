@@ -171,3 +171,105 @@ mod tests {
         b.close().await;
     }
 }
+
+/// What a peer can get wrong: addresses, frame lengths, the protocol it speaks.
+#[cfg(test)]
+mod limits {
+    use super::*;
+
+    async fn pair(alpn: &[u8]) -> (Endpoint, Endpoint, Connection, Connection) {
+        let bind = |seed: u8| {
+            let alpn = alpn.to_vec();
+            async move {
+                Endpoint::builder(presets::Minimal)
+                    .clear_ip_transports()
+                    .bind_addr("127.0.0.1:0")
+                    .unwrap()
+                    .secret_key(SecretKey::from_bytes(&[seed; 32]))
+                    .alpns(vec![alpn])
+                    .bind()
+                    .await
+                    .unwrap()
+            }
+        };
+        let (a, b) = (bind(11).await, bind(12).await);
+        let addr = b.addr();
+        let (outgoing, incoming) = tokio::time::timeout(Duration::from_secs(25), async {
+            tokio::join!(a.connect(addr, alpn), async {
+                b.accept().await.unwrap().await.unwrap()
+            })
+        })
+        .await
+        .unwrap();
+        (a, b, outgoing.unwrap(), incoming)
+    }
+
+    #[tokio::test]
+    async fn refuses_an_address_it_cannot_use_before_dialling() {
+        let a = endpoint([21; 32], true).await.unwrap();
+        let good = address(&endpoint([22; 32], true).await.unwrap());
+        assert_eq!(good.relay, None, "a local endpoint has no relay");
+        assert!(!good.addresses.is_empty() && good.addresses.len() <= 8);
+        assert!(good.addresses.iter().all(|a| a.starts_with("127.0.0.1:")));
+
+        let mut many = good.clone();
+        many.addresses = (0..9).map(|i| format!("127.0.0.1:{}", 47500 + i)).collect();
+        assert_eq!(
+            connect(&a, &many).await.unwrap_err(),
+            "Too many endpoint addresses"
+        );
+        let mut bad = good.clone();
+        bad.id = "not an id".into();
+        assert_eq!(
+            connect(&a, &bad).await.unwrap_err(),
+            "Invalid Iroh endpoint ID"
+        );
+        let mut bad = good.clone();
+        bad.relay = Some("not a url".into());
+        assert_eq!(
+            connect(&a, &bad).await.unwrap_err(),
+            "Invalid Iroh relay URL"
+        );
+        let mut bad = good.clone();
+        bad.addresses = vec!["127.0.0.1".into()];
+        assert_eq!(
+            connect(&a, &bad).await.unwrap_err(),
+            "Invalid endpoint address"
+        );
+        a.close().await;
+    }
+
+    #[tokio::test]
+    async fn frame_lengths_outside_the_budget_or_cut_short_are_errors() {
+        let (a, b, outgoing, incoming) = pair(ALPN).await;
+        for header in [0u32, MAX_FRAME as u32 + 1, u32::MAX] {
+            let (mut tx, _rx) = outgoing.open_bi().await.unwrap();
+            tx.write_all(&header.to_be_bytes()).await.unwrap();
+            tx.write_all(b"payload").await.unwrap();
+            let (_tx_b, mut rx_b) = incoming.accept_bi().await.unwrap();
+            assert_eq!(
+                read_frame(&mut rx_b).await.unwrap_err(),
+                "Frame exceeds transport budget",
+                "{header}"
+            );
+        }
+        // Announces ten bytes, sends five and finishes the stream.
+        let (mut tx, _rx) = outgoing.open_bi().await.unwrap();
+        tx.write_all(&10u32.to_be_bytes()).await.unwrap();
+        tx.write_all(b"12345").await.unwrap();
+        tx.finish().unwrap();
+        let (_tx_b, mut rx_b) = incoming.accept_bi().await.unwrap();
+        assert!(read_frame(&mut rx_b).await.is_err());
+        a.close().await;
+        b.close().await;
+    }
+
+    #[tokio::test]
+    async fn a_connection_for_another_protocol_has_no_binding() {
+        let (a, b, outgoing, incoming) = pair(b"someone-else/1").await;
+        assert_eq!(binding(&a, &outgoing).unwrap_err(), "Unexpected Iroh ALPN");
+        assert_eq!(binding(&b, &incoming).unwrap_err(), "Unexpected Iroh ALPN");
+        a.close().await;
+        b.close().await;
+    }
+}
