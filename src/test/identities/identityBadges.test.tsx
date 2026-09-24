@@ -8,6 +8,8 @@ import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { DAY, identitiesView, now, receivedView } from "./views";
 
+// covers: proofs.share
+
 
 const withReceived = (received: ReceivedIdentityView[], patch: Partial<LinkView> = {}) =>
   ({ links: [linkView({ identities: identitiesView({ received }), ...patch })] });

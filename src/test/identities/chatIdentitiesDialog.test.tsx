@@ -7,6 +7,8 @@ import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { DAY, identitiesView, now, proofView, receivedView, sharedView } from "./views";
 
+// covers: proofs.share, proofs.withdraw, proofs.recheck, proofs.expiry, proofs.unverifiable
+
 
 /** A paired chat with Alice, connected now. */
 const paired = (patch: Partial<LinkView> = {}) => linkView({ pairing: { status: "ready" } as LinkView["pairing"], identities: identitiesView(), ...patch });

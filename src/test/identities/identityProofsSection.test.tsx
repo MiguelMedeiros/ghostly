@@ -5,6 +5,8 @@ import { date } from "../../lib/identities";
 import { renderApp } from "../render";
 import { DAY, now, proofView } from "./views";
 
+// covers: proofs.revoke, proofs.expiry
+
 
 const rows = () => screen.getAllByTestId("identity-proof");
 

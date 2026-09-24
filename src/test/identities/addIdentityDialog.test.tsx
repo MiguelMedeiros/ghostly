@@ -9,6 +9,8 @@ import { fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
 import { proofView } from "./views";
 
+// covers: proofs.picker, proofs.domain.dns, proofs.ssh, proofs.oidc
+
 
 const provider = (id: string) => IDENTITY_PROVIDERS.find((p) => p.id === id)!;
 /** What a web page can add with no OpenID Connect client IDs in the build (they await registration). */
