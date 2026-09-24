@@ -62,7 +62,7 @@ Checked on 2026-09-23 with worthless coins only:
 - Real SDK in Chromium against local regtest (bitcoind 31.0, captaind 0.7.1 without Lightning, electrs): the funder (bark CLI) paid 20,000 sats to Alice's Bark address (movement `successful`, VTXO `8b3c05b3…:0`); 30,000 sats sent on-chain to Bob (txid `95e9beaf9acaa7d294fd90a02f1c6d8567d230895ad142a90c88251de44d0b31`) were boarded to 29,888 after the on-chain fee; Alice paid Bob 5,000 from the wallet page (Ark transaction `d5300750469177ab0cbc8f9216d66aad59c141b65798c7735376bbf7f659866f`); Bob paid Alice 2,000 by Send in the chat (her app answered his ask with a request) and she paid his 1,000 request. Final balances 16,000 (Alice) and 33,888 (Bob), both checked in each app; out-of-round payments cost no fee on that server.
 
 ```sh
-docker compose -p ghostly-bark -f e2e/support/bark-regtest/docker-compose.yml up -d
+npm run e2e:infra:up        # captaind and a funder on the environment's regtest chain (e2e/infra)
 npm test --workspace @ghostly/browser -- test/bark.test.ts test/barkPayments.test.ts
 GHOSTLY_BARK_REGTEST=1 npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/wallet-providers.spec.ts -g Bark
 ```

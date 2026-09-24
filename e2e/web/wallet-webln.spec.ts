@@ -121,7 +121,7 @@ test("a chat request paid between two browser wallets: Lightning only, reviewed 
 });
 
 test.describe("on a regtest Lightning network", () => {
-  test.skip(process.env.GHOSTLY_WEBLN_REGTEST !== "1", "needs the WebLN regtest stack (e2e/README.md) and GHOSTLY_WEBLN_REGTEST=1");
+  test.skip(process.env.GHOSTLY_WEBLN_REGTEST !== "1", "Requires e2e/infra (npm run e2e:infra:up) and GHOSTLY_WEBLN_REGTEST=1");
   test.describe.configure({ timeout: 240_000 });
 
   test("each person's browser wallet in front of their own node: pay, receive, and a request paid in the chat", { tag: ["@gated", "@feature:wallet.lightning.webln.pay", "@feature:payments.lightning.request"] }, async ({ peer }) => {

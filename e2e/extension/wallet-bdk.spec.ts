@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { BDK_REGTEST } from "../support/bdk-regtest/regtest.mjs";
 import { expect, test } from "../support/extension";
 
 /**
@@ -6,7 +7,7 @@ import { expect, test } from "../support/extension";
  * there, syncs from the local regtest Esplora, signs and broadcasts. GHOSTLY_BDK_REGTEST=1 only (see e2e/README.md).
  */
 test("BDK on regtest in the extension: a wallet that receives and sends", { tag: ["@gated", "@feature:wallet.onchain.bdk.send", "@feature:extension.engine"] }, async ({ extensionPeer }) => {
-  test.skip(process.env.GHOSTLY_BDK_REGTEST !== "1", "Requires the local BDK regtest stack (e2e/support/bdk-regtest)");
+  test.skip(process.env.GHOSTLY_BDK_REGTEST !== "1", "Requires e2e/infra (npm run e2e:infra:up) and GHOSTLY_BDK_REGTEST=1");
   test.setTimeout(5 * 60_000);
   const regtest = (...args: string[]) => execFileSync(process.execPath, ["e2e/support/bdk-regtest/regtest.mjs", ...args], { encoding: "utf8", stdio: "pipe" }).trim();
   regtest("ready");
@@ -19,7 +20,7 @@ test("BDK on regtest in the extension: a wallet that receives and sends", { tag:
   const form = panel.getByTestId("provider-form-bdk");
   await panel.getByTestId("bdk-written").check();
   await form.getByLabel("Network").selectOption("regtest");
-  await form.getByLabel("Esplora server").fill("http://127.0.0.1:44202");
+  await form.getByLabel("Esplora server").fill(BDK_REGTEST.esplora);
   await form.getByTestId("provider-save").click();
   await expect(panel.getByTestId("onchain-source-status")).toContainText(/Connected · BDK BIP84/, { timeout: 60_000 });
   await panel.getByTestId("bitcoin-new-address").click();

@@ -11,6 +11,8 @@ src-tauri/target
 .env
 .env.local
 .env.*.local
+# Written by npm run e2e:infra:up (e2e/infra/env.mjs)
+.env.e2e
 # End-to-end test output
 test-results
 playwright-report

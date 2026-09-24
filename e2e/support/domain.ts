@@ -2,11 +2,12 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { BrowserContext } from "@playwright/test";
 import { answerDoh, type Zone } from "../../packages/browser/test/helpers/dohZone";
+import { endpoints } from "../infra/env.mjs";
 
 /**
  * A test domain of our own, for domain identity proofs.
  *
- * Two local servers on this session's ports (45100-45199):
+ * Two local servers, on two ports of the environment's range per slot (from E2E_DOMAIN_PORT, e2e/infra/env.mjs):
  *  - a DNS-over-HTTPS responder (RFC 8484 wire format) answering from `zone`;
  *  - a web server answering `/.well-known/*` for the test domain from `files`.
  *
@@ -41,10 +42,12 @@ function listen(server: Server, port: number): Promise<number> {
   });
 }
 
-/** `slot` keeps parallel Playwright workers on distinct ports inside 45100-45199. */
-/** `base` moves the two ports elsewhere (the matrix runs on 47300-47399); by default they are this session's. */
-export async function startTestDomain(slot = 0, base = 45110): Promise<TestDomain> {
-  if (slot < 0 || (base === 45110 && slot > 44)) throw new Error("Test domain slot out of the 45100-45199 range");
+/** How many workers can each have a test domain at once: 40 slots of two ports, 47120-47199 by default. */
+export const DOMAIN_SLOTS = 40;
+
+/** `slot` keeps parallel Playwright workers on distinct ports; `base` moves them elsewhere (the matrix has its own range). */
+export async function startTestDomain(slot = 0, base = endpoints.domainPort): Promise<TestDomain> {
+  if (slot < 0 || slot >= DOMAIN_SLOTS) throw new Error(`Test domain slot ${slot} out of 0-${DOMAIN_SLOTS - 1}`);
   const domain = `e2e-${Math.random().toString(36).slice(2, 10)}.ghostly.tools`;
   const zone: Zone = { a: { [domain]: ["203.0.113.7"] }, txt: {}, ttl: 1 };
   const files = new Map<string, string>();

@@ -13,6 +13,7 @@ import { NothingSpentError, type ProviderHost } from "../src/engine/paymentAdapt
 import { LIGHTNING_PROVIDERS, offeredIn } from "../src/engine/paymentAdapters/providers/registry";
 import { describeLightningProvider } from "./helpers/providerContract";
 import { ADMIN, FakeLndNode, bakeMacaroon } from "./helpers/fakeLnd";
+import { container, endpoints } from "../../../e2e/infra/env.mjs";
 // covers: wallet.lightning.lnd.connect, wallet.lightning.lnd.pay, wallet.lightning.provider-contract
 // covers-gated: wallet.lightning.lnd.connect, wallet.lightning.lnd.pay
 
@@ -277,12 +278,12 @@ describe("reaching LND", () => {
 // -- a real node ---------------------------------------------------------------------------------------
 
 /**
- * GHOSTLY_LND_REGTEST=1, with e2e/support/lnd-regtest running (`regtest.mjs ready`): the provider on Alice's
+ * GHOSTLY_LND_REGTEST=1, with e2e/infra up (npm run e2e:infra:up): the provider on Alice's
  * node, Bob's node on the other end of their channel. Node's https (the certificate as the trusted CA) stands
  * in for the browser's fetch, which a test process cannot make trust LND's certificate. Nothing is printed.
  */
 const REGTEST = process.env.GHOSTLY_LND_REGTEST === "1";
-const docker = (node: string, ...args: string[]) => execFileSync("docker", ["exec", `ghostly-lnd-${node}`, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+const docker = (node: string, ...args: string[]) => execFileSync("docker", ["exec", container(`lnd-${node}`), ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 const lncli = (node: string, ...args: string[]) => JSON.parse(docker(node, "lncli", "--network=regtest", ...args));
 
 function httpsTransport(url: string, macaroon: string, ca: string): LndTransport {
@@ -320,7 +321,7 @@ describe.runIf(REGTEST)("LND on regtest (GHOSTLY_LND_REGTEST=1)", { timeout: 60_
   const alice = () => {
     const macaroon = docker("alice", "cat", "/root/.lnd/ghostly-scoped.macaroon.hex");
     const scope = macaroonScope(parseMacaroon(macaroon).ops);
-    return new LndLightning(httpsTransport("https://127.0.0.1:44710", macaroon, docker("alice", "cat", "/root/.lnd/tls.cert")), scope);
+    return new LndLightning(httpsTransport(endpoints.lnd.alice, macaroon, docker("alice", "cat", "/root/.lnd/tls.cert")), scope);
   };
 
   it("the macaroon the stack baked is read as scoped, and the admin one is refused", () => {

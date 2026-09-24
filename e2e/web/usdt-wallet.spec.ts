@@ -1,17 +1,17 @@
-import {readFileSync} from 'node:fs';
 import {Interface} from 'ethers';
+import {USDT_LOCAL} from '../support/usdt-local.mjs';
 import {chat,connect,expect,link,openChat,openWallet,test,useTestnet,type Peer} from '../support/fixtures';
 
 test('WDK local token request, approval and confirmed receipt across two peers',{tag:['@gated','@feature:payments.usdt.send','@feature:payments.chat.review']},async({peer},testInfo)=>{
- test.skip(process.env.GHOSTLY_USDT_LOCAL!=='1','Requires disposable Anvil chain 31337');
- const config=JSON.parse(readFileSync('/tmp/ghostly-usdt-local.json','utf8'));
+ test.skip(process.env.GHOSTLY_USDT_LOCAL!=='1','Requires e2e/infra (npm run e2e:infra:up) and GHOSTLY_USDT_LOCAL=1');
+ const config=USDT_LOCAL;
  let id=0;
  const rpc=async(method:string,params:unknown[]=[])=>{
   const response=await fetch(config.provider,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:++id,method,params})});
   const result=await response.json();if(result.error)throw new Error('Local EVM operation failed');return result.result;
  };
  expect(await rpc('eth_chainId')).toBe('0x7a69');
- const [alice,bob]=await Promise.all([peer('usdt-alice'),peer('usdt-bob')]);
+ const [alice,bob]=await Promise.all([peer('usdt-alice',{offlineMainnet:true}),peer('usdt-bob',{offlineMainnet:true})]);
  await link(alice,bob);await connect(alice,bob);
  const panel=(p:Peer)=>p.page.getByTestId('usdt-wallet');
  for(const p of [alice,bob]){

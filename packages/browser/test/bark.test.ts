@@ -108,6 +108,21 @@ describe("the Bark adapter", () => {
     await expect(BarkAdapter.connect({ ...c, network: "bitcoin" }, generateMnemonic(wordlist), { sdk: server.sdk() })).rejects.toThrow();
   });
 
+  it("a wallet closed while a sync is still running is freed once the sync ends, not under it", async () => {
+    const c = config();
+    const adapter = await connect(c);
+    const wallet = walletOf(c);
+    let finish!: () => void;
+    wallet.sync = () => new Promise<void>((resolve) => { finish = resolve; });
+    const syncing = adapter.sync();
+    await adapter.dispose();
+    // Freed now, the SDK would throw "attempted to take ownership of Rust value while it was borrowed".
+    expect(wallet.freed).toBe(false);
+    finish();
+    await syncing;
+    await vi.waitFor(() => expect(wallet.freed).toBe(true));
+  });
+
   it("waits for a wallet opened again to reach its server, and tells a silent server from a changed one", async () => {
     const c = config();
     await connect(c);

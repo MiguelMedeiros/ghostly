@@ -13,18 +13,80 @@ E2E_WEB_URL=https://app.ghostly.tools npx playwright test -c e2e/playwright.conf
 npm run tauri -- build --debug --no-bundle && npm run test:e2e:desktop   # the Desktop app (Linux, Windows)
 ```
 
+## Everything, gated suites included
+
+```bash
+npm run e2e:full                              # up → wait → fund → vitest contracts → web + extension e2e → down
+npm run e2e:full -- --keep                    # leave the environment running afterwards
+npm run e2e:full -- --no-vitest -- --project=web e2e/web/wallet-lnd.spec.ts   # Playwright arguments after the second --
+```
+
+Most suites need nothing but the test process (see [No servers](#no-servers)). The ones that pay over a real
+network — Ark, Bark, BDK, Bitcoin Core, Core Lightning, LND, NWC, WebLN, USDT, S3, the Cashu mint — need services,
+and `e2e/infra/` is all of them in one Docker Compose project: one regtest bitcoind (with a miner wallet) and its
+Esplora, arkd, captaind, two LND nodes for the LND suite, two behind the WebLN wallets, two under Alby Hubs with a
+strfry relay for NWC, two Core Lightning nodes, Anvil with the test USDT contract, MinIO and the Cashu test mint.
+Worthless coins and throwaway keys only. Containers are `ghostly-e2e-*`, host ports `127.0.0.1:47000-47199`.
+
+`e2e:full` starts from nothing and leaves nothing behind: it removes its own project first, brings it up, waits
+until every container is healthy and every endpoint answers, funds and opens channels (each suite's `ready`, in
+parallel, idempotent), writes `.env.e2e`, runs the gated provider contracts of `@ghostly/browser` (vitest), builds
+the extension, runs the whole Playwright suite with every gate on, and removes the project again — on failure and
+on Ctrl-C too. Safe to run twice in a row. It exits non-zero if either the contracts or the browsers failed, and
+prints how long each phase took.
+
+To work on one suite, keep the environment up and run what you want against it:
+
+```bash
+npm run e2e:infra:up        # start, wait, fund; writes .env.e2e (again: only tops up what is missing)
+npm run e2e:infra:status    # containers, and whether each endpoint answers
+npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/wallet-cln.spec.ts
+npm run e2e:infra:reset     # a fresh chain
+npm run e2e:infra:down      # remove everything, volumes and .env.e2e included
+```
+
+`e2e/playwright.config.ts` loads `.env.e2e` when it exists (a variable set in the shell wins), so with the
+environment up every gated suite runs and without it they are skipped. The variables — gates, endpoints, keys —
+are listed with what they mean in [`e2e/infra/env.mjs`](infra/env.mjs); specs and support scripts read every
+endpoint from there, never a literal port. Their names are stable: other suites build on them.
+
+| Port | Service | Variable |
+|---|---|---|
+| 47001 / 47002 | bitcoind RPC (`ghostly` / `regtest`) / Esplora (electrs) | `GHOSTLY_BITCOIND_RPC_URL` / `GHOSTLY_ESPLORA_URL` |
+| 47010 (+47011 admin) | arkd | `GHOSTLY_ARK_SERVER_URL` |
+| 47020 | captaind (Bark) | `GHOSTLY_BARK_SERVER_URL` |
+| 47030 / 47031 | LND REST, Alice / Bob (LND suite) | `GHOSTLY_LND_ALICE_URL` / `_BOB_URL` |
+| 47040 / 47041 | LND REST behind the WebLN wallets | `GHOSTLY_WEBLN_ALICE_URL` / `_BOB_URL` |
+| 47050 / 47051 | Core Lightning Commando websockets | `GHOSTLY_CLN_ALICE_WS` / `_BOB_WS` |
+| 47060 | strfry, the NWC relay | `GHOSTLY_NWC_RELAY_URL` |
+| 47061-47064 | LND REST and Alby Hubs under NWC | `GHOSTLY_NWC_{ALICE,BOB}_{LND,HUB}_URL` |
+| 47070 | Anvil (chain 31337) | `GHOSTLY_USDT_RPC_URL`, `GHOSTLY_USDT_TOKEN` |
+| 47080 | MinIO | `GHOSTLY_S3_ENDPOINT`, `_KEY`, `_SECRET` |
+| 47090 | Cashu test mint (`cashubtc/mintd`, fake Lightning) | `E2E_MINT_URL` |
+| 47100 | the web build under test (`vite preview`) | `E2E_WEB_PORT` |
+| 47110-47119 | Lightning address server, in the test process | `E2E_LNURL_PORT` |
+| 47120-47199 | domain-proof DoH + well-known servers, in the test process | `E2E_DOMAIN_PORT` |
+
+Every Bitcoin service shares the one chain, so Lightning nodes of different implementations can reach each other,
+but each suite has its own pair of nodes: the LND, WebLN and NWC tests assert exact channel balances while other
+files run in parallel. The Ark, Bark and USDT endpoints are also the web app's own Regtest options
+(`ArkWalletPanel`, `BarkWalletPanel`, `UsdtWalletPanel`), so those ports are fixed. The OIDC issuer and the Nostr
+relay of the social suite need no port: the test process answers their requests (`support/oidcIssuer.ts`,
+`support/nostrRelay.ts`). Breez's regtest is hosted by Breez and Lightspark, not by `e2e/infra`: `e2e:full` turns it
+on (`GHOSTLY_BREEZ_TESTNET=1`) unless the shell set it to something else.
+
+Nightly on `dev`, and by hand, the `E2E (full)` workflow (`.github/workflows/e2e-full.yml`) runs `npm run e2e:full`
+on a GitHub runner and keeps the Playwright report. It needs no secrets. See [When they run](#when-they-run) for
+how long it takes.
+
 ## No servers
 
 Peers find each other through Pkarr relays. Here the relay is `support/relay.ts`, inside the test process: requests to the public relays are answered from memory, and the extension, whose peer runs where requests cannot be intercepted, is pointed at its local address in Settings → Network. So tests do not wait on the public relays, are never rate limited, and never see each other's packets. WebRTC connects the browsers directly on this machine. GIFCities is stubbed the same way.
 
-Only the tests tagged `@network` go out: the wallet, against the public Cashu test mint (`testnut.cashu.space`, worthless sats whose invoices pay themselves). CI does not even do that — it runs a mint of its own and answers the public one's requests from it, the way the relay answers Pkarr's:
+Only the tests tagged `@network` go out: the wallet, against the public Cashu test mint (`testnut.cashu.space`, worthless sats whose invoices pay themselves). CI does not even do that — it runs a mint of its own and answers the public one's requests from it, the way the relay answers Pkarr's. `e2e/infra` has that mint (`ghostly-e2e-mint`, `E2E_MINT_URL=http://127.0.0.1:47090`), and the `E2E` workflow starts the same container by itself:
 
 ```bash
-docker run -d --name ghostly-testmint -p 3338:3338 \
-  -e CDK_MINTD_LN_BACKEND=fakewallet -e CDK_MINTD_LISTEN_HOST=0.0.0.0 -e CDK_MINTD_LISTEN_PORT=3338 \
-  -e CDK_MINTD_MNEMONIC="abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" \
-  -e CDK_MINTD_INPUT_FEE_PPK=100 cashubtc/mintd:0.17.7
-E2E_MINT_URL=http://127.0.0.1:3338 npm run test:e2e
+npm run e2e:infra:up && npm run test:e2e      # .env.e2e sets E2E_MINT_URL
 ```
 
 `E2E_MINT_URL` is all it takes: the app is never told, so it goes on adding and spending `testnut.cashu.space` and the tests assert exactly what they asserted before — they just stop depending on one volunteer's server, which GitHub's runners cannot reach and which was blocking every release. Use the same mint software (`cashubtc/mintd`, which is what the public test mint runs); Nutshell refuses to quote an invoice whose mint quote was already issued, and the tests need that to work. Without `E2E_MINT_URL` the public mint answers for itself, as before.
@@ -62,7 +124,7 @@ E2E_MINT_URL=http://127.0.0.1:3338 npm run test:e2e
 
 | `web/wallet-lnd.spec.ts` | gated (`GHOSTLY_LND_REGTEST=1`): the LND provider against two real regtest nodes, over REST from the page — the form, invoices in and out through the Lightning card, a chat request paid, both nodes' balances |
 | `web/payment-extras.spec.ts` | with `E2E_MINT_URL`: memo and "test sats" in both bubbles, a refused payment is taken back, ecash nobody picks up can be taken back, invoice cards |
-| `web/external-wallet.spec.ts` | @network: a request paid with another wallet (QR, `lightning:` link, Copy, "I paid"; the payer pays from its own wallet page and both bubbles turn Paid by themselves), and a Lightning address served by `support/lnurl.ts` (a server in the test process on port 45911 handing out the test mint's invoices) paid through the Cashu source, in the wallet and from a chat card |
+| `web/external-wallet.spec.ts` | @network: a request paid with another wallet (QR, `lightning:` link, Copy, "I paid"; the payer pays from its own wallet page and both bubbles turn Paid by themselves), and a Lightning address served by `support/lnurl.ts` (a server in the test process on `E2E_LNURL_PORT`, 47110 by default, handing out the test mint's invoices) paid through the Cashu source, in the wallet and from a chat card |
 | `extension/wallet-bdk.spec.ts` | gated (`GHOSTLY_BDK_REGTEST=1`): the BDK wallet's WebAssembly in the extension's offscreen document, receiving and sending on regtest |
 | `extension/interop.spec.ts` | the extension and the web app: chat, file, video call |
 | `extension/services.spec.ts` | a local web app shared by one extension and opened by another over WebRTC, stopped, offline, gone |
@@ -144,36 +206,38 @@ For Desktop, use `test` and `app` from `support/desktop.ts`: `app.text(selector)
 
 Say what it covers: `{ tag: ["@feature:<id>"] }` with ids from [`features.json`](features.json), plus `"@gated"` when it needs infrastructure that is not always there. `npm run test:map` checks the tags on every pull request; see [docs/TESTING.md](../docs/TESTING.md).
 
+## The gated suites
+
+Each needs `e2e/infra` up (or `npm run e2e:full`); the commands below run one of them alone. The support scripts
+under `support/*-regtest/` drive their part of the environment — `node e2e/support/<suite>-regtest/regtest.mjs`
+with no argument lists what each can do (mine, pay, show balances) — and read credentials (macaroons, runes,
+pairing URIs, notes) from the containers into memory, never printing them.
+
 ### Held messages on a local S3 server
 
-`profile-backup.spec.ts` and `store-forward.spec.ts` need an S3-compatible server on `127.0.0.1` and its keys in the environment; any MinIO will do, in a container named `ghostly-saf-*` (never print the keys):
+`profile-backup.spec.ts` and `store-forward.spec.ts` need an S3-compatible server and its keys (`GHOSTLY_S3_*`):
+MinIO in `e2e/infra`.
 
 ```bash
-docker run -d --name ghostly-saf-minio -p 127.0.0.1:46010:9000 -e MINIO_ROOT_USER=<key> -e MINIO_ROOT_PASSWORD=<secret> quay.io/minio/minio server /data
-npm run build:web && npx vite preview web --port 46020 --strictPort &
-E2E_WEB_URL=http://localhost:46020 GHOSTLY_S3_ENDPOINT=http://127.0.0.1:46010 GHOSTLY_S3_KEY=<key> GHOSTLY_S3_SECRET=<secret> npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/store-forward.spec.ts
-docker rm -f ghostly-saf-minio   # when done
+npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/store-forward.spec.ts
 ```
 
 Each run makes a bucket of its own. `localStorage["ghostly-test-hold-ttl"]` (milliseconds) shortens how long an item is held, so the test can watch one expire; nothing else reads it and it never lengthens the lifetime.
 
-### Experimental Ark payments
+### Ark payments
 
-With the disposable local Ark regtest stack already running at `127.0.0.1:43010`
-(operator) and `127.0.0.1:43000/api` (Esplora):
+arkd on the regtest chain, set up like ArkLabsHQ/arkade-regtest's (`support/ark-regtest/regtest.mjs`: the server
+wallet created, unlocked, funded, the intent fees of the earlier stack set).
 
 ```bash
-GHOSTLY_ARK_REGTEST=1 npx playwright test e2e/web/ark-wallet.spec.ts -c e2e/playwright.config.ts --project=web
+npx playwright test e2e/web/ark-wallet.spec.ts -c e2e/playwright.config.ts --project=web
 ```
 
-The faucet CLI defaults to `/tmp/ghostly-ark-regtest-20260922/regtest.mjs`;
-set `GHOSTLY_ARK_REGTEST_SCRIPT` to another local checkout's script if needed.
-The test does not start or stop infrastructure. It creates isolated browser
-profiles, funds a disposable seed with worthless regtest credit, restores through
-the actual wallet UI, and checks request/review/approval plus receipt reconciliation
-after recipient unlock. SDK funding uses a native ESM child process to preserve
-conditional exports; the seed is returned through its private pipe, not logged.
-This does not validate mainnet, unilateral exits or native/mobile payments.
+The test creates isolated browser profiles, funds a disposable seed with a note from the server
+(`support/fund-ark.mjs`), restores through the actual wallet UI, and checks request/review/approval plus receipt
+reconciliation after recipient unlock. SDK funding uses a native ESM child process to preserve conditional exports;
+the seed is returned through its private pipe, not logged. This does not validate mainnet, unilateral exits or
+native/mobile payments.
 
 ### Lightning and on-chain providers
 
@@ -182,35 +246,24 @@ and Bitcoin providers (regtest, in memory) then show up in the source pickers, i
 how `wallet-sources.spec.ts` drives a source with nothing running.
 
 A real provider (NWC, WebLN, LND, Core Lightning, Breez, BDK, Bitcoin Core…) gets a gated test of its
-own, like Ark's: `GHOSTLY_<NAME>_REGTEST=1` with the node or wallet already running (a regtest stack on
-ports it documents here), `test.skip` otherwise.
-
-```bash
-GHOSTLY_LND_REGTEST=1 npx playwright test e2e/web/wallet-lnd.spec.ts -c e2e/playwright.config.ts --project=web
-```
-
-The test does not start or stop infrastructure, uses worthless regtest coins only, and never prints a
-secret (macaroons, runes, URIs). See `packages/browser/src/engine/paymentAdapters/PROVIDERS.md`.
+own: `GHOSTLY_<NAME>_REGTEST=1` with its services in `e2e/infra`, `test.skip` otherwise. A new one adds its
+services to `e2e/infra/docker-compose.yml`, its variables to `e2e/infra/env.mjs` and its `ready` to
+`e2e/infra/infra.mjs`. The test does not start or stop infrastructure, uses worthless regtest coins only, and never
+prints a secret (macaroons, runes, URIs). See `packages/browser/src/engine/paymentAdapters/PROVIDERS.md`.
 
 ### Bitcoin Core on regtest
 
 The Bitcoin Core source (`providers/bitcoind.ts`) is Desktop only: bitcoind's RPC answers no CORS, so the
 app reaches it through the `bitcoind_rpc` Tauri command (`src-tauri/src/bitcoind_rpc.rs`, which has Rust
 tests for its method allowlist, URL and wallet-name checks, size limits and redirects). The Desktop e2e
-harness runs on Linux only, so the engine side is covered by a gated vitest against a real node instead,
-reaching it with `fetch` the way the command does. One bitcoind 31 in a container named
-`ghostly-bitcoind-*`, RPC on `127.0.0.1:44301`, worthless regtest coins:
+harness runs on Linux only, so the engine side is covered by a gated vitest against the environment's bitcoind
+instead, reaching it with `fetch` the way the command does (`GHOSTLY_BITCOIND_RPC_URL`, `_USER`, `_PASSWORD` point
+it at another node):
 
 ```bash
-export GHOSTLY_BITCOIND_RPC_PASSWORD=$(openssl rand -hex 16)
-docker run -d --name ghostly-bitcoind-regtest -p 127.0.0.1:44301:18443 bitcoin/bitcoin:31.0 \
-  bitcoind -regtest -server -printtoconsole -rpcbind=0.0.0.0 -rpcallowip=0.0.0.0/0 \
-  -rpcuser=ghostly -rpcpassword="$GHOSTLY_BITCOIND_RPC_PASSWORD"
 cd packages/browser && GHOSTLY_BITCOIND_REGTEST=1 npx vitest run test/bitcoind.regtest.test.ts --silent=false
-docker rm -f ghostly-bitcoind-regtest   # when done
 ```
 
-`GHOSTLY_BITCOIND_RPC_URL` and `GHOSTLY_BITCOIND_RPC_USER` override `http://127.0.0.1:44301` and `ghostly`.
 Each run creates wallets of its own and mines to one of them (it never stops or unloads anything): the
 shared on-chain contract suite runs against a fresh wallet, then Alice's wallet is funded by mining, pays
 Bob through the `PaymentCoordinator` (review signed and locked, nothing in the mempool until approval),
@@ -220,13 +273,11 @@ password never runs, and a regtest node is refused in the Mainnet mode. It print
 
 ### Every provider, sending and receiving
 
-With the Ark regtest stack above and the local EVM chain (`/tmp/ghostly-usdt-local.json`) running:
-
 ```bash
-GHOSTLY_ARK_REGTEST=1 GHOSTLY_USDT_LOCAL=1 NODE_OPTIONS=--experimental-eventsource npx playwright test e2e/web/wallet-providers.spec.ts -c e2e/playwright.config.ts --project=web
+NODE_OPTIONS=--experimental-eventsource npx playwright test e2e/web/wallet-providers.spec.ts -c e2e/playwright.config.ts --project=web
 ```
 
-Without the variables only Cashu and Lightning run. A test mint marks its own invoices paid, so the
+Without the environment only Cashu and Lightning run. A test mint marks its own invoices paid, so the
 Lightning send pays an invoice from `support/bolt11.ts` instead: signed by a key made for the test, it is
 a payment the mint has to make, not one it already knows. On regtest an Ark batch expires within minutes,
 and coins in it become recoverable: the test takes the Recover action when it shows, and allows for the
@@ -247,8 +298,7 @@ rate-limits by IP, so reuse one funded counterpart across runs: put its recovery
 ```bash
 export GHOSTLY_BREEZ_COUNTERPART="<twelve words of a funded regtest wallet>"   # optional
 GHOSTLY_BREEZ_TESTNET=1 npx vitest run test/breez.testnet.test.ts                # in packages/browser: the provider contract on regtest
-npm run build:web && npx vite preview web --port 44401 --strictPort &
-E2E_WEB_URL=http://localhost:44401 GHOSTLY_BREEZ_TESTNET=1 npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/breez-wallet.spec.ts
+GHOSTLY_BREEZ_TESTNET=1 npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/breez-wallet.spec.ts
 npm run build:extension && GHOSTLY_BREEZ_TESTNET=1 npx playwright test -c e2e/playwright.config.ts --project=extension e2e/extension/breez.spec.ts
 ```
 
@@ -259,20 +309,16 @@ counterpart and pay it 200 from Send, and Bob's chat request of 150 paid by Alic
 balances are checked. The extension test makes a wallet in the offscreen document (where the WebAssembly runs
 there) and moves sats in and out. The request is paid through the bubble's "Copy invoice" and the Lightning card: the bubble's
 own review pays Cashu only for now.
+
 ### BDK (on-chain Bitcoin) on regtest
 
-The BDK wallet runs in the page (bitcoindevkit in WebAssembly) and reads the chain from an Esplora server, so its
-stack is bitcoind 31 with a miner wallet and an electrs answering browsers (CORS), worthless regtest coins, in
-containers named `ghostly-bdk-*` on `127.0.0.1:44201` (bitcoind RPC) and `127.0.0.1:44202` (Esplora):
+The BDK wallet runs in the page (bitcoindevkit in WebAssembly) and reads the chain from the environment's Esplora
+(`GHOSTLY_ESPLORA_URL`, CORS open):
 
 ```bash
-docker compose -p ghostly-bdk -f e2e/support/bdk-regtest/docker-compose.yml up -d
-node e2e/support/bdk-regtest/regtest.mjs ready     # a miner wallet with coins, Esplora caught up
 GHOSTLY_BDK_REGTEST=1 npm test -w @ghostly/browser -- bdk.regtest   # the provider contract on the real chain
-npm run build:web && npx vite preview web --port 44210 --strictPort &
-E2E_WEB_URL=http://localhost:44210 GHOSTLY_BDK_REGTEST=1 npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/wallet-bdk.spec.ts
-npm run build:extension && GHOSTLY_BDK_REGTEST=1 npx playwright test -c e2e/playwright.config.ts --project=extension e2e/extension/wallet-bdk.spec.ts   # the engine in an offscreen document
-docker compose -p ghostly-bdk -f e2e/support/bdk-regtest/docker-compose.yml down -v   # when done
+npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/wallet-bdk.spec.ts
+npm run build:extension && npx playwright test -c e2e/playwright.config.ts --project=extension e2e/extension/wallet-bdk.spec.ts   # the engine in an offscreen document
 ```
 
 Both peers make a new BDK wallet on Regtest with the local Esplora; the miner pays Alice's address; Alice sends
@@ -284,24 +330,12 @@ are not automated: their faucets need a login or a CAPTCHA.
 
 ### Nostr Wallet Connect on regtest
 
-Two regtest LND nodes with a channel between them (alice → bob, 1,000,000 sats, 400,000 pushed to bob), each
-behind its own Alby Hub, which answers Nostr Wallet Connect (NIP-47) over a local strfry relay. Worthless coins,
-containers named `ghostly-nwc-*`, everything on `127.0.0.1`:
-
-| Port | |
-|---|---|
-| 44501 | bitcoind RPC (regtest) |
-| 44502 | the Nostr relay, `ws://127.0.0.1:44502` |
-| 44511 / 44512 | LND REST, alice / bob |
-| 44521 / 44522 | Alby Hub, alice / bob |
+Two LND nodes with a channel between them (alice → bob, 1,000,000 sats, 400,000 pushed to bob), each behind its
+own Alby Hub, which answers Nostr Wallet Connect (NIP-47) over the environment's strfry relay.
 
 ```bash
-docker compose -p ghostly-nwc -f e2e/support/nwc-regtest/docker-compose.yml up -d
-node e2e/support/nwc-regtest/regtest.mjs ready      # funds both nodes, opens the channel, starts both hubs (idempotent)
 GHOSTLY_NWC_REGTEST=1 npm test -w @ghostly/browser -- nwc.regtest
-npm run build:web && npx vite preview web --port 44581 --strictPort &
-E2E_WEB_URL=http://localhost:44581 GHOSTLY_NWC_REGTEST=1 npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/wallet-nwc.spec.ts
-docker compose -p ghostly-nwc -f e2e/support/nwc-regtest/docker-compose.yml down -v   # when done
+npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/wallet-nwc.spec.ts
 ```
 
 The vitest file runs the provider contract against alice's hub (bob's node pays and is paid over the channel),
@@ -313,19 +347,14 @@ in memory, with the relay rewritten to the host's address; the CLI never prints 
 
 ### LND on regtest
 
-Two LND nodes (Alice's and Bob's) on one bitcoind, with a channel from Alice to Bob that pushed half of it to
-Bob, all worthless regtest coins, in containers named `ghostly-lnd-*`. Only the REST APIs are published, on
-`127.0.0.1:44710` (Alice) and `127.0.0.1:44720` (Bob); they allow the origin `http://localhost:44780`
-(`restcors`), so the web build must be served there:
+Two LND nodes (Alice's and Bob's) with a channel from Alice to Bob that pushed half of it to Bob. Their REST APIs
+allow any origin (`restcors=*`: throwaway nodes on 127.0.0.1, and every call still needs a macaroon), so the web
+build can be served on any port.
 
 ```bash
-docker compose -p ghostly-lnd -f e2e/support/lnd-regtest/docker-compose.yml up -d
-node e2e/support/lnd-regtest/regtest.mjs ready      # mines, funds Alice, opens the channel, bakes the scoped macaroons (once)
-npm run build:web && npx vite preview web --port 44780 --strictPort &
-E2E_WEB_URL=http://localhost:44780 GHOSTLY_LND_REGTEST=1 npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/wallet-lnd.spec.ts
+npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/wallet-lnd.spec.ts
 GHOSTLY_LND_REGTEST=1 npm test -w @ghostly/browser -- lndProvider     # the provider contract against Alice's node, Bob paying
 GHOSTLY_LND_REGTEST=1 cargo test --manifest-path src-tauri/Cargo.toml lnd   # the desktop command, the node's certificate pinned
-docker compose -p ghostly-lnd -f e2e/support/lnd-regtest/docker-compose.yml down -v   # when done
 ```
 
 Each app is given its own node's address, a macaroon baked with `info:read invoices:read invoices:write
@@ -337,37 +366,28 @@ same node. Credentials are read from the containers in memory (`regtest.mjs`'s `
 
 ### Bark (Second's Ark) on regtest
 
-Bark is a different Ark server from Arkade and cannot pay it, so it has its own stack: bitcoind 31, captaind 0.7.1
-(no Lightning), an Esplora (electrs, for the browser's on-chain wallet) and a funder wallet (the bark CLI), all
-worthless regtest coins, in containers named `ghostly-bark-*` on `127.0.0.1:44101-44135`:
+Bark is a different Ark server from Arkade and cannot pay it, so it has its own: captaind 0.7.1 (no Lightning) on
+the regtest chain and a funder wallet (the bark CLI). captaind is published for amd64 only; on Apple silicon Docker
+runs it emulated (`e2e/infra/config/captaind-start.sh` waits for its Postgres instead of giving it two seconds).
 
 ```bash
-docker compose -p ghostly-bark -f e2e/support/bark-regtest/docker-compose.yml up -d
-node e2e/support/bark-regtest/regtest.mjs ready     # mines, funds the server, boards the funder (once)
-npm run build:web && npx vite preview web --port 44181 --strictPort &
-E2E_WEB_URL=http://localhost:44181 GHOSTLY_BARK_REGTEST=1 npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/wallet-providers.spec.ts -g Bark
-docker compose -p ghostly-bark -f e2e/support/bark-regtest/docker-compose.yml down -v   # when done
+NODE_OPTIONS=--experimental-eventsource npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/wallet-providers.spec.ts -g Bark
 ```
 
 The test switches both peers' Bark wallet from signet to Regtest, has the funder pay Alice's Bark address, sends
 coins on-chain to Bob and moves them into Ark (a board: its on-chain fee comes off), then Alice sends from the
 wallet page, Bob sends in the chat (his app asks hers for an address) and pays his request; balances are checked
-in both apps and the identifiers are printed. captaind is published for amd64 only; on Apple silicon Docker runs
-it emulated. Funded signet runs are not automated: Second's faucet (https://signet.2nd.dev) needs a GitHub login.
+in both apps and the identifiers are printed. Funded signet runs are not automated: Second's faucet
+(https://signet.2nd.dev) needs a GitHub login.
 
 ### Core Lightning on regtest
 
-Two Core Lightning nodes (v26.06) on a regtest bitcoind 31, with a channel from `alice` to `bob` that both sides
-can spend from, in containers named `ghostly-cln-*`. Each node listens for Commando over a websocket
-(`bind-addr=ws:…`), published on `127.0.0.1:44810` (alice) and `127.0.0.1:44811` (bob); bitcoind's RPC on `44801`:
+Two Core Lightning nodes (v26.06) with a channel from `alice` to `bob` that both sides can spend from. Each node
+listens for Commando over a websocket (`bind-addr=ws:…`).
 
 ```bash
-docker compose -p ghostly-cln -f e2e/support/cln-regtest/docker-compose.yml up -d
-node e2e/support/cln-regtest/regtest.mjs ready     # mines, funds both nodes, opens the channel (once)
 GHOSTLY_CLN_REGTEST=1 npm test -w @ghostly/browser -- coreLightning.regtest
-npm run build:web && npx vite preview web --port 44820 --strictPort &
-E2E_WEB_URL=http://localhost:44820 GHOSTLY_CLN_REGTEST=1 npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/wallet-cln.spec.ts
-docker compose -p ghostly-cln -f e2e/support/cln-regtest/docker-compose.yml down -v   # when done
+npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/wallet-cln.spec.ts
 ```
 
 The unit-level test runs the provider contract against alice with bob as the counterpart, plus a rune refused a
@@ -382,19 +402,13 @@ expects, and the Node tests use the `ws` package.
 A browser wallet cannot be installed in Playwright's Chromium, so `support/webln.ts` does what one does: it
 injects `window.webln` into the page, and every call goes to a wallet in the test process. Without a variable
 that wallet is an in-memory fake (`packages/browser/test/helpers/fakeWebln.ts`). With `GHOSTLY_WEBLN_REGTEST=1`
-it is a real LND node of a disposable regtest stack (`packages/browser/test/helpers/lndWebln.ts`), one per
-person: bitcoind 31 and two LND 0.19 nodes, "alice" and "bob", with a 2M-sat channel between them (half on each
-side), in containers named `ghostly-webln-*`. Only the two REST APIs are published, on `127.0.0.1:44610` and
-`:44611`; the tests read each node's TLS certificate and macaroon from its container into memory and never
-print them.
+it is a real LND node of the environment (`packages/browser/test/helpers/lndWebln.ts`), one per person: "alice"
+and "bob", with a 2M-sat channel between them (half on each side). The tests read each node's TLS certificate and
+macaroon from its container into memory and never print them.
 
 ```bash
-docker compose -p ghostly-webln -f e2e/support/webln-regtest/docker-compose.yml up -d
-node e2e/support/webln-regtest/regtest.mjs ready     # mines, funds both nodes, opens the channel (once)
 GHOSTLY_WEBLN_REGTEST=1 npm test -w @ghostly/browser -- weblnProvider.regtest
-npm run build:web && npx vite preview web --port 44680 --strictPort &
-E2E_WEB_URL=http://localhost:44680 GHOSTLY_WEBLN_REGTEST=1 npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/wallet-webln.spec.ts
-docker compose -p ghostly-webln -f e2e/support/webln-regtest/docker-compose.yml down -v   # when done
+npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/wallet-webln.spec.ts
 ```
 
 The vitest file runs the provider contract against Alice's node (Bob's pays and is paid) and a payment whose

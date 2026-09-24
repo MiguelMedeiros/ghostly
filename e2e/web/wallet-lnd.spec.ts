@@ -3,15 +3,15 @@ import { balance, credentials, invoice, lookupInvoice, settled } from "../suppor
 import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
 
 /**
- * The LND provider against real nodes: GHOSTLY_LND_REGTEST=1 with e2e/support/lnd-regtest running
- * (`regtest.mjs ready`) and this build served on port 44780, the origin the nodes allow (restcors). Alice's app
+ * The LND provider against real nodes: GHOSTLY_LND_REGTEST=1 with e2e/infra up (npm run e2e:infra:up) and this
+ * build served on E2E_WEB_PORT (47100), the origin the nodes allow (restcors). Alice's app
  * uses Alice's node and Bob's app Bob's, each over the node's REST API from the page, with a macaroon scoped to
  * invoices and off-chain payments. Worthless regtest sats; no macaroon is ever printed.
  *
  * LND's certificate is self-signed: the contexts trust it the way a browser trusts a node set up with a real
  * one (a reverse proxy, `letsencryptdomain`). Everything else is what a person does: the form, the card, the chat.
  */
-test.skip(process.env.GHOSTLY_LND_REGTEST !== "1", "Requires the LND regtest stack (e2e/support/lnd-regtest) and GHOSTLY_LND_REGTEST=1");
+test.skip(process.env.GHOSTLY_LND_REGTEST !== "1", "Requires e2e/infra (npm run e2e:infra:up) and GHOSTLY_LND_REGTEST=1");
 test.describe.configure({ mode: "serial" });
 
 async function useNode(p: Peer, node: "alice" | "bob") {

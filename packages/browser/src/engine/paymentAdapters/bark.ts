@@ -32,6 +32,15 @@ export class BarkAdapter implements PaymentAdapter<BarkPrepared> {
   readonly method = "bark" as const;
   private queue: Promise<unknown> = Promise.resolve();
   private serial<T>(run: () => Promise<T>): Promise<T> { const next = this.queue.then(run, run); this.queue = next.catch(() => {}); return next; }
+  /** Calls that do not wait for the queue (reads, sync, maintenance): `dispose` frees nothing while one is running. */
+  private running = new Set<Promise<unknown>>();
+  private outside<T>(run: () => Promise<T>): Promise<T> {
+    const call = run();
+    this.running.add(call);
+    const done = () => { this.running.delete(call); };
+    call.then(done, done);
+    return call;
+  }
   private constructor(readonly config: BarkConfig, private sdk: BarkSdk, private wallet: BarkWalletHandle, private onchain: BarkOnchainHandle) {}
 
   static async connect(config: BarkConfig, mnemonic: string, options: { sdk?: BarkSdk; restore?: boolean } = {}): Promise<BarkAdapter> {
@@ -61,19 +70,29 @@ export class BarkAdapter implements PaymentAdapter<BarkPrepared> {
   }); }
   /** A fresh address for one chat request, never the one on the wallet page: what arrives on it pays that request. */
   requestAddress() { return this.serial(async () => { for (;;) { const next = await this.wallet.newAddressWithIndex(); if (next.index > 0) return next.address; } }); }
-  balance(): Promise<BarkBalance> { return this.wallet.balance(); }
-  onchainAddress() { return this.onchain.newAddress(); }
-  async onchainBalance() { await this.onchain.sync().catch(() => {}); return this.onchain.balance(); }
+  balance(): Promise<BarkBalance> { return this.outside(() => this.wallet.balance()); }
+  onchainAddress() { return this.outside(() => this.onchain.newAddress()); }
+  onchainBalance() { return this.outside(async () => { await this.onchain.sync().catch(() => {}); return this.onchain.balance(); }); }
   /** On-chain coins of this wallet into Ark. They show as pending until the board confirms. */
   board() { return this.serial(() => this.wallet.boardAll()); }
-  sync() { return this.wallet.sync(); }
+  sync() { return this.outside(() => this.wallet.sync()); }
   /**
    * Refreshes VTXOs close to expiry (through a round) and settles what the daemon left, so money left alone
    * stays spendable. Not queued behind payments, nor they behind it: a round can take minutes, and the SDK
    * locks the coins it is using itself.
    */
-  maintain() { return this.wallet.maintenance(); }
-  async dispose() { await this.queue.catch(() => {}); try { await this.wallet.stopDaemonWait(); } catch { /* already stopped */ } this.wallet.free(); this.onchain.free(); }
+  maintain() { return this.outside(() => this.wallet.maintenance()); }
+  /**
+   * Stops the wallet; its memory goes once nothing uses it. Freeing a wallet that a call outside the queue still
+   * holds (a sync right after opening, a round) throws "attempted to take ownership of Rust value while it was
+   * borrowed" and leaves Bark unusable in this page — replacing a wallet that had just opened did exactly that.
+   */
+  async dispose() {
+    await this.queue.catch(() => {});
+    try { await this.wallet.stopDaemonWait(); } catch { /* already stopped */ }
+    const free = () => { this.wallet.free(); this.onchain.free(); };
+    if (this.running.size) void Promise.allSettled([...this.running]).then(free); else free();
+  }
 
   prepare(target: PaymentTarget, amount: number, feeCap: number) { return this.serial(async () => {
     validatePaymentTarget(target); assertWholeSats(amount);
@@ -122,7 +141,7 @@ export class BarkAdapter implements PaymentAdapter<BarkPrepared> {
    * the amount asked, made after the request. Nothing the payer says is trusted.
    */
   async received(address: string, amount: number, since: number, claimed: ReadonlySet<string> = new Set()): Promise<string | undefined> {
-    for (const m of await this.wallet.history()) {
+    for (const m of await this.outside(() => this.wallet.history())) {
       if (m.subsystemKind !== "receive" || m.status !== "successful" || m.effectiveBalanceSats < amount || Date.parse(m.createdAt) < since - 60_000) continue;
       if (!m.receivedOnAddresses.map(addressOf).includes(address)) continue;
       const id = outputTxid(m) ?? `movement-${m.id}`;

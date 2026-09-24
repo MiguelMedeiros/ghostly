@@ -9,7 +9,7 @@ import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, ty
  */
 type Node = "alice" | "bob";
 
-test.skip(process.env.GHOSTLY_CLN_REGTEST !== "1", "Requires the local Core Lightning regtest stack (e2e/support/cln-regtest)");
+test.skip(process.env.GHOSTLY_CLN_REGTEST !== "1", "Requires e2e/infra (npm run e2e:infra:up) and GHOSTLY_CLN_REGTEST=1");
 test.setTimeout(3 * 60_000);
 // Both tests move sats on the same two nodes: one at a time, or each sees the other's payments.
 test.describe.configure({ mode: "serial" });

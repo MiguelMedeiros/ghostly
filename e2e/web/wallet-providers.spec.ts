@@ -1,21 +1,22 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { Interface } from "ethers";
+import { USDT_LOCAL } from "../support/usdt-local.mjs";
 import { strangerInvoice } from "../support/bolt11";
-import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
+import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer, type PeerOptions } from "../support/fixtures";
 
 /**
  * Every wallet provider receiving and sending, on test networks only (the Testnet mode):
  *  - Cashu and Lightning: the public test mint, or the local one E2E_MINT_URL answers for (@network).
- *  - Ark: a local regtest server (GHOSTLY_ARK_REGTEST=1).
- *  - Bark (Second's Ark): a local regtest server, e2e/support/bark-regtest (GHOSTLY_BARK_REGTEST=1).
- *  - USDT: a local EVM chain with a test token (GHOSTLY_USDT_LOCAL=1).
+ *  - Ark: arkd on e2e/infra's regtest chain (GHOSTLY_ARK_REGTEST=1).
+ *  - Bark (Second's Ark): captaind on e2e/infra's regtest chain (GHOSTLY_BARK_REGTEST=1).
+ *  - USDT: e2e/infra's local EVM chain with a test token (GHOSTLY_USDT_LOCAL=1).
  * For each: money in, a Send in the chat (reviewed, approved), a Request paid in the chat, and a Send
  * from the wallet page where the provider has one. Balances are checked on both sides.
  */
 
-async function twoInTestnet(peer: (name: string) => Promise<Peer>, names: [string, string]): Promise<[Peer, Peer]> {
-  const [alice, bob] = await Promise.all([peer(names[0]), peer(names[1])]);
+async function twoInTestnet(peer: (name: string, options?: PeerOptions) => Promise<Peer>, names: [string, string]): Promise<[Peer, Peer]> {
+  // Test networks only: the Mainnet wallets a new profile makes by itself never get a server to wait on.
+  const [alice, bob] = await Promise.all([peer(names[0], { offlineMainnet: true }), peer(names[1], { offlineMainnet: true })]);
   await link(alice, bob);
   await connect(alice, bob);
   for (const p of [alice, bob]) { await useTestnet(p); await openChat(p); }
@@ -100,7 +101,7 @@ test.describe("Cashu and Lightning", { tag: "@network" }, () => {
 });
 
 test("Ark: in, a Send from the wallet, a Send in the chat and a Request paid in the chat", { tag: ["@gated", "@feature:wallet.ark.send", "@feature:payments.arkade.send", "@feature:payments.arkade.request"] }, async ({ peer }) => {
-  test.skip(process.env.GHOSTLY_ARK_REGTEST !== "1", "Requires the local Ark regtest stack");
+  test.skip(process.env.GHOSTLY_ARK_REGTEST !== "1", "Requires e2e/infra (npm run e2e:infra:up) and GHOSTLY_ARK_REGTEST=1");
   test.setTimeout(6 * 60_000);
   const mnemonic = execFileSync(process.execPath, ["--experimental-eventsource", "e2e/support/fund-ark.mjs"], { encoding: "utf8", stdio: "pipe" }).trim();
   const [alice, bob] = await twoInTestnet(peer, ["ark-p-alice", "ark-p-bob"]);
@@ -163,7 +164,7 @@ test("Ark: in, a Send from the wallet, a Send in the chat and a Request paid in 
 });
 
 test("Bark: in over Ark and on-chain, a Send from the wallet, a Send in the chat and a Request paid in the chat", { tag: ["@gated", "@feature:wallet.bark.send", "@feature:payments.bark.send"] }, async ({ peer }) => {
-  test.skip(process.env.GHOSTLY_BARK_REGTEST !== "1", "Requires the local Bark regtest stack (e2e/support/bark-regtest)");
+  test.skip(process.env.GHOSTLY_BARK_REGTEST !== "1", "Requires e2e/infra (npm run e2e:infra:up) and GHOSTLY_BARK_REGTEST=1");
   test.setTimeout(6 * 60_000);
   const regtest = (...args: string[]) => execFileSync(process.execPath, ["e2e/support/bark-regtest/regtest.mjs", ...args], { encoding: "utf8", stdio: "pipe" }).trim();
   regtest("ready");
@@ -191,8 +192,10 @@ test("Bark: in over Ark and on-chain, a Send from the wallet, a Send in the chat
   await expect(panel(bob).getByTestId("bark-onchain")).toContainText("30,000", { timeout: 60_000 });
   await panel(bob).getByTestId("bark-board").click();
   const sats = async (p: Peer) => Number((await balance(p).innerText()).trim().match(/^[\d,]*/)![0].replace(/,/g, "") || NaN);
-  // The board is an on-chain transaction: its fee comes off, the rest lands in Ark once it confirms.
-  await expect.poll(async () => { regtest("mine", "1"); return sats(bob); }, { timeout: 120_000, intervals: [3_000] }).toBeGreaterThan(29_000);
+  // The board is an on-chain transaction: its fee comes off, the rest lands in Ark once it confirms. The fee is
+  // what the chain's estimates say — on e2e/infra's shared chain the other suites' channels teach bitcoind about
+  // 10 sat/vB, so around a thousand sats, not the floor rate of an empty chain.
+  await expect.poll(async () => { regtest("mine", "1"); return sats(bob); }, { timeout: 120_000, intervals: [3_000] }).toBeGreaterThan(27_000);
   const boarded = await sats(bob);
   expect(boarded).toBeLessThan(30_000);
   await panel(bob).getByRole("radio", { name: "Bark (instant)" }).click();
@@ -239,9 +242,9 @@ test("Bark: in over Ark and on-chain, a Send from the wallet, a Send in the chat
 });
 
 test("USDT: in, a Send from the wallet, a Send in the chat and a Request paid in the chat", { tag: ["@gated", "@feature:wallet.usdt.send", "@feature:payments.usdt.send"] }, async ({ peer }) => {
-  test.skip(process.env.GHOSTLY_USDT_LOCAL !== "1", "Requires a disposable local EVM chain 31337");
+  test.skip(process.env.GHOSTLY_USDT_LOCAL !== "1", "Requires e2e/infra (npm run e2e:infra:up) and GHOSTLY_USDT_LOCAL=1");
   test.setTimeout(6 * 60_000);
-  const config = JSON.parse(readFileSync("/tmp/ghostly-usdt-local.json", "utf8"));
+  const config = USDT_LOCAL;
   let id = 0;
   const rpc = async (method: string, params: unknown[] = []) => {
     const response = await fetch(config.provider, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method, params }) });

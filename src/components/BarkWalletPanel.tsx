@@ -10,7 +10,7 @@ type Network = "signet" | "regtest";
 /** Second's public signet server, or a local regtest one (e2e/support/bark-regtest). */
 const NETWORKS: Record<Network, { label: string; provider: string; explorer: string }> = {
  signet: { label: "Signet", provider: "https://ark.signet.2nd.dev", explorer: "https://esplora.signet.2nd.dev" },
- regtest: { label: "Regtest", provider: "http://127.0.0.1:44135", explorer: "http://127.0.0.1:44102" },
+ regtest: { label: "Regtest", provider: "http://127.0.0.1:47020", explorer: "http://127.0.0.1:47002" },
 };
 /** Bark's out-of-round payments cost nothing today; the cap only stops a surprise, and the review shows the real fee. */
 const feeCap = (amount: number) => Math.max(100, Math.ceil(amount / 100));

@@ -3,10 +3,10 @@ import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, ty
 
 // Opt-in, local regtest only. Every profile and seed belongs to this test.
 test("Ark request, explicit approval and receipt in the chat", { tag: ["@feature:payments.arkade.request", "@feature:payments.arkade.send", "@feature:payments.chat.review", "@gated"] }, async ({ peer }, testInfo) => {
-  test.skip(process.env.GHOSTLY_ARK_REGTEST !== "1", "Requires the local Ark regtest stack");
+  test.skip(process.env.GHOSTLY_ARK_REGTEST !== "1", "Requires e2e/infra (npm run e2e:infra:up) and GHOSTLY_ARK_REGTEST=1");
   const mnemonic = execFileSync(process.execPath, ["--experimental-eventsource", "e2e/support/fund-ark.mjs"], { encoding: "utf8", stdio: "pipe" }).trim();
 
-  const [alice, bob] = await Promise.all([peer("ark-alice"), peer("ark-bob")]);
+  const [alice, bob] = await Promise.all([peer("ark-alice", { offlineMainnet: true }), peer("ark-bob", { offlineMainnet: true })]);
   await link(alice, bob);
   await connect(alice, bob);
   const panel = (p: Peer) => p.page.getByTestId("ark-wallet");

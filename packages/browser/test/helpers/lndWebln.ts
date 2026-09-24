@@ -1,9 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { request } from "node:https";
 import type { WebLNInfo, WebLNProvider } from "../../src/engine/paymentAdapters/providers/webln";
+import { container, endpoints } from "../../../../e2e/infra/env.mjs";
 
 /**
- * A WebLN wallet backed by a real LND node of the disposable regtest stack (e2e/support/webln-regtest):
+ * A WebLN wallet backed by a real LND node of the end-to-end environment (e2e/infra, e2e/support/webln-regtest):
  * what a browser wallet such as Alby does in front of its node, minus the prompts. Used by the gated
  * contract test (Node) and by the gated e2e, where the page's `window.webln` calls it through a binding.
  *
@@ -11,10 +12,10 @@ import type { WebLNInfo, WebLNProvider } from "../../src/engine/paymentAdapters/
  * requests' headers, and never printed. Worthless regtest sats only.
  */
 export type LndNode = "alice" | "bob";
-export const LND_REST: Record<LndNode, number> = { alice: 44610, bob: 44611 };
+export const LND_REST: Record<LndNode, URL> = { alice: new URL(endpoints.webln.alice), bob: new URL(endpoints.webln.bob) };
 const DIR = "/root/.lnd";
 
-const fromContainer = (node: LndNode, path: string) => execFileSync("docker", ["exec", `ghostly-webln-${node}`, "cat", path], { stdio: ["ignore", "pipe", "ignore"] });
+const fromContainer = (node: LndNode, path: string) => execFileSync("docker", ["exec", container(`webln-${node}`), "cat", path], { stdio: ["ignore", "pipe", "ignore"] });
 const b64hex = (value: string | undefined) => (value ? Buffer.from(value, "base64").toString("hex") : undefined);
 
 export class LndRest {
@@ -27,7 +28,7 @@ export class LndRest {
 
   call<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-      const req = request({ host: "127.0.0.1", port: LND_REST[this.node], path, method, ca: this.ca, servername: "localhost", timeout: 60_000, headers: { "Grpc-Metadata-macaroon": this.macaroon, "content-type": "application/json" } }, (res) => {
+      const req = request({ host: LND_REST[this.node].hostname, port: LND_REST[this.node].port, path, method, ca: this.ca, servername: "localhost", timeout: 60_000, headers: { "Grpc-Metadata-macaroon": this.macaroon, "content-type": "application/json" } }, (res) => {
         const chunks: Buffer[] = [];
         res.on("data", (c: Buffer) => chunks.push(c));
         res.on("end", () => {

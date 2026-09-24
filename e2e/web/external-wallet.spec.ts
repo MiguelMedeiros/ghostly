@@ -1,5 +1,6 @@
 import { chat, connect, expect, link, openChat, openWallet, say, test, type Peer } from "../support/fixtures";
 import { LocalLnurlServer } from "../support/lnurl";
+import { endpoints } from "../infra/env.mjs";
 
 /**
  * Paying with a wallet that is not Ghostly, and paying a Lightning address. Sats move through the test
@@ -83,7 +84,7 @@ test.describe("another wallet", { tag: "@network" }, () => {
   });
 
   test("a Lightning address is resolved against a local server and paid through the Cashu source", { tag: ["@feature:payments.lnurl.card", "@feature:wallet.lnurl.address"] }, async ({ peer }) => {
-    const server = new LocalLnurlServer(45911);
+    const server = new LocalLnurlServer(endpoints.lnurlPort);
     server.names.set("shop", { description: "Coffee at the shop", minSat: 5, maxSat: 500, commentAllowed: 40 });
     server.names.set("fixed", { description: "One ticket", minSat: 12, maxSat: 12 });
     await server.start();

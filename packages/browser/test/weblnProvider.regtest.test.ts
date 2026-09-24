@@ -8,8 +8,8 @@ import { describeLightningProvider } from "./helpers/providerContract";
 
 /**
  * The WebLN provider against a real regtest Lightning node: a WebLN wallet in front of LND "alice", and
- * LND "bob" at the other end of her channel. Needs the stack of e2e/support/webln-regtest running and
- * ready (see e2e/README.md). Worthless regtest sats only.
+ * LND "bob" at the other end of her channel. Needs e2e/infra up (npm run e2e:infra:up,
+ * see e2e/README.md). Worthless regtest sats only.
  */
 const enabled = process.env.GHOSTLY_WEBLN_REGTEST === "1";
 // A real node answers in its own time: a payment that outlives a timed-out test lands in the next one.
