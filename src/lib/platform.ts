@@ -29,8 +29,11 @@ export interface SharedService {
 export interface PeerLinkState {
   id?: string;
   deliveryMode?: "stream" | "dht";
-  textDelivery?: "stream" | "dht" | "unavailable";
+  /** `hold`: the contact is away and what is sent now waits in this device's storage for it (WISP 4xx). */
+  textDelivery?: "stream" | "dht" | "hold" | "unavailable";
   canSendText?: boolean;
+  /** Store-and-forward in this chat: the switch, what the contact said, storage and what is waiting. */
+  hold?: PeerHoldState;
   dhtDelivery?: { mode: "stream" | "dht"; peerMode?: "stream" | "dht"; authenticated: boolean; error?: string; pendingUntil?: number; maxTextBytes: number };
   pairing?: PairingState;
   /** `methods`: ways of paying both sides allow in this chat right now. */
@@ -41,6 +44,21 @@ export interface PeerLinkState {
   online: boolean;
   /** `null` while the peer advertises nothing (offline, or an older client). */
   services: ServiceAd[] | null;
+}
+
+/** What a chat shows of store-and-forward (WISP 4xx). */
+export interface PeerHoldState {
+  enabled: boolean;
+  peerAllows?: boolean;
+  storage: boolean;
+  canHold: boolean;
+  outstanding: number;
+  bytes: number;
+  maxBytes: number;
+  maxItems: number;
+  ttlMs: number;
+  refused: number;
+  error?: string;
 }
 
 export interface NetworkSettings {
@@ -252,6 +270,10 @@ export interface ServicesPlatform {
   getPeer(peerPubKeyZ32: string): PeerLinkState | null;
   /** Which ways of paying the chat with this peer allows. */
   setChatPaymentMethods(peerPubKeyZ32: string, methods: Partial<Record<PaymentMethodName, boolean>>): Promise<void>;
+  /** Store-and-forward in the chat with this peer: accept held items from them, and hold items for them while they are away. */
+  setChatHold(peerPubKeyZ32: string, enabled: boolean): Promise<void>;
+  /** Where held items live: this profile's S3 storage and space (Profile → Backups); null turns holding off. */
+  setHoldStorage(storage: { s3: import("@ghostly/browser/backup/s3").S3Config; space: string } | null): Promise<void>;
   connect(peerPubKeyZ32: string): void;
   openService(peerPubKeyZ32: string, serviceId: string): Promise<void>;
   /**

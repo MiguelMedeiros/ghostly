@@ -37,6 +37,7 @@ export * from './pubkyRing';
 export * from './ringLink';
 
 export { DhtDelivery, DHT_TEXT_BYTES, DHT_MESSAGE_TTL, emptyDhtDeliveryState, type DeliveryMode, type DhtDeliveryState, type DhtDeliveryView } from "./dhtDelivery";
+export * from "./storeForward";
 export * from "./paymentIntent";
 export * from "./bitcoinAddress";
 

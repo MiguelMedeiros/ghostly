@@ -100,3 +100,29 @@ it("never leaves its own folder in the bucket, whatever a name or a listing says
     (async () => new Response("x", { headers: { "content-length": String(2 * 1024 ** 3) } })) as unknown as typeof fetch);
   await expect(huge.get("abcdefghijklmnop/backups/x.ghostly-backup")).rejects.toThrow("too large");
 });
+
+it("presigns a read exactly as AWS documents (SigV4 query-string GET object example), and keeps held items in their folder", async () => {
+  const { presignS3, S3Store } = await import("../src/backup/s3");
+  const { heldName, manifestName } = await import("../src/backup/storage");
+  const url = await presignS3(
+    { method: "GET", url: new URL("https://examplebucket.s3.amazonaws.com/test.txt"), expiresSeconds: 86400 },
+    { region: "us-east-1", accessKeyId: "AKIAIOSFODNN7EXAMPLE", secretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" },
+    new Date("2013-05-24T00:00:00Z"),
+  );
+  expect(new URL(url).searchParams.get("X-Amz-Signature")).toBe("aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404");
+  expect(url).not.toContain("wJalrXUtnFEMI");
+  const mailbox = "abcdefghijklmnopqrstuv";
+  expect(heldName("abcdefghijklmnop", mailbox, 12)).toMatch(/^abcdefghijklmnop\/hold\/abcdefghijklmnopqrstuv\/00000012-[a-z2-7]{8}\.ghostly-held$/);
+  const seen: { method: string; url: string; type?: string }[] = [];
+  const fetcher = (async (input: URL, init: RequestInit) => { seen.push({ method: init.method!, url: String(input), type: (init.headers as Record<string, string>)["content-type"] }); return new Response("<ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>"); }) as unknown as typeof fetch;
+  const store = new S3Store({ endpoint: "https://s3.example.com", region: "us-east-1", bucket: "bkt", prefix: "g", accessKeyId: "k", secretAccessKey: "s" }, fetcher);
+  await store.put(manifestName("abcdefghijklmnop", mailbox), new Uint8Array([1]));
+  expect(seen[0]).toMatchObject({ method: "PUT", url: "https://s3.example.com/bkt/g/abcdefghijklmnop/hold/abcdefghijklmnopqrstuv/manifest.ghostly-held", type: "application/vnd.ghostly.held" });
+  await store.listFolder("abcdefghijklmnop", mailbox);
+  expect(seen[1].url).toContain("prefix=g%2Fabcdefghijklmnop%2Fhold%2Fabcdefghijklmnopqrstuv%2F");
+  await expect(store.put("abcdefghijklmnop/hold/short/x.ghostly-held", new Uint8Array())).rejects.toThrow("Not a Ghostly backup name");
+  await expect(store.listFolder("abcdefghijklmnop", "../backups")).rejects.toThrow("Not a Ghostly backup name");
+  const presigned = await store.presign(heldName("abcdefghijklmnop", mailbox, 1), 10 * 24 * 3600);
+  expect(new URL(presigned).searchParams.get("X-Amz-Expires")).toBe(String(7 * 24 * 3600));
+  expect(seen).toHaveLength(2);
+});

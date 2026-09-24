@@ -23,7 +23,7 @@ import { normalizeNostrRelays } from '../nostr/relay';
 import type { NostrDraft, NostrDraftRequest, NostrPublishResult } from '../nostr/types';
 import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
-import { MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
+import { type PaymentRequest, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
 import {
   DEFAULT_RELAYS,
   GhostLink,
@@ -85,6 +85,9 @@ import { db } from "./db";
 import { Groups } from "./groups";
 import { mayReach } from "./serviceAccess";
 import { Outbox } from "./outbox";
+import { HoldEngine } from "./hold";
+import { S3Store } from "../backup/s3";
+import type { HoldStore } from "../backup/storage";
 import { PaymentDesk } from "./payments";
 import { CashuWallet } from "./wallet";
 
@@ -285,7 +288,7 @@ export class GhostlyNode implements EngineImplementation {
   }, CASHU_MINT_SOURCE);
   /** On-chain Bitcoin through the active source of the mode: none until the person sets one up. */
   private readonly bitcoin = new BitcoinService(() => this.providers().onchain, this.providerHost, () => { void this.refreshWallet(); void this.desk.reconcileBitcoinReceipts().catch(()=>{}); });
-  private readonly desk = new PaymentDesk(this.wallet, {
+  private readonly desk: PaymentDesk = new PaymentDesk(this.wallet, {
     onReviewedPaymentResult:async(id)=>{await this.reconcilePayment({id});},
     onReviewedPaymentRefused:async(id,reason)=>{
       const intent=await intentRepository.get(id);
@@ -294,6 +297,8 @@ export class GhostlyNode implements EngineImplementation {
     },
     getLink: (linkId) => this.links.get(linkId)?.link ?? null,
     storeMessage: (message) => this.storeMessage(message),
+    heldPaymentMethods: (linkId): PaymentMethodName[] | null => { const live = this.links.get(linkId); return live && this.holdingFor(live) ? this.hold.heldPaymentMethods(linkId) : null; },
+    holdRequest: (linkId, request, messageId) => this.hold.hold(linkId, { kind: "pay-req", id: request.id, messageId, ref: request.id, bytes: 1024, timestamp: request.timestamp }),
     onChange: () => {
       for (const payment of Object.values(this.desk.views())) {
         if (payment.kind === "payment" && payment.direction === "out" && payment.state === "settled" && payment.createdAt >= this.feedbackStartedAt) {
@@ -309,6 +314,61 @@ export class GhostlyNode implements EngineImplementation {
     // "I paid": the source and the mints are asked now; the request is paid only once one of them saw it.
     check: async () => { await Promise.all([this.lightning.reconcile(), this.wallet.checkQuotes()]); },
   }, this.bitcoin);
+
+  /** Store-and-forward for away contacts (WISP 4xx): items sealed into this device's own storage, picked up from the contact's. */
+  private holdStore: { key: string; store: HoldStore } | null = null;
+  private readonly hold: HoldEngine = new HoldEngine({
+    transport: undefined as unknown as PkarrTransport,
+    storage: () => {
+      const config = this.settings.holdStorage;
+      if (!config?.s3 || !/^[a-z2-7]{16}$/.test(config.space ?? "")) return null;
+      const key = JSON.stringify(config.s3);
+      try { if (this.holdStore?.key !== key) this.holdStore = { key, store: new S3Store(config.s3) }; } catch { return null; }
+      return { store: this.holdStore.store, space: config.space };
+    },
+    link: (linkId) => { const live = this.links.get(linkId); return live ? { stored: live.stored, open: live.link?.isDataLinkOpen ?? false } : undefined; },
+    linkIds: () => [...this.links.keys()],
+    saveHold: async (linkId, hold) => {
+      await db.patchLink(linkId, { hold });
+      const live = this.links.get(linkId);
+      if (live) live.stored = { ...live.stored, hold };
+    },
+    delivery: async (linkId, messageId, state, error) => {
+      await db.updateDelivery(linkId, messageId, state, error);
+      const messages = await db.getMessages(linkId);
+      const message = messages.find((m) => m.id === messageId);
+      if (message?.file) this.transfers.set(message.file.id, state === "failed" ? { state: "failed", transferred: 0, size: message.file.size, error } : { state: "done", transferred: message.file.size, size: message.file.size });
+      if (message && state !== "failed") this.messageFeedback("sent", message);
+      this.events.onMessages(linkId, messages);
+      this.emitState();
+    },
+    text: async (linkId, messageId) => (await db.getMessages(linkId)).find((m) => m.id === messageId)?.text ?? null,
+    file: async (fileId) => {
+      const stored = await fileStore.get(fileId);
+      if (!stored?.metadata) return null;
+      return { bytes: new Uint8Array(await stored.blob.arrayBuffer()), name: stored.metadata.name, size: stored.metadata.size, mime: stored.metadata.mime };
+    },
+    paymentRequest: (paymentId): PaymentRequest | null => this.desk.requestFor(paymentId),
+    receiveText: (linkId, message) => this.storeMessage({ linkId, id: `peer_${message.id}`, text: message.text, sender: "peer", timestamp: message.timestamp, via: "hold" }),
+    receiveFile: async (linkId, wire, bytes, digest) => {
+      const live = this.links.get(linkId);
+      if (!live) return "unknown chat";
+      if (live.files.wireIds.has(wire.wireId)) return "duplicate file id";
+      if (live.files.receivedBytes + wire.size > LIMITS.maxStoredIncomingBytesPerPeer) return "no room for more files";
+      const file: MessageFile = { id: `${linkId}-in-${toBase64Url(randomBytes(12))}`, name: wire.name, size: wire.size, mime: wire.mime };
+      if (live.stored.deletedIds?.includes(`peer_${wire.wireId}`)) return null;
+      live.files.wireIds.add(wire.wireId);
+      live.files.receivedBytes += wire.size;
+      // The bytes first, then the message that shows them: a message never points at a file that is not there.
+      await fileStore.put({ id: file.id, linkId, blob: new Blob([bytes as BlobPart], { type: safeBlobType(file.mime) }), createdAt: Date.now(), direction: "in", wireId: wire.wireId, digest,
+        metadata: { name: wire.name, size: wire.size, mime: wire.mime, timestamp: wire.timestamp }, transfer: { state: "done", transferred: wire.size, size: wire.size } });
+      this.transfers.set(file.id, { state: "done", transferred: wire.size, size: wire.size });
+      await this.storeMessage({ linkId, id: `peer_${wire.wireId}`, text: `📎 ${wire.name}`, sender: "peer", timestamp: wire.timestamp, via: "hold", file });
+      return null;
+    },
+    receivePaymentRequest: (linkId, request) => this.desk.onPaymentRequest(linkId, request, true),
+    changed: () => this.emitState(),
+  });
 
   /** Identity proofs: this profile's, and those shared in each paired chat (WISP 300). */
   private readonly identities = new IdentityProofs({
@@ -399,6 +459,7 @@ export class GhostlyNode implements EngineImplementation {
     this.transport = options.transport ?? this.relays!;
     this.pollIntervals = options.pollIntervals ?? RELAY_POLL_INTERVALS;
     this.localFetch = options.localFetch ?? webLocalFetch;
+    (this.hold as unknown as { host: { transport: PkarrTransport } }).host.transport = this.transport;
   }
 
   private async refreshWallet(): Promise<void> {
@@ -472,6 +533,7 @@ export class GhostlyNode implements EngineImplementation {
       if (!this.links.get(linkId)?.stored.group) void this.refreshPublicProfiles({ linkId }).catch(() => {});
     }
     this.emitState();
+    if (this.settings.online) this.hold.start();
     void this.pollPaymentStatus().catch(()=>{});
     // The Lightning and Bitcoin sources the person set up (the Cashu mints need no network to connect).
     void this.lightning.recover().then(() => this.lightning.ensureReady());
@@ -497,6 +559,7 @@ export class GhostlyNode implements EngineImplementation {
     await this.lightning.stop();
     await this.bitcoin.stop();
     await this.nativeQueue;
+    await this.hold.stop();
     await Promise.allSettled([...this.outboxes.values()].map(outbox => outbox.stop()));
     await Promise.allSettled([...this.links.values()].map((live) => live.link?.stop(true)));
   }
@@ -675,6 +738,7 @@ export class GhostlyNode implements EngineImplementation {
     this.links.delete(linkId);
     this.identities.forget(linkId);
     this.nostrSocial.forgetLink(linkId);
+    this.hold.forgetLink(linkId);
     void db.deleteLink(linkId);
     void this.desk.forgetLink(linkId);
     this.emitState();
@@ -693,6 +757,7 @@ export class GhostlyNode implements EngineImplementation {
     if (linkId) void this.ensureNativeEndpoints(linkId);
     // With automatic profiles on, a stale Nostr profile is refreshed when the chat is opened.
     if (linkId && this.settings.nostr?.autoLoadProfiles) void this.nostrSocial.ledgerChanged(linkId).catch(() => {});
+    if (linkId) this.hold.wake(linkId);
     for (const [id, live] of this.links) live.link?.session.setActive(id === linkId);
     // Opening a chat is someone wanting to talk: reconnect now, not after the wait between attempts.
     if (linkId) this.links.get(linkId)?.link?.wake();
@@ -701,6 +766,7 @@ export class GhostlyNode implements EngineImplementation {
   /** The window or tab is back in front: every chat looks now, and dropped ones reconnect at once. */
   wake(): void {
     for (const live of this.links.values()) live.link?.wake();
+    this.hold.wake();
   }
 
   exportLinks() {
@@ -720,11 +786,20 @@ export class GhostlyNode implements EngineImplementation {
     const { linkId, text } = params;
     const live = this.links.get(linkId);
     if (!live?.link) return { error: "You are offline" };
-    if (live.stored.profile && !live.link.canSendText) return { error: "Choose compatible delivery methods with your contact before sending." };
+    if (live.stored.profile && !live.link.canSendText && !this.holdingFor(live)) return { error: "Choose compatible delivery methods with your contact before sending." };
     const trimmed = text.trim();
     if (!trimmed) return { error: null };
 
     const timestamp = params.timestamp ?? Date.now();
+    if (live.stored.profile && this.holdingFor(live)) {
+      // The contact is away and allowed this: the text waits in this device's storage, sealed for them.
+      if (new TextEncoder().encode(trimmed).length > HOLD_LIMITS.maxTextBytes) return { error: `A held message is at most ${HOLD_LIMITS.maxTextBytes} UTF-8 bytes.` };
+      const wireId = toBase64Url(randomBytes(16)), id = `me_${wireId}`;
+      await this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp, via: "hold", delivery: "sending" });
+      // The durable row carries the outcome; the promise only says whether it could start.
+      void this.hold.hold(linkId, { kind: "text", id: wireId, messageId: id, bytes: new TextEncoder().encode(trimmed).length, timestamp }).catch(() => {});
+      return { error: null };
+    }
     if (live.stored.profile) {
       const limit = live.link.textDelivery === "dht" ? DHT_TEXT_BYTES : LIMITS.maxChatMessageBytes;
       if (new TextEncoder().encode(trimmed).length > limit) return { error: `Message exceeds ${limit} UTF-8 bytes for this delivery method.` };
@@ -754,8 +829,36 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   async retryMessage({ linkId, messageId }: { linkId: string; messageId: string }): Promise<void> {
-    if (!this.links.get(linkId)?.stored.profile) throw new Error("Retry is only available for paired chat messages");
+    const live = this.links.get(linkId);
+    if (!live?.stored.profile) throw new Error("Retry is only available for paired chat messages");
+    const message = (await db.getMessages(linkId)).find((m) => m.id === messageId);
+    if (message?.via === "hold") {
+      // Its item again if it is still known; held anew (a fresh sequence, the same message id) if it was dropped.
+      if (await this.hold.retry(linkId, messageId)) return;
+      if (!this.holdingFor(live)) throw new Error("Held messages need S3 storage (Profile → Backups) and a contact that allows them.");
+      await db.updateDelivery(linkId, messageId, "sending");
+      this.events.onMessages(linkId, await db.getMessages(linkId));
+      const item = message.file ? { kind: "file" as const, id: message.file.id.slice(`${linkId}-out-`.length), ref: message.file.id, bytes: message.file.size }
+        : message.paymentId ? { kind: "pay-req" as const, id: message.paymentId, ref: message.paymentId, bytes: 1024 }
+        : { kind: "text" as const, id: message.wireId ?? messageId.replace(/^me_/, ""), bytes: new TextEncoder().encode(message.text).length };
+      await this.hold.hold(linkId, { ...item, messageId, timestamp: message.timestamp });
+      return;
+    }
     await this.outboxFor(linkId).transmit(messageId);
+  }
+
+  /** The contact is away, and both sides chose to hold what is sent meanwhile (WISP 4xx). */
+  private holdingFor(live: LiveLink): boolean {
+    return !!live.stored.profile && !!live.link && !live.link.isDataLinkOpen && live.stored.deliveryMode !== "dht" && this.hold.canHold(live.stored.id);
+  }
+
+  /** Store-and-forward in one chat: offered in the handshake, told to a connected contact at once. */
+  async setChatHold({ linkId, enabled }: { linkId: string; enabled: boolean }): Promise<void> {
+    const live = this.links.get(linkId);
+    if (!live?.stored.profile || typeof enabled !== "boolean") throw new Error("Held messages need a paired chat");
+    await this.hold.setEnabled(linkId, enabled);
+    live.link?.setHoldSupport(enabled, live.stored.hold?.outSeq);
+    this.emitState();
   }
 
   private outboxFor(linkId: string): Outbox {
@@ -795,6 +898,7 @@ export class GhostlyNode implements EngineImplementation {
       deletedIds: [...(live.stored.deletedIds ?? []), messageId].slice(-MAX_DELETED_IDS),
     };
     void db.patchLink(linkId, { deletedIds: live.stored.deletedIds });
+    void this.hold.forget(linkId, messageId).catch(() => {});
 
     void (async () => {
       const message = (await db.getMessages(linkId)).find((m) => m.id === messageId);
@@ -830,9 +934,18 @@ export class GhostlyNode implements EngineImplementation {
     };
     if (!live?.link) return fail("You are offline");
     if (this.transfers.get(file.id)?.state === "transferring") return;
-    if (!live.link.supportsFiles) return fail("Connect to an updated peer to send files");
     const wireId = file.id.slice(`${linkId}-out-`.length);
     if (file.id !== GhostlyNode.outgoingFileId(linkId, wireId)) return fail("Invalid file id");
+    if (!live.link.supportsFiles && this.holdingFor(live)) {
+      // The contact is away: the file waits in this device's storage, sealed for them.
+      if (file.size > HOLD_LIMITS.maxBundleBytes - 4096) return fail(`A file held for an away contact is at most ${Math.round(HOLD_LIMITS.maxBundleBytes / 1024 / 1024)} MB`);
+      live.files.wireIds.add(wireId);
+      this.transfers.set(file.id, { state: "transferring", transferred: 0, size: file.size });
+      void this.storeMessage({ linkId, id: `me_${timestamp}`, text: `📎 ${file.name}`, sender: "me", timestamp, via: "hold", delivery: "sending", file })
+        .then(() => this.hold.hold(linkId, { kind: "file", id: wireId, messageId: `me_${timestamp}`, ref: file.id, bytes: file.size, timestamp })).catch(() => {});
+      return;
+    }
+    if (!live.link.supportsFiles) return fail("Connect to an updated peer to send files");
     const { link } = live;
     live.files.wireIds.add(wireId);
 
@@ -1206,6 +1319,9 @@ export class GhostlyNode implements EngineImplementation {
   cancelPayment(params: {id:string}) { return this.paymentCoordinator.cancel(params.id); }
 
   sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number }) {
+    const live = this.links.get(params.linkId);
+    // Ecash is a bearer token: it is never held for an away contact, only a request for it is.
+    if (live && this.holdingFor(live)) throw new Error("Ecash is not held for an away contact. Send a request instead, or wait until they are back.");
     return this.desk.send(params);
   }
 
@@ -1300,6 +1416,11 @@ export class GhostlyNode implements EngineImplementation {
       // GhostLink tells a paired peer directly; a legacy one still reads the record.
       for (const live of this.links.values()) live.link?.setNick(this.settings.nick || undefined);
     }
+    if (settings.holdStorage !== undefined) {
+      if (!this.settings.holdStorage) delete this.settings.holdStorage;
+      await db.putSettings(this.settings);
+      this.hold.storageChanged();
+    }
     if (wasOnline && !this.settings.online) {
       await Promise.allSettled(
         [...this.links.values()].map(async (live) => {
@@ -1311,7 +1432,9 @@ export class GhostlyNode implements EngineImplementation {
       );
     } else if (!wasOnline && this.settings.online) {
       for (const live of this.links.values()) this.startLink(live.stored.id, await db.getMessages(live.stored.id));
+      this.hold.start();
     }
+    if (wasOnline && !this.settings.online) await this.hold.stop();
     this.emitState();
   }
 
@@ -1431,6 +1554,7 @@ export class GhostlyNode implements EngineImplementation {
 
     live.link = new GhostLink({
       paymentMethods: stored.paymentMethods,
+      holdSupport: !!stored.hold?.enabled,
       arkPaymentsSupport: true,
       usdtPaymentsSupport: true,
       barkPaymentsSupport: true,
@@ -1477,6 +1601,7 @@ export class GhostlyNode implements EngineImplementation {
         onGroupFrame: stored.profile ? frame => this.groups.handleContactFrame(linkId, frame) : undefined,
         onGroupsSupport: () => this.emitState(),
         onDhtDelivery: () => this.emitState(),
+        onHold: (state) => this.hold.peerSaid(linkId, state),
         onPeerProof: EXTERNAL_IDENTITIES_ENABLED ? async frame => { await (await this.proofsFor(linkId)).receive(frame); } : undefined,
         onIdentityProof: stored.profile ? frame => this.identities.frame(linkId, frame) : undefined,
         onTransportsChanged: () => this.emitState(),
@@ -1489,6 +1614,8 @@ export class GhostlyNode implements EngineImplementation {
         onPairingState: state => {
           live.pairing = state;
           if (state.status === "ready") this.identities.ready(linkId); else this.identities.closed(linkId);
+          // What the contact allows is remembered for requests held while it is away.
+          if (state.status === "ready" && live.link) void this.hold.rememberPeerMethods(linkId, PAYMENT_METHODS.filter(m => live.link!.peerAllowsPayment(m))).catch(() => {});
           if (EXTERNAL_IDENTITIES_ENABLED && state.status === "ready") void this.proofsFor(linkId).then(p => p.resendWithdrawals()).catch(() => {});
           else live.proofs?.stop();
           this.emitState();
@@ -1644,8 +1771,8 @@ export class GhostlyNode implements EngineImplementation {
       pairing: live.pairing,
       discoveryError: live.discoveryError,
       peerVerified: !!stored.pairedPeerKey && (stored.peerTrust ? stored.peerTrust.verifiedKey === stored.pairedPeerKey : true),
-      capabilities: { files: live.link?.supportsFiles ?? false, payments: live.link?.supportsPayments ?? false,
-        methods: Object.fromEntries(PAYMENT_METHODS.map(m => [m, live.link?.allowsPayment(m) ?? false])) as Record<PaymentMethodName, boolean> },
+      capabilities: this.capabilitiesOf(live),
+      hold: this.hold.view(stored.id),
       paymentMethods: Object.fromEntries(PAYMENT_METHODS.map(m => [m, stored.paymentMethods?.[m] !== false])) as Record<PaymentMethodName, boolean>,
       groups: live.link?.groupsSupport ?? false,
       participationKey: stored.participationSeed ? identityFromSeedB64(stored.participationSeed).pubKeyZ32 : undefined,
@@ -1659,8 +1786,8 @@ export class GhostlyNode implements EngineImplementation {
       availableTransports: live.link?.availableTransports,
       deliveryMode: live.stored.deliveryMode ?? "stream",
       dhtDelivery: live.link?.dhtDelivery,
-      canSendText: live.link?.canSendText ?? false,
-      textDelivery: live.link?.textDelivery ?? "unavailable",
+      canSendText: (live.link?.canSendText ?? false) || this.holdingFor(live),
+      textDelivery: this.holdingFor(live) ? "hold" : live.link?.textDelivery ?? "unavailable",
       transportErrors: live.transportErrors,
       preferredTransport: live.stored.preferredTransport ?? "webrtc/1",
       transportFallback: live.stored.transportFallback ?? true,
@@ -1681,6 +1808,16 @@ export class GhostlyNode implements EngineImplementation {
       lastSyncAt: live.lastSyncAt,
       poll: live.poll,
     };
+  }
+
+  /** What this chat can do right now: on the open session, or held for an away contact (text, files and requests only). */
+  private capabilitiesOf(live: LiveLink): NonNullable<LinkView["capabilities"]> {
+    const link = live.link;
+    if (!this.holdingFor(live)) return { files: link?.supportsFiles ?? false, payments: link?.supportsPayments ?? false,
+      methods: Object.fromEntries(PAYMENT_METHODS.map(m => [m, link?.allowsPayment(m) ?? false])) as Record<PaymentMethodName, boolean> };
+    const held = this.hold.heldPaymentMethods(live.stored.id) ?? [];
+    const methods = Object.fromEntries(PAYMENT_METHODS.map(m => [m, held.includes(m) && (link?.paymentEnabled(m) ?? false)])) as Record<PaymentMethodName, boolean>;
+    return { files: true, payments: Object.values(methods).some(Boolean), methods };
   }
 
   /** State changes arrive in bursts; the UI gets one snapshot per tick. */

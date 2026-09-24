@@ -1,5 +1,5 @@
 import type { UsdtWallet } from "./paymentAdapters/usdtWallet";
-import { assertTokenUnits, formatPaymentAmount, validatePaymentTarget, type PaymentReview, type PaymentTarget } from "@ghostly/core";
+import { assertTokenUnits, formatPaymentAmount, validatePaymentTarget, type PaymentMethodName, type PaymentReview, type PaymentTarget } from "@ghostly/core";
 import type { ArkWallet } from "./paymentAdapters/arkWallet";
 import type { BarkWallet } from "./paymentAdapters/barkWallet";
 import {
@@ -32,6 +32,12 @@ export interface PaymentDeskHost {
   getLink(linkId: string): GhostLink | null;
   storeMessage(message: StoredMessage): Promise<void>;
   onChange(): void;
+  /**
+   * Store-and-forward (WISP 4xx): the ways of paying a request may name while the contact is away and
+   * this device can hold it for them (null when it cannot), and holding the request itself.
+   */
+  heldPaymentMethods?(linkId: string): PaymentMethodName[] | null;
+  holdRequest?(linkId: string, request: PaymentRequest, messageId: string): Promise<void>;
   onReviewedPaymentResult?(id:string):Promise<void>;
   /** A reviewed send the contact refused, whose ecash came back: its review is closed as failed. */
   onReviewedPaymentRefused?(id:string,reason:string):Promise<void>;
@@ -183,9 +189,12 @@ export class PaymentDesk {
       await link.sendPaymentRequest({id,timestamp:params.timestamp,amount:{value:String(params.amount),asset:UNIT},memo,endpoints:[[ENDPOINT.bitcoin,JSON.stringify(target)]],ask:params.ask});
       return {paymentId:id};
     }
-    // Each way of paying goes in only if this chat allows it on both sides.
-    const ecash = link.allowsPayment("cashu"), lightning = link.allowsPayment("lightning");
-    if (!ecash && !lightning) throw new Error("Cashu and Lightning are off in this chat");
+    // Each way of paying goes in only if this chat allows it on both sides. While the contact is away and the
+    // request can be held for them, "both sides" is what their app allowed at the last session.
+    const held = !link.isDataLinkOpen ? this.host.heldPaymentMethods?.(params.linkId) ?? null : null;
+    const ecash = held ? held.includes("cashu") && link.paymentEnabled("cashu") : link.allowsPayment("cashu");
+    const lightning = held ? held.includes("lightning") && link.paymentEnabled("lightning") : link.allowsPayment("lightning");
+    if (!ecash && !lightning) throw new Error(held ? "Your contact allowed neither Cashu nor Lightning in this chat" : "Cashu and Lightning are off in this chat");
     const quote = lightning ? await this.lightning.createInvoice(params.amount, id) : undefined;
     // A request is in real sats or in test sats, never both: ecash from a test mint, worth nothing, must
     // never settle a request for real money. The primary mint says which one this wallet is using.
@@ -212,10 +221,11 @@ export class PaymentDesk {
       text: `⚡ Requested ${params.amount.toLocaleString()} sats`,
       sender: "me",
       timestamp: params.timestamp,
-      via: "datalink",
+      via: held ? "hold" : "datalink",
+      ...(held ? { delivery: "sending" as const } : {}),
       paymentId: id,
     });
-    await link.sendPaymentRequest({
+    const request: PaymentRequest = {
       id,
       timestamp: params.timestamp,
       amount: { value: String(params.amount), asset: UNIT },
@@ -225,7 +235,9 @@ export class PaymentDesk {
         ...(quote ? [[ENDPOINT.bolt11, quote.invoice] as [string, string]] : []),
         ...(ecash ? [[ENDPOINT.cashu, cashuRequestPayload(mints)] as [string, string]] : []),
       ],
-    });
+    };
+    if (held) await this.host.holdRequest!(params.linkId, request, `me_${params.timestamp}`);
+    else await link.sendPaymentRequest(request);
     return { paymentId: id };
   }
 
@@ -365,8 +377,18 @@ export class PaymentDesk {
     await this.request({ linkId, amount: Number(ask.amount.value), method: ask.method, memo: ask.memo, timestamp: now, ask: ask.id }).catch(() => {});
   }
 
-  async onPaymentRequest(linkId: string, request: PaymentRequest): Promise<void> {
+  /** A pending request of ours, as it went on the wire: what a held copy is rebuilt from. Cashu and Lightning only. */
+  requestFor(paymentId: string): PaymentRequest | null {
+    const payment = this.payments.get(paymentId);
+    if (!payment || payment.kind !== "request" || payment.direction !== "out" || payment.target) return null;
+    return { id: payment.id, timestamp: payment.createdAt, amount: { value: String(payment.amount), asset: payment.unit }, memo: payment.memo, ask: payment.ask,
+      endpoints: [...(payment.invoice ? [[ENDPOINT.bolt11, payment.invoice] as [string, string]] : []), ...(payment.mints?.length ? [[ENDPOINT.cashu, cashuRequestPayload(payment.mints)] as [string, string]] : [])] };
+  }
+
+  /** `held`: picked up from the contact's storage while it was away (WISP 4xx): only what this device allows counts, and only Cashu or Lightning. */
+  async onPaymentRequest(linkId: string, request: PaymentRequest, held = false): Promise<void> {
     if (this.payments.has(request.id)) return;
+    if (held && (findEndpoint(request.endpoints, ENDPOINT.usdt) || findEndpoint(request.endpoints, ENDPOINT.arkade) || findEndpoint(request.endpoints, ENDPOINT.bark) || findEndpoint(request.endpoints, ENDPOINT.bitcoin))) return;
     if(findEndpoint(request.endpoints,ENDPOINT.usdt))return this.receiveUsdtRequest(linkId,request);
     const amount = parseSats(request.amount.value, request.amount.asset);
     const link = this.host.getLink(linkId);
@@ -387,8 +409,9 @@ export class PaymentDesk {
       try {target=validatePaymentTarget(JSON.parse(bitcoinPayload));if(target.method!=="bitcoin")return;} catch {return;}
     }
     // Keep only the ways of paying this chat allows; a request with none left is dropped.
-    const invoice = link?.allowsPayment("lightning") ? findEndpoint(request.endpoints, ENDPOINT.bolt11) : undefined;
-    const mints = link?.allowsPayment("cashu") ? parseCashuRequestPayload(findEndpoint(request.endpoints, ENDPOINT.cashu) ?? "") : [];
+    const allowed = (method: "lightning" | "cashu") => held ? !!link?.paymentEnabled(method) : !!link?.allowsPayment(method);
+    const invoice = allowed("lightning") ? findEndpoint(request.endpoints, ENDPOINT.bolt11) : undefined;
+    const mints = allowed("cashu") ? parseCashuRequestPayload(findEndpoint(request.endpoints, ENDPOINT.cashu) ?? "") : [];
     if (!target && !invoice && !mints.length) return;
     await this.save({
       target,
@@ -411,7 +434,7 @@ export class PaymentDesk {
       text: `⚡ Requested ${amount.toLocaleString()} sats`,
       sender: "peer",
       timestamp: request.timestamp,
-      via: "datalink",
+      via: held ? "hold" : "datalink",
       paymentId: request.id,
     });
   }

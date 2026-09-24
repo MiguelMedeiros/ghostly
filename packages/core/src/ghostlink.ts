@@ -81,6 +81,11 @@ export interface GhostLinkEvents {
   /** A paired contact's profile picture, already checked; `null` when they removed it. */
   onPeerAvatar?(avatar: string | null): void;
   onMessageReceipt?(id: string): void | Promise<void>;
+  /**
+   * What the contact's app says about held items (`hold/1`): whether it accepts them (from the handshake, or
+   * a `paired-hold` frame on the session) and the highest sequence it has held for this side, if it said.
+   */
+  onHold?(state: { peerAllows: boolean; peerTop?: number }): void | Promise<void>;
   onPeerAck?(ackTimestamp: number): void;
   onCallSignal?(signal: string): void;
   onStatus?(status: LinkStatus): void;
@@ -113,6 +118,8 @@ export interface GhostLinkOptions {
   barkPaymentsSupport?: boolean;
   /** Announce private groups (WISP 900) on the open session. Announced after the handshake, like `paired-payments`, so a full offer stays within what older apps accept. */
   groupsSupport?: boolean;
+  /** Offer `hold/1`: accept items held for this side, and hold items for the contact while it is away. */
+  holdSupport?: boolean;
   dht?: { state?: DhtDeliveryState; save(state: DhtDeliveryState): Promise<void>; pollMs?: number };
   rtcAvailable?: boolean;
   native?: { peerDescriptors?: TransportDescriptors; peerTransports?: PairedTransport[]; peerFallback?: boolean; preferred?: PairedTransport; fallback?: boolean };
@@ -180,6 +187,8 @@ export class GhostLink {
   /** A paired peer's name arrives over the channel; nothing about it is published. */
   /** Ways of paying the contact allows, as it last said on this session; null until it does. */
   private peerPaymentMethods: Set<PaymentMethodName> | null = null;
+  /** The contact's word on held items on this session; null until it says. */
+  private peerHoldOverride: boolean | null = null;
   private peerNickOverride: string | null = null;
   /** Group protocol versions the peer announced on this session; null until it does. */
   private peerGroupVersions: number[] | null = null;
@@ -767,6 +776,25 @@ export class GhostLink {
   get supportsBitcoinPayments(): boolean { return this.allowsPayment("bitcoin"); }
   /** Payment messages flow at all: some way of paying is allowed by both sides. */
   get supportsPayments(): boolean { return PAYMENT_METHODS.some(m => this.allowsPayment(m)); }
+  /** The contact accepts held items: its latest word on this session, else its handshake offer. */
+  get peerAllowsHold(): boolean {
+    if (!this.options.params.profile || !this.paired || this.paired.state.status !== "ready") return false;
+    return this.peerHoldOverride ?? this.paired.peerHoldSupport;
+  }
+  /** Both sides offer `hold/1` on this session. */
+  get supportsHold(): boolean { return !!this.options.holdSupport && this.isDataLinkOpen && this.peerAllowsHold; }
+  /** The contact's own choice about one way of paying, as it last said on this session or offered in the handshake. */
+  peerAllowsPayment(method: PaymentMethodName): boolean {
+    if (!this.options.params.profile || !this.paired || this.paired.state.status !== "ready") return false;
+    return this.peerPaymentMethods ? this.peerPaymentMethods.has(method) : this.paired.peerAllowsPayment(method);
+  }
+  /** Takes effect at once; a connected contact is told on the open session, and the next handshake offers it. */
+  setHoldSupport(on: boolean, top?: number): void { this.options.holdSupport = on; this.sendHoldState(top); }
+  /** Older apps drop this frame (it carries no id) and keep using the handshake offer. */
+  private sendHoldState(top?: number): void {
+    if (!this.options.params.profile || !this.channel || !this.isDataLinkOpen || this.paired?.state.status !== "ready") return;
+    try { this.channel.send(JSON.stringify({ t: "paired-hold", on: !!this.options.holdSupport, ...(top !== undefined ? { top } : {}) })); } catch { /* the next session offers it */ }
+  }
   /** Takes effect at once, and a connected contact is told on the open session; the next handshake offers it too. */
   setPaymentMethods(methods: Partial<Record<PaymentMethodName, boolean>>): void { this.options.paymentMethods = { ...methods }; this.sendPaymentMethods(); }
   /** The apps this contact may reach, said on the open session. Older apps drop the frame (no id). */
@@ -881,6 +909,7 @@ export class GhostLink {
         fingerprints: fingerprints ?? undefined,
         binding, transports: migration?.plan.choices ?? this.transportOffer(), allowFallback: migration?.plan.local.fallback ?? this.fallback,
         transportSwitchSupport: true,
+        holdSupport: !!this.options.holdSupport,
         proofSupport: !!this.options.events?.onPeerProof,
         identitySupport: !!this.options.events?.onIdentityProof,
         filesSupport: !!this.options.events?.onFileIncoming,
@@ -921,6 +950,7 @@ export class GhostLink {
           if (paired.peerTransportSwitchSupport) this.switcher.begin(paired.proofSession, paired.state.transport!);
           else this.advertiseTransports();
           this.peerPaymentMethods = null;
+          this.peerHoldOverride = null;
           this.pairedHttp?.close();
           this.pairedHttp = new PairedHttp(channel, this.options.getHostedHttpService, this.options.localFetch);
           this.emitPairingState();
@@ -929,6 +959,8 @@ export class GhostLink {
           this.sendPaymentMethods();
           this.sendPairedServices();
           this.sendGroupsSupport();
+          this.sendHoldState();
+          void this.options.events?.onHold?.({ peerAllows: paired.peerHoldSupport });
           migration?.resolve();
           this.rtcCandidateWaiter?.resolve(); this.rtcCandidateWaiter = null;
           // The wait between attempts is for attempts that failed: a link that worked and then dropped
@@ -1015,6 +1047,14 @@ export class GhostLink {
           }
           if (typeof frame?.t === "string" && frame.t.startsWith("group-")) {
             if (this.groupsSupport) await this.options.events?.onGroupFrame?.(frame);
+            return;
+          }
+          if (frame?.t === "paired-hold") {
+            // The contact's latest word on held items; an older app never sends it and keeps its handshake offer.
+            if (typeof frame.on !== "boolean" || (frame.top !== undefined && !(Number.isSafeInteger(frame.top) && (frame.top as number) >= 0))) return;
+            this.peerHoldOverride = frame.on;
+            await this.options.events?.onHold?.({ peerAllows: frame.on, peerTop: frame.top as number | undefined });
+            this.emitPairingState();
             return;
           }
           if (frame?.t === "paired-reconnect") {
