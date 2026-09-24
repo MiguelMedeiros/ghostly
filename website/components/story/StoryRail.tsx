@@ -120,7 +120,10 @@ export function StoryRail({ marks, label }: { marks: RailMark[]; label: string }
               aria-current={i === current ? "true" : undefined}
               aria-label={m.label}
               onPointerEnter={() => setPointed(i)}
-              onFocus={() => setPointed(i)}
+              onFocus={(e) => {
+                // A click focuses too; only keyboard focus should keep the rail lit.
+                if (e.currentTarget.matches(":focus-visible")) setPointed(i);
+              }}
               onClick={() => jump(m.id)}
             />
           ))}

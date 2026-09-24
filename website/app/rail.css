@@ -2,7 +2,7 @@
  *
  * Docked at the bottom of the screen and quiet on purpose: a hairline, small
  * dots, dim text. It lights up a little while you scroll, point at it or tab
- * into it ([data-lit], :hover, :focus-within) and settles back after a moment.
+ * into it ([data-lit], :hover, keyboard focus) and settles back after a moment.
  * A soft wash of the page colour sits under it, so text scrolling past fades
  * out beneath the rail instead of colliding with it. Hidden near the top of the
  * page and once the footer is on its way ([data-on="false"]).
@@ -23,7 +23,7 @@
 }
 /* Out of sight, the marks stay in the tab order and bring the rail back when focused. */
 .rail[data-on="true"],
-.rail:focus-within {
+.rail:has(:focus-visible) {
   opacity: 1;
   transform: none;
   transition:
@@ -56,7 +56,7 @@
 }
 .rail[data-lit="true"] .rail-inner,
 .rail:hover .rail-inner,
-.rail:focus-within .rail-inner {
+.rail:has(:focus-visible) .rail-inner {
   opacity: 1;
   transition-duration: var(--dur-xs);
 }
@@ -136,7 +136,7 @@
   color: var(--dim);
 }
 .rail:hover .rail-label,
-.rail:focus-within .rail-label {
+.rail:has(:focus-visible) .rail-label {
   color: var(--muted);
 }
 
