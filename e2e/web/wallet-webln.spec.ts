@@ -92,7 +92,7 @@ test("a browser wallet as the Lightning source: invoices, payments reviewed firs
   // In: the wallet's own invoice, seen paid by asking the wallet.
   const invoice = await receive(alice, 12);
   wallet.receive(decodeBolt11(invoice)!.paymentHash!);
-  await expect(page.getByTestId("wallet-paid")).toContainText("12 test sats received", { timeout: 30_000 });
+  await expect(page.getByTestId("wallet-paid")).toContainText("12 sats received", { timeout: 30_000 });
 
   // Out: reviewed in Ghostly, then paid by the wallet.
   await pay(alice, (await stranger.makeInvoice({ amount: 30 })).paymentRequest, 30);
@@ -147,7 +147,7 @@ test.describe("on a regtest Lightning network", () => {
     // Alice receives: Bob's node pays her wallet's invoice, from outside any browser.
     const invoice = await receive(alice, 1_000);
     await bobNode.lnd.pay(invoice);
-    await expect(alice.page.getByTestId("wallet-paid")).toContainText("1,000 test sats received", { timeout: 30_000 });
+    await expect(alice.page.getByTestId("wallet-paid")).toContainText("1,000 sats received", { timeout: 30_000 });
 
     // Alice pays an invoice of Bob's node from the Lightning card.
     await pay(alice, await bobNode.lnd.invoice(400, "from the card"), 400);

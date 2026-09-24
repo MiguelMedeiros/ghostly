@@ -6,7 +6,11 @@ import { connect, expect, link, say, test } from "../support/fixtures";
 
 const switcher = (page: Page) => page.getByTestId("profile-switcher");
 const item = (page: Page, name: string) => switcher(page).getByTestId("profile-switcher-item").filter({ hasText: name });
-const profileIs = (page: Page, name: string) => expect(page.getByTestId("account-profile")).toHaveAttribute("title", new RegExp(`: ${name}$`), { timeout: 30_000 });
+/** The account bar's Profile place stands for `name`: its tooltip says so, and so does its label. */
+const profileIs = async (page: Page, name: string) => {
+  await expect(page.getByTestId("account-profile")).toHaveAttribute("title", new RegExp(`: ${name}$`), { timeout: 30_000 });
+  await expect(page.getByTestId("account-profile").locator(".account-label")).toHaveText(name);
+};
 const locked = (page: Page) => page.getByText("Ghostly is locked");
 /** The rows of the chat list, and the unread count on one. */
 const rows = (page: Page) => page.locator("div.group").filter({ has: page.getByTitle("Delete chat") });
@@ -26,19 +30,19 @@ test("the account bar switches profiles in one tap, each one reopening where it 
   await say(bob, "call me");
   await expect(unreadBadge(page)).toHaveText("2");
 
-  // The chevron opens the switcher: the active profile on top, then Add and Manage.
-  await page.getByTestId("account-profile-switcher").click();
+  // A click on the Profile place opens the switcher: the active profile on top (the way to its page), then Add and Manage.
+  await page.getByTestId("account-profile").click();
   await expect(switcher(page)).toBeVisible();
-  await expect(switcher(page).getByTestId("profile-switcher-current")).toHaveAttribute("aria-checked", "true");
+  await expect(switcher(page).getByTestId("profile-switcher-current")).toHaveAccessibleName(/Personal, .*current profile\. Open profile/);
   await expect(switcher(page).getByTestId("profile-switcher-current")).toContainText("Personal");
   await expect(switcher(page).getByTestId("profile-switcher-item")).toHaveCount(0);
   // Escape closes it and gives the focus back.
   await page.keyboard.press("Escape");
   await expect(switcher(page)).toHaveCount(0);
-  await expect(page.getByTestId("account-profile-switcher")).toBeFocused();
+  await expect(page.getByTestId("account-profile")).toBeFocused();
 
   // Add a profile goes to Profile with the form open.
-  await page.getByTestId("account-profile-switcher").click();
+  await page.getByTestId("account-profile").click();
   await switcher(page).getByTestId("profile-switcher-add").click();
   await page.getByTestId("profile-new-name").fill("Work");
   await page.getByTestId("profile-create").click();
@@ -52,7 +56,7 @@ test("the account bar switches profiles in one tap, each one reopening where it 
   // Personal has something unread: a ring on the Profile picture, a count on its line in the switcher.
   await expect(page.getByTestId("account-profile-others")).toBeVisible();
   await expect(page.getByTestId("account-profile")).toHaveAccessibleName(/unread messages in another profile/);
-  await page.getByTestId("account-profile").click({ button: "right" });
+  await page.getByTestId("account-profile").click();
   await expect(item(page, "Personal").getByTestId("profile-switcher-unread")).toBeVisible();
   await expect(item(page, "Personal").getByTestId("profile-switcher-unread")).toHaveText("2");
   await expect(item(page, "Personal")).toHaveAccessibleName("Switch to Personal, 2 unread");
@@ -89,22 +93,28 @@ test("the account bar switches profiles in one tap, each one reopening where it 
   await expect(page.getByTestId("account-profile-others")).toBeVisible();
 
   // Manage profiles is the Profile page, which lists both.
-  await page.getByTestId("account-profile-switcher").click();
+  await page.getByTestId("account-profile").click();
   await switcher(page).getByTestId("profile-switcher-manage").click();
   await expect(page.getByTestId("profile-page")).toBeVisible();
   await expect(page.getByTestId("profile-row")).toHaveCount(2);
+  // And so is the current profile's own row, from any page.
+  await page.getByTestId("account-settings").click();
+  await page.getByTestId("account-profile").click();
+  await switcher(page).getByTestId("profile-switcher-current").click();
+  await expect(page.getByTestId("profile-page")).toBeVisible();
+  await expect(switcher(page)).toHaveCount(0);
 });
 
 test("switching to a locked profile asks its password first, and the switcher says it is locked", { tag: ["@feature:profiles.switcher", "@feature:profiles.lock"] }, async ({ peer }) => {
   const { page } = await peer("switcher-lock");
-  await page.getByTestId("account-profile-switcher").click();
+  await page.getByTestId("account-profile").click();
   await switcher(page).getByTestId("profile-switcher-add").click();
   await page.getByTestId("profile-new-name").fill("Side");
   await page.getByTestId("profile-create").click();
   await expect(page.getByTestId("profile-name")).toHaveValue("Side", { timeout: 30_000 });
 
   // Personal gets a lock of its own.
-  await page.getByTestId("account-profile-switcher").click();
+  await page.getByTestId("account-profile").click();
   await item(page, "Personal").click();
   await profileIs(page, "Personal");
   await page.goto("/#/settings");
@@ -115,10 +125,10 @@ test("switching to a locked profile asks its password first, and the switcher sa
   await expect(page.getByText("Password set successfully")).toBeVisible();
 
   // From Side, Personal is marked locked, with no count or picture of what is inside.
-  await page.getByTestId("account-profile-switcher").click();
+  await page.getByTestId("account-profile").click();
   await item(page, "Side").click();
   await profileIs(page, "Side");
-  await page.getByTestId("account-profile-switcher").click();
+  await page.getByTestId("account-profile").click();
   await expect(item(page, "Personal").getByTestId("profile-switcher-locked")).toBeVisible();
   await expect(item(page, "Personal")).toHaveAccessibleName("Switch to Personal, locked");
 

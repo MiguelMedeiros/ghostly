@@ -1,17 +1,19 @@
 import { describe, expect, it } from "vitest";
 import type { WalletView } from "@ghostly/browser/shared/types";
 import { TEST_MINTS } from "@ghostly/browser/shared/mints";
-import { walletCards, type WalletRail } from "../../components/walletCardData";
+import { pageUnit, walletCards, type WalletRail } from "../../components/walletCardData";
 import { walletView } from "../fakeEngine";
 import { arkReady, barkReady, bitcoinSource, lightningSource, mint, REAL_MINT, TEST_MINT, usdtReady } from "./fixtures";
 
 // covers: wallet.deck, wallet.mode
 
-/** One card, as the wallet page and the chat's picker show it. */
+/** One card, as the chat's picker shows it (no Testnet badge beside it: a test sat says so). */
 const cardOf = (rail: WalletRail, wallet: Partial<WalletView> = {}) => {
   const { id: _, ...shown } = walletCards(walletView(wallet), TEST_MINTS).find((c) => c.id === rail)!;
   return shown;
 };
+/** The same card on the wallet page, under the Testnet badge and banner. */
+const pageCardOf = (rail: WalletRail, wallet: Partial<WalletView> = {}) => walletCards(walletView(wallet), TEST_MINTS, { badged: true }).find((c) => c.id === rail)!;
 
 it("lists every wallet, in the deck's order", () => {
   expect(walletCards(walletView(), TEST_MINTS).map((c) => c.id)).toEqual(["cashu", "lightning", "arkade", "bark", "bitcoin", "usdt"]);
@@ -120,5 +122,34 @@ describe("USDT", () => {
   it("is locked while sealed with a password, and connecting before that", () => {
     expect(cardOf("usdt", { usdt: usdtReady({ locked: true, automatic: false }) })).toMatchObject({ balance: "Locked", status: "Experimental", ready: false });
     expect(cardOf("usdt")).toMatchObject({ balance: "Connecting…", ready: false });
+  });
+});
+
+describe("on the wallet page, under the Testnet badge", () => {
+  it("counts plain sats in Testnet: the badge and the banner already say what they are", () => {
+    expect(pageCardOf("cashu", { mode: "testnet", mints: [mint(TEST_MINT, 500)], balance: 500 })).toMatchObject({ balance: "500 sats", detail: "Ecash · test mints" });
+    expect(pageCardOf("lightning", { mode: "testnet", lightning: lightningSource({ label: "LND", balance: 5 }) }).balance).toBe("5 sats");
+    expect(pageCardOf("arkade", { mode: "testnet", ark: arkReady({ network: "mutinynet", balance: 5_000 }) }).balance).toBe("5,000 sats");
+    expect(pageCardOf("bark", { mode: "testnet", bark: barkReady({ network: "regtest", balance: 3_000 }) }).balance).toBe("3,000 sats");
+    expect(pageCardOf("bitcoin", { mode: "testnet", bitcoin: bitcoinSource({ balance: 7 }) }).balance).toBe("7 sats");
+    expect(walletCards(walletView({ mode: "testnet", mints: [mint(TEST_MINT, 500)], balance: 500 }), TEST_MINTS, { badged: true }).map((c) => c.balance).join(" ")).not.toContain("test sats");
+  });
+
+  it("still says test sats in Mainnet, where a wallet on a test network stands out", () => {
+    expect(pageCardOf("arkade", { ark: arkReady({ network: "mutinynet", balance: 5_000 }) }).balance).toBe("5,000 test sats");
+    expect(pageCardOf("bark", { bark: barkReady({ network: "regtest", balance: 3_000 }) }).balance).toBe("3,000 test sats");
+    expect(pageCardOf("cashu", { mints: [mint(REAL_MINT, 1_300), mint(TEST_MINT, 200)], balance: 1_500 })).toMatchObject({ balance: "1,300 sats", detail: "+200 test sats" });
+  });
+
+  it("the chat's cards say test sats either way: there is no badge beside a chat", () => {
+    expect(cardOf("cashu", { mode: "testnet", mints: [mint(TEST_MINT, 500)], balance: 500 }).balance).toBe("500 test sats");
+    expect(cardOf("arkade", { mode: "testnet", ark: arkReady({ network: "mutinynet", balance: 5_000 }) }).balance).toBe("5,000 test sats");
+  });
+
+  it("pageUnit: the unit of a wallet panel's balance", () => {
+    expect(pageUnit({ mode: "testnet" }, true)).toBe("sats");
+    expect(pageUnit({ mode: "testnet" }, false)).toBe("sats");
+    expect(pageUnit({ mode: "mainnet" }, true)).toBe("test sats");
+    expect(pageUnit({ mode: "mainnet" }, false)).toBe("sats");
   });
 });

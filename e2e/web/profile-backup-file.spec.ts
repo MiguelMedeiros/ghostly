@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { expect, test } from "../support/fixtures";
+import { expect, openProfilePage, test } from "../support/fixtures";
 
 // WISP 05: a whole profile backed up to a file, sealed with a passphrase, and restored as a new profile.
 // Offline: no S3, no second peer.
@@ -11,7 +11,7 @@ test("a profile goes to a file and comes back as a new profile, only with its pa
   // A profile worth keeping: a name of its own, a chat and a nickname.
   await page.getByTitle("New Chat").click();
   await expect(page.getByTestId("invite-card")).toBeVisible();
-  await page.getByTestId("account-profile").click();
+  await openProfilePage(page);
   await expect(page.getByTestId("profile-page")).toBeVisible();
   await page.getByTestId("profile-name").fill("Diary");
   await page.getByTestId("profile-name").press("Enter");

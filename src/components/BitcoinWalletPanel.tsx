@@ -20,7 +20,8 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
   const [address, setAddress] = useState(""), [amount, setAmount] = useState(""), [feeCap, setFeeCap] = useState(String(DEFAULT_FEE_CAP));
   const [review, setReview] = useState<Review | null>(null);
   const ready = bt?.status === "ready";
-  const unit = state.mode === "testnet" ? "test sats" : "sats";
+  // On-chain Bitcoin goes through the mode's source: in Testnet, under the page's badge, plain sats.
+  const unit = "sats";
   const intents = (state.intents ?? []).filter((i) => i.method === "bitcoin" && i.id !== review?.id);
 
   return (

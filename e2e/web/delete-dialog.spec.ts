@@ -1,5 +1,5 @@
 import { manualFallback } from "../support/clipboard";
-import {test,expect} from "../support/fixtures";
+import { expect, openProfilePage, test } from "../support/fixtures";
 test.setTimeout(30000);
 test("delete dialog cancels safely and keeps its target through a reorder",{ tag: ["@feature:chats.list.delete", "@feature:app.popovers"] },async({peer})=>{
   const {page}=await peer("delete-dialog");
@@ -39,7 +39,7 @@ for(const mobile of [false,true]) test(`popup outside gestures close safely (mob
   await expect(dialog).toHaveCount(0);
   if(!mobile){
     // The profile is a page beside the list now, not a popup: Back leaves it.
-    await page.getByTestId("account-profile").click();await expect(page.getByTestId("account-nickname")).toBeVisible();
+    await openProfilePage(page);await expect(page.getByTestId("account-nickname")).toBeVisible();
     await page.getByTestId("account-nickname").click();await expect(page.getByTestId("account-nickname")).toBeVisible();
     await page.getByRole("button",{name:"Back",exact:true}).click();await expect(page.getByTestId("account-nickname")).toHaveCount(0);
   }

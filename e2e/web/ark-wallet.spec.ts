@@ -24,8 +24,8 @@ test("Ark request, explicit approval and receipt in the chat", { tag: ["@feature
     }
     await expect(panel(p).getByTestId("ark-address")).toBeVisible();
   }
-  await expect(balance(alice)).toHaveText(/^9,900\s*test sats/, { timeout: 30000 });
-  await expect(balance(bob)).toHaveText(/^0\s*test sats/);
+  await expect(balance(alice)).toHaveText(/^9,900\s*sats/, { timeout: 30000 });
+  await expect(balance(bob)).toHaveText(/^0\s*sats/);
   // In the chat: pick the Ark card, type the amount, request.
   for (const p of [alice, bob]) await openChat(p);
   await bob.page.getByTestId("payment-button").click();
@@ -49,7 +49,7 @@ test("Ark request, explicit approval and receipt in the chat", { tag: ["@feature
   await expect(chat(bob).getByTestId("payment-bubble").filter({ hasText: "Sent you" }).getByTestId("payment-state")).toHaveText("Received");
   await alice.page.screenshot({ path: testInfo.outputPath("ark-chat-payer.png"), fullPage: true });
   await openWallet(bob, "arkade");
-  await expect(balance(bob)).toHaveText(/^1,000\s*test sats/, { timeout: 30000 });
+  await expect(balance(bob)).toHaveText(/^1,000\s*sats/, { timeout: 30000 });
   await openWallet(alice, "arkade");
   await expect(balance(alice)).not.toHaveText(/^9,900/);
   await bob.page.screenshot({ path: testInfo.outputPath("ark-wallet-recipient.png"), fullPage: true });
@@ -66,5 +66,5 @@ test("Ark request, explicit approval and receipt in the chat", { tag: ["@feature
   await expect(direct).toContainText("settled", { timeout: 60000 });
   await expect(chat(alice).getByTestId("payment-bubble").filter({ hasText: "400" }).filter({ hasText: "Sent you" }).getByTestId("payment-state")).toHaveText("Received", { timeout: 60000 });
   await openWallet(bob, "arkade");
-  await expect(balance(bob)).toHaveText(/^600\s*test sats/, { timeout: 30000 });
+  await expect(balance(bob)).toHaveText(/^600\s*sats/, { timeout: 30000 });
 });

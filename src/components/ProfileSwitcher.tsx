@@ -12,9 +12,10 @@ const LockIcon = () => (
 );
 
 /**
- * The switcher itself: the active profile on top in its colors, the others below with their picture and
- * what they left unread, one tap each; then Add a profile and Manage profiles. A popover over the account
- * bar on a wide screen, a sheet from the bottom on a phone. Arrow keys, Home/End, Enter; Escape closes.
+ * The switcher itself: the active profile on top in its colors, which opens the Profile page; the others
+ * below with their picture and what they left unread, one tap each; then Add a profile and Manage profiles.
+ * A popover over the account bar on a wide screen, a sheet from the bottom on a phone. Arrow keys, Home/End,
+ * Enter; Escape closes.
  */
 export function ProfileSwitcherMenu({ variant, glances, onClose }: {
   variant: "popover" | "sheet";
@@ -69,9 +70,9 @@ export function ProfileSwitcherMenu({ variant, glances, onClose }: {
         {variant === "popover" && <kbd className="text-[10px] text-text-muted font-sans" aria-hidden="true">{shortcutLabel()}</kbd>}
       </div>
 
-      <button type="button" role="menuitemradio" aria-checked="true" data-testid="profile-switcher-current"
-        aria-label={`${current.name}, ${nickname}, ${t("profileSwitcher.current")}`}
-        onClick={() => onClose()} className={`${itemClass} min-h-14 py-2`}>
+      <button type="button" role="menuitem" data-testid="profile-switcher-current"
+        aria-label={`${current.name}, ${nickname}, ${t("profileSwitcher.current")}. ${t("profileSwitcher.open")}`}
+        onClick={() => go("/profile")} className={`${itemClass} min-h-14 py-2`}>
         <span className="shrink-0 rounded-full" style={{ boxShadow: `0 0 0 2px var(--theme-panel-header), 0 0 0 4px ${color}` }}>
           <ProfileBadge entry={current} size={38} avatar={myAvatar} />
         </span>
@@ -79,7 +80,10 @@ export function ProfileSwitcherMenu({ variant, glances, onClose }: {
           <span className="block truncate text-sm font-semibold text-text-primary">{current.name}</span>
           <span className="block truncate text-xs text-text-muted">{nickname}</span>
         </span>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-accent" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+        <span className="shrink-0 flex items-center gap-0.5 text-xs text-text-secondary" aria-hidden="true">
+          {t("profileSwitcher.open")}
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="m9 6 6 6-6 6" /></svg>
+        </span>
       </button>
 
       {others.length > 0 && <div role="none" className="my-1 border-t border-border" />}

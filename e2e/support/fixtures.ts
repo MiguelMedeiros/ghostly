@@ -126,6 +126,12 @@ export async function openWallet(peer: Peer, card?: "cashu" | "lightning" | "ark
   if (card) await peer.page.getByTestId(`wallet-card-${card}`).click();
 }
 
+/** The Profile page, from the account bar: its Profile place opens the account switcher, whose first entry is the page. */
+export async function openProfilePage(page: Page): Promise<void> {
+  await page.getByTestId("account-profile").click();
+  await page.getByTestId("profile-switcher-current").click();
+}
+
 /** Every wallet on test networks (the Testnet mode): test sats only, and the app says so everywhere. */
 export async function useTestnet(peer: Peer): Promise<void> {
   await openWallet(peer);

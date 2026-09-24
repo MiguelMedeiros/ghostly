@@ -56,7 +56,7 @@ test.describe("on Breez's regtest", { tag: "@network" }, () => {
     await form(p).getByTestId("provider-save").click();
     await expect(source(p).getByTestId("lightning-source-status")).toContainText("Connected", { timeout: 90_000 });
     await expect(source(p).getByTestId("lightning-source-status")).toContainText("regtest");
-    await expect(balance(p)).toHaveText(/^0\s*test sats/, { timeout: 30_000 });
+    await expect(balance(p)).toHaveText(/^0\s*sats/, { timeout: 30_000 });
   }
 
   test("in from another wallet, out to it from Send, and a Request paid in the chat, with both balances", { tag: ["@feature:wallet.lightning.breez.pay", "@feature:wallet.lightning.breez.connect", "@gated"] }, async ({ peer }) => {
@@ -75,8 +75,8 @@ test.describe("on Breez's regtest", { tag: "@network" }, () => {
     const invoice = (await alice.page.getByTestId("wallet-invoice").innerText()).trim();
     expect(invoice).toMatch(/^lnbcrt10u1/);
     await other.pay(invoice);
-    await expect(alice.page.getByTestId("wallet-paid")).toContainText("1,000 test sats received", { timeout: 90_000 });
-    await expect(balance(alice)).toHaveText(/^1,000\s*test sats/, { timeout: 60_000 });
+    await expect(alice.page.getByTestId("wallet-paid")).toContainText("1,000 sats received", { timeout: 90_000 });
+    await expect(balance(alice)).toHaveText(/^1,000\s*sats/, { timeout: 60_000 });
 
     // Out: Alice pays one of the counterpart's invoices from Send.
     const before = await other.balance();
@@ -112,7 +112,7 @@ test.describe("on Breez's regtest", { tag: "@network" }, () => {
 
     // Both sides: Bob holds the 150, Alice has paid them and a small fee.
     await openWallet(bob, "lightning");
-    await expect(balance(bob)).toHaveText(/^150\s*test sats/, { timeout: 60_000 });
+    await expect(balance(bob)).toHaveText(/^150\s*sats/, { timeout: 60_000 });
     await openWallet(alice, "lightning");
     await expect.poll(() => sats(alice), { timeout: 60_000 }).toBeLessThanOrEqual(afterSend - 150);
     expect(await sats(alice)).toBeGreaterThanOrEqual(afterSend - 150 - 20);

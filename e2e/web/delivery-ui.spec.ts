@@ -1,7 +1,7 @@
 import { copyInvite } from "../support/clipboard";
 import { manualFallback } from "../support/clipboard";
 import { pasteInvite } from "../support/clipboard";
-import { test, expect } from "../support/fixtures";
+import { expect, openProfilePage, test } from "../support/fixtures";
 import { pair } from "../support/paired";
 
 const countChats = (page: import("@playwright/test").Page) => page.evaluate(() => Object.entries(localStorage).filter(([key, value]) => {try {return key.startsWith("ghostly_") && !!JSON.parse(value).mySeedB64;} catch {return false;}}).length);
@@ -95,13 +95,12 @@ test("header connection popover, five desktop destinations and resizing preserve
     for(const id of ["account-profile","wallet-chip","account-identities","account-services","account-settings"]) {
       const action=a.page.getByTestId(id); await expect(action).toBeVisible(); expect((await action.boundingBox())!.width).toBeGreaterThan(44);
     }
-    const walletLabel = a.page.locator(".account-wallet-label");
-    await expect(walletLabel).toHaveText("0 sats");
-    const rows = await Promise.all([".account-label", ".account-wallet-label"].map(selector => footer.locator(selector).evaluateAll(elements => elements.map(el => el.getBoundingClientRect().y))));
-    const baselines = rows.flat(); expect(Math.max(...baselines) - Math.min(...baselines)).toBeLessThanOrEqual(1);
+    await expect(a.page.getByTestId("wallet-chip")).toHaveText("Wallets");
+    const baselines = await footer.locator(".account-label").evaluateAll(elements => elements.map(el => el.getBoundingClientRect().y));
+    expect(Math.max(...baselines) - Math.min(...baselines)).toBeLessThanOrEqual(1);
     await a.page.screenshot({path:testInfo.outputPath(`sidebar-${width}.png`)});
   }
-  await a.page.getByTestId("account-profile").click(); await expect(a.page.getByTestId("account-nickname")).toBeVisible();
+  await openProfilePage(a.page); await expect(a.page.getByTestId("account-nickname")).toBeVisible();
   await a.page.getByTestId("wallet-chip").click(); await expect(a.page.getByTestId("platform-notice")).toBeVisible();
   await a.page.getByTestId("account-services").click(); await expect(a.page.getByText("needs the Ghostly browser extension or desktop app").first()).toBeVisible();
   await a.page.getByTestId("account-settings").click(); await expect(a.page).toHaveURL(/settings/);

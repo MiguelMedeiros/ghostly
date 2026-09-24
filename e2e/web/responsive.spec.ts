@@ -155,7 +155,7 @@ test("the account bar keeps its five places at the list's narrowest", { tag: ["@
   expect(await navProblems(page)).toEqual([]);
   await expectTidy(page, "[data-testid=identities-page]", "Identities beside the narrowest list");
   // The account switcher fits the narrowest list: inside it, every line tall enough to tap, no name cut short of a word.
-  await page.getByTestId("account-profile-switcher").click();
+  await page.getByTestId("account-profile").click();
   const bar = (await page.getByTestId("account-bar").boundingBox())!;
   const menu = (await page.getByTestId("profile-switcher").boundingBox())!;
   expect(menu.x).toBeGreaterThanOrEqual(bar.x);

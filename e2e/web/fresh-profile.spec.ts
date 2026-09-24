@@ -50,7 +50,7 @@ for (const mobile of [false, true]) {
 
     // Every page the sidebar leads to renders: the account bar on a wide screen, the tab bar on a phone.
     const places = mobile
-      ? ["Wallet", "Identities", "Services", "Settings"].map((name) => page.getByTestId("mobile-tabs").getByRole("button", { name }))
+      ? ["Wallets", "Identities", "Services", "Settings"].map((name) => page.getByTestId("mobile-tabs").getByRole("button", { name }))
       : ["account-profile", "account-identities", "account-services", "account-settings", "wallet-chip"].map((id) => page.getByTestId(id));
     for (const place of places) {
       await page.goto("/");

@@ -58,7 +58,7 @@ describe("the account switcher on the account bar", () => {
     localStorage.setItem("ghostly_app_settings", JSON.stringify({ defaultNickname: "Miguel" }));
     const { user } = renderBar();
 
-    const opener = screen.getByTestId("account-profile-switcher");
+    const opener = screen.getByTestId("account-profile");
     expect(opener).toHaveAttribute("aria-haspopup", "menu");
     expect(opener).toHaveAttribute("aria-expanded", "false");
     expect(opener).toHaveAttribute("aria-keyshortcuts", "Alt+Shift+P");
@@ -66,9 +66,8 @@ describe("the account switcher on the account bar", () => {
     expect(opener).toHaveAttribute("aria-expanded", "true");
 
     const current = within(menu()).getByTestId("profile-switcher-current");
-    expect(current).toHaveAttribute("role", "menuitemradio");
-    expect(current).toHaveAttribute("aria-checked", "true");
-    expect(current).toHaveAccessibleName("Personal, Miguel, current profile");
+    expect(current).toHaveAttribute("role", "menuitem");
+    expect(current).toHaveAccessibleName("Personal, Miguel, current profile. Open profile");
     expect(within(menu()).queryAllByTestId("profile-switcher-item")).toHaveLength(0);
     expect(within(menu()).getByRole("menuitem", { name: "Add a profile" })).toBeInTheDocument();
     expect(within(menu()).getByRole("menuitem", { name: "Manage profiles" })).toBeInTheDocument();
@@ -88,7 +87,7 @@ describe("the account switcher on the account bar", () => {
     expect(await screen.findByTestId("account-profile-others")).toBeInTheDocument();
     expect(screen.getByTestId("account-profile")).toHaveAccessibleName(/unread messages in another profile/);
 
-    await user.click(screen.getByTestId("account-profile-switcher"));
+    await user.click(screen.getByTestId("account-profile"));
     const [workItem, familyItem] = others();
     expect(workItem).toHaveAttribute("aria-checked", "false");
     expect(workItem).toHaveAccessibleName("Switch to Work, 3 unread");
@@ -108,7 +107,7 @@ describe("the account switcher on the account bar", () => {
     const reload = vi.fn();
     vi.spyOn(window, "location", "get").mockReturnValue({ ...window.location, hash: "#/wallet", reload } as Location);
 
-    fireEvent.click(screen.getByTestId("account-profile-switcher"));
+    fireEvent.click(screen.getByTestId("account-profile"));
     fireEvent.click(others()[0]);
 
     expect(lastRouteOf("")).toBe("/wallet");
@@ -149,37 +148,47 @@ describe("the account switcher on the account bar", () => {
     expect(before).toHaveFocus();
   });
 
-  it("opens on a right-click on Profile, which still opens the Profile page on a plain click", async () => {
+  it("opens on a click on Profile, closes on a click outside or a second click, and its first entry is the Profile page", async () => {
     const { user } = renderBar();
-    fireEvent.contextMenu(screen.getByTestId("account-profile"));
+    await user.click(screen.getByTestId("account-profile"));
     expect(menu()).toBeInTheDocument();
     await user.click(document.body);
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
 
     await user.click(screen.getByTestId("account-profile"));
-    expect(screen.getByTestId("landed")).toHaveTextContent("/profile");
+    expect(menu()).toBeInTheDocument();
+    await user.click(screen.getByTestId("account-profile"));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("landed")).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId("account-profile"));
+    await user.click(within(menu()).getByTestId("profile-switcher-current"));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(screen.getByTestId("landed")).toHaveTextContent(/^\/profile$/);
   });
 
   it("Add a profile opens Profile with the form open; Manage profiles opens Profile", async () => {
     const { user, unmount } = renderBar();
-    await user.click(screen.getByTestId("account-profile-switcher"));
+    await user.click(screen.getByTestId("account-profile"));
     await user.click(within(menu()).getByRole("menuitem", { name: "Add a profile" }));
     expect(screen.getByTestId("landed")).toHaveTextContent("/profile +new");
     unmount();
 
     const again = renderBar();
-    await again.user.click(screen.getByTestId("account-profile-switcher"));
+    await again.user.click(screen.getByTestId("account-profile"));
     await again.user.click(within(menu()).getByRole("menuitem", { name: "Manage profiles" }));
     expect(screen.getByTestId("landed")).toHaveTextContent(/^\/profile$/);
   });
 
-  it("is not offered where the client has one profile only", async () => {
+  it("is not offered where the client has one profile only: Profile is the page, with no menu", async () => {
     fakeEngine.features = { ...fakeEngine.features, profiles: false };
     const { user } = renderBar();
-    expect(screen.queryByTestId("account-profile-switcher")).not.toBeInTheDocument();
+    expect(screen.getByTestId("account-profile")).not.toHaveAttribute("aria-haspopup");
     await user.keyboard("{Alt>}{Shift>}P{/Shift}{/Alt}");
-    fireEvent.contextMenu(screen.getByTestId("account-profile"));
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("account-profile"));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(screen.getByTestId("landed")).toHaveTextContent("/profile");
   });
 });
 

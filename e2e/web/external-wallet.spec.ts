@@ -14,7 +14,7 @@ test.describe("another wallet", { tag: "@network" }, () => {
   async function switchToTestMint(peer: Peer): Promise<void> {
     await openWallet(peer, "cashu");
     await peer.page.getByTestId("wallet-mode").getByRole("radio", { name: "Testnet" }).click();
-    await expect(peer.page.getByTestId("wallet-test-balance")).toBeVisible();
+    await expect(peer.page.getByTestId("wallet-balance")).toBeVisible();
   }
 
   async function receive(peer: Peer, sats: number): Promise<string> {

@@ -1,4 +1,4 @@
-import { expect, test, type Peer } from "../support/fixtures";
+import { expect, openProfilePage, test, type Peer } from "../support/fixtures";
 
 /**
  * The group header's connection control (WISP 9xx § Mesh): an icon summing up the edges, and a popover
@@ -10,7 +10,7 @@ const trigger = (peer: Peer) => peer.page.getByTestId("group-connection-options"
 const row = (peer: Peer, name: string) => peer.page.getByTestId("group-connection-member").filter({ hasText: name });
 
 async function setName(peer: Peer, name: string): Promise<void> {
-  await peer.page.getByTestId("account-profile").click();
+  await openProfilePage(peer.page);
   await peer.page.getByTestId("account-nickname").fill(name);
   await expect(peer.page.getByTestId("account-nickname")).toHaveValue(name);
   await peer.page.goBack();

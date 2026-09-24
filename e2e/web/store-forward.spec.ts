@@ -1,4 +1,4 @@
-import { chat, connect, expect, GIF, link, say, test, type Peer } from "../support/fixtures";
+import { chat, connect, expect, GIF, link, openProfilePage, say, test, type Peer } from "../support/fixtures";
 import { signS3 } from "../../packages/browser/src/backup/s3";
 
 /**
@@ -45,7 +45,7 @@ test("text, a picture and a request held for an away contact arrive in order; a 
   await connect(alice, bob);
 
   // Alice's own storage, set up and proven from Profile → Backups; the chat is where she came from.
-  await alice.page.getByTestId("account-profile").click();
+  await openProfilePage(alice.page);
   const backups = alice.page.getByTestId("profile-backups");
   await backups.getByTestId("s3-setup").click();
   await backups.getByTestId("s3-endpoint").fill(endpoint);

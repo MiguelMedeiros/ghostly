@@ -1,4 +1,4 @@
-import { expect, test } from "../support/fixtures";
+import { expect, openProfilePage, test } from "../support/fixtures";
 
 // Local profiles (WISP 04): each one keeps its own chats, settings and look, and switching restarts the
 // app as the other profile.
@@ -9,11 +9,13 @@ test("profiles keep chats and settings apart, each in its own color", { tag: ["@
   // A chat and a name in the first profile.
   await page.getByTitle("New Chat").click();
   await expect(page.getByTestId("invite-card")).toBeVisible();
-  await page.getByTestId("account-profile").click();
+  await openProfilePage(page);
   await expect(page.getByTestId("profile-page")).toBeVisible();
   await page.getByTestId("profile-name").fill("Pessoal");
   await page.getByTestId("profile-name").press("Enter");
   await expect(page.getByTestId("account-profile")).toHaveAttribute("title", /Pessoal/);
+  // The place in the account bar wears the profile's name.
+  await expect(page.getByTestId("account-profile").locator(".account-label")).toHaveText("Pessoal");
   await page.getByTestId("account-nickname").fill("Miguel");
   const firstTheme = await theme();
   await expect(page.getByTestId("profile-links")).toContainText("1 chat");

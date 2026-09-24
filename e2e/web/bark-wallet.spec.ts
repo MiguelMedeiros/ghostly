@@ -23,7 +23,7 @@ test.describe("on Second's signet server", { tag: "@network" }, () => {
     await useTestnet(alice);
     await openWallet(alice, "bark");
     await expect(panel(alice).getByTestId("bark-balance")).toContainText("Signet", { timeout: 90_000 });
-    await expect(panel(alice).getByTestId("bark-balance")).toHaveText(/^0\s*test sats/);
+    await expect(panel(alice).getByTestId("bark-balance")).toHaveText(/^0\s*sats/);
     await expect(panel(alice).getByTestId("bark-address")).toHaveText(/tark1p[a-z0-9]{40,}/);
     await expect(alice.page.getByTestId("wallet-card-bark")).toContainText("Ready");
     await panel(alice).getByRole("button", { name: "Show", exact: true }).click();
