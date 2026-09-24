@@ -1,12 +1,14 @@
 import { parsePaymentAmount } from "@ghostly/core";
 import { useOutsideDismiss } from "../hooks/useDismiss";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import type { WalletPlatform } from "../lib/platform";
 import type { PaymentReview as Review } from "@ghostly/core";
 import { PaymentReview } from "./PaymentReview";
-import { MiniCards, type ChatRail } from "./WalletCards";
+import { WalletMark, type ChatRail } from "./WalletCards";
+import { CardDeck, WalletCardFace } from "./WalletDeck";
 import { ONCHAIN_FEE_CAP, walletCards, type WalletCard } from "./walletCardData";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import "./payment-composer.css";
 
 interface PaymentComposerProps {
   balance: number;
@@ -14,20 +16,28 @@ interface PaymentComposerProps {
   onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin") => Promise<string | null>;
   onClose: () => void;
   reviewContext?:{wallet:WalletPlatform;peer:string;linkId:string};
+  /** Who the chat is with, as the chat shows them. */
+  contact?: string;
 }
 
 const RAIL_KEY = "ghostly-payment-rail";
 /** Cashu fees are per proof: a few sats at most. The review shows the real fee before anything is spent. */
 const CASHU_FEE_CAP = 10;
+const RAILS = ["cashu", "lightning", "arkade", "bark", "bitcoin", "usdt"] as const;
+const FLIP_MS = 520;
+const reducedMotion = () => document.documentElement.dataset.reduceMotion === "true" || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /**
- * Popover over the message input: pick a card, type an amount, request or send. The wallets are
- * already set up, so there is nothing else to choose; every send still stops at a review.
+ * Popover over the message input, as a wallet: the cards in a stack, one comes up as the pointer passes over it
+ * (or a finger swipes to it), and the one clicked turns over. Its back is where the amount and what it is for are
+ * written, then Request or Send. The wallets are already set up, so there is nothing else to choose; every send
+ * still stops at a review.
  */
-export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewContext }: PaymentComposerProps) {
+export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewContext, contact }: PaymentComposerProps) {
   const wallet = reviewContext?.wallet;
   const state = wallet?.getState();
   const peer = useServicesPlatform()?.getPeer(reviewContext?.peer ?? "");
+  const who = contact || "your contact";
   /** Why a card cannot be used in this chat: not set up, off here, or off for the contact. */
   const unavailable = (card: Pick<WalletCard, "name" | "ready" | "balance"> & { id: ChatRail }) => {
     if (!card.ready) return `${card.name} is ${card.balance.toLowerCase()}`;
@@ -37,9 +47,12 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   };
   const [rail, setRail] = useState<ChatRail>(() => {
     const allowed = (id: ChatRail) => !peer?.paymentMethods || peer.paymentMethods[id];
-    try { const saved = localStorage.getItem(RAIL_KEY); if ((saved === "cashu" || saved === "lightning" || saved === "arkade" || saved === "bark" || saved === "bitcoin" || saved === "usdt") && allowed(saved)) return saved; } catch { /* storage unavailable */ }
-    return (["cashu", "lightning", "arkade", "bark", "bitcoin", "usdt"] as const).find(allowed) ?? "cashu";
+    try { const saved = localStorage.getItem(RAIL_KEY); if ((RAILS as readonly string[]).includes(saved ?? "") && allowed(saved as ChatRail)) return saved as ChatRail; } catch { /* storage unavailable */ }
+    return RAILS.find(allowed) ?? "cashu";
   });
+  // The cards, then the chosen one turned over. Without a wallet to show, only the back.
+  const [side, setSide] = useState<"cards" | "back">(state && wallet ? "cards" : "back");
+  const [flipped, setFlipped] = useState(!(state && wallet));
   const [review, setReview] = useState<Review | null>(null);
   const [amount, setAmount] = useState("");
   const [memo, setMemo] = useState("");
@@ -57,8 +70,48 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   // pays a request the contact sends.
   const canSend = rail !== "lightning";
   const [asking, setAsking] = useState<string | null>(null);
-  const blocked = state && wallet ? unavailable(walletCards(state, wallet.testMintUrls).find((c): c is WalletCard & { id: ChatRail } => c.id === rail)!) : undefined;
-  const pick = (next: ChatRail) => { setRail(next); setError(""); try { localStorage.setItem(RAIL_KEY, next); } catch { /* storage unavailable */ } };
+  const cards = state && wallet ? walletCards(state, wallet.testMintUrls) : [];
+  const card = cards.find((c) => c.id === rail);
+  const blocked = card ? unavailable(card) : undefined;
+  // A card that cannot be used says so on its face, briefly; its title says why in full.
+  const shown = cards.map((c) => { const why = unavailable(c); return !why || !c.ready ? c : { ...c, status: why.startsWith("Your contact") ? "Not accepted" : "Off here" }; });
+
+  /** Turn the chosen card over, and back to the cards. */
+  const use = (next: ChatRail) => {
+    setRail(next); setError("");
+    try { localStorage.setItem(RAIL_KEY, next); } catch { /* storage unavailable */ }
+    setSide("back");
+  };
+  useLayoutEffect(() => {
+    if (side !== "back") return;
+    // Mounted face up, then turned: the turn is a transition from the front.
+    let frame = requestAnimationFrame(() => { frame = requestAnimationFrame(() => setFlipped(true)); });
+    return () => cancelAnimationFrame(frame);
+  }, [side]);
+  const backToCards = () => {
+    setFlipped(false); setError("");
+    setTimeout(() => setSide("cards"), reducedMotion() ? 0 : FLIP_MS);
+  };
+  // On the cards, the keyboard starts on the chosen one: arrows move, Enter turns it over. Once turned, on the amount
+  // (not as the back mounts: it is still face down then, and a hidden field takes no focus).
+  const amountRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (side === "cards") containerRef.current?.querySelector<HTMLElement>('[role=radio][tabindex="0"]')?.focus({ preventScroll: true });
+    else if (flipped) amountRef.current?.focus({ preventScroll: true });
+  }, [side, flipped]);
+
+  // The back grows to what it holds (a review is long); the card follows its height as it turns.
+  const backRef = useRef<HTMLDivElement>(null), flipRef = useRef<HTMLDivElement>(null);
+  const [backHeight, setBackHeight] = useState(0), [cardWidth, setCardWidth] = useState(0);
+  useLayoutEffect(() => {
+    const back = backRef.current, box = flipRef.current;
+    if (!back || !box) return;
+    const measure = () => { setBackHeight(back.offsetHeight); setCardWidth(box.clientWidth); };
+    measure();
+    const observer = new ResizeObserver(measure); observer.observe(back); observer.observe(box);
+    return () => observer.disconnect();
+  }, [side]);
+  const cardHeight = Math.round(cardWidth / 1.586);
 
   const send = async () => {
     setError(""); setBusy("send");
@@ -110,8 +163,53 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
     finally { setBusy(null); }
   };
 
-  const field = "w-full bg-input-bg border-none rounded-lg px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent";
   const spendable = method === "cashu" ? balance : method === "arkade" ? state?.ark?.balance : method === "bark" ? state?.bark?.balance : method === "bitcoin" ? state?.bitcoin?.balance : usdt ? Number(usdt.balance) : undefined;
+  const tooMuch = spendable !== undefined && value > spendable;
+  /** What Send and Request do on this card, with this contact. */
+  const how = (id: ChatRail) => id === "cashu"
+    ? `Send gives ${who} ecash straight away; a request also carries a Lightning invoice.`
+    : id === "lightning" ? `Request with a Lightning invoice. To pay ${who} over Lightning, tap Pay on their request.`
+    : `Send asks ${who}'s app for a ${id === "arkade" ? "fresh Ark" : id === "bark" ? "fresh Bark" : id === "bitcoin" ? "fresh Bitcoin" : "USDT"} address, then shows the payment to approve.${id === "bitcoin" ? " Paid once it confirms on-chain." : ""}`;
+
+  const back = (
+    <div ref={backRef} className={`payment-back${card ? ` wallet-card-${card.id}` : ""}`} data-testid="payment-back">
+      <div className="payment-back-stripe" aria-hidden="true" />
+      <div className="payment-back-body">
+        <div className="payment-back-head">
+          {card && <span className="payment-back-mark" aria-hidden="true"><WalletMark rail={card.id} /></span>}
+          <span className="payment-back-title">
+            <span className="payment-back-name">{card?.name ?? "Payment"}</span>
+            <span className="payment-back-meta">{card ? `${card.balance} · with ${who}` : `With ${who}`}</span>
+          </span>
+          {cards.length > 0 && !review && (
+            <button type="button" className="payment-back-turn" data-testid="payment-change-card" aria-label="Choose another card" title="Choose another card" onClick={backToCards}>
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2.5 2v3.2h3.2" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              <span>Cards</span>
+            </button>
+          )}
+        </div>
+        {review && reviewContext ? <PaymentReview key={review.id} review={review} wallet={reviewContext.wallet} onClose={onClose} /> : <>
+          <label className="payment-back-amount" data-over={tooMuch || undefined}>
+            <input ref={amountRef} data-testid="payment-amount" inputMode={decimals ? "decimal" : "numeric"} placeholder="0" aria-label={`Amount in ${unit}`}
+              value={amount} onChange={(e) => setAmount(e.target.value.replace(decimals ? /[^0-9.]/g : /\D/g, ""))} />
+            <span>{unit}</span>
+          </label>
+          <input className="payment-back-memo" placeholder="What for? (optional)" aria-label="What for? (optional)" maxLength={140} value={memo} onChange={(e) => setMemo(e.target.value)} />
+          <p className="payment-back-hint">{blocked ?? (tooMuch ? `More than the ${spendable!.toLocaleString()} ${unit} on this card.` : how(rail))}</p>
+          <div className="payment-back-actions">
+            <button data-testid="payment-request" disabled={!value || busy !== null || !!asking || !!blocked} onClick={() => void request()} className="payment-back-secondary">
+              {busy === "request" ? "Requesting…" : "Request"}
+            </button>
+            <button data-testid="payment-send" disabled={!canSend || !!blocked || !value || busy !== null || !!asking || tooMuch} onClick={() => void send()}
+              title={canSend ? undefined : "To pay on this card, tap Pay on your contact's request"} className="payment-back-primary">
+              {asking ? "Asking for an address…" : busy === "send" ? "Preparing…" : "Send"}
+            </button>
+          </div>
+        </>}
+        {error && <p role="alert" className="text-danger text-xs m-0">{error}</p>}
+      </div>
+    </div>
+  );
 
   return (
     <>
@@ -119,40 +217,30 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
     <div
       ref={containerRef}
       data-testid="payment-composer"
-      className="sheet sheet-padded absolute bottom-full left-0 mb-2 z-50 animate-fade-in w-[360px] max-w-[calc(100vw-1.5rem)] bg-panel-header border border-border rounded-2xl shadow-2xl p-3 space-y-3"
+      data-side={side}
+      className={`payment-composer wallet-card-${rail} sheet sheet-padded absolute bottom-full left-0 mb-2 z-50 animate-fade-in w-[400px] max-w-[calc(100vw-1.5rem)] bg-panel-header border border-border rounded-2xl shadow-2xl p-3`}
       onKeyDown={(e) => e.key === "Escape" && onClose()}
     >
-      {state && wallet ? (
-        <MiniCards state={state} testMints={wallet.testMintUrls} selected={rail} onSelect={pick} disabled={unavailable} />
-      ) : <p className="text-text-secondary text-xs font-bold uppercase tracking-wider m-0">Payment</p>}
-
-      <label className="flex items-baseline gap-2 bg-input-bg rounded-xl px-3 py-2.5 focus-within:ring-1 focus-within:ring-accent">
-        <input data-testid="payment-amount" autoFocus inputMode={decimals ? "decimal" : "numeric"} placeholder="0" aria-label={`Amount in ${unit}`}
-          className="min-w-0 flex-1 bg-transparent border-none outline-none text-2xl font-semibold text-text-primary placeholder-text-muted tabular-nums"
-          value={amount} onChange={(e) => setAmount(e.target.value.replace(decimals ? /[^0-9.]/g : /\D/g, ""))} />
-        <span className="text-text-muted text-sm shrink-0">{unit}</span>
-      </label>
-      <input className={field} placeholder="What for? (optional)" maxLength={140} value={memo} onChange={(e) => setMemo(e.target.value)} />
-
-      <div className="grid grid-cols-2 gap-2">
-        <button data-testid="payment-request" disabled={!value || busy !== null || !!asking || !!blocked} onClick={() => void request()}
-          className="px-3 py-2.5 bg-surface-hover text-text-primary rounded-xl text-sm font-semibold hover:brightness-110 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
-          {busy === "request" ? "Requesting…" : "Request"}
+      {side === "cards" ? <>
+        <div className="payment-composer-head">
+          <span>Pay or request</span>
+          <span className="payment-composer-who">with {who}</span>
+        </div>
+        <CardDeck compact kind="radios" label="Pay with" name="payment-deck" cards={shown} selected={rail} onSelect={(id) => { setRail(id); setError(""); }} onChoose={use}
+          testId={(id) => `payment-card-${id}`} blocked={(c) => unavailable(c)} size={{ max: 250, share: .62 }} />
+        <p className="payment-composer-hint" data-blocked={blocked ? true : undefined}>{blocked ?? how(rail)}</p>
+        <button type="button" data-testid="payment-use" className="payment-composer-use" disabled={!!blocked} onClick={() => use(rail)}>
+          {card ? `Use ${card.name}` : "Continue"}
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </button>
-        <button data-testid="payment-send" disabled={!canSend || !!blocked || !value || busy !== null || !!asking || (spendable !== undefined && value > spendable) || !!review} onClick={() => void send()}
-          title={canSend ? undefined : "To pay on this card, tap Pay on your contact's request"}
-          className="px-3 py-2.5 bg-accent text-[#111b21] rounded-xl text-sm font-bold hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
-          {asking ? "Asking for an address…" : busy === "send" ? "Preparing…" : "Send"}
-        </button>
-      </div>
-      <p className="text-text-muted text-[11px] leading-snug m-0">
-        {blocked ? blocked : rail === "cashu"
-          ? `${balance.toLocaleString()} sats available. Sent as ecash straight to your contact; requests also carry a Lightning invoice.`
-          : rail === "lightning" ? "Request with a Lightning invoice. To pay over Lightning, tap Pay on your contact's request."
-          : `Send asks your contact's app for a ${rail === "arkade" ? "fresh Ark" : rail === "bark" ? "fresh Bark" : rail === "bitcoin" ? "fresh Bitcoin" : "USDT"} address, then shows the payment to approve.${rail === "bitcoin" ? " Paid once it confirms on-chain." : ""}`}
-      </p>
-      {review && reviewContext && <PaymentReview key={review.id} review={review} wallet={reviewContext.wallet} onClose={onClose} />}
-      {error && <p className="text-danger text-xs m-0">{error}</p>}
+      </> : card ? (
+        <div ref={flipRef} className="payment-flip" data-flipped={flipped} style={{ "--card-w": `${cardWidth}px`, "--card-h": `${cardHeight}px`, height: flipped ? backHeight : cardHeight } as CSSProperties}>
+          <div className="payment-flip-card">
+            <div className={`payment-flip-front wallet-card-${card.id}`} aria-hidden="true"><WalletCardFace card={card} /></div>
+            <div className="payment-flip-back">{back}</div>
+          </div>
+        </div>
+      ) : <div ref={flipRef}>{back}</div>}
     </div>
     </>
   );

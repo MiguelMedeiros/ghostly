@@ -46,6 +46,7 @@ test.describe("another wallet", { tag: "@network" }, () => {
 
     // Bob asks for 10 sats. Alice never presses Pay: she pays the invoice from her own wallet page instead.
     await bob.page.getByTestId("payment-button").click();
+    await bob.page.getByTestId("payment-card-cashu").click();
     await bob.page.getByTestId("payment-amount").fill("10");
     await bob.page.getByTestId("payment-request").click();
     const bubble = (p: Peer) => chat(p).getByTestId("payment-bubble").filter({ hasText: "10" });

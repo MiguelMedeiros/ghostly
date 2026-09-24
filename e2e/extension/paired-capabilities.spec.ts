@@ -25,7 +25,7 @@ test("paired extension and web exchange verified files and local-mint sats", asy
   await web.page.getByTestId("wallet-receive").click(); await web.page.getByTestId("wallet-receive-amount").fill("50"); await web.page.getByTestId("wallet-create-invoice").click();
   await expect(web.page.getByTestId("wallet-paid")).toBeVisible();
   await openChat(web);
-  await web.page.getByTestId("payment-button").click(); await web.page.getByTestId("payment-amount").fill("12"); await web.page.getByTestId("payment-send").click();
+  await web.page.getByTestId("payment-button").click(); await web.page.getByTestId("payment-card-cashu").click(); await web.page.getByTestId("payment-amount").fill("12"); await web.page.getByTestId("payment-send").click();
   // Every send is reviewed first: nothing leaves before the approval.
   await web.page.getByTestId("payment-composer").getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
   for (const p of [web, ext]) await expect(chat(p).getByTestId("payment-bubble").filter({ hasText: "12" }).getByTestId("payment-state")).toHaveText(/Received/);
@@ -35,7 +35,7 @@ test("paired extension and web exchange verified files and local-mint sats", asy
   await ext.page.getByTestId("chat-payments-open").click();
   await ext.page.getByTestId("chat-payments").getByTestId("chat-payments-lightning").click();
   await ext.page.getByTestId("chat-payments-save").click();
-  await ext.page.getByTestId("payment-button").click(); await ext.page.getByTestId("payment-amount").fill("5"); await ext.page.getByTestId("payment-request").click();
+  await ext.page.getByTestId("payment-button").click(); await ext.page.getByTestId("payment-card-cashu").click(); await ext.page.getByTestId("payment-amount").fill("5"); await ext.page.getByTestId("payment-request").click();
   await web.page.getByTestId("payment-pay").click();
   await chat(web).getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
   for (const p of [web, ext]) await expect(chat(p).getByTestId("payment-bubble").filter({ hasText: "equest" }).getByTestId("payment-state")).toHaveText(/Paid/);

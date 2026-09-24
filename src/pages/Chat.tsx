@@ -686,7 +686,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         paymentsUnavailable={!paymentsOn ? "Payments are off in this chat. Choose them under ⋮ → Payments." : dhtOnly ? "DHT carries text only. Choose a live connection for sats." : paired && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.payments ? (pairedReady ? "Your contact has payments off in this chat, or needs an updated Ghostly" : deliveryPeer?.textDelivery === "hold" ? "Your contact allowed neither Cashu nor Lightning at your last session; a request cannot be held" : "Connect and confirm your peer to send sats") : undefined}
         payments={
           walletState && wallet && peerKey
-            ? { balance: walletState.balance, onSend: paySend, onRequest: payRequest,reviewContext:platform?.getPeer(peerKey)?.id ? {wallet,peer:peerKey,linkId:platform.getPeer(peerKey)!.id!}:undefined }
+            ? { balance: walletState.balance, contact: displayName || undefined, onSend: paySend, onRequest: payRequest,reviewContext:platform?.getPeer(peerKey)?.id ? {wallet,peer:peerKey,linkId:platform.getPeer(peerKey)!.id!}:undefined }
             : undefined
         }
       />

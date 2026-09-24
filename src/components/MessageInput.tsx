@@ -19,6 +19,8 @@ interface MessageInputProps {
   payments?: {
     reviewContext?: {wallet:import("../lib/platform").WalletPlatform;peer:string;linkId:string};
     balance: number;
+    /** Who the chat is with, as the chat shows them. */
+    contact?: string;
     onSend: (amount: number, memo: string) => Promise<string | null>;
     onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin") => Promise<string | null>;
   };
@@ -338,6 +340,7 @@ export function MessageInput({
           <PaymentComposer
             reviewContext={payments.reviewContext}
             balance={payments.balance}
+            contact={payments.contact}
             onSend={payments.onSend}
             onRequest={payments.onRequest}
             onClose={() => setShowPayment(false)}

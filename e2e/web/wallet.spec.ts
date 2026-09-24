@@ -48,8 +48,9 @@ test.describe("wallet", { tag: "@network" }, () => {
 
     await openChat(alice);
     await alice.page.getByTestId("payment-button").click();
+    await alice.page.getByTestId("payment-card-cashu").click();
     await alice.page.getByTestId("payment-amount").fill("21");
-    // The Cashu card is chosen already, and the mint that holds the sats pays: nothing to pick.
+    // The Cashu card turned over; the mint that holds the sats pays, so there is no mint to pick.
     await alice.page.getByTestId("payment-send").click();
     const directReview = alice.page.getByTestId("payment-composer").getByTestId("payment-review");
     await expect(directReview).toContainText("cashu-test");
@@ -70,6 +71,7 @@ test.describe("wallet", { tag: "@network" }, () => {
     await bob.page.getByTestId("chat-payments").getByTestId("chat-payments-lightning").click();
     await bob.page.getByTestId("chat-payments-save").click();
     await bob.page.getByTestId("payment-button").click();
+    await bob.page.getByTestId("payment-card-cashu").click();
     await bob.page.getByTestId("payment-amount").fill("10");
     await bob.page.getByTestId("payment-request").click();
     await alice.page.getByTestId("payment-pay").click();
@@ -103,6 +105,7 @@ test.describe("wallet", { tag: "@network" }, () => {
     await expect(alice.page.getByTestId("wallet-test-balance")).toHaveText(/^50 test sats/);
     await openChat(alice);
     await alice.page.getByTestId("payment-button").click();
+    await alice.page.getByTestId("payment-card-cashu").click();
     await alice.page.getByTestId("payment-amount").fill("10");
     await alice.page.getByTestId("payment-send").click();
     const review = alice.page.getByTestId("payment-composer").getByTestId("payment-review");
