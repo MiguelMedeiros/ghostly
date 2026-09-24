@@ -102,7 +102,7 @@ export function GroupChat() {
     if (engineNick !== undefined && engineNick !== nick) void engine.call("updateSettings", { settings: { nick } }).catch(() => {});
   }, [settings.defaultNickname, engineNick]);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const closeMenu = useCallback(() => setMenuOpen(false), []);
+  const closeMenu = () => setMenuOpen(false);
 
   useEffect(() => {
     if (!groupId) return;

@@ -53,7 +53,7 @@ export function Sidebar() {
   const [showNewGroup, setShowNewGroup] = useState(false);
   const [newMenuOpen, setNewMenuOpen] = useState(false);
   const newMenuRef = useRef<HTMLDivElement>(null);
-  const closeNewMenu = useCallback(() => setNewMenuOpen(false), []);
+  const closeNewMenu = () => setNewMenuOpen(false);
   const groups = useSyncExternalStore(subscribeEngine, engineSnapshot)?.groups ?? [];
   const activeGroupId = groupRouteId(location.pathname);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);

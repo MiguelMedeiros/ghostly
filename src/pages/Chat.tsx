@@ -310,7 +310,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     setConnectionOpen(false);
   }, [sessionId]);
 
-  const closeMenu = useCallback(() => setMenuOpen(false), []);
+  const closeMenu = () => setMenuOpen(false);
   useOutsideDismiss(connectionRef, connectionOpen, () => {
     if (connectionRef.current?.contains(document.activeElement)) connectionButtonRef.current?.focus();
     setConnectionOpen(false);

@@ -35,7 +35,7 @@ export function Menu({ open, onClose, anchorRef, testId, id, children }: {
       const before = menu.style.translate;
       menu.style.translate = "0";
       const rect = menu.getBoundingClientRect(), opener = anchor.getBoundingClientRect();
-      const width = document.documentElement.clientWidth, height = window.innerHeight;
+      const width = document.documentElement.clientWidth || window.innerWidth, height = window.innerHeight;
       const shift = rect.left < MARGIN ? MARGIN - rect.left : rect.right > width - MARGIN ? Math.max(MARGIN - rect.left, width - MARGIN - rect.right) : 0;
       const up = opener.bottom + rect.height + MARGIN > height && opener.top - rect.height - MARGIN > 0;
       menu.style.translate = before;
