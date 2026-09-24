@@ -1,10 +1,11 @@
 /**
- * The flourish when a wallet deck's chosen card changes (WalletDeck.tsx): the card that comes up swings forward
- * with a small overshoot, the one it replaces tucks back into the deck, a sheen in the new card's ink sweeps across
- * it, its ghost peeks in and the glow behind the deck brightens as it takes the new colour. Everything leans the
- * way the choice moved: toward the next card or back to an earlier one.
+ * The flourish when a deck's chosen card changes (Deck.tsx): the card that comes up swings forward with a small
+ * overshoot, the one it replaces tucks back into the deck, a sheen in the new card's ink sweeps across it, its ghost
+ * peeks in and the glow behind the deck brightens as it takes the new colour. Everything leans the way the choice
+ * moved: toward the next card or back to an earlier one. A face takes part by what it marks: `data-deck="face"` on
+ * the card, `"sheen"` and `"ghost"` on the parts that move (a face without them simply skips that part).
  *
- * The lift itself is a CSS transition (wallet-deck.css): it retargets on its own when the choice changes again. The
+ * The lift itself is a CSS transition (deck.css): it retargets on its own when the choice changes again. The
  * swings here are Web Animations that start and end at rest and are *added* onto whatever else runs on the card, so
  * a person flicking through the deck never makes a card jump: a card still swinging in when it is sent back simply
  * gets the new move on top of the old one, and both settle at rest. Only transform, opacity and filter move.
@@ -56,7 +57,7 @@ export const sheenFrames = (dir: Dir): Frame[] => {
 export const TIMING = { card: 560, out: 460, ghost: 640, ghostDelay: 90, sheen: 720, sheenDelay: 70, glow: 620 } as const;
 
 const ADD = { composite: 'add' } as const;
-const face = (card: HTMLElement | null | undefined) => card?.querySelector<HTMLElement>('.wallet-deck-face') ?? null;
+const face = (card: HTMLElement | null | undefined) => card?.querySelector<HTMLElement>('[data-deck=face]') ?? null;
 
 /** Play the switch from `outgoing` to `incoming`. Nothing moves with reduced motion: the caller does not call it. */
 export function playSwitch({ glow, incoming, outgoing, dir }: { glow: HTMLElement | null; incoming: HTMLElement | null; outgoing: HTMLElement | null; dir: Dir }) {
@@ -65,14 +66,14 @@ export function playSwitch({ glow, incoming, outgoing, dir }: { glow: HTMLElemen
   inFace.animate(incomingFrames(dir), { duration: TIMING.card, ...ADD });
   outFace?.animate(outgoingFrames(dir), { duration: TIMING.out, ...ADD });
 
-  const ghost = inFace.querySelector<HTMLElement>('.wallet-deck-card-ghost');
+  const ghost = inFace.querySelector<HTMLElement>('[data-deck=ghost]');
   if (ghost) {
     // A ghost peeking in on a card that was chosen a moment ago and is chosen again starts over rather than doubling.
     ghost.getAnimations().forEach((a) => a.cancel());
     const rest = Number.parseFloat(getComputedStyle(ghost).opacity) || 0.3;
     ghost.animate(ghostFrames(dir, rest), { duration: TIMING.ghost, delay: TIMING.ghostDelay, easing: 'linear', fill: 'backwards' });
   }
-  inFace.querySelector<HTMLElement>('.wallet-deck-card-sheen')?.animate(sheenFrames(dir), { duration: TIMING.sheen, delay: TIMING.sheenDelay, easing: 'cubic-bezier(.35,0,.25,1)', fill: 'backwards' });
+  inFace.querySelector<HTMLElement>('[data-deck=sheen]')?.animate(sheenFrames(dir), { duration: TIMING.sheen, delay: TIMING.sheenDelay, easing: 'cubic-bezier(.35,0,.25,1)', fill: 'backwards' });
   // The glow takes the new colour by its own transition; this is the breath it takes as it does.
   glow?.animate([{ opacity: 0 }, { opacity: 0.1, offset: 0.3, easing: 'ease-out' }, { opacity: 0 }], { duration: TIMING.glow, ...ADD });
 }

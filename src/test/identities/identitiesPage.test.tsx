@@ -89,7 +89,8 @@ describe("the Identities page", () => {
     const [fine, soon] = screen.getAllByTestId("identity-proof");
     expect(within(fine).queryByTestId("identity-proof-expiring")).not.toBeInTheDocument();
     expect(within(soon).getByTestId("identity-proof-expiring")).toHaveTextContent("Expires in 2 days");
-    expect(soon).toHaveTextContent("Add it again to renew it");
+    await user.click(soon);
+    expect(screen.getByTestId("identity-panel")).toHaveTextContent("Add it again to renew it");
     await user.click(screen.getByTestId("identity-add"));
     expect(screen.getByRole("dialog", { name: "Add an identity" })).toBeInTheDocument();
   });

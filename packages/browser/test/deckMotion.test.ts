@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ghostFrames, incomingFrames, outgoingFrames, sheenFrames, switchDirection } from '../../../src/components/walletDeckMotion';
+import { ghostFrames, incomingFrames, outgoingFrames, sheenFrames, switchDirection } from '../../../src/components/deck/motion';
 // covers: wallet.deck
 
 const at = (frames: Keyframe[], i: number) => frames[i < 0 ? frames.length + i : i] as Record<string, unknown>;

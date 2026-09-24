@@ -1,8 +1,9 @@
 /**
- * Where the cards of a wallet stack sit. Every card keeps its own place in a row, overlapping the next like
- * cards tucked in a wallet: choosing one lifts it to the top, and nothing moves sideways. That is what lets a
- * mouse flip through them by passing over them: the card that comes up is always under the pointer, so the
- * pointer never finds itself over a different card only because the chosen one changed.
+ * Where the cards of a deck's stack sit (Deck.tsx: the wallet's cards, the identities). Every card keeps its own
+ * place in a row, overlapping the next like cards tucked in a wallet: choosing one lifts it to the top, and
+ * nothing moves sideways. That is what lets a mouse flip through them by passing over them: the card that comes
+ * up is always under the pointer, so the pointer never finds itself over a different card only because the
+ * chosen one changed.
  *
  * The part of a card that shows is its strip: the chosen card shows whole, the ones before it show their
  * leading edge (where the mark and name are), the ones after it their trailing edge. The strips tile the row,

@@ -1,3 +1,5 @@
+import { providerForIssuer } from "@ghostly/browser/proofs/oidc/providers";
+
 /**
  * One mark per identity-proof provider, keyed by the provider's id from
  * packages/browser/src/proofs/registry.ts, plus one per OpenID Connect provider
@@ -84,3 +86,10 @@ export const PROVIDER_ICONS: Record<string, ProviderIcon> = {
   "oidc:gitlab": gitlab,
   "oidc:twitch": { tile: `bg-[#9146ff] ${white}`, fill: 0.55, mark: simple(TWITCH) },
 };
+
+/** The provider's icon; for an OpenID Connect proof whose subject names a known provider, that provider's. */
+export function providerIcon(provider: string, subject?: string) {
+  const oidc = provider === "oidc" && subject ? providerForIssuer(subject)?.id : undefined;
+  const key = oidc ? `oidc:${oidc}` : provider;
+  return PROVIDER_ICONS[key] ? { key, ...PROVIDER_ICONS[key] } : undefined;
+}
