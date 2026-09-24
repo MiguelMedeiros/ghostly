@@ -256,8 +256,8 @@ export class ProviderSources<P extends Connectable> {
    * network checked first; only then are its settings saved (secrets sealed) and the old source closed.
    */
   set(providerId: string, values: Record<string, string>): Promise<void> {
-    this.interrupt();
-    return this.afterChange(this.serial(async () => {
+    const interrupted = this.interrupt();
+    return this.afterChange(interrupted, this.serial(async () => {
       const descriptor = this.find(providerId);
       if (!descriptor || !offeredIn(descriptor, this.options.host().platform, this.mode)) throw new Error("That source is not available here");
       const settings: ProviderSettings = { config: {}, secrets: {} };
@@ -279,8 +279,8 @@ export class ProviderSources<P extends Connectable> {
    * checked first, like `set`; a refusal leaves the saved source as it was.
    */
   reconfigure(values: Record<string, string>): Promise<void> {
-    this.interrupt();
-    return this.afterChange(this.serial(async () => {
+    const interrupted = this.interrupt();
+    return this.afterChange(interrupted, this.serial(async () => {
       const stored = this.stored;
       const descriptor = stored ? this.find(stored.providerId) : undefined;
       if (!stored || !descriptor) throw new Error("There is no saved source to change");
@@ -300,16 +300,20 @@ export class ProviderSources<P extends Connectable> {
     }));
   }
 
-  /** A change refused (or dropped) after interrupting: the saved source goes on connecting as before. */
-  private afterChange(change: Promise<void>): Promise<void> {
-    return change.finally(() => { if (!this.provider && !this.stopped) void this.ensureReady(); });
+  /** A change refused after interrupting an attempt: the saved source goes on connecting as before. */
+  private afterChange(interrupted: boolean, change: Promise<void>): Promise<void> {
+    return change.finally(() => { if (interrupted && !this.provider && !this.stopped) void this.ensureReady(); });
   }
 
-  /** A connection attempt under way gives way to a change of settings, instead of holding it for its time-out. */
-  private interrupt() {
-    if (this.provider) return;
+  /**
+   * A connection attempt under way (or waiting to try again) gives way to a change of settings, instead of
+   * holding it for its time-out. Says whether there was one.
+   */
+  private interrupt(): boolean {
+    if (this.provider || (!this.connecting && !this.failures)) return false;
     clearTimeout(this.retry);
     this.controller.abort(); this.controller = new AbortController();
+    return true;
   }
 
   /** Connects `settings`, then saves them and replaces the current source. `same`: the same wallet, reconfigured. */

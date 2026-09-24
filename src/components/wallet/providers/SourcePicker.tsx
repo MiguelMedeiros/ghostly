@@ -5,8 +5,8 @@ import { Block, Button, Notice, Row, Section, input } from "../ui";
 import { useRun } from "../run";
 import { Select } from "../../ui/Select";
 import { PROVIDER_FORMS, type ProviderFormProps } from "./forms";
+import { changeableFields, sourceStatus } from "./sourceStatus";
 
-const STATUS = { none: "Not set up", connecting: "Connecting…", ready: "Connected", error: "Not connected" } as const;
 
 /** A field's suggested values that fit the other fields (`when`), as buttons that fill it in. */
 function Suggestions({ field, values, onPick }: { field: ProviderField; values: Record<string, string | undefined>; onPick: (value: string) => void }) {
@@ -81,17 +81,6 @@ export function ProviderConfigForm({ descriptor, mode, busy, onSubmit }: Provide
     </form>
   );
 }
-
-/** The source's line under its name: connected, reconnecting after a failure (and why), or unavailable. */
-export function sourceStatus(view: SourceView): string {
-  if (view.status === "connecting" && view.failures) return `Connecting… · ${view.error ?? "no answer yet"} · trying again by itself`;
-  if (view.status === "error" && view.error) return view.retryAt ? `${view.error} · trying again by itself` : view.error;
-  return view.error ?? [STATUS[view.status], view.alias, view.network && view.network !== "bitcoin" ? view.network : undefined, view.custodial ? "custodial" : undefined].filter(Boolean).join(" · ");
-}
-
-/** Whether a saved source has a server that "Change server" can edit. */
-export const changeableFields = (view: SourceView): ProviderField[] =>
-  view.providerId && !view.isDefault ? view.offered.find((d) => d.id === view.providerId)?.fields.filter((f) => f.changeable) ?? [] : [];
 
 /**
  * Where a card's money comes from: the source in use for this mode, and the providers that can replace

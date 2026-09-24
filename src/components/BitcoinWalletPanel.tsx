@@ -4,7 +4,8 @@ import type { WalletPlatform, WalletState } from "../lib/platform";
 import { PaymentReview } from "./PaymentReview";
 import { Actions, Address, Amount, Button, Notice, Row, Section, input, type Action } from "./wallet/ui";
 import { useRun } from "./wallet/run";
-import { SourcePicker, changeableFields } from "./wallet/providers/SourcePicker";
+import { SourcePicker } from "./wallet/providers/SourcePicker";
+import { changeableFields } from "./wallet/providers/sourceStatus";
 
 /** The most the person accepts to pay in fees unless they change it; the review shows the real fee. */
 const DEFAULT_FEE_CAP = 2_000;
