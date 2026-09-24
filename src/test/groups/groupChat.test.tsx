@@ -66,14 +66,17 @@ describe("GroupChat: joining through a link", () => {
   it("waits for the admin's app, and says it can be left alone", () => {
     openGroup(viaLink(""));
     expect(screen.getByTestId("group-members")).toHaveTextContent("Joining through a link");
+    expect(screen.getByTestId("group-joining")).toHaveTextContent("Waiting to be let in");
     expect(screen.getByTestId("group-joining")).toHaveTextContent("Waiting for the admin's app to let you in");
-    expect(composer()).toBeDisabled();
+    // Nothing to write until the group lets you in: no composer at all.
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
 
   it("says when the admin's app answered", () => {
     openGroup(viaLink(ALICE));
     expect(screen.getByTestId("group-members")).toHaveTextContent("Joining…");
-    expect(screen.getByTestId("group-joining")).toHaveTextContent("The admin's app answered: getting the group's keys…");
+    expect(screen.getByTestId("group-joining")).toHaveTextContent("Joining Friends…");
+    expect(screen.getByTestId("group-joining")).toHaveTextContent("The admin's app answered: getting the group's keys.");
   });
 
   it("cancels the join: forgets the group and goes back to the chat list", async () => {
