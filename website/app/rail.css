@@ -1,96 +1,181 @@
-/* The story rail: where you are, how far it goes. Owned by components/story/StoryRail.tsx. */
+/* The story rail: where you are, how far it goes. Owned by components/story/StoryRail.tsx.
+ *
+ * Docked at the bottom of the screen and quiet on purpose: a hairline, small
+ * dots, dim text. It lights up a little while you scroll, point at it or tab
+ * into it ([data-lit], :hover, :focus-within) and settles back after a moment.
+ * A soft wash of the page colour sits under it, so text scrolling past fades
+ * out beneath the rail instead of colliding with it. Hidden near the top of the
+ * page and once the footer is on its way ([data-on="false"]).
+ */
 .rail {
   position: fixed;
-  top: var(--nav-h);
   left: 0;
   right: 0;
+  bottom: 0;
   z-index: 45;
+  padding-bottom: env(safe-area-inset-bottom);
   pointer-events: none;
   opacity: 0;
-  transform: translateY(-6px);
+  transform: translateY(6px);
   transition:
-    opacity 0.35s var(--ease),
-    transform 0.35s var(--ease);
+    opacity var(--dur-sm) var(--ease-in),
+    transform var(--dur-sm) var(--ease-in);
 }
-.rail[data-on="true"] {
+/* Out of sight, the marks stay in the tab order and bring the rail back when focused. */
+.rail[data-on="true"],
+.rail:focus-within {
   opacity: 1;
   transform: none;
+  transition:
+    opacity var(--dur-md) var(--ease-out),
+    transform var(--dur-md) var(--ease-out);
+}
+.rail::before {
+  /* The wash: page colour fading up, soft at the sides, only as wide as the rail. */
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: min(1040px, 100%);
+  height: 56px;
+  transform: translateX(-50%);
+  background: linear-gradient(to top, rgba(6, 10, 16, 0.94), rgba(6, 10, 16, 0.7) 50%, rgba(6, 10, 16, 0));
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
 }
 .rail-inner {
   position: relative;
-  max-width: var(--wrap);
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  width: min(840px, calc(100% - 48px));
+  height: 36px;
   margin-inline: auto;
-  padding: 10px 24px 0;
+  opacity: 0.5;
+  transition: opacity var(--dur-md) var(--ease-out);
+}
+.rail[data-lit="true"] .rail-inner,
+.rail:hover .rail-inner,
+.rail:focus-within .rail-inner {
+  opacity: 1;
+  transition-duration: var(--dur-xs);
 }
 .rail-track {
   position: relative;
-  height: 2px;
-  border-radius: 2px;
-  background: rgba(43, 59, 82, 0.55);
+  flex: 1;
+  height: 1px;
+  background: rgba(122, 138, 166, 0.28);
+}
+.rail[data-on="true"] .rail-track {
   pointer-events: auto;
+}
+.rail-track::before {
+  /* Pointing anywhere near the line counts as pointing at the rail. */
+  content: "";
+  position: absolute;
+  inset: -14px 0;
 }
 .rail-fill {
   position: absolute;
   inset: 0;
-  border-radius: 2px;
-  background: linear-gradient(90deg, var(--cyan), var(--mint));
+  background: rgba(163, 176, 194, 0.6);
   transform-origin: left;
   will-change: transform;
 }
 .rail-mark {
   position: absolute;
   top: 50%;
-  width: 10px;
-  height: 10px;
-  margin: -5px 0 0 -5px;
+  width: 5px;
+  height: 5px;
+  margin: -2.5px 0 0 -2.5px;
+  padding: 0;
+  border: 0;
   border-radius: 50%;
-  background: var(--bg);
-  border: 2px solid rgba(107, 122, 144, 0.9);
+  background: rgba(122, 138, 166, 0.55);
   cursor: pointer;
   transition:
-    border-color 0.3s,
-    transform 0.3s var(--ease);
+    background-color var(--dur-xs),
+    transform var(--dur-xs) var(--ease-out);
 }
 .rail-mark::before {
-  /* A larger hit area than the dot. */
+  /* A 25px hit area around a 5px dot. */
   content: "";
   position: absolute;
   inset: -10px;
+  border-radius: 50%;
 }
 .rail-mark[data-past="true"] {
-  border-color: var(--cyan);
+  background: var(--muted);
 }
 .rail-mark[aria-current="true"] {
-  border-color: var(--mint);
-  transform: scale(1.35);
+  background: var(--text);
+  transform: scale(1.5);
 }
 .rail-mark:hover {
-  transform: scale(1.5);
-  border-color: var(--text);
+  background: var(--text);
+  transform: scale(1.8);
+}
+.rail-mark:focus-visible {
+  outline: none;
+  background: var(--cyan);
+  transform: scale(1.8);
+}
+.rail-mark:focus-visible::before {
+  box-shadow: 0 0 0 1.5px var(--cyan);
+  inset: -6px;
 }
 .rail-label {
-  position: absolute;
-  right: 24px;
-  top: 18px;
-  font-size: 11px;
-  letter-spacing: 0.12em;
+  flex: none;
+  width: 236px;
+  overflow: hidden;
+  font-size: 12px;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--muted);
+  text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--dim);
 }
-@media (max-width: 860px) {
-  .rail-inner {
-    padding: 8px 16px 0;
-  }
+.rail:hover .rail-label,
+.rail:focus-within .rail-label {
+  color: var(--muted);
+}
+
+/* Phones: nine dots on a 340px line would be too close to tap, the label
+ * would sit on the reading column, and the bottom edge belongs to the
+ * system's home gesture. Only the progress line stays, as a hairline. */
+@media (max-width: 640px) {
+  .rail::before,
+  .rail-mark,
   .rail-label {
-    right: 16px;
-    top: 15px;
-    font-size: 10px;
+    display: none;
+  }
+  .rail-inner {
+    width: 100%;
+    height: 2px;
+    opacity: 0.45;
+  }
+  .rail-track,
+  .rail[data-on="true"] .rail-track {
+    height: 2px;
+    background: transparent;
+    pointer-events: none;
+  }
+  .rail-track::before {
+    display: none;
+  }
+  .rail-fill {
+    background: rgba(163, 176, 194, 0.7);
   }
 }
+
 @media (prefers-reduced-motion: reduce) {
   .rail,
+  .rail[data-on="true"],
+  .rail-inner,
   .rail-mark {
     transition: none;
+  }
+  .rail {
+    transform: none;
   }
 }
