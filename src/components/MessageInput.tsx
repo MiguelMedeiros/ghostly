@@ -10,7 +10,8 @@ import { useIsMobile } from "../hooks/useIsMobile";
 import { ComposerMenu, type ComposerAction } from "./composer/ComposerMenu";
 import { ExpressionPanel } from "./composer/ExpressionPanel";
 import { CameraCapture, cameraByFileInput, useHasCamera } from "./composer/CameraCapture";
-import { CameraGlyph, DocumentGlyph, IdentityGlyph, MediaGlyph, PaymentGlyph, SmileIcon } from "./composer/icons";
+import { CameraGlyph, DocumentGlyph, IdentityGlyph, MediaGlyph, PaymentGlyph, ServicesGlyph, SmileIcon } from "./composer/icons";
+import type { ComposerServices } from "./composer/servicesRow";
 import "./composer/composer.css";
 
 interface MessageInputProps {
@@ -51,6 +52,8 @@ interface MessageInputProps {
   paymentComposer?: (close: () => void) => ReactNode;
   /** A paired chat: which of this profile's identities its contact sees, from the + menu. */
   identities?: { peerKey: string; contact: string };
+  /** A 1:1 chat's shared apps, from the + menu: which of yours the contact can open, and theirs (`composerServices`). */
+  services?: ComposerServices;
 }
 
 const DEFAULT_MAX = 500;
@@ -58,8 +61,8 @@ const TOAST_DURATION = 5_000;
 
 /**
  * The chat's composer, laid out as WhatsApp's: [+] [emoji/GIF] [message] in one rounded field, and the mic (send
- * once there is text) beside it. The + opens what else can go into the chat (a payment, an identity, a document,
- * photos, the camera); the smiley opens one panel with emoji and GIFs.
+ * once there is text) beside it. The + opens what else can go into the chat (a payment, an identity, shared apps, a
+ * document, photos, the camera); the smiley opens one panel with emoji and GIFs.
  */
 export function MessageInput({
   draftId,
@@ -73,6 +76,7 @@ export function MessageInput({
   payments,
   paymentComposer,
   identities,
+  services,
   fileUnavailable,
   paymentsUnavailable,
 }: MessageInputProps) {
@@ -208,6 +212,10 @@ export function MessageInput({
   if (identities) actions.push({ id: "identity", label: t("composer.identity"), icon: <IdentityGlyph />, testId: "composer-identities-button",
     hint: sharedIdentities ? t("composer.identityShared", { count: String(sharedIdentities) }) : undefined, data: { "data-count": sharedIdentities },
     onSelect: () => setShowIdentities(true) });
+  if (services) actions.push({ id: "services", label: t("composer.services"), icon: <ServicesGlyph />, testId: "composer-services",
+    unavailable: services.unavailable, hint: services.hint,
+    // The chat's dialog gives the focus back to what had it when it opened: the +, as Escape from the menu does.
+    onSelect: () => { plusRef.current?.focus({ preventScroll: true }); services.onOpen(); } });
   if (onSendFile) {
     actions.push({ id: "document", label: t("composer.document"), icon: <DocumentGlyph />, testId: "composer-file", unavailable: fileUnavailable,
       onSelect: () => fileInputRef.current?.click() });

@@ -23,6 +23,7 @@ import { useWebRTC } from "../hooks/useWebRTC";
 import { useSettings } from "../contexts/SettingsContext";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
+import { composerServices } from "../components/composer/servicesRow";
 import { CallButtons } from "../components/CallButtons";
 import { CallOverlay } from "../components/CallOverlay";
 import { IncomingCallNotification } from "../components/IncomingCallNotification";
@@ -648,6 +649,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
             : undefined
         }
         identities={paired ? { peerKey: params.peerPubKeyB64, contact: shownName } : undefined}
+        // The apps this contact and you share, chosen per chat: always reachable here, even before anything is shared.
+        services={composerServices(t, platform, params.peerPubKeyB64, shownName, () => setShowServices(true))}
       />
 
       {/* Incoming call notification */}

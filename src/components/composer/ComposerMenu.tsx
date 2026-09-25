@@ -5,7 +5,7 @@ import { PlusIcon } from "./icons";
 
 export interface ComposerAction {
   /** Also the colour of its icon (composer.css `--attach-<id>`). */
-  id: "payment" | "identity" | "document" | "media" | "camera";
+  id: "payment" | "identity" | "services" | "document" | "media" | "camera";
   label: string;
   icon: ReactNode;
   testId: string;
