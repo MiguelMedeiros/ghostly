@@ -205,7 +205,11 @@ const listValue = (values: string[], what: string): string => {
   return values.join(",");
 };
 
-/** The DNS records of a document, in the spec's layout (names `_did.<ID>.` and `_kN._did.`). */
+/**
+ * The DNS records of a document, in the spec's layout (names `_did.<ID>.` and `_kN._did.`). The root
+ * record comes after the records it names, gateways last: the order @web5/dids writes, and the only one
+ * it reads correctly (it resolves `vm`/`auth` references in packet order). Order-free readers don't mind.
+ */
 export function didDhtRecords(document: DidDhtDocument, options: DidDhtPacketOptions = {}): (TxtRecord | NsRecord)[] {
   const { z32, publicKey } = didDhtKey(document.id);
   const methods = document.verificationMethod;
@@ -258,18 +262,19 @@ export function didDhtRecords(document: DidDhtDocument, options: DidDhtPacketOpt
   }
   if (serviceRecords.length) root.push(`svc=${serviceRecords.map((_, i) => `s${i}`).join(",")}`);
 
-  const records: (TxtRecord | NsRecord)[] = (options.gateways ?? []).map((host) => ({ type: "NS", name: `_did.${z32}.`, host, ttl: DID_DHT_TTL }));
-  records.push({ name: `_did.${z32}.`, value: root.join(";"), ttl: DID_DHT_TTL });
+  const records: (TxtRecord | NsRecord)[] = [];
+  if (document.alsoKnownAs?.length) records.push({ name: "_aka._did.", value: listValue(document.alsoKnownAs, "Also-known-as"), ttl: DID_DHT_TTL });
   if (document.controller !== undefined) {
     const controllers = Array.isArray(document.controller) ? document.controller : [document.controller];
     records.push({ name: "_cnt._did.", value: listValue(controllers, "Controller"), ttl: DID_DHT_TTL });
   }
-  if (document.alsoKnownAs?.length) records.push({ name: "_aka._did.", value: listValue(document.alsoKnownAs, "Also-known-as"), ttl: DID_DHT_TTL });
   records.push(...keyRecords, ...serviceRecords);
   if (options.types?.length) {
     for (const t of options.types) if (!Number.isSafeInteger(t) || t < 0) throw new Error(`Type ${t} is not a registry integer`);
     records.push({ name: "_typ._did.", value: `id=${options.types.join(",")}`, ttl: DID_DHT_TTL });
   }
+  records.push({ name: `_did.${z32}.`, value: root.join(";"), ttl: DID_DHT_TTL });
+  for (const host of options.gateways ?? []) records.push({ type: "NS", name: `_did.${z32}.`, host, ttl: DID_DHT_TTL });
   records.push(...(options.extra ?? []));
   return records;
 }

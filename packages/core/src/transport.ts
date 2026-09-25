@@ -20,6 +20,11 @@ export interface PkarrRequestOptions { background?: boolean; urgent?: boolean }
 
 export interface PkarrTransport {
   publish(identity: Identity, records: GhostRecord[], options?: PkarrRequestOptions): Promise<void>;
+  /**
+   * Puts a relay payload signed elsewhere, byte for byte (a did:dht document: its own record names and
+   * a sequence number in seconds). A transport without it cannot publish one.
+   */
+  publishPayload?(pubKeyZ32: string, payload: Uint8Array, options?: PkarrRequestOptions): Promise<void>;
   /** Most recent packet known for this key, or null when nothing is published. */
   resolve(pubKeyZ32: string, options?: PkarrRequestOptions): Promise<SignedPacket | null>;
   describe(): { protocol: string; relays: string[] };

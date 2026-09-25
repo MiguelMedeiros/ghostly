@@ -131,6 +131,7 @@ function forgeProvider(forge: SshForge): IdentityProofProvider<SshEvidence> {
     limits: `Does not prove a ${label} login: only that a key the account lists is yours, for as long as it stays listed.`,
     platforms: ["web", "extension", "desktop"],
     subject: { label: `${label} username`, placeholder: forge === "github" ? "octocat" : "username", normalize: input => normalizeLogin(forge, input) },
+    publicUri: login => `https://${forge === "github" ? "github.com" : "gitlab.com"}/${login}`,
     validity: { defaultDays: 90, maxDays: 365 },
     // Keys get removed from accounts; the contact's app offers "Check again" after this.
     recheck: { afterSeconds: 600 },

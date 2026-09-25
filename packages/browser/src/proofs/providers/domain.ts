@@ -93,6 +93,7 @@ export const domain: IdentityProofProvider<DomainEvidence> = {
     help: "A domain or subdomain you control. A proof for alice.example.com is published under alice.example.com.",
     normalize: normalizeDomain,
   },
+  publicUri: domain => `https://${domain}`,
   validity: { defaultDays: 90, maxDays: 365 },
   recheck: { afterSeconds: 86_400 },
   privacy: "DNS: the contact's app asks the DNS-over-HTTPS resolver chosen in its settings (Quad9 by default) for the record, " +

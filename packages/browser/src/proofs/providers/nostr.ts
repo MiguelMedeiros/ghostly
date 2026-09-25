@@ -67,6 +67,8 @@ export const nostr: IdentityProofProvider<NostrEvent> = {
     normalize: normalizeNostrKey,
     short: key => { const npub = npubEncode(key); return `${npub.slice(0, 10)}…${npub.slice(-4)}`; },
   },
+  // NIP-21
+  publicUri: key => `nostr:${npubEncode(key)}`,
   validity: { defaultDays: 90, maxDays: 365 },
   privacy: "Nothing: the signature is checked on this device. The proof is never published to a relay.",
   signers: [nostrSigner("nip07"), nostrSigner("nip46")],

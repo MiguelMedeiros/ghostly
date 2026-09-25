@@ -83,6 +83,8 @@ export const openpgp: IdentityProofProvider<PgpEvidence> = {
     normalize: normalizeFingerprint,
     short: fpr => `…${formatFingerprint(fpr.slice(-16))}`,
   },
+  // The fingerprint URI scheme OpenPGP apps share keys with.
+  publicUri: fpr => `openpgp4fpr:${fpr}`,
   validity: { defaultDays: 90, maxDays: 365 },
   privacy: `Nothing: the signature is checked on this device. ${KEYSERVER.replace("https://", "")} is contacted only if you choose it for your key, or ask it to confirm emails.`,
   signers: [gpg, gpgKeyserver],

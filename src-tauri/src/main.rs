@@ -73,6 +73,7 @@ macro_rules! commands {
             commands::publish_messages,
             commands::resolve_messages,
             commands::publish_records,
+            commands::publish_signed_packet,
             commands::resolve_records,
             commands::diagnostic_log,
             commands::local_fetch,

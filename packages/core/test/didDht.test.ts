@@ -28,6 +28,8 @@ const asVector = (records: (TxtRecord | NsRecord)[]): VectorRecord[] => records.
   : { name: r.name, type: "TXT", ttl: r.ttl, rdata: [r.value] });
 
 const joined = (records: VectorRecord[]) => records.map((r) => ({ ...r, rdata: [r.rdata.join("")] }));
+/** The spec gives record sets; the order is ours (root after the keys, see didDhtRecords). */
+const sorted = (records: VectorRecord[]) => [...records].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
 
 describe("did:dht identifiers", () => {
   it("is the z-base-32 of the identity key, and only that", () => {
@@ -52,7 +54,7 @@ describe("the spec's test vectors", () => {
     const expected = vector<DidDhtDocument>("vector-1-did-document");
     const document = didDhtDocument(fromBase64Url(jwk.x));
     expect(document).toEqual(expected);
-    expect(asVector(didDhtRecords(document))).toEqual(vector<VectorRecord[]>("vector-1-dns-records"));
+    expect(sorted(asVector(didDhtRecords(document)))).toEqual(sorted(vector<VectorRecord[]>("vector-1-dns-records")));
     expect(decodeDidDhtPacket(expected.id, encodeDidDhtPacket(document))).toEqual({ document: expected, deactivated: false });
     expect(decodeDidDhtPacket(expected.id, packetOf(vector("vector-1-dns-records"))).document).toEqual(expected);
   });
@@ -63,9 +65,9 @@ describe("the spec's test vectors", () => {
     const decoded = decodeDidDhtPacket(expected.id, packetOf(records));
     expect(decoded.document).toEqual(expected);
     expect(decoded.types).toEqual([1, 2, 3]);
-    expect(asVector(didDhtRecords(expected, {
+    expect(sorted(asVector(didDhtRecords(expected, {
       types: [1, 2, 3], gateways: ["gateway1.example-did-dht-gateway.com.", "gateway2.example-did-dht-gateway.com."],
-    }))).toEqual(records);
+    })))).toEqual(sorted(records));
   });
 
   it("vector 3: an X25519 key named by its thumbprint, a non-default alg, an endpoint over 255 bytes, a previous DID", () => {
@@ -75,7 +77,7 @@ describe("the spec's test vectors", () => {
     expect(decodeDidDhtPacket(expected.id, packetOf(records)).document).toEqual(expected);
     // `_prv._did.` (the link to a previous DID) is read past, not written.
     const ours = didDhtRecords(expected, { gateways: ["gateway1.example-did-dht-gateway.com."] });
-    expect(asVector(ours)).toEqual(joined(records.filter((r) => r.name !== "_prv._did.")));
+    expect(sorted(asVector(ours))).toEqual(sorted(joined(records.filter((r) => r.name !== "_prv._did."))));
     // A TXT value longer than 255 bytes is split into character-strings and joined again.
     const packet = encodeDidDhtPacket(expected);
     expect(decodeTxtPacket(packet).find((r) => r.name === "_s0._did")!.value.length).toBeGreaterThan(255);
@@ -91,7 +93,8 @@ describe("Ghostly's document", () => {
     const document = didDhtDocument(identity.publicKey);
     expect(document.service).toBeUndefined();
     expect(document.alsoKnownAs).toBeUndefined();
-    expect(didDhtRecords(document).map((r) => r.name)).toEqual([`_did.${identity.pubKeyZ32}.`, "_k0._did."]);
+    // The keys before the root record that names them: @web5/dids reads references in packet order.
+    expect(didDhtRecords(document).map((r) => r.name)).toEqual(["_k0._did.", `_did.${identity.pubKeyZ32}.`]);
   });
 
   it("lists the identities chosen as public, in order, as alsoKnownAs", () => {
@@ -105,7 +108,7 @@ describe("Ghostly's document", () => {
   it("shares its key's one packet with the key's other records, within 1000 bytes", () => {
     const extra = [{ name: `_pubky.${identity.pubKeyZ32}`, value: "anything", ttl: 300 }];
     const packet = encodeDidDhtPacket(didDhtDocument(identity.publicKey), { extra });
-    expect(decodeTxtPacket(packet).map((r) => r.name)).toEqual([`_did.${identity.pubKeyZ32}`, "_k0._did", `_pubky.${identity.pubKeyZ32}`]);
+    expect(decodeTxtPacket(packet).map((r) => r.name)).toEqual(["_k0._did", `_did.${identity.pubKeyZ32}`, `_pubky.${identity.pubKeyZ32}`]);
     expect(decodeDidDhtPacket(did, packet).document).toEqual(didDhtDocument(identity.publicKey));
 
     const tooMuch = [{ name: "_big", value: "x".repeat(MAX_DNS_PACKET_BYTES), ttl: 300 }];

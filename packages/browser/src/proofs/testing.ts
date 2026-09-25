@@ -30,6 +30,7 @@ export const fakeKey: IdentityProofProvider<FakeKeyEvidence> = {
   summary: "Sign with the test key", description: "A test identity: an Ed25519 key held by this page. For tests only.",
   platforms: ["web", "extension", "desktop"],
   subject: { label: "Public key", placeholder: "64 hex characters", normalize: normalizeHexKey, short: k => `${k.slice(0, 8)}…${k.slice(-4)}` },
+  publicUri: k => `urn:ghostly-test:${k}`,
   validity: { defaultDays: 30, maxDays: 365 },
   privacy: "Nothing: checked on this device.",
   signers: [

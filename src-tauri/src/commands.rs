@@ -120,6 +120,17 @@ pub async fn publish_records(
     records::publish(&state.pkarr, &keypair, &records).await
 }
 
+/// A relay payload signed in the WebView (the profile's did:dht), published as is.
+#[tauri::command]
+pub async fn publish_signed_packet(
+    state: State<'_, AppState>,
+    public_key_z32: String,
+    payload_b64: String,
+) -> Result<(), String> {
+    let payload = crypto::from_base64_url(&payload_b64)?;
+    records::publish_signed(&state.pkarr, &public_key_z32, &payload).await
+}
+
 #[tauri::command]
 pub async fn resolve_records(
     state: State<'_, AppState>,
@@ -503,6 +514,54 @@ mod tests {
             .await
             .unwrap_err()
             .contains("Invalid public key"));
+    }
+
+    /// A did:dht document the TypeScript peer signed (`@ghostly/core` `signDidDhtPacket`, a test key of
+    /// 32 bytes of 7, sequence 1790000000 in seconds, `alsoKnownAs` https://example.com).
+    const DID_DHT_KEY: &str = "7jfgaa9nutjyixzikb7tgmsf9gkwq7iqz498zr1nd5ig1fng4esy";
+    const DID_DHT_PAYLOAD: &str = "0WTnPoxBDJihtEjzeQUO2F8qDeiUKB7Ej_QLTuEt7QZUvR-ZuIum3Kd1NgzKTKeECmUmbSJbu73iQ0WHq1yZAQAAAABqsTuAAACEAAAAAAMAAAAABF9ha2EEX2RpZAAAEAABAAAcIAAUE2h0dHBzOi8vZXhhbXBsZS5jb20DX2swwBEAEAABAAAcIAAyMXQ9MDtrPTZrcHNZLUtjVWdxLTlWQjdFeTdGLVpWSGRxNi12bnVTUWg3cWFSUkcwaXcEX2RpZDQ3amZnYWE5bnV0anlpeHppa2I3dGdtc2Y5Z2t3cTdpcXo0OTh6cjFuZDVpZzFmbmc0ZXN5AAAQAAEAABwgACcmdj0wO3ZtPWswO2F1dGg9azA7YXNtPWswO2ludj1rMDtkZWw9azA";
+
+    #[tokio::test]
+    async fn a_packet_signed_in_the_webview_is_published_byte_for_byte() {
+        let relay = pkarr_relay().await;
+        let app = app(&relay);
+        publish_signed_packet(app.state(), DID_DHT_KEY.into(), DID_DHT_PAYLOAD.into())
+            .await
+            .unwrap();
+        let payload = crypto::from_base64_url(DID_DHT_PAYLOAD).unwrap();
+        assert_eq!(
+            relay.packets.lock().unwrap().get(DID_DHT_KEY),
+            Some(&payload)
+        );
+
+        // Its sequence number (seconds) and its names (`_k0._did`, `_did.<key>`) come back unchanged.
+        let packet = resolve_records(app.state(), DID_DHT_KEY.into(), None, None)
+            .await
+            .unwrap()
+            .expect("the packet");
+        assert_eq!(packet.timestamp_micros, "1790000000");
+        let labels: Vec<_> = packet.records.iter().map(|r| r.label.as_str()).collect();
+        assert_eq!(labels, ["_aka", "_k0", "_did"]);
+
+        // Someone else's key, or a byte changed: refused before anything is sent.
+        let other = create_keypair().unwrap().pub_key_z32;
+        assert!(
+            publish_signed_packet(app.state(), other, DID_DHT_PAYLOAD.into())
+                .await
+                .unwrap_err()
+                .contains("Invalid packet")
+        );
+        let mut tampered = payload.clone();
+        *tampered.last_mut().unwrap() ^= 1;
+        assert!(publish_signed_packet(
+            app.state(),
+            DID_DHT_KEY.into(),
+            crypto::to_base64_url(&tampered)
+        )
+        .await
+        .unwrap_err()
+        .contains("Invalid packet"));
+        assert_eq!(relay.packets.lock().unwrap().len(), 1);
     }
 
     #[tokio::test]

@@ -1,5 +1,5 @@
 import type { Identity } from "./identity";
-import { createRelayPayload, parseRelayPayload, type GhostRecord, type SignedPacket } from "./pkarr";
+import { createRelayPayload, openRelayPayload, parseRelayPayload, type GhostRecord, type SignedPacket } from "./pkarr";
 import type { PkarrRequestOptions, PkarrTransport } from "./transport";
 
 /**
@@ -104,19 +104,29 @@ export class RelayTransport implements PkarrTransport {
     const timestamp = now > last ? now : last + 1n;
     this.lastTimestamp.set(identity.pubKeyZ32, timestamp);
 
-    const payload = createRelayPayload(identity, records, timestamp);
+    await this.putEverywhere(identity.pubKeyZ32, createRelayPayload(identity, records, timestamp), timestamp, options);
+  }
+
+  /** Puts a payload signed elsewhere (a did:dht document), byte for byte, on every relay. */
+  async publishPayload(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions = {}): Promise<void> {
+    if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
+    const { seq } = openRelayPayload(pubKeyZ32, payload);
+    await this.putEverywhere(pubKeyZ32, payload, seq, options);
+  }
+
+  private async putEverywhere(pubKeyZ32: string, payload: Uint8Array, timestamp: bigint, options: PkarrRequestOptions): Promise<void> {
     const waitingBefore = new Map(this.writeWaiting);
     const results = await Promise.allSettled(
       this.relays.map(async (relay) => {
-        const slot = `${relay} ${identity.pubKeyZ32}`;
+        const slot = `${relay} ${pubKeyZ32}`;
         const previous = this.lastPut.get(slot);
         this.lastPut.set(slot, timestamp);
 
         // A relay refuses (428) to replace a packet whose DHT put is still in flight, unless told which
         // packet is being replaced. Links publish in bursts (a message, its ack, a signal), so say so.
-        let response = await this.put(relay, identity.pubKeyZ32, payload, previous, options.background);
+        let response = await this.put(relay, pubKeyZ32, payload, previous, options.background);
         // 412: the relay never got `previous` (it was busy, or restarted). There is one writer per key, so insist.
-        if (response.status === 412) response = await this.put(relay, identity.pubKeyZ32, payload, undefined, options.background);
+        if (response.status === 412) response = await this.put(relay, pubKeyZ32, payload, undefined, options.background);
         if (response.status === 429) this.coolDown(relay, response);
         if (!response.ok) throw new Error(`${relay} responded ${response.status}`);
       }),
