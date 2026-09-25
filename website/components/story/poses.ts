@@ -25,12 +25,16 @@ export type ChapterBlocking = {
 export type Chapter = "hero" | "invite" | "dht" | "agree" | "alive" | "open";
 export type Orientation = "landscape" | "portrait";
 
+/** Boo's opening pose on a 1440×900 window, the one the hero was drawn for. */
+const HERO_REST: Pose = { x: 900, y: 330, s: 300 };
+
 const L: Record<Chapter, ChapterBlocking> = {
   // Copy panels: invite left, dht bottom-right, agree bottom-right, alive left.
   hero: {
+    // Drawn at a 1440×900 window; fitHero moves and shrinks this rest pose to the window the page is in.
     boo: [
-      [0, { x: 900, y: 330, s: 300 }],
-      [0.2, { x: 900, y: 330, s: 300 }],
+      [0, HERO_REST],
+      [0.2, HERO_REST],
       [0.8, { x: 640, y: 470, s: 240 }],
       [1, { x: 640, y: 470, s: 240 }],
     ],
@@ -220,4 +224,50 @@ export function valueAt<T extends number | [number, number]>(keys: Key<T>[], t: 
   const [x1, y1] = va as [number, number];
   const [x2, y2] = vb as [number, number];
   return [x1 + (x2 - x1) * k, y1 + (y2 - y1) * k] as T;
+}
+
+/**
+ * What a window shows of a landscape stage, in stage units: the visible box
+ * below the nav (`slice` crops the sides of narrow windows and the top and
+ * bottom of wide ones), how many pixels one unit takes (`k`), and the right
+ * edge of the hero copy.
+ */
+export type Frame = { l: number; t: number; r: number; b: number; k: number; copyRight: number };
+
+// A ghost of width s draws its glow from x − 0.2s to x + 1.2s and from y − 0.175s to
+// y + 1.325s (the halo ellipse in Ghost.tsx); the idle bob lifts it by another 0.08s.
+const GLOW = { l: 0.2, r: 1.2, t: 0.255, b: 1.325 };
+
+/**
+ * Boo's hero pose, fitted to the window. He keeps the drawn pose where it fits
+ * and otherwise shrinks and slides into the strip right of the copy, so that
+ * his whole glow stays on screen, clear of the copy, with room above his head
+ * for his line (up to two lines of the Act bubble). The same rule covers
+ * squarish, tall and very wide windows: nothing depends on one size.
+ */
+export function fitHero(p: Pose, f: Frame): Pose {
+  const m = 16 / f.k;
+  const fs = Math.max(18, 13 / f.k);
+  const left = Math.max(f.l + m, f.copyRight + 8 / f.k);
+  const right = f.r - m;
+  const bottom = f.b - m;
+  // The bubble ends 8 − 0.04s above his pose's top and is at most 4.2 font sizes tall; it stays 8px under the nav.
+  const line = 8 / f.k + fs * 4.2 + 8;
+  const s = Math.max(
+    60,
+    Math.min(p.s, (right - left) / (GLOW.l + GLOW.r), (bottom - f.t) / (GLOW.t + GLOW.b), (bottom - f.t - line) / (GLOW.b - 0.04)),
+  );
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(Math.max(lo, hi), v));
+  // Keep his place as far as the window allows: same left edge, same middle height.
+  const x = clamp(p.x, left + GLOW.l * s, right - GLOW.r * s);
+  const y = clamp(p.y + (p.s - s) * 0.625, f.t + Math.max(GLOW.t * s, line - 0.04 * s), bottom - GLOW.b * s);
+  return { ...p, x: Math.round(x), y: Math.round(y), s: Math.round(s) };
+}
+
+/** A chapter's blocking for a window: the hero's rest pose is fitted to it, everything else is the table. */
+export function blockingFor(orient: Orientation, chapter: Chapter, frame: Frame | null): ChapterBlocking {
+  const b = BLOCKING[orient][chapter];
+  if (!frame || orient !== "landscape" || chapter !== "hero") return b;
+  const rest = fitHero(HERO_REST, frame);
+  return { ...b, boo: b.boo.map(([t, v]) => [t, v === HERO_REST ? rest : v] as Key<Pose>) };
 }
