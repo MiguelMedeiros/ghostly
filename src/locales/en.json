@@ -70,7 +70,7 @@
     },
     "compat": {
       "label": "Compatibility chat · older Ghostly",
-      "hint": "This chat was made with a Ghostly 0.4 code. Text and calls keep working both ways; a new chat adds files, payments and held messages.",
+      "hint": "This chat was made with a Ghostly 0.4 code. Text and calls keep working both ways; a chat made with a current invite adds files, payments and held messages.",
       "continued": "You invited your contact to a new chat.",
       "open": "Open the new chat"
     }
