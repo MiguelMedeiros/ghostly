@@ -88,6 +88,21 @@ export interface FileTransferState {
   transferred: number;
   size: number;
   error?: string;
+  /**
+   * While `transferring`, where it stands when it is not moving: `preparing` (a large file being copied
+   * before it is offered), `waiting` (no live connection; it goes on by itself), `asking` (the receiver's
+   * person has not decided; when receiving, this person), `queued`, `paused`, `verifying` (checking the digest).
+   */
+  stage?: "preparing" | "waiting" | "asking" | "queued" | "paused" | "verifying";
+  /** Present for files that can be paused, resumed and cancelled (files/3). */
+  direction?: "in" | "out";
+  pausedBy?: "me" | "peer";
+  /** Bytes per second lately. */
+  rate?: number;
+  /** Receiving, `asking`: bytes this device can still take for files, when it says. */
+  room?: number | null;
+  /** Failed, and it can be sent again. */
+  retry?: boolean;
 }
 
 export interface MintInfo {
@@ -350,6 +365,10 @@ export interface ServicesPlatform {
   /** Null when nothing is known about the transfer, e.g. after a restart. */
   retryFile?(fileId: string): Promise<void>;
   getTransfer(fileId: string): FileTransferState | null;
+  /** files/3: answers an offer, or pauses, resumes or cancels a transfer. */
+  fileAction?(fileId: string, action: "accept" | "decline" | "pause" | "resume" | "cancel"): Promise<void>;
+  /** Why a file of this size cannot go to this contact now, or null when it can (checked before sending). */
+  fileTooLarge?(peerPubKeyZ32: string, size: number): string | null;
   /** The file to show or save, backed by storage. Null when it is gone, or too large to hand out here (see `saveFile`). */
   getFile(fileId: string): Promise<Blob | null>;
   /**

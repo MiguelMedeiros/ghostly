@@ -65,6 +65,15 @@ export function sanitizeMime(mime: string): string {
   return MIME.test(mime) ? mime.toLowerCase() : "application/octet-stream";
 }
 
+/** A size for people: B, KB, MB, GB, TB (powers of 1024), one decimal from KB up. */
+export function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024, unit = 0;
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
+  return `${value.toFixed(1)} ${units[unit]}`;
+}
+
 /** Raster images a UI may show inline. SVG is left out on purpose: it can carry scripts. */
 export const PREVIEWABLE_IMAGE = /^image\/(png|jpe?g|gif|webp)$/;
 

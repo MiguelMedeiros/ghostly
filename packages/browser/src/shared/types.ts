@@ -249,6 +249,21 @@ export interface FileTransferView {
   transferred: number;
   size: number;
   error?: string;
+  /**
+   * files/3 (WISP 501 rev 0.3), while `transferring`: where it stands when it is not moving. `waiting`: no live
+   * connection (it goes on by itself); `asking`: the receiver's person has not decided (on the receiving side,
+   * this person); `queued`: accepted, waiting its turn; `paused`; `verifying`: every byte there, checking the digest.
+   */
+  stage?: "preparing" | "waiting" | "asking" | "queued" | "paused" | "verifying";
+  /** files/3: the transfer can be paused, resumed and cancelled from here. */
+  direction?: "in" | "out";
+  pausedBy?: "me" | "peer";
+  /** Bytes per second lately, while moving. */
+  rate?: number;
+  /** Receiving, `asking`: bytes this device can still take for files, when it says. */
+  room?: number | null;
+  /** Failed but the sender can offer it again (files/3). */
+  retry?: boolean;
 }
 
 /** Ecash held by this peer. One row per proof; `reserved` while an operation is using it. */
@@ -662,7 +677,9 @@ export interface LinkView {
    * `methods`: ways of paying both sides allow in this chat right now. `calls` / `services`: both sides offer
    * `calls/1` / `services/1` on the open session (paired chats only; they need a live connection).
    */
-  capabilities?: { files: boolean; payments: boolean; methods?: Record<PaymentMethodName, boolean>; calls?: boolean; services?: boolean };
+  capabilities?: { files: boolean; payments: boolean; methods?: Record<PaymentMethodName, boolean>; calls?: boolean; services?: boolean; largeFiles?: boolean };
+  /** files/3 live in this chat: bytes the contact's device said it can still take for files, when it said. */
+  peerFileRoom?: number | null;
   /** Ways of paying this device allows in this chat. */
   paymentMethods?: Record<PaymentMethodName, boolean>;
   /** Both sides announced private groups on the open session: this contact can be invited. */

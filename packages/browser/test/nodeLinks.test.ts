@@ -442,11 +442,13 @@ describe("an away contact", () => {
     expect(hold).toHaveBeenCalledWith(chat.id, { kind: "text", id: "w9", messageId: "me_w9", bytes: 5, timestamp: 4 });
   });
 
-  it("a file waits in storage for the contact, within the size of one held item", async () => {
+  it("a file waits in storage for the contact, within the size of one held item; a larger one waits for live", async () => {
     const { node, chat, hold } = await away();
     const big = { id: `${chat.id}-out-big`, name: "big", size: 64 * 1024 * 1024, mime: "" };
     node.sendFile({ linkId: chat.id, file: big, timestamp: 1 });
-    expect(node.getState().transfers[big.id]).toMatchObject({ state: "failed", error: expect.stringContaining("at most") });
+    await vi.waitFor(async () => expect((await db.getMessages(chat.id)).find((m) => m.id === "me_1")).toMatchObject({ delivery: "waiting", file: { id: big.id } }));
+    expect(hold).not.toHaveBeenCalled();
+    await db.deleteMessage(chat.id, "me_1");
     const small = { id: `${chat.id}-out-w1`, name: "small", size: 3, mime: "" };
     node.sendFile({ linkId: chat.id, file: small, timestamp: 2 });
     await vi.waitFor(() => expect(hold).toHaveBeenCalledWith(chat.id, { kind: "file", id: "w1", messageId: "me_2", ref: small.id, bytes: 3, timestamp: 2 }));

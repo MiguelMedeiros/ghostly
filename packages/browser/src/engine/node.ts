@@ -81,6 +81,7 @@ import type { AttentionEvent, EngineImplementation } from "../shared/rpc";
 import { fileStore, type StoredFile } from "../shared/idb";
 import { fileBytes } from "../shared/fileBytes";
 import { FileAppender, readStored, removeStored, storedSize, streamStored } from "../shared/storedFiles";
+import { FileDesk } from "./fileDesk";
 import { DEFAULT_MINTS, TEST_MINT, isWorthlessMint, type WalletMode } from "../shared/mints";
 import type {
   EngineState,
@@ -170,6 +171,8 @@ function linkFilesFrom(linkId: string, files: StoredFile[], messages: StoredMess
   for (const file of files) {
     const legacy = !file.direction;
     result.wireIds.add(file.wireId ?? file.id.slice(linkId.length + 1));
+    // files/3 transfers count in the file desk, which knows which were taken without asking.
+    if (file.wire3) continue;
     if (file.direction === "in" || (legacy && fromPeer.has(file.id))) result.receivedBytes += storedSize(file);
   }
   return result;
@@ -280,6 +283,16 @@ export class GhostlyNode implements EngineImplementation {
   private readonly outboxes = new Map<string, Outbox>();
   private readonly requestCounts = new Map<string, number>();
   private readonly transfers = new Map<string, FileTransferView>();
+  /** files/3 in every chat: offers, resumable transfers, checked by digest (WISP 501 rev 0.3). */
+  private readonly fileDesk = new FileDesk({
+    send: (linkId, frame) => this.links.get(linkId)?.link?.sendFilesFrame(frame) ?? false,
+    receivedBytes: (linkId) => this.links.get(linkId)?.files.receivedBytes ?? 0,
+    wireIds: (linkId) => this.links.get(linkId)?.files.wireIds,
+    deleted: (linkId, messageId) => !!this.links.get(linkId)?.stored.deletedIds?.includes(messageId),
+    storeMessage: (message) => this.storeMessage(message),
+    transfers: this.transfers,
+    changed: (delayMs) => this.emitState(delayMs),
+  });
   private stateTimer: ReturnType<typeof setTimeout> | null = null;
   private paymentTimer:ReturnType<typeof setTimeout>|null=null;
   /** Group links: admins read knocks, joiners knock (WISP 9xx § Entry link). */
@@ -690,8 +703,10 @@ export class GhostlyNode implements EngineImplementation {
     for (const stored of await db.getLinks()) {
       const messages = stored.group ? [] : await db.getMessages(stored.id);
       const storedFiles = stored.group ? [] : await fileStore.listForLink(stored.id);
-      for (const file of storedFiles) if (file.transfer) this.transfers.set(file.id,
+      for (const file of storedFiles) if (file.transfer && !file.wire3) this.transfers.set(file.id,
         file.transfer.state === "transferring" ? { ...file.transfer, state: "failed", error: "Transfer interrupted. Retry when connected." } : file.transfer);
+      // files/3 transfers go on where they stopped, once the chat is live again.
+      if (!stored.group) this.fileDesk.restore(stored.id, storedFiles);
       const files = linkFilesFrom(stored.id, storedFiles, messages);
       this.links.set(stored.id, newLiveLink(stored, messages[messages.length - 1]?.timestamp ?? 0, files));
       history.set(stored.id, messages);
@@ -989,6 +1004,7 @@ export class GhostlyNode implements EngineImplementation {
     this.identities.forget(linkId);
     this.nostrSocial.forgetLink(linkId);
     this.hold.forgetLink(linkId);
+    this.fileDesk.drop(linkId);
     void db.deleteLink(linkId);
     void this.desk.forgetLink(linkId);
     this.emitState();
@@ -1212,9 +1228,11 @@ export class GhostlyNode implements EngineImplementation {
       if (message?.file) {
         const stored = await fileStore.get(message.file.id);
         // Only what the peer sent counts against the room it has here.
-        if (stored && (stored.direction === "in" || (!stored.direction && message.sender === "peer"))) {
+        if (stored && !stored.wire3 && (stored.direction === "in" || (!stored.direction && message.sender === "peer"))) {
           live.files.receivedBytes = Math.max(0, live.files.receivedBytes - storedSize(stored));
         }
+        // A files/3 transfer still going ends on both sides.
+        this.fileDesk.forget(linkId, message.file.id);
         await removeStored(message.file.id);
         this.transfers.delete(message.file.id);
       }
@@ -1243,16 +1261,17 @@ export class GhostlyNode implements EngineImplementation {
     if (this.transfers.get(file.id)?.state === "transferring") return;
     const wireId = file.id.slice(`${linkId}-out-`.length);
     if (file.id !== GhostlyNode.outgoingFileId(linkId, wireId)) return fail("Invalid file id");
-    if (!live.link.supportsFiles && this.holdingFor(live)) {
+    // A file too large to hold waits for the chat to be live instead, like one sent where nothing holds it.
+    const holdable = file.size <= HOLD_LIMITS.maxBundleBytes - 4096;
+    if (!GhostlyNode.takesFiles(live.link) && this.holdingFor(live) && holdable) {
       // The contact is away: the file waits in this device's storage, sealed for them.
-      if (file.size > HOLD_LIMITS.maxBundleBytes - 4096) return fail(`A file held for an away contact is at most ${Math.round(HOLD_LIMITS.maxBundleBytes / 1024 / 1024)} MB`);
       live.files.wireIds.add(wireId);
       this.transfers.set(file.id, { state: "transferring", transferred: 0, size: file.size });
       void this.storeMessage({ linkId, id: `me_${timestamp}`, text: fileMessageText(file), sender: "me", timestamp, via: "hold", delivery: "sending", file })
         .then(() => this.hold.hold(linkId, { kind: "file", id: wireId, messageId: `me_${timestamp}`, ref: file.id, bytes: file.size, timestamp })).catch(() => {});
       return;
     }
-    if (!live.link.supportsFiles && live.stored.profile && !live.link.isDataLinkOpen) {
+    if (!GhostlyNode.takesFiles(live.link) && live.stored.profile && !live.link.isDataLinkOpen) {
       // Not live and nothing holds it: it waits here, with a cancel, and goes when the chat is live (WISP 500).
       if (this.chatStopped(live)) return fail(this.chatStopped(live)!);
       live.files.wireIds.add(wireId);
@@ -1260,7 +1279,7 @@ export class GhostlyNode implements EngineImplementation {
         delivery: "waiting", deliveryError: "Sent when you are live." });
       return;
     }
-    if (!live.link.supportsFiles) return fail("Connect to an updated peer to send files");
+    if (!GhostlyNode.takesFiles(live.link)) return fail("Connect to an updated peer to send files");
     live.files.wireIds.add(wireId);
     void this.storeMessage({
       linkId,
@@ -1274,12 +1293,22 @@ export class GhostlyNode implements EngineImplementation {
     this.transferFile(live, file, wireId, timestamp, fail);
   }
 
-  /** The file of a stored message goes over the open session. */
+  /**
+   * The file of a stored message goes over the open session: offered with files/3 when both sides agree it,
+   * else whole with files/2, which takes up to 100 MB.
+   */
   private transferFile(live: LiveLink, file: MessageFile, wireId: string, timestamp: number, fail: (error: string) => void): void {
     const { link } = live;
     if (!link) return fail("You are offline");
     this.transfers.set(file.id, { state: "transferring", transferred: 0, size: file.size });
     void (async () => {
+      if (await GhostlyNode.largeFilesAgreed(link)) {
+        await this.fileDesk.offer(live.stored.id, file, wireId, timestamp);
+        return;
+      }
+      if (file.size > LIMITS.maxFileBytes) {
+        return fail(`Your contact's app takes files up to ${Math.round(LIMITS.maxFileBytes / 1024 / 1024)} MB. Larger ones need an updated Ghostly on their side.`);
+      }
       const stored = await fileStore.get(file.id);
       if (!stored) return fail("The file is gone");
       await fileStore.updateTransfer(file.id, { state: "transferring", transferred: 0, size: file.size });
@@ -1290,6 +1319,26 @@ export class GhostlyNode implements EngineImplementation {
         source,
       );
     })().catch((error) => fail(error instanceof Error ? error.message : String(error)));
+  }
+
+  fileAction({ linkId, fileId, action }: { linkId: string; fileId: string; action: "accept" | "decline" | "pause" | "resume" | "cancel" }): void {
+    if (!this.links.get(linkId)) throw new Error("No such chat");
+    if (!["accept", "decline", "pause", "resume", "cancel"].includes(action)) throw new Error("Unknown file action");
+    this.fileDesk.act(linkId, fileId, action);
+  }
+
+  /** The contact can take a file on the open session: files/2 or files/3. */
+  private static takesFiles(link: GhostLink): boolean { return link.supportsFiles || !!link.supportsLargeFiles; }
+
+  /**
+   * Whether both sides take files/3 on the open session. A session that just opened has not heard the
+   * contact's capabilities yet: they come in the first second, so this waits for them a little.
+   */
+  private static async largeFilesAgreed(link: GhostLink): Promise<boolean> {
+    for (let waited = 0; waited < 4_000 && link.isDataLinkOpen && !link.supportsLargeFiles && link.sessionOffers?.peer === null; waited += 100) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return link.supportsLargeFiles;
   }
 
   /**
@@ -1303,7 +1352,7 @@ export class GhostlyNode implements EngineImplementation {
       .sort((a, b) => a.timestamp - b.timestamp);
     for (const message of waiting) {
       if (message.file) {
-        if (!live.link.supportsFiles) { await db.updateDelivery(linkId, message.id, "failed", "Your contact's app cannot receive files."); continue; }
+        if (!GhostlyNode.takesFiles(live.link)) { await db.updateDelivery(linkId, message.id, "failed", "Your contact's app cannot receive files."); continue; }
         const file = message.file, wireId = file.id.slice(`${linkId}-out-`.length);
         await db.putMessage(sentNow(message));
         this.transferFile(live, file, wireId, message.timestamp, error => {
@@ -2161,6 +2210,7 @@ export class GhostlyNode implements EngineImplementation {
       rtcAvailable: typeof RTCPeerConnection !== "undefined",
       // Call media is a WebRTC connection of its own, whatever carries the chat: no WebRTC, no calls (Linux WebKitGTK).
       callsSupport: typeof RTCPeerConnection !== "undefined",
+      largeFilesSupport: true,
       servicesSupport: this.options.servicesSupport ?? (this.options.platform ?? "web") !== "web",
       dht: stored.profile ? { state: stored.dhtDeliveryState, save: async state => {
         await db.patchLink(linkId, { dhtDeliveryState: state });
@@ -2331,6 +2381,8 @@ export class GhostlyNode implements EngineImplementation {
           this.fileProgress(this.localFileId(linkId, id, direction), transferred),
         onFileComplete: (id, direction) =>
           this.fileSettled(this.localFileId(linkId, id, direction, { failed: false })),
+        onFilesFrame: (frame) => this.fileDesk.handle(linkId, frame),
+        onFilesSession: (open) => this.fileDesk.session(linkId, open),
         onFileFailed: (id, reason, direction) =>
           this.fileSettled(this.localFileId(linkId, id, direction, { failed: true }), reason),
       },
@@ -2495,6 +2547,7 @@ export class GhostlyNode implements EngineImplementation {
       discoveryError: live.discoveryError,
       peerVerified: !!stored.pairedPeerKey && (stored.peerTrust ? stored.peerTrust.verifiedKey === stored.pairedPeerKey : true),
       capabilities: this.capabilitiesOf(live),
+      peerFileRoom: stored.profile ? this.fileDesk.status(stored.id).peerRoom : undefined,
       hold: this.hold.view(stored.id),
       paymentMethods: Object.fromEntries(PAYMENT_METHODS.map(m => [m, stored.paymentMethods?.[m] !== false])) as Record<PaymentMethodName, boolean>,
       groups: live.link?.groupsSupport ?? false,
@@ -2546,8 +2599,8 @@ export class GhostlyNode implements EngineImplementation {
   /** What this chat can do right now: on the open session, or held for an away contact (text, files and requests only). */
   private capabilitiesOf(live: LiveLink): NonNullable<LinkView["capabilities"]> {
     const link = live.link;
-    if (!this.holdingFor(live)) return { files: link?.supportsFiles ?? false, payments: link?.supportsPayments ?? false,
-      calls: link?.supportsCalls ?? false, services: link?.supportsServices ?? false,
+    if (!this.holdingFor(live)) return { files: !!link && GhostlyNode.takesFiles(link), payments: link?.supportsPayments ?? false,
+      calls: link?.supportsCalls ?? false, services: link?.supportsServices ?? false, largeFiles: link?.supportsLargeFiles ?? false,
       methods: Object.fromEntries(PAYMENT_METHODS.map(m => [m, link?.allowsPayment(m) ?? false])) as Record<PaymentMethodName, boolean> };
     const held = this.hold.heldPaymentMethods(live.stored.id) ?? [];
     const methods = Object.fromEntries(PAYMENT_METHODS.map(m => [m, held.includes(m) && (link?.paymentEnabled(m) ?? false)])) as Record<PaymentMethodName, boolean>;

@@ -198,9 +198,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const sendFile = useCallback(
     async (source: File, voice?: VoiceMeta): Promise<string | null> => {
       if (!platform || !peerKey) return null;
-      if (source.size > platform.maxFileBytes) {
-        return `That file is too large (max ${formatFileSize(platform.maxFileBytes)}).`;
-      }
+      const tooLarge = platform.fileTooLarge ? platform.fileTooLarge(peerKey, source.size)
+        : source.size > platform.maxFileBytes ? `That file is too large (max ${formatFileSize(platform.maxFileBytes)}).` : null;
+      if (tooLarge) return tooLarge;
       try {
         const { timestamp, file } = await platform.sendFile(peerKey, source, { voice });
         addSystemMessage({ id: `me_${timestamp}`, text: fileMessageText(file), sender: "me", timestamp, file });

@@ -1,6 +1,7 @@
 import {
   DEFAULT_RELAYS,
   LIMITS,
+  formatFileSize,
   parseLocalTarget,
   safeBlobType,
   sanitizeFileName,
@@ -13,13 +14,32 @@ import type { ServicesPlatform } from "../../../../src/lib/platform";
 import { fileStore } from "../shared/idb";
 import { SMALL_FILE_BYTES, fileBytes, fileBytesOf } from "../shared/fileBytes";
 import { storedBlob } from "../shared/storedFiles";
+import type { FileTransferState } from "../../../../src/lib/platform";
 import { TEST_MINT, TEST_MINTS } from "../shared/mints";
 import { getBrowserHost } from "../host";
 import { engine } from "./engine";
 
+/**
+ * Large files being copied into file storage before they are offered (this page does it): the bubble shows
+ * how far the copy got. Gone once the peer has the file, or with the reason the copy failed.
+ */
+const preparing = new Map<string, FileTransferState>();
+const preparingListeners = new Set<() => void>();
+let preparingTold = 0;
+function preparingChanged(force = false): void {
+  const now = Date.now();
+  if (!force && now - preparingTold < 250) return;
+  preparingTold = now;
+  for (const listener of preparingListeners) listener();
+}
+
 /** Ephemeral services for the shared UI, backed by the browser peer. */
 export const servicesPlatform: ServicesPlatform | null = {
-  subscribe: (listener) => engine.subscribe(listener),
+  subscribe: (listener) => {
+    preparingListeners.add(listener);
+    const stop = engine.subscribe(listener);
+    return () => { preparingListeners.delete(listener); stop(); };
+  },
 
   isOnline: () => engine.state?.settings.online ?? false,
   setOnline: (online) => engine.call("updateSettings", { settings: { online } }),
@@ -79,11 +99,29 @@ export const servicesPlatform: ServicesPlatform | null = {
 
   maxFileBytes: LIMITS.maxFileBytes,
 
+  fileTooLarge(peerPubKeyZ32, size) {
+    const link = engine.linkByPeer(peerPubKeyZ32);
+    // files/3: the contact's device said how much it can take; otherwise it is asked when the file is offered.
+    if (link?.capabilities?.largeFiles) {
+      const room = link.peerFileRoom;
+      return typeof room === "number" && size > room ? `Not enough space on your contact's device for this file (${formatFileSize(room)} free).` : null;
+    }
+    if (!link?.profile || link.capabilities?.files) {
+      if (size <= LIMITS.maxFileBytes) return null;
+      return link?.profile
+        ? `That file is too large for your contact's app (max ${formatFileSize(LIMITS.maxFileBytes)}). Larger files need an updated Ghostly on their side.`
+        : `That file is too large (max ${formatFileSize(LIMITS.maxFileBytes)}).`;
+    }
+    // Not live: whatever the contact takes is known when the file goes.
+    return null;
+  },
+
   async sendFile(peerPubKeyZ32, source, options) {
     const link = engine.linkByPeer(peerPubKeyZ32);
     if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
     if (link.profile && !link.capabilities?.files) throw new Error("Connect to an updated peer to send files");
-    if (source.size > LIMITS.maxFileBytes) throw new Error("That file is too large to send");
+    const tooLarge = servicesPlatform!.fileTooLarge!(peerPubKeyZ32, source.size);
+    if (tooLarge) throw new Error(tooLarge);
 
     const wireId = toBase64Url(randomBytes(12));
     const file = {
@@ -102,12 +140,28 @@ export const servicesPlatform: ServicesPlatform | null = {
     const transfer = { state: "transferring" as const, transferred: 0, size: file.size };
     if (source.size <= SMALL_FILE_BYTES) {
       await fileStore.put({ id: file.id, linkId: link.id, blob: source, createdAt: timestamp, direction: "out", wireId, metadata, transfer });
-    } else {
-      const bytes = await fileBytes();
-      const digest = await bytes.stage(file.id, source);
-      await fileStore.put({ id: file.id, linkId: link.id, bytes: bytes.kind, digest, createdAt: timestamp, direction: "out", wireId, metadata, transfer });
+      await engine.call("sendFile", { linkId: link.id, file, timestamp });
+      return { timestamp, file };
     }
-    await engine.call("sendFile", { linkId: link.id, file, timestamp });
+    // Copied first, which takes a while for a large file: the bubble shows the copy, then the transfer.
+    preparing.set(file.id, { state: "transferring", stage: "preparing", transferred: 0, size: file.size });
+    preparingChanged(true);
+    void (async () => {
+      const bytes = await fileBytes();
+      const digest = await bytes.stage(file.id, source, (copied) => {
+        preparing.set(file.id, { state: "transferring", stage: "preparing", transferred: copied, size: file.size });
+        preparingChanged();
+      });
+      await fileStore.put({ id: file.id, linkId: link.id, bytes: bytes.kind, digest, createdAt: timestamp, direction: "out", wireId, metadata, transfer });
+      await engine.call("sendFile", { linkId: link.id, file, timestamp });
+      preparing.delete(file.id);
+      preparingChanged(true);
+    })().catch((error: unknown) => {
+      const reason = error instanceof Error ? error.message : String(error);
+      const full = /quota|space|full/i.test(reason) || (error as { name?: string })?.name === "QuotaExceededError";
+      preparing.set(file.id, { state: "failed", transferred: 0, size: file.size, error: full ? "Not enough space on this device to send it" : `Could not prepare the file: ${reason}` });
+      preparingChanged(true);
+    });
     return { timestamp, file };
   },
   async retryFile(fileId) {
@@ -121,7 +175,13 @@ export const servicesPlatform: ServicesPlatform | null = {
     const link = engine.linkByPeer(peerPubKeyZ32);
     if (link) await engine.call("deleteMessage", { linkId: link.id, messageId });
   },
-  getTransfer: (fileId) => engine.state?.transfers[fileId] ?? null,
+  getTransfer: (fileId) => preparing.get(fileId) ?? engine.state?.transfers[fileId] ?? null,
+  async fileAction(fileId, action) {
+    const stored = await fileStore.get(fileId);
+    const linkId = stored?.linkId ?? engine.state?.links.find((link) => fileId.startsWith(`${link.id}-`))?.id;
+    if (!linkId) throw new Error("This file is no longer here");
+    await engine.call("fileAction", { linkId, fileId, action });
+  },
   async getFile(fileId) {
     const stored = await fileStore.get(fileId);
     if (!stored) return null;

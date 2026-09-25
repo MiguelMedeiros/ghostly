@@ -425,7 +425,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
           </div>
         ) : message.file ? (
           <div className="clearfix">
-            <FileBubble file={message.file} />
+            <FileBubble file={message.file} peerName={message.nick || peerNick || undefined} />
             {timestampEl}
           </div>
         ) : money ? (
