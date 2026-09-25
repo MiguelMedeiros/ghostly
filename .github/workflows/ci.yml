@@ -186,6 +186,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-24.04
+    env:
+      # Line numbers in a panic's backtrace are all these tests need of debug info: the cache below is half the size
+      # and restores in half the time (it was 3 GB and up to 105 s).
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
     defaults:
       run:
         working-directory: .
@@ -194,34 +198,49 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # In the background, while the cache below downloads; "Wait for the system dependencies" joins it.
       - name: Install system dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            librsvg2-dev \
-            patchelf \
-            libssl-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev
+          {
+            sudo apt-get update
+            sudo apt-get install -y \
+              libwebkit2gtk-4.1-dev \
+              librsvg2-dev \
+              patchelf \
+              libssl-dev \
+              libgtk-3-dev \
+              libayatana-appindicator3-dev
+          } > "$RUNNER_TEMP/apt.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/apt.pid"
 
       - name: Setup Rust
+        id: rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           components: rustfmt, clippy
 
-      - name: Cache Cargo
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # Crates and what they compiled to. The repository's cache is full (10 GB), so only a push to dev saves one,
+      # once per Cargo.lock and toolchain and without Ghostly's own crates; a pull request restores dev's.
+      - name: Restore Cargo
+        id: cargo-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            ~/.cargo/bin/
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-tauri-${{ github.repository }}-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-tauri-lines-${{ steps.rust.outputs.cachekey }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-tauri-${{ github.repository }}-
+            ${{ runner.os }}-cargo-tauri-lines-${{ steps.rust.outputs.cachekey }}-
+
+      - name: Wait for the system dependencies
+        run: |
+          pid=$(cat "$RUNNER_TEMP/apt.pid")
+          while kill -0 "$pid" 2>/dev/null; do sleep 1; done
+          tail -n 5 "$RUNNER_TEMP/apt.log"
+          # The exit status of a process that is not this shell's child is gone: check the result instead.
+          dpkg -s libwebkit2gtk-4.1-dev librsvg2-dev patchelf libssl-dev libgtk-3-dev libayatana-appindicator3-dev > /dev/null
 
       # tauri-build wants every bundled resource to exist. `tauri build` fills this one
       # (scripts/prepare-native-runtime.mjs); plain cargo only needs the folder.
@@ -238,12 +257,32 @@ jobs:
         run: cargo build --manifest-path src-tauri/Cargo.toml
 
       - name: Test (src-tauri)
+        id: test
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
       # The Iroh framing, limits and reconnects, on loopback: seconds, and the
       # dependencies are already built for src-tauri.
       - name: Test (native-transports)
         run: cargo test --manifest-path native-transports/Cargo.toml
+
+      - name: Leave Ghostly's own crates out of the saved Cargo cache
+        id: prune
+        if: ${{ !cancelled() && steps.test.outcome == 'success' && steps.cargo-cache.outputs.cache-hit != 'true' && ((github.event_name == 'push' && github.ref == 'refs/heads/dev') || github.head_ref == 'mm/ci-speed') }}
+        run: |
+          rm -rf target/debug/incremental
+          find target/debug target/debug/deps target/debug/.fingerprint target/debug/build -maxdepth 1 -name '*ghostly*' -exec rm -rf {} +
+          du -sh target
+
+      - name: Save Cargo
+        if: ${{ !cancelled() && steps.prune.outcome == 'success' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
   # ============================================
   # CLI - Rust
