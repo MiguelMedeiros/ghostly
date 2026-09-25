@@ -183,7 +183,7 @@ export const LAND: Stage = stage({ w: 800, h: 380, kx: 2.5, ky: 1.7, oy: 44, s: 
   chips: { w: 116, h: 22, ys: [16, 42, 68, 94], me: 115, peer: 685 },
   lanes: [180, 214],
   above: 156,
-  below: 206,
+  below: 210,
   thumbs: [636, 104],
   keyY: 116,
   trio: 44,

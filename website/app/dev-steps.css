@@ -130,6 +130,11 @@ html.js:not(.calm) .psx {
   stroke-dasharray: 1 1;
   stroke-dashoffset: calc(1 - var(--p));
 }
+/* Draw a route behind its packet: the same eased progress as along(), so the line's tip is the packet. */
+.sx-trace {
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: calc(1 - var(--e));
+}
 
 /* ── The scene ────────────────────────────────────────── */
 
@@ -620,17 +625,18 @@ html.js:not(.calm) .psx {
     color var(--dur-fast) var(--ease-exit),
     opacity var(--dur-fast) var(--ease-exit);
 }
-.psx-btn:hover:not(:disabled) {
+.psx-btn:hover:not([aria-disabled]) {
   border-color: rgba(34, 211, 238, 0.5);
   color: var(--cyan);
   transform: translateY(-1px);
   transition-timing-function: var(--ease-enter);
 }
-.psx-btn:active:not(:disabled) {
+.psx-btn:active:not([aria-disabled]) {
   transform: translateY(0) scale(0.985);
   transition-duration: 0.06s;
 }
-.psx-btn:disabled {
+/* At either end Previous or Next stays focusable (aria-disabled, not disabled), so a keyboard keeps its place. */
+.psx-btn[aria-disabled] {
   opacity: 0.4;
   cursor: default;
 }
@@ -652,7 +658,7 @@ html.js:not(.calm) .psx {
   color: #031018;
   background: linear-gradient(100deg, var(--cyan), var(--green));
 }
-.psx-btn--next:hover:not(:disabled) {
+.psx-btn--next:hover:not([aria-disabled]) {
   color: #031018;
 }
 .psx-keys {

@@ -64,13 +64,15 @@ export function ProtocolSteps({ t, wisps }: { t: StepsCopy; wisps: Record<string
       { threshold: [0, 0.35] },
     );
     io.observe(el);
-    // ← and → also work while nothing on the page has focus and the explainer is in view.
+    // ← → Home End also work while nothing on the page has focus and the explainer is in view.
     const onDocKey = (e: KeyboardEvent) => {
       if (!visible || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
       const active = document.activeElement;
       if (active && active !== document.body && active !== document.documentElement) return;
       if (e.key === "ArrowRight") clock.next();
       else if (e.key === "ArrowLeft") clock.prev();
+      else if (e.key === "Home") clock.jump(0);
+      else if (e.key === "End") clock.jump(STEPS - 1);
       else return;
       e.preventDefault();
     };
@@ -123,7 +125,7 @@ export function ProtocolSteps({ t, wisps }: { t: StepsCopy; wisps: Record<string
         </figure>
 
         <div className="psx-controls">
-          <button type="button" className="psx-btn" onClick={() => clock.prev()} disabled={step === 0} aria-label={t.prev} data-action="prev">
+          <button type="button" className="psx-btn" onClick={() => clock.prev()} aria-disabled={step === 0 || undefined} aria-label={t.prev} data-action="prev">
             <span aria-hidden="true">←</span>
             <span className="psx-btn-text">{t.prev}</span>
           </button>
@@ -145,7 +147,7 @@ export function ProtocolSteps({ t, wisps }: { t: StepsCopy; wisps: Record<string
             )}
             <span className="psx-btn-text">{playLabel}</span>
           </button>
-          <button type="button" className="psx-btn psx-btn--next" onClick={() => clock.next()} disabled={last} aria-label={t.next} data-action="next">
+          <button type="button" className="psx-btn psx-btn--next" onClick={() => clock.next()} aria-disabled={last || undefined} aria-label={t.next} data-action="next">
             <span className="psx-btn-text">{t.next}</span>
             <span aria-hidden="true">→</span>
           </button>

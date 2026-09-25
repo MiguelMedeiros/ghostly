@@ -26,6 +26,9 @@ export type SceneCopy = {
 /** The ghost of the app's icon (src/components/pairing/PairingScene.tsx), in an 80 × 100 box, with its cut hem. */
 const GHOST_PATH = "M40 8 C18 8 8 22 8 40 L8 72 L16 64 L24 72 L32 64 L40 72 L48 64 L56 72 L64 64 L72 72 L72 40 C72 22 62 8 40 8Z";
 
+/** Two tags in one place: the next arrives this long after the last began to leave, so they never cross-fade. */
+const SWAP = 0.14;
+
 type Vars = CSSProperties & Record<`--${string}`, string | number>;
 /** Timing for the rules in dev-steps.css: a start, an end, fade-in and fade-out lengths, a dim level, a glide. */
 function v(o: { a?: number; b?: number; d?: number; f?: number; lv?: number }, extra?: CSSProperties): Vars {
@@ -58,6 +61,23 @@ function Packet({ pts, a, d, r, tone }: { pts: readonly P[]; a: number; d: numbe
     <g className="sx-go sx-trip" style={v({ a, d }, { transform: along(pts) })}>
       <circle r={r} className={`sx-pk sx-${tone}`} />
     </g>
+  );
+}
+
+/**
+ * The way a packet went: the line draws behind the packet as it travels (the same eased progress, so its tip is
+ * the packet), and the arrowhead appears when it arrives. It stays until b: what a still frame needs.
+ */
+function Route({ pts, a, d, b, tone, marker }: { pts: readonly P[]; a: number; d: number; b: number; tone: string; marker: string }) {
+  const [x0, y0] = pts[pts.length - 2];
+  const [x1, y1] = pts[pts.length - 1];
+  const len = Math.hypot(x1 - x0, y1 - y0);
+  const tip = `M${round1(x1 - (x1 - x0) / len)} ${round1(y1 - (y1 - y0) / len)} L${x1} ${y1}`;
+  return (
+    <Win a={a} b={b} d={0.05}>
+      <path className={`sx-route sx-${tone} sx-go sx-trace`} style={v({ a, d })} d={path(pts)} pathLength={1} />
+      <path className={`sx-route sx-${tone} sx-in`} style={v({ a: round1(a + d - 0.1), d: 0.15 })} d={tip} markerEnd={`url(#${marker})`} />
+    </Win>
   );
 }
 
@@ -251,6 +271,9 @@ export function StepScene({ g, t, className }: { g: Stage; t: SceneCopy; classNa
   const [yA, yB] = g.lanes;
   const rank = at(4, 1.4);
 
+  // Step 8: one short text over the DHT while the line is down.
+  const dmText = { a: at(7, 1.0), d: 1.3 };
+
   // Step 7: the frames of a live chat.
   const chunks = [0, 0.15, 0.3].map((k) => round3(at(6, 1.85) + k));
 
@@ -296,17 +319,11 @@ export function StepScene({ g, t, className }: { g: Stage; t: SceneCopy; classNa
       </g>
 
       {/* The way each step's packets went, drawn with arrowheads: what a still frame needs. */}
-      <Win a={at(0, 0.4)} b={gone1}>
-        <path className="sx-route sx-boo" d={path(g.pubUp)} markerEnd={`url(#sx-arrow-boo-${className})`} />
-        <path className="sx-route sx-boo" d={path(g.pubLow)} markerEnd={`url(#sx-arrow-boo-${className})`} />
-      </Win>
-      <Win a={at(2, 0.5)} b={gone3}>
-        <path className="sx-route sx-casper" d={path(inUp)} markerEnd={`url(#sx-arrow-casper-${className})`} />
-        <path className="sx-route sx-casper" d={path(inLow)} markerEnd={`url(#sx-arrow-casper-${className})`} />
-      </Win>
-      <Win a={at(7, 1.0)} b={EVER}>
-        <path className="sx-route sx-talk" d={path(g.up)} markerEnd={`url(#sx-arrow-talk-${className})`} />
-      </Win>
+      <Route pts={g.pubUp} {...pubA} b={gone1} tone="boo" marker={`sx-arrow-boo-${className}`} />
+      <Route pts={g.pubLow} {...pubB} b={gone1} tone="boo" marker={`sx-arrow-boo-${className}`} />
+      <Route pts={inUp} {...knock} b={gone3} tone="casper" marker={`sx-arrow-casper-${className}`} />
+      <Route pts={inLow} {...knock} b={gone3} tone="casper" marker={`sx-arrow-casper-${className}`} />
+      <Route pts={g.up} {...dmText} b={EVER} tone="talk" marker={`sx-arrow-talk-${className}`} />
 
       {/* Step 1: the two records, resting where the network keeps them. */}
       {(
@@ -434,30 +451,31 @@ export function StepScene({ g, t, className }: { g: Stage; t: SceneCopy; classNa
       </Win>
 
       {/* Under the line: which transport, and in what state. */}
-      <Win a={at(5, 0.3)} b={LIVE}>
-        <Tag x={cx} y={g.below} text="webrtc/1" tone="line" />
-      </Win>
-      <Win a={LIVE} b={DROP}>
-        <Tag x={cx} y={g.below} text={g.short ? t.live : `webrtc/1 · ${t.live}`} tone="line" mono={!g.short} />
-      </Win>
-      <Win a={DROP} b={BACK}>
-        <Tag x={cx} y={g.below} text={g.short ? t.onDhtShort : t.onDht} tone="danger" mono={false} />
-      </Win>
-      <Win a={BACK} b={EVER}>
-        <Tag x={cx} y={g.below} text={g.short ? t.back : `webrtc/1 · ${t.back}`} tone="line" mono={!g.short} />
-      </Win>
+      {/* Under the line: which transport, and in what state. Each tag leaves before the next arrives in its place. */}
+      {(
+        [
+          [at(5, 0.3), LIVE, "webrtc/1", "line", true],
+          [LIVE, DROP, g.short ? t.live : `webrtc/1 · ${t.live}`, "line", !g.short],
+          [DROP, BACK, g.short ? t.onDhtShort : t.onDht, "danger", false],
+          [BACK, EVER, g.short ? t.back : `webrtc/1 · ${t.back}`, "line", !g.short],
+        ] as const
+      ).map(([a, b, text, tone, mono], i) => (
+        <Win key={text} a={i ? round3(a + SWAP) : a} b={b} d={0.2} f={0.12}>
+          <Tag x={cx} y={g.below} text={text} tone={tone} mono={mono} />
+        </Win>
+      ))}
 
       {/* Above the line: the frame on its way. */}
       {(
         [
           ["pair-proof", at(5, 0.3), at(5, 2.0)],
-          ["pair-ready", at(5, 2.0), LIVE + 0.3],
+          ["pair-ready", at(5, 2.0), round3(LIVE + 0.3)],
           ["paired-message", at(6, 0.3), at(6, 1.75)],
           [g.short ? "pf-data" : "files/3 · pf-data", at(6, 1.75), at(6, 3.0)],
           [g.short ? "pay" : "pay · 2,100 sat", at(6, 3.0), at(6, 3.9)],
         ] as const
-      ).map(([text, a, b]) => (
-        <Win key={text} a={a} b={b} d={0.2} f={0.14}>
+      ).map(([text, a, b], i) => (
+        <Win key={text} a={i === 1 || i === 3 || i === 4 ? round3(a + SWAP) : a} b={b} d={0.2} f={0.12}>
           <Tag x={cx} y={g.above} text={text} tone="talk" />
         </Win>
       ))}
@@ -499,7 +517,7 @@ export function StepScene({ g, t, className }: { g: Stage; t: SceneCopy; classNa
       <Win a={at(7, 0.9)} b={EVER}>
         <Tag x={g.tagTop[0]} y={g.tagTop[1]} text={g.short ? "_dm · 256 B" : "_dm · text up to 256 B"} tone="talk" />
       </Win>
-      <g className="sx-go sx-trip" style={v({ a: at(7, 1.0), d: 1.3 }, { transform: along(g.up) })}>
+      <g className="sx-go sx-trip" style={v(dmText, { transform: along(g.up) })}>
         <circle r={g.pk} className="sx-pk sx-talk" />
       </g>
 
