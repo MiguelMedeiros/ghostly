@@ -120,6 +120,8 @@ test("removing a proof revokes it for a contact the person never reconnects to",
   const carolChat = await chatId(carol);
   await carol.page.goto("about:blank");
   await go(alice, "#/identities");
+  // The page opens on the Ghostly card (#238): the proof's card first.
+  await alice.page.getByTestId("identity-proof").click();
   await alice.page.getByTestId("identity-proof-remove").click();
   await alice.page.getByTestId("identity-proof-remove-confirm").click();
   await expect(alice.page.getByTestId("identity-proof")).toHaveCount(0);
