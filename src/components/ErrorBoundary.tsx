@@ -15,7 +15,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { failed: 
         <div className="space-y-3">
           <p className="text-text-primary">Something went wrong.</p>
           <button type="button" onClick={() => { history.replaceState(null, "", "#/"); location.reload(); }}
-            className="px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-[#111b21] hover:bg-accent-hover cursor-pointer">Start again</button>
+            className="px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover cursor-pointer">Start again</button>
         </div>
       </div>
     );

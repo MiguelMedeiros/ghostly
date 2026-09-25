@@ -349,7 +349,7 @@ export function MessageInput({
           aria-label="Send message"
           onClick={handleSubmit}
           disabled={disabled || !text.trim()}
-          className="w-10 h-10 max-md:w-11 max-md:h-11 flex items-center justify-center bg-accent rounded-full text-[#111b21] hover:bg-accent-hover transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shrink-0"
+          className="w-10 h-10 max-md:w-11 max-md:h-11 flex items-center justify-center bg-accent rounded-full text-on-accent hover:bg-accent-hover transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shrink-0"
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
             <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />

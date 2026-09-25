@@ -258,7 +258,7 @@ export function Settings() {
           <div className="flex flex-wrap gap-1 bg-surface-alt rounded-lg p-1">
             {COLOR_SCHEME_OPTIONS.map((option) => (
               <button key={option.value} onClick={() => handleColorSchemeChange(option.value)} aria-pressed={settings.colorScheme === option.value}
-                className={`flex items-center gap-1 px-3 min-h-8 rounded-md text-sm whitespace-nowrap transition-colors cursor-pointer ${settings.colorScheme === option.value ? "bg-accent text-white" : "text-text-secondary hover:text-text-primary"}`}>
+                className={`flex items-center gap-1 px-3 min-h-8 rounded-md text-sm whitespace-nowrap transition-colors cursor-pointer ${settings.colorScheme === option.value ? "bg-accent text-on-accent" : "text-text-secondary hover:text-text-primary"}`}>
                 {option.value === "light" && (
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                     <circle cx="12" cy="12" r="5" strokeWidth="2" />
@@ -284,7 +284,7 @@ export function Settings() {
           <div role="group" aria-label={t("settings.chatListDensity")} data-testid="chat-list-density" className="flex flex-wrap gap-1 bg-surface-alt rounded-lg p-1">
             {(["compact", "comfortable"] as const).map((density) => (
               <button key={density} onClick={() => updateChatListDensity(density)} aria-pressed={settings.chatListDensity === density} data-density={density}
-                className={`px-3 min-h-8 rounded-md text-sm whitespace-nowrap transition-colors cursor-pointer ${settings.chatListDensity === density ? "bg-accent text-white" : "text-text-secondary hover:text-text-primary"}`}>
+                className={`px-3 min-h-8 rounded-md text-sm whitespace-nowrap transition-colors cursor-pointer ${settings.chatListDensity === density ? "bg-accent text-on-accent" : "text-text-secondary hover:text-text-primary"}`}>
                 {t(`settings.chatListDensities.${density}` as const)}
               </button>
             ))}
@@ -323,7 +323,7 @@ export function Settings() {
               <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className={`${field} mt-1`} />
             </label>
             <ButtonGroup fill>
-              <button onClick={handleSetPassword} className={`${button} bg-accent hover:bg-accent-hover text-white`}>
+              <button onClick={handleSetPassword} className={`${button} bg-accent hover:bg-accent-hover text-on-accent`}>
                 {hasPassword ? t("settings.changePassword") : t("settings.setPassword")}
               </button>
               {hasPassword && (
@@ -455,11 +455,11 @@ export function Settings() {
             </span>}
             hint={update.lastCheckedAt ? t("updates.lastChecked", { when: new Date(update.lastCheckedAt).toLocaleTimeString() }) : undefined}>
             {update.update && update.update.apply === "manual" ? (
-              <a href={update.downloadUrl} target="_blank" rel="noopener noreferrer" className={`${button} inline-flex items-center bg-accent hover:bg-accent-hover text-[#111b21] font-semibold`}>
+              <a href={update.downloadUrl} target="_blank" rel="noopener noreferrer" className={`${button} inline-flex items-center bg-accent hover:bg-accent-hover text-on-accent font-semibold`}>
                 {t("updates.download")}
               </a>
             ) : update.update ? (
-              <button onClick={() => void update.install()} disabled={update.stage === "installing"} className={`${button} bg-accent hover:bg-accent-hover text-[#111b21] font-semibold`}>
+              <button onClick={() => void update.install()} disabled={update.stage === "installing"} className={`${button} bg-accent hover:bg-accent-hover text-on-accent font-semibold`}>
                 {update.stage === "installing" ? t("updates.installing") : t(update.update.apply === "restart" ? "updates.restart" : "updates.reload")}
               </button>
             ) : (

@@ -110,7 +110,7 @@ export function NetworkSettings() {
           <button
             onClick={() => void save()}
             data-testid="network-save"
-            className="px-4 py-2 min-h-10 bg-accent text-[#111b21] rounded-lg text-sm font-bold hover:bg-accent-hover transition-colors cursor-pointer"
+            className="px-4 py-2 min-h-10 bg-accent text-on-accent rounded-lg text-sm font-bold hover:bg-accent-hover transition-colors cursor-pointer"
           >
             Save
           </button>

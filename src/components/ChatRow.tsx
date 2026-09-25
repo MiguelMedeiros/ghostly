@@ -50,7 +50,7 @@ export function DeliveryMark({ delivery }: { delivery?: ChatMessage["delivery"] 
 
 function UnreadBadge({ count }: { count: number }) {
   return (
-    <span data-testid="chat-row-unread" className="min-w-5 h-5 inline-flex items-center justify-center rounded-full bg-accent px-1.5 text-[11px] font-bold leading-none text-[#111b21]">
+    <span data-testid="chat-row-unread" className="min-w-5 h-5 inline-flex items-center justify-center rounded-full bg-accent px-1.5 text-[11px] font-bold leading-none text-on-accent">
       {count > 99 ? "99+" : count}
     </span>
   );
@@ -135,7 +135,7 @@ export function ChatRow(p: ChatRowProps) {
           </span>
         )}
         {p.creator && (
-          <span className="absolute -bottom-0.5 -end-0.5 w-4 h-4 flex items-center justify-center rounded-full bg-accent text-[#111b21] ring-2 ring-sidebar-bg z-10 group/star">
+          <span className="absolute -bottom-0.5 -end-0.5 w-4 h-4 flex items-center justify-center rounded-full bg-accent text-on-accent ring-2 ring-sidebar-bg z-10 group/star">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
             </svg>

@@ -103,7 +103,7 @@ export function ProfileSwitcherMenu({ variant, glances, onClose }: {
             <span className="flex-1 min-w-0 truncate text-sm text-text-primary">{entry.name}</span>
             {glance?.locked
               ? <span className="shrink-0 text-text-muted" title={t("profileSwitcher.locked")} data-testid="profile-switcher-locked"><LockIcon /></span>
-              : unread > 0 && <span data-testid="profile-switcher-unread" aria-hidden="true" className="shrink-0 min-w-5 h-5 px-1.5 rounded-full bg-accent text-[11px] font-bold leading-5 text-center text-[#111b21] tabular-nums">{unread > 99 ? "99+" : unread}</span>}
+              : unread > 0 && <span data-testid="profile-switcher-unread" aria-hidden="true" className="shrink-0 min-w-5 h-5 px-1.5 rounded-full bg-accent text-[11px] font-bold leading-5 text-center text-on-accent tabular-nums">{unread > 99 ? "99+" : unread}</span>}
           </button>
         );
       })}

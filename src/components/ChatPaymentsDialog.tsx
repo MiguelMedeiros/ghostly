@@ -60,7 +60,7 @@ export function ChatPaymentsDialog({ peer, name, onSave, onClose }: { peer: Peer
           <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm bg-surface-alt text-text-primary border border-border hover:bg-surface-hover cursor-pointer">Cancel</button>
           <button type="button" data-testid="chat-payments-save" disabled={!changed || busy}
             onClick={() => { setBusy(true); setError(""); void onSave(methods).then(onClose, (e) => { setError(e instanceof Error ? e.message : String(e)); setBusy(false); }); }}
-            className="px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-[#111b21] hover:bg-accent-hover cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+            className="px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
             {busy ? "Saving…" : "Save"}
           </button>
         </div>

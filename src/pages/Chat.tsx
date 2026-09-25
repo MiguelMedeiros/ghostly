@@ -404,7 +404,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           <div className="relative w-10 h-10 rounded-full bg-surface-hover flex items-center justify-center shrink-0">
             <PeerAvatar peerPubKey={params?.peerPubKeyB64} label={shownName} named={!isAnonymous} testId="chat-avatar" />
             {inviteCode && !pairedReady && (
-              <span className="absolute -bottom-0.5 -end-0.5 w-[16px] h-[16px] flex items-center justify-center rounded-full text-[8px] bg-accent text-[#111b21] z-10 group/star">
+              <span className="absolute -bottom-0.5 -end-0.5 w-[16px] h-[16px] flex items-center justify-center rounded-full text-[8px] bg-accent text-on-accent z-10 group/star">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
                 </svg>

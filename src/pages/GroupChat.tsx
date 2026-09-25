@@ -212,7 +212,7 @@ export function GroupChat() {
               const done = JOIN_ORDER.indexOf(stage) >= JOIN_ORDER.indexOf(step.stage);
               const current = !done && JOIN_ORDER[JOIN_ORDER.indexOf(step.stage) - 1] === stage;
               return <li key={step.stage} data-state={done ? "done" : current ? "current" : "todo"} className={`flex items-center gap-2 ${done ? "text-text-primary" : current ? "text-accent" : "text-text-muted/60"}`}>
-                <span aria-hidden="true" className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] ${done ? "bg-accent text-white" : current ? "border border-accent" : "border border-border"}`}>{done ? "✓" : ""}</span>
+                <span aria-hidden="true" className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] ${done ? "bg-accent text-on-accent" : current ? "border border-accent" : "border border-border"}`}>{done ? "✓" : ""}</span>
                 {step.label}
               </li>;
             })}
