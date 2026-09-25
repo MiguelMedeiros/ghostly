@@ -18,6 +18,7 @@
 import { readFileSync, readdirSync, statSync, writeFileSync, existsSync } from "node:fs";
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkPaths, globToRegExp } from "./affected/select.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const FEATURES = "e2e/features.json";
@@ -124,6 +125,14 @@ for (const file of files.filter((p) => isUnit(p) || isRust(p))) {
   else warnings.push(`${file}: no // covers: comment`);
 }
 
+// ---------- the paths map (npm run test:affected) ----------
+// A bad pattern fails; a source file no glob matches only warns: test:affected runs every spec for it.
+for (const problem of checkPaths(inventory)) errors.push(`${FEATURES}: ${problem}`);
+const globs = Object.keys(inventory.paths ?? {}).map((g) => globToRegExp(g));
+const SOURCE = /^(?:src|packages\/[^/]+\/src|extension\/src|web\/src)\//;
+const unmapped = files.filter((p) => SOURCE.test(p) && !isUnit(p) && !p.endsWith(".md") && !globs.some((re) => re.test(p)));
+for (const p of unmapped) warnings.push(`${p}: no glob in ${FEATURES} "paths" (npm run test:affected runs every e2e spec when it changes)`);
+
 // ---------- the verdict ----------
 const covered = (f) => COLUMNS.some((c) => f.hits[c].size > 0);
 for (const f of features.values()) {
@@ -167,7 +176,7 @@ function printConsole() {
     console.log(`\n${warnings.length} warnings:`);
     for (const w of warnings) console.log(`  ${w}`);
   } else if (warnings.length) {
-    console.log(`  ${warnings.length} test files declare no feature (--warnings lists them)`);
+    console.log(`  ${warnings.length - unmapped.length} test files declare no feature, ${unmapped.length} source files have no "paths" glob (--warnings lists them)`);
   }
 }
 

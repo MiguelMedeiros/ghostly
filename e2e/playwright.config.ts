@@ -30,7 +30,8 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  workers: process.env.CI ? 2 : undefined,
+  // Locally other sessions share the machine: E2E_WORKERS, 2 by default (Playwright's own default is half the cores).
+  workers: process.env.CI ? 2 : Number(process.env.E2E_WORKERS) || 2,
   // Two peers find each other by polling every few seconds: messages take seconds, not milliseconds.
   timeout: 3 * 60_000,
   expect: { timeout: 60_000 },
