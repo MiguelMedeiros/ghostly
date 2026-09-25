@@ -58,6 +58,21 @@ pub async fn publish(
     pkarr.publish(&signed_packet).await
 }
 
+/// Publishes a packet the peer signed itself, byte for byte: a did:dht document has record names of
+/// its own and a sequence number in seconds, which the builder above would not keep.
+pub async fn publish_signed(
+    pkarr: &Pkarr,
+    public_key_z32: &str,
+    payload: &[u8],
+) -> Result<(), String> {
+    let public_key: PublicKey = public_key_z32
+        .try_into()
+        .map_err(|e| format!("Invalid public key: {}", e))?;
+    let signed_packet = SignedPacket::from_relay_payload(&public_key, &payload.to_vec().into())
+        .map_err(|e| format!("Invalid packet: {}", e))?;
+    pkarr.publish(&signed_packet).await
+}
+
 /// `background`: a look that can wait; `urgent`: a signal is due (see `Pkarr::resolve_with`).
 pub async fn resolve(
     pkarr: &Pkarr,

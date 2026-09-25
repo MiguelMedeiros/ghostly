@@ -206,8 +206,20 @@ export class IdentityProofs {
   private viewOf(p: StoredIdentityProof): IdentityProofView {
     const id = identityStatement(p.binding).id;
     const sharedWith = this.host.linkIds().filter(l => this.host.ledger(l)?.shared.some(s => s.id === id && s.status !== "withdrawn" && s.status !== "withdrawal-pending" && s.status !== "rejected")).length;
+    const publicUri = this.publicUri(p);
     return { id, provider: p.binding.provider, subject: p.binding.subject, key: p.binding.key, verified: p.verified,
-      issuedAt: p.binding.issuedAt, expiresAt: Math.min(p.binding.expiresAt, p.verified.expiresAt ?? Infinity), createdAt: p.createdAt, sharedWith };
+      issuedAt: p.binding.issuedAt, expiresAt: Math.min(p.binding.expiresAt, p.verified.expiresAt ?? Infinity), createdAt: p.createdAt, sharedWith,
+      ...(publicUri ? { publicUri } : {}) };
+  }
+
+  /** What the profile's public DID would list for this identity: the provider's URI for the verified subject, if well formed. */
+  private publicUri(p: StoredIdentityProof): string | undefined {
+    try {
+      const uri = this.providers().find(x => x.id === p.binding.provider)?.publicUri?.(p.verified.subject);
+      return uri && /^[A-Za-z][A-Za-z0-9+.-]*:[^\s,;]+$/.test(uri) ? uri : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   // -- per chat ----------------------------------------------------------------------------------

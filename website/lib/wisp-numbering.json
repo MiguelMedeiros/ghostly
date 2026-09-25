@@ -252,6 +252,15 @@
     "numberAssignment": "unassigned"
   },
   {
+    "oldId": "none",
+    "id": "310",
+    "oldFile": "3xx-did-dht.md",
+    "file": "3xx-did-dht.md",
+    "kind": "Contract",
+    "displayNumber": "3xx",
+    "numberAssignment": "unassigned"
+  },
+  {
     "oldId": "13",
     "id": "400",
     "oldFile": "13-chat.md",

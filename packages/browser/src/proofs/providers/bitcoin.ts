@@ -116,6 +116,8 @@ export const bitcoin: IdentityProofProvider<BitcoinEvidence> = {
     normalize: normalizeAddress,
     short: shortAddress,
   },
+  // BIP-21
+  publicUri: address => `bitcoin:${address}`,
   validity: { defaultDays: 90, maxDays: 365 },
   privacy: "Nothing: the signature is checked on this device, with no blockchain lookup. Contacts you share it with learn the address.",
   signers: BITCOIN_WALLET_GUIDES.map(walletSigner),

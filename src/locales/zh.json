@@ -325,6 +325,26 @@
       "notVerified": "未验证",
       "verifiedExplain": "你已与对方比对过验证码：这把密钥就是你验证过的那把。",
       "notVerifiedExplain": "你还没有与对方比对验证码；聊天的连接面板提供此功能。"
+    },
+    "did": {
+      "title": "公开 DID",
+      "hint": "任何人都能查到的此个人资料标识符(W3C DID,did:dht)。它有自己的密钥,任何聊天都不使用它,因此不会把聊天彼此关联。",
+      "live": "已发布",
+      "notLive": "未发布",
+      "copy": "复制 DID",
+      "showQr": "显示二维码",
+      "hideQr": "隐藏二维码",
+      "qrTitle": "你的 DID 的二维码",
+      "published": "已于 {{time}} 发布。应用运行期间每小时重新发布一次。",
+      "updating": "正在发布更改…",
+      "publishing": "正在发布…",
+      "offline": "网络关闭时不会发布。",
+      "failed": "无法发布:{{error}}。几分钟后重试。",
+      "listTitle": "在我的 DID 中公开列出身份",
+      "warning": "列在这里的内容对所有人永久公开:任何拥有你 DID 的人都能看到,即使你移除后,一些解析器仍会保留副本。聊天从不需要它。保持关闭,即可一次只与一位联系人分享每个身份。",
+      "none": "还没有可列出的身份。添加 Nostr 密钥、域名、OpenPGP 密钥、比特币地址以及 GitHub 或 GitLab 账户后即可列出。",
+      "expired": "已过期:续期前不会列出",
+      "listOne": "在我的 DID 中公开列出 {{identity}}"
     }
   },
   "profileSwitcher": {

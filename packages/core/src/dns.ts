@@ -1,9 +1,10 @@
 import { concatBytes, utf8Decode, utf8Encode } from "./bytes";
 
 /**
- * Minimal DNS wire codec for Pkarr packets. Ghostly only ever publishes TXT
- * records, so only TXT is encoded. Decoding skips every other record type and
- * understands name compression, which the Rust client (simple-dns) emits.
+ * Minimal DNS wire codec for Pkarr packets. Ghostly publishes TXT records (and,
+ * for a did:dht document that names its gateways, NS). Decoding skips every
+ * other record type and understands name compression, which the Rust client
+ * (simple-dns) emits.
  */
 export interface TxtRecord {
   /** Fully qualified name, e.g. `_msgs.<z32 public key>` */
@@ -12,9 +13,19 @@ export interface TxtRecord {
   ttl: number;
 }
 
+/** A name server record: `host` is the server's name. */
+export interface NsRecord {
+  type: "NS";
+  name: string;
+  host: string;
+  ttl: number;
+}
+
+const TYPE_NS = 2;
 const TYPE_TXT = 16;
 const CLASS_IN = 1;
 const FLAGS_REPLY = 0x8000;
+const FLAG_AUTHORITATIVE = 0x0400;
 const MAX_CHARACTER_STRING = 255;
 const MAX_POINTER_OFFSET = 0x3fff;
 
@@ -62,10 +73,11 @@ function writeName(writer: Writer, name: string, suffixOffsets: Map<string, numb
   writer.u8(0);
 }
 
-export function encodeTxtPacket(records: TxtRecord[]): Uint8Array {
+/** `authoritative` sets the AA flag, which a did:dht packet must carry. */
+export function encodeTxtPacket(records: (TxtRecord | NsRecord)[], options: { authoritative?: boolean } = {}): Uint8Array {
   const writer = new Writer();
   writer.u16(0);
-  writer.u16(FLAGS_REPLY);
+  writer.u16(options.authoritative ? FLAGS_REPLY | FLAG_AUTHORITATIVE : FLAGS_REPLY);
   writer.u16(0);
   writer.u16(records.length);
   writer.u16(0);
@@ -74,6 +86,17 @@ export function encodeTxtPacket(records: TxtRecord[]): Uint8Array {
   const suffixOffsets = new Map<string, number>();
   for (const record of records) {
     writeName(writer, record.name, suffixOffsets);
+    if ("host" in record) {
+      writer.u16(TYPE_NS);
+      writer.u16(CLASS_IN);
+      writer.u32(record.ttl);
+      // The length comes first, so the host is written on its own (uncompressed) and measured.
+      const host = new Writer();
+      writeName(host, record.host, new Map());
+      writer.u16(host.length);
+      writer.push(host.bytes());
+      continue;
+    }
     writer.u16(TYPE_TXT);
     writer.u16(CLASS_IN);
     writer.u32(record.ttl);

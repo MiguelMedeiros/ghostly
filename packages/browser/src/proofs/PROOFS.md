@@ -161,6 +161,11 @@ is shared. The contact's app never trusts the sender's check.
   its `source` right under it, so say plainly what it is and who checked it ("User ID on the key, written by
   its holder"). A name never replaces the contact's chat name. Sanitize like avatars (plain-text name, bounded raster,
   re-encoded to a data URL; see `profiles/public.ts`).
+- `publicUri` (optional) turns a verified subject into a URI (`nostr:npub…`, `https://example.com`) that the
+  person may list, one switch at a time and off by default, in the `alsoKnownAs` of their profile's public
+  DID ([draft 3xx-did-dht](../../../../docs/wisps/3xx-did-dht.md)). Pure and offline: no fetch. No comma in it
+  (did:dht separates the list with commas). Leave it out when the identity has no URI of its own (a bare SSH key,
+  an OpenID account).
 
 ## Expiry and re-checks
 

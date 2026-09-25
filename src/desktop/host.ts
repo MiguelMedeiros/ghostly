@@ -5,6 +5,7 @@ import {
   GhostlyHttpError,
   fromBase64,
   toBase64,
+  toBase64Url,
   type Identity,
   type GhostRecord,
   type LocalFetch,
@@ -32,6 +33,9 @@ import { NativeFileBytes, type NativeInvoke } from "@ghostly/browser/shared/file
 const tauriTransport: PkarrTransport = {
   async publish(identity: Identity, records: GhostRecord[]) {
     await invoke("publish_records", { seedB64: identity.seedB64, records });
+  },
+  async publishPayload(pubKeyZ32: string, payload: Uint8Array) {
+    await invoke("publish_signed_packet", { publicKeyZ32: pubKeyZ32, payloadB64: toBase64Url(payload) });
   },
   async resolve(pubKeyZ32: string, options?: PkarrRequestOptions): Promise<SignedPacket | null> {
     // A look that can wait goes to the DHT alone; the relays' budget is kept for links that are signaling.

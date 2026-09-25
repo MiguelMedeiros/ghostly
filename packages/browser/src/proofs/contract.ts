@@ -185,4 +185,10 @@ export interface IdentityProofProvider<E = unknown> {
   lookupDisplay?(subject: string, options: { signal: AbortSignal }): Promise<IdentityDisplay | undefined>;
   /** The button that runs `lookupDisplay`. Default: "Show public profile". */
   lookupLabel?: string;
+  /**
+   * The verified subject as a URI a public DID document may list in `alsoKnownAs` (the profile's
+   * did:dht, and only for identities the person chooses to list there). Omit when the identity has no
+   * URI of its own. No comma: did:dht separates the list with commas.
+   */
+  publicUri?(subject: string): string | undefined;
 }

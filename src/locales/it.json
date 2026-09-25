@@ -325,6 +325,26 @@
       "notVerified": "Non verificato",
       "verifiedExplain": "Hai confrontato i codici con il contatto: la sua chiave è quella che hai verificato.",
       "notVerifiedExplain": "Non hai ancora confrontato i codici con il contatto; il pannello di connessione della chat lo permette."
+    },
+    "did": {
+      "title": "DID pubblico",
+      "hint": "Un identificativo di questo profilo che chiunque può consultare (un DID del W3C, did:dht). Ha una chiave propria: nessuna chat la usa, quindi non collega le chat tra loro.",
+      "live": "Pubblicato",
+      "notLive": "Non pubblicato",
+      "copy": "Copia DID",
+      "showQr": "Mostra codice QR",
+      "hideQr": "Nascondi codice QR",
+      "qrTitle": "Codice QR del tuo DID",
+      "published": "Pubblicato {{time}}. Viene ripubblicato ogni ora mentre l'app è aperta.",
+      "updating": "Pubblicazione della modifica…",
+      "publishing": "Pubblicazione…",
+      "offline": "Non pubblicato mentre la rete è spenta.",
+      "failed": "Impossibile pubblicare: {{error}}. Nuovo tentativo tra qualche minuto.",
+      "listTitle": "Elenca identità pubblicamente nel mio DID",
+      "warning": "Tutto ciò che è elencato qui è pubblico per tutti e per sempre: chiunque abbia il tuo DID lo vede, e alcuni resolver ne conservano copie anche dopo che lo togli. Le chat non ne hanno mai bisogno. Lascia disattivato per condividere ogni identità con un contatto alla volta.",
+      "none": "Ancora nessuna identità da elencare. Chiavi Nostr, domini, chiavi OpenPGP, indirizzi Bitcoin e account GitHub o GitLab possono essere elencati dopo averli aggiunti.",
+      "expired": "Scaduta: non elencata finché non la rinnovi",
+      "listOne": "Elenca {{identity}} pubblicamente nel mio DID"
     }
   },
   "profileSwitcher": {

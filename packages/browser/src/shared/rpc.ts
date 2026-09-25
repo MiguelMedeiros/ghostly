@@ -89,6 +89,8 @@ export interface EngineApi {
   recheckIdentityProof(params: { linkId: string; id: string }): void;
   /** Only on request: the public name/picture of what the contact shared. */
   lookupIdentityDisplay(params: { linkId: string; id: string }): void;
+  /** Lists one of the profile's identities in its public DID document (`alsoKnownAs`), or takes it out. */
+  setDidListed(params: { id: string; listed: boolean }): void;
   /** Nostr social layer, per contact: their profile (kind 0), follows (kind 3) or notes (kind 1), from the person's relays. Refused without a verified Nostr proof from that contact. */
   nostrLoadContact(params: { linkId: string; subject: string; what: "profile" | "follows" | "notes"; more?: boolean }): void;
   /** Forgets what was loaded about a contact's key. */

@@ -24,6 +24,7 @@ import type { ProviderHost, ProviderPlatform } from "./paymentAdapters/providers
 import type { EngineApi } from "../shared/rpc";
 import { EXTERNAL_IDENTITIES_ENABLED } from '../shared/features';
 import { IdentityProofs } from './identities';
+import { ProfileDid } from './did';
 import { NostrSocial, effectiveNostrSettings } from './nostrSocial';
 import { normalizeNostrRelays } from '../nostr/relay';
 import type { NostrDraft, NostrDraftRequest, NostrPublishResult } from '../nostr/types';
@@ -520,9 +521,25 @@ export class GhostlyNode implements EngineImplementation {
     },
     linkIds: () => [...this.links.keys()],
     online: () => this.settings.online,
-    emit: () => this.emitState(),
+    emit: () => { this.emitState(); this.did.changed(); },
     publish: (seed, records) => this.transport.publish(identityFromSeed(seed), records),
     resolve: async key => (await this.transport.resolve(key))?.records ?? null,
+  });
+
+  /** The profile's did:dht: a key of its own, public, never tied to a chat (WISP 3xx-did-dht). */
+  readonly did = new ProfileDid({
+    online: () => this.settings.online,
+    emit: () => this.emitState(),
+    listable: () => {
+      const now = Date.now() / 1000;
+      return new Map(this.identities.views().filter(v => v.publicUri && v.expiresAt > now).map(v => [v.id, v.publicUri!]));
+    },
+    proofIds: () => this.identities.views().map(v => v.id),
+    publish: (pubKeyZ32, payload) => {
+      if (!this.transport.publishPayload) throw new Error("This app cannot publish a DID");
+      // Background: the DID can wait for a chat's signaling.
+      return this.transport.publishPayload(pubKeyZ32, payload, { background: true });
+    },
   });
 
   /** The Nostr social layer (profile, follows, notes, publication) on top of verified Nostr proofs. */
@@ -701,6 +718,8 @@ export class GhostlyNode implements EngineImplementation {
     this.services = await db.getServices();
     await this.identities.load();
     this.identities.start();
+    await this.did.load();
+    this.did.start();
     await this.nostrSocial.load();
     await this.arkWallet.start();
     await this.barkWallet.start();
@@ -765,6 +784,7 @@ export class GhostlyNode implements EngineImplementation {
     this.stopGroupEntries();
     this.stopWatchingAdapters?.();
     this.identities.stop();
+    this.did.stop();
     this.nostrSocial.stop();
     await this.arkWallet.stop();
     await this.barkWallet.stop();
@@ -793,6 +813,7 @@ export class GhostlyNode implements EngineImplementation {
       wallet: this.walletView,
       payments: this.desk.views(),
       identityProofs: this.identities.views(),
+      did: this.did.view(),
       nostr: this.nostrSocial.state(),
       edges: [...[...this.links.values()].filter(live => live.stored.group && !live.stored.groupEntry).map(live => this.viewOf(live)), ...this.communityPayViews(groups)],
       groups: groups.map(group => ({ ...group, members: group.members.map(member => {
@@ -1009,6 +1030,7 @@ export class GhostlyNode implements EngineImplementation {
   shareIdentityProof(params: { linkId: string; id: string }): Promise<void> { return this.identities.share(params); }
   withdrawIdentityProof(params: { linkId: string; id: string }): Promise<void> { return this.identities.withdraw(params); }
   recheckIdentityProof(params: { linkId: string; id: string }): Promise<void> { return this.identities.recheck(params); }
+  setDidListed(params: { id: string; listed: boolean }): Promise<void> { return this.did.setListed(params); }
   lookupIdentityDisplay(params: { linkId: string; id: string }): Promise<void> {
     // A Nostr profile comes through the social layer, from the relays the person configured.
     const r = this.links.get(params.linkId)?.stored.identities?.received.find(x => x.id === params.id);
@@ -2135,6 +2157,7 @@ export class GhostlyNode implements EngineImplementation {
       this.hold.start();
       this.startGroupEntries();
       this.prepareSpare();
+      void this.did.publishNow().catch(() => {});
     }
     if (wasOnline && !this.settings.online) this.stopGroupEntries();
     if (wasOnline && !this.settings.online) await this.hold.stop();

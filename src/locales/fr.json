@@ -325,6 +325,26 @@
       "notVerified": "Non vérifié",
       "verifiedExplain": "Vous avez comparé les codes avec le contact : sa clé est celle que vous avez vérifiée.",
       "notVerifiedExplain": "Vous n'avez pas encore comparé les codes avec le contact ; le panneau de connexion de la discussion le propose."
+    },
+    "did": {
+      "title": "DID public",
+      "hint": "Un identifiant de ce profil que tout le monde peut consulter (un DID du W3C, did:dht). Il a sa propre clé : aucune discussion ne l'utilise, il ne relie donc aucune d'entre elles.",
+      "live": "Publié",
+      "notLive": "Non publié",
+      "copy": "Copier le DID",
+      "showQr": "Afficher le code QR",
+      "hideQr": "Masquer le code QR",
+      "qrTitle": "Code QR de votre DID",
+      "published": "Publié {{time}}. Il est republié toutes les heures tant que l'app est ouverte.",
+      "updating": "Publication de la modification…",
+      "publishing": "Publication…",
+      "offline": "Pas publié tant que le réseau est coupé.",
+      "failed": "Publication impossible : {{error}}. Nouvel essai dans quelques minutes.",
+      "listTitle": "Afficher des identités publiquement dans mon DID",
+      "warning": "Tout ce qui est affiché ici est public, pour tout le monde et pour toujours : quiconque a votre DID le voit, et certains résolveurs en gardent des copies même après que vous l'avez retiré. Les discussions n'en ont jamais besoin. Laissez désactivé pour partager chaque identité avec un seul contact à la fois.",
+      "none": "Aucune identité à afficher pour l'instant. Les clés Nostr, les domaines, les clés OpenPGP, les adresses Bitcoin et les comptes GitHub ou GitLab peuvent être affichés une fois ajoutés.",
+      "expired": "Expirée : pas affichée tant que vous ne la renouvelez pas",
+      "listOne": "Afficher {{identity}} publiquement dans mon DID"
     }
   },
   "profileSwitcher": {

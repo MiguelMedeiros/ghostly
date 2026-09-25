@@ -738,6 +738,24 @@ export interface IdentityProofView {
   createdAt: number;
   /** Chats it is currently shared in (or queued for). */
   sharedWith: number;
+  /** The identity as a URI the profile's public DID can list (`alsoKnownAs`); absent when it has none. */
+  publicUri?: string;
+}
+
+/** The profile's did:dht (WISP 3xx-did-dht): its own key, public to everyone, never tied to a chat. */
+export interface ProfileDidView {
+  /** `did:dht:…` */
+  id: string;
+  /** Identity proof ids the person listed as public, in order (some may not be publishable right now). */
+  listed: string[];
+  /** What the document says the subject is also known as: the listed identities that are verified and current. */
+  alsoKnownAs: string[];
+  /** The last packet put on Pkarr: when, and its version (the BEP44 sequence number). */
+  published?: { at: number; versionId: string };
+  /** The document out there is the current one. */
+  upToDate: boolean;
+  /** Why the last publish failed. */
+  error?: string;
 }
 
 /** A contact's proof, as this app checked it. */
@@ -879,6 +897,8 @@ export interface EngineState {
   payments: Record<string, PaymentView>;
   /** This profile's identity proofs. */
   identityProofs: IdentityProofView[];
+  /** This profile's public DID. Absent until the engine has loaded it. */
+  did?: ProfileDidView;
   /** The Nostr social layer: the person's own keys' data and the effective settings. */
   nostr: NostrSocialState;
   /** Private groups and pending invitations (WISP 900). */

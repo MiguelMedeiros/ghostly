@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createIdentity } from "../src/identity";
 import { createRelayPayload } from "../src/pkarr";
+import { didDhtDocument, encodeDidDhtPacket, signDidDhtPacket } from "../src/didDht";
 import { DEFAULT_RELAYS, RelayTransport, normalizeRelayUrl } from "../src/relay";
 
 // covers: core.relay-client
@@ -40,6 +41,22 @@ describe("relay URLs", () => {
 });
 
 describe("publishing", () => {
+  it("puts a payload signed elsewhere byte for byte, its own sequence number as the next If-Match, and refuses a forged one", async () => {
+    const seen: { url: string; body: Uint8Array; ifMatch?: string }[] = [];
+    const relay = new RelayTransport({ relays: ["https://a.test", "https://b.test"], fetch: (async (url: RequestInfo | URL, init?: RequestInit) => {
+      seen.push({ url: String(url), body: init!.body as Uint8Array, ifMatch: (init!.headers as Record<string, string> | undefined)?.["If-Match"] });
+      return new Response(null, { status: 204 });
+    }) as typeof fetch });
+    const payload = signDidDhtPacket(id, encodeDidDhtPacket(didDhtDocument(id.publicKey)), 1_790_000_000);
+    await relay.publishPayload(id.pubKeyZ32, payload, { background: true });
+    await relay.publishPayload(id.pubKeyZ32, payload);
+    expect(seen.map((s) => s.url)).toEqual([`https://a.test/${id.pubKeyZ32}`, `https://b.test/${id.pubKeyZ32}`, `https://a.test/${id.pubKeyZ32}`, `https://b.test/${id.pubKeyZ32}`]);
+    for (const s of seen) expect(s.body).toEqual(payload);
+    expect(seen.map((s) => s.ifMatch)).toEqual([undefined, undefined, "1790000000", "1790000000"]);
+    await expect(relay.publishPayload(createIdentity().pubKeyZ32, payload)).rejects.toThrow("Invalid signature");
+    await expect(new RelayTransport({ relays: [], fetch: vi.fn() }).publishPayload(id.pubKeyZ32, payload)).rejects.toThrow("No Pkarr relays configured");
+  });
+
   it("uses strictly increasing sequence numbers even within one millisecond", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const stamps: bigint[] = [];
