@@ -81,6 +81,8 @@ export interface NetworkSettings {
   turn: { urls: string; username?: string; credential?: string } | null;
   /** Where Iroh runs in the page (web app, extension): its relays (empty: the defaults) and the defaults. */
   iroh?: { relays: string[]; defaultRelays: string[] };
+  /** The HyperDHT relay (wss://) paired chats reach HyperDHT through; empty for none. */
+  hyperdhtRelay: string;
 }
 
 export interface FileTransferState {
@@ -380,7 +382,7 @@ export interface ServicesPlatform {
   deleteMessage(peerPubKeyZ32: string, messageId: string): Promise<void>;
   wallet: WalletPlatform;
   getNetwork(): NetworkSettings | null;
-  setNetwork(settings: Pick<NetworkSettings, "relays" | "turn"> & { irohRelays?: string[] }): Promise<void>;
+  setNetwork(settings: Pick<NetworkSettings, "relays" | "turn"> & { irohRelays?: string[] } & Partial<Pick<NetworkSettings, "hyperdhtRelay">>): Promise<void>;
 }
 
 export const servicesPlatform: ServicesPlatform | null = null;

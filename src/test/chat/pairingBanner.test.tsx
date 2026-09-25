@@ -202,7 +202,7 @@ describe("PairingBanner: what the popover does", () => {
     expect(screen.getByRole("radio", { name: "WebRTC" })).toBeEnabled();
     for (const native of ["Iroh", "HyperDHT"]) {
       expect(screen.getByRole("radio", { name: native })).toBeDisabled();
-      expect(screen.getByRole("radio", { name: native })).toHaveAttribute("title", `${native}: ${native} needs Ghostly Desktop`);
+      expect(screen.getByRole("radio", { name: native })).toHaveAttribute("title", `${native}: ${native} needs Ghostly Desktop${native === "HyperDHT" ? ", or a HyperDHT relay in Settings" : ""}`);
     }
     await user.click(screen.getByRole("radio", { name: "WebRTC" }));
     expect(engine.callsTo("setChatTransport")).toEqual([]);

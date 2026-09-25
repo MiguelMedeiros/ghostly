@@ -48,7 +48,7 @@ export function TransportMenu({ link, open, onClose, anchorRef }: {
     <Menu testId="transport-menu" open={open} onClose={onClose} anchorRef={anchorRef}>
       <div className="px-3 pb-1 pt-1.5 text-xs text-text-muted" data-testid="transport-menu-now">
         <span className="font-medium text-text-primary">Connection</span>
-        {" · "}{summary ? `on ${summary.name}${summary.rttMs !== undefined ? `, ${summary.rttMs} ms` : ""}` : link.deliveryMode === "dht" ? "DHT only" : "not live"}
+        {" · "}{summary ? `on ${summary.name}${summary.relays ? ", relayed" : ""}${summary.rttMs !== undefined ? `, ${summary.rttMs} ms` : ""}` : link.deliveryMode === "dht" ? "DHT only" : "not live"}
       </div>
       <TransportOptions link={link} onChosen={onClose} menu />
     </Menu>
@@ -94,7 +94,7 @@ export function TransportOptions({ link, disabled = false, onChosen, menu = fals
       {(single && menu ? local : options).map(o => (
         <Option menu={menu} key={o.transport} testId={`${ids}-${o.transport.replace("/1", "")}`} icon={<TransportIcon transport={o.transport} />}
           checked={!dht && (single ? o.available : !automatic && link.preferredTransport === o.transport)} disabled={off || (single && menu && !dht) || !o.available}
-          hint={!o.available ? o.reason : current === o.transport ? `In use${link.transportRttMs !== undefined ? ` · ${link.transportRttMs} ms` : ""}` : !automatic && link.preferredTransport === o.transport ? "Chosen · not in use" : undefined}
+          hint={!o.available ? o.reason : current === o.transport ? `In use${o.relayed ? " · relayed" : ""}${link.transportRttMs !== undefined ? ` · ${link.transportRttMs} ms` : ""}` : !automatic && link.preferredTransport === o.transport ? "Chosen · not in use" : o.relayed ? "Through a relay · used when nothing direct connects" : undefined}
           onClick={() => void choose(o.transport)} label={transportName(o.transport)} />
       ))}
       {/* Always there (WISP 400): it travels as the DHT envelope's mode, so every app can choose it. */}
@@ -105,8 +105,8 @@ export function TransportOptions({ link, disabled = false, onChosen, menu = fals
     {((single && menu) || (peerDht && menu) || error) && <p className={`${menu ? "max-w-72 px-3 pb-1.5 pt-1" : "mt-1"} whitespace-normal text-[11px] leading-4 text-text-muted`} data-testid="transport-menu-note">
       {error ? <span role="alert" className="text-danger">{error}</span>
         : peerDht ? "Your contact chose DHT only: no live connection until you both leave it."
-        : link.transportErrors?.["iroh/1"] ? `This app connects over WebRTC only right now: Iroh could not start (${link.transportErrors["iroh/1"].replace(/\.$/, "")}). HyperDHT needs Ghostly Desktop on both sides.`
-        : "This app connects over WebRTC only. Iroh and HyperDHT need Ghostly Desktop on both sides."}
+        : link.transportErrors?.["iroh/1"] ? `This app connects over WebRTC only right now: Iroh could not start (${link.transportErrors["iroh/1"].replace(/\.$/, "")}). HyperDHT needs Ghostly Desktop or a HyperDHT relay (Settings, Network).`
+        : "This app connects over WebRTC only. Iroh needs Ghostly Desktop; HyperDHT needs Ghostly Desktop or a HyperDHT relay (Settings, Network)."}
     </p>}
   </>;
 }

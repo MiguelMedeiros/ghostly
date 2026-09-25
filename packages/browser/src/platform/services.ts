@@ -15,6 +15,7 @@ import { fileStore } from "../shared/idb";
 import { SMALL_FILE_BYTES, fileBytes, fileBytesOf } from "../shared/fileBytes";
 import { storedBlob } from "../shared/storedFiles";
 import type { FileTransferState } from "../../../../src/lib/platform";
+import { DEFAULT_HYPERDHT_RELAY } from "../shared/hyperdhtRelay";
 import { TEST_MINT, TEST_MINTS } from "../shared/mints";
 import { getBrowserHost } from "../host";
 import { engine } from "./engine";
@@ -312,8 +313,9 @@ export const servicesPlatform: ServicesPlatform | null = {
       defaultRelays: DEFAULT_RELAYS,
       turn: state.settings.iceServers[0] ?? null,
       ...(state.transport.iroh ? { iroh: { relays: state.settings.irohRelays ?? [], defaultRelays: state.transport.iroh.defaults } } : {}),
+      hyperdhtRelay: state.settings.hyperdhtRelay ?? DEFAULT_HYPERDHT_RELAY,
     };
   },
-  setNetwork: ({ relays, turn, irohRelays }) =>
-    engine.call("updateSettings", { settings: { relays, iceServers: turn?.urls ? [turn] : [], ...(irohRelays ? { irohRelays } : {}) } }),
+  setNetwork: ({ relays, turn, irohRelays, hyperdhtRelay }) =>
+    engine.call("updateSettings", { settings: { relays, iceServers: turn?.urls ? [turn] : [], ...(irohRelays ? { irohRelays } : {}), ...(hyperdhtRelay !== undefined ? { hyperdhtRelay } : {}) } }),
 };

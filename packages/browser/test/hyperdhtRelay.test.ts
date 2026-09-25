@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
-import { GhostLink, createIdentity, createLink, toBase64, type BoundChannel, type NativeEndpoint, type PairingState } from "@ghostly/core";
+import { GhostLink, createIdentity, createLink, fromBase64Url, type BoundChannel, type NativeEndpoint, type PairingState } from "@ghostly/core";
 import { createRelayedHyperEndpoint, hyperKeyPair, relayUrlProblem } from "../src/platform/hyperdhtRelay";
 // covers: transport.hyperdht-relay, transport.hyperdht, transport.relayed
 
@@ -13,7 +13,8 @@ import { createRelayedHyperEndpoint, hyperKeyPair, relayUrlProblem } from "../sr
 type Relay = { url: string; bootstrap: string[]; close(): Promise<void>; stats(): { clients: number; dropped: number; refused: number } };
 let relay: Relay;
 const opened: NativeEndpoint[] = [];
-const seed = () => toBase64(crypto.getRandomValues(new Uint8Array(32)));
+/** A chat's transport seed, as the engine makes it (url-safe base64). */
+const seed = () => createIdentity().seedB64;
 /** What the browser side wrote to the relay, to look for anything it must never see. */
 const sent: Uint8Array[] = [];
 function recordingSocket(url: string): WebSocket {
@@ -67,9 +68,9 @@ it("gives the Desktop's key for the same seed, and says it is relayed", async ()
   const seedB64 = seed();
   const endpoint = await web(relay.url, seedB64);
   const { default: DHT } = await import("hyperdht");
-  const expected = DHT.keyPair(Buffer.from(seedB64, "base64"));
-  expect(endpoint.descriptor).toEqual({ publicKey: expected.publicKey.toString("hex"), relayed: true });
-  expect(Buffer.from(hyperKeyPair(Buffer.from(seedB64, "base64")).secretKey)).toEqual(expected.secretKey);
+  const expected = DHT.keyPair(Buffer.from(fromBase64Url(seedB64)));
+  expect(endpoint.descriptor).toEqual({ publicKey: expected.publicKey.toString("hex"), relayed: true, relay: relay.url });
+  expect(Buffer.from(hyperKeyPair(fromBase64Url(seedB64)).secretKey)).toEqual(expected.secretKey);
 }, 30_000);
 
 it("talks to a Desktop both ways, with the same binding at both ends, and the relay sees no secret", async () => {

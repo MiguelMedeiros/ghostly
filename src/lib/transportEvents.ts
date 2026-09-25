@@ -43,6 +43,7 @@ export function transportLineText(entry: TransportEntry, contact: string): strin
       if (entry.cause === "you") return `You switched to ${t}`;
       if (entry.cause === "contact") return `${contact} switched to ${t}`;
       if (entry.cause === "dropped") return `Switched to ${t}: ${name(entry.from)} dropped`;
+      if (entry.relayed) return `Moved to ${t}, through a relay`;
       return native(entry.transport) ? `Moved to ${t}, a direct path was found` : `Moved to ${t}`;
     case "failed": {
       const reason = entry.reason ? shortReason(entry.reason) : "";
@@ -68,7 +69,7 @@ export function transportLineText(entry: TransportEntry, contact: string): strin
 export function transportLineDetails(entry: TransportEntry, contact: string, format: (at: number) => string): { label: string; value: string }[] {
   const rows: { label: string; value: string }[] = [];
   const live = entry.kind === "flapping" ? entry.live : entry.kind !== "lost" && entry.kind !== "dht-only" && entry.kind !== "dht-left" && entry.kind !== "failed" && !!entry.transport;
-  rows.push({ label: "Transport", value: live ? name(entry.transport) : entry.kind === "dht-only" ? "DHT only" : "None live" });
+  rows.push({ label: "Transport", value: live ? `${name(entry.transport)}${entry.relayed ? " · relayed" : ""}` : entry.kind === "dht-only" ? "DHT only" : "None live" });
   rows.push({ label: "Since", value: format(entry.at) });
   rows.push({ label: "Why", value: transportLineWhy(entry, contact, format) });
   if (entry.kind === "back" && entry.downMs !== undefined) rows.push({ label: "Not live for", value: lasting(entry.downMs) });
@@ -100,6 +101,7 @@ function transportLineWhy(entry: TransportEntry, contact: string, format: (at: n
       if (entry.cause === "you") return `You chose ${name(entry.transport)} for this chat. The session moved from ${name(entry.from)} without reconnecting.`;
       if (entry.cause === "contact") return `${contact} chose ${name(entry.transport)} for this chat. The session moved from ${name(entry.from)} without reconnecting.`;
       if (entry.cause === "dropped") return `${name(entry.from)} dropped, and the chat came back over ${name(entry.transport)}.`;
+      if (entry.relayed) return `Both apps allow ${name(entry.transport)} and moved there by themselves, from ${name(entry.from)}. It goes through a relay, which sees when you talk, never what you say.`;
       return `Both apps allow ${name(entry.transport)} and moved there by themselves, from ${name(entry.from)}.`;
     case "failed": return `${entry.reason ?? "The new transport did not connect."}${entry.transport ? ` The chat stayed on ${name(entry.transport)}.` : ""}`;
     case "lost":
@@ -123,20 +125,28 @@ export interface TransportOption {
   transport: PairedTransport;
   available: boolean;
   reason?: string;
+  /** A session on it would go through a relay: a fallback when nothing direct connects. */
+  relayed?: boolean;
+}
+
+/** Why this app lacks a transport, and how to get it where there is a way. */
+function missing(transport: PairedTransport): string {
+  if (transport === "webrtc/1") return "This app has no WebRTC";
+  if (transport === "hyperdht/1") return "HyperDHT needs Ghostly Desktop, or a HyperDHT relay in Settings";
+  return `${name(transport)} needs Ghostly Desktop`;
 }
 
 /**
  * What the chat's Connection menu offers: transports this app runs and the contact's app supports on this link
  * (per its last word; unknown before a first session, then only this app's side is known). Never one this app lacks.
  */
-export function transportOptions(link: Pick<LinkView, "availableTransports" | "peerTransports" | "transportErrors">): TransportOption[] {
+export function transportOptions(link: Pick<LinkView, "availableTransports" | "peerTransports" | "transportErrors" | "relayedTransports">): TransportOption[] {
   const mine = link.availableTransports ?? [], theirs = link.peerTransports;
   return MENU_ORDER.map(transport => {
     const error = link.transportErrors?.[transport];
-    if (!mine.includes(transport)) return { transport, available: false,
-      reason: error ?? (transport === "webrtc/1" ? "This app has no WebRTC" : `${name(transport)} needs Ghostly Desktop`) };
+    if (!mine.includes(transport)) return { transport, available: false, reason: error ?? missing(transport) };
     if (theirs && !theirs.includes(transport)) return { transport, available: false, reason: `Your contact's app doesn't support ${name(transport)}` };
-    return { transport, available: true };
+    return { transport, available: true, ...(link.relayedTransports?.includes(transport) ? { relayed: true } : {}) };
   });
 }
 
@@ -246,6 +256,7 @@ export function connectionSummary(link: LinkView | undefined, now: number, conta
     : cause === "dropped" ? ["automatic, after a drop", `Automatic: the chat came back over ${t} after the previous transport dropped.`]
     : relayed ? ["no direct path", `Automatic: a direct connection could not be made, so the chat goes through ${t}'s relay.`]
     : ["automatic", `Automatic: both apps rank ${t} first${transport === "webrtc/1" ? ", and a first pairing always uses WebRTC" : ""}.`];
+  const why = relayed ? `${reason} The relay forwards encrypted bytes: it sees when you talk, never what you say.` : reason;
   const since = link.transportLive?.since;
   const rtt = link.transportRttMs !== undefined ? [`${link.transportRttMs} ms`] : [];
   const path = relayed ? ["relayed"] : [];

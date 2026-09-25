@@ -1,15 +1,20 @@
 import { useEffect, useState } from "react";
 import { iceServerProblem } from "@ghostly/browser/shared/ice";
+import { hyperdhtRelayProblem } from "@ghostly/browser/shared/hyperdhtRelay";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { Block, FieldGrid, Section } from "./layout";
 
-/** Settings section for clients that reach Pkarr through relays: which relays, and an optional TURN server. */
+/**
+ * Settings section for clients that reach Pkarr through relays: which relays, an optional TURN server, and
+ * the optional HyperDHT relay that lets paired chats use HyperDHT from a browser.
+ */
 export function NetworkSettings() {
   const platform = useServicesPlatform();
   const network = platform?.getNetwork() ?? null;
   const [relays, setRelays] = useState("");
   const [turn, setTurn] = useState({ urls: "", username: "", credential: "" });
   const [iroh, setIroh] = useState("");
+  const [hyperdhtRelay, setHyperdhtRelay] = useState("");
   // What was last saved: "Saved" stays up while the form still shows it, instead of flashing past while
   // the engine is busy (a save can take seconds while the wallets start).
   const [savedAs, setSavedAs] = useState<string | null>(null);
@@ -21,12 +26,13 @@ export function NetworkSettings() {
     setRelays(network.relays.join("\n"));
     setTurn({ urls: network.turn?.urls ?? "", username: network.turn?.username ?? "", credential: network.turn?.credential ?? "" });
     setIroh((network.iroh?.relays.length ? network.iroh.relays : network.iroh?.defaultRelays ?? []).join("\n"));
+    setHyperdhtRelay(network.hyperdhtRelay);
     // Load once; afterwards the fields belong to the user until they save.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded]);
 
   if (!platform || !network) return null;
-  const current = JSON.stringify({ relays, turn, iroh });
+  const current = JSON.stringify({ relays, turn, iroh, hyperdhtRelay });
   const saved = savedAs === current;
 
   const save = async () => {
@@ -34,13 +40,14 @@ export function NetworkSettings() {
     setSavedAs(null);
     const server = turn.urls.trim() ? { ...turn, urls: turn.urls.trim() } : null;
     // Checked here as well as in the engine, so the person sees why before anything changes.
-    const problem = server ? iceServerProblem(server) : null;
+    const relay = hyperdhtRelay.trim();
+    const problem = (server ? iceServerProblem(server) : null) ?? (relay ? hyperdhtRelayProblem(relay) : null);
     if (problem) { setError(problem); return; }
     try {
       const irohRelays = iroh.split(/\s+/).filter(Boolean);
       // The defaults are stored as "none chosen", so a later change of the defaults reaches this profile.
       const defaults = network.iroh && JSON.stringify(irohRelays) === JSON.stringify(network.iroh.defaultRelays);
-      await platform.setNetwork({ relays: relays.split(/\s+/).filter(Boolean), turn: server, ...(network.iroh ? { irohRelays: defaults ? [] : irohRelays } : {}) });
+      await platform.setNetwork({ relays: relays.split(/\s+/).filter(Boolean), turn: server, ...(network.iroh ? { irohRelays: defaults ? [] : irohRelays } : {}), hyperdhtRelay: relay });
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); return; }
     setSavedAs(current);
   };
@@ -136,6 +143,26 @@ export function NetworkSettings() {
           Reset to defaults
         </button>
       </Block>}
+
+      <Block>
+        <div>
+          <label htmlFor="network-hyperdht-relay" className="text-text-primary text-sm block">HyperDHT relay (optional)</label>
+          <p className="text-text-muted text-xs mt-0.5">
+            Lets chats use HyperDHT from this browser, as a fallback when a direct WebRTC connection fails. The relay
+            forwards encrypted bytes: it sees your address and when you talk, never what you say. Leave it empty to
+            use WebRTC only.
+          </p>
+        </div>
+        <input
+          id="network-hyperdht-relay"
+          value={hyperdhtRelay}
+          onChange={(e) => setHyperdhtRelay(e.target.value)}
+          placeholder="wss://relay.example.org"
+          spellCheck={false}
+          data-testid="network-hyperdht-relay"
+          className={`${field} font-mono text-sm`}
+        />
+      </Block>
 
       <Block>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">

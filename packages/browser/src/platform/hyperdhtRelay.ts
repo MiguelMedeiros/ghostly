@@ -1,5 +1,8 @@
 import { ed25519 } from "@noble/curves/ed25519.js";
-import { fromBase64, type BoundChannel, type FrameChannel, type NativeEndpoint } from "@ghostly/core";
+import { fromBase64Url, type BoundChannel, type FrameChannel, type NativeEndpoint } from "@ghostly/core";
+import { hyperdhtRelayProblem } from "../shared/hyperdhtRelay";
+
+export { hyperdhtRelayProblem as relayUrlProblem };
 
 /**
  * HyperDHT (WISP 103) for a browser, through a dht-relay: a server that runs the UDP half of HyperDHT and
@@ -22,8 +25,11 @@ const RELAY_OPEN_MS = 10_000;
 const LISTEN_MS = 20_000;
 const MAX_CHANNELS = 2;
 
-/** The descriptor a browser's HyperDHT endpoint gives out: its key, and that it is reached only through a relay. */
-export interface RelayedHyperDescriptor { publicKey: string; relayed: true }
+/**
+ * The descriptor a browser's HyperDHT endpoint gives out: its key, that it is reached only through a relay, and
+ * which one (the connection panel names its host; a Desktop dialling it ignores both).
+ */
+export interface RelayedHyperDescriptor { publicKey: string; relayed: true; relay: string }
 
 /** The parts of dht-relay and its streams this adapter uses. */
 interface SecretSocket {
@@ -62,15 +68,6 @@ export function hyperKeyPair(seed: Uint8Array): KeyPair {
   return { publicKey, secretKey };
 }
 
-/** Only `wss://`, or `ws://` to this machine (a relay for tests or development). */
-export function relayUrlProblem(url: string): string | null {
-  let parsed: URL;
-  try { parsed = new URL(url); } catch { return "Enter a relay address (wss://…)"; }
-  if (parsed.protocol === "wss:") return null;
-  if (parsed.protocol === "ws:" && ["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname)) return null;
-  return "Use a wss:// relay address";
-}
-
 /**
  * One WebSocket per relay for the whole app, shared by every chat's endpoint (each listens on its own
  * key). It closes when the last endpoint does. When the relay goes away, every endpoint on it says it is
@@ -94,7 +91,10 @@ async function relayClient(url: string, createSocket: (url: string) => WebSocket
   }
   const opening = (async () => {
     const [{ default: RelayedDHT }, { default: WebSocketStream }] = await Promise.all([
-      import("@hyperswarm/dht-relay"), import("@hyperswarm/dht-relay/ws"),
+      // @ts-expect-error dht-relay ships no types: RelayedNode and SecretSocket above describe what this uses.
+      import("@hyperswarm/dht-relay"),
+      // @ts-expect-error The same package's WebSocket stream, untyped too.
+      import("@hyperswarm/dht-relay/ws"),
     ]);
     const socket = createSocket(url);
     socket.binaryType = "arraybuffer";
@@ -249,9 +249,9 @@ export interface RelayedHyperOptions {
  * when the relay cannot be reached or does not let it listen.
  */
 export async function createRelayedHyperEndpoint(seedB64: string, url: string, options: RelayedHyperOptions = {}): Promise<NativeEndpoint> {
-  const problem = relayUrlProblem(url);
+  const problem = hyperdhtRelayProblem(url);
   if (problem) throw new Error(problem);
-  const keyPair = hyperKeyPair(fromBase64(seedB64));
+  const keyPair = hyperKeyPair(fromBase64Url(seedB64));
   const client = await relayClient(url, options.createSocket ?? (address => new WebSocket(address)));
   const channels = new Set<RelayedChannel>();
   let stopped = false;
@@ -288,7 +288,7 @@ export async function createRelayedHyperEndpoint(seedB64: string, url: string, o
     release(url, client, member);
     throw error;
   }
-  const descriptor: RelayedHyperDescriptor = { publicKey: hex(keyPair.publicKey), relayed: true };
+  const descriptor: RelayedHyperDescriptor = { publicKey: hex(keyPair.publicKey), relayed: true, relay: url };
   endpoint = {
     transport: "hyperdht/1", descriptor, onDescriptor: null, onUnavailable: null,
     get onConnection() { return handler; },

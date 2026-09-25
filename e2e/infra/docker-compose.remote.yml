@@ -48,6 +48,7 @@ services:
   fedimint-lnd: *node
   fedimint-lnd-peer: *node
   fedimint-gateway: *small
+  hyperdht-relay: *small
 
 configs:
   captaind-toml: { environment: E2E_INFRA_CAPTAIND_TOML }

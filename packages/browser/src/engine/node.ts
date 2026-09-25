@@ -110,8 +110,12 @@ import { S3Store } from "../backup/s3";
 import type { HoldStore } from "../backup/storage";
 import { PaymentDesk } from "./payments";
 import { CashuWallet } from "./wallet";
+import { DEFAULT_HYPERDHT_RELAY, hyperdhtRelayProblem } from "../shared/hyperdhtRelay";
 import { traceJoin } from "./joinTrace";
 import { DEFAULT_IROH_RELAYS, createIrohWebEndpoint, irohRelayProblem } from "../platform/irohWeb";
+
+/** How long a chat waits before listening again after its HyperDHT relay went away. */
+const RELAY_RETRY_MS = 30_000;
 
 const DEFAULT_SETTINGS: Settings = {
   online: true,
@@ -204,6 +208,10 @@ function newLiveLink(stored: StoredLink, lastMessageAt: number, files = emptyLin
 const PAYMENT_METHODS: PaymentMethodName[] = ["cashu", "lightning", "arkade", "usdt", "bark", "bitcoin", "fedimint", "spark"];
 
 export interface NodeOptions {
+  /**
+   * The native transports this app runs itself (the Desktop: Iroh and HyperDHT over its sidecars). Default: a
+   * browser's, which is HyperDHT through the relay in `Settings.hyperdhtRelay`, when one is set.
+   */
   nativeTransports?: Partial<Record<NativeTransport, (seedB64: string) => Promise<NativeEndpoint>>>;
   /**
    * Run Iroh in the page (web app, extension): the wasm build, relay only, on the relays in the settings
@@ -739,6 +747,7 @@ export class GhostlyNode implements EngineImplementation {
   /** Tells every peer we are leaving. Best effort: the browser may already be closing. */
   async shutdown(): Promise<void> {
     this.shuttingDown = true;
+    if (this.relayRetry) clearTimeout(this.relayRetry);
     if(this.paymentTimer)clearTimeout(this.paymentTimer);
     if (this.spareTimer) clearTimeout(this.spareTimer);
     this.stopGroupEntries();
@@ -1543,6 +1552,7 @@ export class GhostlyNode implements EngineImplementation {
     const changed = log.observe({
       live: live.dataLink === "open" && pairing?.status === "ready" && !!pairing.transport && live.link.isDataLinkOpen,
       transport: pairing?.transport,
+      relayed: !!pairing?.transport && live.link.relayedTransports.includes(pairing.transport),
       text: this.holdingFor(live) ? "hold" : live.link.textDelivery,
       dhtOnly: live.stored.deliveryMode === "dht",
       peerDhtOnly: live.link.dhtDelivery?.peerMode === "dht",
@@ -1940,6 +1950,13 @@ export class GhostlyNode implements EngineImplementation {
       for (const relay of settings.irohRelays) { const problem = irohRelayProblem(relay); if (problem) throw new Error(problem); }
     }
     const irohRelaysChanged = settings.irohRelays !== undefined && JSON.stringify(settings.irohRelays) !== JSON.stringify(this.settings.irohRelays ?? []);
+    if (settings.hyperdhtRelay !== undefined) {
+      if (typeof settings.hyperdhtRelay !== "string") throw new Error("Enter a relay address (wss://…)");
+      settings.hyperdhtRelay = settings.hyperdhtRelay.trim();
+      const problem = settings.hyperdhtRelay && hyperdhtRelayProblem(settings.hyperdhtRelay);
+      if (problem) throw new Error(problem);
+    }
+    const relayBefore = this.hyperdhtRelay;
     // Of the Nostr settings, only what the patch names changes; the rest stays as stored (or the defaults).
     if (nostr) {
       const current = effectiveNostrSettings(this.settings.nostr);
@@ -1971,6 +1988,12 @@ export class GhostlyNode implements EngineImplementation {
       for (const live of this.links.values()) live.link?.setNick(this.sharedNick);
       // A chat that is not live learns the name from the capability record.
       this.capsChanged();
+    }
+    if (settings.hyperdhtRelay !== undefined) {
+      // The default is kept as no setting at all, so a later default reaches whoever never chose.
+      if (settings.hyperdhtRelay === DEFAULT_HYPERDHT_RELAY) delete this.settings.hyperdhtRelay;
+      await db.putSettings(this.settings);
+      if (this.hyperdhtRelay !== relayBefore && this.settings.online) await this.relayChanged();
     }
     if (settings.holdStorage !== undefined) {
       if (!this.settings.holdStorage) delete this.settings.holdStorage;
@@ -2264,7 +2287,10 @@ export class GhostlyNode implements EngineImplementation {
         onHold: (state) => this.hold.peerSaid(linkId, state),
         onPeerProof: EXTERNAL_IDENTITIES_ENABLED ? async frame => { await (await this.proofsFor(linkId)).receive(frame); } : undefined,
         onIdentityProof: stored.profile ? frame => this.identities.frame(linkId, frame) : undefined,
-        onTransportsChanged: () => this.emitState(),
+        onTransportsChanged: () => {
+          if (live.link && !live.link.availableTransports.includes("hyperdht/1")) this.retryRelayLater();
+          this.emitState();
+        },
         onPeerTransportChoice: transport => { const log = this.transportLogOf(live); if (log?.chose("contact", transport, Date.now())) this.saveTransportLog(live, log); },
         onTransportSwitched: () => {
           // Frames of the old channel may have been cut short: what the contact has not confirmed goes again at
@@ -2451,9 +2477,12 @@ export class GhostlyNode implements EngineImplementation {
     this.emitState();
   }
 
-  /** The native transports this engine runs: the host's, and Iroh's browser build where it runs in the page. */
+  /** The native transports this engine runs: the host's, Iroh's browser build where it runs in the page, and HyperDHT through a relay where one is set and the host has no HyperDHT of its own. */
   private get nativeFactories(): Partial<Record<NativeTransport, (seedB64: string) => Promise<NativeEndpoint>>> {
+    const relay = this.relaysHyperdht ? this.hyperdhtRelay : "";
     return {
+      // Loaded only now: a browser that never uses a relay never downloads the HyperDHT client.
+      ...(relay ? { "hyperdht/1": async (seedB64: string) => (await import("../platform/hyperdhtRelay")).createRelayedHyperEndpoint(seedB64, relay) } : {}),
       ...this.options.nativeTransports,
       ...(this.options.irohWeb ? { "iroh/1": (seedB64: string) => createIrohWebEndpoint(seedB64, { relays: this.irohRelays }) } : {}),
     };
@@ -2469,6 +2498,44 @@ export class GhostlyNode implements EngineImplementation {
       await link.releaseEndpoint("iroh/1");
       void this.ensureNativeEndpoints(linkId);
     }
+  }
+
+  /** The HyperDHT relay a browser reaches the HyperDHT through; empty when none is set. */
+  private get hyperdhtRelay(): string { return (this.settings.hyperdhtRelay ?? DEFAULT_HYPERDHT_RELAY).trim(); }
+  /** HyperDHT goes through the relay here: the host runs none of its own (the Desktop does). */
+  private get relaysHyperdht(): boolean { return !this.options.nativeTransports?.["hyperdht/1"]; }
+
+  /**
+   * A relayed endpoint went away (the relay restarted, the network dropped): try again in a while, for every
+   * chat that keeps native listeners, as opening a chat would.
+   */
+  private relayRetry: ReturnType<typeof setTimeout> | null = null;
+  private retryRelayLater(): void {
+    if (!this.relaysHyperdht || !this.hyperdhtRelay || this.relayRetry || this.shuttingDown) return;
+    this.relayRetry = setTimeout(() => {
+      this.relayRetry = null;
+      for (const [linkId, live] of this.links) {
+        if (live.link && live.stored.profile && !live.stored.group && live.stored.deliveryMode !== "dht" && !live.link.availableTransports.includes("hyperdht/1")
+          && (live.stored.pairedPeerKey || this.activeLinkId === linkId)) void this.ensureNativeEndpoints(linkId);
+      }
+    }, RELAY_RETRY_MS);
+  }
+
+  /** A new relay (or none): chats give up their endpoints on the old one, as soon as none of them carries a session. */
+  private async relayChanged(): Promise<void> {
+    if (!this.relaysHyperdht) return;
+    for (const [linkId, live] of this.links) {
+      const link = live.link;
+      if (!link?.availableTransports.includes("hyperdht/1")) {
+        if (this.hyperdhtRelay && link && (live.stored.pairedPeerKey || this.activeLinkId === linkId)) void this.ensureNativeEndpoints(linkId);
+        continue;
+      }
+      if (!link.canReleaseEndpoint("hyperdht/1")) continue;
+      await link.releaseEndpoint("hyperdht/1");
+      if (live.transportErrors) delete live.transportErrors["hyperdht/1"];
+      if (this.hyperdhtRelay) void this.ensureNativeEndpoints(linkId);
+    }
+    this.emitState();
   }
 
   private ensureNativeEndpoints(linkId: string): Promise<void> {
@@ -2562,6 +2629,7 @@ export class GhostlyNode implements EngineImplementation {
       peerProofs: EXTERNAL_IDENTITIES_ENABLED && stored.peerProofs ? { local: stored.peerProofs.local, remote: stored.peerProofs.remote } : undefined,
       proofError: EXTERNAL_IDENTITIES_ENABLED ? live.proofError : undefined,
       availableTransports: live.link?.availableTransports,
+      relayedTransports: live.link?.relayedTransports,
       deliveryMode: live.stored.deliveryMode ?? "stream",
       dhtDelivery: live.link?.dhtDelivery,
       canSendText: (live.link?.canSendText ?? false) || this.holdingFor(live),

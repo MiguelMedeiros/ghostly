@@ -51,7 +51,7 @@ test("each timeline says when the chat went live, a quick reconnect stays in the
   await expect(menu.getByRole("radio")).toHaveCount(2);
   await expect(menu.getByRole("radio", { name: "WebRTC" })).toHaveAttribute("aria-checked", "true");
   await expect(menu.getByRole("radio", { name: "DHT only" })).toHaveAttribute("aria-checked", "false");
-  await expect(menu.getByTestId("transport-menu-note")).toHaveText("This app connects over WebRTC only. Iroh and HyperDHT need Ghostly Desktop on both sides.");
+  await expect(menu.getByTestId("transport-menu-note")).toHaveText("This app connects over WebRTC only. Iroh needs Ghostly Desktop; HyperDHT needs Ghostly Desktop or a HyperDHT relay (Settings, Network).");
   await alice.page.keyboard.press("Escape");
   await expect(menu).toBeHidden();
 
