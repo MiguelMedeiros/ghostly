@@ -560,7 +560,7 @@
     "packages/core/src/{files,pairedFiles}.ts": ["files.*","delivery.hold.picture"],
     "packages/core/src/voice.ts": ["files.voice.*"],
     "src/components/voice/**": ["files.voice.*"],
-    "src/lib/{voiceRecorder,voicePlayback}.ts": ["files.voice.*"],
+    "src/lib/{voiceRecorder,voicePlayback,voiceDecode}.ts": ["files.voice.*"],
     "packages/core/src/group{Commits,Community,Crypto,Entry,Meta,Session}.ts": ["groups.*"],
     "packages/core/src/{http,pairedHttp}.ts": ["services.*"],
     "packages/core/src/identityProofs.ts": ["proofs.*","core.capabilities","chat.paired.pair"],

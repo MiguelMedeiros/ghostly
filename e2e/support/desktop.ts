@@ -137,6 +137,11 @@ class Driver {
     return (await this.call("POST", "/execute/sync", { script, args })) as T;
   }
 
+  /** As `execute`, for a body that finishes later: it calls `arguments[arguments.length - 1]` with its result. */
+  async executeAsync<T = unknown>(script: string, ...args: unknown[]): Promise<T> {
+    return (await this.call("POST", "/execute/async", { script, args })) as T;
+  }
+
   /** Throws when nothing matches: a click is not something to be vague about. */
   async click(selector: string): Promise<void> {
     const element = await this.find(selector);
@@ -153,7 +158,7 @@ class Driver {
   }
 }
 
-export type DesktopApp = Pick<Driver, "text" | "click" | "title" | "attribute" | "type" | "execute">;
+export type DesktopApp = Pick<Driver, "text" | "click" | "title" | "attribute" | "type" | "execute" | "executeAsync">;
 
 export interface DesktopOptions {
   /** `GHOSTLY_PROFILE`: the app's own space in its storage. */

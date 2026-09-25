@@ -92,20 +92,25 @@ export function recordableTypes(...types: string[]) {
 
 /**
  * Audio elements that "play": `play()` resolves and fires `play`, `pause()` fires `pause`, and
- * `players` lists them so a test can end one. `canPlay` decides what `canPlayType` says.
+ * `players` lists them so a test can end one. `canPlay` decides what `canPlayType` says; `refuse`
+ * makes `play()` reject for a source, as an engine without a decoder (or a CSP) does.
  */
 export const audio = {
   players: [] as HTMLAudioElement[],
   canPlay: (type: string) => (type.startsWith("audio/") ? "maybe" : ""),
+  refuse: (_player: HTMLAudioElement): DOMException | null => null,
 };
 
 export function installFakeAudio() {
   audio.players = [];
   audio.canPlay = (type) => (type.startsWith("audio/") ? "maybe" : "");
+  audio.refuse = () => null;
   const proto = HTMLMediaElement.prototype;
   vi.spyOn(proto, "canPlayType").mockImplementation((type: string) => audio.canPlay(type) as CanPlayTypeResult);
   vi.spyOn(proto, "play").mockImplementation(function (this: HTMLMediaElement) {
     if (!audio.players.includes(this as HTMLAudioElement)) audio.players.push(this as HTMLAudioElement);
+    const refusal = audio.refuse(this as HTMLAudioElement);
+    if (refusal) return Promise.reject(refusal);
     Object.defineProperty(this, "paused", { configurable: true, value: false });
     this.dispatchEvent(new Event("play"));
     return Promise.resolve();
@@ -120,4 +125,35 @@ export function installFakeAudio() {
 export function endPlayback(player: HTMLAudioElement) {
   Object.defineProperty(player, "paused", { configurable: true, value: true });
   player.dispatchEvent(new Event("ended"));
+}
+
+/**
+ * Web Audio's decoder, for the WAV fallback (`lib/voiceDecode.ts`): `decodes` says whether it can read
+ * the recording; what it "decodes" is `seconds` of a quiet tone.
+ */
+export const decoder = { decodes: true, seconds: 0.5, decoded: [] as ArrayBuffer[] };
+
+export function installFakeDecoder() {
+  decoder.decodes = true;
+  decoder.seconds = 0.5;
+  decoder.decoded = [];
+  class Live {
+    close() { return Promise.resolve(); }
+    async decodeAudioData(bytes: ArrayBuffer) {
+      decoder.decoded.push(bytes);
+      if (!decoder.decodes) throw new DOMException("Unable to decode audio data", "EncodingError");
+      return { duration: decoder.seconds, numberOfChannels: 2, sampleRate: 48_000 };
+    }
+  }
+  class Offline {
+    readonly destination = {};
+    constructor(readonly channels: number, readonly length: number, readonly sampleRate: number) {}
+    createBufferSource() { return { buffer: null, connect() {}, start() {} }; }
+    async startRendering() {
+      const samples = new Float32Array(this.length).map((_, i) => Math.sin(i / 8) * 0.25);
+      return { getChannelData: () => samples, length: this.length, sampleRate: this.sampleRate };
+    }
+  }
+  vi.stubGlobal("AudioContext", Live);
+  vi.stubGlobal("OfflineAudioContext", Offline);
 }

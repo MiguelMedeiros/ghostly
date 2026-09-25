@@ -35,6 +35,21 @@ async function hold(page: Page, ms: number) {
   await page.mouse.up();
 }
 
+/**
+ * How far any part of a voice bubble reaches past the message bubble around it, in pixels (0: all inside).
+ * #194's bubble was sized by the window (70vw), so in a 900px Desktop window its mic badge hung outside.
+ */
+const overhang = (bubble: Locator) =>
+  bubble.evaluate((voice) => {
+    const outer = voice.closest("[data-message-bubble]")!.getBoundingClientRect();
+    let worst = 0;
+    for (const part of [voice, ...voice.querySelectorAll("*")]) {
+      const box = part.getBoundingClientRect();
+      if (box.width > 0) worst = Math.max(worst, outer.left - box.left, box.right - outer.right);
+    }
+    return worst;
+  });
+
 /** How many different bar heights a waveform has: a flat line has one. */
 const shapes = (bubble: Locator) =>
   bubble.locator(".voice-wave-base .voice-wave-bar").evaluateAll((bars) => new Set(bars.map((bar) => (bar as HTMLElement).style.height)).size);
@@ -82,6 +97,21 @@ test("voice messages: hold to record, the contact plays it", { tag: ["@feature:f
   await expect(received).toHaveAttribute("data-state", "playing");
   await expect(received.getByTestId("voice-time")).not.toHaveText("0:00");
   await expect(received).toHaveAttribute("data-state", "idle", { timeout: 5_000 });
+
+  // Inside its bubble at every width, sent and received, with the speed showing: the default Desktop window
+  // (900px, the sidebar beside the chat), a narrow one, and a phone.
+  await received.getByTestId("voice-play").click();
+  await expect(received).toHaveAttribute("data-state", "playing");
+  await received.getByTestId("voice-play").click();
+  await expect(received).toHaveAttribute("data-state", "paused");
+  await expect(received.getByTestId("voice-speed")).toBeVisible();
+  for (const width of [1280, 900, 640, 390]) {
+    for (const [who, bubble] of [[bob, received], [alice, sent]] as const) {
+      await who.page.setViewportSize({ width, height: 800 });
+      await expect.poll(() => overhang(bubble), { message: `${width}px` }).toBeLessThanOrEqual(0.5);
+    }
+  }
+  await bob.page.setViewportSize({ width: 1280, height: 800 });
 
   // Survives a reload: stored with its description, still played.
   await bob.page.reload();

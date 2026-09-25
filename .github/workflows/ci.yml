@@ -273,12 +273,34 @@ jobs:
         run: npm run test:e2e
 
   # ============================================
+  # Desktop on a Mac plays voice messages (system WKWebView, the shipped CSP)
+  # ============================================
+  # WKWebView has no WebDriver, so the Desktop e2e (Linux) never sees the engine most Desktop users run: this
+  # plays every committed recording (e2e/support/voice-fixtures/) in it, under tauri.conf.json's policy.
+  # Needs only Node and swiftc. The CSP once had no media-src and every voice message failed here alone.
+  desktop-media:
+    name: Desktop media (macOS WKWebView)
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: Voice recordings play in WKWebView under Desktop's CSP
+        run: node scripts/voice-media/check-wkwebview.mjs
+
+  # ============================================
   # All checks passed
   # ============================================
   ci-success:
     name: CI Success
     runs-on: ubuntu-24.04
-    needs: [changes, frontend, tauri, cli, website]
+    needs: [changes, frontend, tauri, cli, website, desktop-media]
     # Not always(): that also runs in a run cancelled by a newer push, where it would mark the superseded commit
     # failed. A failed job still gets here, and fails this one.
     if: ${{ !cancelled() }}
@@ -291,12 +313,13 @@ jobs:
           TAURI: ${{ needs.tauri.result }}
           CLI: ${{ needs.cli.result }}
           WEBSITE: ${{ needs.website.result }}
+          DESKTOP_MEDIA: ${{ needs.desktop-media.result }}
         run: |
           # Skipped only counts when `changes` chose to skip the Rust jobs.
           rust_ok() { [[ "$1" == "success" || ( "$1" == "skipped" && "$RUST" == "false" ) ]]; }
-          if [[ "$CHANGES" != "success" || "$FRONTEND" != "success" || "$WEBSITE" != "success" ]] || \
+          if [[ "$CHANGES" != "success" || "$FRONTEND" != "success" || "$WEBSITE" != "success" || "$DESKTOP_MEDIA" != "success" ]] || \
              ! rust_ok "$TAURI" || ! rust_ok "$CLI"; then
-            echo "One or more jobs failed: changes=$CHANGES frontend=$FRONTEND tauri=$TAURI cli=$CLI website=$WEBSITE"
+            echo "One or more jobs failed: changes=$CHANGES frontend=$FRONTEND tauri=$TAURI cli=$CLI website=$WEBSITE desktop-media=$DESKTOP_MEDIA"
             exit 1
           fi
           echo "All jobs passed! (tauri=$TAURI cli=$CLI)"

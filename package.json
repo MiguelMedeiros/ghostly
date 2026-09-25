@@ -38,6 +38,7 @@
     "e2e:full": "node e2e/infra/infra.mjs full",
     "build:web": "npm run build -w @ghostly/web",
     "check:desktop-bundle": "node scripts/check-desktop-bundle.mjs",
+    "check:wkwebview-media": "node scripts/voice-media/check-wkwebview.mjs",
     "postinstall": "patch-package",
     "build:sdk": "npm run build -w @ghostly/sdk",
     "test:sdk-example": "node scripts/sdk-example.mjs",

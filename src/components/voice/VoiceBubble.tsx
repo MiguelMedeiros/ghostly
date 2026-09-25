@@ -14,10 +14,21 @@ import {
   releasePlayback,
   voiceRate,
 } from "../../lib/voicePlayback";
+import { decodeToWav } from "../../lib/voiceDecode";
 import { Waveform } from "./Waveform";
 import "./voice.css";
 
 type PlayState = "idle" | "loading" | "playing" | "paused";
+
+const FORMATS: Record<string, string> = { "audio/webm": "WebM", "audio/ogg": "Ogg", "audio/mp4": "M4A", "audio/x-m4a": "M4A", "audio/mpeg": "MP3", "audio/aac": "AAC", "audio/wav": "WAV" };
+const formatOf = (mime: string) => FORMATS[mime.split(";")[0]!.trim().toLowerCase()] ?? (mime || "unknown");
+
+/** What went wrong, for whoever debugs the next failure: the console in dev builds, `data-error` always. */
+function describeFailure(what: string, error: unknown): string {
+  if (typeof MediaError !== "undefined" && error instanceof MediaError) return `${what}: MediaError ${error.code}${error.message ? ` (${error.message})` : ""}`;
+  if (error instanceof Error || (typeof DOMException !== "undefined" && error instanceof DOMException)) return `${what}: ${(error as Error).name}${(error as Error).message ? ` (${(error as Error).message})` : ""}`;
+  return `${what}: ${String(error)}`;
+}
 
 /**
  * A voice message in the chat: play and pause, a waveform that fills as it plays and can be
@@ -36,16 +47,44 @@ export function VoiceBubble({ file, sender }: { file: ChatFile & { voice: VoiceM
   const [rate, setRate] = useState(voiceRate);
   const [played, setPlayed] = useState(() => sender === "me" || isVoicePlayed(file.id));
   const [problem, setProblem] = useState<string | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
   const [saveUrl, setSaveUrl] = useState<string | null>(null);
   const [retryError, setRetryError] = useState("");
 
   const rootRef = useRef<HTMLDivElement>(null);
   const waveRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const urlRef = useRef<string | null>(null);
+  const blobRef = useRef<Blob | null>(null);
+  const urlsRef = useRef<string[]>([]);
   const frameRef = useRef(0);
   const positionRef = useRef(0);
   const loadingRef = useRef<Promise<HTMLAudioElement | null> | null>(null);
+  /** A play() is being started: its own rejection reports what went wrong, not the element's error event. */
+  const startingRef = useRef(false);
+  /** Whether the recording is already playing from a WAV decoded from it (the fallback, tried once). */
+  const decodedRef = useRef(false);
+
+  const objectUrl = (blob: Blob) => {
+    const url = URL.createObjectURL(blob);
+    urlsRef.current.push(url);
+    return url;
+  };
+
+  const report = useCallback((what: string, error: unknown) => {
+    const detail = describeFailure(what, error);
+    setFailure(detail);
+    if (import.meta.env.DEV) console.warn(`[voice] ${detail}`, { file: file.id, mime: file.mime, decoded: decodedRef.current });
+  }, [file.id, file.mime]);
+
+  /** It will not play here: say so plainly, and offer the file to save. */
+  const giveUp = useCallback((message: string) => {
+    if (blobRef.current) setSaveUrl((url) => url ?? objectUrl(blobRef.current!));
+    setProblem(message);
+  }, []);
+  const cannotPlayHere = useCallback(
+    () => giveUp(`This device can't play this recording (${formatOf(file.mime)}). Save it to play it elsewhere.`),
+    [giveUp, file.mime],
+  );
 
   const showProgress = useCallback((at: number) => {
     positionRef.current = at;
@@ -64,23 +103,33 @@ export function VoiceBubble({ file, sender }: { file: ChatFile & { voice: VoiceM
     frameRef.current = requestAnimationFrame(tick);
   }, [showProgress]);
 
+  /** The recording decoded by Web Audio and played as WAV, when `<audio>` has no decoder for its own type. Once. */
+  const switchToDecoded = useCallback(async (audio: HTMLAudioElement): Promise<boolean> => {
+    if (decodedRef.current || !blobRef.current) return false;
+    decodedRef.current = true;
+    const wav = await decodeToWav(blobRef.current);
+    if (!wav) { report("decode", new Error("Web Audio could not decode it either")); return false; }
+    audio.src = objectUrl(wav);
+    audio.load();
+    return true;
+  }, [report]);
+
   /** The player, made on first use: reading the bytes of every voice message on screen would be waste. */
   const load = useCallback((): Promise<HTMLAudioElement | null> => {
     if (audioRef.current) return Promise.resolve(audioRef.current);
     loadingRef.current ??= (async () => {
       const blob = await platform?.getFile(file.id);
       if (!blob) { setProblem("No longer available"); return null; }
-      const url = URL.createObjectURL(blob);
-      urlRef.current = url;
+      blobRef.current = blob;
       const audio = new Audio();
-      if (!audio.canPlayType(file.mime)) {
-        // Recorded in a type this device has no decoder for (AAC on a Linux desktop without it): it can still be saved.
-        setSaveUrl(url);
-        setProblem("This device can't play this recording. Save it to play it elsewhere.");
+      audio.preload = "auto";
+      if (audio.canPlayType(file.mime)) {
+        audio.src = objectUrl(blob);
+      } else if (!(await switchToDecoded(audio))) {
+        // No decoder for this type at all (AAC on a Linux desktop without one): it can still be saved.
+        cannotPlayHere();
         return null;
       }
-      audio.preload = "auto";
-      audio.src = url;
       audio.playbackRate = voiceRate();
       audio.addEventListener("timeupdate", () => setPosition(audio.currentTime));
       audio.addEventListener("ended", () => {
@@ -93,17 +142,55 @@ export function VoiceBubble({ file, sender }: { file: ChatFile & { voice: VoiceM
         playNextVoice(rootRef.current);
       });
       audio.addEventListener("pause", () => { stopFrames(); setState((s) => (s === "playing" ? "paused" : s)); });
-      audio.addEventListener("error", () => { stopFrames(); releasePlayback(file.id); setState("idle"); setProblem("Could not play this recording."); });
+      audio.addEventListener("error", () => {
+        report("media element", audio.error);
+        if (startingRef.current) return;
+        // Broke off while playing.
+        stopFrames();
+        releasePlayback(file.id);
+        setState("idle");
+        giveUp("Could not play this recording.");
+      });
       audioRef.current = audio;
       return audio;
     })().finally(() => { loadingRef.current = null; });
     return loadingRef.current;
-  }, [platform, file.id, file.mime, showProgress]);
+  }, [platform, file.id, file.mime, showProgress, report, giveUp, cannotPlayHere, switchToDecoded]);
 
   const pause = useCallback(() => {
     audioRef.current?.pause();
     releasePlayback(file.id);
   }, [file.id]);
+
+  /** Starts `audio` where the waveform says; on a refusal, tries the decoded WAV once. Resolves whether it plays. */
+  const start = useCallback(async (audio: HTMLAudioElement): Promise<boolean> => {
+    startingRef.current = true;
+    try {
+      for (;;) {
+        if (Math.abs(audio.currentTime - positionRef.current) > 0.05) audio.currentTime = positionRef.current;
+        audio.playbackRate = voiceRate();
+        try {
+          await audio.play();
+          return true;
+        } catch (error) {
+          const name = (error as Error | undefined)?.name;
+          // Paused or moved on before it started: nothing went wrong.
+          if (name === "AbortError") return false;
+          report("play()", error);
+          // Not allowed to start by itself (the next one in a run, on a strict engine): a tap will do.
+          if (name === "NotAllowedError") return false;
+          // Refused as it is: its type may still decode through Web Audio.
+          const decodedAlready = decodedRef.current;
+          if (!decodedAlready && (await switchToDecoded(audio))) continue;
+          if (decodedAlready) giveUp("Could not play this recording.");
+          else cannotPlayHere();
+          return false;
+        }
+      }
+    } finally {
+      startingRef.current = false;
+    }
+  }, [report, switchToDecoded, cannotPlayHere, giveUp]);
 
   const play = useCallback(async () => {
     if (!ready) return;
@@ -114,20 +201,15 @@ export function VoiceBubble({ file, sender }: { file: ChatFile & { voice: VoiceM
     if (!audio) { releasePlayback(file.id); setState("idle"); return; }
     // Played to the end last time, or scrubbed while stopped: start from where the waveform says.
     if (positionRef.current >= seconds - 0.05) showProgress(0);
-    if (Math.abs(audio.currentTime - positionRef.current) > 0.05) audio.currentTime = positionRef.current;
-    audio.playbackRate = voiceRate();
-    try {
-      await audio.play();
-    } catch (error) {
+    if (!(await start(audio))) {
       releasePlayback(file.id);
       setState("idle");
-      if (!(error instanceof DOMException && error.name === "AbortError")) setProblem("Could not play this recording.");
       return;
     }
     setState("playing");
     followAudio();
     if (sender === "peer" && !played) { markVoicePlayed(file.id); setPlayed(true); }
-  }, [ready, file.id, load, seconds, showProgress, followAudio, sender, played]);
+  }, [ready, file.id, load, seconds, showProgress, start, followAudio, sender, played]);
 
   useEffect(() => registerVoicePlayer(file.id, { play: () => void play(), pause }), [file.id, play, pause]);
   useEffect(() => onVoiceRate((next) => {
@@ -139,7 +221,8 @@ export function VoiceBubble({ file, sender }: { file: ChatFile & { voice: VoiceM
     releasePlayback(file.id);
     audioRef.current?.pause();
     audioRef.current?.removeAttribute("src");
-    if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    for (const url of urlsRef.current) URL.revokeObjectURL(url);
+    urlsRef.current = [];
   }, [file.id]);
 
   const seekTo = useCallback((at: number) => {
@@ -181,7 +264,10 @@ export function VoiceBubble({ file, sender }: { file: ChatFile & { voice: VoiceM
   return (
     <div
       ref={rootRef}
-      className="min-w-[240px] max-md:min-w-[min(240px,68vw)] w-[min(320px,70vw)] px-1 pt-1"
+      // As wide as a comfortable waveform, never wider than the message bubble it sits in (whose own limit
+      // is a share of the chat, not of the window: vw here spilled it out of a narrow Desktop window).
+      // Its colours are light in both themes: message bubbles are dark in both (MessageBubble).
+      className="w-[300px] max-w-full pt-1"
       data-testid="voice-bubble"
       data-voice-player={file.id}
       data-voice-sender={sender}
@@ -189,14 +275,14 @@ export function VoiceBubble({ file, sender }: { file: ChatFile & { voice: VoiceM
       data-played={played ? "true" : "false"}
       style={{ ["--voice-fill" as string]: sender === "me" ? "hsla(0,0%,100%,0.92)" : "var(--color-accent-hover)" }}
     >
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
         <button
           type="button"
           data-testid="voice-play"
           aria-label={state === "playing" ? "Pause voice message" : "Play voice message"}
           disabled={!ready || state === "loading"}
           onClick={() => (state === "playing" ? pause() : void play())}
-          className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full bg-transparent border-none text-inherit cursor-pointer disabled:opacity-40 disabled:cursor-default hover:bg-black/15"
+          className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full bg-transparent border-none text-[hsla(0,0%,100%,0.9)] cursor-pointer disabled:opacity-40 disabled:cursor-default hover:bg-black/15"
         >
           {state === "playing" ? (
             <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
@@ -224,32 +310,40 @@ export function VoiceBubble({ file, sender }: { file: ChatFile & { voice: VoiceM
             onPointerCancel={onScrubEnd}
             onKeyDown={onWaveKey}
           />
-          <div className="flex items-center gap-1.5 mt-0.5 h-4 text-[11px] text-[hsla(0,0%,100%,0.6)]">
-            {unplayed && <span data-testid="voice-unplayed" className="w-1.5 h-1.5 rounded-full bg-accent" aria-label="Not played yet" />}
-            <span data-testid="voice-time" className={`tabular-nums ${unplayed ? "text-accent" : ""}`}>
+          {/* One line under the waveform, all inside the bubble: what it is and how long, then the speed while it plays. */}
+          <div className="flex items-center gap-1 mt-1 h-[18px] text-[11px] text-[hsla(0,0%,100%,0.6)]" data-testid="voice-meta">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              className={`shrink-0 ${unplayed ? "text-accent" : ""}`}
+              data-testid={unplayed ? "voice-unplayed" : "voice-mic"}
+              role="img"
+              aria-label={unplayed ? "Voice message, not played yet" : "Voice message"}
+            >
+              <path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" />
+            </svg>
+            <span data-testid="voice-time" className={`tabular-nums ${unplayed ? "text-accent font-medium" : ""}`}>
               {active ? formatVoiceDuration(position * 1000) : formatVoiceDuration(file.voice.duration)}
             </span>
-            {status && <span data-testid="voice-status" className={transfer?.state === "failed" ? "text-danger truncate" : "truncate"}>· {status}</span>}
+            {status && <span data-testid="voice-status" className={`min-w-0 ${transfer?.state === "failed" ? "text-danger truncate" : "truncate"}`}>· {status}</span>}
+            {active && (
+              <button
+                type="button"
+                data-testid="voice-speed"
+                aria-label={`Playback speed ${rate}×`}
+                onClick={() => nextVoiceRate()}
+                className="ms-auto shrink-0 min-w-[34px] h-[18px] px-1.5 rounded-full border-none bg-black/25 text-[hsla(0,0%,100%,0.85)] text-[11px] font-semibold leading-none cursor-pointer hover:bg-black/35 tabular-nums"
+              >
+                {rate}×
+              </button>
+            )}
           </div>
         </div>
-        {active ? (
-          <button
-            type="button"
-            data-testid="voice-speed"
-            aria-label={`Playback speed ${rate}×`}
-            onClick={() => nextVoiceRate()}
-            className="shrink-0 min-w-[40px] h-6 px-2 rounded-full border-none bg-black/25 text-inherit text-[12px] font-semibold cursor-pointer hover:bg-black/35 tabular-nums"
-          >
-            {rate}×
-          </button>
-        ) : (
-          <span className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${unplayed ? "bg-accent/20 text-accent" : "bg-black/20 text-[hsla(0,0%,100%,0.7)]"}`} aria-hidden="true">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" /></svg>
-          </span>
-        )}
       </div>
       {problem && (
-        <p className="text-[12px] text-danger m-0 mt-1 px-1" role="alert" data-testid="voice-problem">
+        <p className="text-[12px] text-danger m-0 mt-1 px-1" role="alert" data-testid="voice-problem" data-error={failure ?? undefined}>
           {problem}{" "}
           {saveUrl && <a href={saveUrl} download={file.name} data-testid="voice-save" className="underline text-inherit">Save</a>}
         </p>
