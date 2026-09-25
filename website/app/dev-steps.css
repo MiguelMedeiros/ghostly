@@ -60,10 +60,11 @@
   --c-talk: #a78bfa;
   --c-pay: #fbbf24;
   --c-danger: #fb7185;
-  --c-mesh: #2b3b52;
-  --c-node: #131c29;
+  /* The app's pairing look, shared with the rest of the site (--pair-* in site.css, PAIR in lib/motion.ts). */
+  --c-mesh: var(--pair-mesh);
+  --c-node: var(--pair-node);
   --c-plate: #0a111b;
-  --c-eye: #0b141a;
+  --c-eye: var(--pair-eye);
   position: relative;
   container: psx / inline-size;
   outline: none;
