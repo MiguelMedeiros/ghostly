@@ -67,9 +67,6 @@ it("tells the chat's connection story: first connection, the contact's switch, y
   // The round trip is on the line of the transport in use, and in the view.
   await vi.waitFor(() => expect(view().transportRttMs).toBeGreaterThanOrEqual(0));
   await vi.waitFor(() => expect(view().transportLog![0].rttMs).toBeGreaterThanOrEqual(0));
-  // The Fallback switch sends the same preference again: not a choice, not a row.
-  await node.setTransportPreference({ linkId: id, preferred: "iroh/1", fallback: true });
-  expect(lines(view())).toEqual([["connected", null, "iroh/1"]]);
 
   await contact.setTransportPreference("hyperdht/1", true);
   await vi.waitFor(() => expect(lines(view()).at(-1)).toEqual(["switched", "contact", "hyperdht/1"]));
@@ -78,6 +75,11 @@ it("tells the chat's connection story: first connection, the contact's switch, y
   await node.setChatTransport({ linkId: id, transport: "iroh/1" });
   await vi.waitFor(() => expect(lines(view()).at(-1)).toEqual(["switched", "you", "iroh/1"]));
   expect(view().preferredTransport).toBe("iroh/1");
+  // The Fallback switch sends the same preference again: not a row. (On the wire it is a choice again, so it
+  // comes only once this side's choice already stands: before, it would race the contact's.)
+  const before = lines(view());
+  await node.setTransportPreference({ linkId: id, preferred: "iroh/1", fallback: true });
+  expect(lines(view())).toEqual(before);
 
   net.unreachable.add("hyperdht/1");
   await node.setChatTransport({ linkId: id, transport: "hyperdht/1" });
