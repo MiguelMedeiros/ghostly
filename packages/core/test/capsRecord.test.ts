@@ -61,6 +61,14 @@ describe("capability record: keys, seal and signature", () => {
     expect(dialDescriptors(record.descriptors)).toEqual({ "iroh/1": { id: IROH.id, relay: IROH.relay, addresses: [] }, "hyperdht/1": { publicKey: HYPER.publicKey } });
   });
 
+  it("keeps the relay a browser's Iroh or HyperDHT is reached through, and refuses a relay that is not a URL", () => {
+    const { aKeys, bKeys } = pair();
+    const browser = capsDescriptors({ "iroh/1": { id: IROH.id, relay: "https://relay.example/", addresses: [], relayed: true }, "hyperdht/1": { publicKey: HYPER.publicKey, relay: "wss://hyper.example/relay" } });
+    const record = bKeys.open(packetOf(aKeys, aKeys.seal(content({ descriptors: browser }), 1).records));
+    expect(dialDescriptors(record.descriptors)).toEqual({ "iroh/1": { id: IROH.id, relay: "https://relay.example/", addresses: [] }, "hyperdht/1": { publicKey: HYPER.publicKey, relay: "wss://hyper.example/relay" } });
+    expect(capsDescriptors({ "hyperdht/1": { publicKey: HYPER.publicKey, relay: "javascript:alert(1)" } })).toEqual({ "hyperdht/1": { publicKey: expect.any(String) } });
+  });
+
   it("fits 1,000 bytes; past it drops the name, then the extensions, and fails rather than cut capabilities", () => {
     const { aKeys } = pair();
     const full = aKeys.seal(content({ name: "n".repeat(64) }), 1, createIdentity().pubKeyZ32);
