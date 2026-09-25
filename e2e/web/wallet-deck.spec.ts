@@ -8,8 +8,8 @@ import { swipe } from "../support/swipe";
  * one. Either way the chosen card's panel shows below, and the arrows under the deck and the keyboard move along it.
  */
 
-const CARDS = ["cashu", "lightning", "arkade", "bark", "bitcoin", "fedimint", "usdt"] as const;
-const PANELS: Record<(typeof CARDS)[number], string> = { cashu: "wallet-balance", lightning: "wallet-balance", arkade: "ark-wallet", bark: "bark-wallet", bitcoin: "bitcoin-wallet", fedimint: "fedimint-wallet", usdt: "usdt-wallet" };
+const CARDS = ["cashu", "lightning", "arkade", "bark", "spark", "bitcoin", "fedimint", "usdt"] as const;
+const PANELS: Record<(typeof CARDS)[number], string> = { cashu: "wallet-balance", lightning: "wallet-balance", arkade: "ark-wallet", bark: "bark-wallet", spark: "spark-wallet", bitcoin: "bitcoin-wallet", fedimint: "fedimint-wallet", usdt: "usdt-wallet" };
 
 const deck = (page: Page) => page.getByTestId("wallet").locator(".wallet-deck");
 const card = (page: Page, id: string) => page.getByTestId(`wallet-card-${id}`);
@@ -66,8 +66,8 @@ test("with a mouse the cards are a stack: resting on one brings it up, and its p
   // A card moving under a still pointer is not the pointer moving: the keys win.
   await card(page, "bark").focus();
   await page.keyboard.press("ArrowRight");
-  await chosen(page, "bitcoin");
-  await expect(card(page, "bitcoin")).toBeFocused();
+  await chosen(page, "spark");
+  await expect(card(page, "spark")).toBeFocused();
   await page.keyboard.press("ArrowLeft");
   await page.keyboard.press("ArrowLeft");
   await chosen(page, "arkade");
@@ -121,8 +121,8 @@ test("on a phone the cards are a snapping track: a swipe chooses the card that c
   // The keyboard works on the track too.
   await card(page, "bark").focus();
   await page.keyboard.press("ArrowRight");
-  await chosen(page, "bitcoin");
-  await expect.poll(() => offCentre(page, "bitcoin")).toBeLessThan(3);
+  await chosen(page, "spark");
+  await expect.poll(() => offCentre(page, "spark")).toBeLessThan(3);
   await page.keyboard.press("End");
   await chosen(page, "usdt");
   await expect.poll(() => offCentre(page, "usdt")).toBeLessThan(3);
@@ -197,7 +197,7 @@ test("changing the card swings the new one up and tucks the old one back, and qu
   await expect.poll(() => atRest(page)).toBe(true);
 
   // Clicking faster than a swing lasts: every one is interrupted, the last card wins and the stack comes to rest.
-  for (let i = 0; i < 4; i++) await page.getByTestId("wallet-deck-next").click({ delay: 0 });
+  for (let i = 0; i < 5; i++) await page.getByTestId("wallet-deck-next").click({ delay: 0 });
   await chosen(page, "fedimint");
   await expect.poll(() => atRest(page)).toBe(true);
   expect(tiled(await strips(page))).toBe(true);
@@ -225,9 +225,11 @@ test("with reduced motion the deck still stacks, chooses and follows, without a 
   await card(page, "bitcoin").click();
   await chosen(page, "bitcoin");
   expect(await card(page, "bitcoin").locator(".wallet-deck-face").evaluate((el) => getComputedStyle(el).transitionDuration)).toBe("0s");
+  // The keys from here on: the pointer leaves the deck, so no card coming up under it takes the choice back.
+  await page.mouse.move(5, 5);
   await card(page, "bitcoin").focus();
   await page.keyboard.press("ArrowLeft");
-  await chosen(page, "bark");
+  await chosen(page, "spark");
   // No swing, no sheen, no ghost peeking: the deck changes at once.
   expect(await swings(page)).toEqual({});
   expect(await atRest(page)).toBe(true);

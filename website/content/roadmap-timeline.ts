@@ -91,8 +91,8 @@ const en: Timeline = {
       title: "Payments",
       items: {
         now: ["Cashu wallet", "Lightning through the mint"],
-        next: ["Ark via Arkade (experimental)", "USDT via Tether WDK (experimental)", "Testnet mode for every wallet", "Lightning sources: NWC · LND · Core Lightning · WebLN · Breez (regtest only)", "Ark via Bark (test networks)", "On-chain: BDK (test networks) · Bitcoin Core (desktop)", "Pay from any other wallet: QR, link, Lightning addresses (LNURL)"],
-        planned: ["Mainnet for Bark, Breez and BDK", "Spark, Fedimint, Liquid and other rails"],
+        next: ["Ark via Arkade (experimental)", "USDT via Tether WDK (experimental)", "Testnet mode for every wallet", "Lightning sources: NWC · LND · Core Lightning · WebLN · Breez (regtest only)", "Ark via Bark (test networks)", "Spark to Spark (Breez regtest; Mainnet with a key)", "On-chain: BDK (test networks) · Bitcoin Core (desktop)", "Pay from any other wallet: QR, link, Lightning addresses (LNURL)"],
+        planned: ["Mainnet for Bark, Breez and BDK", "Fedimint, Liquid and other rails"],
       },
     },
     {
@@ -196,8 +196,8 @@ const ptBr: Timeline = {
       title: "Pagamentos",
       items: {
         now: ["Carteira Cashu", "Lightning pelo mint"],
-        next: ["Ark via Arkade (experimental)", "USDT via Tether WDK (experimental)", "Modo Testnet para todas as carteiras", "Fontes Lightning: NWC · LND · Core Lightning · WebLN · Breez (só regtest)", "Ark via Bark (redes de teste)", "On-chain: BDK (redes de teste) · Bitcoin Core (desktop)", "Pagar com qualquer outra carteira: QR, link, Lightning addresses (LNURL)"],
-        planned: ["Mainnet para Bark, Breez e BDK", "Spark, Fedimint, Liquid e outros trilhos"],
+        next: ["Ark via Arkade (experimental)", "USDT via Tether WDK (experimental)", "Modo Testnet para todas as carteiras", "Fontes Lightning: NWC · LND · Core Lightning · WebLN · Breez (só regtest)", "Ark via Bark (redes de teste)", "Spark para Spark (regtest da Breez; Mainnet com chave)", "On-chain: BDK (redes de teste) · Bitcoin Core (desktop)", "Pagar com qualquer outra carteira: QR, link, Lightning addresses (LNURL)"],
+        planned: ["Mainnet para Bark, Breez e BDK", "Fedimint, Liquid e outros trilhos"],
       },
     },
     {

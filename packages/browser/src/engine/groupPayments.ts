@@ -10,7 +10,7 @@ import type { GroupPayFrame, GroupPayNote, GroupPayRail, PaymentView, StoredMess
  * is about: the payee says a request is open or paid, the payer that it sent.
  */
 
-const RAILS: readonly GroupPayRail[] = ["cashu", "lightning", "arkade", "bark", "bitcoin", "usdt", "fedimint"];
+const RAILS: readonly GroupPayRail[] = ["cashu", "lightning", "arkade", "bark", "bitcoin", "spark", "usdt", "fedimint"];
 const STATES: readonly GroupPayNote["state"][] = ["open", "sent", "paid", "closed"];
 /** How settled a note is: a note only ever moves forward, and paid is final. */
 const RANK: Record<GroupPayNote["state"], number> = { open: 0, sent: 1, closed: 2, paid: 3 };

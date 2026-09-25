@@ -1,6 +1,6 @@
 # WISP numbering and compatibility
 
-All 48 specifications remain Draft. Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
+All 49 specifications remain Draft. Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
 
 ## Independent families
 
@@ -41,6 +41,7 @@ Generated from [numbering.json](numbering.json); edit that source instead of thi
 | 19 | [203](203-lightning.md) |
 | 204 | [204](204-bark.md) |
 | 205 | [205](205-lnurl.md) |
+| — | [2xx · spark · planned; number to be defined](2xx-spark.md) |
 | — | [2xx · fedimint · planned; number to be defined](2xx-fedimint.md) |
 | 09 | [300](300-peer-proofs.md) |
 | 10 | [301](301-nostr.md) |

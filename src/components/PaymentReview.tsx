@@ -21,6 +21,7 @@ export function PaymentReview({review:initial,wallet,onClose}:{review:Review;wal
   {token&&<p className="text-[11px] text-text-muted">{review.asset==='TEST-USDT'?'Local test token, not Tether-issued USDT. ':''}Gas is paid separately in ETH and may exceed a small payment's value. Confirmed after {review.evm?.confirmations??2} blocks.</p>}
   {review.method==='arkade'&&<p className="text-[11px] text-text-muted">Test funds only. Ark confirmation is off-chain.</p>}
   {review.method==='bark'&&<p className="text-[11px] text-text-muted">Sent over Second's Ark server, off-chain. Only an address of that same server can be paid.</p>}
+  {review.method==='spark'&&<p className="text-[11px] text-text-muted" data-testid="review-spark-note">{review.network==='bitcoin'?'Real bitcoin. ':'Regtest: test sats, worthless. '}Spark to Spark, off-chain: final once Spark's operators sign the transfer. Checking it never sends a second one.</p>}
   {review.method==='bitcoin'&&<p className="text-[11px] text-text-muted">An on-chain transaction, signed for exactly this review. Settled after one confirmation; checking it never sends a second one.</p>}
   {review.method==='fedimint'&&<p className="text-[11px] text-text-muted">Ecash notes of this federation go to your contact: they are the money until your contact redeems them. If they never do, take them back (they also come back by themselves after a week).</p>}
   {review.method==='cashu'&&<p className="text-[11px] text-text-muted">The selected mint holds the backing funds. Confirmation requires token redemption at that mint.</p>}

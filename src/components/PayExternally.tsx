@@ -56,7 +56,8 @@ export function PayExternally({ uri, value, testId, note, onPaid, size = 144, ac
         <code className="block break-all select-all bg-black/20 rounded-lg p-2 text-[10px] text-inherit opacity-80 font-mono max-h-20 overflow-y-auto" data-testid={testId}>{value}</code>
         <div className="flex flex-wrap gap-1.5">
           <button type="button" className={`${button} bg-accent text-[#111b21] hover:bg-accent-hover`} data-testid={`${testId}-copy`} onClick={() => void copy()}>{copied ? "Copied" : "Copy"}</button>
-          <a
+          {/* Only a URI a wallet can open (`lightning:`, `bitcoin:`): a Spark address has no scheme wallets agree on. */}
+          {/^[a-z][a-z0-9+.-]*:/i.test(uri) && <a
             className={`${button} bg-black/20 hover:bg-black/30 no-underline text-inherit inline-flex items-center`}
             href={uri}
             data-testid={`${testId}-link`}
@@ -71,7 +72,7 @@ export function PayExternally({ uri, value, testId, note, onPaid, size = 144, ac
             }}
           >
             Open wallet
-          </a>
+          </a>}
           {actions}
           {onPaid && (
             <button type="button" className={`${button} bg-black/20 hover:bg-black/30`} data-testid={`${testId}-paid`} disabled={busy} title="Your contact's wallet is asked to look now. It marks the request paid only once it sees the money." onClick={() => {

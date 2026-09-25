@@ -1,5 +1,5 @@
 import type { UsdtWallet } from "./paymentAdapters/usdtWallet";
-import { assertTokenUnits, formatPaymentAmount, validatePaymentTarget, type PaymentMethodName, type PaymentReview, type PaymentTarget } from "@ghostly/core";
+import { assertTokenUnits, formatPaymentAmount, sparkInvoiceDetails, validatePaymentTarget, type SparkNetwork, type PaymentMethodName, type PaymentReview, type PaymentTarget } from "@ghostly/core";
 import type { ArkWallet } from "./paymentAdapters/arkWallet";
 import type { BarkWallet } from "./paymentAdapters/barkWallet";
 import type { FedimintWallet } from "./paymentAdapters/fedimintWallet";
@@ -36,7 +36,7 @@ const UNIT = "sat";
  * through the group (see communityPay.ts).
  */
 export type PaymentLink = Pick<GhostLink, "isDataLinkOpen" | "paymentEnabled" | "allowsPayment" | "supportsPayments" | "supportsArkPayments" | "supportsUsdtPayments"
-  | "supportsBarkPayments" | "supportsBitcoinPayments" | "supportsFedimintPayments" | "requirePaymentSupport" | "sendPaymentRequest" | "sendPaymentAsk" | "sendPayment" | "sendPaymentResult">;
+  | "supportsBarkPayments" | "supportsBitcoinPayments" | "supportsFedimintPayments" | "supportsSparkPayments" | "requirePaymentSupport" | "sendPaymentRequest" | "sendPaymentAsk" | "sendPayment" | "sendPaymentResult">;
 
 export interface PaymentDeskHost {
   getLink(linkId: string): PaymentLink | null;
@@ -97,18 +97,30 @@ export interface DeskBitcoin {
   received(target: PaymentTarget, amount: number, claimed: ReadonlySet<string>, hint?: string): Promise<{ txid: string; confirmations: number } | undefined>;
 }
 
+/** Spark as the desk needs it (the engine's SparkWallet): an invoice per request, and the wallet's own receives. */
+export interface DeskSpark {
+  /** Open (connected) now: requests can be made and receipts looked up. */
+  ready(): boolean;
+  /** Where to be paid for one request: a Spark invoice of this amount, made for it. */
+  requestTarget(amount: number, memo?: string): Promise<PaymentTarget>;
+  /** A completed receive on this request's invoice of at least `amount`, and none of `claimed`: its transfer id. */
+  received(target: PaymentTarget, amount: number, since: number, claimed: ReadonlySet<string>): Promise<string | undefined>;
+  /** Asks Spark for what arrived. */
+  sync(): Promise<void>;
+}
+
 /** Paying in ecash failed before any token existed, so nothing reached the contact and Lightning is safe to try. */
 class NoEcashError extends Error {}
 
 const arkSats=(network:string)=>network==="bitcoin"?"sats":"test sats";
-type AskMethod = "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint";
-const ENDPOINT_OF: Record<Exclude<AskMethod, "usdt" | "fedimint">, string> = { arkade: ENDPOINT.arkade, bark: ENDPOINT.bark, bitcoin: ENDPOINT.bitcoin };
+type AskMethod = "arkade" | "usdt" | "bark" | "bitcoin" | "spark" | "fedimint";
+const ENDPOINT_OF: Record<Exclude<AskMethod, "usdt" | "fedimint">, string> = { arkade: ENDPOINT.arkade, bark: ENDPOINT.bark, bitcoin: ENDPOINT.bitcoin, spark: ENDPOINT.spark };
 /** A `pay` frame that carries no receipt, only "I paid this from another wallet: look now". */
 const CHECK_PAYLOAD = JSON.stringify({ check: true });
 const isCheck = (payload: string) => { try { return JSON.parse(payload)?.check === true; } catch { return false; } };
-const RAIL_NAME: Record<AskMethod, string> = { arkade: "Ark", usdt: "USDT", bark: "Bark", bitcoin: "on-chain Bitcoin", fedimint: "Fedimint" };
+const RAIL_NAME: Record<AskMethod, string> = { arkade: "Ark", usdt: "USDT", bark: "Bark", bitcoin: "on-chain Bitcoin", fedimint: "Fedimint", spark: "Spark" };
 /** Both sides allow this way of paying on the open data link. */
-const allows = (link: PaymentLink, method: AskMethod) => method === "arkade" ? link.supportsArkPayments : method === "bark" ? link.supportsBarkPayments : method === "bitcoin" ? link.supportsBitcoinPayments : method === "fedimint" ? link.supportsFedimintPayments : link.supportsUsdtPayments;
+const allows = (link: PaymentLink, method: AskMethod) => method === "arkade" ? link.supportsArkPayments : method === "bark" ? link.supportsBarkPayments : method === "bitcoin" ? link.supportsBitcoinPayments : method === "fedimint" ? link.supportsFedimintPayments : method === "spark" ? link.supportsSparkPayments : link.supportsUsdtPayments;
 /** Federation ecash is counted in msats; a chat counts whole sats. */
 const fedimintSats = (msats: number) => Math.floor(msats / 1000);
 export class PaymentDesk {
@@ -121,6 +133,7 @@ export class PaymentDesk {
   private checkingBark=false;
   private checkingBitcoin=false;
   private readonly redeeming = new Map<string, Promise<void>>();
+  private checkingSpark=false;
 
   constructor(
     private readonly wallet: CashuWallet,
@@ -131,6 +144,7 @@ export class PaymentDesk {
     private readonly lightning: DeskLightning = mintLightning(wallet),
     private readonly bitcoin?: DeskBitcoin,
     private readonly fedimint?: FedimintWallet,
+    private readonly spark?: DeskSpark,
   ) {}
 
   async start(): Promise<void> {
@@ -213,6 +227,15 @@ export class PaymentDesk {
       await this.host.storeMessage({linkId:params.linkId,id:`me_${params.timestamp}`,text:`Requested ${params.amount.toLocaleString()} ${test ? "test sats" : "sats"} on Fedimint`,sender:"me",timestamp:params.timestamp,via:"datalink",paymentId:id});
       await link.sendPaymentRequest({id,timestamp:params.timestamp,amount:{value:String(params.amount),asset:UNIT},memo,ask:params.ask,
         endpoints:[[ENDPOINT.fedimint,fedimintRequestPayload(federations)],...(invoice ? [[ENDPOINT.bolt11,invoice] as [string,string]] : [])]});
+      return {paymentId:id};
+    }
+    if (params.method === "spark") {
+      if (!link.supportsSparkPayments || !this.spark) throw new Error("Both peers need Spark on a connected data link");
+      // A Spark invoice for this request only: what arrives on it is what pays it.
+      const target = await this.spark.requestTarget(params.amount, memo);
+      await this.save({id,linkId:params.linkId,kind:"request",direction:"out",amount:params.amount,unit:UNIT,memo,state:"pending",createdAt:params.timestamp,target,ask:params.ask});
+      await this.host.storeMessage({linkId:params.linkId,id:`me_${params.timestamp}`,text:`Requested ${params.amount} ${arkSats(target.network)} on Spark`,sender:"me",timestamp:params.timestamp,via:"datalink",paymentId:id});
+      await link.sendPaymentRequest({id,timestamp:params.timestamp,amount:{value:String(params.amount),asset:UNIT},memo,endpoints:[[ENDPOINT.spark,JSON.stringify(target)]],ask:params.ask});
       return {paymentId:id};
     }
     if (params.method === "bitcoin") {
@@ -485,7 +508,7 @@ export class PaymentDesk {
   /** `held`: picked up from the contact's storage while it was away (WISP 4xx): only what this device allows counts, and only Cashu or Lightning. */
   async onPaymentRequest(linkId: string, request: PaymentRequest, held = false): Promise<void> {
     if (this.payments.has(request.id)) return;
-    if (held && (findEndpoint(request.endpoints, ENDPOINT.usdt) || findEndpoint(request.endpoints, ENDPOINT.arkade) || findEndpoint(request.endpoints, ENDPOINT.bark) || findEndpoint(request.endpoints, ENDPOINT.bitcoin) || findEndpoint(request.endpoints, ENDPOINT.fedimint))) return;
+    if (held && (findEndpoint(request.endpoints, ENDPOINT.usdt) || findEndpoint(request.endpoints, ENDPOINT.arkade) || findEndpoint(request.endpoints, ENDPOINT.bark) || findEndpoint(request.endpoints, ENDPOINT.bitcoin) || findEndpoint(request.endpoints, ENDPOINT.fedimint) || findEndpoint(request.endpoints, ENDPOINT.spark))) return;
     if(findEndpoint(request.endpoints,ENDPOINT.usdt))return this.receiveUsdtRequest(linkId,request);
     const amount = parseSats(request.amount.value, request.amount.asset);
     const link = this.host.getLink(linkId);
@@ -495,7 +518,7 @@ export class PaymentDesk {
     }
     let target: PaymentTarget | undefined;
     let federations: string[] | undefined;
-    const arkPayload=findEndpoint(request.endpoints,ENDPOINT.arkade), barkPayload=findEndpoint(request.endpoints,ENDPOINT.bark), bitcoinPayload=findEndpoint(request.endpoints,ENDPOINT.bitcoin), fedimintPayload=findEndpoint(request.endpoints,ENDPOINT.fedimint);
+    const arkPayload=findEndpoint(request.endpoints,ENDPOINT.arkade), barkPayload=findEndpoint(request.endpoints,ENDPOINT.bark), bitcoinPayload=findEndpoint(request.endpoints,ENDPOINT.bitcoin), fedimintPayload=findEndpoint(request.endpoints,ENDPOINT.fedimint), sparkPayload=findEndpoint(request.endpoints,ENDPOINT.spark);
     if (fedimintPayload) {
       if(!link?.supportsFedimintPayments)return;
       federations=parseFedimintRequestPayload(fedimintPayload);
@@ -513,6 +536,11 @@ export class PaymentDesk {
     } else if (bitcoinPayload) {
       if(!link?.supportsBitcoinPayments)return;
       try {target=validatePaymentTarget(JSON.parse(bitcoinPayload));if(target.method!=="bitcoin")return;} catch {return;}
+    } else if (sparkPayload) {
+      if(!link?.supportsSparkPayments)return;
+      // Only an invoice: a bare Spark address cannot tell this request's payment from any other.
+      // Only an invoice for exactly this amount, in sats: what is asked is what the invoice asks.
+      try {target=validatePaymentTarget(JSON.parse(sparkPayload));const asked=target.method==="spark" ? sparkInvoiceDetails(target.address,target.network as SparkNetwork) : undefined;if(!asked || asked.token || asked.amount!==amount)return;} catch {return;}
     }
     // Keep only the ways of paying this chat allows; a request with none left is dropped.
     const allowed = (method: "lightning" | "cashu") => held ? !!link?.paymentEnabled(method) : !!link?.allowsPayment(method);
@@ -522,7 +550,7 @@ export class PaymentDesk {
     await this.save({
       target,
       federations,
-      ask: federations ? this.answering(linkId, request, "fedimint", amount) : target?.method === "arkade" || target?.method === "bark" || target?.method === "bitcoin" ? this.answering(linkId, request, target.method, amount) : undefined,
+      ask: federations ? this.answering(linkId, request, "fedimint", amount) : target?.method === "arkade" || target?.method === "bark" || target?.method === "bitcoin" || target?.method === "spark" ? this.answering(linkId, request, target.method, amount) : undefined,
       id: request.id,
       linkId,
       kind: "request",
@@ -565,6 +593,7 @@ export class PaymentDesk {
     if(payment.endpoint[0]===ENDPOINT.bark) { await this.receiveBark(linkId,payment); return; }
     if(payment.endpoint[0]===ENDPOINT.bitcoin) { await this.receiveBitcoin(linkId,payment); return; }
     if(payment.endpoint[0]===ENDPOINT.fedimint) { await this.receiveFedimint(linkId,payment); return; }
+    if(payment.endpoint[0]===ENDPOINT.spark) { await this.receiveSpark(linkId,payment); return; }
     const link = this.host.getLink(linkId);
     const known = this.payments.get(payment.id);
     if (known && (known.linkId !== linkId || known.direction !== "in" || known.kind !== "payment")) {
@@ -761,6 +790,7 @@ export class PaymentDesk {
       if (rail === "lightning") await this.lightning.check?.();
       else if (rail === "bitcoin") await this.reconcileBitcoinReceipts();
       else if (rail === "bark") await this.reconcileBarkReceipts();
+      else if (rail === "spark") await this.reconcileSparkReceipts();
       else await this.reconcileArkReceipts();
     } catch { /* the wallet could not be asked right now: the regular checks go on */ }
   }
@@ -1113,6 +1143,54 @@ export class PaymentDesk {
     }
   }
 
+  /** Our Spark payment went out: said in the chat, and the contact is told (a hint; their wallet is the proof). */
+  async recordSpark(review:PaymentReview):Promise<void> {
+    if(review.method!=="spark" || !review.linkId || review.state!=="settled")return;
+    const known=this.payments.get(review.id);
+    if(known?.state==="settled")return;
+    if(known && (known.linkId!==review.linkId || known.kind!=="payment" || known.direction!=="out"))return;
+    const link=this.requireLink(review.linkId);
+    await this.save({id:review.id,linkId:review.linkId,kind:"payment",direction:"out",amount:review.amount,unit:UNIT,state:"settled",createdAt:review.createdAt,requestId:review.requestId,target:review,txid:review.txid});
+    if(review.requestId){const request=this.payments.get(review.requestId);if(request?.linkId===review.linkId)await this.save({...request,state:"settled",txid:review.txid});}
+    await this.host.storeMessage({linkId:review.linkId,id:`me_${review.createdAt}`,text:`${review.amount} ${arkSats(review.network)} on Spark`,sender:"me",timestamp:review.createdAt,via:"datalink",paymentId:review.id});
+    // Replayable; it never causes another spend.
+    if(link.supportsSparkPayments)await link.sendPayment({id:review.id,timestamp:review.createdAt,requestId:review.requestId,amount:{value:String(review.amount),asset:UNIT},endpoint:[ENDPOINT.spark,JSON.stringify({id:review.txid})]});
+  }
+  /** The contact says it paid one of our Spark requests. Recorded as pending until our own wallet shows it. */
+  private async receiveSpark(linkId:string,payment:Payment):Promise<void> {
+    if(isCheck(payment.endpoint[1])){await this.receiveCheck(linkId,payment);return;}
+    const link=this.host.getLink(linkId),request=payment.requestId ? this.payments.get(payment.requestId) : undefined;
+    if(!link?.supportsSparkPayments || request?.target?.method!=="spark" || request.linkId!==linkId || request.direction!=="out" || request.kind!=="request")return;
+    const existing=this.payments.get(payment.id);
+    if(existing && (existing.linkId!==linkId || existing.direction!=="in" || existing.requestId!==request.id))return;
+    if(existing || parseSats(payment.amount.value,payment.amount.asset)!==request.amount)return;
+    const settled=request.state==="settled";
+    await this.save({id:payment.id,linkId,kind:"payment",direction:"in",amount:request.amount,unit:UNIT,state:settled?"settled":"pending",createdAt:payment.timestamp,target:request.target,requestId:request.id,txid:request.txid});
+    await this.host.storeMessage({linkId,id:`peer_${payment.timestamp}`,text:`${request.amount} ${arkSats(request.target.network)} on Spark${settled?"":" — checking wallet"}`,sender:"peer",timestamp:payment.timestamp,via:"datalink",paymentId:payment.id});
+    await this.reconcileSparkReceipts();
+  }
+  /**
+   * A Spark request is paid when this wallet completed a receive on the invoice made for it, of at least the amount
+   * asked. It settles with or without the contact's receipt, and one transfer pays one request.
+   */
+  async reconcileSparkReceipts():Promise<void> {
+    if(this.checkingSpark || !this.spark?.ready())return;
+    this.checkingSpark=true;
+    try {
+      const open=[...this.payments.values()].filter(r=>r.kind==="request" && r.direction==="out" && r.state==="pending" && r.target?.method==="spark");
+      if(open.length)await this.spark.sync().catch(()=>{});
+      for(const request of open) {
+        const current=this.current(request);
+        if(current.state!=="pending" || !current.target)continue;
+        const claimed=new Set([...this.payments.values()].filter(p=>p.target?.method==="spark" && p.kind==="request" && p.txid).map(p=>p.txid!));
+        const id=await this.spark.received(current.target,current.amount,current.createdAt,claimed).catch(()=>undefined);
+        if(!id)continue;
+        await this.settleRequest(current,{txid:id});
+        for(const payment of this.payments.values())if(payment.kind==="payment" && payment.direction==="in" && payment.requestId===current.id && payment.state==="pending")await this.save({...payment,state:"settled",txid:id});
+      }
+    } finally {this.checkingSpark=false;}
+  }
+
   // -- internals -------------------------------------------------------------------
 
   private async sendEcash(
@@ -1202,6 +1280,12 @@ export class PaymentDesk {
         if(payment.kind==="payment" && payment.state==="pending" && payment.token)await this.sendFedimint(payment);
         else if(payment.kind==="request" && payment.state==="pending" && payment.federations?.length)await link.sendPaymentRequest({id:payment.id,timestamp:payment.createdAt,amount:{value:String(payment.amount),asset:UNIT},memo:payment.memo,ask:payment.ask,
           endpoints:[[ENDPOINT.fedimint,fedimintRequestPayload(payment.federations)],...(payment.invoice && link.allowsPayment("lightning") ? [[ENDPOINT.bolt11,payment.invoice] as [string,string]] : [])]});
+        continue;
+      }
+      if (payment.target?.method === "spark") {
+        if(!link.supportsSparkPayments)continue;
+        if(payment.kind==="request" && payment.state==="pending" && payment.target.expiresAt>Date.now())await link.sendPaymentRequest({id:payment.id,timestamp:payment.createdAt,amount:{value:String(payment.amount),asset:UNIT},memo:payment.memo,endpoints:[[ENDPOINT.spark,JSON.stringify(payment.target)]],ask:payment.ask});
+        else if(payment.kind==="payment" && payment.state==="settled")await link.sendPayment({id:payment.id,timestamp:payment.createdAt,requestId:payment.requestId,amount:{value:String(payment.amount),asset:UNIT},endpoint:[ENDPOINT.spark,JSON.stringify({id:payment.txid})]});
         continue;
       }
       if (payment.target?.method === "bitcoin") {

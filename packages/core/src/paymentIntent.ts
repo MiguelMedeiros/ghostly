@@ -1,8 +1,9 @@
 import { BITCOIN_NETWORKS, isBitcoinAddress, type BitcoinNetwork } from "./bitcoinAddress";
 import { isFederationId } from "./payments";
+import { SPARK_NETWORKS, SPARK_PROVIDER, isSparkAddress, type SparkNetwork } from "./sparkAddress";
 
 /** Local wallet contract. Capability support is never authorization to spend. */
-export type PaymentMethod = "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint";
+export type PaymentMethod = "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark";
 export type PaymentNetwork = "bitcoin" | "signet" | "testnet" | "mutinynet" | "regtest" | "cashu-test" | "ethereum" | "sepolia" | "evm-local";
 /**
  * The `provider` of an on-chain target. Anyone can pay a Bitcoin address from any wallet, so the payee
@@ -90,6 +91,10 @@ export function validatePaymentTarget(value: unknown, now = Date.now()): Payment
     // The provider is the federation (its id); the address is what the payment answers: the request, or the contact.
     if (!BITCOIN_NETWORKS.includes(t.network as BitcoinNetwork) || t.asset !== "BTC" || t.unit !== "sat") throw new Error("Unsupported payment method, asset or network");
     if (!isFederationId(t.provider)) throw new Error("That is not a Fedimint federation id");
+  } else if (t.method === "spark") {
+    // Any Spark wallet of the network pays any Spark address or invoice of it: no provider to name.
+    if (!SPARK_NETWORKS.includes(t.network as SparkNetwork) || t.asset !== "BTC" || t.unit !== "sat" || t.provider !== SPARK_PROVIDER) throw new Error("Unsupported payment method, asset or network");
+    if (!isSparkAddress(t.address, t.network as SparkNetwork)) throw new Error(`That is not a Spark address on ${t.network === "bitcoin" ? "Bitcoin" : t.network}`);
   } else if (evm) {
     if (!["ethereum", "sepolia", "evm-local"].includes(t.network) || t.unit !== "token-base" || !/^0x[0-9a-fA-F]{40}$/.test(t.token ?? "") || !/^0x[0-9a-fA-F]{40}$/.test(t.address) || /^0x0{40}$/i.test(t.address)) throw new Error("Invalid token, recipient or EVM network");
     // Only Ethereum carries real USDT; Sepolia and a local chain carry worthless test tokens.
@@ -99,7 +104,7 @@ export function validatePaymentTarget(value: unknown, now = Date.now()): Payment
   // Second's Ark servers run on Bitcoin, signet and regtest only.
   if (t.method === "bark" && !["bitcoin", "signet", "regtest"].includes(t.network)) throw new Error("Unsupported Bark network");
   if (typeof t.address !== "string" || !t.address || t.address.length > 4096 || typeof t.provider !== "string" || t.provider.length > 512) throw new Error("Invalid payment destination");
-  if (t.method !== "bitcoin" && t.method !== "fedimint") {
+  if (t.method !== "bitcoin" && t.method !== "fedimint" && t.method !== "spark") {
     const url = new URL(t.provider);
     if (url.username || url.password || url.search || url.hash || (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)))) throw new Error("Use HTTPS or a local test provider");
   }

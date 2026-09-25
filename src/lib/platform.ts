@@ -7,6 +7,8 @@ import type { BarkCreate, BarkWalletView } from "@ghostly/browser/engine/payment
 import type { BarkConfig } from "@ghostly/browser/engine/paymentAdapters/bark";
 import type { FedimintFederationView, FedimintWalletView } from "@ghostly/browser/engine/paymentAdapters/fedimintWallet";
 import type { FederationInfo } from "@ghostly/browser/engine/paymentAdapters/fedimintSdk";
+import type { SparkCreate, SparkWalletView } from "@ghostly/browser/engine/paymentAdapters/sparkWallet";
+import type { SparkNetwork } from "@ghostly/core";
 import type { LightningView } from "@ghostly/browser/engine/paymentAdapters/providers/lightningService";
 import type { BitcoinView } from "@ghostly/browser/engine/paymentAdapters/providers/bitcoinService";
 import type { DataLinkState, ServiceAd, PairingState } from "@ghostly/core";
@@ -109,6 +111,7 @@ export interface WalletState {
   ark?: ArkWalletView;
   bark?: BarkWalletView;
   fedimint?: FedimintWalletView;
+  spark?: SparkWalletView;
   usdt?: UsdtWalletView;
   /** The Lightning source of this mode (the Cashu mints by default) and its latest operations. */
   lightning?: LightningView;
@@ -211,6 +214,13 @@ export interface WalletPlatform {
   fedimintExportBackup(password: string): Promise<string>;
   fedimintRestoreBackup(text: string, password: string): Promise<{ joined: number; failed: string[] }>;
   fedimintRestorePhrase(mnemonic: string, invites: string[]): Promise<{ joined: number; failed: string[] }>;
+  sparkCreate(params: SparkCreate):Promise<void>;
+  sparkBackup():Promise<{mnemonic:string;network:SparkNetwork}>;
+  sparkExportBackup(password:string):Promise<string>;
+  sparkRestoreBackup(text:string,password:string,apiKey?:string):Promise<void>;
+  sparkRefresh():Promise<void>;
+  /** The Spark wallet becomes the Breez Lightning source too (one seed). */
+  sparkUseForLightning():Promise<void>;
   preparePayment(params:{target:PaymentTarget;amount:number;feeCap:number;payee:string;linkId?:string;requestId?:string;memo?:string}):Promise<PaymentReview>;
   approvePayment(id:string):Promise<PaymentReview>;
   reconcilePayment(id:string):Promise<PaymentReview>;
@@ -263,9 +273,9 @@ export interface WalletPlatform {
   inspectCashu(text: string): Promise<CashuInspection | null>;
   exportTokens(): Promise<{ mint: string; token: string; amount: number }[]>;
   send(peerPubKeyZ32: string, amount: number, memo?: string): Promise<{ timestamp: number; paymentId: string }>;
-  request(peerPubKeyZ32: string, amount: number, memo?: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint"): Promise<{ timestamp: number; paymentId: string }>;
-  /** Paying on Ark, Bark or USDT without a request: asks the contact's app for one. */
-  askToPay(peerPubKeyZ32: string, amount: number, method: "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint", memo?: string): Promise<{ askId: string }>;
+  request(peerPubKeyZ32: string, amount: number, memo?: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark"): Promise<{ timestamp: number; paymentId: string }>;
+  /** Paying on Ark, Bark, Spark or USDT without a request: asks the contact's app for one. */
+  askToPay(peerPubKeyZ32: string, amount: number, method: "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", memo?: string): Promise<{ askId: string }>;
   /** The contact's request answering an ask, once it arrived. */
   answerTo(askId: string): ChatPayment | null;
   /** Pays a contact's request. `via: "lightning"`: its invoice through the Lightning source, as reviewed, within `maxFee`. */

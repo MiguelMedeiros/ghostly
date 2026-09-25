@@ -7,6 +7,8 @@ import type { BarkCreate } from "../engine/paymentAdapters/barkWallet";
 import type { BarkConfig } from "../engine/paymentAdapters/bark";
 import type { FedimintFederationView } from "../engine/paymentAdapters/fedimintWallet";
 import type { FederationInfo } from "../engine/paymentAdapters/fedimintSdk";
+import type { SparkCreate } from "../engine/paymentAdapters/sparkWallet";
+import type { SparkNetwork } from "@ghostly/core";
 import type { ProfileChoice } from '../profiles/public';
 import type { ProofChallenge, ProofEvidence, ProofAdapter } from "@ghostly/core";
 import type { LinkParams, PairedTransport, DeliveryMode } from "@ghostly/core";
@@ -54,6 +56,15 @@ export interface EngineApi {
   fedimintExportBackup(params: { password: string }): string;
   fedimintRestoreBackup(params: { text: string; password: string }): { joined: number; failed: string[] };
   fedimintRestorePhrase(params: { mnemonic: string; invites: string[] }): { joined: number; failed: string[] };
+  /** Mainnet's Spark wallet (with a Breez API key), or a wallet restored from a phrase. Testnet's is made by itself. */
+  sparkCreate(params: SparkCreate): void;
+  sparkBackup(): { mnemonic: string; network: SparkNetwork };
+  sparkExportBackup(params: { password: string }): string;
+  /** `apiKey`: Mainnet's Breez key, not in the file. */
+  sparkRestoreBackup(params: { text: string; password: string; apiKey?: string }): void;
+  sparkRefresh(): void;
+  /** The Spark wallet of this mode becomes the Breez Lightning source too: one seed, one wallet, one balance. */
+  sparkUseForLightning(): void;
   preparePayment(params: {target:PaymentTarget;amount:number;feeCap:number;payee:string;linkId?:string;requestId?:string;memo?:string}): PaymentReview;
   approvePayment(params: {id:string}): PaymentReview;
   reconcilePayment(params: {id:string}): PaymentReview;
@@ -152,13 +163,13 @@ export interface EngineApi {
   /** Everything held, as tokens: the only backup there is for now. */
   walletExport(): { mint: string; token: string; amount: number }[];
   sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number }): { paymentId: string };
-  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint"; rail?: "cashu" | "lightning" }): { paymentId: string };
+  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark"; rail?: "cashu" | "lightning" }): { paymentId: string };
   /** A request any member of a group may pay, once (WISP 9xx § Payments). */
   requestGroupPayment(params: { groupId: string; amount: number; memo?: string; timestamp: number; rail: "cashu" | "lightning" }): { paymentId: string };
   /** The payment composer opened on a member of a community group: their app is asked what ways of paying it takes. */
   groupPaymentHello(params: { groupId: string; member: string }): void;
   /** Asks the contact for a way to pay it (Ark, USDT); its answer is a request carrying `askId`. */
-  askToPay(params: { linkId: string; amount: number; method: "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint"; memo?: string; timestamp: number }): { askId: string };
+  askToPay(params: { linkId: string; amount: number; method: "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark"; memo?: string; timestamp: number }): { askId: string };
   /** `via: "lightning"`: the Lightning payment the person reviewed, never ecash instead, within `maxFee`. */
   payRequest(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number }): void;
   reclaimPayment(params: { paymentId: string }): void;

@@ -10,7 +10,7 @@ import { choose } from "../select";
 
 // covers: payments.chat.review, payments.chat.method-off, payments.cashu.request, payments.cashu.reclaim, payments.cashu.test-sats, payments.lightning.request, payments.bitcoin.send, payments.usdt.send, payments.external
 
-const ALL_ON = { cashu: true, lightning: true, arkade: true, bark: true, bitcoin: true, usdt: true, fedimint: true };
+const ALL_ON = { cashu: true, lightning: true, arkade: true, bark: true, spark: true, bitcoin: true, usdt: true, fedimint: true };
 
 /** The bubble of payment "pay-1" in the chat with "peer". */
 function show(payment: Partial<PaymentView>, { wallet, link }: { wallet?: Partial<WalletView>; link?: Partial<LinkView> } = {}) {

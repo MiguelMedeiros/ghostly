@@ -14,6 +14,8 @@ export const arkReady = (patch: Partial<NonNullable<WalletView["ark"]>> = {}): N
   ({ configured: true, locked: false, address: "tark1contact", balance: 5_000, network: "mutinynet", ...patch });
 export const barkReady = (patch: Partial<NonNullable<WalletView["bark"]>> = {}): NonNullable<WalletView["bark"]> =>
   ({ configured: true, locked: false, address: "tark1bark", balance: 3_000, network: "signet", ...patch });
+export const sparkReady = (patch: Partial<NonNullable<WalletView["spark"]>> = {}): NonNullable<WalletView["spark"]> =>
+  ({ configured: true, locked: false, address: "sparkrt1spark", balance: 4_000, network: "regtest", history: [], ...patch });
 export const usdtReady = (patch: Partial<NonNullable<WalletView["usdt"]>> = {}): NonNullable<WalletView["usdt"]> =>
   ({ configured: true, locked: false, chainId: 11155111, decimals: 6, balance: "5000000", gasBalance: "0", ...patch });
 export const bitcoinSource = (patch: Partial<NonNullable<WalletView["bitcoin"]>> = {}): NonNullable<WalletView["bitcoin"]> =>
@@ -27,6 +29,7 @@ export const everyWallet = (patch: Partial<WalletView> = {}): Partial<WalletView
   balance: 1_000,
   ark: arkReady(),
   bark: barkReady(),
+  spark: sparkReady(),
   usdt: usdtReady(),
   bitcoin: bitcoinSource(),
   ...patch,

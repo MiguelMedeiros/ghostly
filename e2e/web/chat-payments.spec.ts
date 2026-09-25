@@ -43,13 +43,13 @@ test("each chat allows its own ways of paying", { tag: ["@feature:payments.chat.
   await bob.page.getByRole("button", { name: "Cancel" }).click();
 
   // Everything off for this chat: no ⚡ on either side, and the chat itself keeps working.
-  await choose(alice, { lightning: false, arkade: false, bark: false, bitcoin: false, fedimint: false });
+  await choose(alice, { lightning: false, arkade: false, bark: false, spark: false, bitcoin: false, fedimint: false });
   await expect(button(alice)).toBeDisabled();
   await expect(button(bob)).toBeDisabled({ timeout: 90000 });
   await say(bob, "still talking");
   await expect(chat(alice).getByText("still talking")).toBeVisible({ timeout: 60000 });
 
-  await choose(alice, { cashu: true, lightning: true, arkade: true, usdt: true, bark: true, bitcoin: true, fedimint: true });
+  await choose(alice, { cashu: true, lightning: true, arkade: true, usdt: true, bark: true, spark: true, bitcoin: true, fedimint: true });
   await expect(button(bob)).toBeEnabled({ timeout: 90000 });
   await bob.page.getByTestId("payment-button").click();
   await expect(card(bob, "cashu")).toBeEnabled({ timeout: 90000 });

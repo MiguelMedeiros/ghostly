@@ -3,7 +3,7 @@ import type { WalletView } from "@ghostly/browser/shared/types";
 import { TEST_MINTS } from "@ghostly/browser/shared/mints";
 import { pageUnit, walletCards, type WalletRail } from "../../components/walletCardData";
 import { walletView } from "../fakeEngine";
-import { arkReady, barkReady, bitcoinSource, lightningSource, mint, REAL_MINT, TEST_MINT, usdtReady } from "./fixtures";
+import { arkReady, barkReady, sparkReady, bitcoinSource, lightningSource, mint, REAL_MINT, TEST_MINT, usdtReady } from "./fixtures";
 
 // covers: wallet.deck, wallet.mode, wallet.fedimint.join, wallet.fedimint.mainnet-off
 
@@ -16,7 +16,7 @@ const cardOf = (rail: WalletRail, wallet: Partial<WalletView> = {}) => {
 const pageCardOf = (rail: WalletRail, wallet: Partial<WalletView> = {}) => walletCards(walletView(wallet), TEST_MINTS, { badged: true }).find((c) => c.id === rail)!;
 
 it("lists every wallet, in the deck's order", () => {
-  expect(walletCards(walletView(), TEST_MINTS).map((c) => c.id)).toEqual(["cashu", "lightning", "arkade", "bark", "bitcoin", "fedimint", "usdt"]);
+  expect(walletCards(walletView(), TEST_MINTS).map((c) => c.id)).toEqual(["cashu", "lightning", "arkade", "bark", "spark", "bitcoin", "fedimint", "usdt"]);
 });
 
 describe("Cashu", () => {
@@ -87,6 +87,25 @@ describe("Bark", () => {
   it("says it is not on Mainnet yet where it is unavailable", () => {
     expect(cardOf("bark", { bark: { configured: false, locked: false, balance: 0, unavailable: "Mainnet" } }))
       .toMatchObject({ balance: "Testnet only", status: "Not on Mainnet yet", detail: "Second's Ark · signet", ready: false });
+  });
+});
+
+describe("Spark", () => {
+  it("is ready once it has its Spark address, and says where it runs", () => {
+    expect(cardOf("spark", { spark: sparkReady({ balance: 4_000 }) }))
+      .toEqual({ name: "Spark", balance: "4,000 test sats", detail: "Spark · regtest", status: "Ready", ready: true });
+    expect(cardOf("spark", { spark: sparkReady({ address: undefined }) })).toMatchObject({ balance: "Connecting…", ready: false });
+  });
+
+  it("on Mainnet: asks for a Breez API key first, then says it is real bitcoin", () => {
+    expect(cardOf("spark", { spark: { configured: false, locked: true, balance: 0, network: "bitcoin", needsKey: true, unavailable: "key" } }))
+      .toMatchObject({ balance: "Needs a key", status: "Set up", detail: "Spark · Bitcoin", ready: false });
+    expect(cardOf("spark", { spark: sparkReady({ network: "bitcoin", balance: 21 }) })).toMatchObject({ balance: "21 sats", status: "Real bitcoin", detail: "Spark · Bitcoin", ready: true });
+  });
+
+  it("counts plain sats under the Testnet badge, and test sats in Mainnet", () => {
+    expect(pageCardOf("spark", { mode: "testnet", spark: sparkReady({ balance: 4_000 }) }).balance).toBe("4,000 sats");
+    expect(pageCardOf("spark", { spark: sparkReady({ balance: 4_000 }) }).balance).toBe("4,000 test sats");
   });
 });
 

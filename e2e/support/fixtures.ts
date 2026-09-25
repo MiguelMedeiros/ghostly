@@ -121,7 +121,7 @@ export async function linkLegacy(host: Peer, guest: Peer): Promise<void> {
 export const chat = (peer: Peer) => peer.page.locator(".chat-wallpaper");
 
 /** The wallet is a page beside the chat list, like Settings: opening it puts the chat away. */
-export async function openWallet(peer: Peer, card?: "cashu" | "lightning" | "arkade" | "bark" | "usdt" | "bitcoin" | "fedimint"): Promise<void> {
+export async function openWallet(peer: Peer, card?: "cashu" | "lightning" | "arkade" | "bark" | "spark" | "usdt" | "bitcoin" | "fedimint"): Promise<void> {
   if (!await peer.page.getByTestId("wallet").isVisible()) await peer.page.getByTestId("wallet-chip").click();
   if (card) await peer.page.getByTestId(`wallet-card-${card}`).click();
 }

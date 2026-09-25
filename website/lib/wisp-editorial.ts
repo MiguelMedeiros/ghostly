@@ -322,6 +322,18 @@ export const editorial: Record<string, Entry> = {
     },
     feature: inApp("wallets", "Wallets", "Carteiras"),
   },
+  "2xx-spark": {
+    benefit: {
+      en: "Pay a contact who also has Spark straight from wallet to wallet: instant, off-chain, no Lightning hop.",
+      "pt-br": "Pagar um contato que também tem Spark direto de carteira para carteira: instantâneo, fora da cadeia, sem passar pela Lightning.",
+    },
+    level: "development",
+    note: {
+      en: "Experimental. Testnet runs on Breez's hosted regtest with no key; Mainnet needs a Breez API key and moves real bitcoin. The same wallet can be your Lightning source.",
+      "pt-br": "Experimental. A Testnet roda no regtest hospedado da Breez, sem chave; a Mainnet precisa de uma chave de API da Breez e movimenta bitcoin de verdade. A mesma carteira pode ser sua fonte Lightning.",
+    },
+    feature: inApp("wallets", "Wallets", "Carteiras"),
+  },
   "300-peer-proofs": {
     benefit: {
       en: "Optionally prove to one contact that you control an outside identity — never required.",

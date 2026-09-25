@@ -422,6 +422,32 @@ balances are checked. The extension test makes a wallet in the offscreen documen
 there) and moves sats in and out. The request is paid through the bubble's "Copy invoice" and the Lightning card: the bubble's
 own review pays Cashu only for now.
 
+### Spark to Spark on Breez's regtest
+
+Spark is also its own way of paying (`spark`, WISP 2xx): a Spark wallet per profile and mode, the same Breez SDK
+as the Breez source. Testnet's wallet is made by itself on Breez's regtest (no API key); Mainnet's needs one.
+Nothing runs locally, so nothing of it is in `e2e/infra`.
+
+`e2e/web/spark-wallet.spec.ts` has three parts. The Mainnet one (a Breez API key is asked for) runs anywhere.
+`@network` opens a Testnet wallet on Breez's regtest. The gated one needs a funded counterpart
+(`support/spark.ts`): Lightspark's faucet asks for a reCAPTCHA, so a person funds it once at
+https://app.lightspark.com/regtest-faucet, and the test says which address when it holds too little. The shared
+one's phrase is kept outside the repo, in `~/.ghostly-test-identities/spark-regtest-counterpart` (mode 600);
+`GHOSTLY_BREEZ_COUNTERPART` works as well.
+
+```bash
+export GHOSTLY_SPARK_COUNTERPART="$(cat ~/.ghostly-test-identities/spark-regtest-counterpart)"   # never print it
+GHOSTLY_SPARK_REGTEST=1 npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/spark-wallet.spec.ts
+```
+
+In the gated run, Alice and Bob each open their Testnet Spark wallet. The counterpart pays 10,000 sats to Alice's
+address. Alice sends 3,000 to Bob's address from the wallet page. In the chat, Bob's Send asks Alice's app for a
+Spark invoice and pays 1,500 on it, and Bob's Request of 700 is paid by Alice. Every payment is Spark to Spark,
+with no Lightning hop and no fee on regtest, so the balances end at exactly 7,800 (Alice) and 2,200 (Bob). The
+payee settles a request from its own history only. Both then send everything back to the counterpart, so a run
+costs it nothing. Run the counterpart from one place only: two SDK storages of one seed disagree about its leaves
+(a leaf can stay out in a swap for a while).
+
 ### BDK (on-chain Bitcoin) on regtest
 
 The BDK wallet runs in the page (bitcoindevkit in WebAssembly) and reads the chain from the environment's Esplora
