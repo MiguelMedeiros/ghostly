@@ -126,7 +126,7 @@ const en = {
     lead: "Here is what the app does.",
     shot: "Screenshot of the Ghostly app",
     illustration: "Illustration",
-    fromDev: "Development build, {n}",
+    fromDev: "Ghostly {n}",
     fromOld: "An earlier build",
     items: [
       {
@@ -471,7 +471,7 @@ const ptBr: HomeCopy = {
     lead: "Veja o que o app faz.",
     shot: "Captura de tela do app Ghostly",
     illustration: "Ilustração",
-    fromDev: "Build de desenvolvimento, {n}",
+    fromDev: "Ghostly {n}",
     fromOld: "Um build anterior",
     items: [
       {
