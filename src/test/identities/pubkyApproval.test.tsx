@@ -40,7 +40,7 @@ vi.mock("@synonymdev/pubky", () => ({
 
 /** What Ring or Passport hands back: a session for this key, granted exactly what was asked. */
 function session() {
-  const granted = sdk.capabilities.at(-1)!;
+  const granted = sdk.capabilities[sdk.capabilities.length - 1];
   return {
     info: { publicKey: { z32: () => key, free: () => {} }, capabilities: [granted], free: () => {} },
     storage: {
@@ -108,7 +108,7 @@ describe("Pubky approval in the UI", () => {
     expect(popup.close).toHaveBeenCalled();
     const [call] = engine.callsTo("beginIdentityProof");
     expect(call).toMatchObject({ provider: "pubky", subject: key });
-    const [complete] = engine.callsTo("completeIdentityProof") as [{ evidence: { folder: string } }];
+    const [complete] = engine.callsTo("completeIdentityProof") as unknown as [{ evidence: { folder: string } }];
     expect(sdk.written).toHaveLength(1);
     expect(sdk.written[0][0]).toMatch(new RegExp(`^/pub/ghostly\\.app/proofs/${complete.evidence.folder}/[a-f0-9]{64}\\.txt$`));
     expect(sdk.written[0][1]).toMatch(new RegExp(`^Ghostly identity proof v1: I control pubky:${key} `));
