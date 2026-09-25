@@ -134,7 +134,7 @@ const en = {
         icon: "chat",
         title: "Say it your way.",
         body: "Private one-to-one conversations with delivery receipts and local history. No phone number, no public profile.",
-        extra: "Pinned keys, names and pictures, messages sent again by themselves, and messages held for a contact who is away.",
+        extra: "Voice messages, pinned keys, names and pictures, and messages held for a contact who is away.",
       },
       {
         id: "files",
@@ -479,7 +479,7 @@ const ptBr: HomeCopy = {
         icon: "chat",
         title: "Diga do seu jeito.",
         body: "Conversas privadas um a um, com confirmação de entrega e histórico local. Sem número de telefone, sem perfil público.",
-        extra: "Chaves fixadas, nomes e fotos, mensagens reenviadas sozinhas, e mensagens guardadas para um contato ausente.",
+        extra: "Mensagens de voz, chaves fixadas, nomes e fotos, e mensagens guardadas para um contato ausente.",
       },
       {
         id: "files",

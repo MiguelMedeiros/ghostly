@@ -76,8 +76,8 @@ const en: Timeline = {
       color: "#22d3ee",
       title: "Chat & connection",
       items: {
-        now: ["Paired chats: files, payments, local apps", "Calls in WebRTC chats", "Iroh and HyperDHT on desktop", "QR invitations", "Pairing progress you can watch"],
-        planned: ["Calls inside paired chats", "Voice messages", "Local network discovery, QUIC and WebSocket relay profiles"],
+        now: ["Paired chats: files, payments, local apps", "Calls in WebRTC chats", "Iroh and HyperDHT on desktop", "QR invitations", "Pairing progress you can watch", "Voice messages"],
+        planned: ["Calls inside paired chats", "Local network discovery, QUIC and WebSocket relay profiles"],
         later: [{ text: "Tor, libp2p, Pear components", level: "research" }],
       },
     },
@@ -175,8 +175,8 @@ const ptBr: Timeline = {
       color: "#22d3ee",
       title: "Conversa e conexão",
       items: {
-        now: ["Chats pareados: arquivos, pagamentos, apps locais", "Chamadas em chats WebRTC", "Iroh e HyperDHT no desktop", "Convites por QR", "Progresso do pareamento à vista"],
-        planned: ["Chamadas dentro dos chats pareados", "Mensagens de voz", "Descoberta na rede local, perfis QUIC e relay WebSocket"],
+        now: ["Chats pareados: arquivos, pagamentos, apps locais", "Chamadas em chats WebRTC", "Iroh e HyperDHT no desktop", "Convites por QR", "Progresso do pareamento à vista", "Mensagens de voz"],
+        planned: ["Chamadas dentro dos chats pareados", "Descoberta na rede local, perfis QUIC e relay WebSocket"],
         later: [{ text: "Tor, libp2p, componentes Pear", level: "research" }],
       },
     },
