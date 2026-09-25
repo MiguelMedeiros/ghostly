@@ -262,7 +262,7 @@ describe("PairingBanner: what the popover does", () => {
       transportWait: { transport: "hyperdht/1", by: "you", reason: "unreachable", failures: 1, error: "Transport change failed: hyperdht/1 unreachable. Retry or choose another transport.", retryAt } });
     const block = screen.getByTestId("connection-waiting");
     expect(block).toHaveAttribute("data-reason", "unreachable");
-    expect(within(block).getByTestId("connection-waiting-why")).toHaveTextContent(`You chose HyperDHT. HyperDHT didn't connect: HyperDHT unreachable. Trying again at ${new Date(retryAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`);
+    expect(within(block).getByTestId("connection-waiting-why")).toHaveTextContent(`You chose HyperDHT. The last attempt failed: HyperDHT unreachable. Trying again at ${new Date(retryAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`);
     expect(block).toHaveTextContent("Short texts go through the DHT meanwhile; the rest waits.");
     expect(within(block).queryByRole("button", { name: "Use Automatic" })).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();

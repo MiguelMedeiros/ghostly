@@ -207,7 +207,7 @@ export function transportEventText(event: TransportEvent, contact: string): stri
       return `Couldn't switch${event.target ? ` to ${name(event.target)}` : " transport"}${reason ? `: ${reason}` : ""}`;
     }
     case "attempt":
-      if (event.target) return `${name(event.target)} didn't connect yet${event.reason ? `: ${shortReason(event.reason)}` : ""} · tried again by itself`;
+      if (event.target) return `Waiting for ${name(event.target)}${event.reason ? ` · last attempt: ${shortReason(event.reason)}` : ""}`;
       return `Connection attempt failed${event.reason ? `: ${shortReason(event.reason)}` : ""}`;
     case "dht-only": return event.cause === "contact" ? `${contact} switched to DHT only` : "You switched to DHT only";
     case "dht-left": return `Left DHT only${event.transport ? ` · set to ${t}` : " · automatic"}`;
@@ -228,7 +228,7 @@ export function transportWaitText(wait: TransportWait, contact: string, format: 
     "unknown": `${their} app hasn't said yet whether it has ${t}.`,
     "starting": `${their} ${t} is starting.`,
     "connecting": `Connecting over ${t}…`,
-    "unreachable": `${t} didn't connect${wait.error ? `: ${shortReason(wait.error)}` : ""}.${next}`,
+    "unreachable": `${wait.error ? `The last attempt failed: ${shortReason(wait.error)}` : "The last attempt didn't connect"}.${next}`,
     "waiting": `It connects when ${contact} is reachable over it.`,
     "contact-lacks": `${their} app doesn't have ${t}.`,
     "app-lacks": `This app isn't running ${t}${wait.by === "contact" ? "" : " right now"}.`,
