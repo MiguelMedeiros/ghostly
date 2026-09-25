@@ -106,7 +106,7 @@ export interface TransportWait {
   /**
    * - `unknown`: the contact's app has not said whether it has it (no capability record read, no session lists it);
    * - `starting`: the contact's record lists it, but there is no way to dial it yet (its endpoint is starting);
-   * - `connecting`: an attempt is under way;
+   * - `connecting`: a switch to it is under way;
    * - `unreachable`: both have it, and the last attempt did not connect (`error`, when this side knows);
    * - `waiting`: both have it and nothing failed yet: the next attempt goes when the contact is there;
    * - `contact-lacks`: the contact's latest record does not list it: its app does not have it;
@@ -742,9 +742,7 @@ export class GhostLink {
         const message = error instanceof Error ? error.message : String(error);
         this.tracker?.failed("transport", true, message);
         // Waiting for a chosen transport is not a connection error (WISP 100): the wait says why.
-        const wanted = this.wanted();
-        if (wanted) this.unreached(wanted.transport, message, false);
-        else this.options.events?.onPairingState?.({ status: "error", error: message });
+        if (!this.dialFailed(message)) this.options.events?.onPairingState?.({ status: "error", error: message });
         this.rejectWaiters(error instanceof Error ? error : new Error(message));
       });
     });
@@ -875,11 +873,14 @@ export class GhostLink {
     const dialable = t === "webrtc/1" ? !!this.peerTransports?.includes(t) : !!this.peerDescriptors[t];
     const failures = waiting?.failures ?? 0;
     const reason: TransportWait["reason"] = !this.availableTransports.includes(t) ? "app-lacks"
-      : this.switcher.pending?.choices[0] === t || (this.dialing && !this.channel) ? "connecting"
+      : this.switcher.pending?.choices[0] === t ? "connecting"
       : sessionHas ? (failures ? "unreachable" : "waiting")
       : this.peerRecordTransports && !recordHas ? "contact-lacks"
       : policy || !dialable ? (recordHas ? "starting" : "unknown")
       : failures ? "unreachable" : "waiting";
+    // Without a session, a wait is about the transport being there on both sides. A contact that has it and is away,
+    // or not reached yet, is the chat retrying live, as any chat on the DHT is (WISP 400, `on-dht`).
+    if (this.paired?.state.status !== "ready" && reason !== "contact-lacks" && reason !== "starting" && reason !== "app-lacks") return undefined;
     const live = this.isDataLinkOpen ? this.paired?.state.transport : undefined;
     return { transport: t, ...(wanted.by ? { by: wanted.by } : {}), reason, ...(live ? { live } : {}), failures,
       ...(waiting?.error ? { error: waiting.error } : {}), ...(waiting?.retryAt ? { retryAt: waiting.retryAt } : {}) };
@@ -904,6 +905,13 @@ export class GhostLink {
     traceLink(this.myPubKeyZ32, "wait", { transport: target, failures, retryIn: this.waiting.retryAt ? delay : undefined, error });
     this.notifyWait();
     return !told;
+  }
+
+  /** A dial with no session failed while the chat waits for a transport: counted there. True when it waits. */
+  private dialFailed(message: string): boolean {
+    const wait = this.transportWait;
+    if (wait) this.unreached(wait.transport, message, false);
+    return !!wait;
   }
 
   /** The next attempt for the transport the chat waits for, on the background pace. */
@@ -1284,8 +1292,7 @@ export class GhostLink {
     this.autoConnectFailures++;
     void this.dial().catch(error => {
       this.tracker?.failed("transport", true);
-      const wanted = this.wanted();
-      if (wanted) this.unreached(wanted.transport, error instanceof Error ? error.message : String(error), false);
+      this.dialFailed(error instanceof Error ? error.message : String(error));
     });
   }
 

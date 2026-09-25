@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { TransportSwitch, type TransportPolicy, type SwitchPlan } from "../src/transportSwitch";
-// covers: transport.switch, transport.preference
+// covers: transport.switch, transport.preference, transport.wait
 
 function peers(options: { waits?: boolean } = {}) {
   const policies: Omit<TransportPolicy, "revision" | "intent">[] = [0, 1].map(() => ({ preferred: "webrtc/1", fallback: true,

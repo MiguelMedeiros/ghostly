@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GhostLink, createIdentity, createLink, emptyDhtDeliveryState, identityFromSeedB64,
   type GhostRecord, type NativeEndpoint, type PairingState, type PairedTransport, type PkarrTransport, type SignedPacket } from "@ghostly/core";
 import { FakeNativeNet } from "./helpers/fakeNative";
-// covers: transport.switch, transport.chat-switch, transport.preference
+// covers: transport.wait, transport.switch, transport.chat-switch, transport.preference
 
 /**
  * A chosen transport the chat is not on yet waits for it (WISP 100, "A chosen transport not reached yet"), on two
@@ -169,3 +169,27 @@ it("waits again, then lands, when a newer record of the contact's lists the tran
   await vi.waitFor(() => expect([a, b].map(s => [s.state.status, s.state.transport])).toEqual([["ready", "hyperdht/1"], ["ready", "hyperdht/1"]]), { timeout: 10_000 });
   expect(a.link.transportWait).toBeUndefined();
 }, 30_000);
+
+it("with no session, waits only for a transport missing on a side: a contact that has it and is away is retrying live", async () => {
+  const net = new FakeNativeNet();
+  const invitation = createLink(), seeds = [createIdentity().seedB64, createIdentity().seedB64];
+  const b = { iroh: net.endpoint("iroh/1", "b"), hyper: net.endpoint("hyperdht/1", "b") };
+  const link = new GhostLink({
+    params: { ...invitation.mine, profile: "paired-chat/1" }, rtcAvailable: false,
+    pairing: { credentials: { seedB64: seeds[0], peerKey: identityFromSeedB64(seeds[1]).pubKeyZ32 }, pinPeer: async () => {} },
+    native: { preferred: "hyperdht/1", fallback: false },
+    transport: memoryPkarr(), createPeerConnection: () => { throw new Error("No WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
+  });
+  links.push(link);
+  link.registerEndpoint(net.endpoint("iroh/1", "a"));
+  link.registerEndpoint(net.endpoint("hyperdht/1", "a"));
+  // Nothing known of the contact yet: retrying live, as any chat.
+  expect(link.transportWait).toBeUndefined();
+  link.learnPeerTransports(["iroh/1"], { "iroh/1": b.iroh.descriptor });
+  expect(link.transportWait).toEqual({ transport: "hyperdht/1", by: "you", reason: "contact-lacks", failures: 0 });
+  link.learnPeerTransports(["iroh/1", "hyperdht/1"], { "iroh/1": b.iroh.descriptor });
+  expect(link.transportWait).toMatchObject({ reason: "starting" });
+  // It has it and says how to dial it: reaching it is the chat retrying live, not a wait.
+  link.learnPeerTransports(["iroh/1", "hyperdht/1"], { "iroh/1": b.iroh.descriptor, "hyperdht/1": b.hyper.descriptor });
+  expect(link.transportWait).toBeUndefined();
+});

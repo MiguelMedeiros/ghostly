@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CHOICE_TTL_MS, QUIET_DROP_MS, TRANSPORT_HISTORY_MAX, TRANSPORT_LOG_MAX, TransportLog, compactTransportRows, type TransportEntry, type TransportSnapshot } from "../src/engine/transportLog";
-// covers: transport.timeline
+// covers: transport.timeline, transport.wait
 
 const live = (transport: TransportSnapshot["transport"], extra: Partial<TransportSnapshot> = {}): TransportSnapshot =>
   ({ live: true, transport, text: "stream", dhtOnly: false, ...extra });
