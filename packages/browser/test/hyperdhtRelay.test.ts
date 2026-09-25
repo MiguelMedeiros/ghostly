@@ -27,7 +27,10 @@ function recordingSocket(url: string): WebSocket {
   };
   return socket;
 }
+/** Every secret key a browser endpoint here holds: none of them may ever be on the relay's wire. */
+const secrets: Uint8Array[] = [];
 async function web(url = relay.url, seedB64 = seed()) {
+  secrets.push(hyperKeyPair(fromBase64Url(seedB64)).secretKey);
   const endpoint = await createRelayedHyperEndpoint(seedB64, url, { createSocket: recordingSocket });
   opened.push(endpoint);
   return endpoint;
@@ -200,4 +203,32 @@ it("carries a whole paired chat between two browsers with WebRTC off, pinned as 
   } finally {
     await Promise.allSettled(links.map(link => link.stop()));
   }
+}, 60_000);
+
+it("never puts a secret key on the relay's wire: not in the handshake, a listen, a dial, an incoming stream or an announcement", async () => {
+  // Everything the endpoints of this file did (listened, dialled, answered, carried frames) was recorded in `sent`.
+  const [a, b] = [await web(), await web()];
+  const accepted = incoming(b);
+  const dialled = await a.connect(b.descriptor);
+  await accepted;
+  dialled.channel.close();
+  expect(secrets.length).toBeGreaterThanOrEqual(2);
+  for (const secret of secrets) {
+    expect(contains(sent, secret)).toBe(false);
+    expect(contains(sent, secret.subarray(0, 32))).toBe(false); // the seed half alone
+  }
+  // The check can see a leak: dht-relay's own default (custodial) sends the secret key in its first message.
+  const { default: RelayedDHT } = await import("@hyperswarm/dht-relay");
+  const { default: WebSocketStream } = await import("@hyperswarm/dht-relay/ws");
+  const leaked: Uint8Array[] = [];
+  const socket = new WebSocket(relay.url);
+  const send = socket.send.bind(socket);
+  socket.send = (data: string | ArrayBufferLike | Blob | ArrayBufferView) => {
+    if (ArrayBuffer.isView(data)) leaked.push(new Uint8Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)));
+    send(data);
+  };
+  const keyPair = hyperKeyPair(crypto.getRandomValues(new Uint8Array(32)));
+  const custodial = new RelayedDHT(new WebSocketStream(true, socket), { keyPair }) as { destroy(): Promise<void> };
+  await vi.waitFor(() => expect(contains(leaked, keyPair.secretKey)).toBe(true));
+  await custodial.destroy().catch(() => {});
 }, 60_000);
