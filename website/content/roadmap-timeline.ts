@@ -104,8 +104,8 @@ const en: Timeline = {
       color: "#f472b6",
       title: "Identity (optional)",
       items: {
-        now: ["Proofs: Nostr · domain · OpenPGP · SSH · Bitcoin address · DID", "Nostr social layer", "A did:dht per profile"],
-        planned: ["Pubky identities (in implementation)", "Bluesky / AT Protocol accounts, once the site's OAuth client document is live", "OpenID accounts, once Ghostly's clients are registered", "Hardware wallets as signers, passkeys"],
+        now: ["Proofs: Nostr · Pubky · domain · OpenPGP · SSH · Bitcoin address · DID", "Nostr social layer", "A did:dht per profile"],
+        planned: ["Bluesky / AT Protocol accounts, once the site's OAuth client document is live", "OpenID accounts, once Ghostly's clients are registered", "Hardware wallets as signers, passkeys"],
         later: ["Keet, once it has a supported signing API", { text: "Pubky profiles and content", level: "research" }],
       },
     },
@@ -203,8 +203,8 @@ const ptBr: Timeline = {
       color: "#f472b6",
       title: "Identidade (opcional)",
       items: {
-        now: ["Provas: Nostr · domínio · OpenPGP · SSH · endereço Bitcoin · DID", "Camada social do Nostr", "Um did:dht por perfil"],
-        planned: ["Identidades Pubky (em implementação)", "Contas Bluesky / AT Protocol, quando o documento de cliente OAuth do site estiver no ar", "Contas OpenID, quando os clientes do Ghostly forem registrados", "Carteiras de hardware como signers, passkeys"],
+        now: ["Provas: Nostr · Pubky · domínio · OpenPGP · SSH · endereço Bitcoin · DID", "Camada social do Nostr", "Um did:dht por perfil"],
+        planned: ["Contas Bluesky / AT Protocol, quando o documento de cliente OAuth do site estiver no ar", "Contas OpenID, quando os clientes do Ghostly forem registrados", "Carteiras de hardware como signers, passkeys"],
         later: ["Keet, quando tiver uma API de assinatura suportada", { text: "Perfis e conteúdos do Pubky", level: "research" }],
       },
     },

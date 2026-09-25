@@ -111,12 +111,11 @@ const en = {
       title: "Bring an identity, only if you want",
       why: "Nobody needs a public identity to talk. Proofs are optional, several can coexist, and you choose what each contact sees.",
       now: [
-        { text: "Proofs made once, shared per chat: Nostr, a domain, an OpenPGP or SSH key, a Bitcoin address, a DID", level: "available" },
+        { text: "Proofs made once, shared per chat: Nostr, Pubky (approved in Pubky Ring or Passport), a domain, an OpenPGP or SSH key, a Bitcoin address, a DID", level: "available" },
         { text: "Nostr social layer: profile, follows and notes; posting off by default", level: "available" },
         { text: "A did:dht for every profile, listing only the identities you switch on", level: "available" },
       ],
       next: [
-        { text: "Pubky identities, in implementation (#246)", level: "planned" },
         { text: "Bluesky / AT Protocol accounts: built, blocked until the website's OAuth client document is live on ghostly.tools", level: "planned" },
         { text: "OpenID accounts (Google, Microsoft, Apple, GitLab, Twitch): built, blocked until Ghostly's OAuth clients are registered", level: "planned" },
         { text: "Hardware wallets as signers, and passkeys", level: "planned" },
@@ -293,12 +292,11 @@ const ptBr: RoadmapCopy = {
       title: "Traga uma identidade, só se quiser",
       why: "Ninguém precisa de identidade pública para conversar. Provas são opcionais, várias podem coexistir e você escolhe o que cada contato vê.",
       now: [
-        { text: "Provas feitas uma vez, compartilhadas por chat: Nostr, um domínio, uma chave OpenPGP ou SSH, um endereço Bitcoin, um DID", level: "available" },
+        { text: "Provas feitas uma vez, compartilhadas por chat: Nostr, Pubky (aprovada no Pubky Ring ou no Passport), um domínio, uma chave OpenPGP ou SSH, um endereço Bitcoin, um DID", level: "available" },
         { text: "Camada social do Nostr: perfil, quem segue e notas; publicar desligado por padrão", level: "available" },
         { text: "Um did:dht para cada perfil, que lista só as identidades que você ligar", level: "available" },
       ],
       next: [
-        { text: "Identidades Pubky, em implementação (#246)", level: "planned" },
         { text: "Contas Bluesky / AT Protocol: prontas, bloqueadas até o documento de cliente OAuth do site estar no ar em ghostly.tools", level: "planned" },
         { text: "Contas OpenID (Google, Microsoft, Apple, GitLab, Twitch): prontas, bloqueadas até os clientes OAuth do Ghostly serem registrados", level: "planned" },
         { text: "Carteiras de hardware como signers, e passkeys", level: "planned" },

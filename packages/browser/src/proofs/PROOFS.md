@@ -1,14 +1,14 @@
 # Identity proofs: providers
 
 An **identity proof** lets a person show a contact, optionally and per contact, that they control an
-external identity: a Nostr key, a domain, a Bitcoin address, an SSH or PGP key, an OpenID Connect account, an AT Protocol (Bluesky) account.
+external identity: a Nostr key, a Pubky key, a domain, a Bitcoin address, an SSH or PGP key, an OpenID Connect account, an AT Protocol (Bluesky) account.
 A **provider** is one kind of identity: how the person produces evidence, and how any Ghostly app checks
 it. Everything else is shared and already written: the statement bytes, the proof key, sharing and
 withdrawing per contact, replay protection, storage, expiry, re-checks and the UI.
 
 | Category | Who vouches | Examples | Shown as |
 |---|---|---|---|
-| `self-custodied` | the person: they hold the key, or control the domain or the account's DID | Nostr, SSH, PGP, Bitcoin, domain, AT Protocol | "Verified · your key" |
+| `self-custodied` | the person: they hold the key, or control the domain or the account's DID | Nostr, Pubky, SSH, PGP, Bitcoin, domain, AT Protocol | "Verified · your key" |
 | `provider-attested` | a company that says the person logged in | OpenID Connect (Google, Microsoft, Apple…) | "Verified by accounts.google.com" |
 
 ## The model
@@ -122,10 +122,24 @@ A provider has one or more signers; the UI shows the ones whose `platforms` incl
 
 | `kind` | For | The UI | You write |
 |---|---|---|---|
-| `in-app` | a signer Ghostly can call: NIP-07, NIP-46, a wallet API, an AT Protocol server | renders `fields`, calls `run` **synchronously from the click**, shows `onAuthUrl` as a link (never opens it) and `onProgress` | `run(ctx, work)`: open, hand `work` a session with `subject()` and `sign(statement)`, always clean up. A signer that needs a window (AT Protocol OAuth) opens it in `run` before any `await` |
+| `in-app` | a signer Ghostly can call: NIP-07, NIP-46, a wallet API, an AT Protocol server, a Pubky auth request | renders `fields`, calls `run` **synchronously from the click**, shows `onAuthUrl` as a link (never opens it), `onApproval` (below) and `onProgress` | `run(ctx, work)`: open, hand `work` a session with `subject()` and `sign(statement)`, always clean up. A signer that needs a window (AT Protocol OAuth) opens it in `run` before any `await` |
 | `external-tool` | ssh-keygen, gpg, a Bitcoin wallet's "sign message" | shows `instructions(statement)` with copy buttons and a paste field | `instructions`, `parse(pasted)` |
 | `redirect` | OpenID Connect | "Continue" prepares the statement; a second button calls `start(statement, ctx)` **synchronously from its click** (nothing awaited before it, so the popup keeps the user activation) | `start` (PKCE, `nonce` from `statement.id`, `state`, popup): open the popup before any `await` |
 | `publish` | DNS TXT, `/.well-known/…` | shows `instructions(statement)`, then "Check" | `instructions`, `evidence` (often `{}`: the verifier looks it up) |
+
+**Approval elsewhere (`ctx.onApproval`).** An in-app signer that waits for the person to approve somewhere else
+(Pubky: Pubky Passport in a browser window, or Pubky Ring scanning a QR code) hands the UI an `ApprovalRequest`: a
+primary button (`open.label`, `open.run()`), a QR code (`qr.value`, `qr.label`) and short `notes`. The UI shows them on
+one screen in place of the form; whichever approves first wins, and the signer calls `onApproval(null)` when it no longer
+waits. `open.run()` is called **synchronously from the button's click**, so a popup it opens keeps the user activation.
+The values are secrets (a relay key): drawn, never logged, stored or written into the page as text. A signer's
+`action` names the button that starts it ("Continue" for Pubky; default "Sign with <label>").
+
+**Taking a published proof down (`unpublish`).** A provider whose proof lives somewhere the person published it,
+and that Ghostly can remove for them (Pubky's file), declares `unpublish: { description, label, skipLabel, run }`.
+Removing such a proof says `description` and offers `label` (runs `run({ id, subject, evidence }, ctx)` in the
+renderer, with the same `ApprovalRequest` UI, then removes the proof) or `skipLabel` (removes it without). The
+revocation record is published either way.
 
 For `in-app`, the subject comes from the signer (`session.subject()`); for the others the person types or
 picks it in the subject field. A signer's `action` names the button that starts it ("Continue on your server");
@@ -230,8 +244,9 @@ storing the outcome are one transaction.
   account. `e2e/web/identity-proof-kinds.spec.ts` drives the paste-back and redirect flows with the fakes.
   Test ids: Profile `identity-add` → `add-identity` with `add-identity-<provider>`, `add-identity-signer`,
   `add-identity-subject`, `add-identity-validity`, `add-identity-field-<name>`, `add-identity-start`, then
-  `add-identity-copy-<step>`, `add-identity-paste`, `add-identity-finish`, `add-identity-error`; `add-identity-advanced` unfolds the providers marked `advanced`, and a provider with `subject.preview` shows `add-identity-preview` (`data-status`, one `add-identity-preview-<fact>` per fact) or `add-identity-preview-error` before its signers; saved rows
-  `identity-proof`. Chat: Options → `chat-identities-open` → `chat-identities` with `chat-identity-share`,
+  `add-identity-copy-<step>`, `add-identity-paste`, `add-identity-finish`, `add-identity-error`; `add-identity-advanced` unfolds the providers marked `advanced`, and a provider with `subject.preview` shows `add-identity-preview` (`data-status`, one `add-identity-preview-<fact>` per fact) or `add-identity-preview-error` before its signers; an approval elsewhere
+  `approval` with `approval-open`, `approval-qr`, `approval-cancel`; saved rows `identity-proof`, removal
+  `identity-proof-remove`, `identity-proof-remove-confirm`, `identity-proof-remove-unpublish`, `identity-proof-remove-notes`. Chat: Options → `chat-identities-open` → `chat-identities` with `chat-identity-share`,
   `chat-identity-withdraw`, `chat-identity-mine-status`, `chat-identity-received` (`data-status`),
   `chat-identity-recheck`, `chat-identity-lookup`; header `chat-identity-badges`.
 - `e2e/web/atproto-proofs.spec.ts` goes through the real OAuth pages of a local PDS and PLC directory
@@ -244,6 +259,7 @@ storing the outcome are one transaction.
 | id | Category | Signers | `verify` contacts | Status |
 |---|---|---|---|---|
 | `nostr` | self-custodied | NIP-07 extension, NIP-46 remote signer | nothing (profile, follows and notes: the [social layer](../../../../docs/wisps/3xx-nostr-social.md), from the person's relays, on request) | shipped |
+| `pubky` | self-custodied | one Pubky grant request for one proof folder, approved in Pubky Passport (popup) or Pubky Ring (QR); the statement written to `/pub/ghostly.app/proofs/<folder>/<id>.txt` | Pubky's Pkarr relays (the key's and its homeserver's signed records), then the homeserver; re-checked after a day | shipped; removal deletes the file with a new approval; [WISP 302](../../../../docs/wisps/302-pubky.md) |
 | `domain` | self-custodied | DNS TXT record, `/.well-known/ghostly.json` (publish); NIP-05 with a NIP-07/NIP-46 signer | the chosen DNS-over-HTTPS resolver; for the file methods also the domain's web server | experimental, [draft 3xx](../../../../docs/wisps/3xx-domain.md) |
 | `openpgp` | self-custodied | gpg (paste signature and key), gpg with the key from keys.openpgp.org | nothing (`lookupDisplay`, on request: keys.openpgp.org) | shipped; [WISP 3xx](../../../../docs/wisps/3xx-openpgp.md) |
 | `bitcoin` | self-custodied | the person's wallet: Sparrow, Bitcoin Core, Electrum, COLDCARD, Trezor Suite, another BIP-322 wallet (paste) | nothing | experimental: BIP-322 2.0.0 + legacy P2PKH, [draft 3xx](../../../../docs/wisps/3xx-bitcoin.md) |

@@ -168,7 +168,7 @@ const en = {
         id: "identities",
         icon: "badge",
         title: "Prove who you are. Only to whom you choose.",
-        body: "Attach an outside identity to your profile once (a Nostr key, a domain, an OpenPGP or SSH key, a Bitcoin address) and share it with one contact at a time. Their app verifies it on the device.",
+        body: "Attach an outside identity to your profile once (a Nostr or Pubky key, a domain, an OpenPGP or SSH key, a Bitcoin address) and share it with one contact at a time. Their app verifies it on the device.",
         extra: "Never required to talk. Withdraw it from one chat, or revoke it everywhere.",
       },
       {
@@ -513,7 +513,7 @@ const ptBr: HomeCopy = {
         id: "identities",
         icon: "badge",
         title: "Prove quem você é. Só para quem você escolher.",
-        body: "Vincule uma identidade externa ao seu perfil uma vez (uma chave Nostr, um domínio, uma chave OpenPGP ou SSH, um endereço Bitcoin) e compartilhe com um contato por vez. O app dele verifica no aparelho.",
+        body: "Vincule uma identidade externa ao seu perfil uma vez (uma chave Nostr ou Pubky, um domínio, uma chave OpenPGP ou SSH, um endereço Bitcoin) e compartilhe com um contato por vez. O app dele verifica no aparelho.",
         extra: "Nunca é exigido para conversar. Retire de um chat, ou revogue em todo lugar.",
       },
       {
