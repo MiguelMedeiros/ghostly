@@ -11,7 +11,7 @@ no engine, network, IndexedDB or Tauri is involved.
 
 | File | What it gives a test |
 | --- | --- |
-| `setup.ts` | jest-dom matchers; before each test, empty `localStorage` and a reset fake engine; `cleanup` after. The web app's session sync (`platform/sync.ts`, started by the sidebar) is a no-op: it would call the engine behind the test's back on every state push. |
+| `setup.ts` | jest-dom matchers; before each test, empty `localStorage` and `sessionStorage`, a fresh GIF search session (`resetGifSearch`), and a reset fake engine; `cleanup` after. The web app's session sync (`platform/sync.ts`, started by the sidebar) is a no-op: it would call the engine behind the test's back on every state push. No test reaches the Internet Archive: a `fetch` to `archive.org` that is not mocked is refused and fails the test (GifCities limits requests per IP; mock it as `gifCities()` in `chat/composer.test.tsx` does). |
 | `fakeEngine.ts` | `fakeEngine`: `setState(patch)` / `update(patch)` push a new engine state to the UI; `on(method, handler)` answers a call; `calls` / `callsTo(method)` show what the UI asked. A call nobody answers **fails**, like an engine error, so a test never passes on a silent no-op. Builders: `engineState`, `linkView`, `paymentView`, `groupView`, `walletView`. |
 | `select.ts` | `choose(user, select, value)` and `optionsOf(user, select)` for the app's `Select` (`components/ui/Select.tsx`): its options exist only while it is open, and `user.selectOptions` is for native selects. |
 | `render.tsx` | `renderApp(ui, { route, language })`: renders inside the router, settings and translations, and returns Testing Library's queries, a `user` (user-event) and `engine` (the fake). |

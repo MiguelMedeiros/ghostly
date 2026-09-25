@@ -78,11 +78,21 @@ describe("what a GifCities response means", () => {
     expect(answer).toMatchObject({ kind: "ok", gifs: [{ id: "rl" }] });
   });
 
-  it("a network error, or no answer in 20 s, is unavailable, and no reason to wait", async () => {
+  it("online, a request that fails as a network error does is the limit: the Archive's limit page has no CORS header", async () => {
+    // What a browser page gets for that page (Chromium's words; WebKit says "Load failed").
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    expect(await searchGifs("ghost")).toEqual({ kind: "limited" });
+    expect(busyUntil()! - Date.now()).toBeGreaterThan(FIRST_WAIT_MS - 1000);
+  });
+
+  it("offline, a network error is only that: unavailable, and no reason to wait", async () => {
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new TypeError("Failed to fetch"));
     expect(await searchGifs("ghost")).toEqual({ kind: "unavailable" });
     expect(busyUntil()).toBeNull();
+  });
 
+  it("no answer in 20 s is unavailable, and no reason to wait", async () => {
     vi.useFakeTimers();
     vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => new Promise((_resolve, reject) => {
       init!.signal!.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));

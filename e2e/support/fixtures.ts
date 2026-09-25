@@ -105,10 +105,14 @@ export async function guardArchive(context: BrowserContext): Promise<void> {
 export const gifCitiesAnswer = (rows: { gif: string; checksum: string; url_text: string }[]) =>
   ({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(rows) });
 
-/** The page the Internet Archive answers with once an IP has asked too much: a 200 in HTML, not a 429. */
+/**
+ * The page the Internet Archive answers with once an IP has asked too much: a 200 in HTML, not a 429. The real one has no
+ * CORS header (2026-09-25), so a browser page never reads it; `route.abort("failed")` is what such a page sees. This one
+ * can be read, as by a client CORS does not bind (Playwright would add the header to a fulfilled response anyway).
+ */
 export const GIFCITIES_RATE_LIMIT = {
   status: 200,
-  contentType: "text/html; charset=utf-8",
+  contentType: "text/html",
   headers: { "access-control-allow-origin": "*" },
   body: "<!DOCTYPE html><html><head><title>Rate limit reached</title></head><body><h1>Rate limit reached</h1><p>You've reached the limit "
     + "for the number of requests that can be made in a short period of time. Please wait a moment and try again.</p></body></html>",

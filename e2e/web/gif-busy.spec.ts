@@ -3,9 +3,11 @@ import { openExpressions } from "../support/composer";
 import { expect, GIFCITIES, GIFCITIES_RATE_LIMIT, gifCitiesAnswer, test } from "../support/fixtures";
 
 /**
- * GifCities limits requests per IP, and says so with a 200 HTML page. The panel used to read that as "unavailable"
- * and its Try again asked again at once, which kept the limit on (2026-09-25). Now it is "busy": a countdown, Try
- * again off until the wait is over, the same wait in every panel, and nothing asked meanwhile.
+ * GifCities limits requests per IP, and says so with a 200 HTML page that has no CORS header: a browser page's fetch of
+ * it fails as a network error does. The panel read that as "unavailable" and its Try again asked again at once, which
+ * kept the limit on (2026-09-25). Now it is "busy": a countdown, Try again off until the wait is over, the same wait in
+ * every panel, and nothing asked meanwhile. Both forms are played: the page read (as a client CORS does not bind would
+ * read it), and the failed request a browser page really gets.
  */
 test("GIF search: GifCities' rate limit reads as busy, and after the wait a search shows GIFs", { tag: ["@feature:chat.paired.gifs.busy"] }, async ({ peer }) => {
   const alice = await peer("alice");
@@ -16,11 +18,12 @@ test("GIF search: GifCities' rate limit reads as busy, and after the wait a sear
   await expect(page.getByTestId("composer-expressions")).toBeEnabled();
 
   const searches: string[] = [];
-  let limited = true;
+  let answer: "limit page" | "blocked by CORS" | "gifs" = "limit page";
   const gifCities = (route: Route) => {
     const q = new URL(route.request().url()).searchParams.get("q")!;
     searches.push(q);
-    return route.fulfill(limited ? GIFCITIES_RATE_LIMIT : gifCitiesAnswer([{ gif: `http://geocities.com/${q}/boo.gif`, checksum: `${q}-boo`, url_text: `${q} boo` }]));
+    if (answer === "blocked by CORS") return route.abort("failed");
+    return route.fulfill(answer === "limit page" ? GIFCITIES_RATE_LIMIT : gifCitiesAnswer([{ gif: `http://geocities.com/${q}/boo.gif`, checksum: `${q}-boo`, url_text: `${q} boo` }]));
   };
   await alice.context.route(GIFCITIES, gifCities);
 
@@ -47,7 +50,7 @@ test("GIF search: GifCities' rate limit reads as busy, and after the wait a sear
   expect(searches).toEqual(["ghost"]);
 
   // The wait over, Try again is back; nothing asked by itself.
-  limited = false;
+  answer = "gifs";
   await page.clock.fastForward(31_000);
   await expect(wait).toHaveText("You can try again now.");
   await expect(retry).toBeEnabled();
@@ -57,8 +60,9 @@ test("GIF search: GifCities' rate limit reads as busy, and after the wait a sear
   await expect(busy).toHaveCount(0);
   expect(searches).toEqual(["ghost", "ghost"]);
 
-  // Told to wait again: a category not seen yet waits, with the ghosts from before to send meanwhile.
-  limited = true;
+  // Told to wait again, the way a browser page is told: the request fails. A category not seen yet waits, with the
+  // ghosts from before to send meanwhile.
+  answer = "blocked by CORS";
   await panel.getByTestId("gif-category-animals").click();
   await expect(busy).toBeVisible();
   // A GIF came in between: the waits start over at 30 s.

@@ -153,6 +153,8 @@ the seeds takes ~0.15 s over SSH, and 3-4 s locally with the Mac at load 60.
 
 Peers find each other through Pkarr relays. Here the relay is `support/relay.ts`, inside the test process: requests to the public relays are answered from memory, and the extension, whose peer runs where requests cannot be intercepted, is pointed at its local address in Settings → Network. So tests do not wait on the public relays, are never rate limited, and never see each other's packets. WebRTC connects the browsers directly on this machine. GIFCities is stubbed the same way.
 
+GifCities and the Wayback Machine (`GIFCITIES`, `WAYBACK` in `support/fixtures.ts`) are **never** reached. GifCities limits requests per IP, answering with a 200 HTML page that has no CORS header (a browser page sees a failed request, which `route.abort("failed")` plays; `route.fulfill` cannot, since Playwright adds the CORS header itself), and our runs share the IPs Ghostly's own apps use: in September 2026 they were likely part of why it ran out. Each context gets `guardArchive(context)` first and the stubs after it. The guard answers only what gets past the stubs and aborts it, and the automatic `archiveGuard` fixture then fails the test. A spec with answers of its own adds a `context.route(GIFCITIES, handler)` (later routes win) and removes it with `unroute(GIFCITIES, handler)`. A bare `unroute(GIFCITIES)` drops the guard too. The Desktop suites cannot route requests, so they do not open the GIF panel.
+
 Only the tests tagged `@network` go out: the wallet, against the public Cashu test mint (`testnut.cashu.space`, worthless sats whose invoices pay themselves). CI does not even do that — it runs a mint of its own and answers the public one's requests from it, the way the relay answers Pkarr's. `e2e/infra` has that mint (`ghostly-e2e-mint`, `E2E_MINT_URL=http://127.0.0.1:47090`), and the `E2E` workflow starts the same container by itself:
 
 ```bash
@@ -168,6 +170,7 @@ npm run e2e:infra:up && npm run test:e2e      # .env.e2e sets E2E_MINT_URL
 | `web/app.spec.ts` | home, one tab per peer, create/join/name/search/delete chats, "Delete all chats" stays deleted, clear all data, tech info |
 | `web/settings.spec.ts` | nickname, color theme and mode, language, switches, lock screen (password, lock now, idle timeout), relays |
 | `web/chat.spec.ts` | two people: relay then peer to peer, nicknames, read ticks, long messages, offline delivery, emoji, GIFs, files (3 MiB, checksum), images |
+| `web/gif-busy.spec.ts` | GifCities' rate-limit page reads as busy: countdown, Try again disabled until the wait is over (the page's clock skips it), no request meanwhile, then GIFs; earlier GIFs while it waits again |
 | `web/calls.spec.ts` | video and audio calls, mute, camera, screen share, decline, the movable self view, the small call window, a call that outlives its chat, the lock over one |
 | `web/menus.spec.ts` | the chat, group and New menus: one line per row, nothing cut, inside the window — en, pt, ar, wide and 390px (a sheet) |
 | `web/mobile.spec.ts` | the phone layout: tabs, chat screen, composer |

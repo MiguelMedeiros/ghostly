@@ -2,6 +2,7 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageInput } from "../../components/MessageInput";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
+import { resetGifSearch } from "../../lib/gifSearch";
 import { setStorageProfile as setProfile } from "../../lib/storage";
 import { renderApp } from "../render";
 
@@ -545,6 +546,22 @@ describe("GIF search while the Internet Archive says to wait", () => {
     act(() => { vi.advanceTimersByTime(1_000); });
     expect(screen.getByTestId("gif-busy")).toBeInTheDocument();
     expect(searched(fetch)).toEqual(["ghost", "happy"]);
+  });
+
+  it("reads a request that fails as a network error does as busy while online (the limit page has no CORS header), and as unavailable offline", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Load failed"));
+    localStorage.setItem("ghostly_composer_panel_tab", "gif");
+    const first = composer();
+    await first.user.click(smiley());
+    expect(await screen.findByTestId("gif-busy")).toHaveTextContent("GIF search is busy right now.");
+    expect(screen.getByRole("button", { name: "Try again" })).toBeDisabled();
+    first.unmount();
+    resetGifSearch();
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    const second = composer();
+    await second.user.click(smiley());
+    expect(await screen.findByText("GIF search is unavailable.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeEnabled();
   });
 
   it("offers the emoji when it has no GIFs to show", async () => {

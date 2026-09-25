@@ -3,10 +3,12 @@ import { getPrefix } from "./storage";
 /**
  * GIF search, from GifCities (the Internet Archive's GeoCities GIFs), shared by every GIF panel of this app session.
  *
- * The Archive limits requests per IP, and says so with a **200** HTML page ("Rate limit reached"), not a 429. So an
- * answer is read as text and judged here, never parsed with `json()` on trust. Once limited, nothing is asked until a
- * wait is over that doubles with each limit in a row (30 s, 60 s, 120 s, 5 min at most); every panel, and a reload,
- * sees the same wait. Nothing asks again by itself: the person does, once the wait is over.
+ * The Archive limits requests per IP, and says so with a **200** HTML page ("Rate limit reached"), not a 429, and with
+ * no CORS header. So a browser page (the web app, the extension, Desktop's WebView) never reads that page: its fetch
+ * fails as a network error does, and online that counts as the limit. Where the page can be read, it is read as text
+ * and judged here, never parsed with `json()` on trust. Once limited, nothing is asked until a wait is over that
+ * doubles with each limit in a row (30 s, 60 s, 120 s, 5 min at most); every panel, and a reload, sees the same wait.
+ * Nothing asks again by itself: the person does, once the wait is over.
  *
  * Answers are kept for this session (20 min fresh, the last 24 searches), so a category or a panel opened again asks
  * nothing, and while search is busy an answer however old is still shown, as earlier results. A search already on its
@@ -21,7 +23,7 @@ export interface PickerGif {
   url: string;
 }
 
-/** What GifCities said: GIFs, "wait" (the rate limit), or nothing usable (a network error, a timeout, a 5xx). */
+/** What GifCities said: GIFs, "wait" (the rate limit), or nothing usable (offline, a timeout, a 5xx). */
 export type GifAnswer = { kind: "ok"; gifs: PickerGif[] } | { kind: "limited" } | { kind: "unavailable" };
 
 export const GIFCITIES_SEARCH_URL = "https://gifcities.archive.org/api/v1/gifsearch";
@@ -180,15 +182,20 @@ export async function readGifCities(res: Response): Promise<GifAnswer> {
   return /json/i.test(type) && !body.trimStart().startsWith("<") ? { kind: "unavailable" } : { kind: "limited" };
 }
 
+const offline = () => typeof navigator !== "undefined" && navigator.onLine === false;
+
 async function ask(query: string): Promise<GifAnswer> {
   const controller = new AbortController();
-  const deadline = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let timedOut = false;
+  const deadline = setTimeout(() => { timedOut = true; controller.abort(); }, REQUEST_TIMEOUT_MS);
   let answer: GifAnswer;
   try {
     const res = await fetch(`${GIFCITIES_SEARCH_URL}?q=${encodeURIComponent(query)}&limit=${RESULTS_LIMIT}`, { signal: controller.signal });
     answer = await readGifCities(res);
   } catch {
-    answer = { kind: "unavailable" };
+    // The limit page carries no CORS header: in a browser page it fails as a network error does, and a page cannot
+    // tell the two apart. Offline it is only that; online the limit is the likely reason, and waiting harms neither.
+    answer = timedOut || offline() ? { kind: "unavailable" } : { kind: "limited" };
   } finally {
     clearTimeout(deadline);
   }
