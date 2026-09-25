@@ -8,6 +8,7 @@ npm run test:map -- --matrix  # every feature's row
 npm run test:map -- --warnings  # the test files that declare nothing
 npm run test:map:write        # rewrite the generated part of this page
 npm run coverage              # unit test line coverage per package (coverage/<package>/index.html)
+npm run test:affected         # before pushing: only the tests your change can break (see below)
 ```
 
 ## What fails the check
@@ -46,6 +47,42 @@ Tag what the test would catch if it broke, not everything it happens to touch.
 ## Adding a feature
 
 Add one line to `e2e/features.json` (keep one feature per line; the ids are `area.thing[.detail]`, lowercase, dashes inside words), in the same pull request as the feature and its tests. `kind` is `feature` for something a person does or sees, `protocol` for a capability underneath (a record format, a handshake, a provider contract). `infra` names what it needs from outside the process, from the `infra` table at the top of the file; the entries with `fake` have a stand-in in `e2e/support/` already.
+
+A new source file gets a line in the file's `paths` too (see below), or a glob that already matches it; otherwise `npm run test:affected` runs every e2e spec whenever it changes, and `npm run test:map -- --warnings` lists it.
+
+## Testing only what changed
+
+Before pushing, run what your change can break, not everything: **CI runs the whole suite on every push** (lint, typecheck, every unit test, the builds; the E2E workflow runs every spec).
+
+```bash
+npm run test:affected                     # vs origin/dev + your working tree: unit, lint, typecheck, Rust
+npm run test:affected -- --port 50310     # also the e2e picked: builds web/, serves it on 50310, stops it after
+npm run test:affected -- --list           # what would run, and why; runs nothing
+npm run test:affected -- --no-e2e --no-rust
+npm run test:affected -- --base HEAD~1    # another base;  --files a.ts b.tsx  instead of the diff
+```
+
+It prints each step with the reason it runs, runs whole, or is skipped, then a summary with timings, and exits non-zero when a step fails. [`scripts/test-affected.mjs`](../scripts/test-affected.mjs) runs it; what it picks is decided in [`scripts/affected/select.mjs`](../scripts/affected/select.mjs), which has its own tests (`npm run test:scripts`).
+
+| Step | What runs |
+|---|---|
+| Unit | `vitest related <changed files> --run --maxWorkers=$JOBS` in each workspace whose tests can import them (core, browser, sdk, extension, ui, matrix, scripts); changed tests run themselves. A change in `packages/core/src` is followed through the `@ghostly/core` barrel to the files that import one of the changed module's names (type-only imports aside): through `index.ts`, every test is "related" to every core module. |
+| Lint | `eslint` on the changed files |
+| Typecheck | `tsc --noEmit -p` of each touched package and of the packages importing it (a core change rechecks everything: its API breaks the importers, not core) |
+| Rust | `cargo fmt --check`, `clippy -D warnings` and `test` for `src-tauri` (+ `native-transports`) or `cli`, only when they changed |
+| E2E | changed file → features (`"paths"` in `e2e/features.json`) → the web and extension tests tagged with them (`--grep @feature:…`), plus changed specs and the specs importing a changed `e2e/support` helper, `--workers=$E2E_WORKERS`. Without `--port` (or `E2E_WEB_PORT`, or `E2E_WEB_URL` for a build you serve yourself) it says what it would run and runs none. Desktop specs run on Linux only: it prints the command instead. |
+
+**Falling back.** When the diff cannot be narrowed, that area runs whole, and the plan says why: `package-lock.json`, a root `package.json` change other than `"scripts"`, or `patches/` run everything; a Vitest config or setup file runs its project whole; `eslint.config.mjs` the whole lint; a `tsconfig` every typecheck; `e2e/playwright.config.ts`, a file the `paths` map marks `"*"` (the app shell, `@ghostly/core`'s `index.ts`, the pairing path every spec walks through, `en.json`, whose strings the specs click) or a file no glob matches runs every e2e spec.
+
+**The `paths` map.** At the end of `e2e/features.json`: a glob (`*`, `**/`, `{a,b}`) → the features a change there can break, as ids, `area.*` prefixes (the id `area` and everything under it), `"*"` for everything, or `[]` for nothing an e2e spec sees (docs, tests, tooling, Rust). A file matching several globs gets all their features. `npm run test:map` (in CI) fails on a pattern that names no feature and warns on a source file no glob matches.
+
+**Workers.** Locally Vitest runs at most `JOBS` workers (default 2; [`vitest.shared.ts`](../vitest.shared.ts), shared by every Vitest config) and Playwright `E2E_WORKERS` (default 2; `MATRIX_WORKERS` for the matrix), so a plain `npm test` or `npx playwright test` no longer takes a worker per core. CI is unchanged (Vitest's default, 2 Playwright workers). `--maxWorkers` / `--workers` on the command line still win.
+
+### When several sessions share a machine
+
+- verify with `npm run test:affected` (2 workers), never the whole `npm test` / `npm run typecheck` / `test:e2e`: those are CI's job, on the draft pull request;
+- serve e2e builds only on your session's port range (`--port`); `test:affected` stops the preview it started, and you stop every other server or container you started when you finish;
+- a known flaky or load-sensitive test failing locally is not a reason to rerun the whole suite: rerun that file, and let CI judge.
 
 ## Coverage
 

@@ -121,6 +121,8 @@ const isTest = (p) => /\.test\.[cm]?[jt]sx?$/.test(p);
 /** Prose: no test imports it and no compiler reads it. */
 const isDoc = (p) => /\.(?:md|mdx|txt)$/i.test(p) || p.startsWith("docs/");
 const isSpec = (p) => p.startsWith("e2e/") && /\.spec\.[cm]?[jt]sx?$/.test(p);
+/** The specs of e2e/playwright.config.ts (web and extension); Desktop and the matrix have configs of their own. */
+const isSuiteSpec = (p) => isSpec(p) && /^e2e\/(?:web|extension)\//.test(p);
 
 // ---------- e2e specs ----------
 
@@ -314,7 +316,7 @@ export function plan({ changed: all, inventory, e2eFiles, codeFiles }) {
   });
 
   // e2e
-  const specs = Object.keys(e2eFiles).filter((p) => isSpec(p) && !p.startsWith("e2e/desktop/"));
+  const specs = Object.keys(e2eFiles).filter(isSuiteSpec);
   const tagsOf = new Map(specs.map((s) => [s, specFeatures(e2eFiles[s])]));
   const ids = inventory.features.map((f) => f.id);
   const paths = inventory.paths ?? {};
@@ -326,16 +328,17 @@ export function plan({ changed: all, inventory, e2eFiles, codeFiles }) {
     const p = c.path;
     if (match(DESKTOP, p)) e2e.desktop.push(p);
     if (p.startsWith("e2e/desktop/") || p === "e2e/playwright.desktop.config.ts") continue;
+    if (p.startsWith("e2e/matrix/") || p === "e2e/playwright.matrix.config.ts") { e2e.none.push(p); continue; }
     if (match(EVERYTHING, p)) continue;
     if (match(E2E_WHOLE, p)) { wholeBecause.push(`${p} changed (every spec uses it)`); continue; }
-    if (isSpec(p)) {
+    if (isSuiteSpec(p)) {
       if (c.exists) { e2e.specs.add(p); e2e.because.push(`${p}: the spec itself`); } else e2e.none.push(p);
       continue;
     }
     if (p.startsWith("e2e/")) {
-      const reach = /\.[cm]?[jt]sx?$/.test(p) ? specsImporting(p, e2eFiles) : new Set();
-      for (const s of reach) if (!s.startsWith("e2e/desktop/")) e2e.specs.add(s);
-      if (reach.size) e2e.because.push(`${p}: imported by ${[...reach].join(", ")}`);
+      const reach = /\.[cm]?[jt]sx?$/.test(p) ? [...specsImporting(p, e2eFiles)].filter(isSuiteSpec).sort() : [];
+      for (const s of reach) e2e.specs.add(s);
+      if (reach.length) e2e.because.push(`${p}: imported by ${reach.join(", ")}`);
       else e2e.none.push(p);
       continue;
     }

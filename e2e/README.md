@@ -3,6 +3,7 @@
 Real Chromium against the shipped build: the web app (`web/dist`, served by `vite preview`) and the extension (`extension/dist`). Two or three people per test, each in a browser profile of their own, chatting, sending files, calling and paying each other. Desktop is [its own thing](#desktop): the bundled Tauri app, driven through WebDriver.
 
 ```bash
+npm run test:affected -- --port 50310   # only the tests tagged with the features your diff touches (docs/TESTING.md)
 npm run test:e2e            # everything (builds the web app and the extension first)
 npm run test:e2e:offline    # everything but the tests that need the internet
 npm run test:e2e:ui         # pick, watch and debug tests
@@ -12,6 +13,8 @@ E2E_WEB_URL=https://app.ghostly.tools npx playwright test -c e2e/playwright.conf
 
 npm run tauri -- build --debug --no-bundle && npm run test:e2e:desktop   # the Desktop app (Linux, Windows)
 ```
+
+Locally Playwright runs `E2E_WORKERS` workers (default 2, so parallel sessions on one machine leave each other room); CI runs 2.
 
 ## Everything, gated suites included
 

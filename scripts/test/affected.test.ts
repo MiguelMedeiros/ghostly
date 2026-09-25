@@ -36,6 +36,8 @@ const e2eFiles: Record<string, string> = {
   "e2e/web/home.spec.ts": `test("h", { tag: ["@feature:app.home"] }, () => {});`,
   "e2e/extension/ssh.spec.ts": `test("s", { tag: ["@feature:proofs.ssh.verify", "@client:extension"] }, () => {});`,
   "e2e/desktop/smoke.spec.ts": `test("d", { tag: ["@feature:app.home"] }, () => {});`,
+  "e2e/matrix/matrix.spec.ts": `import { pair } from "../support/paired";
+test("m", { tag: ["@feature:payments.chat.send"] }, () => {});`,
 };
 
 const changed = (...paths: string[]) => paths.map((p) => ({ path: p, exists: !p.startsWith("-") })).map((c) => ({ ...c, path: c.path.replace(/^-/, "") }));
@@ -210,10 +212,17 @@ describe("e2e files", () => {
   });
 
   it("a changed helper runs the specs that import it, directly or through another helper", () => {
-    expect([...specsImporting("e2e/support/fixtures.ts", e2eFiles)].sort()).toEqual(["e2e/web/chat-payments.spec.ts", "e2e/web/groups.spec.ts"]);
+    expect([...specsImporting("e2e/support/fixtures.ts", e2eFiles)].sort()).toEqual(["e2e/matrix/matrix.spec.ts", "e2e/web/chat-payments.spec.ts", "e2e/web/groups.spec.ts"]);
     const p = plan({ changed: changed("e2e/support/mint.ts"), inventory, e2eFiles });
     expect(p.e2e.wholeSpecs).toEqual(["e2e/web/wallet-cashu.spec.ts"]);
     expect(p.typecheck.find((t) => t.name === "e2e")!.mode).toBe("run");
+  });
+
+  it("the matrix's specs (a config of their own) are never picked", () => {
+    expect(plan({ changed: changed("src/components/PaymentComposer.tsx"), inventory, e2eFiles }).e2e.taggedSpecs).not.toContain("e2e/matrix/matrix.spec.ts");
+    expect(plan({ changed: changed("e2e/matrix/matrix.spec.ts"), inventory, e2eFiles }).e2e).toMatchObject({ mode: "skip", none: ["e2e/matrix/matrix.spec.ts"] });
+    expect(specsImporting("e2e/support/paired.ts", e2eFiles)).toContain("e2e/matrix/matrix.spec.ts");
+    expect(plan({ changed: changed("e2e/support/paired.ts"), inventory, e2eFiles }).e2e.wholeSpecs).toEqual(["e2e/web/chat-payments.spec.ts", "e2e/web/groups.spec.ts"]);
   });
 
   it("Desktop specs are never picked; a Desktop change leaves a note", () => {
