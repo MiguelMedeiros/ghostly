@@ -412,7 +412,10 @@ mod tests {
             format!("https://passport.pubky.app/authorize#d={request} --args"),
             format!("https://passport.pubky.app/authorize#d={request}\n"),
             "https://passport.pubky.app/authorize#d=https%3A%2F%2Fevil.example".to_string(),
-            format!("https://passport.pubky.app/authorize#d={}", "a".repeat(9000)),
+            format!(
+                "https://passport.pubky.app/authorize#d={}",
+                "a".repeat(9000)
+            ),
         ] {
             assert!(!is_pubky_passport_url(&url), "{url}");
             assert!(super::open_pubky_passport(url).is_err());
