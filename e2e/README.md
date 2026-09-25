@@ -69,6 +69,7 @@ endpoint from there, never a literal port. Their names are stable: other suites 
 | 47085 | Iroh relay (`n0computer/iroh-relay:v1.2.0 --dev`, plain HTTP): the browsers' Iroh (WISP 102) goes through it; specs opt in with `peer(name, { irohRelay })`, every other peer runs without Iroh | `GHOSTLY_IROH_RELAY_URL` |
 | 47090 | Cashu test mint (`cashubtc/mintd`, fake Lightning) | `E2E_MINT_URL` |
 | 47095 / 47096 | Fedimint guardian API (websocket, as the invite code names it) / its gateway's API | `GHOSTLY_FEDIMINT_API_URL` / `_GATEWAY_URL` |
+| 47097 | HyperDHT relay for browsers (`native-transports/hyperdht-relay`, on a HyperDHT network of its own) | `GHOSTLY_HYPERDHT_RELAY_URL` (gate `GHOSTLY_HYPERDHT_RELAY`) |
 | 47100 | the web build under test (`vite preview`) | `E2E_WEB_PORT` |
 | 47110-47119 | Lightning address server, in the test process | `E2E_LNURL_PORT` |
 | 47120-47199 | domain-proof DoH + well-known servers, in the test process | `E2E_DOMAIN_PORT` |
@@ -100,6 +101,7 @@ server on the tailnet. Without `--host` nothing changes: local mode is the defau
 npm run e2e:infra:status -- --host one   # is the shared stack up? (exit 0 when every service answers)
 node e2e/infra/infra.mjs check --host one  # the same answer, read-only: opens no connection, forwards nothing (3: not checked)
 npm run e2e:infra:use -- --host one      # join it as it is: forwards its ports here, writes this checkout's .env.e2e
+node e2e/infra/infra.mjs add hyperdht-relay --host one   # a service new to docker-compose.yml, started alone on the running stack (no seeding)
 npm run e2e:infra:up -- --host one       # bring it up if it is not (joins it, without seeding, if it is)
 npx playwright test -c e2e/playwright.config.ts --project=web --workers=2 e2e/web/wallet-lnd.spec.ts
 npm run e2e:matrix -- --workers=2 --only <id>

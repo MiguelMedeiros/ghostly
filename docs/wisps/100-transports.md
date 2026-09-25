@@ -70,7 +70,7 @@ A transport is **relayed** on a chat when either side's descriptor says it reach
 4. **No probing.** A live relayed session is kept while it works, as any other (above, and [open decisions](#open-decisions)). The next dial, after a drop or a restart, ranks direct paths first again, so a network that lets WebRTC through again is used then.
 5. **Shown.** The connection indicator says "relayed" and names the relays, which see who talks to whom and when, never what is said.
 
-The same flag serves any relayed transport (HyperDHT through a DHT relay in a browser, for example).
+The same flag serves a browser's HyperDHT, which goes through a HyperDHT relay ([103](103-hyperdht.md#browser-profile-through-a-hyperdht-relay-revision-03)). The chat's timeline marks a move onto a relayed transport as such, not as a direct path found.
 
 ### DHT only as a choice
 
@@ -123,5 +123,6 @@ Reverse offer arrival order and still choose the same result; exercise disjoint 
 ## Revision log
 
 - 0.3 (2026-09-25): relayed transports: rank after direct ones, fallback after a failed WebRTC attempt, shown as relayed.
+- 0.3 (2026-09-25, later): a browser's HyperDHT through a HyperDHT relay is relayed too ([103](103-hyperdht.md)).
 - 0.2 (2026-09-25): the DHT as the floor under every transport, never a candidate; inputs from the layer-0 capability record; upgrade, downgrade and background retry rules; DHT only as a per-chat choice; after a drop, the redial and the agreement that follows it.
 - 0.1 (2026-09-20): initial review draft.
