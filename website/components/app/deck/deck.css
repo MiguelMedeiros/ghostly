@@ -49,6 +49,8 @@
 .deck[data-mode=track] .deck-card{flex:0 0 var(--card-w);aspect-ratio:1.586;scroll-snap-align:center;scale:.94;transition:scale .4s var(--deck-ease)}
 .deck[data-mode=track] .deck-card:not([data-active=true]) [data-deck=face]::after{opacity:.15}
 .deck[data-mode=track] .deck-card[data-active=true]{scale:1;transition-duration:.55s;transition-timing-function:var(--deck-spring)}
+/* A deck of checks: a card that is on sits a little raised (in the stack, by its --y). */
+.deck[data-mode=track] .deck-card[data-checked=true] [data-deck=face]{translate:0 -5px;transition:translate .4s var(--deck-ease)}
 
 /* Under the deck: the arrows, and a mark per card with the chosen one lit. */
 .deck-nav{display:flex;align-items:center;justify-content:center;gap:10px}
@@ -60,6 +62,9 @@
 .deck-marks span svg{width:14px;height:14px}
 /* A bar under the lit mark slides to the next one (each mark is 14px wide, 8px apart). */
 .deck-marks::after{content:"";position:absolute;left:3px;bottom:-6px;width:8px;height:2px;border-radius:2px;background:rgb(var(--card-rgb));translate:calc(var(--mark-i,0) * 22px) 0;transition:translate .5s var(--deck-spring),background-color .4s}
+/* In a deck of checks the marks say which cards are on: lit in their ink, the others faint. */
+.deck-marks span[data-checked=true]{color:rgb(var(--card-rgb));opacity:.8}
+.deck-marks span[data-checked=false]{opacity:.3}
 .deck-marks span[data-on=true]{color:rgb(var(--card-rgb));opacity:1;transform:scale(1.25)}
 
 /* Reduced motion: the final frame, at once. Everything still stacks, snaps and selects. */

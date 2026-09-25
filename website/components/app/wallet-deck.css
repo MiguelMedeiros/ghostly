@@ -13,17 +13,24 @@
 .wallet-card-usdt{--from:#0f4034;--to:#0a1f1a}
 .wallet-card-bitcoin{--from:#43250c;--to:#1d140b}
 .wallet-card-fedimint{--from:#35204f;--to:#170f25}
-.wallet-deck-card-glyph{grid-row:1;grid-column:1;color:rgb(var(--card-rgb));display:grid}
+.wallet-deck-card-glyph{grid-row:1;grid-column:1;color:rgb(var(--card-rgb));display:grid;position:relative}
 .wallet-deck-card-glyph>svg,.wallet-deck-card-glyph-end>svg{width:clamp(20px,calc(var(--card-w) * .075),27px);height:auto}
 /* The status sits over the corner, out of the grid: a long one never narrows the name and balance below it. */
 .wallet-deck-card-status{position:absolute;top:clamp(11px,calc(var(--card-w) * .056),20px);right:clamp(13px,calc(var(--card-w) * .061),22px);max-width:62%;overflow:hidden;text-overflow:ellipsis;text-align:right;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(9px,calc(var(--card-w) * .031),11px);letter-spacing:.04em;color:rgb(var(--card-rgb));white-space:nowrap;padding-top:2px;transition:opacity .4s}
-.wallet-deck-card-glyph-end{grid-row:1;grid-column:2;justify-self:end;color:rgb(var(--card-rgb));display:none}
+.wallet-deck-card-glyph-end{grid-row:1;grid-column:2;justify-self:end;color:rgb(var(--card-rgb));display:none;position:relative}
 .wallet-deck-card-ghost{position:absolute;right:16%;top:36%;width:clamp(30px,calc(var(--card-w) * .18),64px);color:var(--theme-accent);opacity:.3;pointer-events:none}
 .wallet-deck-card-text{grid-row:3;grid-column:1;display:grid;gap:2px;min-width:0;max-width:100%}
 .wallet-deck-card-name{font-size:clamp(16px,calc(var(--card-w) * .066),24px);font-weight:700;letter-spacing:-.01em;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wallet-deck-card-balance{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(11px,calc(var(--card-w) * .036),13px);letter-spacing:.04em;color:rgba(255,255,255,.88);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wallet-deck-card-detail{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(10px,calc(var(--card-w) * .031),11px);letter-spacing:.04em;color:rgba(255,255,255,.6);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wallet-deck-card-chip{grid-row:3;grid-column:2;align-self:end;justify-self:end;width:clamp(24px,calc(var(--card-w) * .1),36px);height:clamp(18px,calc(var(--card-w) * .075),27px);border-radius:6px;background:linear-gradient(135deg,rgba(255,255,255,.35),rgba(255,255,255,.08))}
+/* In a deck of checks (the ways of paying a chat accepts), a card that is on wears a check on its mark, on either
+   edge that shows; one that is off has its mark dimmed. */
+.wallet-deck-card-check{position:absolute;right:-5px;bottom:-4px;display:none;place-items:center;width:14px;height:14px;border-radius:999px;background:rgb(var(--card-rgb));color:#10181d;box-shadow:0 0 0 2px var(--to,#0b1f2a)}
+.wallet-deck-card-check svg{width:10px;height:10px}
+.wallet-deck-face[data-checked=true] .wallet-deck-card-check{display:grid}
+.wallet-deck-face[data-checked=false] :is(.wallet-deck-card-glyph,.wallet-deck-card-glyph-end){opacity:.45}
+.wallet-deck-face[data-checked=false] .wallet-deck-card-status{color:rgba(255,255,255,.7)}
 /* A card that cannot be used here says why, over its corner. */
 .wallet-deck-card[data-blocked=true] .wallet-deck-card-status{color:#fff;background:rgba(0,0,0,.45);border-radius:999px;padding:2px 8px;white-space:normal;text-align:right;max-width:70%}
 

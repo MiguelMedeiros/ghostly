@@ -4,6 +4,7 @@ import { chat, openChat, openWallet } from "../support/fixtures";
 import { expect, test } from "../support/extension";
 import { pair } from "../support/paired";
 import { composerRow } from "../support/composer";
+import { chatPayments } from "../support/payments";
 
 test("paired extension and web exchange verified files and local-mint sats", { tag: ["@client:extension", "@client:web", "@feature:extension.interop", "@feature:files.paired.send", "@feature:payments.cashu.send", "@feature:payments.cashu.request", "@feature:payments.chat.review", "@feature:wallet.cashu.mint.add", "@feature:wallet.cashu.mint.manage"] }, async ({ extensionPeer, webPeer }) => {
   test.skip(!process.env.E2E_MINT_URL?.startsWith("http://127.0.0.1:"), "Requires a local fake mint");
@@ -35,10 +36,7 @@ test("paired extension and web exchange verified files and local-mint sats", { t
   await web.page.keyboard.press("Escape");
   await expect(web.page.getByTestId("payment-composer")).toHaveCount(0);
   // Ecash only: the fake mint pays a request's own Lightning invoice by itself and would race the payer.
-  await ext.page.getByTestId("chat-options").click();
-  await ext.page.getByTestId("chat-payments-open").click();
-  await ext.page.getByTestId("chat-payments").getByTestId("chat-payments-lightning").click();
-  await ext.page.getByTestId("chat-payments-save").click();
+  await chatPayments(ext.page, { lightning: false });
   await (await composerRow(ext.page, "payment-button")).click(); await ext.page.getByTestId("payment-card-cashu").click(); await ext.page.getByTestId("payment-amount").fill("5"); await ext.page.getByTestId("payment-request").click();
   await web.page.getByTestId("payment-pay").click();
   await chat(web).getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();

@@ -141,3 +141,58 @@ describe("the deck's switch motion", () => {
     expect(animate).not.toHaveBeenCalled();
   });
 });
+
+/** A deck of checks: any number of cards on, as a chat's Accept side holds them. */
+function Checks({ initial = ["a", "c"], onChoose }: { initial?: string[]; onChoose?: (id: string) => void }) {
+  const [selected, setSelected] = useState("a");
+  const [on, setOn] = useState(new Set(initial));
+  return <Deck<Plain> cards={CARDS.map(c => ({ ...c, off: undefined }))} selected={selected} onSelect={setSelected}
+    onChoose={id => { onChoose?.(id); setOn(s => { const next = new Set(s); if (next.has(id)) next.delete(id); else next.add(id); return next; }); }}
+    kind="checks" checked={c => on.has(c.id)} label="Ways on" name="checks-deck" className="plain-deck" testId={c => `check-${c.id}`}
+    face={(c, { checked }) => <span data-deck="face" data-face-checked={String(checked)}>{c.name}</span>} mark={c => <i data-mark={c.id} />} tone={c => `tone-${c.id}`} />;
+}
+
+describe("a deck of checks", () => {
+  const check = (id: string) => screen.getByTestId(`check-${id}`);
+  const showChecks = (props: Parameters<typeof Checks>[0] = {}) => {
+    const shown = renderApp(<Checks {...props} />);
+    document.documentElement.dataset.reduceMotion = "true";
+    return shown;
+  };
+
+  it("is a group of checkboxes, any number of them on, each face told whether it is on", () => {
+    showChecks();
+    expect(screen.getByRole("group", { name: "Ways on" })).toBeInTheDocument();
+    expect(screen.getAllByRole("checkbox").map(c => c.getAttribute("aria-checked"))).toEqual(["true", "false", "true", "false"]);
+    expect(check("c").querySelector("[data-deck=face]")).toHaveAttribute("data-face-checked", "true");
+    expect(check("b").querySelector("[data-deck=face]")).toHaveAttribute("data-face-checked", "false");
+    // Only the card in front is in the tab order, as in every deck.
+    expect(screen.getAllByRole("checkbox").map(c => c.tabIndex)).toEqual([0, -1, -1, -1]);
+  });
+
+  it("raises the cards that are on, less than the one in front, and leaves the others down", () => {
+    showChecks();
+    expect(check("a").style.getPropertyValue("--y")).toBe("-9px");
+    expect(check("c").style.getPropertyValue("--y")).toBe("-5px");
+    expect(check("b").style.getPropertyValue("--y")).toBe("0px");
+    expect(check("c")).toHaveAttribute("data-checked", "true");
+    // The marks under the deck say which are on too.
+    expect([...document.querySelectorAll(".deck-marks span")].map(m => m.getAttribute("data-checked"))).toEqual(["true", "false", "true", "false"]);
+  });
+
+  it("turns a card on or off with a click, Space or Enter, and moves with the arrows without turning anything", async () => {
+    const onChoose = vi.fn();
+    const { user } = showChecks({ onChoose });
+    await user.click(check("b"));
+    expect(check("b")).toHaveAttribute("aria-checked", "true");
+    expect(check("b")).toHaveAttribute("data-active", "true");
+    await user.keyboard("{ArrowRight}");
+    expect(check("c")).toHaveFocus();
+    expect(check("c")).toHaveAttribute("aria-checked", "true");
+    await user.keyboard(" ");
+    expect(check("c")).toHaveAttribute("aria-checked", "false");
+    await user.keyboard("{Enter}");
+    expect(check("c")).toHaveAttribute("aria-checked", "true");
+    expect(onChoose.mock.calls.map(([id]) => id)).toEqual(["b", "c", "c"]);
+  });
+});

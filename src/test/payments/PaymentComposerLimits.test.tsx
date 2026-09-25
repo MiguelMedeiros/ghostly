@@ -2,6 +2,7 @@ import { screen } from "@testing-library/react";
 import { expect, it } from "vitest";
 import type { WalletView } from "@ghostly/browser/shared/types";
 import { PaymentComposer } from "../../components/PaymentComposer";
+import { rememberRail } from "../../lib/chatPayments";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { everyWallet, reviewContext, usdtReady } from "./fixtures";
@@ -21,7 +22,7 @@ function open(wallet: Partial<WalletView>) {
 // USDT's balance is in the token's smallest units (2 TEST-USDT is "2000000") and the amount in whole tokens. It
 // was compared as is: 3 on a card holding 2 passed, and the hint only came past 2,000,000 tokens.
 it("warns when a USDT amount is more than the card holds", async () => {
-  localStorage.setItem("ghostly-payment-rail", "usdt");
+  rememberRail("peer", "usdt");
   const { user } = open(everyWallet({ usdt: usdtReady({ balance: "2000000", decimals: 6 }) }));
   await user.click(screen.getByTestId("payment-use"));
   await user.type(screen.getByTestId("payment-amount"), "3");

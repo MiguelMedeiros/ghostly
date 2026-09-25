@@ -4,6 +4,7 @@ import { USDT_LOCAL } from "../support/usdt-local.mjs";
 import { strangerInvoice } from "../support/bolt11";
 import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer, type PeerOptions } from "../support/fixtures";
 import { composerRow } from "../support/composer";
+import { chatPayments } from "../support/payments";
 
 /**
  * Every wallet provider receiving and sending, on test networks only (the Testnet mode):
@@ -30,10 +31,7 @@ const composer = async (p: Peer, card: string, amount: string) => {
 };
 /** Lightning off in this chat for the payee: the test mint pays a request's own invoice by itself. */
 async function ecashOnly(p: Peer) {
-  await p.page.getByTestId("chat-options").click();
-  await p.page.getByTestId("chat-payments-open").click();
-  await p.page.getByTestId("chat-payments").getByTestId("chat-payments-lightning").click();
-  await p.page.getByTestId("chat-payments-save").click();
+  await chatPayments(p.page, { lightning: false });
 }
 async function receiveOverLightning(p: Peer, sats: number) {
   await openWallet(p, "cashu");

@@ -2,6 +2,7 @@ import { CLN_REGTEST, channelBalance, invoice, nodeId, pay, rune } from "../supp
 import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
 import { choose } from "../support/select";
 import { composerRow } from "../support/composer";
+import { chatPayments } from "../support/payments";
 
 /**
  * Core Lightning as the Lightning source, against the regtest stack in e2e/support/cln-regtest (two nodes,
@@ -79,10 +80,7 @@ test("a chat request paid over Lightning, from one person's node to the other's"
   // Lightning only in this chat, on both sides: the request carries bob's node's invoice, alice's node pays it.
   for (const p of [alice, bob]) {
     await openChat(p);
-    await p.page.getByTestId("chat-options").click();
-    await p.page.getByTestId("chat-payments-open").click();
-    await p.page.getByTestId("chat-payments").getByTestId("chat-payments-cashu").click();
-    await p.page.getByTestId("chat-payments-save").click();
+    await chatPayments(p.page, { cashu: false });
   }
   await (await composerRow(bob.page, "payment-button")).click();
   await bob.page.getByTestId("payment-card-lightning").click();

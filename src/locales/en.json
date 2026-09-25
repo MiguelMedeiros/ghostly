@@ -494,5 +494,38 @@
       "animals": "Animals",
       "retro": "Retro web"
     }
+  },
+  "payments": {
+    "mode": {
+      "label": "Payments with {{name}}",
+      "pay": "Pay or request",
+      "accept": "Accept"
+    },
+    "accept": {
+      "deck": "Ways of paying this chat accepts from {{name}}",
+      "on": "On here",
+      "off": "Off here",
+      "contactOn": "Contact: accepts it",
+      "contactOff": "Contact: has it off",
+      "hint": {
+        "both": "{{card}} is on for both of you: either of you can pay the other with it here.",
+        "theyOff": "{{card}} is on here, but {{name}} has it off: it works once you both have it on.",
+        "unknown": "{{card}} is on here. It works when {{name}} has it on too.",
+        "onceSaved": "{{card}} is on once you save. It works when {{name}} has it on too.",
+        "off": "{{card}} is off here: neither of you can pay the other with it in this chat."
+      },
+      "status": {
+        "idle": "A way works only when both of you have it on.",
+        "changed": "Not saved yet: {{name}} is told when you save.",
+        "savedLive": "Saved: {{name}} knows now.",
+        "savedLater": "Saved: {{name}} is told when you next connect."
+      },
+      "save": "Save",
+      "saving": "Saving…"
+    },
+    "none": {
+      "text": "No way of paying is on in this chat.",
+      "action": "Choose what this chat accepts"
+    }
   }
 }

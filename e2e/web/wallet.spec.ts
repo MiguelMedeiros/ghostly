@@ -1,6 +1,7 @@
 import { chat, connect, expect, link, openChat, openWallet, test, type Peer } from "../support/fixtures";
 import { TEST_MINT, mintEndpoint } from "../support/mint";
 import { composerRow } from "../support/composer";
+import { chatPayments } from "../support/payments";
 
 /**
  * Sats move through a real Cashu mint: the test mint, whose sats are worthless
@@ -67,10 +68,7 @@ test.describe("wallet", { tag: "@network" }, () => {
 
     // Bob asks for ecash only: with Lightning on, the test mint would pay the request's own invoice by
     // itself, racing Alice (it is a faucet), and the request could be paid before she gets to it.
-    await bob.page.getByTestId("chat-options").click();
-    await bob.page.getByTestId("chat-payments-open").click();
-    await bob.page.getByTestId("chat-payments").getByTestId("chat-payments-lightning").click();
-    await bob.page.getByTestId("chat-payments-save").click();
+    await chatPayments(bob.page, { lightning: false });
     await (await composerRow(bob.page, "payment-button")).click();
     await bob.page.getByTestId("payment-card-cashu").click();
     await bob.page.getByTestId("payment-amount").fill("10");

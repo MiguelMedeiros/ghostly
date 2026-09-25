@@ -3,6 +3,7 @@ import { balance, credentials, invoice, lookupInvoice, settled } from "../suppor
 import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
 import { choose } from "../support/select";
 import { composerRow } from "../support/composer";
+import { chatPayments } from "../support/payments";
 
 /**
  * The LND provider against real nodes: GHOSTLY_LND_REGTEST=1 with e2e/infra up (npm run e2e:infra:up) and this
@@ -88,10 +89,7 @@ test("LND: a node per person, invoices in and out through the card, a chat reque
   // A chat request: Bob asks over Lightning, the invoice comes from his node; Alice pays it from the bubble.
   for (const p of [alice, bob]) await openChat(p);
   // Lightning only in this chat for Bob, so the request is paid over Lightning and not as ecash.
-  await bob.page.getByTestId("chat-options").click();
-  await bob.page.getByTestId("chat-payments-open").click();
-  await bob.page.getByTestId("chat-payments").getByTestId("chat-payments-cashu").click();
-  await bob.page.getByTestId("chat-payments-save").click();
+  await chatPayments(bob.page, { cashu: false });
   await (await composerRow(bob.page, "payment-button")).click();
   await bob.page.getByTestId("payment-card-lightning").click();
   await bob.page.getByTestId("payment-amount").fill("2100");

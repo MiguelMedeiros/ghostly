@@ -1,6 +1,7 @@
 import { chat, connect, expect, GIF, link, openProfilePage, say, test, type Peer } from "../support/fixtures";
 import { signS3 } from "../../packages/browser/src/backup/s3";
 import { composerRow } from "../support/composer";
+import { chatPayments } from "../support/payments";
 
 /**
  * Store-and-forward for an away contact (WISP 4xx, `hold/1`): what Alice sends while Bob's page is
@@ -70,10 +71,7 @@ test("text, a picture and a request held for an away contact arrive in order; a 
     await alice.page.keyboard.press("Escape");
   }).toPass({ timeout: 30_000 });
   // Ecash only in Alice's requests: a Lightning invoice would need a mint on the network.
-  await alice.page.getByTestId("chat-options").click();
-  await alice.page.getByTestId("chat-payments-open").click();
-  await alice.page.getByTestId("chat-payments").getByTestId("chat-payments-lightning").click();
-  await alice.page.getByTestId("chat-payments-save").click();
+  await chatPayments(alice.page, { lightning: false });
 
   // Bob leaves. Alice sends text, a picture and a request: each is held, and the chat says how much waits.
   const url = await away(alice, bob);

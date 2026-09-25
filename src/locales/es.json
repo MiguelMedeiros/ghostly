@@ -494,5 +494,38 @@
       "animals": "Animales",
       "retro": "Web retro"
     }
+  },
+  "payments": {
+    "mode": {
+      "label": "Pagos con {{name}}",
+      "pay": "Pagar o pedir",
+      "accept": "Aceptar"
+    },
+    "accept": {
+      "deck": "Formas de pago que este chat acepta de {{name}}",
+      "on": "Activo aquí",
+      "off": "Apagado aquí",
+      "contactOn": "Contacto: lo acepta",
+      "contactOff": "Contacto: lo tiene apagado",
+      "hint": {
+        "both": "{{card}} está activo para los dos: cualquiera puede pagar al otro con él aquí.",
+        "theyOff": "{{card}} está activo aquí, pero {{name}} lo tiene apagado: funciona cuando los dos lo activen.",
+        "unknown": "{{card}} está activo aquí. Funciona cuando {{name}} también lo active.",
+        "onceSaved": "{{card}} queda activo al guardar. Funciona cuando {{name}} también lo active.",
+        "off": "{{card}} está apagado aquí: ninguno de los dos puede pagar al otro con él en este chat."
+      },
+      "status": {
+        "idle": "Una forma solo funciona cuando los dos la activan.",
+        "changed": "Sin guardar: {{name}} se entera cuando guardes.",
+        "savedLive": "Guardado: {{name}} ya lo sabe.",
+        "savedLater": "Guardado: {{name}} se enterará en la próxima conexión."
+      },
+      "save": "Guardar",
+      "saving": "Guardando…"
+    },
+    "none": {
+      "text": "No hay ninguna forma de pago activa en este chat.",
+      "action": "Elegir qué acepta este chat"
+    }
   }
 }

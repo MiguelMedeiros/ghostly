@@ -4,8 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, type Locator } from "@playwright/test";
 import { Interface } from "ethers";
+import { chatPayments } from "../support/payments";
 import { choose } from "../support/select";
-import { chatOption, chatPane, either, openChat, paymentCard, wallet, type Actor } from "./actors";
+import { chatPane, either, openChat, paymentCard, wallet, type Actor } from "./actors";
 
 /**
  * The Testnet payment blocks of the rails that need e2e/infra (Lightning through LND, Core Lightning, NWC
@@ -22,16 +23,13 @@ import { chatOption, chatPane, either, openChat, paymentCard, wallet, type Actor
 
 /* ---------- shared by every rail ---------- */
 
-/** Only these methods in this person's chat: a test mint pays a request's own Lightning invoice by itself. */
+/**
+ * These methods off in this person's chat (+ → Payment → Accept): a test mint pays a request's own Lightning invoice
+ * by itself.
+ */
 export async function chatMethods(actor: Actor, off: string[]): Promise<void> {
   await openChat(actor);
-  await chatOption(actor, "chat-payments-open");
-  const dialog = actor.page.getByTestId("chat-payments");
-  for (const method of off) {
-    const toggle = dialog.getByTestId(`chat-payments-${method}`);
-    if ((await toggle.getAttribute("aria-checked")) !== "false") await toggle.click();
-  }
-  await actor.page.getByTestId("chat-payments-save").click();
+  await chatPayments(actor.page, Object.fromEntries(off.map((method) => [method, false])));
 }
 
 /** A note of the scenario's own on a payment: the one thing in its bubble no clock or amount can match by accident. */

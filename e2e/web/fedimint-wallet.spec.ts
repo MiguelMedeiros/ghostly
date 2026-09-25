@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
 import { choose } from "../support/select";
 import { composerRow } from "../support/composer";
+import { chatPayments } from "../support/payments";
 
 /**
  * Fedimint: federations joined by invite code, their ecash in the wallet and in chats, and Lightning through a
@@ -117,10 +118,7 @@ test("Fedimint on regtest: join by invite, ecash in over the gateway, notes out 
     await openChat(p);
   }
   // Cashu off in this chat: both have the public test mint, and a request would carry ecash beside the invoice.
-  await bob.page.getByTestId("chat-options").click();
-  await bob.page.getByTestId("chat-payments-open").click();
-  await bob.page.getByTestId("chat-payments").getByTestId("chat-payments-cashu").click();
-  await bob.page.getByTestId("chat-payments-save").click();
+  await chatPayments(bob.page, { cashu: false });
   await (await composerRow(bob.page, "payment-button")).click();
   await bob.page.getByTestId("payment-card-lightning").click();
   await bob.page.getByTestId("payment-amount").fill("2000");

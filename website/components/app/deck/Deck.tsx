@@ -5,8 +5,8 @@ import {playSwitch,switchDirection} from './motion';
 import './deck.css';
 
 /**
- * Cards as a stack, the way they sit in a wallet: the wallet's payment methods (WalletDeck.tsx) and the person's
- * identities (identities/IdentityProofsSection.tsx). With a mouse they overlap in a row and flip up as the pointer
+ * Cards as a stack, the way they sit in a wallet: the wallet's payment methods (WalletDeck.tsx), the person's
+ * identities (identities/IdentityProofsSection.tsx) and the ways of paying a chat accepts (ChatPaymentAccept.tsx). With a mouse they overlap in a row and flip up as the pointer
  * passes over them: every card keeps its place (stack.ts), so the one that comes up is the one under the pointer. On
  * a touch screen they are a horizontal snapping track instead, and the card that comes to rest in the centre is the
  * chosen one. Either way the arrows under the deck, the arrow keys, Home and End move along it.
@@ -24,6 +24,8 @@ import './deck.css';
  */
 /** How far the chosen card rises: less than a card's bottom padding, so no text of the card behind shows under it. */
 const LIFT=9;
+/** How far a card that is on sits raised in a deck of checks: less than the chosen card's lift, so that one still shows it is chosen. */
+const RAISE=5;
 /**
  * The narrowest a card of the stack may be. Under it (a page squeezed by the chat list, a phone-wide column with a
  * mouse) the deck is the snapping track instead, one card whole in the centre: cards shrunk to fit a stack are
@@ -49,15 +51,19 @@ export interface DeckProps<C extends DeckCard> {
  selected:string;
  /** A card came up: by the pointer passing over it, a swipe, the arrows or a key. */
  onSelect:(id:string)=>void;
- /** A card was clicked (or Enter on it). Without this, a click only selects. */
+ /** A card was clicked (or Enter on it). Without this, a click only selects. In a deck of checks, it turns the card on or off. */
  onChoose?:(id:string)=>void;
- /** Tabs over a panel (`panel` names it and each tab's id), or a choice among the cards (radios). */
- kind:'tabs'|'radios';
+ /**
+  * Tabs over a panel (`panel` names it and each tab's id), a choice of one among the cards (radios), or any number
+  * of them turned on (checks: `checked` says which, and those sit a little raised).
+  */
+ kind:'tabs'|'radios'|'checks';
+ checked?:(card:C)=>boolean;
  panel?:{id:string;tabId:(id:string)=>string};
  label:string;
  testId:(card:C)=>string;
  /** The card itself: its root marked `data-deck="face"`, and `"sheen"`/`"ghost"` the parts the switch moves. */
- face:(card:C,place:{active:boolean;after:boolean})=>ReactNode;
+ face:(card:C,place:{active:boolean;after:boolean;checked?:boolean})=>ReactNode;
  /** The card's small mark in the row under the deck. */
  mark:(card:C)=>ReactNode;
  /** The class that gives a card its colour (`--card-rgb`): worn by the card, and by the deck for the chosen one. */
@@ -73,7 +79,7 @@ export interface DeckProps<C extends DeckCard> {
  compact?:boolean;
 }
 
-export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,panel,label,testId,face,mark,tone,blocked,size,name,className,compact}:DeckProps<C>) {
+export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,checked,panel,label,testId,face,mark,tone,blocked,size,name,className,compact}:DeckProps<C>) {
  const part=(p:string)=>`deck-${p} ${className}-${p}`;
  const active=Math.max(0,cards.findIndex(card=>card.id===selected));
  const root=useRef<HTMLDivElement>(null),track=useRef<HTMLDivElement>(null),tabs=useRef<(HTMLButtonElement|null)[]>([]);
@@ -214,17 +220,17 @@ export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,
  // Left to right in every language: the stack, its arrows and its marks are placed and moved in physical pixels.
  return <div ref={root} dir="ltr" className={`deck ${className}${current?` ${tone(current)}`:''}${compact?` deck-compact ${className}-compact`:''}`} data-mode={mode} style={{'--deck-w':`${width}px`,'--card-w':`${cardWidth}px`,'--card-h':`${cardHeight}px`,'--track-h':`${trackHeight}px`} as CSSProperties}>
   <div ref={glow} className={part('glow')} aria-hidden="true"/>
-  <div ref={track} className={part('track')} role={kind==='tabs'?'tablist':'radiogroup'} aria-label={label} onKeyDown={onKey} onPointerMove={onPointerMove} onPointerLeave={onPointerLeave}>
+  <div ref={track} className={part('track')} role={kind==='tabs'?'tablist':kind==='checks'?'group':'radiogroup'} aria-label={label} onKeyDown={onKey} onPointerMove={onPointerMove} onPointerLeave={onPointerLeave}>
    {cards.map((card,i)=>{
-    const offset=i-active,distance=Math.abs(offset),why=blocked?.(card),on=i===active;
+    const offset=i-active,distance=Math.abs(offset),why=blocked?.(card),on=i===active,ticked=kind==='checks'?!!checked?.(card):undefined;
     // The button is the strip of the card that shows; the face is the whole card, placed from the button.
     const strip=strips[i]??{left:0,right:cardWidth},left=layout.lefts[i]??0;
     const place={'--bl':`${Math.round(strip.left)}px`,'--bw':`${Math.max(6,Math.round(strip.right-strip.left))}px`,'--fl':`${Math.round(left)-Math.round(strip.left)}px`,'--ft':`${top}px`,
-     '--y':`${on?-LIFT:0}px`,'--s':on?1:Math.max(.9,1-.025*distance),'--dim':on?0:1-Math.max(.45,.92-.13*distance),'--origin':offset<0?'left center':offset>0?'right center':'center',zIndex:20-distance} as CSSProperties;
-    const semantics=kind==='tabs'?{role:'tab',id:panel?.tabId(card.id),'aria-selected':on,'aria-controls':panel?.id}:{role:'radio','aria-checked':on};
+     '--y':`${on?-LIFT:ticked?-RAISE:0}px`,'--s':on?1:Math.max(.9,1-.025*distance),'--dim':on?0:1-Math.max(.45,.92-.13*distance),'--origin':offset<0?'left center':offset>0?'right center':'center',zIndex:20-distance} as CSSProperties;
+    const semantics=kind==='tabs'?{role:'tab',id:panel?.tabId(card.id),'aria-selected':on,'aria-controls':panel?.id}:kind==='checks'?{role:'checkbox','aria-checked':ticked}:{role:'radio','aria-checked':on};
     return <button key={card.id} ref={el=>{tabs.current[i]=el;}} type="button" {...semantics} tabIndex={on?0:-1} aria-disabled={why?true:undefined} title={why}
-     className={`${part('card')} ${tone(card)}`} data-active={on} data-blocked={why?true:undefined} data-testid={testId(card)} style={place} onClick={()=>choose(i)}>
-     {face(card,{active:on,after:offset>0})}
+     className={`${part('card')} ${tone(card)}`} data-active={on} data-checked={ticked} data-blocked={why?true:undefined} data-testid={testId(card)} style={place} onClick={()=>choose(i)}>
+     {face(card,{active:on,after:offset>0,checked:ticked})}
     </button>;
    })}
   </div>
@@ -232,7 +238,7 @@ export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,
    <button type="button" className={part('arrow')} aria-label="Previous card" data-testid={`${name}-prev`} onClick={()=>select(stepCard(active,-1,cards.length))}>
     <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
    </button>
-   <div className={part('marks')} aria-hidden="true" style={{'--mark-i':active} as CSSProperties}>{cards.map((card,i)=><span key={card.id} className={tone(card)} data-on={i===active}>{mark(card)}</span>)}</div>
+   <div className={part('marks')} aria-hidden="true" style={{'--mark-i':active} as CSSProperties}>{cards.map((card,i)=><span key={card.id} className={tone(card)} data-on={i===active} data-checked={kind==='checks'?!!checked?.(card):undefined}>{mark(card)}</span>)}</div>
    <button type="button" className={part('arrow')} aria-label="Next card" data-testid={`${name}-next`} onClick={()=>select(stepCard(active,1,cards.length))}>
     <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
    </button>

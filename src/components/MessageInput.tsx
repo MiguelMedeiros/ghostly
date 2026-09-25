@@ -27,6 +27,10 @@ interface MessageInputProps {
   softBytes?: number;
   /** Present when the platform can send files; returns an error message or null. */
   fileUnavailable?: string;
+  /**
+   * Why paying is not possible in this chat now. The + row is greyed with it, unless the chat chooses its own ways of
+   * paying (`payments.onSaveMethods`): then the row still opens, on the cards that say why, and on Accept.
+   */
   paymentsUnavailable?: string;
   /** With `voice`, the file is a voice message recorded here (the mic replaces send while the text is empty). */
   onSendFile?: (file: File, voice?: VoiceMeta) => Promise<string | null>;
@@ -40,6 +44,8 @@ interface MessageInputProps {
     onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark") => Promise<string | null>;
     /** Why paying is not possible now (a request still is): shown on the Pay side. */
     sendUnavailable?: string;
+    /** Saves which ways of paying this chat accepts, from the composer's Accept side. */
+    onSaveMethods?: (methods: import("../lib/chatPayments").ChatPaymentMethods) => Promise<void>;
   };
   /** A composer of its own for payments instead of the chat's (a group chooses whom to pay first). */
   paymentComposer?: (close: () => void) => ReactNode;
@@ -195,8 +201,10 @@ export function MessageInput({
   };
 
   const actions: ComposerAction[] = [];
+  // A chat that chooses its own ways of paying always reaches them, to turn one on again: the reason is a hint then.
+  const paymentsConfigurable = !paymentComposer && !!payments?.onSaveMethods;
   if (payments || paymentComposer) actions.push({ id: "payment", label: t("composer.payment"), icon: <PaymentGlyph />, testId: "payment-button",
-    unavailable: paymentsUnavailable, onSelect: () => setShowPayment(true) });
+    unavailable: paymentsConfigurable ? undefined : paymentsUnavailable, hint: paymentsConfigurable ? paymentsUnavailable : undefined, onSelect: () => setShowPayment(true) });
   if (identities) actions.push({ id: "identity", label: t("composer.identity"), icon: <IdentityGlyph />, testId: "composer-identities-button",
     hint: sharedIdentities ? t("composer.identityShared", { count: String(sharedIdentities) }) : undefined, data: { "data-count": sharedIdentities },
     onSelect: () => setShowIdentities(true) });
@@ -316,7 +324,7 @@ export function MessageInput({
 
         {/* What the + opens */}
         {showPayment && paymentComposer && !paymentsUnavailable && !disabled && paymentComposer(() => setShowPayment(false))}
-        {showPayment && !paymentComposer && payments && !paymentsUnavailable && !disabled && (
+        {showPayment && !paymentComposer && payments && (paymentsConfigurable || !paymentsUnavailable) && !disabled && (
           <PaymentComposer
             reviewContext={payments.reviewContext}
             balance={payments.balance}
@@ -324,6 +332,8 @@ export function MessageInput({
             onSend={payments.onSend}
             onRequest={payments.onRequest}
             sendUnavailable={payments.sendUnavailable}
+            payUnavailable={paymentsUnavailable}
+            onSaveMethods={payments.onSaveMethods}
             onClose={() => setShowPayment(false)}
           />
         )}

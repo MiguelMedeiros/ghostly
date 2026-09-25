@@ -1,6 +1,8 @@
 import { formatPaymentAmount, parsePaymentAmount } from "@ghostly/core";
 import { useOutsideDismiss } from "../hooks/useDismiss";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { useI18n } from "../contexts/I18nContext";
+import { rememberRail, rememberedRail, type ChatPaymentMethods } from "../lib/chatPayments";
 import type { WalletPlatform } from "../lib/platform";
 import type { PaymentReview as Review } from "@ghostly/core";
 import { PaymentReview } from "./PaymentReview";
@@ -11,6 +13,7 @@ import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { ComposerSheet, ComposerSheetHead, ForwardArrow } from "./ComposerSheet";
 import { CardFlip, FlipTurnButton } from "./deck/Flip";
 import { useCardFlip } from "./deck/useCardFlip";
+import { ChatPaymentAccept } from "./ChatPaymentAccept";
 import "./payment-composer.css";
 
 interface PaymentComposerProps {
@@ -30,9 +33,16 @@ interface PaymentComposerProps {
   onBack?: () => void;
   /** What Send and Request do on a card here, when it is not what they do in a chat. */
   describe?: (rail: ChatRail) => string;
+  /** Why no card can pay or request here now (the contact takes no payments in this chat): Accept still opens. */
+  payUnavailable?: string;
+  /**
+   * A chat's own ways of paying: with this, the composer has an Accept side beside Pay, where they are chosen, and
+   * Pay shows only the cards this chat has on. Without it (a group) every card shows, and one off here says so.
+   */
+  onSaveMethods?: (methods: ChatPaymentMethods) => Promise<void>;
 }
 
-const RAIL_KEY = "ghostly-payment-rail";
+type Mode = "pay" | "accept";
 /** Cashu fees are per proof: a few sats at most. The review shows the real fee before anything is spent. */
 const CASHU_FEE_CAP = 10;
 const RAILS = ["cashu", "lightning", "arkade", "bark", "spark", "bitcoin", "fedimint", "usdt"] as const;
@@ -43,25 +53,52 @@ const RAILS = ["cashu", "lightning", "arkade", "bark", "spark", "bitcoin", "fedi
  * written, then Request or Send. The wallets are already set up, so there is nothing else to choose; every send
  * still stops at a review.
  */
-export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewContext, contact, rails, sendUnavailable, onBack, describe }: PaymentComposerProps) {
+export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewContext, contact, rails, sendUnavailable, onBack, describe, payUnavailable, onSaveMethods }: PaymentComposerProps) {
+  const { t } = useI18n();
   const wallet = reviewContext?.wallet;
   const state = wallet?.getState();
-  const peer = useServicesPlatform()?.getPeer(reviewContext?.peer ?? "");
+  const chat = reviewContext?.peer;
+  const peer = useServicesPlatform()?.getPeer(chat ?? "");
   const who = contact || "your contact";
   /** Why a card cannot be used in this chat: not set up, off here, or off for the contact. */
   const unavailable = (card: Pick<WalletCard, "name" | "ready" | "balance" | "status"> & { id: ChatRail }) => {
     // A card with nothing to connect to yet (no mint, no source) says so; one on its way says where it is ("Ark is connecting…").
+    if (payUnavailable) return payUnavailable;
     if (rails && !rails.includes(card.id)) return `${card.name} cannot be used here`;
     if (!card.ready) return card.status === "Set up" || card.status === "Shared balance" ? `${card.name} is not set up yet` : `${card.name} is ${card.balance.toLowerCase()}`;
     if (peer?.paymentMethods && !peer.paymentMethods[card.id]) return `${card.name} is off in this chat`;
     if (peer?.dataLink === "open" && peer.capabilities?.methods && !peer.capabilities.methods[card.id]) return `Your contact does not accept ${card.name} in this chat`;
     return undefined;
   };
-  const [rail, setRail] = useState<ChatRail>(() => {
-    const allowed = (id: ChatRail) => (!rails || rails.includes(id)) && (!peer?.paymentMethods || peer.paymentMethods[id]);
-    try { const saved = localStorage.getItem(RAIL_KEY); if ((RAILS as readonly string[]).includes(saved ?? "") && allowed(saved as ChatRail)) return saved as ChatRail; } catch { /* storage unavailable */ }
-    return RAILS.find(allowed) ?? "cashu";
-  });
+  const cards = state && wallet ? walletCards(state, wallet.testMintUrls) : [];
+  // With an Accept side, a card this chat has off is chosen there, not shown on Pay.
+  const offHere = (id: ChatRail) => !!peer?.paymentMethods && !peer.paymentMethods[id];
+  const payCards = onSaveMethods ? cards.filter((c) => !offHere(c.id)) : cards;
+  /**
+   * The card Pay starts on: the one this chat used last, while it can still be used, else the first one that can, in
+   * the deck's order. Without a wallet to show (only the back), as the chat allows.
+   */
+  const firstUsable = (): ChatRail | undefined => {
+    if (!cards.length) return RAILS.find((id) => (!rails || rails.includes(id)) && !offHere(id));
+    const last = rememberedRail(chat);
+    return payCards.find((c) => c.id === last && !unavailable(c))?.id ?? payCards.find((c) => !unavailable(c))?.id;
+  };
+  const [rail, setRail] = useState<ChatRail>(() => firstUsable() ?? payCards[0]?.id ?? "cashu");
+  // Until a card is picked, the deck follows the wallet as it comes up (a mint still loading, Ark connecting): it
+  // moves to the first card that can be used, and never rests on one Pay does not show.
+  const picked = useRef(false);
+  const pick = (id: ChatRail) => { picked.current = true; setRail(id); };
+  const railShown = payCards.some((c) => c.id === rail);
+  const railBlocked = !!payCards.find((c) => c.id === rail && unavailable(c));
+  const usable = firstUsable();
+  useEffect(() => {
+    if (railShown && (picked.current || !railBlocked)) return;
+    const next = usable ?? (railShown ? undefined : payCards[0]?.id);
+    if (next && next !== rail) setRail(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [railShown, railBlocked, usable, payCards.length]);
+  // Pay, or Accept: which ways this chat takes. A chat that has every way off opens on Accept, to turn one on.
+  const [mode, setMode] = useState<Mode>(() => onSaveMethods && cards.length && !payCards.length ? "accept" : "pay");
   // The cards, then the chosen one turned over (deck/Flip.tsx). Without a wallet to show, only the back.
   const { side, flipped, turn, turnBack } = useCardFlip(state && wallet ? "cards" : "back");
   const [review, setReview] = useState<Review | null>(null);
@@ -82,16 +119,15 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   // pays a request the contact sends.
   const canSend = rail !== "lightning" && !sendUnavailable;
   const [asking, setAsking] = useState<string | null>(null);
-  const cards = state && wallet ? walletCards(state, wallet.testMintUrls) : [];
   const card = cards.find((c) => c.id === rail);
   const blocked = card ? unavailable(card) : undefined;
   // A card that cannot be used says so on its face, briefly; its title says why in full.
-  const shown = cards.map((c) => { const why = unavailable(c); return !why || !c.ready ? c : { ...c, status: why.startsWith("Your contact") ? "Not accepted" : "Off here" }; });
+  const shown = payCards.map((c) => { const why = unavailable(c); return !why || !c.ready ? c : { ...c, status: why.startsWith("Your contact") ? "Not accepted" : "Off here" }; });
 
   /** Turn the chosen card over, and back to the cards. */
   const use = (next: ChatRail) => {
-    setRail(next); setError("");
-    try { localStorage.setItem(RAIL_KEY, next); } catch { /* storage unavailable */ }
+    pick(next); setError("");
+    rememberRail(chat, next);
     turn();
   };
   const backToCards = () => { setError(""); turnBack(); };
@@ -99,9 +135,10 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   // (not as the back mounts: it is still face down then, and a hidden field takes no focus).
   const amountRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    if (side === "cards") containerRef.current?.querySelector<HTMLElement>('[role=radio][tabindex="0"]')?.focus({ preventScroll: true });
+    if (side === "cards") containerRef.current?.querySelector<HTMLElement>('[role=radio][tabindex="0"], [role=checkbox][tabindex="0"]')?.focus({ preventScroll: true });
     else if (flipped) amountRef.current?.focus({ preventScroll: true });
   }, [side, flipped]);
+  useSheetRoom(containerRef);
 
   const send = async () => {
     setError(""); setBusy("send");
@@ -206,26 +243,73 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
     </div>
   );
 
+  const switchMode = (next: Mode) => { setMode(next); setError(""); };
+  const MODES: Mode[] = ["pay", "accept"];
+  const modeKeys = (e: KeyboardEvent) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const next = MODES[(MODES.indexOf(mode) + 1) % MODES.length];
+    switchMode(next);
+    containerRef.current?.querySelector<HTMLElement>(`[data-testid="payment-mode-${next}"]`)?.focus();
+  };
+  // Pay, and Accept beside it: two sides of one sheet, chosen in its head.
+  const modes = onSaveMethods && (
+    <span role="tablist" aria-label={t("payments.mode.label", { name: who })} className="payment-modes" onKeyDown={modeKeys}>
+      {MODES.map((m) => (
+        <button key={m} type="button" role="tab" data-testid={`payment-mode-${m}`} aria-selected={mode === m} tabIndex={mode === m ? 0 : -1} onClick={() => switchMode(m)}>
+          {t(m === "pay" ? "payments.mode.pay" : "payments.mode.accept")}
+        </button>
+      ))}
+    </span>
+  );
+  const accepting = !!onSaveMethods && mode === "accept";
+
   return (
     <ComposerSheet
       ref={containerRef}
       data-testid="payment-composer"
       data-side={side}
-      className={`payment-composer wallet-card-${rail}`}
+      data-mode={onSaveMethods ? mode : undefined}
+      className={`payment-composer${accepting ? "" : ` wallet-card-${rail}`}`}
       onKeyDown={(e) => e.key === "Escape" && onClose()}
     >
       {side === "cards" ? <>
-        <ComposerSheetHead title={sendUnavailable ? "Request" : "Pay or request"} who={`with ${who}`} before={onBack && <button type="button" className="deck-flip-turn" data-testid="payment-recipient-change" aria-label="Choose someone else" title="Choose someone else" onClick={onBack}>
+        <ComposerSheetHead title={modes || (sendUnavailable ? "Request" : "Pay or request")} who={`with ${who}`} before={onBack && <button type="button" className="deck-flip-turn" data-testid="payment-recipient-change" aria-label="Choose someone else" title="Choose someone else" onClick={onBack}>
           <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </button>} />
-        <CardDeck compact kind="radios" label="Pay with" name="payment-deck" cards={shown} selected={rail} onSelect={(id) => { setRail(id); setError(""); }} onChoose={use}
-          testId={(id) => `payment-card-${id}`} blocked={(c) => unavailable(c)} size={{ max: 250, share: .62 }} />
-        <p className="composer-sheet-hint" data-blocked={blocked ? true : undefined}>{blocked ?? how(rail)}</p>
-        <button type="button" data-testid="payment-use" className="composer-sheet-action" disabled={!!blocked} onClick={() => use(rail)}>
-          {card ? `Use ${card.name}` : "Continue"}
-          <ForwardArrow />
-        </button>
+        {accepting && onSaveMethods ? <ChatPaymentAccept peer={peer} contact={who} cards={cards} onSave={onSaveMethods} />
+          : !shown.length && onSaveMethods ? <div className="payment-none" data-testid="payment-none">
+            <p className="composer-sheet-hint">{t("payments.none.text")}</p>
+            <button type="button" data-testid="payment-none-accept" className="composer-sheet-action" data-variant="secondary" onClick={() => switchMode("accept")}>
+              {t("payments.none.action")}
+            </button>
+          </div>
+          : <>
+            <CardDeck compact kind="radios" label="Pay with" name="payment-deck" cards={shown} selected={rail} onSelect={(id) => { pick(id); setError(""); }} onChoose={use}
+              testId={(id) => `payment-card-${id}`} blocked={(c) => unavailable(c)} size={{ max: 250, share: .62 }} />
+            <p className="composer-sheet-hint" data-blocked={blocked ? true : undefined}>{blocked ?? how(rail)}</p>
+            <button type="button" data-testid="payment-use" className="composer-sheet-action" disabled={!!blocked} onClick={() => use(rail)}>
+              {card ? `Use ${card.name}` : "Continue"}
+              <ForwardArrow />
+            </button>
+          </>}
       </> : card ? <CardFlip className="payment" flipped={flipped} tone={`wallet-card-${card.id}`} front={<WalletCardFace card={card} />} back={back} /> : back}
     </ComposerSheet>
   );
+}
+
+/**
+ * The room the sheet has over the composer on a desktop: from its bottom edge (over the message field) up to the
+ * window's top. Past that it scrolls, its action kept in view (payment-composer.css), so a short window (the
+ * extension's side panel, a laptop split in two) still reaches Use and Save. A phone's sheet has its own height.
+ */
+function useSheetRoom(ref: RefObject<HTMLElement | null>) {
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const fit = () => el.style.setProperty("--sheet-room", `${Math.max(180, Math.floor(el.getBoundingClientRect().bottom - 8))}px`);
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, [ref]);
 }
