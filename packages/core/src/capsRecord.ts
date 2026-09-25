@@ -102,11 +102,16 @@ export function capsDescriptors(descriptors: TransportDescriptors | undefined): 
   return out;
 }
 
-/** A record's descriptors as the transport adapters dial them (Iroh with no direct addresses). */
+/**
+ * A record's descriptors as the transport adapters dial them. With no address in the record, an Iroh path is
+ * relayed; a HyperDHT that names a relay (a browser's) is too: both rank after direct paths and before the DHT
+ * floor (WISP 100, "Relayed"), and a first contact can dial them before WebRTC has failed.
+ */
 export function dialDescriptors(descriptors: CapsDescriptors): TransportDescriptors {
   const out: TransportDescriptors = {};
-  if (descriptors["iroh/1"]) out["iroh/1"] = { id: keyToHex(descriptors["iroh/1"].id), relay: descriptors["iroh/1"].relay ?? null, addresses: [] };
-  if (descriptors["hyperdht/1"]) out["hyperdht/1"] = { publicKey: keyToHex(descriptors["hyperdht/1"].publicKey), ...(descriptors["hyperdht/1"].relay ? { relay: descriptors["hyperdht/1"].relay } : {}) };
+  const iroh = descriptors["iroh/1"], hyper = descriptors["hyperdht/1"];
+  if (iroh) out["iroh/1"] = { id: keyToHex(iroh.id), relay: iroh.relay ?? null, addresses: [], relayed: true };
+  if (hyper) out["hyperdht/1"] = { publicKey: keyToHex(hyper.publicKey), ...(hyper.relay ? { relay: hyper.relay, relayed: true } : {}) };
   return out;
 }
 
