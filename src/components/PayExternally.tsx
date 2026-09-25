@@ -55,7 +55,7 @@ export function PayExternally({ uri, value, testId, note, onPaid, size = 144, ac
       <div className="min-w-0 flex-[1_1_12rem] space-y-2">
         <code className="block break-all select-all bg-black/20 rounded-lg p-2 text-[10px] text-inherit opacity-80 font-mono max-h-20 overflow-y-auto" data-testid={testId}>{value}</code>
         <div className="flex flex-wrap gap-1.5">
-          <button type="button" className={`${button} bg-accent text-[#111b21] hover:bg-accent-hover`} data-testid={`${testId}-copy`} onClick={() => void copy()}>{copied ? "Copied" : "Copy"}</button>
+          <button type="button" className={`${button} bg-accent text-on-accent hover:bg-accent-hover`} data-testid={`${testId}-copy`} onClick={() => void copy()}>{copied ? "Copied" : "Copy"}</button>
           {/* Only a URI a wallet can open (`lightning:`, `bitcoin:`): a Spark address has no scheme wallets agree on. */}
           {/^[a-z][a-z0-9+.-]*:/i.test(uri) && <a
             className={`${button} bg-black/20 hover:bg-black/30 no-underline text-inherit inline-flex items-center`}
@@ -85,7 +85,7 @@ export function PayExternally({ uri, value, testId, note, onPaid, size = 144, ac
         </div>
         {checked && <p className="text-[11px] m-0 opacity-70" data-testid={`${testId}-checking`}>Your contact's wallet is being checked. It turns Paid here by itself once the payment is seen.</p>}
         {note && <p className="text-[11px] m-0 opacity-70">{note}</p>}
-        {error && <p className="text-[11px] m-0 text-danger" role="alert">{error}</p>}
+        {error && <p className="text-[11px] m-0 text-danger-ink" role="alert">{error}</p>}
       </div>
     </div>
   );

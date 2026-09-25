@@ -41,7 +41,7 @@ export function DeliveryMark({ delivery }: { delivery?: ChatMessage["delivery"] 
   const received = delivery === "delivered";
   return (
     <svg {...common} aria-label={received ? "Received" : "Sent"} data-delivery={received ? "delivered" : "sent"}
-      className={`inline shrink-0 me-0.5 -mt-0.5 ${received ? "text-[#53bdeb]" : "text-text-muted"}`}>
+      className={`inline shrink-0 me-0.5 -mt-0.5 ${received ? "text-link" : "text-text-muted"}`}>
       <path d="M11.07 0.66L4.98 6.75L2.91 4.68L1.5 6.09L4.98 9.57L12.48 2.07L11.07 0.66Z" fill="currentColor" />
       {received && <path d="M14.07 0.66L7.98 6.75L7.05 5.82L5.64 7.23L7.98 9.57L15.48 2.07L14.07 0.66Z" fill="currentColor" />}
     </svg>

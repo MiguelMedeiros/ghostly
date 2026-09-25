@@ -27,7 +27,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
     setError(""); setBusy(true);
     try { await task(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
-  const primary = `${dense ? "px-3 py-1.5 text-xs" : "px-4 py-2 min-h-10 text-sm"} max-md:min-h-11 rounded-lg font-bold bg-accent text-[#111b21] hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed`;
+  const primary = `${dense ? "px-3 py-1.5 text-xs" : "px-4 py-2 min-h-10 text-sm"} max-md:min-h-11 rounded-lg font-bold bg-accent text-on-accent hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed`;
   const quiet = `${dense ? "px-3 py-1.5 text-xs" : "px-4 py-2 min-h-10 text-sm"} max-md:min-h-11 rounded-lg font-bold bg-black/20 hover:bg-black/30 transition-colors cursor-pointer disabled:opacity-40`;
   const field = `w-full min-w-0 bg-black/20 rounded-lg px-3 py-2 ${dense ? "text-xs" : "text-sm"} placeholder-current/50 focus:outline-none focus:ring-1 focus:ring-accent`;
   const muted = `${dense ? "text-[11px]" : "text-xs"} opacity-70 m-0`;
@@ -52,7 +52,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
           setInfo(resolved);
           if (resolved.minSat === resolved.maxSat) setAmount(String(resolved.minSat));
         })}>{busy ? "Looking up…" : "Look up"}</button>
-        {error && <p className={`${dense ? "text-[11px]" : "text-xs"} text-danger m-0`} role="alert" data-testid="lnurl-error">{error}</p>}
+        {error && <p className={`${dense ? "text-[11px]" : "text-xs"} text-danger-ink m-0`} role="alert" data-testid="lnurl-error">{error}</p>}
       </div>
     );
   }
@@ -69,7 +69,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
           })}>{busy ? "Paying…" : "Pay"}</button>
           <button type="button" className={quiet} disabled={busy} onClick={() => { setQuote(null); setInvoice(null); }}>Cancel</button>
         </div>
-        {error && <p className={`${dense ? "text-[11px]" : "text-xs"} text-danger m-0`} role="alert" data-testid="lnurl-error">{error}</p>}
+        {error && <p className={`${dense ? "text-[11px]" : "text-xs"} text-danger-ink m-0`} role="alert" data-testid="lnurl-error">{error}</p>}
       </div>
     );
   }
@@ -98,7 +98,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
         <button type="button" className={primary} disabled={busy || !Number(amount)} data-testid="lnurl-invoice" onClick={getInvoice}>{busy ? "Asking for the invoice…" : "Get invoice"}</button>
         <button type="button" className={quiet} disabled={busy} onClick={() => { setInfo(null); setAmount(""); setComment(""); }}>Back</button>
       </div>
-      {error && <p className={`${dense ? "text-[11px]" : "text-xs"} text-danger m-0`} role="alert" data-testid="lnurl-error">{error}</p>}
+      {error && <p className={`${dense ? "text-[11px]" : "text-xs"} text-danger-ink m-0`} role="alert" data-testid="lnurl-error">{error}</p>}
     </div>
   );
 }

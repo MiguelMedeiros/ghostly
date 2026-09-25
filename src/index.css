@@ -22,6 +22,10 @@
   --color-text-muted: var(--theme-text-muted);
   --color-sent-bg: var(--theme-sent-bg);
   --color-received-bg: var(--theme-received-bg);
+  /* Ink that stays readable on the bubbles, the surfaces and the accent, in every colour theme. */
+  --color-link: var(--theme-link);
+  --color-danger-ink: var(--theme-danger-ink);
+  --color-on-accent: var(--theme-on-accent);
   --color-input-bg: var(--theme-input-bg);
   --color-search-bg: var(--theme-search-bg);
   --color-unread: var(--theme-accent);
@@ -57,6 +61,10 @@
   --theme-accent-dim: #005c4b;
   --theme-accent-hover: #06cf9c;
   --theme-sent-bg: #005c4b;
+  /* Shared by every dark theme: at least 4.5:1 (link) and 3:1 (danger) on each one's bubbles. */
+  --theme-link: #8ad3f6;
+  --theme-danger-ink: #ff9a8f;
+  --theme-on-accent: #111b21;
 }
 
 :root[data-theme="light"],
@@ -83,6 +91,10 @@
   --theme-accent-dim: #dcf8c6;
   --theme-accent-hover: #008f6f;
   --theme-sent-bg: #d9fdd3;
+  /* Shared by every light theme, as for dark. */
+  --theme-link: #026aa0;
+  --theme-danger-ink: #c5221f;
+  --theme-on-accent: #111b21;
 }
 
 /* ============================================
@@ -137,6 +149,7 @@
   --theme-accent-dim: #e8e8e8;
   --theme-accent-hover: #2a2a2a;
   --theme-sent-bg: #e8e8e8;
+  --theme-on-accent: #ffffff;
 }
 
 /* ============================================
@@ -245,6 +258,7 @@
   --theme-accent-dim: #f3e8ff;
   --theme-accent-hover: #6d28d9;
   --theme-sent-bg: #f3e8ff;
+  --theme-on-accent: #ffffff;
 }
 
 html {
