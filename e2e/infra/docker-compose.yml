@@ -395,8 +395,10 @@ services:
     depends_on: { pubky-postgres: { condition: service_healthy } }
     environment:
       TEST_PUBKY_CONNECTION_STRING: postgres://postgres:pubky-e2e-worthless@pubky-postgres:5432/postgres
+      # The config's own database_url wins over the variable above: name the same server (an ephemeral database on it).
       PUBKY_HOMESERVER_TOML: |
         [general]
+        database_url = "postgres://postgres:pubky-e2e-worthless@pubky-postgres:5432/postgres"
         signup_mode = "open"
         user_storage_quota_mb = 0
         [drive]

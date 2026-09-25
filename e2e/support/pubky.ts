@@ -51,12 +51,7 @@ async function forward(route: Route): Promise<void> {
  * the request to `approver`. Seeds `relay` with the homeserver's record, which the testnet published on its own DHT.
  */
 export async function attachPubky(context: BrowserContext, relay: LocalRelay, approver?: PubkyApprover): Promise<void> {
-  const testnet = pubkyTestnet()!;
-  if (!relay.packets.has(PUBKY_HOMESERVER_KEY)) {
-    const answer = await fetch(`${testnet.pkarrRelay}/${PUBKY_HOMESERVER_KEY}`);
-    if (!answer.ok) throw new Error(`The Pubky testnet's relay has no homeserver record (${answer.status})`);
-    relay.packets.set(PUBKY_HOMESERVER_KEY, Buffer.from(await answer.arrayBuffer()));
-  }
+  await seedHomeserver(relay);
   await context.route(`${PUBLIC_HTTP_RELAY}/**`, forward);
   await context.route(`https://${PUBKY_HOMESERVER_HOST}/**`, forward);
   await context.route(`${PASSPORT}/**`, (route) => route.fulfill({ contentType: "text/html", body: PASSPORT_STAND_IN }));
@@ -67,6 +62,14 @@ export async function attachPubky(context: BrowserContext, relay: LocalRelay, ap
       await approver.approve(request);
     });
   }
+}
+
+/** Puts the testnet homeserver's record, which it published on the testnet's own DHT, in the test's relay. */
+export async function seedHomeserver(relay: LocalRelay): Promise<void> {
+  if (relay.packets.has(PUBKY_HOMESERVER_KEY)) return;
+  const answer = await fetch(`${pubkyTestnet()!.pkarrRelay}/${PUBKY_HOMESERVER_KEY}`);
+  if (!answer.ok) throw new Error(`The Pubky testnet's relay has no homeserver record (${answer.status})`);
+  relay.packets.set(PUBKY_HOMESERVER_KEY, Buffer.from(await answer.arrayBuffer()));
 }
 
 /**
@@ -105,9 +108,13 @@ export class PubkyApprover {
   private restoreFetch: (() => void) | undefined;
   readonly approved: string[] = [];
 
-  constructor(private relayUrl: string) {}
+  private relayUrl = "";
+
+  constructor(private relay: LocalRelay) {}
 
   async start(): Promise<this> {
+    await seedHomeserver(this.relay);
+    this.relayUrl = await this.relay.listen();
     this.patchFetch();
     const { Keypair, Pubky, PublicKey } = await import("@synonymdev/pubky");
     const keypair = Keypair.random();

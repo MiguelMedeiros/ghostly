@@ -38,7 +38,7 @@ function collectLogs(peer: Peer): string[] {
 
 test("a Pubky identity approved in Passport is verified by a contact; removing it deletes its file and revokes it", { tag: ["@feature:proofs.pubky", "@feature:proofs.share", "@feature:proofs.revoke", "@gated"] }, async ({ peer, relay }) => {
   test.setTimeout(240_000);
-  const approver = await new PubkyApprover(await relay.listen()).start();
+  const approver = await new PubkyApprover(relay).start();
   try {
     const [alice, bob] = await Promise.all([peer("pubky-alice"), peer("pubky-bob")]);
     const logs = collectLogs(alice);
@@ -108,23 +108,29 @@ test("a Pubky identity approved in Passport is verified by a contact; removing i
     expect(approver.approved).toEqual([approver.approved[0], approver.approved[0]]);
     expect((await approver.read(file)).status).toBe(404);
     await expect.poll(() => [...relay.packets.values()].some(packet => packet.includes("_ghostly-revoked"))).toBe(true);
+    // Alice never comes back: her app cannot tell Bob it is withdrawn, only the revocation on Pkarr can.
+    await alice.context.close();
 
     // Bob comes back: revoked.
     await bob.page.goto(`/${bobChat}`);
     await expect(bob.page.getByPlaceholder("Message…")).toBeVisible();
     await openIdentities(bob);
     const revoked = await turnTheirs(bob);
-    if (await revoked.getAttribute("data-status") !== "revoked") await revoked.getByTestId("chat-identity-recheck").click();
-    await expect(revoked).toHaveAttribute("data-status", "revoked");
+    // The app also looks by itself once it is back; Check again may re-render under the click, so retry until revoked.
+    await expect(async () => {
+      if (await revoked.getAttribute("data-status") !== "revoked") await revoked.getByTestId("chat-identity-recheck").click({ timeout: 5_000 });
+      await expect(revoked).toHaveAttribute("data-status", "revoked", { timeout: 5_000 });
+    }).toPass({ timeout: 60_000 });
+    await expect(revoked.getByTestId("chat-identity-received-status")).toHaveText("Revoked: its owner removed it and published a revocation");
 
-    // No request, with its relay secret, ever reached the console.
+    // No request, with its relay secret, ever reached Alice's console.
     expect(logs.join("\n")).not.toMatch(/pubkyauth|#d=/i);
   } finally { approver.stop(); }
 });
 
 test("a Pubky identity approved by scanning the QR code, as Pubky Ring does", { tag: ["@feature:proofs.pubky", "@gated"] }, async ({ peer, relay }) => {
   test.setTimeout(180_000);
-  const approver = await new PubkyApprover(await relay.listen()).start();
+  const approver = await new PubkyApprover(relay).start();
   try {
     const alice = await peer("pubky-ring");
     await attachPubky(alice.context, relay);
