@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { defineConfig } from 'vitest/config';
+import { maxWorkers } from '../../vitest.shared.ts';
 
 // OpenPGP.js publishes its lightweight build under a "browser" condition only. It
 // runs in Node too, so tests load the very code the apps ship (WebCrypto and
@@ -9,4 +10,5 @@ const openpgp = join(createRequire(import.meta.url).resolve('openpgp'), '../../l
 
 export default defineConfig({
   resolve: { alias: [{ find: /^openpgp\/lightweight$/, replacement: openpgp }] },
+  test: { maxWorkers },
 });

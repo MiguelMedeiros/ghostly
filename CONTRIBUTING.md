@@ -45,7 +45,12 @@ npm run lint:fix
 # Type checking
 npm run typecheck
 
+# Before pushing: only what your change can break (unit, lint, typecheck, Rust; e2e with --port <n>).
+# CI runs everything on every push. See docs/TESTING.md, "Testing only what changed".
+npm run test:affected
+
 # Unit tests: packages/core, packages/browser, packages/sdk, then the UI's component tests
+# (locally at most JOBS=2 Vitest workers; CI uses Vitest's default)
 npm test
 
 # Only the component tests of the UI (src/) and @ghostly/react (see src/test/README.md)
@@ -122,16 +127,13 @@ Security flaws are the exception: never a public issue or pull request for one (
    git checkout -b feature/spooky-feature origin/dev
    ```
 3. **Make** your changes
-4. **Test** your changes
+4. **Test** your changes: before pushing, `npm run test:affected`; CI runs everything
    ```bash
-   npm run lint
-   npm run typecheck
-   npm test
+   npm run test:affected -- --port 50310   # what your diff can break: unit, lint, typecheck, Rust, the e2e tagged
    npm run test:map    # every feature in e2e/features.json has a test: docs/TESTING.md
-   npm run test:e2e
-   npm run check:desktop-bundle
    npm run tauri dev
    ```
+   CI runs the full `npm run lint`, `npm run typecheck`, `npm test`, the builds and `npm run check:desktop-bundle` on every push; the E2E workflow runs `npm run test:e2e`. Run those yourself only to reproduce a CI failure: when `test:affected` cannot narrow a change, it runs the whole area itself.
 5. **Commit** with a clear message
    ```bash
    git commit -m 'Add some spookiness'

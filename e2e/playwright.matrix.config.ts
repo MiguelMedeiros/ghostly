@@ -22,7 +22,7 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   // A retry would hide exactly what the matrix is for: a combination that fails.
   retries: 0,
-  workers: process.env.MATRIX_WORKERS ? Number(process.env.MATRIX_WORKERS) : 3,
+  workers: Number(process.env.MATRIX_WORKERS) || (process.env.CI ? 3 : 2),
   // A scenario is a whole story (pair, talk, pay, go offline, restore): minutes, not seconds.
   timeout: 8 * 60_000,
   expect: { timeout: 60_000 },
