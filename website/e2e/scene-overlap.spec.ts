@@ -28,23 +28,32 @@ const GAP = 8;
 const overlap = (a: Rect, b: Rect, gap: number) => a.x < b.x + b.w + gap && a.x + a.w + gap > b.x && a.y < b.y + b.h + gap && a.y + a.h + gap > b.y;
 const fmt = (r: Rect) => `[${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.w)}×${Math.round(r.h)}]`;
 
-/** Scroll the pinned chapter to a point of its progress and wait for the picture to settle. */
+/**
+ * Scroll the pinned chapter to a point of its progress and wait for the picture to settle. The page
+ * scrolls smoothly (`scroll-behavior: smooth`), so a plain scrollTo animates, and a picture measured
+ * mid-scroll can belong to a chapter that is not pinned yet: jump instantly, and only count the
+ * picture as settled once the page is where it was sent.
+ */
 async function scrollChapter(page: Page, id: string, p: number) {
-  await page.evaluate(
-    ([id, p]) => {
-      const el = document.getElementById(id as string)!;
-      const top = el.getBoundingClientRect().top + scrollY;
-      scrollTo(0, top + (el.offsetHeight - innerHeight) * (p as number));
-    },
-    [id, p] as const,
-  );
+  const go = () =>
+    page.evaluate(
+      ([id, p]) => {
+        const el = document.getElementById(id as string)!;
+        const target = Math.round(el.getBoundingClientRect().top + scrollY + (el.offsetHeight - innerHeight) * (p as number));
+        if (Math.abs(target - scrollY) > 1) scrollTo({ top: target, behavior: "instant" });
+        return Math.abs(target - scrollY) <= 1;
+      },
+      [id, p] as const,
+    );
   let last = "";
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 60; i++) {
+    const there = await go();
     await page.waitForTimeout(100);
     const now = await page.evaluate(settleKey, id);
-    if (now === last) return;
+    if (there && now === last) return;
     last = now;
   }
+  throw new Error(`${id} at ${p}: the page did not settle where it was sent`);
 }
 
 function problems(f: Shot, where: string): string[] {
