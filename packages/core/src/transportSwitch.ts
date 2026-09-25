@@ -54,6 +54,12 @@ export class TransportSwitch {
     cancel(): void;
     /** A plan's target could not be reached and the session stayed on the current transport (fallback allowed it). */
     kept?(target: PairedTransport, reason?: string): void;
+    /**
+     * A plan's target could not be reached, and nothing kept the chat on another transport: the chat waits for it
+     * (WISP 100, "A chosen transport not reached yet") rather than failing, and is told why here, not as an error.
+     * `reason` is known on the side that dialled. Without this callback, the failure is an error state, as before.
+     */
+    unreached?(target: PairedTransport, reason?: string): void;
     timeoutMs?: number;
   }) {}
 
@@ -74,6 +80,17 @@ export class TransportSwitch {
     return local.intent > remote.intent || (local.intent === remote.intent && this.options.key < this.options.peerKey) ? local : remote;
   }
   get pending(): SwitchPlan | null { return this.plan; }
+  /**
+   * Where the policies put the chat while a session is open, and whose choice that is: the agreed target, or, when
+   * the two sides' transports do not overlap, the winning side's preferred. `by` is absent when nobody chose (a
+   * policy alone, such as Fallback off, names it). Both sides get the same answer.
+   */
+  wanted(): { transport: PairedTransport; by?: "you" | "contact" } | undefined {
+    if (!this.context || !this.remote) return undefined;
+    const local = this.local(), remote = this.remote, winner = this.winner(local, remote);
+    const transport = this.choices(local, remote)[0] ?? winner.preferred;
+    return { transport, ...(winner.intent > 0 ? { by: winner === local ? "you" as const : "contact" as const } : {}) };
+  }
   private local(): TransportPolicy { return { ...this.options.policy(), revision: this.revision, intent: this.intent }; }
   private signature(local: TransportPolicy, remote: TransportPolicy): string {
     return this.options.key < this.options.peerKey ? `${local.revision}:${remote.revision}` : `${remote.revision}:${local.revision}`;
@@ -124,15 +141,32 @@ export class TransportSwitch {
     this.clearPlan(); this.options.state(); this.reconcile();
   }
   retry(): void { this.failed = ""; this.announce(); this.reconcile(); }
+  /**
+   * Tries the target again after it did not connect (WISP 100: retried, never given up), also when a fallback kept
+   * the chat on another transport. The coordinator plans again. The other side cannot: its policy goes out again under
+   * a new revision, which the coordinator reconciles afresh, whatever it had given up on.
+   */
+  again(): void {
+    if (!this.context || !this.remote || this.plan) return;
+    this.failed = this.settled = "";
+    if (this.options.key > this.options.peerKey) { this.revision++; this.announce(); }
+    this.reconcile();
+  }
   stop(): void { this.clearPlan(); this.context = ""; this.remote = null; }
   private clearPlan(): void {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null; this.plan = null; this.preparing = false;
   }
   fail(error: string): void {
+    const target = this.plan?.choices[0];
     if (this.plan) this.failed = this.signature(this.plan.local, this.plan.remote);
     this.send({ t: "paired-switch-failed", id: this.plan?.id });
-    this.clearPlan(); this.options.cancel(); this.options.state(error);
+    this.clearPlan(); this.options.cancel(); this.unreached(target, error, error);
+  }
+  /** Waiting for `target`, not failed, where the owner says why; an error state for an owner that does not. */
+  private unreached(target: PairedTransport | undefined, error: string, reason?: string): void {
+    if (target && this.options.unreached) { this.options.unreached(target, reason); this.options.state(); }
+    else this.options.state(error);
   }
   private choices(local: TransportPolicy, remote: TransportPolicy): PairedTransport[] {
     const relayed = relayedTransports(local.descriptors, remote.descriptors);
@@ -156,7 +190,12 @@ export class TransportSwitch {
     const choices = this.choices(local, remote);
     if (!choices.length) {
       this.clearPlan();
-      this.options.state("Transport preferences do not overlap. Enable fallback or choose the same supported transport on both sides.");
+      // A transport one side does not run (yet) is waited for, and its owner says why; only choices that exclude
+      // each other (both limited to different transports) are an error.
+      const wanted = this.winner(local, remote).preferred;
+      const missing = !local.available.includes(wanted) || !remote.available.includes(wanted);
+      this.options.state(missing && this.options.unreached ? undefined
+        : "Transport preferences do not overlap. Enable fallback or choose the same supported transport on both sides.");
       return;
     }
     const signature = this.signature(local, remote);
@@ -168,7 +207,7 @@ export class TransportSwitch {
     if (this.options.key > this.options.peerKey) {
       if (!this.timer) this.timer = setTimeout(() => {
         this.failed = signature; this.clearPlan();
-        this.options.state("Your contact did not acknowledge the transport change. Retry when both peers are connected.");
+        this.unreached(choices[0], "Your contact did not acknowledge the transport change. Retry when both peers are connected.", "Your contact did not answer");
       }, this.options.timeoutMs ?? 30_000);
       return;
     }
@@ -201,8 +240,10 @@ export class TransportSwitch {
     }
     if (!this.plan || frame.id !== this.plan.id) return true;
     if (frame.t === "paired-switch-failed") {
+      const target = this.plan.choices[0];
       this.failed = this.signature(this.plan.local, this.plan.remote);
-      this.clearPlan(); this.options.cancel(); this.options.state("The transport change failed. Retry or choose another transport."); return true;
+      this.clearPlan(); this.options.cancel();
+      this.unreached(target, "The transport change failed. Retry or choose another transport."); return true;
     }
     if (frame.t === "paired-switch-keep") {
       if (this.actual && this.plan.choices.includes(this.actual)) {

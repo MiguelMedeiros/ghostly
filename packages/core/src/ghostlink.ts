@@ -5,7 +5,7 @@ import { proofHash, type ProofAdapter, type ProofScope } from "./peerProofs";
 import { IDENTITY_MAX_FRAME, type IdentityScope } from "./identityProofs";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { identityFromSeedB64 } from "./identity";
-import { rankTransports, relayedTransports, transportOrder, type NativeEndpoint, type NativeBinding, type PairedTransport, type TransportDescriptors } from "./pairedTransports";
+import { rankTransports, relayedTransports, transportOrder, type NativeEndpoint, type NativeBinding, type NativeTransport, type PairedTransport, type TransportDescriptors } from "./pairedTransports";
 import { sanitizeNick } from "./text";
 import { sanitizeAvatar } from "./avatar";
 import { randomBytes, toBase64Url, utf8Encode } from "./bytes";
@@ -96,6 +96,32 @@ export interface IncomingMessage {
   packet?: DhtPacketFacts;
 }
 
+/**
+ * The transport a chat is set to reach and is not on yet (WISP 100, "A chosen transport not reached yet"): waited for,
+ * never failed. `by`: whose choice names it (absent: a policy alone, such as Fallback off, limits the chat to it).
+ */
+export interface TransportWait {
+  transport: PairedTransport;
+  by?: "you" | "contact";
+  /**
+   * - `unknown`: the contact's app has not said whether it has it (no capability record read, no session lists it);
+   * - `starting`: the contact's record lists it, but there is no way to dial it yet (its endpoint is starting);
+   * - `connecting`: a switch to it is under way;
+   * - `unreachable`: both have it, and the last attempt did not connect (`error`, when this side knows);
+   * - `waiting`: both have it and nothing failed yet: the next attempt goes when the contact is there;
+   * - `contact-lacks`: the contact's latest record does not list it: its app does not have it;
+   * - `app-lacks`: this app does not run it (the contact chose it, or this side's adapter is gone).
+   */
+  reason: "unknown" | "starting" | "connecting" | "unreachable" | "waiting" | "contact-lacks" | "app-lacks";
+  /** The chat is live on another transport meanwhile (both allow a fallback); otherwise it is on the DHT. */
+  live?: PairedTransport;
+  /** Attempts that did not connect in a row, and why the last one did not, when this side dialled it. */
+  failures: number;
+  error?: string;
+  /** When the next attempt goes, when one is scheduled on this side. */
+  retryAt?: number;
+}
+
 export interface GhostLinkEvents {
   onDhtDelivery?(view: DhtDeliveryView): void;
   onDiscoveryError?(error: string | null): void;
@@ -113,6 +139,8 @@ export interface GhostLinkEvents {
    * known on the side that dialled; the other side learns only that it did not happen.
    */
   onTransportSwitchFailed?(target: PairedTransport, reason?: string): void;
+  /** The transport the chat waits for, or why, changed (`transportWait`); undefined once nothing is waited for. */
+  onTransportWait?(wait: TransportWait | undefined): void;
   /** A live transport switch completed: the session now runs over `to`, and nothing reconnected. */
   onTransportSwitched?(from: PairedTransport | undefined, to: PairedTransport): void;
   /** Round trip of a liveness ping on the open session, in milliseconds. */
@@ -193,7 +221,8 @@ export interface GhostLinkOptions {
     peerAcceptsText?(): boolean;
   };
   rtcAvailable?: boolean;
-  native?: { peerDescriptors?: TransportDescriptors; peerTransports?: PairedTransport[]; peerFallback?: boolean; preferred?: PairedTransport; fallback?: boolean };
+  /** `automatic`: the chat follows the app's rule (no transport chosen for it); `preferred` is then the rule's. Absent: automatic unless `preferred` is given. */
+  native?: { peerDescriptors?: TransportDescriptors; peerTransports?: PairedTransport[]; peerFallback?: boolean; preferred?: PairedTransport; fallback?: boolean; automatic?: boolean };
   params: LinkParams;
   pairing?: { credentials: PairingCredentials; pinPeer: (key: string, signedSignals?: boolean) => Promise<void>; verifyPeer?: (key: string) => Promise<void>; trustOnFirstUse?: boolean };
   /**
@@ -264,6 +293,12 @@ export class GhostLink {
   private peerFallback: boolean;
   private preferred: PairedTransport;
   private fallback: boolean;
+  /** No transport chosen for this chat: `preferred` is the app's rule. */
+  private automatic: boolean;
+  /** What the contact's latest capability record says its app runs (WISP 03); unknown until one is read. */
+  private peerRecordTransports?: PairedTransport[];
+  /** The transport the chat waits for (WISP 100): attempts that failed in a row, the last error, the next retry. */
+  private waiting: { transport: PairedTransport; failures: number; told?: boolean; error?: string; retryAt?: number; timer?: ReturnType<typeof setTimeout> } | null = null;
   private paired: PairedSession | null = null;
   private pairedPending = new Map<string, number>();
   private httpHost: HttpHost | null = null;
@@ -358,6 +393,7 @@ export class GhostLink {
     this.peerFallback = options.native?.peerFallback ?? false;
     this.preferred = options.native?.preferred ?? "webrtc/1";
     this.fallback = options.native?.fallback ?? true;
+    this.automatic = options.native?.automatic ?? !options.native?.preferred;
     const events = options.events ?? {};
 
     this.session = new LinkSession({
@@ -477,10 +513,19 @@ export class GhostLink {
         void options.events?.onTransportDiscovery?.(policy.descriptors, this.peerTransports, policy.fallback).catch(() => {});
         this.emitPairingState();
       },
-      state: (error, target) => { this.transitionError = error; this.transitionTarget = target; this.emitPairingState(); },
+      state: (error, target) => {
+        this.transitionError = error;
+        // Trying again for a transport the chat already waits for is not a switch starting: the wait says it.
+        this.transitionTarget = target && this.waiting?.transport === target && this.waiting.failures > 0 ? undefined : target;
+        this.emitPairingState();
+      },
       prepare: (plan, dial) => { if (dial) void this.prepareSwitch(plan); },
       cancel: () => this.cancelCandidate(),
-      kept: (target, reason) => options.events?.onTransportSwitchFailed?.(target, reason),
+      kept: (target, reason) => {
+        // The chat stayed live on a fallback: said once per choice (a row), then tried again quietly.
+        if (this.unreached(target, reason)) options.events?.onTransportSwitchFailed?.(target, reason);
+      },
+      unreached: (target, reason) => { this.unreached(target, reason); },
     });
   }
 
@@ -570,8 +615,9 @@ export class GhostLink {
     return !!actual && this.transportOffer().includes(actual) && (!remote || allowedTransports(remote).includes(actual));
   }
   private emitPairingState(): void {
+    this.syncWait();
     const state = this.paired?.state;
-    if (!state) return;
+    if (!state) { this.notifyWait(); return; }
     const blocked = state.status === "ready" && !this.currentTransportAllowed();
     const open = this.isDataLinkOpen;
     if (open !== this.applicationOpen) {
@@ -586,6 +632,7 @@ export class GhostLink {
       transitionTarget: this.transitionTarget, transitionError: this.transitionError,
     });
     this.emitFilesSession();
+    this.notifyWait();
   }
 
   get presence(): PeerPresence {
@@ -611,8 +658,12 @@ export class GhostLink {
     if (this.isDataLinkOpen) return "stream";
     if (!this.dht || this.securityRejected || this.keyStopped || this.dht.view.error?.includes("key does not match")) return "unavailable";
     if (this.deliveryMode === "dht") return "dht";
-    return !this.channel && !!this.options.pairing?.credentials.peerKey && !!this.dht.peerMode ? "dht" : "unavailable";
+    // A session that the policies keep from carrying the chat (a transport waited for with Fallback off) is not live:
+    // text goes over the DHT floor meanwhile, as with no session (WISP 100).
+    return (!this.channel || this.sessionBlocked) && !!this.options.pairing?.credentials.peerKey && !!this.dht.peerMode ? "dht" : "unavailable";
   }
+  /** A session is ready, but on a transport the policies do not allow: it coordinates a switch and carries nothing else. */
+  private get sessionBlocked(): boolean { return this.paired?.state.status === "ready" && !this.currentTransportAllowed(); }
   validateText(text: string, timestamp: number, id: string): string | null {
     if (this.textDelivery === "dht") return this.dht!.validate(text, timestamp, id);
     return this.canSendText ? null : "No authenticated text delivery method is available.";
@@ -660,6 +711,7 @@ export class GhostLink {
   async stop(announce = true): Promise<void> {
     this.stopped = true;
     if (this.dhtPinGrace) clearTimeout(this.dhtPinGrace);
+    if (this.waiting?.timer) clearTimeout(this.waiting.timer);
     await this.dht?.stop();
     this.disconnect();
     await Promise.allSettled([...this.endpoints.values()].map(endpoint => endpoint.close()));
@@ -687,9 +739,11 @@ export class GhostLink {
       }, timeoutMs);
       void this.dial().catch(error => {
         if (epoch !== this.connectionEpoch) return;
-        this.tracker?.failed("transport", true, error instanceof Error ? error.message : String(error));
-        this.options.events?.onPairingState?.({ status: "error", error: error instanceof Error ? error.message : String(error) });
-        this.rejectWaiters(error instanceof Error ? error : new Error(String(error)));
+        const message = error instanceof Error ? error.message : String(error);
+        this.tracker?.failed("transport", true, message);
+        // Waiting for a chosen transport is not a connection error (WISP 100): the wait says why.
+        if (!this.dialFailed(message)) this.options.events?.onPairingState?.({ status: "error", error: message });
+        this.rejectWaiters(error instanceof Error ? error : new Error(message));
       });
     });
   }
@@ -719,7 +773,10 @@ export class GhostLink {
 
   /** What the contact's app can use on this link, as it last said (on the open session, or remembered). */
   get peerAvailableTransports(): PairedTransport[] | undefined {
-    return this.switcher.peerPolicy?.available ?? this.peerTransports;
+    const now = this.switcher.peerPolicy?.available;
+    if (!now) return this.peerTransports;
+    // A session can open before every endpoint of the contact's started: its record says what its app runs.
+    return [...now, ...(this.peerRecordTransports ?? []).filter(t => !now.includes(t))];
   }
   /** The open session goes through relays (WISP 100, "Relayed"): their hosts, this side's first. */
   get relayedPath(): { relays: string[] } | undefined {
@@ -756,9 +813,21 @@ export class GhostLink {
    * connected can still try Iroh or HyperDHT. What a session said (fresher, transcript-bound) is not replaced.
    */
   learnPeerTransports(transports: PairedTransport[], descriptors: TransportDescriptors): void {
+    const wanted = this.wanted()?.transport;
+    const listed = !!wanted && !!this.peerRecordTransports?.includes(wanted), dialable = !!wanted && !!this.peerDescriptors[wanted as NativeTransport];
+    // The record lists every transport the contact's app runs, started or not (WISP 03): what it lacks, it lacks.
+    this.peerRecordTransports = [...transports];
     let changed = false;
     for (const t of ["iroh/1", "hyperdht/1"] as const) if (descriptors[t] && !this.peerDescriptors[t]) { this.peerDescriptors = { ...this.peerDescriptors, [t]: descriptors[t] }; changed = true; }
     if (!this.peerTransports && transports.length) { this.peerTransports = transports; this.peerFallback = true; changed = true; }
+    else {
+      // Its app runs more than a session said (an endpoint that started later): those go after the session's order.
+      const added = transports.filter(t => !this.peerTransports?.includes(t));
+      if (added.length) { this.peerTransports = [...this.peerTransports!, ...added]; changed = true; }
+    }
+    // A transport the chat waits for, newly listed or dialable: tried again now, not at the next retry (WISP 100).
+    if (wanted && ((!listed && transports.includes(wanted)) || (!dialable && !!this.peerDescriptors[wanted as NativeTransport]))) this.waitNews();
+    this.notifyWait();
     if (!changed) return;
     traceLink(this.myPubKeyZ32, "record-transports", { transports });
     // Something new to dial: the next attempt is now, not after the wait that attempts with nothing to try built up.
@@ -777,6 +846,109 @@ export class GhostLink {
   announceCapsRevision(): void {
     if (this.isDataLinkOpen || !this.options.pairing?.credentials.peerKey) return;
     void this.dht?.announce().catch(() => {});
+  }
+
+  /**
+   * Where the chat is set to go and is not yet (WISP 100, "A chosen transport not reached yet"). With a session, the
+   * agreement of both policies; without one, only a limit of this side's (Fallback off) says where the chat must go:
+   * otherwise any transport will do, and the chat is simply retrying live.
+   */
+  private wanted(): { transport: PairedTransport; by?: "you" | "contact" } | undefined {
+    if (!this.options.params.profile || this.streamBlocked || this.keyStopped || this.stopped || !this.options.pairing?.credentials.peerKey) return undefined;
+    const state = this.paired?.state;
+    if (state?.status === "ready") {
+      if (!this.paired!.peerTransportSwitchSupport) return undefined;
+      const wanted = this.switcher.wanted();
+      return wanted && wanted.transport !== state.transport ? wanted : undefined;
+    }
+    return this.fallback ? undefined : { transport: this.preferred, ...(this.automatic ? {} : { by: "you" as const }) };
+  }
+
+  /** The transport this chat waits for, and why; absent when it is on it, or nothing limits where it goes. */
+  get transportWait(): TransportWait | undefined {
+    const wanted = this.wanted();
+    if (!wanted) return undefined;
+    const t = wanted.transport, policy = this.switcher.peerPolicy, waiting = this.waiting?.transport === t ? this.waiting : null;
+    const sessionHas = !!policy?.available.includes(t), recordHas = !!this.peerRecordTransports?.includes(t);
+    const dialable = t === "webrtc/1" ? !!this.peerTransports?.includes(t) : !!this.peerDescriptors[t];
+    const failures = waiting?.failures ?? 0;
+    const reason: TransportWait["reason"] = !this.availableTransports.includes(t) ? "app-lacks"
+      : this.switcher.pending?.choices[0] === t ? "connecting"
+      : sessionHas ? (failures ? "unreachable" : "waiting")
+      : this.peerRecordTransports && !recordHas ? "contact-lacks"
+      : policy || !dialable ? (recordHas ? "starting" : "unknown")
+      : failures ? "unreachable" : "waiting";
+    // Without a session, a wait is about the transport being there on both sides. A contact that has it and is away,
+    // or not reached yet, is the chat retrying live, as any chat on the DHT is (WISP 400, `on-dht`).
+    if (this.paired?.state.status !== "ready" && reason !== "contact-lacks" && reason !== "starting" && reason !== "app-lacks") return undefined;
+    const live = this.isDataLinkOpen ? this.paired?.state.transport : undefined;
+    return { transport: t, ...(wanted.by ? { by: wanted.by } : {}), reason, ...(live ? { live } : {}), failures,
+      ...(waiting?.error ? { error: waiting.error } : {}), ...(waiting?.retryAt ? { retryAt: waiting.retryAt } : {}) };
+  }
+
+  /**
+   * An attempt to reach `target` did not connect. The chat waits for it, and the side that plans switches tries again
+   * on the background pace (`schedule`: with a session; without one the dial's own pace does). True the first time
+   * for this wait: a fallback that kept the chat live is said once, later attempts are quiet.
+   */
+  private unreached(target: PairedTransport, error?: string, schedule = true): boolean {
+    const same = this.waiting?.transport === target ? this.waiting : null;
+    if (same?.timer) clearTimeout(same.timer);
+    const failures = (same?.failures ?? 0) + 1, told = !!same?.told;
+    const delay = Math.min(AUTO_CONNECT_RETRY_MS * 2 ** (failures - 1), AUTO_CONNECT_MAX_RETRY_MS);
+    const coordinates = this.myPubKeyZ32 < this.options.params.peerPubKeyZ32 && this.paired?.state.status === "ready";
+    this.waiting = { transport: target, failures, told: true, ...(error ?? same?.error ? { error: error ?? same?.error } : {}) };
+    if (schedule && coordinates && !this.stopped) {
+      this.waiting.retryAt = Date.now() + delay;
+      this.waiting.timer = setTimeout(() => this.retryWait(), delay);
+    }
+    traceLink(this.myPubKeyZ32, "wait", { transport: target, failures, retryIn: this.waiting.retryAt ? delay : undefined, error });
+    this.notifyWait();
+    return !told;
+  }
+
+  /** A dial with no session failed while the chat waits for a transport: counted there. True when it waits. */
+  private dialFailed(message: string): boolean {
+    const wait = this.transportWait;
+    if (wait) this.unreached(wait.transport, message, false);
+    return !!wait;
+  }
+
+  /** The next attempt for the transport the chat waits for, on the background pace. */
+  private retryWait(): void {
+    const waiting = this.waiting;
+    if (!waiting) return;
+    waiting.timer = waiting.retryAt = undefined;
+    if (this.stopped || this.paired?.state.status !== "ready" || !this.paired.peerTransportSwitchSupport) return;
+    traceLink(this.myPubKeyZ32, "wait-retry", { transport: waiting.transport, failures: waiting.failures });
+    this.switcher.again();
+    this.notifyWait();
+  }
+
+  /** Something new about the transport waited for (the contact's record lists it, or says how to dial it): try now. */
+  private waitNews(): void {
+    if (this.waiting) {
+      if (this.waiting.timer) clearTimeout(this.waiting.timer);
+      this.waiting.timer = this.waiting.retryAt = undefined; this.waiting.failures = 0;
+    }
+    if (this.paired?.state.status === "ready" && this.paired.peerTransportSwitchSupport) this.switcher.again();
+  }
+
+  private clearWait(): void {
+    if (this.waiting?.timer) clearTimeout(this.waiting.timer);
+    this.waiting = null;
+  }
+  /** The chat reached what it waited for, or waits for something else now (a new choice, Automatic, a policy change). */
+  private syncWait(): void {
+    if (this.waiting && this.wanted()?.transport !== this.waiting.transport) this.clearWait();
+  }
+  private waitSaid = "";
+  /** Tells the owner when the wait's view changed (its reason, failures, next retry). */
+  private notifyWait(): void {
+    const view = this.transportWait, said = view ? JSON.stringify(view) : "";
+    if (said === this.waitSaid) return;
+    this.waitSaid = said;
+    this.options.events?.onTransportWait?.(view);
   }
 
   get availableTransports(): PairedTransport[] {
@@ -840,7 +1012,9 @@ export class GhostLink {
   async setTransportPreference(preferred: PairedTransport, fallback: boolean, automatic = false, choice = true): Promise<void> {
     if (!this.options.params.profile || !this.availableTransports.includes(preferred)) throw new Error("Transport unavailable in this runtime");
     const again = this.preferred === preferred;
-    this.preferred = preferred; this.fallback = fallback;
+    this.preferred = preferred; this.fallback = fallback; this.automatic = automatic;
+    // Someone chose: a wait from before starts over (its failures, its retry, the row a failure gets).
+    if (automatic || choice) this.clearWait();
     if (this.paired?.state.status === "ready") {
       if (!this.paired.peerTransportSwitchSupport) {
         if (automatic) return;
@@ -852,6 +1026,7 @@ export class GhostLink {
       else this.switcher.changed(false);
       this.emitPairingState(); return;
     }
+    this.notifyWait();
     // A choice made while offline carries no intent into the next session; going automatic clears an older one.
     if (automatic) this.switcher.changed("automatic");
     // A preference is local configuration, not an instruction to find a peer.
@@ -881,7 +1056,7 @@ export class GhostLink {
       // A standing explicit choice goes first: the session starts where the agreement would move it anyway.
       const chosen = this.switcher.chosenTarget;
       const choices = chosen && ranked.includes(chosen) ? [chosen, ...ranked.filter(t => t !== chosen)] : ranked;
-      if (!choices.length) throw new Error("No common available transport. Initial pairing requires WebRTC on both peers.");
+      if (!choices.length) throw new Error("No transport both apps allow is available yet");
       const fallback = this.fallback && this.peerFallback;
       let lastError: unknown;
       // A transport that keeps failing is tried last for an hour, not first on every attempt.
@@ -1115,7 +1290,10 @@ export class GhostLink {
     traceLink(this.myPubKeyZ32, "dial", { failures: this.autoConnectFailures });
     this.lastAutoConnectAt = Date.now();
     this.autoConnectFailures++;
-    void this.dial().catch(() => { this.tracker?.failed("transport", true); });
+    void this.dial().catch(error => {
+      this.tracker?.failed("transport", true);
+      this.dialFailed(error instanceof Error ? error.message : String(error));
+    });
   }
 
   /** The name this side shows, told to a paired peer directly. */

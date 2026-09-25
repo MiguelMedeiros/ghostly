@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { TransportLine } from "../../components/TransportTimeline";
 import { TransportChip, TransportMenu } from "../../components/TransportMenu";
-import { mergeTimeline, shortReason, transportLineText, transportOptions, type TransportEntry } from "../../lib/transportEvents";
+import { mergeTimeline, shortReason, transportEventText, transportLineText, transportOptions, transportWaitText, type TransportEntry } from "../../lib/transportEvents";
 import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
-// covers: transport.timeline, transport.chat-switch
+// covers: transport.wait, transport.timeline, transport.chat-switch
 
 const line = (patch: Partial<TransportEntry>): TransportEntry => ({ id: "l1", at: Date.UTC(2026, 8, 25, 14, 2), kind: "connected", transport: "webrtc/1", ...patch });
 type Pairing = NonNullable<LinkView["pairing"]>;
@@ -173,6 +173,33 @@ describe("the chat's Connection menu", () => {
     expect(screen.getByTestId("transport-option-auto")).toHaveAttribute("aria-checked", "false");
     await user.click(screen.getByTestId("transport-option-auto"));
     expect(engine.callsTo("setChatTransport").slice(-1)[0]).toEqual({ linkId: "link-1", transport: "auto" });
+  });
+
+  it("says what the chat waits for, in the menu's note and on the chosen option (WISP 100)", async () => {
+    const { user } = chip({ availableTransports: all, peerNick: "Bea", pairing: ready({ transport: "iroh/1" }), preferredTransport: "hyperdht/1", transportAutomatic: false,
+      transportWait: { transport: "hyperdht/1", by: "you", reason: "contact-lacks", live: "iroh/1", failures: 0 } });
+    await user.click(screen.getByTestId("transport-chip"));
+    const menu = screen.getByTestId("transport-menu");
+    expect(within(menu).getByTestId("transport-option-hyperdht")).toHaveAttribute("title", "HyperDHT: Chosen · waiting for it");
+    expect(within(menu).getByTestId("transport-menu-note")).toHaveTextContent("You chose HyperDHT. Bea's app doesn't have HyperDHT. Automatic connects over what both apps have.");
+  });
+
+  it("words each reason a chat waits, where it is meanwhile, and when Automatic is the way out", () => {
+    const text = (wait: Parameters<typeof transportWaitText>[0]) => transportWaitText(wait, "Bea", () => "13:05");
+    const base = { transport: "hyperdht/1" as const, failures: 0 };
+    expect(text({ ...base, by: "you", reason: "unknown" })).toEqual({ label: "Waiting for HyperDHT", why: "You chose HyperDHT. Bea's app hasn't said yet whether it has HyperDHT.",
+      meanwhile: "Short texts go through the DHT meanwhile; the rest waits.", automatic: false });
+    expect(text({ ...base, by: "contact", reason: "starting", live: "iroh/1" })).toMatchObject({ why: "Bea chose HyperDHT. Bea's HyperDHT is starting.", meanwhile: "The chat stays on Iroh meanwhile." });
+    expect(text({ ...base, reason: "unreachable", failures: 2, error: "Transport change failed: hyperdht/1 unreachable. Retry or choose another transport.", retryAt: 1 }).why)
+      .toBe("Fallback is off, so only HyperDHT may carry this chat. The last attempt failed: HyperDHT unreachable. Trying again at 13:05.");
+    expect(text({ ...base, by: "contact", reason: "unreachable", failures: 1 }).why).toBe("Bea chose HyperDHT. The last attempt didn't connect. It is tried again by itself.");
+    expect(text({ ...base, by: "you", reason: "contact-lacks" }).automatic).toBe(true);
+    expect(text({ ...base, by: "you", reason: "app-lacks" })).toMatchObject({ why: "You chose HyperDHT. This app isn't running HyperDHT right now.", automatic: true });
+    // The contact's choice, which this app lacks: Automatic here would not change it.
+    expect(text({ ...base, by: "contact", reason: "app-lacks" })).toMatchObject({ why: "Bea chose HyperDHT. This app isn't running HyperDHT.", automatic: false });
+    // The history says the wait and its attempts, not a lost connection.
+    expect(transportEventText({ at: 1, kind: "down", from: "iroh/1", target: "hyperdht/1", text: "dht" }, "Bea")).toBe("Waiting for HyperDHT · off Iroh · texts go through the DHT");
+    expect(transportEventText({ at: 1, kind: "attempt", target: "hyperdht/1", reason: "hyperdht/1 unreachable" }, "Bea")).toBe("Waiting for HyperDHT · last attempt: HyperDHT unreachable");
   });
 
   it("says why a change could not be made, and stays open", async () => {

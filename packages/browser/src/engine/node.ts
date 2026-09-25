@@ -1705,6 +1705,7 @@ export class GhostlyNode implements EngineImplementation {
       transitionError: pairing?.transitionError,
       transitionTarget: pairing?.transitionTarget,
       error: pairing?.status === "error" ? pairing.error : undefined,
+      waiting: live.link.transportWait,
     }, Date.now());
     if (changed) this.saveTransportLog(live, log);
   }
@@ -2407,7 +2408,8 @@ export class GhostlyNode implements EngineImplementation {
         peerAcceptsText: () => { const peer = live.caps?.peer; return !peer || peer.capabilities.includes(DHT_TEXT_CAPABILITY); },
       } : undefined,
       native: { peerDescriptors: stored.peerDescriptors, peerTransports: stored.peerTransports,
-        peerFallback: stored.peerFallback, preferred: stored.preferredTransport, fallback: stored.transportFallback },
+        peerFallback: stored.peerFallback, preferred: stored.preferredTransport, fallback: stored.transportFallback,
+        automatic: stored.preferredTransport === undefined },
       pairing: credentials ? {
         credentials,
         verifyPeer: async key => {
@@ -2470,6 +2472,8 @@ export class GhostlyNode implements EngineImplementation {
           const log = this.transportLogOf(live);
           if (log?.switchFailed(target, reason ?? "It did not connect", Date.now())) this.saveTransportLog(live, log);
         },
+        // Waiting for a chosen transport (WISP 100): the header, the panel and the menu say so; the history keeps attempts.
+        onTransportWait: () => { this.observeTransport(linkId); this.emitState(); },
         onRtt: ms => { const log = this.transportLogOf(live); if (log?.rtt(ms)) this.saveTransportLog(live, log); else this.emitState(); },
         onDiscoveryError: error => { live.discoveryError = error ?? undefined; this.emitState(); },
         onTransportDiscovery: async (peerDescriptors, peerTransports, peerFallback) => {
@@ -2592,6 +2596,9 @@ export class GhostlyNode implements EngineImplementation {
         published: () => live.link?.announceCapsRevision(),
       });
       live.caps.start();
+      // The contact's record as last read: what its app runs, before any session says more (WISP 03).
+      const peer = live.caps.peer;
+      if (peer) link.learnPeerTransports(peer.transports.filter((t): t is PairedTransport => (TRANSPORTS as readonly string[]).includes(t)), dialDescriptors(peer.descriptors));
     }
     // Unused invites need discovery, not two native listeners. Saved contacts
     // retain background listeners within the real native capacity.
@@ -2614,13 +2621,24 @@ export class GhostlyNode implements EngineImplementation {
     while (new TextEncoder().encode(name).length > 64) name = [...name].slice(0, -1).join("");
     return {
       versions: [1],
-      transports: live?.link?.availableTransports ?? ["webrtc/1"],
+      transports: this.runnableTransports(live),
       capabilities: ["chat/1", DHT_TEXT_CAPABILITY, ...(live?.stored.hold?.enabled ? [HOLD_CAPABILITY] : []), "files/2",
         ...(cashu || lightning ? ["payments/1"] : []), ...(cashu ? ["payments-cashu/1"] : []), ...(lightning ? ["payments-lightning/1"] : [])],
       extensions: ["ping/1"],
       descriptors: capsDescriptors(live?.link?.nativeDescriptors),
       name,
     };
+  }
+
+  /**
+   * Every layer-1 transport this app runs for a chat, started or not (WISP 03): those it has started, in their order,
+   * then WebRTC where the page has it, then the native adapters it can start. `descriptors` names the started ones,
+   * so a contact tells one still starting from one this app lacks (WISP 100).
+   */
+  private runnableTransports(live: LiveLink | undefined): PairedTransport[] {
+    const started = live?.link?.availableTransports ?? [];
+    const can: PairedTransport[] = [...(typeof RTCPeerConnection !== "undefined" ? ["webrtc/1" as const] : []), ...Object.keys(this.nativeFactories) as NativeTransport[]];
+    return [...started, ...TRANSPORTS.filter(t => can.includes(t) && !started.includes(t))];
   }
 
   /** Something the capability record carries changed here: every chat publishes its record anew if it differs. */
@@ -2820,6 +2838,7 @@ export class GhostlyNode implements EngineImplementation {
       transportFallback: live.stored.transportFallback ?? true,
       transportAutomatic: live.stored.preferredTransport === undefined,
       peerTransports: live.link?.peerAvailableTransports,
+      transportWait: live.link?.transportWait,
       transportRttMs: live.link?.rttMs,
       transportRelayed: live.link?.relayedPath,
       transportLive: live.transportLog?.liveNow(),

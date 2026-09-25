@@ -714,7 +714,7 @@ describe("paired connecting", () => {
   it("without WebRTC or a native transport there is nothing to dial", async () => {
     const onPairingState = vi.fn();
     const link = makeLink(createLink().mine, { rtcAvailable: false, events: { onPairingState } });
-    await expect(link.connect()).rejects.toThrow(/No common available transport/);
+    await expect(link.connect()).rejects.toThrow(/No transport both apps allow/);
     expect(onPairingState).toHaveBeenLastCalledWith(expect.objectContaining({ status: "error" }));
   });
 
@@ -1049,14 +1049,20 @@ describe("changing transport on an open session", () => {
     expect(handled[dialer].mock.calls[0][0]).toContain('"u":"ufrag"');
   });
 
-  it("reports a failed change, and blocks the old transport, when this side no longer allows it", async () => {
+  it("waits for a transport this side limits itself to when it does not connect, and blocks the old transport", async () => {
     const t = switchable(true);
     await vi.waitFor(() => { expect(t.a.isDataLinkOpen).toBe(true); expect(t.b.isDataLinkOpen).toBe(true); });
     await t.a.setTransportPreference("iroh/1", false);
-    await vi.waitFor(() => expect([...t.onPairingStateA.mock.calls, ...t.onPairingStateB.mock.calls]
-      .some(([state]) => /iroh: no route/.test(state.transitionError ?? ""))).toBe(true));
-    await vi.waitFor(() => expect(t.onPairingStateA.mock.lastCall?.[0]).toMatchObject({ status: "error" }));
+    // Not a failure (WISP 100): both wait for Iroh, and the side that dialled knows why.
+    await vi.waitFor(() => expect([t.a.transportWait, t.b.transportWait].some(w => w?.reason === "unreachable" && /iroh: no route/.test(w.error ?? ""))).toBe(true));
+    expect(t.a.transportWait).toMatchObject({ transport: "iroh/1", by: "you", failures: 1 });
+    expect(t.b.transportWait).toMatchObject({ transport: "iroh/1", by: "contact", failures: 1 });
+    for (const state of [t.onPairingStateA, t.onPairingStateB].map(s => s.mock.lastCall?.[0])) {
+      expect(state).toMatchObject({ status: "negotiating" });
+      expect(state.transitionError).toBeUndefined();
+    }
     expect(t.a.isDataLinkOpen).toBe(false);
+    // No DHT floor in this harness: nothing carries the text meanwhile.
     expect(await t.a.sendMessage("blocked")).toMatch(/connect before sending/);
   });
 });

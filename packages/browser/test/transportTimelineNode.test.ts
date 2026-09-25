@@ -197,3 +197,27 @@ describe.each([
     expect(contactGot).toEqual(["in flight at the drop"]);
   }, 20_000);
 });
+
+it("waits for a HyperDHT chosen with Fallback off that does not connect yet: no connection issue, no failed row, and it lands as your switch", async () => {
+  const { net, node, id, view, contactState } = await setup({ appCoordinates: true });
+  await vi.waitFor(() => expect(lines(view())).toEqual([["connected", null, "iroh/1"]]));
+  // Iroh only first (the Fallback switch: no choice, nothing moves), then HyperDHT, whose announce is not out yet.
+  await node.setTransportPreference({ linkId: id, preferred: "iroh/1", fallback: false });
+  net.unreachable.add("hyperdht/1");
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], shouldAdvanceTime: true });
+  try {
+    await node.setChatTransport({ linkId: id, transport: "hyperdht/1" });
+    await vi.waitFor(() => expect(view().transportWait).toMatchObject({ transport: "hyperdht/1", by: "you", reason: "unreachable" }), { timeout: 15_000 });
+    expect(view().pairing?.status).not.toBe("error");
+    expect(view().pairing?.transitionError).toBeUndefined();
+    expect(view().transportWait!.retryAt).toBeGreaterThan(Date.now());
+    // The choice is the row; waiting is not, and neither is the attempt that did not connect (the history has it).
+    expect(lines(view())).toEqual([["connected", null, "iroh/1"], ["chose", "you", "iroh/1"]]);
+    expect(view().transportHistory!.filter(e => e.kind === "attempt")).toEqual([expect.objectContaining({ target: "hyperdht/1" })]);
+    net.unreachable.delete("hyperdht/1");
+    await vi.advanceTimersByTimeAsync(21_000);
+    await vi.waitFor(() => expect([view().pairing?.status, view().pairing?.transport, contactState().transport]).toEqual(["ready", "hyperdht/1", "hyperdht/1"]), { timeout: 10_000 });
+    expect(view().transportWait).toBeUndefined();
+    expect(lines(view())).toEqual([["connected", null, "iroh/1"], ["switched", "you", "hyperdht/1"]]);
+  } finally { vi.useRealTimers(); }
+}, 40_000);

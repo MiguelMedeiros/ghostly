@@ -4,7 +4,7 @@
 |---|---|
 | Candidate number | 100; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.3 |
+| Revision | 0.4 |
 | Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [03](03-capabilities.md), [403](403-dht-text.md) |
@@ -60,6 +60,25 @@ While `live`, the chat does not probe for a higher-ranked transport by itself; i
 
 **After a drop, both sides end on the same transport, whichever side dials.** A standing explicit choice is one made in the Connection menu and carried as a switch intent (the higher intent wins; on a tie, the lower rendezvous key). The redial tries that choice's transport first, then the rest by rank sum. With both sides on Automatic, the rank sum alone decides, and it is symmetric. When the new session is ready, both sides agree again from their current policies, as for any fresh session. A switch still in flight when the link dropped, or one that was kept on a fallback transport, does not carry over. If the session is not on the agreed transport, the coordinator moves it once, and the timeline shows one line for coming back. This is not probing: it applies choices already made, at the moment the chat changes transport anyway. With no explicit choice on either side, nothing moves.
 
+### A chosen transport not reached yet (revision 0.4)
+
+The transports a chat allows come from both sides' policies: a transport chosen in the Connection menu, and **Fallback**, which, when off, limits the chat to that one. When the transport the policies name is not the one carrying the chat, the chat is **waiting** for it. Waiting is not failing, and nothing about it is final while both apps run.
+
+1. **Why it waits.** One of:
+   - `unknown`: the contact's app has not said whether it has the transport (no capability record read yet, no session);
+   - `starting`: the contact's record lists it, but the contact has not given a way to dial it yet (no descriptor, or its session policy does not list it yet): its endpoint is starting;
+   - `connecting`: an attempt is under way;
+   - `unreachable`: both sides have it, and the last attempt did not connect; the attempt's error is kept for the details;
+   - `waiting`: both sides have it and no attempt failed yet;
+   - `contact-lacks`: the contact's latest capability record does not list it, so its app does not have it (no such adapter, or one turned off, such as a browser with no HyperDHT relay). A session policy alone never says so: a session can open before every endpoint has started ([03](03-capabilities.md#layer-0-capability-record));
+   - `app-lacks`: the contact chose it, and this app does not have it.
+
+   With no session open, only a transport missing on a side (`contact-lacks`, `starting`, `app-lacks`) is shown as a wait. A contact that has it and is away, or not reached yet, is the chat retrying live, as for any chat on the DHT.
+2. **Retried, never given up.** The switch, or with no session the dial, is tried again at once when the contact's capability record (re)appears or names the transport or a descriptor for it, when the contact's session policy changes, and when either side chooses again. Otherwise it follows the background pace above: 20 s after a failed attempt, doubling to at most 3 minutes, while the contact is online. The lower rendezvous key still coordinates. Applying a standing choice is not probing (above).
+3. **Where the chat is meanwhile.** With Fallback on for both, the chat stays live on the transport it is on, and the connection panel says the choice is waiting. With Fallback off on either side, no other transport may carry the chat: it is `on-dht` ([400](400-chat.md#states-of-a-chat)), short text goes over the DHT, the rest waits, and the header says "On DHT · waiting for <transport>". An authenticated session already open on another transport MAY stay open to coordinate the switch. It carries nothing of the chat (no text, files, payments or calls), and it is not `live`.
+4. **Said plainly.** `contact-lacks` reads as "<contact>'s app doesn't have <transport>", with **Automatic** offered beside it. The chat keeps watching: a newer record that lists the transport makes it `starting` again, and the switch follows by itself.
+5. **Quiet.** Waiting shows in the header indicator, the connection panel and the Connection menu, never as timeline rows ([400](400-chat.md#transport-rows)). The choice is one row. A switch that could not connect while the chat stayed live on another transport is one row the first time; later attempts go to the connection history only. When the chat reaches the chosen transport, the choice's row becomes the switch ("You switched to HyperDHT"), however long it waited.
+
 ### Relayed transports (revision 0.3)
 
 A transport is **relayed** on a chat when either side's descriptor says it reaches the contact only through a relay server: `"relayed": true`, or an Iroh descriptor with no direct address (a browser's, [102](102-iroh.md#browser-profile-relay-only-revision-03)). Both sides hold both descriptors after the exchange, so both reach the same verdict.
@@ -112,6 +131,8 @@ Fix canonical encodings, adapter IDs, timeout/retry values, simultaneous negotia
 
 ## Conformance
 
+Revision 0.4: a transport chosen with Fallback off before the contact's record names it is waited for, not failed, and the chat ends live on it once the contact has it, with no action and no connection error in between; one the contact's app lacks is said so, with Automatic offered; a switch whose transport did not connect is retried until it does.
+
 Revision 0.2: with every transport blocked the chat ends `on-dht` and chats; unblocking one moves it to `live` without action; two native peers whose WebRTC is blocked reach Iroh or HyperDHT from layer-0 descriptors; a drop mid-conversation falls back and returns with no loss or duplicate; a drop while a switch is in flight ends both sides on the agreed transport, whichever side redials or plans the switch; a transport that always fails is demoted and restored.
 
 Reverse offer arrival order and still choose the same result; exercise disjoint sets, crossed attempts, policy-prohibited relay fallback, timeout, stale selection and substituted endpoint keys. Demonstrate the same chat capability over at least two adapters before claiming interchangeability.
@@ -122,6 +143,7 @@ Reverse offer arrival order and still choose the same result; exercise disjoint 
 
 ## Revision log
 
+- 0.4 (2026-09-25): a chosen transport not reached yet is waited for, never failed: why it waits, when it is retried, where the chat is meanwhile (live on a fallback, or on the DHT with Fallback off), and no timeline rows for it.
 - 0.3 (2026-09-25): relayed transports: rank after direct ones, fallback after a failed WebRTC attempt, shown as relayed.
 - 0.3 (2026-09-25, later): a browser's HyperDHT through a HyperDHT relay is relayed too ([103](103-hyperdht.md)).
 - 0.2 (2026-09-25): the DHT as the floor under every transport, never a candidate; inputs from the layer-0 capability record; upgrade, downgrade and background retry rules; DHT only as a per-chat choice; after a drop, the redial and the agreement that follows it.

@@ -5,7 +5,7 @@ import type { PairedTransport } from "@ghostly/core";
 import { useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { dots, focus, transportName, type ConnectionKind } from "../lib/connection";
-import { connectionSummary, lasting } from "../lib/transportEvents";
+import { connectionSummary, lasting, transportWaitText } from "../lib/transportEvents";
 import { TransportIcon } from "./TransportIcon";
 import { TransportOptions } from "./TransportMenu";
 import { ConnectionHistory } from "./TransportTimeline";
@@ -55,8 +55,12 @@ export function PairingBanner({ peerKey }: { peerKey: string }) {
   const preferred = link?.preferredTransport ?? "webrtc/1";
   const pinned = !!link?.peerParticipationKey, canCompare = !!pair?.code && !!pair.peerKey && (pair.status === "ready" || pair.status === "waiting");
   const awaitingJoin = !pinned && !pair?.peerKey && link?.dataLink === "idle";
-  const label = !online ? "Offline" : connectionFailure ? "Connection issue" : discoveryFailure ? (discoveryFailure.startsWith("Could not publish discovery:") && !discoveryFailure.includes("Could not read discovery:") ? "Publication unavailable" : "Discovery unavailable") : dht ? "DHT only · chosen by you" : textDht && link?.dhtDelivery?.peerMode === "dht" ? "DHT only · chosen by your contact" : textDht ? "On DHT · retrying live" : pair?.transitionTarget ? `Switching · ${name(pair.transitionTarget)}` : ready ? `Connected · ${name(pair?.transport)}${link?.transportRelayed ? " (relayed)" : ""}` : pair?.status === "confirm" ? "Confirm peer" : awaitingJoin ? "No contact yet" : !link?.peerOnline && link?.dataLink === "idle" ? "Waiting for contact" : "Connecting…";
-  const kind: ConnectionKind = !online ? "offline" : failure ? "failure" : dht || textDht ? "dht" : ready && !pair?.transitionTarget ? "connected" : "waiting";
+  // A chosen transport not reached yet (WISP 100): waited for, never a connection issue. `waitOff`: nothing else may
+  // carry the chat meanwhile (Fallback off), so it is on the DHT; otherwise it stays live where it is.
+  const wait = !dht ? link?.transportWait : undefined, waitOff = !!wait && !wait.live;
+  const waitText = wait ? transportWaitText(wait, link?.peerNick || "Your contact") : undefined;
+  const label = !online ? "Offline" : connectionFailure ? "Connection issue" : discoveryFailure ? (discoveryFailure.startsWith("Could not publish discovery:") && !discoveryFailure.includes("Could not read discovery:") ? "Publication unavailable" : "Discovery unavailable") : dht ? "DHT only · chosen by you" : textDht && link?.dhtDelivery?.peerMode === "dht" ? "DHT only · chosen by your contact" : waitOff && pair?.transitionTarget ? `Switching · ${name(pair.transitionTarget)}` : waitOff ? `${textDht ? "On DHT · waiting" : "Waiting"} for ${name(wait.transport)}` : textDht ? "On DHT · retrying live" : pair?.transitionTarget ? `Switching · ${name(pair.transitionTarget)}` : ready ? `Connected · ${name(pair?.transport)}${link?.transportRelayed ? " (relayed)" : ""}` : pair?.status === "confirm" ? "Confirm peer" : awaitingJoin ? "No contact yet" : !link?.peerOnline && link?.dataLink === "idle" ? "Waiting for contact" : "Connecting…";
+  const kind: ConnectionKind = !online ? "offline" : failure ? "failure" : waitOff && (pair?.transitionTarget || !textDht) ? "waiting" : dht || textDht ? "dht" : ready && !pair?.transitionTarget ? "connected" : "waiting";
   const connecting = kind === "waiting" && (label === "Connecting…" || !!pair?.transitionTarget);
   // Live, or live and moving to another transport: the transport's own mark, and what it is at a glance.
   const liveOn = ready && !dht && !textDht ? pair?.transport : undefined;
@@ -98,8 +102,16 @@ export function PairingBanner({ peerKey }: { peerKey: string }) {
         <dt>Why</dt><dd className="text-text-primary">{summary.why}</dd>
       </dl>}
       {failure && <p role="alert" className="mt-2 break-words text-danger">{failure}</p>}
+      {wait && waitText && <div data-testid="connection-waiting" data-reason={wait.reason} data-transport={wait.transport} className="mt-2 rounded-lg bg-surface-hover px-2.5 py-2 text-[11px] leading-4">
+        <p className="font-medium text-text-primary">{waitText.label}</p>
+        <p className="mt-0.5 break-words" data-testid="connection-waiting-why">{waitText.why}</p>
+        <p className="mt-0.5">{waitText.meanwhile}</p>
+        {waitText.automatic && link && <button type="button" data-testid="connection-waiting-automatic" disabled={busy || !online}
+          className={`mt-1.5 min-h-9 rounded-md px-2 text-accent hover:bg-surface disabled:opacity-40 ${focus}`}
+          onClick={() => void run(() => engine.call("setChatTransport", { linkId: link.id, transport: "auto" }))}>Use Automatic</button>}
+      </div>}
       {discoveryFailure && <p className="mt-2 text-[11px]" data-testid="discovery-help">{awaitingJoin && "No contact yet. "}Discovery will retry automatically. You can still share this invite or choose a delivery mode. If this persists, check your internet connection or <Link className={`text-accent underline ${focus}`} to="/settings" onClick={(e) => { e.preventDefault(); nav.open("/settings"); }}>review relay settings</Link>. DHT-only also needs discovery.</p>}
-      {!dht && ready && preferred !== pair?.transport && <p className="mt-1 text-[11px]">Preferred: {name(preferred)}</p>}
+      {!dht && ready && !wait && preferred !== pair?.transport && <p className="mt-1 text-[11px]">Preferred: {name(preferred)}</p>}
       <label className="connection-switch-row mt-3 flex min-h-11 items-center justify-between gap-3 rounded-lg bg-surface-hover px-2.5">
         <span className="flex items-center gap-2 text-text-primary"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="m3 7 9-4 9 4-9 4Z M3 12l9 4 9-4 M3 17l9 4 9-4"/></svg>DHT only</span>
         <span className="connection-switch"><input type="checkbox" role="switch" aria-label="DHT-only delivery" aria-checked={dht} checked={dht} disabled={busy || !online || !link}

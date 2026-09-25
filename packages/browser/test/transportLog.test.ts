@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CHOICE_TTL_MS, QUIET_DROP_MS, TRANSPORT_HISTORY_MAX, TRANSPORT_LOG_MAX, TransportLog, compactTransportRows, type TransportEntry, type TransportSnapshot } from "../src/engine/transportLog";
-// covers: transport.timeline
+// covers: transport.timeline, transport.wait
 
 const live = (transport: TransportSnapshot["transport"], extra: Partial<TransportSnapshot> = {}): TransportSnapshot =>
   ({ live: true, transport, text: "stream", dhtOnly: false, ...extra });
@@ -284,5 +284,57 @@ describe("transport log: the live transport now", () => {
     // Back within the quiet window: no row, but live since it came back, still the contact's choice.
     log.observe(live("iroh/1"), 50);
     expect(log.liveNow()).toEqual({ since: 50, cause: "contact" });
+  });
+});
+
+describe("transport log: a chosen transport not reached yet (WISP 100)", () => {
+  const wait = (failures: number, extra: Partial<NonNullable<TransportSnapshot["waiting"]>> = {}): TransportSnapshot["waiting"] =>
+    ({ transport: "hyperdht/1", by: "you", failures, ...extra });
+
+  it("waits off live with Fallback off: no rows while it waits, attempts only in the history, and the choice's row becomes the switch", () => {
+    const log = new TransportLog();
+    log.observe(live("iroh/1"), 0);
+    log.chose("you", "hyperdht/1", MIN);
+    // Off Iroh to wait for HyperDHT: the header says so, the timeline adds nothing.
+    log.observe(down({ text: "dht", waiting: wait(0) }), MIN + 10);
+    expect(kinds(log)).toEqual(["connected", "chose"]);
+    expect(log.history.at(-1)).toMatchObject({ kind: "down", from: "iroh/1", target: "hyperdht/1", text: "dht" });
+    // Retried for 20 minutes: one history line per reason in a row, never a row.
+    for (let i = 1; i <= 8; i++) log.observe(down({ text: "dht", waiting: wait(i, { error: "hyperdht/1 unreachable" }) }), MIN + i * 2 * MIN);
+    log.observe(down({ text: "dht", waiting: wait(9, { error: "Your contact did not answer" }) }), 20 * MIN);
+    expect(kinds(log)).toEqual(["connected", "chose"]);
+    expect(log.history.filter(e => e.kind === "attempt").map(e => [e.target, e.reason])).toEqual([["hyperdht/1", "hyperdht/1 unreachable"], ["hyperdht/1", "Your contact did not answer"]]);
+    // It lands, long after: the choice, not an outage or a drop.
+    log.observe(live("hyperdht/1"), 25 * MIN);
+    expect(log.entries.at(-1)).toMatchObject({ kind: "switched", cause: "you", from: "iroh/1", transport: "hyperdht/1" });
+    expect(kinds(log)).toEqual(["connected", "switched"]);
+    expect(log.history.at(-1)).toMatchObject({ kind: "switched", cause: "you", from: "iroh/1", transport: "hyperdht/1" });
+    expect(log.liveNow()).toEqual({ since: 25 * MIN, cause: "you" });
+  });
+
+  it("stays live on a fallback: the failed switch is one row, later attempts are history, and landing is the choice's switch", () => {
+    const log = new TransportLog();
+    log.observe(live("iroh/1"), 0);
+    log.chose("you", "hyperdht/1", MIN);
+    log.observe(live("iroh/1", { waiting: wait(0) }), MIN + 10);
+    log.switchFailed("hyperdht/1", "hyperdht/1 unreachable", MIN + 20);
+    log.observe(live("iroh/1", { waiting: wait(1, { error: "hyperdht/1 unreachable" }) }), MIN + 30);
+    for (let i = 2; i <= 5; i++) log.observe(live("iroh/1", { waiting: wait(i, { error: "hyperdht/1 unreachable" }) }), i * 3 * MIN);
+    expect(kinds(log)).toEqual(["connected", "chose", "failed"]);
+    log.observe(live("hyperdht/1"), 30 * MIN);
+    // Well past the choice's two minutes, still its switch, not "a direct path was found".
+    expect(log.entries.at(-1)).toMatchObject({ kind: "switched", cause: "you", from: "iroh/1", transport: "hyperdht/1" });
+  });
+
+  it("tells a wait given up for Automatic from a choice landing", () => {
+    const log = new TransportLog();
+    log.observe(live("iroh/1"), 0);
+    log.chose("you", "hyperdht/1", MIN);
+    log.observe(down({ text: "dht", waiting: wait(1) }), MIN + 10);
+    log.chose("you", "automatic", 2 * MIN);
+    log.observe(down({ text: "dht" }), 2 * MIN + 10);
+    log.observe(live("iroh/1"), 2 * MIN + 20);
+    // Back on Iroh within the quiet window: the choices are the rows, nothing reads as a drop.
+    expect(kinds(log)).toEqual(["connected", "chose", "chose"]);
   });
 });

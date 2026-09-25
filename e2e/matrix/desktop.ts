@@ -119,13 +119,27 @@ function wanted(combo: Combination): { preferred?: Name; fallback: boolean; sett
 
 const notLive = (p: Person) => expect.poll(() => p.connection(), { message: `${p.name} is not live` }).not.toMatch(/Connected ·/);
 
+/**
+ * Connected over `transport` in the end, and never "Connection issue" on the way: a chosen transport not reached yet
+ * is waited for (WISP 100, "On DHT · waiting for HyperDHT"), not a failure.
+ */
+async function settlesWithoutIssue(p: Person, transport: string, timeout = 180_000): Promise<void> {
+  const seen = new Set<string>();
+  await expect.poll(async () => { const label = await p.connection(); seen.add(label); return label; },
+    { timeout, message: `${p.name} is connected over ${transport}` }).toMatch(new RegExp(`Connected · ${transport}`));
+  expect([...seen].filter(label => /Connection issue/.test(label)), `${p.name} waited without a connection issue (saw: ${[...seen].join(" / ")})`).toEqual([]);
+}
+
 async function transport({ a, b, combo }: DesktopWorld): Promise<void> {
   const want = wanted(combo);
   const both = combo.client === "desktop-desktop";
   for (const p of [a, b]) await p.go(p.chatHash!);
-  // Two Desktops go live by themselves first, natively from the DHT (native-upgrade.spec.ts): the preferences act on
-  // that. Asked for too early, an option could still be off for want of the contact's record.
-  if (both) for (const p of [a, b]) await connected(p, "(?:Iroh|HyperDHT)");
+  // Two Desktops go live by themselves first, natively from the DHT (native-upgrade.spec.ts), and the preferences act
+  // on that, as a person meets the menu. HyperDHT alone is the exception: it is asked for before the pair is live, the
+  // order that once left the chat on "Connection issue" for good (#244: chosen before the contact's record named
+  // HyperDHT, the switch failed and nothing tried it again). The chat now waits for it (WISP 100) and lands there.
+  const early = both && combo.transport === "hyperdht-only";
+  if (both && !early) for (const p of [a, b]) await connected(p, "(?:Iroh|HyperDHT)");
   for (const p of [a, b]) {
     // The premise of `wanted`: Desktop here is Linux, with no WebRTC.
     if (p.kind === "desktop") expect((await p.callButton()).rtc, `${p.name} (Desktop on Linux) has no WebRTC`).toBe(false);
@@ -133,14 +147,16 @@ async function transport({ a, b, combo }: DesktopWorld): Promise<void> {
     const preferred = p.kind === "desktop" ? want.preferred : want.preferred === "WebRTC" ? "WebRTC" : undefined;
     const fallback = p.kind === "desktop" || want.preferred === "WebRTC" ? want.fallback : true;
     // The options are off for what this app lacks, and for what the contact's lacks (as far as it has learned): a
-    // Desktop offers its native transports to a Desktop, and nothing to a browser, which has WebRTC only.
+    // Desktop offers its native transports to a Desktop, and nothing to a browser, which has WebRTC only; a browser
+    // offers a Desktop nothing either, once the Desktop's record says it has no WebRTC.
     await expect(async () => {
       const offered = await p.preferTransport(preferred, fallback);
       if (p.kind === "desktop") expect(offered, `${p.name} (Desktop) offers what both apps have`).toEqual(both ? ["Iroh", "HyperDHT"] : []);
       else expect(["WebRTC"], `${p.name} (${p.kind}) offers WebRTC at most`).toEqual(expect.arrayContaining(offered));
     }).toPass({ timeout: 60_000 });
   }
-  if (want.settles) for (const p of [a, b]) await connected(p, `(?:${want.settles})`);
+  if (early) for (const p of [a, b]) await settlesWithoutIssue(p, `(?:${want.settles})`);
+  else if (want.settles) for (const p of [a, b]) await connected(p, `(?:${want.settles})`);
   else for (const p of [a, b]) await notLive(p);
   // Live or not, the chat carries text both ways.
   await says(a, b, `over ${combo.transport}`);
