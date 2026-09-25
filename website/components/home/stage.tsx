@@ -1,9 +1,10 @@
 "use client";
 
-import { useId } from "react";
+import { createContext, useContext, useId } from "react";
 import { motion, useTransform, type MotionValue } from "motion/react";
 import { Ghost, type GhostMood } from "@/components/ghost/Ghost";
 import { STAGE, type Orientation } from "@/components/story/poses";
+import { IDENTITY, type Framing } from "@/components/story/framing";
 import { useMediaQuery } from "@/lib/useMediaQuery";
 
 /** Every scene keeps p∈[0,.06] for its entrance and [.94,1] for its exit. */
@@ -36,6 +37,12 @@ export function useStep(p: MotionValue<number>, i: number, n: number, range: num
   return useTransform(p, range.map((f) => stepAt(i, f, n)), output, { clamp: true });
 }
 
+/**
+ * Where a chapter's picture is drawn on this window (see story/framing.ts).
+ * SceneFrame provides it in the film; stills and phones draw the stage as is.
+ */
+export const StageFramingContext = createContext<Framing>(IDENTITY);
+
 export const PORTRAIT_QUERY = "(max-width: 860px)";
 
 /** Landscape stages until 860px; portrait below. The server assumes landscape. */
@@ -48,14 +55,22 @@ export const orientationOf = (portrait: boolean): Orientation => (portrait ? "po
 export const TOUCH_QUERY = "(pointer: coarse)";
 
 /**
+ * A window taller than it is wide cannot hold the film's landscape stage beside
+ * its copy panel. `app/layout.tsx` marks it `data-orient="portrait"` too.
+ */
+export const UPRIGHT_QUERY = "(max-aspect-ratio: 1/1)";
+
+/**
  * Phones, and any touch-first device, do not get the pinned, scroll-scrubbed
- * film: momentum scrolling fights it. They get cards: the same scenes, each
- * step playing its beat once as its figure comes into view.
+ * film: momentum scrolling fights it. Neither do upright windows. They get
+ * cards: the same scenes, each step playing its beat once as its figure comes
+ * into view.
  */
 export function useCards(): boolean {
   const portrait = useMediaQuery(PORTRAIT_QUERY);
   const touch = useMediaQuery(TOUCH_QUERY);
-  return portrait || touch;
+  const upright = useMediaQuery(UPRIGHT_QUERY);
+  return portrait || touch || upright;
 }
 
 /** A ghost placed in stage units; `who` colours it, `s` is its width. */
@@ -119,15 +134,18 @@ export function Stage({
   light?: { color: string; opacity?: MotionValue<number> | number };
 }) {
   const { w, h } = STAGE[orientationOf(portrait)];
+  const framing = useContext(StageFramingContext);
+  const moved = !portrait && (framing.k !== 1 || framing.x !== 0 || framing.y !== 0);
+  const picture = camera ? (
+    <CameraGroup camera={camera} light={light}>
+      {children}
+    </CameraGroup>
+  ) : (
+    children
+  );
   return (
     <svg className={`stage ${className}`} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio={`xMidYMid ${fit}`} role="presentation">
-      {camera ? (
-        <CameraGroup camera={camera} light={light}>
-          {children}
-        </CameraGroup>
-      ) : (
-        children
-      )}
+      {moved ? <g transform={`translate(${framing.x} ${framing.y}) scale(${framing.k})`}>{picture}</g> : picture}
     </svg>
   );
 }

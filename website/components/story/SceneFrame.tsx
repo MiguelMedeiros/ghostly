@@ -4,7 +4,8 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import { animate as tween, motion, motionValue, useInView, useMotionValue, useMotionValueEvent, useScroll, useTransform, type MotionValue } from "motion/react";
 import { useCalm } from "@/lib/useCalm";
 import { DUR, EASE, useScrub } from "@/lib/motion";
-import { EXIT, orientationOf, stepAt, stepOf, useCards, usePortrait, type Camera } from "@/components/home/stage";
+import { EXIT, orientationOf, StageFramingContext, stepAt, stepOf, useCards, usePortrait, type Camera } from "@/components/home/stage";
+import { IDENTITY, measureFraming, sameFraming, type Framing } from "./framing";
 import { BLOCKING, ROOMS, STAGE, valueAt, type Chapter } from "./poses";
 
 /**
@@ -103,6 +104,28 @@ export function SceneFrame({
 
   const { camera, focus } = useBlocking(p, chapter, portrait, calm);
 
+  // Where the picture goes on this window: clear of the copy panel and on screen (story/framing.ts).
+  const [framing, setFraming] = useState<Framing>(IDENTITY);
+  useEffect(() => {
+    if (article || portrait) {
+      setFraming(IDENTITY);
+      return;
+    }
+    const update = () => {
+      const next = measureFraming(ref.current, chapter);
+      setFraming((prev) => (sameFraming(prev, next) ? prev : next));
+    };
+    update();
+    const panel = ref.current?.querySelector(".scene-copy");
+    const ro = new ResizeObserver(update);
+    if (panel) ro.observe(panel);
+    window.addEventListener("resize", update);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, [article, portrait, chapter]);
+
   // The chapter's furniture (its picture and its panel) fades in as the chapter
   // pins and is gone before the actors start their glide at EXIT, so a hand-off
   // shows only the backdrop and the two ghosts. While it is invisible it takes
@@ -167,7 +190,7 @@ export function SceneFrame({
       >
         <div className="scene-sticky">
           <motion.div className="scene-visual" aria-hidden="true" style={{ opacity: furniture }}>
-            {visual}
+            <StageFramingContext.Provider value={framing}>{visual}</StageFramingContext.Provider>
           </motion.div>
           <motion.div className="scene-wash" aria-hidden="true" style={{ opacity: furniture }} />
           <motion.div className="scene-copy" data-hidden={hidden} style={{ opacity: furniture }}>

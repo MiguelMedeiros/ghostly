@@ -141,9 +141,9 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark" data-scroll-behavior="smooth" suppressHydrationWarning>
       <head>
-        {/* Scenes only hold the screen when scripts run; without them every step reads in order. */}
+        {/* Scenes only hold the screen when scripts run; without them every step reads in order. Narrow and upright windows read them as cards (data-orient, stage.tsx useCards). */}
         <Script id="js-flag" strategy="beforeInteractive">
-          {"var d=document.documentElement;d.classList.add('js');try{var q=function(m,f){var l=matchMedia(m);f(l.matches);l.addEventListener('change',function(e){f(e.matches)})};q('(prefers-reduced-motion: reduce)',function(v){d.classList.toggle('calm',v)});q('(max-width: 860px)',function(v){if(v)d.dataset.orient='portrait';else delete d.dataset.orient});q('(pointer: coarse)',function(v){if(v)d.dataset.touch='';else delete d.dataset.touch})}catch(e){}"}
+          {"var d=document.documentElement;d.classList.add('js');try{var q=function(m,f){var l=matchMedia(m);f(l.matches);l.addEventListener('change',function(e){f(e.matches)})};q('(prefers-reduced-motion: reduce)',function(v){d.classList.toggle('calm',v)});q('(max-width: 860px), (max-aspect-ratio: 1/1)',function(v){if(v)d.dataset.orient='portrait';else delete d.dataset.orient});q('(pointer: coarse)',function(v){if(v)d.dataset.touch='';else delete d.dataset.touch})}catch(e){}"}
         </Script>
         <Script
           src="https://www.googletagmanager.com/gtag/js?id=G-KXK4ESQ5DZ"
