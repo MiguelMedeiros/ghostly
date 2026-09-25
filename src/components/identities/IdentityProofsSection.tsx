@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { IdentityProofView, LinkView } from "@ghostly/browser/shared/types";
 import { Block, Button, Notice, Row } from "../wallet/ui";
 import { Deck } from "../deck/Deck";
-import { addableProviders, chatsByPeer, contactName, profileSince, SHARED_STATUS, useEngineState, useNewProof } from "../../lib/identities";
+import { addableProviders, chatsByPeer, contactName, profileSince, providerOf, SHARED_STATUS, useEngineState, useNewProof } from "../../lib/identities";
 import { contactTag } from "../../lib/publicKeyLabel";
 import { chatPath } from "../../lib/url";
 import type { ChatSession } from "../../lib/types";
@@ -43,6 +43,9 @@ export function IdentityProofsSection() {
   const [revoking, setRevoking] = useState<string | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  /** What taking the proof down on its server is doing (an AT Protocol record), and whether it failed. */
+  const [removal, setRemoval] = useState<{ progress?: string; failed?: string }>({});
+  const removeAbort = useRef<AbortController | null>(null);
 
   // A proof just added comes up, so the person sees what they made.
   useNewProof(state, setChosen);
@@ -65,11 +68,23 @@ export function IdentityProofsSection() {
     ...(canAdd ? [{ id: ADD, add: true } as const] : []),
   ];
   const entry = entries.find(e => e.id === chosen) ?? entries[0];
-  const select = (id: string) => { setChosen(id); setRemoving(null); setError(""); };
+  const select = (id: string) => { removeAbort.current?.abort(); setChosen(id); setRemoving(null); setError(""); setRemoval({}); };
   const act = (key: string, work: () => Promise<unknown>) => { setBusy(key); setError(""); void work().catch(e => setError(message(e))).finally(() => setBusy("")); };
-  const remove = (id: string) => {
-    setRevoking(id); setError("");
-    void engine.call("removeIdentityProof", { id }).then(() => setRemoving(null), e => setError(message(e))).finally(() => setRevoking(null));
+  /**
+   * Removes a proof: first what its provider published, when it can take that down (an AT Protocol record, after a
+   * fresh approval on the person's server), then the proof itself, which withdraws it and publishes the revocation.
+   * Called straight from the click: the provider may open a window. `withRecord` false skips the first step.
+   */
+  const remove = (p: IdentityProofView, withRecord = true) => {
+    const unpublish = withRecord ? providerOf(p.provider)?.unpublish : undefined;
+    const controller = new AbortController(); removeAbort.current = controller;
+    setRevoking(p.id); setError(""); setRemoval({});
+    const takenDown = unpublish
+      ? unpublish.run({ id: p.id, subject: p.subject, key: p.key }, { values: {}, signal: controller.signal, onAuthUrl: () => {}, onProgress: progress => setRemoval({ progress }) })
+        .catch((e: unknown) => { setRemoval({ failed: p.id }); throw e; })
+      : Promise.resolve();
+    void takenDown.then(() => engine.call("removeIdentityProof", { id: p.id })).then(() => setRemoving(null), e => { if (!controller.signal.aborted) setError(message(e)); })
+      .finally(() => { setRevoking(null); setRemoval(r => ({ failed: r.failed })); });
   };
   const tone = (e: Entry) => (e.add ? "id-card-add" : idCardTone({ provider: e.card.provider, subject: e.card.bound, attested: e.card.attested }));
 
@@ -142,11 +157,15 @@ export function IdentityProofsSection() {
             </Block>
             <Row label="Remove" hint="Stops sharing it everywhere and publishes a revocation.">
               {removing === p.id ? <>
-                <Button variant="danger" data-testid="identity-proof-remove-confirm" disabled={revoking === p.id} onClick={() => remove(p.id)}>{revoking === p.id ? "Revoking…" : "Remove and stop sharing"}</Button>
-                <Button disabled={revoking === p.id} onClick={() => setRemoving(null)}>Keep</Button>
+                <Button variant="danger" data-testid="identity-proof-remove-confirm" disabled={revoking === p.id} onClick={() => remove(p)}>{revoking === p.id ? "Revoking…" : "Remove and stop sharing"}</Button>
+                {removal.failed === p.id && revoking !== p.id && <Button data-testid="identity-proof-remove-anyway" onClick={() => remove(p, false)}>Remove without it</Button>}
+                <Button disabled={revoking === p.id} onClick={() => { removeAbort.current?.abort(); setRemoving(null); setRemoval({}); }}>Keep</Button>
               </> : <Button data-testid="identity-proof-remove" onClick={() => setRemoving(p.id)}>Remove</Button>}
             </Row>
-            {removing === p.id && <Block><Notice>Contacts you shared it with are told it is no longer shared, and a revocation is published so they can see it even if you never reconnect. A copy they kept cannot be erased.</Notice></Block>}
+            {removing === p.id && <Block><Notice>Contacts you shared it with are told it is no longer shared, and a revocation is published so they can see it even if you never reconnect. A copy they kept cannot be erased.{providerOf(p.provider)?.unpublish ? ` ${providerOf(p.provider)!.unpublish!.description}` : ""}</Notice>
+              {removal.progress && revoking === p.id && <Notice testId="identity-proof-remove-progress">{removal.progress}</Notice>}
+              {removal.failed === p.id && revoking !== p.id && <p className="text-xs text-text-muted">The record could not be deleted. You can remove the proof without it: contacts still see it revoked.</p>}
+            </Block>}
           </>;
         })()}
         {error && <Block><Notice tone="error">{error}</Notice></Block>}

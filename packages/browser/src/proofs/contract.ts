@@ -108,6 +108,8 @@ interface SignerBase {
   platforms?: readonly IdentityPlatform[];
   /** False hides it (no NIP-07 extension in this window). Runs in the UI. */
   available?(): boolean;
+  /** The button that starts it ("Continue on your server"). Default: "Sign with <label>" in-app, "Continue" otherwise. */
+  action?: string;
 }
 
 /** Signs inside Ghostly through something the person already uses (NIP-07, NIP-46, a wallet API). */
@@ -206,4 +208,14 @@ export interface IdentityProofProvider<E = unknown> {
    * URI of its own. No comma: did:dht separates the list with commas.
    */
   publicUri?(subject: string): string | undefined;
+  /**
+   * Takes down what a signer published when the person removes the proof (an AT Protocol record). Runs in
+   * the UI, called synchronously from the confirming click (it may open a window first). The shared Pkarr
+   * revocation is published either way; if this fails, the person may remove the proof without it.
+   */
+  unpublish?: {
+    /** What the removal adds, for the confirmation: "Also deletes the record on your server." */
+    description: string;
+    run(proof: { id: string; subject: string; key: string }, ctx: SignerContext): Promise<void>;
+  };
 }

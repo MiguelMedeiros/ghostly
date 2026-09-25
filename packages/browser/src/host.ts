@@ -2,6 +2,7 @@ import type { FoundUpdate } from "../../../src/lib/updates";
 import type { EngineEvent, RpcRequest, RpcResponse } from "./shared/rpc";
 import type { OidcPlatform } from "./proofs/oidc/providers";
 import type { OidcWindow } from "./proofs/oidc/flow";
+import type { AtprotoHost } from "./proofs/atproto/oauth";
 
 /**
  * What differs between the places this peer runs. The extension keeps the
@@ -65,6 +66,8 @@ export interface BrowserHost {
   readClipboardText?(): Promise<string>;
   /** Signing in with an OpenID Connect provider for an identity proof. Left out where the platform cannot. */
   oidc?: OidcHost;
+  /** Signing in to the person's AT Protocol server (Bluesky or another PDS) for an identity proof. Left out where the platform cannot. */
+  atproto?: AtprotoHost;
 }
 
 /** Where a share sheet points: the button that opened it, in CSS pixels from the page's top left. */

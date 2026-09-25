@@ -365,6 +365,16 @@ services:
     environment: { GHOSTLY_HYPERDHT_TESTNET: "3", GHOSTLY_RELAY_CLIENTS_PER_ADDRESS: "64" }
     ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47097:49443"]
 
+  # ── AT Protocol: a PLC directory (in memory) and a reference PDS, for Bluesky identity proofs ─────────────────
+  # The PDS believes it is https://pds.ghostly.test; e2e/support/atproto.ts routes that name (and the PLC's,
+  # https://plc.ghostly.test) here. Tests make their own accounts; a restart starts from an empty network.
+  atproto:
+    build: ./atproto
+    image: ghostly-e2e-atproto
+    container_name: ghostly-e2e-atproto
+    restart: on-failure
+    ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47086:2583", "${E2E_INFRA_ADDRESS:-127.0.0.1}:47087:2582"]
+
 volumes:
   bark-captaind:
   bark-postgres:

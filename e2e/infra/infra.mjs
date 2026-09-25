@@ -93,6 +93,7 @@ const PROBES = {
   S3: () => http(`${endpoints.s3.endpoint}/health`),
   "Iroh relay": () => http(endpoints.irohRelay),
   "HyperDHT relay": () => http(`${endpoints.hyperdhtRelay.replace(/^ws/, "http")}/healthz`),
+  "AT Protocol PDS / PLC": async () => (await http(`${endpoints.atproto.pds}/xrpc/_health`)) && http(`${endpoints.atproto.plc}/_health`),
   // The environment's own mint, whatever E2E_MINT_URL points the suite at.
   "Cashu mint": () => http(`${read("E2E_MINT_URL")}/v1/info`),
 };

@@ -161,7 +161,7 @@ const en = {
     notes: [
       "One chat (WISPs 400 and 801): a chat with no direct path starts on the DHT and goes live by itself; one ghostly1… invite code with a ghostly.tools link, which the CLI does not read.",
       "Calls: in every chat while it is live, not in groups. Groups: text, a picture and payments; no files or calls. CLI: DHT text in the 0.4 format, keys passed by hand. Desktop on Linux: its webview has no WebRTC, so no calls there, and it goes live only with another desktop app, over Iroh or HyperDHT.",
-      "WebLN is web-only, Bitcoin Core desktop-only. Bark, BDK, Breez and Fedimint run on test networks only; Spark needs your own Breez API key for Mainnet. OpenID waits for OAuth clients.",
+      "WebLN is web-only, Bitcoin Core desktop-only. Bark, BDK, Breez and Fedimint run on test networks only; Spark needs your own Breez API key for Mainnet. OpenID waits for OAuth clients; Bluesky for its OAuth client document on ghostly.tools.",
       "Also contacted: Pkarr relays, Google STUN, mints, Iroh relays, HyperDHT bootstrap nodes, Ark and Spark operators, Fedimint guardians, Esplora servers, Nostr relays, Ethereum RPCs, and any service you add. No TURN by default.",
     ],
   },
@@ -332,7 +332,7 @@ const ptBr: DevCopy = {
     notes: [
       "Um só chat (WISPs 400 e 801): um chat sem caminho direto começa na DHT e passa sozinho ao link direto; um único código de convite ghostly1… com link em ghostly.tools, que a CLI não lê.",
       "Chamadas: em todo chat enquanto ele está ao vivo, não em grupos. Grupos: texto, uma foto e pagamentos; sem arquivos nem chamadas. CLI: texto pela DHT no formato do 0.4, chaves à mão. Desktop no Linux: o webview não tem WebRTC, então sem chamadas lá, e ele só fica ao vivo com outro app desktop, por Iroh ou HyperDHT.",
-      "WebLN só na web, Bitcoin Core só no desktop. Bark, BDK, Breez e Fedimint só em redes de teste; o Spark exige a sua própria chave de API da Breez na Mainnet. OpenID espera os clientes OAuth.",
+      "WebLN só na web, Bitcoin Core só no desktop. Bark, BDK, Breez e Fedimint só em redes de teste; o Spark exige a sua própria chave de API da Breez na Mainnet. OpenID espera os clientes OAuth; o Bluesky, o documento de cliente OAuth dele em ghostly.tools.",
       "Também contatados: relays Pkarr, STUN do Google, mints, relays Iroh, nós de bootstrap da HyperDHT, operadores Ark e Spark, guardiões Fedimint, servidores Esplora, relays Nostr, RPCs Ethereum e o serviço que você adicionar. Sem TURN por padrão.",
     ],
   },

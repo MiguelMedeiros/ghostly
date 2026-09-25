@@ -24,6 +24,7 @@
 .id-card-oidc-microsoft{--card-rgb:40,176,240}
 .id-card-oidc-twitch{--card-rgb:170,124,255}
 .id-card-did{--card-rgb:77,166,224}
+.id-card-atproto{--card-rgb:64,150,255}
 .id-card-add{--card-rgb:0,196,154}
 /* The profile's own Ghostly identity, the first card of every deck: the ghost's cyan. */
 .id-card-ghostly{--card-rgb:34,211,238}

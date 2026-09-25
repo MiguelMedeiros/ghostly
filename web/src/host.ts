@@ -2,6 +2,7 @@ import { createInPageHost } from "@ghostly/browser/inPageHost";
 import { checkVersionFeed } from "@ghostly/browser/updateFeed";
 import { RELEASES_URL } from "../../src/lib/settings";
 import { popupWindow } from "@ghostly/browser/proofs/oidc/popup";
+import { atprotoPopupWindow } from "@ghostly/browser/proofs/atproto/popup";
 import { DHT_POLL_INTERVALS, RelayTransport } from "@ghostly/core";
 import type { NodeOptions } from "@ghostly/browser/engine/node";
 
@@ -61,6 +62,8 @@ export const webHost = createInPageHost({
   requestLocalAccess: async () => false,
   // A popup on this origin; the provider returns to /oidc-callback.html.
   oidc: { platform: "web", open: async () => popupWindow() },
+  // The same popup and callback page, for an AT Protocol server (Bluesky or another PDS).
+  atproto: { platform: "web", open: async () => atprotoPopupWindow() },
   openService: async () => {
     throw new Error("Opening a contact's web app needs the Ghostly browser extension or desktop app.");
   },

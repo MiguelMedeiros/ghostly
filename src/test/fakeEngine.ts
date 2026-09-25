@@ -89,6 +89,8 @@ export class FakeEngine implements BrowserHost {
   openPaymentLink?: BrowserHost["openPaymentLink"];
   /** The desktop host's native clipboard read, when a test gives one; left out, the page's Clipboard API is used. */
   readClipboardText?: BrowserHost["readClipboardText"];
+  /** Every web host can sign in to an AT Protocol server; this window never answers unless a test replaces it. */
+  atproto?: BrowserHost["atproto"] = { platform: "web", open: () => new Promise(() => {}) };
 
   private handlers = new Map<EngineMethod, (params: never) => unknown>();
   private send: ((message: EngineEvent | RpcResponse) => void) | null = null;

@@ -9,7 +9,7 @@ import { providerForIssuer } from "@ghostly/browser/proofs/oidc/providers";
  * provider is adding its mark here; anything unknown gets ProviderMark's fallback.
  *
  * Sources and licences:
- *  - GitHub, GitLab, Apple, Twitch, Bitcoin: simple-icons 16.32 (https://simpleicons.org,
+ *  - GitHub, GitLab, Apple, Twitch, Bitcoin, Bluesky: simple-icons 16.32 (https://simpleicons.org,
  *    CC0 1.0). Tile colours are the brand colours simple-icons lists. Each mark is
  *    shown in white on its brand colour, as the brands' guidelines allow.
  *  - Google "G" and the Microsoft four squares: drawn after the brands' sign-in
@@ -43,6 +43,8 @@ const APPLE = "M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4
 const TWITCH = "M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z";
 /** The ₿ of simple-icons' Bitcoin mark alone (its circle is the tile), so the letter sits at 6.1–17.5 × 2.6–17.8. */
 const BITCOIN_B = "M17.288 10.291c.24-1.59-.974-2.45-2.64-3.03l.54-2.153-1.315-.33-.525 2.107c-.345-.087-.705-.167-1.064-.25l.526-2.127-1.32-.33-.54 2.165c-.285-.067-.565-.132-.84-.2l-1.815-.45-.35 1.407s.975.225.955.236c.535.136.63.486.615.766l-1.477 5.92c-.075.166-.24.406-.614.314.015.02-.96-.24-.96-.24l-.66 1.51 1.71.426.93.242-.54 2.19 1.32.327.54-2.17c.36.1.705.19 1.05.273l-.51 2.154 1.32.33.545-2.19c2.24.427 3.93.257 4.64-1.774.57-1.637-.03-2.58-1.217-3.196.854-.193 1.5-.76 1.68-1.93h.01zm-3.01 4.22c-.404 1.64-3.157.75-4.05.53l.72-2.9c.896.23 3.757.67 3.33 2.37zm.41-4.24c-.37 1.49-2.662.735-3.405.55l.654-2.64c.744.18 3.137.524 2.75 2.084v.006z";
+/** Bluesky's butterfly (simple-icons, after the mark in bsky.social's press FAQ). Stands for AT Protocol accounts at any server. */
+const BLUESKY = "M5.202 2.857C7.954 4.922 10.913 9.11 12 11.358c1.087-2.247 4.046-6.436 6.798-8.501C20.783 1.366 24 .213 24 3.883c0 .732-.42 6.156-.667 7.037-.856 3.061-3.978 3.842-6.755 3.37 4.854.826 6.089 3.562 3.422 6.299-5.065 5.196-7.28-1.304-7.847-2.97-.104-.305-.152-.448-.153-.327 0-.121-.05.022-.153.327-.568 1.666-2.782 8.166-7.847 2.97-2.667-2.737-1.432-5.473 3.422-6.3-2.777.473-5.899-.308-6.755-3.369C.42 10.04 0 4.615 0 3.883c0-3.67 3.217-2.517 5.202-1.026";
 const NOSTR = "M210.8 199.4c0 3.1-2.5 5.7-5.7 5.7h-68c-3.1 0-5.7-2.5-5.7-5.7v-15.5c.3-19 2.3-37.2 6.5-45.5 2.5-5 6.7-7.7 11.5-9.1 9.1-2.7 24.9-.9 31.7-1.2 0 0 20.4.8 20.4-10.7s-9.1-8.6-9.1-8.6c-10 .3-17.7-.4-22.6-2.4-8.3-3.3-8.6-9.2-8.6-11.2-.4-23.1-34.5-25.9-64.5-20.1-32.8 6.2.4 53.3.4 116.1v8.4c0 3.1-2.6 5.6-5.7 5.6H57.7c-3.1 0-5.7-2.5-5.7-5.7v-144c0-3.1 2.5-5.7 5.7-5.7h31.7c3.1 0 5.7 2.5 5.7 5.7 0 4.7 5.2 7.2 9 4.5 11.4-8.2 26-12.5 42.4-12.5 36.6 0 64.4 21.4 64.4 68.7v83.2ZM150 99.3c0-6.7-5.4-12.1-12.1-12.1s-12.1 5.4-12.1 12.1 5.4 12.1 12.1 12.1S150 106 150 99.3Z";
 
 /** The Ghostly ghost (src/assets/identities/ghostly.svg, drawn in a 24-unit box), eyes cut out of its tile. */
@@ -95,6 +97,7 @@ export const PROVIDER_ICONS: Record<string, ProviderIcon> = {
     tile: `bg-[#1f6fb2] ${white}`,
     mark: size => svg(size, "0 0 24 24", <g {...stroke}><circle cx="12" cy="12.5" r="2.6" /><circle cx="12" cy="4" r="1.8" /><circle cx="4.8" cy="18" r="1.8" /><circle cx="19.2" cy="18" r="1.8" /><path d="M12 9.9V5.8M9.8 13.9l-3.5 2.9M14.2 13.9l3.5 2.9" /></g>),
   },
+  atproto: { tile: `bg-[#1185fe] ${white}`, fill: 0.62, mark: simple(BLUESKY) },
   ghostly: { tile: "bg-[#0f172a] text-[#22d3ee]", fill: 0.72, mark: size => svg(size, "0 0 24 24", <><path fill="currentColor" d={GHOST} /><circle cx="9" cy="9" r="1.5" fill="#0f172a" /><circle cx="15" cy="9" r="1.5" fill="#0f172a" /></>) },
 };
 

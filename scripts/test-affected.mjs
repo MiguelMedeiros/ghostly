@@ -257,7 +257,7 @@ async function runE2e() {
   let preview = null;
   // The suite's build: the local OIDC issuer and the SDK example's adapters (see e2e/playwright.config.ts).
   const issuer = /OIDC_TEST_ISSUER\s*=.*?"([^"]+)"/.exec(readFileSync(join(ROOT, "e2e/support/oidcIssuer.ts"), "utf8"))?.[1];
-  const suiteEnv = { VITE_OIDC_TEST_ISSUER: process.env.E2E_OIDC_ISSUER ?? issuer, GHOSTLY_PLUGINS: "examples/sdk-adapter/src/index.ts" };
+  const suiteEnv = { VITE_OIDC_TEST_ISSUER: process.env.E2E_OIDC_ISSUER ?? issuer, VITE_ATPROTO_TEST_PLC: "https://plc.ghostly.test", GHOSTLY_PLUGINS: "examples/sdk-adapter/src/index.ts" };
   // Extension specs pair with the web app too (interop), so a build is served whatever was picked.
   if (!url) {
     // Something already answering there is another session's build: testing it would test the wrong app.

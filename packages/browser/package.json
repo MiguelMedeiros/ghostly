@@ -14,6 +14,8 @@
   },
   "dependencies": {
     "@arkade-os/sdk": "0.4.74",
+    "@atproto/jwk-webcrypto": "^0.3.4",
+    "@atproto/oauth-client": "^0.8.7",
     "@bitcoindevkit/bdk-wallet-web": "0.3.0",
     "@breeztech/breez-sdk-spark": "0.26.0",
     "@cashu/cashu-ts": "^4.10.2",
