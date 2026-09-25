@@ -23,8 +23,8 @@ const members = [
 const group = (patch: Partial<GroupView> = {}) => groupView({ status: "active", epoch: 1, myKey: ME, members, ...patch });
 /** The edges' links as the engine shows them: payments negotiated on Alice's, none on Bob's (an older app). */
 const edges = [
-  linkView({ id: "edge-a", peerPubKeyZ32: "edge-peer-a", capabilities: { files: false, payments: true, methods: { cashu: true, lightning: true, arkade: true, bark: true, bitcoin: true, usdt: true } } }),
-  linkView({ id: "edge-b", peerPubKeyZ32: "edge-peer-b", capabilities: { files: false, payments: false, methods: { cashu: false, lightning: false, arkade: false, bark: false, bitcoin: false, usdt: false } } }),
+  linkView({ id: "edge-a", peerPubKeyZ32: "edge-peer-a", capabilities: { files: false, payments: true, methods: { cashu: true, lightning: true, arkade: true, bark: true, bitcoin: true, usdt: true, fedimint: true } } }),
+  linkView({ id: "edge-b", peerPubKeyZ32: "edge-peer-b", capabilities: { files: false, payments: false, methods: { cashu: false, lightning: false, arkade: false, bark: false, bitcoin: false, usdt: false, fedimint: false } } }),
   linkView({ id: "edge-c", peerPubKeyZ32: "edge-peer-c", dataLink: "idle" }),
 ];
 

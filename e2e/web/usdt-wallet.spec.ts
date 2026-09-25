@@ -73,8 +73,8 @@ test('wallet cards fit a narrow screen, keep keyboard focus and respect reduced 
  await p.page.emulateMedia({reducedMotion:'reduce'});
  await p.page.goto('/#/wallet');
  const cards=p.page.getByRole('tablist',{name:'Wallet integrations'});
- // Cashu, Lightning, Ark, Bark, Bitcoin, USDT: six cards on a snapping track, and the page itself never scrolls sideways at 390 px.
- await expect(cards.getByRole('tab')).toHaveCount(6);
+ // Cashu, Lightning, Ark, Bark, Bitcoin, Fedimint, USDT: seven cards on a snapping track, and the page itself never scrolls sideways at 390 px.
+ await expect(cards.getByRole('tab')).toHaveCount(7);
  await p.page.getByTestId('wallet-card-usdt').focus();
  await expect(p.page.getByTestId('wallet-card-usdt')).toBeFocused();
  await p.page.keyboard.press('Enter');

@@ -2,6 +2,7 @@ import { bdk } from "./bdk";
 import { bitcoindRpc } from "./bitcoind";
 import { breez } from "./breez";
 import { cashuMint } from "./cashuMint";
+import { fedimint } from "./fedimint";
 import { coreLightning } from "./coreLightning";
 import { nwc } from "./nwc";
 import { lnd } from "./lnd";
@@ -20,6 +21,7 @@ import { registeredLightningProviders, registeredOnchainProviders, reserveAdapte
  */
 export const LIGHTNING_PROVIDERS: readonly LightningProviderDescriptor[] = [
   cashuMint,
+  fedimint,
   breez,
   nwc,
   coreLightning,

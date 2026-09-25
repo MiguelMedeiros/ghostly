@@ -75,7 +75,11 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
   const feeInput=feeCap??(tokenPayment?'0.001':payment.target?.method==='bitcoin'?String(ONCHAIN_FEE_CAP):viaLightning?String(Math.max(10,Math.ceil(payment.amount*0.03))):'10');
   const title = isRequest ? (outgoing ? "You requested" : "Requests") : outgoing ? "You sent" : "Sent you";
   // Test sats are worth nothing, and the bubble says so: a contact must not pass them off as money.
-  const testSats = payment.target?.method === "arkade" || payment.target?.method === "bark" || payment.target?.method === "bitcoin" ? payment.target.network !== "bitcoin"
+  // Fedimint: the network of the federation it names (ours, when we joined it; the mode otherwise).
+  const fedimint = payment.federation ?? payment.federations?.[0];
+  const federationNetwork = fedimint ? wallet.getState()?.fedimint?.federations.find((f) => f.id === fedimint)?.network : undefined;
+  const testSats = payment.target?.method === "arkade" || payment.target?.method === "bark" || payment.target?.method === "bitcoin" || payment.target?.method === "fedimint" ? payment.target.network !== "bitcoin"
+    : fedimint ? (federationNetwork ? federationNetwork !== "bitcoin" : wallet.getState()?.mode === "testnet")
     : payment.target?.method === "cashu" ? payment.target.network === "cashu-test"
     : !tokenPayment && (payment.mint ? isWorthlessMint(payment.mint) : payment.mints?.length ? payment.mints.every(isWorthlessMint)
       // A request with only an invoice: its chain says (test mints use lnbc, but they come with their mints).
@@ -85,7 +89,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
     try {
       if (payment.target?.method === "bitcoin") return { uri: paymentUri({ kind: "bitcoin", address: payment.target.address, amountSat: payment.amount, lightning: payment.invoice }), value: payment.target.address };
       if (payment.target?.method === "arkade" || payment.target?.method === "bark") return { uri: paymentUri({ kind: "ark", address: payment.target.address, amountSat: payment.amount }), value: payment.target.address };
-      if (!payment.target && payment.invoice) return { uri: paymentUri({ kind: "lightning", invoice: payment.invoice }), value: payment.invoice };
+      if ((!payment.target || payment.target.method === "fedimint") && payment.invoice) return { uri: paymentUri({ kind: "lightning", invoice: payment.invoice }), value: payment.invoice };
     } catch { /* not something another wallet can open */ }
     return null;
   })();
@@ -109,7 +113,8 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
         </span>
         {" "}<span className="text-xs ml-1 text-[hsla(0,0%,100%,0.7)]">{tokenPayment?payment.target?.asset:testSats?'test sats':'sats'}</span>
       </p>
-      {payment.target && <p className="text-xs text-text-muted">{payment.target.method==="usdt"?"USDT":payment.target.method==="arkade"?"Ark":payment.target.method==="bark"?"Bark":payment.target.method==="bitcoin"?"Bitcoin on-chain":"Cashu"} · {payment.target.network}</p>}
+      {payment.target && <p className="text-xs text-text-muted">{payment.target.method==="usdt"?"USDT":payment.target.method==="arkade"?"Ark":payment.target.method==="bark"?"Bark":payment.target.method==="bitcoin"?"Bitcoin on-chain":payment.target.method==="fedimint"?"Fedimint":"Cashu"} · {payment.target.network}</p>}
+      {!payment.target && fedimint && <p className="text-xs text-text-muted" data-testid="payment-fedimint">Fedimint{isRequest && !outgoing && payment.state === "pending" ? " · you share no federation: Lightning" : ""}</p>}
       {review && <PaymentReview review={review} wallet={wallet} onClose={()=>setReview(null)}/>}
       {payment.memo && <p className="text-[13px] m-0 mt-0.5 wrap-break-word">{payment.memo}</p>}
       <p
@@ -159,13 +164,13 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
           )}
           {external && externalUri && (
             <PayExternally uri={externalUri.uri} value={externalUri.value} testId="payment-external" size={128}
-              note={`Paid from any ${payment.target?.method === "bitcoin" ? "Bitcoin" : payment.target ? "Ark" : "Lightning"} wallet. Your contact's wallet marks it paid once it sees the money${payment.target?.method === "bitcoin" ? ", after one confirmation" : ""}.`}
+              note={`Paid from any ${payment.target?.method === "bitcoin" ? "Bitcoin" : payment.target && payment.target.method !== "fedimint" ? "Ark" : "Lightning"} wallet. Your contact's wallet marks it paid once it sees the money${payment.target?.method === "bitcoin" ? ", after one confirmation" : ""}.`}
               onPaid={() => wallet.checkPayment(peerPubKey, payment.id)} />
           )}
         </div>
       )}
       {/* Ecash nobody picked up is still ours, whether it went out through a review or not. */}
-      {(!payment.target || payment.target.method === "cashu") && !isRequest && outgoing && (payment.state === "pending" || payment.state === "failed") && (
+      {(!payment.target || payment.target.method === "cashu" || payment.target.method === "fedimint") && !isRequest && outgoing && (payment.state === "pending" || payment.state === "failed") && (
         <button className={`${quiet} mt-2`} disabled={busy} onClick={() => run(() => wallet.reclaim(payment.id))} title="If your contact never picks it up, the ecash is still yours">
           Take it back
         </button>

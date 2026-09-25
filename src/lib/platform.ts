@@ -5,6 +5,8 @@ import type { ArkCreate, ArkWalletView } from "@ghostly/browser/engine/paymentAd
 import type { ArkConfig } from "@ghostly/browser/engine/paymentAdapters/arkade";
 import type { BarkCreate, BarkWalletView } from "@ghostly/browser/engine/paymentAdapters/barkWallet";
 import type { BarkConfig } from "@ghostly/browser/engine/paymentAdapters/bark";
+import type { FedimintFederationView, FedimintWalletView } from "@ghostly/browser/engine/paymentAdapters/fedimintWallet";
+import type { FederationInfo } from "@ghostly/browser/engine/paymentAdapters/fedimintSdk";
 import type { LightningView } from "@ghostly/browser/engine/paymentAdapters/providers/lightningService";
 import type { BitcoinView } from "@ghostly/browser/engine/paymentAdapters/providers/bitcoinService";
 import type { DataLinkState, ServiceAd, PairingState } from "@ghostly/core";
@@ -106,6 +108,7 @@ export interface WalletState {
   waitingTestSats?: number;
   ark?: ArkWalletView;
   bark?: BarkWalletView;
+  fedimint?: FedimintWalletView;
   usdt?: UsdtWalletView;
   /** The Lightning source of this mode (the Cashu mints by default) and its latest operations. */
   lightning?: LightningView;
@@ -139,6 +142,10 @@ export interface ChatPayment {
   invoice?: string;
   /** Requests we pay: our Lightning payment is still pending at the mint. */
   lightningPending?: boolean;
+  /** Fedimint requests: the federations the payee takes ecash of. */
+  federations?: string[];
+  /** Fedimint payments: the federation of the notes. */
+  federation?: string;
 }
 
 /** A Lightning address or LNURL, resolved: what the person sees before choosing an amount (whole sats). */
@@ -190,6 +197,20 @@ export interface WalletPlatform {
   barkRefresh():Promise<void>;
   /** On-chain coins of the Bark wallet into Ark; returns the board txid. */
   barkBoard():Promise<string>;
+  /** What an invite code leads to, before joining: the federation's name, guardians, version, network, modules. */
+  fedimintPreview(invite: string): Promise<FederationInfo>;
+  fedimintJoin(invite: string, recover?: boolean): Promise<FedimintFederationView>;
+  fedimintLeave(federation: string): Promise<void>;
+  fedimintRefresh(): Promise<void>;
+  /** Out-of-band notes, to hand over; they come back by themselves if nobody redeems them in a week. */
+  fedimintSpendNotes(federation: string, amount: number): Promise<{ notes: string; operation: string }>;
+  fedimintReceiveNotes(notes: string): Promise<{ federation: string; amount: number }>;
+  fedimintInvoice(federation: string, amount: number, memo?: string): Promise<{ invoice: string }>;
+  fedimintTakeBack(federation: string, operation: string): Promise<"canceled" | "taken" | "pending">;
+  fedimintBackup(): Promise<{ mnemonic: string; federations: { id: string; name?: string; invite: string }[] }>;
+  fedimintExportBackup(password: string): Promise<string>;
+  fedimintRestoreBackup(text: string, password: string): Promise<{ joined: number; failed: string[] }>;
+  fedimintRestorePhrase(mnemonic: string, invites: string[]): Promise<{ joined: number; failed: string[] }>;
   preparePayment(params:{target:PaymentTarget;amount:number;feeCap:number;payee:string;linkId?:string;requestId?:string;memo?:string}):Promise<PaymentReview>;
   approvePayment(id:string):Promise<PaymentReview>;
   reconcilePayment(id:string):Promise<PaymentReview>;

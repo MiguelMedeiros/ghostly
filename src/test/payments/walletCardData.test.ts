@@ -16,7 +16,7 @@ const cardOf = (rail: WalletRail, wallet: Partial<WalletView> = {}) => {
 const pageCardOf = (rail: WalletRail, wallet: Partial<WalletView> = {}) => walletCards(walletView(wallet), TEST_MINTS, { badged: true }).find((c) => c.id === rail)!;
 
 it("lists every wallet, in the deck's order", () => {
-  expect(walletCards(walletView(), TEST_MINTS).map((c) => c.id)).toEqual(["cashu", "lightning", "arkade", "bark", "bitcoin", "usdt"]);
+  expect(walletCards(walletView(), TEST_MINTS).map((c) => c.id)).toEqual(["cashu", "lightning", "arkade", "bark", "bitcoin", "fedimint", "usdt"]);
 });
 
 describe("Cashu", () => {

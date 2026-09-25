@@ -35,7 +35,7 @@ interface PaymentComposerProps {
 const RAIL_KEY = "ghostly-payment-rail";
 /** Cashu fees are per proof: a few sats at most. The review shows the real fee before anything is spent. */
 const CASHU_FEE_CAP = 10;
-const RAILS = ["cashu", "lightning", "arkade", "bark", "bitcoin", "usdt"] as const;
+const RAILS = ["cashu", "lightning", "arkade", "bark", "bitcoin", "fedimint", "usdt"] as const;
 
 /**
  * Popover over the message input, as a wallet: the cards in a stack, one comes up as the pointer passes over it
@@ -74,7 +74,8 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
 
   const method: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" = rail === "lightning" ? "cashu" : rail;
   const usdt = state?.usdt;
-  const unit = method === "usdt" ? (usdt?.chainId && usdt.chainId !== 1 ? "TEST-USDT" : "USDT") : method === "arkade" ? (state?.ark?.network && state.ark.network !== "bitcoin" ? "test sats" : "sats") : method === "bark" ? (state?.bark?.network !== "bitcoin" ? "test sats" : "sats") : method === "bitcoin" ? (state?.bitcoin?.network && state.bitcoin.network !== "bitcoin" ? "test sats" : "sats") : state?.mode === "testnet" ? "test sats" : "sats";
+  const unit = method === "usdt" ? (usdt?.chainId && usdt.chainId !== 1 ? "TEST-USDT" : "USDT") : method === "arkade" ? (state?.ark?.network && state.ark.network !== "bitcoin" ? "test sats" : "sats") : method === "bark" ? (state?.bark?.network !== "bitcoin" ? "test sats" : "sats") : method === "bitcoin" ? (state?.bitcoin?.network && state.bitcoin.network !== "bitcoin" ? "test sats" : "sats")
+    : method === "fedimint" ? (state?.fedimint?.federations.some((f) => f.network === "bitcoin") && state.mode !== "testnet" ? "sats" : "test sats") : state?.mode === "testnet" ? "test sats" : "sats";
   const decimals = method === "usdt" ? usdt?.decimals ?? 6 : 0;
   const value = Number(amount);
   // Ecash goes straight to the contact; Ark, Bark, on-chain and USDT ask the contact's app for an address first. Lightning
@@ -105,7 +106,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   const send = async () => {
     setError(""); setBusy("send");
     try {
-      if (reviewContext && (method === "arkade" || method === "bark" || method === "bitcoin" || method === "usdt")) {
+      if (reviewContext && (method === "arkade" || method === "bark" || method === "bitcoin" || method === "usdt" || method === "fedimint")) {
         const units = method === "usdt" ? parsePaymentAmount(amount, decimals) : value;
         setAsking((await reviewContext.wallet.askToPay(reviewContext.peer, units, method, memo || undefined)).askId);
         return;
@@ -128,7 +129,12 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
     const context = reviewContext, started = Date.now();
     const timer = setInterval(() => {
       const answer = context.wallet.answerTo(asking);
-      if (answer?.target) {
+      if (answer && !answer.target && answer.federations) {
+        // Fedimint, but no federation in common: their request carries an invoice of their federation instead.
+        clearInterval(timer);
+        setAsking(null);
+        setError(answer.invoice ? `You and ${who} share no federation: pay their request over Lightning, with Review payment on it in the chat.` : `You and ${who} share no federation, and their request has no Lightning invoice.`);
+      } else if (answer?.target) {
         clearInterval(timer);
         const token = answer.target.method === "usdt";
         void context.wallet.preparePayment({ target: answer.target, amount: answer.amount, feeCap: token ? parsePaymentAmount("0.001", 18) : answer.target.method === "bitcoin" ? ONCHAIN_FEE_CAP : CASHU_FEE_CAP, payee: context.peer, linkId: answer.linkId, requestId: answer.id })
@@ -141,7 +147,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
       }
     }, 400);
     return () => clearInterval(timer);
-  }, [asking, reviewContext]);
+  }, [asking, reviewContext, who]);
 
   const request = async () => {
     setError(""); setBusy("request");
@@ -153,12 +159,13 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   };
 
   // USDT's balance is in the token's smallest units; the amount is typed in whole tokens.
-  const spendable = method === "cashu" ? balance : method === "arkade" ? state?.ark?.balance : method === "bark" ? state?.bark?.balance : method === "bitcoin" ? state?.bitcoin?.balance : usdt ? Number(formatPaymentAmount(usdt.balance, decimals)) : undefined;
+  const spendable = method === "cashu" ? balance : method === "arkade" ? state?.ark?.balance : method === "bark" ? state?.bark?.balance : method === "bitcoin" ? state?.bitcoin?.balance : method === "fedimint" ? state?.fedimint?.balance : usdt ? Number(formatPaymentAmount(usdt.balance, decimals)) : undefined;
   const tooMuch = spendable !== undefined && value > spendable;
   /** What Send and Request do on this card, with this contact. */
   const how = (id: ChatRail) => describe ? describe(id) : id === "cashu"
     ? `Send gives ${who} ecash straight away; a request also carries a Lightning invoice.`
     : id === "lightning" ? `Request with a Lightning invoice. To pay ${who} over Lightning, tap Pay on their request.`
+    : id === "fedimint" ? `Send asks ${who}'s app which federations it takes: ecash of one you share, after a review. Otherwise their request carries a Lightning invoice.`
     : `Send asks ${who}'s app for a ${id === "arkade" ? "fresh Ark" : id === "bark" ? "fresh Bark" : id === "bitcoin" ? "fresh Bitcoin" : "USDT"} address, then shows the payment to approve.${id === "bitcoin" ? " Paid once it confirms on-chain." : ""}`;
 
   const back = (

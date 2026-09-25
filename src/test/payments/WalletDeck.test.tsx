@@ -10,7 +10,7 @@ import { arkReady, everyWallet } from "./fixtures";
 
 // covers: wallet.deck, payments.chat.cards
 
-const ORDER: WalletRail[] = ["cashu", "lightning", "arkade", "bark", "bitcoin", "usdt"];
+const ORDER: WalletRail[] = ["cashu", "lightning", "arkade", "bark", "bitcoin", "fedimint", "usdt"];
 
 // The swing a card makes as it comes up (walletDeckMotion.ts) is skipped with reduced motion: only the choice is tested.
 beforeEach(() => { document.documentElement.dataset.reduceMotion = "true"; });

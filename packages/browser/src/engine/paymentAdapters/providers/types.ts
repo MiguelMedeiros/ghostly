@@ -62,6 +62,8 @@ export interface ProviderHost {
    * no other provider should read it.
    */
   cashu?: unknown;
+  /** Reserved for the built-in Fedimint source: the engine's Fedimint wallet (its joined federations). Not part of the SDK. */
+  fedimint?: unknown;
   /** Ends when the source is replaced, the mode switches or the engine stops: abort long waits on it. */
   signal: AbortSignal;
   /**

@@ -3,6 +3,7 @@ import type { PaymentMethodName } from "@ghostly/core";
 import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
 import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
+import type { FedimintWalletView } from "../engine/paymentAdapters/fedimintWallet";
 import type { LightningView } from "../engine/paymentAdapters/providers/lightningService";
 import type { BitcoinView } from "../engine/paymentAdapters/providers/bitcoinService";
 import type { PaymentReview, PaymentTarget } from "@ghostly/core";
@@ -315,6 +316,11 @@ export interface StoredPayment {
   /** Requests: how the payer can pay. */
   invoice?: string;
   mints?: string[];
+  /** Fedimint requests: the federations the payee takes ecash of (their ids). */
+  federations?: string[];
+  /** Fedimint payments: the federation of the notes, and the client operation that spent (or redeems) them. */
+  federation?: string;
+  fedimintOp?: string;
   requestId?: string;
   /** Requests we pay: a Lightning payment is in flight at the mint, so paying again would pay twice. */
   lightningPending?: boolean;
@@ -385,6 +391,8 @@ export interface WalletView {
   ark?: ArkWalletView;
   /** Second's Ark (Bark): a different Ark server from `ark`, not interchangeable with it. */
   bark?: BarkWalletView;
+  /** Federations joined with an invite code, and their ecash. */
+  fedimint?: FedimintWalletView;
   usdt?: UsdtWalletView;
   /** The Lightning source of this mode (the Cashu mints by default) and its latest operations. */
   lightning?: LightningView;
@@ -427,7 +435,7 @@ export interface StoredMessage {
 }
 
 /** The ways of paying a group note can name. */
-export type GroupPayRail = "cashu" | "lightning" | "arkade" | "bark" | "bitcoin" | "usdt";
+export type GroupPayRail = "cashu" | "lightning" | "arkade" | "bark" | "bitcoin" | "usdt" | "fedimint";
 
 /**
  * A payment between two members as the whole group sees it (WISP 9xx § Payments): who pays whom, how much, over

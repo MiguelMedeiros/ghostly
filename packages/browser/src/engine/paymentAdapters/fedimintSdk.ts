@@ -48,6 +48,9 @@ export interface FedimintOperation {
   outcome?: unknown;
   /** What Ghostly asked to be kept with it (`extra_meta`): the payment id it belongs to. */
   ghostly?: string;
+  /** Lightning: the invoice it paid or was paid on, and the fee it paid (msats). */
+  invoice?: string;
+  feeMsats?: number;
 }
 
 export interface FedimintClient {
@@ -231,13 +234,18 @@ class RealClient implements FedimintClient {
   }
   async operations(limit: number): Promise<FedimintOperation[]> {
     const list: [{ creation_time?: { secs_since_epoch?: number }; operation_id?: string }, { operation_module_kind?: string; meta?: any; outcome?: any }][] = await this.wallet.federation.listOperations(limit);
-    return list.map(([key, log]) => ({
-      id: String(key.operation_id ?? ""), kind: String(log.operation_module_kind ?? ""),
-      variant: log.meta?.variant ? Object.keys(log.meta.variant)[0] : undefined,
-      createdAt: Number(key.creation_time?.secs_since_epoch ?? 0) * 1000,
-      amountMsats: typeof log.meta?.amount === "number" ? log.meta.amount : undefined,
-      outcome: log.outcome?.outcome, ghostly: typeof log.meta?.extra_meta?.ghostly === "string" ? log.meta.extra_meta.ghostly : undefined,
-    }));
+    return list.map(([key, log]) => {
+      const variant = log.meta?.variant && typeof log.meta.variant === "object" ? Object.keys(log.meta.variant)[0] : undefined;
+      const detail = variant ? log.meta.variant[variant] : undefined;
+      return {
+        id: String(key.operation_id ?? ""), kind: String(log.operation_module_kind ?? ""), variant,
+        createdAt: Number(key.creation_time?.secs_since_epoch ?? 0) * 1000,
+        amountMsats: typeof log.meta?.amount === "number" ? log.meta.amount : typeof detail?.requested_amount === "number" ? detail.requested_amount : undefined,
+        outcome: log.outcome?.outcome, ghostly: typeof log.meta?.extra_meta?.ghostly === "string" ? log.meta.extra_meta.ghostly : undefined,
+        invoice: typeof detail?.invoice === "string" ? detail.invoice : undefined,
+        feeMsats: typeof detail?.fee === "number" ? detail.fee : undefined,
+      };
+    });
   }
   async close() { try { await this.wallet.cleanup(); } catch { /* already gone */ } this.end(); }
 }
