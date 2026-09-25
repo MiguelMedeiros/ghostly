@@ -69,7 +69,8 @@ impl Pkarr {
     /// relays alone: a private network, or the end-to-end tests' relay, which
     /// is how the scenario matrix pairs Desktop with its other peers offline.
     pub fn desktop() -> Result<Self, String> {
-        if let Some(relays) = private_relays(std::env::var("GHOSTLY_PKARR_RELAYS").ok().as_deref())? {
+        if let Some(relays) = private_relays(std::env::var("GHOSTLY_PKARR_RELAYS").ok().as_deref())?
+        {
             return Self::private(&relays);
         }
         let mut dht = Client::builder();
@@ -90,7 +91,11 @@ impl Pkarr {
         Self::with_budget(lookup, relays, READS_PER_MINUTE)
     }
 
-    fn with_budget(lookup: Option<Client>, relays: &[Url], reads_per_minute: usize) -> Result<Self, String> {
+    fn with_budget(
+        lookup: Option<Client>,
+        relays: &[Url],
+        reads_per_minute: usize,
+    ) -> Result<Self, String> {
         // The default reqwest client, as pkarr builds its own relay clients.
         let http = reqwest::Client::builder()
             .build()
@@ -276,12 +281,20 @@ impl RelayBudget {
 
 /// `GHOSTLY_PKARR_RELAYS`, read: `None` when unset or empty, an error for a URL that is not one.
 fn private_relays(list: Option<&str>) -> Result<Option<Vec<Url>>, String> {
-    let urls: Vec<&str> = list.unwrap_or("").split(',').map(str::trim).filter(|url| !url.is_empty()).collect();
+    let urls: Vec<&str> = list
+        .unwrap_or("")
+        .split(',')
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+        .collect();
     if urls.is_empty() {
         return Ok(None);
     }
     urls.iter()
-        .map(|url| url.parse::<Url>().map_err(|e| format!("GHOSTLY_PKARR_RELAYS: {url}: {e}")))
+        .map(|url| {
+            url.parse::<Url>()
+                .map_err(|e| format!("GHOSTLY_PKARR_RELAYS: {url}: {e}"))
+        })
         .collect::<Result<Vec<_>, _>>()
         .map(Some)
 }
@@ -447,22 +460,35 @@ mod tests {
         let pkarr = Pkarr::private(&[relay.url.parse().unwrap()]).unwrap();
         pkarr.publish(&packet(&keypair, "1")).await.unwrap();
         for _ in 0..(READS_PER_MINUTE + 10) {
-            assert_eq!(value(&pkarr.resolve(&keypair.public_key()).await.unwrap()), "1");
+            assert_eq!(
+                value(&pkarr.resolve(&keypair.public_key()).await.unwrap()),
+                "1"
+            );
         }
         // No budget: a private relay answers every poll, so a newer packet is seen at once.
         assert_eq!(gets(&relay), READS_PER_MINUTE + 10);
         tokio::time::sleep(Duration::from_millis(1_100)).await;
         pkarr.publish(&packet(&keypair, "2")).await.unwrap();
-        assert_eq!(value(&pkarr.resolve(&keypair.public_key()).await.unwrap()), "2");
+        assert_eq!(
+            value(&pkarr.resolve(&keypair.public_key()).await.unwrap()),
+            "2"
+        );
     }
 
     #[test]
     fn ghostly_pkarr_relays_is_a_comma_separated_list_of_urls() {
         assert_eq!(private_relays(None).unwrap(), None);
         assert_eq!(private_relays(Some(" , ")).unwrap(), None);
-        let relays = private_relays(Some("http://127.0.0.1:1, http://127.0.0.1:2/")).unwrap().unwrap();
-        assert_eq!(relays.iter().map(Url::as_str).collect::<Vec<_>>(), ["http://127.0.0.1:1/", "http://127.0.0.1:2/"]);
-        assert!(private_relays(Some("not a url")).unwrap_err().contains("GHOSTLY_PKARR_RELAYS"));
+        let relays = private_relays(Some("http://127.0.0.1:1, http://127.0.0.1:2/"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            relays.iter().map(Url::as_str).collect::<Vec<_>>(),
+            ["http://127.0.0.1:1/", "http://127.0.0.1:2/"]
+        );
+        assert!(private_relays(Some("not a url"))
+            .unwrap_err()
+            .contains("GHOSTLY_PKARR_RELAYS"));
     }
 
     #[tokio::test]
