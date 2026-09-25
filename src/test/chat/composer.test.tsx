@@ -2,10 +2,11 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageInput } from "../../components/MessageInput";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
+import { resetGifSearch } from "../../lib/gifSearch";
 import { setStorageProfile as setProfile } from "../../lib/storage";
 import { renderApp } from "../render";
 
-// covers: app.composer.attach, app.composer.expressions, app.emoji-picker, chat.paired.emoji, chat.paired.gifs, chat.paired.gifs.categories
+// covers: app.composer.attach, app.composer.expressions, app.emoji-picker, chat.paired.emoji, chat.paired.gifs, chat.paired.gifs.categories, chat.paired.gifs.busy
 
 const viewport = (width: number, height = 800) => (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height });
 
@@ -39,11 +40,17 @@ function gifCities(count = 3) {
   });
 }
 
+/** The page the Internet Archive answers with once an IP has asked too much: a 200, in HTML, not a 429. */
+const rateLimitPage = () => new Response("<!DOCTYPE html><html><head><title>Rate limit reached</title></head><body><h1>Rate limit reached</h1>"
+  + "<p>You've reached the limit for the number of requests that can be made in a short period of time. Please wait a moment and try again.</p></body></html>",
+{ headers: { "content-type": "text/html; charset=utf-8" } });
+
 beforeEach(() => {
   onSend.mockReset().mockResolvedValue(null);
   onSendFile.mockReset().mockResolvedValue(null);
 });
 afterEach(() => {
+  vi.useRealTimers();
   viewport(1024, 768);
   Reflect.deleteProperty(navigator, "mediaDevices");
   setProfile("");
@@ -455,5 +462,153 @@ describe("the emoji/GIF panel", () => {
     expect(parseFloat(panel.style.width)).toBe(284);
     expect(parseFloat(panel.style.top) + parseFloat(panel.style.height)).toBe(692);
     fireEvent.scroll(window);
+  });
+});
+
+describe("GIF search while the Internet Archive says to wait", () => {
+  const searched = (fetch: { mock: { calls: unknown[][] } }) => fetch.mock.calls.map(([input]) => new URL(String(input)).searchParams.get("q"));
+
+  it("says search is busy and counts the wait down; Try again stays off until it is over, and nothing asks by itself", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async () => rateLimitPage());
+    localStorage.setItem("ghostly_composer_panel_tab", "gif");
+    const { user } = composer();
+    await user.click(smiley());
+    const busy = await screen.findByTestId("gif-busy");
+    expect(busy).toHaveTextContent("GIF search is busy right now.");
+    // Not "unavailable": the page came with a 200, and it is not JSON.
+    expect(screen.queryByTestId("gif-trouble")).not.toBeInTheDocument();
+    const wait = screen.getByTestId("gif-busy-wait");
+    const retry = screen.getByRole("button", { name: "Try again" });
+    expect(wait).toHaveTextContent("Try again in 0:30.");
+    expect(retry).toBeDisabled();
+    act(() => { vi.advanceTimersByTime(10_000); });
+    expect(wait).toHaveTextContent("Try again in 0:20.");
+    expect(retry).toBeDisabled();
+    act(() => { vi.advanceTimersByTime(20_000); });
+    expect(wait).toHaveTextContent("You can try again now.");
+    expect(retry).toBeEnabled();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    act(() => { vi.advanceTimersByTime(60_000); });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    // The person asks; this time GifCities answers.
+    gifCities();
+    await user.click(retry);
+    expect(await screen.findAllByTestId("gif-result")).toHaveLength(3);
+    expect(screen.queryByTestId("gif-busy")).not.toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("waits longer each time it is told to wait again", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => rateLimitPage());
+    localStorage.setItem("ghostly_composer_panel_tab", "gif");
+    const { user } = composer();
+    await user.click(smiley());
+    expect(await screen.findByTestId("gif-busy-wait")).toHaveTextContent("Try again in 0:30.");
+    act(() => { vi.advanceTimersByTime(30_000); });
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(screen.getByTestId("gif-busy-wait")).toHaveTextContent("Try again in 1:00."));
+    expect(screen.getByRole("button", { name: "Try again" })).toBeDisabled();
+  });
+
+  it("keeps the wait across categories and panels, shows the GIFs it has, and asks nothing meanwhile", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const q = new URL(String(input)).searchParams.get("q")!;
+      return q === "ghost" ? new Response(JSON.stringify([{ gif: "http://geocities.com/ghost.gif", url_text: "ghost gif", checksum: "ghost" }])) : rateLimitPage();
+    });
+    localStorage.setItem("ghostly_composer_panel_tab", "gif");
+    const { user } = composer();
+    await user.click(smiley());
+    expect(await screen.findByTitle("ghost gif")).toBeInTheDocument();
+    await user.click(screen.getByTestId("gif-category-happy"));
+    expect(await screen.findByTestId("gif-busy")).toHaveTextContent("GIF search is busy right now.");
+    // The GIFs it has from earlier, said to be so, still to be sent.
+    expect(screen.getByTestId("gif-earlier")).toHaveTextContent("Showing earlier results.");
+    expect(screen.getByTestId("gif-grid")).toHaveAttribute("data-earlier", "true");
+    expect(screen.getByTestId("gif-grid")).toHaveAttribute("data-query", "ghost");
+    expect(screen.queryByTestId("gif-emoji-instead")).not.toBeInTheDocument();
+    await user.click(screen.getByTitle("ghost gif"));
+    expect(onSend).toHaveBeenCalledWith("https://web.archive.org/web/http://geocities.com/ghost.gif");
+    expect(searched(fetch)).toEqual(["ghost", "happy"]);
+
+    // Another panel, the same wait: ghosts are kept, the rest waits, and nothing is asked.
+    await user.click(smiley());
+    expect(screen.getByTitle("ghost gif")).toBeInTheDocument();
+    expect(screen.queryByTestId("gif-busy")).not.toBeInTheDocument();
+    for (const id of ["sad", "party", "happy"]) {
+      await user.click(screen.getByTestId(`gif-category-${id}`));
+      expect(screen.getByTestId("gif-busy")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Try again" })).toBeDisabled();
+    }
+    await user.type(screen.getByPlaceholderText("Search GIFs"), "banshee");
+    act(() => { vi.advanceTimersByTime(1_000); });
+    expect(screen.getByTestId("gif-busy")).toBeInTheDocument();
+    expect(searched(fetch)).toEqual(["ghost", "happy"]);
+  });
+
+  it("reads a request that fails as a network error does as busy while online (the limit page has no CORS header), and as unavailable offline", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Load failed"));
+    localStorage.setItem("ghostly_composer_panel_tab", "gif");
+    const first = composer();
+    await first.user.click(smiley());
+    expect(await screen.findByTestId("gif-busy")).toHaveTextContent("GIF search is busy right now.");
+    expect(screen.getByRole("button", { name: "Try again" })).toBeDisabled();
+    first.unmount();
+    resetGifSearch();
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    const second = composer();
+    await second.user.click(smiley());
+    expect(await screen.findByText("GIF search is unavailable.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeEnabled();
+  });
+
+  it("offers the emoji when it has no GIFs to show", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("", { status: 429 }));
+    localStorage.setItem("ghostly_composer_panel_tab", "gif");
+    const { user } = composer();
+    await user.click(smiley());
+    await user.click(await screen.findByRole("button", { name: "Pick an emoji instead" }));
+    expect(screen.getByTestId("expression-panel")).toHaveAttribute("data-tab", "emoji");
+    expect(screen.getByPlaceholderText("Search emoji")).toBeInTheDocument();
+  });
+
+  it("uses the answers it has when the panel opens again or a category comes back: no second search", async () => {
+    const fetch = gifCities();
+    localStorage.setItem("ghostly_composer_panel_tab", "gif");
+    const { user } = composer();
+    await user.click(smiley());
+    await screen.findByTitle("ghost 0");
+    await user.click(screen.getByTestId("gif-category-love"));
+    await screen.findByTitle("love 0");
+    await user.click(screen.getByTestId("gif-category-ghosts"));
+    expect(screen.getByTitle("ghost 0")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await user.click(smiley());
+    expect(screen.getByTitle("ghost 0")).toBeInTheDocument();
+    expect(screen.queryByTestId("gif-loading")).not.toBeInTheDocument();
+    expect(searched(fetch)).toEqual(["ghost", "love"]);
+  });
+
+  it("asks nothing for a category passed on the way to another", async () => {
+    const fetch = gifCities();
+    localStorage.setItem("ghostly_composer_panel_tab", "gif");
+    const { user } = composer();
+    await user.click(smiley());
+    await screen.findByTitle("ghost 0");
+    // Clicked in a row, as a person looking for the right icon does.
+    for (const id of ["happy", "sad", "love"]) fireEvent.click(screen.getByTestId(`gif-category-${id}`));
+    await screen.findByTitle("love 0");
+    expect(searched(fetch)).toEqual(["ghost", "love"]);
+  });
+
+  it("speaks the app's language", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => rateLimitPage());
+    localStorage.setItem("ghostly_composer_panel_tab", "gif");
+    const { user } = renderApp(<LockScreenProvider><MessageInput onSend={onSend} /></LockScreenProvider>, { language: "pt" });
+    await user.click(smiley());
+    expect(await screen.findByTestId("gif-busy")).toHaveTextContent("A busca de GIFs está ocupada agora.");
+    expect(screen.getByTestId("gif-busy-wait")).toHaveTextContent("Tente de novo em 0:30.");
   });
 });
