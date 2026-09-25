@@ -100,7 +100,7 @@ function RowText({ name, nameClass, marks, status, time, timeClass = "text-text-
 }
 
 const rowClass = (active: boolean, density: ChatListDensity) =>
-  `group relative flex items-center gap-3 ps-3 pe-3 cursor-pointer transition-colors ${ROW[density]} ${active ? "bg-surface-hover" : "hover:bg-surface-alt focus-within:bg-surface-alt"}`;
+  `group relative flex items-center gap-3 ps-3 pe-3 cursor-pointer transition-colors ${ROW[density]} ${active ? "bg-surface-hover" : "hover:bg-surface-alt has-[:focus-visible]:bg-surface-alt"}`;
 
 export interface ChatRowProps {
   density: ChatListDensity;
@@ -176,8 +176,9 @@ export function ChatRow(p: ChatRowProps) {
         trailing={p.unread > 0 && <UnreadBadge count={p.unread} />}
         timeCover={
           // Pointer devices only: a phone opens the chat on a tap and pins from the chat's Options. The layer covers
-          // the marks too, so a pinned chat's mark turns into its Unpin button in place.
-          <div data-testid="chat-row-actions" className={`max-md:hidden absolute top-1/2 end-0 flex min-w-full -translate-y-1/2 items-center justify-end gap-0.5 rounded-md ps-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 ${p.active ? "bg-surface-hover" : "bg-surface-alt"}`}>
+          // the marks too, so a pinned chat's mark turns into its Unpin button in place. Keyboard focus shows it, a
+          // click's leftover focus does not (else the layer would hide the new mark once the pointer leaves).
+          <div data-testid="chat-row-actions" className={`max-md:hidden absolute top-1/2 end-0 flex min-w-full -translate-y-1/2 items-center justify-end gap-0.5 rounded-md ps-1 opacity-0 transition-opacity group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 ${p.active ? "bg-surface-hover" : "bg-surface-alt"}`}>
             <button type="button" title={pinLabel} aria-label={pinLabel} aria-pressed={p.pinned} data-testid="chat-row-pin"
               onClick={e => { e.stopPropagation(); p.onTogglePin(); }}
               className="flex h-7 w-7 items-center justify-center rounded-md text-text-muted hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent cursor-pointer">

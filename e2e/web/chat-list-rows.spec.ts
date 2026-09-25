@@ -126,9 +126,16 @@ test("a chat's row is two lines, the key in its tooltip, the pin and delete butt
   await unpin.click();
   await expect(mark).toHaveCount(0);
 
-  // And from the keyboard: focus shows the layer, Enter pins and unpins.
+  // A click leaves the button focused, but only keyboard focus keeps the layer up: once the pointer has left, the
+  // time shows again.
   await bob.page.mouse.move(900, 700);
-  await row.getByTestId("chat-row-pin").focus();
+  await expect(actions).toHaveCSS("opacity", "0");
+  await expect(row.getByTestId("chat-row-pin")).toBeFocused();
+
+  // And from the keyboard: Tab onto the button shows the layer, Enter pins and unpins.
+  await bob.page.keyboard.press("Shift+Tab");
+  await bob.page.keyboard.press("Tab");
+  await expect(row.getByTestId("chat-row-pin")).toBeFocused();
   await expect(actions).toHaveCSS("opacity", "1");
   await bob.page.keyboard.press("Enter");
   await expect(mark).toBeVisible();

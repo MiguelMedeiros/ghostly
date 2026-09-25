@@ -111,11 +111,11 @@ describe("the chat list's rows (compact, the default)", () => {
     expect(within(rowOf("Gus")).getByRole("button", { name: "Pin chat" })).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("pins and unpins from the keyboard, the layer showing while a button in it has focus", async () => {
+  it("pins and unpins from the keyboard, the layer showing while a button in it has keyboard focus", async () => {
     saveSession(chat("k", { nick: "Kim" }));
     const { user } = list();
     const actions = within(rowOf("Kim")).getByTestId("chat-row-actions");
-    expect(actions).toHaveClass("group-focus-within:opacity-100");
+    expect(actions).toHaveClass("group-has-[:focus-visible]:opacity-100");
     within(actions).getByRole("button", { name: "Pin chat" }).focus();
     await user.keyboard("{Enter}");
     expect(isSessionPinned("k")).toBe(true);
