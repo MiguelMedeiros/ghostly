@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { NostrDraftRequest, NostrOwnView } from "@ghostly/browser/nostr/types";
 import { useEngineState } from "../../lib/identities";
@@ -18,13 +18,21 @@ export function NostrSection() {
   const state = useEngineState();
   const settings = state?.nostr.settings;
   const own = state?.nostr.own ?? [];
-  const [relays, setRelays] = useState("");
+  // What the person typed, kept until their save is in the engine's state: every state push carries a new
+  // `settings`, and resetting the field from it would drop the edit (and turn Save off under the pointer).
+  const [draft, setDraft] = useState<string | null>(null);
+  const savedAfter = useRef<typeof state>(null);
   const [error, setError] = useState("");
   const [publish, setPublish] = useState<NostrDraftRequest | null>(null);
-  useEffect(() => { if (settings) setRelays(settings.relays.join("\n")); }, [settings]);
+  // A state that reached this page after the save answered was made after the save: the list in it is the one kept.
+  useEffect(() => { if (savedAfter.current && state !== savedAfter.current) { savedAfter.current = null; setDraft(null); } }, [state]);
   if (!state || !settings) return null;
-  const save = (patch: Partial<typeof settings>) => { setError(""); return engine.call("updateSettings", { settings: { nostr: { ...settings, ...patch } } }).catch(e => setError(message(e))); };
+  // Only the field that changes: the rest of the settings is the engine's, not this render's copy of it.
+  const save = (patch: Partial<typeof settings>) => { setError(""); return engine.call("updateSettings", { settings: { nostr: patch } }); };
+  const relays = draft ?? settings.relays.join("\n");
   const relaysChanged = relays.split(/\s+/).filter(Boolean).join("\n") !== settings.relays.join("\n");
+  const saveRelays = () => save({ relays: relays.split(/\s+/).filter(Boolean) }).then(() => { savedAfter.current = engine.state; }, e => setError(message(e)));
+  const toggle = (patch: Partial<typeof settings>) => void save(patch).catch(e => setError(message(e)));
 
   return (<>
     <Section title="Nostr" testId="nostr-section">
@@ -33,16 +41,16 @@ export function NostrSection() {
           <label htmlFor="nostr-relays" className="text-text-primary text-sm block">Relays</label>
           <p className="text-text-muted text-xs mt-0.5">Asked for contacts' profiles, follows and notes, and sent what you publish. Each one learns your IP address and which keys you look up. Nothing is asked until you load something.</p>
         </div>
-        <InputGroup as="form" onSubmit={e => { e.preventDefault(); void save({ relays: relays.split(/\s+/).filter(Boolean) }); }}>
-          <textarea id="nostr-relays" data-testid="nostr-relays" value={relays} onChange={e => setRelays(e.target.value)} rows={2} spellCheck={false} className={`${input} font-mono text-xs`} placeholder="wss://…" />
+        <InputGroup as="form" onSubmit={e => { e.preventDefault(); void saveRelays(); }}>
+          <textarea id="nostr-relays" data-testid="nostr-relays" value={relays} onChange={e => setDraft(e.target.value)} rows={2} spellCheck={false} className={`${input} font-mono text-xs`} placeholder="wss://…" />
           <Button type="submit" data-testid="nostr-relays-save" disabled={!relaysChanged}>Save</Button>
         </InputGroup>
       </Block>
       <Row label="Load contacts' profiles automatically" hint="When a contact's Nostr proof is verified, and again when it is a day old. Off: only when you press Load profile.">
-        <Switch testId="nostr-auto-load" label="Load contacts' profiles automatically" checked={settings.autoLoadProfiles} onChange={v => void save({ autoLoadProfiles: v })} />
+        <Switch testId="nostr-auto-load" label="Load contacts' profiles automatically" checked={settings.autoLoadProfiles} onChange={v => toggle({ autoLoadProfiles: v })} />
       </Row>
       <Row label="Publish on Nostr" hint="Post notes, follow and unfollow, update your profile, through your own signer. Every action is shown and confirmed first; everything published is public.">
-        <Switch testId="nostr-publish" label="Publish on Nostr" checked={settings.publish} onChange={v => void save({ publish: v })} />
+        <Switch testId="nostr-publish" label="Publish on Nostr" checked={settings.publish} onChange={v => toggle({ publish: v })} />
       </Row>
       {own.length === 0 && <Block><p className="text-xs text-text-muted">Add a Nostr identity under Identities to see your own profile and follows here.</p></Block>}
       {own.map(o => <OwnKey key={o.subject} view={o} publish={settings.publish} onPublish={setPublish} onError={setError} />)}

@@ -76,6 +76,16 @@ describe("settings", () => {
     expect((await db.getSettings()).nostr).toMatchObject({ autoLoadProfiles: false, publish: true });
   });
 
+  it("a Nostr patch changes only what it names: a switch saved after the relays keeps them", async () => {
+    const { node } = engine();
+    await node.updateSettings({ settings: { nostr: { relays: ["wss://relay.example"] } } });
+    await node.updateSettings({ settings: { nostr: { publish: true } } });
+    await node.updateSettings({ settings: { nostr: { autoLoadProfiles: true } } });
+    expect((await db.getSettings()).nostr).toEqual({ relays: ["wss://relay.example"], autoLoadProfiles: true, publish: true });
+    await node.updateSettings({ settings: { nostr: { relays: ["wss://other.example"] } } });
+    expect(node.getState().nostr.settings).toEqual({ relays: ["wss://other.example"], autoLoadProfiles: true, publish: true });
+  });
+
   it("tells every open chat a new nick, and an empty one as none", async () => {
     const { node } = engine();
     const link = stubLink();

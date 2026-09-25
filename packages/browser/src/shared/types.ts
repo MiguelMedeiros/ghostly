@@ -534,6 +534,13 @@ export interface Settings {
   holdStorage?: { s3: S3Config; space: string } | null;
 }
 
+/**
+ * What `updateSettings` takes: any settings, and of the Nostr ones only those that change. The rest of the
+ * Nostr settings stay as stored, so a switch flipped from a page that has not seen the last save yet does not
+ * put back what that save replaced.
+ */
+export type SettingsPatch = Partial<Omit<Settings, "nostr">> & { nostr?: Partial<NostrSocialSettings> };
+
 /** What pages see of store-and-forward in one chat. */
 export interface LinkHoldView {
   /** The switch of this chat on this device. */
