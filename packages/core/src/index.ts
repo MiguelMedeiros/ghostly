@@ -48,6 +48,7 @@ export * from "./bitcoinAddress";
 export * from "./sparkAddress";
 
 export * from "./identityProofs";
+export * from "./didDht";
 export * from "./bitcoinScript";
 export * from "./bip322";
 export * from "./bitcoinMessage";
