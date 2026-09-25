@@ -45,9 +45,19 @@ export function didDocumentUrl(did: string, plc = plcDirectory()): string {
   throw new Error("Not an AT Protocol DID");
 }
 
+/**
+ * Refuses a host the account chose (a did:web host, the PDS its document names) that points to a private
+ * network address: a contact's app never knocks on its own local network for someone else's proof.
+ */
+export async function assertPublicServer(host: string, options: AtprotoResolveOptions): Promise<void> {
+  try { await assertPublicHost(host, { fetch: options.fetch, signal: options.signal, resolver: options.resolver }); }
+  catch (e) { throw new Error(`The account's server ${host} was not contacted: ${e instanceof Error ? e.message : String(e)}`); } // eslint-disable-line preserve-caught-error -- The domain check's message says why; ES2020 has no Error.cause.
+}
+
 /** A DID's document, checked (parseAtprotoDidDocument). Throws a message people can read. */
 export async function resolveAtprotoDid(did: string, options: AtprotoResolveOptions): Promise<AtprotoDidDocument> {
   const url = didDocumentUrl(did, options.plc);
+  if (atprotoDidMethod(did) === "web") await assertPublicServer(did.slice("did:web:".length), options);
   let response: Awaited<ReturnType<IdentityFetch>>;
   try {
     response = await options.fetch(url, { headers: { accept: "application/did+ld+json, application/json" }, maxBytes: DID_DOCUMENT_MAX_BYTES, signal: options.signal, redirect: "error" });

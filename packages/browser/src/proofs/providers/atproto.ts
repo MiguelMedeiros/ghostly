@@ -7,7 +7,7 @@ import { getBrowserHost } from "../../host";
 import { boundedIdentityFetch } from "../verify";
 import { chosenResolver } from "../domain";
 import { lookupAtprotoAccount, publishAtprotoProof, unpublishAtprotoProof, type AtprotoAccess, type AtprotoHost, AtprotoScopeError } from "../atproto/oauth";
-import { resolveAtprotoDid, verifiedAtprotoHandle, type AtprotoResolveOptions } from "../atproto/resolve";
+import { assertPublicServer, resolveAtprotoDid, verifiedAtprotoHandle, type AtprotoResolveOptions } from "../atproto/resolve";
 
 /**
  * Identity proofs for an AT Protocol account (Bluesky, or any PDS): the account publishes, in its own
@@ -127,6 +127,7 @@ export function createAtprotoIdentityProvider(options: AtprotoIdentityOptions = 
       const resolve = resolveOptions(ctx.fetch, ctx.signal);
       // The server comes from the DID document, never from the proof.
       const doc = await resolveAtprotoDid(did, resolve);
+      await assertPublicServer(hostOf(doc.pds).replace(/:\d+$/, ""), resolve);
       const rkey = atprotoProofRkey(statement.binding.key);
       const url = `${doc.pds}/xrpc/com.atproto.sync.getRecord?${new URLSearchParams({ did, collection: ATPROTO_PROOF_COLLECTION, rkey })}`;
       let response: Awaited<ReturnType<IdentityFetch>>;

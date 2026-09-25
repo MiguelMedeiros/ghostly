@@ -78,6 +78,7 @@ export function testAtprotoNetwork(options: { plc?: string } = {}) {
     const a: TestAccount = { did, handle, pds, secret, records: new Map(), doc };
     accounts.set(did, a);
     zone.a![handle] = ["203.0.113.9"];
+    zone.a![new URL(pds).hostname] = ["203.0.113.10"];
     if (dns) zone.txt![`_atproto.${handle}`] = [`did=${did}`];
     else wellKnown.set(handle, did);
     return a;

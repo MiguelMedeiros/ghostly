@@ -126,6 +126,16 @@ describe("the AT Protocol provider", () => {
     await expect(verifyIdentity([provider], s, {}, ctxOf(down))).rejects.toThrow("could not be reached");
   });
 
+  it("never contacts a server on a private network, whatever the DID document says", async () => {
+    const net = testAtprotoNetwork();
+    const alice = net.account("alice", { pds: "https://pds.lan.example" });
+    const s = statementFor(alice.did);
+    publish(alice, s);
+    net.zone.a!["pds.lan.example"] = ["192.168.1.20"];
+    await expect(verifyIdentity([createAtprotoIdentityProvider({ host: () => undefined })], s, {}, ctxOf(net.fetch))).rejects.toThrow("pds.lan.example was not contacted");
+    expect(net.asked.some(u => u.startsWith("https://pds.lan.example/"))).toBe(false);
+  });
+
   it("refuses a commit signed by a key other than the DID's", async () => {
     const net = testAtprotoNetwork();
     const alice = net.account("alice");
@@ -153,8 +163,16 @@ describe("AT Protocol resolution", () => {
     web.doc.id = web.did;
     (web.doc.verificationMethod as { id: string }[])[0].id = "#atproto";
     net.accounts.set(web.did, web);
+    net.zone.a!["alice.example.com"] = ["203.0.113.11"];
     const doc = await resolveAtprotoDid(web.did, { fetch: net.fetch });
     expect(doc).toMatchObject({ did: "did:web:alice.example.com", pds: "https://pds.example.com", handle: "web.example.com" });
+  });
+
+  it("does not fetch a did:web document from a private network", async () => {
+    const net = testAtprotoNetwork();
+    net.zone.a!["router.example.com"] = ["10.0.0.1"];
+    await expect(resolveAtprotoDid("did:web:router.example.com", { fetch: net.fetch })).rejects.toThrow("router.example.com was not contacted");
+    expect(net.asked.some(u => u.startsWith("https://router.example.com/"))).toBe(false);
   });
 
   it("explains a DID that is not registered, too large or malformed", async () => {

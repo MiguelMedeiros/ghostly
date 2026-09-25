@@ -21,7 +21,8 @@ export interface AtprotoAccount { handle: string; did: string; password: string 
 export const atprotoConfigured = () => !!process.env.E2E_ATPROTO_PDS_URL && !!process.env.E2E_ATPROTO_PLC_URL;
 
 export class LocalAtproto {
-  readonly zone: Zone = { txt: {}, a: {}, ttl: 1 };
+  /** The handles' TXT records, and an address for the PDS's name: a contact's app checks it is not a private one. */
+  readonly zone: Zone = { txt: {}, a: { [ATPROTO_PDS_HOST]: ["203.0.113.10"] }, ttl: 1 };
 
   constructor(readonly pds = endpoints.atproto.pds, readonly plc = endpoints.atproto.plc) {}
 
