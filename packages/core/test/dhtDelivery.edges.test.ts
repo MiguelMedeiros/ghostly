@@ -6,7 +6,7 @@ import { fromBase64Url, randomBytes, toBase64Url, utf8Encode } from "../src/byte
 import { decrypt, encrypt } from "../src/crypto";
 import { createIdentity, identityFromSeed, identityFromSeedB64, publicKeyFromZ32, sign } from "../src/identity";
 import { createLink } from "../src/invite";
-import { DhtDelivery, DHT_MESSAGE_TTL, DHT_TEXT_REFUSED, LEAVING_DHT_FAST_MS, LIVE_POLL_MS, RENDEZVOUS_FAST_MS, emptyDhtDeliveryState, type DhtDeliveryState, type DhtDeliveryView } from "../src/dhtDelivery";
+import { DhtDelivery, DHT_MESSAGE_TTL, DHT_TEXT_REFUSED, LEAVING_DHT_FAST_MS, LIVE_POLL_MS, emptyDhtDeliveryState, type DhtDeliveryState, type DhtDeliveryView } from "../src/dhtDelivery";
 import type { PairingCredentials } from "../src/pairedSession";
 import type { GhostRecord, SignedPacket } from "../src/pkarr";
 
@@ -432,20 +432,20 @@ describe("DHT delivery: sending and lifecycle", () => {
     await h.bob.stop();
   });
 
-  it("reads a first contact at the signaling pace for ten minutes, then at 30 s", async () => {
+  it("a first contact is read at 30 s until the contact shows up, then at the signaling pace for two minutes", async () => {
     const h = setup({ pollMs: null, mode: "stream" }); await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
     const first = h.transport.resolve.mock.calls.length;
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(h.transport.resolve.mock.calls.length - first, "an inviter waiting for its contact reads every 4 s").toBe(15);
-    await vi.advanceTimersByTimeAsync(RENDEZVOUS_FAST_MS);
-    const later = h.transport.resolve.mock.calls.length;
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(h.transport.resolve.mock.calls.length - later, "an invite nobody used does not spend the relays' budget").toBe(2);
+    expect(h.transport.resolve.mock.calls.length - first, "an invite nobody opened spends no relay budget").toBe(2);
     h.bob.expect(); await vi.advanceTimersByTimeAsync(0);
     const expected = h.transport.resolve.mock.calls.length;
-    expect(expected - later, "a fresh packet of the contact is looked at once").toBe(3);
+    expect(expected - first, "a fresh packet of the contact is looked at once").toBe(3);
     await vi.advanceTimersByTimeAsync(20_000);
     expect(h.transport.resolve.mock.calls.length - expected).toBe(5);
+    await vi.advanceTimersByTimeAsync(2 * 60_000);
+    const later = h.transport.resolve.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(h.transport.resolve.mock.calls.length - later).toBe(2);
     await h.bob.stop();
   });
 

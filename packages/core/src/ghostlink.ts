@@ -638,6 +638,9 @@ export class GhostLink {
   }
   start(): void {
     if (this.deliveryMode !== "dht") this.session.start();
+    // A joiner has just opened the invite: the inviter is there, and its first-contact envelope is worth reading
+    // at the signaling pace now (an inviter speeds up when the joiner's fresh packet shows).
+    if (this.tracker && !this.tracker.done && this.options.pairingProgress?.role === "joiner") this.dht?.expect();
     void this.dht?.start();
   }
 

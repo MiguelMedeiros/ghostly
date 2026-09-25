@@ -26,8 +26,6 @@ const STREAM_POLL_MS = 30_000;
 export const LEAVING_DHT_FAST_MS = 2 * 60_000;
 /** Only this often while layer 1 carries the chat (WISP 403, Q7): the relays' per-IP budget is shared by every chat. */
 export const LIVE_POLL_MS = 5 * 60_000;
-/** A new chat reads the contact's mailbox at the signaling pace this long after it starts, until it pins a contact. */
-export const RENDEZVOUS_FAST_MS = 10 * 60_000;
 /**
  * On the DHT with the chat open, the mailbox is read this often (WISP 403 proposes 4 s). The relays' per-IP budget
  * (30 requests a minute per relay here, reads and publishes together) is shared with presence polling, which is at its
@@ -75,8 +73,6 @@ export class DhtDelivery {
   private leavingUntil = 0;
   /** Until when the mailbox is read at the fast pace for any other reason (a drop, a first contact). */
   private fastUntil = 0;
-  /** Until when a chat with no pinned contact reads at the fast pace. */
-  private rendezvousUntil = 0;
   private live = false;
   private active = false;
   /** The next read was asked for (a refresh, a fresh packet of the contact): it is not a background one. */
@@ -150,8 +146,8 @@ export class DhtDelivery {
   async start(): Promise<void> {
     if (this.running) return; this.running = true;
     if (this.state.confirmed) await this.options.receipt(this.state.confirmed);
-    // A chat with no pinned contact yet is a first contact: its mailbox is read at the signaling pace for a while.
-    if (!this.options.credentials.peerKey) this.rendezvousUntil = Date.now() + RENDEZVOUS_FAST_MS;
+    // A chat with no pinned contact is read at the signaling pace only once the contact shows up (`expect`, from its
+    // fresh presence packet): an invite nobody opened yet, or one warmed ahead of time, spends no relay budget.
     this.changed(); void this.tick();
   }
   async stop(): Promise<void> { this.running = false; if (this.timer) clearTimeout(this.timer); this.timer = null; await this.chain; }
@@ -327,7 +323,6 @@ export class DhtDelivery {
     if (this.options.pollMs) return this.options.pollMs;
     const now = Date.now();
     if (this.mode === "dht" || (this.state.peerMode === "dht" && now < this.leavingUntil) || now < this.fastUntil) return DHT_POLL_MS;
-    if (!this.options.credentials.peerKey && now < this.rendezvousUntil) return DHT_POLL_MS;
     if (this.live) return LIVE_POLL_MS;
     // Our text awaits its receipt: the receipt is what the person is looking at.
     if (this.state.pending && this.state.pending.expires > now) return DHT_POLL_MS;
