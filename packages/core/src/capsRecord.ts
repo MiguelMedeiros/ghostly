@@ -37,6 +37,11 @@ export const CAPS_LIMITS = {
 export const CAPS_REFRESH_MS = 60 * 60_000;
 /** Reads of the contact's record closer together than this are merged into one. */
 const CAPS_READ_SPACING_MS = 15_000;
+/**
+ * Changes closer together than this go out as one publication, the last: every publication spends one of the
+ * relays' requests per relay, a budget the chat's signaling needs more.
+ */
+export const CAPS_PUBLISH_SPACING_MS = 30_000;
 
 /**
  * Per native transport, the minimum to dial it: no network address, ever. Keys travel as base64url (32
@@ -277,8 +282,9 @@ export class CapsExchange {
     if (this.running) return;
     this.running = true;
     void this.update().catch(() => {});
-    // Pairing, or an app start after one: the contact's current record, once.
-    if (this.options.credentials.peerKey) this.refresh(true);
+    // Paired, and the contact's record never read: once. After that, a drop or a new pin is what reads it
+    // again, not every start.
+    if (this.options.credentials.peerKey && !this.state.peer) this.refresh(true);
   }
   async stop(): Promise<void> {
     this.running = false;
@@ -299,6 +305,9 @@ export class CapsExchange {
       const peerKey = this.options.credentials.peerKey;
       const changed = digest !== this.state.digest;
       const due = changed || peerKey !== this.state.sealedFor || !this.state.publishedAt || now - this.state.publishedAt >= CAPS_REFRESH_MS;
+      // A change right after a publication waits for the spacing; a new pin does not (the contact reads it next).
+      const soon = changed && peerKey === this.state.sealedFor && !!this.state.publishedAt && now - this.state.publishedAt < CAPS_PUBLISH_SPACING_MS;
+      if (due && soon) { this.schedule(this.state.publishedAt! + CAPS_PUBLISH_SPACING_MS - now); return; }
       if (due) {
         const rev = changed ? this.state.rev + 1 : this.state.rev;
         const { records, dropped } = this.keys.seal(content, rev, peerKey, now);
@@ -311,11 +320,11 @@ export class CapsExchange {
       this.schedule();
     });
   }
-  private schedule(): void {
+  private schedule(inMs?: number): void {
     if (this.timer) clearTimeout(this.timer);
     if (!this.running) return;
     const age = Date.now() - (this.state.publishedAt ?? 0);
-    this.timer = setTimeout(() => void this.update().catch(() => this.schedule()), Math.max(60_000, CAPS_REFRESH_MS - age));
+    this.timer = setTimeout(() => void this.update().catch(() => this.schedule()), inMs ?? Math.max(60_000, CAPS_REFRESH_MS - age));
   }
 
   /** An envelope named this revision of the contact's record: read it when it is newer than the one known. */

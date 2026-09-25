@@ -2154,9 +2154,9 @@ export class GhostlyNode implements EngineImplementation {
           live.stored = { ...live.stored, peerTrust: live.stored.peerTrust ?? { version: 1, verifiedKey: live.stored.pairedPeerKey }, pairedPeerKey: key, requireSignedSignals: live.stored.requireSignedSignals || signedSignals, inviteCode: undefined };
           try { await db.pinPeer(stored.id, key, signedSignals); }
           catch (error) { live.stored = previous; throw error; }
-          // Pinned: the record is sealed anew for the contact alone, and the contact's is read.
-          void live.caps?.update().catch(() => {});
-          live.caps?.refresh(true);
+          // Pinned just now (not a later session or envelope confirming the same key): the record is sealed
+          // anew for the contact alone, and the contact's is read.
+          if (!previous.pairedPeerKey) { void live.caps?.update().catch(() => {}); live.caps?.refresh(true); }
         },
       } : undefined,
       // A chat never paired: the one who made the invite still holds it; the one who joined does not.

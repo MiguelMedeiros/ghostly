@@ -205,6 +205,8 @@ describe("the capability record of a chat (WISP 03)", () => {
     await new Promise(r => setTimeout(r, 20));
     expect(records(), "nothing changed").toBe(1);
     (linkOf(chat.id) as unknown as { setHoldSupport: () => void }).setHoldSupport = vi.fn();
+    // Past the spacing between two publications (CAPS_PUBLISH_SPACING_MS), as a person turning Hold on later is.
+    (node["links"].get(chat.id)!.caps as unknown as { state: { publishedAt: number } }).state.publishedAt -= 60_000;
     await node.setChatHold({ linkId: chat.id, enabled: true });
     await vi.waitFor(() => expect(records()).toBe(2));
     await vi.waitFor(async () => expect((await saved(chat.id))?.capsState?.rev).toBe(2));

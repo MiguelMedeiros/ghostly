@@ -7,7 +7,7 @@ import { fromBase64Url, utf8Encode } from "../src/bytes";
 import { decrypt, encrypt } from "../src/crypto";
 import { measureRecords, MAX_DNS_PACKET_BYTES, type GhostRecord, type SignedPacket } from "../src/pkarr";
 import {
-  CAPS_LABEL, CAPS_REFRESH_MS, CapsExchange, CapsKeys, CapsRefusedError, capsDescriptors, dialDescriptors, emptyCapsState,
+  CAPS_LABEL, CAPS_PUBLISH_SPACING_MS, CAPS_REFRESH_MS, CapsExchange, CapsKeys, CapsRefusedError, capsDescriptors, dialDescriptors, emptyCapsState,
   type CapsContent, type CapsState,
 } from "../src/capsRecord";
 import type { PairingCredentials } from "../src/pairedSession";
@@ -152,6 +152,8 @@ describe("capability record: publishing and reading", () => {
     await caps.update();
     expect(transport.publish, "nothing changed").toHaveBeenCalledTimes(1);
     name = "Ada L."; await caps.update();
+    expect(transport.publish, "a change right after a publication waits for the spacing").toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(CAPS_PUBLISH_SPACING_MS);
     expect(transport.publish).toHaveBeenCalledTimes(2);
     expect(saved.rev).toBe(2);
     credentials.peerKey = createIdentity().pubKeyZ32; await caps.update();
@@ -184,6 +186,7 @@ describe("capability record: publishing and reading", () => {
     bSide.peerRev(1); await vi.advanceTimersByTimeAsync(0);
     expect(transport.resolve.mock.calls.length, "the known revision is not read again").toBe(reads);
     aName = "Ada L."; await aSide.update();
+    await vi.advanceTimersByTimeAsync(CAPS_PUBLISH_SPACING_MS);
     bSide.peerRev(2); await vi.advanceTimersByTimeAsync(0);
     expect(bSide.peer).toMatchObject({ rev: 2, name: "Ada L." });
     // A copied invite publishes a record under A's address, signed by another key: refused, the last good one stays.
