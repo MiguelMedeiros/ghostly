@@ -5,6 +5,7 @@ import {
   safeBlobType,
   sanitizeFileName,
   sanitizeMime,
+  parseVoiceMeta,
   toBase64Url,
   randomBytes,
 } from "@ghostly/core";
@@ -76,7 +77,7 @@ export const servicesPlatform: ServicesPlatform | null = {
 
   maxFileBytes: LIMITS.maxFileBytes,
 
-  async sendFile(peerPubKeyZ32, source) {
+  async sendFile(peerPubKeyZ32, source, options) {
     const link = engine.linkByPeer(peerPubKeyZ32);
     if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
     if (link.profile && !link.capabilities?.files) throw new Error("Connect to an updated peer to send files");
@@ -89,11 +90,13 @@ export const servicesPlatform: ServicesPlatform | null = {
       name: sanitizeFileName(source.name),
       size: source.size,
       mime: sanitizeMime(source.type),
+      ...(options?.voice && { voice: parseVoiceMeta(options.voice, sanitizeMime(source.type)) }),
     };
+    if (options?.voice && !file.voice) throw new Error("That recording cannot be sent as a voice message");
     // The page and the peer share this database; the bytes never go through a message.
     const timestamp = Date.now();
     await fileStore.put({ id: file.id, linkId: link.id, blob: source, createdAt: timestamp, direction: "out", wireId,
-      metadata: { name: file.name, size: file.size, mime: file.mime, timestamp },
+      metadata: { name: file.name, size: file.size, mime: file.mime, timestamp, voice: file.voice },
       transfer: { state: "transferring", transferred: 0, size: file.size } });
     await engine.call("sendFile", { linkId: link.id, file, timestamp });
     return { timestamp, file };

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { PairedFiles } from "../src/pairedFiles";
 import { LIMITS, type FrameChannel } from "../src/frames";
 import type { FileSink } from "../src/files";
-// covers: files.paired.send
+// covers: files.paired.send, files.voice.meta
 const file = { id: "abcdefgh12345678", name: "test.bin", mime: "application/octet-stream", size: 70001, timestamp: 10 };
 async function* source(size = file.size) { yield new Uint8Array(size).fill(123); }
 function setup(sink?: FileSink | null, mutate?: (frame: string) => string) {
@@ -67,5 +67,24 @@ describe("paired files with durable receipts", () => {
   });
   it("allows empty files", async () => {
     const t = setup(); await t.a.send({ ...file, size: 0 }, source(0)); expect(t.completed).toHaveBeenCalledOnce(); t.a.closeAll(); t.b.closeAll();
+  });
+  it("carries a voice message's description with the file, and drops one that does not check out", async () => {
+    const voice = { duration: 4200, peaks: [0, 128, 255] };
+    const t = setup();
+    await t.a.send({ ...file, mime: "audio/webm", voice }, source());
+    expect(t.received).toHaveBeenCalledWith({ ...file, mime: "audio/webm", voice });
+    t.a.closeAll(); t.b.closeAll();
+
+    // A peer lies about the shape: the file still arrives, as a file.
+    const lied = setup(undefined, frame => frame.replace('"peaks":[0,128,255]', '"peaks":[999]'));
+    await lied.a.send({ ...file, id: "voice-bad-0001", mime: "audio/webm", voice }, source());
+    expect(lied.received).toHaveBeenCalledWith({ ...file, id: "voice-bad-0001", mime: "audio/webm" });
+    lied.a.closeAll(); lied.b.closeAll();
+
+    // Not audio: no voice, whatever is announced.
+    const other = setup();
+    await other.a.send({ ...file, id: "voice-bin-0001", voice }, source());
+    expect(other.received).toHaveBeenCalledWith({ ...file, id: "voice-bin-0001" });
+    other.a.closeAll(); other.b.closeAll();
   });
 });

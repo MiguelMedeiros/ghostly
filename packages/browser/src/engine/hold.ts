@@ -1,4 +1,4 @@
-import { decodeControl, fromBase64Url, HOLD_LIMITS, HoldKeys, HoldRefusedError, newHoldMailbox, readManifest, utf8Decode, utf8Encode, type HoldPointer, type PaymentMethodName, type PaymentRequest, type PkarrTransport } from "@ghostly/core";
+import { decodeControl, fromBase64Url, parseVoiceMeta, HOLD_LIMITS, HoldKeys, HoldRefusedError, newHoldMailbox, readManifest, utf8Decode, utf8Encode, type HoldPointer, type PaymentMethodName, type PaymentRequest, type PkarrTransport, type VoiceMeta } from "@ghostly/core";
 import { heldName, manifestName, type HoldStore } from "../backup/storage";
 import type { HeldEntry, HoldState, LinkHoldView, StoredLink } from "../shared/types";
 
@@ -16,11 +16,11 @@ export interface HoldHost {
   delivery(linkId: string, messageId: string, state: "held" | "delivered" | "failed", error?: string): Promise<void>;
   /** What to seal, by kind. Null when it is gone (deleted). */
   text(linkId: string, messageId: string): Promise<string | null>;
-  file(fileId: string): Promise<{ bytes: Uint8Array; name: string; size: number; mime: string } | null>;
+  file(fileId: string): Promise<{ bytes: Uint8Array; name: string; size: number; mime: string; voice?: VoiceMeta } | null>;
   paymentRequest(paymentId: string): PaymentRequest | null;
   receiveText(linkId: string, message: { id: string; text: string; timestamp: number }): Promise<void>;
   /** Returns why it was not kept (room, a reused id), or null when it was. */
-  receiveFile(linkId: string, file: { wireId: string; name: string; size: number; mime: string; timestamp: number }, bytes: Uint8Array, digest: string): Promise<string | null>;
+  receiveFile(linkId: string, file: { wireId: string; name: string; size: number; mime: string; timestamp: number; voice?: VoiceMeta }, bytes: Uint8Array, digest: string): Promise<string | null>;
   receivePaymentRequest(linkId: string, request: PaymentRequest): Promise<void>;
   changed(): void;
   fetch?: typeof fetch;
@@ -217,7 +217,7 @@ export class HoldEngine {
       } else if (entry.kind === "file") {
         const file = await this.host.file(entry.ref!);
         if (!file) return fail("The file is gone");
-        body = file.bytes; meta = { name: file.name, size: file.size, mime: file.mime };
+        body = file.bytes; meta = { name: file.name, size: file.size, mime: file.mime, ...(file.voice && { voice: file.voice }) };
       } else {
         const request = this.host.paymentRequest(entry.ref!);
         if (!request) return fail("The payment request is gone");
@@ -376,8 +376,9 @@ export class HoldEngine {
         // Stored before the sequence advances: a crash in between stores it again, which the id dedups.
         if (header.kind === "text") await this.host.receiveText(linkId, { id: header.id, text: utf8Decode(body), timestamp: header.ts });
         else if (header.kind === "file") {
-          const meta = header.meta as { name: string; size: number; mime: string };
-          const refused = await this.host.receiveFile(linkId, { wireId: header.id, name: meta.name, size: meta.size, mime: meta.mime, timestamp: header.ts }, body, hex(fromBase64Url(header.digest)));
+          const meta = header.meta as { name: string; size: number; mime: string; voice?: unknown };
+          const voice = parseVoiceMeta(meta.voice, meta.mime);
+          const refused = await this.host.receiveFile(linkId, { wireId: header.id, name: meta.name, size: meta.size, mime: meta.mime, timestamp: header.ts, ...(voice && { voice }) }, body, hex(fromBase64Url(header.digest)));
           if (refused) throw new HoldRefusedError("limits", refused);
         } else if (header.kind === "pay-req") {
           let parsed: unknown;

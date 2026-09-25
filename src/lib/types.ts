@@ -1,4 +1,4 @@
-import type { CallEventType } from "@ghostly/core";
+import type { CallEventType, VoiceMeta } from "@ghostly/core";
 
 export type { CallEventType, CallSignal, CallState } from "@ghostly/core";
 
@@ -19,6 +19,8 @@ export interface ChatFile {
   name: string;
   size: number;
   mime: string;
+  /** A voice message: its length and the shape of its sound, measured when it was recorded. */
+  voice?: VoiceMeta;
 }
 
 export interface ChatMessage {
