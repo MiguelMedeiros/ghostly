@@ -1,13 +1,12 @@
-import { useRef, useState, type RefObject } from "react";
+import type { RefObject } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { MUTE_CHOICES, muteEnd, muteEndText, setChatMute, useChatMute, type MutedUntil } from "../lib/chatMute";
-import { focus } from "../lib/connection";
 import { Menu, MenuItem } from "./Menu";
 
 /*
  * A chat's notifications, muted for a while or until turned back on (src/lib/chatMute.ts): the row in the
- * chat's ⋮ menu, the menu of durations and the bell in the header (the list's mark is ChatRow's). `chat` is a
- * session id, or `groupChat(id)` for a group.
+ * chat's ⋮ menu and the menu of durations (the list's mark, and the bell button over it, are ChatRow's). `chat`
+ * is a session id, or `groupChat(id)` for a group.
  */
 
 export function BellIcon({ muted = false, size = 14 }: { muted?: boolean; size?: number }) {
@@ -47,11 +46,11 @@ export function MuteMenuItem({ chat, onChoose, onDone }: { chat: string; onChoos
 }
 
 /**
- * How long to mute the chat for, each choice with the time it ends. Once muted (opened from the header's bell),
- * until when, and the way back.
+ * How long to mute the chat for, each choice with the time it ends. Once muted (opened from the list row's bell),
+ * until when, and the way back. `portal`: for an opener in the chat list (Menu's `portal`).
  */
-export function MuteMenu({ chat, open, onClose, anchorRef, align }: {
-  chat: string; open: boolean; onClose(): void; anchorRef: RefObject<HTMLElement | null>; align?: "start" | "end";
+export function MuteMenu({ chat, open, onClose, anchorRef, align, portal }: {
+  chat: string; open: boolean; onClose(): void; anchorRef: RefObject<HTMLElement | null>; align?: "start" | "end"; portal?: boolean;
 }) {
   const { t, language } = useI18n();
   const until = useChatMute(chat);
@@ -62,7 +61,7 @@ export function MuteMenu({ chat, open, onClose, anchorRef, align }: {
     return end === "forever" ? t("mute.noEnd") : t("mute.until", { time: muteEndText(end, language, now) });
   };
   return (
-    <Menu testId="mute-menu" open={open} onClose={onClose} anchorRef={anchorRef} align={align} focusFirst label={until === undefined ? t("mute.title") : mutedText(until)}>
+    <Menu testId="mute-menu" open={open} onClose={onClose} anchorRef={anchorRef} align={align} portal={portal} focusFirst label={until === undefined ? t("mute.title") : mutedText(until)}>
       {/* Not a row: the note may wrap on a narrow sheet rather than be cut. */}
       <div className="px-3 pb-1 pt-1.5 text-xs text-text-muted" data-testid="mute-menu-head">
         <span className="block truncate whitespace-nowrap font-medium text-text-primary">{until === undefined ? t("mute.title") : mutedText(until)}</span>
@@ -76,25 +75,5 @@ export function MuteMenu({ chat, open, onClose, anchorRef, align }: {
         ))
         : <MenuItem testId="mute-off" icon={<BellIcon />} onClick={() => { setChatMute(chat, undefined); onClose(); }}>{t("mute.unmute")}</MenuItem>}
     </Menu>
-  );
-}
-
-/** The bell in a chat's header while it is muted: its tooltip says until when, and it opens the way to unmute. */
-export function MutedBell({ chat }: { chat: string }) {
-  const { t, language } = useI18n();
-  const until = useChatMute(chat);
-  const [open, setOpen] = useState(false);
-  const wrapper = useRef<HTMLDivElement>(null);
-  if (until === undefined) return null;
-  const label = until === "forever" ? t("mute.bell") : t("mute.bellUntil", { time: muteEndText(until, language) });
-  return (
-    <div ref={wrapper} className="relative flex shrink-0">
-      <button type="button" data-testid="chat-muted" data-muted={until === "forever" ? "forever" : "until"} aria-haspopup="true" aria-expanded={open}
-        aria-label={label} title={label} onClick={() => setOpen(o => !o)}
-        className={`flex h-6 w-6 items-center justify-center rounded-full text-text-muted transition-colors hover:bg-surface-hover hover:text-accent ${focus}`}>
-        <BellIcon muted size={14} />
-      </button>
-      <MuteMenu chat={chat} open={open} onClose={() => setOpen(false)} anchorRef={wrapper} align="start" />
-    </div>
   );
 }

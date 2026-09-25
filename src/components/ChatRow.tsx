@@ -1,14 +1,14 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { PeerAvatar } from "./Avatar";
 import { GroupAvatar } from "./GroupAvatar";
 import { ContactMarks } from "./identities/ContactMarks";
 import { PinIcon } from "./PinIcon";
-import { BellIcon } from "./ChatMute";
+import { BellIcon, MuteMenu } from "./ChatMute";
 import { useI18n } from "../contexts/I18nContext";
 import { formatListTime, previewText } from "../lib/chatList";
-import { groupChat, useChatMute } from "../lib/chatMute";
+import { groupChat, muteEndText, useChatMute } from "../lib/chatMute";
 import { groupReadAt } from "../lib/groups";
 import type { ChatListDensity } from "../lib/settings";
 import type { ChatMessage } from "../lib/types";
@@ -17,7 +17,8 @@ import type { ChatMessage } from "../lib/types";
  * The rows of the chat list, drawn the way messengers draw theirs: the name and the time on one line, the last
  * message (with its delivery mark) and the unread count on the next. `compact` (the default) keeps the contact's
  * key out of the row — it is in the row's tooltip and the chat's header; `comfortable` gives it its own line.
- * What the chat is set to (pinned; muted next) is a quiet mark just before the time, in the time's own tone.
+ * What the chat is set to (muted, pinned) is a quiet mark just before the time, in the time's own tone; on a pointer
+ * device the row's actions (mute, pin, delete) take the marks' and the time's place while it is hovered.
  */
 
 const AVATAR = { compact: 46, comfortable: 52 } as const;
@@ -74,6 +75,51 @@ function MutedMark({ label }: { label: string }) {
   return <StatusMark label={label} testId="chat-row-muted"><BellIcon muted size={12} /></StatusMark>;
 }
 
+/** A button in the row's actions: a round target that lights up under the pointer, and in the accent while it is on. */
+const rowAction = (hover = "hover:text-accent") =>
+  `flex h-7 w-7 items-center justify-center rounded-full text-text-secondary transition-colors cursor-pointer hover:bg-text-primary/10 ${hover} aria-pressed:text-accent aria-expanded:bg-text-primary/10 aria-expanded:text-accent data-[muted]:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`;
+
+/**
+ * The row's actions, laid over its marks and time (RowText's `timeCover`). Pointer devices only: a phone opens the
+ * chat on a tap, and mutes and pins from the chat's ⋮. Hover or keyboard focus shows them, a click's leftover focus
+ * does not (else the layer would hide the new mark once the pointer leaves); an open menu keeps them up.
+ */
+function RowActions({ active, children }: { active: boolean; children: ReactNode }) {
+  return (
+    <div data-testid="chat-row-actions" className={`max-md:hidden absolute top-1/2 end-0 flex min-w-full -translate-y-1/2 items-center justify-end gap-1 rounded-md ps-1 opacity-0 transition-opacity group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 has-[[aria-expanded=true]]:opacity-100 ${active ? "bg-surface-hover" : "bg-surface-alt"}`}>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * The row's bell: mutes the chat for a while, or, muted, says until when and turns it back on, through the chat's own
+ * menu of durations. A muted chat's mark so turns into this button in place. Nothing from here reaches the row, which
+ * would open the chat.
+ */
+function RowMute({ chat }: { chat: string }) {
+  const { t, language } = useI18n();
+  const until = useChatMute(chat);
+  const [open, setOpen] = useState(false);
+  const wrapper = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const label = until === undefined ? t("mute.open") : until === "forever" ? t("mute.bell") : t("mute.bellUntil", { time: muteEndText(until, language) });
+  const close = () => {
+    // Chosen or dismissed from inside the menu (the keys): back to the bell, so the row's actions stay where the keys are.
+    if (document.activeElement?.closest("[data-menu]")) button.current?.focus();
+    setOpen(false);
+  };
+  return (
+    <div ref={wrapper} className="flex" onClick={e => e.stopPropagation()}>
+      <button ref={button} type="button" data-testid="chat-row-mute" data-muted={until === undefined ? undefined : until === "forever" ? "forever" : "until"}
+        aria-haspopup="true" aria-expanded={open} aria-label={label} title={label} onClick={() => setOpen(o => !o)} className={rowAction()}>
+        <BellIcon muted={until !== undefined} />
+      </button>
+      <MuteMenu chat={chat} open={open} onClose={close} anchorRef={wrapper} portal />
+    </div>
+  );
+}
+
 /** The two (or, comfortable, three) lines beside the avatar, shared by chats and groups. */
 function RowText({ name, nameClass, marks, status, time, timeClass = "text-text-muted", sub, preview, trailing, timeCover }: {
   name: ReactNode; nameClass: string;
@@ -92,8 +138,8 @@ function RowText({ name, nameClass, marks, status, time, timeClass = "text-text-
           <span data-testid="chat-row-name" className={`min-w-0 truncate text-[15px] leading-5 ${nameClass}`}>{name}</span>
           {marks}
         </span>
-        {(status || time || timeCover) && <span className="relative flex shrink-0 items-baseline gap-1.5">
-          {status && <span data-testid="chat-row-status" className="flex h-5 items-center gap-1 self-center text-text-muted">{status}</span>}
+        {(status || time || timeCover) && <span className="relative flex shrink-0 items-baseline gap-2">
+          {status && <span data-testid="chat-row-status" className="flex h-5 items-center gap-1.5 self-center text-text-muted">{status}</span>}
           {time && <span data-testid="chat-row-time" className={`text-xs leading-5 ${timeClass}`}>{time}</span>}
           {timeCover}
         </span>}
@@ -108,7 +154,7 @@ function RowText({ name, nameClass, marks, status, time, timeClass = "text-text-
 }
 
 const rowClass = (active: boolean, density: ChatListDensity) =>
-  `group relative flex items-center gap-3 ps-3 pe-3 cursor-pointer transition-colors ${ROW[density]} ${active ? "bg-surface-hover" : "hover:bg-surface-alt has-[:focus-visible]:bg-surface-alt"}`;
+  `group relative flex items-center gap-3 ps-3 pe-3 cursor-pointer transition-colors ${ROW[density]} ${active ? "bg-surface-hover" : "hover:bg-surface-alt has-[:focus-visible]:bg-surface-alt has-[[aria-expanded=true]]:bg-surface-alt"}`;
 
 export interface ChatRowProps {
   /** The chat's session id: what its mute is kept under. */
@@ -189,24 +235,21 @@ export function ChatRow(p: ChatRowProps) {
         </>}
         trailing={p.unread > 0 && <UnreadBadge count={p.unread} muted={muted} />}
         timeCover={
-          // Pointer devices only: a phone opens the chat on a tap and pins from the chat's Options. The layer covers
-          // the marks too, so a pinned chat's mark turns into its Unpin button in place. Keyboard focus shows it, a
-          // click's leftover focus does not (else the layer would hide the new mark once the pointer leaves).
-          <div data-testid="chat-row-actions" className={`max-md:hidden absolute top-1/2 end-0 flex min-w-full -translate-y-1/2 items-center justify-end gap-0.5 rounded-md ps-1 opacity-0 transition-opacity group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 ${p.active ? "bg-surface-hover" : "bg-surface-alt"}`}>
+          // The layer covers the marks too, so a pinned chat's mark turns into its Unpin button in place.
+          <RowActions active={p.active}>
+            <RowMute chat={p.chatId} />
             <button type="button" title={pinLabel} aria-label={pinLabel} aria-pressed={p.pinned} data-testid="chat-row-pin"
-              onClick={e => { e.stopPropagation(); p.onTogglePin(); }}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-text-muted hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent cursor-pointer">
+              onClick={e => { e.stopPropagation(); p.onTogglePin(); }} className={rowAction()}>
               <PinIcon active={p.pinned} />
             </button>
-            <button type="button" onClick={p.onDelete} title={p.deleteLabel}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-text-muted hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent cursor-pointer">
+            <button type="button" onClick={p.onDelete} title={p.deleteLabel} className={rowAction("hover:text-danger")}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M3 6h18" />
                 <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
                 <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
               </svg>
             </button>
-          </div>
+          </RowActions>
         }
       />
     </div>
@@ -239,6 +282,7 @@ export function GroupRow({ group, active, density, onOpen }: { group: GroupView;
           time={group.lastMessageAt > 0 ? formatListTime(group.lastMessageAt) : undefined}
           timeClass={unread && !muted ? "text-accent font-medium" : "text-text-muted"}
           status={muted && <MutedMark label={t("mute.bell")} />}
+          timeCover={!invitation && <RowActions active={active}><RowMute chat={groupChat(group.id)} /></RowActions>}
           preview={<span className="text-text-muted">{status}</span>}
           trailing={unread && <span data-testid="group-row-unread" data-muted={muted || undefined} aria-label="Unread messages" role="img" className={`w-2.5 h-2.5 rounded-full ${muted ? "bg-text-secondary" : "bg-accent"}`} />}
         />

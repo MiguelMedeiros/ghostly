@@ -49,7 +49,7 @@ import { fileMessageText, parseCallSignal, signalHasVideo, type VoiceMeta } from
 import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { TransportChip, TransportMenu } from "../components/TransportMenu";
-import { MuteMenu, MuteMenuItem, MutedBell } from "../components/ChatMute";
+import { MuteMenu, MuteMenuItem } from "../components/ChatMute";
 import { MUTE_SILENCES, callRings, useChatMute } from "../lib/chatMute";
 import { TransportIcon } from "../components/TransportIcon";
 import { useChatLink } from "../hooks/useChatLink";
@@ -470,7 +470,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 )}
               </p>
               {paired && <IdentityStack peerKey={params.peerPubKeyB64} open={showIdentities} onOpen={() => setShowIdentities(open => !open)} />}
-              <MutedBell chat={sessionId} />
               {compat && <span data-testid="compat-chat" title={t("chat.compat.hint")}
                 className="shrink-0 rounded bg-surface-hover px-1.5 py-0.5 text-[10px] leading-none text-text-muted whitespace-nowrap max-md:hidden">{t("chat.compat.label")}</span>}
               </div>
