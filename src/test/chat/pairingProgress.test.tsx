@@ -184,6 +184,14 @@ describe("which chats get the scene", () => {
     expect(label()).toBe("Looking up the invite on the network…");
   });
 
+  it("a chat just joined keeps its scene when the link arrives already pinned by a fast handshake", () => {
+    const { engine } = renderApp(<Pairing inviter={false} createdAt={Date.now()} />);
+    show({ ...connecting, peerParticipationKey: "p" }, engine);
+    expect(label()).toBe("Opening a direct, encrypted link…");
+    show(live, engine);
+    expect(label()).toBe("Connected");
+  });
+
   it("not an old chat whose link is missing", () => {
     renderApp(<Pairing inviter={false} createdAt={Date.now() - 2 * 3600_000} />);
     expect(scene()).toBeNull();

@@ -42,14 +42,18 @@ export function usePairingProgress(peerKey: string | undefined, { inviter, enabl
   const first = useRef<boolean | null>(null);
   const since = useRef<{ stage: PairingStage; at: number; linked: boolean } | null>(null);
   const wasLive = useRef<boolean | null>(null);
-  if (owner.current !== peerKey) { owner.current = peerKey; role.current = first.current = since.current = wasLive.current = null; }
+  const shown = useRef(false);
+  if (owner.current !== peerKey) { owner.current = peerKey; role.current = first.current = since.current = wasLive.current = null; shown.current = false; }
 
   // The role is what this device did first; the invite code is forgotten once the contact shows up.
   role.current ??= reported?.role ?? (inviter ? "inviter" : "joiner");
 
-  // Decided once the link is there to decide from: never paired yet. Until then (a chat just joined), a new chat is.
-  if (first.current === null && enabled && link) first.current = !link.peerParticipationKey;
-  const firstPairing = first.current ?? (!!state && Date.now() - (createdAt ?? Date.now()) < NEW_CHAT_MS);
+  // Decided once the link is there to decide from: never paired yet. Until then (a chat just joined), a new chat is,
+  // and a scene already on stays on: a fast handshake can pin the contact before the link reaches this page.
+  const provisional = !!state && Date.now() - (createdAt ?? Date.now()) < NEW_CHAT_MS;
+  if (first.current === null && enabled && link) first.current = shown.current || !link.peerParticipationKey;
+  const firstPairing = first.current ?? provisional;
+  if (!link && firstPairing) shown.current = true;
 
   const derived = deriveStage(link, reported?.role ?? role.current, online);
   const stage: PairingStage = reported?.stage ?? derived.stage;
