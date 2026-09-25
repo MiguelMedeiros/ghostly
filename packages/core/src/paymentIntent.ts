@@ -6,6 +6,15 @@ import { SPARK_NETWORKS, SPARK_PROVIDER, isSparkAddress, type SparkNetwork } fro
 export type PaymentMethod = "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark";
 export type PaymentNetwork = "bitcoin" | "signet" | "testnet" | "mutinynet" | "regtest" | "cashu-test" | "ethereum" | "sepolia" | "evm-local";
 /**
+ * Real money, or test coins: what every wallet is, whatever chain it runs on. A payment never crosses from one
+ * to the other: a test wallet never settles a request for real money, nor the reverse.
+ */
+export type WalletNetwork = "mainnet" | "testnet";
+export const WALLET_NETWORKS: readonly WalletNetwork[] = ["mainnet", "testnet"];
+/** Bitcoin and Ethereum carry real money; every other chain of a payment target is a test network. */
+export const walletNetworkOf = (network: PaymentNetwork | string): WalletNetwork => network === "bitcoin" || network === "ethereum" ? "mainnet" : "testnet";
+export const isWalletNetwork = (value: unknown): value is WalletNetwork => value === "mainnet" || value === "testnet";
+/**
  * The `provider` of an on-chain target. Anyone can pay a Bitcoin address from any wallet, so the payee
  * names no service; which wallet pays is the payer's own choice (its active on-chain source).
  */

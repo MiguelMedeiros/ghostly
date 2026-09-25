@@ -303,6 +303,7 @@
     {"id":"payments.bolt11","wisp":"203","kind":"protocol","clients":["web","extension","desktop","cli"],"infra":[],"title":"BOLT 11 invoice parsing"},
     {"id":"payments.amounts","wisp":"200","kind":"protocol","clients":["web","extension","desktop","cli"],"infra":[],"title":"Payment amount formatting and token unit checks"},
     {"id":"wallet.mode","wisp":"200","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Testnet / Mainnet switch: every wallet on test networks, said everywhere, Mainnet untouched"},
+    {"id":"wallet.instances.migration","wisp":"200","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Wallets of both former modes open side by side after the update, each on its network; no seed, mint or proof moved away or lost"},
     {"id":"wallet.ready","wisp":"200","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"A new profile has every wallet ready to receive; they reopen without asking"},
     {"id":"wallet.badge","wisp":"200","kind":"feature","clients":["web","extension","desktop"],"infra":["cashu-mint"],"title":"What came in while the wallet was closed shows on its icon"},
     {"id":"wallet.deck","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Wallet cards: hover stack on desktop, snapping track on phones, reduced motion"},

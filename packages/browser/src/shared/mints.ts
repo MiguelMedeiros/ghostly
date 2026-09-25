@@ -1,3 +1,4 @@
+import type { WalletNetwork } from "@ghostly/core";
 /**
  * Mints a new wallet starts with, so nobody has to know what a mint is before
  * receiving sats. The first one that answers is where Lightning invoices are
@@ -37,5 +38,7 @@ export function isLocalMint(url: string): boolean {
  */
 export const isWorthlessMint = (url: string) => isTestMint(url) || isLocalMint(url);
 
-/** Real money, or test networks: every wallet follows it together. */
-export type WalletMode = "mainnet" | "testnet";
+/** Real money, or test networks: each wallet has its own (see WalletNetwork in @ghostly/core). */
+export type WalletMode = WalletNetwork;
+/** The network a Cashu mint's ecash belongs to: test mints and mints on this machine are Testnet. */
+export const mintNetwork = (url: string): WalletNetwork => isWorthlessMint(url) ? "testnet" : "mainnet";
