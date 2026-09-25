@@ -40,15 +40,15 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: Wall
   const [mintUrl, setMintUrl] = useState("");
   const [review, setReview] = useState<Review | null>(null);
 
-  // Test sats are worth nothing and must never be added to real ones. In Testnet the mints shown are
-  // the test ones, so the whole balance is test sats.
+  // Test sats are worth nothing and must never be added to real ones. A Testnet Cashu wallet has only test
+  // mints, so its whole balance is test sats; a Mainnet one never shows a test mint's.
   const testnet = state.mode === "testnet";
   const testMints = testnet ? state.mints : state.mints.filter((m) => wallet.testMintUrls.includes(m.url));
   const testMint = testMints.length > 0;
   const testBalance = testMints.reduce((sum, m) => sum + m.balance, 0);
   const realShown = useCountUp(state.balance - testBalance);
   const testShown = useCountUp(testBalance);
-  // The Cashu card always uses the mints; the Lightning card uses the mode's source (the mints by default).
+  // The Cashu card always uses the mints; the Lightning card uses its network's source (the mints by default).
   const ln = state.lightning;
   const viaMint = rail === "cashu" || !ln?.providerId || ln.providerId === CASHU_MINT_SOURCE;
   const sourceName = ln?.alias ?? ln?.label ?? "the source";
@@ -70,9 +70,8 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: Wall
         {viaMint ? (
           <p className="text-text-primary" data-testid="wallet-balance">
             <span className="text-4xl font-semibold tabular-nums">{(testnet ? testShown : realShown).toLocaleString()}</span>
-            <span className="text-text-muted text-sm ml-2">sats</span>
-            {/* In Testnet the whole balance is test sats and the page's badge and banner say so; in Mainnet a test
-                mint's sats are set apart, and say what they are. */}
+            <span className="text-text-muted text-sm ml-2">{testnet ? "test sats" : "sats"}</span>
+            {/* A Testnet wallet's whole balance is test sats; a test mint's sats never count in a Mainnet one. */}
             {testMint && !testnet && <span className="block text-xs text-yellow-500 mt-1" data-testid="wallet-test-balance">{testShown.toLocaleString()} test sats (worthless)</span>}
           </p>
         ) : (
@@ -81,12 +80,6 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: Wall
             <span className="text-text-muted text-sm ml-2">sats · {sourceName}</span>
             {ln?.status !== "ready" && <span className="block text-xs text-yellow-500 mt-1" data-testid="lightning-source-state">{ln?.error ?? "Connecting to the source…"}</span>}
           </p>
-        )}
-        {!testnet && !!state.waitingTestSats && (
-          <Notice tone="warning" testId="wallet-waiting-test-sats">
-            {state.waitingTestSats.toLocaleString()} test sats are waiting in Testnet.{" "}
-            <button type="button" className="underline cursor-pointer" onClick={() => void run(() => wallet.setMode("testnet"))}>Switch to Testnet</button>
-          </Notice>
         )}
         <Actions value={action} onChange={choose} actions={rail === "cashu" ? ["receive", "send", "history"] : ["receive", "send"]} />
 

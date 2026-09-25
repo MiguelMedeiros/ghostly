@@ -37,7 +37,3 @@ export function setMyAvatar(avatar: string | null): Promise<void> {
   return engine.call("updateSettings", { settings: { avatar: avatar ?? "" } });
 }
 
-/** Real money or test networks: which wallets are in use, for the warning shown everywhere in Testnet. */
-export function useWalletMode(): "mainnet" | "testnet" {
-  return useSyncExternalStore(subscribe, () => engine.state?.wallet?.mode ?? "mainnet");
-}

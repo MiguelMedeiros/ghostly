@@ -144,7 +144,7 @@ export function SourcePicker({ kind, view, onSet, onClear, onRetry, onReconfigur
         )}
         {saved && <Notice tone="success" testId={`${kind}-source-saved`}>{saved}</Notice>}
         {error && <Notice tone="error" testId={`${kind}-source-error`}>{error}</Notice>}
-        <Notice>{view.mode === "testnet" ? "Testnet has its own source; your Mainnet source is kept." : "Mainnet has its own source; your Testnet source is kept."}</Notice>
+        <Notice>{view.mode === "testnet" ? "This is the Testnet wallet's source; a Mainnet wallet has its own." : "This is the Mainnet wallet's source; a Testnet wallet has its own."}</Notice>
       </Block>
     </Section>
   );

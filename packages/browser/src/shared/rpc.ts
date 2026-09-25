@@ -134,7 +134,7 @@ export interface EngineApi {
   setTransportPreference(params: { linkId: string; preferred: PairedTransport; fallback: boolean }): void;
   /** One chat's connection from its menu: a transport both sides can use, `auto` for the app's rule, or `dht` for DHT only. */
   setChatTransport(params: { linkId: string; transport: PairedTransport | "auto" | "dht" }): void;
-  setChatPaymentMethods(params: { linkId: string; methods: Partial<Record<import("@ghostly/core").PaymentMethodName, boolean>> }): void;
+  setChatPaymentMethods(params: { linkId: string; methods: Partial<Record<import("@ghostly/core").PaymentMethodName, boolean>>; networks?: Partial<Record<import("@ghostly/core").PaymentMethodName, WalletNetwork[]>> }): void;
   /** Store-and-forward in one chat (WISP 4xx): accept held items from this contact, and hold items for it while it is away. */
   setChatHold(params: { linkId: string; enabled: boolean }): void;
   connect(params: { linkId: string }): void;

@@ -1,7 +1,7 @@
 import { useCallback, useLayoutEffect, useRef, useState, type PointerEvent } from "react";
 import { Link } from "react-router-dom";
 import { useSettings } from "../contexts/SettingsContext";
-import { BRAND_BUSY, enterBrandBadge, firstOpen, playBrandMotion, takeBrandTurn, type BrandCue, type BrandMotion } from "../lib/brandMotion";
+import { BRAND_BUSY, firstOpen, playBrandMotion, takeBrandTurn, type BrandCue, type BrandMotion } from "../lib/brandMotion";
 import "./app-brand.css";
 
 type Play = { motion: BrandMotion; on: BrandCue };
@@ -13,28 +13,19 @@ function systemReducesMotion(): boolean {
 }
 
 interface AppBrandProps {
-  testnet: boolean;
-  /** Whether the wallet's mode is known yet: until then there is no telling if the Testnet badge belongs in the opening. */
-  ready: boolean;
   onHome: () => void;
-  onWallet: () => void;
 }
-/** How long the opening waits for the wallet's mode, at most, on its first frame. */
-const HOLD_MAX = 1500;
 
 /**
- * The top of the chat list: the ghost and the wordmark, which go home, and in Testnet the badge under the wordmark,
- * which opens the wallets. The logo moves briefly when the app opens and when the pointer comes over it, then rests;
- * nothing loops, and with reduced motion it stays still.
+ * The top of the chat list: the ghost and the wordmark, which go home. The logo moves briefly when the app opens and
+ * when the pointer comes over it, then rests; nothing loops, and with reduced motion it stays still. Wallets say their
+ * own network on their cards: nothing here is about money.
  */
-export function AppBrand({ testnet, ready, onHome, onWallet }: AppBrandProps) {
+export function AppBrand({ onHome }: AppBrandProps) {
   const moves = !useSettings().settings.reduceMotion && !systemReducesMotion();
   const root = useRef<HTMLDivElement>(null);
   const [play, setPlay] = useState<Play | null>(null);
-  const [waited, setWaited] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  /** The opening, made before the first paint and held on its first frame until the wallet's mode is known. */
-  const held = useRef<{ motion: BrandMotion; animations: Animation[] } | null>(null);
 
   const busy = useCallback((motion: BrandMotion, on: BrandCue) => {
     setPlay({ motion, on });
@@ -42,35 +33,22 @@ export function AppBrand({ testnet, ready, onHome, onWallet }: AppBrandProps) {
     timer.current = setTimeout(() => setPlay(null), BRAND_BUSY[motion][on]);
   }, []);
 
-  // Before the first paint, so the letters and the badge don't show and then vanish to come in.
+  // Before the first paint, so the letters don't show and then vanish to come in.
   useLayoutEffect(() => {
     if (!firstOpen() || !moves || !root.current) return;
     const motion = takeBrandTurn();
-    const animations = playBrandMotion(root.current, motion, "open");
-    if (ready) { busy(motion, "open"); return; }
-    for (const animation of animations) animation.pause();
-    held.current = { motion, animations };
-    setTimeout(() => setWaited(true), HOLD_MAX);
-  }, [moves, ready, busy]);
-
-  // The mode is known (or it took too long): the badge, if there is one now, takes its part, and the opening plays.
-  useLayoutEffect(() => {
-    const opening = held.current;
-    if (!opening || !(ready || waited) || !root.current) return;
-    held.current = null;
-    for (const animation of [...opening.animations, ...enterBrandBadge(root.current, opening.motion)]) animation.play();
-    busy(opening.motion, "open");
-  }, [ready, waited, busy]);
+    playBrandMotion(root.current, motion, "open");
+    busy(motion, "open");
+  }, [moves, busy]);
 
   const hover = (e: PointerEvent<HTMLDivElement>) => {
-    if (e.pointerType !== "mouse" || play || held.current || !moves || !root.current) return;
+    if (e.pointerType !== "mouse" || play || !moves || !root.current) return;
     const motion = takeBrandTurn();
     playBrandMotion(root.current, motion, "hover");
     busy(motion, "hover");
   };
 
   return (
-    // In Testnet the badge sits under the wordmark, out of the header's row, so it never takes the buttons' width.
     <div ref={root} className="app-brand relative flex shrink-0 items-center" data-testid="app-brand" data-motion={play?.motion} data-on={play?.on}
       onPointerEnter={hover}>
       <Link to="/" onClick={(e) => { e.preventDefault(); onHome(); }} aria-label="Go home" title="Go home" className="sidebar-home flex items-center gap-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
@@ -83,18 +61,11 @@ export function AppBrand({ testnet, ready, onHome, onWallet }: AppBrandProps) {
             </g>
           </g>
         </svg>
-        <span className={`sidebar-wordmark whitespace-nowrap text-accent font-bold text-[17px] leading-6 tracking-tight ${testnet ? "-translate-y-[7px]" : ""}`}>
+        <span className="sidebar-wordmark whitespace-nowrap text-accent font-bold text-[17px] leading-6 tracking-tight">
           {/* One span per letter, so they can come in one after another; inline, so the word keeps its kerning. */}
           {[...WORD].map((letter, i) => <span key={i} className="app-brand-letter">{letter}</span>)}
         </span>
       </Link>
-      {/* Wherever the app is, it says when its wallets are on test networks: nothing there is money. */}
-      {testnet && (
-        <Link to="/wallet" onClick={(e) => { e.preventDefault(); onWallet(); }} data-testid="testnet-badge" title="Wallets are on test networks: test coins, worth nothing"
-          className="app-brand-badge absolute start-[42px] top-[calc(50%+3px)] rounded-full border border-amber-500/60 bg-amber-500/15 px-1.5 py-px text-[9px] font-bold uppercase leading-[12px] tracking-wider text-amber-500 hover:bg-amber-500/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500">
-          Testnet
-        </Link>
-      )}
     </div>
   );
 }

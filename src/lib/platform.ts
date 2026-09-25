@@ -48,13 +48,19 @@ export interface PeerLinkState {
    * `methods`: ways of paying both sides allow in this chat right now. `calls` / `services`: both sides offer
    * `calls/1` / `services/1` on the open session (paired chats; they need a live connection).
    */
-  capabilities?: { files: boolean; payments: boolean; methods?: Record<PaymentMethodName, boolean>; calls?: boolean; services?: boolean };
+  capabilities?: {
+    files: boolean; payments: boolean; methods?: Record<PaymentMethodName, boolean>; calls?: boolean; services?: boolean;
+    /** The networks the contact has a wallet on, per way of paying. Absent: it said none (an older app): any may meet. */
+    networks?: Partial<Record<PaymentMethodName, WalletNetwork[]>>;
+  };
   /** Paired chats: what each side offers after the handshake; `peer` is null until it says. */
   sessionOffers?: { mine: string[]; peer: string[] | null };
   /** Paired chats: why a call cannot be placed right now, or null when it can. */
   callsUnavailable?: string | null;
   /** Ways of paying this device allows in this chat. */
   paymentMethods?: Record<PaymentMethodName, boolean>;
+  /** For each way of paying, the networks this chat takes it on (its cards on the Accept side). */
+  paymentNetworks?: Record<PaymentMethodName, WalletNetwork[]>;
   dataLink: DataLinkState;
   online: boolean;
   /** `null` while the peer advertises nothing (offline, or an older client). */
@@ -188,6 +194,8 @@ export interface ChatPayment {
   federations?: string[];
   /** Fedimint payments: the federation of the notes. */
   federation?: string;
+  /** Real money or test coins: only a wallet of this network pays it. Absent on older records. */
+  network?: WalletNetwork;
 }
 
 /** A Lightning address or LNURL, resolved: what the person sees before choosing an amount (whole sats). */
@@ -356,7 +364,8 @@ export interface ServicesPlatform {
   setServiceShared(id: string, peerPubKeyZ32: string, shared: boolean): Promise<void>;
   getPeer(peerPubKeyZ32: string): PeerLinkState | null;
   /** Which ways of paying the chat with this peer allows. */
-  setChatPaymentMethods(peerPubKeyZ32: string, methods: Partial<Record<PaymentMethodName, boolean>>): Promise<void>;
+  /** `networks`: for a way of paying, the networks this chat takes it on; the others are kept as they are. */
+  setChatPaymentMethods(peerPubKeyZ32: string, methods: Partial<Record<PaymentMethodName, boolean>>, networks?: Partial<Record<PaymentMethodName, WalletNetwork[]>>): Promise<void>;
   /** Store-and-forward in the chat with this peer: accept held items from them, and hold items for them while they are away. */
   setChatHold(peerPubKeyZ32: string, enabled: boolean): Promise<void>;
   /** Where held items live: this profile's S3 storage and space (Profile → Backups); null turns holding off. */

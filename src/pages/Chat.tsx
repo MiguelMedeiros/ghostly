@@ -47,6 +47,7 @@ import { continueInNewChat } from "../lib/continueChat";
 import { engine } from "@ghostly/browser/platform/engine";
 import { fileMessageText, parseCallSignal, signalHasVideo, type VoiceMeta } from "@ghostly/core";
 import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
+import type { WalletNetwork } from "../lib/platform";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { MuteMenu, MuteMenuItem } from "../components/ChatMute";
 import { MUTE_SILENCES, callRings, useChatMute } from "../lib/chatMute";
@@ -233,11 +234,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const wallet = platform?.wallet;
   const walletState = wallet?.getState() ?? null;
   const pay = useCallback(
-    async (kind: "send" | "request", amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark"): Promise<string | null> => {
+    async (kind: "send" | "request", amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", network?: WalletNetwork): Promise<string | null> => {
       if (!wallet || !peerKey) return null;
+      // The card's own wallet: the request or the ecash is of its network.
+      const card = network ? wallet.forNetwork(network) : wallet;
       try {
-        const { timestamp, paymentId } = await (kind === "request" ? wallet.request(peerKey, amount, memo || undefined, method) : wallet.send(peerKey, amount, memo || undefined));
-        const text = method === "usdt" ? "Token payment request" : kind === "send" ? `⚡ ${amount.toLocaleString()} sats` : `⚡ Requested ${amount.toLocaleString()} sats`;
+        const { timestamp, paymentId } = await (kind === "request" ? card.request(peerKey, amount, memo || undefined, method) : card.send(peerKey, amount, memo || undefined));
+        const sats = network === "testnet" ? "test sats" : "sats";
+        const text = method === "usdt" ? "Token payment request" : kind === "send" ? `⚡ ${amount.toLocaleString()} ${sats}` : `⚡ Requested ${amount.toLocaleString()} ${sats}`;
         addSystemMessage({ id: `me_${timestamp}`, text, sender: "me", timestamp, paymentId });
         window.dispatchEvent(new Event("session-updated"));
         return null;
@@ -247,8 +251,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     },
     [wallet, peerKey, addSystemMessage],
   );
-  const paySend = useCallback((amount: number, memo: string) => pay("send", amount, memo), [pay]);
-  const payRequest = useCallback((amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark") => pay("request", amount, memo, method), [pay]);
+  const paySend = useCallback((amount: number, memo: string, network?: WalletNetwork) => pay("send", amount, memo, undefined, network), [pay]);
+  const payRequest = useCallback((amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", _rail?: unknown, network?: WalletNetwork) => pay("request", amount, memo, method, network), [pay]);
 
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
@@ -639,7 +643,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               // Paying needs live: a bearer token never waits in a queue or a hold. A request can wait.
               sendUnavailable: paired && !chatLive ? "Payments need a live connection" : undefined, reviewContext:platform?.getPeer(peerKey)?.id ? {wallet,peer:peerKey,linkId:platform.getPeer(peerKey)!.id!}:undefined,
               // Which ways this chat accepts: chosen on the composer's Accept side, for this chat only.
-              onSaveMethods: chatPeer && platform ? (methods) => platform.setChatPaymentMethods(peerKey, methods) : undefined }
+              onSaveMethods: chatPeer && platform ? ({ methods, networks }) => platform.setChatPaymentMethods(peerKey, methods, networks) : undefined }
             : undefined
         }
         identities={paired ? { peerKey: params.peerPubKeyB64, contact: shownName } : undefined}

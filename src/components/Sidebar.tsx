@@ -1,5 +1,4 @@
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
-import { useWalletMode } from "../hooks/useAvatars";
 import { DeleteChatDialog } from "./DeleteChatDialog";
 import { ChatRow, GroupRow } from "./ChatRow";
 import { formatListTime } from "../lib/chatList";
@@ -46,7 +45,6 @@ export function Sidebar() {
   const location = useLocation();
   const { t } = useI18n();
   const isMobile = useIsMobile();
-  const walletMode = useWalletMode();
   const density = useSettings().settings.chatListDensity;
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [search, setSearch] = useState("");
@@ -150,7 +148,7 @@ export function Sidebar() {
     >
       {/* Header */}
       <div className="sidebar-header h-14 header-safe shrink-0 flex items-center justify-between px-4 bg-panel-header">
-        <AppBrand testnet={walletMode === "testnet"} ready={engineState != null} onHome={() => nav.home()} onWallet={() => nav.place("/wallet")} />
+        <AppBrand onHome={() => nav.home()} />
         <div className="grid shrink-0 grid-cols-2 items-stretch gap-1 whitespace-nowrap" data-testid="sidebar-chat-actions">
           {/* New: one click is a chat, as always; the arrow beside it also offers a group. */}
           <div ref={newMenuRef} role="group" aria-label={t("sidebar.new")} data-testid="sidebar-new" className="sidebar-new-split relative flex min-w-0">

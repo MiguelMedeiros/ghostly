@@ -63,7 +63,7 @@ export function UsdtWalletPanel({wallet,state}:{wallet:WalletPlatform;state:Wall
   </Section>}
 
   {(ready||stuck)&&<Section title="Settings">
-   {/* Mainnet is Ethereum only; the test chains are the Testnet mode's (switch at the top of the wallet). */}
+   {/* A Mainnet wallet is Ethereum only; a Testnet wallet may move between the test chains while empty. */}
    {state.mode==='testnet'&&<Row label="Network" hint={stuck?'This network is not answering. You can switch to another one.':canReplace?'Sepolia and the local chain carry worthless test tokens.':'Only while this wallet is empty and has no payments.'}>
     <Segmented label="USDT network" value={pending??network} disabled={busy||!canReplace} options={[{value:'sepolia',label:'Sepolia'},{value:'evm-local',label:'Local test chain'}]} onChange={choose}/>
    </Row>}

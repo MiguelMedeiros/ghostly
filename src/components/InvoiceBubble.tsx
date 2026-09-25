@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import type { Bolt11Invoice, LightningDestination } from "@ghostly/core";
 import { LightningAddressPay } from "./wallet/LightningAddressPay";
+import { lightningNetworkFor } from "./walletCardData";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import type { CashuInspection } from "../lib/platform";
 import type { MoneyInText } from "../lib/money";
@@ -99,7 +100,9 @@ function relativeExpiry(expiresAt: number, now: number): string {
 }
 
 function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: boolean; off: boolean }) {
-  const wallet = useServicesPlatform()?.wallet;
+  const all = useServicesPlatform()?.wallet;
+  // Paid by the Lightning wallet of the invoice's network: a test invoice never meets real money.
+  const wallet = all?.forNetwork(lightningNetworkFor(all.getState(), invoice.network));
   const id = invoice.paymentHash ?? invoice.invoice.slice(-32);
   const [paid, setPaid] = useState(() => isSettled(id));
   // Handed to the mint, which has not settled it yet: paying again could pay twice.
@@ -190,7 +193,8 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
 
 /** A Lightning address or LNURL: resolved and paid through the Lightning source, step by step, when tapped. */
 function LightningAddressCard({ destination, mine, off }: { destination: LightningDestination; mine: boolean; off: boolean }) {
-  const wallet = useServicesPlatform()?.wallet;
+  const all = useServicesPlatform()?.wallet;
+  const wallet = all?.forNetwork(lightningNetworkFor(all.getState()));
   const [paying, setPaying] = useState(false);
   const { copied, copy } = useCopy(destination.text);
   return (
