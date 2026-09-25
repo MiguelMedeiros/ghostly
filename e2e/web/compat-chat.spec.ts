@@ -1,4 +1,5 @@
 import { chat, connect, expect, linkLegacy, say, test } from "../support/fixtures";
+import { pasteInvite } from "../support/clipboard";
 
 /**
  * A chat made with a v0.4 code (WISP 402) is a compatibility chat: it keeps working both ways, says what it
@@ -18,9 +19,10 @@ test("a 0.4 compatibility chat keeps working, says so, and continues in a new ch
   await expect(alice.page.getByTestId("invite-card")).toBeVisible();
   const invite = chat(bob).getByText("Let's continue in a new chat", { exact: false });
   await expect(invite).toBeVisible({ timeout: 60_000 });
-  const url = /https?:\/\/\S+/.exec(await invite.innerText())![0];
-  expect(url).toMatch(/#\/chat\/\S+/);
-  await bob.page.goto(url);
+  // Bob opens it with Join, the way a link or a pasted code arrives.
+  const code = /(ghostly1[0-9a-z]+|pair1\/\S+)/i.exec(await invite.innerText())![1];
+  await bob.page.getByRole("button", { name: "Join chat", exact: true }).first().click();
+  await pasteInvite(bob.page, code);
   await expect(bob.page.getByPlaceholder("Message…")).toBeVisible();
   await expect(bob.page.getByTestId("compat-chat")).toHaveCount(0);
   await say(bob, "hello in the new chat");
