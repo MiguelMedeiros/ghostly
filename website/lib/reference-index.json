@@ -214,7 +214,7 @@
     "title": "WISP 103: HyperDHT",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "Experimental native adapter of the chat session (desktop); descriptors on the DHT (decided 2026-09-25; being implemented)",
+    "implementation": "Experimental native adapter of the chat session (desktop); browsers through a HyperDHT relay (web app, extension); descriptors on the DHT (decided 2026-09-25; being implemented)",
     "dependencies": [
       "100-transports.md"
     ],

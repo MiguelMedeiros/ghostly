@@ -39,6 +39,8 @@ export interface TransportEntry {
   fallback?: "dht" | "hold" | "dht-only";
   /** `back`: how long the chat had no live connection. */
   downMs?: number;
+  /** The transport carrying the chat after this line goes through a relay (WISP 100: a fallback, never first). */
+  relayed?: boolean;
   /** Round trip measured on this transport, once known. */
   rttMs?: number;
   /** Legacy `flapping` rows: how many times the link came back, since when, and whether it was live at the end. */
@@ -73,6 +75,8 @@ export interface TransportEvent {
 export interface TransportSnapshot {
   live: boolean;
   transport?: PairedTransport;
+  /** `transport` goes through a relay. */
+  relayed?: boolean;
   /** What carries text right now. */
   text: "stream" | "dht" | "hold" | "unavailable";
   /** This side chose DHT-only delivery. */
@@ -381,7 +385,8 @@ export class TransportLog {
   }
 
   private add(line: Omit<TransportEntry, "id">): TransportEntry {
-    const entry: TransportEntry = { id: lineId(line.at), ...line };
+    const relayed = !!line.transport && line.transport === this.snapshot?.transport && !!this.snapshot?.relayed;
+    const entry: TransportEntry = { id: lineId(line.at), ...line, ...(relayed ? { relayed } : {}) };
     this.entries.push(entry);
     if (this.entries.length > TRANSPORT_LOG_MAX) this.entries.splice(0, this.entries.length - TRANSPORT_LOG_MAX);
     return entry;

@@ -133,3 +133,17 @@ it("choosing again what this side's standing choice names raises no intent; an o
   expect(h.switches.every(s => s.pending?.choices[0] === "iroh/1")).toBe(true);
   h.switches.forEach(s => s.stop());
 });
+it("falls back to a relayed transport only after the direct ones, and still honours an explicit choice of it", () => {
+  const plain = peers(); plain.policies.forEach(p => p.preferred = "iroh/1"); plain.switches[1].changed(); plain.flush();
+  expect((plain.prepare[0].mock.calls[0][0] as SwitchPlan).choices).toEqual(["iroh/1", "hyperdht/1", "webrtc/1"]);
+  plain.switches.forEach(s => s.stop());
+  // The same policies with one side's HyperDHT reached through a relay (a browser): WebRTC comes before it.
+  const h = peers(); h.policies.forEach(p => p.preferred = "iroh/1");
+  h.policies[0].descriptors = { ...h.policies[0].descriptors, "hyperdht/1": { publicKey: "ab".repeat(32), relayed: true } };
+  h.switches[1].changed(); h.flush();
+  for (const prepare of h.prepare) expect((prepare.mock.calls[0][0] as SwitchPlan).choices).toEqual(["iroh/1", "webrtc/1", "hyperdht/1"]);
+  h.switches.forEach(s => s.begin("session-2", "iroh/1")); h.flush();
+  h.policies[1].preferred = "hyperdht/1"; h.switches[1].changed(); h.flush();
+  expect(h.switches.every(s => s.pending?.choices[0] === "hyperdht/1")).toBe(true);
+  h.switches.forEach(s => s.stop());
+});

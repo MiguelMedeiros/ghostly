@@ -27,6 +27,7 @@ export const VARIABLES = {
   GHOSTLY_NWC_REGTEST: ["1", "Nostr Wallet Connect suites: two Alby Hubs on two LND nodes, a local relay"],
   GHOSTLY_USDT_LOCAL: ["1", "USDT suites: the local EVM chain with the test token deployed"],
   GHOSTLY_WEBLN_REGTEST: ["1", "WebLN suites: two LND nodes behind the injected browser wallets"],
+  GHOSTLY_HYPERDHT_RELAY: ["1", "HyperDHT-in-the-browser suites: a HyperDHT relay on a HyperDHT network of its own"],
 
   // Harness: ports of the suite's own servers. Defaults only, never written to .env.e2e — other runners (the scenario
   // matrix) read the same names for ranges of their own.
@@ -70,6 +71,8 @@ export const VARIABLES = {
 
   // Iroh (WISP 102): the relay the browsers' Iroh goes through, and the native test peer homes on.
   GHOSTLY_IROH_RELAY_URL: ["http://127.0.0.1:47085", "Iroh relay (iroh-relay 1.2 --dev, plain HTTP): browser Iroh suites"],
+  // HyperDHT for browsers (WISP 103): the relay browsers reach HyperDHT through, on its own HyperDHT network.
+  GHOSTLY_HYPERDHT_RELAY_URL: ["ws://127.0.0.1:47097", "HyperDHT relay (dht-relay over WebSocket, native-transports/hyperdht-relay)"],
 
   // S3 (held messages, profile backups): RustFS with throwaway keys.
   GHOSTLY_S3_ENDPOINT: ["http://127.0.0.1:47080", "S3-compatible endpoint (RustFS)"],
@@ -120,6 +123,7 @@ export const endpoints = {
   fedimint: { api: read("GHOSTLY_FEDIMINT_API_URL"), gateway: read("GHOSTLY_FEDIMINT_GATEWAY_URL") },
   usdt: { rpc: read("GHOSTLY_USDT_RPC_URL"), token: read("GHOSTLY_USDT_TOKEN") },
   irohRelay: read("GHOSTLY_IROH_RELAY_URL"),
+  hyperdhtRelay: read("GHOSTLY_HYPERDHT_RELAY_URL"),
   s3: { endpoint: read("GHOSTLY_S3_ENDPOINT"), key: read("GHOSTLY_S3_KEY"), secret: read("GHOSTLY_S3_SECRET") },
 };
 

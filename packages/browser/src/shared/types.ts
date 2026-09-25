@@ -563,6 +563,12 @@ export interface Settings {
    * packet goes through one. Absent or empty means the defaults (n0's public relays, as the desktop app's).
    */
   irohRelays?: string[];
+  /**
+   * The HyperDHT relay (wss://) this browser reaches the HyperDHT through, so paired chats can use HyperDHT
+   * (WISP 103) beside WebRTC. Empty: none. Absent means the default (shared/hyperdhtRelay.ts). The Desktop
+   * runs HyperDHT itself and ignores it.
+   */
+  hyperdhtRelay?: string;
   /** Cashu mints this peer holds ecash at and accepts ecash from. The first is where invoices are created. */
   mints: string[];
   /** False until the default mints were put in place once; after that the list is the user's. */
@@ -689,6 +695,8 @@ export interface LinkView {
   /** Paired chats: why a call cannot be placed right now, or null when it can. */
   callsUnavailable?: string | null;
   availableTransports?: PairedTransport[];
+  /** Transports a session with this contact would cross a relay on (a browser's HyperDHT or Iroh): a fallback, and shown as relayed. */
+  relayedTransports?: PairedTransport[];
   deliveryMode?: DeliveryMode;
   dhtDelivery?: DhtDeliveryView;
   canSendText?: boolean;

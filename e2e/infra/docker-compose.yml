@@ -354,6 +354,17 @@ services:
       CDK_MINTD_INPUT_FEE_PPK: "100"
     ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47090:3338"]
 
+  # ── HyperDHT for browsers: the relay (native-transports/hyperdht-relay) on a HyperDHT network of its own ─────
+  # The relay and a three-node HyperDHT network run in one process on the container's loopback, so the suites'
+  # browsers reach HyperDHT through the relay only, and nothing touches the public HyperDHT.
+  hyperdht-relay:
+    build: ../../native-transports/hyperdht-relay
+    image: ghostly-e2e-hyperdht-relay
+    container_name: ghostly-e2e-hyperdht-relay
+    restart: on-failure
+    environment: { GHOSTLY_HYPERDHT_TESTNET: "3", GHOSTLY_RELAY_CLIENTS_PER_ADDRESS: "64" }
+    ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47097:49443"]
+
 volumes:
   bark-captaind:
   bark-postgres:

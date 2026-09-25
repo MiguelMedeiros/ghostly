@@ -132,7 +132,7 @@ describe("the chat's Connection menu", () => {
       { transport: "hyperdht/1", available: false, reason: "Your contact's app doesn't support HyperDHT" },
     ]);
     expect(transportOptions({ availableTransports: ["webrtc/1"], peerTransports: undefined }).filter(o => !o.available).map(o => o.reason))
-      .toEqual(["Iroh needs Ghostly Desktop", "HyperDHT needs Ghostly Desktop"]);
+      .toEqual(["Iroh needs Ghostly Desktop", "HyperDHT needs Ghostly Desktop, or a HyperDHT relay in Settings"]);
     // A native adapter that could not start says so; Linux WebKitGTK has no WebRTC.
     expect(transportOptions({ availableTransports: ["hyperdht/1"], transportErrors: { "iroh/1": "All eight native connection slots are in use." } }).map(o => o.reason))
       .toEqual(["This app has no WebRTC", "All eight native connection slots are in use.", undefined]);
@@ -193,7 +193,7 @@ describe("the chat's Connection menu", () => {
     expect(radios.map(r => r.getAttribute("aria-label"))).toEqual(["WebRTC", "DHT only"]);
     expect(radios[0]).toHaveAttribute("aria-checked", "true");
     expect(radios[0]).toBeDisabled();
-    expect(within(menu).getByTestId("transport-menu-note")).toHaveTextContent("This app connects over WebRTC only. Iroh and HyperDHT need Ghostly Desktop on both sides.");
+    expect(within(menu).getByTestId("transport-menu-note")).toHaveTextContent("This app connects over WebRTC only. Iroh needs Ghostly Desktop; HyperDHT needs Ghostly Desktop or a HyperDHT relay (Settings, Network).");
     // DHT only is always there, on every app.
     await user.click(within(menu).getByTestId("transport-option-dht"));
     expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "dht" }]);

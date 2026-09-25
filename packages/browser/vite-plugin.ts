@@ -46,12 +46,20 @@ const PLATFORM_MODULES = new Map([
   [desktop("hooks/useBackgroundPoller.ts"), platform("useBackgroundPoller.ts")],
 ]);
 
+/**
+ * Packages a browser build replaces. `noise-curve-ed` (HyperDHT's Noise curve, which dht-relay's client
+ * loads) needs a libsodium call sodium-javascript lacks; the stand-in computes the same on noble curves.
+ */
+const BROWSER_PACKAGES = new Map([
+  ["noise-curve-ed", platform("noiseCurveEd.ts")],
+]);
+
 export function ghostlyPlatformModules(): Plugin {
   return {
     name: "ghostly-platform-modules",
     enforce: "pre",
     async resolveId(source, importer, options) {
-      const sdkModule = SDK_MODULES.get(source);
+      const sdkModule = SDK_MODULES.get(source) ?? BROWSER_PACKAGES.get(source);
       if (sdkModule) return sdkModule;
       if (!importer || importer.startsWith(platform(""))) return null;
       const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });

@@ -664,6 +664,14 @@ export class GhostLink {
   /** The round trip last measured on the open session; unknown until a ping was answered. */
   get rttMs(): number | undefined { return this.isDataLinkOpen ? this.rtt : undefined; }
 
+  /**
+   * The transports a session with this contact would cross a relay on: those either side reaches only
+   * through one (a browser's HyperDHT or Iroh), per the latest descriptors both sides gave.
+   */
+  get relayedTransports(): PairedTransport[] {
+    return relayedTransports(this.localDescriptors(), this.switcher.peerPolicy?.descriptors ?? this.peerDescriptors);
+  }
+
   get availableTransports(): PairedTransport[] {
     return [...(this.options.rtcAvailable !== false ? ["webrtc/1" as const] : []), ...this.endpoints.keys()];
   }

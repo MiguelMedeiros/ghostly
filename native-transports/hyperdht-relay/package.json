@@ -1,0 +1,14 @@
+{
+  "name": "ghostly-hyperdht-relay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A dht-relay for Ghostly's browsers: it runs their HyperDHT over a WebSocket and never holds their keys.",
+  "main": "relay.mjs",
+  "scripts": { "start": "node server.mjs" },
+  "dependencies": {
+    "@hyperswarm/dht-relay": "0.4.3",
+    "hyperdht": "6.34.0",
+    "ws": "8.21.3"
+  }
+}

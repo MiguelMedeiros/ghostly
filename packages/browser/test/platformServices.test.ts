@@ -230,6 +230,13 @@ describe("wallet and settings", () => {
     ]);
   });
 
+  it("reads and saves the HyperDHT relay with the rest of the network", async () => {
+    withLinks(chat({ peerOnline: true }));
+    expect(services.getNetwork()).toMatchObject({ hyperdhtRelay: "" });
+    await services.setNetwork({ relays: ["wss://a"], turn: null, hyperdhtRelay: "wss://relay.example" });
+    expect(engine.calls.at(-1)).toEqual(["updateSettings", { settings: { relays: ["wss://a"], iceServers: [], hyperdhtRelay: "wss://relay.example" } }]);
+  });
+
   it("leaves payment links to the page when the host cannot open them", async () => {
     expect(services.openPaymentLink("lightning:lnbc1")).toBeNull();
     const open = vi.fn(async () => {});

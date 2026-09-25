@@ -8,6 +8,8 @@
 //   node e2e/infra/infra.mjs status   the containers and whether each endpoint answers
 //   node e2e/infra/infra.mjs check    whether it answers, read-only: exit 0 yes, 1 no, 3 not checked (another host
 //                                     with no connection from here: check opens none and forwards nothing)
+//   node e2e/infra/infra.mjs add <service>…  start services new to docker-compose.yml on an environment that is up,
+//                                     alone (no other service touched, nothing mined or funded), then `use` it
 //   node e2e/infra/infra.mjs use      an environment that is already up, as it is: check it answers, write .env.e2e
 //                                     (npm run e2e:infra:use; with --host, how another checkout joins the shared one)
 //   node e2e/infra/infra.mjs full [--keep] [--no-vitest] [-- <playwright args>]         (npm run e2e:full)
@@ -90,6 +92,7 @@ const PROBES = {
   "Fedimint guardian / gateway": async () => (await tcp(endpoints.fedimint.api.replace(/^ws/, "http"))) && tcp(endpoints.fedimint.gateway),
   S3: () => http(`${endpoints.s3.endpoint}/health`),
   "Iroh relay": () => http(endpoints.irohRelay),
+  "HyperDHT relay": () => http(`${endpoints.hyperdhtRelay.replace(/^ws/, "http")}/healthz`),
   // The environment's own mint, whatever E2E_MINT_URL points the suite at.
   "Cashu mint": () => http(`${read("E2E_MINT_URL")}/v1/info`),
 };
@@ -290,6 +293,19 @@ async function check() {
   if (!ok) process.exitCode = 1;
 }
 
+/**
+ * A service added to docker-compose.yml since the environment came up, started on its own: `up` would re-seed, which
+ * mines blocks under whatever the other checkouts sharing it are running. Its image is built from this checkout.
+ */
+async function add(services) {
+  if (!services.length || services.some((service) => !/^[a-z0-9-]+$/.test(service))) throw new Error("usage: infra.mjs [--host <ssh target>] add <service>…");
+  if (remote) forwardAll({ strict: false });
+  if (!containers().length) throw new Error(`${where} is not running: bring it up first (npm run e2e:infra:up${remote ? ` -- --host ${HOST}` : ""})`);
+  log(`adding ${services.join(", ")} to ${where}`);
+  if (compose(["up", "-d", "--no-deps", "--build", "--wait", ...services]) === null) throw new Error(`docker compose up ${services.join(" ")} failed`);
+  await use();
+}
+
 function run(command, args, env) {
   return new Promise((resolve) => {
     const child = spawn(command, args, { cwd: ROOT, env, stdio: "inherit" });
@@ -360,8 +376,9 @@ try {
   else if (command === "status") await status();
   else if (command === "check") await check();
   else if (command === "use") await use();
+  else if (command === "add") await add(rest);
   else if (command === "full") await full(rest);
-  else { console.error("usage: infra.mjs [--host <ssh target>] up | seed | down | reset | status | check | use | full [--keep] [--no-vitest] [-- <playwright args>]"); process.exit(2); }
+  else { console.error("usage: infra.mjs [--host <ssh target>] up | seed | down | reset | status | check | use | add <service>… | full [--keep] [--no-vitest] [-- <playwright args>]"); process.exit(2); }
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);
   process.exit(1);
