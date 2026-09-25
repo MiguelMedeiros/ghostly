@@ -1644,6 +1644,8 @@ export class GhostlyNode implements EngineImplementation {
     if (log?.chose("you", preferred, Date.now())) this.saveTransportLog(live, log);
     // Not a choice (the Fallback switch): no switch intent on the wire either, or it could beat the contact's.
     await live.link.setTransportPreference(preferred, fallback, false, chosen);
+    // The capability record names the chat's choice, for a contact with no session to hear it on.
+    this.capsChanged(linkId);
   }
 
   /**
@@ -1677,6 +1679,7 @@ export class GhostlyNode implements EngineImplementation {
     if (log?.chose("you", "automatic", Date.now())) this.saveTransportLog(live, log);
     // The app's rule: WebRTC first where there is one (Linux WebKitGTK has none), fallback on.
     await live.link.setTransportPreference(automaticTransport(live.link.availableTransports), true, true);
+    this.capsChanged(linkId);
   }
 
   /** The chat's connection story, for paired chats (not group edges). */
@@ -2458,9 +2461,16 @@ export class GhostlyNode implements EngineImplementation {
         onIdentityProof: stored.profile ? frame => this.identities.frame(linkId, frame) : undefined,
         onTransportsChanged: () => {
           if (live.link && !live.link.availableTransports.includes("hyperdht/1")) this.retryRelayLater();
+          // How to dial this side changed (an endpoint went, or homed on a relay): the capability record says so.
+          this.capsChanged(linkId);
           this.emitState();
         },
-        onPeerTransportChoice: transport => { const log = this.transportLogOf(live); if (log?.chose("contact", transport, Date.now())) this.saveTransportLog(live, log); },
+        onPeerTransportChoice: (transport, apart) => {
+          const log = this.transportLogOf(live);
+          // Heard apart from a session's intent (its record, or a session it chose before): a row only if it is news.
+          if (!log || (apart && log.lastChoice("contact") === transport)) return;
+          if (log.chose("contact", transport, Date.now())) this.saveTransportLog(live, log);
+        },
         onTransportSwitched: () => {
           // Frames of the old channel may have been cut short: what the contact has not confirmed goes again at
           // once over the new one (it acknowledges a repeated id without showing it twice), and so do payments.
@@ -2598,7 +2608,10 @@ export class GhostlyNode implements EngineImplementation {
       live.caps.start();
       // The contact's record as last read: what its app runs, before any session says more (WISP 03).
       const peer = live.caps.peer;
-      if (peer) link.learnPeerTransports(peer.transports.filter((t): t is PairedTransport => (TRANSPORTS as readonly string[]).includes(t)), dialDescriptors(peer.descriptors));
+      if (peer) {
+        link.learnPeerTransports(peer.transports.filter((t): t is PairedTransport => (TRANSPORTS as readonly string[]).includes(t)), dialDescriptors(peer.descriptors));
+        link.learnPeerChoice(peer.choice);
+      }
     }
     // Unused invites need discovery, not two native listeners. Saved contacts
     // retain background listeners within the real native capacity.
@@ -2627,6 +2640,8 @@ export class GhostlyNode implements EngineImplementation {
       extensions: ["ping/1"],
       descriptors: capsDescriptors(live?.link?.nativeDescriptors),
       name,
+      // The transport chosen for this chat, for a contact with no session to hear it on (WISP 100).
+      ...(live?.link?.choice ? { choice: live.link.choice } : {}),
     };
   }
 
@@ -2654,8 +2669,10 @@ export class GhostlyNode implements EngineImplementation {
   private peerCapsChanged(linkId: string, record: CapsRecord): void {
     const live = this.links.get(linkId);
     if (!live) return;
-    // Native transports to try without WebRTC first; a session's own word, when there was one, stays.
-    live.link?.learnPeerTransports(record.transports.filter((t): t is PairedTransport => (TRANSPORTS as readonly string[]).includes(t)), dialDescriptors(record.descriptors));
+    // Native transports to try without WebRTC first, and how to dial them as the contact last said; a choice it made
+    // meanwhile (WISP 100, "A choice made while not live").
+    live.link?.learnPeerTransports(record.transports.filter((t): t is PairedTransport => (TRANSPORTS as readonly string[]).includes(t)), dialDescriptors(record.descriptors), true);
+    live.link?.learnPeerChoice(record.choice, true);
     if (live.link?.isDataLinkOpen) return;
     if (record.name !== (live.stored.peerNick ?? "")) {
       live.stored = { ...live.stored, peerNick: record.name };

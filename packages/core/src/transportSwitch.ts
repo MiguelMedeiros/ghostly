@@ -44,6 +44,8 @@ export class TransportSwitch {
   private settled = "";
   private failed = "";
   private preparing = false;
+  /** This side chose while no session was open: the next one begins with it as a choice. */
+  private apart = false;
   constructor(private readonly options: {
     key: string; peerKey: string;
     policy(): Omit<TransportPolicy, "revision" | "intent">;
@@ -107,6 +109,8 @@ export class TransportSwitch {
   begin(context: string, actual: PairedTransport, migrated = false): void {
     this.settled = migrated && this.plan ? this.signature(this.plan.local, this.plan.remote) : "";
     if (!migrated) this.failed = "";
+    // A choice made while apart is a choice now: above the contact's last intent, as one made on a session would be.
+    if (this.apart) { this.intent = Math.max(this.intent, this.lastRemote?.intent ?? 0) + 1; this.apart = false; }
     this.clearPlan();
     this.context = context; this.actual = actual;
     this.options.state(); this.announce();
@@ -115,7 +119,7 @@ export class TransportSwitch {
    * current transport is kept while it is allowed. */
   changed(userIntent: boolean | "automatic" = true): void {
     this.revision++;
-    if (userIntent === "automatic") this.intent = 0;
+    if (userIntent === "automatic") { this.intent = 0; this.apart = false; }
     else if (userIntent) this.intent = Math.max(this.intent, this.remote?.intent ?? 0) + 1;
     this.failed = "";
     this.announce(); this.reconcile();
@@ -127,6 +131,11 @@ export class TransportSwitch {
    * Choosing again while the contact's choice stands is an override, and raises it.
    */
   chose(again = false): void { this.changed(!(again && this.standing)); }
+  /**
+   * This side's user chose with no session open (WISP 100, "A choice made while not live"). Nothing to announce it on:
+   * the next session begins with it as a choice, so the chat moves there if that session opened elsewhere.
+   */
+  choseApart(): void { this.revision++; this.apart = true; this.failed = ""; }
   /** This side's explicit choice is the one that stands (its intent is the higher, or wins the tie). */
   get standing(): boolean {
     if (this.intent === 0) return false;

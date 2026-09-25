@@ -5,7 +5,7 @@ import { proofHash, type ProofAdapter, type ProofScope } from "./peerProofs";
 import { IDENTITY_MAX_FRAME, type IdentityScope } from "./identityProofs";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { identityFromSeedB64 } from "./identity";
-import { rankTransports, relayedTransports, transportOrder, type NativeEndpoint, type NativeBinding, type NativeTransport, type PairedTransport, type TransportDescriptors } from "./pairedTransports";
+import { TRANSPORTS, rankTransports, relayedTransports, transportOrder, type NativeEndpoint, type NativeBinding, type NativeTransport, type PairedTransport, type TransportDescriptors } from "./pairedTransports";
 import { sanitizeNick } from "./text";
 import { sanitizeAvatar } from "./avatar";
 import { randomBytes, toBase64Url, utf8Encode } from "./bytes";
@@ -100,6 +100,22 @@ export interface IncomingMessage {
  * The transport a chat is set to reach and is not on yet (WISP 100, "A chosen transport not reached yet"): waited for,
  * never failed. `by`: whose choice names it (absent: a policy alone, such as Fallback off, limits the chat to it).
  */
+/**
+ * A native descriptor from the contact's capability record against the one known (a session's, or an older record's).
+ * The record carries only how to dial, never an address: the Iroh endpoint id and the relay it is homed on, the
+ * HyperDHT key and the relay a browser's goes through. For the same endpoint, a known Iroh descriptor keeps its
+ * addresses and takes the record's relay. `newer`: the record was just read, so what it says replaces what is known;
+ * otherwise it only fills a relay the known one lacks. The known one itself when nothing changes.
+ */
+function recordDescriptor(transport: NativeTransport, known: unknown, record: unknown, newer: boolean): unknown {
+  if (!record) return known;
+  if (!known) return record;
+  const k = known as { id?: unknown; publicKey?: unknown; relay?: unknown }, r = record as typeof k;
+  if (transport === "iroh/1" ? k.id !== r.id : k.publicKey !== r.publicKey) return newer ? record : known;
+  if (!r.relay || r.relay === k.relay || (k.relay && !newer)) return known;
+  return transport === "iroh/1" ? { ...k, relay: r.relay } : record;
+}
+
 export interface TransportWait {
   transport: PairedTransport;
   by?: "you" | "contact";
@@ -131,9 +147,11 @@ export interface GhostLinkEvents {
   onTransportsChanged?(): void;
   /**
    * The contact chose a transport for this chat just now (its switch intent went up on the open session), or went
-   * back to automatic (its intent fell to 0). Nothing new on the wire: read from the `paired-policy` it already sends.
+   * back to automatic (its intent fell to 0). `apart`: heard with no session to raise an intent on, from its capability
+   * record, or from the first policy of a session it chose before (WISP 100, "A choice made while not live"); the
+   * owner may have told it already.
    */
-  onPeerTransportChoice?(transport: PairedTransport | "automatic"): void;
+  onPeerTransportChoice?(transport: PairedTransport | "automatic", apart?: boolean): void;
   /**
    * A switch to `target` could not connect and the session stayed where it was (both allow fallback). `reason` is
    * known on the side that dialled; the other side learns only that it did not happen.
@@ -297,6 +315,11 @@ export class GhostLink {
   private automatic: boolean;
   /** What the contact's latest capability record says its app runs (WISP 03); unknown until one is read. */
   private peerRecordTransports?: PairedTransport[];
+  /**
+   * The contact's explicit choice for this chat as last heard, from its capability record or a session's switch
+   * intent; none on Automatic, or before either said (WISP 100, "A choice made while not live").
+   */
+  private peerChoice?: PairedTransport;
   /** The transport the chat waits for (WISP 100): attempts that failed in a row, the last error, the next retry. */
   private waiting: { transport: PairedTransport; failures: number; told?: boolean; error?: string; retryAt?: number; timer?: ReturnType<typeof setTimeout> } | null = null;
   private paired: PairedSession | null = null;
@@ -504,9 +527,12 @@ export class GhostLink {
       peer: policy => {
         const before = this.peerPolicySeen;
         this.peerPolicySeen = { intent: policy.intent };
-        if (before && policy.intent > before.intent) options.events?.onPeerTransportChoice?.(policy.preferred);
+        if (before && policy.intent > before.intent) { this.peerChoice = policy.preferred; options.events?.onPeerTransportChoice?.(policy.preferred); }
         // Intent 0 is only ever "automatic": the contact dropped its standing choice.
-        else if (before && before.intent > 0 && policy.intent === 0) options.events?.onPeerTransportChoice?.("automatic");
+        else if (before && before.intent > 0 && policy.intent === 0) { this.peerChoice = undefined; options.events?.onPeerTransportChoice?.("automatic"); }
+        // A session's first policy that stands for a choice not heard of yet: made while no session was open, and its
+        // record not read (yet). Said once, and the owner knows what it already told.
+        else if (!before && policy.intent > 0 && policy.preferred !== this.peerChoice) { this.peerChoice = policy.preferred; options.events?.onPeerTransportChoice?.(policy.preferred, true); }
         this.peerDescriptors = policy.descriptors;
         this.peerTransports = transportOrder(policy.available, policy.preferred, true);
         this.peerFallback = policy.fallback;
@@ -810,15 +836,24 @@ export class GhostLink {
 
   /**
    * The contact's capability record named its native transports and how to dial them: a chat whose WebRTC never
-   * connected can still try Iroh or HyperDHT. What a session said (fresher, transcript-bound) is not replaced.
+   * connected can still try Iroh or HyperDHT. `fresh`: a record just read, the contact's latest word, so a way to dial
+   * it gives (a relay its Iroh endpoint homed on after it started, a new endpoint) replaces the one known. Otherwise (the
+   * record kept from before) it only fills what is missing: what a session said is fresher, and transcript-bound.
    */
-  learnPeerTransports(transports: PairedTransport[], descriptors: TransportDescriptors): void {
+  learnPeerTransports(transports: PairedTransport[], descriptors: TransportDescriptors, fresh = false): void {
     const wanted = this.wanted()?.transport;
     const listed = !!wanted && !!this.peerRecordTransports?.includes(wanted), dialable = !!wanted && !!this.peerDescriptors[wanted as NativeTransport];
     // The record lists every transport the contact's app runs, started or not (WISP 03): what it lacks, it lacks.
     this.peerRecordTransports = [...transports];
-    let changed = false;
-    for (const t of ["iroh/1", "hyperdht/1"] as const) if (descriptors[t] && !this.peerDescriptors[t]) { this.peerDescriptors = { ...this.peerDescriptors, [t]: descriptors[t] }; changed = true; }
+    let changed = false, redescribed = false;
+    for (const t of ["iroh/1", "hyperdht/1"] as const) {
+      const known = this.peerDescriptors[t], next = recordDescriptor(t, known, descriptors[t], fresh);
+      if (next === known) continue;
+      this.peerDescriptors = { ...this.peerDescriptors, [t]: next };
+      changed = true; redescribed ||= t === wanted;
+      // A new way to dial it: the attempts that failed on the old one say nothing about this one.
+      this.nativeFailures.delete(t); this.demotedUntil.delete(t);
+    }
     if (!this.peerTransports && transports.length) { this.peerTransports = transports; this.peerFallback = true; changed = true; }
     else {
       // Its app runs more than a session said (an endpoint that started later): those go after the session's order.
@@ -826,7 +861,7 @@ export class GhostLink {
       if (added.length) { this.peerTransports = [...this.peerTransports!, ...added]; changed = true; }
     }
     // A transport the chat waits for, newly listed or dialable: tried again now, not at the next retry (WISP 100).
-    if (wanted && ((!listed && transports.includes(wanted)) || (!dialable && !!this.peerDescriptors[wanted as NativeTransport]))) this.waitNews();
+    if (wanted && ((!listed && transports.includes(wanted)) || (!dialable && !!this.peerDescriptors[wanted as NativeTransport]) || redescribed)) this.waitNews();
     this.notifyWait();
     if (!changed) return;
     traceLink(this.myPubKeyZ32, "record-transports", { transports });
@@ -848,6 +883,44 @@ export class GhostLink {
     void this.dht?.announce().catch(() => {});
   }
 
+  /** The transport chosen for this chat on this side, for its capability record; none on Automatic. */
+  get choice(): PairedTransport | undefined { return this.automatic ? undefined : this.preferred; }
+
+  /**
+   * The contact's explicit choice as its capability record names it (WISP 100, "A choice made while not live"): how a
+   * contact with no session hears of it. `fresh`: a record just read. One that names another choice than the last heard
+   * is told (`onPeerTransportChoice`, apart) and dialled first from now on. With a session open, its intents are the
+   * contact's word, not a record that may be older; the record kept from before only sets where to start.
+   */
+  learnPeerChoice(choice: string | undefined, fresh = false): void {
+    const next = (TRANSPORTS as readonly string[]).includes(choice ?? "") ? choice as PairedTransport : undefined;
+    if (!fresh) { this.peerChoice = next; return; }
+    if (this.isDataLinkOpen || next === this.peerChoice) return;
+    this.peerChoice = next;
+    this.options.events?.onPeerTransportChoice?.(next ?? "automatic", true);
+    this.syncWait(); this.notifyWait();
+    this.dialNow();
+  }
+
+  /**
+   * The explicit choice that stands with no session to agree in (WISP 100, "A choice made while not live"): this
+   * side's, or the contact's last heard. When both chose and they differ, the lower rendezvous key's, as a tie is
+   * settled on a session. None when neither chose.
+   */
+  private get choiceApart(): { transport: PairedTransport; by: "you" | "contact" } | undefined {
+    const mine = this.choice, theirs = this.peerChoice;
+    if (mine && (!theirs || theirs === mine || this.myPubKeyZ32 < this.options.params.peerPubKeyZ32)) return { transport: mine, by: "you" };
+    return theirs ? { transport: theirs, by: "contact" } : undefined;
+  }
+
+  /** Something decides where the chat dials first now: the next attempt goes at once, not after the wait failures built up. */
+  private dialNow(): void {
+    if (this.channel || this.dialing) return;
+    this.autoConnectFailures = 0;
+    this.lastAutoConnectAt = 0;
+    this.maybeAutoConnect(this.presence);
+  }
+
   /**
    * Where the chat is set to go and is not yet (WISP 100, "A chosen transport not reached yet"). With a session, the
    * agreement of both policies; without one, only a limit of this side's (Fallback off) says where the chat must go:
@@ -861,7 +934,10 @@ export class GhostLink {
       const wanted = this.switcher.wanted();
       return wanted && wanted.transport !== state.transport ? wanted : undefined;
     }
-    return this.fallback ? undefined : { transport: this.preferred, ...(this.automatic ? {} : { by: "you" as const }) };
+    if (!this.fallback) return { transport: this.preferred, ...(this.automatic ? {} : { by: "you" as const }) };
+    // Any transport may carry the chat, but someone chose one (WISP 100, "A choice made while not live"): a side that
+    // lacks it says so, as with Fallback off.
+    return this.choiceApart;
   }
 
   /** The transport this chat waits for, and why; absent when it is on it, or nothing limits where it goes. */
@@ -974,7 +1050,9 @@ export class GhostLink {
       this.endpoints.delete(endpoint.transport);
       this.advertiseTransports(); this.options.events?.onTransportsChanged?.();
     };
-    endpoint.onDescriptor = () => this.advertiseTransports();
+    // A way to dial it changed (the Desktop's Iroh homed on a relay a few seconds after it bound): the open session
+    // hears it, and the owner republishes the capability record, which is all a contact with no session has.
+    endpoint.onDescriptor = () => { this.advertiseTransports(); this.options.events?.onTransportsChanged?.(); };
     // A changed available offer needs a new authenticated session before native
     // transports are usable. Until then descriptors can be saved but not selected.
     this.advertiseTransports();
@@ -1027,15 +1105,19 @@ export class GhostLink {
       this.emitPairingState(); return;
     }
     this.notifyWait();
-    // A choice made while offline carries no intent into the next session; going automatic clears an older one.
+    // A choice made with no session open (WISP 100, "A choice made while not live") reaches the contact in the
+    // capability record, goes first in the dial, and is the choice the next session begins with (a switch intent), so
+    // a session that opens elsewhere moves there. Going automatic clears it, and an older one.
     if (automatic) this.switcher.changed("automatic");
-    // A preference is local configuration, not an instruction to find a peer.
-    // Discovery/incoming connections will use this offer when a contact arrives.
-    // This also applies to a saved contact that is currently offline.
+    else if (choice) this.switcher.choseApart();
+    // Discovery/incoming connections use this offer when a contact arrives. This also applies to a saved contact that
+    // is currently offline.
     if (!this.isDataLinkOpen) {
       // Invalidate an older, incomplete attempt. A late native dial must not
       // install a session using preferences that have since been changed.
       if (this.channel || this.dialing || this.dataLink.state !== "idle") this.disconnect();
+      // Someone chose: the dialling side tries at once, the choice first.
+      if (automatic || choice) this.dialNow();
       return;
     }
   }
@@ -1053,8 +1135,9 @@ export class GhostLink {
       // PairedSession offer enforces the peer's current (possibly offline-edited) policy.
       const remembered = this.peerTransports && rankTransports(local, this.peerFallback ? this.peerTransports : this.peerTransports.slice(0, 1), relayed);
       const ranked = remembered?.length ? remembered : this.peerTransports ? rankTransports(local, this.peerTransports, relayed) : local.filter(t => t === "webrtc/1");
-      // A standing explicit choice goes first: the session starts where the agreement would move it anyway.
-      const chosen = this.switcher.chosenTarget;
+      // A standing explicit choice goes first, relayed or not: the session starts where the agreement would move it
+      // anyway. With no session behind it, the choice this side or the contact made meanwhile (WISP 100).
+      const chosen = this.switcher.chosenTarget ?? this.choiceApart?.transport;
       const choices = chosen && ranked.includes(chosen) ? [chosen, ...ranked.filter(t => t !== chosen)] : ranked;
       if (!choices.length) throw new Error("No transport both apps allow is available yet");
       const fallback = this.fallback && this.peerFallback;
