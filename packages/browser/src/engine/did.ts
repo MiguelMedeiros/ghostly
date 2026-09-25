@@ -124,7 +124,8 @@ export class ProfileDid {
     try {
       encodeDidDhtPacket(didDhtDocument(this.publicKey(), { alsoKnownAs: this.alsoKnownAs(next) }));
     } catch (error) {
-      if (error instanceof PacketTooLargeError) throw new Error("Your DID has no room for another identity (1000 bytes). Take one out first.", { cause: error });
+      // eslint-disable-next-line preserve-caught-error -- a message for the person; ES2020 has no Error.cause.
+      if (error instanceof PacketTooLargeError) throw new Error("Your DID has no room for another identity (1000 bytes). Take one out first.");
       throw error;
     }
     await this.save({ ...this.stored!, listed: next });

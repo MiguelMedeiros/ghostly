@@ -81,7 +81,7 @@ describe("Public DID", () => {
     act(() => engine.update({ did: didView({ listed: ["github"], alsoKnownAs: ["https://github.com/octocat"] }) }));
     expect(switches().map(s => s.getAttribute("aria-checked"))).toEqual(["false", "true"]);
     await user.click(switches()[1]);
-    expect(engine.callsTo("setDidListed").at(-1)).toEqual({ id: "github", listed: false });
+    expect(engine.callsTo("setDidListed")).toEqual([{ id: "github", listed: true }, { id: "github", listed: false }]);
   });
 
   it("says why a listing was refused, and keeps an expired identity out until it is renewed", async () => {
