@@ -72,6 +72,10 @@ describe("capability record: keys, seal and signature", () => {
     // Ranked as relayed: after direct paths, before the DHT floor.
     expect(relayedTransports({}, dial)).toEqual(["iroh/1", "hyperdht/1"]);
     expect(capsDescriptors({ "hyperdht/1": { publicKey: HYPER.publicKey, relay: "javascript:alert(1)" } })).toEqual({ "hyperdht/1": { publicKey: expect.any(String) } });
+    // Plain HTTP only on this machine's loopback, as a test relay is; anywhere else a relay is TLS.
+    expect(capsDescriptors({ "iroh/1": { id: IROH.id, relay: "http://127.0.0.1:47085" } })["iroh/1"]).toMatchObject({ relay: "http://127.0.0.1:47085" });
+    expect(capsDescriptors({ "iroh/1": { id: IROH.id, relay: "http://relay.example/" } })["iroh/1"]).not.toHaveProperty("relay");
+    expect(capsDescriptors({ "iroh/1": { id: IROH.id, relay: "http://127.0.0.1.example/" } })["iroh/1"]).not.toHaveProperty("relay");
   });
 
   it("fits 1,000 bytes; past it drops the name, then the extensions, and fails rather than cut capabilities", () => {
@@ -129,11 +133,25 @@ describe("capability record: keys, seal and signature", () => {
     expect(bKeys.open(packetOf(aKeys, old.records), { minRev: 3 }).rev).toBe(3);
   });
 
+  it("carries the chat's choice as a trailing element, and none on Automatic (WISP 100, a choice made while not live)", () => {
+    const { link, aKeys, bKeys } = pair();
+    const chosen = aKeys.seal(content({ choice: "iroh/1" }), 1).records;
+    expect(bKeys.open(packetOf(aKeys, chosen)).choice).toBe("iroh/1");
+    // The body grows by one element, which a reader from before (10 to 16 elements, the rest ignored) still opens.
+    const body = JSON.parse(decryptInvite(link.mine, chosen[0].value))[0];
+    expect(body).toHaveLength(11);
+    expect(body[10]).toBe("iroh/1");
+    // Automatic: the record is the one it was before the element existed.
+    const automatic = aKeys.seal(content(), 2).records;
+    expect(JSON.parse(decryptInvite(link.mine, automatic[0].value))[0]).toHaveLength(10);
+    expect(bKeys.open(packetOf(aKeys, automatic))).not.toHaveProperty("choice");
+  });
+
   it("refuses out-of-bounds fields and the DHT listed as a transport", () => {
     const { aKeys, bKeys } = pair();
     const bad: Partial<CapsContent>[] = [
       { transports: ["dht/1"] }, { versions: [0] }, { capabilities: ["Not An Id"] }, { name: "é".repeat(33) },
-      { versions: Array(9).fill(1) }, { descriptors: { "iroh/1": { id: "short" } } },
+      { versions: Array(9).fill(1) }, { descriptors: { "iroh/1": { id: "short" } } }, { choice: "dht/1" }, { choice: "Not An Id" },
     ];
     for (const over of bad)
       expect(() => bKeys.open(packetOf(aKeys, aKeys.seal(content({ ...over, extensions: [] }), 1).records)), JSON.stringify(over))

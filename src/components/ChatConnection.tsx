@@ -6,7 +6,7 @@ import type { PairedTransport } from "@ghostly/core";
 import { useId, useRef, useState, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { dots, focus, transportName, type ConnectionKind } from "../lib/connection";
-import { connectionSummary, lasting, transportWaitText } from "../lib/transportEvents";
+import { connectionSummary, lasting, liveAttemptText, transportWaitText } from "../lib/transportEvents";
 import { ConnectionIcon } from "./ConnectionIcon";
 import { TransportOptions } from "./TransportOptions";
 import { ConnectionHistory } from "./TransportTimeline";
@@ -52,6 +52,8 @@ export function ChatConnection({ peerKey, paired = true, myKey, status }: {
   // carry the chat meanwhile (Fallback off), so it is on the DHT; otherwise it stays live where it is.
   const wait = !dht ? link?.transportWait : undefined, waitOff = !!wait && !wait.live;
   const waitText = wait ? transportWaitText(wait, contact) : undefined;
+  // Why a pinned chat is not live (WISP 100): what the last attempt tried, or that the contact's app dials. Not for DHT only.
+  const notLive = paired && pinned && !dht && !ready ? liveAttemptText(link?.liveAttempt, link?.liveDialer, contact) : undefined;
   const label = !paired ? status ?? "Connecting" : !online ? "Offline" : connectionFailure ? "Connection issue" : discoveryFailure ? (discoveryFailure.startsWith("Could not publish discovery:") && !discoveryFailure.includes("Could not read discovery:") ? "Publication unavailable" : "Discovery unavailable") : dht ? "DHT only · chosen by you" : textDht && link?.dhtDelivery?.peerMode === "dht" ? "DHT only · chosen by your contact" : waitOff && pair?.transitionTarget ? `Switching · ${name(pair.transitionTarget)}` : waitOff ? `${textDht ? "On DHT · waiting" : "Waiting"} for ${name(wait.transport)}` : textDht ? "On DHT · retrying live" : pair?.transitionTarget ? `Switching · ${name(pair.transitionTarget)}` : ready ? `Connected · ${name(pair?.transport)}${link?.transportRelayed ? " (relayed)" : ""}` : pair?.status === "confirm" ? "Confirm peer" : awaitingJoin ? "No contact yet" : !link?.peerOnline && link?.dataLink === "idle" ? "Waiting for contact" : "Connecting…";
   const kind: ConnectionKind = !paired ? (/^Connected/.test(label) ? "connected" : /issue|unavailable|mismatch/.test(label) ? "failure" : label === "Offline" ? "offline" : "waiting")
     : !online ? "offline" : failure ? "failure" : waitOff && (pair?.transitionTarget || !textDht) ? "waiting" : dht || textDht ? "dht" : ready && !pair?.transitionTarget ? "connected" : "waiting";
@@ -112,6 +114,10 @@ export function ChatConnection({ peerKey, paired = true, myKey, status }: {
               {waitText.automatic && link && <button type="button" data-testid="connection-waiting-automatic" disabled={busy || !online}
                 className={`mt-1.5 min-h-9 rounded-md px-2 text-accent hover:bg-surface disabled:opacity-40 ${focus}`}
                 onClick={() => void run(() => engine.call("setChatTransport", { linkId: link.id, transport: "auto" }))}>Use Automatic</button>}
+            </div>}
+            {notLive && <div data-testid="connection-not-live" data-side={link?.liveAttempt?.side ?? "none"} className="rounded-lg bg-surface-hover px-2.5 py-2 leading-4">
+              <p className="font-medium text-text-primary">{notLive.label}</p>
+              {notLive.lines.map(line => <p key={line} className="mt-0.5 break-words">{line}</p>)}
             </div>}
             {discoveryFailure && <p data-testid="discovery-help">{awaitingJoin && "No contact yet. "}Discovery will retry automatically. You can still share this invite or choose a delivery mode. If this persists, check your internet connection or <Link className={`text-accent underline ${focus}`} to="/settings" onClick={(e) => { e.preventDefault(); nav.open("/settings"); }}>review relay settings</Link>. DHT-only also needs discovery.</p>}
             {summary && <dl data-testid="connection-summary" className="grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-0.5">

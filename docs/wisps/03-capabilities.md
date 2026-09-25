@@ -4,7 +4,7 @@
 |---|---|
 | Candidate number | 03; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.2 |
+| Revision | 0.3 |
 | Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [403](403-dht-text.md) |
@@ -31,7 +31,7 @@ When the two disagree (an app updated between them, a setting changed), the `pai
 
 **Sealing.** Before the pin, sealed with the invitation-derived envelope key and signed by the author's participation key (the joiner's key is learned from it, as from a first-contact envelope). After the pin, sealed with the post-pin envelope key of [DHT delivery](../DHT-DELIVERY.md#invitation-bootstrap-and-encryption), so a copied invite no longer reads it.
 
-**Contents.** `[1, rev, issued, author, versions, transports, capabilities, extensions, descriptors, name]`, signed over `["ghostly-caps", from, to, body]`:
+**Contents.** `[1, rev, issued, author, versions, transports, capabilities, extensions, descriptors, name, choice?]`, signed over `["ghostly-caps", from, to, body]`:
 
 | Field | Meaning | Bound |
 |---|---|---|
@@ -40,14 +40,15 @@ When the two disagree (an app updated between them, a setting changed), the `pai
 | `transports` | Layer-1 transports this runtime has, in local preference order (`iroh/1`, `hyperdht/1`, `webrtc/1`): every one it can run for this chat, started or not. `descriptors` names the started ones, so a contact tells a transport still starting from one the app lacks ([100](100-transports.md#a-chosen-transport-not-reached-yet-revision-04)) | At most 8; never `dht` ([100](100-transports.md#the-dht-floor-upgrade-and-downgrade-revision-02)) |
 | `capabilities` | The same identifiers as `pair-offer`, plus the layer-0 ones: `dht-text/1` (accepts [403](403-dht-text.md) text) and `hold/1` (the **Hold messages** consent of [4xx](4xx-store-and-forward.md)) | At most 32 |
 | `extensions` | As in `pair-offer`: behaviour that grants nothing | At most 32 |
-| `descriptors` | Per native transport, the minimum to dial: the Iroh endpoint id, the HyperDHT public key. No addresses | At most one per transport |
+| `descriptors` | Per native transport, the minimum to dial: the Iroh endpoint id and the relay it is homed on, the HyperDHT public key (and the relay a browser's goes through). No addresses | At most one per transport; a relay is an `https` or `wss` URL, or plain `http`/`ws` on loopback (a test relay) |
 | `name` | The name this profile shares with contacts ([401](401-paired-chat.md#name-and-picture)); empty when it shares none | At most 64 UTF-8 bytes |
+| `choice` | Optional, revision 0.3. The layer-1 transport chosen for this chat in its Connection menu; absent on Automatic. How a contact with no session hears of a choice ([100](100-transports.md#a-choice-made-while-not-live-revision-05)) | One transport identifier, never `dht` |
 
 The complete packet MUST fit 1,000 bytes. If it does not, the author drops `name`, then `extensions`, and fails explicitly if it still does not fit; it never truncates `capabilities` or `transports`.
 
-**Refresh.** Published at first start of the chat, at every change, and hourly while the chat exists. The mailbox envelope carries the record's current `rev` (a new optional trailing element; readers MUST ignore trailing elements they do not know), so a contact re-reads the record only when it changed, when the chat drops to `on-dht`, or at pairing.
+**Refresh.** Published at first start of the chat, at every change, and hourly while the chat exists. A change includes a native descriptor that changes after its endpoint started: a desktop's Iroh endpoint names the relay it is homed on only a few seconds after it binds, and a browser can dial it through nothing else ([102](102-iroh.md#browser-profile-relay-only-revision-03)). The mailbox envelope carries the record's current `rev` (a new optional trailing element; readers MUST ignore trailing elements they do not know), so a contact re-reads the record only when it changed, when the chat drops to `on-dht`, or at pairing.
 
-**Reading it.** A reader refuses a record under the wrong key, not decryptable, not signed by the pinned participation key (or, before the pin, by a key other than the one its first-contact envelope carries), dated more than a minute in the future, or with a `rev` lower than one already seen. A refused record leaves the last good one in force; a contact with no readable record is treated as offering `chat/1` and `dht-text/1` only.
+**Reading it.** A record just read is the author's latest word on how to dial it: its relay (or a new endpoint) replaces the one the reader knew, keeping the addresses a session gave for the same endpoint, and the transport's failures from before count no more. A record kept from an earlier read only fills what the reader lacks, since a later session may have said more. A reader refuses a record under the wrong key, not decryptable, not signed by the pinned participation key (or, before the pin, by a key other than the one its first-contact envelope carries), dated more than a minute in the future, or with a `rev` lower than one already seen. A refused record leaves the last good one in force; a contact with no readable record is treated as offering `chat/1` and `dht-text/1` only.
 
 **What it enables on layer 0.** Exactly two things: DHT text, when the recipient's record lists `dht-text/1`; and holding, when both records list `hold/1` (the per-session `paired-hold` frame still updates it on layer 1). Every other capability in the record only predicts layer 1, so the UI can say "Sends when live" rather than "Not supported".
 
@@ -87,5 +88,6 @@ Choose identifier registry, exact version rules, canonical offer/selection encod
 
 ## Revision log
 
+- 0.3 (2026-09-25): the optional trailing `choice`; the record is published again when a native descriptor changes, and a record just read replaces the relay the reader knew; a loopback test relay may be plain HTTP, as in the relay settings. Apps from before ignore the element, as trailing elements are ignored.
 - 0.2 (2026-09-25): capabilities on two layers; the layer-0 capability record (sketch), with `dht-text/1`, `hold/1`, minimal native descriptors and the shared name.
 - 0.1 (2026-09-20): initial review draft.

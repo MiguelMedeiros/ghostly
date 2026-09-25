@@ -15,7 +15,7 @@ import type { PublicProfile, ProfileChoice } from '../profiles/public';
 import type { NostrContactCache, NostrContactView, NostrSocialSettings, NostrSocialState } from "../nostr/types";
 import type { ProofLedger, ProofAdapter } from "@ghostly/core";
 import type { IdentityDisplay, IdentityLedger, IdentityStatus, SharedIdentity, VerifiedIdentity } from "@ghostly/core";
-import type { DataLinkState, LinkStatus, ServiceAd, PairingState, NativeTransport, PairedTransport, TransportDescriptors, TransportWait } from "@ghostly/core";
+import type { DataLinkState, LinkStatus, LiveAttempt, ServiceAd, PairingState, NativeTransport, PairedTransport, TransportDescriptors, TransportWait } from "@ghostly/core";
 import type { CommunityState, GroupCommit, GroupRole, GroupState, GroupStatus } from "@ghostly/core";
 
 /** A link as stored in IndexedDB. Same fields Desktop keeps in its ChatSession. */
@@ -845,6 +845,13 @@ export interface LinkView {
    * yet"): waited for, never a failure. Absent when the chat is on it, or nothing limits where it goes.
    */
   transportWait?: TransportWait;
+  /**
+   * The last attempt to go live that did not, as this side saw it (WISP 100, "Why a chat is not live"): what it tried
+   * and why each did not connect, whether this side dialled or answered, and when it dials again. Absent while live.
+   */
+  liveAttempt?: LiveAttempt;
+  /** Which side dials this chat to go live (the other answers): paired chats. */
+  liveDialer?: "you" | "contact";
   /** Round trip on the live session, once measured. */
   transportRttMs?: number;
   /**

@@ -61,6 +61,12 @@ export interface CapsContent {
   descriptors: CapsDescriptors;
   /** The name this profile shares with contacts; empty when it shares none. */
   name: string;
+  /**
+   * The layer-1 transport chosen for this chat in its Connection menu, absent on Automatic (WISP 100, "A choice made
+   * while not live"). It reaches a contact that has no session to hear a switch intent on. A trailing element: apps
+   * from before it ignore it.
+   */
+  choice?: string;
 }
 export interface CapsRecord extends CapsContent {
   rev: number;
@@ -69,7 +75,7 @@ export interface CapsRecord extends CapsContent {
   author: string;
 }
 type Body = [version: 1, rev: number, issued: number, author: string, versions: number[], transports: string[], capabilities: string[],
-  extensions: string[], descriptors: CapsDescriptors, name: string];
+  extensions: string[], descriptors: CapsDescriptors, name: string, choice?: string];
 
 export type CapsRefusal = "address" | "size" | "sealed" | "format" | "signature" | "author" | "future" | "rev";
 /** Why a record was not used. A refused record leaves the last good one in force. */
@@ -82,8 +88,11 @@ const HEX64 = /^[0-9a-f]{64}$/;
 const SIG = /^[A-Za-z0-9_-]{86}$/;
 const Z32 = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;
 const KEY = /^[A-Za-z0-9_-]{43}$/;
-/** A relay server's URL: https, or wss for a browser's relay, and short. */
-const RELAY = /^(https|wss):\/\/[^\s]{1,120}$/;
+/**
+ * A relay server's URL, short: https, or wss for a browser's relay; plain http or ws only on this machine's loopback,
+ * as a test relay is (the same rule as the relay settings).
+ */
+const RELAY = /^((https|wss):\/\/[^\s]{1,120}|(http|ws):\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d{1,5})?(\/[^\s]{0,100})?)$/;
 const hexToKey = (hex: string) => toBase64Url(Uint8Array.from(hex.match(/../g)!, b => parseInt(b, 16)));
 const keyToHex = (key: string) => Array.from(fromBase64Url(key), b => b.toString(16).padStart(2, "0")).join("");
 
@@ -176,7 +185,8 @@ export class CapsKeys {
     const dropped: ("name" | "extensions")[] = [];
     let name = content.name, extensions = content.extensions;
     for (;;) {
-      const body: Body = [1, rev, now, this.me, content.versions, content.transports, content.capabilities, extensions, content.descriptors, name];
+      const body: Body = [1, rev, now, this.me, content.versions, content.transports, content.capabilities, extensions, content.descriptors, name,
+        ...(content.choice ? [content.choice] : [])] as Body;
       const signature = toBase64Url(sign(this.signable(this.from, this.to, body), this.seed));
       const records = [{ label: CAPS_LABEL, value: encrypt(JSON.stringify([body, signature]), peerKey ? this.pinnedKey(peerKey) : this.inviteKey), ttl: 3600 }];
       if (measureRecords(this.identity.pubKeyZ32, records) <= MAX_DNS_PACKET_BYTES) return { records, dropped };
@@ -206,14 +216,15 @@ export class CapsKeys {
     const body = envelope[0] as unknown[], signature = envelope[1];
     // Trailing elements a later revision may add are carried by the signature and otherwise ignored.
     if (body.length < 10 || body.length > 16) throw new CapsRefusedError("format", "Malformed capability record.");
-    const [version, rev, issued, author, versions, transports, capabilities, extensions, rawDescriptors, name] = body;
+    const [version, rev, issued, author, versions, transports, capabilities, extensions, rawDescriptors, name, choice] = body;
     const descriptors = parseDescriptors(rawDescriptors);
     if (version !== 1 || !Number.isSafeInteger(rev) || (rev as number) < 0 || !Number.isSafeInteger(issued) || (issued as number) <= 0 ||
       typeof author !== "string" || !Z32.test(author) ||
       !list(versions, CAPS_LIMITS.versions, v => Number.isSafeInteger(v) && (v as number) > 0) ||
       !list(transports, CAPS_LIMITS.transports, ident) || (transports as string[]).includes("dht/1") ||
       !list(capabilities, CAPS_LIMITS.capabilities, ident) || !list(extensions, CAPS_LIMITS.extensions, ident) ||
-      !descriptors || typeof name !== "string" || utf8Encode(name).length > CAPS_LIMITS.nameBytes)
+      !descriptors || typeof name !== "string" || utf8Encode(name).length > CAPS_LIMITS.nameBytes ||
+      (choice !== undefined && (!ident(choice) || choice === "dht/1")))
       throw new CapsRefusedError("format", "Malformed capability record.");
     const signer = options.pinned ?? options.expected;
     if (signer && author !== signer) throw new CapsRefusedError("author", "The capability record is signed by another participation key than this contact's.");
@@ -227,7 +238,7 @@ export class CapsKeys {
     if ((issued as number) > now + CAPS_LIMITS.clockSkewMs) throw new CapsRefusedError("future", "The capability record is dated in the future.");
     if (options.minRev !== undefined && (rev as number) < options.minRev) throw new CapsRefusedError("rev", "An older capability record than one already seen.");
     return { rev: rev as number, issued: issued as number, author, versions: versions as number[], transports: transports as string[],
-      capabilities: capabilities as string[], extensions: extensions as string[], descriptors, name };
+      capabilities: capabilities as string[], extensions: extensions as string[], descriptors, name, ...(choice !== undefined ? { choice: choice as string } : {}) };
   }
 }
 

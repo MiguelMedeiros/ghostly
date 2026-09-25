@@ -90,6 +90,26 @@ describe("one chat: DHT rendezvous, peer-to-peer upgrade, DHT fallback", () => {
     expect(texts(inviter)).toEqual(["hello over the DHT"]);
   }, 120_000);
 
+  it("says on each side why it is not live: what the dialling side tried, and the offer the other side answered", async () => {
+    rtc.blocked = true;
+    const pkarr = new MemoryPkarr(DESKTOP_NETWORK), made = invitation();
+    const inviter = open(made.inviter, pkarr, { dht: true });
+    await run(2_000);
+    const joiner = open(made.joiner, pkarr, { dht: true });
+    expect(await until(() => inviter.link.pairingProgress?.stage === "on-dht" && joiner.link.pairingProgress?.stage === "on-dht", 60_000)).toBeLessThan(Infinity);
+    const [dialling, answering] = inviter.link.dialer === "you" ? [inviter, joiner] : [joiner, inviter];
+    expect(answering.link.dialer).toBe("contact");
+    expect(await until(() => dialling.link.liveAttempt?.side === "dialled" && answering.link.liveAttempt?.side === "answered", 5 * 60_000)).toBeLessThan(Infinity);
+    expect(dialling.link.liveAttempt).toMatchObject({ failed: [{ transport: "webrtc/1" }] });
+    expect(dialling.link.liveAttempt!.retryAt).toBeGreaterThanOrEqual(dialling.link.liveAttempt!.at);
+    expect(answering.link.liveAttempt).toMatchObject({ failed: [{ transport: "webrtc/1", error: "No connection came up" }] });
+    expect(answering.link.liveAttempt!.retryAt).toBeUndefined();
+    // Live once WebRTC gets through: nothing left to explain.
+    rtc.blocked = false;
+    expect(await until(() => inviter.link.isDataLinkOpen && joiner.link.isDataLinkOpen, 5 * 60_000)).toBeLessThan(Infinity);
+    expect([inviter.link.liveAttempt, joiner.link.liveAttempt]).toEqual([undefined, undefined]);
+  }, 120_000);
+
   it("dials a native transport the contact's record just named at once, not after the wait failed attempts built up", async () => {
     // No WebRTC between them (Linux Desktop): until the record arrives there is nothing to dial, and every attempt
     // with nothing to try doubles the wait before the next one, up to three minutes.

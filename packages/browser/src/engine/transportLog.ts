@@ -195,6 +195,20 @@ export class TransportLog {
   }
 
   /**
+   * The choice `by` last made, as the rows tell it: the transport of its latest choice (a `chose` row, or the switch
+   * that choice became), `automatic` when that was going back to the app's rule or there is none.
+   */
+  lastChoice(by: "you" | "contact"): PairedTransport | "automatic" {
+    for (let i = this.entries.length - 1; i >= 0; i--) {
+      const e = this.entries[i];
+      if (e.cause !== by) continue;
+      if (e.kind === "chose") return e.target ?? "automatic";
+      if (e.kind === "switched" && e.transport) return e.transport;
+    }
+    return "automatic";
+  }
+
+  /**
    * Someone chose a transport for this chat just now (`automatic`: back to the app's rule). Always a row; a live
    * switch to it soon after turns that row into the switch. Choosing the one already carrying the chat moves
    * nothing, so there is nothing for it to explain later.

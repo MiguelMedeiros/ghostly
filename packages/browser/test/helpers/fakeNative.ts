@@ -27,15 +27,31 @@ export class FakeNativeNet {
     return () => { if (this.held.get(transport) === waiting) this.held.delete(transport); for (const fail of waiting.splice(0)) fail(); };
   }
 
-  endpoint(transport: NativeTransport, name: string): NativeEndpoint {
-    const id = `${name}:${transport}`, identity = hex(32);
-    const entry = { identity, closed: false, endpoint: null as unknown as NativeEndpoint };
+  /**
+   * `kind`: how the endpoint describes itself. Absent: by name (`{ id: "<name>:<transport>" }`), for tests that hand
+   * descriptors over themselves. Otherwise as the real adapters do, so a capability record can carry it (a 64-hex Iroh
+   * endpoint id, or HyperDHT public key): `direct`, a native endpoint (an Iroh one homed on its relay, with its
+   * addresses); for Iroh also `relay-only`, a browser's,
+   * reachable through its relay alone (its descriptor names the relay and no address) and able to dial only a
+   * descriptor that names one; and `relay-later`, the Desktop's, homed on a relay a few seconds after it binds: it
+   * names none until `homeRelay()`, which then tells the owner, as the Desktop's address refresh does.
+   */
+  endpoint(transport: NativeTransport, name: string, kind?: "direct" | "relay-only" | "relay-later"): NativeEndpoint & { homeRelay(): void } {
+    const id = kind ? hex(32) : `${name}:${transport}`, identity = hex(32);
+    const entry = { identity, closed: false, endpoint: null as unknown as NativeEndpoint & { homeRelay(): void } };
+    const descriptor = !kind ? { id } : transport === "hyperdht/1" ? { publicKey: id }
+      : kind === "relay-only" ? { id, relay: "https://relay.test/", addresses: [], relayed: true }
+      : { id, relay: kind === "direct" ? "https://relay.test./" : null, addresses: ["192.0.2.1:4000"] };
     entry.endpoint = {
-      transport, descriptor: { id }, onConnection: null, onDescriptor: null,
+      transport, descriptor, onConnection: null, onDescriptor: null,
+      homeRelay: () => { entry.endpoint.descriptor = { ...descriptor, relay: "https://relay.test./" }; entry.endpoint.onDescriptor?.(); },
       connect: async descriptor => {
         const waiting = this.held.get(transport);
         if (waiting) await new Promise<void>((_, reject) => waiting.push(() => reject(new Error(`${transport} dial abandoned`))));
-        const remote = this.endpoints.get((descriptor as { id?: string })?.id ?? "");
+        const d = descriptor as { id?: string; publicKey?: string; relay?: unknown } | undefined;
+        const remote = this.endpoints.get(d?.id ?? d?.publicKey ?? "");
+        // A page cannot send UDP: without the contact's relay there is no way to it (the wasm adapter's words).
+        if (kind === "relay-only" && !d?.relay) throw new Error("The contact has no Iroh relay");
         if (this.unreachable.has(transport)) throw new Error(`${transport} unreachable`);
         if (!remote || remote.closed || entry.closed) throw new Error("Peer native address unavailable");
         const [mine, theirs] = this.pair();

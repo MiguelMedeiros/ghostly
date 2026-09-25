@@ -1,4 +1,4 @@
-import { TRANSPORTS, type PairedTransport, type TransportWait } from "@ghostly/core";
+import { TRANSPORTS, type LiveAttempt, type PairedTransport, type TransportWait } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import type { TransportEntry, TransportEvent } from "@ghostly/browser/engine/transportLog";
 import { transportName } from "./connection";
@@ -239,6 +239,24 @@ export function transportWaitText(wait: TransportWait, contact: string, format: 
     meanwhile: wait.live ? `The chat stays on ${name(wait.live)} meanwhile.` : "Short texts go through the DHT meanwhile; the rest waits.",
     automatic: wait.reason === "contact-lacks" || (wait.reason === "app-lacks" && wait.by !== "contact"),
   };
+}
+
+/**
+ * Why a chat on the DHT is not live, said for people (WISP 100, "Why a chat is not live"): what this side's last
+ * attempt tried and why each did not connect, and when it tries again; on the side that answers, that the contact's
+ * app dials, and what of its attempts reached this one. Nothing when there is nothing to say yet.
+ */
+export function liveAttemptText(attempt: LiveAttempt | undefined, dialer: "you" | "contact" | undefined, contact: string,
+  format: (at: number) => string = at => new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })): { label: string; lines: string[] } | undefined {
+  if (!attempt && dialer !== "contact") return undefined;
+  const lines: string[] = [];
+  if (dialer === "contact") lines.push(`${contact}'s app connects to this one: this app answers.`);
+  if (!attempt) return { label: "Not live yet", lines: [...lines, `No attempt of ${contact}'s has reached this app yet.`] };
+  if (attempt.side === "answered") lines.push(`${contact}'s last attempt reached this app and did not connect:`);
+  for (const f of attempt.failed) lines.push(`${name(f.transport)}: ${shortReason(f.error)}.`);
+  if (!attempt.failed.length && attempt.reason) lines.push(`${shortReason(attempt.reason)}.`);
+  if (attempt.retryAt) lines.push(`Trying again at about ${format(attempt.retryAt)}.`);
+  return { label: `Last attempt at ${format(attempt.at)}`, lines };
 }
 
 /** The live transport of a chat: on it, and nothing moving. */

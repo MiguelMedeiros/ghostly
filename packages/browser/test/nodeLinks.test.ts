@@ -32,6 +32,7 @@ vi.mock("@ghostly/core", async (importOriginal) => {
     session = { setActive: vi.fn(), pollNow: vi.fn(), setFastPoll: vi.fn() };
     setChatActive = (active: boolean) => this.session.setActive(active);
     learnPeerTransports = vi.fn();
+    learnPeerChoice = vi.fn();
     nativeDescriptors = {};
     start = vi.fn();
     stop = vi.fn(async () => {});
@@ -223,9 +224,11 @@ describe("the capability record of a chat (WISP 03)", () => {
     linkOf(chat.id).isDataLinkOpen = false;
     const said = vi.spyOn(node["hold"], "peerSaid"), methods = vi.spyOn(node["hold"], "rememberPeerMethods");
     const record = { rev: 3, issued: 1, author: createIdentity().pubKeyZ32, versions: [1], transports: ["webrtc/1"], extensions: [], descriptors: {},
-      capabilities: ["chat/1", "dht-text/1", "hold/1", "payments/1", "payments-lightning/1"], name: "Bob" };
+      capabilities: ["chat/1", "dht-text/1", "hold/1", "payments/1", "payments-lightning/1"], name: "Bob", choice: "iroh/1" };
     node["peerCapsChanged"](chat.id, record);
     expect(node.getState().links[0].peerNick).toBe("Bob");
+    // A choice the contact made meanwhile, from a record just read (WISP 100): the link tells it and dials it first.
+    expect(linkOf(chat.id).learnPeerChoice).toHaveBeenCalledWith("iroh/1", true);
     expect(said).toHaveBeenCalledWith(chat.id, { peerAllows: true });
     expect(methods).toHaveBeenCalledWith(chat.id, ["lightning"]);
     // On an open session the session's own word stands.

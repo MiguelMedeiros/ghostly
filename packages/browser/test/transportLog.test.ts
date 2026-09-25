@@ -98,6 +98,24 @@ describe("transport log: the timeline says what matters", () => {
     expect(events(log).filter(k => k === "chose")).toHaveLength(5);
   });
 
+  it("knows each side's last choice from its rows, whether it stayed a choice or became the switch", () => {
+    const log = new TransportLog();
+    expect([log.lastChoice("you"), log.lastChoice("contact")]).toEqual(["automatic", "automatic"]);
+    log.observe(live("webrtc/1"), 0);
+    log.chose("contact", "iroh/1", 10);
+    expect(log.lastChoice("contact")).toBe("iroh/1");
+    log.observe(live("iroh/1"), 20);
+    // The choice's row became the switch: still the contact's choice.
+    expect(log.entries.at(-1)).toMatchObject({ kind: "switched", cause: "contact" });
+    expect(log.lastChoice("contact")).toBe("iroh/1");
+    expect(log.lastChoice("you")).toBe("automatic");
+    log.chose("contact", "automatic", 30);
+    expect(log.lastChoice("contact")).toBe("automatic");
+    // Kept with the rows, so a choice heard again after a restart is known.
+    log.chose("contact", "hyperdht/1", 40);
+    expect(new TransportLog(log.entries, log.history).lastChoice("contact")).toBe("hyperdht/1");
+  });
+
   it("forgets a choice that did not land in time, or landed elsewhere", () => {
     const log = new TransportLog();
     log.observe(live("webrtc/1"), 0);
