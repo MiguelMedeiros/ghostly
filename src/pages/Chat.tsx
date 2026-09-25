@@ -43,6 +43,7 @@ import {
 } from "../lib/storage";
 import { chatPath, inviteShareText } from "../lib/url";
 import { continueInNewChat } from "../lib/continueChat";
+import { engine } from "@ghostly/browser/platform/engine";
 import { fileMessageText, parseCallSignal, signalHasVideo, type VoiceMeta } from "@ghostly/core";
 import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
 import { useAppNavigation } from "../hooks/useAppNavigation";
@@ -730,7 +731,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         key={sessionId}
         onSend={sendMessage}
         // Ghostly offline, or a security stop: nothing can go. Otherwise what cannot go now waits.
-        disabled={isSending || (paired && (!!chatStop || status === "offline"))}
+        disabled={isSending || (paired && (!!chatStop || engine.state?.settings.online === false))}
         disabledPlaceholder="Message…"
         // The DHT carries a few hundred characters; the direct link has room for long invoices and ecash tokens.
         softBytes={paired && !chatLive ? deliveryPeer?.dhtDelivery?.maxTextBytes ?? 256 : undefined}
