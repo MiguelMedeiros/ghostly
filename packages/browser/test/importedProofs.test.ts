@@ -1,9 +1,10 @@
 import 'fake-indexeddb/auto';
 import { describe, expect, it, vi } from 'vitest';
-import { createIdentity, PeerProofs, emptyProofLedger, verifyPeerProof, type ProofAdapter, type ProofChallenge, type ProofLedger } from '@ghostly/core';
+import { ed25519 } from '@noble/curves/ed25519.js';
+import { createIdentity, importedProof, PeerProofs, emptyProofLedger, proofStatement, utf8Encode, verifyPeerProof, type ProofAdapter, type ProofChallenge, type ProofLedger } from '@ghostly/core';
 import { importLocalSigner, disposableImportSecret } from '../src/proofs/imported';
 import { db } from '../src/engine/db';
-// covers: proofs.pubky, proofs.keet, proofs.peer-proofs
+// covers: proofs.keet, proofs.peer-proofs
 
 function pair() {
   const keys=[createIdentity().pubKeyZ32,createIdentity().pubKeyZ32];
@@ -18,7 +19,9 @@ function pair() {
   });
   return {peers,ledgers,errors,wire,advance:(n:number)=>now+=n,reconnect:()=>session='c'.repeat(64)};
 }
-const adapters=['pubky-import','keet-import'] as const;
+const adapters=['keet-import'] as const;
+/** Evidence the retired Pubky import made (a pasted secret signing the statement): still verifies, nothing makes it now. */
+const retiredPubky=(c:ProofChallenge,seed:Uint8Array)=>importedProof(c,ed25519.sign(utf8Encode(proofStatement(c)),seed));
 describe.each(adapters)('%s imported local proof',adapter=>{
   it('signs with a real SDK-derived disposable key, verifies remotely, rejects replay, preserves evidence across reconnect, withdraws with ack, and never serializes the secret',async()=>{
     const secret=await disposableImportSecret(adapter);
@@ -57,8 +60,17 @@ describe.each(adapters)('%s imported local proof',adapter=>{
     }finally{signer.clear();p.peers.forEach(p=>p.stop());}
   });
 });
-it('preserves independent Pubky and Keet records on one participation and withdraws only the chosen adapter',async()=>{
+it('no longer imports a Pubky secret: Pubky is approved in Ring or Passport now',async()=>{
+  const secret='a'.repeat(64);
+  const error=await importLocalSigner('pubky-import',secret).then(()=>undefined,e=>e as Error);
+  expect(error?.message).toBe('Unsupported local key type');
+  expect(error?.message.includes(secret)).toBe(false);
+  await expect(disposableImportSecret('pubky-import')).rejects.toThrow('Unsupported local key type');
+});
+it('preserves independent Pubky (retired import) and Keet records on one participation and withdraws only the chosen adapter',async()=>{
   const p=pair();
+  const pubky=createIdentity();
+  {const c=await p.peers[0].prepare(pubky.pubKeyZ32,'pubky-import');await p.peers[0].submit(c,await retiredPubky(c,pubky.seed));}
   for(const adapter of adapters){const s=await importLocalSigner(adapter,await disposableImportSecret(adapter));try{const c=await p.peers[0].prepare(s.externalKey,adapter);await p.peers[0].submit(c,await s.sign(c));}finally{s.clear();}}
   await vi.waitFor(()=>expect(p.ledgers[1].remote.length).toBe(2));
   await p.peers[0].withdraw('pubky-import');await vi.waitFor(()=>expect(p.ledgers[0].local.find(r=>r.challenge.adapter==='pubky-import')?.status).toBe('withdrawn'));
