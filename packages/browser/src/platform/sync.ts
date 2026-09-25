@@ -4,6 +4,7 @@ import {
   ensureSession,
   findSession,
   forgetInviteCode,
+  getInviteCode,
   listSessions,
   setSessionPeerNick,
   updateSessionLabel,
@@ -141,6 +142,8 @@ async function reconcile(): Promise<void> {
         seedB64: session.mySeedB64,
         peerPubKeyZ32: session.peerPubKeyB64,
         encKeyB64: session.encKeyB64,
+        // The side that made the invite still holds it; the engine learns who invited whom from that.
+        inviteCode: getInviteCode(session.id) ?? undefined,
       })
       .catch(() => {})
       .finally(() => ensuring.delete(session.id));

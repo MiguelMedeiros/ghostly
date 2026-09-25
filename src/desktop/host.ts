@@ -8,8 +8,10 @@ import {
   type Identity,
   type GhostRecord,
   type LocalFetch,
+  type PkarrRequestOptions,
   type PkarrTransport,
   type SignedPacket,
+  setLinkTraceSink,
 } from "@ghostly/core";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { createInPageHost } from "@ghostly/browser/inPageHost";
@@ -29,9 +31,12 @@ const tauriTransport: PkarrTransport = {
   async publish(identity: Identity, records: GhostRecord[]) {
     await invoke("publish_records", { seedB64: identity.seedB64, records });
   },
-  async resolve(pubKeyZ32: string): Promise<SignedPacket | null> {
+  async resolve(pubKeyZ32: string, options?: PkarrRequestOptions): Promise<SignedPacket | null> {
+    // A look that can wait goes to the DHT alone; the relays' budget is kept for links that are signaling.
     const packet = await invoke<{ timestamp_micros: string; records: GhostRecord[] } | null>("resolve_records", {
       publicKeyZ32: pubKeyZ32,
+      background: !!options?.background,
+      urgent: !!options?.urgent,
     });
     // Rust verified the signature while resolving.
     return packet && { pubKeyZ32, timestampMicros: BigInt(packet.timestamp_micros), records: packet.records };
@@ -103,6 +108,9 @@ function serveServiceWindows(server: EngineServer): void {
 }
 
 export function createDesktopHost(version: string) {
+  // Every step of a link's way to a live connection goes to the app's log (see `diagnostic_log`), so a
+  // pairing that took long can be read back afterwards, step by step.
+  setLinkTraceSink((line) => void invoke("diagnostic_log", { line: `link ${line}` }).catch(() => {}));
   return createInPageHost({
     version,
     features: { shareLocalServices: true, openServices: true, profiles: true },

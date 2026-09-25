@@ -4,6 +4,7 @@ use tauri::State;
 
 use crate::bitcoind_rpc::{self, RpcError};
 use crate::crypto;
+use crate::diagnostics;
 use crate::lnd::{self, LndRequest, LndResponse};
 use crate::local_fetch::{self, LocalResponse};
 use crate::pkarr_client;
@@ -123,8 +124,23 @@ pub async fn publish_records(
 pub async fn resolve_records(
     state: State<'_, AppState>,
     public_key_z32: String,
+    background: Option<bool>,
+    urgent: Option<bool>,
 ) -> Result<Option<ResolvedPacket>, String> {
-    records::resolve(&state.pkarr, &public_key_z32).await
+    records::resolve(
+        &state.pkarr,
+        &public_key_z32,
+        background.unwrap_or(false),
+        urgent.unwrap_or(false),
+    )
+    .await
+}
+
+/// A line for the app's log (see `diagnostics`): the peer in the WebView says how a link is doing.
+#[tauri::command]
+pub fn diagnostic_log(line: String) {
+    let line: String = line.chars().take(2_000).collect();
+    diagnostics::log(&line);
 }
 
 #[tauri::command]
@@ -465,7 +481,7 @@ mod tests {
             .unwrap()
             .contains_key(&pair.pub_key_z32));
 
-        let packet = resolve_records(app.state(), pair.pub_key_z32.clone())
+        let packet = resolve_records(app.state(), pair.pub_key_z32.clone(), None, None)
             .await
             .unwrap()
             .expect("the packet");
@@ -479,11 +495,11 @@ mod tests {
 
         // Nobody published under this key: nothing, not an error.
         let stranger = create_keypair().unwrap().pub_key_z32;
-        assert!(resolve_records(app.state(), stranger)
+        assert!(resolve_records(app.state(), stranger, None, None)
             .await
             .unwrap()
             .is_none());
-        assert!(resolve_records(app.state(), "not-a-key".into())
+        assert!(resolve_records(app.state(), "not-a-key".into(), None, None)
             .await
             .unwrap_err()
             .contains("Invalid public key"));

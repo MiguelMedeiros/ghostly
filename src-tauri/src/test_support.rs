@@ -97,10 +97,22 @@ pub async fn respond<S: AsyncWrite + Unpin>(
 pub struct Relay {
     pub url: String,
     pub packets: Arc<Mutex<HashMap<String, Vec<u8>>>>,
-    /// Every request's method and path, in order.
+    /// Every request's method and path, in order (a PUT with `If-Match` says so: `PUT /key if-match=<ts>`).
     pub requests: Arc<Mutex<Vec<String>>>,
     /// How long it takes to answer a GET, the way the DHT takes its time.
     pub delay: Arc<Mutex<std::time::Duration>>,
+    /// Headers added to every answer (`x-ratelimit-remaining`, as the public relays say).
+    pub headers: Arc<Mutex<Vec<(String, String)>>>,
+    /// The relay is still putting the packet it holds on the DHT: a PUT replacing it must name it
+    /// (`If-Match`, 428 otherwise), as the public relays do.
+    pub putting: Arc<Mutex<bool>>,
+}
+
+/// The timestamp of a relay payload (bytes 64..72, microseconds, big-endian).
+fn payload_timestamp(payload: &[u8]) -> Option<u64> {
+    payload
+        .get(64..72)
+        .map(|b| u64::from_be_bytes(b.try_into().unwrap()))
 }
 
 pub async fn pkarr_relay() -> Relay {
@@ -109,27 +121,73 @@ pub async fn pkarr_relay() -> Relay {
     let packets = Arc::new(Mutex::new(HashMap::<String, Vec<u8>>::new()));
     let requests = Arc::new(Mutex::new(Vec::new()));
     let delay = Arc::new(Mutex::new(std::time::Duration::ZERO));
-    let (store, seen, slow) = (packets.clone(), requests.clone(), delay.clone());
+    let headers = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
+    let putting = Arc::new(Mutex::new(false));
+    let (store, seen, slow, extra, busy) = (
+        packets.clone(),
+        requests.clone(),
+        delay.clone(),
+        headers.clone(),
+        putting.clone(),
+    );
     tokio::spawn(async move {
         while let Ok((mut stream, _)) = listener.accept().await {
-            let (store, seen, slow) = (store.clone(), seen.clone(), slow.clone());
+            let (store, seen, slow, extra, busy) = (
+                store.clone(),
+                seen.clone(),
+                slow.clone(),
+                extra.clone(),
+                busy.clone(),
+            );
             tokio::spawn(async move {
                 let Some((head, body)) = read_request(&mut stream).await else {
                     return;
                 };
                 let mut request = head.lines().next().unwrap_or("").split(' ');
                 let (method, target) = (request.next().unwrap_or(""), request.next().unwrap_or(""));
-                seen.lock().unwrap().push(format!("{method} {target}"));
+                let if_match = head
+                    .lines()
+                    .filter_map(|line| line.split_once(':'))
+                    .find(|(name, _)| name.trim().eq_ignore_ascii_case("if-match"))
+                    .and_then(|(_, value)| value.trim().parse::<u64>().ok());
+                seen.lock().unwrap().push(match if_match {
+                    Some(ts) => format!("{method} {target} if-match={ts}"),
+                    None => format!("{method} {target}"),
+                });
                 let key = target
                     .trim_start_matches('/')
                     .split('?')
                     .next()
                     .unwrap_or("")
                     .to_string();
+                let extra: Vec<(String, String)> = extra.lock().unwrap().clone();
+                let extra: Vec<(&str, &str)> = extra
+                    .iter()
+                    .map(|(n, v)| (n.as_str(), v.as_str()))
+                    .collect();
                 match method {
                     "PUT" => {
-                        store.lock().unwrap().insert(key, body);
-                        respond(&mut stream, "200 OK", &[], b"").await;
+                        let held = store
+                            .lock()
+                            .unwrap()
+                            .get(&key)
+                            .and_then(|p| payload_timestamp(p));
+                        let incoming = payload_timestamp(&body);
+                        let status = match (held, if_match, *busy.lock().unwrap()) {
+                            // Older than what it holds: never.
+                            (Some(held), _, _) if incoming.is_some_and(|ts| ts <= held) => {
+                                "409 Conflict"
+                            }
+                            (Some(_), None, true) => "428 Precondition Required",
+                            (held, Some(named), _) if held != Some(named) => {
+                                "412 Precondition Failed"
+                            }
+                            _ => "200 OK",
+                        };
+                        if status.starts_with("200") {
+                            store.lock().unwrap().insert(key, body);
+                        }
+                        respond(&mut stream, status, &extra, b"").await;
                     }
                     "GET" => {
                         let delay = *slow.lock().unwrap();
@@ -137,15 +195,12 @@ pub async fn pkarr_relay() -> Relay {
                         let packet = store.lock().unwrap().get(&key).cloned();
                         match packet {
                             Some(packet) => {
-                                respond(
-                                    &mut stream,
-                                    "200 OK",
-                                    &[("Content-Type", "application/pkarr.org/relays#payload")],
-                                    &packet,
-                                )
-                                .await
+                                let mut headers =
+                                    vec![("Content-Type", "application/pkarr.org/relays#payload")];
+                                headers.extend(extra.iter().copied());
+                                respond(&mut stream, "200 OK", &headers, &packet).await
                             }
-                            None => respond(&mut stream, "404 Not Found", &[], b"").await,
+                            None => respond(&mut stream, "404 Not Found", &extra, b"").await,
                         }
                     }
                     _ => respond(&mut stream, "405 Method Not Allowed", &[], b"").await,
@@ -158,6 +213,8 @@ pub async fn pkarr_relay() -> Relay {
         packets,
         requests,
         delay,
+        headers,
+        putting,
     }
 }
 

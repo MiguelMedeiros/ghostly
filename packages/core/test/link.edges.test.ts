@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Identity } from "../src/identity";
+import { identityFromSeedB64, type Identity } from "../src/identity";
+import { fromBase64Url } from "../src/bytes";
+import { buildLinkRecords, emptyLinkRecords } from "../src/records";
 import { createLink, type LinkParams } from "../src/invite";
 import {
   EXPECT_PEER_MS,
@@ -491,5 +493,29 @@ describe("LinkSession poll pacing", () => {
     answer(null);
     await settle();
     await a.s.stop(false);
+  });
+});
+
+describe("LinkSession and an empty packet", () => {
+  it("reads the packet an inviter puts under the contact's key as nobody there", async () => {
+    const { transport, packets } = network();
+    const link = createLink();
+    const me = identityFromSeedB64(link.mine.seedB64), contact = identityFromSeedB64(link.invite.seedB64);
+    const encKey = fromBase64Url(link.mine.encKeyB64);
+    // The inviter warms the contact's key: a packet with nothing in it.
+    packets.set(contact.pubKeyZ32, { pubKeyZ32: contact.pubKeyZ32, timestampMicros: BigInt(NOW - 60_000) * 1000n, records: emptyLinkRecords() });
+    const onPresence = vi.fn();
+    const session = new LinkSession({ params: { ...link.mine, profile: "paired-chat/1" }, transport: transport(), pollIntervals: I, getServices: () => [{ id: "chat", type: "chat" }], events: { onPresence } });
+    session.start();
+    await vi.advanceTimersByTimeAsync(I.active * 3);
+    expect(onPresence).not.toHaveBeenCalled();
+    expect(session.peerPresence).toEqual({ online: false, lastPacketAt: 0, services: null });
+    // Then the contact's real first packet, which says they are here.
+    packets.set(contact.pubKeyZ32, { pubKeyZ32: contact.pubKeyZ32, timestampMicros: BigInt(Date.now()) * 1000n,
+      records: buildLinkRecords(contact.pubKeyZ32, { messages: [], ackTimestamp: 0, services: [{ id: "chat", type: "chat" }] }, encKey).records });
+    await vi.advanceTimersByTimeAsync(I.active * 2);
+    expect(session.peerPresence.online).toBe(true);
+    expect(me.pubKeyZ32).not.toBe(contact.pubKeyZ32);
+    await session.stop(false);
   });
 });

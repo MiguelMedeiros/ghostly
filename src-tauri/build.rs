@@ -27,6 +27,7 @@ const COMMANDS: &[&str] = &[
     "resolve_messages",
     "publish_records",
     "resolve_records",
+    "diagnostic_log",
     "local_fetch",
     "bitcoind_rpc",
     "lnd_request",

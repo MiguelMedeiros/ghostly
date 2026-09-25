@@ -4,6 +4,7 @@ mod bitcoind_rpc;
 mod clipboard;
 mod commands;
 mod crypto;
+mod diagnostics;
 mod hyperdht;
 mod lnd;
 mod local_fetch;
@@ -68,6 +69,7 @@ macro_rules! commands {
             commands::resolve_messages,
             commands::publish_records,
             commands::resolve_records,
+            commands::diagnostic_log,
             commands::local_fetch,
             commands::bitcoind_rpc,
             commands::lnd_request,
@@ -100,6 +102,13 @@ fn main() {
         .manage(hyperdht::HyperState::default())
         .manage(oidc::OidcState::default())
         .manage(clipboard::ClipboardSource::system())
+        .setup(|app| {
+            // The app's log, where the peer and the Pkarr client say how a link is doing.
+            if let Ok(dir) = app.path().app_log_dir() {
+                diagnostics::init(&dir);
+            }
+            Ok(())
+        })
         .register_asynchronous_uri_scheme_protocol(viewer::SCHEME, |ctx, request, responder| {
             let app = ctx.app_handle().clone();
             let label = ctx.webview_label().to_string();
@@ -212,7 +221,7 @@ mod tests {
     #[test]
     fn build_rs_capabilities_and_permission_files_name_the_same_commands() {
         let declared: BTreeSet<String> = declared().into_iter().collect();
-        assert_eq!(declared.len(), 37, "{declared:?}");
+        assert_eq!(declared.len(), 38, "{declared:?}");
         let granted: BTreeSet<String> = capability()["permissions"]
             .as_array()
             .unwrap()

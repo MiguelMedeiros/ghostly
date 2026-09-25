@@ -39,6 +39,7 @@ import { servicesFromWire, servicesToWire, type ServiceAd } from "./services";
 import { PairedHttp } from "./pairedHttp";
 import { traceLink } from "./linkTrace";
 import type { PkarrTransport } from "./transport";
+import { PairingTracker, type PairingProgress, type PairingRole } from "./pairingProgress";
 
 /**
  * One link to one peer, complete: Pkarr presence and signaling, the WebRTC
@@ -50,6 +51,18 @@ import type { PkarrTransport } from "./transport";
 /** After a failed attempt: 20 s, then doubling up to 3 min. Someone opening the chat starts it over. */
 const AUTO_CONNECT_RETRY_MS = 20_000;
 const AUTO_CONNECT_MAX_RETRY_MS = 3 * 60_000;
+/**
+ * A first pairing is different: the contact is right there, having just read the invite, so an attempt
+ * that did not make it in `PAIRING_ATTEMPT_MS` is given up and the next one starts after `PAIRING_RETRY_MS`
+ * (doubling up to `PAIRING_MAX_RETRY_MS`), instead of the 90 s and 20 s a saved contact's reconnect waits.
+ */
+export const PAIRING_ATTEMPT_MS = 15_000;
+export const PAIRING_RETRY_MS = 3_000;
+const PAIRING_MAX_RETRY_MS = 30_000;
+/** A packet published this recently is fresh enough for whoever comes back to the chat. */
+const RECENTLY_PUBLISHED_MS = 5_000;
+/** An inviter that sees the joiner without its offer waits this long for one before offering itself. */
+export const INVITER_DIAL_GRACE_MS = 2_500;
 /**
  * Liveness of a paired session: a ping this often, and the session is taken for dead after this many
  * pings in a row with nothing at all back. Counted in pings, not seconds, so a throttled background
@@ -77,6 +90,8 @@ export interface GhostLinkEvents {
   onTransportsChanged?(): void;
   onTransportDiscovery?(descriptors: TransportDescriptors, transports: PairedTransport[], fallback: boolean): Promise<void>;
   onPairingState?(state: PairingState): void;
+  /** How far a first pairing got (`pairingProgress` option): every change, up to `live`. */
+  onPairingProgress?(progress: PairingProgress): void;
   onMessage?(message: IncomingMessage): void | Promise<void>;
   onPresence?(presence: PeerPresence): void;
   /** A paired contact's profile picture, already checked; `null` when they removed it. */
@@ -131,6 +146,11 @@ export interface GhostLinkOptions {
   native?: { peerDescriptors?: TransportDescriptors; peerTransports?: PairedTransport[]; peerFallback?: boolean; preferred?: PairedTransport; fallback?: boolean };
   params: LinkParams;
   pairing?: { credentials: PairingCredentials; pinPeer: (key: string, signedSignals?: boolean) => Promise<void>; verifyPeer?: (key: string) => Promise<void>; trustOnFirstUse?: boolean };
+  /**
+   * A chat that was never paired: follow its first pairing (`onPairingProgress`), and pace its attempts
+   * for a contact who is right there. `startedAt`: when the invite was made or joined.
+   */
+  pairingProgress?: { role: PairingRole; startedAt: number };
   transport: PkarrTransport;
   nick?: string;
   /** This side's profile picture (a small JPEG data URL), told to a paired peer directly. */
@@ -212,10 +232,21 @@ export class GhostLink {
   private heldSignal: string | null = null;
   /** The link packet of a DHT-only contact its mailbox was last read early for (its timestamp): once per packet. */
   private leftDhtSeenFor = 0;
+  /** The first pairing of this chat, while it is one (`pairingProgress` option, no peer key yet). */
+  private readonly tracker: PairingTracker | null;
+  private lastDataLinkState: DataLinkState = "idle";
+  /** When an inviter first saw the joiner on the network (0: not yet). */
+  private peerSeenAt = 0;
 
   constructor(options: GhostLinkOptions) {
     this.options = options;
     this.deliveryMode = options.params.deliveryMode ?? "stream";
+    // A DHT-only invite pairs through its mailbox, not through these stages.
+    this.tracker = options.pairingProgress && options.pairing && !options.pairing.credentials.peerKey && this.deliveryMode !== "dht"
+      ? new PairingTracker(options.pairingProgress.role, options.pairingProgress.startedAt, progress => {
+        traceLink(this.myPubKeyZ32, "progress", { stage: progress.stage, attempt: progress.attempt, peerSeen: progress.peerSeen, reason: progress.reason, retryable: progress.retryable, transport: progress.transport });
+        options.events?.onPairingProgress?.(progress);
+      }) : null;
     this.dht = options.params.profile && options.pairing && options.dht ? new DhtDelivery({
       params: options.params, mode: this.deliveryMode, state: options.dht.state, credentials: options.pairing.credentials, transport: options.transport,
       save: options.dht.save, pollMs: options.dht.pollMs, pin: key => options.pairing!.pinPeer(key, true),
@@ -245,16 +276,22 @@ export class GhostLink {
       lastSeenTimestamp: options.lastSeenTimestamp,
       pollIntervals: options.pollIntervals,
       getServices: options.getServices,
+      // A joiner dials the moment it sees the inviter: its offer goes in its first packet.
+      firstPublish: this.tracker && options.pairingProgress?.role === "joiner" ? "after-first-poll" : "at-start",
       events: {
+        // The first look decided nothing to dial: say we are here now (a dial says it with its offer).
+        onFirstPoll: () => { if (!this.dialing) this.session.ensureAdvertised(); },
         onMessages: (messages, batch) => {
           if (options.params.profile) return;
           for (const m of messages) events.onMessage?.({ ...m, via: "pkarr", batch });
         },
         onPresence: (presence) => {
+          if (presence.online) this.tracker?.sawPeer();
           events.onPresence?.(this.mergePresence(presence));
           this.peerMayHaveLeftDht(presence);
           this.maybeAutoConnect(presence);
         },
+        onPublish: result => { if (result.error) this.tracker?.failed("publish", true, result.error); else this.tracker?.published(); },
         onPeerAck: (ack) => events.onPeerAck?.(ack),
         onCallSignal: (signal) => { if (!options.params.profile) events.onCallSignal?.(signal); },
         onRtcSignal: signal => {
@@ -279,6 +316,10 @@ export class GhostLink {
             error: `Could not publish connection details: ${error instanceof Error ? error.message : "discovery unavailable"}. Reconnect to retry.` });
         };
         try {
+          if (signal && this.tracker) {
+            const kind = (JSON.parse(signal) as { t?: string }).t;
+            if (kind === "o") this.tracker.offerSent(); else if (kind === "a") this.tracker.answerSent();
+          }
           const signed = signal && options.params.profile && options.pairing
             ? fitSignedPairedSignal(signal, options.pairing.credentials.seedB64, this.myPubKeyZ32,
               options.params.peerPubKeyZ32, candidate => this.session.fitsRtcSignal(candidate)) : signal;
@@ -302,10 +343,12 @@ export class GhostLink {
       onClose: () => { if (!this.activeBinding) this.detach(); },
       onState: (state) => {
         traceLink(this.myPubKeyZ32, "datalink", { state });
+        this.trackDataLink(state);
         if (this.activeBinding) return;
         events.onDataLinkState?.(state);
         if (state === "idle") this.rejectWaiters(new GhostlyHttpError("unreachable", "Could not connect to the peer"));
       },
+      attemptTimeoutMs: this.tracker ? PAIRING_ATTEMPT_MS : undefined,
     });
     this.switcher = new TransportSwitch({
       key: this.myPubKeyZ32, peerKey: options.params.peerPubKeyZ32,
@@ -332,6 +375,24 @@ export class GhostLink {
     return this.session.identity.pubKeyZ32;
   }
 
+  /** The first pairing's stages, read off the data link's states. */
+  private trackDataLink(state: DataLinkState): void {
+    const was = this.lastDataLinkState;
+    this.lastDataLinkState = state;
+    const tracker = this.tracker;
+    if (!tracker || tracker.done) return;
+    if (state === "answering") tracker.offerReceived();
+    else if (state === "connecting" && was === "offering") tracker.answerReceived();
+    else if (state === "idle") {
+      if (was === "offering") tracker.failed("timeout", true);
+      else if (was === "answering" || was === "connecting") tracker.failed("transport", true);
+      else if (was === "open") tracker.reset();
+    }
+  }
+
+  /** How far the first pairing got; absent for a chat that was paired before, or has no `pairingProgress`. */
+  get pairingProgress(): PairingProgress | undefined { return this.tracker?.progress; }
+
   private handleRtcSignal(signal: string): void {
     const options = this.options, credentials = options.pairing?.credentials;
     const verified = options.params.profile ? verifyPairedSignal(signal, options.params.peerPubKeyZ32,
@@ -343,6 +404,7 @@ export class GhostLink {
       const keyMismatch = !!credentials.peerKey && !!verifyPairedSignal(signal,
         options.params.peerPubKeyZ32, this.myPubKeyZ32, undefined, true);
       this.securityRejected = true;
+      this.tracker?.failed(keyMismatch ? "key-mismatch" : "rejected", false);
       options.events?.onPairingState?.({ status: "error", keyMismatch, error: keyMismatch
         ? "This connection uses a different participation key. The saved contact has not been replaced; use a fresh invitation for a new contact."
         : "Ignored an unauthenticated discovery signal. Keep both peers on the updated version; the saved key has not been replaced.",
@@ -484,6 +546,7 @@ export class GhostLink {
       }, timeoutMs);
       void this.dial().catch(error => {
         if (epoch !== this.connectionEpoch) return;
+        this.tracker?.failed("transport", true, error instanceof Error ? error.message : String(error));
         this.options.events?.onPairingState?.({ status: "error", error: error instanceof Error ? error.message : String(error) });
         this.rejectWaiters(error instanceof Error ? error : new Error(String(error)));
       });
@@ -730,10 +793,21 @@ export class GhostLink {
     await this.session.refreshAdvertisement();
   }
 
-  /** Only the lower key offers, so two peers coming online together do not collide. */
+  /**
+   * Only the lower key offers, so two peers coming online together do not collide. A first pairing is
+   * the exception: the joiner offers, whatever its key, in the very packet that says it is here (one hop
+   * less than presence, then the inviter's offer), and the inviter waits for that offer. An inviter that
+   * sees the joiner but no offer for `INVITER_DIAL_GRACE_MS` (an app from before this rule) offers itself;
+   * the lower-key rule settles any collision, on both sides.
+   */
   private maybeAutoConnect(presence: PeerPresence): void {
     if (this.streamBlocked || !this.options.autoConnect || !presence.online || this.channel || this.dataLink.state !== "idle") return;
-    if (this.myPubKeyZ32 > this.options.params.peerPubKeyZ32) {
+    const pairing = !!this.tracker && !this.tracker.done;
+    const role = pairing ? this.options.pairingProgress?.role : undefined;
+    if (role === "inviter") {
+      this.peerSeenAt ||= Date.now();
+      if (Date.now() - this.peerSeenAt < INVITER_DIAL_GRACE_MS) { this.session.expectPeer(); return; }
+    } else if (role !== "joiner" && this.myPubKeyZ32 > this.options.params.peerPubKeyZ32) {
       // The other side dials as soon as it sees me. A packet of its that is new to me and fresh says it just
       // (re)appeared, so its offer is a poll away; an old one (a contact online for a while, as when this app
       // starts) says nothing is coming now, and looking fast for it would only spend the relays' budget.
@@ -741,12 +815,14 @@ export class GhostLink {
       if (fresh && presence.lastPacketAt !== this.offerAwaitedFor) { this.offerAwaitedFor = presence.lastPacketAt; this.session.expectPeer(); }
       return;
     }
-    const wait = Math.min(AUTO_CONNECT_RETRY_MS * 2 ** this.autoConnectFailures, AUTO_CONNECT_MAX_RETRY_MS);
+    // A first pairing tries again sooner: the contact just read the invite and is waiting.
+    const wait = pairing ? Math.min(PAIRING_RETRY_MS * 2 ** this.autoConnectFailures, PAIRING_MAX_RETRY_MS)
+      : Math.min(AUTO_CONNECT_RETRY_MS * 2 ** this.autoConnectFailures, AUTO_CONNECT_MAX_RETRY_MS);
     if (Date.now() - this.lastAutoConnectAt < wait) { traceLink(this.myPubKeyZ32, "dial-backoff", { failures: this.autoConnectFailures, left: wait - (Date.now() - this.lastAutoConnectAt) }); return; }
     traceLink(this.myPubKeyZ32, "dial", { failures: this.autoConnectFailures });
     this.lastAutoConnectAt = Date.now();
     this.autoConnectFailures++;
-    void this.dial().catch(() => {});
+    void this.dial().catch(() => { this.tracker?.failed("transport", true); });
   }
 
   /** The name this side shows, told to a paired peer directly. */
@@ -1001,6 +1077,7 @@ export class GhostLink {
         onState: () => { if (this.channel === channel) this.emitPairingState(); },
         onFailure: () => {
           this.securityRejected = true;
+          this.tracker?.failed(paired.state.keyMismatch ? "key-mismatch" : "rejected", !paired.state.keyMismatch, paired.state.error);
           migration?.reject(new Error(paired.state.error ?? "Candidate authentication failed"));
           channel.close(); if (this.channel === channel) this.detach();
         },
@@ -1047,6 +1124,7 @@ export class GhostLink {
           this.autoConnectFailures = 0;
           this.lastAutoConnectAt = 0;
           traceLink(this.myPubKeyZ32, "paired-ready");
+          this.tracker?.live(paired.state.transport);
           this.startLiveness(channel, paired.peerAnswersPings);
           for (const waiter of this.openWaiters.splice(0)) waiter.resolve();
           this.options.events?.onPresence?.(this.presence);
@@ -1254,8 +1332,9 @@ export class GhostLink {
     this.lastAutoConnectAt = 0;
     this.session.pollNow();
     if (!this.channel) {
-      // The side that does not dial makes sure the other one sees it here, fresh.
-      void this.session.refreshAdvertisement();
+      // The side that does not dial makes sure the other one sees it here, fresh — unless it just did:
+      // a second packet right behind the first is one relays hold back for seconds.
+      if (!this.session.publishedRecently(RECENTLY_PUBLISHED_MS)) void this.session.refreshAdvertisement();
       this.maybeAutoConnect(this.presence);
     }
   }

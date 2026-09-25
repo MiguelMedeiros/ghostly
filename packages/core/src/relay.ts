@@ -29,6 +29,11 @@ export interface RelayTransportOptions {
   relays?: string[];
   timeoutMs?: number;
   fetch?: typeof fetch;
+  /**
+   * Requests allowed per relay and minute (`REQUESTS_PER_MINUTE`); background ones get a share of it.
+   * `Infinity` for relays of one's own, with no limit to stay under (a test's relay in the same process).
+   */
+  requestsPerMinute?: number;
 }
 
 export function normalizeRelayUrl(input: string): string | null {
@@ -54,12 +59,16 @@ export class RelayTransport implements PkarrTransport {
   private readonly spentBackground = new Map<string, number[]>();
   /** Timestamp of the last packet sent to each relay, per key: the compare-and-swap value for the next one. */
   private readonly lastPut = new Map<string, bigint>();
+  private readonly perMinute: number;
+  private readonly backgroundPerMinute: number;
 
   constructor(options: RelayTransportOptions = {}) {
     this.relays = [];
     this.setRelays(options.relays ?? DEFAULT_RELAYS);
     this.timeoutMs = options.timeoutMs ?? 10_000;
     this.fetchFn = options.fetch ?? ((...args) => fetch(...args));
+    this.perMinute = options.requestsPerMinute ?? REQUESTS_PER_MINUTE;
+    this.backgroundPerMinute = this.perMinute === REQUESTS_PER_MINUTE ? BACKGROUND_REQUESTS_PER_MINUTE : Math.ceil(this.perMinute * 2 / 3);
   }
 
   setRelays(relays: string[]): void {
@@ -146,8 +155,8 @@ export class RelayTransport implements PkarrTransport {
       }
     }
     if (!reachable) {
-      const resting = this.relays.every((r) => this.isCoolingDown(r, "GET") || (this.spent.get(r)?.length ?? 0) >= REQUESTS_PER_MINUTE
-        || (!!options.background && (this.spentBackground.get(r)?.length ?? 0) >= BACKGROUND_REQUESTS_PER_MINUTE));
+      const resting = this.relays.every((r) => this.isCoolingDown(r, "GET") || (this.spent.get(r)?.length ?? 0) >= this.perMinute
+        || (!!options.background && (this.spentBackground.get(r)?.length ?? 0) >= this.backgroundPerMinute));
       // Holding back is not an outage: report what is already known.
       if (resting && this.newest.has(pubKeyZ32)) return this.newest.get(pubKeyZ32)!;
       throw new Error("No Pkarr relay reachable");
@@ -175,7 +184,7 @@ export class RelayTransport implements PkarrTransport {
     const recentBackground = (this.spentBackground.get(relay) ?? []).filter((at) => now - at < 60_000);
     this.spent.set(relay, recent);
     this.spentBackground.set(relay, recentBackground);
-    if (recent.length >= REQUESTS_PER_MINUTE || (background && recentBackground.length >= BACKGROUND_REQUESTS_PER_MINUTE)) return false;
+    if (recent.length >= this.perMinute || (background && recentBackground.length >= this.backgroundPerMinute)) return false;
     recent.push(now);
     if (background) recentBackground.push(now);
     return true;

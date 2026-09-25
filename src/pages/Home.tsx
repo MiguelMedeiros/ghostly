@@ -19,7 +19,7 @@ export function Home() {
   const handleCreate = async () => {
     setIsCreating(true);
     try {
-      nav.conversation(chatPath(createPairedChat()));
+      nav.conversation(chatPath(await createPairedChat()));
     } finally { setIsCreating(false); }
   };
 

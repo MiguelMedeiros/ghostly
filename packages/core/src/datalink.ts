@@ -1,5 +1,6 @@
 import { waitForIceGathering } from "./callSignal";
 import { wrapDataChannel, type FrameChannel } from "./frames";
+import { traceLink } from "./linkTrace";
 import {
   DATA_CHANNEL_ID,
   DATA_CHANNEL_LABEL,
@@ -28,9 +29,15 @@ export interface DataLinkOptions {
   onOpen: (channel: FrameChannel) => void;
   onClose: () => void;
   onState?: (state: DataLinkState) => void;
+  /**
+   * How long an attempt (offer or answer out, channel not yet open) may take before it is given up, so the
+   * next one can start. Default `CONNECT_TIMEOUT_MS`; a first pairing, whose contact is right there
+   * reading its invite, uses a short one.
+   */
+  attemptTimeoutMs?: number;
 }
 
-const CONNECT_TIMEOUT_MS = 90_000;
+export const CONNECT_TIMEOUT_MS = 90_000;
 const ICE_GATHERING_TIMEOUT_MS = 5_000;
 /** How long a connection may stay `disconnected` before it is given up. */
 const DISCONNECT_GRACE_MS = 12_000;
@@ -53,8 +60,10 @@ export class DataLink {
     try {
       const pc = this.createConnection();
       await pc.setLocalDescription(await pc.createOffer());
+      const gathering = Date.now();
       await waitForIceGathering(pc, ICE_GATHERING_TIMEOUT_MS);
       if (this.pc !== pc) return;
+      traceLink(this.options.myPubKeyZ32, "ice-gathered", { ms: Date.now() - gathering, offer: true });
 
       this.myOfferTs = Date.now();
       const signal: RtcSignal = { t: "o", ts: this.myOfferTs, ...extractRtcParams(pc.localDescription!.sdp) };
@@ -115,8 +124,10 @@ export class DataLink {
       const pc = this.createConnection();
       await pc.setRemoteDescription({ type: "offer", sdp: buildDataSdp(offer) });
       await pc.setLocalDescription(await pc.createAnswer());
+      const gathering = Date.now();
       await waitForIceGathering(pc, ICE_GATHERING_TIMEOUT_MS);
       if (this.pc !== pc) return;
+      traceLink(this.options.myPubKeyZ32, "ice-gathered", { ms: Date.now() - gathering, offer: false });
 
       const signal: RtcSignal = {
         t: "a",
@@ -162,8 +173,11 @@ export class DataLink {
     });
 
     this.connectTimer = setTimeout(() => {
-      if (this.pc === pc && this.state !== "open") this.reset();
-    }, CONNECT_TIMEOUT_MS);
+      if (this.pc === pc && this.state !== "open") {
+        traceLink(this.options.myPubKeyZ32, "attempt-timeout", { state: this.state });
+        this.reset();
+      }
+    }, this.options.attemptTimeoutMs ?? CONNECT_TIMEOUT_MS);
     return pc;
   }
 

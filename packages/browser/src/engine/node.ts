@@ -33,6 +33,7 @@ import { fileMessageText, type PaymentRequest, type PaymentAsk, type Payment, ty
 import {
   DEFAULT_RELAYS,
   GhostLink,
+  emptyLinkRecords,
   DHT_TEXT_BYTES, DHT_MESSAGE_TTL, type DeliveryMode,
   GhostlyHttpError,
   HTTP_SERVICE_PROTO,
@@ -67,6 +68,7 @@ import {
   type PollIntervals,
   type PeerPresence,
   type ServiceAd,
+  type PairingProgress,
   type PairingState,
   type NativeEndpoint,
   type NativeTransport,
@@ -123,6 +125,7 @@ interface LiveLink {
   proofs?: PeerProofs;
   proofError?: string;
   pairing?: PairingState;
+  pairingProgress?: PairingProgress;
   stored: StoredLink;
   myPubKeyZ32: string;
   link: GhostLink | null;
@@ -162,6 +165,12 @@ function linkFilesFrom(linkId: string, files: StoredFile[], messages: StoredMess
   }
   return result;
 }
+
+interface SpareInvite { mine: LinkParams; inviteKey: ReturnType<typeof identityFromSeedB64>; inviteCode: string; madeAt: number }
+/** A spare invite is warmed again this often while it waits, and handed out only between these ages. */
+const SPARE_INVITE_WARM_EVERY_MS = 4 * 60_000;
+export const SPARE_INVITE_MIN_AGE_MS = 6_000;
+const SPARE_INVITE_MAX_AGE_MS = 15 * 60_000;
 
 function newLiveLink(stored: StoredLink, lastMessageAt: number, files = emptyLinkFiles()): LiveLink {
   return {
@@ -238,6 +247,11 @@ export class GhostlyNode implements EngineImplementation {
     if (message.timestamp < this.feedbackStartedAt || message.file || message.paymentId || /^👋 (?:.+ )?joined$/.test(message.text)) return;
     this.feedback(type, message.linkId + ":" + message.id);
   }
+  /** The next chat's keys, warmed on the network ahead of time (`takeInvite`). */
+  private spare: SpareInvite | null = null;
+  private spareTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Keys this engine warmed with an empty packet, and when. */
+  private readonly warmedKeys = new Map<string, number>();
   private readonly outboxes = new Map<string, Outbox>();
   private readonly requestCounts = new Map<string, number>();
   private readonly transfers = new Map<string, FileTransferView>();
@@ -659,7 +673,7 @@ export class GhostlyNode implements EngineImplementation {
       if (!this.links.get(linkId)?.stored.group) void this.refreshPublicProfiles({ linkId }).catch(() => {});
     }
     this.emitState();
-    if (this.settings.online) { this.hold.start(); this.startGroupEntries(); }
+    if (this.settings.online) { this.hold.start(); this.startGroupEntries(); this.prepareSpare(); }
     void this.pollPaymentStatus().catch(()=>{});
     // Federations joined before: opened (and the notes a contact sent that an interruption left unredeemed, redeemed).
     void this.fedimintWallet.ensureReady().then(() => this.desk.resumeFedimint());
@@ -679,6 +693,7 @@ export class GhostlyNode implements EngineImplementation {
   async shutdown(): Promise<void> {
     this.shuttingDown = true;
     if(this.paymentTimer)clearTimeout(this.paymentTimer);
+    if (this.spareTimer) clearTimeout(this.spareTimer);
     this.stopGroupEntries();
     this.stopWatchingAdapters?.();
     this.identities.stop();
@@ -749,9 +764,42 @@ export class GhostlyNode implements EngineImplementation {
   // -- links ---------------------------------------------------------------
 
   async createLink(): Promise<{ linkId: string; inviteCode: string }> {
+    const { mine, inviteCode } = this.takeInvite();
+    return { linkId: await this.addLink(mine, inviteCode), inviteCode };
+  }
+
+  /**
+   * The next chat's keys, made and warmed ahead of time. The first packet under a key nobody has heard of
+   * takes the network seconds (the DHT's iterative lookup before the store, on the relays' side too, and
+   * a relay refuses to replace a packet it is still putting); a packet under a key it knows lands in
+   * under a second. So the engine keeps one invite ready with both its keys warmed with empty packets
+   * (`emptyLinkRecords`), and makes the next one the moment this one is taken.
+   */
+  takeInvite(): { mine: LinkParams; inviteCode: string } {
+    // A spare warmed seconds ago is worse than fresh keys: the network is still putting its first packet,
+    // and a second one under the key meanwhile is refused by relays and DHT alike (for ~4 s).
+    const age = this.spare ? Date.now() - this.spare.madeAt : 0;
+    const spare = this.spare && age >= SPARE_INVITE_MIN_AGE_MS && age < SPARE_INVITE_MAX_AGE_MS ? this.spare : this.makeSpare();
+    if (spare === this.spare) { this.spare = null; this.prepareSpare(); }
+    return { mine: spare.mine, inviteCode: spare.inviteCode };
+  }
+
+  private makeSpare(): SpareInvite {
     const { mine, invite } = createLink();
-    const modernInvite = encodeInviteCode({ ...invite, profile: "paired-chat/1" });
-    return { linkId: await this.addLink({ ...mine, profile: "paired-chat/1" }, modernInvite), inviteCode: modernInvite };
+    return { mine: { ...mine, profile: "paired-chat/1" }, inviteKey: identityFromSeedB64(invite.seedB64), inviteCode: encodeInviteCode({ ...invite, profile: "paired-chat/1" }), madeAt: Date.now() };
+  }
+
+  /** One invite warmed and waiting, warmed again every so often while it waits (the relays forget). */
+  private prepareSpare(): void {
+    if (this.shuttingDown || !this.settings.online) return;
+    if (!this.spare) this.spare = this.makeSpare();
+    const spare = this.spare;
+    for (const identity of [identityFromSeedB64(spare.mine.seedB64), spare.inviteKey]) {
+      this.warmedKeys.set(identity.pubKeyZ32, Date.now());
+      void this.transport.publish(identity, emptyLinkRecords()).catch(() => {});
+    }
+    if (this.spareTimer) clearTimeout(this.spareTimer);
+    this.spareTimer = setTimeout(() => { this.spareTimer = null; if (this.spare === spare) this.prepareSpare(); }, SPARE_INVITE_WARM_EVERY_MS);
   }
 
   async joinLink({ inviteCode }: { inviteCode: string }): Promise<{ linkId: string }> {
@@ -765,8 +813,13 @@ export class GhostlyNode implements EngineImplementation {
     return { linkId: await this.addLink(params) };
   }
 
-  ensureLink(params: LinkParams): Promise<{ linkId: string }> {
-    return this.joinLink({ inviteCode: encodeInviteCode(params) });
+  async ensureLink({ inviteCode, ...params }: LinkParams & { inviteCode?: string }): Promise<{ linkId: string }> {
+    const existing = [...this.links.values()].find((l) => l.stored.seedB64 === params.seedB64);
+    if (existing) {
+      if (existing.stored.profile !== params.profile) throw new Error("Invitation profile does not match the stored link");
+      return { linkId: existing.stored.id };
+    }
+    return { linkId: await this.addLink(params, inviteCode) };
   }
 
   private profileRequests = new Map<string, Promise<void>>();
@@ -1693,6 +1746,7 @@ export class GhostlyNode implements EngineImplementation {
       for (const live of this.links.values()) this.startLink(live.stored.id, await db.getMessages(live.stored.id));
       this.hold.start();
       this.startGroupEntries();
+      this.prepareSpare();
     }
     if (wasOnline && !this.settings.online) this.stopGroupEntries();
     if (wasOnline && !this.settings.online) await this.hold.stop();
@@ -1713,8 +1767,32 @@ export class GhostlyNode implements EngineImplementation {
     try { await db.putLink(stored); }
     catch (error) { this.links.delete(stored.id); throw error; }
     if (this.settings.online) this.startLink(stored.id, []);
+    // The other side is due any moment: the joiner's inviter is polling for this very moment and its offer
+    // (or its answer) is a poll away; an inviter's contact is reading the invite right now more often than
+    // not. Both look fast for a while, as a group's entry session does.
+    if (params.profile) this.links.get(stored.id)?.link?.expectPeer();
+    if (params.profile && inviteCode && this.settings.online) this.warmInviteKey(inviteCode);
     this.emitState();
     return stored.id;
+  }
+
+  /**
+   * The first packet under a key nobody has heard of takes the network seconds (the DHT's iterative
+   * lookup before the store, on every relay's side too); the next one under a known key lands in under a
+   * second. The invite holds the contact's link key, so the inviter puts an empty packet there now: when
+   * the contact joins, minutes later, their first packet replaces a known one. The packet says nothing
+   * (no services, no messages) and the link session reads it as no packet at all.
+   */
+  private warmInviteKey(inviteCode: string): void {
+    const invite = decodeInviteCode(inviteCode);
+    if (!invite) return;
+    try {
+      const identity = identityFromSeedB64(invite.seedB64);
+      // Warmed ahead of time (`takeInvite`): another empty packet now would only be one the relays queue.
+      if (Date.now() - (this.warmedKeys.get(identity.pubKeyZ32) ?? 0) < SPARE_INVITE_MAX_AGE_MS) return;
+      this.warmedKeys.set(identity.pubKeyZ32, Date.now());
+      void this.transport.publish(identity, emptyLinkRecords()).catch(() => {});
+    } catch { /* a malformed invite warms nothing */ }
   }
 
   /** What this peer advertises. Chat, voice and video are what Ghostly always offered. */
@@ -1903,6 +1981,9 @@ export class GhostlyNode implements EngineImplementation {
           catch (error) { live.stored = previous; throw error; }
         },
       } : undefined,
+      // A chat never paired: the one who made the invite still holds it; the one who joined does not.
+      pairingProgress: stored.profile && stored.participationSeed && !stored.pairedPeerKey
+        ? { role: stored.inviteCode ? "inviter" : "joiner", startedAt: stored.createdAt } : undefined,
       transport: this.transport,
       nick: this.sharedNick,
       avatar: this.sharedAvatar,
@@ -1919,6 +2000,7 @@ export class GhostlyNode implements EngineImplementation {
       // Private groups are announced on paired chats; their admission frames arrive here.
       groupsSupport: !!stored.profile,
       events: {
+        onPairingProgress: progress => { live.pairingProgress = progress; this.emitState(); },
         onGroupFrame: stored.profile ? frame => this.groups.handleContactFrame(linkId, frame) : undefined,
         onGroupsSupport: () => this.emitState(),
         onDhtDelivery: () => { if (stored.profile && !stored.group) void this.outboxes.get(linkId)?.flush().catch(() => {}); this.emitState(); },
@@ -2107,6 +2189,7 @@ export class GhostlyNode implements EngineImplementation {
       nostr: this.nostrSocial.linkView(stored.id),
       profile: stored.profile,
       pairing: live.pairing,
+      pairingProgress: live.pairingProgress ?? live.link?.pairingProgress,
       discoveryError: live.discoveryError,
       peerVerified: !!stored.pairedPeerKey && (stored.peerTrust ? stored.peerTrust.verifiedKey === stored.pairedPeerKey : true),
       capabilities: this.capabilitiesOf(live),
