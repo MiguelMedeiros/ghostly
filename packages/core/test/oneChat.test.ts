@@ -108,6 +108,31 @@ describe("one chat: DHT rendezvous, peer-to-peer upgrade, DHT fallback", () => {
     expect(calls, "the side that dials tries the record's transport now").toEqual(["iroh/1"]);
   }, 120_000);
 
+  it("announces a new capability-record revision in an envelope only on the DHT, never on a live chat", async () => {
+    const announced = (side: Opened) => vi.spyOn((side.link as unknown as { dht: { announce(): Promise<void> } }).dht, "announce");
+    // Live: the session says it all, and the relays' budget is for signalling and held items.
+    const pkarr = new MemoryPkarr(DESKTOP_NETWORK), made = invitation();
+    const inviter = open(made.inviter, pkarr, { dht: true });
+    await run(2_000);
+    const joiner = open(made.joiner, pkarr, { dht: true });
+    expect(await until(() => inviter.link.isDataLinkOpen && joiner.link.isDataLinkOpen, 60_000)).toBeLessThan(Infinity);
+    const live = announced(inviter);
+    inviter.link.announceCapsRevision();
+    expect(live).not.toHaveBeenCalled();
+    await stop(inviter); await stop(joiner);
+
+    // On the DHT, pinned: an envelope is the only way the contact hears of it.
+    rtc.blocked = true;
+    const other = invitation();
+    const a = open(other.inviter, pkarr, { dht: true });
+    await run(2_000);
+    open(other.joiner, pkarr, { dht: true });
+    expect(await until(() => a.link.pairingProgress?.stage === "on-dht" && !!a.credentials.peerKey, 60_000)).toBeLessThan(Infinity);
+    const onDht = announced(a);
+    a.link.announceCapsRevision();
+    expect(onDht).toHaveBeenCalledTimes(1);
+  }, 120_000);
+
   it("live, then a drop: back on the DHT at once, text still goes, and live again when the contact is back", async () => {
     const pkarr = new MemoryPkarr(DESKTOP_NETWORK), made = invitation();
     const inviter = open(made.inviter, pkarr, { dht: true });

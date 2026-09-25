@@ -755,8 +755,14 @@ export class GhostLink {
     this.maybeAutoConnect(this.presence);
   }
 
-  /** This side's capability record has a new revision: a DHT envelope names it now, so the contact reads it (WISP 03). */
+  /**
+   * This side's capability record has a new revision: a DHT envelope names it now, so the contact reads it (WISP 03).
+   * Only on the DHT with the contact pinned. A live session carries the same news itself, and before the pin the
+   * contact reads the record when it pins; either way an envelope would only spend a relay request, the budget the
+   * chat's signalling and held items need.
+   */
   announceCapsRevision(): void {
+    if (this.isDataLinkOpen || !this.options.pairing?.credentials.peerKey) return;
     void this.dht?.announce().catch(() => {});
   }
 
