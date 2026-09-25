@@ -148,7 +148,7 @@ const en = {
         icon: "video",
         title: "Be a little closer.",
         body: "Voice, video and screen sharing, one to one. Turn the camera on or share your screen without calling again.",
-        extra: "Screen sharing needs a computer. Calls ring today in chats with Ghostly 0.4 contacts; calls in every chat are planned, and groups don't ring yet.",
+        extra: "Screen sharing needs a computer. Calls ring in every chat while it is live (not on the DHT, and not on Linux desktop, whose webview has no WebRTC); groups don't ring yet.",
       },
       {
         id: "sats",
@@ -493,7 +493,7 @@ const ptBr: HomeCopy = {
         icon: "video",
         title: "Fique mais perto.",
         body: "Voz, vídeo e compartilhamento de tela, um a um. Ligue a câmera ou mostre a tela sem ligar de novo.",
-        extra: "Compartilhar a tela exige um computador. Hoje as chamadas tocam em chats com contatos no Ghostly 0.4; chamadas em todo chat estão planejadas, e grupos ainda não tocam.",
+        extra: "Compartilhar a tela exige um computador. As chamadas tocam em todo chat enquanto ele está ao vivo (não pela DHT, nem no desktop Linux, cujo webview não tem WebRTC); grupos ainda não tocam.",
       },
       {
         id: "sats",

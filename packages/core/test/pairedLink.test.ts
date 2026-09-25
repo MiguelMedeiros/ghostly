@@ -98,7 +98,8 @@ describe("paired profile policy boundaries", () => {
       transport:{publish,resolve:async()=>null,describe:()=>({protocol:"test",relays:[]})},
       createPeerConnection:()=>{throw new Error("not available");},localFetch:vi.fn(),getServices:()=>[],getHostedHttpService:()=>undefined});
     expect(await link.sendMessage("private text")).toMatch(/never falls back/);
-    await expect(link.setCallSignal("private signal")).rejects.toThrow(/chat only/);
+    // Calls are a paired capability of their own now (calls/1): without a live session a signal is refused.
+    await expect(link.setCallSignal("private signal")).rejects.toThrow(/not available in this app/);
     // Shared services travel over the paired session now (paired-services / ph frames), so a
     // request is no longer refused as out-of-profile: without a data link it fails, and never
     // reaches the bootstrap.

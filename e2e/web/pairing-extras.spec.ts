@@ -71,7 +71,7 @@ test("the header shows only an icon, as big as the call buttons; a tooltip names
   await expect(trigger(alice)).toHaveText("");
   await expect(trigger(alice)).toHaveAttribute("data-state", "connected");
   await expect(trigger(alice).getByTestId("connection-dot")).toBeVisible();
-  const icon = (await trigger(alice).boundingBox())!, call = (await alice.page.getByTitle("Video calls are not supported in this chat").boundingBox())!;
+  const icon = (await trigger(alice).boundingBox())!, call = (await alice.page.getByTestId("call-video").boundingBox())!;
   expect(Math.abs(icon.width - call.width)).toBeLessThanOrEqual(1);
   expect(Math.abs(icon.height - call.height)).toBeLessThanOrEqual(1);
 

@@ -76,8 +76,8 @@ const en: Timeline = {
       color: "#22d3ee",
       title: "Chat & connection",
       items: {
-        now: ["Chats: files, payments, local apps", "Short texts over the DHT when the live link drops", "Calls with Ghostly 0.4 contacts", "Iroh and HyperDHT on desktop", "QR invitations", "Pairing progress you can watch", "Voice messages"],
-        planned: ["DHT start and self-upgrade in every chat", "ghostly1 invite codes", "Calls in every chat", "Local network discovery, QUIC and WebSocket relay profiles"],
+        now: ["Chats: files, payments, local apps", "Short texts over the DHT when the live link drops", "Calls in every chat, while live", "Iroh and HyperDHT on desktop", "QR invitations", "Pairing progress you can watch", "Voice messages"],
+        planned: ["DHT start and self-upgrade in every chat", "ghostly1 invite codes", "Local network discovery, QUIC and WebSocket relay profiles"],
         later: [{ text: "Tor, libp2p, Pear components", level: "research" }],
       },
     },
@@ -175,8 +175,8 @@ const ptBr: Timeline = {
       color: "#22d3ee",
       title: "Conversa e conexão",
       items: {
-        now: ["Chats: arquivos, pagamentos, apps locais", "Textos curtos pela DHT quando o link direto cai", "Chamadas com contatos no Ghostly 0.4", "Iroh e HyperDHT no desktop", "Convites por QR", "Progresso do pareamento à vista", "Mensagens de voz"],
-        planned: ["Início na DHT e upgrade sozinho em todo chat", "Códigos de convite ghostly1", "Chamadas em todo chat", "Descoberta na rede local, perfis QUIC e relay WebSocket"],
+        now: ["Chats: arquivos, pagamentos, apps locais", "Textos curtos pela DHT quando o link direto cai", "Chamadas em todo chat, ao vivo", "Iroh e HyperDHT no desktop", "Convites por QR", "Progresso do pareamento à vista", "Mensagens de voz"],
+        planned: ["Início na DHT e upgrade sozinho em todo chat", "Códigos de convite ghostly1", "Descoberta na rede local, perfis QUIC e relay WebSocket"],
         later: [{ text: "Tor, libp2p, componentes Pear", level: "research" }],
       },
     },

@@ -71,8 +71,8 @@ Inspection of `dev` at `802b48bc`, rechecked at `8670aeab`. The chat family's re
 | Files, long text, requests while on the DHT | Held if both allow `hold/1` and the chat is not DHT-only; otherwise attach is refused | Held in `on-dht` and `dht-chosen`; otherwise queued for layer 1 |
 | Mailbox reads while live | Every 30 s | Every 5 min, at once on a drop |
 | Compatibility (prefix-less, v0.4) chats | Read and written; `_msgs` text, legacy WebRTC, calls, legacy files, hosted HTTP | Same; never created; "Continue in a new chat" |
-| Hosted HTTP in new chats | Yes: `ph` frames on the chat session ([pairedHttp.ts](../../packages/core/src/pairedHttp.ts)), no negotiated capability | Unchanged |
-| Calls in new chats | No: `GhostLink` drops call signals when the chat has a profile | Being implemented (`calls/1` on the chat session) |
+| Hosted HTTP in new chats | Yes: `ph` frames on the chat session ([pairedHttp.ts](../../packages/core/src/pairedHttp.ts)) under `services/1` ([pairedCapabilities.ts](../../packages/core/src/pairedCapabilities.ts)), live only | Unchanged |
+| Calls in new chats | Yes: `calls/1`, `paired-call` signals on the live session ([pairedCalls.ts](../../packages/core/src/pairedCalls.ts)), media on its own WebRTC connection; not on Linux Desktop (no WebRTC) | Unchanged |
 | Pairing progress | Stages end `live` or `failed` | Adds terminal `on-dht`; `failed` only for security or an unreachable DHT |
 | CLI | Legacy `_msgs` only | Unchanged by the Drafts; a DHT-only client of 403 is the natural next step |
 

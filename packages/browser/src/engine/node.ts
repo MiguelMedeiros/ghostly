@@ -211,6 +211,11 @@ export interface NodeOptions {
   invoke?: ProviderHost["invoke"];
   /** The Fedimint client (tests pass a fake: the real one needs a worker and the origin-private file system). */
   fedimintSdk?: () => Promise<FedimintSdk>;
+  /**
+   * Whether paired chats offer `services/1`: this app serves granted local web apps and opens a contact's.
+   * Default: everywhere but the web app, which can do neither (a tab has no way to reach localhost).
+   */
+  servicesSupport?: boolean;
 }
 
 export interface NodeEvents {
@@ -2034,6 +2039,9 @@ export class GhostlyNode implements EngineImplementation {
       barkPaymentsSupport: true,
       params: stored,
       rtcAvailable: typeof RTCPeerConnection !== "undefined",
+      // Call media is a WebRTC connection of its own, whatever carries the chat: no WebRTC, no calls (Linux WebKitGTK).
+      callsSupport: typeof RTCPeerConnection !== "undefined",
+      servicesSupport: this.options.servicesSupport ?? (this.options.platform ?? "web") !== "web",
       dht: stored.profile ? { state: stored.dhtDeliveryState, save: async state => {
         await db.patchLink(linkId, { dhtDeliveryState: state });
         live.stored = { ...live.stored, dhtDeliveryState: state };
@@ -2288,6 +2296,8 @@ export class GhostlyNode implements EngineImplementation {
       hold: this.hold.view(stored.id),
       paymentMethods: Object.fromEntries(PAYMENT_METHODS.map(m => [m, stored.paymentMethods?.[m] !== false])) as Record<PaymentMethodName, boolean>,
       groups: live.link?.groupsSupport ?? false,
+      sessionOffers: stored.profile ? live.link?.sessionOffers : undefined,
+      callsUnavailable: !stored.profile ? undefined : live.link ? live.link.callsUnavailable : "Calls need a live connection",
       participationKey: stored.participationSeed ? identityFromSeedB64(stored.participationSeed).pubKeyZ32 : undefined,
       peerParticipationKey: stored.pairedPeerKey,
       publicProfiles: EXTERNAL_IDENTITIES_ENABLED ? stored.publicProfiles : undefined,
@@ -2333,10 +2343,11 @@ export class GhostlyNode implements EngineImplementation {
   private capabilitiesOf(live: LiveLink): NonNullable<LinkView["capabilities"]> {
     const link = live.link;
     if (!this.holdingFor(live)) return { files: link?.supportsFiles ?? false, payments: link?.supportsPayments ?? false,
+      calls: link?.supportsCalls ?? false, services: link?.supportsServices ?? false,
       methods: Object.fromEntries(PAYMENT_METHODS.map(m => [m, link?.allowsPayment(m) ?? false])) as Record<PaymentMethodName, boolean> };
     const held = this.hold.heldPaymentMethods(live.stored.id) ?? [];
     const methods = Object.fromEntries(PAYMENT_METHODS.map(m => [m, held.includes(m) && (link?.paymentEnabled(m) ?? false)])) as Record<PaymentMethodName, boolean>;
-    return { files: true, payments: Object.values(methods).some(Boolean), methods };
+    return { files: true, payments: Object.values(methods).some(Boolean), methods, calls: false, services: false };
   }
 
   /** State changes arrive in bursts; the UI gets one snapshot per tick. */

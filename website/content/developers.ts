@@ -158,8 +158,8 @@ const en = {
       { name: "Payments in groups", cells: [A, A, A, null] },
     ] as { name: string; cells: (Level | null)[] }[],
     notes: [
-      "Planned, specified in WISPs 400 and 801: a chat with no direct path starts on the DHT and goes live by itself; one ghostly1… invite code with a ghostly.tools link; calls in every chat.",
-      "Calls: today only with Ghostly 0.4 contacts, not in groups. Groups: text, a picture and payments; no files or calls. CLI: DHT text in the 0.4 format, keys passed by hand. Desktop on Linux: its webview has no WebRTC, so no live link there yet.",
+      "Planned, specified in WISPs 400 and 801: a chat with no direct path starts on the DHT and goes live by itself; one ghostly1… invite code with a ghostly.tools link.",
+      "Calls: in every chat while it is live, not in groups. Groups: text, a picture and payments; no files or calls. CLI: DHT text in the 0.4 format, keys passed by hand. Desktop on Linux: its webview has no WebRTC, so no live link or calls there yet.",
       "WebLN is web-only, Bitcoin Core desktop-only. Bark, BDK, Breez and Fedimint run on test networks only; Spark needs your own Breez API key for Mainnet. OpenID waits for OAuth clients.",
       "Also contacted: Pkarr relays, Google STUN, mints, Iroh relays, HyperDHT bootstrap nodes, Ark and Spark operators, Fedimint guardians, Esplora servers, Nostr relays, Ethereum RPCs, and any service you add. No TURN by default.",
     ],
@@ -328,8 +328,8 @@ const ptBr: DevCopy = {
       { name: "Pagamentos em grupos", cells: [A, A, A, null] },
     ],
     notes: [
-      "Planejado, especificado nos WISPs 400 e 801: um chat sem caminho direto começa na DHT e passa sozinho ao link direto; um único código de convite ghostly1… com link em ghostly.tools; chamadas em todo chat.",
-      "Chamadas: hoje só com contatos no Ghostly 0.4, não em grupos. Grupos: texto, uma foto e pagamentos; sem arquivos nem chamadas. CLI: texto pela DHT no formato do 0.4, chaves à mão. Desktop no Linux: o webview não tem WebRTC, então ainda sem link ao vivo lá.",
+      "Planejado, especificado nos WISPs 400 e 801: um chat sem caminho direto começa na DHT e passa sozinho ao link direto; um único código de convite ghostly1… com link em ghostly.tools.",
+      "Chamadas: em todo chat enquanto ele está ao vivo, não em grupos. Grupos: texto, uma foto e pagamentos; sem arquivos nem chamadas. CLI: texto pela DHT no formato do 0.4, chaves à mão. Desktop no Linux: o webview não tem WebRTC, então ainda sem link ao vivo nem chamadas lá.",
       "WebLN só na web, Bitcoin Core só no desktop. Bark, BDK, Breez e Fedimint só em redes de teste; o Spark exige a sua própria chave de API da Breez na Mainnet. OpenID espera os clientes OAuth.",
       "Também contatados: relays Pkarr, STUN do Google, mints, relays Iroh, nós de bootstrap da HyperDHT, operadores Ark e Spark, guardiões Fedimint, servidores Esplora, relays Nostr, RPCs Ethereum e o serviço que você adicionar. Sem TURN por padrão.",
     ],

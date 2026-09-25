@@ -4,7 +4,7 @@
 |---|---|
 | Candidate number | 700; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.2 |
+| Revision | 0.3 |
 | Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [03](03-capabilities.md), [100](100-transports.md) |
@@ -22,7 +22,7 @@ See the concrete profiles above for current fields, limits, receipt semantics an
 
 ## Candidate requirements
 
-Preserve the local allowlist, origin/base-path confinement, header stripping and explicit enable/disable behavior across adapters. Advertising a service cannot add a target or change local authorization. Closing sharing terminates access through Ghostly; it does not necessarily stop the local application. Group membership MUST NOT automatically grant localhost access: require a separately selected service audience and host policy before such a profile is enabled.
+Preserve the local allowlist, origin/base-path confinement, header stripping and explicit enable/disable behavior across adapters. In the chat session the service frames need a live session and both apps offering `services/1` ([701](701-http-services.md#paired-profile)); a chat on the DHT carries none. Advertising a service cannot add a target or change local authorization. Closing sharing terminates access through Ghostly; it does not necessarily stop the local application. Group membership MUST NOT automatically grant localhost access: require a separately selected service audience and host policy before such a profile is enabled.
 
 HTTP request/response bodies travel outside Core records. Extensions for WebSockets, server-sent events or sustained response streaming must be negotiated; current binary chunk framing is not a promise that the entire proxy streams end to end.
 
@@ -40,5 +40,6 @@ Test path traversal, alternate URL/header injection, redirects, local credential
 
 ## Revision log
 
+- 0.3 (2026-09-25): in the chat session, shared apps need `services/1` on both sides and a live session.
 - 0.2 (2026-09-25): implementation line: hosting works in compatibility chats and in the chat session of every new chat.
 - 0.1 (2026-09-20): initial review draft.

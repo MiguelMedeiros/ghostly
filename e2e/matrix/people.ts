@@ -40,7 +40,14 @@ export interface Person {
   preferTransport(preferred: "WebRTC" | "Iroh" | "HyperDHT" | undefined, fallback: boolean): Promise<string[]>;
   /** Leaves (closes the app or the page) and returns how to come back to the chat. */
   away(): Promise<() => Promise<void>>;
+  /** The open chat's audio call button: whether it is off and why (its title), and whether this client has WebRTC at all. */
+  callButton(): Promise<{ disabled: boolean; title: string | null; rtc: boolean }>;
 }
+
+/** `callButton` as a page script, for Desktop (WebDriver runs a string). */
+const CALL_BUTTON = `
+  const button = document.querySelector('[data-testid="call-audio"]');
+  return { disabled: !button || button.disabled, title: button?.getAttribute("title") ?? null, rtc: typeof RTCPeerConnection !== "undefined" };`;
 
 /* ---------- the browser clients ---------- */
 
@@ -104,6 +111,10 @@ export function webPerson(actor: Actor): Person {
         await expect(chatPane(actor)).toBeVisible({ timeout: 60_000 });
       };
     },
+    callButton: () => page().evaluate(() => {
+      const button = document.querySelector<HTMLButtonElement>('[data-testid="call-audio"]');
+      return { disabled: !button || button.disabled, title: button?.getAttribute("title") ?? null, rtc: typeof RTCPeerConnection !== "undefined" };
+    }),
   };
   return person;
 }
@@ -197,6 +208,7 @@ export async function desktopPerson(name: string, options: { home: string; env: 
         if (hash) await person.go(hash);
       };
     },
+    callButton: () => run(CALL_BUTTON),
     stop: () => session.stop(),
   };
   return person;

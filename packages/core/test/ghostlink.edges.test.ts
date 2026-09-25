@@ -34,6 +34,8 @@ function makeLink(params: LinkParams, side: Side): GhostLink {
     transport: { publish: vi.fn(async () => {}), resolve: async () => null, describe: () => ({ protocol: "test", relays: [] }) },
     createPeerConnection: () => { throw new Error("no dial in this test"); },
     localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
+    // A full app: calls and shared apps offered on its paired sessions (`paired-capabilities`).
+    callsSupport: profile, servicesSupport: profile,
     ...rest, events,
   });
   // The paired handshake binds to the DTLS fingerprints of the WebRTC connection; these stand in for them.

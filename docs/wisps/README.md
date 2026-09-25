@@ -6,7 +6,7 @@
 
 > Decided (2026-09-25), chat family revision 0.2: **one chat, one invite.** The DHT is the rendezvous of every 1:1 chat and its floor; the apps upgrade to WebRTC, Iroh or HyperDHT when one connects, fall back to DHT text when none does, and come back by themselves. A person can keep a chat on DHT only. Chats with Ghostly 0.4 contacts keep working as compatibility chats ([402](402-legacy-chat.md)). The invite is one bech32m code, `ghostly1…`, also shared as `https://ghostly.tools/#ghostly1…`. Start at [400](400-chat.md); the invite is in [801](801-invitation-profiles.md).
 >
-> **Implemented today** (dev): every new chat is a chat session ([401](401-paired-chat.md)) over WebRTC, or Iroh/HyperDHT between desktops; short texts fall back to the DHT after a live link drops; DHT only per chat; held items; hosted local apps. **Being implemented:** the `ghostly1` invite and its ghostly.tools link; a first pairing with no direct path starting on the DHT and every chat upgrading by itself; calls in the chat session (today calls exist only in compatibility chats).
+> **Implemented today** (dev): every new chat is a chat session ([401](401-paired-chat.md)) over WebRTC, or Iroh/HyperDHT between desktops; short texts fall back to the DHT after a live link drops; DHT only per chat; held items; hosted local apps and calls on the live session. **Being implemented:** the `ghostly1` invite and its ghostly.tools link; a first pairing with no direct path starting on the DHT and every chat upgrading by itself.
 
 **All 31 entries remain Drafts.** The maintainer approved family-based numbering on 2026-09-22. This editorial migration does not assign new wire identifiers or claim new implementation support. See [numbering and compatibility](NUMBERING.md) for the old-to-new map and independent families. Future adapters need substantive contracts, not empty numbered placeholders.
 
@@ -57,15 +57,15 @@ The implementation column is independent of document status. Existing features c
 | [Bitcoin address · 3xx planned](3xx-bitcoin.md) | Bitcoin Address Proof | Draft | Experimental provider: BIP-322 2.0.0 and legacy P2PKH, verified locally |
 | [SSH · 3xx planned](3xx-ssh.md) | SSH keys | Draft | Experimental `ssh`, `ssh-github`, `ssh-gitlab` providers |
 | [400](400-chat.md) | Chat Messaging | Draft | One chat on two layers: live link and DHT fallback today; DHT start and self-upgrade being implemented |
-| [401](401-paired-chat.md) | Chat Session (formerly Paired Chat) | Draft | Layer-1 session of every new chat: WebRTC, native Iroh/HyperDHT where supported; DHT first contact, automatic upgrade and calls being implemented |
+| [401](401-paired-chat.md) | Chat Session (formerly Paired Chat) | Draft | Layer-1 session of every new chat: WebRTC, native Iroh/HyperDHT where supported; calls and shared apps (live); DHT first contact and automatic upgrade being implemented |
 | [402](402-legacy-chat.md) | Compatibility Chat (formerly Legacy Timestamp Chat) | Draft; retained for compatibility | v0.4 and CLI clients; existing chats and v0.4 codes only |
 | [403](403-dht-text.md) | DHT Text (formerly Bounded DHT Text) | Draft | Existing envelope, fallback after a drop and DHT only; first contact of every chat being implemented |
 | [Store-and-forward · 4xx planned](4xx-store-and-forward.md) | Store-and-Forward for an Away Contact | Draft | Experimental `hold/1`: sealed items in the sender's own S3 storage, a signed DHT pointer; text, pictures and payment requests |
 | [500](500-files.md) | File Transfer | Draft | Existing 1:1 transfer |
 | [501](501-paired-files.md) | Chat Files (formerly Paired Files) | Draft | Every new chat's live link; WebRTC and supported native adapters |
 | [502](502-legacy-files.md) | Compatibility File Frames | Draft; retained for compatibility | Compatibility chats only; both peers online |
-| [600](600-media.md) | Voice and Video | Draft | 1:1 calls and screen sharing in compatibility chats; every chat being implemented |
-| [601](601-webrtc-media.md) | WebRTC Media | Draft | Compatibility chats; capture varies by platform; chat session being implemented |
+| [600](600-media.md) | Voice and Video | Draft | 1:1 calls and screen sharing in every chat (live) |
+| [601](601-webrtc-media.md) | WebRTC Media | Draft | Compatibility chats and the chat session (`calls/1`); capture varies by platform |
 | [700](700-local-services.md) | Local Services | Draft | Existing HTTP proxy, in every chat (desktop and extension hosts) |
 | [701](701-http-services.md) | HTTP Local Service Profile | Draft | Desktop/extension hosting in every chat (`ph` frames in the chat session); web viewer where supported |
 | [800](800-invite-join.md) | Invite and Join | Draft | Existing bearer invite; admission protocol proposed |

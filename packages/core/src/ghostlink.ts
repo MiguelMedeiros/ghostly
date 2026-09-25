@@ -37,6 +37,8 @@ import { EXPECT_PEER_MS, LinkSession, type LinkStatus, type PeerPresence, type P
 import type { ResolvedLink } from "./records";
 import { servicesFromWire, servicesToWire, type ServiceAd } from "./services";
 import { PairedHttp } from "./pairedHttp";
+import { CALLS_CAPABILITY, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, type SessionCapability } from "./pairedCapabilities";
+import { PAIRED_CALL_FRAME, PairedCalls, parsePairedCallFrame } from "./pairedCalls";
 import { traceLink } from "./linkTrace";
 import type { PkarrTransport } from "./transport";
 import { PairingTracker, type PairingProgress, type PairingRole } from "./pairingProgress";
@@ -160,6 +162,10 @@ export interface GhostLinkOptions {
   groupsSupport?: boolean;
   /** Offer `hold/1`: accept items held for this side, and hold items for the contact while it is away. */
   holdSupport?: boolean;
+  /** Offer `calls/1` on paired sessions: this app can place and take calls (WebRTC media and capture). */
+  callsSupport?: boolean;
+  /** Offer `services/1` on paired sessions: this app can serve granted local web apps and open the contact's. */
+  servicesSupport?: boolean;
   dht?: { state?: DhtDeliveryState; save(state: DhtDeliveryState): Promise<void>; pollMs?: number };
   rtcAvailable?: boolean;
   native?: { peerDescriptors?: TransportDescriptors; peerTransports?: PairedTransport[]; peerFallback?: boolean; preferred?: PairedTransport; fallback?: boolean };
@@ -239,6 +245,9 @@ export class GhostLink {
   private peerNickOverride: string | null = null;
   /** Group protocol versions the peer announced on this session; null until it does. */
   private peerGroupVersions: number[] | null = null;
+  /** What each side announced after the handshake (`paired-capabilities`): calls, services. */
+  private readonly sessionCapabilities = new SessionCapabilities(() => this.offeredCapabilities());
+  private readonly pairedCalls = new PairedCalls();
   private livenessTimer: ReturnType<typeof setInterval> | null = null;
   private peerAnswersPings = false;
   /** When the ping awaiting its pong went, and the round trip last measured on this session. */
@@ -755,7 +764,14 @@ export class GhostLink {
 
   /** Publishes a `_call` signal; a connected peer also gets it right away over the data link. */
   async setCallSignal(signal: string | null): Promise<void> {
-    this.requireLegacyCapabilities();
+    if (this.options.params.profile) {
+      // Kept until cleared, so what the session could not carry goes on the next one while still fresh.
+      const frame = this.pairedCalls.set(signal);
+      if (!frame) return;
+      if (!this.supportsCalls || !this.channel) throw new Error(this.callsUnavailable ?? "Calls need a live connection");
+      this.channel.send(JSON.stringify(frame));
+      return;
+    }
     if (signal && this.channel) {
       try {
         this.channel.send(encodeControl({ t: "call", s: signal }));
@@ -770,6 +786,8 @@ export class GhostLink {
   async request(serviceId: string, request: ClientRequest): Promise<ClientResponse> {
     if (this.options.params.profile) {
       await this.connect();
+      if (!this.supportsServices) throw new GhostlyHttpError("unavailable", this.isDataLinkOpen
+        ? "Your contact's app cannot share web apps in this chat, or needs an updated Ghostly" : "Shared apps need a live connection");
       if (!this.pairedHttp) throw new GhostlyHttpError("closed", "Data link is closed");
       return this.pairedHttp.client.request(serviceId, request);
     }
@@ -1014,8 +1032,48 @@ export class GhostLink {
   setPaymentMethods(methods: Partial<Record<PaymentMethodName, boolean>>): void { this.options.paymentMethods = { ...methods }; this.sendPaymentMethods(); }
   /** The apps this contact may reach, said on the open session. Older apps drop the frame (no id). */
   private sendPairedServices(): void {
-    if (!this.options.params.profile || !this.channel || !this.isDataLinkOpen || this.paired?.state.status !== "ready") return;
+    if (!this.options.params.profile || !this.channel || !this.supportsServices || this.paired?.state.status !== "ready") return;
     try { this.channel.send(JSON.stringify({ t: "paired-services", s: servicesToWire(this.options.getPairedServices?.() ?? []) })); } catch { /* sent again on the next session */ }
+  }
+  private offeredCapabilities(): SessionCapability[] {
+    const offered: SessionCapability[] = [];
+    if (this.options.callsSupport) offered.push(CALLS_CAPABILITY);
+    if (this.options.servicesSupport) offered.push(SERVICES_CAPABILITY);
+    return offered;
+  }
+  /** Both sides offer `calls/1` on the open session: call signals can flow. Calls need a live session. */
+  get supportsCalls(): boolean { return this.isDataLinkOpen && this.sessionCapabilities.agreed(CALLS_CAPABILITY); }
+  /** Both sides offer `services/1` on the open session: shared web apps can be listed and reached. */
+  get supportsServices(): boolean { return this.isDataLinkOpen && this.sessionCapabilities.agreed(SERVICES_CAPABILITY); }
+  /** What each side offers on the open session, for showing why something is unavailable. `peer` is null until it says. */
+  get sessionOffers(): { mine: SessionCapability[]; peer: string[] | null } {
+    const known = [CALLS_CAPABILITY, SERVICES_CAPABILITY] as const;
+    return { mine: this.offeredCapabilities(),
+      peer: this.isDataLinkOpen && this.sessionCapabilities.peerAnnounced ? known.filter(c => this.sessionCapabilities.peerOffers(c)) : null };
+  }
+  /** Why a call cannot be placed in this paired chat right now, or null when it can. */
+  get callsUnavailable(): string | null {
+    if (!this.options.params.profile || this.supportsCalls) return null;
+    if (!this.options.callsSupport) return "Calls are not available in this app";
+    if (!this.isDataLinkOpen) return "Calls need a live connection";
+    return this.sessionCapabilities.peerAnnounced ? "Your contact's app cannot take calls" : "Your contact needs an updated Ghostly for calls";
+  }
+  /** Says what this side offers on the open session. Older apps drop the frame (no id). */
+  private sendSessionCapabilities(): void {
+    if (!this.options.params.profile || !this.channel || !this.isDataLinkOpen) return;
+    try { this.channel.send(JSON.stringify(this.sessionCapabilities.announcement())); } catch { /* said again on the next session */ }
+  }
+  /** The contact said what it offers: start what both sides now agree on. */
+  private sessionCapabilitiesChanged(changed: SessionCapability[]): void {
+    if (changed.includes(SERVICES_CAPABILITY)) {
+      if (this.supportsServices) this.sendPairedServices();
+      else if (this.peerServicesOverride) { this.peerServicesOverride = null; this.options.events?.onPresence?.(this.presence); }
+    }
+    if (changed.includes(CALLS_CAPABILITY) && this.supportsCalls && this.channel) {
+      const pending = this.pairedCalls.pending();
+      if (pending) try { this.channel.send(JSON.stringify(pending)); } catch { /* the next session */ }
+    }
+    this.emitPairingState();
   }
   /** Both sides announced groups on this session and it is open. */
   get groupsSupport(): boolean { return !!this.options.groupsSupport && this.isDataLinkOpen && !!this.peerGroupVersions?.includes(1); }
@@ -1180,13 +1238,14 @@ export class GhostLink {
           else this.advertiseTransports();
           this.peerPaymentMethods = null;
           this.peerHoldOverride = null;
+          this.sessionCapabilities.reset();
           this.pairedHttp?.close();
           this.pairedHttp = new PairedHttp(channel, this.options.getHostedHttpService, this.options.localFetch);
           this.emitPairingState();
           this.sendPairedNick();
           this.sendPairedAvatar();
           this.sendPaymentMethods();
-          this.sendPairedServices();
+          this.sendSessionCapabilities();
           this.sendGroupsSupport();
           this.sendHoldState();
           void this.options.events?.onHold?.({ peerAllows: paired.peerHoldSupport });
@@ -1262,8 +1321,19 @@ export class GhostLink {
             }
             return;
           }
-          if (frame?.t === "ph") { this.pairedHttp?.handle(frame); return; }
+          if (frame?.t === SESSION_CAPABILITIES_FRAME) {
+            const changed = this.sessionCapabilities.receive(frame);
+            if (changed) this.sessionCapabilitiesChanged(changed);
+            return;
+          }
+          if (frame?.t === PAIRED_CALL_FRAME) {
+            const signal = this.supportsCalls ? parsePairedCallFrame(frame) : null;
+            if (signal) this.options.events?.onCallSignal?.(signal);
+            return;
+          }
+          if (frame?.t === "ph") { if (this.supportsServices) this.pairedHttp?.handle(frame); return; }
           if (frame?.t === "paired-services") {
+            if (!this.supportsServices) return;
             const services = servicesFromWire(frame.s);
             if (services) { this.peerServicesOverride = services; this.options.events?.onPresence?.(this.presence); }
             return;
@@ -1443,6 +1513,7 @@ export class GhostLink {
     this.channel = this.httpHost = this.httpClient = this.files = null;
     this.peerServicesOverride = null;
     this.peerNickOverride = null;
+    this.sessionCapabilities.reset();
     if (this.peerGroupVersions) { this.peerGroupVersions = null; this.options.events?.onGroupsSupport?.(false); }
     this.session.setDataLinkOpen(false);
     if (wasNative) this.options.events?.onDataLinkState?.("idle");

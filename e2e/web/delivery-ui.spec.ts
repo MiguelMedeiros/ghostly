@@ -117,7 +117,7 @@ test("mobile keeps its footer and compact header, with multiline text and QR ins
   await a.page.getByPlaceholder("Message…").fill("Line one\nLine two");
   // Only the icon in the header, with the call buttons, and nothing past the edge.
   const icon=a.page.getByTestId("connection-options"); await expect(icon).toHaveText("");
-  const iconBox=(await icon.boundingBox())!, call=(await a.page.getByTitle("Video calls are not supported in this chat").boundingBox())!;
+  const iconBox=(await icon.boundingBox())!, call=(await a.page.getByTestId("call-video").boundingBox())!;
   expect(Math.abs(iconBox.width-call.width)).toBeLessThanOrEqual(1); expect(iconBox.x+iconBox.width).toBeLessThanOrEqual(390);
   expect(await icon.evaluate(el=>{const h=el.closest(".header-safe")!;return h.scrollWidth<=h.clientWidth;})).toBe(true);
   await a.page.getByTestId("connection-options").click();await expect(a.page.getByRole("dialog",{name:"Connection options"})).toBeVisible();

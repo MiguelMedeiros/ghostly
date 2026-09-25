@@ -477,8 +477,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "available",
     note: {
-      en: "Every new chat on web, desktop and extension. Calls in it are planned.",
-      "pt-br": "Todo chat novo na web, no desktop e na extensão. Chamadas nela estão planejadas.",
+      en: "Every new chat on web, desktop and extension, calls included while it is live.",
+      "pt-br": "Todo chat novo na web, no desktop e na extensão, com chamadas enquanto está ao vivo.",
     },
     feature: inApp("next", "Chat", "Conversar"),
   },
@@ -545,8 +545,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "available",
     note: {
-      en: "Today only in chats with Ghostly 0.4 contacts. Calls in every chat are planned.",
-      "pt-br": "Hoje só em chats com contatos no Ghostly 0.4. Chamadas em todo chat estão planejadas.",
+      en: "In every chat while it is live. Not on Linux desktop (its webview has no WebRTC) and not in groups.",
+      "pt-br": "Em todo chat enquanto ele está ao vivo. Não no desktop Linux (o webview não tem WebRTC) nem em grupos.",
     },
     feature: inApp("next", "Calls", "Chamadas"),
   },

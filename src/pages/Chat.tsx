@@ -173,6 +173,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const dhtOnly = deliveryPeer?.deliveryMode === "dht" || deliveryPeer?.textDelivery === "dht";
   const pairedReady = deliveryPeer?.pairing?.status === "ready";
   const textReady = deliveryPeer?.canSendText ?? pairedReady;
+  // A paired chat calls over its live session (`calls/1`); why it cannot right now, if it cannot.
+  const callsBlocked = paired ? (deliveryPeer?.callsUnavailable === undefined ? "Calls need a live connection" : deliveryPeer.callsUnavailable) : null;
   // A chat made here (it has an invite to give) is the inviter's side of the pairing; read once, before the
   // invite code is forgotten when the contact shows up.
   const createdHere = useMemo(() => !!getInviteCode(sessionId), [sessionId]);
@@ -497,9 +499,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           {paired && <PairingBanner peerKey={params.peerPubKeyB64} />}
           <button
             onClick={() => webrtc.startCall(false)}
-            disabled={paired || webrtc.callState !== "idle"}
+            disabled={!!callsBlocked || webrtc.callState !== "idle"}
             className="p-2 max-md:p-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-            title={paired ? "Audio calls are not supported in this chat" : "Audio call"}
+            title={callsBlocked ?? "Audio call"}
+            aria-label="Audio call"
+            data-testid="call-audio"
           >
             <svg
               width="18"
@@ -518,9 +522,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           {typeof navigator.mediaDevices?.getDisplayMedia === "function" && (
             <button
               onClick={() => webrtc.startCall(true, "screen")}
-              disabled={paired || webrtc.callState !== "idle"}
+              disabled={!!callsBlocked || webrtc.callState !== "idle"}
               className="max-md:hidden p-2 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-              title={paired ? "Screen sharing is not supported in this chat" : "Share your screen"}
+              title={callsBlocked ?? "Share your screen"}
+              aria-label="Share your screen"
               data-testid="call-screen"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -532,9 +537,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           {/* Video call button */}
           <button
             onClick={() => webrtc.startCall(true)}
-            disabled={paired || webrtc.callState !== "idle"}
+            disabled={!!callsBlocked || webrtc.callState !== "idle"}
             className="p-2 max-md:p-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-            title={paired ? "Video calls are not supported in this chat" : "Video call"}
+            title={callsBlocked ?? "Video call"}
+            aria-label="Video call"
+            data-testid="call-video"
           >
             <svg
               width="18"
