@@ -46,6 +46,7 @@ export function HomePage({ locale, version }: { locale: Locale; version: string 
         id="act-1"
         field
         bubble={t.hero.booSays}
+        bubbleAvoid=".hero-inner > *"
         chapters={[
           { id: "hero", chapter: "hero", kind: "free" },
           { id: "invite", chapter: "invite" },
