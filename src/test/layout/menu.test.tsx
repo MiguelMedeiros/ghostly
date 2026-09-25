@@ -12,12 +12,12 @@ import { renderApp } from "../render";
 /** How wide the window is, as matchMedia and layout read it. */
 const viewport = (width: number, height = 800) => (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height });
 
-function Harness({ onPick = () => {}, portal, align }: { onPick?: () => void; portal?: boolean; align?: "start" | "end" }) {
+function Harness({ onPick = () => {}, portal, align, prefer, within }: { onPick?: () => void; portal?: boolean; align?: "start" | "end"; prefer?: "up" | "down"; within?: string }) {
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLDivElement>(null);
   return <div ref={anchor} data-testid="anchor" className="relative">
     <button onClick={() => setOpen(o => !o)}>Options</button>
-    <Menu testId="menu" open={open} onClose={() => setOpen(false)} anchorRef={anchor} portal={portal} align={align}>
+    <Menu testId="menu" open={open} onClose={() => setOpen(false)} anchorRef={anchor} portal={portal} align={align} prefer={prefer} within={within}>
       <MenuItem testId="short" onClick={() => { onPick(); setOpen(false); }}>Refresh</MenuItem>
       <MenuSeparator />
       <MenuItem testId="long" hint="Uma pessoa, com um convite" onClick={() => setOpen(false)}>Informações técnicas</MenuItem>
@@ -108,6 +108,24 @@ describe("Menu: one line per row", () => {
     await user.click(screen.getByRole("button", { name: "Options" }));
     expect(screen.getByTestId("menu").style.left).toBe(`${800 - 8 - 192}px`);
     expect(screen.getByTestId("menu").style.top).toBe(`${76 + 4}px`);
+  });
+
+  it("within: kept inside the opener's list as well as the window, moving over and flipping there", async () => {
+    viewport(1000, 760);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      // A chat's message list right of a 400px sidebar; the ⋮ of a wide bubble of mine close to its left edge.
+      const box = this.dataset.testid === "menu" ? { left: 0, right: 176, top: 0, bottom: 82 }
+        : this.dataset.testid === "anchor" ? { left: 420, right: 452, top: 100, bottom: 136 }
+        : this.dataset.testid === "list" ? { left: 400, right: 1000, top: 60, bottom: 700 } : { left: 0, right: 0, top: 0, bottom: 0 };
+      return { ...box, x: box.left, y: box.top, width: box.right - box.left, height: box.bottom - box.top, toJSON: () => box } as DOMRect;
+    });
+    const { user } = renderApp(<div data-testid="list" data-list><Harness portal prefer="up" within="[data-list]" /></div>);
+    await user.click(screen.getByRole("button", { name: "Options" }));
+    const menu = screen.getByTestId("menu");
+    // Its end on the opener's end would start it at 276px, over the sidebar: it starts inside the list instead.
+    expect(menu.style.left).toBe(`${400 + 8}px`);
+    // Above the opener it would cover the chat's header, which the window alone would allow: it opens below.
+    expect(menu.style.top).toBe(`${136 + 4}px`);
   });
 
   it("is a sheet from the bottom on a phone, with full-width rows; the backdrop closes it", async () => {
