@@ -2,6 +2,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { fromBase64Url, toBase64Url } from "./bytes";
 import { LIMITS, type FrameChannel } from "./frames";
 import { sanitizeFileName, sanitizeMime, type FileInfo, type FileSink, type FileTransferEvents } from "./files";
+import { parseVoiceMeta } from "./voice";
 
 const CHUNK = 16 * 1024;
 const ID = /^[A-Za-z0-9_-]{8,64}$/;
@@ -51,7 +52,7 @@ export class PairedFiles {
     if (this.outgoing.has(file.id) || this.outgoing.size >= LIMITS.maxIncomingFilesPerPeer) throw new Error("File transfer already active");
     this.outgoing.add(file.id);
     try {
-      await this.exchange(file.id, 0, "start", { t: "pf-start", ...file, name: sanitizeFileName(file.name), mime: sanitizeMime(file.mime) });
+      await this.exchange(file.id, 0, "start", { t: "pf-start", ...file, name: sanitizeFileName(file.name), mime: sanitizeMime(file.mime), voice: parseVoiceMeta(file.voice, sanitizeMime(file.mime)) });
       const hash = sha256.create();
       let offset = 0;
       for await (const part of source) {
@@ -95,7 +96,10 @@ export class PairedFiles {
           typeof frame.size !== "number" || !Number.isSafeInteger(frame.size) || frame.size < 0 || frame.size > LIMITS.maxFileBytes ||
           typeof frame.timestamp !== "number" || !Number.isSafeInteger(frame.timestamp) || frame.timestamp <= 0 ||
           this.incoming.size >= LIMITS.maxIncomingFilesPerPeer) throw new Error("Invalid file announcement");
-        const file = { id, name: sanitizeFileName(frame.name), mime: sanitizeMime(frame.mime), size: frame.size, timestamp: frame.timestamp };
+        const file: FileInfo = { id, name: sanitizeFileName(frame.name), mime: sanitizeMime(frame.mime), size: frame.size, timestamp: frame.timestamp };
+        // A description that does not check out only costs the player: the file itself is fine.
+        const voice = parseVoiceMeta(frame.voice, file.mime);
+        if (voice) file.voice = voice;
         const stored = await this.events.onStored?.(file);
         if (this.closed) return;
         const sink = stored ? null : this.events.onIncoming(file);

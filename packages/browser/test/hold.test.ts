@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createIdentity, createLink, createRelayPayload, parseRelayPayload, HOLD_LIMITS, type PaymentRequest, type PkarrTransport, type SignedPacket } from "@ghostly/core";
+import { createIdentity, createLink, createRelayPayload, parseRelayPayload, HOLD_LIMITS, type PaymentRequest, type PkarrTransport, type SignedPacket, type VoiceMeta } from "@ghostly/core";
 import { HoldEngine, emptyHoldState, type HoldHost } from "../src/engine/hold";
 import { presignS3 } from "../src/backup/s3";
 import type { HoldStore, StoredBackup } from "../src/backup/storage";
 import type { HoldState, StoredLink } from "../src/shared/types";
-// covers: delivery.hold.enable, delivery.hold.text, delivery.hold.picture, delivery.hold.request, delivery.hold.tamper, delivery.hold.expiry, delivery.hold.protocol
+// covers: files.voice.meta, delivery.hold.enable, delivery.hold.text, delivery.hold.picture, delivery.hold.request, delivery.hold.tamper, delivery.hold.expiry, delivery.hold.protocol
 
 /**
  * A bucket in memory that hands out presigned addresses the way S3 does, and a relay in memory: two
@@ -46,9 +46,9 @@ interface Side {
   engine: HoldEngine;
   stored: StoredLink;
   messages: Map<string, { text?: string; file?: { name: string; size: number; mime: string }; request?: PaymentRequest; timestamp: number }>;
-  received: { kind: string; id: string; text?: string; name?: string; bytes?: Uint8Array; request?: PaymentRequest; timestamp: number }[];
+  received: { kind: string; id: string; text?: string; name?: string; bytes?: Uint8Array; request?: PaymentRequest; voice?: VoiceMeta; timestamp: number }[];
   delivery: Map<string, { state: string; error?: string }>;
-  files: Map<string, { bytes: Uint8Array; name: string; size: number; mime: string }>;
+  files: Map<string, { bytes: Uint8Array; name: string; size: number; mime: string; voice?: VoiceMeta }>;
   requests: Map<string, PaymentRequest>;
   open: boolean;
   refuseFiles?: string;
@@ -72,7 +72,7 @@ function setup(options: { aliceStorage?: boolean; bobStorage?: boolean; now?: ()
       file: async (fileId) => side.files!.get(fileId) ?? null,
       paymentRequest: (paymentId) => side.requests!.get(paymentId) ?? null,
       receiveText: async (_id, m) => { side.received!.push({ kind: "text", id: m.id, text: m.text, timestamp: m.timestamp }); },
-      receiveFile: async (_id, f, bytes) => { if (side.refuseFiles) return side.refuseFiles; side.received!.push({ kind: "file", id: f.wireId, name: f.name, bytes, timestamp: f.timestamp }); return null; },
+      receiveFile: async (_id, f, bytes) => { if (side.refuseFiles) return side.refuseFiles; side.received!.push({ kind: "file", id: f.wireId, name: f.name, bytes, timestamp: f.timestamp, ...(f.voice && { voice: f.voice }) }); return null; },
       receivePaymentRequest: async (_id, request) => { side.received!.push({ kind: "pay-req", id: request.id, request, timestamp: request.timestamp }); },
       changed: () => {},
       // Bob reads Alice's bucket and Alice reads Bob's: each fetches from wherever the manifest points.
@@ -136,6 +136,24 @@ describe("store-and-forward engine", () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(b.received).toHaveLength(3);
     expect(transport.puts).toBe(puts);
+  });
+
+  it("holds a voice message with its length and waveform, and drops a description that is not one", async () => {
+    const { a, b } = setup();
+    engines.push(a.engine, b.engine);
+    const voice = { duration: 3200, peaks: [0, 90, 255, 12] };
+    a.files.set("link-a-out-v1", { bytes: new Uint8Array(900).fill(3), name: "Voice message.webm", size: 900, mime: "audio/webm", voice });
+    a.files.set("link-a-out-v2", { bytes: new Uint8Array(10).fill(4), name: "notes.bin", size: 10, mime: "application/octet-stream", voice });
+    a.messages.set("me_5000", { file: { name: "Voice message.webm", size: 900, mime: "audio/webm" }, timestamp: 5000 });
+    a.messages.set("me_6000", { file: { name: "notes.bin", size: 10, mime: "application/octet-stream" }, timestamp: 6000 });
+    await a.engine.hold("link-a", { kind: "file", id: "wire-voice-1", messageId: "me_5000", ref: "link-a-out-v1", bytes: 900, timestamp: 5000 });
+    await a.engine.hold("link-a", { kind: "file", id: "wire-voice-2", messageId: "me_6000", ref: "link-a-out-v2", bytes: 10, timestamp: 6000 });
+    b.engine.start();
+    await vi.waitFor(() => expect(b.received).toHaveLength(2));
+    expect(b.received[0]).toMatchObject({ kind: "file", id: "wire-voice-1", voice });
+    // Not audio: the file arrives, the description does not.
+    expect(b.received[1]).toMatchObject({ kind: "file", id: "wire-voice-2" });
+    expect(b.received[1].voice).toBeUndefined();
   });
 
   it("refuses a tampered item, keeps the rest, counts it, and survives a crash between store and acknowledgement", async () => {

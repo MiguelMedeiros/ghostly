@@ -18,6 +18,7 @@ export * from "./link";
 export * from "./datalink";
 export * from "./ghostlink";
 export * from "./files";
+export * from "./voice";
 export * from "./payments";
 export * from "./bolt11";
 export * from "./paymentUri";

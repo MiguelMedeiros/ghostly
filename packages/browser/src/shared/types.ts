@@ -1,5 +1,5 @@
 import type { WalletMode } from "./mints";
-import type { PaymentMethodName } from "@ghostly/core";
+import type { PaymentMethodName, VoiceMeta } from "@ghostly/core";
 import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
 import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
@@ -230,6 +230,8 @@ export interface MessageFile {
   name: string;
   size: number;
   mime: string;
+  /** A voice message: its length and the shape of its sound. */
+  voice?: VoiceMeta;
 }
 
 export interface FileTransferView {

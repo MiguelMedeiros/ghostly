@@ -46,7 +46,7 @@ export interface StoredFile {
   /** The id the file had on the data link. */
   wireId?: string;
   digest?: string;
-  metadata?: { name: string; size: number; mime: string; timestamp: number };
+  metadata?: { name: string; size: number; mime: string; timestamp: number; voice?: import("@ghostly/core").VoiceMeta };
   transfer?: { state: "transferring" | "done" | "failed"; transferred: number; size: number; error?: string };
 }
 

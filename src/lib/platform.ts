@@ -333,8 +333,11 @@ export interface ServicesPlatform {
   readClipboardText(): Promise<string> | null;
   /** Largest file that can be sent, in bytes. */
   maxFileBytes: number;
-  /** Starts sending and returns what to show in the chat. Progress comes through `getTransfer`. */
-  sendFile(peerPubKeyZ32: string, file: File): Promise<{ timestamp: number; file: ChatFile }>;
+  /**
+   * Starts sending and returns what to show in the chat. Progress comes through `getTransfer`.
+   * `voice` makes it a voice message: the file then plays in the chat instead of being saved.
+   */
+  sendFile(peerPubKeyZ32: string, file: File, options?: { voice?: ChatFile["voice"] }): Promise<{ timestamp: number; file: ChatFile }>;
   /** Null when nothing is known about the transfer, e.g. after a restart. */
   retryFile?(fileId: string): Promise<void>;
   getTransfer(fileId: string): FileTransferState | null;

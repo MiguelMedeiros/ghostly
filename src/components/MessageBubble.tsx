@@ -3,6 +3,7 @@ import { publicKeyLabel } from "../lib/publicKeyLabel";
 import React, { useMemo, useRef, useState } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { FileBubble } from "./FileBubble";
+import { VoiceBubble } from "./voice/VoiceBubble";
 import { InvoiceBubble } from "./InvoiceBubble";
 import { findMoney } from "../lib/money";
 import { PaymentBubble } from "./PaymentBubble";
@@ -376,6 +377,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
 
   return (
     <div
+      data-message-row
       className={`group flex items-start gap-1 ${isMe ? "justify-end" : "justify-start"} mb-3.5 px-[63px] max-md:px-2.5 ${enter}`}
       onDoubleClick={() => message.meta && setShowTech((v) => !v)}
     >
@@ -410,6 +412,11 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
         {message.paymentId ? (
           <div className="clearfix">
             <PaymentBubble paymentId={message.paymentId} peerPubKey={peerPubKey} fallbackText={message.text} />
+            {timestampEl}
+          </div>
+        ) : message.file?.voice ? (
+          <div className="clearfix">
+            <VoiceBubble file={{ ...message.file, voice: message.file.voice }} sender={isMe ? "me" : "peer"} />
             {timestampEl}
           </div>
         ) : message.file ? (

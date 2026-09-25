@@ -4,6 +4,9 @@ import { EmojiPicker } from "./EmojiPicker";
 import { GifPicker } from "./GifPicker";
 import { PaymentComposer } from "./PaymentComposer";
 import { ComposerIdentityButton, ComposerIdentityPicker } from "./identities/ComposerIdentities";
+import { VoiceRecorderButton } from "./voice/VoiceRecorderButton";
+import { canRecordVoice } from "../lib/voiceRecorder";
+import type { VoiceMeta } from "@ghostly/core";
 
 interface MessageInputProps {
   draftId?: string;
@@ -15,7 +18,8 @@ interface MessageInputProps {
   /** Present when the platform can send files; returns an error message or null. */
   fileUnavailable?: string;
   paymentsUnavailable?: string;
-  onSendFile?: (file: File) => Promise<string | null>;
+  /** With `voice`, the file is a voice message recorded here (the mic replaces send while the text is empty). */
+  onSendFile?: (file: File, voice?: VoiceMeta) => Promise<string | null>;
   /** Present when the platform has a wallet. */
   payments?: {
     reviewContext?: {wallet:import("../lib/platform").WalletPlatform;peer:string;linkId:string};
@@ -60,6 +64,7 @@ export function MessageInput({
   const [toast, setToast] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [canRecord] = useState(canRecordVoice);
 
   useEffect(() => {
     textareaRef.current?.focus();
@@ -331,8 +336,16 @@ export function MessageInput({
           )}
         </div>
 
-        {/* Send button */}
-        <button
+        {/* Send button; the mic while there is nothing to send, as in WhatsApp */}
+        {onSendFile && canRecord && !text.trim() ? (
+          <VoiceRecorderButton
+            onSend={(file, voice) => onSendFile(file, voice)}
+            unavailable={fileUnavailable}
+            disabled={disabled}
+            onError={showToast}
+            onActiveChange={(active) => { if (active) { closeAll(); setShowMore(false); setShowPayment(false); } }}
+          />
+        ) : <button
           aria-label="Send message"
           onClick={handleSubmit}
           disabled={disabled || !text.trim()}
@@ -341,7 +354,7 @@ export function MessageInput({
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
             <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
           </svg>
-        </button>
+        </button>}
 
         {/* Pickers */}
         {showEmoji && (

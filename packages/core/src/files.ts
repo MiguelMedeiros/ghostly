@@ -8,6 +8,7 @@ import {
   type FrameChannel,
   type ResetFrame,
 } from "./frames";
+import { PLAYABLE_AUDIO, type VoiceMeta } from "./voice";
 
 /**
  * Files over the data link. A `file` frame announces name, size and type, the
@@ -22,6 +23,8 @@ export interface FileInfo {
   size: number;
   mime: string;
   timestamp: number;
+  /** A voice message: its length and the shape of its sound (files/2 and held items only). */
+  voice?: VoiceMeta;
 }
 
 /** Where a platform puts incoming bytes: memory, IndexedDB, disk. */
@@ -68,11 +71,12 @@ export const PREVIEWABLE_IMAGE = /^image\/(png|jpe?g|gif|webp)$/;
 /**
  * The type received bytes are served with. The peer picks the announced type,
  * and a blob: URL typed text/html or image/svg+xml would run in the app's
- * origin, so anything but a previewable image is opaque bytes.
+ * origin, so anything but a previewable image or playable audio is opaque bytes.
+ * Audio keeps its type because WebKit will not play what is typed as bytes.
  */
 export function safeBlobType(mime: string): string {
   const clean = sanitizeMime(mime);
-  return PREVIEWABLE_IMAGE.test(clean) ? clean : "application/octet-stream";
+  return PREVIEWABLE_IMAGE.test(clean) || PLAYABLE_AUDIO.test(clean) ? clean : "application/octet-stream";
 }
 
 interface Incoming {

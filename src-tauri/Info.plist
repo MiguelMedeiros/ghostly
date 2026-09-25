@@ -3,4 +3,6 @@
 <plist version="1.0"><dict>
   <key>NSCameraUsageDescription</key>
   <string>Scan a Ghostly invitation QR code when you choose Scan, or use your camera in a call.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Record a voice message when you hold the microphone button, or talk in a call.</string>
 </dict></plist>

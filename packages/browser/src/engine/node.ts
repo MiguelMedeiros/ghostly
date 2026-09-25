@@ -29,7 +29,7 @@ import { normalizeNostrRelays } from '../nostr/relay';
 import type { NostrDraft, NostrDraftRequest, NostrPublishResult } from '../nostr/types';
 import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
-import { type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
+import { fileMessageText, type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
 import {
   DEFAULT_RELAYS,
   GhostLink,
@@ -393,7 +393,7 @@ export class GhostlyNode implements EngineImplementation {
     file: async (fileId) => {
       const stored = await fileStore.get(fileId);
       if (!stored?.metadata) return null;
-      return { bytes: new Uint8Array(await stored.blob.arrayBuffer()), name: stored.metadata.name, size: stored.metadata.size, mime: stored.metadata.mime };
+      return { bytes: new Uint8Array(await stored.blob.arrayBuffer()), name: stored.metadata.name, size: stored.metadata.size, mime: stored.metadata.mime, voice: stored.metadata.voice };
     },
     paymentRequest: (paymentId): PaymentRequest | null => this.desk.requestFor(paymentId),
     receiveText: (linkId, message) => this.storeMessage({ linkId, id: `peer_${message.id}`, text: message.text, sender: "peer", timestamp: message.timestamp, via: "hold" }),
@@ -402,15 +402,15 @@ export class GhostlyNode implements EngineImplementation {
       if (!live) return "unknown chat";
       if (live.files.wireIds.has(wire.wireId)) return "duplicate file id";
       if (live.files.receivedBytes + wire.size > LIMITS.maxStoredIncomingBytesPerPeer) return "no room for more files";
-      const file: MessageFile = { id: `${linkId}-in-${toBase64Url(randomBytes(12))}`, name: wire.name, size: wire.size, mime: wire.mime };
+      const file: MessageFile = { id: `${linkId}-in-${toBase64Url(randomBytes(12))}`, name: wire.name, size: wire.size, mime: wire.mime, ...(wire.voice && { voice: wire.voice }) };
       if (live.stored.deletedIds?.includes(`peer_${wire.wireId}`)) return null;
       live.files.wireIds.add(wire.wireId);
       live.files.receivedBytes += wire.size;
       // The bytes first, then the message that shows them: a message never points at a file that is not there.
       await fileStore.put({ id: file.id, linkId, blob: new Blob([bytes as BlobPart], { type: safeBlobType(file.mime) }), createdAt: Date.now(), direction: "in", wireId: wire.wireId, digest,
-        metadata: { name: wire.name, size: wire.size, mime: wire.mime, timestamp: wire.timestamp }, transfer: { state: "done", transferred: wire.size, size: wire.size } });
+        metadata: { name: wire.name, size: wire.size, mime: wire.mime, timestamp: wire.timestamp, voice: wire.voice }, transfer: { state: "done", transferred: wire.size, size: wire.size } });
       this.transfers.set(file.id, { state: "done", transferred: wire.size, size: wire.size });
-      await this.storeMessage({ linkId, id: `peer_${wire.wireId}`, text: `📎 ${wire.name}`, sender: "peer", timestamp: wire.timestamp, via: "hold", file });
+      await this.storeMessage({ linkId, id: `peer_${wire.wireId}`, text: fileMessageText(file), sender: "peer", timestamp: wire.timestamp, via: "hold", file });
       return null;
     },
     receivePaymentRequest: (linkId, request) => this.desk.onPaymentRequest(linkId, request, true),
@@ -1126,7 +1126,7 @@ export class GhostlyNode implements EngineImplementation {
       if (file.size > HOLD_LIMITS.maxBundleBytes - 4096) return fail(`A file held for an away contact is at most ${Math.round(HOLD_LIMITS.maxBundleBytes / 1024 / 1024)} MB`);
       live.files.wireIds.add(wireId);
       this.transfers.set(file.id, { state: "transferring", transferred: 0, size: file.size });
-      void this.storeMessage({ linkId, id: `me_${timestamp}`, text: `📎 ${file.name}`, sender: "me", timestamp, via: "hold", delivery: "sending", file })
+      void this.storeMessage({ linkId, id: `me_${timestamp}`, text: fileMessageText(file), sender: "me", timestamp, via: "hold", delivery: "sending", file })
         .then(() => this.hold.hold(linkId, { kind: "file", id: wireId, messageId: `me_${timestamp}`, ref: file.id, bytes: file.size, timestamp })).catch(() => {});
       return;
     }
@@ -1138,7 +1138,7 @@ export class GhostlyNode implements EngineImplementation {
     void this.storeMessage({
       linkId,
       id: `me_${timestamp}`,
-      text: `📎 ${file.name}`,
+      text: fileMessageText(file),
       sender: "me",
       timestamp,
       via: "datalink",
@@ -1161,7 +1161,7 @@ export class GhostlyNode implements EngineImplementation {
         } finally { await reader.cancel(); reader.releaseLock(); }
       })();
       await link.sendFile(
-        { id: wireId, name: file.name, size: file.size, mime: file.mime, timestamp },
+        { id: wireId, name: file.name, size: file.size, mime: file.mime, timestamp, ...(file.voice && { voice: file.voice }) },
         source,
       );
     })().catch((error) => fail(error instanceof Error ? error.message : String(error)));
@@ -1169,7 +1169,7 @@ export class GhostlyNode implements EngineImplementation {
 
   private receiveFile(
     linkId: string,
-    wire: { id: string; name: string; size: number; mime: string; timestamp: number },
+    wire: { id: string; name: string; size: number; mime: string; timestamp: number; voice?: MessageFile["voice"] },
   ): FileSink | string {
     const files = this.links.get(linkId)?.files;
     if (!files) return "refused";
@@ -1188,11 +1188,11 @@ export class GhostlyNode implements EngineImplementation {
     const messageStored = this.storeMessage({
       linkId,
       id: `peer_${wire.timestamp}`,
-      text: `📎 ${file.name}`,
+      text: fileMessageText(file),
       sender: "peer",
       timestamp: wire.timestamp,
       via: "datalink",
-      file: { id: file.id, name: file.name, size: file.size, mime: file.mime },
+      file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(file.voice && { voice: file.voice }) },
     });
     void messageStored.catch(() => {});
     return {
@@ -1214,7 +1214,7 @@ export class GhostlyNode implements EngineImplementation {
           direction: "in",
           wireId: wire.id,
           digest,
-          metadata: { name: wire.name, size: wire.size, mime: wire.mime, timestamp: wire.timestamp },
+          metadata: { name: wire.name, size: wire.size, mime: wire.mime, timestamp: wire.timestamp, voice: wire.voice },
         });
         chunks.length = 0;
         if (cancelled) { await fileStore.delete(file.id); throw new Error("Transfer cancelled"); }
