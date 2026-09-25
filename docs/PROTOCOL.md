@@ -187,6 +187,27 @@ A DataChannel message is at most 16 KiB (16378 bytes of payload per chunk), a co
 - Limits: 100 MiB per file, 3 incoming files per peer at a time, 500 MiB of received files kept per peer. A file that would go past a limit, or that reuses an `f` already seen on the link, is refused with `rst`.
 - The name is display text and a download suggestion, never a path: path separators, control and other invisible characters (Unicode Cc, Cf, Zl, Zp, so bidi overrides and zero-width characters too), leading whitespace and leading dots are removed, 200 characters at most. An unparseable media type becomes `application/octet-stream`. Receivers store files under their own ids, never the sender's, serve the bytes as `application/octet-stream` unless they are an image they preview, and must not open or execute what they received on their own.
 
+### 6.2.1 Files of any size (`files/3`)
+
+In a chat session, files go with `files/3` when both sides list it in `paired-capabilities` ([WISP 501](wisps/501-paired-files.md), revision 0.3); otherwise with `files/2` and its 100 MiB limit. The frames are JSON on the authenticated session:
+
+```text
+sender   → { "t": "pf-offer", "id", "name", "mime", "size", "ts", "voice"?, "paused"? }
+receiver → { "t": "pf-accept", "id", "offset" } | { "t": "pf-wait", "id", "why": "consent" | "paused" | "busy" }
+         | { "t": "pf-refuse", "id", "why", "room"? }
+sender   → { "t": "pf-data", "id", "offset", "data": <base64url, at most 16 KiB> }   (up to 1 MiB unconfirmed)
+receiver → { "t": "pf-got", "id", "offset" }                                          (cumulative)
+sender   → { "t": "pf-sum", "id", "size", "digest": <SHA-256, base64url> }
+receiver → { "t": "pf-done", "id" }
+sender   → { "t": "pf-abort", "id" }
+both     → { "t": "pf-room", "max" }                                                  (bytes this side can take)
+```
+
+- The sender offers again on every session until the transfer ends; the receiver answers where it stands (an offset, a wait, done, or a refusal), so a drop, a transport switch or a restart of either side resumes from the last byte the receiver stored. A receiver makes what it stored durable every 8 MiB, and resumes from there after a restart.
+- A receiver takes a file of up to 25 MiB by itself while the files it took that way from the contact stay under 500 MiB; anything else waits for its person (`pf-wait` `consent`). A file larger than its free space is refused with `no-room` and the space left. At most 16 offers wait for an answer and 3 files arrive at once per contact; an offer nobody answers ends after seven days.
+- The receiver checks the digest on what it stored; a mismatch deletes the file and is refused with `damaged`. Either side pauses (`pf-offer` `paused`, `pf-wait` `paused`) and cancels (`pf-abort`, `pf-refuse` `cancelled`).
+- Received files are written to file storage as they arrive (the origin-private file system in browsers, real files on Desktop), never held whole in memory.
+
 ### 6.3 Payments
 
 Ghostly does not move money. It carries payment requests, payments that fit in a message (ecash) and receipts between two linked peers, and a wallet on each side does the rest. The vocabulary is [Paykit](https://github.com/pubky/paykit-rs)'s, so that publishing the same endpoints through Paykit later is a change of transport rather than of model: a *payment endpoint* is an identifier plus a payload, an *amount* is decimal text plus an asset.

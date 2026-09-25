@@ -177,8 +177,9 @@ export const servicesPlatform: ServicesPlatform | null = {
   },
   getTransfer: (fileId) => preparing.get(fileId) ?? engine.state?.transfers[fileId] ?? null,
   async fileAction(fileId, action) {
-    const stored = await fileStore.get(fileId);
-    const linkId = stored?.linkId ?? engine.state?.links.find((link) => fileId.startsWith(`${link.id}-`))?.id;
+    // A file's local id starts with its chat's.
+    const linkId = engine.state?.links.find((link) => fileId.startsWith(`${link.id}-in-`) || fileId.startsWith(`${link.id}-out-`))?.id
+      ?? (await fileStore.get(fileId).catch(() => undefined))?.linkId;
     if (!linkId) throw new Error("This file is no longer here");
     await engine.call("fileAction", { linkId, fileId, action });
   },

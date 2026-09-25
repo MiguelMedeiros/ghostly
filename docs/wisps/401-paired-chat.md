@@ -4,7 +4,7 @@
 |---|---|
 | Candidate number | 401; editorial family allocation |
 | Status | Draft |
-| Revision | 0.3 |
+| Revision | 0.4 |
 | Updated | 2026-09-25 |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [100](100-transports.md), [403](403-dht-text.md) |
@@ -49,9 +49,9 @@ The `pair-offer` lists what this session can carry: `chat/1`, `signed-signal/1`,
 
 ### Calls and shared apps
 
-Calls ([600](600-media.md)) and hosted local services ([700](700-local-services.md)) are what the one chat needs to do everything a compatibility chat ([402](402-legacy-chat.md)) did ([400](400-chat.md#what-each-state-can-carry)). Once the session is ready, each side sends `{"t":"paired-capabilities","c":[...]}` with what it offers on this session beyond the offer: `calls/1` (voice and video calls, [601](601-webrtc-media.md#paired-profile)) and `services/1` (shared local web apps, [701](701-http-services.md#paired-profile)). It sends the frame on every ready session, a transport switch included, and again when what it offers changes. A capability is on only while both sides list it on the current session. A peer that never sends the frame (an older app) offers nothing here. A receiver MUST ignore a malformed frame (not a list, more than 32 entries, an entry that is not 1 to 40 characters of `a-z`, `0-9`, `/` and `-`) and keep what the peer said before; it MUST keep identifiers it does not know, and enable nothing for them. The frame carries no message ID; older apps drop it.
+Calls ([600](600-media.md)) and hosted local services ([700](700-local-services.md)) are what the one chat needs to do everything a compatibility chat ([402](402-legacy-chat.md)) did ([400](400-chat.md#what-each-state-can-carry)). Once the session is ready, each side sends `{"t":"paired-capabilities","c":[...]}` with what it offers on this session beyond the offer: `calls/1` (voice and video calls, [601](601-webrtc-media.md#paired-profile)) and `services/1` (shared local web apps, [701](701-http-services.md#paired-profile)), and `files/3` (files of any size, offered, resumed and checked, [501](501-paired-files.md#files3-files-of-any-size-revision-03)). It sends the frame on every ready session, a transport switch included, and again when what it offers changes. A capability is on only while both sides list it on the current session. A peer that never sends the frame (an older app) offers nothing here. A receiver MUST ignore a malformed frame (not a list, more than 32 entries, an entry that is not 1 to 40 characters of `a-z`, `0-9`, `/` and `-`) and keep what the peer said before; it MUST keep identifiers it does not know, and enable nothing for them. The frame carries no message ID; older apps drop it.
 
-These two are not in the offer's `capabilities`, which are full at 16 for apps before 0.5. The frame grants no more than an offer entry would: it travels on the authenticated session, after the transcript is signed and bound to this connection. An app offers `calls/1` only where it can place a call (WebRTC and capture exist; Desktop on Linux has no WebRTC), and `services/1` only where it can serve granted apps and open a contact's (not the web app).
+These are not in the offer's `capabilities`, which are full at 16 for apps before 0.5. The frame grants no more than an offer entry would: it travels on the authenticated session, after the transcript is signed and bound to this connection. An app offers `calls/1` only where it can place a call (WebRTC and capture exist; Desktop on Linux has no WebRTC), and `services/1` only where it can serve granted apps and open a contact's (not the web app).
 
 Both need a live session. On the DHT ([403](403-dht-text.md)), or while connecting, there is no call and no shared app, and an app SHOULD say so where the action is ("Calls need a live connection"), and why when the contact's app is the reason.
 
@@ -65,6 +65,7 @@ Initial pairing currently uses WebRTC; revision 0.2 proposes first contact on th
 
 ## Revision log
 
+- 0.4 (2026-09-25): `files/3` announced in `paired-capabilities` too ([501](501-paired-files.md) 0.3).
 - 0.3 (2026-09-25): `calls/1` and `services/1` announced after the handshake in `paired-capabilities`; both need a live session. Shared apps now need `services/1` on both sides.
 - 0.2.1 (2026-09-25): hosted local services already run on this session (`ph` frames); only calls are the gap. Implementation status updated.
 - 0.2 (2026-09-25): renamed Chat Session; the layer-1 session of the one chat; first contact may complete on the DHT; the `no-dht-payload` transcript constant explained; capabilities list; calls and hosted services named as gaps.
