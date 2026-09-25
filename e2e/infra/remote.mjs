@@ -96,6 +96,9 @@ function address() {
   return ip;
 }
 
+/** This machine's own Docker (whatever DOCKER_HOST was before this module pointed it elsewhere), for `docker` here. */
+export const LOCAL_DOCKER = { ...process.env };
+
 if (remote && main) {
   connect();
   process.env.E2E_INFRA_HOST = HOST;

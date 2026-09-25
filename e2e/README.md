@@ -126,7 +126,7 @@ How it works (`e2e/infra/remote.mjs`):
   so the three files of `config/` travel as Compose configs. The project name and the containers are the same
   (`ghostly-e2e`, `ghostly-e2e-*`).
 - A stack here and a stack elsewhere cannot both have 47001-47090 on this Mac: `use`/`up` refuse while a local one
-  holds them. `E2E_INFRA_LOCAL_PORTS=<first free port>` forwards to that port and the next 18 instead (written to
+  holds them, and `status` says NOT READY and names the checkout that started the local one. `E2E_INFRA_LOCAL_PORTS=<first free port>` forwards to that port and the next 18 instead (written to
   `.env.e2e`), at the cost of the app's own Regtest options: the Ark, Bark and USDT specs then miss the stack.
 - To run the gated vitest contracts by hand: `set -a; . ./.env.e2e; set +a` first.
 
