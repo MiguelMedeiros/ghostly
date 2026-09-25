@@ -35,7 +35,14 @@
     "joinChat": "加入聊天",
     "quiet": "这里很安静...",
     "quietHint": "该去吓唬谁了！👻",
-    "startChat": "新聊天"
+    "startChat": "新聊天",
+    "newMenu": {
+      "label": "创建群组或聊天",
+      "chat": "聊天",
+      "chatHint": "一个人，通过邀请",
+      "group": "群组",
+      "groupHint": "任何人都能打开的链接"
+    }
   },
   "chat": {
     "typeMessage": "输入消息...",
@@ -47,7 +54,26 @@
     "today": "今天",
     "yesterday": "昨天",
     "deleteMessage": "删除消息",
-    "deleteMessageHint": "仅在此设备上删除，对方仍保留副本。"
+    "deleteMessageHint": "仅在此设备上删除，对方仍保留副本。",
+    "options": "选项",
+    "menu": {
+      "pin": "置顶聊天",
+      "unpin": "取消置顶",
+      "payments": "付款…",
+      "hold": "暂存消息…",
+      "identities": "身份…",
+      "services": "服务…",
+      "refresh": "刷新",
+      "techInfo": "技术信息"
+    }
+  },
+  "group": {
+    "menu": {
+      "members": "成员…",
+      "rotate": "轮换密钥",
+      "leave": "退出群组",
+      "forget": "从此设备删除"
+    }
   },
   "invite": {
     "live": "实时聊天",

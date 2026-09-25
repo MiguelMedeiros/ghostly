@@ -8,7 +8,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { NewGroupDialog } from "./NewGroupDialog";
 import { groupPath, groupRouteId } from "../lib/groups";
 import { useIsMobile } from "../hooks/useIsMobile";
-import { useOutsideDismiss } from "../hooks/useDismiss";
+import { Menu, MenuItem } from "./Menu";
 import { useLocation, Link } from "react-router-dom";
 import { JoinDialog } from "./JoinDialog";
 import { useBackgroundPoller } from "../hooks/useBackgroundPoller";
@@ -53,7 +53,7 @@ export function Sidebar() {
   const [showNewGroup, setShowNewGroup] = useState(false);
   const [newMenuOpen, setNewMenuOpen] = useState(false);
   const newMenuRef = useRef<HTMLDivElement>(null);
-  useOutsideDismiss(newMenuRef, newMenuOpen, () => setNewMenuOpen(false));
+  const closeNewMenu = () => setNewMenuOpen(false);
   const groups = useSyncExternalStore(subscribeEngine, engineSnapshot)?.groups ?? [];
   const activeGroupId = groupRouteId(location.pathname);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -174,20 +174,20 @@ export function Sidebar() {
           {/* New: one click is a chat, as always; the arrow beside it also offers a group. */}
           <div ref={newMenuRef} role="group" aria-label={t("sidebar.new")} data-testid="sidebar-new" className="sidebar-new-split relative flex min-w-0">
             <button onClick={() => nav.conversation(chatPath(createPairedChat()))} aria-label={t("sidebar.startChat")} title={t("sidebar.newChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 flex-1 items-center justify-center gap-1 rounded-s-lg bg-accent p-2 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8"/></svg><span className="sidebar-action-label">{t("sidebar.new")}</span></button>
-            <button onClick={() => setNewMenuOpen(open => !open)} aria-haspopup="true" aria-expanded={newMenuOpen} aria-controls="sidebar-new-menu" aria-label="Create a group or a chat" title="Create a group or a chat" data-testid="sidebar-new-more"
+            <button onClick={() => setNewMenuOpen(open => !open)} aria-haspopup="true" aria-expanded={newMenuOpen} aria-controls="sidebar-new-menu" aria-label={t("sidebar.newMenu.label")} title={t("sidebar.newMenu.label")} data-testid="sidebar-new-more"
               className="inline-flex min-h-10 w-6 shrink-0 items-center justify-center rounded-e-lg border-s border-panel-header/25 bg-accent text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header">
               <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${newMenuOpen ? "rotate-180" : ""}`}><path d="m6 9 6 6 6-6"/></svg>
             </button>
-            {newMenuOpen && <div id="sidebar-new-menu" data-testid="sidebar-new-menu" className="absolute end-0 top-full z-50 mt-1 min-w-[220px] rounded-lg border border-border bg-surface-alt py-1 shadow-lg animate-fade-in">
-              <button onClick={() => { setNewMenuOpen(false); nav.conversation(chatPath(createPairedChat())); }} className="flex w-full items-center gap-3 px-3 py-2 text-start text-sm text-text-primary hover:bg-surface-hover max-md:min-h-11 focus-visible:outline-none focus-visible:bg-surface-hover">
-                <svg aria-hidden="true" width="16" height="16" className="shrink-0 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8"/></svg>
-                <span><span className="block">Chat</span><span className="block text-xs text-text-muted">One person, with an invite</span></span>
-              </button>
-              <button onClick={() => { setNewMenuOpen(false); setShowNewGroup(true); }} data-testid="new-group" className="flex w-full items-center gap-3 px-3 py-2 text-start text-sm text-text-primary hover:bg-surface-hover max-md:min-h-11 focus-visible:outline-none focus-visible:bg-surface-hover">
-                <svg aria-hidden="true" width="16" height="16" className="shrink-0 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M19 8v6M16 11h6" /></svg>
-                <span><span className="block">Group</span><span className="block text-xs text-text-muted">A link anyone can open</span></span>
-              </button>
-            </div>}
+            <Menu id="sidebar-new-menu" testId="sidebar-new-menu" open={newMenuOpen} onClose={closeNewMenu} anchorRef={newMenuRef}>
+              <MenuItem onClick={() => { closeNewMenu(); nav.conversation(chatPath(createPairedChat())); }} hint={t("sidebar.newMenu.chatHint")}
+                icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8"/></svg>}>
+                {t("sidebar.newMenu.chat")}
+              </MenuItem>
+              <MenuItem testId="new-group" onClick={() => { closeNewMenu(); setShowNewGroup(true); }} hint={t("sidebar.newMenu.groupHint")}
+                icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M19 8v6M16 11h6" /></svg>}>
+                {t("sidebar.newMenu.group")}
+              </MenuItem>
+            </Menu>
           </div>
           <button onClick={() => setShowNewChat(true)} aria-label={t("join.submit")} title={t("sidebar.joinChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center gap-1 rounded-lg p-2 text-sm font-medium text-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 8V6a3 3 0 0 1 3-3h11a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H9l-5 3v-6 M2 12h12 M10 8l4 4-4 4"/></svg><span className="sidebar-action-label">{t("sidebar.join")}</span></button>
         </div>

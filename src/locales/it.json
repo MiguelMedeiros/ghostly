@@ -35,7 +35,14 @@
     "joinChat": "Entra in una chat",
     "quiet": "C'è silenzio qui...",
     "quietHint": "È ora di infestare qualcuno! 👻",
-    "startChat": "Nuova chat"
+    "startChat": "Nuova chat",
+    "newMenu": {
+      "label": "Crea un gruppo o una chat",
+      "chat": "Chat",
+      "chatHint": "Una persona, con un invito",
+      "group": "Gruppo",
+      "groupHint": "Un link che chiunque può aprire"
+    }
   },
   "chat": {
     "typeMessage": "Scrivi un messaggio...",
@@ -47,7 +54,26 @@
     "today": "Oggi",
     "yesterday": "Ieri",
     "deleteMessage": "Elimina messaggio",
-    "deleteMessageHint": "Eliminato solo qui. Il tuo contatto conserva la sua copia."
+    "deleteMessageHint": "Eliminato solo qui. Il tuo contatto conserva la sua copia.",
+    "options": "Opzioni",
+    "menu": {
+      "pin": "Fissa chat",
+      "unpin": "Sblocca chat",
+      "payments": "Pagamenti…",
+      "hold": "Trattieni messaggi…",
+      "identities": "Identità…",
+      "services": "Servizi…",
+      "refresh": "Aggiorna",
+      "techInfo": "Info tecniche"
+    }
+  },
+  "group": {
+    "menu": {
+      "members": "Membri…",
+      "rotate": "Rinnova chiavi",
+      "leave": "Esci dal gruppo",
+      "forget": "Elimina da questo dispositivo"
+    }
   },
   "invite": {
     "live": "Chat dal vivo",

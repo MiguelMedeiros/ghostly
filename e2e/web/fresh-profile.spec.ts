@@ -45,7 +45,8 @@ for (const mobile of [false, true]) {
     // The New split button: its menu offers a group.
     await page.getByTestId("sidebar-new-more").click();
     await expect(page.getByTestId("new-group")).toBeVisible();
-    await page.getByTestId("sidebar-new-more").click();
+    // The arrow closes it again; on a phone the menu is a sheet, and a tap on the shade over the page does.
+    await (mobile ? page.getByTestId("menu-backdrop") : page.getByTestId("sidebar-new-more")).click();
     await expect(page.getByTestId("sidebar-new-menu")).toHaveCount(0);
 
     // Every page the sidebar leads to renders: the account bar on a wide screen, the tab bar on a phone.

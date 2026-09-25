@@ -11,7 +11,8 @@ import { GroupShareDialog } from "../components/GroupLinkPanel";
 import { GroupConnection } from "../components/GroupConnection";
 import { GroupPaymentComposer } from "../components/GroupPaymentComposer";
 import { GroupPaymentCaption, GroupPaymentNote } from "../components/GroupPaymentNote";
-import { useOutsideDismiss } from "../hooks/useDismiss";
+import { Menu, MenuItem, MenuSeparator } from "../components/Menu";
+import { useI18n } from "../contexts/I18nContext";
 import { markGroupRead, memberName } from "../lib/groups";
 import type { ChatMessage } from "../lib/types";
 import { useSettings } from "../contexts/SettingsContext";
@@ -75,6 +76,7 @@ export function GroupChat() {
   const { groupId = "" } = useParams();
   const navigate = useNavigate();
   const nav = useAppNavigation();
+  const { t } = useI18n();
   const state = useSyncExternalStore(subscribe, snapshot);
   const group = state?.groups.find(g => g.id === groupId);
   const [messages, setMessages] = useState<StoredMessage[]>([]);
@@ -100,7 +102,7 @@ export function GroupChat() {
     if (engineNick !== undefined && engineNick !== nick) void engine.call("updateSettings", { settings: { nick } }).catch(() => {});
   }, [settings.defaultNickname, engineNick]);
   const bottomRef = useRef<HTMLDivElement>(null);
-  useOutsideDismiss(menuRef, menuOpen, () => setMenuOpen(false));
+  const closeMenu = () => setMenuOpen(false);
 
   useEffect(() => {
     if (!groupId) return;
@@ -176,16 +178,16 @@ export function GroupChat() {
             <span className="max-[480px]:hidden">Share link</span>
           </button>}
           <div className="relative" ref={menuRef}>
-            <button onClick={() => setMenuOpen(!menuOpen)} className="p-2 max-md:p-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer" title="Options" data-testid="group-options">
+            <button onClick={() => setMenuOpen(!menuOpen)} className="p-2 max-md:p-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer" title={t("chat.options")} aria-haspopup="true" aria-expanded={menuOpen} data-testid="group-options">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1" /><circle cx="12" cy="5" r="1" /><circle cx="12" cy="19" r="1" /></svg>
             </button>
-            {menuOpen && <div data-testid="group-options-menu" className="absolute right-0 top-full mt-1 bg-surface-alt border border-border rounded-lg shadow-lg py-1 min-w-[180px] z-50 animate-fade-in">
-              <button onClick={() => { setShowMembers(true); setMenuOpen(false); }} className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary">Members…</button>
-              {group.isAdmin && <button data-testid="group-rotate" onClick={() => void act(() => engine.call("rotateGroup", { groupId }))} className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary">Rotate keys</button>}
-              <div className="border-t border-border my-1" />
-              {group.status === "active" && <button data-testid="group-leave" onClick={() => { setMenuOpen(false); setConfirmLeave(true); }} className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-danger hover:bg-surface-hover">Leave group</button>}
-              <button data-testid="group-forget" onClick={() => { setMenuOpen(false); setConfirmForget(true); }} className="w-full px-3 py-2 max-md:min-h-11 text-left text-sm text-danger hover:bg-surface-hover">Delete from this device</button>
-            </div>}
+            <Menu testId="group-options-menu" open={menuOpen} onClose={closeMenu} anchorRef={menuRef}>
+              <MenuItem onClick={() => { setShowMembers(true); closeMenu(); }}>{t("group.menu.members")}</MenuItem>
+              {group.isAdmin && <MenuItem testId="group-rotate" onClick={() => void act(() => engine.call("rotateGroup", { groupId }))}>{t("group.menu.rotate")}</MenuItem>}
+              <MenuSeparator />
+              {group.status === "active" && <MenuItem danger testId="group-leave" onClick={() => { closeMenu(); setConfirmLeave(true); }}>{t("group.menu.leave")}</MenuItem>}
+              <MenuItem danger testId="group-forget" onClick={() => { closeMenu(); setConfirmForget(true); }}>{t("group.menu.forget")}</MenuItem>
+            </Menu>
           </div>
         </div>
       </div>

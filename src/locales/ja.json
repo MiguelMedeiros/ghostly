@@ -35,7 +35,14 @@
     "joinChat": "チャットに参加",
     "quiet": "ここは静かです...",
     "quietHint": "誰かを驚かせよう！👻",
-    "startChat": "新しいチャット"
+    "startChat": "新しいチャット",
+    "newMenu": {
+      "label": "グループまたはチャットを作成",
+      "chat": "チャット",
+      "chatHint": "1人と、招待で",
+      "group": "グループ",
+      "groupHint": "誰でも開けるリンク"
+    }
   },
   "chat": {
     "typeMessage": "メッセージを入力...",
@@ -47,7 +54,26 @@
     "today": "今日",
     "yesterday": "昨日",
     "deleteMessage": "メッセージを削除",
-    "deleteMessageHint": "この端末からのみ削除されます。相手の端末には残ります。"
+    "deleteMessageHint": "この端末からのみ削除されます。相手の端末には残ります。",
+    "options": "オプション",
+    "menu": {
+      "pin": "チャットをピン留め",
+      "unpin": "ピン留めを解除",
+      "payments": "支払い…",
+      "hold": "メッセージを保留…",
+      "identities": "ID証明…",
+      "services": "サービス…",
+      "refresh": "更新",
+      "techInfo": "技術情報"
+    }
+  },
+  "group": {
+    "menu": {
+      "members": "メンバー…",
+      "rotate": "鍵を更新",
+      "leave": "グループを退出",
+      "forget": "この端末から削除"
+    }
   },
   "invite": {
     "live": "ライブチャット",
