@@ -383,6 +383,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
     >
       {isMe && onDelete && <MessageActions onDelete={onDelete} align="left" />}
       <div
+        data-message-bubble
         className={`relative max-w-[85%] min-w-[80px] ${
           isMe
             ? "rounded-ss-[7.5px] rounded-es-[7.5px] rounded-ee-[7.5px]"
