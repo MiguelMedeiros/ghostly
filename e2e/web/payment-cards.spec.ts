@@ -46,8 +46,8 @@ test("the chat's payment cards: flip through them, turn one over, and back to th
   await expect(card("bark")).toHaveAttribute("aria-checked", "true");
   await page.getByTestId("payment-deck-next").click();
   await page.getByTestId("payment-deck-next").click();
-  await expect(card("usdt")).toHaveAttribute("aria-checked", "true");
-  await card("usdt").focus();
+  await expect(card("fedimint")).toHaveAttribute("aria-checked", "true");
+  await card("fedimint").focus();
   await page.keyboard.press("Home");
   await expect(card("cashu")).toHaveAttribute("aria-checked", "true");
 

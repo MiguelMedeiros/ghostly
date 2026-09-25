@@ -43,6 +43,10 @@ services:
   anvil: *node
   s3: *node
   mint: *small
+  fedimintd: *node
+  fedimint-lnd: *node
+  fedimint-lnd-peer: *node
+  fedimint-gateway: *small
 
 configs:
   captaind-toml: { environment: E2E_INFRA_CAPTAIND_TOML }

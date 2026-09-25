@@ -88,7 +88,8 @@ export const SERVICE_PORTS = [...new Set(Object.entries(VARIABLES).filter(([name
 /**
  * The port of this machine a published port is reached on. The same one, even with the environment on another host
  * (remote.mjs forwards it here: the app takes plain HTTP and WS from loopback only); or, with
- * E2E_INFRA_LOCAL_PORTS=<base>, base, base+1, … (19 ports) in SERVICE_PORTS order, to stay clear of ports held here.
+ * E2E_INFRA_LOCAL_PORTS=<base>, base, base+1, … (one per port of SERVICE_PORTS, in order), to stay clear of ports held here.
+ * Fedimint's invite code names its guardian's port itself (47095), so the Fedimint suites need that one unmoved.
  */
 export const localPort = (port) => (process.env.E2E_INFRA_LOCAL_PORTS ? Number(process.env.E2E_INFRA_LOCAL_PORTS) + SERVICE_PORTS.indexOf(port) : port);
 const here = (value) => value.replace(/127\.0\.0\.1:(\d+)/, (_, port) => `127.0.0.1:${localPort(Number(port))}`);

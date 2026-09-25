@@ -282,25 +282,16 @@ services:
     # The gateway lives in this container's network: its API is published here too.
     ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47095:47095", "${E2E_INFRA_ADDRESS:-127.0.0.1}:47096:47096"]
     depends_on: { bitcoind: { condition: service_healthy } }
-    cpu_shares: 256
-    cpus: 1
-    mem_limit: 768m
   # The gateway's Lightning node, and a peer with a channel to it: Lightning in and out of the federation.
   fedimint-lnd:
     <<: *lnd
     container_name: ghostly-e2e-fedimint-lnd
     command: ["--alias=ghostly-fedimint-gateway", "--tlsextradomain=fedimint-lnd"]
     volumes: ["fedimint-lnd:/root/.lnd"]
-    cpu_shares: 256
-    cpus: 1
-    mem_limit: 768m
   fedimint-lnd-peer:
     <<: *lnd
     container_name: ghostly-e2e-fedimint-lnd-peer
     command: ["--alias=ghostly-fedimint-peer", "--tlsextradomain=fedimint-lnd-peer"]
-    cpu_shares: 256
-    cpus: 1
-    mem_limit: 768m
   fedimint-gateway:
     image: fedimint/gatewayd:v0.12.1
     container_name: ghostly-e2e-fedimint-gateway
@@ -323,9 +314,6 @@ services:
       FM_LND_MACAROON: /lnd/data/chain/bitcoin/regtest/admin.macaroon
     volumes: ["fedimint-gateway:/data", "fedimint-lnd:/lnd:ro"]
     depends_on: { fedimintd: { condition: service_started }, fedimint-lnd: { condition: service_healthy } }
-    cpu_shares: 256
-    cpus: 1
-    mem_limit: 512m
 
   # ── USDT: a local EVM chain (31337) the test token is deployed on ────────────────────────────────────────
   anvil:
