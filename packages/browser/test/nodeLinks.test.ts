@@ -196,14 +196,17 @@ describe("the capability record of a chat (WISP 03)", () => {
     const publish = vi.spyOn(fixture, "publish");
     const chat = row({ pairedPeerKey: createIdentity().pubKeyZ32 });
     const { node, linkOf } = await started(chat);
-    await vi.waitFor(() => expect(publish).toHaveBeenCalledOnce());
+    // Only what goes to the record's own key: the engine publishes presence and warmed invites too.
+    const address = node["links"].get(chat.id)!.caps!.address;
+    const records = () => publish.mock.calls.filter(([identity]) => (identity as { pubKeyZ32: string }).pubKeyZ32 === address).length;
+    await vi.waitFor(() => expect(records()).toBe(1));
     await vi.waitFor(async () => expect((await saved(chat.id))?.capsState).toMatchObject({ rev: 1 }));
     node["capsChanged"](chat.id);
     await new Promise(r => setTimeout(r, 20));
-    expect(publish, "nothing changed").toHaveBeenCalledOnce();
+    expect(records(), "nothing changed").toBe(1);
     (linkOf(chat.id) as unknown as { setHoldSupport: () => void }).setHoldSupport = vi.fn();
     await node.setChatHold({ linkId: chat.id, enabled: true });
-    await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(records()).toBe(2));
     await vi.waitFor(async () => expect((await saved(chat.id))?.capsState?.rev).toBe(2));
   });
 

@@ -159,7 +159,7 @@ describe("capability record: publishing and reading", () => {
     expect(saved.rev, "the same content keeps its revision").toBe(2);
     await vi.advanceTimersByTimeAsync(CAPS_REFRESH_MS + 1_000);
     expect(transport.publish, "hourly").toHaveBeenCalledTimes(4);
-    expect(transport.publish.mock.lastCall![2]).toEqual({ background: true });
+    expect((transport.publish.mock.lastCall as unknown[])[2]).toEqual({ background: true });
     await caps.stop();
     // An app start within the hour, with the same content: nothing goes out.
     const again = new CapsExchange({ params: link.mine, credentials, transport, local: () => content({ name }), state: saved, save: async s => { saved = s; } });

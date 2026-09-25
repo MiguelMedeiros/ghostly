@@ -636,9 +636,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               {compat && (
                 <MenuItem testId="chat-continue-new" onClick={() => {
                   closeMenu();
-                  const next = continueInNewChat(sessionId);
-                  if (!next) return;
-                  void sendMessage(next.message).finally(() => nav.conversation(chatPath(next.sessionId)));
+                  void continueInNewChat(sessionId).then(next => {
+                    if (next) void sendMessage(next.message).finally(() => nav.conversation(chatPath(next.sessionId)));
+                  });
                 }}
                   icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5" /><path d="M16 19h6m-3-3 3 3-3 3" /></svg>}>
                   {t("chat.menu.continueNew")}

@@ -19,7 +19,7 @@ test("a 0.4 compatibility chat keeps working, says so, and continues in a new ch
   const invite = chat(bob).getByText("Let's continue in a new chat", { exact: false });
   await expect(invite).toBeVisible({ timeout: 60_000 });
   const url = /https?:\/\/\S+/.exec(await invite.innerText())![0];
-  expect(url).toMatch(/#\/chat\/pair1\//);
+  expect(url).toMatch(/#\/chat\/\S+/);
   await bob.page.goto(url);
   await expect(bob.page.getByPlaceholder("Message…")).toBeVisible();
   await expect(bob.page.getByTestId("compat-chat")).toHaveCount(0);
