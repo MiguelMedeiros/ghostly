@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Ghost, GhostMark } from "@/components/ghost/Ghost";
+import { Brand } from "./Brand";
 import { href, type Locale } from "@/lib/i18n";
 import { RELEASES_URL } from "@/lib/release";
 import { shell, APP_URL, REPO_URL } from "@/content/shell";
@@ -43,8 +44,7 @@ export function SiteFooter({ locale = "en" }: { locale?: Locale }) {
         <div className="footer-top">
           <div>
             <Link href={href(locale, "/")} className="brand">
-              <GhostMark />
-              Ghostly
+              <Brand />
             </Link>
             <p className="muted" style={{ marginTop: 14, maxWidth: 340, fontSize: 14, lineHeight: 1.6 }}>
               {t.tagline}

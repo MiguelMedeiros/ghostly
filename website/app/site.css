@@ -1,5 +1,5 @@
 /* Ghostly site: tokens, shell and the pieces every page shares.
-   The palette, the mono wordmark and the ghosts come from the original site. */
+   The palette and the ghosts come from the original site; the wordmark is the app's (components/site/Brand.tsx). */
 
 :root {
   --bg: #060a10;
@@ -373,19 +373,25 @@ body {
   align-items: center;
   gap: 24px;
 }
+/* The app's lockup (components/site/Brand.tsx): its icon, GHOSTLY in the app's font stack, 700, tracking-tight,
+   both in the accent, the text 16/28 of the icon as in the app's sidebar, scaled up 1.125 for the nav. */
 .brand {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  gap: 9px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   font-weight: 700;
   font-size: 18px;
-  color: var(--text);
-}
-.brand svg {
-  width: 26px;
-  height: 26px;
+  line-height: 1;
+  letter-spacing: -0.025em;
+  text-transform: uppercase;
+  white-space: nowrap;
   color: var(--cyan);
+}
+.brand-icon {
+  flex-shrink: 0;
+  width: 31.5px;
+  height: 31.5px;
 }
 .nav-links {
   display: flex;
@@ -835,6 +841,24 @@ html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act
 }
 .scene-progress button:hover::before {
   background: var(--text);
+}
+
+/* Upright windows with a pointer (a half-screen browser, a vertical monitor) still get the film: the copy runs in
+   a band across the bottom, at the panel's reading width, on a wash that rises from the bottom edge, and the
+   picture is framed whole above it (story/framing.ts reads --copy-at). */
+@media (min-width: 861px) and (max-aspect-ratio: 1/1) {
+  html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .scene[data-copy] .scene-copy {
+    --copy-at: band;
+    top: auto;
+    right: auto;
+    bottom: max(56px, 6vh);
+    left: max(32px, calc((100vw - var(--wrap)) / 2 + 32px));
+    width: min(600px, calc(100% - 64px));
+    translate: none;
+  }
+  html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .scene[data-copy] .scene-wash {
+    background: linear-gradient(0deg, rgb(var(--chapter-rgb) / 0.94) 0%, rgb(var(--chapter-rgb) / 0.82) 22%, rgb(var(--chapter-rgb) / 0.35) 34%, transparent 42%);
+  }
 }
 
 /* Phones: the picture on top, the copy in a sheet that rises from the bottom. */

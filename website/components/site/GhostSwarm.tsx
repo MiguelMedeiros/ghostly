@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { GhostMark } from "@/components/ghost/Ghost";
+import { GhostSprite } from "@/components/ghost/Ghost";
 import { DUR } from "@/lib/motion";
 import "@/app/swarm.css";
 
@@ -163,7 +163,7 @@ export function GhostSwarm() {
             } as React.CSSProperties
           }
         >
-          <GhostMark />
+          <GhostSprite />
         </span>
       ))}
     </div>

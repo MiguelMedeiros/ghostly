@@ -1,8 +1,5 @@
 "use client";
 
-import { useEffect } from "react";
-import { useSpring, type MotionValue } from "motion/react";
-
 /**
  * Motion tokens: every animation on the site takes its curve, duration and
  * spring from here (CSS mirrors them as --ease-*, --dur-* in app/site.css).
@@ -36,17 +33,38 @@ export const STAGGER = 0.06;
 export const STAGGER_MAX = 6;
 
 /**
- * Springs. `scrub` smooths anything driven by scroll so a wheel tick or a
- * trackpad flick becomes a glide, without taking the scroll away from the
- * reader (no scroll-jacking); it settles in about 0.35 s. `body` is the one
- * spring for physical things (the ghosts, the pointer ghost): just under
- * critical damping, so a stop carries a hint of follow-through. `ui` is for
- * small interface elements.
+ * Springs. `body` is the one spring for physical things (the ghosts, the
+ * pointer ghost): just under critical damping, so a stop carries a hint of
+ * follow-through. `ui` is for small interface elements. Scroll-driven scenes
+ * are smoothed by the playhead instead (`SCRUB`).
  */
 export const SPRING = {
-  scrub: { stiffness: 170, damping: 34, mass: 0.55, restDelta: 0.0005 },
   body: { stiffness: 130, damping: 19, mass: 0.9 },
   ui: { stiffness: 380, damping: 32, mass: 0.6 },
+} as const;
+
+/**
+ * The story's playhead (lib/playhead.ts): how the pictures follow the scroll.
+ * The scroll is the reader's; these only shape how the pictures catch up.
+ */
+export const SCRUB = {
+  /** Outside a beat the playhead follows the scroll with a critically damped glide of about this time (s). */
+  follow: 0.12,
+  /**
+   * Inside a beat it moves at most this many viewport heights a second, so a flick still shows every beat it
+   * crosses: a step's action (0.57 of a 70-viewport step) plays in about 0.8 s, a 4% fade in a blink.
+   */
+  pace: 0.72,
+  /** However many beats a flick crossed, catching up takes at most this long (s): past it, every beat plays faster. */
+  catchUp: 1.2,
+  /** How hard it may slow down on its way into a beat, in viewport heights per second squared: it eases in, never brakes. */
+  decel: 30,
+  /** The scroll counts as stopped after this long without moving (ms), where the browser has no `scrollend`. */
+  rest: 140,
+  /** A scroll that moves more than this many viewport heights at once is a jump: it is taken at once, nothing replays. */
+  jump: 1.5,
+  /** A scene's beats still count until it has scrolled this many viewport heights past its pinned range (most of it is on screen). */
+  seen: 0.4,
 } as const;
 
 /**
@@ -73,12 +91,14 @@ export const HERO = {
 } as const;
 
 /**
- * A story beat inside a step of a chapter, as fractions of the step: the copy
- * and the subject arrive (establish), the subject does its one thing (action),
- * and nothing new moves after `settle`, so a reader who stops scrolling lands
- * on a finished picture with time to read.
+ * A story beat inside a step of a chapter, as fractions of the step. The
+ * step's copy changes at the step's edge; its picture moves between
+ * `establish` and `settle` (the subject arrives or is singled out, then does
+ * its one thing), and nothing moves after `settle`, so a reader who stops
+ * scrolling there sees the finished picture. The playhead treats that window
+ * as the beat: a stop inside it finishes it (or rewinds it, scrolling up).
  */
-export const BEAT = { establish: 0.15, settle: 0.7 } as const;
+export const BEAT = { establish: 0.04, settle: 0.86 } as const;
 
 /** A cubic-bézier as a function of progress, for `useTransform` ranges. */
 export function bezier([x1, y1, x2, y2]: readonly [number, number, number, number]): (t: number) => number {
@@ -112,21 +132,3 @@ export const ease = {
   exit: bezier(EASE.exit),
   move: bezier(EASE.move),
 } as const;
-
-/**
- * Scroll progress, smoothed. Follows `source` through the `scrub` spring so
- * scroll-driven scenes glide instead of stepping with each wheel tick; a jump
- * larger than a quarter of the range (an anchor link, a reload mid-page) is
- * taken at once rather than swept through.
- */
-export function useScrub(source: MotionValue<number>): MotionValue<number> {
-  const smooth = useSpring(source.get(), SPRING.scrub);
-  useEffect(() => {
-    smooth.jump(source.get());
-    return source.on("change", (v) => {
-      if (Math.abs(v - smooth.get()) > 0.25) smooth.jump(v);
-      else smooth.set(v);
-    });
-  }, [source, smooth]);
-  return smooth;
-}
