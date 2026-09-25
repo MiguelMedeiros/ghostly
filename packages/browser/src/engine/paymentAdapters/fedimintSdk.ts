@@ -99,14 +99,16 @@ const MODULE_WASM = () => import("@fedimint/fedimint-client-wasm-bundler/fedimin
 const CLIENT_NAME = "dd5135b2-c228-41b7-a4f9-3b6e7afe3088";
 const NETWORKS: Record<string, BitcoinNetwork> = { bitcoin: "bitcoin", signet: "signet", testnet: "testnet", testnet4: "testnet", regtest: "regtest", mutinynet: "mutinynet" };
 /**
- * A v1 wallet module's client config comes consensus-encoded (hex); its network is the chain's magic, a u32 as a
- * compact-size integer (`fe` + four bytes, little-endian). Exactly one network must be found, or it stays unknown.
+ * A v1 wallet (or Lightning) module's client config comes consensus-encoded as hex (`config` from a joined client,
+ * `unknown_module_hex` in a preview); its network is the chain's magic, a u32 as a compact-size integer (`fe` +
+ * four bytes, little-endian). Exactly one network must be found, or it stays unknown.
  */
 const MAGIC: [string, BitcoinNetwork][] = [["fed9b4bef9", "bitcoin"], ["fe0709110b", "testnet"], ["fe283f161c", "testnet"], ["fe40cf030a", "signet"], ["fecb2ddfa5", "mutinynet"], ["fedab5bffa", "regtest"]];
-function walletNetwork(module: { network?: unknown; config?: unknown }): BitcoinNetwork | undefined {
+function moduleNetwork(module: { network?: unknown; config?: unknown; unknown_module_hex?: unknown }): BitcoinNetwork | undefined {
   if (typeof module.network === "string") return NETWORKS[module.network];
-  if (typeof module.config !== "string" || !/^[0-9a-f]*$/i.test(module.config)) return undefined;
-  const hex = module.config.toLowerCase();
+  const encoded = typeof module.config === "string" ? module.config : module.unknown_module_hex;
+  if (typeof encoded !== "string" || !/^[0-9a-f]*$/i.test(encoded)) return undefined;
+  const hex = encoded.toLowerCase();
   const found = [...new Set(MAGIC.filter(([magic]) => hex.includes(magic)).map(([, network]) => network))];
   return found.length === 1 ? found[0] : undefined;
 }
@@ -147,10 +149,11 @@ const text = (value: unknown, max = 200) => typeof value === "string" ? value.sl
 const errorText = (error: unknown) => error instanceof Error ? error.message : typeof error === "string" ? error : JSON.stringify(error);
 
 export function federationInfo(federationId: string, config: unknown): FederationInfo {
-  const c = config as { global?: { api_endpoints?: Record<string, { url?: unknown; name?: unknown }>; consensus_version?: { major?: unknown; minor?: unknown }; meta?: Record<string, unknown> }; modules?: Record<string, { kind?: unknown; network?: unknown; config?: unknown }> };
+  const c = config as { global?: { api_endpoints?: Record<string, { url?: unknown; name?: unknown }>; consensus_version?: { major?: unknown; minor?: unknown }; meta?: Record<string, unknown> }; modules?: Record<string, { kind?: unknown; network?: unknown; config?: unknown; unknown_module_hex?: unknown }> };
   const endpoints = Object.entries(c?.global?.api_endpoints ?? {}).sort(([a], [b]) => Number(a) - Number(b));
   const modules = Object.values(c?.modules ?? {});
-  const network = modules.map((m) => (m?.kind === "wallet" ? walletNetwork(m) : undefined)).find(Boolean);
+  // The wallet module says it; a federation without one (Lightning and ecash only) says it through its Lightning module.
+  const network = modules.filter((m) => m?.kind === "wallet").map(moduleNetwork).find(Boolean) ?? modules.filter((m) => m?.kind === "ln").map(moduleNetwork).find(Boolean);
   const version = c?.global?.consensus_version;
   return {
     federationId,

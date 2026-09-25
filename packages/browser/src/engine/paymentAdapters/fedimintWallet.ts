@@ -65,6 +65,8 @@ export interface FedimintWalletView {
 export const FEDIMINT_MAINNET = false;
 export const FEDIMINT_MAINNET_UNAVAILABLE = "Fedimint on Mainnet is not available yet. Switch the wallets to Testnet to join a test federation.";
 export const MAX_FEDERATIONS = 8;
+/** How long to wait before asking again about an invoice the client answered about at once (tests shorten it). */
+export const fedimintTiming = { pollMs: 10_000 };
 /** Notes nobody redeemed come back by themselves after this (the SDK's refund timer), whatever happens to the chat. */
 export const NOTES_REFUND_SECS = 7 * 24 * 60 * 60;
 const MAX_SATS = 10_000_000;
@@ -75,10 +77,10 @@ export function assertFedimintAmount(amount: number) {
   if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error("Enter an amount in sats");
   if (amount > MAX_SATS) throw new Error(`Amounts above ${MAX_SATS.toLocaleString()} sats are not supported`);
 }
-/** An invite code as the client takes it: bech32m `fed1…`, one line, bounded. */
+/** An invite code as the client takes it: bech32m with the prefix `fed1` (so `fed11…`), one line, bounded. */
 export function normalizeInvite(text: string): string {
   const invite = text.trim();
-  if (!/^fed1[02-9ac-hj-np-z]{20,2000}$/i.test(invite)) throw new Error("That is not a Fedimint invite code: it starts with fed1");
+  if (!/^fed11[02-9ac-hj-np-z]{20,2000}$/i.test(invite)) throw new Error("That is not a Fedimint invite code: it starts with fed1");
   return invite.toLowerCase();
 }
 
@@ -305,8 +307,11 @@ export class FedimintWallet {
     if (!client) throw new Error("Wait for this federation to connect: its balance must be read before leaving it");
     if (sats(await client.balance()) > 0) throw new Error("This federation still holds your sats: spend or move them first");
     if ((await intentRepository.list()).some((i) => i.review.method === "fedimint" && i.review.provider === federationId && ["pending", "submitted", "unknown"].includes(i.review.state))) throw new Error("A payment through this federation is not finished yet");
-    const pending = (await client.operations(50)).map((op) => historyEntry(federationId, op)).some((tx) => tx?.state === "pending" && tx.kind === "notes-out");
-    if (pending) throw new Error("Notes you sent from this federation were not redeemed yet: take them back or wait");
+    // Notes handed out stay "sent" until their refund timer, redeemed or not: taking them back is the only way to
+    // know. Redeemed ones stay with whoever redeemed them; the others come back, and then there is money here.
+    const out = (await client.operations(100)).filter((op) => historyEntry(federationId, op)?.kind === "notes-out" && historyEntry(federationId, op)?.state === "pending");
+    for (const op of out) if (await this.takeBack(federationId, op.id, 15_000) === "pending") throw new Error("Notes you sent from this federation are still being settled: try again in a moment");
+    if (sats(await client.balance()) > 0) throw new Error("Notes nobody redeemed came back to this federation: spend or move them first");
     this.unsubscribe.get(federationId)?.(); this.unsubscribe.delete(federationId);
     this.clients.delete(federationId); this.balances.delete(federationId);
     await client.close().catch(() => {});
@@ -426,9 +431,12 @@ export class FedimintWallet {
       for (;;) {
         const client = this.clients.get(receive.federation);
         if (!client || this.stopped) return;
+        const asked = Date.now();
         const state = await client.receiveState(receive.operationId, 60_000).catch(() => undefined);
         if (state === "claimed") { this.events.received(receive.paymentId, receive.federation); break; }
         if (state === "canceled" || Date.now() > receive.expiresAt + 60 * 60_000) break;
+        // The client waits for a change by itself; one that answers at once (not open, not reachable) is asked again later.
+        if (Date.now() - asked < 5_000) await new Promise((resolve) => setTimeout(resolve, fedimintTiming.pollMs));
       }
       await transact([STORES.settings], (stores) => { stores[STORES.settings].delete(`fedimintReceive-${receive.operationId}`); });
       void this.refresh();

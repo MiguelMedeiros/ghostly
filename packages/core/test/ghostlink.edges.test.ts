@@ -546,9 +546,14 @@ describe("paired payments", () => {
     expect(t.b.allowsPayment("lightning")).toBe(false);
     expect(t.b.peerAllowsPayment("lightning")).toBe(false);
     expect(t.b.supportsBitcoinPayments).toBe(true);
+    expect(t.b.supportsFedimintPayments, "not in the list").toBe(false);
+    t.toB({ t: "paired-payments", m: ["cashu", "fedimint"] });
+    await t.settle("b");
+    expect(t.b.supportsFedimintPayments).toBe(true);
     t.toB({ t: "paired-payments", m: ["cashu", "lightning"] });
     await t.settle("b");
     expect(t.b.supportsBitcoinPayments).toBe(false);
+    expect(t.b.supportsFedimintPayments).toBe(false);
     // The contact turning a method off locally is told on the open session.
     t.a.setPaymentMethods({ cashu: false });
     await t.settle("b");
@@ -571,7 +576,7 @@ describe("paired payments", () => {
 
   it("a contact that turned all payments off is told apart from one that allows them", async () => {
     const onPaymentRequest = vi.fn();
-    const off = { cashu: false, lightning: false, arkade: false, usdt: false, bark: false, bitcoin: false };
+    const off = { cashu: false, lightning: false, arkade: false, usdt: false, bark: false, bitcoin: false, fedimint: false };
     const t = linkedPair([{ events: payEvents() }, { paymentMethods: off, events: { ...payEvents(), onPaymentRequest } }]);
     await t.ready();
     expect(t.a.supportsPayments).toBe(false);
@@ -582,7 +587,7 @@ describe("paired payments", () => {
   });
 
   it("refuses every payment when this chat turned them all off", async () => {
-    const off = { cashu: false, lightning: false, arkade: false, usdt: false, bark: false, bitcoin: false };
+    const off = { cashu: false, lightning: false, arkade: false, usdt: false, bark: false, bitcoin: false, fedimint: false };
     const t = linkedPair([{ paymentMethods: off, events: payEvents() }, { events: payEvents() }]);
     await t.ready();
     await expect(t.a.sendPaymentRequest(request)).rejects.toThrow("Payments are turned off in this chat.");

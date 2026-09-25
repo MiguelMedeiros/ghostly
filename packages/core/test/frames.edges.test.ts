@@ -238,7 +238,7 @@ describe("payment frames", () => {
 
   it("accepts pay-ask only for known methods", () => {
     const ask = { t: "pay-ask", id, ts: 1, v: "1", u: "sat" };
-    for (const m of ["arkade", "usdt", "bark", "bitcoin"]) expect(decode({ ...ask, m })).toMatchObject({ m, memo: undefined });
+    for (const m of ["arkade", "usdt", "bark", "bitcoin", "fedimint"]) expect(decode({ ...ask, m })).toMatchObject({ m, memo: undefined });
     for (const m of ["cashu", "", undefined, "ARKADE"]) expect(decode({ ...ask, m })).toBeNull();
     expect(decode({ ...ask, m: "bark", v: "01" })).toBeNull();
     expect(decode({ ...ask, m: "bark", memo: "z".repeat(200) })).toMatchObject({ memo: "z".repeat(140) });
