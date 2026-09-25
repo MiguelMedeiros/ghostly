@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { BIG, BIG_SHA256 } from "../../extension/test/atlas.mjs";
+import type { Route } from "@playwright/test";
 import { chat, connect, expect, GIF, link, linkLegacy, say, test, type Peer } from "../support/fixtures";
 import { openExpressions } from "../support/composer";
 
@@ -70,7 +71,7 @@ test("compatibility chat delivers through the relay while the other side is away
   await expect(chat(bob).getByText("still here")).toBeVisible();
 });
 
-test("emoji and GIFs", { tag: ["@feature:chat.paired.emoji", "@feature:chat.paired.gifs"] }, async ({ peer }) => {
+test("emoji and GIFs", { tag: ["@feature:chat.paired.emoji", "@feature:chat.paired.gifs", "@feature:chat.paired.gifs.categories"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await link(alice, bob);
   await connect(alice, bob);
@@ -87,6 +88,25 @@ test("emoji and GIFs", { tag: ["@feature:chat.paired.emoji", "@feature:chat.pair
   await openExpressions(alice.page, "gif");
   await expect(alice.page.getByRole("button", { name: "Giphy", exact: true })).toHaveCount(0);
   await expect(alice.page.getByTestId("gif-category-ghosts")).toHaveAttribute("aria-pressed", "true");
+  await expect(alice.page.getByTitle("retro ghost")).toBeVisible();
+  // Each category icon is a search of its own, and the grid changes with it.
+  const perSearch = (route: Route) => {
+    const q = new URL(route.request().url()).searchParams.get("q")!;
+    return route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" },
+      body: JSON.stringify([1, 2].map((i) => ({ gif: `http://geocities.com/${q.replace(/\s/g, "_")}/${i}.gif`, checksum: `${q}-${i}`, url_text: `${q} ${i}` }))) });
+  };
+  await alice.context.route("https://gifcities.archive.org/**", perSearch);
+  for (const [id, q] of [["retro", "computer"], ["yes", "thumbs up"], ["animals", "cat"]] as const) {
+    await alice.page.getByTestId(`gif-category-${id}`).click();
+    await expect(alice.page.getByTestId(`gif-category-${id}`)).toHaveAttribute("aria-pressed", "true");
+    await expect(alice.page.getByTestId("gif-grid")).toHaveAttribute("data-query", q);
+    await expect(alice.page.getByTitle(`${q} 1`)).toBeVisible();
+    await expect(alice.page.getByTestId("gif-result")).toHaveCount(2);
+    await expect(alice.page.getByTitle("retro ghost")).toHaveCount(0);
+  }
+  await alice.context.unroute("https://gifcities.archive.org/**", perSearch);
+  // Back to the ghosts, seen already: at once.
+  await alice.page.getByTestId("gif-category-ghosts").click();
   await alice.page.getByTitle("retro ghost").click();
   await expect(alice.page.getByTestId("expression-panel")).toHaveCount(0);
   const gif = bob.page.locator('img[src*="ghost.gif"]');
@@ -109,7 +129,7 @@ test("emoji and GIFs", { tag: ["@feature:chat.paired.emoji", "@feature:chat.pair
   await expect(sheet).toHaveCount(0);
   await alice.context.route("https://gifcities.archive.org/**",route=>route.fulfill({status:503,body:"Unavailable"}));
   await alice.page.getByTestId("composer-expressions").click();
-  await expect(alice.page.getByText("GIF search is unavailable. Try again.")).toBeVisible();
+  await expect(alice.page.getByText("GIF search is unavailable.")).toBeVisible();
   await alice.page.keyboard.press("Escape");
 });
 

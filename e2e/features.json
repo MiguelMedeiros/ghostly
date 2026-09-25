@@ -158,6 +158,7 @@
     {"id":"chat.paired.image-links","wisp":"400","kind":"feature","clients":["web","extension","desktop"],"infra":["image-host"],"title":"A picture address over https shows only once asked; http is never fetched"},
     {"id":"chat.paired.emoji","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Emoji in the composer"},
     {"id":"chat.paired.gifs","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":["gif-api"],"title":"GIF search and send"},
+    {"id":"chat.paired.gifs.categories","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":["gif-api"],"title":"The GIF panel's category icons are searches of their own: the grid changes with the icon, spins while GifCities answers, and says when nothing loads"},
     {"id":"chat.paired.nickname-sync","wisp":"401","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Nicknames exchanged between paired contacts"},
     {"id":"chat.paired.join-notice","wisp":"401","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"The chat's join announcement names whoever actually joined"},
     {"id":"chat.paired.draft","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"A multiline draft survives navigation, resizing and Home"},
