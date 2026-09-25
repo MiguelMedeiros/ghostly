@@ -211,14 +211,19 @@ async function waitFor(url, ms) {
 }
 
 async function runE2e() {
-  const needsWeb = e2eSelected.some((s) => s.startsWith("e2e/web/"));
   const needsExt = e2eSelected.some((s) => s.startsWith("e2e/extension/"));
   let url = webUrl;
   let preview = null;
   // The suite's build: the local OIDC issuer and the SDK example's adapters (see e2e/playwright.config.ts).
   const issuer = /OIDC_TEST_ISSUER\s*=.*?"([^"]+)"/.exec(readFileSync(join(ROOT, "e2e/support/oidcIssuer.ts"), "utf8"))?.[1];
   const suiteEnv = { VITE_OIDC_TEST_ISSUER: process.env.E2E_OIDC_ISSUER ?? issuer, GHOSTLY_PLUGINS: "examples/sdk-adapter/src/index.ts" };
-  if (!url && needsWeb) {
+  // Extension specs pair with the web app too (interop), so a build is served whatever was picked.
+  if (!url) {
+    // Something already answering there is another session's build: testing it would test the wrong app.
+    if (await fetch(`http://localhost:${port}`).then(() => true, () => false)) {
+      results.push({ label: `e2e: port ${port} is taken by another server; pick a free one in your range`, ok: false, seconds: 0 });
+      return;
+    }
     if (!(await run("e2e: build the web app", "npm", ["run", "build:web"], { env: suiteEnv }))) return;
     url = `http://localhost:${port}`;
     console.log(`\n▶ e2e: serve web/dist on ${url}`);
@@ -229,7 +234,6 @@ async function runE2e() {
       return;
     }
   }
-  url ??= `http://localhost:${port}`;
   const stop = () => { if (preview) { try { process.kill(-preview.pid); } catch { /* gone */ } preview = null; } };
   process.on("SIGINT", () => { stop(); process.exit(130); });
   try {
