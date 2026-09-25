@@ -37,7 +37,7 @@ When the two disagree (an app updated between them, a setting changed), the `pai
 |---|---|---|
 | `rev` | Increases with every change | Safe integer |
 | `versions` | Session versions, as in `pair-offer` | At most 8 |
-| `transports` | Layer-1 transports this runtime has, in local preference order (`iroh/1`, `hyperdht/1`, `webrtc/1`) | At most 8; never `dht` ([100](100-transports.md#the-dht-floor-upgrade-and-downgrade-revision-02)) |
+| `transports` | Layer-1 transports this runtime has, in local preference order (`iroh/1`, `hyperdht/1`, `webrtc/1`): every one it can run for this chat, started or not. `descriptors` names the started ones, so a contact tells a transport still starting from one the app lacks ([100](100-transports.md#a-chosen-transport-not-reached-yet-revision-04)) | At most 8; never `dht` ([100](100-transports.md#the-dht-floor-upgrade-and-downgrade-revision-02)) |
 | `capabilities` | The same identifiers as `pair-offer`, plus the layer-0 ones: `dht-text/1` (accepts [403](403-dht-text.md) text) and `hold/1` (the **Hold messages** consent of [4xx](4xx-store-and-forward.md)) | At most 32 |
 | `extensions` | As in `pair-offer`: behaviour that grants nothing | At most 32 |
 | `descriptors` | Per native transport, the minimum to dial: the Iroh endpoint id, the HyperDHT public key. No addresses | At most one per transport |
