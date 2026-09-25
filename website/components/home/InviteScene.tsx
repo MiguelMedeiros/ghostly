@@ -6,6 +6,7 @@ import { SceneFrame, useScene, type SceneStep } from "@/components/story/SceneFr
 import { StaticActors } from "@/components/story/StaticActors";
 import { ease, PAIR } from "@/lib/motion";
 import { BLOCKING, poseAt } from "@/components/story/poses";
+import { GHOST_PATH } from "@/components/ghost/path";
 import { Stage, useStep } from "./stage";
 
 type Card = { title: string; link: string; qr: string; code: string; forOne: string };
@@ -17,10 +18,12 @@ const GREEN = "#4ade80";
 const INK = "#060a10";
 const PAPER = "#e8edf5";
 const DIM = "#8b98ab";
+const PILL = "#172231";
 
 // The invitation in the one format of WISP 801: the link, the QR and the text code are the same secret three ways.
-const LINK = "ghostly.tools/#ghostly1p…";
-const CODE = "ghostly1pk7qx…";
+// Both run past their field on purpose, as a real code does: the field clips them and fades their end out.
+const CODE = "ghostly1pk7qx9d3m8fz2hv5c";
+const LINK = `ghostly.tools/#${CODE}`;
 
 const round = (v: number) => Math.round(v * 100) / 100;
 
@@ -63,24 +66,51 @@ function Qr({ x, y, size, glow }: { x: number; y: number; size: number; glow: MV
   );
 }
 
-/** A labelled pill (Link / Code) with the same cyan pulse. */
+/** A labelled pill (Link / Code) with the same cyan pulse. The value never leaves the pill, whatever font draws it:
+ *  it is clipped `inset` units inside the pill's ends and fades out over its last `font * 2` units. */
 function Row({ label, value, x, y, w, font, color, glow }: { label: string; value: string; x: number; y: number; w: number; font: number; color: string; glow: MV }) {
+  const id = useId().replace(/:/g, "");
   const h = font * 2;
   const pillY = y + font + 6;
+  const inset = 8;
+  const end = x + w - inset;
+  const fade = font * 2;
   const wash = useTransform(glow, (g) => g * 0.16);
   const soft = useTransform(glow, (g) => g * 0.3);
   return (
-    <g>
+    <g data-invite-row>
+      <defs>
+        <clipPath id={`${id}-clip`}>
+          <rect data-invite-field x={x + inset} y={pillY} width={w - inset * 2} height={h} />
+        </clipPath>
+        <linearGradient id={`${id}-fade`} x1={end - fade} x2={end} y1="0" y2="0" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor={PILL} stopOpacity="0" />
+          <stop offset="1" stopColor={PILL} />
+        </linearGradient>
+      </defs>
       <text x={x} y={y + font} fontSize={font} fill={DIM}>
         {label}
       </text>
-      <rect x={x} y={pillY} width={w} height={h} rx={7} fill="#172231" />
-      <motion.rect x={x} y={pillY} width={w} height={h} rx={7} fill={CYAN} style={{ opacity: wash }} />
-      <text x={x + 8} y={round(pillY + h / 2 + font * 0.36)} fontSize={font} className="mono" fill={color}>
+      <rect data-invite-pill x={x} y={pillY} width={w} height={h} rx={7} fill={PILL} />
+      <text x={x + inset} y={round(pillY + h / 2 + font * 0.36)} fontSize={font} className="mono" fill={color} clipPath={`url(#${id}-clip)`}>
         {value}
       </text>
+      <rect x={end - fade} y={pillY} width={fade} height={h} fill={`url(#${id}-fade)`} />
+      <motion.rect x={x} y={pillY} width={w} height={h} rx={7} fill={CYAN} style={{ opacity: wash }} />
       <motion.rect x={x - 4} y={pillY - 4} width={w + 8} height={h + 8} rx={11} fill="none" stroke={CYAN} strokeWidth="5" style={{ opacity: soft }} />
       <motion.rect x={x - 1} y={pillY - 1} width={w + 2} height={h + 2} rx={8} fill="none" stroke={CYAN} strokeWidth="1.6" style={{ opacity: glow }} />
+    </g>
+  );
+}
+
+/** Boo's mark: the app's ghost, `size` units wide, its body's top-left corner at (x, y). */
+function Mark({ x, y, size }: { x: number; y: number; size: number }) {
+  const k = size / 64; // the body spans 64 units of GHOST_PATH's 80×100 box, from (8, 8)
+  return (
+    <g transform={`translate(${round(x - 8 * k)} ${round(y - 8 * k)}) scale(${round(k * 1000) / 1000})`}>
+      <path d={GHOST_PATH} fill={CYAN} />
+      <ellipse cx="30" cy="38" rx="5.5" ry="6.5" fill={PAIR.eye} />
+      <ellipse cx="50" cy="38" rx="5.5" ry="6.5" fill={PAIR.eye} />
     </g>
   );
 }
@@ -94,7 +124,7 @@ function CardBody({ w, h, id }: { w: number; h: number; id: string }) {
           <stop offset="0.5" stopColor="#fff" stopOpacity="0" />
         </linearGradient>
       </defs>
-      <rect x={-w / 2} y={-h / 2} width={w} height={h} rx="20" fill="#0f1823" stroke={CYAN} strokeOpacity="0.55" />
+      <rect data-invite-card x={-w / 2} y={-h / 2} width={w} height={h} rx="20" fill="#0f1823" stroke={CYAN} strokeOpacity="0.55" />
       <rect x={-w / 2} y={-h / 2} width={w} height={h} rx="20" fill={`url(#${id}-sheen)`} />
     </>
   );
@@ -112,9 +142,10 @@ function FullCard({ t, glow, ink }: CardProps) {
   const y0 = -FULL.h / 2;
   const pad = 16;
   const inner = FULL.w - pad * 2;
-  const qr = 80;
+  const qr = 84;
   const qrTop = y0 + 62;
-  // The QR's centre sits at -28; as the type goes it moves to the card's centre.
+  const mark = 24;
+  // The QR's centre sits at -26; as the type goes it moves to the card's centre.
   const qrShift = useTransform(ink, (i) => round((1 - i) * -(qrTop + qr / 2)));
   return (
     <g>
@@ -126,8 +157,10 @@ function FullCard({ t, glow, ink }: CardProps) {
         <text x={x0 + pad} y={y0 + 50} fontSize="12" fill={DIM}>
           {t.forOne}
         </text>
-        <Row label={t.link} value={LINK} x={x0 + pad} y={y0 + 152} w={inner} font={12} color="#cfd8e6" glow={glow[0]} />
-        <Row label={t.code} value={CODE} x={x0 + pad} y={y0 + 202} w={inner} font={12} color={GREEN} glow={glow[2]} />
+        {/* Level with the two header lines, at the right edge. */}
+        <Mark x={-x0 - pad - mark} y={y0 + 23} size={mark} />
+        <Row label={t.link} value={LINK} x={x0 + pad} y={y0 + 154} w={inner} font={12} color="#cfd8e6" glow={glow[0]} />
+        <Row label={t.code} value={CODE} x={x0 + pad} y={y0 + 204} w={inner} font={12} color={GREEN} glow={glow[2]} />
       </motion.g>
       <motion.g style={{ y: qrShift }}>
         <Qr x={-qr / 2} y={qrTop} size={qr} glow={glow[1]} />
