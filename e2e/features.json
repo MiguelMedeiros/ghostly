@@ -574,6 +574,7 @@
     "src/components/TransportTimeline.tsx": ["transport.timeline"],
     "src/components/TransportMenu.tsx": ["transport.chat-switch"],
     "src/lib/transportEvents.ts": ["transport.timeline","transport.chat-switch"],
+    "src/hooks/useChatLink.ts": ["transport.chat-switch"],
     "packages/core/src/version.ts": ["core.version","app.updates.*","app.version"],
     "packages/browser/vite-plugin.ts": ["*"],
     "packages/browser/src/{host,inPageHost}.ts": ["*"],

@@ -81,7 +81,7 @@ export class TransportLog {
   observe(next: TransportSnapshot, now: number): boolean {
     const prev = this.snapshot;
     this.snapshot = { ...next };
-    const last = this.entries.at(-1);
+    const last = this.entries[this.entries.length - 1] as TransportEntry | undefined;
     if (next.live && next.transport) {
       if (prev?.live && prev.transport === next.transport) {
         // Still on the same one: a switch that did not happen is the only news.
@@ -115,7 +115,7 @@ export class TransportLog {
 
   /** A round trip measured on the current transport: the line that started it shows it. */
   rtt(ms: number): boolean {
-    const last = this.entries.at(-1);
+    const last = this.entries[this.entries.length - 1] as TransportEntry | undefined;
     if (!last || !liveLine(last) || last.kind === "failed" || last.rttMs === ms) return false;
     last.rttMs = ms;
     return true;
@@ -138,7 +138,7 @@ export class TransportLog {
   }
 
   private failed(target: PairedTransport | undefined, reason: string, transport: PairedTransport | undefined, now: number): boolean {
-    const last = this.entries.at(-1);
+    const last = this.entries[this.entries.length - 1] as TransportEntry | undefined;
     if (last?.kind === "failed" && last.reason === reason && last.target === target) return false;
     if (target && this.choice?.transport === target) this.choice = null;
     return this.add({ kind: "failed", at: now, target, reason, transport });
@@ -146,7 +146,7 @@ export class TransportLog {
 
   private add(line: Omit<TransportEntry, "id">): boolean {
     const entry: TransportEntry = { id: lineId(line.at), ...line };
-    const tail = this.entries.at(-1);
+    const tail = this.entries[this.entries.length - 1] as TransportEntry | undefined;
     if (churn(entry) && tail?.kind === "flapping" && entry.at - tail.at <= FLAP_WINDOW_MS) {
       tail.at = entry.at;
       if (entry.kind === "lost") { tail.live = false; tail.from = entry.from; tail.transport = undefined; tail.fallback = entry.fallback; }
