@@ -8,7 +8,7 @@ import type { SparkWalletView } from "../engine/paymentAdapters/sparkWallet";
 import type { LightningView } from "../engine/paymentAdapters/providers/lightningService";
 import type { BitcoinView } from "../engine/paymentAdapters/providers/bitcoinService";
 import type { PaymentReview, PaymentTarget } from "@ghostly/core";
-import type { DeliveryMode, DhtDeliveryState, DhtDeliveryView, HoldKind } from "@ghostly/core";
+import type { CapsState, DeliveryMode, DhtDeliveryState, DhtDeliveryView, HoldKind } from "@ghostly/core";
 import type { S3Config } from "../backup/s3";
 import type { TransportCause, TransportEntry } from "../engine/transportLog";
 import type { PublicProfile, ProfileChoice } from '../profiles/public';
@@ -22,6 +22,8 @@ import type { CommunityState, GroupCommit, GroupRole, GroupState, GroupStatus } 
 export interface StoredLink {
   deliveryMode?: DeliveryMode;
   dhtDeliveryState?: DhtDeliveryState;
+  /** This side's layer-0 capability record and the contact's last good one (WISP 03). */
+  capsState?: CapsState;
   publicProfiles?: PublicProfile[];
   profileChoice?: ProfileChoice;
   peerProofs?: ProofLedger;

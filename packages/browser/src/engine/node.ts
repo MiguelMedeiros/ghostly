@@ -29,6 +29,7 @@ import { normalizeNostrRelays } from '../nostr/relay';
 import type { NostrDraft, NostrDraftRequest, NostrPublishResult } from '../nostr/types';
 import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
+import { CapsExchange, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
 import { fileMessageText, type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
 import {
   DEFAULT_RELAYS,
@@ -121,6 +122,8 @@ const DEFAULT_SETTINGS: Settings = {
 const MAX_DELETED_IDS = 500;
 
 interface LiveLink {
+  /** The chat's layer-0 capability record exchange (WISP 03); paired chats only. */
+  caps?: CapsExchange;
   transportErrors?: Partial<Record<PairedTransport, string>>;
   discoveryError?: string;
   proofs?: PeerProofs;
@@ -534,7 +537,7 @@ export class GhostlyNode implements EngineImplementation {
       this.links.delete(linkId);
       // An entry session is over once the admission is (or was given up): nobody waits on it, so it goes
       // without a last packet saying so, which would only spend two of the relays' requests at a busy moment.
-      await live.link?.stop(!live.stored.groupEntry);
+      await live.link?.stop(!live.stored.groupEntry); await live.caps?.stop();
       await db.deleteLink(linkId);
     },
     edgeNick: linkId => this.links.get(linkId)?.presence.nick || undefined,
@@ -728,7 +731,7 @@ export class GhostlyNode implements EngineImplementation {
     await this.nativeQueue;
     await this.hold.stop();
     await Promise.allSettled([...this.outboxes.values()].map(outbox => outbox.stop()));
-    await Promise.allSettled([...this.links.values()].map((live) => live.link?.stop(true)));
+    await Promise.allSettled([...this.links.values()].map(async (live) => { await live.link?.stop(true); await live.caps?.stop(); }));
   }
 
   getState(): EngineState {
@@ -972,7 +975,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!live) return;
     void this.outboxes.get(linkId)?.stop();
     this.outboxes.delete(linkId);
-    void live.link?.stop(true);
+    void live.link?.stop(true); void live.caps?.stop();
     this.links.delete(linkId);
     this.identities.forget(linkId);
     this.nostrSocial.forgetLink(linkId);
@@ -1128,6 +1131,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!live?.stored.profile || typeof enabled !== "boolean") throw new Error("Held messages need a paired chat");
     await this.hold.setEnabled(linkId, enabled);
     live.link?.setHoldSupport(enabled, live.stored.hold?.outSeq);
+    this.capsChanged(linkId);
     this.emitState();
   }
 
@@ -1495,6 +1499,7 @@ export class GhostlyNode implements EngineImplementation {
     live.stored = { ...live.stored, paymentMethods };
     // A connected contact is told on the open session; nothing reconnects.
     live.link?.setPaymentMethods(paymentMethods);
+    this.capsChanged(linkId);
     this.emitState();
   }
 
@@ -1886,6 +1891,8 @@ export class GhostlyNode implements EngineImplementation {
     if (settings.nick !== undefined || settings.shareProfile !== undefined) {
       // GhostLink tells a paired peer directly; a legacy one still reads the record.
       for (const live of this.links.values()) live.link?.setNick(this.sharedNick);
+      // A chat that is not live learns the name from the capability record.
+      this.capsChanged();
     }
     if (settings.holdStorage !== undefined) {
       if (!this.settings.holdStorage) delete this.settings.holdStorage;
@@ -1895,7 +1902,7 @@ export class GhostlyNode implements EngineImplementation {
     if (wasOnline && !this.settings.online) {
       await Promise.allSettled(
         [...this.links.values()].map(async (live) => {
-          await live.link?.stop(true);
+          await live.link?.stop(true); await live.caps?.stop(); live.caps = undefined;
           live.link = null;
           live.status = "offline";
           live.dataLink = "idle";
@@ -2111,6 +2118,10 @@ export class GhostlyNode implements EngineImplementation {
       0,
     );
 
+    // One set of credentials for the link and its capability record: a pin by either is seen by both.
+    const credentials: PairingCredentials | undefined = stored.profile && stored.participationSeed ? {
+      seedB64: stored.participationSeed, peerKey: stored.pairedPeerKey, requireSignedSignals: stored.requireSignedSignals,
+      verifiedPeerKey: stored.peerTrust ? stored.peerTrust.verifiedKey : stored.pairedPeerKey, expectedPeerKey: stored.peerParticipationKeyZ32 } : undefined;
     live.link = new GhostLink({
       paymentMethods: stored.paymentMethods,
       holdSupport: !!stored.hold?.enabled,
@@ -2128,9 +2139,8 @@ export class GhostlyNode implements EngineImplementation {
       } } : undefined,
       native: { peerDescriptors: stored.peerDescriptors, peerTransports: stored.peerTransports,
         peerFallback: stored.peerFallback, preferred: stored.preferredTransport, fallback: stored.transportFallback },
-      pairing: stored.profile && stored.participationSeed ? {
-        credentials: { seedB64: stored.participationSeed, peerKey: stored.pairedPeerKey, requireSignedSignals: stored.requireSignedSignals,
-          verifiedPeerKey: stored.peerTrust ? stored.peerTrust.verifiedKey : stored.pairedPeerKey, expectedPeerKey: stored.peerParticipationKeyZ32 },
+      pairing: credentials ? {
+        credentials,
         verifyPeer: async key => {
           await db.verifyPeer(stored.id, key);
           live.stored = { ...live.stored, peerTrust: { version: 1, verifiedKey: key, verifiedAt: Date.now() } };
@@ -2144,6 +2154,9 @@ export class GhostlyNode implements EngineImplementation {
           live.stored = { ...live.stored, peerTrust: live.stored.peerTrust ?? { version: 1, verifiedKey: live.stored.pairedPeerKey }, pairedPeerKey: key, requireSignedSignals: live.stored.requireSignedSignals || signedSignals, inviteCode: undefined };
           try { await db.pinPeer(stored.id, key, signedSignals); }
           catch (error) { live.stored = previous; throw error; }
+          // Pinned: the record is sealed anew for the contact alone, and the contact's is read.
+          void live.caps?.update().catch(() => {});
+          live.caps?.refresh(true);
         },
       } : undefined,
       // A chat never paired: the one who made the invite still holds it; the one who joined does not.
@@ -2219,6 +2232,7 @@ export class GhostlyNode implements EngineImplementation {
           this.emitState();
         },
         onDataLinkState: (state) => {
+          const was = live.dataLink;
           live.dataLink = state;
           if (state === "open") {
             void this.desk.replay(linkId).catch(() => {}).then(() => this.sendWaiting(linkId)).catch(() => {});
@@ -2226,6 +2240,8 @@ export class GhostlyNode implements EngineImplementation {
           }
           if (state !== "open") { live.proofs?.stop(); this.identities.closed(linkId); }
           if (stored.profile && live.stored.deliveryMode !== "dht" && state !== "open") void this.outboxFor(linkId).disconnected().catch(() => {});
+          // Dropped to the DHT: what the contact's app accepts there is read again (WISP 03).
+          if (state !== "open" && was === "open") live.caps?.refresh();
           // Back live: what the contact has not confirmed goes again at once, under the same ids.
           if (stored.profile && !stored.group && state === "open") void this.outboxFor(linkId).flush({ reopened: true }).catch(() => {});
           if (stored.profile && state !== "open" && live.pairing?.status !== "error") live.pairing = { status: "connecting" };
@@ -2292,12 +2308,66 @@ export class GhostlyNode implements EngineImplementation {
     });
     const link = live.link;
     link.start(); this.emitState();
+    if (credentials && !stored.group) {
+      live.caps = new CapsExchange({
+        params: stored, credentials, transport: this.transport, state: stored.capsState,
+        local: () => this.capsContent(linkId),
+        save: async state => { await db.patchLink(linkId, { capsState: state }); live.stored = { ...live.stored, capsState: state }; },
+        changed: record => this.peerCapsChanged(linkId, record),
+      });
+      live.caps.start();
+    }
     // Unused invites need discovery, not two native listeners. Saved contacts
     // retain background listeners within the real native capacity.
     if (stored.deliveryMode !== "dht" && (stored.pairedPeerKey || this.activeLinkId === linkId)) void this.ensureNativeEndpoints(linkId).then(() => {
       if (live.link === link && stored.peerTransports && stored.preferredTransport !== "webrtc/1" && live.myPubKeyZ32 < stored.peerPubKeyZ32)
         void link.connect().catch(() => {});
     });
+  }
+
+  /**
+   * What this side's capability record says in a chat (WISP 03): the layer-0 capabilities (`dht-text/1`,
+   * `hold/1` when Hold messages is on), what layer 1 would carry as this chat allows it, and the shared name.
+   * Only what the other side needs to decide what to send, hold or queue: the whole offer does not fit 1,000 bytes.
+   */
+  private capsContent(linkId: string): CapsContent {
+    const live = this.links.get(linkId);
+    const methods = live?.stored.paymentMethods ?? {};
+    const cashu = methods.cashu !== false, lightning = methods.lightning !== false;
+    let name = this.sharedNick ?? "";
+    while (new TextEncoder().encode(name).length > 64) name = [...name].slice(0, -1).join("");
+    return {
+      versions: [1],
+      transports: live?.link?.availableTransports ?? ["webrtc/1"],
+      capabilities: ["chat/1", DHT_TEXT_CAPABILITY, ...(live?.stored.hold?.enabled ? [HOLD_CAPABILITY] : []), "files/2",
+        ...(cashu || lightning ? ["payments/1"] : []), ...(cashu ? ["payments-cashu/1"] : []), ...(lightning ? ["payments-lightning/1"] : [])],
+      extensions: ["ping/1"],
+      descriptors: {},
+      name,
+    };
+  }
+
+  /** Something the capability record carries changed here: every chat publishes its record anew if it differs. */
+  private capsChanged(linkId?: string): void {
+    for (const live of linkId ? [this.links.get(linkId)] : this.links.values()) void live?.caps?.update().catch(() => {});
+  }
+
+  /**
+   * The contact's capability record changed. While no session is open it is the contact's latest word on its
+   * name, on held items and on the ways of paying it takes: a chat that never went live still shows a name,
+   * can hold, and can have requests wait for it. An open session's own word stays authoritative.
+   */
+  private peerCapsChanged(linkId: string, record: CapsRecord): void {
+    const live = this.links.get(linkId);
+    if (!live || live.link?.isDataLinkOpen) return;
+    if (record.name !== (live.stored.peerNick ?? "")) {
+      live.stored = { ...live.stored, peerNick: record.name };
+      void db.patchLink(linkId, { peerNick: record.name });
+    }
+    void this.hold.peerSaid(linkId, { peerAllows: record.capabilities.includes(HOLD_CAPABILITY) });
+    const methods = (["cashu", "lightning"] as const).filter(m => record.capabilities.includes(`payments-${m}/1`));
+    void this.hold.rememberPeerMethods(linkId, methods).catch(() => {});
+    this.emitState();
   }
 
   private ensureNativeEndpoints(linkId: string): Promise<void> {

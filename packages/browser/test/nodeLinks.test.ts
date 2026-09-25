@@ -5,7 +5,7 @@ import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { STORES, fileStore, transact } from "../src/shared/idb";
 import type { StoredLink } from "../src/shared/types";
-// covers: core.peer-keys, chat.paired.send, chat.paired.receipts, chat.paired.nickname-sync, files.paired.send, files.size-limit, files.persistence, delivery.hold.text, delivery.hold.picture, groups.protocol.link-frames, chat.waiting
+// covers: core.peer-keys, chat.paired.send, chat.paired.receipts, chat.paired.nickname-sync, files.paired.send, files.size-limit, files.persistence, delivery.hold.text, delivery.hold.picture, groups.protocol.link-frames, chat.waiting, chat.caps-record
 
 /**
  * GhostLink is replaced by a recorder: the engine builds it with its callbacks, and a test plays the peer by
@@ -188,6 +188,40 @@ describe("a chat as the contact drives it", () => {
     await pairing.verifyPeer!(first);
     expect(await saved(chat.id)).toMatchObject({ pairedPeerKey: first, requireSignedSignals: true, peerTrust: { verifiedKey: first } });
     expect(node.getState().links[0]).toMatchObject({ peerVerified: true, peerParticipationKey: first });
+  });
+});
+
+describe("the capability record of a chat (WISP 03)", () => {
+  it("is published once for its content, and again when what it says changes", async () => {
+    const publish = vi.spyOn(fixture, "publish");
+    const chat = row({ pairedPeerKey: createIdentity().pubKeyZ32 });
+    const { node, linkOf } = await started(chat);
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledOnce());
+    await vi.waitFor(async () => expect((await saved(chat.id))?.capsState).toMatchObject({ rev: 1 }));
+    node["capsChanged"](chat.id);
+    await new Promise(r => setTimeout(r, 20));
+    expect(publish, "nothing changed").toHaveBeenCalledOnce();
+    (linkOf(chat.id) as unknown as { setHoldSupport: () => void }).setHoldSupport = vi.fn();
+    await node.setChatHold({ linkId: chat.id, enabled: true });
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(2));
+    await vi.waitFor(async () => expect((await saved(chat.id))?.capsState?.rev).toBe(2));
+  });
+
+  it("while no session is open, gives the contact's name, hold consent and ways of paying", async () => {
+    const chat = row({ peerNick: "" });
+    const { node, linkOf } = await started(chat);
+    linkOf(chat.id).isDataLinkOpen = false;
+    const said = vi.spyOn(node["hold"], "peerSaid"), methods = vi.spyOn(node["hold"], "rememberPeerMethods");
+    const record = { rev: 3, issued: 1, author: createIdentity().pubKeyZ32, versions: [1], transports: ["webrtc/1"], extensions: [], descriptors: {},
+      capabilities: ["chat/1", "dht-text/1", "hold/1", "payments/1", "payments-lightning/1"], name: "Bob" };
+    node["peerCapsChanged"](chat.id, record);
+    expect(node.getState().links[0].peerNick).toBe("Bob");
+    expect(said).toHaveBeenCalledWith(chat.id, { peerAllows: true });
+    expect(methods).toHaveBeenCalledWith(chat.id, ["lightning"]);
+    // On an open session the session's own word stands.
+    linkOf(chat.id).isDataLinkOpen = true;
+    node["peerCapsChanged"](chat.id, { ...record, rev: 4, name: "Mallory" });
+    expect(node.getState().links[0].peerNick).toBe("Bob");
   });
 });
 
