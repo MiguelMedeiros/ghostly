@@ -9,12 +9,19 @@ import { wisps, wispCount } from "@/lib/wisps";
 import { REPO_URL, shell } from "@/content/shell";
 import { BlockGrid } from "./BlockGrid";
 import { Negotiation } from "./Negotiation";
-import { ProtocolLoop } from "./ProtocolLoop";
+import { ProtocolSteps, type WispLink } from "./ProtocolSteps";
 import "@/app/developers.css";
 
 export function DevelopersPage({ locale }: { locale: Locale }) {
   const t = developers[locale];
   const wispRefs = wisps.map((w) => ({ slug: w.slug, number: w.number, name: w.name }));
+  // The explainer links each step to the rendered WISPs it cites.
+  const stepWisps: Record<string, WispLink> = Object.fromEntries(
+    [...new Set(t.hero.steps.list.flatMap((s) => s.wisps))].flatMap((n) => {
+      const w = wisps.find((x) => x.number === n);
+      return w ? [[n, { number: w.number, name: w.name, href: href(locale, `/developers/wisps/${w.slug}`) }]] : [];
+    }),
+  );
   return (
     <Shell locale={locale}>
       <section className="dvx-hero">
@@ -37,7 +44,7 @@ export function DevelopersPage({ locale }: { locale: Locale }) {
               </div>
             </div>
           </div>
-          <ProtocolLoop t={t.hero.loop} />
+          <ProtocolSteps t={t.hero.steps} wisps={stepWisps} />
         </div>
       </section>
 

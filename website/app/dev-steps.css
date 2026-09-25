@@ -1,0 +1,925 @@
+/* /developers hero: the protocol explainer (components/dev/ProtocolSteps.tsx,
+   StepScene.tsx, protocolTimeline.ts) and the hero around it. Prefixes: psx-
+   (the explainer's layout and controls), sx- (shapes in its scene), dvx- (the
+   page around it).
+
+   The scene is driven by one custom property, --t (seconds along the eight
+   steps), which the component writes on .psx while a step plays. Each sx- rule
+   turns --t into opacity, a translation or a stroke offset, from the shape's
+   own --a (start), --b (end), --d (fade-in or duration) and --f (fade-out).
+   Those are registered as non-inheriting numbers, so a shape never picks up
+   its parent's times. */
+
+@property --t {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+@property --a {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+@property --b {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 999;
+}
+@property --d {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0.3;
+}
+@property --f {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0.2;
+}
+@property --lv {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0.3;
+}
+@property --p {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+@property --e {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
+.psx {
+  /* Without scripts, and with reduced motion: the first step's finished frame (END[0]). */
+  --t: 2.6;
+  --c-boo: #22d3ee;
+  --c-casper: #4ade80;
+  --c-line: #60a5fa;
+  --c-talk: #a78bfa;
+  --c-pay: #fbbf24;
+  --c-danger: #fb7185;
+  --c-mesh: #2b3b52;
+  --c-node: #131c29;
+  --c-plate: #0a111b;
+  --c-eye: #0b141a;
+  position: relative;
+  container: psx / inline-size;
+  outline: none;
+}
+/* With scripts the picture starts at the first step's first frame and plays it once in view. */
+html.js:not(.calm) .psx {
+  --t: 0;
+}
+
+/* ── Timing rules ─────────────────────────────────────── */
+
+/* Appear at --a over --d, and stay. */
+.sx-in {
+  opacity: clamp(0, (var(--t) - var(--a)) / var(--d), 1);
+}
+/* Leave at --b over --f. */
+.sx-out {
+  opacity: clamp(0, (var(--b) - var(--t)) / var(--f), 1);
+}
+/* Visible from --a to --b. */
+.sx-win {
+  opacity: min(clamp(0, (var(--t) - var(--a)) / var(--d), 1), clamp(0, (var(--b) - var(--t)) / var(--f), 1));
+}
+/* Dimmed to --lv from --a to --b. */
+.sx-dim {
+  opacity: calc(1 - (1 - var(--lv)) * min(clamp(0, (var(--t) - var(--a)) / var(--d), 1), clamp(0, (var(--b) - var(--t)) / var(--f), 1)));
+}
+/* Progress over --d from --a, and the same eased on EASE.move (easeInOutCubic, both halves in one expression). */
+.sx-go {
+  --p: clamp(0, (var(--t) - var(--a)) / var(--d), 1);
+  --e: calc(
+    4 * min(var(--p), 0.5) * min(var(--p), 0.5) * min(var(--p), 0.5) + 0.5 - 4 * min(1 - var(--p), 0.5) * min(1 - var(--p), 0.5) *
+      min(1 - var(--p), 0.5)
+  );
+}
+/* A packet on its way: visible only while it travels (its transform is inline, from along()). */
+.sx-trip {
+  opacity: min(clamp(0, (var(--t) - var(--a)) / 0.12, 1), clamp(0, (var(--a) + var(--d) - var(--t)) / 0.12, 1));
+}
+/* Something that travels and stays where it lands. */
+.sx-land {
+  opacity: clamp(0, (var(--t) - var(--a)) / 0.12, 1);
+}
+/* Pops in: fades and grows to size on the enter curve (1 - (1 - p)³), about its own centre. */
+.sx-pop {
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: var(--p);
+  transform: scale(calc(0.72 + 0.28 * (1 - (1 - var(--p)) * (1 - var(--p)) * (1 - var(--p)))));
+}
+/* A small hop, up and back down. */
+.sx-hop {
+  transform: translateY(calc(sin(var(--p) * 3.14159) * -12px));
+}
+/* A ring that bursts once. */
+.sx-burst {
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: calc(min(clamp(0, (var(--t) - var(--a)) / 0.04, 1), 1 - var(--p)) * 0.9);
+  transform: scale(calc(0.6 + 1.2 * (1 - (1 - var(--p)) * (1 - var(--p)))));
+}
+/* Draw a path (pathLength = 1). */
+.sx-draw {
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: calc(1 - var(--p));
+}
+
+/* ── The scene ────────────────────────────────────────── */
+
+.psx-stage {
+  position: relative;
+  margin: 0;
+  padding: clamp(10px, 1.6cqi, 18px);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background:
+    radial-gradient(ellipse at 50% 40%, rgba(34, 211, 238, 0.06), transparent 65%),
+    linear-gradient(180deg, #0b121c, #080d15);
+  transition: opacity var(--dur-base) var(--ease-enter);
+}
+.psx-stage[data-cut] {
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-exit);
+}
+.psx-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.psx-svg--port {
+  display: none;
+}
+
+.sx-label {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  fill: var(--muted);
+}
+.sx-mesh {
+  fill: none;
+  stroke: var(--c-mesh);
+  stroke-width: 1.2;
+  stroke-dasharray: 2 5;
+  stroke-linecap: round;
+}
+.sx-edge {
+  fill: none;
+  stroke: var(--c-mesh);
+  stroke-width: 1.3;
+  stroke-linejoin: round;
+}
+.sx-dot {
+  fill: var(--c-mesh);
+}
+.sx-node {
+  fill: var(--c-node);
+  stroke: #3a4d68;
+  stroke-width: 1.6;
+}
+.sx-lit {
+  stroke: none;
+}
+.sx-boo {
+  --tone: var(--c-boo);
+}
+.sx-casper {
+  --tone: var(--c-casper);
+}
+.sx-talk {
+  --tone: var(--c-talk);
+}
+.sx-pay {
+  --tone: var(--c-pay);
+}
+.sx-line-tone {
+  --tone: var(--c-line);
+}
+.sx-lit,
+.sx-pk {
+  fill: var(--tone);
+}
+.sx-route {
+  fill: none;
+  stroke: var(--tone);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-opacity: 0.4;
+}
+.sx-arrow path {
+  fill: var(--tone);
+  fill-opacity: 0.7;
+}
+.sx-record rect {
+  fill: var(--c-plate);
+  stroke: var(--c-boo);
+  stroke-width: 1.6;
+}
+.sx-record path {
+  stroke: var(--c-boo);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+
+.sx-tag rect {
+  fill: var(--c-plate);
+  stroke: var(--line-2);
+  stroke-width: 1;
+}
+.sx-tag text {
+  font-size: 14px;
+  fill: var(--text);
+}
+.sx-tag--boo rect {
+  stroke: color-mix(in srgb, var(--c-boo) 60%, transparent);
+}
+.sx-tag--casper rect {
+  stroke: color-mix(in srgb, var(--c-casper) 60%, transparent);
+}
+.sx-tag--talk rect {
+  stroke: color-mix(in srgb, var(--c-talk) 65%, transparent);
+}
+.sx-tag--line rect {
+  fill: #0d1830;
+  stroke: color-mix(in srgb, var(--c-line) 70%, transparent);
+}
+.sx-tag--danger rect {
+  stroke: color-mix(in srgb, var(--c-danger) 70%, transparent);
+}
+.sx-tag--dim text {
+  fill: var(--muted);
+}
+.sx-tag--key rect {
+  stroke: color-mix(in srgb, var(--c-casper) 55%, var(--line-2));
+}
+.sx-key circle,
+.sx-key path {
+  fill: none;
+  stroke: var(--c-pay);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+
+.sx-oob {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.4;
+  stroke-opacity: 0.55;
+}
+.sx-oob-tag {
+  font-size: 14px;
+  fill: var(--muted);
+}
+.sx-ticket rect {
+  fill: var(--c-boo);
+}
+.sx-ticket path {
+  fill: none;
+  stroke: var(--c-eye);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.sx-chip rect {
+  fill: var(--c-plate);
+  stroke: var(--line-2);
+}
+.sx-chip text {
+  font-size: 14px;
+  fill: var(--text);
+}
+.sx-chip-lit {
+  fill: color-mix(in srgb, var(--tone) 20%, transparent) !important;
+  stroke: var(--tone) !important;
+  stroke-width: 1.5;
+}
+
+.sx-lane {
+  fill: none;
+  stroke: var(--c-line);
+  stroke-width: 2;
+  stroke-dasharray: 6 6;
+  stroke-opacity: 0.8;
+}
+.sx-line {
+  fill: none;
+  stroke: var(--c-line);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+.sx-line--dash {
+  stroke-width: 2.5;
+  stroke-dasharray: 7 7;
+}
+.psx-dash {
+  animation: psx-dash 0.9s linear infinite;
+}
+@keyframes psx-dash {
+  to {
+    stroke-dashoffset: -14;
+  }
+}
+.sx-glow {
+  fill: none;
+  stroke: var(--c-line);
+  stroke-width: 12;
+  stroke-opacity: 0.16;
+  stroke-linecap: round;
+}
+.sx-broken {
+  fill: none;
+  stroke: var(--c-danger);
+  stroke-width: 2;
+  stroke-dasharray: 4 6;
+}
+.sx-cross {
+  fill: none;
+  stroke: var(--c-danger);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+.sx-check-bg {
+  fill: var(--tone);
+}
+.sx-check {
+  fill: none;
+  stroke: var(--c-eye);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.sx-glyph {
+  fill: var(--tone);
+  stroke: var(--c-plate);
+  stroke-width: 0.8;
+}
+.sx-coin {
+  font-size: 11px;
+  font-weight: 700;
+  fill: var(--c-plate);
+}
+.sx-trio {
+  fill: var(--c-plate);
+  stroke: var(--line-2);
+}
+.sx-ring {
+  fill: none;
+  stroke: var(--tone);
+  stroke-width: 2;
+}
+
+/* The ghosts: the app's, in the site's colours (Boo cyan, Casper mint). */
+.sx-ghost--boo {
+  --tone: var(--c-boo);
+}
+.sx-ghost--casper {
+  --tone: var(--c-casper);
+}
+.sx-body {
+  fill: var(--tone);
+}
+.sx-halo {
+  fill: var(--tone);
+  opacity: 0.08;
+}
+.sx-shadow {
+  fill: #000;
+  opacity: 0.35;
+}
+.sx-outline {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 3;
+  stroke-dasharray: 6 6;
+}
+.sx-eyes {
+  fill: var(--c-eye);
+  stroke: var(--c-eye);
+}
+.sx-eyes circle {
+  stroke: none;
+}
+.sx-eyes .sx-shine {
+  fill: #fff;
+}
+.sx-name {
+  font-size: 14px;
+  font-weight: 600;
+  fill: var(--muted);
+}
+.psx-float {
+  animation: psx-float 3.4s ease-in-out infinite;
+}
+.psx-float--late {
+  animation-delay: -1.7s;
+}
+@keyframes psx-float {
+  50% {
+    transform: translateY(-5px);
+  }
+}
+.psx-blink {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: psx-blink 5.2s infinite;
+}
+@keyframes psx-blink {
+  0%,
+  94%,
+  100% {
+    transform: scaleY(1);
+  }
+  97% {
+    transform: scaleY(0.1);
+  }
+}
+.sx-bubble {
+  fill: var(--c-plate);
+  stroke: var(--c-casper);
+  stroke-width: 1.6;
+}
+.sx-thumb {
+  fill: var(--c-casper);
+}
+
+/* ── Layout ───────────────────────────────────────────── */
+
+.psx-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "steps" "stage" "controls" "copy";
+  gap: 14px;
+}
+.psx-steps {
+  grid-area: steps;
+}
+.psx-stage {
+  grid-area: stage;
+}
+.psx-controls {
+  grid-area: controls;
+}
+.psx-copy {
+  grid-area: copy;
+}
+/* Wide: the copy beside the picture. The picture keeps ≥ 704 units of width, so its 14-unit labels stay ≥ 12px. */
+@container psx (min-width: 1100px) {
+  .psx-grid {
+    grid-template-columns: minmax(0, 1fr) 340px;
+    grid-template-areas: "steps steps" "stage copy" "controls copy";
+    column-gap: 32px;
+  }
+  .psx-copy {
+    align-self: start;
+  }
+}
+/* Narrow: the portrait stage (340 units, ≥ 12px labels down to 290px). */
+@container psx (max-width: 719px) {
+  .psx-svg--land {
+    display: none;
+  }
+  .psx-svg--port {
+    display: block;
+  }
+  .psx-stage {
+    width: 100%;
+    max-width: 480px;
+    justify-self: center;
+  }
+}
+
+/* The steps: dots on a line, as in the app's pairing steps. */
+.psx-steps {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.psx-steps li {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+}
+.psx-steps li + li::before {
+  content: "";
+  position: absolute;
+  top: 17px;
+  inset-inline-end: 50%;
+  width: 100%;
+  height: 2px;
+  background: var(--line-2);
+  transition: background var(--dur-base) var(--ease-enter);
+}
+.psx-steps li:is([data-state="done"], [data-state="current"])::before {
+  background: var(--cyan);
+}
+.psx-dot {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 36px;
+  padding: 11px 2px 2px;
+  border: 0;
+  background: none;
+  color: var(--dim);
+  font-size: 13px;
+  line-height: 16px;
+  cursor: pointer;
+  border-radius: 10px;
+}
+.psx-dot-mark {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  box-shadow: 0 0 0 2px var(--line-2);
+  transition:
+    background var(--dur-base) var(--ease-enter),
+    box-shadow var(--dur-base) var(--ease-enter),
+    transform var(--dur-fast) var(--ease-exit);
+}
+.psx-dot:hover .psx-dot-mark {
+  transform: scale(1.18);
+  transition-timing-function: var(--ease-enter);
+}
+.psx-dot:hover {
+  color: var(--text);
+}
+.psx-steps li[data-state="done"] .psx-dot-mark {
+  background: var(--cyan);
+  box-shadow: none;
+}
+.psx-steps li[data-state="current"] .psx-dot {
+  color: var(--text);
+  font-weight: 650;
+}
+.psx-steps li[data-state="current"] .psx-dot-mark {
+  background: var(--cyan);
+  box-shadow: 0 0 0 4px rgba(34, 211, 238, 0.28);
+}
+.psx-dot-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Too narrow for eight names: dots only; the copy's eyebrow names the step. */
+@container psx (max-width: 719px) {
+  .psx-dot-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .psx-dot {
+    min-height: 40px;
+  }
+}
+
+/* The controls, right under the picture so they never move. */
+.psx-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.psx-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-exit),
+    border-color var(--dur-fast) var(--ease-exit),
+    color var(--dur-fast) var(--ease-exit),
+    opacity var(--dur-fast) var(--ease-exit);
+}
+.psx-btn:hover:not(:disabled) {
+  border-color: rgba(34, 211, 238, 0.5);
+  color: var(--cyan);
+  transform: translateY(-1px);
+  transition-timing-function: var(--ease-enter);
+}
+.psx-btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.985);
+  transition-duration: 0.06s;
+}
+.psx-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.psx-btn svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.psx-btn svg .psx-fill {
+  fill: currentColor;
+  stroke: none;
+}
+.psx-btn--next {
+  border: 0;
+  color: #031018;
+  background: linear-gradient(100deg, var(--cyan), var(--green));
+}
+.psx-btn--next:hover:not(:disabled) {
+  color: #031018;
+}
+.psx-keys {
+  flex-basis: 100%;
+  text-align: center;
+  font-size: 12px;
+  color: var(--dim);
+}
+html[data-touch] .psx-keys {
+  display: none;
+}
+@container psx (max-width: 520px) {
+  .psx-btn:not(.psx-btn--next) .psx-btn-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .psx-btn {
+    padding: 0 14px;
+  }
+  .psx-btn--next {
+    flex: 1 1 auto;
+  }
+}
+
+/* The copy: every step's card in one grid cell, so the panel is as tall as the tallest and nothing below it moves. */
+.psx-copy {
+  display: grid;
+}
+.psx-card {
+  grid-area: 1 / 1;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 18px 20px 20px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface);
+  opacity: 0;
+  transform: translateY(8px);
+  visibility: hidden;
+  /* Leaving: fast, on the exit curve. */
+  transition:
+    opacity var(--dur-fast) var(--ease-exit),
+    transform var(--dur-fast) var(--ease-exit),
+    visibility 0s linear var(--dur-fast);
+}
+.psx-card[data-state="current"] {
+  opacity: 1;
+  transform: none;
+  visibility: visible;
+  /* Arriving: after the old card has gone, base on the enter curve. */
+  transition:
+    opacity var(--dur-base) var(--ease-enter) var(--dur-fast),
+    transform var(--dur-base) var(--ease-enter) var(--dur-fast),
+    visibility 0s;
+}
+.psx-count {
+  margin: 0;
+  font-size: 13px;
+  color: var(--cyan);
+}
+.psx-title {
+  margin: 0;
+  font-size: clamp(20px, 2cqi, 24px);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+.psx-body {
+  margin: 0;
+  color: var(--muted);
+  font-size: 15.5px;
+  line-height: 1.55;
+}
+.psx-wire {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 12px;
+  align-items: baseline;
+  margin: 4px 0 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #0a1019;
+  border: 1px solid var(--line);
+}
+.psx-wire-row {
+  display: contents;
+}
+.psx-wire dt {
+  font-size: 13px;
+  color: var(--cyan);
+  white-space: nowrap;
+}
+.psx-wire dd {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+@container psx (max-width: 420px) {
+  .psx-wire {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 2px;
+  }
+  .psx-wire dd + dt {
+    margin-top: 6px;
+  }
+}
+.psx-wisps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--dim);
+}
+.psx-wisp {
+  padding: 3px 9px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 13px;
+  transition:
+    border-color var(--dur-fast) var(--ease-exit),
+    color var(--dur-fast) var(--ease-exit);
+}
+.psx-wisp:hover {
+  border-color: rgba(34, 211, 238, 0.5);
+  color: var(--cyan);
+  transition-timing-function: var(--ease-enter);
+}
+
+/* Without scripts: no controls, and every step's card in order under the first step's picture. */
+html:not(.js) .psx-controls,
+html:not(.js) .psx-steps {
+  display: none;
+}
+html:not(.js) .psx-copy {
+  gap: 12px;
+}
+html:not(.js) .psx-card {
+  grid-area: auto;
+  opacity: 1;
+  transform: none;
+  visibility: visible;
+}
+
+/* Reduced motion: still frames, instant changes; no idle loops. */
+html.calm .psx *,
+html.calm .psx {
+  animation: none !important;
+  transition: none !important;
+}
+html.calm .psx-replay {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .psx *,
+  .psx {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ── The hero around it ─────────────────────────────── */
+.dvx-hero {
+  position: relative;
+  padding-block: calc(var(--nav-h) + clamp(20px, 4.5vh, 48px)) clamp(48px, 9vh, 96px);
+  overflow: hidden;
+  background: radial-gradient(ellipse at 50% 62%, rgba(34, 211, 238, 0.08), transparent 62%);
+}
+.dvx-head {
+  display: grid;
+  gap: 14px;
+  margin-bottom: clamp(18px, 3vh, 32px);
+}
+.dvx-title {
+  font-size: clamp(36px, 3.9vw, 60px);
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+  margin: 0;
+}
+.dvx-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px 32px;
+}
+.dvx-sub .lead {
+  max-width: 62ch;
+  margin: 0;
+  font-size: clamp(16px, 1.25vw, 18px);
+}
+.dvx-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.dvx-gh {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 6px;
+  color: var(--muted);
+  font-size: 14.5px;
+}
+.dvx-gh:hover {
+  color: var(--text);
+}
+.dvx-gh svg {
+  width: 17px;
+  height: 17px;
+}
+
+/* ── Your path: three one-line steps ─────────────────── */
+.dvx-path {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(14px, 2vw, 24px);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: dvx-step;
+}
+.dvx-step {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 20px 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.dvx-step-num {
+  color: var(--cyan);
+  font-size: 13px;
+}
+.dvx-step-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.dvx-step-body {
+  margin: 0;
+  color: var(--muted);
+  font-size: 15px;
+}
+.dvx-step-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+}
+@media (max-width: 860px) {
+  .dvx-path {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
