@@ -1,8 +1,9 @@
 import { test as base, expect } from "@playwright/test";
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { createServer } from "node:net";
-import { resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export { expect };
@@ -121,6 +122,21 @@ class Driver {
     return element === null ? null : ((await this.call("GET", `/element/${element}/attribute/${name}`)) as string | null);
   }
 
+  /**
+   * Types into the first match, as keys: React sees each one. `\uE007` is Enter. Throws when nothing
+   * matches, like a click.
+   */
+  async type(selector: string, text: string): Promise<void> {
+    const element = await this.find(selector);
+    if (element === null) throw new Error(`Nothing to type into at ${selector}`);
+    await this.call("POST", `/element/${element}/value`, { text });
+  }
+
+  /** Runs a function body in the page (`arguments[0]`… are `args`) and returns what it returns. */
+  async execute<T = unknown>(script: string, ...args: unknown[]): Promise<T> {
+    return (await this.call("POST", "/execute/sync", { script, args })) as T;
+  }
+
   /** Throws when nothing matches: a click is not something to be vague about. */
   async click(selector: string): Promise<void> {
     const element = await this.find(selector);
@@ -137,10 +153,36 @@ class Driver {
   }
 }
 
-export type DesktopApp = Pick<Driver, "text" | "click" | "title" | "attribute">;
+export type DesktopApp = Pick<Driver, "text" | "click" | "title" | "attribute" | "type" | "execute">;
 
-/** `tauri-driver`, and the app it opens, for the length of one test. */
-async function openDesktop(): Promise<{ app: Driver; stop: () => Promise<void> }> {
+export interface DesktopOptions {
+  /** `GHOSTLY_PROFILE`: the app's own space in its storage. */
+  profile?: string;
+  /**
+   * A home of its own (HOME and the XDG directories): the WebView's storage, the app's data. Two apps on one
+   * machine need one each, or they share one WebKit store. Kept between two opens with the same directory,
+   * which is how a test closes an app and opens it again.
+   */
+  home?: string;
+  /** More environment for the app, e.g. `GHOSTLY_PKARR_RELAYS` or `GHOSTLY_HYPERDHT_BOOTSTRAP`. */
+  env?: Record<string, string>;
+}
+
+/** A directory for `DesktopOptions.home`, removed by the returned function. */
+export function desktopHome(name: string): { dir: string; remove: () => void } {
+  const dir = mkdtempSync(join(tmpdir(), `ghostly-desktop-${name}-`));
+  // The app may still be writing its store for a moment after it closed.
+  return { dir, remove: () => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }) };
+}
+
+const homeEnv = (dir: string): Record<string, string> => {
+  const env = { HOME: dir, XDG_DATA_HOME: join(dir, "data"), XDG_CONFIG_HOME: join(dir, "config"), XDG_CACHE_HOME: join(dir, "cache") };
+  for (const path of Object.values(env)) mkdirSync(path, { recursive: true });
+  return env;
+};
+
+/** `tauri-driver`, and the app it opens, until `stop`. */
+export async function openDesktop(options: DesktopOptions = {}): Promise<{ app: DesktopApp; stop: () => Promise<void> }> {
   // Before anything is spawned: a missing binary is not something to retry for 30 seconds.
   const application = desktopBinary();
   const port = await freePort();
@@ -151,7 +193,12 @@ async function openDesktop(): Promise<{ app: Driver; stop: () => Promise<void> }
     {
       stdio: ["ignore", "pipe", "pipe"],
       // A test must never open the person's own chats: its own profile, its own storage.
-      env: { ...process.env, GHOSTLY_PROFILE: process.env.GHOSTLY_PROFILE ?? "e2e" },
+      env: {
+        ...process.env,
+        GHOSTLY_PROFILE: options.profile ?? process.env.GHOSTLY_PROFILE ?? "e2e",
+        ...(options.home ? homeEnv(options.home) : {}),
+        ...options.env,
+      },
     },
   );
   const log: string[] = [];

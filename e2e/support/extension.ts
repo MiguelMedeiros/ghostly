@@ -36,9 +36,11 @@ type Fixtures = {
 export const test = base.extend<Fixtures>({
   extensionPeer: async ({ relay }, use) => {
     const work = mkdtempSync(join(tmpdir(), "ghostly-e2e-"));
-    const extensionDir = prepareExtension(work);
+    // Prepared on first use: a test that asks for the fixture but opens no extension needs no build of it.
+    let extensionDir: string | undefined;
     const opened: Peer[] = [];
     await use(async (name, options = {}) => {
+      extensionDir ??= prepareExtension(work);
       const context = await chromium.launchPersistentContext(join(work, name), {
         channel: "chromium",
         headless: !process.env.HEADED,

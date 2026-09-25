@@ -4,6 +4,11 @@ import { createHyperEndpoint } from './endpoint.mjs'
 import { createInterface } from 'node:readline'
 
 const emit = value => process.stdout.write(JSON.stringify(value) + '\n')
+// GHOSTLY_HYPERDHT_BOOTSTRAP ("host:port,…") replaces the public bootstrap nodes: a private network, or the
+// end-to-end tests' own (hyperdht/testnet). A network all on loopback is announced on loopback too.
+const bootstrap = (process.env.GHOSTLY_HYPERDHT_BOOTSTRAP ?? '').split(',').map(node => node.trim()).filter(Boolean)
+const loopback = bootstrap.length > 0 && bootstrap.every(node => /^(127\.0\.0\.1|localhost):\d+$/.test(node))
+const network = bootstrap.length ? { bootstrap, ...(loopback ? { host: '127.0.0.1' } : {}) } : {}
 let endpoint
 let next = 0
 const connections = new Map()
@@ -31,7 +36,7 @@ createInterface({ input: process.stdin }).on('line', line => {
     if (command.type === 'start' && !endpoint) {
       const seed = Buffer.from(command.seedB64, 'base64url')
       if (seed.length !== 32) throw new Error('Invalid native seed')
-      endpoint = await createHyperEndpoint(seed)
+      endpoint = await createHyperEndpoint(seed, network)
       seed.fill(0)
       endpoint.onConnection = bound => attach(bound, true)
       emit({ type: 'started', descriptor: endpoint.descriptor })

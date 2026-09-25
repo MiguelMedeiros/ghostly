@@ -219,6 +219,26 @@ The test needs no network either. It asserts what only the Desktop wiring can pr
 
 `npm run check:desktop-bundle` runs everywhere, in a second, and catches the same class of mistake from the other end: it reads what `src/desktop/` asks of Rust and fails if it is not in `dist/`, and it fails when a module is added to `PLATFORM_MODULES` without someone writing down why Desktop can live with the stand-in. It is a build assertion, not a test — but it is what stands between a Mac and a Desktop feature that silently does nothing. CI runs it on every pull request.
 
+A Mac can still run the Linux harness inside a Linux container: `ubuntu:22.04` (arm64 works) with the packages of
+the `Desktop (Tauri)` job, Node 22, Rust, `cargo install tauri-driver` and `xvfb`, the repository copied in (not
+mounted over: `node_modules` must be Linux's), then `npm ci`, `npm run tauri -- build --debug --no-bundle` (about
+35 minutes the first time) and `xvfb-run -a npm run test:e2e:desktop`.
+
+### Several apps, and their network
+
+`openDesktop({ profile, home, env })` opens one more app: `profile` is its `GHOSTLY_PROFILE`, `home` a directory of
+its own for `HOME` and the XDG directories (`desktopHome(name)` makes one) — two apps on one machine otherwise
+share one WebKit store — and `env` whatever else it should start with. The app reads two variables for its network,
+both for a private network as much as for tests:
+
+| | |
+|---|---|
+| `GHOSTLY_PKARR_RELAYS` | comma-separated Pkarr relay URLs used instead of the Mainline DHT and the public relays, with no read budget (`src-tauri/src/pkarr_network.rs`). The matrix points it at the test's relay (`relay.listen()`), which the browsers reach by request interception |
+| `GHOSTLY_HYPERDHT_BOOTSTRAP` | `host:port,…` bootstrap nodes for the HyperDHT runtime instead of the public ones (`native-transports/hyperdht/sidecar.mjs`); the matrix starts `hyperdht/testnet` in the test process |
+
+`DesktopApp` clicks, types (`type`, with `\uE007` for Enter), reads text and attributes, and runs a script in the
+page (`execute`): enough for `matrix/people.ts` to drive a chat.
+
 ## The combination matrix
 
 Each spec above tests one feature in one setup. `matrix/` tests them together: two people on a combination of
@@ -245,6 +265,7 @@ npm run e2e:matrix -- --shard 1/4 --docs          # a shard; --docs writes the t
 | `matrix/requirements.ts` | what a block needs from outside (a mint, S3, a regtest stack, `gpg`…) and how to tell it is up |
 | `matrix/reporter.ts` | the matrix as a table: `test-results/matrix-summary/summary.md` and `results.json`, the job summary in CI |
 
+| `matrix/desktop.ts` · `matrix/people.ts` | the scenarios with a Desktop peer (`desktop-web`, `desktop-desktop`): the same person, whether Playwright drives a browser or WebDriver drives the app; pair, talk, go away and back, pick a transport |
 | `matrix/rails.ts` | the Testnet payment blocks of the rails that need `e2e/infra` (LND, Core Lightning, NWC, Breez, Arkade, Bark, BDK, USDT): the source set up through its form or its wallet, funded from the environment, then a request and a direct Send each way in the chat, with the bubbles and both balances checked |
 
 A (the host) is always a laptop in English; B (who joins) carries the scenario's language, screen and restored profile,
@@ -260,8 +281,14 @@ see each other's payments in the balances. Breez's regtest is hosted by Breez an
 offline; its block runs only with a funded counterpart wallet (`GHOSTLY_BREEZ_COUNTERPART`), and is skipped with
 that reason otherwise.
 
-The matrix runs every night with the ephemeral environment (`e2e-full.yml`: four shards, then one report with the
-matrix in the run's summary), not on pull requests. It serves its own
+A scenario with a Desktop peer needs Linux (or Windows), `tauri-driver` and a built app; elsewhere it is skipped
+with that reason. Desktop only chats in it — it pairs, talks, goes away and back, and picks a transport — so its
+files and wallet steps are skipped with the reason, and every other dimension stays at its plainest value. On
+Linux, WebKitGTK has no WebRTC at all, and a first live session needs WebRTC on both sides, so these pairs chat over
+the DHT; see docs/TESTING.md for what that means for Iroh and HyperDHT.
+
+The matrix runs every night with the ephemeral environment (`e2e-full.yml`: four shards, the Desktop scenarios in a
+job of their own on ubuntu-22.04, then one report with the matrix in the run's summary), not on pull requests. It serves its own
 build on port 47300 (`MATRIX_WEB_PORT`), and its test domain uses 47320-47399.
 
 ## When they run
