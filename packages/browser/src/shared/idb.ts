@@ -13,7 +13,7 @@ export function setDatabaseName(name: string): void {
 export function databaseName(): string {
   return dbName;
 }
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 
 export const STORES = {
   links: "links",
@@ -29,10 +29,13 @@ export const STORES = {
   intents: "paymentIntents",
   /** Private groups (WISP 900): membership chain, epoch secrets and my own recent messages, by group id. */
   groups: "groups",
+  /** Files kept in 1 MiB pieces where the platform has no file system for them (see `fileBytesIdb.ts`). */
+  fileChunks: "fileChunks",
 } as const;
 
 /**
- * A file's contents. Metadata travels with the chat message; this is only the bytes.
+ * A file's contents. Metadata travels with the chat message; this is only the bytes: in `blob` for a file
+ * small enough to hold whole, or in the platform's file storage (`bytes`, see `fileBytes.ts`) under the same id.
  * Ids are `<link id>-out-<random>` for files we send and `<link id>-in-<random>` for
  * files we receive, both chosen here. Files stored before that are `<link id>-<wire id>`
  * without `direction` and are still read under their old id.
@@ -40,7 +43,9 @@ export const STORES = {
 export interface StoredFile {
   id: string;
   linkId: string;
-  blob: Blob;
+  blob?: Blob;
+  /** Where the bytes are when there is no `blob`. */
+  bytes?: import("./fileBytes").FileBytesKind;
   createdAt: number;
   direction?: "in" | "out";
   /** The id the file had on the data link. */
@@ -76,6 +81,8 @@ export function openDb(): Promise<IDBDatabase> {
       }
       // v7: private groups.
       if (!has(STORES.groups)) db.createObjectStore(STORES.groups, { keyPath: "id" });
+      // v8: files in pieces, for platforms without the origin-private file system.
+      if (!has(STORES.fileChunks)) db.createObjectStore(STORES.fileChunks, { keyPath: ["id", "index"] });
     };
     request.onsuccess = () => {
       // Let the other context upgrade the schema instead of blocking it.
@@ -97,7 +104,7 @@ export function openDb(): Promise<IDBDatabase> {
  */
 export async function clearChatData(): Promise<void> {
   if (typeof indexedDB === "undefined") return;
-  const names = [STORES.links, STORES.messages, STORES.files, STORES.services, STORES.groups];
+  const names = [STORES.links, STORES.messages, STORES.files, STORES.fileChunks, STORES.services, STORES.groups];
   const tx = (await openDb()).transaction(names, "readwrite");
   for (const name of names) tx.objectStore(name).clear();
   await new Promise<void>((resolve, reject) => {

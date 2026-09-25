@@ -207,6 +207,72 @@
           "markdownDescription": "Enables the encrypt_text command without any pre-configured scope."
         },
         {
+          "description": "Enables the file_bytes_append command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-file-bytes-append",
+          "markdownDescription": "Enables the file_bytes_append command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the file_bytes_close command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-file-bytes-close",
+          "markdownDescription": "Enables the file_bytes_close command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the file_bytes_digest command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-file-bytes-digest",
+          "markdownDescription": "Enables the file_bytes_digest command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the file_bytes_flush command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-file-bytes-flush",
+          "markdownDescription": "Enables the file_bytes_flush command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the file_bytes_read command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-file-bytes-read",
+          "markdownDescription": "Enables the file_bytes_read command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the file_bytes_remove command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-file-bytes-remove",
+          "markdownDescription": "Enables the file_bytes_remove command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the file_bytes_remove_where command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-file-bytes-remove-where",
+          "markdownDescription": "Enables the file_bytes_remove_where command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the file_bytes_room command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-file-bytes-room",
+          "markdownDescription": "Enables the file_bytes_room command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the file_bytes_save command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-file-bytes-save",
+          "markdownDescription": "Enables the file_bytes_save command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the file_bytes_size command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-file-bytes-size",
+          "markdownDescription": "Enables the file_bytes_size command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the file_bytes_truncate command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-file-bytes-truncate",
+          "markdownDescription": "Enables the file_bytes_truncate command without any pre-configured scope."
+        },
+        {
           "description": "Enables the generate_enc_key command without any pre-configured scope.",
           "type": "string",
           "const": "allow-generate-enc-key",
@@ -433,6 +499,72 @@
           "type": "string",
           "const": "deny-encrypt-text",
           "markdownDescription": "Denies the encrypt_text command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the file_bytes_append command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-file-bytes-append",
+          "markdownDescription": "Denies the file_bytes_append command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the file_bytes_close command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-file-bytes-close",
+          "markdownDescription": "Denies the file_bytes_close command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the file_bytes_digest command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-file-bytes-digest",
+          "markdownDescription": "Denies the file_bytes_digest command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the file_bytes_flush command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-file-bytes-flush",
+          "markdownDescription": "Denies the file_bytes_flush command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the file_bytes_read command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-file-bytes-read",
+          "markdownDescription": "Denies the file_bytes_read command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the file_bytes_remove command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-file-bytes-remove",
+          "markdownDescription": "Denies the file_bytes_remove command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the file_bytes_remove_where command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-file-bytes-remove-where",
+          "markdownDescription": "Denies the file_bytes_remove_where command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the file_bytes_room command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-file-bytes-room",
+          "markdownDescription": "Denies the file_bytes_room command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the file_bytes_save command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-file-bytes-save",
+          "markdownDescription": "Denies the file_bytes_save command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the file_bytes_size command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-file-bytes-size",
+          "markdownDescription": "Denies the file_bytes_size command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the file_bytes_truncate command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-file-bytes-truncate",
+          "markdownDescription": "Denies the file_bytes_truncate command without any pre-configured scope."
         },
         {
           "description": "Denies the generate_enc_key command without any pre-configured scope.",
@@ -2647,6 +2779,72 @@
           "type": "string",
           "const": "core:window:deny-unminimize",
           "markdownDescription": "Denies the unminimize command without any pre-configured scope."
+        },
+        {
+          "description": "This permission set configures the types of dialogs\navailable from the dialog plugin.\n\n#### Granted Permissions\n\nAll dialog types are enabled.\n\n\n\n#### This default permission set includes:\n\n- `allow-message`\n- `allow-save`\n- `allow-open`",
+          "type": "string",
+          "const": "dialog:default",
+          "markdownDescription": "This permission set configures the types of dialogs\navailable from the dialog plugin.\n\n#### Granted Permissions\n\nAll dialog types are enabled.\n\n\n\n#### This default permission set includes:\n\n- `allow-message`\n- `allow-save`\n- `allow-open`"
+        },
+        {
+          "description": "Enables the ask command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `allow-message` and will be removed in v3)",
+          "type": "string",
+          "const": "dialog:allow-ask",
+          "markdownDescription": "Enables the ask command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `allow-message` and will be removed in v3)"
+        },
+        {
+          "description": "Enables the confirm command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `allow-message` and will be removed in v3)",
+          "type": "string",
+          "const": "dialog:allow-confirm",
+          "markdownDescription": "Enables the confirm command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `allow-message` and will be removed in v3)"
+        },
+        {
+          "description": "Enables the message command without any pre-configured scope.",
+          "type": "string",
+          "const": "dialog:allow-message",
+          "markdownDescription": "Enables the message command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open command without any pre-configured scope.",
+          "type": "string",
+          "const": "dialog:allow-open",
+          "markdownDescription": "Enables the open command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the save command without any pre-configured scope.",
+          "type": "string",
+          "const": "dialog:allow-save",
+          "markdownDescription": "Enables the save command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ask command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `deny-message` and will be removed in v3)",
+          "type": "string",
+          "const": "dialog:deny-ask",
+          "markdownDescription": "Denies the ask command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `deny-message` and will be removed in v3)"
+        },
+        {
+          "description": "Denies the confirm command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `deny-message` and will be removed in v3)",
+          "type": "string",
+          "const": "dialog:deny-confirm",
+          "markdownDescription": "Denies the confirm command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `deny-message` and will be removed in v3)"
+        },
+        {
+          "description": "Denies the message command without any pre-configured scope.",
+          "type": "string",
+          "const": "dialog:deny-message",
+          "markdownDescription": "Denies the message command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open command without any pre-configured scope.",
+          "type": "string",
+          "const": "dialog:deny-open",
+          "markdownDescription": "Denies the open command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the save command without any pre-configured scope.",
+          "type": "string",
+          "const": "dialog:deny-save",
+          "markdownDescription": "Denies the save command without any pre-configured scope."
         },
         {
           "description": "This permission set configures which\nnotification features are by default exposed.\n\n#### Granted Permissions\n\nIt allows all notification related features.\n\n\n#### This default permission set includes:\n\n- `allow-is-permission-granted`\n- `allow-request-permission`\n- `allow-notify`\n- `allow-register-action-types`\n- `allow-register-listener`\n- `allow-cancel`\n- `allow-get-pending`\n- `allow-remove-active`\n- `allow-get-active`\n- `allow-check-permissions`\n- `allow-show`\n- `allow-batch`\n- `allow-list-channels`\n- `allow-delete-channel`\n- `allow-create-channel`\n- `allow-permission-state`",

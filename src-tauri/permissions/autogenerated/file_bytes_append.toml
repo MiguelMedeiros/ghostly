@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-file-bytes-append"
+description = "Enables the file_bytes_append command without any pre-configured scope."
+commands.allow = ["file_bytes_append"]
+
+[[permission]]
+identifier = "deny-file-bytes-append"
+description = "Denies the file_bytes_append command without any pre-configured scope."
+commands.deny = ["file_bytes_append"]

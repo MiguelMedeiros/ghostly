@@ -19,6 +19,8 @@ import { createIrohEndpoint, createHyperEndpoint } from "./nativeTransports";
 import { desktopUpdates } from "./updates";
 import { desktopOidc } from "./oidc";
 import { engine } from "@ghostly/browser/platform/engine";
+import { registerFileBytes } from "@ghostly/browser/shared/fileBytes";
+import { NativeFileBytes, type NativeInvoke } from "@ghostly/browser/shared/fileBytesNative";
 
 /**
  * Ghostly Desktop runs the same peer as the browser clients, in its WebView,
@@ -111,6 +113,8 @@ export function createDesktopHost(version: string) {
   // Every step of a link's way to a live connection goes to the app's log (see `diagnostic_log`), so a
   // pairing that took long can be read back afterwards, step by step.
   setLinkTraceSink((line) => void invoke("diagnostic_log", { line: `link ${line}` }).catch(() => {}));
+  // Files sent and received are real files in the app's data folder, written and read through Rust.
+  registerFileBytes("native", async () => new NativeFileBytes(invoke as NativeInvoke), true);
   return createInPageHost({
     version,
     features: { shareLocalServices: true, openServices: true, profiles: true },

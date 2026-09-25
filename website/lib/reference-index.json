@@ -92,7 +92,7 @@
     "slug": "05-backups",
     "title": "WISP 05: Profile Backups",
     "status": "Draft",
-    "updated": "2026-09-23",
+    "updated": "2026-09-25",
     "implementation": "Experimental: web and desktop clients",
     "dependencies": [
       "04-profiles.md",

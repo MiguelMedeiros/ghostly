@@ -11,6 +11,8 @@ import {
 } from "@ghostly/core";
 import type { ServicesPlatform } from "../../../../src/lib/platform";
 import { fileStore } from "../shared/idb";
+import { SMALL_FILE_BYTES, fileBytes, fileBytesOf } from "../shared/fileBytes";
+import { storedBlob } from "../shared/storedFiles";
 import { TEST_MINT, TEST_MINTS } from "../shared/mints";
 import { getBrowserHost } from "../host";
 import { engine } from "./engine";
@@ -93,11 +95,18 @@ export const servicesPlatform: ServicesPlatform | null = {
       ...(options?.voice && { voice: parseVoiceMeta(options.voice, sanitizeMime(source.type)) }),
     };
     if (options?.voice && !file.voice) throw new Error("That recording cannot be sent as a voice message");
-    // The page and the peer share this database; the bytes never go through a message.
+    // The page and the peer share this database and the file storage; the bytes never go through a message.
+    // A small file is kept whole; a larger one is copied into file storage a step at a time.
     const timestamp = Date.now();
-    await fileStore.put({ id: file.id, linkId: link.id, blob: source, createdAt: timestamp, direction: "out", wireId,
-      metadata: { name: file.name, size: file.size, mime: file.mime, timestamp, voice: file.voice },
-      transfer: { state: "transferring", transferred: 0, size: file.size } });
+    const metadata = { name: file.name, size: file.size, mime: file.mime, timestamp, voice: file.voice };
+    const transfer = { state: "transferring" as const, transferred: 0, size: file.size };
+    if (source.size <= SMALL_FILE_BYTES) {
+      await fileStore.put({ id: file.id, linkId: link.id, blob: source, createdAt: timestamp, direction: "out", wireId, metadata, transfer });
+    } else {
+      const bytes = await fileBytes();
+      const digest = await bytes.stage(file.id, source);
+      await fileStore.put({ id: file.id, linkId: link.id, bytes: bytes.kind, digest, createdAt: timestamp, direction: "out", wireId, metadata, transfer });
+    }
     await engine.call("sendFile", { linkId: link.id, file, timestamp });
     return { timestamp, file };
   },
@@ -114,9 +123,16 @@ export const servicesPlatform: ServicesPlatform | null = {
   },
   getTransfer: (fileId) => engine.state?.transfers[fileId] ?? null,
   async getFile(fileId) {
-    const blob = (await fileStore.get(fileId))?.blob;
+    const stored = await fileStore.get(fileId);
+    if (!stored) return null;
     // Files stored before received types were cleaned up may still carry the peer's type.
-    return blob ? blob.slice(0, blob.size, safeBlobType(blob.type)) : null;
+    return storedBlob(stored, safeBlobType(stored.blob?.type || stored.metadata?.mime || ""));
+  },
+  async saveFile(fileId) {
+    const stored = await fileStore.get(fileId);
+    const bytes = stored?.bytes && await fileBytesOf(stored.bytes);
+    if (!stored?.metadata || !bytes?.save) return null;
+    return bytes.save(fileId, stored.metadata.name);
   },
 
   wallet: {

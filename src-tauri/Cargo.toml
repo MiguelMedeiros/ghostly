@@ -26,6 +26,9 @@ futures-util = { version = "0.3", default-features = false }
 tokio = { version = "1", features = ["rt", "sync", "time", "process", "io-util", "macros"] }
 tauri-plugin-notification = "2"
 arboard = { version = "3.6.1", default-features = false }
+tauri-plugin-dialog = "2"
+sha2 = "0.10"
+fs4 = { version = "0.13", features = ["sync"] }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }

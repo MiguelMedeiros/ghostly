@@ -1,4 +1,5 @@
 import { databaseExists } from "@ghostly/browser/backup/database";
+import { dropFileSpace } from "@ghostly/browser/shared/fileBytes";
 import { activeProfileId, listProfiles, namespaceOf, prefixOf, settingsKeyFor, unregisterProfile } from "./profiles";
 import { unreadUnder } from "./storage";
 import { verifyPassword } from "./settings";
@@ -123,6 +124,7 @@ export async function deleteProfile(id: string, password?: string): Promise<void
   const others = new Set((await Promise.all(listProfiles().filter((p) => p.id !== id).map((p) => arkWalletIds(databaseOf(p.id))))).flat());
   const arkIds = (await arkWalletIds(dbName)).filter((walletId) => !others.has(walletId));
   if (await databaseExists(dbName)) await drop(dbName);
+  await dropFileSpace(dbName).catch(() => {});
   for (const walletId of arkIds) await drop(`ghostly-ark-${walletId}`);
   const prefix = `ghostly_${ns}_`;
   for (const key of Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((k): k is string => !!k?.startsWith(prefix))) localStorage.removeItem(key);
