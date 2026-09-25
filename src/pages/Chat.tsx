@@ -729,7 +729,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
       <MessageInput draftId={sessionId}
         key={sessionId}
         onSend={sendMessage}
-        disabled={isSending || (paired && !!chatStop)}
+        // Ghostly offline, or a security stop: nothing can go. Otherwise what cannot go now waits.
+        disabled={isSending || (paired && (!!chatStop || status === "offline"))}
         disabledPlaceholder="Message…"
         // The DHT carries a few hundred characters; the direct link has room for long invoices and ecash tokens.
         softBytes={paired && !chatLive ? deliveryPeer?.dhtDelivery?.maxTextBytes ?? 256 : undefined}
