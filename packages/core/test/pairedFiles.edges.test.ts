@@ -71,13 +71,39 @@ describe("paired files: what the receiver refuses", () => {
     expect(r.events.onIncoming).not.toHaveBeenCalled();
   });
 
-  it("refuses a second announcement for a file already in progress", async () => {
+  it("acknowledges the same announcement again before any chunk (a transport switch lost the first ack)", async () => {
     const r = receiver();
     await r.start();
     await r.start();
     expect(r.events.onIncoming).toHaveBeenCalledOnce();
-    expect(r.cancels()).toHaveLength(1);
-    expect(r.events.onFailed).toHaveBeenCalledWith(ID, "Duplicate active file", "in");
+    expect(r.sent.map((f) => `${f.t}:${f.phase}:${f.offset}`)).toEqual(["pf-ack:start:0", "pf-ack:start:0"]);
+    expect(r.cancels()).toHaveLength(0);
+    r.files.closeAll();
+  });
+
+  it("refuses a different announcement for a file already in progress, or any once bytes arrived", async () => {
+    const other = receiver();
+    await other.start();
+    await other.start({ name: "another.bin" });
+    expect(other.cancels()).toHaveLength(1);
+    expect(other.events.onFailed).toHaveBeenCalledWith(ID, "Duplicate active file", "in");
+    const late = receiver();
+    await late.start();
+    await late.chunk(Uint8Array.of(1));
+    await late.start();
+    expect(late.events.onFailed).toHaveBeenCalledWith(ID, "Duplicate active file", "in");
+  });
+
+  it("acknowledges the last chunk again without writing it twice, and refuses an older one", async () => {
+    const r = receiver();
+    await r.start();
+    await r.chunk(Uint8Array.of(1, 2));
+    await r.chunk(Uint8Array.of(1, 2));
+    expect((r.sink as ReturnType<typeof sinkSpy>).written).toEqual([Uint8Array.of(1, 2)]);
+    expect(r.sent.map((f) => `${f.t}:${f.phase}:${f.offset}`)).toEqual(["pf-ack:start:0", "pf-ack:chunk:2", "pf-ack:chunk:2"]);
+    await r.chunk(Uint8Array.of(3), 2);
+    await r.chunk(Uint8Array.of(1));
+    expect(r.events.onFailed).toHaveBeenCalledWith(ID, "Invalid file offset", "in");
   });
 
   it("keeps at most the per-peer number of incoming files", async () => {
@@ -164,9 +190,13 @@ describe("paired files: what the receiver refuses", () => {
     expect(r.events.onProgress.mock.calls).toEqual([[ID, 2, "in"], [ID, 3, "in"]]);
     expect(r.events.onComplete).toHaveBeenCalledWith(ID, "in");
     expect(r.sent.map((f) => `${f.t}:${f.phase}:${f.offset}`)).toEqual(["pf-ack:start:0", "pf-ack:chunk:2", "pf-ack:chunk:3", "pf-ack:end:3"]);
-    // The entry is gone: a replayed end frame is ignored.
+    // The entry is gone: a replayed end frame is acknowledged again (its ack may have been lost in a switch), and
+    // nothing is written or completed twice; one for another offset is ignored.
     await r.end(3, digestOf(Uint8Array.of(1, 2, 3)));
-    expect(r.sent).toHaveLength(4);
+    expect(r.sent.map((f) => `${f.t}:${f.phase}:${f.offset}`).slice(4)).toEqual(["pf-ack:end:3"]);
+    await r.end(2, digestOf(Uint8Array.of(1, 2, 3)));
+    expect(r.sent).toHaveLength(5);
+    expect(r.events.onComplete).toHaveBeenCalledOnce();
   });
 });
 
@@ -399,5 +429,27 @@ describe("paired files: the sending side", () => {
     const s = sender(ackAll);
     s.files.closeAll();
     await expect(s.files.send(info, bytes([1, 2, 3]))).rejects.toThrow("Invalid file or connection closed");
+  });
+});
+
+describe("paired files: a transport switch mid-transfer", () => {
+  it("sends what awaits its acknowledgement again on the new channel, and finishes there", async () => {
+    // The old channel swallows everything from the first chunk on, as one closing under a switch would.
+    let lost = false;
+    const s = sender((frame, files) => { if (frame.t === "pf-chunk") lost = true; if (!lost) return ackAll(frame, files); });
+    const moved: Record<string, unknown>[] = [];
+    const next: FrameChannel = {
+      bufferedAmount: 0, drained: async () => {}, close() {}, onMessage: null, onClose: null,
+      send(data) { const frame = JSON.parse(String(data)); moved.push(frame); queueMicrotask(() => void ackAll(frame, s.files)); },
+    };
+    const done = s.files.send({ ...info, size: 3 }, bytes([1, 2, 3]));
+    await vi.waitFor(() => expect(lost).toBe(true));
+    s.files.rebind(next);
+    await done;
+    expect(moved.map(f => `${f.t}:${f.offset}`)).toEqual(["pf-chunk:0", "pf-end:3"]);
+    // Closed, it takes nothing more.
+    s.files.closeAll();
+    s.files.rebind(next);
+    expect(moved).toHaveLength(2);
   });
 });

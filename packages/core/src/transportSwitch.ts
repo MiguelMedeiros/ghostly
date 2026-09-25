@@ -50,6 +50,8 @@ export class TransportSwitch {
     state(error?: string, target?: PairedTransport): void;
     prepare(plan: SwitchPlan, dial: boolean): void;
     cancel(): void;
+    /** A plan's target could not be reached and the session stayed on the current transport (fallback allowed it). */
+    kept?(target: PairedTransport, reason?: string): void;
     timeoutMs?: number;
   }) {}
 
@@ -68,14 +70,19 @@ export class TransportSwitch {
     this.context = context; this.actual = actual;
     this.options.state(); this.announce();
   }
-  changed(userIntent = true): void {
+  /** `automatic`: no choice of this side's any more; the contact's explicit one wins, and without one the
+   * current transport is kept while it is allowed. */
+  changed(userIntent: boolean | "automatic" = true): void {
     this.revision++;
-    if (userIntent) this.intent = Math.max(this.intent, this.remote?.intent ?? 0) + 1;
+    if (userIntent === "automatic") this.intent = 0;
+    else if (userIntent) this.intent = Math.max(this.intent, this.remote?.intent ?? 0) + 1;
     this.failed = "";
     this.announce(); this.reconcile();
   }
-  keep(): void {
+  keep(reason?: string): void {
+    const target = this.plan?.choices[0];
     if (this.plan) this.settled = this.signature(this.plan.local, this.plan.remote);
+    if (target && target !== this.actual) this.options.kept?.(target, reason);
     this.send({ t: "paired-switch-keep", id: this.plan?.id });
     this.clearPlan(); this.options.state(); this.reconcile();
   }
@@ -159,6 +166,7 @@ export class TransportSwitch {
     }
     if (frame.t === "paired-switch-keep") {
       if (this.actual && this.plan.choices.includes(this.actual)) {
+        if (this.plan.choices[0] !== this.actual) this.options.kept?.(this.plan.choices[0]);
         this.settled = this.signature(this.plan.local, this.plan.remote);
         this.clearPlan(); this.options.state(); this.reconcile();
       }

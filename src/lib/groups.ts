@@ -1,4 +1,4 @@
-import { decodeCommunityLink, decodeGroupEntryLink, groupEntryUrl } from "@ghostly/core";
+import { decodeCommunityLink, decodeGroupEntryLink, groupEntryUrl, type PairedTransport } from "@ghostly/core";
 import { getPrefix } from "./storage";
 import type { GroupMemberView } from "@ghostly/browser/shared/types";
 import { publicKeyLabel } from "./publicKeyLabel";
@@ -17,6 +17,20 @@ export function edgeLabel(member: GroupMemberView, now = Date.now()): string {
   if (edge.state === "connecting") return "Connecting…";
   const seen = edge.lastSeenAt ? `last seen ${ago(edge.lastSeenAt / 1000, now / 1000)}` : "not seen yet";
   return `${edge.state === "error" ? "Connection issue" : "Not reachable"} · ${seen}`;
+}
+
+/**
+ * What carries the group, in a few words: "2 of 3 live over WebRTC", or each transport counted when edges differ
+ * ("3 of 4 live · 2 WebRTC, 1 Iroh"). Undefined while nobody else is reachable. `transport`: the one they share.
+ */
+export function groupTransports(members: GroupMemberView[]): { line: string; transport?: PairedTransport } | undefined {
+  const others = members.filter(m => !m.me), live = others.filter(m => m.edge?.state === "open");
+  if (!live.length) return undefined;
+  const counts = new Map<PairedTransport, number>();
+  for (const m of live) { const t = m.edge!.transport ?? "webrtc/1"; counts.set(t, (counts.get(t) ?? 0) + 1); }
+  const head = `${live.length} of ${others.length} live`;
+  if (counts.size === 1) { const [transport] = counts.keys(); return { line: `${head} over ${transportName(transport)}`, transport }; }
+  return { line: `${head} · ${[...counts].sort((a, b) => b[1] - a[1]).map(([t, n]) => `${n} ${transportName(t)}`).join(", ")}` };
 }
 
 /** The dot beside a member: reachable, on its way, failed, or away. */

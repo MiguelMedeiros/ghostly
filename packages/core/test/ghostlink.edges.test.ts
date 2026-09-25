@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GhostLink, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, type GhostLinkEvents, type GhostLinkOptions } from "../src/ghostlink";
+import { GhostLink, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, SWITCH_RETIRE_MS, type GhostLinkEvents, type GhostLinkOptions } from "../src/ghostlink";
 import { createLink, type LinkParams } from "../src/invite";
 import { createIdentity } from "../src/identity";
 import { CHUNK_KIND, encodeChunk, type FrameChannel } from "../src/frames";
@@ -989,10 +989,13 @@ describe("changing transport on an open session", () => {
     await t.a.setTransportPreference("iroh/1", false);
     await vi.waitFor(() => { expect(transportOf(t.onPairingStateA)).toBe("iroh/1"); expect(transportOf(t.onPairingStateB)).toBe("iroh/1"); });
     await vi.waitFor(() => expect(t.a.isDataLinkOpen && t.b.isDataLinkOpen).toBe(true));
-    expect((t.ca as FrameChannel & { closed: boolean }).closed).toBe(true);
+    // The old channel is closed only once the contact has had time to move too, not while it may still be on it.
+    expect((t.ca as FrameChannel & { closed: boolean }).closed).toBe(false);
+    await vi.waitFor(() => expect((t.ca as FrameChannel & { closed: boolean }).closed).toBe(true), { timeout: SWITCH_RETIRE_MS + 2_000 });
+    expect(t.a.isDataLinkOpen && t.b.isDataLinkOpen).toBe(true);
     expect(t.dials[0].mock.calls.length + t.dials[1].mock.calls.length).toBe(1);
     expect(await t.a.sendMessage("over iroh")).toBeNull();
-  });
+  }, SWITCH_RETIRE_MS + 10_000);
 
   it("keeps the WebRTC session when the iroh connection cannot be made and both allow fallback", async () => {
     const t = switchable(true);

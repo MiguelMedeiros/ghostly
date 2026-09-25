@@ -45,6 +45,11 @@ import { chatPath } from "../lib/url";
 import { fileMessageText, parseCallSignal, signalHasVideo, type VoiceMeta } from "@ghostly/core";
 import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
 import { useAppNavigation } from "../hooks/useAppNavigation";
+import { TransportChip, TransportMenu } from "../components/TransportMenu";
+import { TransportIcon } from "../components/TransportIcon";
+import { useChatLink } from "../hooks/useChatLink";
+import { TransportLine } from "../components/TransportTimeline";
+import { connectionSummary, mergeTimeline } from "../lib/transportEvents";
 
 interface ChatProps {
   /** The stored session this chat is. `App` reads it off the address. */
@@ -241,12 +246,16 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const [labelDraft, setLabelDraft] = useState("");
   /** Ways of paying are chosen per chat; the ⚡ works while this device allows at least one. */
   const chatPeer = platform?.getPeer(params?.peerPubKeyB64 ?? "");
+  // The chat's link as the engine shows it: its transport lines and what its Connection menu offers.
+  const chatLink = useChatLink(params?.peerPubKeyB64 ?? "");
+  const timeline = useMemo(() => mergeTimeline(messages, paired ? chatLink?.transportLog ?? [] : []), [messages, paired, chatLink?.transportLog]);
   const paymentsOn = !chatPeer?.paymentMethods || Object.values(chatPeer.paymentMethods).some(Boolean);
   const [showPayments, setShowPayments] = useState(false);
   const [showHold, setShowHold] = useState(false);
   const [showIdentities, setShowIdentities] = useState(false);
   const [showServices, setShowServices] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [showTransport, setShowTransport] = useState(false);
   const [connectionOpen, setConnectionOpen] = useState(false);
   const connectionRef = useRef<HTMLDivElement>(null);
   const connectionButtonRef = useRef<HTMLButtonElement>(null);
@@ -476,10 +485,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               )}
             </div>
               {/* Until live: the "connected" moment belongs to the scene, and the header goes back to how it was. */}
-              {pairing.show && pairing.progress && pairing.progress.stage !== "live" && (
+              {pairing.show && pairing.progress && pairing.progress.stage !== "live" ? (
                 <PairingIndicator progress={pairing.progress}
                   onOpen={() => document.getElementById(pairingSceneId)?.scrollIntoView({ block: "center", behavior: "smooth" })} />
-              )}
+              ) : paired && <TransportChip peerKey={params.peerPubKeyB64} />}
             </div>
           </div>
         </div>
@@ -596,6 +605,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                   {t("chat.menu.identities")}
                 </MenuItem>
               )}
+              {paired && chatLink && (
+                <MenuItem testId="chat-connection-open" onClick={() => { closeMenu(); setShowTransport(true); }}
+                  icon={<TransportIcon transport={chatLink.pairing?.transport} size={16} />}
+                  hint={connectionSummary(chatLink, Date.now(), shownName)?.short ?? (chatLink.deliveryMode === "dht" ? "DHT only · no live connection" : "Not live")}>
+                  {t("chat.menu.connection")}
+                </MenuItem>
+              )}
               {platform && platform.getPeer(params.peerPubKeyB64) && (
                 <MenuItem testId="chat-services-open" onClick={() => { setShowServices(true); closeMenu(); }}
                   icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>}>
@@ -616,6 +632,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 {t("sidebar.deleteChat")}
               </MenuItem>
             </Menu>
+            {paired && chatLink && <TransportMenu link={chatLink} open={showTransport} onClose={() => setShowTransport(false)} anchorRef={menuRef} />}
           </div>
         </div>
       </div>
@@ -651,14 +668,16 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               </div>
             </div>
           )}
-          {messages.map((msg) => (
+          {timeline.map((row) => row.kind === "transport"
+            ? <TransportLine key={`transport:${row.entry.id}`} entry={row.entry} contact={shownName} />
+            : (
             <MessageBubble
-              key={msg.id}
-              message={msg}
+              key={row.message.id}
+              message={row.message}
               peerAck={peerAck}
               peerPubKey={params.peerPubKeyB64}
               peerNick={contactNick}
-              onDelete={() => forgetMessage(msg.id)}
+              onDelete={() => forgetMessage(row.message.id)}
             />
           ))}
           <div ref={bottomRef} />

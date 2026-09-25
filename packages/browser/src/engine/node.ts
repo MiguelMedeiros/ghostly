@@ -99,6 +99,7 @@ import { CommunityPay, groupLinkId, parsePayLink } from "./communityPay";
 import { mayReach } from "./serviceAccess";
 import { Outbox } from "./outbox";
 import { HoldEngine } from "./hold";
+import { TransportLog } from "./transportLog";
 import { S3Store } from "../backup/s3";
 import type { HoldStore } from "../backup/storage";
 import { PaymentDesk } from "./payments";
@@ -134,6 +135,8 @@ interface LiveLink {
   lastSyncAt: number;
   poll: LinkView["poll"];
   files: LinkFiles;
+  /** The chat's connection story (paired chats), made from `stored.transportLog` on first use. */
+  transportLog?: TransportLog;
 }
 
 /** What one peer has sent us, so it can neither fill the disk nor reuse an id. */
@@ -921,6 +924,8 @@ export class GhostlyNode implements EngineImplementation {
     for (const [id, live] of this.links) live.link?.session.setActive(id === linkId);
     // Opening a chat is someone wanting to talk: reconnect now, not after the wait between attempts.
     if (linkId) this.links.get(linkId)?.link?.wake();
+    // The chat on screen carries its connection story in the state.
+    this.emitState();
   }
 
   /** The window or tab is back in front: every chat looks now, and dropped ones reconnect at once. */
@@ -1262,6 +1267,7 @@ export class GhostlyNode implements EngineImplementation {
     live.stored = { ...live.stored, deliveryMode: mode };
     await live.link.setDeliveryMode(mode);
     if (mode === "stream") await this.ensureNativeEndpoints(linkId);
+    this.observeTransport(linkId);
     this.emitState();
   }
 
@@ -1271,7 +1277,70 @@ export class GhostlyNode implements EngineImplementation {
     const patch = { preferredTransport: preferred, transportFallback: fallback };
     await db.patchLink(linkId, patch);
     live.stored = { ...live.stored, ...patch }; this.emitState();
+    this.transportLogOf(live)?.chose("you", preferred, Date.now());
     await live.link.setTransportPreference(preferred, fallback);
+  }
+
+  /**
+   * One chat's connection, chosen from its menu: a transport both sides can use (it overrides the app's rule for
+   * this chat, and is remembered for the next reconnect), `auto` to go back to the app's rule, or `dht` for DHT only
+   * (WISP 400: it travels as the DHT envelope's mode; either side choosing it keeps both off the live link). Choosing
+   * anything else while on DHT only leaves it first. Fallback stays as it was. A live session moves over without
+   * reconnecting; if the new transport fails, it stays where it was.
+   */
+  async setChatTransport({ linkId, transport }: { linkId: string; transport: PairedTransport | "auto" | "dht" }): Promise<void> {
+    const live = this.links.get(linkId);
+    if (transport === "dht") { await this.setDeliveryMode({ linkId, mode: "dht" }); return; }
+    if (live?.stored.deliveryMode === "dht") {
+      // The choice is recorded first, so the line that says the chat left DHT only names it. The native adapters
+      // were released with DHT only: the preference reaches the link once they are back.
+      const preferredTransport = transport === "auto" ? undefined : transport;
+      live.stored = { ...live.stored, preferredTransport };
+      await db.patchLink(linkId, { preferredTransport });
+      await this.setDeliveryMode({ linkId, mode: "stream" });
+    }
+    if (transport !== "auto") {
+      await this.setTransportPreference({ linkId, preferred: transport, fallback: live?.stored.transportFallback ?? true });
+      return;
+    }
+    if (!live?.stored.profile || !live.link) throw new Error("Transport unavailable");
+    const patch = { preferredTransport: undefined, transportFallback: undefined };
+    await db.patchLink(linkId, patch);
+    live.stored = { ...live.stored, ...patch }; this.emitState();
+    // The app's rule: WebRTC first where there is one (Linux WebKitGTK has none), fallback on.
+    const available = live.link.availableTransports;
+    await live.link.setTransportPreference(available.includes("webrtc/1") ? "webrtc/1" : available[0], true, true);
+  }
+
+  /** The chat's connection story, for paired chats (not group edges). */
+  private transportLogOf(live: LiveLink): TransportLog | undefined {
+    if (!live.stored.profile || live.stored.group) return undefined;
+    return live.transportLog ??= new TransportLog(live.stored.transportLog);
+  }
+
+  /** Looks at the chat's link and adds a line to its story when the transport changed. */
+  private observeTransport(linkId: string): void {
+    const live = this.links.get(linkId), log = live && this.transportLogOf(live);
+    if (!live || !log || !live.link || this.shuttingDown) return;
+    const pairing = live.pairing;
+    const changed = log.observe({
+      live: live.dataLink === "open" && pairing?.status === "ready" && !!pairing.transport && live.link.isDataLinkOpen,
+      transport: pairing?.transport,
+      text: this.holdingFor(live) ? "hold" : live.link.textDelivery,
+      dhtOnly: live.stored.deliveryMode === "dht",
+      peerDhtOnly: live.link.dhtDelivery?.peerMode === "dht",
+      preferred: live.stored.preferredTransport,
+      transitionError: pairing?.transitionError,
+      transitionTarget: pairing?.transitionTarget,
+    }, Date.now());
+    if (changed) this.saveTransportLog(live, log);
+  }
+
+  private saveTransportLog(live: LiveLink, log: TransportLog): void {
+    const transportLog = log.entries.map(e => ({ ...e }));
+    live.stored = { ...live.stored, transportLog };
+    void db.patchLink(live.stored.id, { transportLog }).catch(() => {});
+    this.emitState();
   }
 
   /** Which ways of paying one chat allows. */
@@ -1921,11 +1990,24 @@ export class GhostlyNode implements EngineImplementation {
       events: {
         onGroupFrame: stored.profile ? frame => this.groups.handleContactFrame(linkId, frame) : undefined,
         onGroupsSupport: () => this.emitState(),
-        onDhtDelivery: () => { if (stored.profile && !stored.group) void this.outboxes.get(linkId)?.flush().catch(() => {}); this.emitState(); },
+        onDhtDelivery: () => { if (stored.profile && !stored.group) void this.outboxes.get(linkId)?.flush().catch(() => {}); this.observeTransport(linkId); this.emitState(); },
         onHold: (state) => this.hold.peerSaid(linkId, state),
         onPeerProof: EXTERNAL_IDENTITIES_ENABLED ? async frame => { await (await this.proofsFor(linkId)).receive(frame); } : undefined,
         onIdentityProof: stored.profile ? frame => this.identities.frame(linkId, frame) : undefined,
         onTransportsChanged: () => this.emitState(),
+        onPeerTransportChoice: transport => { this.transportLogOf(live)?.chose("contact", transport, Date.now()); },
+        onTransportSwitched: () => {
+          // Frames of the old channel may have been cut short: what the contact has not confirmed goes again at
+          // once over the new one (it acknowledges a repeated id without showing it twice), and so do payments.
+          if (stored.profile && !stored.group) void this.outboxFor(linkId).flush({ reopened: true }).catch(() => {});
+          void this.desk.replay(linkId).catch(() => {});
+          this.observeTransport(linkId);
+        },
+        onTransportSwitchFailed: (target, reason) => {
+          const log = this.transportLogOf(live);
+          if (log?.switchFailed(target, reason ?? "It did not connect", Date.now())) this.saveTransportLog(live, log);
+        },
+        onRtt: ms => { const log = this.transportLogOf(live); if (log?.rtt(ms)) this.saveTransportLog(live, log); else this.emitState(); },
         onDiscoveryError: error => { live.discoveryError = error ?? undefined; this.emitState(); },
         onTransportDiscovery: async (peerDescriptors, peerTransports, peerFallback) => {
           const patch = { peerDescriptors, peerTransports, peerFallback };
@@ -1939,6 +2021,7 @@ export class GhostlyNode implements EngineImplementation {
           if (state.status === "ready" && live.link) void this.hold.rememberPeerMethods(linkId, PAYMENT_METHODS.filter(m => live.link!.peerAllowsPayment(m))).catch(() => {});
           if (EXTERNAL_IDENTITIES_ENABLED && state.status === "ready") void this.proofsFor(linkId).then(p => p.resendWithdrawals()).catch(() => {});
           else live.proofs?.stop();
+          this.observeTransport(linkId);
           this.emitState();
         },
         onStatus: (status) => {
@@ -1965,6 +2048,7 @@ export class GhostlyNode implements EngineImplementation {
           // Back live: what the contact has not confirmed goes again at once, under the same ids.
           if (stored.profile && !stored.group && state === "open") void this.outboxFor(linkId).flush({ reopened: true }).catch(() => {});
           if (stored.profile && state !== "open" && live.pairing?.status !== "error") live.pairing = { status: "connecting" };
+          this.observeTransport(linkId);
           this.emitState();
         },
         onPeerAvatar: (avatar) => {
@@ -2129,6 +2213,12 @@ export class GhostlyNode implements EngineImplementation {
       transportErrors: live.transportErrors,
       preferredTransport: live.stored.preferredTransport ?? "webrtc/1",
       transportFallback: live.stored.transportFallback ?? true,
+      transportAutomatic: live.stored.preferredTransport === undefined,
+      peerTransports: live.link?.peerAvailableTransports,
+      transportRttMs: live.link?.rttMs,
+      transportLive: live.transportLog?.liveNow(),
+      // The whole story only for the chat on screen: every state push carries every link.
+      transportLog: stored.id === this.activeLinkId && stored.profile && !stored.group ? stored.transportLog ?? [] : undefined,
       myPubKeyZ32: live.myPubKeyZ32,
       peerPubKeyZ32: stored.peerPubKeyZ32,
       label: stored.label,

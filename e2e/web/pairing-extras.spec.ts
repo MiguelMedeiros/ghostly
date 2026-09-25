@@ -79,8 +79,9 @@ test("the header shows only an icon, as big as the call buttons; a tooltip names
   await expect(tip).toBeHidden();
   await trigger(alice).hover();
   await expect(tip).toBeVisible();
-  await expect(tip).toHaveText("Connected · WebRTC");
-  await expect(trigger(alice)).toHaveAccessibleDescription("Connected · WebRTC");
+  // The state, then what the connection is: round trip, since when, why (#204).
+  await expect(tip).toHaveText(/^Connected · WebRTC\s*(\d+ ms · )?live for .+ · the only one here$/);
+  await expect(trigger(alice)).toHaveAccessibleDescription(/^Connected · WebRTC/);
 
   // Opening the popover hides the tooltip; the popover has the full picture.
   await trigger(alice).click();
@@ -93,7 +94,8 @@ test("the header shows only an icon, as big as the call buttons; a tooltip names
   await expect(popover(alice)).toBeHidden();
   await alice.page.mouse.move(0, 0);
   await expect(tip).toBeHidden();
-  await alice.page.getByRole("button", { name: "Connection details" }).focus();
+  // Between them, the live transport's chip in the subtitle (#204).
+  await alice.page.getByTestId("transport-chip").focus();
   await alice.page.keyboard.press("Tab");
   await expect(trigger(alice)).toBeFocused();
   await expect(tip).toBeVisible();

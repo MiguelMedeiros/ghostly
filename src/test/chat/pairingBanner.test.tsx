@@ -5,7 +5,7 @@ import { PairingBanner } from "../../components/PairingBanner";
 import { linkView, type StatePatch } from "../fakeEngine";
 import { renderApp } from "../render";
 
-// covers: chat.paired.status, chat.paired.verify, chat.paired.reconnect
+// covers: chat.paired.status, chat.paired.verify, chat.paired.reconnect, transport.indicator, transport.chat-switch
 
 type Pairing = NonNullable<LinkView["pairing"]>;
 const ready = (patch: Partial<Pairing> = {}): Pairing => ({ status: "ready", transport: "webrtc/1", ...patch } as Pairing);
@@ -26,7 +26,8 @@ function header() {
     kind: trigger.dataset.state,
     name: trigger.getAttribute("aria-label")!.replace("Connection options: ", ""),
     popover: screen.getByTestId("connection-state").textContent,
-    tooltip: screen.getByTestId("connection-tooltip").textContent,
+    // The label (and a failure), without the live connection's detail line.
+    tooltip: screen.getByTestId("connection-tooltip").textContent!.replace(screen.queryByTestId("connection-tooltip-detail")?.textContent ?? "", ""),
     dot: dot ? [...dot.classList].find(c => c.startsWith("bg-")) : null,
     pulse: !!dot?.classList.contains("motion-safe:animate-pulse"),
   };
@@ -81,11 +82,63 @@ describe("PairingBanner: what the header says", () => {
     expect(screen.getByText("Preferred: Iroh")).toBeInTheDocument();
   });
 
-  it("says why a transport is unavailable, on its button and below", () => {
-    banner({ pairing: ready(), availableTransports: ["webrtc/1"], transportErrors: { "iroh/1": "UDP blocked" } });
+  it("says why a transport is unavailable, on its option and below", () => {
+    banner({ pairing: ready(), availableTransports: ["webrtc/1", "hyperdht/1"], transportErrors: { "iroh/1": "UDP blocked" }, peerTransports: ["webrtc/1"] });
     expect(screen.getByText("Iroh: UDP blocked")).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "Iroh" }).closest("label")).toHaveAttribute("title", "UDP blocked");
-    expect(screen.getByRole("radio", { name: "HyperDHT" }).closest("label")).toHaveAttribute("title", "Not available in this client");
+    expect(screen.getByRole("radio", { name: "Iroh" })).toHaveAttribute("title", "Iroh: UDP blocked");
+    expect(screen.getByRole("radio", { name: "Iroh" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "HyperDHT" })).toHaveAttribute("title", "HyperDHT: Your contact's app doesn't support HyperDHT");
+    expect(screen.getByRole("radio", { name: "HyperDHT" })).toBeDisabled();
+  });
+
+  it.each<[string, Partial<LinkView>, string]>([
+    ["WebRTC", { pairing: ready() }, "webrtc/1"],
+    ["Iroh", { pairing: ready({ transport: "iroh/1" }) }, "iroh/1"],
+    ["HyperDHT", { pairing: ready({ transport: "hyperdht/1" }) }, "hyperdht/1"],
+    ["a switch, still on the old one", { pairing: ready({ transport: "iroh/1", transitionTarget: "hyperdht/1" }) }, "iroh/1"],
+  ])("shows the live transport's own mark in the header: %s", (_, link, transport) => {
+    banner(link);
+    expect(screen.getByTestId("connection-options")).toHaveAttribute("data-transport", transport);
+    expect(screen.getByTestId("connection-options").querySelector("[data-transport-icon]")).toHaveAttribute("data-transport-icon", transport);
+  });
+
+  it.each<[string, Partial<LinkView>, StatePatch]>([
+    ["DHT only", { deliveryMode: "dht", dataLink: "idle" }, {}],
+    ["offline text", { textDelivery: "dht", pairing: ready() }, {}],
+    ["offline", { pairing: ready() }, { settings: { online: false } }],
+    ["connecting", { dataLink: "connecting", pairing: { status: "connecting", peerKey: "peer" } as Pairing }, {}],
+  ])("shows no transport mark when not live: %s", (_, link, state) => {
+    banner(link, state);
+    expect(screen.getByTestId("connection-options")).not.toHaveAttribute("data-transport");
+    expect(screen.queryByTestId("connection-summary")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("connection-tooltip-detail")).not.toBeInTheDocument();
+  });
+
+  it("marks messages held for an away contact with their own glyph", () => {
+    banner({ dataLink: "idle", peerOnline: false, peerParticipationKey: "saved", textDelivery: "hold" });
+    expect(screen.getByTestId("connection-options")).toHaveAttribute("data-transport", "hold");
+    expect(screen.getByTestId("connection-options").querySelector("[data-transport-icon]")).toHaveAttribute("data-transport-icon", "hold");
+  });
+
+  it("says in the tooltip and the popover what the connection is: transport, round trip, since when, why", () => {
+    const since = Date.now() - 12 * 60_000 - 5_000;
+    banner({ pairing: ready({ transport: "iroh/1" }), preferredTransport: "iroh/1", transportAutomatic: false, transportRttMs: 42, transportLive: { since, cause: "you" } });
+    expect(screen.getByTestId("connection-tooltip-detail")).toHaveTextContent("42 ms · live for 12 min · your choice");
+    const summary = screen.getByTestId("connection-summary");
+    expect(within(summary).getByText("Transport").nextSibling).toHaveTextContent("Iroh");
+    expect(within(summary).getByText("Round trip").nextSibling).toHaveTextContent("42 ms");
+    expect(within(summary).getByText("Live since").nextSibling).toHaveTextContent("(12 min)");
+    expect(within(summary).getByText("Why").nextSibling).toHaveTextContent("You chose Iroh for this chat.");
+  });
+
+  it.each<[string, Partial<LinkView>, string]>([
+    ["automatic", { pairing: ready() }, "automatic"],
+    ["the contact's choice", { pairing: ready({ transport: "hyperdht/1" }), transportLive: { since: Date.now(), cause: "contact" } }, "live for less than a minute · your contact's choice"],
+    ["a fallback from the chosen one", { pairing: ready(), preferredTransport: "iroh/1", transportAutomatic: false }, "fallback"],
+    ["the only one here", { pairing: ready(), availableTransports: ["webrtc/1"] }, "the only one here"],
+  ])("says why this transport: %s", (_, link, line) => {
+    banner(link);
+    expect(screen.getByTestId("connection-tooltip-detail")).toHaveTextContent(line);
   });
 
   it("warns, instead of offering to verify, when the key does not match the saved contact", () => {
@@ -132,33 +185,48 @@ describe("PairingBanner: what the popover does", () => {
     expect(screen.getByRole("switch", { name: "Fallback" })).toBeDisabled();
   });
 
-  it("picks a transport, keeping the fallback choice", async () => {
-    const { user, engine } = banner({ pairing: ready(), availableTransports: ["webrtc/1", "iroh/1"], transportFallback: false });
-    engine.on("setTransportPreference", () => undefined);
-    expect(screen.getByRole("radio", { name: "WebRTC" })).toBeChecked();
+  it("picks a transport for this chat (the engine keeps the fallback choice)", async () => {
+    const { user, engine } = banner({ pairing: ready(), availableTransports: ["webrtc/1", "iroh/1"], transportFallback: false, transportAutomatic: true });
+    engine.on("setChatTransport", () => undefined);
+    expect(screen.getByRole("radio", { name: "Automatic" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "WebRTC" })).toHaveAttribute("aria-checked", "false");
     expect(screen.getByRole("radio", { name: "HyperDHT" })).toBeDisabled();
     await user.click(screen.getByRole("radio", { name: "Iroh" }));
-    expect(engine.callsTo("setTransportPreference")).toEqual([{ linkId: "link-1", preferred: "iroh/1", fallback: false }]);
+    expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "iroh/1" }]);
   });
 
-  it("falls back by default when the chat never chose", async () => {
-    const { user, engine } = banner({ pairing: ready() });
-    engine.on("setTransportPreference", () => undefined);
-    await user.click(screen.getByRole("radio", { name: "HyperDHT" }));
-    expect(engine.callsTo("setTransportPreference")).toEqual([{ linkId: "link-1", preferred: "hyperdht/1", fallback: true }]);
+  it("in a WebRTC-only app lists every transport, WebRTC in use, the others disabled with the reason, and asks nothing", async () => {
+    const { user, engine } = banner({ pairing: ready(), availableTransports: ["webrtc/1"], transportAutomatic: true });
+    expect(screen.queryByRole("radio", { name: "Automatic" })).not.toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "WebRTC" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "WebRTC" })).toBeEnabled();
+    for (const native of ["Iroh", "HyperDHT"]) {
+      expect(screen.getByRole("radio", { name: native })).toBeDisabled();
+      expect(screen.getByRole("radio", { name: native })).toHaveAttribute("title", `${native}: ${native} needs Ghostly Desktop`);
+    }
+    await user.click(screen.getByRole("radio", { name: "WebRTC" }));
+    expect(engine.callsTo("setChatTransport")).toEqual([]);
   });
 
-  it("asks again for the preferred transport when the chat ended up on another", async () => {
-    const { user, engine } = banner({ pairing: ready(), preferredTransport: "iroh/1" });
-    engine.on("setTransportPreference", () => undefined);
+  it("goes back to Automatic", async () => {
+    const { user, engine } = banner({ pairing: ready(), preferredTransport: "hyperdht/1", transportAutomatic: false });
+    engine.on("setChatTransport", () => undefined);
+    await user.click(screen.getByRole("radio", { name: "Automatic" }));
+    expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "auto" }]);
+  });
+
+  it("asks again for the chosen transport when the chat ended up on another", async () => {
+    const { user, engine } = banner({ pairing: ready(), preferredTransport: "iroh/1", transportAutomatic: false });
+    engine.on("setChatTransport", () => undefined);
+    expect(screen.getByRole("radio", { name: "Iroh" })).toHaveAttribute("title", "Iroh: Chosen · not in use");
     await user.click(screen.getByRole("radio", { name: "Iroh" }));
-    expect(engine.callsTo("setTransportPreference")).toEqual([{ linkId: "link-1", preferred: "iroh/1", fallback: true }]);
+    expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "iroh/1" }]);
   });
 
   it("does not ask again for the transport it is already on", async () => {
-    const { user, engine } = banner({ pairing: ready(), preferredTransport: "webrtc/1" });
+    const { user, engine } = banner({ pairing: ready(), preferredTransport: "webrtc/1", transportAutomatic: false });
     await user.click(screen.getByRole("radio", { name: "WebRTC" }));
-    expect(engine.callsTo("setTransportPreference")).toEqual([]);
+    expect(engine.callsTo("setChatTransport")).toEqual([]);
   });
 
   it("turns the fallback off for the preferred transport", async () => {

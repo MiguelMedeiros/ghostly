@@ -30,6 +30,27 @@ An empty intersection fails explicitly. Both sessions recompute the ranking. A l
 
 Iroh uses its N0 preset and HyperDHT its upstream default discovery. **The fallback toggle controls the choice of adapter, not relay-versus-direct routing inside an adapter.** This increment has no separate relay prohibition, address-class policy, anonymity mode or external identity requirement. Those broader draft policies are not claimed as implemented.
 
+## Live switch and the chat's transport lines
+
+A switch on an open session (`transport-switch/1`) moves the conversation without reconnecting it:
+
+- **Choosing per chat.** The chat's Connection menu (header chip or ⋮) sets the chat's preference, which is kept for the next reconnect. It offers only transports this app runs and the contact's app announced on this link, and shows the rest disabled with the reason. "Automatic" clears the chat's preference and drops this side's switch intent to 0. The contact's explicit choice then wins; without one, the current transport is kept while both policies allow it. No preference can add an adapter this runtime lacks, and nothing bridges.
+- **Nothing lost or doubled.** Once the replacement session is ready, the old channel stays open, unread, for `SWITCH_RETIRE_MS` (3 s) before it closes. The contact swaps a round trip later, and seeing its current channel close first would make it drop the whole session. Frames cut short on the old channel are healed at once: unconfirmed messages go again over the new channel under the same ids (the receiver acknowledges a repeated id without showing it twice), payments are replayed, and a file in flight carries on. `PairedFiles.rebind` sends again the one frame awaiting its acknowledgement, and a receiver acknowledges a repeated start, last chunk or end without applying it twice.
+- **A switch that cannot connect.** With fallback allowed on both sides, the session stays on its transport. Both sides are told (`onTransportSwitchFailed`); the side that dialled also knows why. Without fallback, the existing `paired-switch-failed` path applies.
+- **DHT only** is one of the menu's choices, on every app (WISP 400). It travels as the DHT envelope's `mode`, not in `paired-policy`: either side choosing it keeps both off the live link, and both must leave it to go live again. Choosing any other entry while on DHT only leaves it first.
+- **Who chose.** A contact's explicit choice is read from a rise in the switch intent of the `paired-policy` frame it already sends. Nothing new goes on the wire.
+
+Each side derives the chat's transport lines from its own engine events (`packages/browser/src/engine/transportLog.ts`):
+
+- the first connection;
+- a switch and why: you, the contact, the old transport dropped, or the apps on their own;
+- a failed switch, and the transport it stayed on;
+- a lost live link and what carries text meanwhile (DHT or held items);
+- DHT only chosen, by you or the contact ("You switched to DHT only", "Ana switched to DHT only"), in place of the drop it caused; and the way out ("Left DHT only · connecting live"), worded as WISP 400 § Pairing progress and transport rows;
+- coming back.
+
+Four or more drop/return lines within a minute collapse into one "Reconnected n times" line that keeps counting. The round trip comes from the existing liveness ping, with one extra ping at the open, not counted as missed. The lines live on the link (`StoredLink.transportLog`, the last 50), not among the messages. So they are never sent, never counted as unread and never the chat's preview, and they go when the chat goes. The app has no disappearing-message timer; if one comes, the lines follow it.
+
 ## Native packaging and lifecycle
 
 Iroh is linked into the Rust app. HyperDHT runs in a fixed packaged Node process, reached through private stdin/stdout pipes, with no localhost administration server. The main window alone can invoke the transport commands; contact service windows remain denied. No arbitrary executable/module/path is accepted from a peer or UI command. Node options/module-path injection is removed from the child's environment; seeds travel through stdin rather than process arguments.

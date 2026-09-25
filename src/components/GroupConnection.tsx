@@ -2,9 +2,9 @@ import { useId, useRef, useState, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { useOutsideDismiss } from "../hooks/useDismiss";
-import { edgeDot, edgeLabel, memberName } from "../lib/groups";
+import { edgeDot, edgeLabel, groupTransports, memberName } from "../lib/groups";
 import { dots, focus, type ConnectionKind } from "../lib/connection";
-import { StateIcon } from "./PairingBanner";
+import { ConnectionIcon } from "./PairingBanner";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -34,6 +34,9 @@ export function GroupConnection({ group }: { group: GroupView }) {
   const label = !online ? "Offline" : others.length === 0 ? "Only you so far"
     : reachable === 0 ? (connecting ? "Connecting to members…" : "Nobody reachable") : `${reachable} of ${others.length} reachable`;
   const dot = kind === "partial" ? "bg-amber-500" : dots[kind];
+  // Over what the reachable members are live: the icon takes the mark of the transport they share.
+  const carried = online ? groupTransports(group.members) : undefined;
+  const iconKind: ConnectionKind = kind === "partial" ? "connected" : kind;
   const close = () => { setMenuOpen(false); trigger.current?.focus(); };
   useOutsideDismiss(root, menuOpen, () => setMenuOpen(false));
   const reconnect = async (linkId: string) => {
@@ -45,19 +48,20 @@ export function GroupConnection({ group }: { group: GroupView }) {
     if (e.key !== "Escape") return;
     if (menuOpen) { e.stopPropagation(); close(); } else if (tip) { e.stopPropagation(); setTip(false); }
   }}>
-      <button ref={trigger} type="button" onClick={() => { setTip(false); setMenuOpen(open => !open); }} data-testid="group-connection-options" data-state={kind}
+      <button ref={trigger} type="button" onClick={() => { setTip(false); setMenuOpen(open => !open); }} data-testid="group-connection-options" data-state={kind} data-transport={carried?.transport}
         aria-label={`Group connection: ${label}`} aria-describedby={`${id}-tip`} aria-expanded={menuOpen} aria-controls={`${id}-popover`}
         onPointerEnter={e => { if (e.pointerType !== "touch") setTip(true); }} onPointerLeave={() => setTip(false)}
         onFocus={e => { if (e.currentTarget.matches(":focus-visible")) setTip(true); }} onBlur={() => setTip(false)}
         className={`relative flex cursor-pointer items-center justify-center rounded-full p-2 transition-colors max-md:p-2.5 hover:bg-surface-hover ${focus} ${kind === "failure" ? "text-danger" : kind === "offline" ? "text-text-muted hover:text-accent" : "text-text-secondary hover:text-accent"}`}>
-        <StateIcon kind={kind === "partial" ? "connected" : kind} size={18} weight={2} />
+        <ConnectionIcon kind={iconKind} transport={carried?.transport} size={18} weight={2} />
         {dot && <span aria-hidden="true" data-testid="group-connection-dot" className={`pointer-events-none absolute right-1 top-1 h-2 w-2 rounded-full ring-2 ring-panel-header max-md:right-1.5 max-md:top-1.5 ${dot} ${kind === "waiting" && connecting ? "motion-safe:animate-pulse" : ""}`} />}
       </button>
       {menuOpen && <div role="dialog" id={`${id}-popover`} aria-label="Group connection" className="absolute right-0 top-full max-md:fixed max-md:inset-x-2 max-md:top-[calc(3.5rem_+_env(safe-area-inset-top))] max-md:w-auto z-40 mt-2 w-[min(21rem,calc(100vw-1rem))] max-h-[70dvh] overflow-y-auto rounded-xl border border-border bg-panel-header p-4 text-xs leading-5 text-text-muted shadow-xl">
         <div className="flex items-center gap-2 font-medium text-text-primary" data-testid="group-connection-state">
-          <StateIcon kind={kind === "partial" ? "connected" : kind} size={16} weight={1.7} />
+          <ConnectionIcon kind={iconKind} transport={carried?.transport} size={16} weight={1.7} />
           <span>{label}</span>
         </div>
+        {carried && <p className="mt-0.5 text-[11px]" data-testid="group-connection-transports">{carried.line}</p>}
         {!online && <p className="mt-1 text-[11px]">This device is offline: no member can be reached until it is back online.</p>}
         <ul className="mt-3 space-y-1" data-testid="group-connection-members">
           {others.map(m => {
@@ -84,7 +88,7 @@ export function GroupConnection({ group }: { group: GroupView }) {
         </p>
       </div>}
     <span role="tooltip" id={`${id}-tip`} data-testid="group-connection-tooltip" className={`pointer-events-none absolute right-0 top-full z-50 mt-1.5 w-max max-w-[min(16rem,55vw)] rounded-md border border-border bg-surface-alt px-2 py-1 text-[11px] leading-4 text-text-primary shadow-lg motion-safe:transition-opacity ${tip && !menuOpen ? "opacity-100" : "invisible opacity-0"}`}>
-      {label}
+      {label}{carried && <span data-testid="group-connection-tooltip-detail" className="mt-0.5 block text-text-secondary">{carried.line}</span>}
     </span>
     <span className="sr-only" aria-live="polite">{label}</span>
   </div>;
