@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 
 /** Fades a block in the first time it enters the viewport. Content is visible without JS. */
-export function Reveal({ children, className = "", id, as: Tag = "div" }: { children: React.ReactNode; className?: string; id?: string; as?: "div" | "section" | "article" }) {
-  const ref = useRef<HTMLDivElement>(null);
+export function Reveal({ children, className = "", id, as: Tag = "div" }: { children: React.ReactNode; className?: string; id?: string; as?: "div" | "section" | "article" | "li" }) {
+  const ref = useRef<HTMLElement>(null);
   const [state, setState] = useState<"idle" | "hidden" | "shown">("idle");
   useEffect(() => {
     const el = ref.current;
@@ -25,7 +25,7 @@ export function Reveal({ children, className = "", id, as: Tag = "div" }: { chil
     return () => io.disconnect();
   }, []);
   return (
-    <Tag ref={ref as React.Ref<HTMLDivElement>} id={id} className={`reveal ${className}`} data-reveal={state}>
+    <Tag ref={ref as React.Ref<never>} id={id} className={`reveal ${className}`} data-reveal={state}>
       {children}
     </Tag>
   );

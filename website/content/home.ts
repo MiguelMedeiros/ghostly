@@ -39,16 +39,15 @@ const en = {
     steps: [
       {
         title: "Create an invitation.",
-        body: "Boo makes an invitation for one person. It holds the keys for this connection and nothing about a public account, because there isn't one.",
+        body: "Boo makes an invitation for one person. It holds the keys, not an account.",
       },
       {
         title: "Share it your way.",
-        body: "As a link, a QR code or a text code. In person, by message, however you like. Only share it with the person you want to meet.",
-        note: "The QR code scans with a camera or from an image. The code starts with ghostly1 and catches typos; the link opens on ghostly.tools.",
+        body: "A link, a QR code or a text code. Send it only to the person you want to meet.",
       },
       {
         title: "Connect.",
-        body: "Casper opens it, both apps find each other, and the two of you confirm the connection. That's it. You're talking.",
+        body: "Casper opens it, both apps find each other and confirm. You're talking.",
       },
     ],
     card: { title: "Invitation", link: "Link", qr: "QR", code: "Code", forOne: "for one person" },
@@ -59,20 +58,20 @@ const en = {
     steps: [
       {
         title: "A public network with no owner.",
-        body: "To find each other, both apps use the Mainline DHT (millions of computers that already help BitTorrent users meet) through Pkarr. There is no Ghostly server in the middle.",
-        note: "Browsers reach the DHT through public Pkarr relays; the desktop app and CLI can also reach it directly.",
+        body: "The apps meet on the Mainline DHT, which millions of BitTorrent users already share. There is no Ghostly server in the middle.",
+        note: "Browsers reach it through public Pkarr relays.",
       },
       {
         title: "Small, signed, sealed notes.",
-        body: "Boo leaves a few tiny records at different places in the network. Each is signed, and what matters inside is encrypted. They are notes, not a mailbox: under a kilobyte each.",
+        body: "Boo leaves a few tiny signed records in the network. What matters inside is encrypted.",
       },
       {
         title: "Only the invitation opens them.",
-        body: "Casper knows where to look and how to read, because the invitation says so. Anyone else passing by sees sealed records they can't interpret.",
+        body: "Casper knows where to look and how to read them. Anyone else sees sealed records.",
       },
       {
         title: "Then they fade.",
-        body: "Records are republished while you're online. When you stop, nothing refreshes them: they age out of the network and the apps stop accepting old ones. That doesn't erase copies someone may already have made, or the history on your own device.",
+        body: "They are refreshed only while you're online. Stop, and they age out. Copies someone already made are not erased.",
       },
     ],
     tags: { sealed: "sealed", ttl: "expires" },
@@ -83,16 +82,16 @@ const en = {
     steps: [
       {
         title: "Each side says what it can do.",
-        body: "Boo's desktop app and Casper's browser each list the abilities they support, with versions, and the paths they prefer.",
+        body: "Boo's desktop app and Casper's browser each list what they support.",
       },
       {
         title: "They keep what they share.",
-        body: "Not a lottery, not magic: only what appears on both lists is used. What one side lacks simply stays off.",
+        body: "Only what is on both lists is used. The rest stays off.",
       },
       {
         title: "A plan both agreed to.",
-        body: "Chat, files and Cashu, over WebRTC, because that's what these two have in common. Change the apps, and the plan changes with them.",
-        note: "Every new chat negotiates its abilities. Chats with Ghostly 0.4 contacts keep a fixed set.",
+        body: "Here: chat, files and Cashu over WebRTC. Other apps, another plan.",
+        note: "Chats with Ghostly 0.4 contacts keep a fixed set.",
       },
     ],
     boo: "Boo · desktop",
@@ -105,16 +104,16 @@ const en = {
     steps: [
       {
         title: "The DHT only introduced them.",
-        body: "Rendezvous records are small on purpose. Once Boo and Casper know how to reach each other, the conversation moves off them.",
+        body: "Once they know how to reach each other, the conversation moves off the DHT.",
       },
       {
-        title: "A direct line for the real conversation.",
-        body: "Messages, files and payments travel over a live connection between the two devices: WebRTC in the web app, extension and desktop, Iroh or HyperDHT between desktop apps, and Iroh through a relay when a browser has no direct path. Calls use WebRTC media.",
+        title: "A direct line.",
+        body: "Messages, files and payments travel over a live connection between the two devices: WebRTC, Iroh or HyperDHT.",
       },
       {
         title: "Honest about the route.",
-        body: "Public STUN servers help the two devices find a route through home routers. When the direct path is lost, short texts keep going through the DHT while the apps look for it again. You can add your own TURN relay in settings.",
-        note: "DHT texts are short: 256 bytes (500 with Ghostly 0.4 contacts). A first meeting with no direct path starts on the DHT too, and the chat goes live by itself once a path appears.",
+        body: "Public STUN servers help find a way through home routers. If the direct path drops, short texts keep going over the DHT.",
+        note: "You can add your own TURN relay in settings.",
       },
     ],
     pipe: "live connection",
@@ -384,16 +383,15 @@ const ptBr: HomeCopy = {
     steps: [
       {
         title: "Crie um convite.",
-        body: "O Boo cria um convite para uma pessoa. Ele guarda as chaves desta conexão. Nada de conta pública, porque não existe uma.",
+        body: "O Boo cria um convite para uma pessoa. Ele guarda as chaves, não uma conta.",
       },
       {
         title: "Compartilhe do seu jeito.",
-        body: "Como link, QR code ou código de texto, pessoalmente ou por mensagem, como preferir. Compartilhe só com quem você quer encontrar.",
-        note: "O QR code é lido pela câmera ou de uma imagem. O código começa com ghostly1 e detecta erros de digitação; o link abre em ghostly.tools.",
+        body: "Link, QR code ou código de texto. Mande só para quem você quer encontrar.",
       },
       {
         title: "Conecte.",
-        body: "O Casper abre o convite, os dois apps se encontram e vocês confirmam a conexão. Pronto. Já estão conversando.",
+        body: "O Casper abre, os dois apps se encontram e confirmam. Pronto, vocês estão conversando.",
       },
     ],
     card: { title: "Convite", link: "Link", qr: "QR", code: "Código", forOne: "para uma pessoa" },
@@ -404,20 +402,20 @@ const ptBr: HomeCopy = {
     steps: [
       {
         title: "Uma rede pública, sem dono.",
-        body: "Para se acharem, os dois apps usam a DHT Mainline, por meio do Pkarr. São milhões de computadores que já ajudam usuários de BitTorrent a se encontrar. Não há um servidor do Ghostly no meio.",
-        note: "Navegadores chegam à DHT por relays públicos do Pkarr; o app desktop e a CLI também falam com ela diretamente.",
+        body: "Os apps se encontram na DHT Mainline, que milhões de usuários de BitTorrent já compartilham. Não há um servidor do Ghostly no meio.",
+        note: "Navegadores chegam a ela por relays públicos do Pkarr.",
       },
       {
         title: "Bilhetes pequenos, assinados e selados.",
-        body: "O Boo deixa alguns registros minúsculos em lugares diferentes da rede. Cada um é assinado, e o que importa lá dentro é criptografado. São bilhetes, não uma caixa postal: menos de um kilobyte cada.",
+        body: "O Boo deixa alguns registros minúsculos e assinados na rede. O que importa lá dentro é criptografado.",
       },
       {
         title: "Só o convite abre.",
-        body: "O Casper sabe onde procurar e como ler, porque o convite diz. Quem passar por ali vê registros selados que não consegue interpretar.",
+        body: "O Casper sabe onde procurar e como ler. Quem mais passar vê só registros selados.",
       },
       {
         title: "Depois, eles somem.",
-        body: "Os registros são republicados enquanto você está online. Quando você para, ninguém os renova: eles envelhecem para fora da rede e os apps deixam de aceitar os antigos. Isso não apaga cópias que alguém já tenha feito, nem o histórico no seu aparelho.",
+        body: "Só são renovados enquanto você está online. Parou, eles expiram. Cópias que alguém já fez não são apagadas.",
       },
     ],
     tags: { sealed: "selado", ttl: "expira" },
@@ -428,16 +426,16 @@ const ptBr: HomeCopy = {
     steps: [
       {
         title: "Cada lado diz o que sabe fazer.",
-        body: "O app desktop do Boo e o navegador do Casper listam as capacidades que suportam, com versões, e os caminhos que preferem.",
+        body: "O app desktop do Boo e o navegador do Casper listam o que suportam.",
       },
       {
         title: "Fica o que os dois têm.",
-        body: "Não é sorteio nem mágica: só o que aparece nas duas listas é usado. O que falta de um lado simplesmente fica desligado.",
+        body: "Só o que está nas duas listas é usado. O resto fica desligado.",
       },
       {
         title: "Um plano que os dois aceitaram.",
-        body: "Chat, arquivos e Cashu, por WebRTC, porque é isso que esses dois têm em comum. Troque os apps, e o plano muda junto.",
-        note: "Todo chat novo negocia suas capacidades. Chats com contatos no Ghostly 0.4 mantêm um conjunto fixo.",
+        body: "Aqui: chat, arquivos e Cashu por WebRTC. Outros apps, outro plano.",
+        note: "Chats com contatos no Ghostly 0.4 mantêm um conjunto fixo.",
       },
     ],
     boo: "Boo · desktop",
@@ -450,16 +448,16 @@ const ptBr: HomeCopy = {
     steps: [
       {
         title: "A DHT só fez as apresentações.",
-        body: "Os registros de encontro são pequenos de propósito. Quando Boo e Casper sabem como se alcançar, a conversa sai deles.",
+        body: "Quando eles sabem como se alcançar, a conversa sai da DHT.",
       },
       {
-        title: "Uma linha direta para a conversa de verdade.",
-        body: "Mensagens, arquivos e pagamentos vão por uma conexão ao vivo entre os dois aparelhos: WebRTC no app web, na extensão e no desktop, Iroh ou HyperDHT entre apps desktop, e Iroh por um relay quando um navegador não tem caminho direto. Chamadas usam mídia WebRTC.",
+        title: "Uma linha direta.",
+        body: "Mensagens, arquivos e pagamentos vão por uma conexão ao vivo entre os dois aparelhos: WebRTC, Iroh ou HyperDHT.",
       },
       {
         title: "Sincero sobre o caminho.",
-        body: "Servidores STUN públicos ajudam os aparelhos a achar uma rota através dos roteadores de casa. Quando o caminho direto se perde, textos curtos continuam passando pela DHT enquanto os apps procuram de novo. Dá para adicionar seu próprio relay TURN nos ajustes.",
-        note: "Textos pela DHT são curtos: 256 bytes (500 com contatos no Ghostly 0.4). Um primeiro encontro sem caminho direto também começa na DHT, e o chat passa sozinho ao link direto quando um caminho aparece.",
+        body: "Servidores STUN públicos ajudam a atravessar os roteadores de casa. Se o caminho direto cai, textos curtos seguem pela DHT.",
+        note: "Dá para adicionar seu próprio relay TURN nos ajustes.",
       },
     ],
     pipe: "conexão ao vivo",

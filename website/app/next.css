@@ -1,7 +1,7 @@
-/* 09 · "What happens next": the product sits still on the table while you read.
-   Prefix nx-. Stacked rows are the base layout (phones, reduced motion, small
-   windows); the two-column sticky reading layout is layered on at ≥861px when
-   motion is allowed. Imported by components/home/NextSection.tsx. */
+/* 05 · "What happens next": one row per thing the app does, its words beside its screens.
+   Prefix nx-. Stacked rows are the base layout (phones, tablets); from 1024px the words
+   and the screens share a row, alternating sides down the page, each row fading in once
+   as it arrives (Reveal). Imported by components/home/NextSection.tsx. */
 
 /* ── Room ─────────────────────────────────────────── */
 .nx {
@@ -96,23 +96,37 @@ html.js .nx-line[data-drawn="true"] path {
   transition: stroke-dashoffset calc(var(--dur-slow) * 1.5) var(--ease-move) 0.15s;
 }
 
-/* ── Rows (base: stacked) ─────────────────────────── */
+/* ── Rows (base: stacked, the words first) ────────── */
 .nx-list {
   list-style: none;
-  margin: 0;
-  padding: 0;
+  margin: 0 auto;
   display: grid;
-  gap: clamp(56px, 8vw, 96px);
+  gap: clamp(64px, 9vw, 120px);
 }
 .nx-item {
   scroll-margin-top: calc(var(--nav-h) + 24px);
   display: grid;
-  gap: 22px;
+  gap: 28px;
 }
 .nx-copy {
   display: grid;
   gap: 14px;
   justify-items: start;
+  align-content: center;
+}
+.nx-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  color: var(--cyan);
+  background: rgba(34, 211, 238, 0.08);
+  border: 1px solid rgba(34, 211, 238, 0.22);
+}
+.nx-icon .icon {
+  width: 22px;
+  height: 22px;
 }
 .nx-title {
   font-size: clamp(26px, 3vw, 38px);
@@ -120,6 +134,7 @@ html.js .nx-line[data-drawn="true"] path {
 }
 .nx-copy .body {
   color: var(--muted);
+  max-width: 34em;
 }
 .nx-note {
   border-left: 2px solid var(--line-2);
@@ -127,18 +142,22 @@ html.js .nx-line[data-drawn="true"] path {
   max-width: 34em;
 }
 
-/* Each row carries its own picture; on the wide layout the sticky frame takes over. */
+/* The screens: the window, and beside it the same screen on a phone. */
 .nx-row-media {
   margin: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
+  min-width: 0;
+}
+.nx-devices {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: end;
+  column-gap: 14px;
 }
 .nx-row-media .caption {
-  grid-column: 1 / -1;
   text-align: right;
 }
-/* The phone beside a row's window: only where there is room for it (wide stacked layouts). */
 .nx-row-phone {
   display: none;
 }
@@ -157,31 +176,60 @@ html.js .nx-line[data-drawn="true"] path {
     border: 4px solid #111a25;
     box-shadow: 0 30px 50px -20px rgba(0, 0, 0, 0.9);
   }
-}
-
-/* Stacked rows on a wide screen (reduced motion, no scripts): the picture stays a device, not a billboard. */
-@media (min-width: 861px) {
-  .nx-row-media {
-    max-width: 760px;
-  }
-  /* Window and phone share the row, feet on the same line; the phone is ≈ 22% of the window's width. */
-  .nx-row-media[data-phone="true"] {
-    max-width: 940px;
-    grid-template-columns: minmax(0, 1fr) 18%;
-    column-gap: 14px;
-    align-items: end;
-  }
-  /* The caption stays under the window's right edge, as on the stage. */
   .nx-row-media[data-phone="true"] .caption {
-    grid-column: 1;
+    text-align: center;
   }
-  .nx-row-media[data-phone="true"] .nx-row-phone {
+}
+/* From a tablet up, window and phone share the row, feet on the same line; the phone is ≈ 22% of the window's width. */
+@media (min-width: 861px) {
+  .nx-row-media[data-phone="true"] .nx-devices {
+    grid-template-columns: minmax(0, 1fr) 18%;
+  }
+  .nx-row-phone {
     display: block;
     width: 100%;
     height: auto;
     border-radius: 18px;
     border: 4px solid #111a25;
     box-shadow: 0 30px 50px -20px rgba(0, 0, 0, 0.9);
+  }
+  /* The caption stays under the window's right edge. */
+  .nx-row-media[data-phone="true"] .caption {
+    margin-right: calc(18% + 14px);
+  }
+}
+
+/* Words and screens side by side, sides alternating; the phone stands on the outer side of the window. */
+@media (min-width: 1024px) {
+  .nx-list {
+    --wrap: 1320px;
+    gap: clamp(88px, 9vw, 128px);
+  }
+  .nx-item {
+    grid-template-columns: minmax(0, 4fr) minmax(0, 7fr);
+    grid-template-areas: "copy media";
+    align-items: center;
+    column-gap: clamp(48px, 5.5vw, 88px);
+  }
+  .nx-item:nth-child(even) {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 4fr);
+    grid-template-areas: "media copy";
+  }
+  .nx-copy {
+    grid-area: copy;
+  }
+  .nx-row-media {
+    grid-area: media;
+  }
+  .nx-item:nth-child(even) .nx-row-media[data-phone="true"] .nx-devices {
+    grid-template-columns: 18% minmax(0, 1fr);
+  }
+  .nx-item:nth-child(even) .nx-row-phone {
+    grid-row: 1;
+    grid-column: 1;
+  }
+  .nx-item:nth-child(even) .nx-row-media[data-phone="true"] .caption {
+    margin-right: 0;
   }
 }
 
@@ -195,10 +243,6 @@ html.js .nx-line[data-drawn="true"] path {
   box-shadow:
     0 60px 120px -40px #000,
     0 0 90px -30px rgba(34, 211, 238, 0.22);
-}
-.nx-win--light {
-  background: var(--surface-2);
-  box-shadow: 0 30px 60px -30px rgba(0, 0, 0, 0.9);
 }
 .nx-bar {
   display: flex;
@@ -216,7 +260,7 @@ html.js .nx-line[data-drawn="true"] path {
   background: var(--line-2);
 }
 .nx-screen {
-  /* Crop defaults (the whole picture); each shot sets its own, on the screen or the img. */
+  /* Crop defaults (the whole picture); each shot sets its own. */
   --nx-x: 0;
   --nx-y: 0;
   --nx-w: 1;
@@ -226,29 +270,22 @@ html.js .nx-line[data-drawn="true"] path {
   background: #060b11;
   overflow: hidden;
 }
-/* Everything on the screen fills it exactly; the pictures are then placed by their crop. */
-.nx-screen > * {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-}
 /* A picture is sized so its crop (--nx-x, --nx-y, --nx-w as image fractions, --nx-r =
    height / width) fills the 16:10 screen: width = 1 / w of the screen, then shifted so
    the crop's top-left corner lands on the screen's. */
 .nx-shot {
   display: block;
-  inset: auto;
+  position: absolute;
   left: calc(var(--nx-x) / var(--nx-w) * -100%);
   top: calc(var(--nx-y) * var(--nx-r) * 1.6 / var(--nx-w) * -100%);
   width: calc(100% / var(--nx-w));
   height: auto;
   max-width: none;
 }
+/* The CLI row: a terminal as tall as its session. */
 .nx-term {
   margin: 0;
-  padding: 20px 22px;
+  padding: 26px 28px;
   border-radius: 0;
   border: 0;
   background: #03070c;
@@ -258,130 +295,11 @@ html.js .nx-line[data-drawn="true"] path {
   line-height: 1.8;
   overflow-x: auto;
   white-space: pre;
-  display: grid;
-  align-content: center;
 }
 
-/* ── Stage (hidden until the wide layout) ─────────── */
-.nx-stage {
-  display: none;
-}
-
-/* ── Wide, motion allowed: read on the left, the device stays on the right ── */
-@media (min-width: 861px) and (prefers-reduced-motion: no-preference) {
-  .nx-body {
-    --nx-over: 17%; /* the gutter to the right of the frame where the chat phone stands */
-    display: grid;
-    grid-template-columns: minmax(0, 0.64fr) minmax(0, 1.36fr);
-    gap: clamp(32px, 4vw, 64px);
-    align-items: start;
-  }
-  @media (max-width: 1200px) {
-    .nx-body {
-      --nx-over: 21%; /* the phone (22% of the frame, 14px away) stays inside the column */
-    }
-  }
-  .nx-list {
-    gap: 0;
-  }
-  .nx-item {
-    min-height: 70vh;
-    align-content: center;
-    padding-block: 24px;
-    transition: opacity var(--dur-base) var(--ease-move);
-  }
-  html.js .nx-item[data-active="false"] {
-    opacity: 0.62;
-  }
-  .nx-row-media {
-    display: none;
-  }
-  /* Without scripts nothing swaps, so every row keeps its picture and the stacked layout stays. */
-  html:not(.js) .nx-row-media {
-    display: grid;
-  }
-  html:not(.js) .nx-stage {
-    display: none;
-  }
-  html:not(.js) .nx-body {
-    display: block;
-  }
-  html:not(.js) .nx-item {
-    min-height: 0;
-  }
-  html:not(.js) .nx-list {
-    gap: clamp(56px, 8vw, 96px);
-  }
-  .nx-stage {
-    display: block;
-    min-height: 100%;
-  }
-  .nx-sticky {
-    position: sticky;
-    top: calc(var(--nav-h) + 48px);
-  }
-  .nx-device {
-    --dir: 1; /* the scroll direction of the last swap, set by the script */
-    position: relative;
-    margin-right: var(--nx-over);
-  }
-  .nx-term--stage {
-    padding-inline: 26px;
-  }
-  .nx-win--stage .nx-screen {
-    transition: background var(--dur-base) var(--ease-move);
-  }
-  .nx-win--stage[data-cli="true"] .nx-screen {
-    background: #03070c;
-  }
-
-  /* Crossfade: the incoming screen slides 12px in the scroll direction and settles from 1.03. */
-  .nx-swap {
-    opacity: 0;
-    visibility: hidden;
-    transform: translateY(calc(var(--dir, 1) * 12px)) scale(1.03);
-    transition:
-      opacity var(--dur-base) var(--ease-exit),
-      transform 0s var(--dur-base),
-      visibility 0s var(--dur-base);
-  }
-  .nx-swap[data-on="true"] {
-    opacity: 1;
-    visibility: visible;
-    transform: none;
-    transition:
-      opacity var(--dur-base) var(--ease-enter),
-      transform var(--dur-base) var(--ease-enter),
-      visibility 0s;
-  }
-
-  /* Every screen's phone stands in the same spot to the right of the window; .nx-swap
-     shows the active one and hides the rest, with the window's own crossfade. */
-  .nx-phone {
-    position: absolute;
-    left: calc(100% + 14px);
-    bottom: 0;
-    width: 22%;
-    height: auto;
-    border-radius: 18px;
-    border: 4px solid #111a25;
-    box-shadow: 0 30px 50px -20px rgba(0, 0, 0, 0.9);
-    pointer-events: none;
-  }
-  .nx-honesty {
-    display: block;
-    margin-top: 14px;
-    margin-right: var(--nx-over);
-    text-align: right;
-  }
-}
-
-/* Reduced motion: the line is simply drawn, rows never fade, and the screens cross-fade in place. */
+/* Reduced motion: the line is simply drawn. */
 @media (prefers-reduced-motion: reduce) {
   html.js .nx-line[data-drawn="false"] path {
     stroke-dashoffset: 0;
-  }
-  .nx-swap {
-    transform: none;
   }
 }

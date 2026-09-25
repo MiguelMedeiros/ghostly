@@ -1179,7 +1179,7 @@ html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .sce
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
-  :where(.scene-step, .nx-swap, .nx-item, .fin-bubble, .fin-lead, .fin-cta, .fin-eyebrow, .rail, .rail-inner, .act-room, .act-bubble, .swarm-veil, .sp-desc::before, .btn, .link-arrow, .nav, .nav-links a, .footer li a, .fin-dl, .fin-card) {
+  :where(.scene-step, .nx-item, .fin-bubble, .fin-lead, .fin-cta, .fin-eyebrow, .rail, .rail-inner, .act-room, .act-bubble, .swarm-veil, .sp-desc::before, .btn, .link-arrow, .nav, .nav-links a, .footer li a, .fin-dl, .fin-card) {
     transition-duration: var(--dur-base) !important;
     transition-property: opacity, color, background-color, border-color, fill, text-decoration-color, box-shadow !important;
   }
