@@ -46,7 +46,7 @@ test("a paired chat's Services… dialog on the web explains the same, and close
   for (const p of [alice, bob]) await expect(p.page.getByTestId("peer-services")).toHaveCount(0);
 
   for (const p of [alice, bob]) {
-    await p.page.getByTitle("Options").click();
+    await p.page.getByTestId("chat-options").click();
     await p.page.getByTestId("chat-services-open").click();
     const dialog = p.page.getByTestId("chat-services");
     await expect(dialog).toBeVisible();
@@ -64,7 +64,7 @@ test("a paired chat's Services… dialog on the web explains the same, and close
   }
 
   // A click beside it closes it as well.
-  await alice.page.getByTitle("Options").click();
+  await alice.page.getByTestId("chat-options").click();
   await alice.page.getByTestId("chat-services-open").click();
   await expect(alice.page.getByTestId("chat-services")).toBeVisible();
   await alice.page.mouse.click(5, 5);
@@ -105,7 +105,7 @@ test("an older chat's apps strip on the web: Manage opens the same explanation",
 test("Escape closes a chat's Services… dialog", { tag: ["@feature:app.popovers"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("svc-escape-alice"), peer("svc-escape-bob")]);
   await pair(alice, bob);
-  await alice.page.getByTitle("Options").click();
+  await alice.page.getByTestId("chat-options").click();
   await alice.page.getByTestId("chat-services-open").click();
   await expect(alice.page.getByTestId("chat-services")).toBeVisible();
   await alice.page.keyboard.press("Escape");

@@ -315,7 +315,7 @@ test("Tech Info copies the keys it shows, and shows only a preview of the encryp
   expect(encKey).toHaveLength(43);
   const sessionId = decodeURIComponent(alice.page.url().split("#/chat/")[1]);
 
-  await alice.page.getByTitle("Options").click();
+  await alice.page.getByTestId("chat-options").click();
   await alice.page.getByTestId("chat-options-menu").getByText("Tech Info").click();
   const modal = alice.page.locator("div.fixed").filter({ has: alice.page.getByRole("heading", { name: "Tech Info" }) });
   await expect(modal).toBeVisible();

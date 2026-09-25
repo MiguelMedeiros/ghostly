@@ -35,7 +35,7 @@ test("paired chat: files, real WebRTC, local mint send/request and persistence",
   await alice.page.getByTestId("payment-composer").getByRole("button", { name: "Close", exact: true }).click();
   await openChat(bob);
   // Ecash only: the fake mint pays a request's own Lightning invoice by itself and would race Alice.
-  await bob.page.getByTitle("Options").click();
+  await bob.page.getByTestId("chat-options").click();
   await bob.page.getByTestId("chat-payments-open").click();
   await bob.page.getByTestId("chat-payments").getByTestId("chat-payments-lightning").click();
   await bob.page.getByTestId("chat-payments-save").click();

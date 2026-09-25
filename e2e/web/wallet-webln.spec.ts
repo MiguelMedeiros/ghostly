@@ -36,7 +36,7 @@ async function pay(p: Peer, invoice: string, sats: number) {
  */
 async function requestPaidInChat(alice: Peer, bob: Peer, sats: number, aliceSource: string) {
   await openChat(bob);
-  await bob.page.getByTitle("Options").click();
+  await bob.page.getByTestId("chat-options").click();
   await bob.page.getByTestId("chat-payments-open").click();
   await bob.page.getByTestId("chat-payments").getByTestId("chat-payments-cashu").click();
   await bob.page.getByTestId("chat-payments-save").click();

@@ -11,7 +11,7 @@ const endpoint = process.env.GHOSTLY_S3_ENDPOINT ?? "";
 const credentials = { region: "us-east-1", accessKeyId: process.env.GHOSTLY_S3_KEY ?? "", secretAccessKey: process.env.GHOSTLY_S3_SECRET ?? "" };
 const bucket = `ghostly-saf-${Date.now()}`;
 
-const openHold = async (p: Peer) => { await p.page.getByTitle("Options").click(); await p.page.getByTestId("chat-hold-open").click(); return p.page.getByTestId("chat-hold"); };
+const openHold = async (p: Peer) => { await p.page.getByTestId("chat-options").click(); await p.page.getByTestId("chat-hold-open").click(); return p.page.getByTestId("chat-hold"); };
 async function holdOn(p: Peer) {
   const dialog = await openHold(p);
   await dialog.getByTestId("chat-hold-toggle").click();
@@ -70,7 +70,7 @@ test("text, a picture and a request held for an away contact arrive in order; a 
     await alice.page.keyboard.press("Escape");
   }).toPass({ timeout: 30_000 });
   // Ecash only in Alice's requests: a Lightning invoice would need a mint on the network.
-  await alice.page.getByTitle("Options").click();
+  await alice.page.getByTestId("chat-options").click();
   await alice.page.getByTestId("chat-payments-open").click();
   await alice.page.getByTestId("chat-payments").getByTestId("chat-payments-lightning").click();
   await alice.page.getByTestId("chat-payments-save").click();
@@ -155,7 +155,7 @@ test("a contact whose app does not hold is unaffected: nothing is held, offline 
   await expect(dialog.getByTestId("chat-hold-contact")).toHaveText("Contact: has it off, or needs an updated Ghostly");
   await expect(dialog.getByTestId("chat-hold-storage")).toContainText("not set up");
   await carol.page.keyboard.press("Escape");
-  await expect(dave.page.getByTitle("Options")).toBeVisible();
+  await expect(dave.page.getByTestId("chat-options")).toBeVisible();
   const url = dave.page.url();
   await dave.page.close();
   // Not "held": short text falls back to the DHT mailbox of WISP 403, exactly as before.

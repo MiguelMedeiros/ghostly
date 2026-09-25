@@ -48,7 +48,7 @@ test.describe("on Second's signet server", { tag: "@network" }, () => {
     await bob.page.keyboard.press("Escape");
 
     // Alice turns Bark off in this chat: Bob's app can no longer pick it, and says why.
-    await alice.page.getByTitle("Options").click();
+    await alice.page.getByTestId("chat-options").click();
     await alice.page.getByTestId("chat-payments-open").click();
     await alice.page.getByTestId("chat-payments").getByTestId("chat-payments-bark").click();
     await alice.page.getByTestId("chat-payments-save").click();
@@ -57,7 +57,7 @@ test.describe("on Second's signet server", { tag: "@network" }, () => {
     await expect(card(bob)).toHaveAttribute("title", /does not accept Bark/);
     await expect(bob.page.getByTestId("payment-card-arkade"), "Arkade is its own way of paying, still allowed").toBeEnabled();
     await bob.page.keyboard.press("Escape");
-    await bob.page.getByTitle("Options").click();
+    await bob.page.getByTestId("chat-options").click();
     await bob.page.getByTestId("chat-payments-open").click();
     await expect(bob.page.getByTestId("chat-payments-bark-contact")).toContainText("has it off");
   });

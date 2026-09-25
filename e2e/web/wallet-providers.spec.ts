@@ -30,7 +30,7 @@ const composer = async (p: Peer, card: string, amount: string) => {
 };
 /** Lightning off in this chat for the payee: the test mint pays a request's own invoice by itself. */
 async function ecashOnly(p: Peer) {
-  await p.page.getByTitle("Options").click();
+  await p.page.getByTestId("chat-options").click();
   await p.page.getByTestId("chat-payments-open").click();
   await p.page.getByTestId("chat-payments").getByTestId("chat-payments-lightning").click();
   await p.page.getByTestId("chat-payments-save").click();

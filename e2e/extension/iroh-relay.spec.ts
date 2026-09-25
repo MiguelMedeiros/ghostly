@@ -21,7 +21,7 @@ test("the extension runs Iroh in its offscreen document and moves a chat with a 
     await p.page.keyboard.press("Escape");
   }
 
-  await ext.page.getByTitle("Options").click();
+  await ext.page.getByTestId("chat-options").click();
   await ext.page.getByTestId("chat-connection-open").click();
   await ext.page.getByTestId("transport-menu").getByTestId("transport-option-iroh").click();
   for (const p of [ext, web]) {

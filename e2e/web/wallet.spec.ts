@@ -67,7 +67,7 @@ test.describe("wallet", { tag: "@network" }, () => {
 
     // Bob asks for ecash only: with Lightning on, the test mint would pay the request's own invoice by
     // itself, racing Alice (it is a faucet), and the request could be paid before she gets to it.
-    await bob.page.getByTitle("Options").click();
+    await bob.page.getByTestId("chat-options").click();
     await bob.page.getByTestId("chat-payments-open").click();
     await bob.page.getByTestId("chat-payments").getByTestId("chat-payments-lightning").click();
     await bob.page.getByTestId("chat-payments-save").click();
