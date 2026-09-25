@@ -31,10 +31,10 @@ export interface DataLinkOptions {
   onState?: (state: DataLinkState) => void;
   /**
    * How long an attempt (offer or answer out, channel not yet open) may take before it is given up, so the
-   * next one can start. Default `CONNECT_TIMEOUT_MS`; a first pairing, whose contact is right there
-   * reading its invite, uses a short one.
+   * next one can start, asked as each one starts. Default `CONNECT_TIMEOUT_MS`; a first pairing, whose contact
+   * is right there reading its invite, uses a short one until it is over.
    */
-  attemptTimeoutMs?: number;
+  attemptTimeoutMs?: () => number | undefined;
 }
 
 export const CONNECT_TIMEOUT_MS = 90_000;
@@ -177,7 +177,7 @@ export class DataLink {
         traceLink(this.options.myPubKeyZ32, "attempt-timeout", { state: this.state });
         this.reset();
       }
-    }, this.options.attemptTimeoutMs ?? CONNECT_TIMEOUT_MS);
+    }, this.options.attemptTimeoutMs?.() ?? CONNECT_TIMEOUT_MS);
     return pc;
   }
 
