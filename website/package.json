@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
+    "lint": "eslint && node scripts/check-dashes.mjs",
     "sync:references": "node scripts/sync-references.mjs",
     "prebuild": "npm run sync:references"
   },
