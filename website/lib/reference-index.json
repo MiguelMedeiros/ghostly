@@ -197,7 +197,7 @@
     "title": "WISP 102: Iroh",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "Experimental native adapter of the chat session (desktop); descriptors on the DHT (decided 2026-09-25; being implemented)",
+    "implementation": "Experimental native adapter of the chat session (desktop); relay-only browser build in the web app and the extension (2026-09-25); descriptors on the DHT (decided 2026-09-25; being implemented)",
     "dependencies": [
       "100-transports.md"
     ],
