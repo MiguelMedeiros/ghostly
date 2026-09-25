@@ -40,7 +40,7 @@ When the two disagree (an app updated between them, a setting changed), the `pai
 | `transports` | Layer-1 transports this runtime has, in local preference order (`iroh/1`, `hyperdht/1`, `webrtc/1`): every one it can run for this chat, started or not. `descriptors` names the started ones, so a contact tells a transport still starting from one the app lacks ([100](100-transports.md#a-chosen-transport-not-reached-yet-revision-04)) | At most 8; never `dht` ([100](100-transports.md#the-dht-floor-upgrade-and-downgrade-revision-02)) |
 | `capabilities` | The same identifiers as `pair-offer`, plus the layer-0 ones: `dht-text/1` (accepts [403](403-dht-text.md) text) and `hold/1` (the **Hold messages** consent of [4xx](4xx-store-and-forward.md)) | At most 32 |
 | `extensions` | As in `pair-offer`: behaviour that grants nothing | At most 32 |
-| `descriptors` | Per native transport, the minimum to dial: the Iroh endpoint id and the relay it is homed on, the HyperDHT public key (and the relay a browser's goes through). No addresses | At most one per transport |
+| `descriptors` | Per native transport, the minimum to dial: the Iroh endpoint id and the relay it is homed on, the HyperDHT public key (and the relay a browser's goes through). No addresses | At most one per transport; a relay is an `https` or `wss` URL, or plain `http`/`ws` on loopback (a test relay) |
 | `name` | The name this profile shares with contacts ([401](401-paired-chat.md#name-and-picture)); empty when it shares none | At most 64 UTF-8 bytes |
 | `choice` | Optional, revision 0.3. The layer-1 transport chosen for this chat in its Connection menu; absent on Automatic. How a contact with no session hears of a choice ([100](100-transports.md#a-choice-made-while-not-live-revision-05)) | One transport identifier, never `dht` |
 
@@ -88,6 +88,6 @@ Choose identifier registry, exact version rules, canonical offer/selection encod
 
 ## Revision log
 
-- 0.3 (2026-09-25): the optional trailing `choice`; the record is published again when a native descriptor changes, and a record just read replaces the relay the reader knew. Apps from before ignore the element, as trailing elements are ignored.
+- 0.3 (2026-09-25): the optional trailing `choice`; the record is published again when a native descriptor changes, and a record just read replaces the relay the reader knew; a loopback test relay may be plain HTTP, as in the relay settings. Apps from before ignore the element, as trailing elements are ignored.
 - 0.2 (2026-09-25): capabilities on two layers; the layer-0 capability record (sketch), with `dht-text/1`, `hold/1`, minimal native descriptors and the shared name.
 - 0.1 (2026-09-20): initial review draft.

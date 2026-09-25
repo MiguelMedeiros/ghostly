@@ -88,8 +88,11 @@ const HEX64 = /^[0-9a-f]{64}$/;
 const SIG = /^[A-Za-z0-9_-]{86}$/;
 const Z32 = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;
 const KEY = /^[A-Za-z0-9_-]{43}$/;
-/** A relay server's URL: https, or wss for a browser's relay, and short. */
-const RELAY = /^(https|wss):\/\/[^\s]{1,120}$/;
+/**
+ * A relay server's URL, short: https, or wss for a browser's relay; plain http or ws only on this machine's loopback,
+ * as a test relay is (the same rule as the relay settings).
+ */
+const RELAY = /^((https|wss):\/\/[^\s]{1,120}|(http|ws):\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d{1,5})?(\/[^\s]{0,100})?)$/;
 const hexToKey = (hex: string) => toBase64Url(Uint8Array.from(hex.match(/../g)!, b => parseInt(b, 16)));
 const keyToHex = (key: string) => Array.from(fromBase64Url(key), b => b.toString(16).padStart(2, "0")).join("");
 

@@ -72,6 +72,10 @@ describe("capability record: keys, seal and signature", () => {
     // Ranked as relayed: after direct paths, before the DHT floor.
     expect(relayedTransports({}, dial)).toEqual(["iroh/1", "hyperdht/1"]);
     expect(capsDescriptors({ "hyperdht/1": { publicKey: HYPER.publicKey, relay: "javascript:alert(1)" } })).toEqual({ "hyperdht/1": { publicKey: expect.any(String) } });
+    // Plain HTTP only on this machine's loopback, as a test relay is; anywhere else a relay is TLS.
+    expect(capsDescriptors({ "iroh/1": { id: IROH.id, relay: "http://127.0.0.1:47085" } })["iroh/1"]).toMatchObject({ relay: "http://127.0.0.1:47085" });
+    expect(capsDescriptors({ "iroh/1": { id: IROH.id, relay: "http://relay.example/" } })["iroh/1"]).not.toHaveProperty("relay");
+    expect(capsDescriptors({ "iroh/1": { id: IROH.id, relay: "http://127.0.0.1.example/" } })["iroh/1"]).not.toHaveProperty("relay");
   });
 
   it("fits 1,000 bytes; past it drops the name, then the extensions, and fails rather than cut capabilities", () => {
