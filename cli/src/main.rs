@@ -35,15 +35,15 @@ enum Commands {
     /// Send a message
     Send {
         /// Your seed (base64url)
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         seed: String,
 
         /// Peer's public key (z32)
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         peer: String,
 
         /// Shared encryption key (base64url)
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         key: String,
 
         /// Your nickname (optional)
@@ -54,31 +54,31 @@ enum Commands {
         #[arg(long)]
         stdin: bool,
 
-        /// Message text (if not using --stdin)
+        /// Message text (if not using --stdin); put `--` before one that starts with `-`
         message: Option<String>,
     },
     /// Receive messages (single poll)
     Recv {
         /// Peer's public key (z32)
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         peer: String,
 
         /// Shared encryption key (base64url)
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         key: String,
     },
     /// Watch for new messages (streaming mode for bots)
     Watch {
         /// Your seed (base64url)
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         seed: String,
 
         /// Peer's public key (z32)
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         peer: String,
 
         /// Shared encryption key (base64url)
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         key: String,
 
         /// Your nickname (optional)
@@ -106,16 +106,17 @@ enum InviteAction {
     /// Generate an invite URL
     New {
         /// Your seed (base64url)
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         seed: String,
 
         /// Shared key (optional, generates new if not provided)
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         key: Option<String>,
     },
     /// Parse an invite URL
     Parse {
         /// The invite URL (ghost://...)
+        #[arg(allow_hyphen_values = true)]
         url: String,
     },
 }
