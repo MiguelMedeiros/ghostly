@@ -966,7 +966,16 @@ export class Communities {
     this.host.emit();
   }
 
+  /**
+   * A line in the group's history. Its id carries its time, and the engine's clock moves once a tick: two
+   * lines of one kind within a tick (a picture changed, then removed) get distinct times, a millisecond
+   * apart, or the store would keep the first and drop the second as already there.
+   */
   private async event(groupId: string, event: GroupEvent, text: string, timestamp: number, epoch: number, member?: string): Promise<void> {
+    const last = this.lastEventAt.get(groupId) ?? 0;
+    if (timestamp <= last) timestamp = last + 1;
+    this.lastEventAt.set(groupId, Math.max(last, timestamp));
     await this.host.storeMessage({ linkId: MESSAGE_LINK(groupId), id: `event:${epoch}:${event}:${member ?? ""}:${timestamp}`, text, sender: "peer", event, member, timestamp, via: "datalink" });
   }
+  private readonly lastEventAt = new Map<string, number>();
 }
