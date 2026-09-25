@@ -43,7 +43,7 @@ test("each timeline says when the chat went live, a quick reconnect stays in the
 
   // The header names the live transport, and the chat's Connection menu (chip or ⋮) offers WebRTC alone here.
   await expect(alice.page.getByTestId("transport-chip")).toHaveAttribute("data-transport", "webrtc/1");
-  await alice.page.getByTitle("Options").click();
+  await alice.page.getByTestId("chat-options").click();
   await expect(alice.page.getByTestId("chat-connection-open")).toContainText(/Connection…WebRTC · (\d+ ms · )?the only one here/);
   await alice.page.getByTestId("chat-connection-open").click();
   const menu = alice.page.getByTestId("transport-menu");
@@ -88,7 +88,7 @@ test("DHT only from the Connection menu: both timelines say who chose it, texts 
   for (const p of [alice, bob]) await expect(lineText(p, "Connected over WebRTC")).toHaveCount(1, { timeout: 60_000 });
 
   // Alice chooses DHT only; it travels in her DHT envelope, and Bob's app keeps off the live link too.
-  await alice.page.getByTitle("Options").click();
+  await alice.page.getByTestId("chat-options").click();
   await alice.page.getByTestId("chat-connection-open").click();
   await alice.page.getByTestId("transport-menu").getByTestId("transport-option-dht").click();
   await expect(lineText(alice, "You switched to DHT only")).toHaveCount(1, { timeout: 60_000 });
@@ -98,7 +98,7 @@ test("DHT only from the Connection menu: both timelines say who chose it, texts 
   await expect(chat(alice).getByText("over the DHT")).toBeVisible({ timeout: 120_000 });
 
   // Back to Automatic: both timelines say the chat is live again, in one row that also stands for leaving DHT only.
-  await alice.page.getByTitle("Options").click();
+  await alice.page.getByTestId("chat-options").click();
   await alice.page.getByTestId("chat-connection-open").click();
   const menu = alice.page.getByTestId("transport-menu");
   await expect(menu.getByTestId("transport-option-dht")).toHaveAttribute("aria-checked", "true");
