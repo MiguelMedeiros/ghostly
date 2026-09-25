@@ -1,4 +1,5 @@
 import type { GhostMood } from "@/components/ghost/Ghost";
+import { ease } from "@/lib/motion";
 
 /**
  * The film's blocking, in stage units. Landscape stages are 1440×900 (safe
@@ -45,8 +46,15 @@ const L: Record<Chapter, ChapterBlocking> = {
   },
   invite: {
     // s0 the card grows from Boo's hem; s1 it flies to Casper, who enters late; s2 the link and the check.
+    // Boo nods when Casper arrives (s1) and again when his chip pops (s2); Casper nods at his own chip.
     boo: [
       [0, { x: 640, y: 470, s: 240 }],
+      [0.51, { x: 640, y: 470, s: 240 }],
+      [0.53, { x: 640, y: 456, s: 240 }],
+      [0.55, { x: 640, y: 470, s: 240 }],
+      [0.69, { x: 640, y: 470, s: 240 }],
+      [0.705, { x: 640, y: 456, s: 240 }],
+      [0.72, { x: 640, y: 470, s: 240 }],
       [0.94, { x: 640, y: 470, s: 240 }],
       [1, { x: 200, y: 560, s: 150 }],
     ],
@@ -54,6 +62,9 @@ const L: Record<Chapter, ChapterBlocking> = {
       [0, { x: 1500, y: 470, s: 240, a: 0 }],
       [0.4, { x: 1500, y: 470, s: 240, a: 0 }],
       [0.5, { x: 1060, y: 460, s: 240, a: 1 }],
+      [0.73, { x: 1060, y: 460, s: 240, a: 1 }],
+      [0.745, { x: 1060, y: 446, s: 240, a: 1 }],
+      [0.76, { x: 1060, y: 460, s: 240, a: 1 }],
       [0.94, { x: 1060, y: 460, s: 240, a: 1 }],
       [1, { x: 610, y: 560, s: 150, a: 1 }],
     ],
@@ -68,7 +79,8 @@ const L: Record<Chapter, ChapterBlocking> = {
       [0.715, { x: 200, y: 536, s: 150 }],
       [0.73, { x: 200, y: 560, s: 150 }],
       [0.94, { x: 200, y: 560, s: 150 }],
-      [1, { x: 735, y: 190, s: 170 }],
+      // Act I ends here: the two rise toward the next act and fade before the backdrop scrolls away.
+      [1, { x: 735, y: 150, s: 170, a: 0 }],
     ],
     // Casper dims into a flashback (Boo alone at the network) and returns when the invitation opens the records.
     casper: [
@@ -77,7 +89,7 @@ const L: Record<Chapter, ChapterBlocking> = {
       [0.5, { x: 610, y: 560, s: 150, a: 0.35 }],
       [0.56, { x: 610, y: 560, s: 150, a: 1 }],
       [0.94, { x: 610, y: 560, s: 150, a: 1 }],
-      [1, { x: 1055, y: 190, s: 170, a: 1 }],
+      [1, { x: 1055, y: 150, s: 170, a: 0 }],
     ],
     focus: [[0, [560, 340]], [0.3, [560, 340]], [0.5, [420, 280]], [0.62, [560, 340]], [0.72, [275, 640]], [0.78, [1150, 200]], [1, [1150, 200]]],
     camera: [[0, 1], [0.5, 1], [0.6, 1.12], [0.72, 1.12], [0.8, 1], [1, 1]],
@@ -85,13 +97,20 @@ const L: Record<Chapter, ChapterBlocking> = {
   },
   agree: {
     // Landscape heads never above y 190 (portrait 150): a 64px nav sits over a stage that 2:1 viewports crop by 90.
+    // Act II opens as it pins: the two settle in from a little above while they fade in, so nothing of them
+    // shows while the statement has the screen. Casper nods when the plan lands (step 2).
     boo: [
-      [0, { x: 735, y: 190, s: 170 }],
+      [0, { x: 735, y: 160, s: 170, a: 0 }],
+      [0.04, { x: 735, y: 190, s: 170, a: 1 }],
       [0.94, { x: 735, y: 190, s: 170 }],
       [1, { x: 690, y: 360, s: 220 }],
     ],
     casper: [
-      [0, { x: 1055, y: 190, s: 170 }],
+      [0, { x: 1055, y: 160, s: 170, a: 0 }],
+      [0.04, { x: 1055, y: 190, s: 170, a: 1 }],
+      [0.72, { x: 1055, y: 190, s: 170 }],
+      [0.735, { x: 1055, y: 178, s: 170 }],
+      [0.75, { x: 1055, y: 190, s: 170 }],
       [0.94, { x: 1055, y: 190, s: 170 }],
       [1, { x: 1170, y: 360, s: 220 }],
     ],
@@ -203,23 +222,40 @@ export const STAGE = {
   portrait: { w: 390, h: 844 },
 } as const;
 
-/** The pose at a sub-progress, linearly interpolated between keys. */
+/** A glide longer than this (stage units) starts with a small step back; shorter moves (nods) do not. */
+const ANTICIPATED = 60;
+/** How far back, as a fraction of the glide, and over which first part of it. */
+const ANTICIPATION = 0.06;
+const ANTICIPATION_END = 0.35;
+
+/**
+ * The pose at a sub-progress, between keys on the move curve. A glide between
+ * two places starts with a small step the other way (anticipation) and lands
+ * softly; the actor spring in Act.tsx adds the follow-through. Opacity and
+ * size go on the same curve, with no anticipation.
+ */
 export function poseAt(keys: Key<Pose>[], t: number): Required<Pose> {
   let i = 0;
   while (i < keys.length - 1 && keys[i + 1][0] <= t) i++;
   const [a, pa] = keys[i];
   const [b, pb] = keys[Math.min(i + 1, keys.length - 1)];
   const k = b === a ? 0 : Math.max(0, Math.min(1, (t - a) / (b - a)));
-  const mix = (u: number, v: number) => u + (v - u) * k;
-  return { x: mix(pa.x, pb.x), y: mix(pa.y, pb.y), s: mix(pa.s, pb.s), a: mix(pa.a ?? 1, pb.a ?? 1) };
+  const e = ease.move(k);
+  const dx = pb.x - pa.x;
+  const dy = pb.y - pa.y;
+  const far = Math.hypot(dx, dy) > ANTICIPATED;
+  const dip = far && k < ANTICIPATION_END ? Math.sin((Math.PI * k) / ANTICIPATION_END) * ANTICIPATION : 0;
+  const mix = (u: number, v: number) => u + (v - u) * e;
+  return { x: pa.x + dx * (e - dip), y: pa.y + dy * (e - dip), s: mix(pa.s, pb.s), a: mix(pa.a ?? 1, pb.a ?? 1) };
 }
 
+/** A value at a sub-progress, between keys on the move curve (the camera, the focal point). */
 export function valueAt<T extends number | [number, number]>(keys: Key<T>[], t: number): T {
   let i = 0;
   while (i < keys.length - 1 && keys[i + 1][0] <= t) i++;
   const [a, va] = keys[i];
   const [b, vb] = keys[Math.min(i + 1, keys.length - 1)];
-  const k = b === a ? 0 : Math.max(0, Math.min(1, (t - a) / (b - a)));
+  const k = ease.move(b === a ? 0 : Math.max(0, Math.min(1, (t - a) / (b - a))));
   if (typeof va === "number") return (va + ((vb as number) - va) * k) as T;
   const [x1, y1] = va as [number, number];
   const [x2, y2] = vb as [number, number];

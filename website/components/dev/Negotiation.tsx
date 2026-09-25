@@ -121,11 +121,11 @@ function outcome(s: Scenario) {
 // ── Timing (website/MOTION.md, "Loops and demos") ────────────────────────────
 // Three named phases per scenario, each with its own short caption: offers go
 // out (0 to 2 s), transports are ranked (2 to 4 s), capabilities settle (4 s on) and
-// the complete frame holds for at least 1.5 s before a DUR.md cross-fade.
+// the complete frame holds for at least 1.5 s before a DUR.slow cross-fade.
 const PHASE_1 = 2000; // transports compared
 const PHASE_2 = 4000; // capabilities compared
 const SCENE_MS = 7600; // one scenario, fade included
-const FADE_MS = Math.round(DUR.md * 1000); // cross-fade between scenarios: half out, half in
+const FADE_MS = Math.round(DUR.slow * 1000); // cross-fade between scenarios: half out, half in
 const PICK_MS = 12000; // hold after a reader picks a scenario
 const TICK = 100;
 /** The still frame (server render, no-JS, reduced motion) is the finished

@@ -22,7 +22,7 @@
   gap: 0;
 }
 .fin-eyebrow {
-  transition: opacity 0.6s var(--ease);
+  transition: opacity var(--dur-slow) var(--ease-enter);
 }
 
 /* ── The stage ─────────────────────────────────── */
@@ -48,8 +48,8 @@
   align-content: end;
   transform: translateX(calc(var(--k, 0) * var(--fin-travel)));
   transition:
-    transform 0.9s var(--ease),
-    opacity 0.6s var(--ease);
+    transform calc(var(--dur-slow) * 1.6) var(--ease-move),
+    opacity var(--dur-slow) var(--ease-enter);
 }
 .fin[data-state="play"]:not([data-step="-1"]) .fin-actor {
   transition-duration: 1.6s, 0.6s;
@@ -59,8 +59,8 @@
   position: relative;
   transform-origin: 50% 70%;
   transition:
-    transform 0.45s var(--ease),
-    opacity 0.45s var(--ease);
+    transform var(--dur-base) var(--ease-exit),
+    opacity var(--dur-base) var(--ease-exit);
 }
 .fin-actor .ghost {
   width: var(--fin-ghost);
@@ -82,8 +82,8 @@
   opacity: 0;
   transform: translateY(8px) scale(0.92);
   transition:
-    opacity 0.3s var(--ease),
-    transform 0.3s var(--ease);
+    opacity var(--dur-fast) var(--ease-exit),
+    transform var(--dur-fast) var(--ease-exit);
 }
 .fin-bubble:empty {
   visibility: hidden;
@@ -91,6 +91,9 @@
 .fin-bubble[data-on="true"] {
   opacity: 1;
   transform: none;
+  transition:
+    opacity var(--dur-base) var(--ease-enter),
+    transform var(--dur-base) var(--ease-enter);
 }
 .fin-bubble--boo {
   left: 30%;
@@ -130,7 +133,7 @@
   filter: none;
 }
 .fin[data-poof="true"] .fin-actor--casper .fin-poof {
-  animation: fin-poof 1s var(--ease) calc(var(--n) * 70ms) both;
+  animation: fin-poof 1s var(--ease-enter) calc(var(--n) * var(--stagger)) both;
 }
 .fin[data-poof="true"] .fin-actor--casper .fin-bubble {
   opacity: 0;
@@ -175,23 +178,23 @@ html.js .fin[data-state="done"][data-poof="true"] .fin-actor--boo {
   display: inline-block;
   clip-path: inset(-0.25em -0.1em -0.3em -0.1em);
   transition:
-    clip-path 0.55s var(--ease),
-    transform 0.55s var(--ease);
-  transition-delay: calc(var(--i, 0) * 45ms);
+    clip-path var(--dur-slow) var(--ease-enter),
+    transform var(--dur-slow) var(--ease-enter);
+  transition-delay: calc(min(var(--i, 0), 6) * var(--stagger));
 }
 .fin-lead {
   margin-top: 26px;
   max-width: 34em;
   transition:
-    opacity 0.55s var(--ease) 0.15s,
-    transform 0.55s var(--ease) 0.15s;
+    opacity var(--dur-slow) var(--ease-enter) 0.15s,
+    transform var(--dur-slow) var(--ease-enter) 0.15s;
 }
 .fin-cta {
   margin-top: 34px;
   transition:
-    opacity 0.55s var(--ease) 0.25s,
-    transform 0.2s var(--ease),
-    box-shadow 0.2s;
+    opacity var(--dur-slow) var(--ease-enter) 0.25s,
+    transform var(--dur-fast) var(--ease-exit),
+    box-shadow var(--dur-fast) var(--ease-exit);
 }
 .fin[data-state="done"][data-poof="true"] .fin-cta {
   animation: fin-glow 0.9s ease-out 1 both;
@@ -258,8 +261,13 @@ html.js .fin[data-state="done"][data-poof="true"] .fin-actor--boo {
   gap: 14px;
   align-content: start;
   transition:
-    border-color 0.3s,
-    box-shadow 0.3s;
+    border-color var(--dur-fast) var(--ease-exit),
+    box-shadow var(--dur-fast) var(--ease-exit);
+}
+/* A card lifts a little under the pointer, on the same curves as a button; the hot one is already lit. */
+.fin-card:hover {
+  border-color: rgba(34, 211, 238, 0.3);
+  transition-timing-function: var(--ease-enter);
 }
 /* The reader's machine. */
 .fin-card[data-hot="true"] {
@@ -332,8 +340,13 @@ html.js .fin[data-state="done"][data-poof="true"] .fin-actor--boo {
   letter-spacing: 0.06em;
   color: var(--muted);
 }
-.fin-dl:hover .fin-dl-ext {
+.fin-dl-ext {
+  transition: color var(--dur-fast) var(--ease-exit);
+}
+.fin-dl:hover .fin-dl-ext,
+.fin-dl:focus-visible .fin-dl-ext {
   color: var(--cyan);
+  transition-timing-function: var(--ease-enter);
 }
 /* The exact installer we guessed for this machine. */
 .fin-dl[aria-current="true"] {

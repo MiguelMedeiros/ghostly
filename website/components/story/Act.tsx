@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { motion, useInView, useMotionValue, useMotionValueEvent, useScroll, useSpring, useTransform, type MotionValue } from "motion/react";
+import { animate as tween, motion, useInView, useMotionValue, useMotionValueEvent, useScroll, useSpring, useTransform, type MotionValue } from "motion/react";
 import { Ghost, type GhostMood } from "@/components/ghost/Ghost";
 import { EXIT, orientationOf, scatter, stepOf, useCards, usePortrait, VIEW_BOX_ORIGIN } from "@/components/home/stage";
 import { useCalm } from "@/lib/useCalm";
-import { SPRING, useScrub } from "@/lib/motion";
+import { DUR, EASE, HERO, SPRING, useScrub } from "@/lib/motion";
 import { BLOCKING, blockingFor, poseAt, ROOMS, STAGE, valueAt, type Chapter, type Frame } from "./poses";
 import { IDENTITY, lerpFraming, measureFraming, sameFraming, type Framing } from "./framing";
 
@@ -130,12 +130,16 @@ function LiveAct({ id, chapters, field, bubble, bubbleAvoid, children }: { id: s
   const framed = useMotionValue<number>(0);
   const [frame, setFrame] = useState<Frame | null>(null);
   const table = (chapter: Chapter) => blockingFor(orient, chapter, frameRef.current);
+  // The hero's Boo arrives after the headline has landed: until then his pose is held below its place, unseen,
+  // and the body spring carries him up into it when `arrived` flips (see the layout effect below).
+  const arrivedRef = useRef(false);
   const pose = (who: "boo" | "casper", v: number) => {
     const at = locate(v);
     // Until the window is measured the fitted pose is unknown: Boo waits unseen instead of standing somewhere he may be cut.
     if (!frameRef.current && orient === "landscape" && chapters[0].chapter === "hero") return { ...poseAt(table(chapters[0].chapter)[who], 0), a: 0 };
-    if (!at) return poseAt(table(chapters[0].chapter)[who], 0);
-    return poseAt(table(at.chapter)[who], at.t);
+    const p = !at ? poseAt(table(chapters[0].chapter)[who], 0) : poseAt(table(at.chapter)[who], at.t);
+    if (who === "boo" && !arrivedRef.current && chapters[0].chapter === "hero" && (!at || (at.chapter === "hero" && at.t < 0.2))) return { ...p, y: p.y + HERO.arriveFrom, a: 0 };
+    return p;
   };
   const focus = (v: number): [number, number] => {
     const at = locate(v);
@@ -143,8 +147,8 @@ function LiveAct({ id, chapters, field, bubble, bubbleAvoid, children }: { id: s
     return valueAt(BLOCKING[orient][at.chapter].focus, at.t);
   };
 
-  // Every actor channel, opacity included, goes through the same spring: no hard cuts inside an act.
-  const spring = SPRING.actor;
+  // Every actor channel, opacity included, goes through the one body spring: no hard cuts inside an act.
+  const spring = SPRING.body;
   const bx = useSpring(useTransform([actP, framed], ([v]) => pose("boo", v as number).x), spring);
   const by = useSpring(useTransform([actP, framed], ([v]) => pose("boo", v as number).y), spring);
   const bs = useSpring(useTransform([actP, framed], ([v]) => pose("boo", v as number).s / 100), spring);
@@ -174,12 +178,16 @@ function LiveAct({ id, chapters, field, bubble, bubbleAvoid, children }: { id: s
       frameRef.current = next;
       setFrame(next);
       framed.set(framed.get() + 1);
-      // The first fit is where he stands, not somewhere he glides to; he fades in there.
+      // The first fit is where he stands, not somewhere he glides to. He waits below it, then arrives.
       if (!prev) {
         const at = pose("boo", actP.get());
         bx.jump(at.x);
         by.jump(at.y);
         bs.jump(at.s / 100);
+        window.setTimeout(() => {
+          arrivedRef.current = true;
+          framed.set(framed.get() + 1);
+        }, HERO.arriveAfter * 1000);
       }
     };
     measure();
@@ -257,22 +265,24 @@ function LiveAct({ id, chapters, field, bubble, bubbleAvoid, children }: { id: s
   return (
     <div id={id} ref={ref} className="act" data-chapter={scene.chapter} data-inview={inView} style={{ ["--chapter-bg" as string]: room }}>
       <div className="act-backdrop" aria-hidden="true">
+        {/* The room's colour, then the field on its own layer (its parallax and drift are composited transforms on
+            HTML boxes, so the field never repaints the stage with the actors), then the stage. */}
+        <div className="act-room" />
+        {field && (
+          <motion.div className="act-field" style={{ y: fieldY }}>
+            <div className="act-field-drift">
+              <svg className="stage" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="xMidYMid slice">
+                {edges.map(([a, b]) => (
+                  <line key={`${a}-${b}`} x1={nodes[a].x} y1={nodes[a].y} x2={nodes[b].x} y2={nodes[b].y} stroke="#22d3ee" strokeOpacity="0.08" />
+                ))}
+                {nodes.map((n, i) => (
+                  <circle key={i} cx={n.x} cy={n.y} r={1.6 + n.t * 2} fill="#4c5f7a" opacity={0.55 + n.t * 0.45} />
+                ))}
+              </svg>
+            </div>
+          </motion.div>
+        )}
         <svg ref={svgRef} className="stage" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="xMidYMid slice">
-          <rect className="act-room" width={w} height={h} />
-          {field && (
-            <motion.g className="act-field" style={{ y: fieldY }}>
-              {edges.map(([a, b]) => (
-                <line key={`${a}-${b}`} x1={nodes[a].x} y1={nodes[a].y} x2={nodes[b].x} y2={nodes[b].y} stroke="#22d3ee" strokeOpacity="0.08" />
-              ))}
-              {[0, 1, 2].map((bucket) => (
-                <g key={bucket} className="dht-node" style={{ animationDelay: `${-bucket * 1.3}s` }}>
-                  {nodes.filter((_, i) => i % 3 === bucket).map((n, i) => (
-                    <circle key={i} cx={n.x} cy={n.y} r={1.6 + n.t * 2} fill="#4c5f7a" />
-                  ))}
-                </g>
-              ))}
-            </motion.g>
-          )}
           <motion.g style={{ x: framingX, y: framingY, scale: framingK, ...VIEW_BOX_ORIGIN }}>
             <motion.g style={{ x: camX, y: camY, scale, ...VIEW_BOX_ORIGIN }}>
               <motion.g className="actor" style={{ x: cx, y: cy, scale: cs, opacity: ca, ...VIEW_BOX_ORIGIN }}>
@@ -419,6 +429,9 @@ function Bubble({
 }) {
   const ref = useRef<SVGGElement>(null);
   const [shown, setShown] = useState(0);
+  // The box fades in with the first character (motion's inline opacity would otherwise show it from the start).
+  const on = useMotionValue<number>(0);
+  const opacity = useTransform([fade, on], ([f, o]) => (f as number) * (o as number));
   const [lay, setLay] = useState<BubbleLayout>(() => {
     const fs = 18;
     const w = text.length * fs * 0.55 + fs * 2.8;
@@ -429,17 +442,18 @@ function Bubble({
     let i = 0;
     let tick: number | undefined;
     const start = window.setTimeout(() => {
+      tween(on, 1, { duration: DUR.base, ease: EASE.enter });
       tick = window.setInterval(() => {
         i++;
         setShown(i);
         if (i >= text.length && tick !== undefined) window.clearInterval(tick);
-      }, 35);
-    }, 1200);
+      }, HERO.typeMs);
+    }, HERO.lineAfter * 1000);
     return () => {
       window.clearTimeout(start);
       if (tick !== undefined) window.clearInterval(tick);
     };
-  }, [text]);
+  }, [text, on]);
   const { x: rx, y: ry, s: rs } = rest;
   useEffect(() => {
     const place = () => {
@@ -482,7 +496,7 @@ function Bubble({
   const caretLine = Math.max(0, typed.findIndex((t, i) => t.length < lines[i].length));
   const first = bh / 2 - ((lines.length - 1) * 1.3 * fs) / 2 + fs * 0.33;
   return (
-    <motion.g ref={ref} style={{ x: ox, y: oy, opacity: fade }} className="act-bubble" data-on={shown > 0} data-side={lay.side}>
+    <motion.g ref={ref} style={{ x: ox, y: oy, opacity }} className="act-bubble" data-on={shown > 0} data-side={lay.side}>
       <rect width={bw} height={bh} rx={Math.min(bh / 2, fs * 1.45)} fill="rgba(34,211,238,0.14)" />
       <path d={`M${lay.tail - base} ${bh} L${tip} ${bh + tailH} L${lay.tail + base} ${bh} z`} fill="rgba(34,211,238,0.14)" />
       <text textAnchor="middle" fontSize={fs} fill="#22d3ee">

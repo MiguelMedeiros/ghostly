@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { GhostMark } from "@/components/ghost/Ghost";
+import { DUR } from "@/lib/motion";
 import "@/app/swarm.css";
 
 /**
@@ -57,8 +58,9 @@ const FLOCK = (() => {
   return out;
 })();
 
-const IN = 420;
-const OUT = 520;
+// The flock's in and out, in ms: DUR.slow (swarm.css uses the same token), plus the last ghost's delay.
+const IN = Math.round(DUR.slow * 1000);
+const OUT = Math.round(DUR.slow * 1000);
 
 export function GhostSwarm() {
   const router = useRouter();

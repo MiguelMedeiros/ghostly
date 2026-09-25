@@ -17,8 +17,8 @@ import "@/app/dev-loop.css";
  * app/dev-loop.css (`pl-in`, `pl-win`, `pl-fly`, `pl-draw`, …) with its own
  * start/duration as inline custom properties, so the whole timeline lives in
  * `TL` below. Six named phases of 2 to 3 s (website/MOTION.md, "Loops and
- * demos"), each with its caption; moves follow EASE.inOut; the last phase holds
- * the complete frame for 2 s, then the loop cross-fades (DUR.md) into the next
+ * demos"), each with its caption; moves follow EASE.move; the last phase holds
+ * the complete frame for 2 s, then the loop cross-fades (DUR.slow) into the next
  * run. The CSS default is `--t: 13.5` (the final frame: everything
  * placed, the four steps labelled), which is what the server renders, what a
  * page without JS keeps and what prefers-reduced-motion shows. With JS the
@@ -493,7 +493,7 @@ export function ProtocolLoop({ t }: { t: LoopCopy }) {
     };
   }, []);
   return (
-    <figure ref={ref} className="pl" role="img" aria-label={t.label} tabIndex={0} data-state="still" style={v({ T: LOOP, fin: TL.final, xf: DUR.md })}>
+    <figure ref={ref} className="pl" role="img" aria-label={t.label} tabIndex={0} data-state="still" style={v({ T: LOOP, fin: TL.final, xf: DUR.slow })}>
       <Landscape t={t} />
       <Portrait t={t} />
       <span className="pl-pausemark" aria-hidden="true" />

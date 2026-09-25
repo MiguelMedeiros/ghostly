@@ -25,15 +25,17 @@
   --radius: 18px;
   --wrap: 1180px;
   --nav-h: 64px;
-  /* Motion tokens: mirror lib/motion.ts; rules in website/MOTION.md. */
-  --ease: cubic-bezier(0.22, 1, 0.36, 1);
-  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
-  --ease-in: cubic-bezier(0.55, 0, 1, 0.45);
-  --dur-xs: 0.18s;
-  --dur-sm: 0.32s;
-  --dur-md: 0.6s;
-  --dur-lg: 0.9s;
+  /* Motion tokens: mirror lib/motion.ts; rules in website/MOTION.md.
+     enter = arriving (the default, also --ease), exit = leaving, move = travelling on screen. */
+  --ease-enter: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-exit: cubic-bezier(0.55, 0, 1, 0.45);
+  --ease-move: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease: var(--ease-enter);
+  --dur-fast: 0.14s;
+  --dur-base: 0.28s;
+  --dur-slow: 0.56s;
+  --dur-beat: 1.8s;
+  --stagger: 0.06s;
   /* One type voice at different volumes. Mono is for eyebrows, captions, chips and code only. */
   --t-display: clamp(56px, 9.5vw, 148px);
   --t-section: clamp(40px, 5.4vw, 72px);
@@ -99,7 +101,7 @@ body {
   background: var(--cyan);
   color: #031018;
   font-weight: 700;
-  transition: top 0.2s;
+  transition: top var(--dur-fast) var(--ease-enter);
 }
 .skip-link:focus {
   top: 12px;
@@ -229,17 +231,25 @@ body {
   border: 1px solid var(--line-2);
   color: var(--text);
   background: rgba(255, 255, 255, 0.02);
+  /* Feedback: in on the enter curve, out on the exit curve, both fast. Press settles back down at once. */
   transition:
-    transform 0.2s var(--ease),
-    border-color 0.2s,
-    background 0.2s,
-    box-shadow 0.2s;
+    transform var(--dur-fast) var(--ease-exit),
+    border-color var(--dur-fast) var(--ease-exit),
+    background var(--dur-fast) var(--ease-exit),
+    color var(--dur-fast) var(--ease-exit),
+    box-shadow var(--dur-fast) var(--ease-exit);
   white-space: nowrap;
 }
-.btn:hover {
+.btn:hover,
+.btn:focus-visible {
   border-color: rgba(34, 211, 238, 0.5);
   color: var(--cyan);
   transform: translateY(-1px);
+  transition-timing-function: var(--ease-enter);
+}
+.btn:active {
+  transform: translateY(0) scale(0.985);
+  transition-duration: 0.06s;
 }
 .btn--primary {
   border: 0;
@@ -247,7 +257,8 @@ body {
   background: linear-gradient(100deg, var(--cyan), var(--green));
   box-shadow: 0 10px 30px -10px rgba(34, 211, 238, 0.55);
 }
-.btn--primary:hover {
+.btn--primary:hover,
+.btn--primary:focus-visible {
   color: #031018;
   box-shadow: 0 16px 40px -12px rgba(34, 211, 238, 0.7);
 }
@@ -268,10 +279,15 @@ body {
   gap: 6px;
   color: var(--cyan);
   font-weight: 600;
-}
-.link-arrow:hover {
   text-decoration: underline;
+  text-decoration-color: transparent;
   text-underline-offset: 4px;
+  transition: text-decoration-color var(--dur-fast) var(--ease-exit);
+}
+.link-arrow:hover,
+.link-arrow:focus-visible {
+  text-decoration-color: currentColor;
+  transition-timing-function: var(--ease-enter);
 }
 
 /* ── Level badges and the Draft chip ─────────────── */
@@ -342,8 +358,8 @@ body {
   display: flex;
   align-items: center;
   transition:
-    background 0.3s,
-    border-color 0.3s;
+    background var(--dur-base) var(--ease-move),
+    border-color var(--dur-base) var(--ease-move);
   border-bottom: 1px solid transparent;
 }
 .nav[data-scrolled="true"] {
@@ -382,8 +398,8 @@ body {
   font-size: 14px;
   color: var(--muted);
   transition:
-    color 0.2s,
-    background 0.2s;
+    color var(--dur-fast) var(--ease-exit),
+    background var(--dur-fast) var(--ease-exit);
 }
 .nav-links a:hover,
 .nav-links a[aria-current="page"] {
@@ -538,7 +554,7 @@ body {
   animation: ghost-blink 5.3s infinite;
 }
 .ghost-pupils {
-  transition: transform 0.5s var(--ease);
+  transition: transform var(--dur-slow) var(--ease-enter);
 }
 .ghost-mouth-talk {
   transform-box: fill-box;
@@ -548,6 +564,12 @@ body {
 @keyframes ghost-bob {
   50% {
     transform: translateY(-8px);
+  }
+}
+/* The actors' idle on a stage: the bob and a breath (1.5% taller at the top of it). */
+@keyframes stage-bob {
+  50% {
+    transform: translateY(-8px) scaleY(1.015);
   }
 }
 @keyframes ghost-blink {
@@ -630,23 +652,37 @@ body {
   height: 100%;
 }
 .act-room {
-  fill: var(--chapter-bg);
-  transition: fill 0.9s var(--ease);
+  position: absolute;
+  inset: 0;
+  background: var(--chapter-bg);
+  transition: background-color 0.9s var(--ease-move);
+}
+/* The network behind Act I: its own layer, parallaxed by motion and drifting a few pixels over half a minute. */
+.act-field {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}
+.act-field-drift {
+  position: absolute;
+  inset: 0;
+  animation: field-drift 28s ease-in-out infinite alternate;
+}
+@keyframes field-drift {
+  to {
+    transform: translate(6px, -10px);
+  }
 }
 .act > :not(.act-backdrop) {
   position: relative;
   z-index: 1;
 }
-/* Idle loops rest while their act, scene or section is off screen. */
-[data-inview="false"] :is(.stage-bob, .dht-node, .ghost-eyes--blink, .ghost-mouth-talk, .act-caret, .particles span, .bg-grid, .ghost--float, .text-gradient-animated, .zzz span) {
+/* Idle loops rest while their act, scene or section is off screen (data-inview from the
+   sections that know it, data-offscreen from components/site/IdleLoops.tsx for everything). */
+[data-inview="false"] :is(.stage-bob, .dht-node, .ghost-eyes--blink, .ghost-mouth-talk, .act-caret, .particles span, .bg-grid, .ghost--float, .text-gradient-animated, .zzz span),
+[data-offscreen],
+[data-offscreen] * {
   animation-play-state: paused;
-}
-.act-bubble {
-  opacity: 0;
-  transition: opacity 0.4s;
-}
-.act-bubble[data-on="true"] {
-  opacity: 1;
 }
 .act-caret {
   animation: caret 1s steps(1) infinite;
@@ -683,12 +719,6 @@ body {
 .stage .mono,
 .stage text.mono {
   font-family: var(--font-jetbrains), ui-monospace, monospace;
-}
-.stage-bob {
-  animation: ghost-bob 4.2s ease-in-out infinite;
-}
-.key-light {
-  mix-blend-mode: screen;
 }
 /* In the story the act draws the actors; a scene's own ghosts only carry the stills. */
 html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act--static) .scene-actors-static {
@@ -727,8 +757,9 @@ html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act
 }
 .scene[data-copy="left"] .scene-copy,
 .scene[data-copy="right"] .scene-copy {
+  /* Centred with `translate`, not `transform`: motion owns the transform (the panel's rise into place). */
   top: 50%;
-  transform: translateY(-50%);
+  translate: 0 -50%;
 }
 .scene[data-copy="left"] .scene-copy,
 .scene[data-copy="bottom-left"] .scene-copy {
@@ -747,16 +778,17 @@ html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act
   display: grid;
   min-height: 210px;
 }
+/* A step's copy leaves fast and the next arrives after it, rising the last 8px: never two half-faded titles. */
 .scene-step {
   grid-area: 1 / 1;
   display: grid;
   gap: 12px;
   align-content: start;
   opacity: 0;
-  transform: translateY(14px);
+  transform: translateY(8px);
   transition:
-    opacity 0.12s ease,
-    transform 0.12s ease;
+    opacity var(--dur-fast) var(--ease-exit),
+    transform var(--dur-fast) var(--ease-exit);
   pointer-events: none;
 }
 .scene-step[data-active="true"] {
@@ -764,8 +796,8 @@ html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act
   transform: none;
   pointer-events: auto;
   transition:
-    opacity 0.45s 0.08s var(--ease),
-    transform 0.45s 0.08s var(--ease);
+    opacity var(--dur-base) var(--dur-fast) var(--ease-enter),
+    transform var(--dur-base) var(--dur-fast) var(--ease-enter);
 }
 .scene-step .body {
   color: var(--muted);
@@ -791,8 +823,8 @@ html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act
   border-radius: 3px;
   background: var(--line-2);
   transition:
-    background 0.3s,
-    transform 0.3s var(--ease);
+    background var(--dur-base),
+    transform var(--dur-base) var(--ease-enter);
 }
 .scene-progress button[data-on="true"]::before {
   background: var(--cyan);
@@ -815,6 +847,7 @@ html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act
     inset: auto 0 0 0;
     width: auto;
     transform: none;
+    translate: none;
     padding: 36px 16px 22px;
     background: linear-gradient(to bottom, transparent, rgb(var(--chapter-rgb)) 40px);
     gap: 12px;
@@ -971,7 +1004,8 @@ html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .sce
 html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene[data-copy] .scene-copy {
   position: static;
   width: auto;
-  transform: none;
+  transform: none !important;
+  translate: none;
   padding: 0;
   background: none;
 }
@@ -1016,9 +1050,11 @@ html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .sce
 .footer li a {
   color: var(--muted);
   font-size: 14px;
+  transition: color var(--dur-fast) var(--ease-exit);
 }
 .footer li a:hover {
   color: var(--cyan);
+  transition-timing-function: var(--ease-enter);
 }
 .footer-bottom {
   margin-top: 56px;
@@ -1101,6 +1137,8 @@ html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .sce
   }
 }
 
+/* Reduced motion: nothing moves, loops stop, and what changes changes by a cross-fade. Opacity and colour
+   transitions keep a base duration (that is what the preference allows); transforms and animations are cut. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -1109,19 +1147,32 @@ html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .sce
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
+  :where(.scene-step, .nx-swap, .nx-item, .fin-bubble, .fin-lead, .fin-cta, .fin-eyebrow, .rail, .rail-inner, .act-room, .act-bubble, .swarm-veil, .sp-desc::before, .btn, .link-arrow, .nav, .nav-links a, .footer li a, .fin-dl, .fin-card) {
+    transition-duration: var(--dur-base) !important;
+    transition-property: opacity, color, background-color, border-color, fill, text-decoration-color, box-shadow !important;
+  }
   .particles {
     display: none;
   }
 }
 
-/* The original pointer ghost. */
+/* The original pointer ghost. Its float slows as it tires and sleeps. */
 .pet {
   position: absolute;
   z-index: 40;
   pointer-events: none;
   transition:
-    opacity 0.2s,
-    transform 0.2s;
+    opacity var(--dur-fast) var(--ease-exit),
+    transform var(--dur-fast) var(--ease-exit);
+}
+.pet-body {
+  animation: pet-float 4s ease-in-out infinite;
+}
+.pet[data-mood="happy"] .pet-body {
+  animation-duration: 3s;
+}
+.pet[data-mood="sleeping"] .pet-body {
+  animation-duration: 6s;
 }
 .pet-hide {
   position: absolute;
@@ -1136,7 +1187,7 @@ html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .sce
   color: var(--dim);
   pointer-events: auto;
   opacity: 0;
-  transition: opacity 0.2s;
+  transition: opacity var(--dur-fast);
 }
 .pet-hide:hover,
 .pet-hide:focus-visible {
@@ -1166,7 +1217,9 @@ html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .sce
   font-family: var(--font-jetbrains), ui-monospace, monospace;
 }
 .stage-bob {
-  animation: ghost-bob 4.2s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: stage-bob 4.2s ease-in-out infinite;
 }
 .dht-node {
   animation: twinkle 4s ease-in-out infinite;

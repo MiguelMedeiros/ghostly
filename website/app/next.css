@@ -93,7 +93,7 @@ html.js .nx-line[data-drawn="false"] path {
   stroke-dashoffset: 100;
 }
 html.js .nx-line[data-drawn="true"] path {
-  transition: stroke-dashoffset 0.9s var(--ease) 0.15s;
+  transition: stroke-dashoffset calc(var(--dur-slow) * 1.5) var(--ease-move) 0.15s;
 }
 
 /* ── Rows (base: stacked) ─────────────────────────── */
@@ -288,7 +288,7 @@ html.js .nx-line[data-drawn="true"] path {
     min-height: 70vh;
     align-content: center;
     padding-block: 24px;
-    transition: opacity 0.4s var(--ease);
+    transition: opacity var(--dur-base) var(--ease-move);
   }
   html.js .nx-item[data-active="false"] {
     opacity: 0.62;
@@ -329,7 +329,7 @@ html.js .nx-line[data-drawn="true"] path {
     padding-inline: 26px;
   }
   .nx-win--stage .nx-screen {
-    transition: background 0.4s;
+    transition: background var(--dur-base) var(--ease-move);
   }
   .nx-win--stage[data-cli="true"] .nx-screen {
     background: #03070c;
@@ -341,17 +341,17 @@ html.js .nx-line[data-drawn="true"] path {
     visibility: hidden;
     transform: translateY(calc(var(--dir, 1) * 12px)) scale(1.03);
     transition:
-      opacity 0.4s var(--ease),
-      transform 0s 0.4s,
-      visibility 0s 0.4s;
+      opacity var(--dur-base) var(--ease-exit),
+      transform 0s var(--dur-base),
+      visibility 0s var(--dur-base);
   }
   .nx-swap[data-on="true"] {
     opacity: 1;
     visibility: visible;
     transform: none;
     transition:
-      opacity 0.4s var(--ease),
-      transform 0.4s var(--ease),
+      opacity var(--dur-base) var(--ease-enter),
+      transform var(--dur-base) var(--ease-enter),
       visibility 0s;
   }
 
@@ -376,9 +376,12 @@ html.js .nx-line[data-drawn="true"] path {
   }
 }
 
-/* Reduced motion: the line is simply drawn and rows never fade. */
+/* Reduced motion: the line is simply drawn, rows never fade, and the screens cross-fade in place. */
 @media (prefers-reduced-motion: reduce) {
   html.js .nx-line[data-drawn="false"] path {
     stroke-dashoffset: 0;
+  }
+  .nx-swap {
+    transform: none;
   }
 }

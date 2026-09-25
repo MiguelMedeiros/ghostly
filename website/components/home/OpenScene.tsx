@@ -4,6 +4,7 @@ import Link from "next/link";
 import { motion, useTransform, type MotionValue } from "motion/react";
 import { SceneFrame, useScene, type SceneStep } from "@/components/story/SceneFrame";
 import { Ghost } from "@/components/ghost/Ghost";
+import { ease } from "@/lib/motion";
 import { Stage, useStep } from "./stage";
 
 /** One colour per layer, bottom to top. */
@@ -16,11 +17,11 @@ const P: Layout = { cx: 195, cy: 340, W: 100, D: 38, H: 10, gap: 36, ghost: 60 }
 function Slab({ p, n, i, label, count, C, portrait }: { p: MotionValue<number>; n: number; i: number; label: string; count: number; C: Layout; portrait: boolean }) {
   const closed = C.cy - i * (C.H + 4);
   const open = C.cy + (count - 1) * (C.gap / 2) - i * C.gap;
-  // The stack opens over the first step; labels arrive one by one as it does.
-  const y = useStep(p, 0, n, [0.1, 0.95], [closed, open]);
-  const labelOn = useStep(p, 0, n, [0.42 + i * 0.06, 0.56 + i * 0.06], [0, 1]);
-  const labelX = useStep(p, 0, n, [0.42 + i * 0.06, 0.56 + i * 0.06], [24, 0]);
-  const shadow = useStep(p, 0, n, [0.1, 0.95], [0, 0.55]);
+  // The stack opens over the action of the first step; the labels arrive one by one as it does, and it holds from .7.
+  const y = useStep(p, 0, n, [0.1, 0.62], [closed, open], ease.move);
+  const labelOn = useStep(p, 0, n, [0.3 + i * 0.05, 0.4 + i * 0.05], [0, 1]);
+  const labelX = useStep(p, 0, n, [0.3 + i * 0.05, 0.4 + i * 0.05], [16, 0], ease.enter);
+  const shadow = useStep(p, 0, n, [0.1, 0.62], [0, 0.55], ease.move);
   const c = COLORS[i];
   const last = i === count - 1;
   return (
@@ -49,13 +50,13 @@ function Visual({ layers }: { layers: string[] }) {
   const closedTop = C.cy - top * (C.H + 4) - C.D;
   const openTop = C.cy + (count - 1) * (C.gap / 2) - top * C.gap - C.D;
   // The ghosts stand on the top slab and ride up with it.
-  const ride = useStep(p, 0, n, [0.1, 0.95], [closedTop, openTop]);
+  const ride = useStep(p, 0, n, [0.1, 0.62], [closedTop, openTop], ease.move);
   const g = C.ghost;
   const booY = useTransform(ride, (v) => v - g * 1.25 + 8);
   // Another app (a dashed outline, not a character) comes to stand on your app.
-  const other = useStep(p, 1, n, [0.3, 0.6], [0, 1]);
-  const otherX = useStep(p, 1, n, [0.3, 0.6], [C.cx + C.W + 60, C.cx + g * 0.25]);
-  const light = useStep(p, 0, n, [0.2, 0.9], [0.04, 0.12]);
+  const other = useStep(p, 1, n, [0.16, 0.36], [0, 1]);
+  const otherX = useStep(p, 1, n, [0.16, 0.46], [C.cx + C.W + 60, C.cx + g * 0.25], ease.move);
+  const light = useStep(p, 0, n, [0.2, 0.7], [0.04, 0.12]);
 
   return (
     <Stage portrait={portrait} camera={camera} light={{ color: "#a78bfa", opacity: light }}>
@@ -103,7 +104,7 @@ function Legend({ layers }: { layers: string[] }) {
   );
 }
 function LegendItem({ p, n, i, color, children }: { p: MotionValue<number>; n: number; i: number; color: string; children: string }) {
-  const on = useStep(p, 0, n, [0.42 + i * 0.06, 0.56 + i * 0.06], [0.25, 1]);
+  const on = useStep(p, 0, n, [0.3 + i * 0.05, 0.4 + i * 0.05], [0.25, 1]);
   return (
     <motion.li style={{ opacity: on, ["--c" as string]: color }}>
       <span aria-hidden="true" />

@@ -5,7 +5,7 @@ import { motion, useScroll, useTransform } from "motion/react";
 import { GhostMark, Ghost } from "@/components/ghost/Ghost";
 import { Particles } from "@/components/site/Particles";
 import { useCalm } from "@/lib/useCalm";
-import { useScrub } from "@/lib/motion";
+import { HERO, useScrub } from "@/lib/motion";
 import { usePortrait } from "./stage";
 import { APP_URL } from "@/content/shell";
 import type { HomeCopy } from "@/content/home";
@@ -45,18 +45,19 @@ export function Hero({ t }: { t: HomeCopy["hero"] }) {
 
       <motion.div className="wrap hero-inner" style={calm ? { y: 0, opacity: 1 } : { y, opacity }}>
         <p className="sr-only">Boo: {t.booSays}</p>
+        {/* The opening (lib/motion.ts HERO): the headline leads, the rest follows as one group, then Boo, then his line. */}
         <h1 className="h-display hero-title">
-          <span className="hero-line" style={{ animationDelay: "0.05s" }}>
+          <span className="hero-line" style={{ animationDelay: `${HERO.headline}s` }}>
             {t.title1}
           </span>
-          <span className="hero-line accent" style={{ animationDelay: "0.14s" }}>
+          <span className="hero-line accent" style={{ animationDelay: `${HERO.headline + 0.08}s` }}>
             {t.title2}
           </span>
         </h1>
-        <p className="lead hero-lead hero-rise" style={{ animationDelay: "0.35s" }}>
+        <p className="lead hero-lead hero-rise" style={{ animationDelay: `${HERO.copy}s` }}>
           {t.lead}
         </p>
-        <div className="hero-actions hero-rise" style={{ animationDelay: "0.42s" }}>
+        <div className="hero-actions hero-rise" style={{ animationDelay: `${HERO.copy + 0.06}s` }}>
           <a className="btn btn--primary btn--lg" href={APP_URL}>
             <GhostMark /> {t.open} <span aria-hidden="true">↗</span>
           </a>
@@ -64,13 +65,16 @@ export function Hero({ t }: { t: HomeCopy["hero"] }) {
             {t.download} <span aria-hidden="true">↓</span>
           </a>
         </div>
-        <p className="hero-micro caption hero-rise" style={{ animationDelay: "0.5s" }}>
+        <p className="hero-micro caption hero-rise" style={{ animationDelay: `${HERO.copy + 0.12}s` }}>
           <span>{t.badge}</span>
           <span>{t.micro}</span>
         </p>
-        <div className="hero-follow hero-rise" style={{ animationDelay: "0.55s" }}>
+        <div className="hero-follow hero-rise" style={{ animationDelay: `${HERO.copy + 0.18}s` }}>
           <a href="#invite" className="link-arrow">
-            {t.follow} <span aria-hidden="true">↓</span>
+            {t.follow}{" "}
+            <span aria-hidden="true" className="hero-cue" style={{ animationDelay: `${HERO.cueAfter}s` }}>
+              ↓
+            </span>
           </a>
           <a href="#next" className="hero-skip">
             {t.skip}

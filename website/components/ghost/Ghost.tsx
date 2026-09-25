@@ -114,10 +114,11 @@ export const Ghost = memo(function Ghost({
       focusable="false"
     >
       <defs>
+        {/* A plain alpha sheen: a blend mode here would make every ghost an isolated group repainted each frame. */}
         <radialGradient id={`sheen-${id}`} cx="35%" cy="25%" r="75%">
-          <stop offset="0%" stopColor="#fff" stopOpacity="0.35" />
-          <stop offset="45%" stopColor="#fff" stopOpacity="0.06" />
-          <stop offset="100%" stopColor="#000" stopOpacity="0.12" />
+          <stop offset="0%" stopColor="#fff" stopOpacity="0.2" />
+          <stop offset="45%" stopColor="#fff" stopOpacity="0.04" />
+          <stop offset="100%" stopColor="#000" stopOpacity="0.1" />
         </radialGradient>
         {halo && (
           <radialGradient id={`halo-${id}`} cx="50%" cy="45%" r="50%">
@@ -129,7 +130,7 @@ export const Ghost = memo(function Ghost({
       {halo && <ellipse cx="40" cy="46" rx="56" ry="60" fill={`url(#halo-${id})`} />}
       <g className="ghost-lean" style={{ transform: `rotate(${tilt}deg)` }}>
         {[fill, `url(#sheen-${id})`].map((paint, i) => (
-          <path key={i} d={STILL} fill={paint} style={i ? { mixBlendMode: "soft-light" } : undefined}>
+          <path key={i} d={STILL} fill={paint}>
             {!reduce && (
               <animate
                 attributeName="d"

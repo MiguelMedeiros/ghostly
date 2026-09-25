@@ -3,6 +3,7 @@
 import { motion, useTransform, type MotionValue } from "motion/react";
 import { SceneFrame, useScene, type SceneStep } from "@/components/story/SceneFrame";
 import { StaticActors } from "@/components/story/StaticActors";
+import { ease } from "@/lib/motion";
 import { Stage, useStep } from "./stage";
 
 // Real capability identifiers from the paired session code.
@@ -16,16 +17,18 @@ const L: Layout = { row: 40, tagW: 200, font: 14, boo: [720, 430], casper: [1040
 const P: Layout = { row: 34, tagW: 168, font: 12, boo: [12, 316], casper: [210, 316], plan: [195, 400], planW: 210, planH: 116, booRows: BOO.slice(0, 5) };
 
 function Tag({ p, n, x, y, w, font, text, shared, i, side, portrait }: { p: MotionValue<number>; n: number; x: number; y: number; w: number; font: number; text: string; shared: boolean; i: number; side: "l" | "r"; portrait: boolean }) {
-  const appear = useStep(p, 0, n, [0.05 + i * 0.07, 0.2 + i * 0.07], [0, 1]);
-  const keep = useStep(p, 1, n, [0.1, 0.5], [1, shared ? 1 : 0.28]);
+  // Tags arrive one by one (.06 apart), each rising the last 6 units; the tenth lands by .6.
+  const appear = useStep(p, 0, n, [0.06 + i * 0.06, 0.18 + i * 0.06], [0, 1]);
+  const rise = useStep(p, 0, n, [0.06 + i * 0.06, 0.18 + i * 0.06], [6, 0], ease.enter);
+  const keep = useStep(p, 1, n, [0.1, 0.45], [1, shared ? 1 : 0.28]);
   // In step 3 the plan takes over; on phones nothing may linger behind the sheet.
-  const fade = useStep(p, 2, n, [0.1, 0.5], [1, shared && !portrait ? 0.25 : 0]);
+  const fade = useStep(p, 2, n, [0.08, 0.36], [1, shared && !portrait ? 0.25 : 0]);
   const opacity = useTransform([appear, keep, fade], ([a, k, f]) => (a as number) * (k as number) * (f as number));
-  const glow = useStep(p, 1, n, [0.15 + i * 0.05, 0.4 + i * 0.05], [0, shared ? 1 : 0]);
-  const strike = useStep(p, 1, n, [0.2, 0.45], [0, 1]);
+  const glow = useStep(p, 1, n, [0.15 + i * 0.05, 0.38 + i * 0.05], [0, shared ? 1 : 0]);
+  const strike = useStep(p, 1, n, [0.18, 0.42], [0, 1], ease.move);
   const h = 30;
   return (
-    <motion.g style={{ opacity }}>
+    <motion.g style={{ opacity, y: rise }}>
       <rect x={x} y={y} width={w} height={h} rx="9" fill="#0f1823" stroke="#2b3b52" />
       <motion.rect x={x} y={y} width={w} height={h} rx="9" fill="none" stroke="#4ade80" strokeWidth="1.8" style={{ opacity: glow }} />
       <text x={side === "l" ? x + 12 : x + w - 12} y={y + 19.5} fontSize={font} textAnchor={side === "l" ? "start" : "end"} fill="#e8edf5" className="mono">
@@ -39,11 +42,12 @@ function Tag({ p, n, x, y, w, font, text, shared, i, side, portrait }: { p: Moti
 function Visual({ labels }: { labels: { boo: string; casper: string; plan: string } }) {
   const { p, n, portrait, camera } = useScene();
   const C = portrait ? P : L;
-  const lines = useStep(p, 1, n, [0.15, 0.6], [0, 1]);
-  const linesFade = useStep(p, 2, n, [0.1, 0.5], [1, 0.15]);
-  const plan = useStep(p, 2, n, [0.2, 0.5], [0, 1]);
-  const planScale = useStep(p, 2, n, [0.2, 0.5], [0.6, 1]);
-  const light = useStep(p, 2, n, [0.2, 0.6], [0.05, 0.16]);
+  const lines = useStep(p, 1, n, [0.18, 0.6], [0, 1], ease.move);
+  const linesFade = useStep(p, 2, n, [0.08, 0.36], [1, 0.15]);
+  // The plan lands once the columns have stepped back, on the enter curve, and holds from .5.
+  const plan = useStep(p, 2, n, [0.24, 0.44], [0, 1]);
+  const planScale = useStep(p, 2, n, [0.24, 0.5], [0.85, 1], ease.enter);
+  const light = useStep(p, 2, n, [0.24, 0.6], [0.05, 0.16]);
   const casperRows = CASPER;
   const booLabelY = C.boo[1] - 14;
   const casperLabelY = C.casper[1] - 14;

@@ -4,6 +4,7 @@ import { useId } from "react";
 import { motion, useTransform, type MotionValue } from "motion/react";
 import { SceneFrame, useScene, type SceneStep } from "@/components/story/SceneFrame";
 import { StaticActors } from "@/components/story/StaticActors";
+import { ease } from "@/lib/motion";
 import { scatter, Stage, useStep } from "./stage";
 
 /**
@@ -91,9 +92,9 @@ const P: Layout = {
 type Kind = "chat" | "bolt" | "file";
 /** One conversation, in step-1 fractions: a message over, sats back, a file over. Never two in flight; the trips fill the step so each one reads at scroll speed. */
 const CONVERSATION: { kind: Kind; dir: 1 | -1; at: [number, number] }[] = [
-  { kind: "chat", dir: 1, at: [0.26, 0.48] },
-  { kind: "bolt", dir: -1, at: [0.52, 0.74] },
-  { kind: "file", dir: 1, at: [0.78, 1] },
+  { kind: "chat", dir: 1, at: [0.26, 0.46] },
+  { kind: "bolt", dir: -1, at: [0.48, 0.68] },
+  { kind: "file", dir: 1, at: [0.7, 0.9] },
 ];
 const COLOR: Record<Kind, string> = { chat: "#22d3ee", bolt: "#fbbf24", file: "#a78bfa" };
 const ICON: Record<Kind, string> = {
@@ -104,7 +105,7 @@ const ICON: Record<Kind, string> = {
 
 /** One item's trip along the pipe: it grows out of one end and shrinks into the other. */
 function Item({ p, n, kind, dir, at, C }: { p: MotionValue<number>; n: number; kind: Kind; dir: 1 | -1; at: [number, number]; C: Layout }) {
-  const t = useStep(p, 1, n, at, [0, 1]);
+  const t = useStep(p, 1, n, at, [0, 1], ease.move);
   const x = useTransform(t, (v) => {
     const f = dir === 1 ? v : 1 - v;
     return C.track[0] + f * (C.track[1] - C.track[0]);
@@ -121,10 +122,10 @@ function Item({ p, n, kind, dir, at, C }: { p: MotionValue<number>; n: number; k
 
 /** STUN finds the route; it never carries the conversation. A mast under the pipe, one ping, helper lines to each device. */
 function Stun({ p, n, C }: { p: MotionValue<number>; n: number; C: Layout }) {
-  const mast = useStep(p, 2, n, [0.1, 0.3], [0, 1]);
+  const mast = useStep(p, 2, n, [0.1, 0.28], [0, 1], ease.enter);
   const rise = useTransform(mast, (v) => (1 - v) * 14);
-  const helpers = useStep(p, 2, n, [0.28, 0.5], [0, 1]);
-  const ping = useStep(p, 2, n, [0.4, 0.82], [0, 1]);
+  const helpers = useStep(p, 2, n, [0.28, 0.46], [0, 1]);
+  const ping = useStep(p, 2, n, [0.46, 0.7], [0, 1], ease.exit);
   const ringScale = useTransform(ping, (v) => 1 + v * C.ping);
   const ringFade = useTransform(ping, (v) => 1 - v);
   const [cx, cy, anchor] = C.stunCaption;
@@ -161,18 +162,18 @@ function Visual({ labels }: { labels: { pipe: string; thread: string } }) {
   );
 
   // s0: the thread draws through the cloud and gets its name; all of it dims when the pipe takes over.
-  const reveal = useStep(p, 0, n, [0.05, 0.45], [0, 1]);
-  const threadOn = useStep(p, 0, n, [0.05, 0.2], [0, 1]);
-  const nameOn = useStep(p, 0, n, [0.35, 0.5], [0, 1]);
-  const dim = useStep(p, 1, n, [0, 0.25], [1, 0.15]);
+  const reveal = useStep(p, 0, n, [0.08, 0.5], [0, 1], ease.move);
+  const threadOn = useStep(p, 0, n, [0.08, 0.2], [0, 1]);
+  const nameOn = useStep(p, 0, n, [0.5, 0.62], [0, 1]);
+  const dim = useStep(p, 1, n, [0, 0.2], [1, 0.15]);
   const threadOpacity = useTransform([threadOn, dim], ([a, b]) => (a as number) * (b as number));
   const nameOpacity = useTransform([nameOn, dim], ([a, b]) => (a as number) * (b as number));
 
   // s1: the pipe draws between the hems, then the conversation plays over it. An undrawn path still
   // shows its round caps as a dot, so the pipe stays invisible until it starts.
   const pipeOn = useStep(p, 1, n, [0.04, 0.07], [0, 1]);
-  const pipe = useStep(p, 1, n, [0.05, 0.24], [0, 1]);
-  const pipeLabelIn = useStep(p, 1, n, [0.18, 0.3], [0, 1]);
+  const pipe = useStep(p, 1, n, [0.05, 0.22], [0, 1], ease.move);
+  const pipeLabelIn = useStep(p, 1, n, [0.16, 0.26], [0, 1]);
   // Portrait lets the label go before the mast rises, so the two never share the spot half-faded.
   const pipeLabelKeep = useStep(p, 2, n, [0, 0.08], [1, C.labelKeep]);
   const pipeLabel = useTransform([pipeLabelIn, pipeLabelKeep], ([a, b]) => (a as number) * (b as number));
@@ -235,5 +236,5 @@ function Visual({ labels }: { labels: { pipe: string; thread: string } }) {
 }
 
 export function AliveScene({ eyebrow, label, steps, labels }: { eyebrow: string; label: string; steps: SceneStep[]; labels: { pipe: string; thread: string } }) {
-  return <SceneFrame id="alive" chapter="alive" eyebrow={eyebrow} label={label} steps={steps} stills={[0.21, 0.614, 0.83]} copyAt="left" length={90} visual={<Visual labels={labels} />} />;
+  return <SceneFrame id="alive" chapter="alive" eyebrow={eyebrow} label={label} steps={steps} stills={[0.22, 0.6, 0.83]} copyAt="left" length={90} visual={<Visual labels={labels} />} />;
 }

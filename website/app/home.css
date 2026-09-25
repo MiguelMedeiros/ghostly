@@ -10,11 +10,13 @@
   padding-block: calc(var(--nav-h) + 24px) 56px;
   overflow: hidden;
 }
+/* The grid holds still: the network field behind the act is the one thing that drifts. */
 .hero-bg {
   position: absolute;
   inset: 0;
   mask-image: radial-gradient(ellipse at 40% 45%, #000 20%, transparent 70%);
   opacity: 0.7;
+  animation: none;
 }
 .hero-light {
   position: absolute;
@@ -37,17 +39,34 @@
   display: grid;
   font-size: clamp(48px, 7.2vw, 118px);
 }
+/* The headline leads (a longer rise), the rest follows as one group (shorter, quicker). */
 .hero-line {
   display: block;
-  animation: hero-rise 0.7s var(--ease) both;
+  animation: hero-rise-lead calc(var(--dur-slow) * 1.25) var(--ease-enter) both;
 }
 .hero-rise {
-  animation: hero-rise 0.7s var(--ease) both;
+  animation: hero-rise var(--dur-slow) var(--ease-enter) both;
+}
+@keyframes hero-rise-lead {
+  from {
+    opacity: 0;
+    transform: translateY(28px);
+  }
 }
 @keyframes hero-rise {
   from {
     opacity: 0;
-    transform: translateY(24px);
+    transform: translateY(14px);
+  }
+}
+/* The cue to follow Boo nudges twice once his line has been read, then rests. */
+.hero-cue {
+  display: inline-block;
+  animation: hero-cue 1.4s var(--ease-move) 2 both;
+}
+@keyframes hero-cue {
+  50% {
+    transform: translateY(4px);
   }
 }
 .hero-lead {
@@ -228,12 +247,12 @@ html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act
 /* ── Reveal ── */
 .reveal[data-reveal="hidden"] {
   opacity: 0;
-  transform: translateY(28px);
+  transform: translateY(20px);
 }
 .reveal[data-reveal="shown"] {
   opacity: 1;
   transform: none;
   transition:
-    opacity 0.9s var(--ease),
-    transform 0.9s var(--ease);
+    opacity var(--dur-slow) var(--ease-enter),
+    transform var(--dur-slow) var(--ease-enter);
 }
