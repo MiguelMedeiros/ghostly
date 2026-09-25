@@ -108,7 +108,7 @@ jobs:
 
       - name: Leave Ghostly's own crates out of the saved dependencies
         id: prune
-        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.target-cache.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.target-cache.outputs.cache-hit != 'true' && ((github.event_name == 'push' && github.ref == 'refs/heads/dev') || github.head_ref == 'mm/ci-speed') }}
         run: |
           rm -rf target/debug/bundle target/debug/incremental
           find target/debug target/debug/deps target/debug/.fingerprint target/debug/build -maxdepth 1 -name '*ghostly*' -exec rm -rf {} +
