@@ -1,11 +1,12 @@
 import {
-  COMMUNITY_LIMITS, COMMUNITY_TOPOLOGY, CommunitySession, GROUP_READ_NOTE_COMMUNITY, KNOCK_TTL_MS, MEMBER_KEY,
-  beaconKeys, beaconRecords, createIdentity, decodeCommunityLink, doorHubs, publicKeyFromZ32, encodeCommunityLink, freshHubs, identityFromSeedB64, knockIdentity, knockRecords, lobbyKeys, lobbyRecords, mergeBeacon,
+  COMMUNITY_LIMITS, COMMUNITY_TOPOLOGY, CommunitySession, GROUP_READ_NOTE_COMMUNITY, KNOCK_TTL_MS, MAX_KNOCKS, MEMBER_KEY,
+  beaconKeys, beaconRecords, createIdentity, decodeCommunityLink, doorHubs, entryParams, publicKeyFromZ32, encodeCommunityLink, freshHubs, identityFromSeedB64, knockIdentity, knockRecords, lobbyKeys, lobbyRecords, mergeBeacon,
   mergeKnocks, mergeLobby, pickHubs, rankHubs, readBeacon, readKnocks, readLobby, rosterHas, shouldBeHub,
   type CommunityFrame, type CommunityState, type GroupEntryLink, type Hub, type Roster,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import type { GroupStore, GroupsHost } from "./groups";
+import { traceJoin } from "./joinTrace";
 
 /** The line a change of a group's picture leaves in its history (both profiles). */
 export const pictureText = (name: string, set: boolean) => `${name} ${set ? "changed" : "removed"} the group's picture`;
@@ -18,11 +19,31 @@ export const pictureText = (name: string, set: boolean) => `${name} ${set ? "cha
  * this class decides which edges exist, who answers knocks and who commits leaves.
  */
 export interface CommunityTimings {
-  /** How often the beacon is read, a hub's lobby polled and knocks looked at. */
+  /**
+   * How often the beacon is read. Not less often: hubs agree on who is at the door from entries
+   * republished in the last 45 s (`doorHubs`), so a reading must never be much older than 10 s. A hub
+   * alone in it has nobody to agree with and reads it only when it republishes (a new hub is not at
+   * the door for its first minute, and is seen long before).
+   */
   beaconReadMs: number;
+  /** A hub polls its lobby every `lobbyPollMs` for `lobbyBusyMs` after someone new asked there, every `lobbyIdlePollMs` otherwise. */
   lobbyPollMs: number;
+  lobbyIdlePollMs: number;
+  lobbyBusyMs: number;
+  /** A member refreshes its request in a hub's lobby this often until the hub opens its edge. */
   lobbyWriteMs: number;
+  /**
+   * The door reads the knock bell every `knockPollMs` (`knockWarmPollMs` for `knockWarmMs` after the
+   * link was shown, `knockBusyPollMs` while it is letting someone in) and one of the other knock
+   * records every `knockShardPollMs`; the other hubs at the door read one record every `otherHubKnockPollMs`.
+   */
   knockPollMs: number;
+  knockWarmPollMs: number;
+  knockWarmMs: number;
+  knockBusyPollMs: number;
+  knockShardPollMs: number;
+  otherHubKnockPollMs: number;
+  /** A joiner refreshes its knock this often, `slowKnockMs` once it has waited `patienceMs`. */
   knockMs: number;
   slowKnockMs: number;
   patienceMs: number;
@@ -36,18 +57,44 @@ export interface CommunityTimings {
   hubJitterMs: number;
   /** A hub that has not opened my edge this long is avoided for a while. */
   hubWaitMs: number;
+  /** A newcomer connects to the member who let it in before it considers being a hub itself. */
+  newcomerMs: number;
 }
+/**
+ * Every periodic read and write here is a background request (`PkarrTransport`): on relays they may
+ * spend 20 of each relay's 30 requests a minute, and spend far less, so that the entry sessions and
+ * edges they lead to (an admission signals two links, about 10 requests on each relay) find the rest.
+ * A lone door spends about 22 a minute on both relays together, 11 on each: the bell 15, the other
+ * knock records 1, its lobby 2, the beacon 6 (republished twice, a read and a write to each relay);
+ * with other hubs, 4 more reads of the beacon; less while it is letting someone in.
+ */
 export const COMMUNITY_TIMINGS: CommunityTimings = {
-  beaconReadMs: 10_000, lobbyPollMs: 3_000, lobbyWriteMs: 5_000, knockPollMs: 1_250, knockMs: 5_000, slowKnockMs: 20_000, patienceMs: 2 * 60_000,
-  idleHubMs: 60_000, memberGoneMs: 60_000, knockFallbackMs: 30_000, hubJitterMs: 3_000, hubWaitMs: 20_000,
+  beaconReadMs: 10_000, lobbyPollMs: 6_000, lobbyIdlePollMs: 30_000, lobbyBusyMs: 60_000, lobbyWriteMs: 20_000,
+  knockPollMs: 4_000, knockWarmPollMs: 2_500, knockWarmMs: 60_000, knockBusyPollMs: 6_000, knockShardPollMs: 60_000, otherHubKnockPollMs: 15_000,
+  knockMs: 10_000, slowKnockMs: 20_000, patienceMs: 2 * 60_000,
+  idleHubMs: 60_000, memberGoneMs: 60_000, knockFallbackMs: 30_000, hubJitterMs: 3_000, hubWaitMs: 20_000, newcomerMs: 30_000,
 };
 
 /**
- * Knocks are spread over a few Pkarr records (a joiner's shard follows from its key), so a crowd
- * opening the link at once is not six at a time; hubs read one shard per knock poll, in turn.
+ * Knocks go to a few Pkarr records: the **bell** (record 0) while it has room, and a joiner's own
+ * record (1 to 3, from its key) when a crowd opening the link at once has filled it. The door reads
+ * the bell often and the others now and then, all of them while the bell is full: one read finds a
+ * knock whenever the crowd is small, and a crowd is not six at a time.
  */
 export const KNOCK_SHARDS = 4;
-const knockShard = (link: GroupEntryLink, key: string): GroupEntryLink => ({ g: `${link.g}.${publicKeyFromZ32(key)[0] % KNOCK_SHARDS}`, host: link.host });
+const KNOCK_BELL = 0;
+const knockRecord = (link: GroupEntryLink, n: number): GroupEntryLink => ({ g: `${link.g}.${n}`, host: link.host });
+const ownKnockRecord = (key: string): number => 1 + publicKeyFromZ32(key)[0] % (KNOCK_SHARDS - 1);
+/** Knocks in the bell that make it full: the next joiner goes to its own record. */
+const BELL_FULL = MAX_KNOCKS - 1;
+/** How long the door reads every knock record after it found the bell full. */
+const CROWD_MS = 2 * 60_000;
+const BEACON_RETRY_MS = 5_000;
+/** An admission's links keep looking fast (see `keepLooking`), renewed this often, an edge for this long. */
+const REARM_MS = 20_000;
+const AWAIT_EDGE_MS = 2 * 60_000;
+/** After letting someone in, the door keeps its reads at the admitting pace this long. */
+const ADMITTED_QUIET_MS = 30_000;
 const MAX_PENDING_ENTRIES = 8;
 const ENTRY_TIMEOUT_MS = 3 * 60_000;
 const ENTRY_UNANSWERED_MS = 90_000;
@@ -65,6 +112,21 @@ const ENTRY_LINGER_MS = 20_000;
 const RELAYED_KEPT = 4096;
 const MESSAGE_LINK = (groupId: string) => `group:${groupId}`;
 
+/**
+ * A member key for a joiner whose entry session the member's side dials. Of a paired session's two
+ * ends only the lower key dials, and only once it has seen the other; the member's side opens when it
+ * sees the knock, and the joiner has been there since it knocked, so the member's side can dial at
+ * once: two trips through Pkarr instead of three (offer, answer), which on public relays is seconds.
+ * The session's keys derive from both ends' keys (`entryParams`), so the joiner draws keys (two on
+ * average) until its end is the higher one.
+ */
+export function dialedKey(link: GroupEntryLink): string {
+  for (let i = 0; ; i++) {
+    const me = createIdentity(), params = entryParams(link, me.seed, me.pubKeyZ32, link.host);
+    if (identityFromSeedB64(params.seedB64).pubKeyZ32 > params.peerPubKeyZ32 || i >= 32) return me.seedB64;
+  }
+}
+
 /** Per group, in memory: the topology as this device sees and plays it. */
 interface Live {
   session: CommunitySession;
@@ -73,6 +135,7 @@ interface Live {
   beacon: Hub[];
   lastBeaconRead: number;
   lastBeaconWrite: number;
+  lastBeaconTry: number;
   hubCandidateAt: number;
   /** As a hub: members I keep edges with → when their edge was last up (or they asked). */
   members: Map<string, number>;
@@ -85,7 +148,23 @@ interface Live {
   /** Joiners with an entry session open: key → since; knocks first seen: key → when, and with which hubs at the door. */
   pendingEntries: Map<string, number>;
   knocksSeen: Map<string, { first: number; doors: string; changed?: boolean }>;
-  knockShard?: number;
+  /** Knock records: every one read at once next time (`knocksScanned` false); the last of the others read, and when; the bell full until. */
+  knocksScanned: boolean;
+  knockCursor: number;
+  lastShardPoll: number;
+  crowdUntil: number;
+  /** The hubs at the door when I last looked, and the link shown until (the door reads faster meanwhile). */
+  doors: string;
+  warmUntil: number;
+  /** My lobby is polled fast until then. */
+  lobbyBusyUntil: number;
+  /** Members whose edge is due any moment (we just met over the admission): opened expecting them, and since when it is awaited. */
+  expect: Set<string>;
+  awaited: Map<string, number>;
+  /** As a newcomer: when I was let in; as a door: when I last let someone in. */
+  joinedAt: number;
+  admittedAt: number;
+  lastRearm: number;
   /** As a member: when I started waiting for each hub, and hubs that did not take me (until when). */
   hubWaits: Map<string, number>;
   hubsAvoided: Map<string, number>;
@@ -109,6 +188,9 @@ export class Communities {
   private readonly lastMessageAt = new Map<string, number>();
   private readonly refused = new Map<string, number>();
   private readonly lastKnock = new Map<string, number>();
+  /** Joiners: groups whose knock is out (published), and the knock record it is in. */
+  private readonly knocked = new Set<string>();
+  private readonly knockAt = new Map<string, number>();
   constructor(private readonly host: GroupsHost, private readonly store: GroupStore, private readonly timings: CommunityTimings = COMMUNITY_TIMINGS, private readonly random: () => number = Math.random) {}
 
   /** Application frames and pair payloads handed to the engine, one after the other per group. */
@@ -170,7 +252,7 @@ export class Communities {
     const joining = group.joining!;
     if (joining.inviter) return "admitted";
     if (this.host.linkReady(joining.linkId, 2) || this.host.linkSeen?.(joining.linkId)) return "answered";
-    return this.lastKnock.has(group.id) ? "knocked" : "knocking";
+    return this.knocked.has(group.id) ? "knocked" : "knocking";
   }
 
   // -- what the person does --------------------------------------------------------------------
@@ -195,17 +277,19 @@ export class Communities {
     if (live && live.session.status === "active") return link.g;
     if (existing?.joining && existing.joining.host === link.host) return link.g;
     if (existing) await this.forget(link.g);
-    await this.startJoining(link, createIdentity().seedB64, this.now());
+    await this.startJoining(link, dialedKey(link), this.now());
     return link.g;
   }
 
   private async startJoining(link: GroupEntryLink, seedB64: string, since: number): Promise<void> {
+    this.lastKnock.delete(link.g); this.knocked.delete(link.g); this.knockAt.delete(link.g);
     const linkId = await this.host.openEntry(link, "guest", seedB64, link.host);
     const group: StoredGroup = this.stored.get(link.g) ?? { id: link.g, createdAt: since };
     group.joining = { g: link.g, host: link.host, seedB64, linkId, name: group.community?.name ?? "", inviter: "", pieces: [], since };
     this.stored.set(link.g, group);
     await this.store.putGroup(group);
     this.host.emit();
+    traceJoin(link.g, "join.start");
     void this.knock(group, since).catch(() => {});
   }
 
@@ -272,6 +356,12 @@ export class Communities {
     const key = await s.replaceLink(off);
     return key ? encodeCommunityLink({ g: groupId, host: key }) : "";
   }
+  /** The link was shown to be handed out: whoever gets it opens it soon, so the door looks for knocks faster a while. */
+  linkShown(groupId: string): void {
+    const live = this.live.get(groupId);
+    if (live) live.warmUntil = this.now() + this.timings.knockWarmMs;
+  }
+
   entryLink(groupId: string): string {
     const s = this.require(groupId);
     return s.entryKey ? encodeCommunityLink({ g: groupId, host: s.entryKey }) : "";
@@ -324,18 +414,32 @@ export class Communities {
 
   private async topology(groupId: string, live: Live, now: number): Promise<void> {
     const s = live.session, me = s.myKey;
+    // Back after a while away (the app was closed or asleep): knocks left meanwhile may be in any record.
+    if (live.lastTick !== undefined && now - live.lastTick > 10_000) live.knocksScanned = false;
     live.lastTick = now;
-    for (const [linkId, until] of live.lingering) if (now >= until) { live.lingering.delete(linkId); if ([...this.host.entries(groupId).values()].includes(linkId)) await this.host.closeEdge(linkId); }
-    if (now - live.lastBeaconRead >= this.timings.beaconReadMs || live.lastBeaconRead === 0) await this.readBeacon(groupId, live, now);
+    // An entry session kept open after the welcome went, until the joiner closes its side (it does on the
+    // welcome) or a while: left open, it would look fast for a joiner that is gone, spending the relays' budget.
+    for (const [linkId, until] of live.lingering) if (now >= until || !this.host.linkReady(linkId, 2)) { live.lingering.delete(linkId); if ([...this.host.entries(groupId).values()].includes(linkId)) await this.host.closeEdge(linkId); }
+    const alone = live.hub && !freshHubs(live.beacon, now).some(h => h.key !== me);
+    if (now - live.lastBeaconRead >= (alone ? COMMUNITY_TOPOLOGY.beaconEveryMs : this.timings.beaconReadMs) || live.lastBeaconRead === 0) await this.readBeacon(groupId, live, now);
     const others = freshHubs(live.beacon, now).filter(h => h.key !== me);
     if (!live.hub) {
-      const want = () => shouldBeHub(me, live.beacon, now) || (!!live.forceHub && freshHubs(live.beacon, now).length < COMMUNITY_TOPOLOGY.maxHubs);
+      // A newcomer first connects to the member who let it in (a hub): only then, or a while after, is it one more.
+      const settled = () => now - live.joinedAt >= this.timings.newcomerMs || !freshHubs(live.beacon, now).some(h => h.key !== me);
+      const want = () => settled() && (shouldBeHub(me, live.beacon, now) || (!!live.forceHub && freshHubs(live.beacon, now).length < COMMUNITY_TOPOLOGY.maxHubs));
       if (want()) {
-        if (!live.hubCandidateAt) live.hubCandidateAt = now + Math.floor(this.random() * this.timings.hubJitterMs);
-        else if (now >= live.hubCandidateAt) {
+        // With no hub at all there is nobody to agree with: at once (another member doing the same is one
+        // more hub, which steps down when idle). Otherwise a random wait, so a crowd does not all step up.
+        if (!live.hubCandidateAt) live.hubCandidateAt = now + (freshHubs(live.beacon, now).length ? Math.floor(this.random() * this.timings.hubJitterMs) : 0);
+        if (now >= live.hubCandidateAt) {
           live.hubCandidateAt = 0;
-          await this.readBeacon(groupId, live, now);
-          if (want()) { live.forceHub = false; live.hub = true; live.hubSince = now; live.emptySince = now; await this.publishBeacon(groupId, live, now, true); }
+          if (live.lastBeaconRead !== now) await this.readBeacon(groupId, live, now);
+          if (want()) {
+            live.forceHub = false; live.hub = true; live.hubSince = now; live.emptySince = now;
+            live.knocksScanned = false;
+            await this.publishBeacon(groupId, live, now, true);
+            traceJoin(groupId, "hub.elected");
+          }
         }
       } else live.hubCandidateAt = 0;
     }
@@ -351,6 +455,8 @@ export class Communities {
         // No longer at the door: admissions in flight are closed, so they do not collide with the next door's.
         await this.closeEntries(groupId);
         await this.publishBeacon(groupId, live, now, false);
+      } else if (now - live.lastBeaconTry < BEACON_RETRY_MS) {
+        // A publish that just failed (the relays' budget, say) is tried again in a moment, not every tick.
       } else if (now - live.lastBeaconWrite >= COMMUNITY_TOPOLOGY.beaconEveryMs || !live.beacon.some(h => h.key === me)
         // A load that moved much (or filled up) is said at once, so members stop asking a full hub.
         || (now - live.lastBeaconWrite >= 5_000 && Math.abs(load - (live.beacon.find(h => h.key === me)?.load ?? load)) >= 8)) {
@@ -358,8 +464,11 @@ export class Communities {
       }
     }
     if (live.hub) {
-      if (now - live.lastLobbyPoll >= this.timings.lobbyPollMs) { live.lastLobbyPoll = now; await this.pollLobby(groupId, live, now); }
-      if (now - live.lastKnockPoll >= this.timings.knockPollMs) { live.lastKnockPoll = now; await this.answerKnocks(groupId, live, now); }
+      // Letting someone in: the budget goes to that session first, the lobby waits.
+      const busy = this.admitting(groupId, live, now);
+      const lobbyEvery = now < live.lobbyBusyUntil && !busy ? this.timings.lobbyPollMs : this.timings.lobbyIdlePollMs;
+      if (now - live.lastLobbyPoll >= lobbyEvery) { live.lastLobbyPoll = now; await this.pollLobby(groupId, live, now); }
+      await this.answerKnocks(groupId, live, now, busy);
       await this.commitLeaves(live, others.map(h => h.key), now);
     } else {
       // A member: stick with hubs that are up and listed, fill up with the least loaded.
@@ -389,6 +498,7 @@ export class Communities {
         if (now - (live.lobbyWrites.get(hub) ?? 0) >= this.timings.lobbyWriteMs) { live.lobbyWrites.set(hub, now); await this.askHub(groupId, live, hub, now).catch(() => {}); }
       }
     }
+    await this.keepLooking(groupId, live, now);
     for (const [key, since] of live.pendingEntries) {
       const linkId = this.host.entries(groupId).get(key), up = !!linkId && this.host.linkReady(linkId, 2);
       // Nobody came (the joiner got in elsewhere, or left): dropped. Came and did not finish: not answered for a while.
@@ -408,6 +518,28 @@ export class Communities {
     await this.reconcile(groupId, live, now);
   }
 
+  /**
+   * The links of an admission look fast for the other side (`expectPeer`) for half a minute from when
+   * they open. When the relays' budget is short (a second admission in the same minute), their polls
+   * wait for it, and the half minute can run out first: they would then look only every half minute,
+   * and a join would take a minute more. So each keeps looking fast until it is up, for a while:
+   * a poll the budget refuses costs nothing.
+   */
+  private async keepLooking(groupId: string, live: Live, now: number): Promise<void> {
+    if (!this.host.expectPeer || now - live.lastRearm < REARM_MS) return;
+    live.lastRearm = now;
+    const edges = this.host.edges(groupId), entries = this.host.entries(groupId);
+    for (const [key, since] of live.awaited) {
+      const id = edges.get(key);
+      if (!id || this.host.linkReady(id, 2) || now - since > AWAIT_EDGE_MS) live.awaited.delete(key);
+      else this.host.expectPeer(id);
+    }
+    for (const [key] of live.pendingEntries) {
+      const id = entries.get(key);
+      if (id && !this.host.linkReady(id, 2)) this.host.expectPeer(id);
+    }
+  }
+
   private hubLoad(groupId: string, live: Live, now: number): number {
     const edges = this.host.edges(groupId);
     for (const [key, since] of live.members) {
@@ -421,18 +553,20 @@ export class Communities {
   private async readBeacon(groupId: string, live: Live, now: number): Promise<void> {
     live.lastBeaconRead = now;
     const keys = beaconKeys(live.session.state.rv, groupId);
-    const records = await this.host.resolve(keys.identity.pubKeyZ32).catch(() => null);
+    const records = await this.host.resolve(keys.identity.pubKeyZ32, true).catch(() => null);
     // Hubs I do not know yet are members newer than my view of the roster: exactly whom I need to catch up.
     live.beacon = readBeacon(keys, records ?? []);
     this.noteHubs(live, now);
   }
 
   private async publishBeacon(groupId: string, live: Live, now: number, listed: boolean): Promise<void> {
+    live.lastBeaconTry = now;
     const keys = beaconKeys(live.session.state.rv, groupId);
-    const existing = readBeacon(keys, (await this.host.resolve(keys.identity.pubKeyZ32).catch(() => null)) ?? []);
+    // Read this very tick already: what it said is what there is to merge with.
+    const existing = live.lastBeaconRead === now ? live.beacon : readBeacon(keys, (await this.host.resolve(keys.identity.pubKeyZ32, true).catch(() => null)) ?? []);
     // Nobody drops a hub it does not know: a member behind on the roster would erase newer ones.
     const hubs = mergeBeacon(existing, live.session.myKey, listed ? { key: live.session.myKey, ts: now, load: live.members.size, since: live.hubSince || now } : null, now, key => !live.session.wasRemoved(key));
-    await this.host.publish(keys.identity, beaconRecords(keys, hubs));
+    await this.host.publish(keys.identity, beaconRecords(keys, hubs), true);
     live.beacon = hubs;
     this.noteHubs(live, now);
     live.lastBeaconWrite = now; live.lastBeaconRead = now;
@@ -447,13 +581,14 @@ export class Communities {
   /** A member asks a hub for an edge: its key in the hub's lobby, and its side of the edge started. */
   private async askHub(groupId: string, live: Live, hub: string, now: number): Promise<void> {
     const keys = lobbyKeys(live.session.state.rv, groupId, hub);
-    const existing = readLobby(keys, (await this.host.resolve(keys.identity.pubKeyZ32)) ?? []);
-    await this.host.publish(keys.identity, lobbyRecords(keys, mergeLobby(existing, { key: live.session.myKey, ts: now }, now)));
+    const existing = readLobby(keys, (await this.host.resolve(keys.identity.pubKeyZ32, true)) ?? []);
+    await this.host.publish(keys.identity, lobbyRecords(keys, mergeLobby(existing, { key: live.session.myKey, ts: now }, now)), true);
+    traceJoin(groupId, "lobby.written");
   }
 
   private async pollLobby(groupId: string, live: Live, now: number): Promise<void> {
     const keys = lobbyKeys(live.session.state.rv, groupId, live.session.myKey);
-    const entries = readLobby(keys, (await this.host.resolve(keys.identity.pubKeyZ32).catch(() => null)) ?? []);
+    const entries = readLobby(keys, (await this.host.resolve(keys.identity.pubKeyZ32, true).catch(() => null)) ?? []);
     for (const { key, ts } of entries) {
       // Anyone the chain did not take out: a member whose admission lost a race, or who is ahead of me on the
       // roster, needs the edge to find out. The session hands nothing to someone who is not a member.
@@ -461,6 +596,7 @@ export class Communities {
       // Someone is asking: not the moment to step down.
       live.emptySince = now;
       if (!live.members.has(key) && live.members.size >= COMMUNITY_TOPOLOGY.hubCapacity) continue;
+      if (!live.members.has(key)) { traceJoin(groupId, "lobby.seen", { age: now - ts }); live.lobbyBusyUntil = now + this.timings.lobbyBusyMs; }
       live.members.set(key, Math.max(live.members.get(key) ?? 0, now));
     }
   }
@@ -479,20 +615,73 @@ export class Communities {
       for (const [key, id] of existing) if (this.host.linkReady(id, 2) && (live.members.has(key) || this.recentHub(live, key))) wanted.add(key);
     }
     for (const [key, id] of existing) if (!wanted.has(key)) await this.host.closeEdge(id);
-    for (const key of wanted) if (!existing.has(key) && key !== s.myKey) { try { await this.host.openEdge(s.state, key); } catch { /* next tick */ } }
+    for (const key of wanted) if (!existing.has(key) && key !== s.myKey) {
+      const expect = live.expect.delete(key);
+      try { await this.host.openEdge(s.state, key, expect); if (expect) live.awaited.set(key, now); } catch { /* next tick */ }
+    }
   }
 
-  private async answerKnocks(groupId: string, live: Live, now: number): Promise<void> {
+  /**
+   * Letting someone in: an entry session of mine, or the edge to someone I just let in, is not up yet,
+   * or was a moment ago. The two links of an admission spend a good part of the minute's relay budget
+   * signaling; the reads that can wait leave them the rest a while.
+   */
+  private admitting(groupId: string, live: Live, now: number): boolean {
+    const entries = this.host.entries(groupId), edges = this.host.edges(groupId);
+    const down = (id: string | undefined) => !id || !this.host.linkReady(id, 2);
+    return now - live.admittedAt < ADMITTED_QUIET_MS || [...live.pendingEntries.keys()].some(key => down(entries.get(key))) || [...live.expect].some(key => down(edges.get(key)));
+  }
+
+  /**
+   * Which knock records to read now (none, most of the time): every one at once the first time
+   * (a hub just elected, an app back, a change of door), since a knock left while nobody was at the
+   * door may be in any; then the door the bell, and the others in turn; the other hubs one in turn, slowly.
+   */
+  private knockRecordsToRead(live: Live, door: boolean, busy: boolean, now: number): number[] {
+    // (While letting someone in, the link was just shown or members ask in my lobby, the other records wait.)
+    if (!live.knocksScanned) {
+      live.knocksScanned = true;
+      live.lastKnockPoll = live.lastShardPoll = now;
+      // Someone may be knocking this very moment (told to wait for a member's app): the bell faster a little while.
+      if (door) live.warmUntil = Math.max(live.warmUntil, now + this.timings.knockWarmMs / 3);
+      return Array.from({ length: KNOCK_SHARDS }, (_, n) => n);
+    }
+    const crowd = now < live.crowdUntil;
+    const every = !door ? this.timings.otherHubKnockPollMs : busy && !crowd ? this.timings.knockBusyPollMs
+      : now < live.warmUntil ? this.timings.knockWarmPollMs : this.timings.knockPollMs;
+    if (now - live.lastKnockPoll < every) return [];
+    live.lastKnockPoll = now;
+    if (!door) return [live.knockCursor = (live.knockCursor + 1) % KNOCK_SHARDS];
+    // The link was just shown: one or two people open it, and they knock in the bell (the rest waits a little).
+    if (!crowd && (now - live.lastShardPoll < this.timings.knockShardPollMs || busy || now < live.warmUntil || now < live.lobbyBusyUntil)) return [KNOCK_BELL];
+    live.lastShardPoll = now;
+    live.knockCursor = live.knockCursor % (KNOCK_SHARDS - 1) + 1;
+    return [KNOCK_BELL, live.knockCursor];
+  }
+
+  private async answerKnocks(groupId: string, live: Live, now: number, busy: boolean): Promise<void> {
     const s = live.session;
     if (!s.entryKey || !s.state.entry.seedB64 || s.roster.length >= COMMUNITY_LIMITS.members) return;
     const link = { g: groupId, host: s.entryKey };
-    const shard = { g: `${groupId}.${(live.knockShard = ((live.knockShard ?? -1) + 1) % KNOCK_SHARDS)}`, host: link.host };
-    const knocks = readKnocks(shard, (await this.host.resolve(knockIdentity(shard).pubKeyZ32).catch(() => null)) ?? []);
     // The hubs that take turns at the door: listed lately and settled, the same set for every hub that
     // reads the beacon (a closed app stays listed until its entry goes stale; a new hub waits a minute).
     const hubs = doorHubs(live.beacon, now);
     if (!hubs.includes(s.myKey)) return;
-    const door = [...hubs].sort()[0];
+    const door = [...hubs].sort()[0], doorSig = [...hubs].sort().join(",");
+    // Just became the door (the one before went): whatever knocked meanwhile, in any record.
+    if (live.doors !== doorSig) { if (door === s.myKey && live.doors) live.knocksScanned = false; live.doors = doorSig; }
+    const records = this.knockRecordsToRead(live, door === s.myKey, busy, now);
+    if (!records.length) return;
+    const read = await Promise.all(records.map(async n => {
+      const record = knockRecord(link, n);
+      return readKnocks(record, (await this.host.resolve(knockIdentity(record).pubKeyZ32, true).catch(() => null)) ?? []);
+    }));
+    const bell = records.indexOf(KNOCK_BELL);
+    if (bell >= 0 && read[bell].filter(k => now - k.ts < KNOCK_TTL_MS).length >= BELL_FULL) live.crowdUntil = now + CROWD_MS;
+    // A joiner that moved from the bell to its own record is in both for a while: its newest knock counts.
+    const newest = new Map<string, number>();
+    for (const { key, ts } of read.flat()) newest.set(key, Math.max(ts, newest.get(key) ?? 0));
+    const knocks = [...newest].map(([key, ts]) => ({ key, ts }));
     for (const { key, ts } of knocks) {
       if (now - ts > KNOCK_TTL_MS || this.refused.has(key) || live.pendingEntries.has(key) || key === link.host) continue;
       // Still knocking means still waiting: a joiner stops once its entry session is up. Only those count
@@ -504,7 +693,7 @@ export class Communities {
       }
       // Turns count from when this knock was first seen with the current set of hubs at the door: when
       // that set changes (the door's app closed), the new door answers at once instead of waiting a turn.
-      const doorSig = [...hubs].sort().join(","), seen = live.knocksSeen.get(key);
+      const seen = live.knocksSeen.get(key);
       const changed = !!seen && seen.doors !== doorSig;
       const first = seen && !changed ? seen.first : now;
       live.knocksSeen.set(key, { first, doors: doorSig, changed: changed || !!seen?.changed });
@@ -522,6 +711,7 @@ export class Communities {
       if (order[turn] !== s.myKey || !early || (waited >= KNOCK_SLOT_MS && !stillKnocking)) continue;
       if (live.pendingEntries.size >= MAX_PENDING_ENTRIES) break;
       live.pendingEntries.set(key, now);
+      traceJoin(groupId, "knock.seen", { age: now - ts, turn });
       try { await this.host.openEntry(link, "host", s.state.entry.seedB64, key); } catch { live.pendingEntries.delete(key); }
     }
     for (const [key, { first }] of live.knocksSeen) if (now - first > 2 * KNOCK_TTL_MS) live.knocksSeen.delete(key);
@@ -536,13 +726,25 @@ export class Communities {
     if (mine || now - since > this.timings.knockFallbackMs) { await s.commitPendingLeaves(now); (live as Live & { leavesSince?: number }).leavesSince = undefined; }
   }
 
+  /**
+   * Leaves (or refreshes) my knock: in the bell while it has room, in my own record once a crowd has
+   * filled it. The first one goes out at once; refreshes are background requests, and keep my side of
+   * the entry session looking fast while I still expect a member to answer soon.
+   */
   private async knock(group: StoredGroup, now = this.now()): Promise<void> {
     const joining = group.joining!;
+    const first = !this.lastKnock.has(group.id);
     this.lastKnock.set(group.id, now);
-    const me = identityFromSeedB64(joining.seedB64).pubKeyZ32;
-    const link = knockShard({ g: group.id, host: joining.host }, me), identity = knockIdentity(link);
-    const existing = readKnocks(link, (await this.host.resolve(identity.pubKeyZ32)) ?? []);
-    await this.host.publish(identity, knockRecords(link, mergeKnocks(existing, { key: me, ts: now }, now)));
+    if (!first && now - joining.since < this.timings.patienceMs) this.host.expectPeer?.(joining.linkId);
+    const me = identityFromSeedB64(joining.seedB64).pubKeyZ32, link = { g: group.id, host: joining.host };
+    const started = Date.now();
+    const read = async (n: number) => { const record = knockRecord(link, n); return { record, knocks: readKnocks(record, (await this.host.resolve(knockIdentity(record).pubKeyZ32, !first)) ?? []) }; };
+    let n = this.knockAt.get(group.id) ?? KNOCK_BELL, { record, knocks } = await read(n);
+    if (n === KNOCK_BELL && !knocks.some(k => k.key === me) && knocks.filter(k => k.key !== me && now - k.ts < KNOCK_TTL_MS).length >= BELL_FULL) ({ record, knocks } = await read(n = ownKnockRecord(me)));
+    await this.host.publish(knockIdentity(record), knockRecords(record, mergeKnocks(knocks, { key: me, ts: now }, now)), !first);
+    this.knockAt.set(group.id, n);
+    traceJoin(group.id, "knock.published", { ms: Date.now() - started, record: n });
+    if (!this.knocked.has(group.id)) { this.knocked.add(group.id); this.host.emit(); }
   }
 
   private async closeEntries(groupId: string): Promise<void> {
@@ -557,7 +759,7 @@ export class Communities {
   entryReady(groupId: string, linkId: string, peer: string): boolean {
     const live = this.live.get(groupId);
     if (!live?.pendingEntries.has(peer) || !live.session.isMember) return false;
-    try { this.host.sendOnLink(linkId, live.session.inviteFrame()); } catch { /* it closed */ }
+    try { this.host.sendOnLink(linkId, live.session.inviteFrame()); traceJoin(groupId, "invite.sent"); } catch { /* it closed */ }
     return true;
   }
 
@@ -576,6 +778,7 @@ export class Communities {
         joining.inviter = frame.admin;
         joining.name = typeof frame.name === "string" ? frame.name.slice(0, 48) : joining.name;
         joining.pieces = [];
+        traceJoin(g, "invite.received");
         await this.store.putGroup(group);
         this.host.sendOnLink(linkId, { t: "group-accept", v: 2, g, key: identityFromSeedB64(joining.seedB64).pubKeyZ32 });
         this.host.emit();
@@ -587,12 +790,20 @@ export class Communities {
         if (!live || !peer || frame.key !== peer || !live.pendingEntries.has(peer)) return;
         let welcome;
         // Already in the roster (their welcome was lost): the welcome again, with nothing committed.
-        try { welcome = rosterHas(live.session.roster, peer) ? await live.session.rewelcome(peer) : await live.session.admit(peer); }
+        try { welcome = rosterHas(live.session.roster, peer) ? await live.session.rewelcome(peer) : await live.session.admit(peer, this.now()); }
         catch { live.pendingEntries.delete(peer); await this.host.closeEdge(linkId); return; }
         for (const piece of welcome) { try { this.host.sendOnLink(linkId, piece); } catch { /* the joiner knocks again */ } }
+        traceJoin(g, "welcome.sent");
         live.pendingEntries.delete(peer);
         live.knocksSeen.delete(peer);
         live.lingering.set(linkId, this.now() + ENTRY_LINGER_MS);
+        live.admittedAt = this.now();
+        // Its first hub is me (it knows): its edge at once, both sides looking fast, no lobby in between.
+        if (live.hub && (live.members.has(peer) || live.members.size < COMMUNITY_TOPOLOGY.hubCapacity)) {
+          live.members.set(peer, this.now());
+          if (!this.host.edges(g).has(peer)) live.expect.add(peer);
+          await this.reconcile(g, live, this.now());
+        }
         this.host.emit();
         return;
       }
@@ -608,6 +819,7 @@ export class Communities {
         if (!joining || joining.linkId !== linkId || !joining.inviter) return;
         const joined = CommunitySession.join({ g, host: joining.host }, joining.pieces, frame, joining.seedB64);
         if ("error" in joined) { joining.pieces = []; return; }
+        traceJoin(g, "welcome.received");
         const again = !!this.live.get(g);
         // Whatever entry sessions this device still ran for the group (as a door before it lost its place) go.
         for (const [, id] of this.host.entries(g)) if (id !== linkId) await this.host.closeEdge(id);
@@ -615,14 +827,21 @@ export class Communities {
         this.stored.set(g, member);
         this.live.delete(g);
         this.attach(joined.state);
-        // The member who let me in is a hub and its app is open: my first hub.
-        const live = this.live.get(g)!;
+        // The member who let me in is a hub and its app is open: my first hub, which is opening our edge
+        // now too (no lobby needed, both sides look fast); the lobby only if that edge is not up in a while.
+        const live = this.live.get(g)!, now = this.now();
         live.myHubs = [joining.inviter];
-        live.seenHubs.set(joining.inviter, this.now());
+        live.seenHubs.set(joining.inviter, now);
+        live.expect.add(joining.inviter);
+        live.lobbyWrites.set(joining.inviter, now);
+        live.joinedAt = now;
         await this.store.putGroup(member);
-        if (!again) await this.event(g, "joined", `You joined. ${GROUP_READ_NOTE_COMMUNITY}`, this.now(), joined.state.chain.length - 1);
+        if (!again) await this.event(g, "joined", `You joined. ${GROUP_READ_NOTE_COMMUNITY}`, now, joined.state.chain.length - 1);
         this.lastKnock.delete(g);
+        this.knocked.delete(g);
+        this.knockAt.delete(g);
         await this.host.closeEdge(linkId);
+        await this.reconcile(g, live, now);
         this.host.emit();
         return;
       }
@@ -721,9 +940,10 @@ export class Communities {
       clock: () => this.now(),
       relay: frame => { if (this.live.get(id)?.hub) for (const linkId of this.host.edges(id).values()) this.sendTo(linkId, frame); },
     });
-    this.live.set(id, { session, hub: false, hubSince: 0, beacon: [], lastBeaconRead: 0, lastBeaconWrite: 0, hubCandidateAt: 0, members: new Map(), emptySince: 0,
+    this.live.set(id, { session, hub: false, hubSince: 0, beacon: [], lastBeaconRead: 0, lastBeaconWrite: 0, lastBeaconTry: 0, hubCandidateAt: 0, members: new Map(), emptySince: 0,
       lastLobbyPoll: 0, myHubs: [], lobbyWrites: new Map(), lastKnockPoll: 0, pendingEntries: new Map(), knocksSeen: new Map(),
       hubWaits: new Map(), hubsAvoided: new Map(), hubsUp: new Set(), lingering: new Map(), seenHubs: new Map(),
+      knocksScanned: false, knockCursor: 0, lastShardPoll: 0, crowdUntil: 0, doors: "", warmUntil: 0, lobbyBusyUntil: 0, expect: new Set(), awaited: new Map(), joinedAt: 0, admittedAt: 0, lastRearm: 0,
       lastRoster: session.roster, lastStatus: session.status, relayed: new Set() });
   }
 

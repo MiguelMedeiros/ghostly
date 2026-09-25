@@ -55,6 +55,8 @@ describe("Sidebar: groups in the chat list", () => {
     ["an accepted invitation", invitation({ accepted: true }), "Joining…"],
     ["a link waiting for the admin", invitation({ accepted: true, viaLink: true, admin: "" }), "Waiting for the admin's app…"],
     ["a link the admin answered", invitation({ accepted: true, viaLink: true }), "Joining…"],
+    ["a community's link, knocked", { ...invitation({ accepted: true, viaLink: true, admin: "", stage: "knocked" }), profile: "community" as const }, "Waiting to be let in…"],
+    ["a community's link a member answers", { ...invitation({ accepted: true, viaLink: true, admin: "", stage: "answered" }), profile: "community" as const }, "A member is letting you in…"],
   ])("says it is joining for %s, with nothing to answer", (_, group, status) => {
     sidebar([group]);
     expect(row()).toHaveTextContent(status);

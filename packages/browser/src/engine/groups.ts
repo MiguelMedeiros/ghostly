@@ -35,9 +35,14 @@ export interface GroupsHost {
   entries(groupId: string): Map<string, string>;
   /** The other end of this link is here (its packet is fresh), or a connection with it is under way. */
   linkSeen?(linkId: string): boolean;
-  /** Pkarr, for the knocks under a link's knock identity. */
-  publish(identity: Identity, records: GhostRecord[]): Promise<void>;
-  resolve(pubKeyZ32: string): Promise<GhostRecord[] | null>;
+  /**
+   * Pkarr, for the knocks under a link's knock identity (and a community's beacon and lobbies).
+   * `background`: a periodic look that can wait, spending only part of the relays' budget.
+   */
+  publish(identity: Identity, records: GhostRecord[], background?: boolean): Promise<void>;
+  resolve(pubKeyZ32: string, background?: boolean): Promise<GhostRecord[] | null>;
+  /** The other end of this link is due any moment: look fast for it a while (`LinkSession.expectPeer`). */
+  expectPeer?(linkId: string): void;
   storeMessage(message: StoredMessage): Promise<void>;
   emit(): void;
   /** My name, for community groups, where it travels (encrypted) with my messages. */
@@ -105,8 +110,8 @@ export class Groups {
   /** Community groups (`group-community/1`) live in their own engine; this class routes to it. */
   readonly communities: Communities;
 
-  constructor(private readonly host: GroupsHost, private readonly store: GroupStore = db, private readonly timings: EntryTimings = ENTRY_TIMINGS, communityTimings: CommunityTimings = COMMUNITY_TIMINGS) {
-    this.communities = new Communities(host, store, communityTimings);
+  constructor(private readonly host: GroupsHost, private readonly store: GroupStore = db, private readonly timings: EntryTimings = ENTRY_TIMINGS, communityTimings: CommunityTimings = COMMUNITY_TIMINGS, random?: () => number) {
+    this.communities = new Communities(host, store, communityTimings, random);
   }
 
   async load(): Promise<void> {
@@ -316,7 +321,10 @@ export class Groups {
   async enableLink(groupId: string, reset = false): Promise<string> {
     if (this.isCommunity(groupId)) {
       const current = this.communities.entryLink(groupId);
-      return current && !reset ? current : this.communities.replaceLink(groupId);
+      const link = current && !reset ? current : await this.communities.replaceLink(groupId);
+      // Asked for the link: it is being handed out, and whoever gets it opens it soon.
+      this.communities.linkShown(groupId);
+      return link;
     }
     const session = this.session(groupId);
     if (!session.isAdmin) throw new Error("Only the admin can share a link to the group");

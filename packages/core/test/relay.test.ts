@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { RelayTransport, createIdentity, createRelayPayload } from "../src";
+import { BACKGROUND_REQUESTS_PER_MINUTE, REQUESTS_PER_MINUTE, RelayTransport, createIdentity, createRelayPayload } from "../src";
 // covers: core.relay-client
 
 describe("relay transport", () => {
@@ -78,6 +78,38 @@ describe("relay transport under pressure", () => {
     const relay = new RelayTransport({ relays: ["https://a.test"], fetch: fetchFn });
     for (let i = 0; i < 100; i++) expect((await relay.resolve(id.pubKeyZ32))?.timestampMicros).toBe(3n);
     expect(requests).toBe(30);
+  });
+
+  it("spends only part of the budget on background requests, keeping the rest for the links", async () => {
+    let requests = 0;
+    const fetchFn = (async (_: RequestInfo | URL, init?: RequestInit) => {
+      requests++;
+      return init?.method === "PUT" ? new Response(null, { status: 204 }) : new Response(createRelayPayload(id, [{ label: "_ts", value: "1" }], 3n) as BodyInit);
+    }) as typeof fetch;
+    const relay = new RelayTransport({ relays: ["https://a.test"], fetch: fetchFn });
+    // A hub's periodic looks run out at the background share, reads and writes alike…
+    for (let i = 0; i < BACKGROUND_REQUESTS_PER_MINUTE; i++) await relay.resolve(id.pubKeyZ32, { background: true });
+    await expect(relay.publish(id, [{ label: "_ts", value: "2" }], { background: true })).rejects.toThrow("budget");
+    // …and a background read with nothing known yet says so, rather than answering from nothing.
+    await expect(relay.resolve(createIdentity().pubKeyZ32, { background: true })).rejects.toThrow("No Pkarr relay reachable");
+    expect(requests).toBe(BACKGROUND_REQUESTS_PER_MINUTE);
+    // …while a link's signaling still has the rest.
+    for (let i = BACKGROUND_REQUESTS_PER_MINUTE; i < REQUESTS_PER_MINUTE; i++) await relay.resolve(id.pubKeyZ32);
+    expect(requests).toBe(REQUESTS_PER_MINUTE);
+    await relay.resolve(id.pubKeyZ32);
+    expect(requests).toBe(REQUESTS_PER_MINUTE);
+  });
+
+  it("counts background requests on their own: a burst of signaling does not hold them back afterwards", async () => {
+    let requests = 0;
+    const relay = new RelayTransport({ relays: ["https://a.test"], fetch: (async () => {
+      requests++; return new Response(createRelayPayload(id, [{ label: "_ts", value: "1" }], 3n) as BodyInit);
+    }) as typeof fetch });
+    // A link's signaling spent most of the minute…
+    for (let i = 0; i < REQUESTS_PER_MINUTE - 5; i++) await relay.resolve(id.pubKeyZ32);
+    // …the background still has what is left of the whole, not nothing.
+    for (let i = 0; i < 10; i++) await relay.resolve(id.pubKeyZ32, { background: true });
+    expect(requests).toBe(REQUESTS_PER_MINUTE);
   });
 });
 

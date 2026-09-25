@@ -44,20 +44,26 @@ function eventText(message: StoredMessage, group: GroupView): string {
   return message.text;
 }
 
-/** A join through a link, step by step: what the joiner's app knows so far, never more. In a community any member's app answers. */
-const joinSteps = (community: boolean): { stage: GroupJoinStage; label: string }[] => [
-  { stage: "knocked", label: community ? "Knock left for the group" : "Knock left for the admin's app" },
-  { stage: "answered", label: community ? "A member's app answered" : "The admin's app answered" },
+/**
+ * A join through a link, step by step: what the joiner's app knows so far, never more. In a community
+ * any member's app answers. The last step ("in", connecting to the members) starts once let in; this
+ * screen gives way to the chat when it does, with a notice until someone is reached.
+ */
+type JoinStep = GroupJoinStage | "in";
+const joinSteps = (community: boolean): { stage: JoinStep; label: string }[] => [
+  { stage: "knocked", label: community ? "Knock sent to the group" : "Knock left for the admin's app" },
+  { stage: "answered", label: community ? "A member's app is answering" : "The admin's app answered" },
   { stage: "admitted", label: "Let in: getting the group's keys" },
+  { stage: "in", label: community ? "Connecting to the group" : "Connecting to the members" },
 ];
 /** How long after joining a group with nobody reached yet says it is still connecting (later, they are simply away). */
 const JUST_JOINED_MS = 5 * 60_000;
-const JOIN_ORDER: GroupJoinStage[] = ["knocking", "knocked", "answered", "admitted"];
+const JOIN_ORDER: JoinStep[] = ["knocking", "knocked", "answered", "admitted", "in"];
 
 function joiningText(stage: GroupJoinStage, name: string, community: boolean): { title: string; body: string } {
   const who = community ? "A member's app" : "The admin's app";
   if (stage === "admitted") return { title: `Joining ${name || "the group"}…`, body: `${who} answered: getting the group's keys. You are in in a moment.` };
-  if (stage === "answered") return { title: "Waiting to be let in", body: `${who} saw you knock and is connecting to you. You are in in a moment.` };
+  if (stage === "answered") return { title: community ? "A member is letting you in" : "Waiting to be let in", body: `${who} saw you knock and is connecting to you. You are in in a moment.` };
   if (stage === "knocked") return { title: "Waiting to be let in", body: community
     ? "Waiting for someone in the group to let you in. It happens on its own as soon as any member's app is open: you can leave this page and come back."
     : "Waiting for the admin's app to let you in. It happens on its own as soon as their app is open: you can leave this page and come back." };
@@ -136,8 +142,10 @@ export function GroupChat() {
   const canShare = group.status === "active" && (group.isAdmin || (group.profile === "community" && !!group.entryLink));
   const openShare = async () => {
     setError("");
-    // The link may be off: sharing it turns it on.
-    if (!group.entryLink) { try { await engine.call("enableGroupLink", { groupId }); } catch (e) { setError(e instanceof Error ? e.message : "Could not turn the link on"); return; } }
+    // The link may be off: sharing it turns it on. On or not, the engine hears it is being handed out
+    // (whoever gets it opens it soon, so this app looks for knocks faster a while).
+    try { await engine.call("enableGroupLink", { groupId }); }
+    catch (e) { if (!group.entryLink) { setError(e instanceof Error ? e.message : "Could not turn the link on"); return; } }
     setSharing("share");
   };
   const act = async (action: () => Promise<unknown>) => {
@@ -183,7 +191,7 @@ export function GroupChat() {
       </div>
 
       {connecting && !error && <div role="status" data-testid="group-connecting" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
-        You are in. Connecting to the members: messages go out as soon as one of them is reached.
+        {community ? "You are in. Connecting to the group: messages go out as soon as a member's app is reached." : "You are in. Connecting to the members: messages go out as soon as one of them is reached."}
       </div>}
       {(error || (group.status && group.status !== "active")) && <div role="status" data-testid="group-notice" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
         {error || group.statusReason}

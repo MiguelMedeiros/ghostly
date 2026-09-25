@@ -4,17 +4,23 @@ import { expect, test, type Peer } from "../support/fixtures";
 
 /**
  * A measurement, not a check: how long a join through a group's link takes, step by step, with the
- * admin's app open. Skipped unless `E2E_JOIN_RUNS` says how many joins to time; `E2E_REAL_RELAYS=1`
+ * admin's app open (`E2E_JOIN_KIND`, `E2E_JOIN_WARM_MS`). Skipped unless `E2E_JOIN_RUNS` says how many joins to time; `E2E_REAL_RELAYS=1`
  * sends both peers to the public Pkarr relays instead of the test's own. The engine prints one line
  * per step when the page sets `__ghostlyJoinTrace` (`packages/browser/src/engine/joinTrace.ts`);
  * every run is appended to `test-results/group-join-timing.jsonl` (or `E2E_JOIN_OUT`) and the distribution printed.
  */
 const RUNS = Number(process.env.E2E_JOIN_RUNS ?? 0);
 const REAL = process.env.E2E_REAL_RELAYS === "1";
+/** `community` (the default kind of New group) or `mesh` (a private group). */
+const KIND = process.env.E2E_JOIN_KIND === "mesh" ? "mesh" : "community";
+/** How long the member's app has been open when the link is opened (ms): 0 opens it the moment the group is made. */
+const WARM_MS = Number(process.env.E2E_JOIN_WARM_MS ?? 6_000);
 
 interface Step { t: number; g: string; step: string; role?: string; [key: string]: unknown }
 
 async function traced(peer: Peer, steps: Step[]): Promise<void> {
+  // Every Pkarr request the page makes (the app's own budget is 30 a minute per relay): a step of its own.
+  peer.page.on("request", request => { if (/^https:\/\/pkarr\.pubky\.(org|app)\//.test(request.url())) steps.push({ t: Date.now(), g: "", step: `pkarr.${request.method()}`, who: peer.name }); });
   peer.page.on("console", message => {
     const text = message.text();
     if (!text.startsWith("[ghostly:join] ")) return;
@@ -45,6 +51,7 @@ test("time a join through a group's link, step by step", { tag: ["@feature:group
     await Promise.all([traced(alice, steps), traced(bob, steps)]);
     await alice.page.getByTestId("sidebar-new-more").click();
     await alice.page.getByTestId("new-group").click();
+    await alice.page.getByTestId(`new-group-kind-${KIND}`).click();
     await alice.page.getByTestId("new-group-name").fill(`timing ${run}`);
     // A private group (group-mesh/1): the steps timed here are its link join and edge.
     await alice.page.getByTestId("new-group-kind-mesh").click();
@@ -52,18 +59,20 @@ test("time a join through a group's link, step by step", { tag: ["@feature:group
     const url = await alice.page.getByTestId("group-share-dialog").getByTestId("group-link-url").inputValue();
     await alice.page.getByTestId("group-share-dialog").getByTestId("group-share-done").click();
     // The admin's app has been open a while, as it would be: its link is being watched already.
-    await alice.page.waitForTimeout(6_000);
+    if (WARM_MS) await alice.page.waitForTimeout(WARM_MS);
 
     const clicked = Date.now();
     await bob.page.goto(url);
     await expect(bob.page.getByTestId("group-chat")).toHaveAttribute("data-status", "active", { timeout: 180_000 });
     const active = Date.now() - clicked;
-    await expect(bob.page.getByTestId("group-members")).toContainText("1 of 1 reachable", { timeout: 180_000 });
+    // The header's connection control says every other member is reachable (both kinds of group).
+    await expect(bob.page.getByTestId("group-connection-options")).toHaveAttribute("data-state", "connected", { timeout: 180_000 });
     const reachable = Date.now() - clicked;
 
     const t0 = steps.find(s => s.who === bob.name && s.step === "join.start")?.t ?? clicked;
     const row = {
       run, real: REAL ? 1 : 0,
+      hubElected: at(steps, t0, alice.name, "hub.elected"),
       knockPublished: at(steps, t0, bob.name, "knock.published"),
       knockSeen: at(steps, t0, alice.name, "knock.seen"),
       hostPresence: at(steps, t0, alice.name, "link.presence", "host"),
@@ -72,19 +81,25 @@ test("time a join through a group's link, step by step", { tag: ["@feature:group
       answering: Math.min(at(steps, t0, alice.name, "link.answering", "host") ?? Infinity, at(steps, t0, bob.name, "link.answering", "guest") ?? Infinity),
       entryOpen: at(steps, t0, bob.name, "link.open", "guest"),
       inviteSent: at(steps, t0, alice.name, "invite.sent"),
+      welcomeSent: at(steps, t0, alice.name, "welcome.sent"),
       welcomeReceived: at(steps, t0, bob.name, "welcome.received"),
       uiActive: active - (t0 - clicked),
+      lobbySeen: at(steps, t0, alice.name, "lobby.seen"),
       edgeOffering: Math.min(at(steps, t0, alice.name, "link.offering", "edge") ?? Infinity, at(steps, t0, bob.name, "link.offering", "edge") ?? Infinity),
       edgeOpen: at(steps, t0, bob.name, "link.ready", "edge"),
       uiReachable: reachable - (t0 - clicked),
+      // Pkarr requests in the minute before and the join itself, per app: how close each came to its budget.
+      memberPkarr: steps.filter(s => s.who === alice.name && s.step.startsWith("pkarr.") && s.t >= t0 - 60_000 && s.t <= t0).length,
+      memberPkarrDuring: steps.filter(s => s.who === alice.name && s.step.startsWith("pkarr.") && s.t >= t0 && s.t <= t0 + reachable).length,
+      joinerPkarrDuring: steps.filter(s => s.who === bob.name && s.step.startsWith("pkarr.") && s.t >= t0 && s.t <= t0 + reachable).length,
     };
     rows.push(row);
-    appendFileSync(file, JSON.stringify({ ...row, steps: steps.map(s => ({ ...s, t: s.t - t0 })) }) + "\n");
+    appendFileSync(file, JSON.stringify({ ...row, kind: KIND, warm: WARM_MS, steps: steps.filter(s => !s.step.startsWith("pkarr.")).map(s => ({ ...s, t: s.t - t0 })) }) + "\n");
     console.log(`  run ${run}: ${JSON.stringify(row)}`);
     await Promise.all([alice.context.close(), bob.context.close()]);
   }
   const keys = Object.keys(rows[0]).filter(k => k !== "run" && k !== "real");
-  console.log(`\n  ${RUNS} joins (${REAL ? "public relays" : "test relay"}), ms from the join: median / p90 / max`);
+  console.log(`\n  ${RUNS} ${KIND} joins, member's app open ${WARM_MS} ms before (${REAL ? "public relays" : "test relay"}), ms from the join: median / p90 / max`);
   for (const key of keys) {
     const values = rows.map(r => r[key]).filter((v): v is number => typeof v === "number" && Number.isFinite(v)).sort((a, b) => a - b);
     console.log(`  ${key.padEnd(16)} ${String(percentile(values, 0.5)).padStart(7)} ${String(percentile(values, 0.9)).padStart(7)} ${String(values[values.length - 1] ?? NaN).padStart(7)}  (n=${values.length})`);

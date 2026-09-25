@@ -73,8 +73,8 @@
     "slug": "04-profiles",
     "title": "WISP 04 — Local Profiles",
     "status": "Draft",
-    "updated": "2026-09-23",
-    "implementation": "Experimental: web and desktop clients; the browser extension runs one profile",
+    "updated": "2026-09-24",
+    "implementation": "Experimental: web, desktop and browser extension clients",
     "dependencies": [
       "01-ghost-core.md",
       "02-peer-keys.md",
@@ -772,7 +772,7 @@
     "title": "WISP 9xx — Group Community Distribution Profile",
     "status": "Draft",
     "updated": "2026-09-24",
-    "implementation": "group-community/1: core protocol in groupCommunity.ts and communityRendezvous.ts; engine in community.ts; UI shared with the mesh; unit tests, a six-browser e2e and a headless load test",
+    "implementation": "group-community/1: core protocol in groupCommunity.ts and communityRendezvous.ts; engine in community.ts, payments in communityPay.ts; UI shared with the mesh; unit tests, a six-browser e2e, a three-browser payments e2e and a headless load test",
     "documentKind": "Profile",
     "dependencies": [
       "02-peer-keys.md",

@@ -457,14 +457,17 @@ export class GhostlyNode implements EngineImplementation {
     },
     openEntry: (link, role, seedB64, peer) => this.openEntry(link, role, seedB64, peer),
     linkSeen: linkId => { const live = this.links.get(linkId); return !!live?.presence?.online || (!!live?.dataLink && live.dataLink !== "idle"); },
-    publish: (identity, records) => this.transport.publish(identity, records),
-    resolve: async pubKeyZ32 => (await this.transport.resolve(pubKeyZ32))?.records ?? null,
+    publish: (identity, records, background) => this.transport.publish(identity, records, { background }),
+    resolve: async (pubKeyZ32, background) => (await this.transport.resolve(pubKeyZ32, { background }))?.records ?? null,
+    expectPeer: linkId => this.links.get(linkId)?.link?.expectPeer(),
     openEdge: (state, peer, expectPeer) => this.openEdge(state, peer, expectPeer),
     closeEdge: async linkId => {
       const live = this.links.get(linkId);
       if (!live?.stored.group) return;
       this.links.delete(linkId);
-      await live.link?.stop(true);
+      // An entry session is over once the admission is (or was given up): nobody waits on it, so it goes
+      // without a last packet saying so, which would only spend two of the relays' requests at a busy moment.
+      await live.link?.stop(!live.stored.groupEntry);
       await db.deleteLink(linkId);
     },
     edgeNick: linkId => this.links.get(linkId)?.presence.nick || undefined,

@@ -188,7 +188,7 @@ export function GroupRow({ group, active, density, onOpen }: { group: GroupView;
     setBusy(true);
     try { await engine.call(method, { groupId: group.id }); } catch { /* the row says what state it is in */ } finally { setBusy(false); }
   };
-  const status = invitation ? (invitation.viaLink ? (invitation.admin ? "Joining…" : group.profile === "community" ? "Waiting to be let in…" : invitation.stage === "answered" ? "The admin's app answered…" : "Waiting for the admin's app…") : invitation.accepted ? "Joining…" : `Invited by ${invitation.contact || "a contact"} · ${invitation.members} member${invitation.members === 1 ? "" : "s"}`)
+  const status = invitation ? (invitation.viaLink ? (invitation.admin ? "Joining…" : group.profile === "community" ? (invitation.stage === "answered" ? "A member is letting you in…" : "Waiting to be let in…") : invitation.stage === "answered" ? "The admin's app answered…" : "Waiting for the admin's app…") : invitation.accepted ? "Joining…" : `Invited by ${invitation.contact || "a contact"} · ${invitation.members} member${invitation.members === 1 ? "" : "s"}`)
     : group.status !== "active" ? group.statusReason ?? group.status : `${group.members.length} member${group.members.length === 1 ? "" : "s"}`;
   const size = AVATAR[density];
   return (
