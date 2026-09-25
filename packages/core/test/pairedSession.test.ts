@@ -71,9 +71,10 @@ describe("paired chat admission and session binding", () => {
     await vi.waitFor(()=>expect(p.a.state.status).toBe("ready"));
     const offered=(p.a as unknown as {offer:{capabilities:string[]}}).offer.capabilities;
     expect(offered.length).toBeLessThanOrEqual(16);
-    expect(offered.some(c=>c.includes("bitcoin"))).toBe(false);
-    // Only the open session's paired-payments list (GhostLink) can allow it.
+    expect(offered.some(c=>c.includes("bitcoin") || c.includes("fedimint"))).toBe(false);
+    // Only the open session's paired-payments list (GhostLink) can allow them.
     expect(p.a.allowsPayment("bitcoin")).toBe(false);
+    expect(p.a.allowsPayment("fedimint")).toBe(false);
   });
   const ready = async (p: ReturnType<typeof pair>) => {
     await confirming(p); await p.a.confirm(p.a.state.code!); await p.b.confirm(p.b.state.code!);

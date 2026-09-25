@@ -10,7 +10,7 @@ import { arkReady, bitcoinSource, everyWallet, mint, REAL_MINT, reviewContext, r
 
 const RAIL_KEY = "ghostly-payment-rail";
 const OTHER_MINT = "https://mint2.example.com";
-const ALL_ON = { cashu: true, lightning: true, arkade: true, bark: true, bitcoin: true, usdt: true };
+const ALL_ON = { cashu: true, lightning: true, arkade: true, bark: true, bitcoin: true, usdt: true, fedimint: true };
 
 interface Open {
   wallet?: Partial<WalletView>;

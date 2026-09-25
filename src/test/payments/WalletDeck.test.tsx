@@ -10,7 +10,7 @@ import { arkReady, everyWallet } from "./fixtures";
 
 // covers: wallet.deck, payments.chat.cards
 
-const ORDER: WalletRail[] = ["cashu", "lightning", "arkade", "bark", "bitcoin", "usdt"];
+const ORDER: WalletRail[] = ["cashu", "lightning", "arkade", "bark", "bitcoin", "fedimint", "usdt"];
 
 // The swing a card makes as it comes up (walletDeckMotion.ts) is skipped with reduced motion: only the choice is tested.
 beforeEach(() => { document.documentElement.dataset.reduceMotion = "true"; });
@@ -36,7 +36,7 @@ describe("the wallet page's deck", () => {
     expect(screen.getByRole("tablist", { name: "Wallet integrations" })).toBeInTheDocument();
     expect(tabs.map((t) => t.dataset.testid)).toEqual(ORDER.map((rail) => `wallet-card-${rail}`));
     expect(chosen()).toEqual(["wallet-card-arkade"]);
-    expect(tabs.map((t) => t.tabIndex)).toEqual([-1, -1, 0, -1, -1, -1]);
+    expect(tabs.map((t) => t.tabIndex)).toEqual([-1, -1, 0, -1, -1, -1, -1]);
     expect(tab("arkade")).toHaveAttribute("aria-controls", "wallet-panel");
   });
 
@@ -144,7 +144,7 @@ describe("the wallet page's deck on a touch screen", () => {
     // The track reaches Bitcoin, and End is pressed before that scroll's end is dispatched.
     moveTo("bitcoin");
     await user.keyboard("{End}");
-    expect(sentTo).toEqual([960, 1200]);
+    expect(sentTo).toEqual([960, 1440]);
     scrollEnds("bitcoin");
     expect(chosen()).toEqual(["wallet-card-usdt"]);
     scrollEnds("usdt");
@@ -188,7 +188,7 @@ describe("the chat's deck of ways to pay", () => {
   it("is a radiogroup with the chosen card checked", () => {
     showPayWith();
     expect(screen.getByRole("radiogroup", { name: "Pay with" })).toBeInTheDocument();
-    expect(screen.getAllByRole("radio")).toHaveLength(6);
+    expect(screen.getAllByRole("radio")).toHaveLength(7);
     expect(radio("cashu")).toHaveAttribute("aria-checked", "true");
     expect(radio("lightning")).toHaveAttribute("aria-checked", "false");
   });

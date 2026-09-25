@@ -164,6 +164,8 @@ class PairLink implements PaymentLink {
   get supportsUsdtPayments(): boolean { return this.allowsPayment("usdt"); }
   get supportsBarkPayments(): boolean { return this.allowsPayment("bark"); }
   get supportsBitcoinPayments(): boolean { return this.allowsPayment("bitcoin"); }
+  /** Not carried through a community group yet. */
+  get supportsFedimintPayments(): boolean { return false; }
   async requirePaymentSupport(): Promise<void> {
     if (!PAYMENT_METHODS.some(m => this.paymentEnabled(m))) throw new Error("Payments are turned off in this group.");
     if (!this.host.membership(this.groupId)?.members.has(this.member)) throw new Error("They are no longer in this group");
@@ -201,6 +203,7 @@ class GroupLink implements PaymentLink {
   get supportsUsdtPayments(): boolean { return false; }
   get supportsBarkPayments(): boolean { return false; }
   get supportsBitcoinPayments(): boolean { return false; }
+  get supportsFedimintPayments(): boolean { return false; }
   async requirePaymentSupport(): Promise<void> {
     if (!this.supportsPayments) throw new Error("Payments are turned off in this group.");
     if (!this.host.membership(this.groupId)) throw new Error("You are not in this group");

@@ -1,7 +1,7 @@
 import type { GroupPayNote, GroupView } from "@ghostly/browser/shared/types";
 import { memberName } from "./groups";
 
-export const RAIL = { cashu: "Cashu", lightning: "Lightning", arkade: "Ark", bark: "Bark", bitcoin: "Bitcoin on-chain", usdt: "USDT" } as const;
+export const RAIL = { cashu: "Cashu", lightning: "Lightning", arkade: "Ark", bark: "Bark", bitcoin: "Bitcoin on-chain", usdt: "USDT", fedimint: "Fedimint" } as const;
 
 /** A member as the group knows them now; someone no longer in it, by what is left. */
 function who(group: GroupView, key: string, capital = true): string {

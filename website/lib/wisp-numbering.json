@@ -144,6 +144,15 @@
     "numberAssignment": "defined"
   },
   {
+    "oldId": "—",
+    "id": "207",
+    "oldFile": "2xx-fedimint.md",
+    "file": "2xx-fedimint.md",
+    "kind": "Adapter",
+    "displayNumber": "2xx",
+    "numberAssignment": "unassigned"
+  },
+  {
     "oldId": "09",
     "id": "300",
     "oldFile": "09-peer-proofs.md",

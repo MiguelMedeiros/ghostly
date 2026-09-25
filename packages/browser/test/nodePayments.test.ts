@@ -246,11 +246,11 @@ describe("sending, requesting and asking", () => {
     expect(request).toHaveBeenCalledWith({ linkId: "chat", amount: 5, memo: "m", timestamp: 1, method: "bark" });
   });
 
-  it("only Ark, Bark, USDT and on-chain Bitcoin are paid by asking, and only a contact taking them is asked", async () => {
+  it("only Ark, Bark, USDT, on-chain Bitcoin and Fedimint are paid by asking, and only a contact taking them is asked", async () => {
     const { node } = track(engine());
     const link = stubLink({ supportsBarkPayments: false });
     const chat = addChat(node, link);
-    expect(() => node.askToPay({ linkId: chat.id, amount: 5, method: "cashu" as never, timestamp: 1 })).toThrow("Only Ark, Bark, USDT and on-chain Bitcoin");
+    expect(() => node.askToPay({ linkId: chat.id, amount: 5, method: "cashu" as never, timestamp: 1 })).toThrow("Only Ark, Bark, USDT, on-chain Bitcoin and Fedimint");
     await expect(node.askToPay({ linkId: chat.id, amount: 5, method: "bark", timestamp: 1 })).rejects.toThrow("does not accept Bark");
     expect(await node.askToPay({ linkId: chat.id, amount: 5, method: "arkade", timestamp: 1 })).toHaveProperty("askId");
     expect(link.sendPaymentAsk).toHaveBeenCalledOnce();

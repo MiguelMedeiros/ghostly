@@ -180,6 +180,17 @@ wallet is in the page. Connecting calls `enable()` (the wallet's own approval pr
   lookup either finds the payment paid or leaves it pending; without `lookupInvoice` an unknown payment stays
   unknown, and the Lightning card says to check it in the wallet itself.
 
+### A federation (Fedimint)
+
+[providers/fedimint.ts](providers/fedimint.ts) is a source over a wallet the engine already holds: the Fedimint
+card's federations (`FedimintWallet`, handed over as `host.fedimint`, reserved like `host.cashu`). Its one field is
+the federation's id; its form (`FedimintForm`) lists the joined federations with a Lightning module instead of
+asking for it, and the Fedimint card's **Use for Lightning** sets it directly. Invoices are paid into the
+federation's ecash through its gateway; paying funds a contract the gateway claims, for the fee it advertises
+(estimated before paying and held to the reviewed maximum; the client passes no limit of its own). Refused before a
+contract is funded is `NothingSpentError`; after, `pending` until the client's operation says paid (a preimage) or
+refunded. An invoice of the same federation is swapped inside it, without a gateway. See [WISP 2xx](../../../../../docs/wisps/2xx-fedimint.md).
+
 ## Paying from another wallet
 
 Every request a chat carries, and every invoice or address the Wallet page shows to be paid on, can be paid
@@ -193,6 +204,7 @@ payer: the payee's own source decides, the same way it does when the payer pays 
 | On-chain (`btc-onchain/1`) | `OnchainProvider.received(address)` (or `history` with the payer's txid hint), one confirmation | same |
 | Ark (`btc-arkade/1`) | the indexer's virtual outputs on the request's address (`ArkadeAdapter.received`) | same |
 | Bark (`btc-bark/1`) | the Bark wallet's receives on the request's address | same |
+| Fedimint (`fedimint-ecash/1` with an invoice) | the federation's receive operation of the invoice it made for the request | same |
 
 The payer's copy of the request settles only on that `pay-res` from the payee, never on its own word.
 "I paid" sends a `pay` frame with no receipt (the invoice itself, or `{"check":true}` for an address) that

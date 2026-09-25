@@ -21,6 +21,7 @@ export const VARIABLES = {
   GHOSTLY_BARK_REGTEST: ["1", "Bark (Second's Ark) suites: captaind on regtest"],
   GHOSTLY_BDK_REGTEST: ["1", "BDK on-chain wallet suites (web and extension): the regtest chain's Esplora"],
   GHOSTLY_BITCOIND_REGTEST: ["1", "Bitcoin Core source contract test (vitest): the regtest bitcoind's RPC"],
+  GHOSTLY_FEDIMINT_REGTEST: ["1", "Fedimint suites: a one-guardian federation, its LND gateway and an LND peer"],
   GHOSTLY_CLN_REGTEST: ["1", "Core Lightning source suites: two CLN nodes with a channel"],
   GHOSTLY_LND_REGTEST: ["1", "LND source suites: two LND nodes with a channel, REST from the page"],
   GHOSTLY_NWC_REGTEST: ["1", "Nostr Wallet Connect suites: two Alby Hubs on two LND nodes, a local relay"],
@@ -59,6 +60,10 @@ export const VARIABLES = {
   GHOSTLY_NWC_ALICE_HUB_URL: ["http://127.0.0.1:47063", "Alice's Alby Hub (its own HTTP API, for pairing)"],
   GHOSTLY_NWC_BOB_HUB_URL: ["http://127.0.0.1:47064", "Bob's Alby Hub"],
 
+  // Fedimint. The invite code names the guardian's API; e2e/support/fedimint-regtest/regtest.mjs `invite` prints it.
+  GHOSTLY_FEDIMINT_API_URL: ["ws://127.0.0.1:47095", "Fedimint guardian API (websocket), as the invite code names it"],
+  GHOSTLY_FEDIMINT_GATEWAY_URL: ["http://127.0.0.1:47096", "Fedimint gateway API (gatewayd, LND-backed)"],
+
   // USDT (the RPC is the web app's "Local test chain").
   GHOSTLY_USDT_RPC_URL: ["http://127.0.0.1:47070", "Anvil, chain 31337"],
   GHOSTLY_USDT_TOKEN: ["0x5FbDB2315678afecb367f032d93F642f64180aa3", "TestUSDT contract (first deployment of Anvil's first account)"],
@@ -83,7 +88,8 @@ export const SERVICE_PORTS = [...new Set(Object.entries(VARIABLES).filter(([name
 /**
  * The port of this machine a published port is reached on. The same one, even with the environment on another host
  * (remote.mjs forwards it here: the app takes plain HTTP and WS from loopback only); or, with
- * E2E_INFRA_LOCAL_PORTS=<base>, base, base+1, … (19 ports) in SERVICE_PORTS order, to stay clear of ports held here.
+ * E2E_INFRA_LOCAL_PORTS=<base>, base, base+1, … (one per port of SERVICE_PORTS, in order), to stay clear of ports held here.
+ * Fedimint's invite code names its guardian's port itself (47095), so the Fedimint suites need that one unmoved.
  */
 export const localPort = (port) => (process.env.E2E_INFRA_LOCAL_PORTS ? Number(process.env.E2E_INFRA_LOCAL_PORTS) + SERVICE_PORTS.indexOf(port) : port);
 const here = (value) => value.replace(/127\.0\.0\.1:(\d+)/, (_, port) => `127.0.0.1:${localPort(Number(port))}`);
@@ -108,6 +114,7 @@ export const endpoints = {
     lnd: { alice: read("GHOSTLY_NWC_ALICE_LND_URL"), bob: read("GHOSTLY_NWC_BOB_LND_URL") },
     hub: { alice: read("GHOSTLY_NWC_ALICE_HUB_URL"), bob: read("GHOSTLY_NWC_BOB_HUB_URL") },
   },
+  fedimint: { api: read("GHOSTLY_FEDIMINT_API_URL"), gateway: read("GHOSTLY_FEDIMINT_GATEWAY_URL") },
   usdt: { rpc: read("GHOSTLY_USDT_RPC_URL"), token: read("GHOSTLY_USDT_TOKEN") },
   s3: { endpoint: read("GHOSTLY_S3_ENDPOINT"), key: read("GHOSTLY_S3_KEY"), secret: read("GHOSTLY_S3_SECRET") },
 };

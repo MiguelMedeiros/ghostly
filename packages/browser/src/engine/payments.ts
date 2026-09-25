@@ -2,11 +2,14 @@ import type { UsdtWallet } from "./paymentAdapters/usdtWallet";
 import { assertTokenUnits, formatPaymentAmount, validatePaymentTarget, type PaymentMethodName, type PaymentReview, type PaymentTarget } from "@ghostly/core";
 import type { ArkWallet } from "./paymentAdapters/arkWallet";
 import type { BarkWallet } from "./paymentAdapters/barkWallet";
+import type { FedimintWallet } from "./paymentAdapters/fedimintWallet";
 import {
   ENDPOINT,
   cashuRequestPayload,
+  fedimintRequestPayload,
   findEndpoint,
   parseCashuRequestPayload,
+  parseFedimintRequestPayload,
   randomBytes,
   toBase64Url,
   type GhostLink,
@@ -33,7 +36,7 @@ const UNIT = "sat";
  * through the group (see communityPay.ts).
  */
 export type PaymentLink = Pick<GhostLink, "isDataLinkOpen" | "paymentEnabled" | "allowsPayment" | "supportsPayments" | "supportsArkPayments" | "supportsUsdtPayments"
-  | "supportsBarkPayments" | "supportsBitcoinPayments" | "requirePaymentSupport" | "sendPaymentRequest" | "sendPaymentAsk" | "sendPayment" | "sendPaymentResult">;
+  | "supportsBarkPayments" | "supportsBitcoinPayments" | "supportsFedimintPayments" | "requirePaymentSupport" | "sendPaymentRequest" | "sendPaymentAsk" | "sendPayment" | "sendPaymentResult">;
 
 export interface PaymentDeskHost {
   getLink(linkId: string): PaymentLink | null;
@@ -98,14 +101,16 @@ export interface DeskBitcoin {
 class NoEcashError extends Error {}
 
 const arkSats=(network:string)=>network==="bitcoin"?"sats":"test sats";
-type AskMethod = "arkade" | "usdt" | "bark" | "bitcoin";
-const ENDPOINT_OF: Record<Exclude<AskMethod, "usdt">, string> = { arkade: ENDPOINT.arkade, bark: ENDPOINT.bark, bitcoin: ENDPOINT.bitcoin };
+type AskMethod = "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint";
+const ENDPOINT_OF: Record<Exclude<AskMethod, "usdt" | "fedimint">, string> = { arkade: ENDPOINT.arkade, bark: ENDPOINT.bark, bitcoin: ENDPOINT.bitcoin };
 /** A `pay` frame that carries no receipt, only "I paid this from another wallet: look now". */
 const CHECK_PAYLOAD = JSON.stringify({ check: true });
 const isCheck = (payload: string) => { try { return JSON.parse(payload)?.check === true; } catch { return false; } };
-const RAIL_NAME: Record<AskMethod, string> = { arkade: "Ark", usdt: "USDT", bark: "Bark", bitcoin: "on-chain Bitcoin" };
+const RAIL_NAME: Record<AskMethod, string> = { arkade: "Ark", usdt: "USDT", bark: "Bark", bitcoin: "on-chain Bitcoin", fedimint: "Fedimint" };
 /** Both sides allow this way of paying on the open data link. */
-const allows = (link: PaymentLink, method: AskMethod) => method === "arkade" ? link.supportsArkPayments : method === "bark" ? link.supportsBarkPayments : method === "bitcoin" ? link.supportsBitcoinPayments : link.supportsUsdtPayments;
+const allows = (link: PaymentLink, method: AskMethod) => method === "arkade" ? link.supportsArkPayments : method === "bark" ? link.supportsBarkPayments : method === "bitcoin" ? link.supportsBitcoinPayments : method === "fedimint" ? link.supportsFedimintPayments : link.supportsUsdtPayments;
+/** Federation ecash is counted in msats; a chat counts whole sats. */
+const fedimintSats = (msats: number) => Math.floor(msats / 1000);
 export class PaymentDesk {
   private readonly payments = new Map<string, StoredPayment>();
   private readonly paying = new Map<string, Promise<void>>();
@@ -115,6 +120,7 @@ export class PaymentDesk {
   private checkingUsdt=false;
   private checkingBark=false;
   private checkingBitcoin=false;
+  private readonly redeeming = new Map<string, Promise<void>>();
 
   constructor(
     private readonly wallet: CashuWallet,
@@ -124,6 +130,7 @@ export class PaymentDesk {
     private readonly bark?: BarkWallet,
     private readonly lightning: DeskLightning = mintLightning(wallet),
     private readonly bitcoin?: DeskBitcoin,
+    private readonly fedimint?: FedimintWallet,
   ) {}
 
   async start(): Promise<void> {
@@ -192,6 +199,20 @@ export class PaymentDesk {
       await this.save({id,linkId:params.linkId,kind:"request",direction:"out",amount:params.amount,unit:UNIT,memo,state:"pending",createdAt:params.timestamp,target,ask:params.ask});
       await this.host.storeMessage({linkId:params.linkId,id:`me_${params.timestamp}`,text:`Requested ${params.amount} ${arkSats(target.network)} on Bark`,sender:"me",timestamp:params.timestamp,via:"datalink",paymentId:id});
       await link.sendPaymentRequest({id,timestamp:params.timestamp,amount:{value:String(params.amount),asset:UNIT},memo,endpoints:[[ENDPOINT.bark,JSON.stringify(target)]],ask:params.ask});
+      return {paymentId:id};
+    }
+    if (params.method === "fedimint") {
+      if (!link.supportsFedimintPayments || !this.fedimint) throw new Error("Both peers need Fedimint on a connected data link");
+      const federations = this.fedimint.requestFederations();
+      if (!federations.length) throw new Error("Join a federation first (Wallet → Fedimint)");
+      // A contact in another federation pays the invoice instead: made by one of ours, through its gateway.
+      const invoiceFederation = link.allowsPayment("lightning") ? this.fedimint.invoiceFederation() : undefined;
+      const invoice = invoiceFederation ? (await this.fedimint.createInvoice(invoiceFederation, params.amount, memo ?? "Ghostly request", id)).invoice : undefined;
+      const test = this.fedimint.federation(federations[0])?.network !== "bitcoin";
+      await this.save({id,linkId:params.linkId,kind:"request",direction:"out",amount:params.amount,unit:UNIT,memo,state:"pending",createdAt:params.timestamp,federations,invoice,federation:invoiceFederation,ask:params.ask});
+      await this.host.storeMessage({linkId:params.linkId,id:`me_${params.timestamp}`,text:`Requested ${params.amount.toLocaleString()} ${test ? "test sats" : "sats"} on Fedimint`,sender:"me",timestamp:params.timestamp,via:"datalink",paymentId:id});
+      await link.sendPaymentRequest({id,timestamp:params.timestamp,amount:{value:String(params.amount),asset:UNIT},memo,ask:params.ask,
+        endpoints:[[ENDPOINT.fedimint,fedimintRequestPayload(federations)],...(invoice ? [[ENDPOINT.bolt11,invoice] as [string,string]] : [])]});
       return {paymentId:id};
     }
     if (params.method === "bitcoin") {
@@ -334,7 +355,8 @@ export class PaymentDesk {
     const lightning = !!request.invoice && link.allowsPayment("lightning");
     // The person reviewed a Lightning payment: that is what is paid, never ecash in its place.
     if (params.via === "lightning" && !lightning) throw new Error("This request cannot be paid over Lightning in this chat");
-    if (params.via !== "lightning" && link.allowsPayment("cashu")) {
+    // A Fedimint request names no mint: ecash of a shared federation goes through a review, anything else is its invoice.
+    if (params.via !== "lightning" && link.allowsPayment("cashu") && !request.federations) {
       try {
         await this.sendEcash(link, {
           linkId: params.linkId,
@@ -382,6 +404,16 @@ export class PaymentDesk {
 
   private async reclaimOnce(paymentId: string): Promise<void> {
     const payment = this.payments.get(paymentId);
+    if (payment?.target?.method === "fedimint" && payment.direction === "out" && payment.kind === "payment") {
+      if (!this.fedimint || !payment.federation || !payment.fedimintOp) throw new Error("Nothing to take back");
+      const state = await this.fedimint.takeBack(payment.federation, payment.fedimintOp);
+      if (state === "pending") throw new Error("The federation has not answered yet: try again in a moment");
+      const current = this.current(payment);
+      if (state === "canceled") await this.save({ ...current, state: "reclaimed", token: undefined });
+      // Redeemed by someone: the contact took it. Only a payment still waiting on them becomes settled.
+      else if (current.state === "pending") await this.save({ ...current, state: "settled", token: undefined });
+      return;
+    }
     if (!payment?.token || payment.direction !== "out") throw new Error("Nothing to reclaim");
     try {
       await this.wallet.receiveToken(payment.token, "reclaimed", payment.memo);
@@ -445,7 +477,7 @@ export class PaymentDesk {
   /** A pending request of ours, as it went on the wire: what a held copy is rebuilt from. Cashu and Lightning only. */
   requestFor(paymentId: string): PaymentRequest | null {
     const payment = this.payments.get(paymentId);
-    if (!payment || payment.kind !== "request" || payment.direction !== "out" || payment.target) return null;
+    if (!payment || payment.kind !== "request" || payment.direction !== "out" || payment.target || payment.federations) return null;
     return { id: payment.id, timestamp: payment.createdAt, amount: { value: String(payment.amount), asset: payment.unit }, memo: payment.memo, ask: payment.ask,
       endpoints: [...(payment.invoice ? [[ENDPOINT.bolt11, payment.invoice] as [string, string]] : []), ...(payment.mints?.length ? [[ENDPOINT.cashu, cashuRequestPayload(payment.mints)] as [string, string]] : [])] };
   }
@@ -453,7 +485,7 @@ export class PaymentDesk {
   /** `held`: picked up from the contact's storage while it was away (WISP 4xx): only what this device allows counts, and only Cashu or Lightning. */
   async onPaymentRequest(linkId: string, request: PaymentRequest, held = false): Promise<void> {
     if (this.payments.has(request.id)) return;
-    if (held && (findEndpoint(request.endpoints, ENDPOINT.usdt) || findEndpoint(request.endpoints, ENDPOINT.arkade) || findEndpoint(request.endpoints, ENDPOINT.bark) || findEndpoint(request.endpoints, ENDPOINT.bitcoin))) return;
+    if (held && (findEndpoint(request.endpoints, ENDPOINT.usdt) || findEndpoint(request.endpoints, ENDPOINT.arkade) || findEndpoint(request.endpoints, ENDPOINT.bark) || findEndpoint(request.endpoints, ENDPOINT.bitcoin) || findEndpoint(request.endpoints, ENDPOINT.fedimint))) return;
     if(findEndpoint(request.endpoints,ENDPOINT.usdt))return this.receiveUsdtRequest(linkId,request);
     const amount = parseSats(request.amount.value, request.amount.asset);
     const link = this.host.getLink(linkId);
@@ -462,8 +494,17 @@ export class PaymentDesk {
       return;
     }
     let target: PaymentTarget | undefined;
-    const arkPayload=findEndpoint(request.endpoints,ENDPOINT.arkade), barkPayload=findEndpoint(request.endpoints,ENDPOINT.bark), bitcoinPayload=findEndpoint(request.endpoints,ENDPOINT.bitcoin);
-    if (arkPayload) {
+    let federations: string[] | undefined;
+    const arkPayload=findEndpoint(request.endpoints,ENDPOINT.arkade), barkPayload=findEndpoint(request.endpoints,ENDPOINT.bark), bitcoinPayload=findEndpoint(request.endpoints,ENDPOINT.bitcoin), fedimintPayload=findEndpoint(request.endpoints,ENDPOINT.fedimint);
+    if (fedimintPayload) {
+      if(!link?.supportsFedimintPayments)return;
+      federations=parseFedimintRequestPayload(fedimintPayload);
+      if(!federations.length)return;
+      // Ecash when we share a federation (the one we hold most in); the invoice, through any Lightning source, otherwise.
+      const ours=new Map((this.fedimint?.view.federations ?? []).filter(f=>f.status==="ready").map(f=>[f.id,f.balance]));
+      const shared=federations.filter(id=>ours.has(id)).sort((a,b)=>ours.get(b)!-ours.get(a)!);
+      if(shared.length)target=this.fedimint!.target(shared[0],request.id);
+    } else if (arkPayload) {
       if(!link?.supportsArkPayments)return;
       try {target=validatePaymentTarget(JSON.parse(arkPayload));if(target.method!=="arkade")return;} catch {return;}
     } else if (barkPayload) {
@@ -477,10 +518,11 @@ export class PaymentDesk {
     const allowed = (method: "lightning" | "cashu") => held ? !!link?.paymentEnabled(method) : !!link?.allowsPayment(method);
     const invoice = allowed("lightning") ? findEndpoint(request.endpoints, ENDPOINT.bolt11) : undefined;
     const mints = allowed("cashu") ? parseCashuRequestPayload(findEndpoint(request.endpoints, ENDPOINT.cashu) ?? "") : [];
-    if (!target && !invoice && !mints.length) return;
+    if (!target && !invoice && !mints.length && !federations) return;
     await this.save({
       target,
-      ask: target?.method === "arkade" || target?.method === "bark" || target?.method === "bitcoin" ? this.answering(linkId, request, target.method, amount) : undefined,
+      federations,
+      ask: federations ? this.answering(linkId, request, "fedimint", amount) : target?.method === "arkade" || target?.method === "bark" || target?.method === "bitcoin" ? this.answering(linkId, request, target.method, amount) : undefined,
       id: request.id,
       linkId,
       kind: "request",
@@ -522,6 +564,7 @@ export class PaymentDesk {
     if(payment.endpoint[0]===ENDPOINT.arkade) { await this.receiveArk(linkId,payment); return; }
     if(payment.endpoint[0]===ENDPOINT.bark) { await this.receiveBark(linkId,payment); return; }
     if(payment.endpoint[0]===ENDPOINT.bitcoin) { await this.receiveBitcoin(linkId,payment); return; }
+    if(payment.endpoint[0]===ENDPOINT.fedimint) { await this.receiveFedimint(linkId,payment); return; }
     const link = this.host.getLink(linkId);
     const known = this.payments.get(payment.id);
     if (known && (known.linkId !== linkId || known.direction !== "in" || known.kind !== "payment")) {
@@ -603,6 +646,22 @@ export class PaymentDesk {
 
   async onPaymentResult(linkId: string, result: PaymentResult): Promise<void> {
     const payment = this.payments.get(result.id);
+    if (payment?.target?.method === "fedimint" && payment.linkId === linkId && payment.direction === "out" && payment.kind === "payment") {
+      if (payment.state !== "pending") return;
+      if (!result.ok) {
+        // Refused (a federation they did not join, Fedimint off): the notes come straight back.
+        await this.save({ ...payment, error: result.error ?? "The payment was refused" });
+        await this.reclaim(payment.id).catch(() => {});
+        if (this.current(payment).state === "reclaimed") await this.host.onReviewedPaymentRefused?.(payment.id, result.error ?? "The payment was refused");
+        return;
+      }
+      // The contact redeemed them: the notes are theirs now, and the copy kept here is worth nothing.
+      await this.save({ ...payment, state: "settled", token: undefined, error: undefined });
+      const request = payment.requestId ? this.payments.get(payment.requestId) : undefined;
+      if (request?.linkId === linkId && request.state === "pending") await this.save({ ...request, state: "settled" });
+      void Promise.resolve(this.host.onReviewedPaymentResult?.(payment.id)).catch(() => {});
+      return;
+    }
     if(payment?.target?.method==="cashu" && payment.linkId===linkId && payment.direction==="out"){
       if(!result.ok && payment.state==="pending"){
         // Refused: take the token back instead of offering it again, which would be refused again.
@@ -672,7 +731,8 @@ export class PaymentDesk {
     if (!request || request.kind !== "request" || request.direction !== "in" || request.linkId !== params.linkId) throw new Error("Unknown payment request");
     if (request.state !== "pending") return;
     const endpoint: [string, string] | undefined = request.target
-      ? request.target.method === "usdt" || request.target.method === "cashu" ? undefined : [ENDPOINT_OF[request.target.method], CHECK_PAYLOAD]
+      ? request.target.method === "fedimint" ? request.invoice ? [ENDPOINT.bolt11, request.invoice] : undefined
+      : request.target.method === "usdt" || request.target.method === "cashu" ? undefined : [ENDPOINT_OF[request.target.method], CHECK_PAYLOAD]
       : request.invoice ? [ENDPOINT.bolt11, request.invoice] : undefined;
     if (!endpoint) throw new Error("This request cannot be paid from another wallet");
     const now = Date.now();
@@ -692,7 +752,7 @@ export class PaymentDesk {
     const request = payment.requestId ? this.payments.get(payment.requestId) : undefined;
     if (!link || !request || request.kind !== "request" || request.direction !== "out" || !this.owns(request, linkId)) return;
     const rail = request.target ? request.target.method : request.invoice ? "lightning" : undefined;
-    if (!rail || rail === "usdt" || rail === "cashu" || payment.endpoint[0] !== (rail === "lightning" ? ENDPOINT.bolt11 : ENDPOINT_OF[rail])) return;
+    if (!rail || rail === "usdt" || rail === "cashu" || rail === "fedimint" || payment.endpoint[0] !== (rail === "lightning" ? ENDPOINT.bolt11 : ENDPOINT_OF[rail])) return;
     if (request.state === "settled") { link.sendPaymentResult({ id: request.id, ok: true }); return; }
     const now = Date.now();
     if (now - (this.lastCheckFrom.get(request.id) ?? 0) < 3_000) return;
@@ -939,6 +999,120 @@ export class PaymentDesk {
     } finally {this.checkingBitcoin=false;}
   }
 
+  // -- Fedimint ------------------------------------------------------------------------
+
+  /** What the Fedimint adapter writes through: the payment before the notes exist, then the notes, then the chat. */
+  readonly fedimintPublisher = {
+    payment: (id: string) => this.payments.get(id),
+    journal: async (review: PaymentReview) => {
+      if (!review.linkId) throw new Error("Fedimint ecash goes to a contact in a chat");
+      const known = this.payments.get(review.id);
+      if (known) return;
+      await this.save({ id: review.id, linkId: review.linkId, kind: "payment", direction: "out", amount: review.amount, unit: UNIT, memo: review.memo, state: "pending", createdAt: review.createdAt, requestId: review.requestId, target: review, federation: review.provider });
+    },
+    publish: async (review: PaymentReview, notes: string, operationId: string) => {
+      const known = this.payments.get(review.id);
+      if (!known || known.linkId !== review.linkId) throw new Error("The Fedimint payment is not in the journal");
+      // Written down first: from here on these notes are the only copy of that money.
+      await this.save({ ...known, token: notes, fedimintOp: operationId });
+      await this.host.storeMessage({ linkId: review.linkId!, id: `me_${review.createdAt}`, text: `${review.amount.toLocaleString()} ${review.network === "bitcoin" ? "sats" : "test sats"} on Fedimint`, sender: "me", timestamp: review.createdAt, via: "datalink", paymentId: review.id });
+      await this.sendFedimint(this.payments.get(review.id)!);
+    },
+    republish: async (review: PaymentReview) => { const known = this.payments.get(review.id); if (known?.token && known.state === "pending") await this.sendFedimint(known); },
+    withdrawn: async (review: PaymentReview, reason: string) => {
+      const known = this.payments.get(review.id);
+      if (known && known.state === "pending") await this.save({ ...known, state: reason.startsWith("Redeemed") ? "settled" : "reclaimed", token: undefined, error: reason.startsWith("Redeemed") ? undefined : reason });
+    },
+  };
+
+  private async sendFedimint(payment: StoredPayment): Promise<void> {
+    const link = this.host.getLink(payment.linkId);
+    if (!link?.supportsFedimintPayments || !payment.token) return;
+    await link.sendPayment({ id: payment.id, timestamp: payment.createdAt, requestId: payment.requestId, amount: { value: String(payment.amount), asset: UNIT }, memo: payment.memo, endpoint: [ENDPOINT.fedimint, payment.token] });
+  }
+
+  /**
+   * Notes from the contact. Redeemed only when they are of a federation we joined and this chat allows Fedimint;
+   * otherwise refused unredeemed, and the contact takes them back. Written down (with the notes) before redeeming:
+   * an interrupted redeem is finished from the journal, never lost.
+   */
+  private async receiveFedimint(linkId: string, payment: Payment): Promise<void> {
+    const link = this.host.getLink(linkId);
+    const known = this.payments.get(payment.id);
+    if (known && (known.linkId !== linkId || known.direction !== "in" || known.kind !== "payment")) { link?.sendPaymentResult({ id: payment.id, ok: false, error: "Unknown payment" }); return; }
+    if (known) {
+      // A retransmission: say again what happened, or finish what an interruption left.
+      if (known.state === "pending" && known.token) await this.finishRedeem(known);
+      const now = this.current(known);
+      if (now.state !== "pending") link?.sendPaymentResult({ id: payment.id, ok: now.state === "settled", credited: now.state === "settled" ? String(now.amount) : undefined, error: now.error });
+      return;
+    }
+    const refuse = async (reason: string) => {
+      link?.sendPaymentResult({ id: payment.id, ok: false, error: reason });
+      try { await this.host.storeMessage({ linkId, id: `peer_${payment.timestamp}_refused`, text: `Could not receive Fedimint ecash: ${reason}`, sender: "peer", timestamp: payment.timestamp, via: "datalink" }); } catch { /* the refusal already went to the contact */ }
+    };
+    if (!link?.allowsPayment("fedimint")) { await refuse("Fedimint is off in this chat"); return; }
+    if (!this.fedimint) { await refuse("This app has no Fedimint wallet"); return; }
+    if (parseSats(payment.amount.value, payment.amount.asset) === null) { await refuse("Unsupported amount"); return; }
+    const notes = payment.endpoint[1];
+    const found = await this.fedimint.inspectNotes(notes).catch(() => null);
+    if (!found) { await refuse("These notes are from a federation I have not joined"); return; }
+    const amount = fedimintSats(found.amountMsats);
+    if (amount < 1) { await refuse("These notes are worth less than a sat"); return; }
+    const network = this.fedimint.federation(found.federation)?.network;
+    await this.save({ id: payment.id, linkId, kind: "payment", direction: "in", amount, unit: UNIT, memo: payment.memo, state: "pending", createdAt: payment.timestamp, requestId: payment.requestId, federation: found.federation, token: notes });
+    await this.host.storeMessage({ linkId, id: `peer_${payment.timestamp}`, text: `⚡ ${amount.toLocaleString()} ${network === "bitcoin" ? "sats" : "test sats"} on Fedimint`, sender: "peer", timestamp: payment.timestamp, via: "datalink", paymentId: payment.id });
+    await this.finishRedeem(this.payments.get(payment.id)!);
+  }
+
+  /** Redeems the notes of an incoming payment (once at a time), settles it, and tells the contact. */
+  private finishRedeem(payment: StoredPayment): Promise<void> {
+    let running = this.redeeming.get(payment.id);
+    if (!running) {
+      running = this.redeemOnce(payment.id).finally(() => this.redeeming.delete(payment.id));
+      this.redeeming.set(payment.id, running);
+    }
+    return running;
+  }
+  private async redeemOnce(id: string): Promise<void> {
+    const payment = this.payments.get(id);
+    if (!payment?.token || !payment.federation || payment.state !== "pending" || !this.fedimint) return;
+    let state: string | undefined;
+    try {
+      if (payment.fedimintOp) state = await this.fedimint.redeemState(payment.federation, payment.fedimintOp, 60_000);
+      else {
+        const redeemed = await this.fedimint.redeemNotes(payment.federation, payment.token, payment.id);
+        await this.save({ ...this.current(payment), fedimintOp: redeemed.operationId });
+        state = redeemed.state;
+      }
+    } catch (error) {
+      // The federation could not be asked: the notes stay in the journal, and the next retransmission (or start) tries again.
+      await this.save({ ...this.current(payment), error: error instanceof Error ? error.message : String(error) });
+      return;
+    }
+    const link = this.host.getLink(payment.linkId);
+    if (state === "failed") {
+      await this.save({ ...this.current(payment), state: "failed", token: undefined, error: "These notes were already redeemed" });
+      link?.sendPaymentResult({ id, ok: false, error: "These notes were already redeemed" });
+      return;
+    }
+    if (state !== "done") return;
+    await this.save({ ...this.current(payment), state: "settled", token: undefined, error: undefined });
+    // It settles our request only in full, in ecash of a federation the request named.
+    const request = payment.requestId ? this.payments.get(payment.requestId) : undefined;
+    if (request?.kind === "request" && request.direction === "out" && request.linkId === payment.linkId && request.state === "pending" && payment.amount >= request.amount && (request.federations ?? []).includes(payment.federation!)) {
+      await this.save({ ...request, state: "settled", federation: payment.federation });
+    }
+    link?.sendPaymentResult({ id, ok: true, credited: String(payment.amount) });
+  }
+
+  /** At start: incoming notes an interruption left unredeemed are redeemed now. */
+  async resumeFedimint(): Promise<void> {
+    for (const payment of [...this.payments.values()]) {
+      if (payment.kind === "payment" && payment.direction === "in" && payment.state === "pending" && payment.token && payment.federation) await this.finishRedeem(payment).catch(() => {});
+    }
+  }
+
   // -- internals -------------------------------------------------------------------
 
   private async sendEcash(
@@ -1021,6 +1195,13 @@ export class PaymentDesk {
         if(!link.supportsBarkPayments)continue;
         if(payment.kind==="request" && payment.state==="pending" && payment.target.expiresAt>Date.now())await link.sendPaymentRequest({id:payment.id,timestamp:payment.createdAt,amount:{value:String(payment.amount),asset:UNIT},memo:payment.memo,endpoints:[[ENDPOINT.bark,JSON.stringify(payment.target)]],ask:payment.ask});
         else if(payment.kind==="payment" && payment.state==="settled")await link.sendPayment({id:payment.id,timestamp:payment.createdAt,requestId:payment.requestId,amount:{value:String(payment.amount),asset:UNIT},endpoint:[ENDPOINT.bark,JSON.stringify({txid:payment.txid})]});
+        continue;
+      }
+      if (payment.target?.method === "fedimint" || payment.federations) {
+        if(!link.supportsFedimintPayments)continue;
+        if(payment.kind==="payment" && payment.state==="pending" && payment.token)await this.sendFedimint(payment);
+        else if(payment.kind==="request" && payment.state==="pending" && payment.federations?.length)await link.sendPaymentRequest({id:payment.id,timestamp:payment.createdAt,amount:{value:String(payment.amount),asset:UNIT},memo:payment.memo,ask:payment.ask,
+          endpoints:[[ENDPOINT.fedimint,fedimintRequestPayload(payment.federations)],...(payment.invoice && link.allowsPayment("lightning") ? [[ENDPOINT.bolt11,payment.invoice] as [string,string]] : [])]});
         continue;
       }
       if (payment.target?.method === "bitcoin") {

@@ -87,6 +87,7 @@ const PROBES = {
   "NWC relay": () => tcp(endpoints.nwc.relay.replace(/^ws/, "http")),
   "Alby Hubs": async () => (await http(`${endpoints.nwc.hub.alice}/api/info`)) && http(`${endpoints.nwc.hub.bob}/api/info`),
   Anvil: () => rpc(endpoints.usdt.rpc, "eth_chainId"),
+  "Fedimint guardian / gateway": async () => (await tcp(endpoints.fedimint.api.replace(/^ws/, "http"))) && tcp(endpoints.fedimint.gateway),
   S3: () => http(`${endpoints.s3.endpoint}/health`),
   // The environment's own mint, whatever E2E_MINT_URL points the suite at.
   "Cashu mint": () => http(`${read("E2E_MINT_URL")}/v1/info`),
@@ -134,6 +135,7 @@ const SEEDS = {
   cln: ["e2e/support/cln-regtest/regtest.mjs", "ready"],
   nwc: ["e2e/support/nwc-regtest/regtest.mjs", "ready"],
   usdt: ["e2e/support/usdt-local.mjs", "ready"],
+  fedimint: ["e2e/support/fedimint-regtest/regtest.mjs", "ready"],
 };
 
 function node(args, env) {

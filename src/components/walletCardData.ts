@@ -1,6 +1,6 @@
 import {formatPaymentAmount} from '@ghostly/core';
 import type {WalletState} from '../lib/platform';
-export type WalletRail = 'cashu' | 'lightning' | 'arkade' | 'bark' | 'usdt' | 'bitcoin';
+export type WalletRail = 'cashu' | 'lightning' | 'arkade' | 'bark' | 'usdt' | 'bitcoin' | 'fedimint';
 /** The cards a chat can pay with: all of them. */
 export type ChatRail = WalletRail;
 export const CASHU_MINT_SOURCE = 'cashu-mint';
@@ -36,6 +36,7 @@ export function walletCards(state:WalletState,testMints:readonly string[],{badge
   {id:'arkade',name:'Ark',balance:arkReady?`${ark!.balance.toLocaleString()} ${unit(!!arkTest)}`:ark?.configured&&!ark.automatic?'Locked':'Connecting…',detail:`Arkade · ${arkTest?ark!.network:'Bitcoin'}`,status:arkReady?'Ready':'Experimental',ready:arkReady},
   {id:'bark',name:'Bark',balance:barkReady?`${bark!.balance.toLocaleString()} ${unit(barkTest)}`:bark?.unavailable?'Testnet only':'Connecting…',detail:`Second's Ark · ${bark?.network==='regtest'?'regtest':bark?.network==='bitcoin'?'Bitcoin':'signet'}`,status:barkReady?'Ready':bark?.unavailable?'Not on Mainnet yet':'Experimental',ready:barkReady},
   bitcoinCard(state,unit(testnet)),
+  fedimintCard(state,unit),
   {id:'usdt',name:'USDT',balance:usdtReady?`${formatPaymentAmount(usdt!.balance,usdt!.decimals)} ${usdtTest?'TEST-USDT':'USDT'}`:usdt?.configured&&!usdt.automatic?'Locked':'Connecting…',detail:usdt?.chainId===31337?'EVM local · test token':usdt?.chainId===11155111?'Sepolia · test token':'Ethereum · via WDK',status:usdtReady?'Ready':'Experimental',ready:usdtReady},
  ];
 }
@@ -48,6 +49,15 @@ function lightningCard(state:WalletState,cashu:string,unit:string):WalletCard {
  // Reconnecting: the last balance it read (the status says it is not a fresh one), until it is unavailable.
  const last=ln.status==='connecting'&&ln.balance!==undefined?`${ln.balance.toLocaleString()} ${unit}`:undefined;
  return {id:'lightning',name:'Lightning',balance:ready?ln.balance!==undefined?`${ln.balance.toLocaleString()} ${unit}`:'Ready':ln.status==='error'?'Unavailable':last??'Connecting…',detail:`Via ${ln.alias??ln.label??ln.providerId}`,status:ready?'Ready':ln.status==='error'?'Check settings':'Connecting…',ready};
+}
+/** Federation ecash: the federations joined in this mode, one balance. None is joined by default. */
+function fedimintCard(state:WalletState,unit:(isTest:boolean)=>string):WalletCard {
+ const fm=state.fedimint,federations=fm?.federations??[],ready=federations.some(f=>f.status==='ready');
+ const test=federations.some(f=>f.network&&f.network!=='bitcoin')||state.mode==='testnet';
+ const detail=federations.length===1?federations[0].name??'1 federation':federations.length?`${federations.length} federations`:'Federation ecash';
+ if(fm?.unavailable)return {id:'fedimint',name:'Fedimint',balance:'Testnet only',detail,status:'Not on Mainnet yet',ready:false};
+ if(!federations.length)return {id:'fedimint',name:'Fedimint',balance:'No federation',detail,status:'Set up',ready:false};
+ return {id:'fedimint',name:'Fedimint',balance:ready?`${(fm!.balance).toLocaleString()} ${unit(test)}`:federations.some(f=>f.status==='error')?'Unavailable':'Connecting…',detail,status:ready?'Ready':'Connecting…',ready};
 }
 /** On-chain Bitcoin through the mode's source; there is none until one is set up. */
 function bitcoinCard(state:WalletState,unit:string):WalletCard {

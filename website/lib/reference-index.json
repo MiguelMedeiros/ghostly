@@ -321,6 +321,24 @@
     "notices": []
   },
   {
+    "file": "2xx-fedimint.md",
+    "sourcePath": "docs/wisps/2xx-fedimint.md",
+    "aliases": [],
+    "slug": "2xx-fedimint",
+    "title": "WISP 2xx — Fedimint ecash and Lightning through a federation",
+    "status": "Draft",
+    "updated": "2026-09-25",
+    "implementation": "Experimental browser adapter on the Fedimint web SDK (@fedimint/core canary, pinned). Testnet mode only; regtest evidence below.",
+    "documentKind": "Adapter",
+    "dependencies": [
+      "200-payments.md",
+      "203-lightning.md",
+      "05-backups.md"
+    ],
+    "summary": "Fedimint is a federation of guardians who hold bitcoin together (a threshold of them must agree on everything) and issue blinded ecash for it. It has three modules this adapter uses: mint (ecash notes), ln (Lightning through a gateway, a Lightning node that swaps ecash for HTLCs) and wallet (on-chain peg-in and peg-out, not used here yet). Joining a federation is trusting its guardians with the sats: custodial like a",
+    "notices": []
+  },
+  {
     "file": "300-peer-proofs.md",
     "sourcePath": "docs/wisps/300-peer-proofs.md",
     "aliases": [

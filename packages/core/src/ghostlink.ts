@@ -114,7 +114,7 @@ export interface GhostLinkEvents {
   onGroupsSupport?(supported: boolean): void;
 }
 
-const PAYMENT_METHODS: PaymentMethodName[] = ["cashu", "lightning", "arkade", "usdt", "bark", "bitcoin"];
+const PAYMENT_METHODS: PaymentMethodName[] = ["cashu", "lightning", "arkade", "usdt", "bark", "bitcoin", "fedimint"];
 
 export interface GhostLinkOptions {
   /** Ways of paying this chat allows. One that is off is not offered in the handshake, sent or accepted. Absent: allowed. */
@@ -847,6 +847,8 @@ export class GhostLink {
   get supportsBarkPayments(): boolean { return this.allowsPayment("bark"); }
   /** On-chain: only ever through the contact's `paired-payments` list (see PaymentMethodName). */
   get supportsBitcoinPayments(): boolean { return this.allowsPayment("bitcoin"); }
+  /** Fedimint: only ever through the contact's `paired-payments` list, like on-chain. */
+  get supportsFedimintPayments(): boolean { return this.allowsPayment("fedimint"); }
   /** Payment messages flow at all: some way of paying is allowed by both sides. */
   get supportsPayments(): boolean { return PAYMENT_METHODS.some(m => this.allowsPayment(m)); }
   /** The contact accepts held items: its latest word on this session, else its handshake offer. */

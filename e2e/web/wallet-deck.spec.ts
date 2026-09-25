@@ -8,8 +8,8 @@ import { swipe } from "../support/swipe";
  * one. Either way the chosen card's panel shows below, and the arrows under the deck and the keyboard move along it.
  */
 
-const CARDS = ["cashu", "lightning", "arkade", "bark", "bitcoin", "usdt"] as const;
-const PANELS: Record<(typeof CARDS)[number], string> = { cashu: "wallet-balance", lightning: "wallet-balance", arkade: "ark-wallet", bark: "bark-wallet", bitcoin: "bitcoin-wallet", usdt: "usdt-wallet" };
+const CARDS = ["cashu", "lightning", "arkade", "bark", "bitcoin", "fedimint", "usdt"] as const;
+const PANELS: Record<(typeof CARDS)[number], string> = { cashu: "wallet-balance", lightning: "wallet-balance", arkade: "ark-wallet", bark: "bark-wallet", bitcoin: "bitcoin-wallet", fedimint: "fedimint-wallet", usdt: "usdt-wallet" };
 
 const deck = (page: Page) => page.getByTestId("wallet").locator(".wallet-deck");
 const card = (page: Page, id: string) => page.getByTestId(`wallet-card-${id}`);
@@ -129,8 +129,8 @@ test("on a phone the cards are a snapping track: a swipe chooses the card that c
   // Two keys faster than the track scrolls: the end of the first, cut off on its way, does not choose its card.
   await page.keyboard.press("ArrowLeft");
   await page.keyboard.press("ArrowLeft");
-  await expect.poll(() => offCentre(page, "bark")).toBeLessThan(3);
-  await chosen(page, "bark");
+  await expect.poll(() => offCentre(page, "bitcoin")).toBeLessThan(3);
+  await chosen(page, "bitcoin");
   // Nothing scrolls sideways but the track itself.
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(await page.evaluate(() => { const body = document.querySelector("[data-page-body]")!; return body.scrollWidth <= body.clientWidth + 1; })).toBe(true);
@@ -198,7 +198,7 @@ test("changing the card swings the new one up and tucks the old one back, and qu
 
   // Clicking faster than a swing lasts: every one is interrupted, the last card wins and the stack comes to rest.
   for (let i = 0; i < 4; i++) await page.getByTestId("wallet-deck-next").click({ delay: 0 });
-  await chosen(page, "usdt");
+  await chosen(page, "fedimint");
   await expect.poll(() => atRest(page)).toBe(true);
   expect(tiled(await strips(page))).toBe(true);
 });

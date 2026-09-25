@@ -5,6 +5,8 @@ import type { ArkConfig } from "../engine/paymentAdapters/arkade";
 import type { ArkCreate } from "../engine/paymentAdapters/arkWallet";
 import type { BarkCreate } from "../engine/paymentAdapters/barkWallet";
 import type { BarkConfig } from "../engine/paymentAdapters/bark";
+import type { FedimintFederationView } from "../engine/paymentAdapters/fedimintWallet";
+import type { FederationInfo } from "../engine/paymentAdapters/fedimintSdk";
 import type { ProfileChoice } from '../profiles/public';
 import type { ProofChallenge, ProofEvidence, ProofAdapter } from "@ghostly/core";
 import type { LinkParams, PairedTransport, DeliveryMode } from "@ghostly/core";
@@ -38,6 +40,20 @@ export interface EngineApi {
   barkRefresh(): void;
   /** On-chain coins of the Bark wallet into Ark; returns the board txid. */
   barkBoard(): string;
+  /** What an invite code leads to, before joining: the federation's name, guardians, version, network, modules. */
+  fedimintPreview(params: { invite: string }): FederationInfo;
+  fedimintJoin(params: { invite: string; recover?: boolean }): FedimintFederationView;
+  fedimintLeave(params: { federation: string }): void;
+  fedimintRefresh(): void;
+  /** Out-of-band notes of that federation, to hand over. They come back by themselves if nobody redeems them in a week. */
+  fedimintSpendNotes(params: { federation: string; amount: number }): { notes: string; operation: string };
+  fedimintReceiveNotes(params: { notes: string }): { federation: string; amount: number };
+  fedimintInvoice(params: { federation: string; amount: number; memo?: string }): { invoice: string };
+  fedimintTakeBack(params: { federation: string; operation: string }): "canceled" | "taken" | "pending";
+  fedimintBackup(): { mnemonic: string; federations: { id: string; name?: string; invite: string }[] };
+  fedimintExportBackup(params: { password: string }): string;
+  fedimintRestoreBackup(params: { text: string; password: string }): { joined: number; failed: string[] };
+  fedimintRestorePhrase(params: { mnemonic: string; invites: string[] }): { joined: number; failed: string[] };
   preparePayment(params: {target:PaymentTarget;amount:number;feeCap:number;payee:string;linkId?:string;requestId?:string;memo?:string}): PaymentReview;
   approvePayment(params: {id:string}): PaymentReview;
   reconcilePayment(params: {id:string}): PaymentReview;
@@ -136,13 +152,13 @@ export interface EngineApi {
   /** Everything held, as tokens: the only backup there is for now. */
   walletExport(): { mint: string; token: string; amount: number }[];
   sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number }): { paymentId: string };
-  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin"; rail?: "cashu" | "lightning" }): { paymentId: string };
+  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint"; rail?: "cashu" | "lightning" }): { paymentId: string };
   /** A request any member of a group may pay, once (WISP 9xx § Payments). */
   requestGroupPayment(params: { groupId: string; amount: number; memo?: string; timestamp: number; rail: "cashu" | "lightning" }): { paymentId: string };
   /** The payment composer opened on a member of a community group: their app is asked what ways of paying it takes. */
   groupPaymentHello(params: { groupId: string; member: string }): void;
   /** Asks the contact for a way to pay it (Ark, USDT); its answer is a request carrying `askId`. */
-  askToPay(params: { linkId: string; amount: number; method: "arkade" | "usdt" | "bark" | "bitcoin"; memo?: string; timestamp: number }): { askId: string };
+  askToPay(params: { linkId: string; amount: number; method: "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint"; memo?: string; timestamp: number }): { askId: string };
   /** `via: "lightning"`: the Lightning payment the person reviewed, never ecash instead, within `maxFee`. */
   payRequest(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number }): void;
   reclaimPayment(params: { paymentId: string }): void;

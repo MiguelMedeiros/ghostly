@@ -74,10 +74,11 @@ export interface PairedSessionOptions {
 
 /** The ways of paying a chat can allow one by one. */
 /**
- * `bitcoin` (on-chain) is never offered in the handshake: a full offer is already at the 16 capabilities
- * apps before 0.5 accept. Both sides allow it only through the `paired-payments` list of the open session.
+ * `bitcoin` (on-chain) and `fedimint` are never offered in the handshake: a full offer is already at the 16
+ * capabilities apps before 0.5 accept. Both sides allow them only through the `paired-payments` list of the open
+ * session.
  */
-export type PaymentMethodName = "cashu" | "lightning" | "arkade" | "usdt" | "bark" | "bitcoin";
+export type PaymentMethodName = "cashu" | "lightning" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint";
 
 /**
  * What this app does that grants nothing, said outside `capabilities`: apps before 0.5 accept at most 16
@@ -144,7 +145,7 @@ export class PairedSession {
   peerAllowsPayment(method: PaymentMethodName): boolean {
     if (this.state.status !== "ready" || !this.peer) return false;
     const theirs = this.peer.capabilities, capability = `payments-${method}/1`;
-    if (method === "arkade" || method === "usdt" || method === "bark" || method === "bitcoin") return theirs.includes(capability);
+    if (method === "arkade" || method === "usdt" || method === "bark" || method === "bitcoin" || method === "fedimint") return theirs.includes(capability);
     const other = method === "cashu" ? "payments-lightning/1" : "payments-cashu/1";
     return theirs.includes("payments/1") && (theirs.includes(capability) || !theirs.includes(other));
   }

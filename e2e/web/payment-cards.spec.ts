@@ -17,7 +17,7 @@ test("the chat's payment cards: flip through them, turn one over, and back to th
 
   // The cards first, as a choice of how to pay, the remembered one chosen and focused.
   const cards = composer.getByRole("radiogroup", { name: "Pay with" }).getByRole("radio");
-  await expect(cards).toHaveCount(6);
+  await expect(cards).toHaveCount(7);
   await expect(card("cashu")).toHaveAttribute("aria-checked", "true");
   await expect(card("cashu")).toBeFocused();
   await expect(composer).toHaveAttribute("data-side", "cards");
@@ -46,8 +46,8 @@ test("the chat's payment cards: flip through them, turn one over, and back to th
   await expect(card("bark")).toHaveAttribute("aria-checked", "true");
   await page.getByTestId("payment-deck-next").click();
   await page.getByTestId("payment-deck-next").click();
-  await expect(card("usdt")).toHaveAttribute("aria-checked", "true");
-  await card("usdt").focus();
+  await expect(card("fedimint")).toHaveAttribute("aria-checked", "true");
+  await card("fedimint").focus();
   await page.keyboard.press("Home");
   await expect(card("cashu")).toHaveAttribute("aria-checked", "true");
 

@@ -10,6 +10,7 @@
 .wallet-card-bark{--from:#4d2519;--to:#20120e}
 .wallet-card-usdt{--from:#0f4034;--to:#0a1f1a}
 .wallet-card-bitcoin{--from:#43250c;--to:#1d140b}
+.wallet-card-fedimint{--from:#35204f;--to:#170f25}
 .wallet-deck-card-glyph{grid-row:1;grid-column:1;color:rgb(var(--card-rgb));display:grid}
 .wallet-deck-card-glyph>svg,.wallet-deck-card-glyph-end>svg{width:clamp(20px,calc(var(--card-w) * .075),27px);height:auto}
 /* The status sits over the corner, out of the grid: a long one never narrows the name and balance below it. */
