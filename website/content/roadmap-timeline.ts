@@ -3,16 +3,15 @@ import type { Level } from "@/lib/status";
 
 /**
  * The roadmap as a timeline: columns in the order things happen, rows by area.
- * No dates: a column is a stage, not a quarter. Every item's stage matches
- * its availability as checked in the code (see content/roadmap.ts).
+ * No dates: a column is a stage, not a quarter. "Today" is where Ghostly
+ * stands (the 0.5.0 release on `dev`); every column after it is future work,
+ * checked against the code (see content/roadmap.ts).
  */
-export const PHASES = ["now", "next", "building", "planned", "later"] as const;
+export const PHASES = ["now", "planned", "later"] as const;
 export type Phase = (typeof PHASES)[number];
 
 export const PHASE_LEVEL: Record<Phase, Level> = {
-  now: "released",
-  next: "development",
-  building: "building",
+  now: "available",
   planned: "planned",
   later: "planned",
 };
@@ -44,7 +43,7 @@ type Timeline = {
 
 const en: Timeline = {
   mapTitle: "The map",
-  mapLead: "Every piece of Ghostly, by area. Move along the stages and watch the pieces light up as they arrive.",
+  mapLead: "Every piece of Ghostly, by area. Start from today, then move along the stages to see what comes next.",
   timelineTitle: "Stage by stage",
   timelineLead: "Left to right is the order things happen. No dates: a column is a stage, not a quarter.",
   detailsTitle: "Why this order? Dependencies and what \"done\" means",
@@ -61,13 +60,11 @@ const en: Timeline = {
       title: "Stages",
       play: "Play the evolution",
       pause: "Pause",
-      names: { released: "Today · v0.4.0", development: "Next · 0.5.0", building: "Being built", planned: "Planned", research: "Research" },
+      names: { available: "Today", planned: "Planned", research: "Research" },
     },
   },
   phases: {
-    now: { title: "Today", sub: "Public release v0.4.0" },
-    next: { title: "Next release", sub: "0.5.0 · merged, not released" },
-    building: { title: "Being built", sub: "Work in progress now" },
+    now: { title: "Today", sub: "What the app does now" },
     planned: { title: "Next steps", sub: "In order of what they depend on" },
     later: { title: "Horizon", sub: "Long-term vision and open questions" },
   },
@@ -79,9 +76,8 @@ const en: Timeline = {
       color: "#22d3ee",
       title: "Chat & connection",
       items: {
-        now: ["Private chat from an invitation", "Files up to 100 MiB", "Voice, video and screen sharing", "Share a local web app", "CLI for scripts and bots"],
-        next: ["Paired chats with pinned keys", "QR invitations you can scan", "Iroh and HyperDHT on desktop"],
-        planned: ["Calls and local apps inside paired chats", "Local network discovery, QUIC and WebSocket relay profiles"],
+        now: ["Paired chats: files, payments, local apps", "Calls in WebRTC chats", "Iroh and HyperDHT on desktop", "QR invitations"],
+        planned: ["Calls inside paired chats", "Voice messages", "Pairing progress you can watch", "Local network discovery, QUIC and WebSocket relay profiles"],
         later: [{ text: "Tor, libp2p, Pear components", level: "research" }],
       },
     },
@@ -90,9 +86,8 @@ const en: Timeline = {
       color: "#fbbf24",
       title: "Payments",
       items: {
-        now: ["Cashu wallet", "Lightning through the mint"],
-        next: ["Ark via Arkade (experimental)", "USDT via Tether WDK (experimental)", "Testnet mode for every wallet", "Lightning sources: NWC · LND · Core Lightning · WebLN · Breez (regtest only)", "Ark via Bark (test networks)", "Spark to Spark (Breez regtest; Mainnet with a key)", "On-chain: BDK (test networks) · Bitcoin Core (desktop)", "Pay from any other wallet: QR, link, Lightning addresses (LNURL)"],
-        planned: ["Mainnet for Bark, Breez and BDK", "Fedimint, Liquid and other rails"],
+        now: ["Cashu and Lightning, from your own source too", "Lightning addresses, paying from any wallet", "Ark, Spark, Fedimint, USDT, on-chain (experimental)", "Testnet mode for every wallet"],
+        planned: ["Mainnet for Bark, Breez, BDK and Fedimint", "Unilateral exit for Ark", "Liquid and other rails"],
       },
     },
     {
@@ -100,8 +95,7 @@ const en: Timeline = {
       color: "#4ade80",
       title: "Profiles & backup",
       items: {
-        now: ["App lock, themes, 8 languages"],
-        next: ["Local profiles", "Sealed backups to a file or S3", "Messages held for an away contact, in your own S3 (store-and-forward)"],
+        now: ["Local profiles", "Sealed backups to a file or S3", "Messages held for an away contact"],
         planned: ["Scheduled backups and retention", "More storage places"],
       },
     },
@@ -110,8 +104,8 @@ const en: Timeline = {
       color: "#f472b6",
       title: "Identity (optional)",
       items: {
-        next: ["Proofs made once, shared per chat: Nostr · domain · OpenPGP · SSH · Bitcoin address", "OpenID accounts (Google, Microsoft, Apple, GitLab, Twitch), once clients are registered", "Nostr social layer: profile, follows, notes; posting off by default"],
-        planned: ["Hardware signers, passkeys"],
+        now: ["Proofs: Nostr · domain · OpenPGP · SSH · Bitcoin address", "Nostr social layer"],
+        planned: ["OpenID accounts, once Ghostly's clients are registered", "Hardware signers, passkeys"],
         later: [{ text: "Pubky and Keet, and their profiles and content", level: "research" }],
       },
     },
@@ -120,9 +114,9 @@ const en: Timeline = {
       color: "#fb923c",
       title: "Groups",
       items: {
-        next: ["Private groups of up to eight, text only"],
-        planned: ["Files, calls and payments in groups", "More than one admin"],
-        later: ["Larger groups (GossipSub), channels and topics", { text: "Group encryption beyond epoch keys (MLS)", level: "research" }],
+        now: ["Private groups (8) and communities (256)", "A group picture, payments between members"],
+        planned: ["Files and calls in groups", "More than one admin"],
+        later: ["Channels and topics", { text: "Group encryption beyond epoch keys (MLS)", level: "research" }],
       },
     },
     {
@@ -130,8 +124,7 @@ const en: Timeline = {
       color: "#a78bfa",
       title: "SDKs & plugins",
       items: {
-        now: ["Open contracts (WISP drafts)"],
-        next: ["@ghostly/sdk: adapters that register without a registry line"],
+        now: ["Open contracts (WISP drafts)", "@ghostly/sdk and plugins"],
         planned: ["Adapter manifests, the SDK on npm", "Package authenticity and updates"],
         later: [{ text: "A permissioned plugin host", level: "research" }],
       },
@@ -149,7 +142,7 @@ const en: Timeline = {
 
 const ptBr: Timeline = {
   mapTitle: "O mapa",
-  mapLead: "Todas as peças do Ghostly, por área. Avance pelas etapas e veja as peças acenderem conforme chegam.",
+  mapLead: "Todas as peças do Ghostly, por área. Comece por hoje e avance pelas etapas para ver o que vem depois.",
   timelineTitle: "Etapa por etapa",
   timelineLead: "Da esquerda para a direita é a ordem em que as coisas acontecem. Sem datas: uma coluna é uma etapa, não um trimestre.",
   detailsTitle: "Por que nesta ordem? Dependências e o que significa \"pronto\"",
@@ -166,13 +159,11 @@ const ptBr: Timeline = {
       title: "Etapas",
       play: "Ver a evolução",
       pause: "Pausar",
-      names: { released: "Hoje · v0.4.0", development: "Próxima · 0.5.0", building: "Em construção", planned: "Planejado", research: "Pesquisa" },
+      names: { available: "Hoje", planned: "Planejado", research: "Pesquisa" },
     },
   },
   phases: {
-    now: { title: "Hoje", sub: "Versão pública v0.4.0" },
-    next: { title: "Próxima versão", sub: "0.5.0 · integrado, não lançado" },
-    building: { title: "Em construção", sub: "Trabalho em andamento agora" },
+    now: { title: "Hoje", sub: "O que o app faz agora" },
     planned: { title: "Próximos passos", sub: "Na ordem do que depende de quê" },
     later: { title: "Horizonte", sub: "Visão de longo prazo e perguntas em aberto" },
   },
@@ -184,9 +175,8 @@ const ptBr: Timeline = {
       color: "#22d3ee",
       title: "Conversa e conexão",
       items: {
-        now: ["Chat privado a partir de um convite", "Arquivos de até 100 MiB", "Voz, vídeo e compartilhamento de tela", "Compartilhar um app web local", "CLI para scripts e bots"],
-        next: ["Chats pareados com chaves fixadas", "Convites por QR que dá para escanear", "Iroh e HyperDHT no desktop"],
-        planned: ["Chamadas e apps locais dentro dos chats pareados", "Descoberta na rede local, perfis QUIC e relay WebSocket"],
+        now: ["Chats pareados: arquivos, pagamentos, apps locais", "Chamadas em chats WebRTC", "Iroh e HyperDHT no desktop", "Convites por QR"],
+        planned: ["Chamadas dentro dos chats pareados", "Mensagens de voz", "Progresso do pareamento à vista", "Descoberta na rede local, perfis QUIC e relay WebSocket"],
         later: [{ text: "Tor, libp2p, componentes Pear", level: "research" }],
       },
     },
@@ -195,9 +185,8 @@ const ptBr: Timeline = {
       color: "#fbbf24",
       title: "Pagamentos",
       items: {
-        now: ["Carteira Cashu", "Lightning pelo mint"],
-        next: ["Ark via Arkade (experimental)", "USDT via Tether WDK (experimental)", "Modo Testnet para todas as carteiras", "Fontes Lightning: NWC · LND · Core Lightning · WebLN · Breez (só regtest)", "Ark via Bark (redes de teste)", "Spark para Spark (regtest da Breez; Mainnet com chave)", "On-chain: BDK (redes de teste) · Bitcoin Core (desktop)", "Pagar com qualquer outra carteira: QR, link, Lightning addresses (LNURL)"],
-        planned: ["Mainnet para Bark, Breez e BDK", "Fedimint, Liquid e outros trilhos"],
+        now: ["Cashu e Lightning, também da sua própria fonte", "Lightning addresses, pagar com qualquer carteira", "Ark, Spark, Fedimint, USDT, on-chain (experimentais)", "Modo Testnet para todas as carteiras"],
+        planned: ["Mainnet para Bark, Breez, BDK e Fedimint", "Saída unilateral no Ark", "Liquid e outros trilhos"],
       },
     },
     {
@@ -205,8 +194,7 @@ const ptBr: Timeline = {
       color: "#4ade80",
       title: "Perfis e backup",
       items: {
-        now: ["Trava do app, temas, 8 idiomas"],
-        next: ["Perfis locais", "Backups selados em arquivo ou S3", "Mensagens guardadas para um contato ausente, no seu próprio S3 (store-and-forward)"],
+        now: ["Perfis locais", "Backups selados em arquivo ou S3", "Mensagens guardadas para um contato ausente"],
         planned: ["Backups agendados e retenção", "Mais lugares de armazenamento"],
       },
     },
@@ -215,8 +203,8 @@ const ptBr: Timeline = {
       color: "#f472b6",
       title: "Identidade (opcional)",
       items: {
-        next: ["Provas feitas uma vez, compartilhadas por chat: Nostr · domínio · OpenPGP · SSH · endereço Bitcoin", "Contas OpenID (Google, Microsoft, Apple, GitLab, Twitch), quando os clientes forem registrados", "Camada social do Nostr: perfil, quem segue, notas; publicar desligado por padrão"],
-        planned: ["Signers de hardware, passkeys"],
+        now: ["Provas: Nostr · domínio · OpenPGP · SSH · endereço Bitcoin", "Camada social do Nostr"],
+        planned: ["Contas OpenID, quando os clientes do Ghostly forem registrados", "Signers de hardware, passkeys"],
         later: [{ text: "Pubky e Keet, com os perfis e conteúdos deles", level: "research" }],
       },
     },
@@ -225,9 +213,9 @@ const ptBr: Timeline = {
       color: "#fb923c",
       title: "Grupos",
       items: {
-        next: ["Grupos privados de até oito pessoas, só texto"],
-        planned: ["Arquivos, chamadas e pagamentos em grupos", "Mais de um admin"],
-        later: ["Grupos maiores (GossipSub), canais e tópicos", { text: "Criptografia de grupo além das chaves por época (MLS)", level: "research" }],
+        now: ["Grupos privados (8) e comunidades (256)", "Foto do grupo, pagamentos entre membros"],
+        planned: ["Arquivos e chamadas em grupos", "Mais de um admin"],
+        later: ["Canais e tópicos", { text: "Criptografia de grupo além das chaves por época (MLS)", level: "research" }],
       },
     },
     {
@@ -235,8 +223,7 @@ const ptBr: Timeline = {
       color: "#a78bfa",
       title: "SDKs e plugins",
       items: {
-        now: ["Contratos abertos (rascunhos WISP)"],
-        next: ["@ghostly/sdk: adapters que se registram sem linha no registro"],
+        now: ["Contratos abertos (rascunhos WISP)", "@ghostly/sdk e plugins"],
         planned: ["Manifestos de adapters, o SDK no npm", "Autenticidade de pacotes e atualizações"],
         later: [{ text: "Um host de plugins com permissões", level: "research" }],
       },

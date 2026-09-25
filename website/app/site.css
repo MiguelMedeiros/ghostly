@@ -19,9 +19,7 @@
   --violet: #a78bfa;
   --sky: #60a5fa;
   --rose: #f472b6;
-  --lvl-released: #4ade80;
-  --lvl-development: #fbbf24;
-  --lvl-building: #a78bfa;
+  --lvl-available: #4ade80;
   --lvl-planned: #60a5fa;
   --lvl-research: #94a3b8;
   --radius: 18px;
@@ -300,14 +298,8 @@ body {
   background: var(--c);
   flex: none;
 }
-.level[data-level="released"] {
-  --c: var(--lvl-released);
-}
-.level[data-level="development"] {
-  --c: var(--lvl-development);
-}
-.level[data-level="building"] {
-  --c: var(--lvl-building);
+.level[data-level="available"] {
+  --c: var(--lvl-available);
 }
 .level[data-level="planned"] {
   --c: var(--lvl-planned);
@@ -315,9 +307,6 @@ body {
 .level[data-level="research"] {
   --c: var(--lvl-research);
   border-style: dashed;
-}
-.level[data-level="building"]::before {
-  animation: pulse 1.6s ease-in-out infinite;
 }
 .level--sm {
   font-size: 11px;

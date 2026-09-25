@@ -1,5 +1,5 @@
 import type { Localized } from "@/lib/i18n";
-import { NEXT_VERSION, type Level } from "@/lib/status";
+import type { Level } from "@/lib/status";
 
 export const APP_URL = "https://app.ghostly.tools";
 export const REPO_URL = "https://github.com/MiguelMedeiros/ghostly";
@@ -41,16 +41,12 @@ const en = {
     },
     pet: "Hide the ghost",
     levels: {
-      released: "Available",
-      development: `Coming in ${NEXT_VERSION}`,
-      building: "Being built",
+      available: "Available",
       planned: "Planned",
       research: "Research",
     } satisfies Record<Level, string>,
     levelHelp: {
-      released: "In the public release, v{v}.",
-      development: "Merged for the next release, {n}. Not in public downloads yet.",
-      building: "Being built right now. Not merged.",
+      available: "In the app today.",
       planned: "Designed or proposed. No working version yet.",
       research: "An open question we are investigating.",
     } satisfies Record<Level, string>,
@@ -97,16 +93,12 @@ const ptBr: ShellCopy = {
     },
     pet: "Esconder o fantasma",
     levels: {
-      released: "Disponível",
-      development: `Chega na ${NEXT_VERSION}`,
-      building: "Sendo construído",
+      available: "Disponível",
       planned: "Planejado",
       research: "Pesquisa",
     },
     levelHelp: {
-      released: "Na versão pública, v{v}.",
-      development: "Integrado para a próxima versão, {n}. Ainda não está nos downloads.",
-      building: "Em construção agora. Ainda não integrado.",
+      available: "No app hoje.",
       planned: "Desenhado ou proposto. Ainda sem versão funcionando.",
       research: "Uma pergunta em aberto que estamos investigando.",
     },

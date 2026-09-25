@@ -1,8 +1,5 @@
 import { Ghost } from "@/components/ghost/Ghost";
 import { Icon } from "@/components/site/icons";
-import { LevelBadge } from "@/components/site/Level";
-import type { Locale } from "@/lib/i18n";
-import { NEXT_VERSION } from "@/lib/status";
 import type { HomeCopy } from "@/content/home";
 import { Reveal } from "./Reveal";
 import { WalletDeck } from "./WalletDeck";
@@ -22,7 +19,7 @@ const THEMES = [
  * sentence, a visual, a caption-sized honesty note), and the wallet deck as a
  * set piece on a full-bleed band below.
  */
-export function SpaceSection({ t, w, locale, shotLabel }: { t: HomeCopy["space"]; w: HomeCopy["wallets"]; locale: Locale; shotLabel: string }) {
+export function SpaceSection({ t, w, shotLabel }: { t: HomeCopy["space"]; w: HomeCopy["wallets"]; shotLabel: string }) {
   return (
     <section className="sp-section" id="space">
       <div className="wrap">
@@ -46,14 +43,13 @@ export function SpaceSection({ t, w, locale, shotLabel }: { t: HomeCopy["space"]
                   <img src="/screenshots/current/profiles.webp" alt="The Profile page listing two profiles, Boo and Haunted House, with backups above" loading="lazy" width={1280} height={820} />
                 </div>
               </div>
-              <figcaption className="caption">{shotLabel.replace("{n}", NEXT_VERSION)}</figcaption>
+              <figcaption className="caption">{shotLabel}</figcaption>
             </figure>
 
             <div className="sp-rail">
               <article className="sp-feature">
                 <div className="sp-feature-head">
                   <h3 className="h-card">{t.profiles.title}</h3>
-                  <LevelBadge level={t.profiles.level} locale={locale} />
                 </div>
                 <div className="sp-chips" aria-hidden="true">
                   {t.profiles.names.map((name, i) => (
@@ -71,7 +67,6 @@ export function SpaceSection({ t, w, locale, shotLabel }: { t: HomeCopy["space"]
               <article className="sp-feature">
                 <div className="sp-feature-head">
                   <h3 className="h-card">{t.backup.title}</h3>
-                  <LevelBadge level={t.backup.level} locale={locale} />
                 </div>
                 <div className="sp-flow">
                   <div className="sp-box">
@@ -104,7 +99,6 @@ export function SpaceSection({ t, w, locale, shotLabel }: { t: HomeCopy["space"]
               <article className="sp-feature">
                 <div className="sp-feature-head">
                   <h3 className="h-card">{t.look.title}</h3>
-                  <LevelBadge level={t.look.level} locale={locale} />
                 </div>
                 <div className="sp-look" aria-hidden="true">
                   <span className="sp-swatches">
@@ -126,7 +120,7 @@ export function SpaceSection({ t, w, locale, shotLabel }: { t: HomeCopy["space"]
               <h3 className="h-section">{w.title}</h3>
               <p className="lead">{w.lead}</p>
             </div>
-            <WalletDeck t={w} locale={locale} />
+            <WalletDeck t={w} />
             <p className="note sp-testnet">{w.testnet}</p>
           </div>
         </Reveal>

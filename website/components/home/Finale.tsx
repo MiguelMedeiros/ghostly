@@ -7,7 +7,6 @@ import { Ghost, GhostMark, type GhostMood } from "@/components/ghost/Ghost";
 import { Icon } from "@/components/site/icons";
 import { Particles } from "@/components/site/Particles";
 import { DOWNLOADS, PLATFORMS, RELEASE_URL, VERSION, defaultInstaller, platformOf, type InstallerKey } from "@/lib/release";
-import { NEXT_VERSION } from "@/lib/status";
 import { APP_URL } from "@/content/shell";
 import type { HomeCopy } from "@/content/home";
 import "@/app/finale.css";
@@ -293,7 +292,7 @@ export function Finale({ t }: { t: HomeCopy["finale"] }) {
           </div>
         </div>
         <p className="caption fin-note">
-          {t.note.replace("{v}", VERSION).replace("{n}", NEXT_VERSION)}{" "}
+          {t.note.replace("{v}", VERSION)}{" "}
           <a href={RELEASE_URL}>
             {t.all} <span aria-hidden="true">↗</span>
           </a>

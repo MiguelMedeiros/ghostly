@@ -264,14 +264,8 @@
   border-radius: 50%;
   background: var(--l);
 }
-.bgrid-level[data-level="released"] {
-  --l: var(--lvl-released);
-}
-.bgrid-level[data-level="development"] {
-  --l: var(--lvl-development);
-}
-.bgrid-level[data-level="building"] {
-  --l: var(--lvl-building);
+.bgrid-level[data-level="available"] {
+  --l: var(--lvl-available);
 }
 .bgrid-level[data-level="planned"] {
   --l: var(--lvl-planned);
@@ -343,10 +337,6 @@
 .bgrid-count {
   white-space: nowrap;
 }
-.bgrid-delta {
-  color: var(--lvl-development);
-  font-weight: 600;
-}
 /* How many pieces each composition lights, on its own button. */
 .bgrid-preset-n {
   display: inline-block;
@@ -394,7 +384,7 @@
   right: 10%;
   top: 15px;
   height: 2px;
-  background: linear-gradient(90deg, var(--lvl-released), var(--lvl-development), var(--lvl-building), var(--lvl-planned), var(--lvl-research));
+  background: linear-gradient(90deg, var(--lvl-available), var(--lvl-planned), var(--lvl-research));
   opacity: 0.45;
 }
 .stage-node {
@@ -409,14 +399,8 @@
   font-weight: 600;
   text-align: center;
 }
-.stage-node[data-level="released"] {
-  --l: var(--lvl-released);
-}
-.stage-node[data-level="development"] {
-  --l: var(--lvl-development);
-}
-.stage-node[data-level="building"] {
-  --l: var(--lvl-building);
+.stage-node[data-level="available"] {
+  --l: var(--lvl-available);
 }
 .stage-node[data-level="planned"] {
   --l: var(--lvl-planned);

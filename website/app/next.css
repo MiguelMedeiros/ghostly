@@ -121,11 +121,6 @@ html.js .nx-line[data-drawn="true"] path {
 .nx-copy .body {
   color: var(--muted);
 }
-.nx-badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
 .nx-note {
   border-left: 2px solid var(--line-2);
   padding-left: 12px;

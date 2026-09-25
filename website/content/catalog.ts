@@ -1,5 +1,4 @@
 import type { Localized } from "@/lib/i18n";
-import { NEXT_VERSION } from "@/lib/status";
 
 const en = {
   meta: {
@@ -48,7 +47,7 @@ const en = {
       { id: "adapter", term: "Adapter", gloss: "One technology behind a contract", key: "webrtc/1" },
       { id: "profile", term: "Protocol profile", gloss: "The exact wire rules in use", key: "paired-chat/1" },
       { id: "provider", term: "Provider / signer", gloss: "Who runs a service or signs for it", key: "Cashu mint" },
-      { id: "plugin", term: "Plugin", gloss: "Adapters packaged and compiled into a build", key: "registerAdapters()", status: `In development (${NEXT_VERSION})` },
+      { id: "plugin", term: "Plugin", gloss: "Adapters packaged and compiled into a build", key: "registerAdapters()" },
     ] as { id: string; term: string; gloss: string; key: string; status?: string }[],
   },
 };
@@ -102,7 +101,7 @@ const ptBr: CatalogCopy = {
       { id: "adapter", term: "Adapter", gloss: "Uma tecnologia por trás de um contrato", key: "webrtc/1" },
       { id: "profile", term: "Perfil de protocolo", gloss: "As regras exatas de wire em uso", key: "paired-chat/1" },
       { id: "provider", term: "Provider / signer", gloss: "Quem opera um serviço ou assina por ele", key: "mint Cashu" },
-      { id: "plugin", term: "Plugin", gloss: "Adapters empacotados e compilados num build", key: "registerAdapters()", status: `Em desenvolvimento (${NEXT_VERSION})` },
+      { id: "plugin", term: "Plugin", gloss: "Adapters empacotados e compilados num build", key: "registerAdapters()" },
     ],
   },
 };

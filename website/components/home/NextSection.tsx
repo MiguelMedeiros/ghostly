@@ -3,9 +3,6 @@
 import Link from "next/link";
 import { useEffect, useId, useRef, useState } from "react";
 import { Ghost } from "@/components/ghost/Ghost";
-import { LevelBadge } from "@/components/site/Level";
-import { NEXT_VERSION } from "@/lib/status";
-import type { Locale } from "@/lib/i18n";
 import type { HomeCopy } from "@/content/home";
 import "@/app/next.css";
 
@@ -22,7 +19,7 @@ type Shot = {
   mobile?: string;
 };
 
-// Real screens from the development build, each with its phone counterpart.
+// Real screens from the app, each with its phone counterpart.
 // Each crop zooms into the detail its caption names so the UI text stays legible.
 const SHOTS: Record<string, Shot> = {
   chat: {
@@ -68,7 +65,7 @@ const SHOTS: Record<string, Shot> = {
   },
   services: {
     src: "/screenshots/current/services-chat.webp",
-    alt: "Choosing which of your apps a contact can open, in the development build",
+    alt: "Choosing which of your apps a contact can open",
     from: "dev",
     width: 2560,
     height: 1640,
@@ -78,7 +75,7 @@ const SHOTS: Record<string, Shot> = {
   },
   groups: {
     src: "/screenshots/current/groups.webp",
-    alt: "A private group called Haunted house with Boo, Casper and Spooky talking, in the development build",
+    alt: "A private group called Haunted house with Boo, Casper and Spooky talking",
     from: "dev",
     width: 2560,
     height: 1640,
@@ -88,7 +85,7 @@ const SHOTS: Record<string, Shot> = {
   },
   identities: {
     src: "/screenshots/current/identities-chat.webp",
-    alt: "Casper's chat with Boo, the Identities dialog open: Boo's SSH key and OpenPGP key, each verified as their own key, in the development build",
+    alt: "Casper's chat with Boo, the Identities dialog open: Boo's SSH key and OpenPGP key, each verified as their own key",
     from: "dev",
     width: 2560,
     height: 1640,
@@ -130,7 +127,7 @@ function Bar() {
   );
 }
 
-export function NextSection({ t, locale }: { t: HomeCopy["next"]; locale: Locale }) {
+export function NextSection({ t }: { t: HomeCopy["next"] }) {
   const gradId = useId().replace(/:/g, "");
   const headRef = useRef<HTMLDivElement>(null);
   const copyRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -144,7 +141,7 @@ export function NextSection({ t, locale }: { t: HomeCopy["next"]; locale: Locale
   const honesty = (id: string) => {
     const shot = SHOTS[id];
     if (!shot) return t.illustration;
-    return shot.from === "dev" ? t.fromDev.replace("{n}", NEXT_VERSION) : t.fromOld;
+    return shot.from === "dev" ? t.fromDev : t.fromOld;
   };
 
   // The live line draws once, when the head comes into view.
@@ -272,10 +269,6 @@ export function NextSection({ t, locale }: { t: HomeCopy["next"]; locale: Locale
                   >
                     <h3 className="h-card nx-title">{item.title}</h3>
                     <p className="body">{item.body}</p>
-                    <div className="nx-badges">
-                      <LevelBadge level={item.level} locale={locale} />
-                      {"extraLevel" in item && item.extraLevel && <LevelBadge level={item.extraLevel} locale={locale} />}
-                    </div>
                     {item.extra && <p className="note nx-note">{item.extra}</p>}
                     {"link" in item && item.link && (
                       <Link className="link-arrow" href={item.link.href}>

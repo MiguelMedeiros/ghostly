@@ -68,8 +68,8 @@ export function HomePage({ locale }: { locale: Locale }) {
         <AgreeScene eyebrow={t.agree.eyebrow} label={t.agree.label} steps={t.agree.steps} labels={t.agree} />
         <AliveScene eyebrow={t.alive.eyebrow} label={t.alive.label} steps={t.alive.steps} labels={t.alive} />
       </Act>
-      <NextSection t={t.next} locale={locale} />
-      <SpaceSection t={t.space} w={t.wallets} locale={locale} shotLabel={t.next.fromDev} />
+      <NextSection t={t.next} />
+      <SpaceSection t={t.space} w={t.wallets} shotLabel={t.next.fromDev} />
       <OpenScene
         eyebrow={t.open.eyebrow}
         label={t.open.label}
