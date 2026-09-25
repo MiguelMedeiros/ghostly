@@ -1,4 +1,4 @@
-import { test, expect } from "../support/desktop";
+import { test, expect, choose } from "../support/desktop";
 
 /**
  * One test, and it is the one that was missing: Ghostly Desktop opens, and the
@@ -36,12 +36,12 @@ test("the webview's <html lang> and <html dir> follow the language", { tag: ["@f
   await expect.poll(() => app.attribute("html", "dir")).toBe("ltr");
 
   await app.click('[title="Settings"]');
-  await app.click('select option[value="ar"]');
+  await choose(app, "settings-language", "ar");
   await expect.poll(() => app.attribute("html", "lang")).toBe("ar");
   await expect.poll(() => app.attribute("html", "dir")).toBe("rtl");
 
   // The profile outlives the test: leave it in English for the next one.
-  await app.click('select option[value="en"]');
+  await choose(app, "settings-language", "en");
   await expect.poll(() => app.attribute("html", "lang")).toBe("en");
   await expect.poll(() => app.attribute("html", "dir")).toBe("ltr");
 });

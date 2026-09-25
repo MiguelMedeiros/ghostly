@@ -160,6 +160,20 @@ class Driver {
 
 export type DesktopApp = Pick<Driver, "text" | "click" | "title" | "attribute" | "type" | "execute" | "executeAsync">;
 
+/**
+ * Chooses in a `Select` (src/components/ui/Select.tsx) by its test id, as a person does: opens it and clicks the
+ * option. It is a combobox with a listbox, not a native `<select>` — its options exist only while it is open, and
+ * its value is in `data-value`. e2e/support/select.ts does the same for the browser projects.
+ */
+export async function choose(app: DesktopApp, testId: string, value: string): Promise<void> {
+  const select = `[data-testid="${testId}"]`;
+  if ((await app.attribute(select, "aria-expanded")) !== "true") await app.click(select);
+  const option = `[data-testid="${testId}-list"] [role="option"][data-value="${value}"]`;
+  await expect.poll(() => app.text(option)).not.toBeNull();
+  await app.click(option);
+  await expect.poll(() => app.attribute(select, "data-value")).toBe(value);
+}
+
 export interface DesktopOptions {
   /** `GHOSTLY_PROFILE`: the app's own space in its storage. */
   profile?: string;
