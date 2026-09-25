@@ -1,5 +1,7 @@
 # Identity presentation and local public profiles
 
+> 2026-09-25: the one thing a profile publishes about itself for everyone is its DID ([3xx-did-dht](3xx-did-dht.md)): a did:dht under a key of its own, in a packet of its own, with the key alone unless the person lists identities in it. No record was merged into another key's packet, and nothing below changed.
+
 > Release decision (2026-09-21): external identity proofs and external profile lookup are deferred. This release exposes only Ghostly participation identity. Nostr, Pubky, Keet, imports and Ring UI are disabled; previous experiments and stored data are preserved for future work. Descriptions below are historical/research, not available release features.
 >
 > 2026-09-23: new Nostr proofs use the rebuilt [identity proofs](300-peer-proofs.md#implementation-2026-09-23-identity-proofs) instead; this `proof-*` protocol stays disabled. A verified Nostr proof's profile, follows and notes are the [Nostr social layer](3xx-nostr-social.md), which reuses this document's text sanitizing, fixed picture hosts and bounded re-encoding (`packages/browser/src/profiles/public.ts`) but reads from the relays the person configures, on request.

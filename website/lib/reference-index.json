@@ -448,6 +448,25 @@
     "notices": []
   },
   {
+    "file": "3xx-did-dht.md",
+    "sourcePath": "docs/wisps/3xx-did-dht.md",
+    "aliases": [],
+    "slug": "3xx-did-dht",
+    "title": "WISP 3xx: Profile DID (did:dht)",
+    "status": "Draft",
+    "updated": "2026-09-25",
+    "implementation": "Experimental, web, desktop and extension: packages/core/src/didDht.ts, packages/browser/src/engine/did.ts, src/components/identities/PublicDid.tsx, Desktop publishsignedpacket",
+    "dependencies": [
+      "01-ghost-core.md",
+      "02-peer-keys.md",
+      "04-profiles.md",
+      "05-backups.md",
+      "300-peer-proofs.md"
+    ],
+    "summary": "Every Ghostly profile has a W3C Decentralized Identifier of the did:dht method (DIF, specification version 0): a DID document written as DNS records into the Pkarr packet of an Ed25519 key and stored in the Mainline DHT as a BEP44 mutable item, the same mechanism Ghostly uses for chats (01). Any did:dht resolver reads it, with no Ghostly server involved.",
+    "notices": []
+  },
+  {
     "file": "3xx-domain.md",
     "sourcePath": "docs/wisps/3xx-domain.md",
     "aliases": [],

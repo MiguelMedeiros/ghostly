@@ -1,6 +1,6 @@
 # WISP numbering and compatibility
 
-All 49 specifications remain Draft. Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
+All 50 specifications remain Draft. Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
 
 ## Independent families
 
@@ -53,6 +53,7 @@ Generated from [numbering.json](numbering.json); edit that source instead of thi
 | none | [3xx · ssh · planned; number to be defined](3xx-ssh.md) |
 | none | [3xx · oidc-proofs · planned; number to be defined](3xx-oidc-proofs.md) |
 | none | [3xx · nostr-social · planned; number to be defined](3xx-nostr-social.md) |
+| none | [3xx · did-dht · planned; number to be defined](3xx-did-dht.md) |
 | 13 | [400](400-chat.md) |
 | 401 | [401](401-paired-chat.md) |
 | 402 | [402](402-legacy-chat.md) |
