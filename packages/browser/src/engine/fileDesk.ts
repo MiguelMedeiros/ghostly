@@ -195,8 +195,10 @@ export class FileDesk {
 
   /** Where a received file is written: from what is durably there, cut back to that if more was written after. */
   private async openTarget(linkId: string, record: FileTransferRecord): Promise<IncomingTarget> {
-    const id = this.chat(linkId).local.get(record.id);
+    const chat = this.chat(linkId), id = chat.local.get(record.id);
     if (!id) throw new Error("No such file");
+    // Its record is written first (a new offer's is on its way).
+    await chat.saving;
     const stored = await fileStore.get(id);
     const bytes = (stored?.bytes && await fileBytesOf(stored.bytes)) || await fileBytes();
     const have = (await bytes.size(id)) ?? 0;
@@ -238,7 +240,7 @@ export class FileDesk {
       const { file } = record;
       const message: MessageFile = { id, name: file.name, size: file.size, mime: file.mime, ...(file.voice && { voice: file.voice }) };
       chat.saving = chat.saving.then(async () => {
-        await fileStore.put({ id, linkId, direction: "in", wireId: record.id, createdAt: Date.now(),
+        await fileStore.put({ id, linkId, direction: "in", wireId: record.id, createdAt: Date.now(), bytes: (await fileBytes()).kind,
           metadata: { name: file.name, size: file.size, mime: file.mime, timestamp: file.timestamp, voice: file.voice }, wire3: record });
         await this.deps.storeMessage({ linkId, id: `peer_${record.id}`, text: fileMessageText(message), sender: "peer", timestamp: file.timestamp, via: "datalink", file: message });
       }).catch(() => {});

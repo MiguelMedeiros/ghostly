@@ -50,15 +50,16 @@ function fileRecords(peer: Peer): Promise<{ id: string; bytes?: string; blob: bo
   }));
 }
 
-test("a large file goes through file storage on both sides and arrives intact", { tag: ["@feature:files.storage", "@feature:files.paired.send"] }, async ({ peer }, testInfo) => {
+test("a file over 16 MiB goes through file storage on both sides and arrives intact", { tag: ["@feature:files.storage", "@feature:files.paired.send"] }, async ({ peer }, testInfo) => {
   test.setTimeout(180_000);
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await link(alice, bob);
   await connect(alice, bob);
 
-  // Above the 16 MiB kept whole in IndexedDB: the sender copies it into file storage first.
+  // Above the 16 MiB kept whole in IndexedDB (the sender copies it into file storage first), and under the
+  // 25 MiB a receiver takes without asking.
   const path = testInfo.outputPath("ghost archive.bin");
-  const size = 40 * 1024 * 1024;
+  const size = 20 * 1024 * 1024;
   const sha = await generate(path, size);
   await alice.page.getByTestId("file-input").setInputFiles(path);
 
