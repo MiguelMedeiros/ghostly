@@ -10,6 +10,7 @@
     "test:e2e": "playwright test -c e2e/playwright.config.ts",
     "sync:references": "node scripts/sync-references.mjs",
     "sync:app-deck": "node scripts/sync-app-deck.mjs",
+    "capture": "node scripts/capture/run.mjs",
     "prebuild": "npm run sync:references"
   },
   "dependencies": {

@@ -20,27 +20,27 @@ type Shot = {
   mobile?: string;
 };
 
-// Real screens from the app, each with its phone counterpart.
+// Real screens from the app (npm run capture), each with its phone counterpart.
 // Each crop zooms into the detail its caption names so the UI text stays legible.
 const SHOTS: Record<string, Shot> = {
   chat: {
     src: "/screenshots/current/chat.webp",
-    alt: "A paired chat between Boo and Casper with delivery receipts",
+    alt: "Boo's chat with Casper: text, a voice message and delivery receipts under each message",
     from: "dev",
     width: 2560,
     height: 1640,
-    // The conversation column: Casper's bubbles on the left, ours with "Received by peer" on the right.
-    crop: { x: 0.375, y: 0.15, w: 0.625 },
+    // The conversation column: Casper's bubbles and voice message on the left, ours with "Received by peer" on the right.
+    crop: { x: 0.345, y: 0.27, w: 0.655 },
     mobile: "/screenshots/current/chat-mobile.webp",
   },
   files: {
     src: "/screenshots/current/file.webp",
-    alt: "An image sent in a chat, with its preview and a download button",
+    alt: "A photo Casper sent in the chat, with its preview and a download button",
     from: "dev",
     width: 2560,
     height: 1640,
-    // The received image bubble and the haunted-house.png row under it.
-    crop: { x: 0.385, y: 0.345, w: 0.61 },
+    // The received photo bubble and the lake-house.jpg row under it.
+    crop: { x: 0.385, y: 0.33, w: 0.61 },
     mobile: "/screenshots/current/file-mobile.webp",
   },
   calls: {
@@ -55,43 +55,43 @@ const SHOTS: Record<string, Shot> = {
     mobile: "/screenshots/current/call-mobile.webp",
   },
   sats: {
-    src: "/screenshots/current/wallet-mainnet.webp",
-    alt: "The wallet with Cashu, Lightning, Ark and USDT cards",
+    src: "/screenshots/current/sats.webp",
+    alt: "Paying in the chat with Casper on test networks: 2,100 sats received for the snacks, a request paid over Ark, and the deck of eight wallet cards",
     from: "dev",
     width: 2560,
     height: 1640,
-    // The four wallet cards, the balance and the Receive / Send row.
-    crop: { x: 0.355, y: 0.075, w: 0.625 },
-    mobile: "/screenshots/current/wallet-mobile.webp",
+    // The payment deck open over the chat (Cashu, 44,100 test sats), the thank-you and the paid request beside it.
+    crop: { x: 0.33, y: 0.3, w: 0.67 },
+    mobile: "/screenshots/current/sats-mobile.webp",
   },
   services: {
     src: "/screenshots/current/services-chat.webp",
-    alt: "Choosing which of your apps a contact can open",
+    alt: "Choosing which of your apps a contact can open: Lake photos, running on Boo's computer, shared with Casper",
     from: "dev",
     width: 2560,
     height: 1640,
-    // The "Apps with Casper" sheet over the chat, the bubble above it kept whole.
-    crop: { x: 0.275, y: 0.26, w: 0.45 },
+    // The "Apps with Casper" sheet over the chat, Lake photos switched on.
+    crop: { x: 0.25, y: 0.2, w: 0.52 },
     mobile: "/screenshots/current/services-mobile.webp",
   },
   groups: {
     src: "/screenshots/current/groups.webp",
-    alt: "A private group called Haunted house with Boo, Casper and Spooky talking",
+    alt: "A private group called Lake house trip: its picture, four members talking, and a request to the group paid by Wendy",
     from: "dev",
     width: 2560,
     height: 1640,
-    // The conversation column with the group header and the three voices.
-    crop: { x: 0.36, y: 0.0, w: 0.64 },
+    // The conversation's end: the request to the group paid by Wendy, and the voices around it.
+    crop: { x: 0.36, y: 0.36, w: 0.64 },
     mobile: "/screenshots/current/groups-mobile.webp",
   },
   identities: {
     src: "/screenshots/current/identities-chat.webp",
-    alt: "Casper's chat with Boo, the Identities dialog open: Boo's SSH key and OpenPGP key, each verified as their own key",
+    alt: "Casper's chat with Boo, the identities panel open: Boo's Nostr, OpenPGP, SSH and Bitcoin identities, each verified by Casper's app",
     from: "dev",
     width: 2560,
     height: 1640,
-    // The "Identities with Boo" dialog whole, with a little of the chat around it.
-    crop: { x: 0.26, y: 0.215, w: 0.58 },
+    // The "Identities with Boo" panel: Boo's verified cards, with a little of the chat beside it.
+    crop: { x: 0.44, y: 0, w: 0.56 },
     mobile: "/screenshots/current/identities-chat-mobile.webp",
   },
 };
