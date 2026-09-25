@@ -149,6 +149,31 @@ describe("relay transport under pressure", () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it("does not hold reads back on a relay that refused a write another relay took", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const gets: string[] = [];
+      const relay = new RelayTransport({ relays: ["https://a.test", "https://b.test"], fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === "PUT") return new Response(null, { status: 204 });
+        gets.push(new URL(String(input)).host); return new Response(createRelayPayload(id, [{ label: "_ts", value: "1" }], 3n) as BodyInit);
+      }) as typeof fetch });
+      const start = Date.now();
+      // Writes go to both relays: 29 on each, then one read fills a's minute.
+      for (let i = 0; i < REQUESTS_PER_MINUTE - 1; i++) await relay.publish(createIdentity(), [{ label: "_ts", value: "1" }]);
+      vi.setSystemTime(start + 1_000);
+      await relay.resolve(id.pubKeyZ32);
+      expect(gets).toEqual(["a.test"]);
+      // a refuses a link's packet, b takes it: it is out, and the link will not try again…
+      vi.setSystemTime(start + 57_000);
+      await relay.publish(createIdentity(), [{ label: "_ts", value: "2" }]);
+      // …so when a's minute frees up, its reads go on: there is no write to wait for.
+      vi.setSystemTime(start + 60_500);
+      await relay.resolve(id.pubKeyZ32);
+      await relay.resolve(id.pubKeyZ32);
+      expect(gets.slice(1).sort()).toEqual(["a.test", "b.test"]);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("does not hold reads back for a background write the budget refused", async () => {
     let reads = 0;
     const relay = new RelayTransport({ relays: ["https://a.test"], fetch: (async (_: RequestInfo | URL, init?: RequestInit) => {

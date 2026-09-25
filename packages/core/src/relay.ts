@@ -105,6 +105,7 @@ export class RelayTransport implements PkarrTransport {
     this.lastTimestamp.set(identity.pubKeyZ32, timestamp);
 
     const payload = createRelayPayload(identity, records, timestamp);
+    const waitingBefore = new Map(this.writeWaiting);
     const results = await Promise.allSettled(
       this.relays.map(async (relay) => {
         const slot = `${relay} ${identity.pubKeyZ32}`;
@@ -121,6 +122,10 @@ export class RelayTransport implements PkarrTransport {
       }),
     );
 
+    // Out on one relay: the link will not try again, so a relay that refused it has no write to wait for.
+    if (results.some((r) => r.status === "fulfilled")) {
+      for (const relay of this.relays) if (this.writeWaiting.get(relay) !== waitingBefore.get(relay)) this.writeWaiting.delete(relay);
+    }
     if (!results.some((r) => r.status === "fulfilled")) {
       const reasons = results.map((r) => (r.status === "rejected" ? String(r.reason) : "")).join("; ");
       throw new Error(`Publish failed on every relay: ${reasons}`);
