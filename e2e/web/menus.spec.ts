@@ -73,9 +73,10 @@ test("every row of the chat, group and New menus is one line and whole, in every
       const at = `${language} at ${viewport.width}px`;
       const sheet = viewport === PHONE ? "sheet" : "popover";
 
-      // The chat's ⋮: Pin, Mute notifications, Hold messages, Services, Refresh, Tech Info, Delete.
-      // Not in it: the connection (the header's connection control has it), Payments (the composer's + → Payment) and
-      // Identities (the contact's marks in the header, e2e/web/contact-identities.spec.ts).
+      // The chat's ⋮: Pin, Mute notifications, Hold messages, Refresh, Tech Info, Delete.
+      // Not in it: the connection (the header's connection control has it), Payments (the composer's + → Payment),
+      // Identities (the contact's marks in the header, e2e/web/contact-identities.spec.ts) and Services (the
+      // composer's + → Shared apps).
       await go(chatHash);
       await page.getByTestId("chat-options").click();
       const chatMenu = page.getByTestId("chat-options-menu");
@@ -84,7 +85,8 @@ test("every row of the chat, group and New menus is one line and whole, in every
       await expect(chatMenu.getByTestId("chat-connection-open")).toHaveCount(0);
       await expect(chatMenu.getByTestId("chat-payments-open")).toHaveCount(0);
       await expect(chatMenu.getByTestId("chat-identities-open")).toHaveCount(0);
-      await oneLineEach(chatMenu, 7, `chat menu, ${at}`);
+      await expect(chatMenu.getByTestId("chat-services-open")).toHaveCount(0);
+      await oneLineEach(chatMenu, 6, `chat menu, ${at}`);
       if (language !== "ar") await page.screenshot({ path: testInfo.outputPath(`chat-menu-${language}-${viewport.width}.png`) });
       await close(page, chatMenu);
 
