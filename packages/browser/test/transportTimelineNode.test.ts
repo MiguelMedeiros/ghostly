@@ -50,13 +50,15 @@ async function setup({ appCoordinates }: { appCoordinates?: boolean } = {}) {
   await vi.waitFor(() => expect(view().availableTransports).toHaveLength(2));
   void contact.connect(5_000).catch(() => {});
   await vi.waitFor(() => expect([view().pairing?.status, view().pairing?.transport, contactState.transport]).toEqual(["ready", "iroh/1", "iroh/1"]));
-  return { net, node, contact, id, view, contactState: () => contactState, contactGot };
+  // A disconnected link says nothing more, so what it said before the drop would pass for the redial's state.
+  const dropContact = () => { contact.disconnect(); contactState = { status: "connecting" }; };
+  return { net, node, contact, id, view, contactState: () => contactState, contactGot, dropContact };
 }
 
 const lines = (view: LinkView) => (view.transportLog ?? []).map(e => [e.kind, e.cause ?? null, e.transport ?? null]);
 
 it("tells the chat's connection story: first connection, the contact's switch, yours, a failed one, a drop and back", async () => {
-  const { net, node, contact, id, view, contactState } = await setup();
+  const { net, node, contact, id, view, contactState, dropContact } = await setup();
   await vi.waitFor(() => expect(lines(view())).toEqual([["connected", null, "iroh/1"]]));
   expect(view().peerTransports).toEqual(expect.arrayContaining(["iroh/1", "hyperdht/1"]));
   expect(view().transportAutomatic).toBe(false);
@@ -84,14 +86,14 @@ it("tells the chat's connection story: first connection, the contact's switch, y
   expect((await db.getLinks()).find(l => l.id === id)?.preferredTransport).toBeUndefined();
   await vi.waitFor(() => expect(lines(view()).at(-1)).toEqual(["switched", "automatic", "hyperdht/1"]));
 
-  contact.disconnect();
+  dropContact();
   await vi.waitFor(() => expect(lines(view()).at(-1)).toEqual(["lost", null, null]));
   // It comes back where the agreement put it, in one line: the redial starts on the contact's choice.
   void contact.connect(5_000).catch(() => {});
-  await vi.waitFor(() => expect([view().pairing?.transport, contactState().transport]).toEqual(["hyperdht/1", "hyperdht/1"]));
+  await vi.waitFor(() => expect([view().pairing?.status, view().pairing?.transport, contactState().status, contactState().transport])
+    .toEqual(["ready", "hyperdht/1", "ready", "hyperdht/1"]));
   const after = view().transportLog!.slice(view().transportLog!.findIndex(e => e.kind === "lost") + 1);
   expect(after.map(e => [e.kind, e.transport])).toEqual([["back", "hyperdht/1"]]);
-  expect(contactState().status).toBe("ready");
 
   // Kept with the chat, and never a message: nothing to count as unread, nothing to preview.
   expect((await db.getLinks()).find(l => l.id === id)?.transportLog?.map(e => e.kind).slice(0, 5))
@@ -135,7 +137,7 @@ describe.each([
   { appCoordinates: false, dialer: "both", who: "both redial at once" },
 ] as const)("a drop mid-switch (the app plans switches: $appCoordinates), $who", ({ appCoordinates, dialer }) => {
   it("ends on the contact's choice on both sides, with one line for coming back", async () => {
-    const { net, node, contact, id, view, contactState, contactGot } = await setup({ appCoordinates });
+    const { net, node, contact, id, view, contactState, contactGot, dropContact } = await setup({ appCoordinates });
     await vi.waitFor(() => expect(lines(view())).toEqual([["connected", null, "iroh/1"]]));
     await node.setChatTransport({ linkId: id, transport: "auto" });
 
@@ -148,7 +150,7 @@ describe.each([
     net.latencyMs = 5_000;
     expect((await node.sendMessage({ linkId: id, text: "in flight at the drop" })).error).toBeNull();
     net.latencyMs = 2;
-    contact.disconnect();
+    dropContact();
     await vi.waitFor(() => expect(lines(view()).at(-1)).toEqual(["lost", null, null]));
     release();
     expect(contactGot).toEqual([]);
