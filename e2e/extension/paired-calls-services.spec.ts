@@ -62,6 +62,8 @@ test("with a web contact the chat calls, and says why apps cannot travel", { tag
   await ext.page.getByTestId("chat-services-open").click();
   // The web app can neither serve nor open local apps, so it does not offer services/1.
   await expect(ext.page.getByTestId("chat-services-unavailable")).toContainText("cannot open or share apps");
+  // After the dialog's fade-in, so the picture shows it and not half of it.
+  await ext.page.waitForTimeout(700);
   await ext.page.screenshot({ path: testInfo.outputPath("services-web-contact.png") });
   await ext.page.getByRole("button", { name: "Done" }).click();
 
