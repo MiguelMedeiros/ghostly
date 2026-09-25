@@ -13,6 +13,7 @@ const METHODS: { id: PaymentMethodName; name: string; what: string }[] = [
   { id: "bark", name: "Bark", what: "Ark requests on Second's server; not the same as Arkade" },
   { id: "usdt", name: "USDT", what: "USDT requests" },
   { id: "bitcoin", name: "Bitcoin", what: "On-chain requests, paid to a fresh address; final after a confirmation" },
+  { id: "fedimint", name: "Fedimint", what: "Federation ecash in the chat when you share a federation; Lightning through its gateway otherwise" },
 ];
 
 /**
@@ -20,7 +21,7 @@ const METHODS: { id: PaymentMethodName; name: string; what: string }[] = [
  * it; a connected contact is told at once, and later sessions offer it in the handshake.
  */
 export function ChatPaymentsDialog({ peer, name, onSave, onClose }: { peer: PeerLinkState; name: string; onSave: (methods: Record<PaymentMethodName, boolean>) => Promise<void>; onClose: () => void }) {
-  const initial = peer.paymentMethods ?? { cashu: true, lightning: true, arkade: true, usdt: true, bark: true, bitcoin: true };
+  const initial = peer.paymentMethods ?? { cashu: true, lightning: true, arkade: true, usdt: true, bark: true, bitcoin: true, fedimint: true };
   const [methods, setMethods] = useState(initial);
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const dialog = useRef<HTMLDivElement>(null);

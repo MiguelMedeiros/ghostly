@@ -247,6 +247,86 @@ services:
     ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47064:8080"]
     depends_on: { nwc-lnd-bob: { condition: service_healthy }, nwc-relay: { condition: service_started } }
 
+  # ── Fedimint: a one-guardian federation (mint, wallet and Lightning v1 modules) with an LND-backed gateway ─
+  # The invite code carries the guardian's API URL, and the browser, the gateway and fedimint-cli all use it: the
+  # guardian binds its API on the same port inside the container as on the host, and the gateway shares its network
+  # namespace, so ws://127.0.0.1:47140 is the guardian everywhere (on another host too, where the port is forwarded).
+  # Its setup (DKG) and the gateway's channel are e2e/support/fedimint-regtest/regtest.mjs `ready`.
+  fedimintd:
+    image: fedimint/fedimintd:v0.12.1
+    container_name: ghostly-e2e-fedimintd
+    restart: on-failure
+    environment:
+      FM_BITCOIN_NETWORK: regtest
+      FM_BITCOIND_URL: http://bitcoind:18443
+      FM_BITCOIND_USERNAME: ghostly
+      FM_BITCOIND_PASSWORD: regtest
+      FM_BIND_P2P: 0.0.0.0:8173
+      FM_P2P_URL: fedimint://fedimintd:8173
+      FM_BIND_API: 0.0.0.0:47140
+      FM_API_URL: ws://127.0.0.1:47140
+      FM_BIND_UI: 127.0.0.1:8175
+      FM_ENABLE_IROH: "false"
+      FM_IROH_NEXT_ENABLE: "false"
+      # A test-only password guarding a regtest federation: the setup (DKG) runs through the admin API.
+      FM_PASSWORD_API: ghostly-fedimint-regtest
+      FM_PASSWORD_UI: ghostly-fedimint-regtest
+      # The web SDK speaks the v1 modules; 0.12 turns them off by default.
+      FM_ENABLE_MODULE_MINT: "1"
+      FM_ENABLE_MODULE_WALLET: "1"
+      FM_ENABLE_MODULE_LNV1: "1"
+      FM_ENABLE_MODULE_MINTV2: "0"
+      FM_ENABLE_MODULE_WALLETV2: "0"
+      FM_ENABLE_MODULE_LNV2: "0"
+    volumes: ["fedimintd:/data"]
+    # The gateway lives in this container's network: its API is published here too.
+    ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47140:47140", "${E2E_INFRA_ADDRESS:-127.0.0.1}:47141:47141"]
+    depends_on: { bitcoind: { condition: service_healthy } }
+    cpu_shares: 256
+    cpus: 1
+    mem_limit: 768m
+  # The gateway's Lightning node, and a peer with a channel to it: Lightning in and out of the federation.
+  fedimint-lnd:
+    <<: *lnd
+    container_name: ghostly-e2e-fedimint-lnd
+    command: ["--alias=ghostly-fedimint-gateway", "--tlsextradomain=fedimint-lnd"]
+    volumes: ["fedimint-lnd:/root/.lnd"]
+    cpu_shares: 256
+    cpus: 1
+    mem_limit: 768m
+  fedimint-lnd-peer:
+    <<: *lnd
+    container_name: ghostly-e2e-fedimint-lnd-peer
+    command: ["--alias=ghostly-fedimint-peer", "--tlsextradomain=fedimint-lnd-peer"]
+    cpu_shares: 256
+    cpus: 1
+    mem_limit: 768m
+  fedimint-gateway:
+    image: fedimint/gatewayd:v0.12.1
+    container_name: ghostly-e2e-fedimint-gateway
+    restart: on-failure
+    command: ["gatewayd", "lnd"]
+    network_mode: "service:fedimintd"
+    environment:
+      FM_GATEWAY_DATA_DIR: /data
+      FM_GATEWAY_LISTEN_ADDR: 0.0.0.0:47141
+      FM_GATEWAY_API_ADDR: http://127.0.0.1:47141
+      # bcrypt of the test-only password "ghostly-fedimint-regtest" (gateway-cli create-password-hash).
+      FM_GATEWAY_BCRYPT_PASSWORD_HASH: "$$2b$$12$$QCRxtsPF3kZQTu5v0j/YVuN9K0FurX3M.dRIQDYsdjlgWq7VcOgx6"
+      FM_GATEWAY_NETWORK: regtest
+      FM_GATEWAY_SKIP_SETUP: "true"
+      FM_BITCOIND_URL: http://bitcoind:18443
+      FM_BITCOIND_USERNAME: ghostly
+      FM_BITCOIND_PASSWORD: regtest
+      FM_LND_RPC_ADDR: https://fedimint-lnd:10009
+      FM_LND_TLS_CERT: /lnd/tls.cert
+      FM_LND_MACAROON: /lnd/data/chain/bitcoin/regtest/admin.macaroon
+    volumes: ["fedimint-gateway:/data", "fedimint-lnd:/lnd:ro"]
+    depends_on: { fedimintd: { condition: service_started }, fedimint-lnd: { condition: service_healthy } }
+    cpu_shares: 256
+    cpus: 1
+    mem_limit: 512m
+
   # ── USDT: a local EVM chain (31337) the test token is deployed on ────────────────────────────────────────
   anvil:
     image: ghcr.io/foundry-rs/foundry@sha256:043752653d5be351c71709091b3db97c4421c907eb40ea294195e7f532aadf46
@@ -285,3 +365,6 @@ volumes:
   nwc-lnd-bob:
   nwc-hub-alice:
   nwc-hub-bob:
+  fedimintd:
+  fedimint-lnd:
+  fedimint-gateway:

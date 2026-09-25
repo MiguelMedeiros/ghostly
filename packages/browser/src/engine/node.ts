@@ -174,7 +174,7 @@ function newLiveLink(stored: StoredLink, lastMessageAt: number, files = emptyLin
 }
 
 /** What a host may replace. The defaults are what a browser can do on its own. */
-const PAYMENT_METHODS: PaymentMethodName[] = ["cashu", "lightning", "arkade", "usdt", "bark", "bitcoin"];
+const PAYMENT_METHODS: PaymentMethodName[] = ["cashu", "lightning", "arkade", "usdt", "bark", "bitcoin", "fedimint"];
 
 export interface NodeOptions {
   nativeTransports?: Partial<Record<NativeTransport, (seedB64: string) => Promise<NativeEndpoint>>>;
@@ -1482,7 +1482,7 @@ export class GhostlyNode implements EngineImplementation {
     return this.desk.send(params);
   }
 
-  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin"; rail?: "cashu" | "lightning" }) {
+  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint"; rail?: "cashu" | "lightning" }) {
     return this.desk.request({ linkId: params.linkId, amount: params.amount, memo: params.memo, timestamp: params.timestamp, method: params.method,
       ...(params.rail === "cashu" || params.rail === "lightning" ? { rail: params.rail } : {}) });
   }
@@ -1496,7 +1496,7 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** Paying on a card without a request (Ark, Bark, USDT, on-chain): the contact's app answers with one. */
-  askToPay(params: { linkId: string; amount: number; method: "arkade" | "usdt" | "bark" | "bitcoin"; memo?: string; timestamp: number }) {
+  askToPay(params: { linkId: string; amount: number; method: "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint"; memo?: string; timestamp: number }) {
     if (params.method !== "arkade" && params.method !== "usdt" && params.method !== "bark" && params.method !== "bitcoin") throw new Error("Only Ark, Bark, USDT and on-chain Bitcoin are paid this way");
     return this.desk.ask(params);
   }
@@ -1726,7 +1726,7 @@ export class GhostlyNode implements EngineImplementation {
     live.pairing = { status: "connecting" };
     live.link = new GhostLink({
       // An edge carries payments with its member (WISP 9xx § Payments), as a chat does; an entry session does not.
-      paymentMethods: entry ? { cashu: false, lightning: false, arkade: false, usdt: false, bark: false, bitcoin: false } : stored.paymentMethods,
+      paymentMethods: entry ? { cashu: false, lightning: false, arkade: false, usdt: false, bark: false, bitcoin: false, fedimint: false } : stored.paymentMethods,
       arkPaymentsSupport: !entry,
       usdtPaymentsSupport: !entry,
       barkPaymentsSupport: !entry,

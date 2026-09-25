@@ -17,7 +17,7 @@ interface PaymentComposerProps {
   balance: number;
   onSend: (amount: number, memo: string) => Promise<string | null>;
   /** `rail`: the card it was made on, for a request that must carry that way of paying only (groups). */
-  onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin", rail?: ChatRail) => Promise<string | null>;
+  onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint", rail?: ChatRail) => Promise<string | null>;
   onClose: () => void;
   reviewContext?:{wallet:WalletPlatform;peer:string;linkId:string};
   /** Who the chat is with, as the chat shows them. */
@@ -72,7 +72,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   const containerRef = useRef<HTMLDivElement>(null);
   useOutsideDismiss(containerRef, true, onClose);
 
-  const method: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" = rail === "lightning" ? "cashu" : rail;
+  const method: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" = rail === "lightning" ? "cashu" : rail;
   const usdt = state?.usdt;
   const unit = method === "usdt" ? (usdt?.chainId && usdt.chainId !== 1 ? "TEST-USDT" : "USDT") : method === "arkade" ? (state?.ark?.network && state.ark.network !== "bitcoin" ? "test sats" : "sats") : method === "bark" ? (state?.bark?.network !== "bitcoin" ? "test sats" : "sats") : method === "bitcoin" ? (state?.bitcoin?.network && state.bitcoin.network !== "bitcoin" ? "test sats" : "sats") : state?.mode === "testnet" ? "test sats" : "sats";
   const decimals = method === "usdt" ? usdt?.decimals ?? 6 : 0;

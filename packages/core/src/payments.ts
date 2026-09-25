@@ -24,6 +24,12 @@ export const ENDPOINT = {
   usdt: "usdt-erc20/1",
   /** On-chain Bitcoin. Payload in a request: a payment target (a fresh address); in a payment: a receipt hint `{ txid }`. */
   bitcoin: "btc-onchain/1",
+  /**
+   * Fedimint ecash. Payload in a request: JSON `{ "federations": ["<federation id>", …] }`, the federations the
+   * payee has joined and takes ecash from. Payload in a payment: the notes themselves (out-of-band notes, a
+   * bearer string only the federation that issued them redeems).
+   */
+  fedimint: "fedimint-ecash/1",
 } as const;
 
 export interface PaymentAmount {
@@ -51,7 +57,7 @@ export interface PaymentAsk {
   id: string;
   timestamp: number;
   amount: PaymentAmount;
-  method: "arkade" | "usdt" | "bark" | "bitcoin";
+  method: "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint";
   memo?: string;
 }
 
@@ -83,6 +89,24 @@ export function parseCashuRequestPayload(payload: string): string[] {
     const { mints } = JSON.parse(payload) as { mints?: unknown };
     if (!Array.isArray(mints)) return [];
     return mints.filter((m): m is string => typeof m === "string" && /^https?:\/\//.test(m)).slice(0, 8);
+  } catch {
+    return [];
+  }
+}
+
+/** A Fedimint federation id: 32 bytes, lowercase hex. */
+export const isFederationId = (value: unknown): value is string => typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+
+export function fedimintRequestPayload(federations: string[]): string {
+  return JSON.stringify({ federations });
+}
+
+/** Federations named by a `fedimint-ecash/1` endpoint of a request. Anything malformed yields none. */
+export function parseFedimintRequestPayload(payload: string): string[] {
+  try {
+    const { federations } = JSON.parse(payload) as { federations?: unknown };
+    if (!Array.isArray(federations)) return [];
+    return [...new Set(federations.filter(isFederationId))].slice(0, 8);
   } catch {
     return [];
   }

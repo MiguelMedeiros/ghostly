@@ -23,7 +23,7 @@ interface MessageInputProps {
     /** Who the chat is with, as the chat shows them. */
     contact?: string;
     onSend: (amount: number, memo: string) => Promise<string | null>;
-    onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin") => Promise<string | null>;
+    onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint") => Promise<string | null>;
   };
   /** A composer of its own for ⚡ instead of the chat's (a group chooses whom to pay first). */
   paymentComposer?: (close: () => void) => ReactNode;
