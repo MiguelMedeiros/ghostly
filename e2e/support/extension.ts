@@ -2,7 +2,7 @@ import { chromium } from "@playwright/test";
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, openPeer, type Peer, type PeerOptions } from "./fixtures";
+import { expect, guardArchive, openPeer, type Peer, type PeerOptions } from "./fixtures";
 import { test as base } from "./fixtures";
 
 const dist = join(import.meta.dirname, "..", "..", "extension", "dist");
@@ -57,6 +57,7 @@ export const test = base.extend<Fixtures>({
           ...(options.ignoreHTTPSErrors ? ["--ignore-certificate-errors"] : []),
         ],
       });
+      await guardArchive(context);
       // The update check is the one request that would leave this machine. Answer
       // it with the version that is running, so a test only sees one when it says so.
       const running = JSON.parse(readFileSync(join(dist, "manifest.json"), "utf8")).version;

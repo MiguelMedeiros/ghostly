@@ -129,6 +129,9 @@ test("emoji and GIFs", { tag: ["@feature:chat.paired.emoji", "@feature:chat.pair
   await expect(sheet).toHaveCount(0);
   await alice.context.route("https://gifcities.archive.org/**",route=>route.fulfill({status:503,body:"Unavailable"}));
   await alice.page.getByTestId("composer-expressions").click();
+  // The ghosts are kept for the app session; a search not seen yet asks, and hears nothing.
+  await expect(alice.page.getByTitle("retro ghost")).toBeVisible();
+  await alice.page.getByPlaceholder("Search GIFs").fill("banshee");
   await expect(alice.page.getByText("GIF search is unavailable.")).toBeVisible();
   await alice.page.keyboard.press("Escape");
 });

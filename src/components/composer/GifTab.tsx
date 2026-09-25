@@ -1,33 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../../contexts/I18nContext";
+import { busyUntil, earlierGifs, keptGifs, searchGifs, type GifAnswer, type PickerGif } from "../../lib/gifSearch";
 import { GIF_CATEGORY_ICONS } from "./icons";
 import { CategoryBar, PanelSearch } from "./PanelParts";
 
-interface GifCitiesGif {
-  gif: string;
-  url_text: string;
-  checksum: string;
-}
-
-/** What the grid shows, whichever source it came from. */
-interface PickerGif {
-  id: string;
-  title: string;
-  previewUrl: string;
-  url: string;
-}
-
 /** A search's answer, kept with the search it answers: the grid shows it only while that is still the search. */
-interface Results {
-  query: string;
-  gifs: PickerGif[];
-}
+type Results = GifAnswer & { query: string };
 
-const GIFCITIES_SEARCH_URL = "https://gifcities.archive.org/api/v1/gifsearch";
-const WAYBACK_URL = "https://web.archive.org/web/";
-const RESULTS_LIMIT = 20;
-/** GifCities answers in about 3 s; past this the panel says so rather than spin on. */
-const REQUEST_TIMEOUT_MS = 20_000;
+/** Typing waits for a pause before it asks: each search counts against the Archive's limit. */
+const TYPING_PAUSE_MS = 600;
+/** A category waits a moment too, so icons clicked on the way to another one ask nothing. */
+const CATEGORY_PAUSE_MS = 250;
 
 /** GifCities has no "trending": the icons over the grid are searches it answers well, ghosts first. */
 const GIF_CATEGORIES: { id: string; query: string }[] = [
@@ -41,20 +24,11 @@ const GIF_CATEGORIES: { id: string; query: string }[] = [
   { id: "retro", query: "computer" },
 ];
 
-async function searchGifCities(query: string, signal: AbortSignal): Promise<PickerGif[]> {
-  const q = encodeURIComponent(query);
-  const res = await fetch(`${GIFCITIES_SEARCH_URL}?q=${q}&limit=${RESULTS_LIMIT}`, {signal});
-  if (!res.ok) throw new Error("GIF search unavailable");
-  const json = (await res.json()) as GifCitiesGif[];
-  return json
-    .filter((gif) => /\.gif$/i.test(gif.gif))
-    .map((gif) => ({
-      id: gif.checksum,
-      title: gif.url_text,
-      previewUrl: `${WAYBACK_URL}${gif.gif}`,
-      url: `${WAYBACK_URL}${gif.gif}`,
-    }));
-}
+/** How long until search may be asked again, as m:ss. */
+const formatWait = (ms: number) => {
+  const seconds = Math.ceil(ms / 1000);
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+};
 
 /**
  * The panel's GIFs, from GifCities (the Internet Archive's GeoCities GIFs): category icons that are ready-made
@@ -62,20 +36,22 @@ async function searchGifCities(query: string, signal: AbortSignal): Promise<Pick
  *
  * The grid only ever shows the current search's answer. GifCities takes seconds, so while a category's answer is on
  * its way the grid is a spinner, never the last category's tiles (which looked like the click did nothing). Answers
- * are kept for the panel's life, so a category seen once is back at once.
+ * are kept for the app session (`lib/gifSearch.ts`), so a category seen once is back at once, in any panel.
+ *
+ * When the Archive says to wait (its rate limit), the panel says search is busy and counts down; Try again stays off
+ * until the wait is over, and nothing asks again by itself. Meanwhile it shows the GIFs it has from earlier, or offers
+ * the emoji instead.
  */
-export function GifTab({ onSelect, autoFocus }: { onSelect: (url: string) => void; autoFocus?: boolean }) {
+export function GifTab({ onSelect, onEmojiTab, autoFocus }: { onSelect: (url: string) => void; onEmojiTab?: () => void; autoFocus?: boolean }) {
   const { t } = useI18n();
   const [category, setCategory] = useState(GIF_CATEGORIES[0].id);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Results | null>(null);
-  /** The search GifCities did not answer, if it is the current one. */
-  const [failed, setFailed] = useState<string | null>(null);
   /** Bumped by "Try again": the search runs again, and the tiles are drawn anew. */
   const [attempt, setAttempt] = useState(0);
   // The Wayback Machine lost some of these files; drop the tiles that do not load.
   const [broken, setBroken] = useState<Set<string>>(new Set());
-  const answers = useRef(new Map<string, PickerGif[]>());
+  const [now, setNow] = useState(Date.now);
   const inputRef = useRef<HTMLInputElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
 
@@ -84,43 +60,68 @@ export function GifTab({ onSelect, autoFocus }: { onSelect: (url: string) => voi
   const typed = query.trim();
   const search = typed || GIF_CATEGORIES.find((c) => c.id === category)!.query;
   useEffect(() => {
-    const show = (gifs: PickerGif[]) => {
-      setResults({ query: search, gifs });
+    const show = (answer: Results) => {
+      setResults(answer);
       setBroken(new Set());
-      setFailed(null);
-      if (scroller.current) scroller.current.scrollTop = 0;
+      setNow(Date.now());
+      if (answer.kind === "ok" && scroller.current) scroller.current.scrollTop = 0;
     };
-    const known = answers.current.get(search);
-    if (known) { show(known); return; }
-    const controller = new AbortController();
-    let timedOut = false;
-    let deadline: ReturnType<typeof setTimeout> | undefined;
-    const timer = setTimeout(async () => {
-      deadline = setTimeout(() => { timedOut = true; controller.abort(); }, REQUEST_TIMEOUT_MS);
-      try {
-        const gifs = await searchGifCities(search, controller.signal);
-        if (controller.signal.aborted) return;
-        answers.current.set(search, gifs);
-        show(gifs);
-      } catch {
-        if (timedOut || !controller.signal.aborted) setFailed(search);
-      } finally {
-        clearTimeout(deadline);
-      }
-    }, typed ? 400 : 0);
-    return () => { clearTimeout(timer); clearTimeout(deadline); controller.abort(); };
+    const gifs = keptGifs(search);
+    if (gifs) { show({ query: search, kind: "ok", gifs }); return; }
+    if (busyUntil()) { show({ query: search, kind: "limited" }); return; }
+    let live = true;
+    const timer = setTimeout(() => {
+      void searchGifs(search).then((answer) => { if (live) show({ query: search, ...answer }); });
+    }, typed ? TYPING_PAUSE_MS : CATEGORY_PAUSE_MS);
+    return () => { live = false; clearTimeout(timer); };
   }, [search, typed, attempt]);
 
   const current = results?.query === search ? results : null;
-  const shown = current ? current.gifs.filter((gif) => !broken.has(gif.id)) : [];
-  const loading = !current && failed !== search;
-  const retry = () => { setFailed(null); setBroken(new Set()); setAttempt((n) => n + 1); };
+  // The wait, counted down each second while it is on.
+  const until = current?.kind === "limited" ? busyUntil() : null;
+  useEffect(() => {
+    if (!until) return;
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(tick);
+  }, [until]);
+  const wait = until && until > now ? until - now : 0;
+
+  const loading = !current;
+  // A spinner while it asks again; an answer this session has is back at once.
+  const retry = () => { setResults(null); setBroken(new Set()); setAttempt((n) => n + 1); };
+  const tiles = (gifs: PickerGif[], query: string, earlier = false) => (
+    <div className="gif-masonry" data-testid="gif-grid" data-query={query} data-earlier={earlier || undefined}>
+      {gifs.filter((gif) => !broken.has(gif.id)).map((gif) => (
+        <button key={`${attempt}:${gif.id}`} type="button" data-testid="gif-result" onClick={() => onSelect(gif.url)} title={gif.title} className="gif-tile">
+          <img src={gif.previewUrl} alt={gif.title} loading="lazy" onError={() => setBroken((prev) => new Set(prev).add(gif.id))} />
+        </button>
+      ))}
+    </div>
+  );
   const trouble = (message: string) => (
     <div className="expression-trouble" data-testid="gif-trouble" role="status">
       <p>{message}</p>
       <button type="button" className="expression-retry" data-testid="gif-retry" onClick={retry}>{t("composer.retry")}</button>
     </div>
   );
+  const busy = () => {
+    const earlier = earlierGifs(search);
+    return <>
+      <div className={earlier ? "expression-trouble gif-busy-bar" : "expression-trouble"} data-testid="gif-busy">
+        <p role="status">{t("composer.gifsBusy")}</p>
+        <p id="gif-busy-wait" className="gif-busy-wait" data-testid="gif-busy-wait">{wait ? t("composer.gifsBusyWait", { time: formatWait(wait) }) : t("composer.gifsBusyOver")}</p>
+        <div className="gif-busy-actions">
+          <button type="button" className="expression-retry" data-testid="gif-retry" onClick={retry} disabled={!!wait} aria-describedby="gif-busy-wait">{t("composer.retry")}</button>
+          {!earlier && onEmojiTab && <button type="button" className="expression-retry" data-testid="gif-emoji-instead" onClick={onEmojiTab}>{t("composer.gifsEmojiInstead")}</button>}
+        </div>
+      </div>
+      {earlier && <>
+        <p className="gif-earlier" data-testid="gif-earlier">{t("composer.gifsEarlier")}</p>
+        {tiles(earlier.gifs, earlier.query, true)}
+      </>}
+    </>;
+  };
+  const shown = current?.kind === "ok" ? current.gifs.filter((gif) => !broken.has(gif.id)) : [];
   return (
     <div className="expression-tab" data-testid="gif-tab">
       <CategoryBar label={t("composer.gifCategories")} testIdPrefix="gif-category" active={typed ? null : category}
@@ -130,20 +131,16 @@ export function GifTab({ onSelect, autoFocus }: { onSelect: (url: string) => voi
       <div ref={scroller} className="expression-scroll" aria-busy={loading}>
         {loading ? (
           <div className="expression-empty" data-testid="gif-loading"><div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" /></div>
-        ) : !current ? (
+        ) : current.kind === "limited" ? (
+          busy()
+        ) : current.kind === "unavailable" ? (
           trouble(t("composer.gifsUnavailable"))
         ) : !current.gifs.length ? (
           <p className="expression-empty" data-testid="gif-empty">{t("composer.noGifs")}</p>
         ) : !shown.length ? (
           trouble(t("composer.gifsNotLoading"))
         ) : (
-          <div className="gif-masonry" data-testid="gif-grid" data-query={search}>
-            {shown.map((gif) => (
-              <button key={`${attempt}:${gif.id}`} type="button" data-testid="gif-result" onClick={() => onSelect(gif.url)} title={gif.title} className="gif-tile">
-                <img src={gif.previewUrl} alt={gif.title} loading="lazy" onError={() => setBroken((prev) => new Set(prev).add(gif.id))} />
-              </button>
-            ))}
-          </div>
+          tiles(current.gifs, search)
         )}
         <p className="gif-source">{t("composer.gifSource")}</p>
       </div>

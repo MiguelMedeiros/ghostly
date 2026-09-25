@@ -38,6 +38,8 @@ export interface PeerOptions {
 export const MAINNET_SERVICES = [/^https:\/\/arkade\.computer\//, /^https:\/\/mempool\.space\/api\//, /^https:\/\/ethereum\.publicnode\.com/];
 
 type Fixtures = {
+  /** Fails the test if any request got past the stubs to the real Internet Archive (see `guardArchive`). Automatic. */
+  archiveGuard: void;
   relay: LocalRelay;
   /** Opens Ghostly on the web as a new person: its own browser storage, the same relay as everyone else in the test. */
   peer: (name: string, options?: PeerOptions) => Promise<Peer>;
@@ -51,6 +53,7 @@ export async function openPeer(browser: Browser, relay: LocalRelay, baseURL: str
     ...(options.mobile ? { isMobile: true, hasTouch: true } : {}),
     ...(options.ignoreHTTPSErrors ? { ignoreHTTPSErrors: true } : {}),
   });
+  await guardArchive(context);
   if (!options.realRelays) await relay.attach(context);
   await attachMint(context);
   await stubGifServices(context);
@@ -77,18 +80,54 @@ export async function setIrohRelay(page: Page, relay: string): Promise<void> {
 /** A 1×1 GIF. */
 export const GIF = Buffer.from("R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==", "base64");
 
-/** GIFCities answers from here: one ghost, no network. */
-async function stubGifServices(context: BrowserContext): Promise<void> {
-  const json = (body: unknown) => ({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(body) });
-  await context.route("https://gifcities.archive.org/**", (route) =>
-    route.fulfill(json([{ gif: "http://geocities.com/haunted/ghost.gif", checksum: "c1", url_text: "retro ghost" }])),
-  );
-  for (const host of ["https://web.archive.org/**"]) {
-    await context.route(host, (route) => route.fulfill({ status: 200, contentType: "image/gif", body: GIF }));
+/** GifCities' search and the Wayback Machine that serves its GIFs. */
+export const GIFCITIES = "https://gifcities.archive.org/**";
+export const WAYBACK = "https://web.archive.org/**";
+
+/** Requests that got past every stub to the real Internet Archive during this test. */
+const archiveReached: string[] = [];
+
+/**
+ * The Internet Archive's last word in `context`: registered before the stubs, so it answers only what gets past them
+ * (a spec that unroutes a stub, a route that falls back) and refuses it; the `archiveGuard` fixture then fails the test.
+ * GifCities limits requests per IP, and our runs share the IPs Ghostly's own apps use: our tests helped exhaust it.
+ */
+export async function guardArchive(context: BrowserContext): Promise<void> {
+  for (const host of [GIFCITIES, WAYBACK]) {
+    await context.route(host, (route) => {
+      archiveReached.push(route.request().url());
+      return route.abort("blockedbyclient");
+    });
   }
 }
 
+/** GifCities answering `rows` as it does: a JSON list of GeoCities GIFs. */
+export const gifCitiesAnswer = (rows: { gif: string; checksum: string; url_text: string }[]) =>
+  ({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(rows) });
+
+/** The page the Internet Archive answers with once an IP has asked too much: a 200 in HTML, not a 429. */
+export const GIFCITIES_RATE_LIMIT = {
+  status: 200,
+  contentType: "text/html; charset=utf-8",
+  headers: { "access-control-allow-origin": "*" },
+  body: "<!DOCTYPE html><html><head><title>Rate limit reached</title></head><body><h1>Rate limit reached</h1><p>You've reached the limit "
+    + "for the number of requests that can be made in a short period of time. Please wait a moment and try again.</p></body></html>",
+};
+
+/** GifCities answers from here: one ghost, no network. */
+async function stubGifServices(context: BrowserContext): Promise<void> {
+  await context.route(GIFCITIES, (route) =>
+    route.fulfill(gifCitiesAnswer([{ gif: "http://geocities.com/haunted/ghost.gif", checksum: "c1", url_text: "retro ghost" }])),
+  );
+  await context.route(WAYBACK, (route) => route.fulfill({ status: 200, contentType: "image/gif", body: GIF }));
+}
+
 export const test = base.extend<Fixtures>({
+  archiveGuard: [async ({}, use) => {
+    archiveReached.length = 0;
+    await use();
+    expect(archiveReached.splice(0), "requests that got past the stubs to the real Internet Archive (GifCities limits requests per IP)").toEqual([]);
+  }, { auto: true }],
   relay: async ({}, use) => {
     const relay = new LocalRelay();
     await use(relay);

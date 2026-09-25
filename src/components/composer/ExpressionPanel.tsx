@@ -98,7 +98,7 @@ export function ExpressionPanel({ boundsRef, dismissRef, onEmoji, onGif, onClose
       className={`expression-panel ${phone ? "sheet expression-sheet" : "expression-popover"}`} style={position ?? { visibility: "hidden" }}>
       {tab === "emoji"
         ? <EmojiTab key="emoji" onPick={onEmoji} autoFocus={switched && !phone} />
-        : <GifTab key="gif" onSelect={onGif} autoFocus={!phone} />}
+        : <GifTab key="gif" onSelect={onGif} onEmojiTab={() => choose("emoji")} autoFocus={!phone} />}
       <div role="tablist" aria-label={t("composer.expressions")} className="expression-switch" onKeyDown={tabKeys}>
         {TABS.map((id) => (
           <button key={id} type="button" role="tab" data-testid={`expression-tab-${id}`} aria-selected={tab === id} tabIndex={tab === id ? 0 : -1}

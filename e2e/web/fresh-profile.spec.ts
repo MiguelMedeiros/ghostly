@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, openProfilePage, test } from "../support/fixtures";
+import { expect, guardArchive, openProfilePage, test } from "../support/fixtures";
 import { attachMint } from "../support/mint";
 
 /**
@@ -32,6 +32,7 @@ for (const mobile of [false, true]) {
       viewport: mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 },
       ...(mobile ? { isMobile: true, hasTouch: true } : {}),
     });
+    await guardArchive(context);
     await relay.attach(context);
     await attachMint(context);
     const page = await context.newPage();
