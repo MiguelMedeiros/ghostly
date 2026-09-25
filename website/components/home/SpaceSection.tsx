@@ -41,7 +41,7 @@ export function SpaceSection({ t, w, shotLabel }: { t: HomeCopy["space"]; w: Hom
                 </div>
                 <div className="sp-window-body">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src="/screenshots/current/profiles.webp" alt="The Profile page listing two profiles, Boo and Haunted House, with backups above" loading="lazy" width={1280} height={820} />
+                  <img src="/screenshots/current/profiles.webp" alt="The Profile page with three profiles, Personal, Work and Club, and backups above them" loading="lazy" width={1280} height={820} />
                 </div>
               </div>
               <figcaption className="caption">{shotLabel.replace("{n}", NEXT_VERSION)}</figcaption>

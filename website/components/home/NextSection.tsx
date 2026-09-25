@@ -20,12 +20,12 @@ type Shot = {
   mobile?: string;
 };
 
-// Real screens from the app, each with its phone counterpart.
+// Real screens from the app (npm run capture), each with its phone counterpart.
 // Each crop zooms into the detail its caption names so the UI text stays legible.
 const SHOTS: Record<string, Shot> = {
   chat: {
     src: "/screenshots/current/chat.webp",
-    alt: "A paired chat between Boo and Casper with delivery receipts",
+    alt: "Boo's chat with Casper: names and pictures in the chat list, delivery receipts under each message",
     from: "dev",
     width: 2560,
     height: 1640,
@@ -35,7 +35,7 @@ const SHOTS: Record<string, Shot> = {
   },
   files: {
     src: "/screenshots/current/file.webp",
-    alt: "An image sent in a chat, with its preview and a download button",
+    alt: "A photo Casper sent in the chat, with its preview and a download button",
     from: "dev",
     width: 2560,
     height: 1640,
@@ -55,18 +55,18 @@ const SHOTS: Record<string, Shot> = {
     mobile: "/screenshots/current/call-mobile.webp",
   },
   sats: {
-    src: "/screenshots/current/wallet-mainnet.webp",
-    alt: "The wallet with Cashu, Lightning, Ark and USDT cards",
+    src: "/screenshots/current/sats.webp",
+    alt: "Paying in the chat with Casper on test networks: 2,100 sats received for the snacks, a request paid over Ark, and the deck of eight wallet cards",
     from: "dev",
     width: 2560,
     height: 1640,
     // The four wallet cards, the balance and the Receive / Send row.
     crop: { x: 0.355, y: 0.075, w: 0.625 },
-    mobile: "/screenshots/current/wallet-mobile.webp",
+    mobile: "/screenshots/current/sats-mobile.webp",
   },
   services: {
     src: "/screenshots/current/services-chat.webp",
-    alt: "Choosing which of your apps a contact can open",
+    alt: "Choosing which of your apps a contact can open: Lake photos, running on Boo's computer, shared with Casper",
     from: "dev",
     width: 2560,
     height: 1640,
@@ -76,7 +76,7 @@ const SHOTS: Record<string, Shot> = {
   },
   groups: {
     src: "/screenshots/current/groups.webp",
-    alt: "A private group called Haunted house with Boo, Casper and Spooky talking",
+    alt: "A private group called Lake house trip, with its picture and four members talking",
     from: "dev",
     width: 2560,
     height: 1640,
@@ -86,7 +86,7 @@ const SHOTS: Record<string, Shot> = {
   },
   identities: {
     src: "/screenshots/current/identities-chat.webp",
-    alt: "Casper's chat with Boo, the Identities dialog open: Boo's SSH key and OpenPGP key, each verified as their own key",
+    alt: "Casper's chat with Boo, the identities panel open: Boo's Nostr, OpenPGP, SSH and Bitcoin identities, each verified by Casper's app",
     from: "dev",
     width: 2560,
     height: 1640,
