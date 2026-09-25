@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import { GHOST_PATH } from "@/components/ghost/path";
 import { APPEAR, BACK, DROP, EVER, LIVE, along, at, passes, path, reverse, type P, type Stage } from "./protocolTimeline";
 
 /**
@@ -30,9 +31,6 @@ export type SceneCopy = {
   relayedShort: string;
   pay: string;
 };
-
-/** The ghost of the app's icon (src/components/pairing/PairingScene.tsx), in an 80 × 100 box, with its cut hem. */
-const GHOST_PATH = "M40 8 C18 8 8 22 8 40 L8 72 L16 64 L24 72 L32 64 L40 72 L48 64 L56 72 L64 64 L72 72 L72 40 C72 22 62 8 40 8Z";
 
 /** Two tags in one place: the next arrives this long after the last began to leave, so they never cross-fade. */
 const SWAP = 0.14;
