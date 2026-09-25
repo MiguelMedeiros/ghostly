@@ -121,10 +121,23 @@ describe("sending files", () => {
     expect(engine.calls).toEqual([]);
   });
 
-  it("refuses a paired chat whose peer cannot take files", async () => {
-    withLinks(chat({ profile: "paired-chat/1", capabilities: { files: false, payments: true } }));
+  it("refuses a paired chat whose live peer cannot take files; one not live yet keeps it for when it is", async () => {
+    withLinks(chat({ profile: "paired-chat/1", dataLink: "open", capabilities: { files: false, payments: true } }));
     await expect(services.sendFile("peer-1", new Blob(["x"]) as File)).rejects.toThrow("updated peer");
     expect(engine.calls).toEqual([]);
+    withLinks(chat({ profile: "paired-chat/1", dataLink: "idle", capabilities: { files: false, payments: true } }));
+    await services.sendFile("peer-1", new File(["x"], "x.txt"));
+    expect(engine.calls.map(([method]) => method)).toEqual(["sendFile"]);
+  });
+
+  it("with files/3 a file is checked against the room the contact said it has; files/2 stops at 100 MB", () => {
+    withLinks(chat({ profile: "paired-chat/1", dataLink: "open", capabilities: { files: true, payments: false, largeFiles: true }, peerFileRoom: 2 * 1024 ** 3 }));
+    expect(services.fileTooLarge!("peer-1", 3 * 1024 ** 3)).toBe("Not enough space on your contact's device for this file (2.0 GB free).");
+    expect(services.fileTooLarge!("peer-1", 1024 ** 3)).toBeNull();
+    withLinks(chat({ profile: "paired-chat/1", dataLink: "open", capabilities: { files: true, payments: false } }));
+    expect(services.fileTooLarge!("peer-1", LIMITS.maxFileBytes + 1)).toContain("updated Ghostly");
+    withLinks(chat({ profile: "paired-chat/1", dataLink: "idle", capabilities: { files: false, payments: false } }));
+    expect(services.fileTooLarge!("peer-1", 5 * 1024 ** 3), "not live: known when it goes").toBeNull();
   });
 
   it("stores the bytes under an id of its own and sends only a cleaned description of the file", async () => {

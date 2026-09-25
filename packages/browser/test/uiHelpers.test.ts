@@ -37,4 +37,7 @@ it("says file sizes in the unit people expect", () => {
   expect(formatFileSize(1023)).toBe("1023 B");
   expect(formatFileSize(1024)).toBe("1.0 KB");
   expect(formatFileSize(3 * 1024 * 1024)).toBe("3.0 MB");
+  expect(formatFileSize(4.2 * 1024 ** 3)).toBe("4.2 GB");
+  expect(formatFileSize(3 * 1024 ** 4)).toBe("3.0 TB");
+  expect(formatFileSize(5000 * 1024 ** 4)).toBe("5000.0 TB");
 });

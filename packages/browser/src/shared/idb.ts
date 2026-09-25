@@ -53,6 +53,8 @@ export interface StoredFile {
   digest?: string;
   metadata?: { name: string; size: number; mime: string; timestamp: number; voice?: import("@ghostly/core").VoiceMeta };
   transfer?: { state: "transferring" | "done" | "failed"; transferred: number; size: number; error?: string };
+  /** files/3: the transfer's own record (`@ghostly/core` `FileTransferRecord`), kept so it resumes after a restart. */
+  wire3?: import("@ghostly/core").FileTransferRecord;
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -154,6 +156,14 @@ export const fileStore = {
       const files = stores[STORES.files];
       const request = files.get(id);
       request.onsuccess = () => { if (request.result) files.put({ ...request.result, transfer }); };
+    });
+  },
+  /** Changes some fields of a stored file; nothing happens to one that was deleted. */
+  async patch(id: string, fields: Partial<Omit<StoredFile, "id">>): Promise<void> {
+    await transact([STORES.files], stores => {
+      const files = stores[STORES.files];
+      const request = files.get(id);
+      request.onsuccess = () => { if (request.result) files.put({ ...request.result, ...fields }); };
     });
   },
   async get(id: string): Promise<StoredFile | undefined> {

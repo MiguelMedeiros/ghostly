@@ -37,7 +37,8 @@ import { EXPECT_PEER_MS, LinkSession, type LinkStatus, type PeerPresence, type P
 import type { ResolvedLink } from "./records";
 import { servicesFromWire, servicesToWire, type ServiceAd } from "./services";
 import { PairedHttp } from "./pairedHttp";
-import { CALLS_CAPABILITY, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, type SessionCapability } from "./pairedCapabilities";
+import { CALLS_CAPABILITY, FILES_CAPABILITY, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, type SessionCapability } from "./pairedCapabilities";
+import { FILE_FRAMES } from "./chatFiles";
 import { PAIRED_CALL_FRAME, PairedCalls, parsePairedCallFrame } from "./pairedCalls";
 import { traceLink } from "./linkTrace";
 import type { PkarrTransport } from "./transport";
@@ -139,6 +140,13 @@ export interface GhostLinkEvents {
   onFileProgress?(fileId: string, transferred: number, direction: "in" | "out"): void;
   onFileComplete?(fileId: string, direction: "in" | "out"): void;
   onFileFailed?(fileId: string, reason: string, direction: "in" | "out"): void;
+  /** A files/3 frame (`FILE_FRAMES`), only while both sides agreed `files/3` on the open session. */
+  onFilesFrame?(frame: Record<string, unknown>): void | Promise<void>;
+  /**
+   * files/3 can flow (a session agreed it and is open), or no longer can. Said again, open, after a live
+   * transport switch: frames on the old channel may be lost, and offering again puts both sides in step.
+   */
+  onFilesSession?(open: boolean): void;
   onPaymentRequest?(request: PaymentRequest): void | Promise<void>;
   /** A contact asking to pay this side (paired chats): answer with a request carrying the ask's id. */
   onPaymentAsk?(ask: PaymentAsk): void | Promise<void>;
@@ -166,6 +174,8 @@ export interface GhostLinkOptions {
   callsSupport?: boolean;
   /** Offer `services/1` on paired sessions: this app can serve granted local web apps and open the contact's. */
   servicesSupport?: boolean;
+  /** Offer `files/3` on paired sessions: files of any size, offered, resumed and checked (`chatFiles.ts`). */
+  largeFilesSupport?: boolean;
   dht?: { state?: DhtDeliveryState; save(state: DhtDeliveryState): Promise<void>; pollMs?: number };
   rtcAvailable?: boolean;
   native?: { peerDescriptors?: TransportDescriptors; peerTransports?: PairedTransport[]; peerFallback?: boolean; preferred?: PairedTransport; fallback?: boolean };
@@ -524,6 +534,7 @@ export class GhostLink {
       ...(blocked ? { status: this.transitionError ? "error" as const : "negotiating" as const, error: this.transitionError } : {}),
       transitionTarget: this.transitionTarget, transitionError: this.transitionError,
     });
+    this.emitFilesSession();
   }
 
   get presence(): PeerPresence {
@@ -1114,15 +1125,31 @@ export class GhostLink {
     const offered: SessionCapability[] = [];
     if (this.options.callsSupport) offered.push(CALLS_CAPABILITY);
     if (this.options.servicesSupport) offered.push(SERVICES_CAPABILITY);
+    if (this.options.largeFilesSupport) offered.push(FILES_CAPABILITY);
     return offered;
   }
   /** Both sides offer `calls/1` on the open session: call signals can flow. Calls need a live session. */
   get supportsCalls(): boolean { return this.isDataLinkOpen && this.sessionCapabilities.agreed(CALLS_CAPABILITY); }
   /** Both sides offer `services/1` on the open session: shared web apps can be listed and reached. */
   get supportsServices(): boolean { return this.isDataLinkOpen && this.sessionCapabilities.agreed(SERVICES_CAPABILITY); }
+  /** Both sides offer `files/3` on the open session: files of any size, offered and resumed. */
+  get supportsLargeFiles(): boolean { return this.isDataLinkOpen && this.sessionCapabilities.agreed(FILES_CAPABILITY); }
+  /** Whether files/3 was agreed on the session open now; kept to say when that changes. */
+  private filesOpen = false;
+  private emitFilesSession(again = false): void {
+    const open = this.supportsLargeFiles;
+    if (open === this.filesOpen && !(open && again)) return;
+    this.filesOpen = open;
+    this.options.events?.onFilesSession?.(open);
+  }
+  /** A files/3 frame to the contact, on the open session. False when files/3 cannot flow now. */
+  sendFilesFrame(frame: Record<string, unknown>): boolean {
+    if (!this.supportsLargeFiles || !this.channel) return false;
+    try { this.channel.send(JSON.stringify(frame)); return true; } catch { return false; }
+  }
   /** What each side offers on the open session, for showing why something is unavailable. `peer` is null until it says. */
   get sessionOffers(): { mine: SessionCapability[]; peer: string[] | null } {
-    const known = [CALLS_CAPABILITY, SERVICES_CAPABILITY] as const;
+    const known = [CALLS_CAPABILITY, SERVICES_CAPABILITY, FILES_CAPABILITY] as const;
     return { mine: this.offeredCapabilities(),
       peer: this.isDataLinkOpen && this.sessionCapabilities.peerAnnounced ? known.filter(c => this.sessionCapabilities.peerOffers(c)) : null };
   }
@@ -1336,6 +1363,7 @@ export class GhostLink {
           for (const waiter of this.openWaiters.splice(0)) waiter.resolve();
           this.options.events?.onPresence?.(this.presence);
           if (switched) this.options.events?.onTransportSwitched?.(switched.from, switched.to);
+          if (switched) this.emitFilesSession(true);
         },
         onApplication: async data => {
           if (this.channel !== channel) return;
@@ -1362,6 +1390,10 @@ export class GhostLink {
             return;
           }
           if (!this.isDataLinkOpen) return;
+          if (typeof frame?.t === "string" && FILE_FRAMES.has(frame.t)) {
+            if (this.supportsLargeFiles) await this.options.events?.onFilesFrame?.(frame);
+            return;
+          }
           if (typeof frame?.t === "string" && frame.t.startsWith("pf-")) {
             if (this.supportsFiles) await this.pairedFiles?.handle(frame);
             return;
@@ -1589,6 +1621,7 @@ export class GhostLink {
     this.peerServicesOverride = null;
     this.peerNickOverride = null;
     this.sessionCapabilities.reset();
+    this.emitFilesSession();
     if (this.peerGroupVersions) { this.peerGroupVersions = null; this.options.events?.onGroupsSupport?.(false); }
     this.session.setDataLinkOpen(false);
     if (wasNative) this.options.events?.onDataLinkState?.("idle");

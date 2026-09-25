@@ -16,7 +16,13 @@ export const CALLS_CAPABILITY = "calls/1";
 /** Shared local web apps: `paired-services` and `ph` HTTP frames on this session (WISP 701). */
 export const SERVICES_CAPABILITY = "services/1";
 
-export type SessionCapability = typeof CALLS_CAPABILITY | typeof SERVICES_CAPABILITY;
+/**
+ * Files of any size (WISP 501 rev 0.3): offered and accepted, many chunks in flight, resumed from the last
+ * confirmed byte, checked by digest (`pf-offer` … frames, `chatFiles.ts`). Without it, files/2 and 100 MiB.
+ */
+export const FILES_CAPABILITY = "files/3";
+
+export type SessionCapability = typeof CALLS_CAPABILITY | typeof SERVICES_CAPABILITY | typeof FILES_CAPABILITY;
 
 export const SESSION_CAPABILITIES_FRAME = "paired-capabilities";
 
@@ -65,7 +71,7 @@ export class SessionCapabilities {
    * A `paired-capabilities` frame from the peer. Returns the capabilities whose agreement changed, or null
    * when the frame was malformed and ignored.
    */
-  receive(frame: Record<string, unknown>, known: readonly SessionCapability[] = [CALLS_CAPABILITY, SERVICES_CAPABILITY]): SessionCapability[] | null {
+  receive(frame: Record<string, unknown>, known: readonly SessionCapability[] = [CALLS_CAPABILITY, SERVICES_CAPABILITY, FILES_CAPABILITY]): SessionCapability[] | null {
     const parsed = parseSessionCapabilities(frame);
     if (!parsed) return null;
     const before = known.map(capability => this.agreed(capability));
