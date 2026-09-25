@@ -336,7 +336,7 @@ export function CallOverlay({
             onClick={onToggleScreenShare}
             data-testid="share-screen"
             className={`w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
-              isScreenSharing ? "bg-accent text-[#111b21]" : "bg-white/10 text-white hover:bg-white/20"
+              isScreenSharing ? "bg-accent text-on-accent" : "bg-white/10 text-white hover:bg-white/20"
             }`}
             title={isScreenSharing ? "Stop sharing your screen" : "Share your screen"}
           >

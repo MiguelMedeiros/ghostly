@@ -19,7 +19,7 @@ export function Segmented<T extends string>({ options, value, onChange, label, d
     <div role="radiogroup" aria-label={label} className="flex flex-wrap gap-1 bg-surface-alt rounded-lg p-1 max-w-full">
       {options.map((option) => (
         <button key={option.value} type="button" role="radio" aria-checked={value === option.value} disabled={disabled && value !== option.value} onClick={() => { if (option.value !== value) onChange(option.value); }}
-          className={`${compact ? "px-2.5 min-h-8 text-[13px]" : "px-3 min-h-8 text-sm"} whitespace-nowrap rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${value === option.value ? "bg-accent text-[#111b21] font-medium" : "text-text-secondary hover:text-text-primary"}`}>
+          className={`${compact ? "px-2.5 min-h-8 text-[13px]" : "px-3 min-h-8 text-sm"} whitespace-nowrap rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${value === option.value ? "bg-accent text-on-accent font-medium" : "text-text-secondary hover:text-text-primary"}`}>
           {option.label}
         </button>
       ))}
@@ -28,7 +28,7 @@ export function Segmented<T extends string>({ options, value, onChange, label, d
 }
 
 const BUTTON = {
-  primary: "bg-accent text-[#111b21] hover:bg-accent-hover font-semibold",
+  primary: "bg-accent text-on-accent hover:bg-accent-hover font-semibold",
   secondary: "bg-surface-alt text-text-primary hover:bg-surface-hover border border-border",
   danger: "bg-transparent text-danger hover:bg-danger/10 border border-border",
 } as const;
@@ -51,7 +51,7 @@ export function Actions({ value, onChange, actions = ["receive", "send"] }: { va
     <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${actions.length}, minmax(0, 1fr))` }} role="tablist">
       {actions.map((action) => (
         <button key={action} type="button" role="tab" aria-selected={value === action} data-testid={`wallet-${action === "send" ? "send" : action}`} onClick={() => onChange(action)}
-          className={`flex items-center justify-center gap-2 min-w-0 px-2 py-2.5 min-h-10 max-md:min-h-11 rounded-xl text-sm font-semibold transition-colors cursor-pointer border ${value === action ? "bg-accent text-[#111b21] border-accent" : "bg-surface text-text-secondary border-border hover:text-text-primary hover:border-border-bright"}`}>
+          className={`flex items-center justify-center gap-2 min-w-0 px-2 py-2.5 min-h-10 max-md:min-h-11 rounded-xl text-sm font-semibold transition-colors cursor-pointer border ${value === action ? "bg-accent text-on-accent border-accent" : "bg-surface text-text-secondary border-border hover:text-text-primary hover:border-border-bright"}`}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">{ACTION_ICON[action]}</svg>
           <span className="truncate">{ACTION_LABEL[action]}</span>
         </button>

@@ -52,6 +52,7 @@
     {"id":"app.i18n","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"The interface language can be changed (en, pt, es, fr, it, ja, zh, ar)"},
     {"id":"app.theme","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Color theme and light/dark/system mode apply at once and survive a reload"},
     {"id":"app.theme.bubbles","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Message bubbles take the colour theme's sent/received colours; text, links, ticks, files, voice, invoices and payments stay readable (WCAG contrast) in every theme, light and dark"},
+    {"id":"app.theme.on-accent","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Text on the accent colour (buttons, badges, chosen options) takes the theme's on-accent ink, readable in every colour theme, light and dark"},
     {"id":"app.reduce-motion","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Reduce motion switch (and prefers-reduced-motion honored)"},
     {"id":"app.version","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Settings shows the version being released"},
     {"id":"app.error-boundary","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"An error in a page shows a recoverable error screen instead of a blank app"},

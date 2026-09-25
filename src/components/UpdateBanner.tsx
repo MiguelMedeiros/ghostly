@@ -40,7 +40,7 @@ export function UpdateBanner() {
           href={downloadUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="shrink-0 px-3 py-1.5 bg-accent hover:bg-accent-hover text-[#111b21] rounded-lg text-xs font-semibold transition-colors"
+          className="shrink-0 px-3 py-1.5 bg-accent hover:bg-accent-hover text-on-accent rounded-lg text-xs font-semibold transition-colors"
         >
           {t("updates.download")}
         </a>
@@ -48,7 +48,7 @@ export function UpdateBanner() {
         <button
           onClick={() => void install()}
           disabled={installing}
-          className="shrink-0 px-3 py-1.5 bg-accent hover:bg-accent-hover text-[#111b21] rounded-lg text-xs font-semibold transition-colors disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+          className="shrink-0 px-3 py-1.5 bg-accent hover:bg-accent-hover text-on-accent rounded-lg text-xs font-semibold transition-colors disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
         >
           {t(update.apply === "restart" ? "updates.restart" : "updates.reload")}
         </button>

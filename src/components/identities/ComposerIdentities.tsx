@@ -34,7 +34,7 @@ export function ComposerIdentityButton({ peerKey, open, onToggle, buttonRef }: {
         open ? "bg-accent/20 text-accent" : "bg-transparent text-text-secondary hover:text-text-primary hover:bg-surface-hover"}`}>
       <IdentitiesIcon size={20} />
       {count > 0 && <span aria-hidden="true" data-testid="composer-identities-count"
-        className="absolute -top-0.5 -right-0.5 max-md:top-0 max-md:right-0 min-w-4 h-4 px-1 rounded-full bg-accent text-[#111b21] text-[10px] font-semibold leading-4 text-center ring-2 ring-panel-header">{count}</span>}
+        className="absolute -top-0.5 -right-0.5 max-md:top-0 max-md:right-0 min-w-4 h-4 px-1 rounded-full bg-accent text-on-accent text-[10px] font-semibold leading-4 text-center ring-2 ring-panel-header">{count}</span>}
     </button>
   );
 }

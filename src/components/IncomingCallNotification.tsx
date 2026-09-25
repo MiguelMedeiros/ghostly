@@ -57,7 +57,7 @@ export function IncomingCallNotification({
           {/* Accept audio */}
           <button
             onClick={onAcceptAudio}
-            className="w-14 h-14 max-md:w-[72px] max-md:h-[72px] rounded-full bg-accent flex items-center justify-center text-[#111b21] hover:bg-accent-hover transition-colors cursor-pointer"
+            className="w-14 h-14 max-md:w-[72px] max-md:h-[72px] rounded-full bg-accent flex items-center justify-center text-on-accent hover:bg-accent-hover transition-colors cursor-pointer"
             title="Accept audio call"
           >
             <svg
@@ -78,7 +78,7 @@ export function IncomingCallNotification({
           {hasVideo && (
             <button
               onClick={onAcceptVideo}
-              className="w-14 h-14 max-md:w-[72px] max-md:h-[72px] rounded-full bg-accent flex items-center justify-center text-[#111b21] hover:bg-accent-hover transition-colors cursor-pointer"
+              className="w-14 h-14 max-md:w-[72px] max-md:h-[72px] rounded-full bg-accent flex items-center justify-center text-on-accent hover:bg-accent-hover transition-colors cursor-pointer"
               title="Accept video call"
             >
               <svg

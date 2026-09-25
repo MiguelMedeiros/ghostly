@@ -72,7 +72,7 @@ export function ChatServicesDialog({ peerPubKey, name, onClose }: { peerPubKey: 
                   <p className="flex-1 text-sm text-text-primary truncate">{service.name ?? service.id}</p>
                   {platform.features.openServices
                     ? <button type="button" data-testid="chat-service-open" onClick={() => void platform.openService(peerPubKey, service.id).catch(() => {})}
-                      className="px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-[#111b21] hover:bg-accent-hover cursor-pointer">Open</button>
+                      className="px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover cursor-pointer">Open</button>
                     : <span className="text-[11px] text-text-muted text-right">Open it from the extension or desktop app</span>}
                 </div>
               ))}

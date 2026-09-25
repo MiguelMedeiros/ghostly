@@ -41,7 +41,7 @@ export function PeerServices({ peerPubKey, showLink = true, onManage }: { peerPu
             if (!platform.features.openServices) { setError("Opening a contact's web app needs the Ghostly browser extension or desktop app."); return; }
             platform.openService(peerPubKey, service.id).catch((e) => setError(e instanceof Error ? e.message : String(e)));
           }}
-          className="flex items-center gap-1.5 px-3 py-1 bg-accent text-[#111b21] rounded-full text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer shrink-0"
+          className="flex items-center gap-1.5 px-3 py-1 bg-accent text-on-accent rounded-full text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer shrink-0"
           title={`Open ${service.name ?? service.id}, served from your contact's machine`}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></svg>
           {service.name ?? service.id}
