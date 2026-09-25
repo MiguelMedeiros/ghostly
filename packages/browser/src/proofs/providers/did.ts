@@ -199,6 +199,8 @@ export const did: IdentityProofProvider<DidEvidence> = {
     short: shortDid,
     preview: async (subject, { signal }) => previewOf(await resolveDid(subject, { fetch: uiFetch, signal })),
   },
+  // A proven DID is already a URI: the profile's own did:dht may list it under alsoKnownAs.
+  publicUri: subject => subject,
   validity: { defaultDays: 90, maxDays: 365 },
   // A did:web or did:dht document can drop a key, or the file be deleted: contacts can check again.
   recheck: { afterSeconds: 86_400 },

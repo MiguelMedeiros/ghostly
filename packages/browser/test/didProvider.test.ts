@@ -4,8 +4,8 @@ import { p256 } from "@noble/curves/nist.js";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { base58 } from "@scure/base";
 import {
-  createIdentity, createRelayPayload, didGhostlyServiceEntry, didWebFile, identityStatement, newIdentityBinding, sign, toBase64Url, utf8Encode,
-  type IdentityStatement,
+  createIdentity, didDhtDocument, didGhostlyServiceEntry, didWebFile, encodeDidDhtPacket, identityStatement, newIdentityBinding, sign, signDidDhtPacket,
+  toBase64Url, utf8Encode, type DidDhtDocument, type IdentityStatement,
 } from "@ghostly/core";
 import type { IdentityFetch, IdentityFetchOptions, IdentityProofProvider, VerifyContext } from "../src/proofs/contract";
 import { did, setOwnDidSource, type DidEvidence } from "../src/proofs/providers/did";
@@ -138,33 +138,34 @@ describeIdentityProof("DID (did:web, a service in did.json)", async () => {
   };
 });
 
-/** A did:dht published on a relay the way Pkarr clients do: its identity key signs the packet. */
+/** A did:dht published on a relay as the spec's Create step writes it: its identity key signs the packet. */
 function dhtNetwork() {
   const identity = createIdentity();
-  const didDht = `did:dht:${identity.pubKeyZ32}`;
-  let payload: Uint8Array | undefined;
-  const publish = (keys: { id: string; t: number; k: Uint8Array }[], auth: string[]) => {
-    payload = createRelayPayload(identity, [
-      { label: "_did", value: `v=0;vm=${keys.map((_, i) => `k${i}`).join(",")};auth=${auth.join(",")};asm=${auth.join(",")}` },
-      ...keys.map((key, i) => ({ label: `_k${i}._did`, value: `id=${key.id};t=${key.t};k=${b64u(key.k)}` })),
-    ]);
-  };
+  const document = didDhtDocument(identity.publicKey);
+  const didDht = document.id;
+  let payload: Uint8Array | undefined, seq = 1_700_000_000;
+  const publish = (doc: DidDhtDocument) => { payload = signDidDhtPacket(identity, encodeDidDhtPacket(doc), seq++); };
   const fetch: IdentityFetch = async url => {
-    if (url !== `https://pkarr.pubky.org/${identity.pubKeyZ32}`) return { status: 404, contentType: "", text: "", bytes: new Uint8Array() };
-    return payload ? { status: 200, contentType: "application/pkarr.org/relays#payload", text: "", bytes: payload } : { status: 404, contentType: "", text: "", bytes: new Uint8Array() };
+    if (url !== `https://pkarr.pubky.org/${identity.pubKeyZ32}` || !payload) return { status: 404, contentType: "", text: "", bytes: new Uint8Array() };
+    return { status: 200, contentType: "application/pkarr.org/relays#payload", text: "", bytes: payload };
   };
-  const identityKey = identity.publicKey;
-  return { identity, didDht, publish, fetch, identityKey };
+  /** The same DID with a second key that alone may sign; the identity key keeps only capability invocation and delegation. */
+  const rotated = (other: Uint8Array): DidDhtDocument => {
+    const backup = { id: `${didDht}#backup`, type: "JsonWebKey" as const, controller: didDht, publicKeyJwk: { kty: "OKP" as const, crv: "Ed25519" as const, x: b64u(other), alg: "EdDSA", kid: "backup" } };
+    const key = document.verificationMethod[0].id;
+    return { ...document, verificationMethod: [...document.verificationMethod, backup], authentication: [backup.id], assertionMethod: [backup.id], capabilityInvocation: [key], capabilityDelegation: [key] };
+  };
+  return { identity, document, didDht, publish, rotated, fetch };
 }
 
 describeIdentityProof("DID (did:dht, the identity key's raw signature)", async () => {
   const net = dhtNetwork(), other = createIdentity();
-  net.publish([{ id: "0", t: 0, k: net.identityKey }], ["k0"]);
+  net.publish(net.document);
   return {
     provider: did, subject: net.didDht, fetch: net.fetch,
     prove: async s => ({ method: "sig", vm: `${net.didDht}#0`, sig: b64u(sign(utf8Encode(s.text), net.identity.seed)) }),
     proveAsOther: async s => ({ method: "sig", vm: `${net.didDht}#0`, sig: b64u(sign(utf8Encode(s.text), other.seed)) }),
-    revoke: () => { net.publish([{ id: "0", t: 0, k: net.identityKey }, { id: "backup", t: 0, k: other.publicKey }], ["k1"]); clearDidCache(); },
+    revoke: () => { net.publish(net.rotated(other.publicKey)); clearDidCache(); },
   };
 });
 
@@ -321,7 +322,7 @@ describe("resolving a did:web", () => {
 describe("resolving a did:dht", () => {
   it("reads the signed record's keys, and refuses one signed by another key or deactivated", async () => {
     const net = dhtNetwork();
-    net.publish([{ id: "0", t: 0, k: net.identityKey }], ["k0"]);
+    net.publish(net.document);
     const found = await resolveDid(net.didDht, { fetch: net.fetch });
     expect(found.document.keys.map(k => [k.id, k.curve, k.relationships])).toEqual([[`${net.didDht}#0`, "Ed25519", ["authentication", "assertionMethod"]]]);
     expect(found.relay).toBe("https://pkarr.pubky.org");
@@ -329,7 +330,7 @@ describe("resolving a did:dht", () => {
     const forged: IdentityFetch = async (url, o) => { const r = await net.fetch(url, o); const bytes = r.bytes.slice(); bytes[0] ^= 1; return { ...r, bytes }; };
     await expect(resolveDid(net.didDht, { fetch: forged })).rejects.toThrow(/not signed by the DID's key/);
     clearDidCache();
-    const deactivated = async () => ({ document: {}, metadata: { versionId: "1", updated: "", deactivated: true as const }, relay: "x" });
+    const deactivated = async () => ({ document: net.document, metadata: { versionId: "1", updated: "", deactivated: true as const }, relay: "x" });
     await expect(resolveDid(net.didDht, { fetch: net.fetch, dht: deactivated })).rejects.toThrow(/deactivated/);
   });
 });

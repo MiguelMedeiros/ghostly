@@ -7,7 +7,7 @@
 | Revision | 0.1 |
 | Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
-| Dependencies | [300](300-peer-proofs.md); did:dht resolution: the did:dht draft (pull request 247) |
+| Dependencies | [300](300-peer-proofs.md); did:dht resolution: [3xx-did-dht](3xx-did-dht.md) |
 | Implementation | Experimental provider `did`; see below |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
@@ -37,7 +37,7 @@ The provider id is `did`, so the statement reads `I control did:did:web:example.
 |---|---|---|
 | `did:key` | built from the identifier: one verification method `<did>#<multibase>`, in `authentication` and `assertionMethod` | nothing |
 | `did:jwk` | built from the identifier: `<did>#0`, in both unless `"use": "enc"` | nothing |
-| `did:dht` | the Pkarr record under the DID's key, its signature checked against that key (the did:dht draft); a deactivated DID is refused | the Pkarr relay learns which DID was looked up |
+| `did:dht` | the Pkarr record under the DID's key, its signature checked against that key ([3xx-did-dht](3xx-did-dht.md)); a deactivated DID is refused | the Pkarr relay learns which DID was looked up |
 | `did:web` | `https://<host>/.well-known/did.json`, or `https://<host>/<path>/did.json` | the DNS-over-HTTPS resolver learns the domain; the domain's web server sees the verifier's IP address |
 
 For `did:web`, the verifier first resolves the host's A and AAAA records through the DNS-over-HTTPS resolver the person chose, and does not contact a host with any private, loopback, link-local or otherwise non-public address. The GET is HTTPS only, without credentials or referrer, with a 10 second time-out and at most 64 KiB, and **no redirect is followed**. The server must send `Access-Control-Allow-Origin: *` so browsers may read it.
