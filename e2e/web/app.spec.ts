@@ -79,7 +79,7 @@ test("creating a chat shows an invite code, the options menu copies it", { tag: 
   await expect(page.getByRole("button", { name: "Copied!" })).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(invite);
 
-  await page.getByTitle("Options").click();
+  await page.getByTestId("chat-options").click();
   await page.getByText("Copy invite code").click();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(invite);
 });
@@ -118,7 +118,7 @@ test("chats can be named and found", { tag: ["@feature:chats.list.rename", "@fea
 test("tech info shows the keys of the chat", { tag: ["@feature:app.tech-info"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await createChat(page);
-  await page.getByTitle("Options").click();
+  await page.getByTestId("chat-options").click();
   await page.getByText("Tech Info").click();
   for (const section of ["Identity", "Protocol", "Sync", "ACK Status"]) await expect(page.getByText(section, { exact: true })).toBeVisible();
   await expect(page.getByText("My Key")).toBeVisible();
@@ -127,7 +127,7 @@ test("tech info shows the keys of the chat", { tag: ["@feature:app.tech-info"] }
 test("one chat can be deleted, from the chat or from the list", { tag: ["@feature:chats.list.delete"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await createChat(page);
-  await page.getByTitle("Options").click();
+  await page.getByTestId("chat-options").click();
   await page.getByTestId("chat-options-menu").getByRole("button", { name: "Delete chat" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Delete chat" }).click();
   await expect(page).toHaveURL(/#\/$/);

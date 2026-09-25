@@ -112,7 +112,7 @@ test.describe("NWC on regtest Lightning", () => {
 
     // Bob asks over Lightning only (Cashu off in this chat): the invoice in the request is his own wallet's.
     await openChat(bob);
-    await bob.page.getByTitle("Options").click();
+    await bob.page.getByTestId("chat-options").click();
     await bob.page.getByTestId("chat-payments-open").click();
     await bob.page.getByTestId("chat-payments").getByTestId("chat-payments-cashu").click();
     await bob.page.getByTestId("chat-payments-save").click();

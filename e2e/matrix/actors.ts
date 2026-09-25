@@ -134,6 +134,6 @@ export async function useTestnet(actor: Actor): Promise<void> {
 
 /** The chat's Options menu, then one of its entries. */
 export async function chatOption(actor: Actor, testId: string): Promise<void> {
-  await actor.page.getByTitle("Options").click();
+  await actor.page.getByTestId("chat-options").click();
   await actor.page.getByTestId(testId).click();
 }

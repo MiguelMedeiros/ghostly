@@ -79,7 +79,7 @@ test("a chat request paid over Lightning, from one person's node to the other's"
   // Lightning only in this chat, on both sides: the request carries bob's node's invoice, alice's node pays it.
   for (const p of [alice, bob]) {
     await openChat(p);
-    await p.page.getByTitle("Options").click();
+    await p.page.getByTestId("chat-options").click();
     await p.page.getByTestId("chat-payments-open").click();
     await p.page.getByTestId("chat-payments").getByTestId("chat-payments-cashu").click();
     await p.page.getByTestId("chat-payments-save").click();

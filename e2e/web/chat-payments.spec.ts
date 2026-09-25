@@ -10,7 +10,7 @@ test("each chat allows its own ways of paying", { tag: ["@feature:payments.chat.
   const button = (p: Peer) => composerRow(p.page, "payment-button");
   const card = (p: Peer, id: string) => p.page.getByTestId(`payment-card-${id}`);
   const choose = async (p: Peer, methods: Record<string, boolean>) => {
-    await p.page.getByTitle("Options").click();
+    await p.page.getByTestId("chat-options").click();
     await p.page.getByTestId("chat-payments-open").click();
     const dialog = p.page.getByTestId("chat-payments");
     for (const [id, on] of Object.entries(methods)) {
@@ -37,7 +37,7 @@ test("each chat allows its own ways of paying", { tag: ["@feature:payments.chat.
   await alice.page.keyboard.press("Escape");
 
   // The dialog shows both sides' choices.
-  await bob.page.getByTitle("Options").click();
+  await bob.page.getByTestId("chat-options").click();
   await bob.page.getByTestId("chat-payments-open").click();
   await expect(bob.page.getByTestId("chat-payments-cashu-contact")).toContainText("has it off");
   await expect(bob.page.getByTestId("chat-payments-lightning-contact")).toContainText("allows it");

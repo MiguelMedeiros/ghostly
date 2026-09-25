@@ -88,7 +88,7 @@ test("LND: a node per person, invoices in and out through the card, a chat reque
   // A chat request: Bob asks over Lightning, the invoice comes from his node; Alice pays it from the bubble.
   for (const p of [alice, bob]) await openChat(p);
   // Lightning only in this chat for Bob, so the request is paid over Lightning and not as ecash.
-  await bob.page.getByTitle("Options").click();
+  await bob.page.getByTestId("chat-options").click();
   await bob.page.getByTestId("chat-payments-open").click();
   await bob.page.getByTestId("chat-payments").getByTestId("chat-payments-cashu").click();
   await bob.page.getByTestId("chat-payments-save").click();

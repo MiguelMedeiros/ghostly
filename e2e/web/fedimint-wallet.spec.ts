@@ -117,7 +117,7 @@ test("Fedimint on regtest: join by invite, ecash in over the gateway, notes out 
     await openChat(p);
   }
   // Cashu off in this chat: both have the public test mint, and a request would carry ecash beside the invoice.
-  await bob.page.getByTitle("Options").click();
+  await bob.page.getByTestId("chat-options").click();
   await bob.page.getByTestId("chat-payments-open").click();
   await bob.page.getByTestId("chat-payments").getByTestId("chat-payments-cashu").click();
   await bob.page.getByTestId("chat-payments-save").click();

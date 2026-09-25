@@ -35,7 +35,7 @@ test("paired extension and web exchange verified files and local-mint sats", { t
   await web.page.keyboard.press("Escape");
   await expect(web.page.getByTestId("payment-composer")).toHaveCount(0);
   // Ecash only: the fake mint pays a request's own Lightning invoice by itself and would race the payer.
-  await ext.page.getByTitle("Options").click();
+  await ext.page.getByTestId("chat-options").click();
   await ext.page.getByTestId("chat-payments-open").click();
   await ext.page.getByTestId("chat-payments").getByTestId("chat-payments-lightning").click();
   await ext.page.getByTestId("chat-payments-save").click();

@@ -11,7 +11,7 @@ import { expect, type Peer } from "./fixtures";
 export async function openIdentities(peer: Peer) {
   const panel = peer.page.getByTestId("chat-identities");
   if (await panel.count()) return panel;
-  await peer.page.getByTitle("Options", { exact: true }).click();
+  await peer.page.getByTestId("chat-options").click();
   await peer.page.getByTestId("chat-identities-open").click();
   await expect(panel).toBeVisible();
   return panel;

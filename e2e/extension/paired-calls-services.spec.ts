@@ -23,7 +23,7 @@ test("a new chat shares an app and calls, both over its live session", { tag: ["
     await a.page.getByTestId("service-target").fill(`localhost:${atlas.port}`);
     await a.page.getByTestId("service-save").click();
     await a.page.goBack();
-    await a.page.getByTitle("Options").click();
+    await a.page.getByTestId("chat-options").click();
     await a.page.getByTestId("chat-services-open").click();
     // Both apps offer services/1 and the chat is live: nothing to explain.
     await expect(a.page.getByTestId("chat-services-unavailable")).toHaveCount(0);
@@ -58,7 +58,7 @@ test("with a web contact the chat calls, and says why apps cannot travel", { tag
   const [ext, web] = await Promise.all([extensionPeer("pcs-ext"), webPeer("pcs-web")]);
   await pair(ext, web);
   await expect(ext.page.getByTestId("call-video")).toBeEnabled();
-  await ext.page.getByTitle("Options").click();
+  await ext.page.getByTestId("chat-options").click();
   await ext.page.getByTestId("chat-services-open").click();
   // The web app can neither serve nor open local apps, so it does not offer services/1.
   await expect(ext.page.getByTestId("chat-services-unavailable")).toContainText("cannot open or share apps");

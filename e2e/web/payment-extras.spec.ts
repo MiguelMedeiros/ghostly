@@ -166,7 +166,7 @@ test("a contact who turns Cashu off stops a reviewed payment before anything is 
   const review = await prepareSend(alice, 21);
 
   // Bob turns Cashu off for this chat while Alice looks at the review.
-  await bob.page.getByTitle("Options").click();
+  await bob.page.getByTestId("chat-options").click();
   await bob.page.getByTestId("chat-payments-open").click();
   await bob.page.getByTestId("chat-payments").getByTestId("chat-payments-cashu").click();
   await bob.page.getByTestId("chat-payments-save").click();

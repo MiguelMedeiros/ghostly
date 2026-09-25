@@ -22,7 +22,7 @@ test("a local web app shared in a paired chat, from the chat itself", { tag: ["@
     await a.page.goBack();
 
     // Granted per chat, from the chat's own menu.
-    await a.page.getByTitle("Options").click();
+    await a.page.getByTestId("chat-options").click();
     await a.page.getByTestId("chat-services-open").click();
     const toggle = a.page.getByTestId("chat-services").getByTestId("chat-service-toggle");
     await expect(toggle).toHaveAttribute("aria-checked", "false");

@@ -53,6 +53,9 @@ test("every kind of signer: a pasted signature and a provider's attestation, bot
   // Bob's app has no fake providers: it says it cannot verify them, and nothing is sent.
   await alice.page.evaluate(h => { location.hash = h; }, chatHash);
   const mine = (await openIdentities(alice)).getByTestId("chat-identities-mine");
+  // The picker opens on the Ghostly card; the arrow brings the first proof forward without turning it over.
+  await mine.getByTestId("composer-identity-deck-next").click();
+  await expect(mine.getByTestId("composer-identity").first()).toHaveAttribute("aria-checked", "true");
   await expect(mine.getByTestId("composer-identity-hint")).toContainText("cannot verify");
   await expect(mine.getByTestId("composer-identity-use")).toBeDisabled();
   await closeIdentities(alice);
