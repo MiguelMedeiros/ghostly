@@ -25,10 +25,11 @@ npm run e2e:full -- --no-vitest -- --project=web e2e/web/wallet-lnd.spec.ts   # 
 ```
 
 Most suites need nothing but the test process (see [No servers](#no-servers)). The ones that pay over a real
-network — Ark, Bark, BDK, Bitcoin Core, Core Lightning, LND, NWC, WebLN, USDT, S3, the Cashu mint — need services,
+network — Ark, Bark, BDK, Bitcoin Core, Core Lightning, Fedimint, LND, NWC, WebLN, USDT, S3, the Cashu mint — need services,
 and `e2e/infra/` is all of them in one Docker Compose project: one regtest bitcoind (with a miner wallet) and its
 Esplora, arkd, captaind, two LND nodes for the LND suite, two behind the WebLN wallets, two under Alby Hubs with a
-strfry relay for NWC, two Core Lightning nodes, Anvil with the test USDT contract, an S3 server (RustFS) and the Cashu test mint.
+strfry relay for NWC, two Core Lightning nodes, a one-guardian Fedimint federation with an LND gateway and an LND peer,
+Anvil with the test USDT contract, an S3 server (RustFS) and the Cashu test mint.
 Worthless coins and throwaway keys only. Containers are `ghostly-e2e-*`, host ports `127.0.0.1:47000-47199`.
 
 `e2e:full` starts from nothing and leaves nothing behind: it removes its own project first, brings it up, waits
@@ -66,6 +67,7 @@ endpoint from there, never a literal port. Their names are stable: other suites 
 | 47070 | Anvil (chain 31337) | `GHOSTLY_USDT_RPC_URL`, `GHOSTLY_USDT_TOKEN` |
 | 47080 | S3 (RustFS; MinIO no longer publishes pullable images) | `GHOSTLY_S3_ENDPOINT`, `_KEY`, `_SECRET` |
 | 47090 | Cashu test mint (`cashubtc/mintd`, fake Lightning) | `E2E_MINT_URL` |
+| 47095 / 47096 | Fedimint guardian API (websocket, as the invite code names it) / its gateway's API | `GHOSTLY_FEDIMINT_API_URL` / `_GATEWAY_URL` |
 | 47100 | the web build under test (`vite preview`) | `E2E_WEB_PORT` |
 | 47110-47119 | Lightning address server, in the test process | `E2E_LNURL_PORT` |
 | 47120-47199 | domain-proof DoH + well-known servers, in the test process | `E2E_DOMAIN_PORT` |
@@ -180,6 +182,7 @@ npm run e2e:infra:up && npm run test:e2e      # .env.e2e sets E2E_MINT_URL
 | `web/store-forward.spec.ts` | held messages (WISP 4xx): with `GHOSTLY_S3_*`, text, a picture and a request held in Alice's S3 while Bob's page is closed, picked up in order when he is back, a changed object refused, an expired one dropped; a contact without the switch is unaffected (no S3 needed) |
 | `web/wallet-cashu.spec.ts` · `wallets-ready.spec.ts` · `wallet-backups.spec.ts` | wallets ready with no setup, Cashu send/mint errors, the Lightning card, test sats; Ark and USDT recovery phrase and encrypted backup files (`@network`) |
 | `web/wallet-providers.spec.ts` | every wallet provider sending and receiving, in the Testnet mode: Cashu (in over Lightning, Send and Request in the chat), Lightning (in through an invoice, out paying an invoice the test mint does not own, `@network`), Ark, Bark and USDT (in, Send from the wallet, Send and Request in the chat; gated, see below) |
+| `web/fedimint-wallet.spec.ts` | Fedimint joins nothing on Mainnet and refuses what is not an invite code; the Lightning source form lists joined federations only; gated (`GHOSTLY_FEDIMINT_REGTEST=1`, see below): two peers join e2e/infra's federation, ecash in over the gateway, notes out and back, a Send in the chat in ecash, a request paid over the gateway's Lightning, Lightning out, both balances |
 | `web/bark-wallet.spec.ts` | Bark (Second's Ark) is not on Mainnet yet; `@network`: a Testnet wallet on Second's signet server by itself, and a chat offers Bark only when both sides allow it (Arkade stays separate) |
 | `web/wallet-bdk.spec.ts` | the BDK wallet as the on-chain source: offered in Testnet only, a new wallet's 12 words shown once, a bad phrase or an unreachable Esplora refused before anything is saved, the chat's Bitcoin card; gated (see below): funded, a Send from the wallet, a Send and a Request paid in the chat on regtest |
 | `web/wallet-webln.spec.ts` | the browser wallet (WebLN) as the Lightning source, with `window.webln` injected by the test: no wallet, a refused connection, invoices in and payments out (reviewed in Ghostly first), a refused wallet prompt that spends nothing, a chat request paid between two browser wallets (Lightning only, reviewed in the bubble); with `GHOSTLY_WEBLN_REGTEST=1`, the same against two real regtest LND nodes (see below) |
@@ -472,6 +475,29 @@ certificate is self-signed, which a browser does not trust: the test's contexts 
 `ignoreHTTPSErrors`, standing in for a node set up with a real certificate (a reverse proxy, `letsencryptdomain`).
 Desktop needs neither CORS nor a trusted certificate: Rust pins `tls.cert`, which the Rust test checks against the
 same node. Credentials are read from the containers in memory (`regtest.mjs`'s `credentials()`) and never printed.
+
+### Fedimint on regtest
+
+A federation of one guardian (`fedimint/fedimintd:v0.12.1`, the v1 mint, wallet and Lightning modules the web SDK
+speaks, iroh off so the invite code carries `ws://127.0.0.1:47095`), its gateway (`fedimint/gatewayd:v0.12.1` on an
+LND node of its own) and an LND peer with a channel to that node. The gateway lives in the guardian's network
+namespace, so the invite's address is the guardian for the browser, the gateway and `fedimint-cli` alike (on "one"
+too, where the port is forwarded). `e2e/support/fedimint-regtest/regtest.mjs ready` sets the federation up (its
+DKG, through the admin API with a test-only password), connects the gateway, pegs 0.05 BTC into the gateway's ecash
+(LNv1: the gateway funds incoming payments from it; the federation counts a deposit about ten blocks deep, and
+the gateway is asked to look again), and opens the peer's channel. About three minutes the first time, seconds
+after.
+
+```bash
+GHOSTLY_FEDIMINT_REGTEST=1 npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/fedimint-wallet.spec.ts
+```
+
+Both peers join the federation by its invite code after checking its preview; the LND peer pays Alice's invoice
+(ecash in through the gateway); notes go from Alice's wallet page to Bob's and are redeemed, others are taken back;
+Alice's Send in the chat is reviewed as ecash (they share the federation) and redeemed by Bob; with the Fedimint
+Lightning source on both sides Bob's Lightning request is paid inside the federation; Alice pays an invoice of the
+LND peer through the gateway. Both balances are checked and the evidence printed. `regtest.mjs pay|invoice|lookup`
+drive the peer.
 
 ### Bark (Second's Ark) on regtest
 

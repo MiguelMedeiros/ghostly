@@ -185,6 +185,7 @@ export class FakeFedimintSdk {
         return client;
       },
       remove: async (database) => { this.removed.push(database); this.databases.delete(database); },
+      exists: async (database) => this.databases.has(database),
     };
     return async () => sdk;
   }

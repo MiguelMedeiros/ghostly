@@ -41,6 +41,7 @@ The implementation column is independent of document status. Existing features c
 | [203](203-lightning.md) | Lightning | Draft | Existing invoice integration |
 | [204](204-bark.md) | Ark via Bark | Draft | Experimental, Testnet only; regtest verified; not compatible with Arkade; exits pending |
 | [205](205-lnurl.md) | Lightning Addresses and LNURL-pay | Draft | Paying an address or LNURL through the Lightning source; strict checks; no receiving |
+| [Fedimint · 2xx planned](2xx-fedimint.md) | Fedimint ecash and Lightning through a federation | Draft | Experimental, Testnet only; web SDK canary; regtest verified (ecash in chats, Lightning through the gateway); Mainnet off |
 | [300](300-peer-proofs.md) | Identity Proofs | Draft | Experimental Nostr subset |
 | [301](301-nostr.md) | Nostr | Draft | Implemented experimental proof; signer/runtime limits below |
 | [Nostr social · 3xx planned](3xx-nostr-social.md) | Nostr social layer | Draft | Experimental: profile, follows, notes on request; publication through the person's signer, off by default |

@@ -14,8 +14,8 @@ import { ensureMiner, mine, miner, retry, run, until } from "../../infra/chain.m
 export { mine };
 const PASSWORD = "ghostly-fedimint-regtest";
 /** The guardian's API as every container of the federation sees it (the port is the same inside and out). */
-const API = "ws://127.0.0.1:47140";
-const GATEWAY = "http://127.0.0.1:47141";
+const API = "ws://127.0.0.1:47095";
+const GATEWAY = "http://127.0.0.1:47096";
 
 const fedimintCli = (...args) => run("fedimintd", ["fedimint-cli", "--password", PASSWORD, ...args]);
 const setup = (...args) => fedimintCli("admin", "setup", API, ...args);
@@ -75,10 +75,16 @@ export async function ready() {
     const address = gatewayCli("ecash", "pegin", "--federation-id", federationId).address;
     miner("sendtoaddress", address, "0.05");
     // The federation counts a deposit once its consensus block count (the tip minus a finality delay of ~10,
-    // agreed about once a minute) passes it: a block now and then until it does.
+    // agreed about once a minute) passes it. The gateway does not always look again by itself (seen on 0.12.1): it
+    // is asked to, and given a block now and then.
     mine(12);
     let polls = 0;
-    await until("the gateway's ecash", () => { if (ecash() >= 2_000_000_000) return true; if (++polls % 4 === 0) mine(2); return false; }, { tries: 120, every: 3000 });
+    await until("the gateway's ecash", () => {
+      if (ecash() >= 2_000_000_000) return true;
+      try { gatewayCli("ecash", "pegin-recheck", "--address", address, "--federation-id", federationId); } catch { /* asked again next time */ }
+      if (++polls % 6 === 0) mine(2);
+      return false;
+    }, { tries: 120, every: 5000 });
   }
   return { invite: code, federation: federationId, gatewayEcashMsats: ecash(), api: endpoints.fedimint.api };
 }

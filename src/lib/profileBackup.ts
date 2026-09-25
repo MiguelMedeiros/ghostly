@@ -86,12 +86,20 @@ export async function restoreProfileBackup(text: string, passphrase: string): Pr
     if (isArkRecord(settings!.keys[i]) && typeof walletId === "string" && !walletIds.has(walletId)) walletIds.set(walletId, crypto.randomUUID());
   }
   for (const [oldId, fresh] of walletIds) if (Object.prototype.hasOwnProperty.call(ark, oldId)) await restoreArkDatabase(fresh, ark[oldId]);
+  // Fedimint client databases are files of this origin, not in the bundle: every federation gets a new file name,
+  // which the wallet finds missing and fills by joining again with the mnemonic (the federation's recovery).
+  const freshFedimint = (value: unknown) => {
+    const record = value as { database?: unknown; federations?: { database?: unknown }[] };
+    const renamed = (f: { database?: unknown }) => typeof f?.database === "string" ? { ...f, database: `ghostly-fedimint-${crypto.randomUUID()}.db` } : f;
+    return Array.isArray(record?.federations) ? { ...record, federations: record.federations.map(renamed) } : typeof record?.database === "string" ? renamed(record) : value;
+  };
   if (peer) {
     for (const store of peer.stores) {
       if (store.name === "settings") {
         store.values = store.values.map((value, i) => {
           const record = value as { config?: { walletId?: string } };
           const moved = record?.config?.walletId && walletIds.get(record.config.walletId);
+          if (typeof store.keys[i] === "string" && (store.keys[i] as string).startsWith("fedimint")) return freshFedimint(value);
           return isArkRecord(store.keys[i]) && moved ? { ...record, config: { ...record.config, walletId: moved } } : value;
         });
       }

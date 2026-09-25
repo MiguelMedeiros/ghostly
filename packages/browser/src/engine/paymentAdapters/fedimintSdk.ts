@@ -87,6 +87,8 @@ export interface FedimintSdk {
   open(params: { database: string; mnemonic: string }): Promise<FedimintClient>;
   /** Deletes a database: only one that never held money (a failed join). */
   remove(database: string): Promise<void>;
+  /** Whether this device has the database (a profile restored from a backup has the records, not the files). */
+  exists(database: string): Promise<boolean>;
 }
 
 export const fedimintDatabase = (id: string) => `ghostly-fedimint-${id}.db`;
@@ -289,6 +291,10 @@ export function loadFedimintSdk(): Promise<FedimintSdk> {
         if (!(await wallet.joinFederation(invite.trim(), { clientName: CLIENT_NAME, forceRecover: recover }))) throw new Error("Could not join the federation: its guardians did not answer, or the invite code is not valid");
       }),
       open: ({ database, mnemonic }) => client(database, mnemonic, (wallet) => wallet.open(CLIENT_NAME)),
+      async exists(database) {
+        const root = await navigator.storage.getDirectory();
+        try { const file = await (await root.getFileHandle(database)).getFile(); return file.size > 0; } catch { return false; }
+      },
       async remove(database) {
         const root = await navigator.storage.getDirectory();
         await root.removeEntry(database).catch((error: unknown) => { if ((error as { name?: string })?.name !== "NotFoundError") throw error; });

@@ -32,7 +32,7 @@ describe("Fedimint in the payment protocol", () => {
     const ask = { t: "pay-ask", id: "ask-00001", ts: 1, v: "500", u: "sat", m: "fedimint" } as const;
     expect(decodeControl(encodeControl(ask))).toEqual({ ...ask, memo: undefined });
     const notes = "A11".padEnd(3_000, "q");
-    const pay = { t: "pay", id: "payment-1", ts: 1, v: "500", u: "sat", e: [ENDPOINT.fedimint, notes] } as const;
+    const pay = { t: "pay" as const, id: "payment-1", ts: 1, v: "500", u: "sat", e: [ENDPOINT.fedimint, notes] as [string, string] };
     expect(decodeControl(encodeControl(pay))).toMatchObject({ e: [ENDPOINT.fedimint, notes] });
   });
 });

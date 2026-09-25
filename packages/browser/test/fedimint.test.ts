@@ -165,9 +165,9 @@ describe("the Fedimint wallet", () => {
 
   it("reads the network of a v1 wallet module from its consensus-encoded config", () => {
     // What a regtest federation of fedimintd 0.12.1 answered (e2e/infra), shortened around the network.
-    const config = { global: { api_endpoints: { 0: { url: "ws://127.0.0.1:47140/", name: "ghostly-guardian" } }, consensus_version: { major: 2, minor: 1 }, meta: { federation_name: "Ghostly regtest" } },
+    const config = { global: { api_endpoints: { 0: { url: "ws://127.0.0.1:47095/", name: "ghostly-guardian" } }, consensus_version: { major: 2, minor: 1 }, meta: { federation_name: "Ghostly regtest" } },
       modules: { 0: { kind: "ln", config: "00" }, 1: { kind: "mint", config: "00" }, 2: { kind: "wallet", config: "037e51776b6828fedab5bffa0afe000f4240" } } };
-    expect(federationInfo("ab".repeat(32), config)).toMatchObject({ name: "Ghostly regtest", network: "regtest", consensusVersion: "2.1", modules: ["ln", "mint", "wallet"], guardians: [{ name: "ghostly-guardian", url: "ws://127.0.0.1:47140/" }] });
+    expect(federationInfo("ab".repeat(32), config)).toMatchObject({ name: "Ghostly regtest", network: "regtest", consensusVersion: "2.1", modules: ["ln", "mint", "wallet"], guardians: [{ name: "ghostly-guardian", url: "ws://127.0.0.1:47095/" }] });
     expect(federationInfo("ab".repeat(32), { ...config, modules: { 0: { kind: "wallet", config: "fed9b4bef9" } } }).network).toBe("bitcoin");
     expect(federationInfo("ab".repeat(32), { ...config, modules: { 0: { kind: "wallet", config: "fed9b4bef9fedab5bffa" } } }).network, "two networks: unknown").toBeUndefined();
     // A preview (before joining) names it `unknown_module_hex`; without a wallet module, the Lightning module says it.
@@ -432,5 +432,21 @@ describe("the Fedimint Lightning source", () => {
     expect(pending.state).toBe("pending");
     expect(await source.paymentStatus({ invoice: outside, paymentHash: "", ref: pending.ref })).toMatchObject({ state: "pending" });
     await settle();
+  });
+});
+
+describe("a Fedimint wallet restored with its profile", () => {
+  it("joins every federation again, recovering, when the client's database is not on this device", async () => {
+    const w = await funded(1_500);
+    await w.stop();
+    // A profile backup restored elsewhere: the records came (with new database names), the client's files did not.
+    const stored = await wrap<{ federations: { database: string }[] }>((await store(STORES.settings, "readonly")).get("fedimintWallet-testnet"));
+    await transact([STORES.settings], (s) => { s[STORES.settings].put({ ...stored, federations: stored.federations.map((f) => ({ ...f, database: "ghostly-fedimint-restored.db" })) }, "fedimintWallet-testnet"); });
+    const restored = await wallet();
+    await restored.ensureReady();
+    await restored.refresh();
+    expect(restored.view.federations[0]).toMatchObject({ status: "ready" });
+    expect(restored.view.balance, "the federation's recovery gave the ecash back").toBe(1_500);
+    expect(fake.databases.has("ghostly-fedimint-restored.db")).toBe(true);
   });
 });

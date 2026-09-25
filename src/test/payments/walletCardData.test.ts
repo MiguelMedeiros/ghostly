@@ -5,7 +5,7 @@ import { pageUnit, walletCards, type WalletRail } from "../../components/walletC
 import { walletView } from "../fakeEngine";
 import { arkReady, barkReady, bitcoinSource, lightningSource, mint, REAL_MINT, TEST_MINT, usdtReady } from "./fixtures";
 
-// covers: wallet.deck, wallet.mode
+// covers: wallet.deck, wallet.mode, wallet.fedimint.join, wallet.fedimint.mainnet-off
 
 /** One card, as the chat's picker shows it (no Testnet badge beside it: a test sat says so). */
 const cardOf = (rail: WalletRail, wallet: Partial<WalletView> = {}) => {
@@ -161,5 +161,25 @@ describe("on the wallet page, under the Testnet badge", () => {
     expect(pageUnit({ mode: "testnet" }, false)).toBe("sats");
     expect(pageUnit({ mode: "mainnet" }, true)).toBe("test sats");
     expect(pageUnit({ mode: "mainnet" }, false)).toBe("sats");
+  });
+});
+
+describe("Fedimint", () => {
+  const federation = (over: Record<string, unknown> = {}) => ({ id: "ab".repeat(32), name: "Ghostly regtest", guardians: [{ name: "g0", url: "ws://127.0.0.1:47095" }], consensusVersion: "2.1", network: "regtest" as const,
+    modules: ["ln", "mint", "wallet"], joinedAt: 1, invite: "fed11qq", balance: 0, status: "ready" as const, lightning: true, ...over });
+  it("says it is Testnet only on Mainnet", () => {
+    expect(cardOf("fedimint", { fedimint: { unavailable: "not yet", federations: [], balance: 0, history: [] } }))
+      .toEqual({ name: "Fedimint", balance: "Testnet only", detail: "Federation ecash", status: "Not on Mainnet yet", ready: false });
+  });
+  it("asks for a federation, and joins none by itself", () => {
+    expect(cardOf("fedimint", { mode: "testnet", fedimint: { federations: [], balance: 0, history: [] } })).toMatchObject({ balance: "No federation", status: "Set up", ready: false });
+  });
+  it("shows the balance of its federations, named, once one is connected", () => {
+    expect(cardOf("fedimint", { mode: "testnet", fedimint: { federations: [federation({ balance: 1_200 })], balance: 1_200, history: [] } }))
+      .toEqual({ name: "Fedimint", balance: "1,200 test sats", detail: "Ghostly regtest", status: "Ready", ready: true });
+    expect(pageCardOf("fedimint", { mode: "testnet", fedimint: { federations: [federation({ balance: 5 }), federation({ id: "cd".repeat(32), balance: 7 })], balance: 12, history: [] } }))
+      .toMatchObject({ balance: "12 sats", detail: "2 federations" });
+    expect(cardOf("fedimint", { mode: "testnet", fedimint: { federations: [federation({ status: "connecting" })], balance: 0, history: [] } })).toMatchObject({ balance: "Connecting…", ready: false });
+    expect(cardOf("fedimint", { mode: "testnet", fedimint: { federations: [federation({ status: "error" })], balance: 0, history: [] } })).toMatchObject({ balance: "Unavailable", ready: false });
   });
 });

@@ -61,8 +61,8 @@ export const VARIABLES = {
   GHOSTLY_NWC_BOB_HUB_URL: ["http://127.0.0.1:47064", "Bob's Alby Hub"],
 
   // Fedimint. The invite code names the guardian's API; e2e/support/fedimint-regtest/regtest.mjs `invite` prints it.
-  GHOSTLY_FEDIMINT_API_URL: ["ws://127.0.0.1:47140", "Fedimint guardian API (websocket), as the invite code names it"],
-  GHOSTLY_FEDIMINT_GATEWAY_URL: ["http://127.0.0.1:47141", "Fedimint gateway API (gatewayd, LND-backed)"],
+  GHOSTLY_FEDIMINT_API_URL: ["ws://127.0.0.1:47095", "Fedimint guardian API (websocket), as the invite code names it"],
+  GHOSTLY_FEDIMINT_GATEWAY_URL: ["http://127.0.0.1:47096", "Fedimint gateway API (gatewayd, LND-backed)"],
 
   // USDT (the RPC is the web app's "Local test chain").
   GHOSTLY_USDT_RPC_URL: ["http://127.0.0.1:47070", "Anvil, chain 31337"],

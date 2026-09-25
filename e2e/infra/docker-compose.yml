@@ -250,7 +250,7 @@ services:
   # ── Fedimint: a one-guardian federation (mint, wallet and Lightning v1 modules) with an LND-backed gateway ─
   # The invite code carries the guardian's API URL, and the browser, the gateway and fedimint-cli all use it: the
   # guardian binds its API on the same port inside the container as on the host, and the gateway shares its network
-  # namespace, so ws://127.0.0.1:47140 is the guardian everywhere (on another host too, where the port is forwarded).
+  # namespace, so ws://127.0.0.1:47095 is the guardian everywhere (on another host too, where the port is forwarded).
   # Its setup (DKG) and the gateway's channel are e2e/support/fedimint-regtest/regtest.mjs `ready`.
   fedimintd:
     image: fedimint/fedimintd:v0.12.1
@@ -263,8 +263,8 @@ services:
       FM_BITCOIND_PASSWORD: regtest
       FM_BIND_P2P: 0.0.0.0:8173
       FM_P2P_URL: fedimint://fedimintd:8173
-      FM_BIND_API: 0.0.0.0:47140
-      FM_API_URL: ws://127.0.0.1:47140
+      FM_BIND_API: 0.0.0.0:47095
+      FM_API_URL: ws://127.0.0.1:47095
       FM_BIND_UI: 127.0.0.1:8175
       FM_ENABLE_IROH: "false"
       FM_IROH_NEXT_ENABLE: "false"
@@ -280,7 +280,7 @@ services:
       FM_ENABLE_MODULE_LNV2: "0"
     volumes: ["fedimintd:/data"]
     # The gateway lives in this container's network: its API is published here too.
-    ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47140:47140", "${E2E_INFRA_ADDRESS:-127.0.0.1}:47141:47141"]
+    ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47095:47095", "${E2E_INFRA_ADDRESS:-127.0.0.1}:47096:47096"]
     depends_on: { bitcoind: { condition: service_healthy } }
     cpu_shares: 256
     cpus: 1
@@ -309,8 +309,8 @@ services:
     network_mode: "service:fedimintd"
     environment:
       FM_GATEWAY_DATA_DIR: /data
-      FM_GATEWAY_LISTEN_ADDR: 0.0.0.0:47141
-      FM_GATEWAY_API_ADDR: http://127.0.0.1:47141
+      FM_GATEWAY_LISTEN_ADDR: 0.0.0.0:47096
+      FM_GATEWAY_API_ADDR: http://127.0.0.1:47096
       # bcrypt of the test-only password "ghostly-fedimint-regtest" (gateway-cli create-password-hash).
       FM_GATEWAY_BCRYPT_PASSWORD_HASH: "$$2b$$12$$QCRxtsPF3kZQTu5v0j/YVuN9K0FurX3M.dRIQDYsdjlgWq7VcOgx6"
       FM_GATEWAY_NETWORK: regtest
