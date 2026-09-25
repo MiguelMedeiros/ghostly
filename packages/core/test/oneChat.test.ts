@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { randomBytes, toBase64Url } from "../src/bytes";
 import { createIdentity } from "../src/identity";
 import { RELAY_POLL_INTERVALS } from "../src/link";
-import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, invitation, open, rtc, useFakeWorld, yieldToLoop, type Opened } from "./support/pairingWorld";
+import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, invitation, invitationWhere, open, rtc, useFakeWorld, yieldToLoop, type Opened } from "./support/pairingWorld";
 
 // covers: chat.one-chat, chat.dht.fallback, chat.paired.reconnect, core.peer-keys
 
@@ -88,6 +88,24 @@ describe("one chat: DHT rendezvous, peer-to-peer upgrade, DHT fallback", () => {
     // Nothing was lost or shown twice across the move.
     expect(texts(joiner)).toEqual(["and back", "now live"]);
     expect(texts(inviter)).toEqual(["hello over the DHT"]);
+  }, 120_000);
+
+  it("dials a native transport the contact's record just named at once, not after the wait failed attempts built up", async () => {
+    // No WebRTC between them (Linux Desktop): until the record arrives there is nothing to dial, and every attempt
+    // with nothing to try doubles the wait before the next one, up to three minutes.
+    rtc.blocked = true;
+    const pkarr = new MemoryPkarr(DESKTOP_NETWORK), made = invitationWhere("inviter");
+    const inviter = open(made.inviter, pkarr, { dht: true });
+    await run(2_000);
+    open(made.joiner, pkarr, { dht: true });
+    expect(await until(() => inviter.link.pairingProgress?.stage === "on-dht", 60_000)).toBeLessThan(Infinity);
+    await run(90_000);
+    const calls: string[] = [];
+    inviter.link.registerEndpoint({ transport: "iroh/1", descriptor: { id: "mine" }, onConnection: null, onDescriptor: null,
+      connect: async () => { calls.push("iroh/1"); throw new Error("no answer"); }, close: async () => {} });
+    inviter.link.learnPeerTransports(["iroh/1"], { "iroh/1": { id: "theirs" } });
+    await run(2_000);
+    expect(calls, "the side that dials tries the record's transport now").toEqual(["iroh/1"]);
   }, 120_000);
 
   it("live, then a drop: back on the DHT at once, text still goes, and live again when the contact is back", async () => {

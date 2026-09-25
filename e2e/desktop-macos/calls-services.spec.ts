@@ -12,8 +12,8 @@ import { LocalRelay } from "../support/relay";
  * of them shares, opened by the other in a window of its own (`services/1`). On the DHT the call buttons are
  * off and say why.
  *
- * The Linux Desktop harness (e2e/desktop/) cannot show any of it: WebKitGTK has no WebRTC, so a Linux pair
- * never goes live. macOS has no WebDriver for WKWebView, so the apps are driven through the test driver built
+ * The Linux Desktop harness (e2e/desktop/) cannot show the calls: WebKitGTK has no WebRTC for their media (a Linux
+ * pair goes live on Iroh or HyperDHT, e2e/desktop/native-upgrade.spec.ts, but cannot call). macOS has no WebDriver for WKWebView, so the apps are driven through the test driver built
  * into a debug build (support/desktopMac.ts). The Pkarr relay, the HyperDHT network and the shared app are in
  * this process; the call's STUN lookups (and the wallets' providers, which the apps reach at start) are not.
  *

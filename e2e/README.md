@@ -256,8 +256,8 @@ page (`execute`): enough for `matrix/people.ts` to drive a chat.
 
 ## Desktop on macOS
 
-Calls and shared apps need a live chat, and a Linux Desktop pair never goes live (WebKitGTK has no WebRTC), so
-the Linux harness only sees their buttons say why not. `desktop-macos/calls-services.spec.ts` runs them where most
+A call's media is WebRTC, which WebKitGTK does not have: a Linux Desktop pair goes live on Iroh or HyperDHT
+(`desktop/native-upgrade.spec.ts`) but cannot call, so the Linux harness only sees the call buttons say why not. `desktop-macos/calls-services.spec.ts` runs them where most
 Desktop users are: two apps on one Mac, in the system WKWebView.
 
 ```bash

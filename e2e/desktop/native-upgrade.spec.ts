@@ -1,7 +1,10 @@
 import { test, expect } from "@playwright/test";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { desktopHome } from "../support/desktop";
 import { LocalRelay } from "../support/relay";
-import { desktopNetwork, openDesktopPerson } from "../matrix/desktop";
-import type { DesktopPerson } from "../matrix/people";
+import { desktopNetwork } from "../matrix/desktop";
+import { desktopPerson, type DesktopPerson } from "../matrix/people";
 
 /**
  * Two Desktop apps with no WebRTC between them go live on a native transport, from the DHT floor, by what the
@@ -12,6 +15,12 @@ import type { DesktopPerson } from "../matrix/people";
  * DHT, each side publishes a capability record with its native descriptors (Iroh id and relay, HyperDHT key and
  * relay; never addresses), the other learns them (`GhostLink.learnPeerTransports`) and dials Iroh or HyperDHT
  * (`dialDescriptors`). A unit test covers the dial order; this is the two real apps doing it.
+ *
+ * And in good time. The descriptors reach the record only once the endpoints are up, as its next revision, and a
+ * contact reads the record when an envelope names a newer one: before the envelope announced it at once
+ * (`DhtDelivery.announce`), the dialling side could hear of it only with the next control envelope, four minutes
+ * on, and then waited out the backoff its empty attempts had built (`learnPeerTransports` now dials at once). Live
+ * took 50 s to over 5 minutes then; about 40 s now, so two minutes is the budget.
  *
  * Nothing leaves the machine: both apps read and publish on the test's Pkarr relay (GHOSTLY_PKARR_RELAYS) and
  * find each other on a HyperDHT testnet in this process (GHOSTLY_HYPERDHT_BOOTSTRAP). Iroh keeps n0's relays, so
@@ -25,11 +34,11 @@ import type { DesktopPerson } from "../matrix/people";
 const RECORD = `
   if (window.qaStates) return;
   const states = window.qaStates = [];
-  const note = (value) => { if (value && states[states.length - 1] !== value) states.push(value); };
+  const last = {};
+  const note = (kind, value) => { if (value && last[kind] !== value) { last[kind] = value; states.push(kind + ":" + value); } };
   const look = () => {
-    note(document.querySelector('[data-testid="pairing-indicator"]')?.getAttribute("data-stage")?.replace(/^/, "stage:"));
-    const label = document.querySelector('[data-testid="connection-options"]')?.getAttribute("aria-label");
-    note(label?.replace(/^Connection options: /, "label:"));
+    note("stage", document.querySelector('[data-testid="pairing-indicator"]')?.getAttribute("data-stage"));
+    note("label", document.querySelector('[data-testid="connection-options"]')?.getAttribute("aria-label")?.replace(/^Connection options: /, ""));
   };
   new MutationObserver(look).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-stage", "aria-label"] });
   look();`;
@@ -45,6 +54,13 @@ const transport = (p: DesktopPerson) => p.app.attribute('[data-testid="connectio
 
 const NATIVE = /^label:Connected · (Iroh|HyperDHT)/;
 
+/** Each app's own log (`ghostly.log`, src-tauri/src/diagnostics.rs): its link-trace lines say what it dialled and why. */
+function attachLogs(name: string, home: string): void {
+  const find = (dir: string): string[] => readdirSync(dir, { withFileTypes: true })
+    .flatMap((e) => e.isDirectory() ? find(join(dir, e.name)) : e.name === "ghostly.log" ? [join(dir, e.name)] : []);
+  for (const file of find(home)) void test.info().attach(`${name}'s ghostly.log`, { body: readFileSync(file), contentType: "text/plain" });
+}
+
 test("two Desktop apps without WebRTC go live on Iroh or HyperDHT from the DHT, and nothing is lost", {
   tag: ["@feature:chat.native-upgrade", "@feature:chat.one-chat"],
 }, async () => {
@@ -53,8 +69,14 @@ test("two Desktop apps without WebRTC go live on Iroh or HyperDHT from the DHT, 
   const network = await desktopNetwork(relay);
   const cleanup: (() => Promise<void> | void)[] = [() => relay.close(), () => network.close()];
   try {
-    const a = await openDesktopPerson({ cleanup }, "ana", network.env) as DesktopPerson;
-    const b = await openDesktopPerson({ cleanup }, "bia", network.env) as DesktopPerson;
+    const open = async (name: string): Promise<DesktopPerson> => {
+      const home = desktopHome(name);
+      const person = await desktopPerson(name, { home: home.dir, env: network.env });
+      cleanup.push(async () => { await person.stop(); attachLogs(name, home.dir); home.remove(); });
+      return person;
+    };
+    const a = await open("ana");
+    const b = await open("bia");
     for (const p of [a, b]) {
       // The premise: this WebView has no WebRTC at all.
       expect(await p.app.execute<boolean>(`return typeof RTCPeerConnection !== "undefined";`), `${p.name} has no WebRTC`).toBe(false);
@@ -76,12 +98,13 @@ test("two Desktop apps without WebRTC go live on Iroh or HyperDHT from the DHT, 
 
     // Then both go live on a native transport, dialled from the other's capability record.
     for (const p of [a, b]) {
-      await expect.poll(() => p.connection(), { timeout: 300_000, message: `${p.name} goes live on a native transport` })
+      await expect.poll(() => p.connection(), { timeout: 120_000, message: `${p.name} goes live on a native transport` })
         .toMatch(/Connected · (Iroh|HyperDHT)/);
     }
     const [onA, onB] = [await transport(a), await transport(b)];
     expect(onA, "the same transport on both sides").toBe(onB);
     expect(onA).toMatch(/^(iroh|hyperdht)\/1$/);
+    test.info().annotations.push({ type: "transport", description: onA! });
 
     // Each side was on the DHT before it was live, never failed, and went live on the native transport.
     for (const p of [a, b]) {
@@ -91,6 +114,7 @@ test("two Desktop apps without WebRTC go live on Iroh or HyperDHT from the DHT, 
       const before = seen.slice(0, live);
       expect(before.some((s) => s === "stage:on-dht" || s.startsWith("label:On DHT")), `${p.name} was on the DHT first: ${seen.join(" → ")}`).toBe(true);
       expect(seen, `${p.name} never showed a failed pairing`).not.toContain("stage:failed");
+      test.info().annotations.push({ type: `${p.name}'s states`, description: seen.join(" → ") });
     }
 
     // Live: texts both ways, sent back to back, each arriving once on both sides.

@@ -297,7 +297,7 @@ jobs:
   # ============================================
   # Two Desktop apps on a Mac call and share an app (system WKWebView, the test driver)
   # ============================================
-  # Calls and shared apps need a live chat, which a Linux Desktop pair never has (no WebRTC in WebKitGTK).
+  # A call's media is WebRTC, which WebKitGTK lacks: a Linux Desktop pair goes live on Iroh or HyperDHT but cannot call.
   # desktop-macos.yml builds the app with the test driver and runs e2e/desktop-macos/ (about 4 minutes).
   desktop-macos:
     name: Desktop on macOS
