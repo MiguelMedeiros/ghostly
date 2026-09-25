@@ -114,13 +114,17 @@ it("a browser reaches a Desktop over Iroh through the relay the Desktop's endpoi
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], shouldAdvanceTime: true });
   // The browser has the lower key and dials, as Miguel's web did.
   const s = await setup({ appDials: false, app: { iroh: "relay-later" }, contact: { iroh: "relay-only" } });
-  // Its first record names the endpoint with no relay: nothing the browser can dial.
-  await advance(45_000);
+  // Its first record names the endpoint with no relay: nothing the browser can dial. The browser says so, and the
+  // app knows the browser dials: it is not a silent retry loop on either side.
+  await until(() => expect(s.contact.liveAttempt).toMatchObject({ side: "dialled", failed: [{ transport: "iroh/1", error: "The contact has no Iroh relay" }] }), 45_000);
+  expect(s.contact.liveAttempt!.retryAt).toBeGreaterThan(Date.now());
   expect(s.contact.isDataLinkOpen).toBe(false);
+  expect(s.view().liveDialer).toBe("contact");
   s.appEndpoints["iroh/1"]!.homeRelay();
   // Homed now: the record says so, the browser takes it, and the chat goes live through the relay.
   await until(() => expect(liveOn(s)).toEqual(["ready", "iroh/1", "ready", "iroh/1"]), 120_000);
   expect(s.view().transportRelayed).toEqual({ relays: ["relay.test"] });
+  expect([s.view().liveAttempt, s.contact.liveAttempt]).toEqual([undefined, undefined]);
 }, 60_000);
 
 describe("a choice made while the chat is not live", () => {
@@ -132,6 +136,8 @@ describe("a choice made while the chat is not live", () => {
     await s.contactChooses("iroh/1");
     // The app hears of it from the contact's record: one row, as for a choice made on a session.
     await until(() => expect(lines(s.view())).toContainEqual(["chose", "contact", "iroh/1"]), 90_000);
+    // The choice is dialled, and why it does not connect is said where it was tried.
+    await until(() => expect(s.contact.liveAttempt?.failed).toEqual([{ transport: "iroh/1", error: "iroh/1 unreachable" }]), 90_000);
     s.net.unreachable.delete("iroh/1");
     await until(() => expect(liveOn(s)).toEqual(["ready", "iroh/1", "ready", "iroh/1"]), 240_000);
     expect(s.view().transportWait).toBeUndefined();
@@ -153,5 +159,25 @@ describe("a choice made while the chat is not live", () => {
     else await until(() => expect(s.contactHeard).toEqual(["hyperdht/1"]), 90_000);
     s.net.unreachable.delete("iroh/1"); s.net.unreachable.delete("hyperdht/1");
     await until(() => expect(liveOn(s)).toEqual(["ready", "hyperdht/1", "ready", "hyperdht/1"]), 240_000);
+    // Told once, though the session that opened carries the same choice as its switch intent.
+    await advance(5_000);
+    if (chooser === "contact") expect(lines(s.view()).filter(l => l[0] === "chose")).toEqual([["chose", "contact", "hyperdht/1"]]);
+    else expect(s.contactHeard).toEqual(["hyperdht/1"]);
+  }, 60_000);
+
+  it("begins the session that opens elsewhere as a choice, so the chat moves there once it connects", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], shouldAdvanceTime: true });
+    const s = await setup({ appDials: true, app: { iroh: "direct", hyperdht: true }, contact: { iroh: "direct", hyperdht: true } });
+    s.net.unreachable.add("iroh/1"); s.net.unreachable.add("hyperdht/1");
+    await advance(45_000);
+    await s.node.setChatTransport({ linkId: s.id, transport: "hyperdht/1" });
+    // Only Iroh gets through: the chat opens there (Fallback on), and the choice still stands.
+    s.net.unreachable.delete("iroh/1");
+    await until(() => expect(liveOn(s)).toEqual(["ready", "iroh/1", "ready", "iroh/1"]), 240_000);
+    await until(() => expect(s.view().transportWait).toMatchObject({ transport: "hyperdht/1", by: "you", live: "iroh/1" }), 60_000);
+    expect(s.contact.transportWait).toMatchObject({ transport: "hyperdht/1", by: "contact", live: "iroh/1" });
+    s.net.unreachable.delete("hyperdht/1");
+    await until(() => expect(liveOn(s)).toEqual(["ready", "hyperdht/1", "ready", "hyperdht/1"]), 240_000);
+    expect([s.view().transportWait, s.contact.transportWait]).toEqual([undefined, undefined]);
   }, 60_000);
 });

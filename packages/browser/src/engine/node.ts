@@ -2484,6 +2484,8 @@ export class GhostlyNode implements EngineImplementation {
         },
         // Waiting for a chosen transport (WISP 100): the header, the panel and the menu say so; the history keeps attempts.
         onTransportWait: () => { this.observeTransport(linkId); this.emitState(); },
+        // Why the chat is not live: what the last attempt tried (WISP 100), never a silent retry loop.
+        onLiveAttempt: () => this.emitState(),
         onRtt: ms => { const log = this.transportLogOf(live); if (log?.rtt(ms)) this.saveTransportLog(live, log); else this.emitState(); },
         onDiscoveryError: error => { live.discoveryError = error ?? undefined; this.emitState(); },
         onTransportDiscovery: async (peerDescriptors, peerTransports, peerFallback) => {
@@ -2856,6 +2858,8 @@ export class GhostlyNode implements EngineImplementation {
       transportAutomatic: live.stored.preferredTransport === undefined,
       peerTransports: live.link?.peerAvailableTransports,
       transportWait: live.link?.transportWait,
+      liveAttempt: live.link?.liveAttempt,
+      liveDialer: live.stored.profile && !live.stored.group ? live.link?.dialer : undefined,
       transportRttMs: live.link?.rttMs,
       transportRelayed: live.link?.relayedPath,
       transportLive: live.transportLog?.liveNow(),

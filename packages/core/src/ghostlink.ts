@@ -138,6 +138,23 @@ export interface TransportWait {
   retryAt?: number;
 }
 
+/**
+ * The last attempt to go live that did not, as one side saw it (WISP 100, "Why a chat is not live"): shown so that a
+ * chat on the DHT is never a silent retry loop.
+ */
+export interface LiveAttempt {
+  /** When it ended (ms since the epoch). */
+  at: number;
+  /** This side dialled it (the side with the lower rendezvous key, or a joiner), or answered the contact's offer. */
+  side: "dialled" | "answered";
+  /** Each transport tried and why it did not connect, in the order tried. An answering side knows only its own part. */
+  failed: { transport: PairedTransport; error: string }[];
+  /** Why nothing could be tried, when nothing was (no transport both apps have and can dial yet). */
+  reason?: string;
+  /** When this side dials again (it dials): about then, once the contact is seen. */
+  retryAt?: number;
+}
+
 export interface GhostLinkEvents {
   onDhtDelivery?(view: DhtDeliveryView): void;
   onDiscoveryError?(error: string | null): void;
@@ -159,6 +176,8 @@ export interface GhostLinkEvents {
   onTransportSwitchFailed?(target: PairedTransport, reason?: string): void;
   /** The transport the chat waits for, or why, changed (`transportWait`); undefined once nothing is waited for. */
   onTransportWait?(wait: TransportWait | undefined): void;
+  /** An attempt to go live ended without it (`liveAttempt`), or the chat went live (undefined). */
+  onLiveAttempt?(attempt: LiveAttempt | undefined): void;
   /** A live transport switch completed: the session now runs over `to`, and nothing reconnected. */
   onTransportSwitched?(from: PairedTransport | undefined, to: PairedTransport): void;
   /** Round trip of a liveness ping on the open session, in milliseconds. */
@@ -320,6 +339,9 @@ export class GhostLink {
    * intent; none on Automatic, or before either said (WISP 100, "A choice made while not live").
    */
   private peerChoice?: PairedTransport;
+  /** The attempt to go live under way on this side, and what failed in it so far. */
+  private attempt: { side: LiveAttempt["side"]; failed: LiveAttempt["failed"] } | null = null;
+  private lastAttempt?: LiveAttempt;
   /** The transport the chat waits for (WISP 100): attempts that failed in a row, the last error, the next retry. */
   private waiting: { transport: PairedTransport; failures: number; told?: boolean; error?: string; retryAt?: number; timer?: ReturnType<typeof setTimeout> } | null = null;
   private paired: PairedSession | null = null;
@@ -512,6 +534,7 @@ export class GhostLink {
           void this.dialAfterRtc(next); return;
         }
         this.afterRtc = undefined;
+        if (!this.dialing) this.attemptEnded();
         this.rejectWaiters(new GhostlyHttpError("unreachable", "Could not connect to the peer"));
       },
       attemptTimeoutMs: this.tracker ? PAIRING_ATTEMPT_MS : undefined,
@@ -563,6 +586,12 @@ export class GhostLink {
   private trackDataLink(state: DataLinkState): void {
     const was = this.lastDataLinkState;
     this.lastDataLinkState = state;
+    // WebRTC as a way to go live, not as the candidate of a switch on a session already open.
+    if (!this.activeBinding) {
+      if (state === "answering") this.attempt ??= { side: "answered", failed: [] };
+      else if (state === "idle" && (was === "offering" || was === "answering" || was === "connecting"))
+        this.attemptFailed("webrtc/1", was === "offering" ? "The offer was not answered" : "No connection came up");
+    }
     const tracker = this.tracker;
     if (!tracker || tracker.done) return;
     if (state === "answering") tracker.offerReceived();
@@ -1127,6 +1156,7 @@ export class GhostLink {
     if (!this.options.params.profile) { await this.dataLink.connect(); return; }
     this.dialing = true;
     const epoch = this.connectionEpoch;
+    this.attempt = { side: "dialled", failed: [] };
     this.options.events?.onPairingState?.({ status: "connecting" });
     try {
       const local = this.transportOffer();
@@ -1160,7 +1190,16 @@ export class GhostLink {
         lastError = result;
       }
       throw lastError ?? new Error("No permitted transport could connect");
-    } finally { if (epoch === this.connectionEpoch) this.dialing = false; }
+    } catch (error) {
+      if (epoch === this.connectionEpoch) this.attemptEnded(error instanceof Error ? error.message : String(error));
+      throw error;
+    } finally {
+      if (epoch === this.connectionEpoch) {
+        this.dialing = false;
+        // A WebRTC attempt that already ended, with nothing ranked after it to go on to.
+        if (!this.channel && !this.afterRtc && this.dataLink.state === "idle") this.attemptEnded();
+      }
+    }
   }
 
   private localDescriptors(): TransportDescriptors {
@@ -1179,6 +1218,7 @@ export class GhostLink {
       this.attach(channel, binding); return true;
     } catch (error) {
       if (epoch !== this.connectionEpoch) return true;
+      this.attemptFailed(transport, error instanceof Error ? error.message : String(error));
       // Three failures in a row demote it for an hour (WISP 100).
       const failures = (this.nativeFailures.get(transport) ?? 0) + 1;
       if (failures >= DEMOTE_AFTER_FAILURES) { this.nativeFailures.delete(transport); this.demotedUntil.set(transport, Date.now() + DEMOTE_MS); traceLink(this.myPubKeyZ32, "demote", { transport }); }
@@ -1198,9 +1238,41 @@ export class GhostLink {
         if (result === true) return;
         lastError = result;
       }
-      if (next.epoch === this.connectionEpoch)
+      if (next.epoch === this.connectionEpoch) {
+        this.attemptEnded();
         this.rejectWaiters(new GhostlyHttpError("unreachable", lastError ? `Could not connect to the peer: ${lastError.message}` : "Could not connect to the peer"));
+      }
     } finally { if (next.epoch === this.connectionEpoch) this.dialing = false; }
+  }
+
+  /** A transport of the attempt under way did not connect. */
+  private attemptFailed(transport: PairedTransport, error: string): void {
+    if (this.isDataLinkOpen) return;
+    const attempt = this.attempt ??= { side: "dialled", failed: [] };
+    attempt.failed = [...attempt.failed.filter(f => f.transport !== transport), { transport, error }];
+  }
+
+  /** The attempt under way ended without going live: kept as the last one, and told. `reason`: why, when nothing was tried. */
+  private attemptEnded(reason?: string): void {
+    const attempt = this.attempt;
+    this.attempt = null;
+    if (!attempt || this.isDataLinkOpen || this.stopped || (!attempt.failed.length && !reason)) return;
+    this.lastAttempt = { at: Date.now(), side: attempt.side, failed: attempt.failed, ...(!attempt.failed.length && reason ? { reason } : {}),
+      ...(attempt.side === "dialled" ? { retryAt: Math.max(Date.now(), this.lastAutoConnectAt + this.dialWait()) } : {}) };
+    traceLink(this.myPubKeyZ32, "attempt-ended", { side: attempt.side, failed: attempt.failed.map(f => f.transport), reason: this.lastAttempt.reason });
+    this.options.events?.onLiveAttempt?.(this.lastAttempt);
+  }
+
+  /** The last attempt to go live that did not (WISP 100, "Why a chat is not live"); none while live. */
+  get liveAttempt(): LiveAttempt | undefined { return this.isDataLinkOpen ? undefined : this.lastAttempt; }
+  /**
+   * Which side dials this chat to go live: the lower rendezvous key, or the joiner of a first pairing (WISP 100). The
+   * other side answers, so what it can tell of a failed attempt is only what reached it.
+   */
+  get dialer(): "you" | "contact" {
+    const pairing = !!this.tracker && !this.tracker.done && this.tracker.progress.stage !== "on-dht";
+    const role = pairing ? this.options.pairingProgress?.role : undefined;
+    return role === "joiner" || (role !== "inviter" && this.myPubKeyZ32 < this.options.params.peerPubKeyZ32) ? "you" : "contact";
   }
 
   /** Chat goes over the data link when it is up, through Pkarr otherwise. */
@@ -1366,9 +1438,7 @@ export class GhostLink {
       if (fresh && presence.lastPacketAt !== this.offerAwaitedFor) { this.offerAwaitedFor = presence.lastPacketAt; this.session.expectPeer(); }
       return;
     }
-    // A first pairing tries again sooner: the contact just read the invite and is waiting.
-    const wait = pairing ? Math.min(PAIRING_RETRY_MS * 2 ** this.autoConnectFailures, PAIRING_MAX_RETRY_MS)
-      : Math.min(AUTO_CONNECT_RETRY_MS * 2 ** this.autoConnectFailures, AUTO_CONNECT_MAX_RETRY_MS);
+    const wait = this.dialWait();
     if (Date.now() - this.lastAutoConnectAt < wait) { traceLink(this.myPubKeyZ32, "dial-backoff", { failures: this.autoConnectFailures, left: wait - (Date.now() - this.lastAutoConnectAt) }); return; }
     traceLink(this.myPubKeyZ32, "dial", { failures: this.autoConnectFailures });
     this.lastAutoConnectAt = Date.now();
@@ -1377,6 +1447,13 @@ export class GhostLink {
       this.tracker?.failed("transport", true);
       this.dialFailed(error instanceof Error ? error.message : String(error));
     });
+  }
+
+  /** How long after the last automatic dial the next one may go. A first pairing tries again sooner: the contact just read the invite and is waiting. */
+  private dialWait(): number {
+    const pairing = !!this.tracker && !this.tracker.done && this.tracker.progress.stage !== "on-dht";
+    return pairing ? Math.min(PAIRING_RETRY_MS * 2 ** this.autoConnectFailures, PAIRING_MAX_RETRY_MS)
+      : Math.min(AUTO_CONNECT_RETRY_MS * 2 ** this.autoConnectFailures, AUTO_CONNECT_MAX_RETRY_MS);
   }
 
   /** The name this side shows, told to a paired peer directly. */
@@ -1748,6 +1825,8 @@ export class GhostLink {
           this.autoConnectFailures = 0;
           this.lastAutoConnectAt = 0;
           traceLink(this.myPubKeyZ32, "paired-ready");
+          this.attempt = null;
+          if (this.lastAttempt) { this.lastAttempt = undefined; this.options.events?.onLiveAttempt?.(undefined); }
           this.tracker?.live(paired.state.transport);
           this.startLiveness(channel, paired.peerAnswersPings);
           for (const waiter of this.openWaiters.splice(0)) waiter.resolve();
