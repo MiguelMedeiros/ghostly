@@ -12,8 +12,9 @@ test("a first connection needs no comparison, and says so", { tag: ["@feature:ch
 
   await say(alice, "no codes were compared");
   await expect(chat(bob).getByText("no codes were compared")).toBeVisible();
-  await expect(alice.page.getByTitle("Audio calls are not supported in this chat")).toBeDisabled();
-  await expect(alice.page.getByTitle("Video calls are not supported in this chat")).toBeDisabled();
+  // Every new chat calls over its live session (calls/1).
+  await expect(alice.page.getByTestId("call-audio")).toBeEnabled();
+  await expect(alice.page.getByTestId("call-video")).toBeEnabled();
 
   // The panel must not imply a comparison that never happened.
   await alice.page.getByTestId("connection-options").click();

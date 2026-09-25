@@ -2297,7 +2297,7 @@ export class GhostlyNode implements EngineImplementation {
       paymentMethods: Object.fromEntries(PAYMENT_METHODS.map(m => [m, stored.paymentMethods?.[m] !== false])) as Record<PaymentMethodName, boolean>,
       groups: live.link?.groupsSupport ?? false,
       sessionOffers: stored.profile ? live.link?.sessionOffers : undefined,
-      callsUnavailable: stored.profile ? live.link?.callsUnavailable ?? "Calls need a live connection" : undefined,
+      callsUnavailable: !stored.profile ? undefined : live.link ? live.link.callsUnavailable : "Calls need a live connection",
       participationKey: stored.participationSeed ? identityFromSeedB64(stored.participationSeed).pubKeyZ32 : undefined,
       peerParticipationKey: stored.pairedPeerKey,
       publicProfiles: EXTERNAL_IDENTITIES_ENABLED ? stored.publicProfiles : undefined,
