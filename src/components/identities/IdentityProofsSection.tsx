@@ -9,37 +9,32 @@ import { contactTag } from "../../lib/publicKeyLabel";
 import { chatPath } from "../../lib/url";
 import type { ChatSession } from "../../lib/types";
 import { useI18n } from "../../contexts/I18nContext";
-import { AddIdentityDialog } from "./AddIdentityDialog";
-import { AddIdCardFace, IdCardFace, IdCardMark } from "./IdCardFace";
+import { IdCardFace, IdCardMark } from "./IdCardFace";
 import { GHOSTLY, ghostlyCard, idCard, idCardTone, type IdCardContent } from "./idCard";
 import { ProviderMark, StatusPill } from "./ProviderMark";
 import { PublicDid } from "./PublicDid";
 import { ApprovalPanel } from "./ApprovalPanel";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
 
-/** The last card: a blank one that adds an identity. */
-const ADD = "add";
 type Entry =
-  | { id: typeof GHOSTLY; ghostly: true; add?: false; card: IdCardContent }
-  | { id: string; ghostly?: false; add?: false; proof: IdentityProofView; card: IdCardContent }
-  | { id: typeof ADD; ghostly?: false; add: true };
+  | { id: typeof GHOSTLY; ghostly: true; card: IdCardContent }
+  | { id: string; ghostly?: false; proof: IdentityProofView; card: IdCardContent };
 const PANEL = { id: "identity-panel", tabId: (id: string) => `identity-tab-${id}` };
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /**
  * Identities → Yours: a deck of ID cards (the wallet's deck, with ID cards for faces). The first card is the
  * profile's own Ghostly identity, what contacts see by default: its name and picture, and a key pair made for
- * each chat. Then this profile's proofs of other identities, and last the blank card that adds one. Below the
- * deck, the chosen card's details: for the Ghostly card, what it is and where its name and picture are edited;
- * for a proof, what it proves and how, the chats it is shared in, and removing it. Made once here; each chat
- * then shares them with that contact only when the person chooses (the chat's Identities).
+ * each chat. Then this profile's proofs of other identities. Below the deck, the chosen card's details: for the
+ * Ghostly card, what it is and where its name and picture are edited; for a proof, what it proves and how, the
+ * chats it is shared in, and removing it. Made once here; each chat then shares them with that contact only when
+ * the person chooses (the chat's Identities). Adding one is the page's New (`onAdd`), not a card in the deck.
  */
-export function IdentityProofsSection() {
+export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
   const state = useEngineState();
   const { t } = useI18n();
   const nav = useAppNavigation();
   const proofs = state?.identityProofs ?? [];
-  const [adding, setAdding] = useState(false);
   const [chosen, setChosen] = useState<string>();
   const [removing, setRemoving] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<string | null>(null);
@@ -70,7 +65,6 @@ export function IdentityProofsSection() {
   const entries: Entry[] = [
     { id: GHOSTLY, ghostly: true, card: ghostly },
     ...proofs.map((proof): Entry => ({ id: proof.id, proof, card: idCard(proof, { now, refusedBy: refusedBy(proof.id), revoking: revoking === proof.id }) })),
-    ...(canAdd ? [{ id: ADD, add: true } as const] : []),
   ];
   const entry = entries.find(e => e.id === chosen) ?? entries[0];
   const select = (id: string) => { removeAbort.current?.abort(); setChosen(id); setRemoving(null); setError(""); setRemoval({}); };
@@ -96,27 +90,25 @@ export function IdentityProofsSection() {
       .then(() => setRemoving(null), e => { if (!controller.signal.aborted) setError(message(e)); })
       .finally(() => { setRevoking(null); setTakingDown(null); setApproval(null); setRemoval(r => ({ failed: r.failed })); });
   };
-  const tone = (e: Entry) => (e.add ? "id-card-add" : idCardTone({ provider: e.card.provider, subject: e.card.bound, attested: e.card.attested }));
+  const tone = (e: Entry) => idCardTone({ provider: e.card.provider, subject: e.card.bound, attested: e.card.attested });
 
-  return (<>
+  return (
     <section className="space-y-3" data-testid="identities-mine">
       <h2 className="text-sm font-semibold text-accent uppercase tracking-wide">Yours</h2>
-      <Deck<Entry> cards={entries} selected={entry.id} onSelect={select} onChoose={id => { if (id === ADD) setAdding(true); }}
+      <Deck<Entry> cards={entries} selected={entry.id} onSelect={select}
         kind="tabs" panel={PANEL} label="Your identities" name="identity-deck" className="id-deck"
-        testId={e => (e.add ? "identity-add" : e.ghostly ? "identity-ghostly" : "identity-proof")}
-        face={(e, { after }) => (e.add ? <AddIdCardFace first={proofs.length === 0} providers={providers} /> : <IdCardFace card={e.card} after={after} />)}
-        mark={e => <IdCardMark provider={e.add ? undefined : e.card.provider} subject={e.add ? undefined : e.card.bound} />} tone={tone} />
+        testId={e => (e.ghostly ? "identity-ghostly" : "identity-proof")}
+        face={(e, { after }) => <IdCardFace card={e.card} after={after} />}
+        mark={e => <IdCardMark provider={e.card.provider} subject={e.card.bound} />} tone={tone} />
       <div role="tabpanel" id={PANEL.id} aria-labelledby={PANEL.tabId(entry.id)} data-testid="identity-panel" className="bg-surface rounded-xl divide-y divide-border">
-        {entry.add ? (
-          <Block>
-            <p className="text-xs text-text-muted">{t("identities.ghostly.addHint")}</p>
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="flex flex-wrap gap-1" aria-hidden="true">{providers.map(p => <ProviderMark key={p} provider={p} small />)}</span>
-              <Button variant="primary" data-testid="identity-add-open" onClick={() => setAdding(true)}>{proofs.length ? t("identities.ghostly.addAnother") : t("identities.ghostly.addOne")}</Button>
-            </div>
-          </Block>
-        ) : entry.ghostly ? (
+        {entry.ghostly ? (
           <div data-testid="identity-ghostly-panel" className="divide-y divide-border">
+            {proofs.length === 0 && canAdd && (
+              <Block testId="identity-empty">
+                <p className="text-sm text-text-primary">{t("identities.ghostly.emptyHint")}</p>
+                <span className="flex flex-wrap gap-1" aria-hidden="true">{providers.map(p => <ProviderMark key={p} provider={p} small />)}</span>
+              </Block>
+            )}
             <Row leading={<ProviderMark provider={GHOSTLY} />}
               label={<span className="flex flex-wrap items-center gap-2"><span data-testid="identity-ghostly-name">{ghostly.name}</span>
                 <StatusPill ok testId="identity-panel-status">{ghostly.statusLabel}</StatusPill></span>}
@@ -151,7 +143,7 @@ export function IdentityProofsSection() {
               {(card.status === "expired" || card.status === "expiring") && (
                 <div className="flex flex-wrap items-center gap-3">
                   <p className="flex-1 min-w-[12rem] text-xs text-text-muted">Add it again to renew it; then remove this one.</p>
-                  {canAdd && <Button data-testid="identity-renew" onClick={() => setAdding(true)}>Add it again</Button>}
+                  {canAdd && onAdd && <Button data-testid="identity-renew" onClick={onAdd}>Add it again</Button>}
                 </div>
               )}
             </Block>
@@ -183,6 +175,5 @@ export function IdentityProofsSection() {
         {error && <Block><Notice tone="error">{error}</Notice></Block>}
       </div>
     </section>
-    {adding && <AddIdentityDialog onClose={() => setAdding(false)} />}
-  </>);
+  );
 }

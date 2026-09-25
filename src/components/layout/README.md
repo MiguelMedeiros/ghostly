@@ -9,6 +9,7 @@ and a new card or panel holds together at every width for free.
 | Primitive | Use it for |
 | --- | --- |
 | `Page` (`title`, `trailing`, `width`, `testId`) | A whole right-column page: header with Back, title and `trailing` controls (these wrap under the title when they do not fit), and a scrolling body that is a size container named `page`, so `@sm/page:` / `@md/page:` variants work anywhere inside. |
+| `PageAction` (`label`, `testId`, button props) | The page's primary action in `trailing`: an accent button with a plus and a short label, like New on Identities and Wallets. The page creates things there, not with an add card in its list. |
 | `Section` (`title`) | A titled card of rows. |
 | `Row` (`label`, `hint`, `value`, `leading`, children) | One option: text on the left, `value` (a balance, a size) and controls (children) on the right. When they do not fit beside at least 12rem of text (8rem without a hint), they wrap **under** the text, aligned with it. Buttons wrap among themselves. Text never collapses into a one-letter column. |
 | `LinkRow` (`label`, `hint`, `value`, `leading`, `onClick`) | A row that opens another page: the whole line is a button, ending in a chevron. |

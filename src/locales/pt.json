@@ -333,6 +333,7 @@
       "addOne": "Adicionar uma identidade",
       "addAnother": "Adicionar outra identidade",
       "addHint": "Prove que você tem uma chave Nostr, um domínio ou uma conta, e mostre aos contatos que escolher, uma conversa de cada vez.",
+      "emptyHint": "Nenhuma outra identidade ainda. Escolha Nova para provar que você tem uma chave Nostr, um domínio ou uma conta, e depois mostre aos contatos que escolher, uma conversa por vez.",
       "chosenChats": "Mostrada só nas conversas que você escolher",
       "noOthers": "Nenhuma outra identidade ainda.",
       "nothingElse": "{{name}} ainda não compartilhou mais nada.",

@@ -333,6 +333,7 @@
       "addOne": "Add an identity",
       "addAnother": "Add another identity",
       "addHint": "Prove that you hold a Nostr key, a domain or an account, then show it to the contacts you choose, one chat at a time.",
+      "emptyHint": "No other identities yet. Choose New to prove that you hold a Nostr key, a domain or an account, then show it to the contacts you choose, one chat at a time.",
       "chosenChats": "Shown only in the chats you choose",
       "noOthers": "No other identities yet.",
       "nothingElse": "Nothing else shared by {{name}} yet.",
