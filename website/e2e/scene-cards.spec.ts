@@ -2,8 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 
 /**
  * The home story's cards keep their pictures whole. Touch devices wider than
- * 860px (a tablet in landscape), windows taller than wide (1024×1366) and
- * reduced motion read the story as cards: each step is a still in a 1.6
+ * 860px (a tablet, upright or in landscape) and reduced motion read the story
+ * as cards: each step is a still in a 1.6
  * figure, pushed in on its chapter's picture. Every ghost body and every label
  * a still draws must sit inside its figure, once the step's beat has played.
  * (Phones and portrait tablets draw the portrait stage, which
@@ -60,10 +60,10 @@ async function playChapter(page: Page, id: string) {
 }
 
 const VIEWPORTS: { w: number; h: number; name: string; touch?: boolean; calm?: boolean }[] = [
-  // Windows taller than wide, above 860px.
-  { w: 1024, h: 1366, name: "upright tablet" },
-  { w: 900, h: 1200, name: "upright" },
-  { w: 1280, h: 1600, name: "upright" },
+  // Upright touch devices above 860px (an upright window with a mouse runs the film: scene-overlap.spec.ts).
+  { w: 1024, h: 1366, name: "tablet upright", touch: true },
+  { w: 900, h: 1200, name: "tablet upright", touch: true },
+  { w: 1280, h: 1600, name: "tablet upright", touch: true },
   // Touch devices in landscape.
   { w: 1024, h: 768, name: "tablet landscape", touch: true },
   { w: 1180, h: 820, name: "tablet landscape", touch: true },

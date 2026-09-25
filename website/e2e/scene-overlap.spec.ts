@@ -6,9 +6,9 @@ import { measure, settleKey, type Shot, type Rect } from "./scene-measure";
  * SceneFrame, at every step, nothing of the picture (its shapes, labels and
  * the act's two ghosts) may intersect the copy block: the eyebrow, the step's
  * title and body, the progress dashes and the buttons. The ghosts must also
- * stay whole on screen, below the nav. On narrow and upright windows the
- * chapters become an article (picture, then copy), which is checked the same
- * way.
+ * stay whole on screen, below the nav. Upright windows run the film too, with
+ * the copy in a band across the bottom. On narrow windows the chapters become
+ * an article (picture, then copy), which is checked the same way.
  */
 
 const CHAPTERS = ["invite", "dht", "agree", "alive", "open"] as const;
@@ -80,6 +80,8 @@ test.describe.configure({ timeout: 240_000 });
 const VIEWPORTS = [
   ...SHAPES.flatMap((shape) => WIDTHS.map((w) => ({ w, h: shape.h(w), name: shape.name }))),
   { w: 1000, h: 800, name: "the window the overlap was reported from" },
+  { w: 1009, h: 1239, name: "the app's browser panel, upright" },
+  { w: 900, h: 1200, name: "upright" },
 ];
 
 for (const { w, h, name } of VIEWPORTS) {

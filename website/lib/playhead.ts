@@ -25,7 +25,12 @@ import { SCRUB } from "./motion";
  * - A scroll that moves more than `SCRUB.jump` viewports at once (a link, the
  *   rail, the swarm, a reload mid-page) is taken at once: nothing rewinds.
  */
-export type Beat = { from: number; to: number; seen: [number, number] };
+/**
+ * A beat, in page pixels: `from`/`to` where it runs, `seen` the scroll range in which its scene is pinned on
+ * screen. `stop: false` keeps its pace but lets a stop rest inside it (for a scene that is not pinned, whose copy
+ * scrolls away on its own, like the hero).
+ */
+export type Beat = { from: number; to: number; seen: [number, number]; stop?: boolean };
 
 class Playhead {
   readonly y: MotionValue<number>;
@@ -91,7 +96,7 @@ class Playhead {
   private onRest = () => {
     clearTimeout(this.restTimer);
     const v = this.raw;
-    const beat = this.all().find((b) => b.from < v && v < b.to);
+    const beat = this.all().find((b) => b.stop !== false && b.from < v && v < b.to);
     if (!beat) return;
     this.held = this.dir > 0 ? beat.to : beat.from;
     this.heldDir = this.dir;

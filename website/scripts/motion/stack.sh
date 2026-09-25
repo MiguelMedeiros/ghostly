@@ -15,7 +15,7 @@ while [ $# -ge 2 ]; do
   d=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$clip" | awk -v c="$cut" '{print $1 - c}')
   longest=$(echo "$d $longest" | awk '{print ($1 > $2) ? $1 : $2}')
   inputs="$inputs -ss $cut -i $clip"
-  filters="$filters[$n:v]fps=25,scale=-2:$h,tpad=stop=-1:stop_mode=clone,pad=iw:ih+28:0:28:0x0b0f16,drawtext=fontfile=$font:text='$label':x=10:y=7:fontsize=15:fontcolor=white[v$n];"
+  filters="$filters[$n:v]fps=25,scale=-2:$h,tpad=stop=-1:stop_mode=clone,pad=iw:ih+28:0:28:color=0x0b0f16,drawtext=fontfile=$font:text='$label':x=10:y=7:fontsize=15:fontcolor=white[v$n];"
   labels="$labels[v$n]"
   n=$((n + 1))
 done

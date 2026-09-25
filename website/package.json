@@ -13,7 +13,8 @@
     "capture": "node scripts/capture/run.mjs",
     "prebuild": "npm run sync:references",
     "motion:perf": "node scripts/motion/perf.mjs",
-    "motion:record": "node scripts/motion/record.mjs"
+    "motion:record": "node scripts/motion/record.mjs",
+    "motion:speeds": "node scripts/motion/speeds.mjs"
   },
   "dependencies": {
     "github-slugger": "^2.0.0",

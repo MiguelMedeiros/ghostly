@@ -109,7 +109,8 @@ function LiveAct({ id, chapters, field, bubble, bubbleAvoid, children }: { id: s
 
   // The actors' own beats: the hero's walk into the story and every glide from one chapter's pose to the next (an
   // act's pair arriving as it pins is its first scene's fade-in beat). A flick still shows them; a stop never leaves
-  // the pair halfway.
+  // the pair halfway between two chapters. The hero is not pinned (its copy scrolls away by itself), so a stop there
+  // stays where it is.
   useBeats(
     `act:${id}`,
     () => {
@@ -121,8 +122,9 @@ function LiveAct({ id, chapters, field, bubble, bubbleAvoid, children }: { id: s
       const seen: [number, number] = [top, top + travel];
       const at = (r: Range, t: number) => top + (r.start + t * (r.end - r.start)) * travel;
       return rs.map((r) => {
-        const [a, b] = r.chapter === "hero" ? HERO_WALK : [EXIT, 1];
-        return { from: at(r, a), to: at(r, b), seen };
+        const hero = r.chapter === "hero";
+        const [a, b] = hero ? HERO_WALK : [EXIT, 1];
+        return { from: at(r, a), to: at(r, b), seen, stop: !hero };
       });
     },
     [ranges],
