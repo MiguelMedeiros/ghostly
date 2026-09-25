@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { db } from "../src/engine/db";
 import { Outbox, RESEND_POLICY, type Resender } from "../src/engine/outbox";
 import type { StoredMessage } from "../src/shared/types";
-// covers: chat.paired.offline-send, chat.paired.receipts, chat.dht.send
+// covers: chat.paired.offline-send, chat.paired.receipts, chat.dht.send, chat.waiting
 
 afterEach(() => vi.useRealTimers());
 let serial = 0;
@@ -285,4 +285,39 @@ it("resumes a DHT receipt timer at the original deadline without retransmitting 
   // The DHT path retried within its own budget until expiry: that is final, and waits for Retry.
   expect(row.delivery).toBe("failed"); expect(send).not.toHaveBeenCalled();
   await restarted.stop();
+});
+
+describe("what waits for the chat to carry it (WISP 400, \"Sends when live\")", () => {
+  it("is kept as waiting, sent once when the chat can carry it, counting no attempt before", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    let ready = false;
+    const send = vi.fn(async () => null);
+    const m = memory(send, { ready: () => ready });
+    await m.box.wait(m.id, "Waits for the text before it to be confirmed.");
+    expect(await m.row()).toMatchObject({ delivery: "waiting", deliveryError: "Waits for the text before it to be confirmed." });
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(send, "nothing carries it: not sent, not failed").not.toHaveBeenCalled();
+    expect((await m.row()).delivery).toBe("waiting");
+    ready = true;
+    await m.box.flush();
+    expect(send).toHaveBeenCalledOnce();
+    expect((await m.row()).delivery).toBe("sent");
+    await m.box.stop();
+  });
+
+  it("survives a restart as waiting, and fails without claiming the contact may have it when the week passes", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const send = vi.fn(async () => null);
+    const m = memory(send, { ready: () => false });
+    await m.box.wait(m.id, "Sent when your contact is reachable.");
+    await m.box.stop();
+    const again = new Outbox(m.store, send, 20_000, undefined, { resender: { ready: () => false } });
+    await again.recover();
+    expect((await m.row()).delivery).toBe("waiting");
+    await vi.advanceTimersByTimeAsync(RESEND_POLICY.windowMs + 10 * 60_000);
+    expect(await m.row()).toMatchObject({ delivery: "failed", deliveryError: expect.stringContaining("It was not sent") });
+    expect((await m.row()).deliveryError).not.toContain("may have received");
+    expect(send).not.toHaveBeenCalled();
+    await again.stop();
+  });
 });

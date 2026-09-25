@@ -5,7 +5,7 @@ import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { STORES, fileStore, transact } from "../src/shared/idb";
 import type { StoredLink } from "../src/shared/types";
-// covers: core.peer-keys, chat.paired.send, chat.paired.receipts, chat.paired.nickname-sync, files.paired.send, files.size-limit, files.persistence, delivery.hold.text, delivery.hold.picture, groups.protocol.link-frames
+// covers: core.peer-keys, chat.paired.send, chat.paired.receipts, chat.paired.nickname-sync, files.paired.send, files.size-limit, files.persistence, delivery.hold.text, delivery.hold.picture, groups.protocol.link-frames, chat.waiting
 
 /**
  * GhostLink is replaced by a recorder: the engine builds it with its callbacks, and a test plays the peer by
@@ -282,6 +282,44 @@ describe("files sent to a contact", () => {
     expect((await db.getMessages(chat.id))[0]).toMatchObject({ id: "me_3", file: { id: file.id } });
   });
 
+  it("waits while the chat is not live and nothing holds it, and goes when the session opens", async () => {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    vi.spyOn(node["desk"], "replay").mockResolvedValue();
+    const link = linkOf(chat.id);
+    link.isDataLinkOpen = false; link.supportsFiles = false;
+    const file = { id: `${chat.id}-out-w9`, name: "a.txt", size: 5, mime: "text/plain" };
+    await fileStore.put({ id: file.id, linkId: chat.id, blob: new Blob([bytes("hello")]), createdAt: 1, direction: "out", wireId: "w9" });
+    node.sendFile({ linkId: chat.id, file, timestamp: 3 });
+    await vi.waitFor(async () => expect((await db.getMessages(chat.id))[0]).toMatchObject({ id: "me_3", delivery: "waiting", file: { id: file.id } }));
+    expect(link.sendFile).not.toHaveBeenCalled();
+    expect(node.getState().transfers[file.id]).toBeUndefined();
+    link.isDataLinkOpen = true; link.supportsFiles = true;
+    link.options.events.onDataLinkState("open");
+    await vi.waitFor(() => expect(link.sendFile).toHaveBeenCalledOnce());
+    expect(link.sendFile.mock.calls[0][0]).toMatchObject({ id: "w9", name: "a.txt", timestamp: 3 });
+    const [sent] = await db.getMessages(chat.id);
+    expect(sent.delivery, "from now on it shows by its transfer").toBeUndefined();
+  });
+
+  it("a waiting file for an app that takes no files fails with that reason; a cancelled one never goes", async () => {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    vi.spyOn(node["desk"], "replay").mockResolvedValue();
+    const link = linkOf(chat.id);
+    link.isDataLinkOpen = false; link.supportsFiles = false;
+    const file = (n: number) => ({ id: `${chat.id}-out-f${n}`, name: `${n}.txt`, size: 1, mime: "text/plain" });
+    node.sendFile({ linkId: chat.id, file: file(1), timestamp: 1 });
+    node.sendFile({ linkId: chat.id, file: file(2), timestamp: 2 });
+    await vi.waitFor(async () => expect(await db.getMessages(chat.id)).toHaveLength(2));
+    node.deleteMessage({ linkId: chat.id, messageId: "me_2" });
+    await vi.waitFor(async () => expect(await db.getMessages(chat.id)).toHaveLength(1));
+    link.isDataLinkOpen = true;
+    link.options.events.onDataLinkState("open");
+    await vi.waitFor(async () => expect((await db.getMessages(chat.id))[0]).toMatchObject({ id: "me_1", delivery: "failed", deliveryError: "Your contact's app cannot receive files." }));
+    expect(link.sendFile).not.toHaveBeenCalled();
+  });
+
   it("fails visibly when offline, for an id not of this chat, a peer without files, or bytes that are gone", async () => {
     const chat = row(), away = row();
     const { node, linkOf } = await started(chat, away);
@@ -309,7 +347,7 @@ describe("text in a chat", () => {
     expect(message).toMatchObject({ text: "hi", sender: "me", via: "datalink" });
     expect(linkOf(chat.id).sendMessage).toHaveBeenCalledWith("hi", 4, message.wireId);
     linkOf(chat.id).validateText.mockReturnValueOnce("Payment tokens are not text" as never);
-    expect(await node.sendMessage({ linkId: chat.id, text: "cashuA" })).toEqual({ error: "Payment tokens are not text" });
+    expect(await node.sendMessage({ linkId: chat.id, text: "cashuA" })).toMatchObject({ error: "Payment tokens are not text", refused: true });
     expect(await db.getMessages(chat.id)).toHaveLength(1);
   });
 
@@ -332,7 +370,7 @@ describe("text in a chat", () => {
     linkOf(chat.id).isDataLinkOpen = false;
     vi.spyOn(node["hold"], "canHold").mockReturnValue(true);
     const hold = vi.spyOn(node["hold"], "hold").mockResolvedValue();
-    expect((await node.sendMessage({ linkId: chat.id, text: "x".repeat(70_000) })).error).toContain("held message is at most");
+    expect((await node.sendMessage({ linkId: chat.id, text: "x".repeat(70_000) })).error).toContain("16384");
     expect(await node.sendMessage({ linkId: chat.id, text: "later", timestamp: 3 })).toEqual({ error: null });
     expect((await db.getMessages(chat.id))[0]).toMatchObject({ text: "later", via: "hold", delivery: "sending" });
     expect(hold).toHaveBeenCalledWith(chat.id, expect.objectContaining({ kind: "text", timestamp: 3 }));

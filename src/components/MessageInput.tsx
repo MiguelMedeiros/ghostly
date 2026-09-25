@@ -15,6 +15,11 @@ interface MessageInputProps {
   disabledPlaceholder?: string;
   maxLength?: number;
   maxBytes?: number;
+  /**
+   * What the DHT carries while the chat is not live: past it the counter turns amber and the text is still
+   * sent, waiting for a live connection (or held) instead of being refused.
+   */
+  softBytes?: number;
   /** Present when the platform can send files; returns an error message or null. */
   fileUnavailable?: string;
   paymentsUnavailable?: string;
@@ -28,6 +33,8 @@ interface MessageInputProps {
     contact?: string;
     onSend: (amount: number, memo: string) => Promise<string | null>;
     onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark") => Promise<string | null>;
+    /** Why paying is not possible now (a request still is): shown on the Pay side. */
+    sendUnavailable?: string;
   };
   /** A composer of its own for ⚡ instead of the chat's (a group chooses whom to pay first). */
   paymentComposer?: (close: () => void) => ReactNode;
@@ -45,6 +52,7 @@ export function MessageInput({
   disabledPlaceholder = "Message…",
   maxLength = DEFAULT_MAX,
   maxBytes,
+  softBytes,
   onSendFile,
   payments,
   paymentComposer,
@@ -164,7 +172,9 @@ export function MessageInput({
     setShowGif((v) => !v);
   };
 
-  const remaining = maxBytes ? maxBytes - new TextEncoder().encode(text.trim()).length : maxLength - text.length;
+  const bytes = maxBytes || softBytes ? new TextEncoder().encode(text.trim()).length : 0;
+  const remaining = maxBytes ? maxBytes - bytes : maxLength - text.length;
+  const overSoft = !!softBytes && bytes > softBytes;
 
   return (
     <div className="bg-panel-header px-4 max-md:px-2 py-2.5 composer-safe shrink-0 relative">
@@ -327,7 +337,13 @@ export function MessageInput({
             rows={1}
             className="w-full bg-input-bg border-none rounded-lg px-3 py-2 max-md:py-2.5 text-[15px] text-text-primary placeholder-text-muted resize-none focus:outline-none disabled:opacity-50 min-h-10 max-md:min-h-11 max-md:rounded-3xl"
           />
-          {remaining < 100 && (
+          {softBytes && !maxBytes && bytes > softBytes - 60 && (
+            <span data-testid="dht-byte-count" title={overSoft ? `Over the ${softBytes} bytes the DHT carries: it is sent when you are live` : undefined}
+              className={`absolute right-2.5 bottom-1.5 text-[10px] ${overSoft ? "text-amber-500" : "text-text-muted"}`}>
+              {bytes} / {softBytes} B
+            </span>
+          )}
+          {!(softBytes && !maxBytes) && remaining < 100 && (
             <span
               className={`absolute right-2.5 bottom-1.5 text-[10px] ${remaining < 50 ? "text-danger" : "text-text-muted"}`}
             >
@@ -372,6 +388,7 @@ export function MessageInput({
             contact={payments.contact}
             onSend={payments.onSend}
             onRequest={payments.onRequest}
+            sendUnavailable={payments.sendUnavailable}
             onClose={() => setShowPayment(false)}
           />
         )}

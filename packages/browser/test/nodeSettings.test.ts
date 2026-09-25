@@ -316,9 +316,11 @@ describe("messages", () => {
 
   it("nothing is sent while offline, and an empty text is not a message", async () => {
     const { node } = engine();
-    const away = await addChat(node, null), chat = await addChat(node, stubLink({ canSendText: false }));
+    const away = await addChat(node, null), chat = await addChat(node, stubLink({ canSendText: false, isDataLinkOpen: false, textDelivery: "unavailable" }));
     expect(await node.sendMessage({ linkId: away.id, text: "hi" })).toEqual({ error: "You are offline" });
-    expect((await node.sendMessage({ linkId: chat.id, text: "hi" })).error).toContain("compatible delivery methods");
+    // Nothing carries it now: it waits, and goes by itself when something does ("Sends when live").
+    expect(await node.sendMessage({ linkId: chat.id, text: "hi" })).toEqual({ error: null });
+    expect(await db.getMessages(chat.id)).toEqual([expect.objectContaining({ text: "hi", delivery: "waiting" })]);
     const open = await addChat(node, stubLink({ canSendText: true }));
     expect(await node.sendMessage({ linkId: open.id, text: "   " })).toEqual({ error: null });
     expect(await db.getMessages(open.id)).toEqual([]);

@@ -230,6 +230,12 @@ export interface NodeEvents {
  * shares, and the glue to IndexedDB. It owns nothing durable on the network;
  * when it stops, the peer is gone.
  */
+/** A waiting file or request that went out: it shows like any other from now on (a file by its transfer). */
+function sentNow(message: StoredMessage): StoredMessage {
+  const { delivery: _delivery, deliveryError: _error, resendUntil: _until, ...sent } = message;
+  return sent;
+}
+
 export class GhostlyNode implements EngineImplementation {
   private settings: Settings = DEFAULT_SETTINGS;
   private readonly transport: PkarrTransport;
@@ -357,6 +363,12 @@ export class GhostlyNode implements EngineImplementation {
     groupLinks: (groupId) => this.groups.isCommunityGroup(groupId) ? [groupLinkId(groupId)] : [...this.groupEdges(groupId).values()],
     storeMessage: (message) => this.storeMessage(message),
     heldPaymentMethods: (linkId): PaymentMethodName[] | null => { const live = this.links.get(linkId); return live && this.holdingFor(live) ? this.hold.heldPaymentMethods(linkId) : null; },
+    // What the contact allowed at the last session; before any, Cashu and Lightning, as a chat that negotiated nothing.
+    waitingPaymentMethods: (linkId): PaymentMethodName[] | null => {
+      const live = this.links.get(linkId);
+      if (!live?.stored.profile || !live.link || live.link.isDataLinkOpen || live.stored.group || this.chatStopped(live)) return null;
+      return (this.hold.lastPeerMethods(linkId) ?? ["cashu", "lightning"]).filter(m => m === "cashu" || m === "lightning");
+    },
     holdRequest: (linkId, request, messageId) => this.hold.hold(linkId, { kind: "pay-req", id: request.id, messageId, ref: request.id, bytes: 1024, timestamp: request.timestamp }),
     onChange: () => {
       for (const payment of Object.values(this.desk.views())) {
@@ -1017,32 +1029,11 @@ export class GhostlyNode implements EngineImplementation {
     const { linkId, text } = params;
     const live = this.links.get(linkId);
     if (!live?.link) return { error: "You are offline" };
-    if (live.stored.profile && !live.link.canSendText && !this.holdingFor(live)) return { error: "Choose compatible delivery methods with your contact before sending." };
     const trimmed = text.trim();
     if (!trimmed) return { error: null };
 
     const timestamp = params.timestamp ?? Date.now();
-    if (live.stored.profile && this.holdingFor(live)) {
-      // The contact is away and allowed this: the text waits in this device's storage, sealed for them.
-      if (new TextEncoder().encode(trimmed).length > HOLD_LIMITS.maxTextBytes) return { error: `A held message is at most ${HOLD_LIMITS.maxTextBytes} UTF-8 bytes.` };
-      const wireId = toBase64Url(randomBytes(16)), id = `me_${wireId}`;
-      await this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp, via: "hold", delivery: "sending" });
-      // The durable row carries the outcome; the promise only says whether it could start.
-      void this.hold.hold(linkId, { kind: "text", id: wireId, messageId: id, bytes: new TextEncoder().encode(trimmed).length, timestamp }).catch(() => {});
-      return { error: null };
-    }
-    if (live.stored.profile) {
-      const limit = live.link.textDelivery === "dht" ? DHT_TEXT_BYTES : LIMITS.maxChatMessageBytes;
-      if (new TextEncoder().encode(trimmed).length > limit) return { error: `Message exceeds ${limit} UTF-8 bytes for this delivery method.` };
-      const wireId = toBase64Url(randomBytes(16));
-      const validationError = live.link.validateText(trimmed, timestamp, wireId);
-      if (validationError) return { error: validationError };
-      const id = `me_${wireId}`;
-      await this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp, via: live.link.textDelivery === "dht" ? "pkarr" : "datalink", delivery: "sending" });
-      await this.outboxFor(linkId).transmit(id);
-      // The durable row carries delivery errors and an explicit retry action.
-      return { error: null };
-    }
+    if (live.stored.profile) return this.sendChatText(live, trimmed, timestamp);
     const via = live.link.isDataLinkOpen ? "datalink" : "pkarr";
     // What the DHT cannot carry is refused before it is kept: it must not show as sent.
     const bytes = new TextEncoder().encode(trimmed).length;
@@ -1057,6 +1048,53 @@ export class GhostlyNode implements EngineImplementation {
       this.emitState();
     }
     return { error };
+  }
+
+  /**
+   * Text in a chat (WISP 400): over layer 1 while live; on the DHT floor when it fits 256 bytes; held when
+   * both sides allow it; otherwise kept as `waiting` ("Sends when live") and sent by itself, in order, once
+   * the chat can carry it. Only what must never wait, or a security stop, is refused.
+   */
+  private async sendChatText(live: LiveLink, trimmed: string, timestamp: number): Promise<{ error: string | null; refused?: boolean }> {
+    const { link } = live, linkId = live.stored.id;
+    if (!link) return { error: "You are offline" };
+    const bytes = new TextEncoder().encode(trimmed).length;
+    if (bytes > LIMITS.maxChatMessageBytes) return { error: `Message exceeds ${LIMITS.maxChatMessageBytes} UTF-8 bytes.` };
+    const stop = this.chatStopped(live);
+    if (stop) return { error: stop };
+    const wireId = toBase64Url(randomBytes(16)), id = `me_${wireId}`;
+    const delivery = link.isDataLinkOpen ? "stream" : link.textDelivery === "dht" ? "dht" : "unavailable";
+    if (delivery === "stream" || (delivery === "dht" && bytes <= DHT_TEXT_BYTES)) {
+      const validationError = link.validateText(trimmed, timestamp, wireId);
+      if (!validationError) {
+        await this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp, via: delivery === "dht" ? "pkarr" : "datalink", delivery: "sending" });
+        await this.outboxFor(linkId).transmit(id);
+        // The durable row carries delivery errors and an explicit retry action.
+        return { error: null };
+      }
+      if (/Payment tokens|does not match/.test(validationError)) return { error: validationError, refused: true };
+    }
+    if (this.holdingFor(live) && bytes <= HOLD_LIMITS.maxTextBytes) {
+      // Longer than the DHT carries, and both sides allow held items: it waits in this device's storage, sealed for them.
+      await this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp, via: "hold", delivery: "sending" });
+      // The durable row carries the outcome; the promise only says whether it could start.
+      void this.hold.hold(linkId, { kind: "text", id: wireId, messageId: id, bytes, timestamp }).catch(() => {});
+      return { error: null };
+    }
+    const reason = delivery === "dht" && bytes <= DHT_TEXT_BYTES ? "Waits for the text before it to be confirmed."
+      : delivery === "dht" ? `Longer than the ${DHT_TEXT_BYTES} bytes the DHT carries: it is sent when you are live.`
+      : "Sent when your contact is reachable.";
+    await this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp, via: "datalink", delivery: "waiting", deliveryError: reason });
+    await this.outboxFor(linkId).wait(id, reason);
+    return { error: null };
+  }
+
+  /** A chat stopped by a security rejection (a participation key other than the pinned one): nothing goes until the person acts. */
+  private chatStopped(live: LiveLink): string | null {
+    const error = live.link?.dhtDelivery?.error;
+    if (live.pairing?.keyMismatch) return live.pairing.error ?? "This chat stopped: your contact's key changed.";
+    if (error?.includes("does not match")) return error;
+    return null;
   }
 
   async retryMessage({ linkId, messageId }: { linkId: string; messageId: string }): Promise<void> {
@@ -1080,7 +1118,8 @@ export class GhostlyNode implements EngineImplementation {
 
   /** The contact is away, and both sides chose to hold what is sent meanwhile (WISP 4xx). */
   private holdingFor(live: LiveLink): boolean {
-    return !!live.stored.profile && !!live.link && !live.link.isDataLinkOpen && live.stored.deliveryMode !== "dht" && this.hold.canHold(live.stored.id);
+    // Holding dials nobody: it works in DHT only too (WISP 4xx, revision 0.2).
+    return !!live.stored.profile && !!live.link && !live.link.isDataLinkOpen && this.hold.canHold(live.stored.id);
   }
 
   /** Store-and-forward in one chat: offered in the handshake, told to a connected contact at once. */
@@ -1155,6 +1194,8 @@ export class GhostlyNode implements EngineImplementation {
 
     void (async () => {
       const message = (await db.getMessages(linkId)).find((m) => m.id === messageId);
+      // A request that never left (waiting for live) is withdrawn with its message: the next session must not send it.
+      if (message?.paymentId && message.delivery === "waiting") await this.desk.withdraw(message.paymentId).catch(() => {});
       if (message?.file) {
         const stored = await fileStore.get(message.file.id);
         // Only what the peer sent counts against the room it has here.
@@ -1198,11 +1239,16 @@ export class GhostlyNode implements EngineImplementation {
         .then(() => this.hold.hold(linkId, { kind: "file", id: wireId, messageId: `me_${timestamp}`, ref: file.id, bytes: file.size, timestamp })).catch(() => {});
       return;
     }
+    if (!live.link.supportsFiles && live.stored.profile && !live.link.isDataLinkOpen) {
+      // Not live and nothing holds it: it waits here, with a cancel, and goes when the chat is live (WISP 500).
+      if (this.chatStopped(live)) return fail(this.chatStopped(live)!);
+      live.files.wireIds.add(wireId);
+      void this.storeMessage({ linkId, id: `me_${timestamp}`, text: fileMessageText(file), sender: "me", timestamp, via: "datalink", file,
+        delivery: "waiting", deliveryError: "Sent when you are live." });
+      return;
+    }
     if (!live.link.supportsFiles) return fail("Connect to an updated peer to send files");
-    const { link } = live;
     live.files.wireIds.add(wireId);
-
-    this.transfers.set(file.id, { state: "transferring", transferred: 0, size: file.size });
     void this.storeMessage({
       linkId,
       id: `me_${timestamp}`,
@@ -1212,7 +1258,14 @@ export class GhostlyNode implements EngineImplementation {
       via: "datalink",
       file,
     });
+    this.transferFile(live, file, wireId, timestamp, fail);
+  }
 
+  /** The file of a stored message goes over the open session. */
+  private transferFile(live: LiveLink, file: MessageFile, wireId: string, timestamp: number, fail: (error: string) => void): void {
+    const { link } = live;
+    if (!link) return fail("You are offline");
+    this.transfers.set(file.id, { state: "transferring", transferred: 0, size: file.size });
     void (async () => {
       const stored = await fileStore.get(file.id);
       if (!stored) return fail("The file is gone");
@@ -1233,6 +1286,33 @@ export class GhostlyNode implements EngineImplementation {
         source,
       );
     })().catch((error) => fail(error instanceof Error ? error.message : String(error)));
+  }
+
+  /**
+   * The chat is live: what waited for it goes now, in the order it was written. A file for an app that turns
+   * out not to take files fails with that reason instead of waiting forever (WISP 03).
+   */
+  private async sendWaiting(linkId: string): Promise<void> {
+    const live = this.links.get(linkId);
+    if (!live?.link?.isDataLinkOpen) return;
+    const waiting = (await db.getMessages(linkId)).filter(m => m.sender === "me" && m.delivery === "waiting" && (m.file || m.paymentId))
+      .sort((a, b) => a.timestamp - b.timestamp);
+    for (const message of waiting) {
+      if (message.file) {
+        if (!live.link.supportsFiles) { await db.updateDelivery(linkId, message.id, "failed", "Your contact's app cannot receive files."); continue; }
+        const file = message.file, wireId = file.id.slice(`${linkId}-out-`.length);
+        await db.putMessage(sentNow(message));
+        this.transferFile(live, file, wireId, message.timestamp, error => {
+          this.transfers.set(file.id, { state: "failed", transferred: 0, size: file.size, error });
+          this.emitState();
+        });
+      } else {
+        // The desk's replay has sent every pending request of this chat on the open session.
+        if (live.link.supportsPayments) await db.putMessage(sentNow(message));
+        else await db.updateDelivery(linkId, message.id, "failed", "Your contact's app cannot receive payment requests.");
+      }
+    }
+    if (waiting.length) this.events.onMessages(linkId, await db.getMessages(linkId));
   }
 
   private receiveFile(
@@ -2140,7 +2220,10 @@ export class GhostlyNode implements EngineImplementation {
         },
         onDataLinkState: (state) => {
           live.dataLink = state;
-          if (state === "open") { void this.desk.replay(linkId).catch(() => {}); this.identities.ready(linkId); }
+          if (state === "open") {
+            void this.desk.replay(linkId).catch(() => {}).then(() => this.sendWaiting(linkId)).catch(() => {});
+            this.identities.ready(linkId);
+          }
           if (state !== "open") { live.proofs?.stop(); this.identities.closed(linkId); }
           if (stored.profile && live.stored.deliveryMode !== "dht" && state !== "open") void this.outboxFor(linkId).disconnected().catch(() => {});
           // Back live: what the contact has not confirmed goes again at once, under the same ids.

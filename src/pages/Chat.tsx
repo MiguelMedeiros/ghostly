@@ -170,11 +170,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const platform = useServicesPlatform();
   const paired = session?.profile === "paired-chat/1";
   const deliveryPeer = platform?.getPeer(session?.peerPubKeyB64 ?? "");
-  const dhtOnly = deliveryPeer?.deliveryMode === "dht" || deliveryPeer?.textDelivery === "dht";
   const pairedReady = deliveryPeer?.pairing?.status === "ready";
-  const textReady = deliveryPeer?.canSendText ?? pairedReady;
   // A paired chat calls over its live session (`calls/1`); why it cannot right now, if it cannot.
   const callsBlocked = paired ? (deliveryPeer?.callsUnavailable === undefined ? "Calls need a live connection" : deliveryPeer.callsUnavailable) : null;
+  // The one chat (WISP 400): live over layer 1, or not; what cannot go now waits ("Sends when live") or is held.
+  const chatLive = pairedReady && deliveryPeer?.dataLink === "open";
+  // A security rejection stops the chat on both layers until the person acts.
+  const chatStop = paired && (deliveryPeer?.pairing?.keyMismatch || deliveryPeer?.dhtDelivery?.error?.includes("does not match"))
+    ? deliveryPeer?.pairing?.error ?? deliveryPeer?.dhtDelivery?.error ?? "This chat stopped: your contact's key changed." : undefined;
   // A chat made here (it has an invite to give) is the inviter's side of the pairing; read once, before the
   // invite code is forgotten when the contact shows up.
   const createdHere = useMemo(() => !!getInviteCode(sessionId), [sessionId]);
@@ -703,17 +706,19 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
       <MessageInput draftId={sessionId}
         key={sessionId}
         onSend={sendMessage}
-        disabled={isSending || (paired && !textReady)}
+        disabled={isSending || (paired && !!chatStop)}
         disabledPlaceholder="Message…"
         // The DHT carries a few hundred characters; the direct link has room for long invoices and ecash tokens.
-        maxBytes={dhtOnly ? deliveryPeer?.dhtDelivery?.maxTextBytes ?? 256 : undefined}
+        softBytes={paired && !chatLive ? deliveryPeer?.dhtDelivery?.maxTextBytes ?? 256 : undefined}
         maxLength={paired ? 16_384 : platform?.getPeer(params.peerPubKeyB64)?.dataLink === "open" ? 4000 : undefined}
         onSendFile={platform ? sendFile : undefined}
-        fileUnavailable={dhtOnly ? "DHT carries text only. Choose a live connection for files." : paired && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.files ? (pairedReady ? "Update both peers to send files" : "Connect and confirm your peer to send files, or hold messages for them under ⋮ → Hold messages") : undefined}
-        paymentsUnavailable={!paymentsOn ? "Payments are off in this chat. Choose them under ⋮ → Payments." : dhtOnly ? "DHT carries text only. Choose a live connection for sats." : paired && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.payments ? (pairedReady ? "Your contact has payments off in this chat, or needs an updated Ghostly" : deliveryPeer?.textDelivery === "hold" ? "Your contact allowed neither Cashu nor Lightning at your last session; a request cannot be held" : "Connect and confirm your peer to send sats") : undefined}
+        fileUnavailable={paired ? chatStop ?? (chatLive && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.files ? "Update both peers to send files" : undefined) : undefined}
+        paymentsUnavailable={!paymentsOn ? "Payments are off in this chat. Choose them under ⋮ → Payments." : chatStop ? chatStop : paired && chatLive && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.payments ? "Your contact has payments off in this chat, or needs an updated Ghostly" : undefined}
         payments={
           walletState && wallet && peerKey
-            ? { balance: walletState.balance, contact: displayName || undefined, onSend: paySend, onRequest: payRequest,reviewContext:platform?.getPeer(peerKey)?.id ? {wallet,peer:peerKey,linkId:platform.getPeer(peerKey)!.id!}:undefined }
+            ? { balance: walletState.balance, contact: displayName || undefined, onSend: paySend, onRequest: payRequest,
+              // Paying needs live: a bearer token never waits in a queue or a hold. A request can wait.
+              sendUnavailable: paired && !chatLive ? "Payments need a live connection" : undefined, reviewContext:platform?.getPeer(peerKey)?.id ? {wallet,peer:peerKey,linkId:platform.getPeer(peerKey)!.id!}:undefined }
             : undefined
         }
         identities={paired ? { peerKey: params.peerPubKeyB64, contact: shownName } : undefined}

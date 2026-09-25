@@ -47,6 +47,11 @@ export interface PaymentDeskHost {
    * this device can hold it for them (null when it cannot), and holding the request itself.
    */
   heldPaymentMethods?(linkId: string): PaymentMethodName[] | null;
+  /**
+   * The chat is not live and nothing holds a request: the ways of paying a request may name that waits here
+   * and goes when the chat is live ("Sends when live", WISP 400), or null when a request cannot wait.
+   */
+  waitingPaymentMethods?(linkId: string): PaymentMethodName[] | null;
   holdRequest?(linkId: string, request: PaymentRequest, messageId: string): Promise<void>;
   onReviewedPaymentResult?(id:string):Promise<void>;
   /** The group an edge link belongs to (WISP 9xx), for requests to a whole group. */
@@ -185,7 +190,8 @@ export class PaymentDesk {
     const link = this.requireLink(params.linkId);
     // A Cashu/Lightning request that can be held for an away contact needs no session; anything else does.
     const held = !link.isDataLinkOpen ? this.host.heldPaymentMethods?.(params.linkId) ?? null : null;
-    if (!held || (params.method && params.method !== "cashu")) await link.requirePaymentSupport();
+    const waiting = !link.isDataLinkOpen && !held && (!params.method || params.method === "cashu") ? this.host.waitingPaymentMethods?.(params.linkId) ?? null : null;
+    if ((!held && !waiting) || (params.method && params.method !== "cashu")) await link.requirePaymentSupport();
 
     const id = newId();
     const memo = params.memo?.trim().slice(0, 140) || undefined;
@@ -249,8 +255,9 @@ export class PaymentDesk {
     }
     // Each way of paying goes in only if this chat allows it on both sides. While the contact is away and the
     // request can be held for them, "both sides" is what their app allowed at the last session.
-    const ecash = params.rail !== "lightning" && (held ? held.includes("cashu") && link.paymentEnabled("cashu") : link.allowsPayment("cashu"));
-    const lightning = params.rail !== "cashu" && (held ? held.includes("lightning") && link.paymentEnabled("lightning") : link.allowsPayment("lightning"));
+    const known = held ?? waiting;
+    const ecash = params.rail !== "lightning" && (known ? known.includes("cashu") && link.paymentEnabled("cashu") : link.allowsPayment("cashu"));
+    const lightning = params.rail !== "cashu" && (known ? known.includes("lightning") && link.paymentEnabled("lightning") : link.allowsPayment("lightning"));
     if (!ecash && !lightning) throw new Error(params.rail ? `${params.rail === "cashu" ? "Cashu" : "Lightning"} is not allowed by both of you here` : held ? "Your contact allowed neither Cashu nor Lightning in this chat" : "Cashu and Lightning are off in this chat");
     const quote = lightning ? await this.lightning.createInvoice(params.amount, id) : undefined;
     // A request is in real sats or in test sats, never both: ecash from a test mint, worth nothing, must
@@ -279,7 +286,7 @@ export class PaymentDesk {
       sender: "me",
       timestamp: params.timestamp,
       via: held ? "hold" : "datalink",
-      ...(held ? { delivery: "sending" as const } : {}),
+      ...(held ? { delivery: "sending" as const } : waiting ? { delivery: "waiting" as const, deliveryError: "Sent when you are live." } : {}),
       paymentId: id,
     });
     const request: PaymentRequest = {
@@ -294,7 +301,8 @@ export class PaymentDesk {
       ],
     };
     if (held) await this.host.holdRequest!(params.linkId, request, `me_${params.timestamp}`);
-    else await link.sendPaymentRequest(request);
+    // A waiting request goes with the replay of pending requests when the session opens.
+    else if (!waiting) await link.sendPaymentRequest(request);
     return { paymentId: id };
   }
 
@@ -1251,6 +1259,13 @@ export class PaymentDesk {
   }
 
   /** Re-send the same pending token/id, never make a second spend after a lost receipt. */
+  /** A request of ours that was never sent (it waited for live): closed, so no replay sends it. */
+  async withdraw(id: string): Promise<void> {
+    const payment = this.payments.get(id);
+    if (payment?.kind !== "request" || payment.direction !== "out" || payment.state !== "pending") return;
+    await this.save({ ...payment, state: "failed" });
+  }
+
   async replay(linkId: string): Promise<void> {
     const link = this.host.getLink(linkId);
     if (!link?.supportsPayments) return;

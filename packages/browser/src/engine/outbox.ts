@@ -4,7 +4,7 @@ import type { StoredMessage } from "../shared/types";
  * `queued`: sent at least once, not confirmed, and sent again by itself — under the same id — as soon as
  * the chat can carry it. `failed`: no longer retried by itself; only the Retry button sends it again.
  */
-export type Delivery = "sending" | "sent" | "queued" | "held" | "delivered" | "failed";
+export type Delivery = "sending" | "sent" | "queued" | "waiting" | "held" | "delivered" | "failed";
 export interface OutboxStore {
   read(): Promise<StoredMessage[]>;
   /** `extra` also changes the path the message takes and its resend deadline (`resendUntil: undefined` clears it). */
@@ -71,6 +71,7 @@ export class Outbox {
       // Held items have their own durable queue and are picked up by the store-and-forward engine.
       if (message.via === "hold" || message.sender !== "me") continue;
       if (message.delivery === "queued") { await this.queue(message, message.deliveryError ?? "Not confirmed yet."); continue; }
+      if (message.delivery === "waiting") { this.schedule(message.id); continue; }
       if (message.delivery !== "sending" && message.delivery !== "sent") continue;
       const until = this.pendingUntil?.(message);
       if (until && until > this.now()) {
@@ -109,6 +110,18 @@ export class Outbox {
     } finally { this.busy.delete(id); }
   }
 
+  /**
+   * A message the chat cannot carry yet (a second DHT text while one awaits its receipt, a long text on the
+   * DHT): kept as `waiting`, and sent by itself, in order, once the chat can carry it. Never sent before, so
+   * nothing about it is unconfirmed; it counts no attempt until it goes.
+   */
+  async wait(id: string, reason: string): Promise<void> {
+    const message = (await this.store.read()).find(m => m.id === id);
+    if (!message || this.stopped) return;
+    await this.store.update(id, "waiting", reason, { resendUntil: message.resendUntil ?? this.now() + this.policy.windowMs });
+    this.schedule(id);
+  }
+
   async received(wireId: string): Promise<void> {
     const id = `me_${wireId}`;
     await this.store.update(id, "delivered");
@@ -126,7 +139,7 @@ export class Outbox {
   async flush({ reopened = false }: { reopened?: boolean } = {}): Promise<void> {
     if (this.stopped || (!reopened && !this.waiting.size)) return;
     const due = (await this.store.read())
-      .filter(m => m.sender === "me" && m.via !== "hold" && (m.delivery === "queued" || (reopened && m.delivery === "sent" && this.receipts.has(m.id))))
+      .filter(m => m.sender === "me" && m.via !== "hold" && (m.delivery === "queued" || m.delivery === "waiting" || (reopened && m.delivery === "sent" && this.receipts.has(m.id))))
       .sort((a, b) => a.timestamp - b.timestamp);
     for (const message of due) {
       if (message.delivery !== "sent") { await this.attempt(message.id); continue; }
@@ -158,8 +171,12 @@ export class Outbox {
   private async attempt(id: string): Promise<void> {
     if (this.stopped || this.busy.has(id)) return;
     const message = (await this.store.read()).find(m => m.id === id);
-    if (!message || message.delivery !== "queued" || message.via === "hold") { this.forget(id); return; }
-    if ((message.resendUntil ?? Infinity) <= this.now()) { await this.fail(id, `Not confirmed within ${days(this.policy.windowMs)}.`); return; }
+    if (!message || (message.delivery !== "queued" && message.delivery !== "waiting") || message.via === "hold") { this.forget(id); return; }
+    if ((message.resendUntil ?? Infinity) <= this.now()) {
+      if (message.delivery === "waiting") { this.forget(id); await this.store.update(id, "failed", `Your contact was not reachable within ${days(this.policy.windowMs)}. It was not sent; Retry sends it.`); }
+      else await this.fail(id, `Not confirmed within ${days(this.policy.windowMs)}.`);
+      return;
+    }
     if (this.resender.ready(message)) { await this.transmit(id); return; }
     const wait = this.waiting.get(id);
     if (this.resender.divert && wait && this.now() - wait.since >= this.policy.holdAfterMs && await this.resender.divert(message)) { this.forget(id); return; }
