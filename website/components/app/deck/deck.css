@@ -21,8 +21,11 @@
 .deck-card[data-active=true] [data-deck=face]{border-color:rgba(var(--card-rgb),.75)}
 .deck-card:focus-visible{outline:none}
 .deck-card:focus-visible [data-deck=face]{outline:2px solid #fff;outline-offset:4px}
-/* The light that crosses a card as it comes up, in its ink (motion.ts moves it; at rest it is off the card). */
-[data-deck=sheen]{position:absolute;inset:0;pointer-events:none;opacity:0;mix-blend-mode:screen;
+/* The light that crosses a card as it comes up, in its ink (motion.ts moves it; at rest it is transparent). Plain alpha,
+   never a blend mode: Chrome drew a screen-blended sheen crossing a card that swings (a rotate) against a shifted copy
+   of the card, a second card edge with square corners inside it on the side the light came in from. Over these dark
+   cards screen and plain alpha look the same. */
+[data-deck=sheen]{position:absolute;inset:0;pointer-events:none;opacity:0;
  background:linear-gradient(105deg,transparent 28%,rgba(var(--card-rgb),.28) 42%,rgba(255,255,255,.34) 50%,rgba(var(--card-rgb),.28) 58%,transparent 72%)}
 /* A card that cannot be used here still comes up, greyed, to say why. */
 .deck-card[data-blocked=true]{cursor:not-allowed}
