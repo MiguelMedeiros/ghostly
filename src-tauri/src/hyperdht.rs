@@ -1,11 +1,17 @@
 //! Fixed packaged HyperDHT runtime, controlled over private pipes. This bridge
 //! cannot launch arbitrary programs or expose a network administration port.
+//!
+//! One runtime serves the whole app: every chat's endpoint lives in it under
+//! the number this bridge gave it. It starts with the first endpoint, starts
+//! again only if it died, and ends with the last endpoint or with the app (the
+//! runtime leaves as soon as the pipe to the app closes).
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
+    path::PathBuf,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
     time::Duration,
@@ -13,7 +19,7 @@ use std::{
 use tauri::{ipc::Channel, Manager, State};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    process::Command,
+    process::{ChildStdout, Command},
     sync::{mpsc, oneshot},
 };
 
@@ -26,15 +32,261 @@ struct Peer {
     tx: mpsc::Sender<Request>,
     descriptor: Value,
 }
+type Peers = Arc<Mutex<HashMap<u64, Peer>>>;
+type Slot = Arc<tokio::sync::Mutex<Option<Runtime>>>;
+
+/// What the runtime says about one endpoint goes to that endpoint's page.
+struct Route {
+    events: Channel<Value>,
+    ready: Option<Reply>,
+    pending: Option<Reply>,
+    sockets: Vec<u64>,
+}
+type Routes = Arc<Mutex<HashMap<u64, Route>>>;
+impl Route {
+    fn close(self, error: &str) {
+        if let Some(reply) = self.ready {
+            let _ = reply.send(Err(format!("{error} during startup")));
+        }
+        if let Some(reply) = self.pending {
+            let _ = reply.send(Err(format!("{error} during connection")));
+        }
+        for socket in self.sockets {
+            let _ = self.events.send(json!({"type":"closed", "id":socket}));
+        }
+    }
+}
+
+/// The running Node process. Dropping this asks it to leave.
+struct Runtime {
+    generation: u64,
+    lines: mpsc::Sender<String>,
+    routes: Routes,
+    exited: Arc<AtomicBool>,
+    #[cfg_attr(not(test), allow(dead_code))]
+    pid: Option<u32>,
+    _leave: oneshot::Sender<()>,
+}
+
 #[derive(Clone, Default)]
 pub struct HyperState {
-    peers: Arc<Mutex<HashMap<u64, Peer>>>,
+    peers: Peers,
     next: Arc<AtomicU64>,
+    runtime: Slot,
+    spawned: Arc<AtomicU64>,
+    /// Node and the script, when a test brings its own.
+    program: Option<(PathBuf, PathBuf)>,
 }
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct Started {
     id: u64,
     descriptor: Value,
+}
+
+fn packaged<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(PathBuf, PathBuf), String> {
+    let mut root = app
+        .path()
+        .resource_dir()
+        .map_err(|e| e.to_string())?
+        .join("native-runtime");
+    #[cfg(debug_assertions)]
+    if !root.join("sidecar.mjs").exists() {
+        root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("native-runtime");
+    }
+    let executable = root.join(if cfg!(windows) { "node.exe" } else { "node" });
+    Ok((executable, root.join("sidecar.mjs")))
+}
+
+impl HyperState {
+    /// Starts the runtime. Called with the slot locked, so two endpoints
+    /// starting at once never start two.
+    fn spawn(&self, program: (PathBuf, PathBuf)) -> Result<Runtime, String> {
+        let (executable, script) = program;
+        let mut child = Command::new(executable)
+            .arg(script)
+            .env_remove("NODE_OPTIONS")
+            .env_remove("NODE_PATH")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(|e| format!("Packaged HyperDHT runtime unavailable: {e}"))?;
+        let generation = self.spawned.fetch_add(1, Ordering::Relaxed) + 1;
+        let mut input = child.stdin.take().ok_or("Native stdin unavailable")?;
+        let output = child.stdout.take().ok_or("Native stdout unavailable")?;
+        let (lines, mut queued) = mpsc::channel::<String>(64);
+        let (leave, left) = oneshot::channel::<()>();
+        let routes = Routes::default();
+        let exited = Arc::new(AtomicBool::new(false));
+        let pid = child.id();
+
+        tokio::spawn(async move {
+            while let Some(line) = queued.recv().await {
+                if input.write_all((line + "\n").as_bytes()).await.is_err() {
+                    break;
+                }
+            }
+        });
+        // A runtime that says something it should not is stopped, as one that says nothing more.
+        let reader = tokio::spawn(read(output, routes.clone(), self.peers.clone()));
+        let (slot, peers, routes_, exited_, leaving) = (
+            self.runtime.clone(),
+            self.peers.clone(),
+            routes.clone(),
+            exited.clone(),
+            lines.clone(),
+        );
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = child.wait() => {},
+                _ = reader => {},
+                _ = left => {
+                    // Asked first, so every DHT node closes properly; then made to.
+                    let _ = leaving.try_send(json!({"type":"shutdown"}).to_string());
+                    drop(leaving);
+                    if tokio::time::timeout(Duration::from_secs(5), child.wait()).await.is_err() {
+                        let _ = child.kill().await;
+                    }
+                },
+            }
+            let _ = child.kill().await;
+            exited_.store(true, Ordering::SeqCst);
+            {
+                let mut slot = slot.lock().await;
+                if slot.as_ref().is_some_and(|r| r.generation == generation) {
+                    *slot = None;
+                }
+            }
+            // Its endpoints are gone with it. Their forwarders tell their pages.
+            let ids: Vec<u64> = routes_.lock().unwrap().keys().copied().collect();
+            let mut peers = peers.lock().unwrap();
+            for id in ids {
+                peers.remove(&id);
+            }
+        });
+        Ok(Runtime {
+            generation,
+            lines,
+            routes,
+            exited,
+            pid,
+            _leave: leave,
+        })
+    }
+}
+
+/// Everything the runtime prints, to the endpoint it names.
+async fn read(output: ChildStdout, routes: Routes, peers: Peers) {
+    let mut output = BufReader::new(output).lines();
+    while let Ok(Some(line)) = output.next_line().await {
+        if line.len() > 256 * 1024 {
+            break;
+        }
+        let Ok(value) = serde_json::from_str::<Value>(&line) else {
+            break;
+        };
+        let Some(id) = value["endpoint"].as_u64() else {
+            break;
+        };
+        let mut gone = false;
+        {
+            let mut routes = routes.lock().unwrap();
+            // A late word about an endpoint that was already stopped.
+            let Some(route) = routes.get_mut(&id) else {
+                continue;
+            };
+            match value["type"].as_str() {
+                Some("started") => {
+                    if let Some(reply) = route.ready.take() {
+                        let _ = reply.send(Ok(value["descriptor"].clone()));
+                    }
+                }
+                Some("result") => {
+                    if let Some(reply) = route.pending.take() {
+                        let _ = reply.send(Ok(value["id"].clone()));
+                    }
+                }
+                Some("error") => {
+                    let error = value["message"]
+                        .as_str()
+                        .unwrap_or("HyperDHT failed")
+                        .to_string();
+                    let reply = match value["command"].as_str() {
+                        Some("start") => route.ready.take(),
+                        Some("connect") => route.pending.take(),
+                        _ => None,
+                    };
+                    if let Some(reply) = reply {
+                        let _ = reply.send(Err(error));
+                    }
+                }
+                Some("open") => {
+                    if let Some(socket) = value["id"].as_u64() {
+                        route.sockets.push(socket);
+                    }
+                    gone = route.events.send(value).is_err();
+                }
+                Some("closed") => {
+                    route
+                        .sockets
+                        .retain(|socket| Some(*socket) != value["id"].as_u64());
+                    gone = route.events.send(value).is_err();
+                }
+                Some("frame") => gone = route.events.send(value).is_err(),
+                Some("stopped") => gone = true,
+                _ => break,
+            }
+        }
+        // Its page is gone, or the runtime dropped it: stopped like any other.
+        if gone {
+            peers.lock().unwrap().remove(&id);
+        }
+    }
+}
+
+/// Carries one endpoint's commands to the runtime until the endpoint is
+/// stopped (its sender dropped), then stops it there too; the last one out
+/// lets the runtime go.
+async fn forward(
+    id: u64,
+    mut rx: mpsc::Receiver<Request>,
+    lines: mpsc::Sender<String>,
+    routes: Routes,
+    generation: u64,
+    slot: Slot,
+) {
+    while let Some(request) = rx.recv().await {
+        if let Some(reply) = request.reply {
+            let mut routes = routes.lock().unwrap();
+            let Some(route) = routes.get_mut(&id) else {
+                let _ = reply.send(Err("HyperDHT endpoint closed".into()));
+                continue;
+            };
+            if route.pending.is_some() {
+                let _ = reply.send(Err("A native connection attempt is already running".into()));
+                continue;
+            }
+            route.pending = Some(reply);
+        }
+        let mut value = request.value;
+        value["endpoint"] = json!(id);
+        if lines.send(value.to_string()).await.is_err() {
+            break;
+        }
+    }
+    let stop = json!({"type":"stop", "endpoint":id}).to_string();
+    let _ = tokio::time::timeout(Duration::from_secs(5), lines.send(stop)).await;
+    if let Some(route) = routes.lock().unwrap().remove(&id) {
+        route.close("HyperDHT runtime stopped");
+    }
+    let mut slot = slot.lock().await;
+    if slot
+        .as_ref()
+        .is_some_and(|r| r.generation == generation && r.routes.lock().unwrap().is_empty())
+    {
+        *slot = None;
+    }
 }
 
 #[tauri::command]
@@ -56,101 +308,59 @@ pub async fn paired_hyperdht_start<R: tauri::Runtime>(
     if state.peers.lock().unwrap().len() >= 8 {
         return Err("Native endpoint limit reached".into());
     }
-    let mut root = app
-        .path()
-        .resource_dir()
-        .map_err(|e| e.to_string())?
-        .join("native-runtime");
-    #[cfg(debug_assertions)]
-    if !root.join("sidecar.mjs").exists() {
-        root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("native-runtime");
-    }
-    let executable = root.join(if cfg!(windows) { "node.exe" } else { "node" });
-    let mut child = Command::new(executable)
-        .arg(root.join("sidecar.mjs"))
-        .env_remove("NODE_OPTIONS")
-        .env_remove("NODE_PATH")
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|e| format!("Packaged HyperDHT runtime unavailable: {e}"))?;
-    let mut input = child.stdin.take().ok_or("Native stdin unavailable")?;
-    let mut output =
-        BufReader::new(child.stdout.take().ok_or("Native stdout unavailable")?).lines();
     let id = state.next.fetch_add(1, Ordering::Relaxed) + 1;
-    let (tx, mut rx) = mpsc::channel::<Request>(32);
+    let (tx, rx) = mpsc::channel::<Request>(32);
     let (ready_tx, ready_rx) = oneshot::channel();
     {
-        let mut peers = state.peers.lock().unwrap();
-        if peers.len() >= 8 {
+        let mut slot = state.runtime.lock().await;
+        if state.peers.lock().unwrap().len() >= 8 {
             return Err("Native endpoint limit reached".into());
         }
-        peers.insert(
+        if slot
+            .as_ref()
+            .is_some_and(|r| r.exited.load(Ordering::SeqCst))
+        {
+            *slot = None;
+        }
+        if slot.is_none() {
+            let program = match &state.program {
+                Some(program) => program.clone(),
+                None => packaged(&app)?,
+            };
+            *slot = Some(state.spawn(program)?);
+        }
+        let runtime = slot.as_ref().expect("runtime");
+        runtime.routes.lock().unwrap().insert(
+            id,
+            Route {
+                events,
+                ready: Some(ready_tx),
+                pending: None,
+                sockets: Vec::new(),
+            },
+        );
+        state.peers.lock().unwrap().insert(
             id,
             Peer {
                 tx,
                 descriptor: Value::Null,
             },
         );
+        let start = json!({"type":"start", "endpoint":id, "seedB64":seed_b64}).to_string();
+        let started = runtime.lines.try_send(start).is_ok();
+        tokio::spawn(forward(
+            id,
+            rx,
+            runtime.lines.clone(),
+            runtime.routes.clone(),
+            runtime.generation,
+            state.runtime.clone(),
+        ));
+        if !started {
+            state.peers.lock().unwrap().remove(&id);
+            return Err("Native command queue full".into());
+        }
     }
-    let peers = state.peers.clone();
-    tokio::spawn(async move {
-        let mut ready = Some(ready_tx);
-        let mut pending: Option<Reply> = None;
-        let mut sockets = Vec::<u64>::new();
-        let init = json!({"type":"start", "seedB64":seed_b64}).to_string() + "\n";
-        if input.write_all(init.as_bytes()).await.is_err() {
-            peers.lock().unwrap().remove(&id);
-            return;
-        }
-        loop {
-            tokio::select! {
-                line = output.next_line() => {
-                    let Ok(Some(line)) = line else { break };
-                    if line.len() > 256 * 1024 { break; }
-                    let Ok(value) = serde_json::from_str::<Value>(&line) else { break };
-                    match value["type"].as_str() {
-                        Some("started") => { if let Some(reply) = ready.take() { let _ = reply.send(Ok(value["descriptor"].clone())); } },
-                        Some("result") => { if let Some(reply) = pending.take() { let _ = reply.send(Ok(value["id"].clone())); } },
-                        Some("error") => {
-                            let error = value["message"].as_str().unwrap_or("HyperDHT failed").to_string();
-                            if let Some(reply) = ready.take() { let _ = reply.send(Err(error.clone())); }
-                            if let Some(reply) = pending.take() { let _ = reply.send(Err(error)); }
-                        },
-                        Some("open") => {
-                            if let Some(socket) = value["id"].as_u64() { sockets.push(socket); }
-                            if events.send(value).is_err() { break; }
-                        },
-                        Some("closed") => { sockets.retain(|socket| Some(*socket) != value["id"].as_u64()); if events.send(value).is_err() { break; } },
-                        Some("frame") => { if events.send(value).is_err() { break; } },
-                        _ => break,
-                    }
-                },
-                request = rx.recv() => {
-                    let Some(request) = request else { break };
-                    if let Some(reply) = request.reply {
-                        if pending.is_some() { let _ = reply.send(Err("A native connection attempt is already running".into())); continue; }
-                        pending = Some(reply);
-                    }
-                    if input.write_all((request.value.to_string() + "\n").as_bytes()).await.is_err() { break; }
-                },
-                _ = child.wait() => break,
-            }
-        }
-        if let Some(reply) = ready {
-            let _ = reply.send(Err("HyperDHT runtime stopped during startup".into()));
-        }
-        if let Some(reply) = pending {
-            let _ = reply.send(Err("HyperDHT runtime stopped during connection".into()));
-        }
-        for socket in sockets {
-            let _ = events.send(json!({"type":"closed", "id":socket}));
-        }
-        peers.lock().unwrap().remove(&id);
-        let _ = child.kill().await;
-    });
     let result = tokio::time::timeout(Duration::from_secs(25), ready_rx).await;
     let descriptor = match result {
         Ok(Ok(Ok(value))) => value,
@@ -454,5 +664,251 @@ mod tests {
                 .unwrap_err(),
             closed
         );
+    }
+}
+
+/// The real sidecar.mjs, run by Node, over endpoints held in memory
+/// (`native-transports/hyperdht/test/fake-endpoint.mjs`): how many processes
+/// there are, and when they go.
+#[cfg(all(test, unix))]
+mod runtime_tests {
+    // covers: transport.native-pool
+    use super::*;
+    use tauri::ipc::InvokeResponseBody;
+    use tauri::test::{mock_builder, MockRuntime};
+
+    /// A folder holding the sidecar with the fake endpoint in place of the real
+    /// one, made once per test run.
+    fn program() -> (PathBuf, PathBuf) {
+        static PROGRAM: std::sync::OnceLock<(PathBuf, PathBuf)> = std::sync::OnceLock::new();
+        PROGRAM
+            .get_or_init(|| {
+                let source =
+                    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../native-transports/hyperdht");
+                let folder =
+                    std::env::temp_dir().join(format!("ghostly-hyperdht-{}", std::process::id()));
+                std::fs::create_dir_all(&folder).unwrap();
+                std::fs::copy(source.join("sidecar.mjs"), folder.join("sidecar.mjs")).unwrap();
+                std::fs::copy(
+                    source.join("test/fake-endpoint.mjs"),
+                    folder.join("endpoint.mjs"),
+                )
+                .unwrap();
+                let node = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                    .map(|dir| dir.join("node"))
+                    .find(|path| path.is_file())
+                    .expect("node on PATH");
+                (node, folder.join("sidecar.mjs"))
+            })
+            .clone()
+    }
+
+    fn app() -> tauri::App<MockRuntime> {
+        mock_builder()
+            .manage(HyperState {
+                program: Some(program()),
+                ..HyperState::default()
+            })
+            .build(tauri::generate_context!(test = true))
+            .expect("app")
+    }
+
+    fn seed(byte: u8) -> String {
+        use base64::Engine;
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode([byte; 32])
+    }
+
+    /// A page's channel, and what reaches it.
+    fn page() -> (Channel<Value>, mpsc::UnboundedReceiver<Value>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let channel = Channel::new(move |body| {
+            if let InvokeResponseBody::Json(json) = body {
+                let _ = tx.send(serde_json::from_str(&json).unwrap());
+            }
+            Ok(())
+        });
+        (channel, rx)
+    }
+
+    async fn start(app: &tauri::App<MockRuntime>, byte: u8) -> Result<Started, String> {
+        paired_hyperdht_start(app.handle().clone(), app.state(), seed(byte), page().0).await
+    }
+
+    async fn pid(app: &tauri::App<MockRuntime>) -> Option<u32> {
+        app.state::<HyperState>()
+            .runtime
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|r| r.pid)
+    }
+
+    fn spawned(app: &tauri::App<MockRuntime>) -> u64 {
+        app.state::<HyperState>().spawned.load(Ordering::Relaxed)
+    }
+
+    fn alive(pid: u32) -> bool {
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap()
+            .success()
+    }
+
+    async fn until(what: &str, mut done: impl FnMut() -> bool) {
+        for _ in 0..200 {
+            if done() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("{what} did not happen in 10 s");
+    }
+
+    async fn next(events: &mut mpsc::UnboundedReceiver<Value>) -> Value {
+        tokio::time::timeout(Duration::from_secs(10), events.recv())
+            .await
+            .expect("an event in 10 s")
+            .expect("the page's channel open")
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn every_endpoint_lives_in_one_runtime_that_leaves_with_the_last() {
+        let app = app();
+        let (events_a, mut page_a) = page();
+        let (events_b, mut page_b) = page();
+        let a = paired_hyperdht_start(app.handle().clone(), app.state(), seed(1), events_a)
+            .await
+            .unwrap();
+        let b = paired_hyperdht_start(app.handle().clone(), app.state(), seed(2), events_b)
+            .await
+            .unwrap();
+        let c = start(&app, 3).await.unwrap();
+        assert_eq!(spawned(&app), 1, "three endpoints, one process");
+        let runtime = pid(&app).await.unwrap();
+        assert_eq!(a.descriptor, json!({"publicKey": "01".repeat(32)}));
+
+        // Each endpoint hears only about its own connections.
+        let connection = paired_hyperdht_connect(app.state(), a.id, b.descriptor.clone())
+            .await
+            .unwrap();
+        let opened = next(&mut page_a).await;
+        assert_eq!(
+            (&opened["type"], &opened["id"], &opened["incoming"]),
+            (&json!("open"), &json!(connection), &json!(false))
+        );
+        let incoming = next(&mut page_b).await;
+        assert_eq!(incoming["incoming"], true);
+        paired_hyperdht_send(app.state(), a.id, connection, "hello".into()).unwrap();
+        let frame = next(&mut page_b).await;
+        assert_eq!(
+            (&frame["type"], &frame["text"]),
+            (&json!("frame"), &json!("hello"))
+        );
+        assert_eq!(frame["id"], incoming["id"]);
+        assert!(page_a.try_recv().is_err());
+
+        // Stopping one closes its connection on both ends, and keeps the runtime.
+        paired_hyperdht_stop(app.state(), a.id);
+        assert_eq!(
+            next(&mut page_a).await,
+            json!({"type":"closed", "id":connection})
+        );
+        let closed = next(&mut page_b).await;
+        assert_eq!(
+            (&closed["type"], &closed["id"]),
+            (&json!("closed"), &incoming["id"])
+        );
+        paired_hyperdht_stop(app.state(), c.id);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(pid(&app).await, Some(runtime));
+        assert!(alive(runtime));
+
+        // The last one out lets it go.
+        paired_hyperdht_stop(app.state(), b.id);
+        until("the runtime leaving", || !alive(runtime)).await;
+        assert_eq!(pid(&app).await, None);
+
+        // The next endpoint starts it again.
+        start(&app, 4).await.unwrap();
+        assert_eq!(spawned(&app), 2);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn endpoints_starting_at_once_start_one_runtime() {
+        let app = app();
+        let started = futures_util::future::join_all((1..=8).map(|byte| start(&app, byte))).await;
+        assert!(
+            started.iter().all(Result::is_ok),
+            "{:?}",
+            started.iter().find(|r| r.is_err())
+        );
+        assert_eq!(spawned(&app), 1);
+        assert_eq!(
+            start(&app, 9).await.err().unwrap(),
+            "Native endpoint limit reached"
+        );
+        assert_eq!(spawned(&app), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_runtime_that_died_takes_its_endpoints_and_is_started_again_once() {
+        let app = app();
+        let (events, mut page) = page();
+        let a = paired_hyperdht_start(app.handle().clone(), app.state(), seed(1), events)
+            .await
+            .unwrap();
+        let b = start(&app, 2).await.unwrap();
+        let connection = paired_hyperdht_connect(app.state(), a.id, b.descriptor.clone())
+            .await
+            .unwrap();
+        assert_eq!(next(&mut page).await["type"], "open");
+        let first = pid(&app).await.unwrap();
+
+        std::process::Command::new("kill")
+            .args(["-9", &first.to_string()])
+            .status()
+            .unwrap();
+        // Its page learns the connection is gone, and the endpoints are closed.
+        assert_eq!(
+            next(&mut page).await,
+            json!({"type":"closed", "id":connection})
+        );
+        until("both endpoints closing", || {
+            [a.id, b.id]
+                .iter()
+                .all(|id| paired_hyperdht_address(app.state(), *id).is_err())
+        })
+        .await;
+        assert_eq!(pid(&app).await, None);
+
+        // The chats reopening start one runtime between them.
+        let again = futures_util::future::join_all((1..=3).map(|byte| start(&app, byte))).await;
+        assert!(
+            again.iter().all(Result::is_ok),
+            "{again:?}",
+            again = again.iter().map(|r| r.as_ref().err()).collect::<Vec<_>>()
+        );
+        assert_eq!(spawned(&app), 2);
+        let second = pid(&app).await.unwrap();
+        assert_ne!(first, second);
+        assert!(alive(second));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_endpoint_the_runtime_refuses_leaves_nothing_behind() {
+        let app = app();
+        start(&app, 1).await.unwrap();
+        // The fake, like the DHT, will not listen twice on one key.
+        assert_eq!(
+            start(&app, 1).await.err().unwrap(),
+            "Endpoint already listening"
+        );
+        until("the refused endpoint being forgotten", || {
+            app.state::<HyperState>().peers.lock().unwrap().len() == 1
+        })
+        .await;
+        assert_eq!(spawned(&app), 1);
     }
 }

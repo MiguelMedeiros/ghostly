@@ -171,7 +171,10 @@ fn open_in_browser(url: &str) -> Result<(), String> {
     let result = std::process::Command::new("rundll32")
         .args(["url.dll,FileProtocolHandler", url])
         .spawn();
-    result.map(|_| ()).map_err(|e| e.to_string())
+    // The opener exits at once; waiting for it keeps no zombie behind until the app quits.
+    result
+        .map(|mut child| drop(std::thread::spawn(move || child.wait())))
+        .map_err(|e| e.to_string())
 }
 
 /// Listens on a free loopback port for one sign-in answer. Returns the port.
