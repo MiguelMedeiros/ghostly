@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 /**
  * The invitation card in the home story's first chapter. Its link and code are longer than their fields on purpose
@@ -53,6 +53,27 @@ function audit(): Found {
   return { cards, problems };
 }
 
+/** Brings the card to where Boo holds it out, full size, and waits until it stops growing. Measured while the film
+ *  still draws it small, text positions snap to whole device pixels (on Linux) and drift by several card units. */
+async function holdOut(page: Page) {
+  await page.evaluate(() => {
+    const scene = document.getElementById("invite")!;
+    const still = scene.querySelector(".scene-static-figure");
+    if (scene.classList.contains("scene--static") && still) return still.scrollIntoView({ block: "center", behavior: "instant" });
+    // The film: the first step's still (InviteScene's stills[0]).
+    const top = scene.getBoundingClientRect().top + scrollY;
+    scrollTo({ top: top + (scene.offsetHeight - innerHeight) * 0.3, behavior: "instant" });
+  });
+  let last = -1;
+  for (let i = 0; i < 40; i++) {
+    await page.waitForTimeout(150);
+    const width = await page.evaluate(() => Math.max(0, ...[...document.querySelectorAll("#invite [data-invite-card]")].map((c) => c.getBoundingClientRect().width)));
+    if (width > 100 && Math.abs(width - last) < 0.5) return;
+    last = width;
+  }
+  throw new Error("the invitation card never settled at full size");
+}
+
 const CASES = [
   { name: "desktop film", path: "/", viewport: { width: 1440, height: 900 } },
   { name: "desktop film, Portuguese", path: "/pt-br", viewport: { width: 1440, height: 900 } },
@@ -66,7 +87,7 @@ for (const { name, path, viewport, reducedMotion, isMobile, hasTouch } of CASES)
     test.use({ viewport, reducedMotion: reducedMotion ?? "no-preference", isMobile: !!isMobile, hasTouch: !!hasTouch });
     test(`the invitation card keeps its link and code in their fields (${name})`, async ({ page }) => {
       await page.goto(path, { waitUntil: "networkidle" });
-      await page.locator("#invite").scrollIntoViewIfNeeded();
+      await holdOut(page);
       await page.evaluate(() => document.fonts.ready);
       const { cards, problems } = await page.evaluate(audit);
       expect(cards, "no invitation card was drawn").toBeGreaterThan(0);
