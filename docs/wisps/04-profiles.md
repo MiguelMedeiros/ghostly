@@ -1,4 +1,4 @@
-# WISP 04 — Local Profiles
+# WISP 04: Local Profiles
 
 | Field | Value |
 |---|---|
@@ -14,7 +14,7 @@
 
 ## Scope
 
-A **profile** is a local container on one device. It holds everything a person may want to keep apart — for example "Personal" and "Work" — and exactly one profile is active in a running client. A profile is not a protocol identity: contacts never learn that profiles exist, how many there are, or their names. Each chat already has its own keys ([02](02-peer-keys.md)); a profile groups chats and everything tied to them.
+A **profile** is a local container on one device. It holds everything a person may want to keep apart (for example "Personal" and "Work"), and exactly one profile is active in a running client. A profile is not a protocol identity: contacts never learn that profiles exist, how many there are, or their names. Each chat already has its own keys ([02](02-peer-keys.md)); a profile groups chats and everything tied to them.
 
 Number note: legacy reader paths once used `04` for capability negotiation (now [03](03-capabilities.md)). Per the [numbering map](NUMBERING.md), the current number takes precedence; the old `04-capabilities` alias still resolves.
 
@@ -43,7 +43,7 @@ The device keeps one registry, the only record shared by all profiles:
 ```
 
 - `id` is empty for the **default profile** or ten characters `[a-z0-9]`. The default profile keeps the storage names clients used before profiles existed, so upgrading moves no data.
-- `name` is 1–32 characters after collapsing whitespace. It is a local label, distinct from the nickname shown to contacts.
+- `name` is 1 to 32 characters after collapsing whitespace. It is a local label, distinct from the nickname shown to contacts.
 - A missing or corrupt registry is read as a single default profile. An unknown `active` falls back to the default profile.
 
 Each profile `p` maps to separate namespaces: storage prefix `ghostly_` (default) or `ghostly_<p>_`; peer database `ghostly` or `ghostly_<p>`; single-peer lock `ghostly-peer` or `ghostly-peer-<p>`; settings record `ghostly_app_settings` or `ghostly_<p>_app_settings`. Because the default prefix is also the start of every other profile's keys, a client MUST NOT treat a key of the form `ghostly_<10 characters>_…` as the default profile's.

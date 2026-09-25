@@ -1,4 +1,4 @@
-# WISP 600 — Voice and Video
+# WISP 600: Voice and Video
 
 | Field | Value |
 |---|---|

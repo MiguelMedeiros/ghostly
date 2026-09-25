@@ -1,4 +1,4 @@
-# WISP 3xx — Domain Proofs
+# WISP 3xx: Domain Proofs
 
 | Field | Value |
 |---|---|
@@ -78,7 +78,7 @@ Caching: DNS answers are shared between checks for their TTL, capped at 30 s, wh
 What a check discloses, as the provider's `privacy` line tells the person before they share:
 
 - **DNS**: the chosen resolver learns that this device looked up `_ghostly.<domain>`. The domain's servers see the resolver, not the device.
-- **HTTPS / NIP-05**: the resolver learns the domain, and the domain's web server — run by the person being checked — sees the contact's IP address and when it checked. This is the cost of the file methods; DNS avoids it.
+- **HTTPS / NIP-05**: the resolver learns the domain, and the domain's web server (run by the person being checked) sees the contact's IP address and when it checked. This is the cost of the file methods; DNS avoids it.
 - The record is public for as long as it is published: anyone can see that `example.com` vouches for that proof key, but not with whom it was shared.
 
 ## Security considerations

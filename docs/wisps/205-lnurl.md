@@ -1,4 +1,4 @@
-# WISP 205 — Lightning Addresses and LNURL-pay
+# WISP 205: Lightning Addresses and LNURL-pay
 
 | Field | Value |
 |---|---|

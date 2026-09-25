@@ -1,4 +1,4 @@
-# WISP 3xx — SSH keys
+# WISP 3xx: SSH keys
 
 | Field | Value |
 |---|---|
@@ -54,7 +54,7 @@ Key types and signature algorithms:
 |---|---|---|
 | `ssh-ed25519` | Ed25519, RFC 8032 strict (no ZIP-215) | |
 | `ecdsa-sha2-nistp256` / `384` / `521` | ECDSA with SHA-256 / 384 / 512 | canonical positive mpints; high-S accepted, as OpenSSH does |
-| `ssh-rsa` | `rsa-sha2-512` or `rsa-sha2-256` | 2048–8192-bit moduli; `ssh-rsa` (SHA-1) signatures refused |
+| `ssh-rsa` | `rsa-sha2-512` or `rsa-sha2-256` | moduli of 2048 to 8192 bits; `ssh-rsa` (SHA-1) signatures refused |
 | `sk-ssh-ed25519@openssh.com` | Ed25519 over `SHA256(application) ‖ flags ‖ counter ‖ SHA256(message)` | FIDO security keys (YubiKey and others) |
 | `sk-ecdsa-sha2-nistp256@openssh.com` | ECDSA P-256 over the same | |
 

@@ -1,4 +1,4 @@
-# WISP 1000 — Storage Contract
+# WISP 1000: Storage Contract
 
 | Field | Value |
 |---|---|
@@ -18,7 +18,7 @@ Storage keeps **encrypted bundles** ([05](05-backups.md)) somewhere other than t
 
 ## Contract
 
-An adapter implements four operations on **objects** — opaque byte strings with a name:
+An adapter implements four operations on **objects**, which are opaque byte strings with a name:
 
 | Operation | Meaning |
 |---|---|

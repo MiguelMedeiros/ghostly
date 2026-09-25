@@ -126,7 +126,7 @@ export function SceneFrame({
   const style = { "--chapter-bg": room, "--chapter-rgb": hexToRgb(room) } as React.CSSProperties;
 
   if (article) {
-    // An illustrated article: each paragraph with its own frame — a still, or a beat that plays once in view.
+    // An illustrated article: each paragraph with its own frame (a still, or a beat that plays once in view).
     return (
       <SceneContext.Provider value={{ ...state, still: true }}>
       <section ref={ref} id={id} className="scene scene--static" data-chapter={chapter} aria-label={label} style={style}>

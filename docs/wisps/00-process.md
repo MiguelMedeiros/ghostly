@@ -1,4 +1,4 @@
-# WISP 00 — WISP process and document format
+# WISP 00: WISP process and document format
 
 | Field | Value |
 |---|---|
@@ -18,7 +18,7 @@ Separate Ghost, the small rendezvous primitive, from Ghostly, its reference appl
 
 ## Process
 
-The catalogue was checked in this repository before preparing this series; no existing WISP registry was found. The initial 01–22 draft sequence was reorganized by family with explicit maintainer approval on 2026-09-22. The migration source is `numbering.json`; see [numbering and compatibility](NUMBERING.md). This is editorial organization, not a change to wire identifiers or implementation conformance. Acceptance of the catalogue by maintainers assigns the numbers. After assignment, a number MUST remain attached to its document and MUST NOT be reused, even if the proposal is withdrawn or superseded. Withdrawal/supersession is recorded in a disposition field and linked replacement, not by deleting or renumbering the entry. Assignment does not imply implementation or approval of the design.
+The catalogue was checked in this repository before preparing this series; no existing WISP registry was found. The initial 01-22 draft sequence was reorganized by family with explicit maintainer approval on 2026-09-22. The migration source is `numbering.json`; see [numbering and compatibility](NUMBERING.md). This is editorial organization, not a change to wire identifiers or implementation conformance. Acceptance of the catalogue by maintainers assigns the numbers. After assignment, a number MUST remain attached to its document and MUST NOT be reused, even if the proposal is withdrawn or superseded. Withdrawal/supersession is recorded in a disposition field and linked replacement, not by deleting or renumbering the entry. Assignment does not imply implementation or approval of the design.
 
 - **Draft:** scope and alternatives are reviewable; wire details may be incomplete. Existing features can be documented as Drafts.
 - **Proposed:** blockers are resolved, exact encodings, validation, versioning, security analysis and executable conformance cases are published. Maintainers record the review decision and reference the discussion.

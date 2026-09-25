@@ -1,4 +1,4 @@
-# WISP 300 — Identity Proofs
+# WISP 300: Identity Proofs
 
 | Field | Value |
 |---|---|
@@ -8,7 +8,7 @@
 | Updated | 2026-09-23 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md) |
-| Implementation | Identity proofs with a provider contract; Nostr first. See [2026-09-23](#implementation--2026-09-23-identity-proofs) |
+| Implementation | Identity proofs with a provider contract; Nostr first. See [2026-09-23](#implementation-2026-09-23-identity-proofs) |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 
@@ -26,7 +26,7 @@ Proofs use a **two-layer delegation**, so a person proves an identity once and s
 4. **Expiry and revocation.** Every binding expires. Removing it from the profile revokes it early: *P* publishes a revocation record on the Ghost DHT (Pkarr, under *P*), republished until the binding would have expired; contacts look it up when they check again, at presentation, and periodically. Withdrawing a share in one chat tells that contact and stops future presentations there; a copy already received cannot be erased.
 5. **Linkage.** *P* is revealed only to the contacts the person chose. Each binding has its own *P*: contacts shown the same identity can correlate (they see the same *X* anyway), and different identities shared with different contacts never share a key. For unlinkable personas, use separate local profiles.
 
-Exact bytes, frames and limits: [implementation](#implementation--2026-09-23-identity-proofs); provider contract: [PROOFS.md](../../packages/browser/src/proofs/PROOFS.md). Providers only produce and verify the binding; the presentation is shared code.
+Exact bytes, frames and limits: [implementation](#implementation-2026-09-23-identity-proofs); provider contract: [PROOFS.md](../../packages/browser/src/proofs/PROOFS.md). Providers only produce and verify the binding; the presentation is shared code.
 
 The verifier checks the external signature, expected audience/context, participation-key possession, challenge freshness/single use, expiry and the adapter's revocation rules. Keep replay state for the validity window; reject replays across channels, peers and reconnects. A stable external identifier intentionally links participations and must be presented as such to the user.
 
@@ -44,11 +44,11 @@ Valid proof plus participation possession succeeds; wrong audience/key/channel, 
 
 [Peer keys](02-peer-keys.md), [Nostr](301-nostr.md), [Pubky](302-pubky.md), [Keet](303-keet.md), [Domain](3xx-domain.md), [OpenPGP](3xx-openpgp.md), [Bitcoin address](3xx-bitcoin.md).
 
-## Implementation follow-up — 2026-09-20
+## Implementation follow-up (2026-09-20)
 
 The [proof increment](PROOF-INCREMENT.md) now includes explicit experimental local imports for Pubky and Keet-compatible keys, alongside external-signer Nostr. Multiple proofs coexist per conversation. Ghostly participation remains the default. Pubky Ring and existing Keet account signer bridges remain unavailable; local key control is not evidence of those integrations. All WISPs remain Draft; earlier baseline inspections are historical.
 
-## Implementation — 2026-09-23: identity proofs
+## Implementation (2026-09-23): identity proofs
 
 Replaces the per-adapter `proof-*` experiment for new proofs (that code stays disabled; its stored data is kept). Code: `packages/core/src/identityProofs.ts` (statement, presentation, exchange), `packages/browser/src/proofs/` (provider contract, registry, providers), `packages/browser/src/engine/identities.ts`; provider guide: [PROOFS.md](../../packages/browser/src/proofs/PROOFS.md).
 
@@ -82,10 +82,10 @@ Providers under the [provider contract](../../packages/browser/src/proofs/PROOFS
 - **SSH keys** (`ssh`, `ssh-github`, `ssh-gitlab`, experimental, [draft 3xx](3xx-ssh.md)): three providers (`packages/browser/src/proofs/providers/ssh.ts`) that sign the binding statement once with OpenSSH's `ssh-keygen -Y sign -n ghostly`: `ssh` (subject: the key's SHA-256 fingerprint, verified on the device), and `ssh-github` / `ssh-gitlab` (subject: an account whose published SSH keys must include the signing key; looked up through the engine's bounded fetch and re-checked after ten minutes, no OAuth). Ed25519, ECDSA P-256/384/521, RSA and FIDO security keys (`sk-ssh-ed25519`, `sk-ecdsa`) are verified against real `ssh-keygen` vectors.
 - **Accounts at an OpenID Connect provider** (`oidc`, in development, [draft 3xx](3xx-oidc-proofs.md)): the person signs in once with Google, Microsoft, Apple, GitLab or Twitch using the binding's statement id as the `nonce`; the provider's signed ID token is the evidence, checked by each contact against the provider's published keys. **Attested** by the provider, not a key the person holds. No client registered yet ([checklist](../OIDC-PROVIDERS.md)).
 
-## Implementation follow-up — 2026-09-23: OpenPGP
+## Implementation follow-up (2026-09-23): OpenPGP
 
 An [OpenPGP proof](3xx-openpgp.md) is drafted: the participant signs, once, the binding by which their OpenPGP key authorizes a Ghostly proof key, with their own gpg (a YubiKey or OpenPGP card works unchanged) and the contact verifies locally. It is the `openpgp` provider of the identity-proof registry; per-chat presentations are signed by the app with the proof key. It fixes this WISP's open choices for that adapter: the signed bytes (the statement, or the statement plus one line ending), the algorithm and hash allowlists, and that expiry and revocation are checked both at signing time and at verification time. Showing a key's user IDs always comes with the warning that holding a key does not prove a user ID's name or email; the only email check shown is keys.openpgp.org's, labelled as such, and only from a lookup the viewing app made on request.
 
-## Implementation follow-up — provider-attested accounts (OpenID Connect), 2026-09-23
+## Implementation follow-up (2026-09-23): provider-attested accounts (OpenID Connect)
 
 Provider `oidc` ([draft 3xx](3xx-oidc-proofs.md)): the person signs in with Google, Microsoft, Apple, GitLab or Twitch using the statement id as the OpenID Connect `nonce`; the provider's signed ID token is the evidence, checked by each contact against the provider's published keys, issuer, Ghostly's client ID, the nonce and the sign-in time, with no Ghostly server. It is **attested** by the provider (the contact trusts that company), not a key the person holds, and it is shown that way. Facebook, X/Twitter, LinkedIn and GitHub issue no ID token a browser can verify without a Ghostly server and are out. Clients are registered by the maintainer ([checklist](../OIDC-PROVIDERS.md)); until then the provider is neither offered nor accepted.

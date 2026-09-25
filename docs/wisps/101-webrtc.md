@@ -1,4 +1,4 @@
-# WISP 101 — WebRTC
+# WISP 101: WebRTC
 
 | Field | Value |
 |---|---|

@@ -9,14 +9,14 @@ import "@/app/dev-loop.css";
  * The protocol at a glance, as a 15.5 s loop. Two apps publish a signed record
  * to Pkarr / the Mainline DHT (WISP 01) and find each other's, exchange
  * capability offers and keep the intersection (03), open a direct line on a
- * transport both offer (100–102) and send a message, a file and a payment
+ * transport both offer (100-102) and send a message, a file and a payment
  * frame over it (400 · 500 · 200).
  *
  * One number drives the picture: `--t`, seconds into the loop, set on the
  * figure. Every moving element reads it through a few generic rules in
  * app/dev-loop.css (`pl-in`, `pl-win`, `pl-fly`, `pl-draw`, …) with its own
- * start/duration as inline custom properties — so the whole timeline lives in
- * `TL` below. Six named phases of 2–3 s (website/MOTION.md, "Loops and
+ * start/duration as inline custom properties, so the whole timeline lives in
+ * `TL` below. Six named phases of 2 to 3 s (website/MOTION.md, "Loops and
  * demos"), each with its caption; moves follow EASE.inOut; the last phase holds
  * the complete frame for 2 s, then the loop cross-fades (DUR.md) into the next
  * run. The CSS default is `--t: 13.5` (the final frame: everything
@@ -117,14 +117,14 @@ const PHASE_TAGS = {
   publish: "WISP 01",
   find: "WISP 01",
   offer: "WISP 03",
-  connect: "WISP 100–102",
+  connect: "WISP 100-102",
   talk: "WISP 400 · 500 · 200",
   done: "",
 } as const;
 const STACK = [
   { key: "rendezvous", c: C.core, tag: "WISP 01", short: "WISP 01" },
   { key: "negotiate", c: C.core, tag: "WISP 03", short: "WISP 03" },
-  { key: "connect", c: C.transport, tag: "WISP 100–102", short: "100–102" },
+  { key: "connect", c: C.transport, tag: "WISP 100-102", short: "100-102" },
   { key: "talk", c: C.talk, tag: "WISP 400 · 500 · 200", short: "400·500·200" },
 ] as const;
 

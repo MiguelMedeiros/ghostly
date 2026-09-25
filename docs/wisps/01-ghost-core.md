@@ -1,4 +1,4 @@
-# WISP 01 — Ghost Core Protocol
+# WISP 01: Ghost Core Protocol
 
 | Field | Value |
 |---|---|

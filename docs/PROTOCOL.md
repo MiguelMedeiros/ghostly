@@ -85,7 +85,7 @@ v1 changed two things, both compatible with v0 peers:
 
 ### 4.1 Turning a voice call into a video one (v2)
 
-Renegotiating a call would mean a second offer through the DHT, which is slow and which a v0 peer cannot answer. So a v2 offer always describes a video section, even for a voice call: `m` is `["a", "v"]` either way, the section is `sendrecv`, and nobody sends on it until somebody turns a camera or a screen on. Switching one on is then a `replaceTrack` on a section both sides already agreed on — no signaling, no ringing, nothing the peer has to accept. A peer answering a v2 offer without a camera of its own opens its half of that section before answering, so it can turn one on later too.
+Renegotiating a call would mean a second offer through the DHT, which is slow and which a v0 peer cannot answer. So a v2 offer always describes a video section, even for a voice call: `m` is `["a", "v"]` either way, the section is `sendrecv`, and nobody sends on it until somebody turns a camera or a screen on. Switching one on is then a `replaceTrack` on a section both sides already agreed on: no signaling, no ringing, nothing the peer has to accept. A peer answering a v2 offer without a camera of its own opens its half of that section before answering, so it can turn one on later too.
 
 Because the media list no longer says who is sending a picture, two fields do:
 

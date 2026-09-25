@@ -1,4 +1,4 @@
-# WISP 103 — HyperDHT
+# WISP 103: HyperDHT
 
 | Field | Value |
 |---|---|

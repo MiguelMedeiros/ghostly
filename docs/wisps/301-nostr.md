@@ -1,4 +1,4 @@
-# WISP 301 — Nostr
+# WISP 301: Nostr
 
 | Field | Value |
 |---|---|
@@ -8,7 +8,7 @@
 | Updated | 2026-09-23 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [300](300-peer-proofs.md) |
-| Implementation | Nostr identity-proof provider; see [2026-09-23](#implementation--2026-09-23) |
+| Implementation | Nostr identity-proof provider; see [2026-09-23](#implementation-2026-09-23) |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 
@@ -34,21 +34,21 @@ Verify identical proof bytes in two independent verifiers; reject a valid Nostr 
 
 [Peer Proofs](300-peer-proofs.md), [capability negotiation](03-capabilities.md).
 
-## Implementation follow-up — 2026-09-20
+## Implementation follow-up (2026-09-20)
 
 The [proof increment](PROOF-INCREMENT.md) now includes explicit experimental local imports for Pubky and Keet-compatible keys, alongside external-signer Nostr. Multiple proofs coexist per conversation. Ghostly participation remains the default. Pubky Ring and existing Keet account signer bridges remain unavailable; local key control is not evidence of those integrations. All WISPs remain Draft; earlier baseline inspections are historical.
 
-## Implementation — 2026-09-23
+## Implementation (2026-09-23)
 
-Nostr is the first provider of the [identity proofs](300-peer-proofs.md#implementation--2026-09-23-identity-proofs) (`packages/browser/src/proofs/providers/nostr.ts`). Category: self-custodied. Subject: the 32-byte public key, lowercase hex (npub accepted as input).
+Nostr is the first provider of the [identity proofs](300-peer-proofs.md#implementation-2026-09-23-identity-proofs) (`packages/browser/src/proofs/providers/nostr.ts`). Category: self-custodied. Subject: the 32-byte public key, lowercase hex (npub accepted as input).
 
-- **Signers.** NIP-07 (the page's `window.nostr`: web and desktop pages, never assumed inside the extension) and NIP-46 (a `bunker://` link, 1–3 `wss://` relays, loopback `ws://` only for tests, permission `sign_event:30078`, auth URLs shown as links and never opened, two-minute time-out; the ephemeral client key is discarded). No private key is ever entered in Ghostly.
+- **Signers.** NIP-07 (the page's `window.nostr`: web and desktop pages, never assumed inside the extension) and NIP-46 (a `bunker://` link, 1 to 3 `wss://` relays, loopback `ws://` only for tests, permission `sign_event:30078`, auth URLs shown as links and never opened, two-minute time-out; the ephemeral client key is discarded). No private key is ever entered in Ghostly.
 - **Evidence.** One event: kind 30078 (existing NIP-78 application data; no kind is claimed), `created_at` = issue time, content = the exact statement, tags exactly `[["d","ghostly-identity-proof"],["expiration","<expires>"]]`. The verifier recomputes the NIP-01 id from the serialized event, requires `pubkey` = subject, and checks the BIP-340 signature itself, never trusting an id or verification flag it received. Signed once per profile; never published to a relay by Ghostly.
 - **Validity.** 90 days by default, at most 365. Nothing is fetched to verify.
 - **Profile.** A kind-0 name/picture is looked up only when the contact asks ("Show public profile"), from two fixed relays, signature-checked, name sanitized as plain text, picture from fixed hosts re-encoded to a small JPEG; labelled self-described.
 
 Tests: the contract suite, template tampering, a real NIP-46 WebSocket exchange with an isolated disposable bunker, a NIP-07 signer injected into the page in e2e. No real Nostr account was used.
 
-## Implementation follow-up — 2026-09-23: social layer
+## Implementation follow-up (2026-09-23): social layer
 
 What the proven key lets a person show and do (profile, follows, notes, publication) is the separate, experimental [Nostr social layer](3xx-nostr-social.md): each part a capability of its own, loaded on request from the relays the person configures, publication off by default and only through NIP-07/NIP-46. The kind-0 lookup mentioned above now goes through it (the person's relays, not two fixed ones).

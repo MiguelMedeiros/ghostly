@@ -3,7 +3,7 @@ import type { Level } from "@/lib/status";
 
 /**
  * The roadmap as a timeline: columns in the order things happen, rows by area.
- * No dates — a column is a stage, not a quarter. Every item's stage matches
+ * No dates: a column is a stage, not a quarter. Every item's stage matches
  * its availability as checked in the code (see content/roadmap.ts).
  */
 export const PHASES = ["now", "next", "building", "planned", "later"] as const;
@@ -72,7 +72,7 @@ const en: Timeline = {
     later: { title: "Horizon", sub: "Long-term vision and open questions" },
   },
   here: "We are here",
-  empty: "—",
+  empty: "None",
   lanes: [
     {
       id: "talk",
@@ -110,7 +110,7 @@ const en: Timeline = {
       color: "#f472b6",
       title: "Identity (optional)",
       items: {
-        next: ["Proofs made once, shared per chat: Nostr · domain · OpenPGP · SSH · Bitcoin address", "OpenID accounts (Google, Microsoft, Apple, GitLab, Twitch) — once clients are registered", "Nostr social layer: profile, follows, notes; posting off by default"],
+        next: ["Proofs made once, shared per chat: Nostr · domain · OpenPGP · SSH · Bitcoin address", "OpenID accounts (Google, Microsoft, Apple, GitLab, Twitch), once clients are registered", "Nostr social layer: profile, follows, notes; posting off by default"],
         planned: ["Hardware signers, passkeys"],
         later: [{ text: "Pubky and Keet, and their profiles and content", level: "research" }],
       },
@@ -177,7 +177,7 @@ const ptBr: Timeline = {
     later: { title: "Horizonte", sub: "Visão de longo prazo e perguntas em aberto" },
   },
   here: "Estamos aqui",
-  empty: "—",
+  empty: "Nenhum",
   lanes: [
     {
       id: "talk",
@@ -215,7 +215,7 @@ const ptBr: Timeline = {
       color: "#f472b6",
       title: "Identidade (opcional)",
       items: {
-        next: ["Provas feitas uma vez, compartilhadas por chat: Nostr · domínio · OpenPGP · SSH · endereço Bitcoin", "Contas OpenID (Google, Microsoft, Apple, GitLab, Twitch) — quando os clientes forem registrados", "Camada social do Nostr: perfil, quem segue, notas; publicar desligado por padrão"],
+        next: ["Provas feitas uma vez, compartilhadas por chat: Nostr · domínio · OpenPGP · SSH · endereço Bitcoin", "Contas OpenID (Google, Microsoft, Apple, GitLab, Twitch), quando os clientes forem registrados", "Camada social do Nostr: perfil, quem segue, notas; publicar desligado por padrão"],
         planned: ["Signers de hardware, passkeys"],
         later: [{ text: "Pubky e Keet, com os perfis e conteúdos deles", level: "research" }],
       },

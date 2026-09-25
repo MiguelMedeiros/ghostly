@@ -1,4 +1,4 @@
-# WISP 900 — Group Session Negotiation
+# WISP 900: Group Session Negotiation
 
 | Field | Value |
 |---|---|

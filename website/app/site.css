@@ -924,7 +924,7 @@ html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act
   .scene-static-copy .h-scene {
     grid-row: auto;
   }
-  /* The portrait stage is 390 × 844 with the action in y 120–500 (nav-safe to sheet-safe): show that band, not a 1.6 slice through the ghosts. */
+  /* The portrait stage is 390 × 844 with the action in y 120-500 (nav-safe to sheet-safe): show that band, not a 1.6 slice through the ghosts. */
   .scene-static-figure {
     aspect-ratio: 390 / 380;
   }

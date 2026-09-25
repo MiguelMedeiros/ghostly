@@ -1,4 +1,4 @@
-# WISP 500 — File Transfer
+# WISP 500: File Transfer
 
 | Field | Value |
 |---|---|

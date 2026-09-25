@@ -1,4 +1,4 @@
-# WISP 403 — Bounded DHT Text
+# WISP 403: Bounded DHT Text
 
 | Field | Value |
 |---|---|

@@ -1,6 +1,6 @@
 # Experimental native transport increment
 
-Implemented locally on 2026-09-20, after the [paired-chat base](PAIRED-CHAT-INCREMENT.md). All WISPs remain Draft. This is the exact bounded implementation profile, not full conformance to every candidate requirement in WISPs 100–103.
+Implemented locally on 2026-09-20, after the [paired-chat base](PAIRED-CHAT-INCREMENT.md). All WISPs remain Draft. This is the exact bounded implementation profile, not full conformance to every candidate requirement in WISPs 100 to 103.
 
 ## What runs
 

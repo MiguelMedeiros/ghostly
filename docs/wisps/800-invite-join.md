@@ -1,4 +1,4 @@
-# WISP 800 — Invite and Join
+# WISP 800: Invite and Join
 
 | Field | Value |
 |---|---|

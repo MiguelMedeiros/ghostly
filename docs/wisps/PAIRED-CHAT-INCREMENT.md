@@ -2,7 +2,7 @@
 
 **Subsequent implementation:** the [native transport increment](TRANSPORT-INCREMENT.md) extends this base to Iroh and HyperDHT on desktop. WebRTC-only statements below describe the initial base; initial product pairing still requires WebRTC.
 
-Status: local experimental implementation, not a Final WISP or security audit. This additive profile exercises parts of candidates 02–03, 100–101, 400 and 800. It does not implement their entire proposed lifecycle or a general multi-adapter framework. Existing chats keep the legacy profile unchanged.
+Status: local experimental implementation, not a Final WISP or security audit. This additive profile exercises parts of candidates 02-03, 100-101, 400 and 800. It does not implement their entire proposed lifecycle or a general multi-adapter framework. Existing chats keep the legacy profile unchanged.
 
 ## What is implemented
 

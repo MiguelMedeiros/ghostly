@@ -1,4 +1,4 @@
-# WISP 501 — Paired Files
+# WISP 501: Paired Files
 
 | Field | Value |
 |---|---|

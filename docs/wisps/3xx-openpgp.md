@@ -1,4 +1,4 @@
-# WISP 3xx — OpenPGP
+# WISP 3xx: OpenPGP
 
 | Field | Value |
 |---|---|
@@ -14,15 +14,15 @@
 
 ## Scope
 
-An optional proof that a participant controls an OpenPGP key ([RFC 9580](https://www.rfc-editor.org/rfc/rfc9580.html), and the [RFC 4880](https://www.rfc-editor.org/rfc/rfc4880.html) v4 keys people already have). The participant signs a Ghostly statement with their own tooling — `gpg --clearsign`, or `gpg --detach-sign --armor` — and gives the result and their public key to their app. Ghostly never holds the secret key, so the same flow works when the key lives on a YubiKey or another OpenPGP card: gpg asks for the card's PIN (and a touch, when the card's policy wants one).
+An optional proof that a participant controls an OpenPGP key ([RFC 9580](https://www.rfc-editor.org/rfc/rfc9580.html), and the [RFC 4880](https://www.rfc-editor.org/rfc/rfc4880.html) v4 keys people already have). The participant signs a Ghostly statement with their own tooling (`gpg --clearsign`, or `gpg --detach-sign --armor`) and gives the result and their public key to their app. Ghostly never holds the secret key, so the same flow works when the key lives on a YubiKey or another OpenPGP card: gpg asks for the card's PIN (and a touch, when the card's policy wants one).
 
-Like every proof under [300](300-peer-proofs.md), it is optional. The person signs **once**: a binding by which their OpenPGP key authorizes a Ghostly proof key (a fresh key per proof, kept in the profile) for a validity period. Each chat then receives a presentation that the app signs with the proof key, bound to that chat, that contact and a fresh challenge — contract code shared by every provider, not part of this document. The person decides per chat whether to present the identity; nothing is re-signed with the OpenPGP key.
+Like every proof under [300](300-peer-proofs.md), it is optional. The person signs **once**: a binding by which their OpenPGP key authorizes a Ghostly proof key (a fresh key per proof, kept in the profile) for a validity period. Each chat then receives a presentation that the app signs with the proof key, bound to that chat, that contact and a fresh challenge. Presentations are contract code shared by every provider, not part of this document. The person decides per chat whether to present the identity; nothing is re-signed with the OpenPGP key.
 
 ## Statement
 
 What is signed is the binding statement defined by the proofs contract ([`PROOFS.md`](../../packages/browser/src/proofs/PROOFS.md)), as plain text. For OpenPGP it MUST be signable by `gpg --clearsign` without alteration: printable ASCII and line feeds only, no trailing whitespace on any line, no line starting with `-` (which clearsigning would dash-escape), and no final line feed. The app refuses to offer a statement that breaks this.
 
-The signed bytes are the statement itself, or the statement followed by one `LF` or `CRLF` — what a detached signature over a saved file covers. A verifier tries exactly these three and nothing else. A clearsigned text is compared with the statement after the normalization clearsigning applies (trailing whitespace dropped, line endings unified); any other difference is refused before any signature is checked.
+The signed bytes are the statement itself, or the statement followed by one `LF` or `CRLF` (what a detached signature over a saved file covers). A verifier tries exactly these three and nothing else. A clearsigned text is compared with the statement after the normalization clearsigning applies (trailing whitespace dropped, line endings unified); any other difference is refused before any signature is checked.
 
 ## Evidence
 
@@ -31,7 +31,7 @@ The signed bytes are the statement itself, or the statement followed by one `LF`
 ```
 
 - `signature`: exactly one OpenPGP signature packet (binary, then base64url), of type 0x00 (binary) or 0x01 (text). A clearsigned text is reduced to its signature packet; a message with several signatures is refused.
-- `key`: a minimal transferable public key — the primary key, its revocation and direct-key signatures, each valid user ID with its self-certifications only, and the one subkey that signed with its binding signatures. Third-party certifications, user attributes (photos) and unused subkeys are removed before sharing.
+- `key`: a minimal transferable public key, made of the primary key, its revocation and direct-key signatures, each valid user ID with its self-certifications only, and the one subkey that signed with its binding signatures. Third-party certifications, user attributes (photos) and unused subkeys are removed before sharing.
 
 No other fields are allowed. Limits, enforced before parsing: 1.5 KiB for the signature packet and 9 KiB for the minimal key, so the JSON fits the contract's 16 KiB of evidence (an RSA-4096 key with eight user IDs does); 16 user IDs of at most 256 bytes. Pasted input is bounded too: 16 KiB for a signature, 256 KiB for a public key (a flooded key is refused, not trimmed).
 
@@ -55,7 +55,7 @@ Because the binding is long-lived and re-used across chats, checks 6 and 7 run a
 
 The UI shows the fingerprint and the key's first valid user ID (the verifier records them all), and MUST say, wherever a user ID appears, that anyone can put any name or email on their own key: holding the key does not prove that a user ID's name or email belongs to the person.
 
-**keys.openpgp.org.** The app contacts [keys.openpgp.org](https://keys.openpgp.org) only when the person asks, and says beforehand that doing so tells that server which key or email is being looked up. That keyserver publishes a user ID only after its email owner confirmed it, so an email present in its copy of the key MAY be shown as confirmed — labelled as the keyserver's check, never Ghostly's, and never extended to the name. Because a contact cannot check a claim that the other side fetched a key from there, the label is only ever shown for a lookup made by the app showing it: the person's own, while preparing the proof, or the contact's own, from the proof's details. The contact's lookup also reveals a revocation or new expiry published there since.
+**keys.openpgp.org.** The app contacts [keys.openpgp.org](https://keys.openpgp.org) only when the person asks, and says beforehand that doing so tells that server which key or email is being looked up. That keyserver publishes a user ID only after its email owner confirmed it, so an email present in its copy of the key MAY be shown as confirmed, labelled as the keyserver's check (never Ghostly's) and never extended to the name. Because a contact cannot check a claim that the other side fetched a key from there, the label is only ever shown for a lookup made by the app showing it: the person's own, while preparing the proof, or the contact's own, from the proof's details. The contact's lookup also reveals a revocation or new expiry published there since.
 
 **Revocation freshness.** The shared key is the prover's copy. A prover can present a copy from before a revocation; nothing but a fresh lookup (above) or re-proving reveals it. The binding's validity period bounds how long such a copy can be presented, and a verifier treats "verified" as "verified with the key as presented".
 

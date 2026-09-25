@@ -1,4 +1,4 @@
-# WISP 02 — Peer Keys
+# WISP 02: Peer Keys
 
 | Field | Value |
 |---|---|

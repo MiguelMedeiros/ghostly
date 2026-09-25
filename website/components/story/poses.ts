@@ -2,8 +2,8 @@ import type { GhostMood } from "@/components/ghost/Ghost";
 
 /**
  * The film's blocking, in stage units. Landscape stages are 1440×900 (safe
- * area x 160–1280, y 150–750); portrait stages are 390×844 (action zone
- * y 70–480, the caption sheet covers the rest). Every chapter reads its
+ * area x 160-1280, y 150-750); portrait stages are 390×844 (action zone
+ * y 70-480, the caption sheet covers the rest). Every chapter reads its
  * actors, camera and focal point from here, and the act backdrop interpolates
  * between them, so the exit of one chapter is the entry of the next by
  * construction. `s` is the ghost's width; a ghost is 1.25× as tall.

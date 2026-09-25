@@ -40,17 +40,17 @@ so the exit pose of one chapter is the entry pose of the next by construction.
 Inside a chapter, beats are placed with `useStep(p, step, n, [from, to], [a, b])`
 from `components/home/stage.tsx`: a range inside one step, in step units, so
 copy and picture stay in sync when a step's text changes. A chapter's picture
-and copy fade in over p 0–.04 and out over p .90–.94, so the glide between two
+and copy fade in over p 0 to .04 and out over p .90 to .94, so the glide between two
 chapters happens on the bare backdrop (`seams={false}` keeps them for a chapter
 outside an act). The copy sits on a full-height wash, never a boxed panel. With
 reduced motion, or without scripts, the same components render an illustrated
-article — one still per step (`stills` on each scene) — and the act backdrop is
+article, one still per step (`stills` on each scene), and the act backdrop is
 not drawn; the layout script in `app/layout.tsx` flags `html.calm` and
 `html[data-orient]` before hydration so CSS carries that layout at first paint.
 
 Touch devices (`(pointer: coarse)`) and viewports up to 860px do not get the
 pinned, scroll-scrubbed film: momentum scrolling fights it. `useCards()` in
-`components/home/stage.tsx` switches them to cards — the same article shape as
+`components/home/stage.tsx` switches them to cards: the same article shape as
 reduced motion, but each step's frame plays its beat once as it scrolls into
 view (`StaticFigure` tweens the scene's `p` from the step's start to its still).
 The layout script also flags `html[data-touch]` so the CSS carries that shape
@@ -72,9 +72,9 @@ They need the dev server on :4330 and Chrome.
 
 Four levels, separate from a document's Draft status:
 
-- **released** — in the public release (`lib/release.ts`, built from `main`);
-- **development** — merged on `dev`, going to the next release;
-- **building** — work in progress, not merged;
+- **released**: in the public release (`lib/release.ts`, built from `main`);
+- **development**: merged on `dev`, going to the next release;
+- **building**: work in progress, not merged;
 - **planned** / **research**.
 
 Before changing a level, check the code of both branches. Copy that names a

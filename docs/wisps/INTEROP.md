@@ -15,8 +15,8 @@ A positive case exchanges data in both directions. A negative case records the e
 | 02 Core | Rust/TypeScript record exchange | Wrong key/signature, bad secretbox, stale/replayed packet, full budget, relay failures |
 | 03 Keys / 20 Invite | Pair, confirm intended peer, restart and reconnect with stored participation | Two-joiner race; consumed invite reuse; crash at each commit boundary; expired/revoked invite; lost final confirmation; key loss and rotation |
 | 04 Capabilities | Same exact selected versions and limits | No common required version; unknown optional/required extension; conflicting revisions; unavailable runtime permission |
-| 100–103 Transports | Same payload semantics on two adapters | Offer races, endpoint substitution, timeouts, bounded retries, policy-prohibited fallback; no common adapter |
-| 300–303 Proofs | None/one/multiple valid optional proofs | Wrong channel/key/audience, replay, expiry, rotation/revocation, unsupported signer; Keet feasibility first |
+| 100-103 Transports | Same payload semantics on two adapters | Offer races, endpoint substitution, timeouts, bounded retries, policy-prohibited fallback; no common adapter |
+| 300-303 Proofs | None/one/multiple valid optional proofs | Wrong channel/key/audience, replay, expiry, rotation/revocation, unsupported signer; Keet feasibility first |
 | 400 Chat | Bounded bidirectional delivery | Same timestamp, duplicates across paths, out-of-order/gaps, disconnect/restart, no false durable/read receipt, DHT size pressure |
 | 500 Files | Accepted size and exact bytes | Malicious name, excess/truncated body, duplicate IDs, timeout, cancel, quota and partial cleanup |
 | 600 Media | Voice/video and permitted screen modes | Permission denial, stale call, crossed offers, hangup cleanup, unavailable API |

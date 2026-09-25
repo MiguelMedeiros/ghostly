@@ -322,7 +322,7 @@ export function WalletDeck({ t, locale }: { t: HomeCopy["wallets"]; locale: Loca
         <ul className="sp-noscript">
           {t.cards.map((c) => (
             <li key={c.id}>
-              <strong>{c.name}</strong> — {c.body} {c.limits}
+              <strong>{c.name}</strong>: {c.body} {c.limits}
             </li>
           ))}
         </ul>

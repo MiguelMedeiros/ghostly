@@ -65,7 +65,7 @@ npm run test:e2e
 # End-to-end: the bundled Desktop app, through WebDriver (Linux and Windows only)
 npm run tauri -- build --debug --no-bundle && npm run test:e2e:desktop
 
-# Desktop got its Desktop wiring and not a browser stand-in — runs anywhere, takes a second
+# Desktop got its Desktop wiring and not a browser stand-in. Runs anywhere, takes a second.
 npm run build && npm run check:desktop-bundle
 ```
 

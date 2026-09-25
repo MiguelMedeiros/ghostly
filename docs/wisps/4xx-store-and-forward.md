@@ -1,4 +1,4 @@
-# WISP 4xx — Store-and-Forward for an Away Contact
+# WISP 4xx: Store-and-Forward for an Away Contact
 
 | Field | Value |
 |---|---|
@@ -15,13 +15,13 @@
 
 ## Purpose
 
-Today a message for a contact who is away reaches them only as short text through bounded DHT records ([403](403-dht-text.md)); a picture or a payment request waits until both are online ([401](401-paired-chat.md)). This profile lets what is sent meanwhile be **held** — text, a small file, a payment request — and delivered when the contact is back, with bounds that are stated rather than implied. Nothing here replaces the paired session or the DHT text path; a chat that does not turn it on behaves exactly as before.
+Today a message for a contact who is away reaches them only as short text through bounded DHT records ([403](403-dht-text.md)); a picture or a payment request waits until both are online ([401](401-paired-chat.md)). This profile lets what is sent meanwhile be **held** (text, a small file, a payment request) and delivered when the contact is back, with bounds that are stated rather than implied. Nothing here replaces the paired session or the DHT text path; a chat that does not turn it on behaves exactly as before.
 
 ## Options weighed
 
 | | Where held items live | Who pays and controls quota | Renewal while the reader is away | Setup |
 |---|---|---|---|---|
-| **(a) The sender's own storage** — chosen | The sender's S3-compatible space ([1002](1002-s3-storage.md)) or a self-hosted endpoint | The sender: abuse of the reader's resources is impossible; the reader only ever downloads what it accepts, within declared limits | The sender re-signs read addresses whenever it is online; the reader needs nothing from anyone while away | The sender's bucket must allow reads from the contact's client (CORS `GET`, any origin is fine for presigned reads) |
+| **(a) The sender's own storage** (chosen) | The sender's S3-compatible space ([1002](1002-s3-storage.md)) or a self-hosted endpoint | The sender: abuse of the reader's resources is impossible; the reader only ever downloads what it accepts, within declared limits | The sender re-signs read addresses whenever it is online; the reader needs nothing from anyone while away | The sender's bucket must allow reads from the contact's client (CORS `GET`, any origin is fine for presigned reads) |
 | (b) A mailbox the contact designates (their own storage) | The reader's space | The reader, who must pre-issue write slots (presigned `PUT`s) to each sender on a live session | Slots expire seven days after the reader was last online: the one who is away is the one who cannot renew | The reader's bucket must allow writes from every contact's client origin |
 | (c) Larger DHT records only | Relays and the DHT | Nobody; relays already rate-limit and evict | Records are replaced by every publish and retained at the relay's discretion | None, but a picture does not fit in 1,000 bytes and never will |
 
@@ -51,9 +51,9 @@ One held item is one object: `"GHLD" || 0x01 || nonce(24) || XSalsa20-Poly1305(s
 
 | `kind` | `body` | `meta` | Limit |
 |---|---|---|---|
-| `text` | UTF-8 text | — | 16 KiB |
+| `text` | UTF-8 text | None | 16 KiB |
 | `file` | the bytes | `{ "name", "size", "mime" }`, `size` = body length | 8 MiB per bundle |
-| `pay-req` | JSON of the [`pay-req`](../PROTOCOL.md#63-payments) frame without `t` | — | 64 KiB; Cashu and Lightning endpoints only |
+| `pay-req` | JSON of the [`pay-req`](../PROTOCOL.md#63-payments) frame without `t` | None | 64 KiB; Cashu and Lightning endpoints only |
 | `manifest` | empty | `{ "entries": [[seq, id, kind, bytes, url, expires], …] }` | 64 KiB, at most 64 entries, sequences strictly increasing |
 
 A receiver refuses a bundle whole, never partially, when: authentication fails; the header is malformed; `from`/`to`/`recipient` are not this link and this device; `author` is not the pinned contact; the signature fails; the digest does not match; `ts` is more than a minute in the future; `expires ≤ ts` or `expires` is more than one lifetime past now; `mailbox` differs from the manifest's; or the kind's limits are exceeded. A refused item is counted and skipped; its sequence is still passed, so a bad object cannot stall the mailbox.

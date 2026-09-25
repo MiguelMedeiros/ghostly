@@ -1,4 +1,4 @@
-# WISP 1001 — Local File Storage
+# WISP 1001: Local File Storage
 
 | Field | Value |
 |---|---|
@@ -23,5 +23,5 @@ The simplest place: a file the person keeps. It needs no account, network or cre
 
 ## Notes
 
-- Where the file goes after saving — a USB stick, a password manager, cloud drive sync — is outside Ghostly, and so is its protection beyond the envelope's encryption.
+- Where the file goes after saving (a USB stick, a password manager, cloud drive sync) is outside Ghostly, and so is its protection beyond the envelope's encryption.
 - On desktop the file lands in the downloads folder unless the platform asks. Native save dialogs are a planned improvement.

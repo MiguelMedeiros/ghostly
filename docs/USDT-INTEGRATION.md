@@ -1,4 +1,4 @@
-# USDT via Tether WDK — experimental implementation
+# USDT via Tether WDK: experimental implementation
 
 Ghostly integrates `@tetherto/wdk-wallet-evm` 1.0.0-beta.19 with the existing payment coordinator. This is an experimental implementation, not a production security audit or an independent protocol implementation.
 
@@ -32,7 +32,7 @@ The wallet uses safe-integer token units and gas wei, not unbounded transaction 
 
 ## Reproduce local validation
 
-The end-to-end environment (`e2e/infra`, see `e2e/README.md`) runs a disposable Anvil on `127.0.0.1:47070`, chain 31337, mining every second — the web app's "Local test chain" — and deploys the fixture there. The fixture setup refuses any other chain.
+The end-to-end environment (`e2e/infra`, see `e2e/README.md`) runs a disposable Anvil on `127.0.0.1:47070`, chain 31337, mining every second (the web app's "Local test chain"), and deploys the fixture there. The fixture setup refuses any other chain.
 
 ```sh
 npm run e2e:infra:up        # Anvil, the contract deployed (e2e/support/usdt-local.mjs ready), .env.e2e written

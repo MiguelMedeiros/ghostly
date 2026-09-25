@@ -107,7 +107,7 @@ function Record({ p, n, i, L, shadeX, shadeOn }: { p: MotionValue<number>; n: nu
   const x = useTransform(t, (v) => quad(L.hand, L.bends[i], to, smooth(v))[0]);
   const y = useTransform(t, (v) => quad(L.hand, L.bends[i], to, smooth(v))[1]);
   const appear = useStep(p, 1, n, [start - 0.02, start + 0.04], [0, 1]);
-  // s2: it opens the moment Casper's first ring reaches it — the seal leaves, the frame turns green, then the check lands.
+  // s2: it opens the moment Casper's first ring reaches it: the seal leaves, the frame turns green, then the check lands.
   const hit = ringHits(L, to);
   const open = useStep(p, 2, n, [hit - 0.01, hit + 0.01], [0, 1]);
   const check = useStep(p, 2, n, [hit + 0.01, hit + 0.03], [0, 1]);

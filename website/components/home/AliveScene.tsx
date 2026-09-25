@@ -7,7 +7,7 @@ import { StaticActors } from "@/components/story/StaticActors";
 import { scatter, Stage, useStep } from "./stage";
 
 /**
- * Chapter 4: the connection comes alive. Step 0 recalls the DHT — a faint node
+ * Chapter 4: the connection comes alive. Step 0 recalls the DHT: a faint node
  * cloud above the heads and the dashed rendezvous thread that introduced the
  * two. Step 1 draws the live pipe between the hems and plays one conversation
  * over it with a single item in flight at a time: a message goes over, a
@@ -40,7 +40,7 @@ type Layout = {
   font: number;
 };
 
-// Landscape: actors at x 690–950 and 1130–1390 (cloth ends 928 / starts 1152 after the slide),
+// Landscape: actors at x 690-950 and 1130-1390 (cloth ends 928 / starts 1152 after the slide),
 // heads at y ≈ 382, eyes ≈ 459, hems ≈ 584. The pipe sits in the gap between the bodies.
 const L: Layout = {
   pipe: "M952 520 H1128",
@@ -63,7 +63,7 @@ const L: Layout = {
   labelKeep: 1,
   font: 13,
 };
-// Portrait: actors at x 30–160 and 230–360, heads at y ≈ 203, hems ≈ 323; the gap is too narrow
+// Portrait: actors at x 30-160 and 230-360, heads at y ≈ 203, hems ≈ 323; the gap is too narrow
 // for a pipe, so two drops hang from the hem centres to a bus bar under them. The sheet starts ≈ 480.
 // Short phones (360×640) hide stage y < ~145 under the nav: the caption's glyphs start at y ≈ 152.
 const P: Layout = {

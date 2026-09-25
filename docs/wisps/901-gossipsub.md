@@ -1,4 +1,4 @@
-# WISP 9xx — GossipSub Transport
+# WISP 9xx: GossipSub Transport
 
 | Field | Value |
 |---|---|

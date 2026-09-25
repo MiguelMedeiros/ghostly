@@ -120,7 +120,7 @@ function outcome(s: Scenario) {
 
 // ── Timing (website/MOTION.md, "Loops and demos") ────────────────────────────
 // Three named phases per scenario, each with its own short caption: offers go
-// out (0–2 s), transports are ranked (2–4 s), capabilities settle (4 s on) and
+// out (0 to 2 s), transports are ranked (2 to 4 s), capabilities settle (4 s on) and
 // the complete frame holds for at least 1.5 s before a DUR.md cross-fade.
 const PHASE_1 = 2000; // transports compared
 const PHASE_2 = 4000; // capabilities compared

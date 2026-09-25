@@ -1,4 +1,4 @@
-# WISP 700 — Local Services
+# WISP 700: Local Services
 
 | Field | Value |
 |---|---|

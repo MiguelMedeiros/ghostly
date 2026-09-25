@@ -2,7 +2,7 @@
    legend, the hero around it and the short "your path" row. Prefixes: pl-
    (the loop), dvx- (the page around it).
 
-   The loop is driven by one custom property, --t (seconds, 0–15.5), which the
+   The loop is driven by one custom property, --t (seconds, 0 to 15.5), which the
    component sets on .pl every frame. Each rule below turns --t into opacity,
    a translation or a stroke offset, from the element's own --a (start),
    --d (duration) or --b (end). The default --t is the final frame: that is

@@ -1,4 +1,4 @@
-# WISP 200 — Payment Negotiation
+# WISP 200: Payment Negotiation
 
 | Field | Value |
 |---|---|

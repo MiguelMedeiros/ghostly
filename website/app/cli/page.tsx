@@ -10,11 +10,11 @@ import { CLIReference } from "@/components/cli/CLIReference";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Ghostly CLI — Ghost Protocol for Bots",
+  title: "Ghostly CLI: Ghost Protocol for Bots",
   description:
     "CLI tool for bots and automation. Send and receive encrypted ephemeral messages from scripts, AI agents, and automation tools.",
   openGraph: {
-    title: "Ghostly CLI — Ghost Protocol for Bots",
+    title: "Ghostly CLI: Ghost Protocol for Bots",
     description:
       "CLI tool for bots and automation. Encrypted ephemeral messaging for scripts and AI agents.",
     type: "website",
@@ -30,7 +30,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Ghostly CLI — Ghost Protocol for Bots",
+    title: "Ghostly CLI: Ghost Protocol for Bots",
     description:
       "CLI tool for bots and automation. Encrypted ephemeral messaging for scripts and AI agents.",
     images: ["https://ghostly.tools/og-image.png"],

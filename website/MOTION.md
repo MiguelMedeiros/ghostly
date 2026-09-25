@@ -12,7 +12,7 @@ first, with a sentence saying what it is for.
 2. **One thing at a time.** Within a beat there is one subject in motion; the
    rest waits, dims or has finished. Two things never cross paths.
 3. **The subject leads, props follow.** The ghost or the object the sentence is
-   about moves first; its captions, lines and highlights arrive 60–120 ms after.
+   about moves first; its captions, lines and highlights arrive 60 to 120 ms after.
 4. **Arrive soft, leave quick.** Entrances use `EASE.out` (fast start, long
    landing); exits use `EASE.in` and take about two thirds of the entrance.
    Things travelling on their own (loops, demos) use `EASE.inOut`.
@@ -48,8 +48,8 @@ first, with a sentence saying what it is for.
   (`components/home/stage.tsx`). A beat occupies a range inside its step; keep
   at least 0.1 of the step between the end of one beat and the start of the
   next so a reader who stops scrolling lands on a finished picture.
-- Every chapter reserves p 0–0.06 to arrive and 0.94–1 to leave; its picture
-  and copy fade in over 0–0.04 and out over 0.90–0.94, so the hand-off between
+- Every chapter reserves p 0 to 0.06 to arrive and 0.94 to 1 to leave; its picture
+  and copy fade in over 0 to 0.04 and out over 0.90 to 0.94, so the hand-off between
   chapters happens on the bare backdrop with only the two ghosts on it.
 - Actors live in the act backdrop and move only between poses in
   `components/story/poses.ts`. The exit pose of a chapter is the entry pose of
@@ -60,8 +60,8 @@ first, with a sentence saying what it is for.
 
 ## Loops and demos (developer page, wallet deck)
 
-- A loop runs 10–16 s, split into named phases of 2–4 s each; each phase has a
-  caption of 2–4 words that changes with it.
+- A loop runs 10 to 16 s, split into named phases of 2 to 4 s each; each phase has a
+  caption of 2 to 4 words that changes with it.
 - Phases move with `EASE.inOut`; the last phase holds a complete frame for at
   least 1.5 s before the loop restarts with a cross-fade of `DUR.md`.
 - Pause on hover and on keyboard focus; after a click on a control, hold the

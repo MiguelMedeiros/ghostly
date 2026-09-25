@@ -1,4 +1,4 @@
-# WISP 3xx — Bitcoin Address Proof
+# WISP 3xx: Bitcoin Address Proof
 
 | Field | Value |
 |---|---|
@@ -28,8 +28,8 @@ Two formats wallets produce today; a verifier accepts exactly these and nothing 
 | BIP-322 full (`ful…`) | same | P2WPKH, P2TR key path, P2SH-P2WPKH, P2PKH | BIP-322 |
 | Legacy `signmessage` | Bitcoin Core `signmessage`/`verifymessage` | **P2PKH only** (1…, m…, n…) | Legacy |
 
-- **Unprefixed** signatures are read as BIP-322 simple, the BIP's backward-compatibility rule for wallets that predate its 1.0.0 prefixes (Sparrow's older releases, many libraries). A 65-byte base64 value whose first byte is 27–42 is read as legacy.
-- **Legacy is P2PKH only.** BIP-322 restricts it so ("MUST be restricted to the legacy P2PKH invoice address format"); for SegWit addresses wallets disagree on the header byte (BIP 137 vs Electrum) and the format does not commit to the script. A legacy signature for a SegWit address is refused with a pointer to BIP-322. Headers 35–42 (BIP 137 SegWit) are refused.
+- **Unprefixed** signatures are read as BIP-322 simple, the BIP's backward-compatibility rule for wallets that predate its 1.0.0 prefixes (Sparrow's older releases, many libraries). A 65-byte base64 value whose first byte is 27 to 42 is read as legacy.
+- **Legacy is P2PKH only.** BIP-322 restricts it so ("MUST be restricted to the legacy P2PKH invoice address format"); for SegWit addresses wallets disagree on the header byte (BIP 137 vs Electrum) and the format does not commit to the script. A legacy signature for a SegWit address is refused with a pointer to BIP-322. Headers 35 to 42 (BIP 137 SegWit) are refused.
 - **Checked scripts only.** Without a full script interpreter the verifier checks P2WPKH, P2TR key path, P2SH-P2WPKH and P2PKH, applying BIP-322's required rules for them: SIGHASH_ALL (or SIGHASH_DEFAULT for P2TR), strict DER, low S, compressed keys in witness v0, exact `to_sign` shape (one input spending `to_spend:0`, one zero-value `OP_RETURN` output, version 0 or 2). Everything else is **inconclusive**, which a proof treats as not proven: multisig and other P2WSH/P2SH scripts, a Taproot script path whose control block commits to the output key, an annex, witness versions above 1.
 - **Proof of funds (`pof…`) is refused**, deliberately: it is the one BIP-322 variant about coins, and this proof makes no claim about coins.
 - **Time locks.** The official full vectors set nLockTime and nSequence (BIP-322: "valid at time T and age S"). For the single-key scripts checked, those gate when a real spend could confirm, not who holds the key; the verifier accepts them and reports T and S.

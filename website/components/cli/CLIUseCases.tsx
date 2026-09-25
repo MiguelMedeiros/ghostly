@@ -54,14 +54,14 @@ const useCases = [
   {
     icon: <BotIcon />,
     title: "AI Assistant Communication",
-    description: "Let your AI agent send you private updates, summaries, or ask for clarification — all encrypted and ephemeral.",
+    description: "Let your AI agent send you private updates, summaries, or ask for clarification. All encrypted and ephemeral.",
     example: "OpenClaw sends you a private summary of research findings",
     color: "cyan",
   },
   {
     icon: <BellIcon />,
     title: "Encrypted Alerts & Notifications",
-    description: "Server alerts, deployment notifications, security warnings — without exposing sensitive info to third-party services.",
+    description: "Server alerts, deployment notifications, security warnings, without exposing sensitive info to third-party services.",
     example: "CI/CD pipeline sends encrypted build status to your device",
     color: "green",
   },
@@ -89,7 +89,7 @@ const useCases = [
   {
     icon: <LinkIcon />,
     title: "Cross-Platform Bridge",
-    description: "Bridge messages between platforms while maintaining privacy — no central server sees the content.",
+    description: "Bridge messages between platforms while maintaining privacy. No central server sees the content.",
     example: "Forward private messages between Slack and Matrix anonymously",
     color: "green",
   },

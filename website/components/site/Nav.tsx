@@ -68,7 +68,7 @@ export function Nav({ locale }: { locale: Locale }) {
   return (
     <header className="nav" data-scrolled={scrolled}>
       <div className="wrap nav-inner">
-        <Link href={href(locale, "/")} className="brand" aria-label="Ghostly — home">
+        <Link href={href(locale, "/")} className="brand" aria-label="Ghostly home">
           <GhostMark />
           Ghostly
         </Link>

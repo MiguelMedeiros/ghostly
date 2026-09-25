@@ -16,7 +16,7 @@ const jetbrains = JetBrains_Mono({
 
 const siteConfig = {
   name: "Ghostly",
-  title: "Ghostly — Find each other. Talk peer to peer.",
+  title: "Ghostly: Find each other. Talk peer to peer.",
   description:
     "Meet the people you choose through a private invitation, then chat, send files and sats, peer to peer. No account to create. Free and open source, built on small open contracts anyone can implement.",
   url: "https://ghostly.tools",
@@ -85,7 +85,7 @@ export const metadata: Metadata = {
         url: siteConfig.ogImage,
         width: 1200,
         height: 630,
-        alt: "Ghostly — two friendly ghosts, Boo and Casper, talking peer to peer",
+        alt: "Ghostly: two friendly ghosts, Boo and Casper, talking peer to peer",
         type: "image/png",
       },
     ],

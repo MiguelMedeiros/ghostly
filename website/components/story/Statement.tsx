@@ -10,7 +10,7 @@ import "@/app/statement.css";
 /**
  * A second of silence between the acts: one sentence gets the whole screen.
  * Each word fades in, un-blurs and rises into place as the block scrolls up
- * (p .15–.5 of the section), the accent word landing last; the sentence then
+ * (p .15 to .5 of the section), the accent word landing last; the sentence then
  * holds and fades as it leaves. It repeats a verified line from the story,
  * so it is hidden from readers who already have the copy.
  */
