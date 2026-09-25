@@ -1,4 +1,3 @@
-import { useOutsideDismiss } from "../hooks/useDismiss";
 import { publicKeyLabel } from "../lib/publicKeyLabel";
 import React, { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useI18n } from "../contexts/I18nContext";
@@ -252,17 +251,20 @@ function formatDuration(ms: number): string {
   return `${minutes}m ${seconds}s`;
 }
 
+/** The chat's scrolling list of messages: a message's menus stay inside it (see `Menu`'s `within`). */
+export const MESSAGE_LIST = "[data-message-list]";
+
 /**
  * What can be done to a message, behind its ⋮: its details, and forgetting it here. The deletion is local, so the
- * menu says so before it happens: nothing is sent, and the contact keeps their copy.
+ * menu says so before it happens: nothing is sent, and the contact keeps their copy. Both popovers are drawn over
+ * the page (the list scrolls and would cut them off) and kept inside the message list.
  */
 function MessageMenu({ onDelete, onDetails, align }: { onDelete?: () => void; onDetails: () => void; align: "left" | "right" }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-
-  useOutsideDismiss(ref, confirm, () => setConfirm(false));
+  const side = align === "left" ? "end" : "start";
 
   return (
     <div ref={ref} className="relative self-center shrink-0">
@@ -283,7 +285,7 @@ function MessageMenu({ onDelete, onDetails, align }: { onDelete?: () => void; on
           <circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" />
         </svg>
       </button>
-      <Menu open={open} onClose={() => setOpen(false)} anchorRef={ref} testId="message-menu" align={align === "left" ? "end" : "start"} prefer="up" focusFirst label={t("chat.message.options")}>
+      <Menu open={open} onClose={() => setOpen(false)} anchorRef={ref} testId="message-menu" align={side} prefer="up" portal within={MESSAGE_LIST} focusFirst label={t("chat.message.options")}>
         <MenuItem testId="message-details" onClick={() => { setOpen(false); onDetails(); }}
           icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 16v-4M12 8h.01" /></svg>}>
           {t("chat.message.details")}
@@ -293,36 +295,32 @@ function MessageMenu({ onDelete, onDetails, align }: { onDelete?: () => void; on
           {t("chat.deleteMessage")}
         </MenuItem>}
       </Menu>
-      {confirm && onDelete && (
-        <div
-          data-testid="message-delete-menu"
-          // No `translate` of its own: the fade-in animation sets `transform`.
-          className={`absolute z-20 bottom-full mb-1 w-[210px] p-3 rounded-lg bg-surface border border-border shadow-lg animate-fade-in ${
-            align === "left" ? "start-0" : "end-0"
-          }`}
-        >
-          <p className="m-0 mb-2 text-[11px] leading-snug text-text-muted">{t("chat.deleteMessageHint")}</p>
-          <div className="flex items-center justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setConfirm(false)}
-              className="px-2 py-0.5 rounded border border-border bg-surface-hover text-text-muted text-xs font-bold hover:text-text-secondary transition-colors cursor-pointer"
-            >
-              {t("common.cancel")}
-            </button>
-            <button
-              type="button"
-              data-testid="message-delete-confirm"
-              onClick={() => {
-                setConfirm(false);
-                onDelete();
-              }}
-              className="px-2 py-0.5 rounded border border-danger/30 bg-danger/20 text-danger text-xs font-bold hover:bg-danger/30 transition-colors cursor-pointer"
-            >
-              {t("common.delete")}
-            </button>
+      {onDelete && (
+        <Menu open={confirm} onClose={() => setConfirm(false)} anchorRef={ref} testId="message-delete-menu" align={side} prefer="up" portal within={MESSAGE_LIST} label={t("chat.deleteMessage")}>
+          <div className="px-3 py-2 md:w-[210px]">
+            <p className="m-0 mb-2 whitespace-normal text-[11px] leading-snug text-text-muted">{t("chat.deleteMessageHint")}</p>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirm(false)}
+                className="px-2 py-0.5 rounded border border-border bg-surface-hover text-text-muted text-xs font-bold hover:text-text-secondary transition-colors cursor-pointer max-md:min-h-10 max-md:px-4"
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                data-testid="message-delete-confirm"
+                onClick={() => {
+                  setConfirm(false);
+                  onDelete();
+                }}
+                className="px-2 py-0.5 rounded border border-danger/30 bg-danger/20 text-danger text-xs font-bold hover:bg-danger/30 transition-colors cursor-pointer max-md:min-h-10 max-md:px-4"
+              >
+                {t("common.delete")}
+              </button>
+            </div>
           </div>
-        </div>
+        </Menu>
       )}
     </div>
   );

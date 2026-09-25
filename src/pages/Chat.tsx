@@ -567,7 +567,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
       )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto chat-wallpaper">
+      <div data-message-list className="flex-1 overflow-y-auto chat-wallpaper">
         <div className="max-w-3xl mx-auto py-3">
           {session?.createdAt && Number.isFinite(session.createdAt) && session.createdAt > 0 && (
             <p data-testid="chat-created" className="mb-3 px-4 text-center text-[11px] text-text-muted">
