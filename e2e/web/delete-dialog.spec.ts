@@ -57,12 +57,13 @@ test("the connection panel opens by keyboard, has both keys, and dismisses witho
   await page.keyboard.press("Enter");
   const panel = page.getByRole("dialog", {name:"Connection options"});
   await expect(panel).toBeVisible();
-  // Both keys, whole and copyable: this side's and the contact's, whose short form is in the header.
+  // Both keys, whole and copyable, under Details: this side's and the contact's, whose short form is under the name.
+  await panel.getByTestId("connection-details-summary").click();
   await expect(panel.getByText("You", {exact:true})).toBeVisible();
   await expect(panel.getByText("Contact", {exact:true})).toBeVisible();
   const key = (await panel.getByTestId("connection-key-contact").textContent())!;
   expect(key.length).toBeGreaterThan(40);
-  await expect(trigger.getByTestId("connection-key")).toHaveText(`${key.slice(0, 6)}...${key.slice(-6)}`);
+  await expect(page.getByTestId("chat-subtitle")).toHaveText(`${key.slice(0, 6)}...${key.slice(-6)}`);
   await expect(panel.getByTestId("connection-key-you")).not.toHaveText(key);
   await page.keyboard.press("Escape");
   await expect(panel).toBeHidden();

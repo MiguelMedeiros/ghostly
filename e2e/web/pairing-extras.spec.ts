@@ -2,13 +2,18 @@ import { chat, expect, say, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 
 /**
- * The connection control in a paired chat's header and its panel: how it opens
- * and closes, the optional code comparison, and what it says and offers when
- * one side goes away and comes back.
+ * The connection popover in a paired chat's header: how it opens and closes,
+ * the optional code comparison, and what it says and offers when one side
+ * goes away and comes back.
  */
 
 const trigger = (p: Peer) => p.page.getByTestId("connection-options");
 const popover = (p: Peer) => p.page.getByRole("dialog", { name: "Connection options" });
+/** The panel's secondary part: verification, keys, history. Closed until asked for. */
+async function details(p: Peer): Promise<void> {
+  const more = p.page.getByTestId("connection-details");
+  if ((await more.getAttribute("open")) === null) await p.page.getByTestId("connection-details-summary").click();
+}
 
 /** Ghostly's own Offline switch, on the Services page: the chat has to go somewhere it can be seen. */
 async function setOnline(p: Peer, online: boolean): Promise<void> {
@@ -65,21 +70,19 @@ test("the connection popover opens and closes by click, Escape and a click outsi
   await expect(alice.page.getByPlaceholder("Message…")).toBeEnabled();
 });
 
-test("the header has one connection control: the dot, the key, the transport in use and its round trip; a tooltip names the state", { tag: ["@feature:chat.paired.status", "@feature:transport.indicator"] }, async ({ peer }) => {
+test("the header shows only an icon, as big as the call buttons; a tooltip names the state", { tag: ["@feature:chat.paired.status", "@feature:transport.indicator"] }, async ({ peer }) => {
   const [alice] = await linked(peer, ["icon-alice", "icon-bob"]);
   const tip = alice.page.getByRole("tooltip");
-  // One control: nothing else in the header speaks of the connection.
+  // One connection control: no chip, no second button, no ⋮ Connection.
   await expect(alice.page.getByTestId("connection-options")).toHaveCount(1);
   await expect(alice.page.getByTestId("transport-chip")).toHaveCount(0);
   await expect(alice.page.getByRole("button", { name: "Connection details", exact: true })).toHaveCount(0);
+  await expect(trigger(alice)).toHaveText("");
   await expect(trigger(alice)).toHaveAttribute("data-state", "connected");
-  await expect(trigger(alice).getByTestId("contact-status")).toHaveAttribute("aria-label", "Connected");
-  await expect(trigger(alice).getByTestId("contact-status")).toBeVisible();
-  await expect(trigger(alice).getByTestId("connection-key")).toHaveText(/^\S{6}\.\.\.\S{6}$/);
-  await expect(trigger(alice).getByTestId("connection-now")).toHaveText(/^WebRTC(· \d+ ms)?$/);
-  // Under the name, left of the calls: the right side has the call buttons and ⋮ only.
-  const control = (await trigger(alice).boundingBox())!, call = (await alice.page.getByTestId("call-audio").boundingBox())!;
-  expect(control.x + control.width).toBeLessThan(call.x);
+  await expect(trigger(alice).getByTestId("connection-dot")).toBeVisible();
+  const icon = (await trigger(alice).boundingBox())!, call = (await alice.page.getByTestId("call-video").boundingBox())!;
+  expect(Math.abs(icon.width - call.width)).toBeLessThanOrEqual(1);
+  expect(Math.abs(icon.height - call.height)).toBeLessThanOrEqual(1);
 
   // Hover names the state; nothing is said until then.
   await expect(tip).toBeHidden();
@@ -93,7 +96,8 @@ test("the header has one connection control: the dot, the key, the transport in 
   await trigger(alice).click();
   await expect(popover(alice)).toBeVisible();
   await expect(tip).toBeHidden();
-  await expect(popover(alice).getByTestId("connection-state")).toHaveText("Connected · WebRTC");
+  // Its first line is the state and the round trip.
+  await expect(popover(alice).getByTestId("connection-state")).toHaveText(/^Connected · WebRTC( · \d+ ms)?$/);
 
   // Reached from the keyboard, the tooltip shows; Escape dismisses it and keeps focus.
   await alice.page.keyboard.press("Escape");
@@ -114,6 +118,7 @@ test("verifying shows one code on both sides, and each side confirms for itself"
   const [alice, bob] = await linked(peer, ["code-alice", "code-bob"]);
   for (const p of [alice, bob]) {
     await trigger(p).click();
+    await details(p);
     await expect(p.page.getByTestId("pair-trust")).toContainText("Key saved · not verified");
     // No code until someone asks to compare.
     await expect(p.page.getByTestId("pair-code")).toHaveCount(0);
@@ -137,6 +142,7 @@ test("verifying shows one code on both sides, and each side confirms for itself"
   // Closed and opened again, it stays verified.
   await bob.page.keyboard.press("Escape");
   await trigger(bob).click();
+  await details(bob);
   await expect(bob.page.getByTestId("pair-verified")).toBeVisible();
   await expect(bob.page.getByTestId("pair-verify")).toHaveCount(0);
   await say(bob, "verified and still talking");
@@ -149,7 +155,7 @@ test("offline, the popover says so; the contact is offered Reconnect, and the ch
   await setOnline(alice, false);
   await expect(trigger(alice)).toHaveAccessibleName("Connection options: Offline");
   await expect(trigger(alice)).toHaveAttribute("data-state", "offline");
-  await expect(trigger(alice).getByTestId("connection-now")).toHaveText("Offline");
+  await expect(trigger(alice)).toHaveText("");
   await trigger(alice).hover();
   await expect(alice.page.getByRole("tooltip")).toHaveText("Offline");
   await trigger(alice).click();

@@ -54,8 +54,9 @@ test("with WebRTC blocked, two browsers keep chatting over Iroh through a relay,
   await say(bob, "and back");
   await expect(chat(alice).getByText("and back")).toBeVisible({ timeout: 60_000 });
 
-  // The panel says the path is relayed, and through which relay.
+  // The panel says the path is relayed, and through which relay (under Details).
   await alice.page.getByTestId("connection-options").click();
+  await alice.page.getByTestId("connection-details-summary").click();
   await expect(alice.page.getByTestId("connection-relayed")).toHaveText(`Relayed via ${new URL(relay).host}`);
   await expect(alice.page.getByTestId("connection-summary")).toContainText("sees which devices talk and when, never what they say");
   await alice.page.keyboard.press("Escape");

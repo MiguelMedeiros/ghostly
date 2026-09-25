@@ -139,33 +139,33 @@ describe("the chat's connection control and its panel", () => {
       .toEqual(["This app has no WebRTC", "All eight native connection slots are in use.", undefined]);
   });
 
-  it("shows the live transport and its round trip in the header, and the state until live", () => {
+  it("shows the live transport by its mark in the header, and its round trip on the panel's first line", () => {
     const view = control({ pairing: ready({ transport: "iroh/1" }), transportRttMs: 38 });
-    const now = () => screen.getByTestId("connection-now");
-    expect(now()).toHaveTextContent("Iroh· 38 ms");
-    expect(now().querySelector("[data-transport-icon]")).toHaveAttribute("data-transport-icon", "iroh/1");
-    expect(screen.getByTestId("connection-options")).toHaveAccessibleName("Connection options: Connected · Iroh");
+    const icon = () => screen.getByTestId("connection-options");
+    expect(icon().querySelector("[data-transport-icon]")).toHaveAttribute("data-transport-icon", "iroh/1");
+    expect(icon()).toHaveAccessibleName("Connection options: Connected · Iroh");
+    expect(screen.getByTestId("connection-state")).toHaveTextContent("Connected · Iroh · 38 ms");
     act(() => view.engine.update({ links: [linkView({ pairing: ready({ transport: "iroh/1", transitionTarget: "hyperdht/1" }), dataLink: "open" })] }));
-    expect(now()).toHaveTextContent("Switching · HyperDHT");
+    expect(screen.getByTestId("connection-state")).toHaveTextContent(/^Switching · HyperDHT$/);
     act(() => view.engine.update({ links: [linkView({ pairing: { status: "connecting", peerKey: "peer" } as Pairing, dataLink: "connecting" })] }));
-    expect(now()).toHaveTextContent("Connecting…");
-    expect(now().querySelector("[data-transport-icon]")).toBeNull();
+    expect(icon()).toHaveAccessibleName("Connection options: Connecting…");
+    expect(icon().querySelector("[data-transport-icon]")).toBeNull();
   });
 
   it("switches this chat on Desktop, back to Automatic too, and keeps what the contact cannot use off", async () => {
     const { user, engine } = control({ availableTransports: all, peerTransports: ["webrtc/1", "iroh/1"], transportAutomatic: true, transportRttMs: 12 });
     engine.on("setChatTransport", () => undefined);
     await user.click(screen.getByTestId("connection-options"));
-    expect(within(panel()).getByTestId("connection-in-use")).toHaveTextContent("WebRTC");
-    expect(within(panel()).getByTestId("connection-chosen")).toHaveTextContent("Automatic");
     const radios = within(panel()).getAllByRole("radio");
     expect(radios.map(r => [r.textContent, r.getAttribute("aria-checked"), (r as HTMLButtonElement).disabled])).toEqual([
-      ["AutomaticThe apps choose, WebRTC first", "true", false],
+      ["Automatic", "true", false],
       ["WebRTCIn use · 12 ms", "false", false],
       ["Iroh", "false", false],
-      ["HyperDHTYour contact's app doesn't support HyperDHT", "false", true],
-      ["DHT onlyShort texts over the DHT, even offline", "false", false],
+      ["HyperDHT", "false", true],
+      ["DHT only", "false", false],
     ]);
+    // The longer word is the row's tooltip.
+    expect(within(panel()).getByTestId("connection-option-hyperdht")).toHaveAttribute("title", "HyperDHT: Your contact's app doesn't support HyperDHT");
     await user.click(within(panel()).getByTestId("connection-option-iroh"));
     expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "iroh/1" }]);
     // The panel stays open: the choice moves at once, and what is in use follows when the switch lands.
@@ -223,7 +223,6 @@ describe("the chat's connection control and its panel", () => {
     expect(radios.map(r => [r.getAttribute("aria-label"), r.getAttribute("aria-checked"), (r as HTMLButtonElement).disabled])).toEqual([
       ["WebRTC", "true", false], ["Iroh", "false", true], ["HyperDHT", "false", true], ["DHT only", "false", false],
     ]);
-    expect(within(panel()).getByTestId("connection-chosen")).toHaveTextContent("WebRTC · the only one this app runs");
     // WebRTC is what it is on: nothing to ask. DHT only is there on every app.
     await user.click(within(panel()).getByTestId("connection-option-webrtc"));
     expect(engine.callsTo("setChatTransport")).toEqual([]);

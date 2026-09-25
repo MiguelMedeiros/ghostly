@@ -463,9 +463,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               </div>
             )}
             <div className="flex min-w-0 items-center gap-2">
-              {/* The chat's one connection control: the status dot, the key, what carries the chat, and one panel. */}
-              <ChatConnection key={sessionId} peerKey={params.peerPubKeyB64} paired={paired} myKey={techInfo?.myPubKey}
-                status={statusLabel} polling={pollCountdown.isPolling} compact={pairingShown} />
+              {/* The contact's status and key. The connection is the icon beside the calls; both keys are in its panel. */}
+              <span className="flex min-w-0 items-center gap-1.5" data-testid="chat-subtitle">
+                <span role="img" aria-label={statusLabel} data-testid="contact-status"
+                  className={`h-2 w-2 shrink-0 rounded-full ${statusLabel === "Connected" ? `bg-green-500 ${pollCountdown.isPolling ? "contact-fetch-pulse" : ""}` : /issue|unavailable|mismatch/.test(statusLabel) ? "bg-danger" : "bg-text-muted"}`} />
+                <span className={`text-text-muted/60 text-xs max-md:text-[10px] font-mono whitespace-nowrap ${pairing.show ? "max-md:hidden" : ""}`}>
+                  {truncatedPeerKey}
+                </span>
+              </span>
               {pairingShown && pairing.progress && (
                 <PairingIndicator progress={pairing.progress}
                   onOpen={() => document.getElementById(pairingSceneId)?.scrollIntoView({ block: "center", behavior: "smooth" })} />
@@ -474,6 +479,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           </div>
         </div>
         <div className="flex items-center gap-1">
+          {/* The chat's one connection control: its icon, and one panel with the choice and the rest under Details. */}
+          <ChatConnection key={sessionId} peerKey={params.peerPubKeyB64} paired={paired} myKey={techInfo?.myPubKey} status={statusLabel} />
           <CallButtons blocked={callsBlocked} busy={webrtc.callState !== "idle"} onCall={(withVideo) => webrtc.startCall(withVideo)} />
           {/* Options dropdown */}
           <div className="relative" ref={menuRef}>

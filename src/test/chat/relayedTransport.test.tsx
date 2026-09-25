@@ -46,11 +46,10 @@ describe("a relayed transport", () => {
   it("shows in the header's connection control and in its panel", async () => {
     const view = renderApp(<ChatConnection peerKey="peer" />);
     act(() => view.engine.update({ links: [linkView({ ...web, pairing: onHyperdht, dataLink: "open", transportRttMs: 180, transportRelayed: { relays: ["relay.example"] } })] }));
-    expect(screen.getByTestId("connection-now")).toHaveTextContent("HyperDHT · relayed· 180 ms");
     expect(screen.getByTestId("connection-options")).toHaveAttribute("data-relayed", "");
+    expect(screen.getByTestId("connection-options")).toHaveAccessibleName("Connection options: Connected · HyperDHT (relayed)");
     await view.user.click(screen.getByTestId("connection-options"));
     const panel = screen.getByRole("dialog", { name: "Connection options" });
-    expect(within(panel).getByTestId("connection-in-use")).toHaveTextContent("HyperDHT · relayed");
     expect(within(panel).getByTestId("connection-option-hyperdht")).toHaveTextContent("In use · relayed · 180 ms");
     expect(within(panel).getByTestId("connection-relayed")).toHaveTextContent("Relayed via relay.example");
     expect(within(panel).getByTestId("connection-summary")).toHaveTextContent("never what they say");
@@ -60,6 +59,6 @@ describe("a relayed transport", () => {
     const view = renderApp(<ChatConnection peerKey="peer" />);
     act(() => view.engine.update({ links: [linkView({ ...web, pairing: { status: "ready", transport: "webrtc/1" } as Pairing, dataLink: "open" })] }));
     await view.user.click(screen.getByTestId("connection-options"));
-    expect(screen.getByTestId("connection-option-hyperdht")).toHaveTextContent("Through a relay · used when nothing direct connects");
+    expect(screen.getByTestId("connection-option-hyperdht")).toHaveAttribute("title", "HyperDHT: Through a relay · used when nothing direct connects");
   });
 });

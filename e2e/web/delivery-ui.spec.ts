@@ -81,6 +81,9 @@ test("header connection popover, five desktop destinations and resizing preserve
   await expect(a.page.getByRole("dialog",{name:"Connection options"})).toBeVisible();
   await expect(a.page.getByRole("radio",{name:"WebRTC",exact:true})).toBeChecked();
   await expect(a.page.getByRole("switch",{name:"Fallback",exact:true})).toBeVisible();
+  // Verification is under Details, closed until asked for.
+  await expect(a.page.getByTestId("pair-verify")).toBeHidden();
+  await a.page.getByTestId("connection-details-summary").click();
   await expect(a.page.getByTestId("pair-verify")).toBeVisible();
   await a.page.keyboard.press("Escape"); await expect(trigger).toBeFocused();
   await expect(a.page.getByRole("dialog",{name:"Connection options"})).toBeHidden();
@@ -119,10 +122,10 @@ test("mobile keeps its footer and compact header, with multiline text and QR ins
   await expect(a.page.getByPlaceholder("Message…")).toBeEnabled();
   await expect(a.page.getByTestId("account-bar")).toHaveCount(0);
   await a.page.getByPlaceholder("Message…").fill("Line one\nLine two");
-  // One connection control under the name, a tap target of its own, left of the calls, and nothing past the edge.
-  const icon=a.page.getByTestId("connection-options"); await expect(icon).toBeVisible();
-  const iconBox=(await icon.boundingBox())!, call=(await a.page.getByTestId("call-audio").boundingBox())!;
-  expect(iconBox.height).toBeGreaterThanOrEqual(32); expect(iconBox.x+iconBox.width).toBeLessThanOrEqual(call.x);
+  // Only the icon in the header, with the call buttons, and nothing past the edge.
+  const icon=a.page.getByTestId("connection-options"); await expect(icon).toHaveText("");
+  const iconBox=(await icon.boundingBox())!, call=(await a.page.getByTestId("call-video").boundingBox())!;
+  expect(Math.abs(iconBox.width-call.width)).toBeLessThanOrEqual(1); expect(iconBox.x+iconBox.width).toBeLessThanOrEqual(390);
   expect(await icon.evaluate(el=>{const h=el.closest(".header-safe")!;return h.scrollWidth<=h.clientWidth;})).toBe(true);
   await a.page.getByTestId("connection-options").click();await expect(a.page.getByRole("dialog",{name:"Connection options"})).toBeVisible();
   const menu=await a.page.getByRole("dialog",{name:"Connection options"}).boundingBox(); expect(menu!.x).toBeGreaterThanOrEqual(0); expect(menu!.x+menu!.width).toBeLessThanOrEqual(390);
@@ -197,6 +200,8 @@ for (const unavailable of ["none", "read", "publish", "network", "publication-ne
     await expect.poll(() => reads).toBeGreaterThan(0);
     await expect(menu).toHaveAccessibleName(unavailable === "none" ? /No contact yet/ : unavailable === "publication-network" ? /Publication unavailable/ : /Discovery unavailable|Publication unavailable/);
     await menu.click();
+    // The failure is on the panel's first lines; the help, under Details.
+    await page.getByTestId("connection-details-summary").click();
     const alert = page.getByTestId("connection-menu").getByRole("alert");
     // The inviter only needs its own invite published: a failed read leaves the pairing scene waiting, a failed
     // publish is the scene's failure too, with its own retry.

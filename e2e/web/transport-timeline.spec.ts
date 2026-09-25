@@ -28,27 +28,29 @@ test("each timeline says when the chat went live, a quick reconnect stays in the
   await expect(details).toContainText("WebRTC");
   await expect(details).toContainText("A first pairing always uses WebRTC.");
 
-  // The header's connection control names the transport in use by its own mark and its name; hovering it says
-  // what it is, clicking it says why.
+  // The header's connection icon shows the transport by its own mark; hovering it says what it is, clicking it says
+  // why.
   const icon = alice.page.getByTestId("connection-options");
   await expect(icon).toHaveAttribute("data-transport", "webrtc/1");
   await expect(icon.locator("[data-transport-icon]")).toHaveAttribute("data-transport-icon", "webrtc/1");
-  await expect(icon.getByTestId("connection-now")).toHaveText(/^WebRTC(· \d+ ms)?$/);
   await icon.hover();
   await expect(alice.page.getByTestId("connection-tooltip-detail")).toHaveText(/^(\d+ ms · )?live for .+ · the only one here$/);
   await icon.click();
   const panel = alice.page.getByRole("dialog", { name: "Connection options" });
-  await expect(panel.getByTestId("connection-in-use")).toHaveText("WebRTC");
-  await expect(panel.getByTestId("connection-chosen")).toHaveText("WebRTC · the only one this app runs");
-  await expect(panel.getByTestId("connection-summary")).toContainText("WebRTC is the only transport this app runs.");
-  // Every choice is there: WebRTC, in use and chosen; the native ones off, and why; DHT only, which every app can choose.
+  await expect(panel.getByTestId("connection-state")).toHaveText(/^Connected · WebRTC( · \d+ ms)?$/);
+  // Every choice is there, one line each: WebRTC, chosen and in use; the native ones off, and why (in their
+  // tooltip); DHT only, which every app can choose.
   await expect(panel.getByRole("radio")).toHaveCount(4);
   await expect(panel.getByRole("radio", { name: "WebRTC", exact: true })).toHaveAttribute("aria-checked", "true");
   await expect(panel.getByRole("radio", { name: "WebRTC", exact: true })).toHaveAttribute("data-in-use", "");
+  await expect(panel.getByRole("radio", { name: "WebRTC", exact: true })).toHaveText(/^WebRTCIn use( · \d+ ms)?$/);
   await expect(panel.getByRole("radio", { name: "Iroh", exact: true })).toBeDisabled();
   await expect(panel.getByRole("radio", { name: "Iroh", exact: true })).toHaveAttribute("title", "Iroh: Iroh needs Ghostly Desktop");
   await expect(panel.getByRole("radio", { name: "HyperDHT", exact: true })).toHaveAttribute("title", "HyperDHT: HyperDHT needs Ghostly Desktop, or a HyperDHT relay in Settings");
   await expect(panel.getByRole("radio", { name: "DHT only", exact: true })).toHaveAttribute("aria-checked", "false");
+  // Why this transport is under Details.
+  await panel.getByTestId("connection-details-summary").click();
+  await expect(panel.getByTestId("connection-summary")).toContainText("WebRTC is the only transport this app runs.");
   await alice.page.keyboard.press("Escape");
   await expect(panel).toBeHidden();
 
@@ -62,6 +64,9 @@ test("each timeline says when the chat went live, a quick reconnect stays in the
   // has the drop and the reconnect in its history.
   await bob.page.reload();
   await icon.click();
+  // The history is under Details.
+  const more = alice.page.getByTestId("connection-details");
+  if ((await more.getAttribute("open")) === null) await alice.page.getByTestId("connection-details-summary").click();
   const history = alice.page.getByTestId("connection-history");
   await history.getByText(/^Connection history/).click();
   await expect(history.locator('[data-kind="down"]').first()).toBeVisible({ timeout: 90_000 });
@@ -103,7 +108,7 @@ test("DHT only from the connection panel: both timelines say who chose it, texts
   // Back to Automatic: both timelines say the chat is live again, in one row that also stands for leaving DHT only.
   await alice.page.getByTestId("connection-options").click();
   const panel = alice.page.getByRole("dialog", { name: "Connection options" });
-  await expect(panel.getByTestId("connection-chosen")).toHaveText("DHT only");
+  await expect(panel.getByTestId("connection-state")).toHaveText("DHT only · chosen by you");
   await expect(panel.getByTestId("connection-option-dht")).toHaveAttribute("aria-checked", "true");
   await panel.getByTestId("connection-option-webrtc").click();
   await alice.page.keyboard.press("Escape");
