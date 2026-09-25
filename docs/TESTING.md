@@ -670,9 +670,28 @@ The Desktop scenarios (2026-09-25, the Linux harness in an `ubuntu:22.04` contai
 
 What they found:
 
-- **On Linux, Desktop never has a live link, with anyone, so Iroh and HyperDHT are never used.** WebKitGTK (Ubuntu 22.04's `libwebkit2gtk-4.1`) has no `RTCPeerConnection` at all, and a first session needs WebRTC on both sides. `GhostLink.dial` says so: "No common available transport. Initial pairing requires WebRTC on both peers." The native transports' addresses are exchanged inside a session WebRTC authenticated first ("Peer native address unavailable; reconnect WebRTC once to exchange endpoints"). Two Linux Desktop apps pair, and they talk, go away and come back, but always over the DHT ("DHT · offline text"). Both offer Iroh and HyperDHT, show no transport error, and never dial either. A Linux Desktop and a browser meet the same way. On macOS (WKWebView) and Windows (WebView2) WebRTC exists, so this is Linux's own. Nothing here exercises Iroh or HyperDHT until a pair can start without WebRTC, or the harness drives Desktop on Windows.
+- **On Linux, Desktop never had a live link, with anyone, so Iroh and HyperDHT were never used** (superseded: since the one-chat model, #209, #229 and #235, two Linux Desktops go live natively from the DHT; see the next run below). WebKitGTK (Ubuntu 22.04's `libwebkit2gtk-4.1`) has no `RTCPeerConnection` at all, and a first session needs WebRTC on both sides. `GhostLink.dial` says so: "No common available transport. Initial pairing requires WebRTC on both peers." The native transports' addresses are exchanged inside a session WebRTC authenticated first ("Peer native address unavailable; reconnect WebRTC once to exchange endpoints"). Two Linux Desktop apps pair, and they talk, go away and come back, but always over the DHT ("DHT · offline text"). Both offer Iroh and HyperDHT, show no transport error, and never dial either. A Linux Desktop and a browser meet the same way. On macOS (WKWebView) and Windows (WebView2) WebRTC exists, so this is Linux's own. Nothing here exercises Iroh or HyperDHT until a pair can start without WebRTC, or the harness drives Desktop on Windows.
 - The harness learned: WebKitGTK draws an emoji as an image, which a text match does not see (Desktop texts have none); Desktop reads the clipboard natively, so its join types the invite in the field an empty clipboard opens; two apps need a home each, or they share one WebKit store.
 - Intermittent (`mx-7ff28d43`): after the web peer closed its page and opened it again, the text the Desktop peer wrote meanwhile over the DHT did not arrive within 4 minutes. It arrived in the other run.
+
+The Desktop scenarios again (2026-09-25, #244, the nightly job "Combination matrix (Desktop)" on `ubuntu-22.04`, run by hand with `jobs: desktop`). Since the one-chat model a first contact does not need WebRTC: the pair opens On DHT, each side publishes its native descriptors in its capability record, and the other dials them (`e2e/desktop/native-upgrade.spec.ts`, about 40 s to live). The matrix's `wanted()` (e2e/matrix/desktop.ts) now expects:
+
+| transport | desktop-desktop | desktop-web |
+|---|---|---|
+| `webrtc` (Automatic, fallback on) | live on Iroh or HyperDHT | not live, texts over the DHT |
+| `webrtc-strict` | live on Iroh: a Linux Desktop cannot choose WebRTC (its option is off, with the reason), and Fallback off keeps it to its first transport | not live, texts over the DHT |
+| `native-fallback` | live on Iroh | not live, texts over the DHT |
+| `iroh-only` | live on Iroh | not live, texts over the DHT |
+| `hyperdht-only` | live on HyperDHT | not live, texts over the DHT |
+
+Desktop↔web has no live transport in common: the matrix's browser has WebRTC only (its fixture keeps Iroh off, having no relay to give it, and HyperDHT needs a relay too), and WebKitGTK has none. The Connection options say so: an option is off for what either app lacks, so the Desktop offers its browser contact nothing.
+
+RESULTS_PLACEHOLDER
+
+What it found:
+
+- **Turning Fallback off failed on a Linux Desktop in Automatic** with "Transport unavailable". The popover's switch sends the chat's preference back, and Automatic reported WebRTC, which the app does not have. Automatic now reports the app's own first transport (`automaticTransport`: WebRTC where there is one, else Iroh, then HyperDHT), which is also what choosing Automatic asks the link for (before, whichever endpoint had started first).
+- The harness learned: the Connection options are `role=radio` buttons (no longer inputs), and the Desktop person must wait for its choice to be drawn before flipping Fallback, which sends the preference the page shows.
 
 <!-- matrix:begin (scripts/matrix-docs.mjs writes this section; edit the text above it) -->
 

@@ -121,17 +121,24 @@ const notLive = (p: Person) => expect.poll(() => p.connection(), { message: `${p
 
 async function transport({ a, b, combo }: DesktopWorld): Promise<void> {
   const want = wanted(combo);
+  const both = combo.client === "desktop-desktop";
+  for (const p of [a, b]) await p.go(p.chatHash!);
+  // Two Desktops go live by themselves first, natively from the DHT (native-upgrade.spec.ts): the preferences act on
+  // that. Asked for too early, an option could still be off for want of the contact's record.
+  if (both) for (const p of [a, b]) await connected(p, "(?:Iroh|HyperDHT)");
   for (const p of [a, b]) {
-    await p.go(p.chatHash!);
     // The premise of `wanted`: Desktop here is Linux, with no WebRTC.
     if (p.kind === "desktop") expect((await p.callButton()).rtc, `${p.name} (Desktop on Linux) has no WebRTC`).toBe(false);
     // Only Desktop is asked for a native transport; a browser keeps WebRTC, strict when the value says so.
     const preferred = p.kind === "desktop" ? want.preferred : want.preferred === "WebRTC" ? "WebRTC" : undefined;
-    const offered = await p.preferTransport(preferred, p.kind === "desktop" || want.preferred === "WebRTC" ? want.fallback : true);
-    // The options are off for what this app lacks, and for what the contact's lacks (once its record said so): a
+    const fallback = p.kind === "desktop" || want.preferred === "WebRTC" ? want.fallback : true;
+    // The options are off for what this app lacks, and for what the contact's lacks (as far as it has learned): a
     // Desktop offers its native transports to a Desktop, and nothing to a browser, which has WebRTC only.
-    if (p.kind === "desktop") expect(offered, `${p.name} (Desktop) offers what both apps have`).toEqual(combo.client === "desktop-desktop" ? ["Iroh", "HyperDHT"] : []);
-    else expect(["WebRTC"], `${p.name} (${p.kind}) offers WebRTC at most`).toEqual(expect.arrayContaining(offered));
+    await expect(async () => {
+      const offered = await p.preferTransport(preferred, fallback);
+      if (p.kind === "desktop") expect(offered, `${p.name} (Desktop) offers what both apps have`).toEqual(both ? ["Iroh", "HyperDHT"] : []);
+      else expect(["WebRTC"], `${p.name} (${p.kind}) offers WebRTC at most`).toEqual(expect.arrayContaining(offered));
+    }).toPass({ timeout: 60_000 });
   }
   if (want.settles) for (const p of [a, b]) await connected(p, `(?:${want.settles})`);
   else for (const p of [a, b]) await notLive(p);
