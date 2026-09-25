@@ -270,6 +270,15 @@
     "numberAssignment": "unassigned"
   },
   {
+    "oldId": "none",
+    "id": "312",
+    "oldFile": "3xx-atproto.md",
+    "file": "3xx-atproto.md",
+    "kind": "Adapter",
+    "displayNumber": "3xx",
+    "numberAssignment": "unassigned"
+  },
+  {
     "oldId": "13",
     "id": "400",
     "oldFile": "13-chat.md",

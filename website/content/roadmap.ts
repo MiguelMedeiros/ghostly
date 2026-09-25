@@ -116,7 +116,8 @@ const en = {
         { text: "A did:dht for every profile, listing only the identities you switch on", level: "available" },
       ],
       next: [
-        { text: "Pubky and Bluesky identities, in implementation (#246, #248)", level: "planned" },
+        { text: "Pubky identities, in implementation (#246)", level: "planned" },
+        { text: "Bluesky / AT Protocol accounts: built, blocked until the website's OAuth client document is live on ghostly.tools", level: "planned" },
         { text: "OpenID accounts (Google, Microsoft, Apple, GitLab, Twitch): built, blocked until Ghostly's OAuth clients are registered", level: "planned" },
         { text: "Hardware wallets as signers, and passkeys", level: "planned" },
         { text: "Keet, blocked until it offers a supported signing API", level: "planned" },
@@ -297,7 +298,8 @@ const ptBr: RoadmapCopy = {
         { text: "Um did:dht para cada perfil, que lista só as identidades que você ligar", level: "available" },
       ],
       next: [
-        { text: "Identidades Pubky e Bluesky, em implementação (#246, #248)", level: "planned" },
+        { text: "Identidades Pubky, em implementação (#246)", level: "planned" },
+        { text: "Contas Bluesky / AT Protocol: prontas, bloqueadas até o documento de cliente OAuth do site estar no ar em ghostly.tools", level: "planned" },
         { text: "Contas OpenID (Google, Microsoft, Apple, GitLab, Twitch): prontas, bloqueadas até os clientes OAuth do Ghostly serem registrados", level: "planned" },
         { text: "Carteiras de hardware como signers, e passkeys", level: "planned" },
         { text: "Keet, bloqueado até oferecer uma API de assinatura suportada", level: "planned" },

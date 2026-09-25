@@ -1,6 +1,6 @@
 # WISP numbering and compatibility
 
-All 51 specifications remain Draft. Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
+All 52 specifications remain Draft. Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
 
 ## Independent families
 
@@ -9,7 +9,7 @@ All 51 specifications remain Draft. Family numbering was approved on 2026-09-22.
 | 00-99 | Foundations: process, Ghost Core, peer keys, common capabilities |
 | 100-199 | Transport negotiation (100), WebRTC (101), Iroh (102), HyperDHT (103) |
 | 200-299 | Payment negotiation (200), Cashu (201), experimental Arkade (202), Lightning (203), Bark (204), Lightning addresses (205) |
-| 300-399 | Identity proofs (300; external proofs optional), Nostr (301), Pubky, Keet, domain, OpenPGP, Bitcoin address, SSH and OpenID Connect providers, and the Nostr social layer (3xx; planned, number to be defined) |
+| 300-399 | Identity proofs (300; external proofs optional), Nostr (301), Pubky, Keet, domain, OpenPGP, Bitcoin address, SSH, OpenID Connect and AT Protocol (Bluesky) providers, and the Nostr social layer (3xx; planned, number to be defined) |
 | 400-499 | Chat messaging (400), an independent application capability; store-and-forward for an away contact (4xx; planned, number to be defined) |
 | 500-599 | File transfer (500), an independent application capability |
 | 600-699 | Voice and video (600), an independent application capability |
@@ -55,6 +55,7 @@ Generated from [numbering.json](numbering.json); edit that source instead of thi
 | none | [3xx · nostr-social · planned; number to be defined](3xx-nostr-social.md) |
 | none | [3xx · did-dht · planned; number to be defined](3xx-did-dht.md) |
 | none | [3xx · did · planned; number to be defined](3xx-did.md) |
+| none | [3xx · atproto · planned; number to be defined](3xx-atproto.md) |
 | 13 | [400](400-chat.md) |
 | 401 | [401](401-paired-chat.md) |
 | 402 | [402](402-legacy-chat.md) |

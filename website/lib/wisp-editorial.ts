@@ -448,6 +448,18 @@ export const editorial: Record<string, Entry> = {
       "pt-br": "Atestada pelo provedor, não por uma chave sua; o contato confia nessa empresa. Pronta, mas só oferecida quando o mantenedor registrar os clientes OAuth do Ghostly. Número ainda não atribuído.",
     },
   },
+  "3xx-atproto": {
+    group: "identity",
+    benefit: {
+      en: "Show a contact that you control a Bluesky (AT Protocol) account, checked from its signed repository without logging in.",
+      "pt-br": "Mostrar a um contato que você controla uma conta Bluesky (AT Protocol), verificada no repositório assinado dela, sem login.",
+    },
+    level: "planned",
+    note: {
+      en: "Approved once on your own server, asking only for Ghostly's records; the record is public. Built, and offered once the website's OAuth client document is live. Number not yet assigned.",
+      "pt-br": "Aprovada uma vez no seu próprio servidor, pedindo acesso só aos registros do Ghostly; o registro é público. Pronta, e oferecida quando o documento de cliente OAuth do site estiver no ar. Número ainda não atribuído.",
+    },
+  },
   "302-pubky": {
     benefit: {
       en: "Explore a Pubky identity binding. Using Pkarr is not, by itself, a Pubky integration.",

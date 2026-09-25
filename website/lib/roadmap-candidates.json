@@ -600,12 +600,12 @@
     "title": "AT Protocol / Bluesky",
     "family": "3",
     "kind": "Identity / account adapter",
-    "status": "In implementation",
-    "note": "#248",
+    "status": "Blocked",
+    "note": "its OAuth client-metadata file live on ghostly.tools",
     "level": "planned",
     "range": "3xx",
     "section": "Identity and social candidate matrix",
-    "body": "**Confirmed upstream primitive / source**\n\n[protocol overview](https://atproto.com/guides/overview), [OAuth profile](https://atproto.com/specs/oauth)\n\n**Signer, runtime and trust distinction**\n\nDID/account resolution and OAuth/DPoP authorization; an app's DPoP key is not the user's repository identity key\n\n**Ghostly status / next gate**\n\n**In implementation: #248**: [#248](https://github.com/MiguelMedeiros/ghostly/pull/248) proves an account by one signed record in its own repository, written after AT Protocol OAuth and verified from the repository by each contact. It is usable only once its OAuth client-metadata file is live on ghostly.tools, which ships with the website deploy. Separate PDS/repository data from AppView/feed/search indexes, scopes and handle changes.",
+    "body": "**Confirmed upstream primitive / source**\n\n[protocol overview](https://atproto.com/guides/overview), [OAuth profile](https://atproto.com/specs/oauth)\n\n**Signer, runtime and trust distinction**\n\nDID/account resolution and OAuth/DPoP authorization; an app's DPoP key is not the user's repository identity key\n\n**Ghostly status / next gate**\n\n**Blocked: its OAuth client-metadata file live on ghostly.tools**: [#248](https://github.com/MiguelMedeiros/ghostly/pull/248) proves an account by one signed record in its own repository (`tools.ghostly.proof`, [draft 3xx](3xx-atproto.md)), written after AT Protocol OAuth asking only for Ghostly's records and verified from the repository by each contact (`proofs.atproto*`, e2e against a local PDS). Servers find the client by `https://ghostly.tools/oauth/client-metadata.json`, which ships with the website deploy; a check with a real Bluesky account is the maintainer's. Separate PDS/repository data from AppView/feed/search indexes, scopes and handle changes.",
     "sourceAnchor": "identity-and-social-candidate-matrix"
   },
   {

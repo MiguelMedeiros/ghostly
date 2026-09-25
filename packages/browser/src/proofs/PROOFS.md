@@ -1,14 +1,14 @@
 # Identity proofs: providers
 
 An **identity proof** lets a person show a contact, optionally and per contact, that they control an
-external identity: a Nostr key, a domain, a Bitcoin address, an SSH or PGP key, an OpenID Connect account.
+external identity: a Nostr key, a domain, a Bitcoin address, an SSH or PGP key, an OpenID Connect account, an AT Protocol (Bluesky) account.
 A **provider** is one kind of identity: how the person produces evidence, and how any Ghostly app checks
 it. Everything else is shared and already written: the statement bytes, the proof key, sharing and
 withdrawing per contact, replay protection, storage, expiry, re-checks and the UI.
 
 | Category | Who vouches | Examples | Shown as |
 |---|---|---|---|
-| `self-custodied` | the person: they hold the key, or control the domain | Nostr, SSH, PGP, Bitcoin, domain | "Verified · your key" |
+| `self-custodied` | the person: they hold the key, or control the domain or the account's DID | Nostr, SSH, PGP, Bitcoin, domain, AT Protocol | "Verified · your key" |
 | `provider-attested` | a company that says the person logged in | OpenID Connect (Google, Microsoft, Apple…) | "Verified by accounts.google.com" |
 
 ## The model
@@ -122,13 +122,23 @@ A provider has one or more signers; the UI shows the ones whose `platforms` incl
 
 | `kind` | For | The UI | You write |
 |---|---|---|---|
-| `in-app` | a signer Ghostly can call: NIP-07, NIP-46, a wallet API | renders `fields`, calls `run`, shows `onAuthUrl` as a link (never opens it) and `onProgress` | `run(ctx, work)`: open, hand `work` a session with `subject()` and `sign(statement)`, always clean up |
+| `in-app` | a signer Ghostly can call: NIP-07, NIP-46, a wallet API, an AT Protocol server | renders `fields`, calls `run` **synchronously from the click**, shows `onAuthUrl` as a link (never opens it) and `onProgress` | `run(ctx, work)`: open, hand `work` a session with `subject()` and `sign(statement)`, always clean up. A signer that needs a window (AT Protocol OAuth) opens it in `run` before any `await` |
 | `external-tool` | ssh-keygen, gpg, a Bitcoin wallet's "sign message" | shows `instructions(statement)` with copy buttons and a paste field | `instructions`, `parse(pasted)` |
 | `redirect` | OpenID Connect | "Continue" prepares the statement; a second button calls `start(statement, ctx)` **synchronously from its click** (nothing awaited before it, so the popup keeps the user activation) | `start` (PKCE, `nonce` from `statement.id`, `state`, popup): open the popup before any `await` |
 | `publish` | DNS TXT, `/.well-known/…` | shows `instructions(statement)`, then "Check" | `instructions`, `evidence` (often `{}`: the verifier looks it up) |
 
 For `in-app`, the subject comes from the signer (`session.subject()`); for the others the person types or
-picks it in the subject field. For `redirect`, the subject in the statement is the issuer, and the account
+picks it in the subject field. A signer's `action` names the button that starts it ("Continue on your server");
+by default "Sign with <label>" for `in-app`, "Continue" otherwise.
+
+### Taking down what was published (`unpublish`)
+
+A provider whose signer published something the verifier fetches, and that the person can delete again (the AT
+Protocol record), declares `unpublish: { description, run(proof, ctx) }`. Removing the proof on the Identities page
+then calls `run` synchronously from the confirming click (it may open a window), and removes the proof only once
+it resolved; `description` is added to the confirmation. If it fails or is declined, the person may remove the
+proof without it ("Remove without it"): the shared Pkarr revocation still tells contacts. Test ids:
+`identity-proof-remove-progress`, `identity-proof-remove-anyway`. For `redirect`, the subject in the statement is the issuer, and the account
 comes out of `verify`.
 
 ### `verify`
@@ -224,6 +234,8 @@ storing the outcome are one transaction.
   `identity-proof`. Chat: Options → `chat-identities-open` → `chat-identities` with `chat-identity-share`,
   `chat-identity-withdraw`, `chat-identity-mine-status`, `chat-identity-received` (`data-status`),
   `chat-identity-recheck`, `chat-identity-lookup`; header `chat-identity-badges`.
+- `e2e/web/atproto-proofs.spec.ts` goes through the real OAuth pages of a local PDS and PLC directory
+  (e2e/infra's `atproto` service, `e2e/support/atproto.ts`), gated on `E2E_ATPROTO_PDS_URL`.
 - Real services: gate on `GHOSTLY_<NAME>_LIVE=1`, skip otherwise; never a person's real account or key.
   Never print or commit a private key.
 
@@ -238,5 +250,6 @@ storing the outcome are one transaction.
 | `ssh` | self-custodied | `ssh-keygen -Y sign -n ghostly` (external tool) | nothing | experimental |
 | `ssh-github` | self-custodied | same | `api.github.com/users/<login>/keys`; re-checked after 10 min | experimental |
 | `ssh-gitlab` | self-custodied | same | `gitlab.com/api/v4/users?username=` then `/users/<id>/keys`; re-checked after 10 min | experimental |
+| `atproto` | self-custodied | in-app: the handle, then AT Protocol OAuth on the person's own server (PAR, PKCE, DPoP; scope `repo:tools.ghostly.proof` create/delete only, or full access on older servers), which writes one record keyed by the proof key; `unpublish` deletes it | the PLC directory or the did:web host (DID document), the account's PDS (`com.atproto.sync.getRecord`: CAR, commit signature, MST path), DoH or the handle's website (handle back-check); re-checked after an hour | in development; the client metadata goes live with the website ([draft](../../../../docs/wisps/3xx-atproto.md), [lexicon](../../../../docs/lexicons/tools.ghostly.proof.json)). A web app on a loopback address uses AT Protocol's development client, which returns only to `127.0.0.1`: open the dev app there, not at `localhost` |
 | `oidc` | provider-attested | redirect: sign in with Google, Microsoft, Apple, GitLab, Twitch (account only / + email / + email and name) | the provider's JWKS (pinned URL) | in development; no client ID registered yet ([checklist](../../../../docs/OIDC-PROVIDERS.md), [draft](../../../../docs/wisps/3xx-oidc-proofs.md)) |
 | `did` | self-custodied | sign with a key of the DID document (JWS or raw signature, pasted back); did:web also: a file beside did.json, a service in it (publish). Listed under Advanced; `subject.preview` resolves the DID first | did:key/did:jwk: nothing; did:web: the DoH resolver and the domain's server; did:dht: a Pkarr relay; re-checked after a day | experimental, [draft 3xx](../../../../docs/wisps/3xx-did.md) |

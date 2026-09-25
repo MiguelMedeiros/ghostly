@@ -433,6 +433,21 @@
     ]
   },
   {
+    "file": "3xx-atproto.md",
+    "sourcePath": "docs/wisps/3xx-atproto.md",
+    "aliases": [],
+    "slug": "3xx-atproto",
+    "title": "WISP 3xx: AT Protocol identity (Bluesky)",
+    "status": "Draft",
+    "updated": "2026-09-25",
+    "implementation": "In development: packages/core/src/atprotoRepo.ts, atprotoIdentity.ts, packages/browser/src/proofs/atproto/, proofs/providers/atproto.ts; the client metadata goes live with the website",
+    "dependencies": [
+      "300-peer-proofs.md"
+    ],
+    "summary": "A person shows one contact that they control an AT Protocol account (a Bluesky account, or one on any other Personal Data Server). The evidence is a record in the account's own repository, which the account's key signs; the contact checks it from the repository, without logging in anywhere and without a Ghostly server.",
+    "notices": []
+  },
+  {
     "file": "3xx-bitcoin.md",
     "sourcePath": "docs/wisps/3xx-bitcoin.md",
     "aliases": [],
