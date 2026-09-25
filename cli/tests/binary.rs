@@ -29,7 +29,19 @@ fn run(args: &[&str], stdin: Option<&str>) -> Output {
 }
 
 fn json(bytes: &[u8]) -> Value {
-    serde_json::from_slice(bytes).unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(bytes)))
+    serde_json::from_slice(bytes)
+        .unwrap_or_else(|_| panic!("not JSON: {:?}", String::from_utf8_lossy(bytes)))
+}
+
+/// Exits 0 with one JSON value on stdout; a failure shows the exit code and stderr.
+fn ok(output: Output) -> Value {
+    assert!(
+        output.status.success(),
+        "exit {:?}, stderr: {}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    json(&output.stdout)
 }
 
 /// Exits 1 with `{"error": ...}` on stderr and nothing on stdout.
@@ -41,9 +53,7 @@ fn error(output: Output) -> String {
 
 #[test]
 fn identity_new_prints_one_json_identity() {
-    let output = cli(&["identity", "new"]);
-    assert!(output.status.success());
-    let identity = json(&output.stdout);
+    let identity = ok(cli(&["identity", "new"]));
     assert_eq!(identity["seed"].as_str().unwrap().len(), 43);
     assert_eq!(identity["pubkey"].as_str().unwrap().len(), 52);
     assert_eq!(identity["shared_key"].as_str().unwrap().len(), 43);
@@ -51,27 +61,98 @@ fn identity_new_prints_one_json_identity() {
 
 #[test]
 fn an_invite_goes_out_and_comes_back() {
-    let identity = json(&cli(&["identity", "new"]).stdout);
+    let identity = ok(cli(&["identity", "new"]));
     let (seed, pubkey, key) = (
         identity["seed"].as_str().unwrap(),
         identity["pubkey"].as_str().unwrap(),
         identity["shared_key"].as_str().unwrap(),
     );
-    let invite = json(&cli(&["invite", "new", "--seed", seed, "--key", key]).stdout);
+    let invite = ok(cli(&["invite", "new", "--seed", seed, "--key", key]));
     let url = format!("ghost://{pubkey}#{key}");
     assert_eq!(invite["invite_url"], url.as_str());
     assert_eq!(invite["pubkey"], pubkey);
 
     // Without --key, a fresh one.
-    let fresh = json(&cli(&["invite", "new", "--seed", seed]).stdout);
+    let fresh = ok(cli(&["invite", "new", "--seed", seed]));
     let fresh_url = fresh["invite_url"].as_str().unwrap();
     assert!(fresh_url.starts_with(&format!("ghost://{pubkey}#")));
     assert_ne!(fresh_url, url);
 
-    let parsed = json(&cli(&["invite", "parse", &url]).stdout);
+    let parsed = ok(cli(&["invite", "parse", &url]));
     assert_eq!(parsed["peer_pubkey"], pubkey);
     assert_eq!(parsed["shared_key"], key);
     assert_ne!(parsed["my_pubkey"], pubkey);
+}
+
+// Base64url has `-` in its alphabet, so about one seed or key in 64 starts
+// with it. Clap used to read such a value as a flag (usage error, exit 2),
+// which made `an_invite_goes_out_and_comes_back` fail a few % of runs.
+const HYPHEN_SEED: &str = "-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+const HYPHEN_KEY: &str = "-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_A";
+
+#[test]
+fn seeds_and_keys_may_start_with_a_hyphen() {
+    let invite = ok(cli(&[
+        "invite",
+        "new",
+        "--seed",
+        HYPHEN_SEED,
+        "--key",
+        HYPHEN_KEY,
+    ]));
+    let pubkey = invite["pubkey"].as_str().unwrap();
+    let url = format!("ghost://{pubkey}#{HYPHEN_KEY}");
+    assert_eq!(invite["invite_url"], url.as_str());
+
+    let seed = format!("--seed={HYPHEN_SEED}");
+    let key = format!("--key={HYPHEN_KEY}");
+    assert_eq!(ok(cli(&["invite", "new", &seed, &key])), invite);
+    let fresh = ok(cli(&["invite", "new", "--seed", HYPHEN_SEED]));
+    assert_eq!(fresh["pubkey"], pubkey);
+
+    let parsed = ok(cli(&["invite", "parse", &url]));
+    assert_eq!(parsed["peer_pubkey"], pubkey);
+    assert_eq!(parsed["shared_key"], HYPHEN_KEY);
+
+    // Whatever the value, it reaches the CLI's own checks: a JSON error, not a
+    // usage error. Each of these fails before any network call.
+    assert_eq!(
+        error(cli(&["invite", "parse", "-ghost://x#y"])),
+        "Invalid invite URL: must start with ghost://"
+    );
+    assert!(error(cli(&["invite", "new", "--seed", "-x"])).contains("Base64url decode failed"));
+    assert_eq!(
+        error(cli(&[
+            "send",
+            "--seed",
+            HYPHEN_SEED,
+            "--peer",
+            "-p",
+            "--key",
+            HYPHEN_KEY
+        ])),
+        "Message required (provide as argument or use --stdin)"
+    );
+    assert!(
+        error(cli(&["recv", "--peer", "-p", "--key", "-x"])).contains("Base64url decode failed")
+    );
+    assert!(error(cli(&[
+        "watch", "--seed", "-x", "--peer", "-p", "--key", HYPHEN_KEY
+    ]))
+    .contains("Base64url decode failed"));
+}
+
+#[test]
+fn a_message_that_starts_with_a_hyphen_goes_after_double_dash() {
+    // The message stays a plain positional, so a mistyped flag is a usage
+    // error rather than text sent to the peer.
+    let send = ["send", "--seed", "s", "--peer", "p", "--key", "k"];
+    let mut typo = send.to_vec();
+    typo.push("--stdn");
+    assert_eq!(cli(&typo).status.code(), Some(2));
+    let mut dashed = send.to_vec();
+    dashed.extend(["--", "-hi"]);
+    assert!(error(cli(&dashed)).contains("Base64url decode failed"));
 }
 
 #[test]
