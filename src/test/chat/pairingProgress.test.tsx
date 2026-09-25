@@ -371,10 +371,14 @@ describe("the connected sound", () => {
     expect(scene()).toBeNull();
   });
 
-  it("not for a pairing that ends on the DHT", () => {
+  it("not for a pairing that ends on the DHT; its first live link, if one comes up later, is the connected moment", () => {
     const { engine } = renderApp(<Pairing inviter={false} createdAt={Date.now()} />);
-    show({ ...published, pairingProgress: { role: "joiner", stage: "on-dht", reason: "transport", retryable: true, since: Date.now(), startedAt: Date.now(), attempt: 2 } } as Partial<LinkView>, engine);
+    const report = (stage: PairingProgress["stage"]) => ({ ...published, pairingProgress: { role: "joiner", stage, reason: stage === "on-dht" ? "transport" : undefined, since: Date.now(), startedAt: Date.now(), attempt: 2 } } as Partial<LinkView>);
+    show(report("on-dht"), engine);
     expect(sounds()).toEqual([]);
+    show(report("live"), engine);
+    expect(scene()).toHaveAttribute("data-stage", "live");
+    expect(sounds()).toEqual(["connected"]);
   });
 
   it("from the engine's own report too", () => {

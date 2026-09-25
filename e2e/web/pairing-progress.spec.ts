@@ -86,3 +86,42 @@ test("with reduced motion the scene is a still picture of the stage", { tag: ["@
   await expect(alice.page.getByTestId("pairing-stage-label")).toHaveText("Waiting for your contact to open the invite");
   await expect(alice.page.getByTestId("pairing-announcement")).toHaveText("Waiting for your contact to open the invite");
 });
+
+/** Every sound the page starts (its length, and when), and when the scene first shows its live stage. */
+async function recordSounds(page: Page) {
+  await page.evaluate(() => {
+    const state = { heard: [] as { duration: number; at: number }[], liveAt: null as number | null };
+    (window as unknown as { qaSounds: typeof state }).qaSounds = state;
+    const start = AudioBufferSourceNode.prototype.start;
+    AudioBufferSourceNode.prototype.start = function (this: AudioBufferSourceNode, ...args: Parameters<typeof start>) {
+      state.heard.push({ duration: this.buffer?.duration ?? 0, at: performance.now() });
+      return start.apply(this, args);
+    };
+    new MutationObserver(() => {
+      if (state.liveAt === null && document.querySelector("[data-testid=pairing-scene][data-stage=live]")) state.liveAt = performance.now();
+    }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-stage"] });
+  });
+}
+const sounds = (page: Page) => page.evaluate(() => (window as unknown as { qaSounds: { heard: { duration: number; at: number }[]; liveAt: number | null } }).qaSounds);
+
+test("the connected moment is heard once on each side, together with the scene going live, and not while waiting", { tag: ["@feature:chat.paired.pairing-progress", "@feature:app.attention.sounds"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("sound-alice"), peer("sound-bob")]);
+  await Promise.all([recordSounds(alice.page), recordSounds(bob.page)]);
+  // The clicks below are the gestures that let each page play sound at all.
+  await alice.page.getByTitle("New Chat").click();
+  await expect(alice.page.getByTestId("pairing-scene")).toHaveAttribute("data-stage", "waiting");
+  const invite = await copyInvite(alice.page);
+  await bob.page.getByRole("button", { name: "Join chat", exact: true }).first().click();
+  await pasteInvite(bob.page, invite);
+  for (const { page } of [alice, bob]) await expect(page.getByTestId("pairing-scene")).toHaveCount(0, { timeout: 15_000 });
+  for (const { page } of [alice, bob]) {
+    const { heard, liveAt } = await sounds(page);
+    expect(heard, JSON.stringify(heard)).toHaveLength(1);
+    // connected.mp3 (0.88 s), decoded and played: the synthesized fallback has no buffer.
+    expect(heard[0].duration).toBeGreaterThan(0.8);
+    expect(heard[0].duration).toBeLessThan(1);
+    // Asked for in the same change that starts the connected moment: within a few frames of the live scene.
+    expect(liveAt).not.toBeNull();
+    expect(Math.abs(heard[0].at - liveAt!)).toBeLessThan(100);
+  }
+});
