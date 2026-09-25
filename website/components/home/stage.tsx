@@ -110,6 +110,8 @@ export type Camera = {
   scale: MotionValue<number>;
   fx: MotionValue<number>;
   fy: MotionValue<number>;
+  /** Where the key light sits, when not on the focal point (a still pushed in off centre keeps its light). */
+  light?: { x: MotionValue<number>; y: MotionValue<number> };
 };
 
 /**
@@ -166,7 +168,7 @@ function CameraGroup({ camera, light, children }: { camera: Camera; light?: Reac
               <stop offset="1" stopColor={light.color} stopOpacity="0" />
             </radialGradient>
           </defs>
-          <motion.circle className="key-light" r="420" fill={`url(#light-${id})`} style={{ cx: camera.fx, cy: camera.fy, opacity: light.opacity ?? 0.16 }} />
+          <motion.circle className="key-light" r="420" fill={`url(#light-${id})`} style={{ cx: camera.light?.x ?? camera.fx, cy: camera.light?.y ?? camera.fy, opacity: light.opacity ?? 0.16 }} />
         </>
       )}
       {children}

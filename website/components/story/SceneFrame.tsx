@@ -5,8 +5,8 @@ import { animate as tween, motion, motionValue, useInView, useMotionValue, useMo
 import { useCalm } from "@/lib/useCalm";
 import { DUR, EASE, useScrub } from "@/lib/motion";
 import { EXIT, orientationOf, StageFramingContext, stepAt, stepOf, useCards, usePortrait, type Camera } from "@/components/home/stage";
-import { IDENTITY, measureFraming, sameFraming, type Framing } from "./framing";
-import { BLOCKING, ROOMS, STAGE, valueAt, type Chapter } from "./poses";
+import { IDENTITY, measureFraming, sameFraming, STILL_LIGHT, stillCamera, type Framing } from "./framing";
+import { BLOCKING, ROOMS, valueAt, type Chapter } from "./poses";
 
 /**
  * A chapter of the story: a full-bleed stage that holds the screen while its
@@ -238,11 +238,15 @@ function StaticFigure({ state, at, from, play, chapter, portrait, children }: { 
     return () => controls.stop();
   }, [play, inView, at, p]);
   const b = BLOCKING[orientationOf(portrait)][chapter];
-  // A landscape still is a whole stage in a figure: a slight push about the centre keeps the safe area and lifts the labels above 11px.
-  const scale = useTransform(p, (): number => (portrait ? 1 : 1.25));
-  const fx = useTransform(p, (v): number => (portrait ? valueAt(b.focus, v)[0] : STAGE.landscape.w / 2));
-  const fy = useTransform(p, (v): number => (portrait ? valueAt(b.focus, v)[1] : 470));
-  const value = useMemo<SceneState>(() => ({ ...state, p, camera: { scale, fx, fy }, focus: { x: fx, y: fy } }), [state, p, scale, fx, fy]);
+  // A landscape still is a whole stage in a figure: a slight push lifts the labels, as far as the chapter's picture stays whole (framing.ts).
+  const still = stillCamera(chapter);
+  const scale = useTransform(p, (): number => (portrait ? 1 : still.scale));
+  const fx = useTransform(p, (v): number => (portrait ? valueAt(b.focus, v)[0] : still.fx));
+  const fy = useTransform(p, (v): number => (portrait ? valueAt(b.focus, v)[1] : still.fy));
+  // The key light and the gazes stay where they were before the push moved off centre.
+  const lx = useTransform(p, (v): number => (portrait ? valueAt(b.focus, v)[0] : STILL_LIGHT[0]));
+  const ly = useTransform(p, (v): number => (portrait ? valueAt(b.focus, v)[1] : STILL_LIGHT[1]));
+  const value = useMemo<SceneState>(() => ({ ...state, p, camera: { scale, fx, fy, light: { x: lx, y: ly } }, focus: { x: lx, y: ly } }), [state, p, scale, fx, fy, lx, ly]);
   return (
     <SceneContext.Provider value={value}>
       <figure ref={ref} className="scene-static-figure" aria-hidden="true">
