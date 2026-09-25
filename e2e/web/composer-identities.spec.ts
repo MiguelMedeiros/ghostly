@@ -80,8 +80,8 @@ test("an identity is added, shared and withdrawn from the chat's composer", { ta
   await expect(bob.page.getByTestId("chat-identity-badges")).toHaveCount(0);
   await openIdentities(bob);
   await expect(theirFace(bob)).toHaveAttribute("data-status", "withdrawn");
-  const back = await turnTheirs(bob);
-  await expect(back.getByTestId("chat-identity-received-status")).toHaveText("No longer shared");
+  const bobsCard = await turnTheirs(bob);
+  await expect(bobsCard.getByTestId("chat-identity-received-status")).toHaveText("No longer shared");
   await closeIdentities(bob);
 
   // Escape closes it and gives the focus back to the button; opened again, the keys start on the chosen card.

@@ -1,7 +1,7 @@
 import { act, screen, within } from "@testing-library/react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
-import type { LinkView } from "@ghostly/browser/shared/types";
+import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
 import { ContactIdentitiesPanel } from "../../components/identities/ContactIdentitiesPanel";
 import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -35,7 +35,7 @@ async function turnOver(user: ReturnType<typeof renderApp>["user"], i: number) {
   await user.click(theirs()[i]);
   return back();
 }
-const withReceived = (received: Parameters<typeof identitiesView>[0]["received"]) => ({ links: [paired({ identities: identitiesView({ received }) })] });
+const withReceived = (received: ReceivedIdentityView[]) => ({ links: [paired({ identities: identitiesView({ received }) })] });
 
 /** A chat's identities, in a panel beside the chat: the contact's ID cards, and which of mine they see. */
 describe("ContactIdentitiesPanel", () => {

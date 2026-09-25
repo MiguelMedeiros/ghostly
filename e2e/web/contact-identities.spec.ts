@@ -4,6 +4,7 @@ import { closeIdentities, shareIdentity, theirCards, turnTheirs, backToTheirCard
 import { LocalNostrRelay, NOSTR_TEST_RELAY } from "../support/nostrRelay";
 import { addNostrIdentity, injectNostrSigner } from "../support/nostrSigner";
 import { pair } from "../support/paired";
+import { choose } from "../support/select";
 import { testSshKey, type TestSshKey } from "../support/ssh";
 import { testBitcoinWallet } from "../../packages/browser/test/helpers/bitcoinSign";
 
@@ -56,7 +57,7 @@ async function addBitcoin(peer: Peer) {
   const add = peer.page.getByTestId("add-identity");
   await add.getByTestId("add-identity-bitcoin").click();
   await add.getByTestId("add-identity-subject").fill(wallet.address);
-  await add.getByTestId("add-identity-signer").selectOption("sparrow");
+  await choose(add.getByTestId("add-identity-signer"), "sparrow");
   await add.getByTestId("add-identity-start").click();
   const statement = (await add.getByTestId("add-identity-copy-0").textContent())!.trim();
   await add.getByTestId("add-identity-paste").fill(wallet.signBip322(statement).simple!);
