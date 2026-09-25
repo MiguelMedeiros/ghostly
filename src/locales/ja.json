@@ -55,6 +55,16 @@
     "yesterday": "昨日",
     "deleteMessage": "メッセージを削除",
     "deleteMessageHint": "この端末からのみ削除されます。相手の端末には残ります。",
+    "message": {
+      "details": "詳細",
+      "detailsTitle": "メッセージの詳細",
+      "detailsClose": "閉じる",
+      "copyJson": "すべてJSONとしてコピー",
+      "copied": "コピーしました",
+      "keysHint": "鍵はここには表示されません。",
+      "options": "メッセージのオプション",
+      "copyHint": "クリックしてコピー"
+    },
     "options": "オプション",
     "menu": {
       "pin": "チャットをピン留め",

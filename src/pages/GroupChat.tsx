@@ -227,11 +227,11 @@ export function GroupChat() {
             // A note about a payment this device is part of is shown under its own bubble instead.
             : m.groupPay ? (ownNotes.has(m.groupPay.id) ? null : <GroupPaymentNote key={m.id} note={m.groupPay} group={group} />)
             : m.paymentId ? <div key={m.id} data-testid="group-payment">
-              <MessageBubble message={toChatMessage(m, group)} peerAck={Number.MAX_SAFE_INTEGER} peerPubKey={peerOf(m.paymentId)} />
+              <MessageBubble message={toChatMessage(m, group)} peerAck={Number.MAX_SAFE_INTEGER} peerPubKey={peerOf(m.paymentId)} linkId={`group:${groupId}`} />
               {/* Said once, under the request (or the payment) itself: not again under a payment that answers it. */}
               {noteIdOf(state, m.paymentId) === m.paymentId && notes.get(m.paymentId) && <GroupPaymentCaption note={notes.get(m.paymentId)!} group={group} />}
             </div>
-            : <MessageBubble key={m.id} message={toChatMessage(m, group)} peerAck={Number.MAX_SAFE_INTEGER} />)}
+            : <MessageBubble key={m.id} message={toChatMessage(m, group)} peerAck={Number.MAX_SAFE_INTEGER} linkId={`group:${groupId}`} />)}
           <div ref={bottomRef} />
         </div>
       </div>}

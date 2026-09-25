@@ -55,6 +55,16 @@
     "yesterday": "Ontem",
     "deleteMessage": "Apagar mensagem",
     "deleteMessageHint": "Apagada só aqui. Seu contato continua com a cópia dele.",
+    "message": {
+      "details": "Detalhes",
+      "detailsTitle": "Detalhes da mensagem",
+      "detailsClose": "Fechar",
+      "copyJson": "Copiar tudo como JSON",
+      "copied": "Copiado",
+      "keysHint": "Chaves nunca aparecem aqui.",
+      "options": "Opções da mensagem",
+      "copyHint": "Clique para copiar"
+    },
     "options": "Opções",
     "menu": {
       "pin": "Fixar conversa",

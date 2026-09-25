@@ -464,6 +464,116 @@ export interface StoredMessage {
   event?: GroupEvent;
   /** Group history: a payment between members, as the group knows it (WISP 9xx § Payments). */
   groupPay?: GroupPayNote;
+  /** How this message travelled, as the engine saw it go or come (the message's details view). */
+  details?: MessageDetails;
+}
+
+/**
+ * The way a message went, as the engine saw it at that moment: a live transport, the DHT floor (a paired chat's
+ * `dht-text/1` envelope), the sender's storage (`hold/1`), or a chat from before pairing (`legacy-*`).
+ */
+export type MessagePath = PairedTransport | "dht" | "hold" | "legacy-datalink" | "legacy-dht";
+
+/** One send of a message: when, over what, and how it ended. */
+export interface MessageSend {
+  at: number;
+  path: MessagePath;
+  /** The live session crossed a relay (WISP 100, "Relayed"); the relays' hosts. */
+  relayed?: boolean;
+  relays?: string[];
+  /** The round trip measured on the session at the time. */
+  rttMs?: number;
+  /** Absent while the send is under way. */
+  result?: "sent" | "failed";
+  error?: string;
+}
+
+/**
+ * What the engine remembers about one message's travels, for its details view (WISP 400 § Message details): facts
+ * as they were when the message went or came, that nothing else keeps. Kept on the message row, bounded by
+ * `MESSAGE_DETAILS_MAX_BYTES`. Never a key, a seed or anything else that opens the chat.
+ */
+export interface MessageDetails {
+  /** Sends of this message, oldest first: the first and the last ones (`MESSAGE_DETAILS_MAX_SENDS`). */
+  sends?: MessageSend[];
+  /** Sends there were in all, when more than `sends` keeps. */
+  attempts?: number;
+  /** A received message: when it came and over what. */
+  received?: Omit<MessageSend, "result" | "error">;
+  /** The last successful send was handed to the transport. */
+  sentAt?: number;
+  /** The contact's receipt came (the message is `delivered`). */
+  receiptAt?: number;
+  /** Stored for an away contact, sealed for them. */
+  heldAt?: number;
+  /** A file: its last byte arrived here, or the contact confirmed it. */
+  completedAt?: number;
+  /** The frame the message travelled in. `wireBytes`: as sent on the channel (a JSON frame, a sealed record, a bundle). */
+  wire?: { frame: string; protocol: string; plaintextBytes?: number; wireBytes?: number; chunks?: number; chunkBytes?: number };
+  /** The DHT floor: the envelope's sequence and times, the sealed packet's size and nonce, the record read. */
+  dht?: { seq?: number; issued?: number; expires?: number; packetBytes?: number; nonce?: string; recordKey?: string; records?: string[] };
+  /** Store-and-forward: the item's sequence in the mailbox, its sealed size and expiry. */
+  hold?: { seq?: number; bytes?: number; expires?: number; mailbox?: string };
+}
+
+/** A details record larger than this (as JSON) is trimmed: its oldest sends go first. */
+export const MESSAGE_DETAILS_MAX_BYTES = 2048;
+/** Sends kept on a record: the first, and the last ones. */
+export const MESSAGE_DETAILS_MAX_SENDS = 6;
+
+/** What the details view is made of: the row, its record, and what the engine knows around it right now. */
+export interface MessageDetailsView {
+  message: Pick<StoredMessage, "id" | "wireId" | "linkId" | "sender" | "timestamp" | "via" | "delivery" | "deliveryError" | "resendUntil" | "member" | "nick"> & {
+    kind: "text" | "file" | "voice" | "payment" | "event" | "note";
+    /** UTF-8 bytes of the text. */
+    textBytes: number;
+  };
+  details?: MessageDetails;
+  /** The chat the message is in. Keys are the public participation keys (z-base-32), never a seed. */
+  link?: {
+    id: string;
+    profile?: "paired-chat/1";
+    deliveryMode?: DeliveryMode;
+    /** Our own participation key on this link. */
+    myKey: string;
+    /** The contact's, as pinned; absent before the first contact. */
+    peerKey?: string;
+    /** The pinned key was compared by the two people (WISP 401 § verification). */
+    verified: boolean;
+    /** The session carrying the chat right now, if any. */
+    transportNow?: PairedTransport;
+    relayedNow?: boolean;
+    rttNowMs?: number;
+  };
+  /** The file the message carries (files/2, files/3 or a held item), as stored. */
+  file?: {
+    id: string; name: string; size: number; mime: string;
+    /** SHA-256 of the bytes, hex, once known (the sender's own, or checked on arrival). */
+    digest?: string;
+    protocol?: "files/2" | "files/3" | "hold/1";
+    state?: string;
+    stage?: string;
+    transferred?: number;
+    /** files/3: bytes confirmed durably, where a restart resumes. */
+    confirmed?: number;
+    /** files/3: when the offer was made. */
+    since?: number;
+    consented?: boolean;
+    /** Where the bytes are kept on this device. */
+    storage?: string;
+    voice?: { duration: number; peaks: number };
+  };
+  /** The payment or request the message stands for: everything but the money itself. */
+  payment?: {
+    id: string; kind: "payment" | "request"; direction: "in" | "out"; amount: number; unit: string; state: PaymentState;
+    method?: string; network?: string; provider?: string; asset?: string; mint?: string; txid?: string; ask?: string;
+    createdAt: number; error?: string; memo?: string; group?: string;
+    /** SHA-256 of the invoice, hex, when there is one (the invoice itself carries the amount and a payment hash). */
+    invoiceDigest?: string;
+    lightningPending?: boolean; paidHere?: boolean;
+  };
+  /** A group message: which group, and the member key of the sender when it is not this device. */
+  group?: { id: string; member?: string; profile?: string };
 }
 
 /** The ways of paying a group note can name. */

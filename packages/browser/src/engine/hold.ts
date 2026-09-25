@@ -2,6 +2,8 @@ import { decodeControl, fromBase64Url, parseVoiceMeta, HOLD_LIMITS, HoldKeys, Ho
 import { heldName, manifestName, type HoldStore } from "../backup/storage";
 import type { HeldEntry, HoldState, LinkHoldView, StoredLink } from "../shared/types";
 
+/** What a picked-up item's manifest line says about it: its sequence in the contact's mailbox, the sealed size, its expiry. */
+export interface HeldFacts { seq: number; bytes: number; expires: number }
 export const emptyHoldState = (): HoldState => ({ enabled: false, outSeq: 0, inSeq: 0, peerAck: 0, pointerRev: 0, peerPointerRev: 0, outbox: [], refused: 0 });
 
 /** What the engine gives store-and-forward: storage, discovery, the chats and where received items go. */
@@ -18,9 +20,9 @@ export interface HoldHost {
   text(linkId: string, messageId: string): Promise<string | null>;
   file(fileId: string): Promise<{ bytes: Uint8Array; name: string; size: number; mime: string; voice?: VoiceMeta } | null>;
   paymentRequest(paymentId: string): PaymentRequest | null;
-  receiveText(linkId: string, message: { id: string; text: string; timestamp: number }): Promise<void>;
+  receiveText(linkId: string, message: { id: string; text: string; timestamp: number }, held?: HeldFacts): Promise<void>;
   /** Returns why it was not kept (room, a reused id), or null when it was. */
-  receiveFile(linkId: string, file: { wireId: string; name: string; size: number; mime: string; timestamp: number; voice?: VoiceMeta }, bytes: Uint8Array, digest: string): Promise<string | null>;
+  receiveFile(linkId: string, file: { wireId: string; name: string; size: number; mime: string; timestamp: number; voice?: VoiceMeta }, bytes: Uint8Array, digest: string, held?: HeldFacts): Promise<string | null>;
   receivePaymentRequest(linkId: string, request: PaymentRequest): Promise<void>;
   changed(): void;
   fetch?: typeof fetch;
@@ -376,11 +378,12 @@ export class HoldEngine {
         const { header, body } = keys.open(await this.fetchBytes(url, Math.min(bytes, HOLD_LIMITS.maxBundleBytes)), { maxBytes: HOLD_LIMITS.maxBundleBytes, now, mailbox });
         if (header.seq !== seq || header.id !== id || header.kind !== kind) throw new HoldRefusedError("format", "The item does not match the manifest");
         // Stored before the sequence advances: a crash in between stores it again, which the id dedups.
-        if (header.kind === "text") await this.host.receiveText(linkId, { id: header.id, text: utf8Decode(body), timestamp: header.ts });
+        const held: HeldFacts = { seq, bytes, expires };
+        if (header.kind === "text") await this.host.receiveText(linkId, { id: header.id, text: utf8Decode(body), timestamp: header.ts }, held);
         else if (header.kind === "file") {
           const meta = header.meta as { name: string; size: number; mime: string; voice?: unknown };
           const voice = parseVoiceMeta(meta.voice, meta.mime);
-          const refused = await this.host.receiveFile(linkId, { wireId: header.id, name: meta.name, size: meta.size, mime: meta.mime, timestamp: header.ts, ...(voice && { voice }) }, body, hex(fromBase64Url(header.digest)));
+          const refused = await this.host.receiveFile(linkId, { wireId: header.id, name: meta.name, size: meta.size, mime: meta.mime, timestamp: header.ts, ...(voice && { voice }) }, body, hex(fromBase64Url(header.digest)), held);
           if (refused) throw new HoldRefusedError("limits", refused);
         } else if (header.kind === "pay-req") {
           let parsed: unknown;

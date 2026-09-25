@@ -55,6 +55,16 @@
     "yesterday": "Hier",
     "deleteMessage": "Supprimer le message",
     "deleteMessageHint": "Supprimé uniquement ici. Votre contact garde sa copie.",
+    "message": {
+      "details": "Détails",
+      "detailsTitle": "Détails du message",
+      "detailsClose": "Fermer",
+      "copyJson": "Tout copier en JSON",
+      "copied": "Copié",
+      "keysHint": "Les clés ne sont jamais affichées ici.",
+      "options": "Options du message",
+      "copyHint": "Cliquer pour copier"
+    },
     "options": "Options",
     "menu": {
       "pin": "Épingler la discussion",

@@ -55,6 +55,16 @@
     "yesterday": "Ieri",
     "deleteMessage": "Elimina messaggio",
     "deleteMessageHint": "Eliminato solo qui. Il tuo contatto conserva la sua copia.",
+    "message": {
+      "details": "Dettagli",
+      "detailsTitle": "Dettagli del messaggio",
+      "detailsClose": "Chiudi",
+      "copyJson": "Copia tutto come JSON",
+      "copied": "Copiato",
+      "keysHint": "Le chiavi non vengono mai mostrate qui.",
+      "options": "Opzioni del messaggio",
+      "copyHint": "Clicca per copiare"
+    },
     "options": "Opzioni",
     "menu": {
       "pin": "Fissa chat",

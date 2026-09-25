@@ -186,7 +186,8 @@ test("a deleted message is gone for good, and gone only here", { tag: ["@feature
   expect(await storedFiles(alice)).toBe(1);
 
   for (const text of ["forget this one", "ghost.gif"]) {
-    await message(alice, text).getByTestId("message-delete").click();
+    await message(alice, text).getByTestId("message-options").click();
+    await alice.page.getByTestId("message-delete").click();
     await expect(message(alice, text).getByTestId("message-delete-menu")).toBeVisible();
     await message(alice, text).getByTestId("message-delete-confirm").click();
   }

@@ -1,3 +1,4 @@
+import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { MessageBubble } from "../../components/MessageBubble";
 import type { ChatMessage } from "../../lib/types";
@@ -44,11 +45,14 @@ describe("MessageBubble: theme colours", () => {
     expect(fixedColours(container)).toEqual([]);
   });
 
-  it("the double-click details stay on the theme too", async () => {
+  it("the double-click details take the bubble's colour too", async () => {
     const meta = { dhtKey: "k".repeat(40), dnsRecords: ["a"], relays: [] } as unknown as ChatMessage["meta"];
     const { container, user } = renderApp(<MessageBubble message={message({ meta })} peerPubKey="peer" />);
     await user.dblClick(container.querySelector("[data-message-bubble]")!);
-    expect(container).toHaveTextContent("NaCl secretbox");
+    const panel = await screen.findByTestId("message-details");
+    expect(within(panel).getByTestId("message-details-excerpt")).toHaveClass("bg-received-bg");
+    expect(container.querySelector("[data-message-bubble]")).toHaveClass("ring-accent");
     expect(fixedColours(container)).toEqual([]);
+    expect(fixedColours(panel)).toEqual([]);
   });
 });
