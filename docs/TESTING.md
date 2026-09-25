@@ -59,6 +59,7 @@ npm run test:affected                     # vs origin/dev + your working tree: u
 npm run test:affected -- --port 50310     # also the e2e picked: builds web/, serves it on 50310, stops it after
 npm run test:affected -- --list           # what would run, and why; runs nothing
 npm run test:affected -- --no-e2e --no-rust
+npm run test:affected -- --no-stack       # @gated tests: leave .env.e2e as it is, do not ask the shared stack
 npm run test:affected -- --base HEAD~1    # another base;  --files a.ts b.tsx  instead of the diff
 ```
 
@@ -75,6 +76,16 @@ It prints each step with the reason it runs, runs whole, or is skipped, then a s
 **Falling back.** When the diff cannot be narrowed, that area runs whole, and the plan says why: `package-lock.json`, a root `package.json` change other than `"scripts"`, or `patches/` run everything; a Vitest config or setup file runs its project whole; `eslint.config.mjs` the whole lint; a `tsconfig` every typecheck; `e2e/playwright.config.ts`, a file the `paths` map marks `"*"` (the app shell, `@ghostly/core`'s `index.ts`, the pairing path every spec walks through, `en.json`, whose strings the specs click) or a file no glob matches runs every e2e spec.
 
 **The `paths` map.** At the end of `e2e/features.json`: a glob (`*`, `**/`, `{a,b}`) → the features a change there can break, as ids, `area.*` prefixes (the id `area` and everything under it), `"*"` for everything, or `[]` for nothing an e2e spec sees (docs, tests, tooling, Rust). A file matching several globs gets all their features. `npm run test:map` (in CI) fails on a pattern that names no feature and warns on a source file no glob matches.
+
+**Gated tests and the shared stack.** When the e2e picked include `@gated` tests, the plan counts them: those whose spec reads one of the e2e stack's variables (`e2e/infra/env.mjs`) and those waiting on something the stack does not provide (Breez's hosted regtest, a measurement's `E2E_JOIN_RUNS`), which skip unless you set it. For the first kind it prefers the shared stack on the test server "one" ([e2e/README.md](../e2e/README.md#on-another-host-the-shared-stack-on-one)):
+
+| | What `test:affected` does |
+|---|---|
+| a run with the e2e (`--port`, `E2E_WEB_URL`) | `node e2e/infra/infra.mjs status --host one` (opens this machine's connection to one and its port forwards); if it answers and `.env.e2e` does not point there, `npm run e2e:infra:use -- --host one` (forwards + `.env.e2e`) before Playwright |
+| `--list` | `node e2e/infra/infra.mjs check --host one`: the same verdict through the connection this machine already has, read-only; with none running it says "not checked". It prints what a run would do, `use` command included, and writes nothing |
+| one does not answer (or `use` fails) | says why and how many gated tests will skip. If `.env.e2e` points at one, its variables go to Playwright empty, so those tests skip instead of timing out on dead ports (and the Cashu tests use the public mint). A `.env.e2e` naming another stack (a local one) is used as it is |
+
+It never starts, stops, resets or seeds a stack, here or on one, and never falls back to a local Docker stack: when one is down, `npm run e2e:infra:status -- --host one` tells you why, and bringing it up is a decision for whoever owns it. The decisions are pure functions in [`scripts/affected/stack.mjs`](../scripts/affected/stack.mjs), tested in `scripts/test/affected-stack.test.ts`.
 
 **Workers.** Locally Vitest runs at most `JOBS` workers (default 2; [`vitest.shared.ts`](../vitest.shared.ts), shared by every Vitest config) and Playwright `E2E_WORKERS` (default 2; `MATRIX_WORKERS` for the matrix), so a plain `npm test` or `npx playwright test` no longer takes a worker per core. CI is unchanged (Vitest's default, 2 Playwright workers). `--maxWorkers` / `--workers` on the command line still win.
 

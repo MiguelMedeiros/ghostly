@@ -99,9 +99,15 @@ function address() {
 /** This machine's own Docker (whatever DOCKER_HOST was before this module pointed it elsewhere), for `docker` here. */
 export const LOCAL_DOCKER = { ...process.env };
 
-if (remote && main) {
+// `check` is read-only (`npm run test:affected -- --list` asks it): it uses the connection when one runs and never
+// opens one, nor forwards a port.
+const readOnly = main && process.argv[2] === "check";
+if (remote && main && !readOnly) {
   connect();
   process.env.E2E_INFRA_HOST = HOST;
   process.env.E2E_INFRA_ADDRESS = address();
   process.env.DOCKER_HOST = `unix://${SOCKET}`;
+} else if (remote && readOnly) {
+  process.env.E2E_INFRA_HOST = HOST;
+  if (connected()) process.env.DOCKER_HOST = `unix://${SOCKET}`;
 }

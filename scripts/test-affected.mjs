@@ -9,14 +9,18 @@
 //   npm run test:affected -- --base HEAD~3       # diff against another base
 //   npm run test:affected -- --files a.ts b.tsx  # these files instead of the diff
 //   npm run test:affected -- --no-e2e --no-rust  # leave those out
+//   npm run test:affected -- --no-stack          # @gated tests: .env.e2e as it is, the shared stack not asked
 //
 // JOBS (default 2): vitest workers, cargo test threads. E2E_WORKERS (default 2): Playwright workers.
 // What is picked and why: scripts/affected/select.mjs. The e2e mapping is e2e/features.json "paths".
+// @gated tests picked: the shared stack on "one" is checked and joined first (scripts/affected/stack.mjs).
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync, mkdirSync } from "node:fs";
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { HARNESS_PORTS, REMOTE, VARIABLES } from "../e2e/infra/env.mjs";
 import { plan as makePlan } from "./affected/select.mjs";
+import { COMMANDS, SHARED, blanked, envTarget, gatedTests, stackDecision, statusWhy } from "./affected/stack.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const argv = process.argv.slice(2);
@@ -26,7 +30,7 @@ const option = (name) => {
   return i >= 0 ? argv[i + 1] : undefined;
 };
 if (flag("--help") || flag("-h")) {
-  console.log(readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 15).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
+  console.log(readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 17).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
   process.exit(0);
 }
 
@@ -36,6 +40,7 @@ const base = option("--base") ?? "origin/dev";
 const list = flag("--list");
 const noE2e = flag("--no-e2e");
 const noRust = flag("--no-rust");
+const noStack = flag("--no-stack");
 const port = option("--port") ?? process.env.E2E_WEB_PORT;
 const webUrl = process.env.E2E_WEB_URL;
 
@@ -96,7 +101,8 @@ function sources(...dirs) {
 const inventory = JSON.parse(readFileSync(join(ROOT, "e2e/features.json"), "utf8"));
 const coreTouched = changed.some((c) => c.path.startsWith("packages/core/src/"));
 const codeFiles = coreTouched ? sources("packages", "src", "extension/src", "extension/test", "web/src") : undefined;
-const p = makePlan({ changed, inventory, e2eFiles: sources("e2e"), codeFiles });
+const e2eFiles = sources("e2e");
+const p = makePlan({ changed, inventory, e2eFiles, codeFiles });
 
 // ---------- the plan, printed ----------
 const short = (xs, n = 8) => (xs.length <= n ? xs.join(", ") : `${xs.slice(0, n).join(", ")} … (+${xs.length - n})`);
@@ -135,6 +141,41 @@ const e2eTarget = webUrl ? `E2E_WEB_URL=${webUrl}` : port ? `a fresh build serve
 if (noE2e && p.e2e.mode !== "skip") console.log("  off     --no-e2e");
 else if (e2eWanted && !e2eTarget) console.log("  off     no --port <n> (or E2E_WEB_PORT / E2E_WEB_URL) given: pass one from your session's port range to run these");
 else if (e2eWanted) console.log(`  target  ${e2eTarget}`);
+
+// ---------- @gated tests and the shared stack ----------
+const ENV_FILE = join(ROOT, ".env.e2e");
+const envNow = () => envTarget(existsSync(ENV_FILE) ? readFileSync(ENV_FILE, "utf8") : null);
+/** What `.env.e2e` holds (DOCKER_HOST aside: the shell's Docker is not the suite's to blank). */
+const STACK_VARIABLES = [...Object.keys(VARIABLES).filter((n) => !HARNESS_PORTS.includes(n)), ...Object.keys(REMOTE).filter((n) => n !== "DOCKER_HOST")];
+const gated = gatedTests(p.e2e, e2eFiles, Object.keys(VARIABLES).filter((n) => n.startsWith("GHOSTLY_")));
+const e2eRuns = e2eWanted && Boolean(e2eTarget) && !list;
+/** `node e2e/infra/infra.mjs <command> --host one`, quietly: the exit code and what it printed. */
+function infra(command) {
+  const r = spawnSync(process.execPath, ["e2e/infra/infra.mjs", command, "--host", SHARED.name], { cwd: ROOT, encoding: "utf8", timeout: 120_000 });
+  return { code: r.status ?? 1, output: `${r.stdout ?? ""}${r.stderr ?? ""}${r.error ? `\n${r.error.message}` : ""}` };
+}
+let stack = { use: false, blank: false, lines: [] };
+if (!noE2e && gated.stackTests + gated.otherTests) {
+  console.log("gated (@gated)");
+  const specs = (xs) => short(xs.map((g) => `${g.spec.replace(/^e2e\//, "")}${g.tests > 1 ? ` ×${g.tests}` : ""}`), 6);
+  if (gated.stackTests) console.log(`  stack   ${gated.stackTests} test(s) need the e2e stack: ${specs(gated.stack)}`);
+  if (gated.otherTests) console.log(`  other   ${gated.otherTests} test(s) wait on something the stack does not provide, and skip unless it is set: ${specs(gated.other)}`);
+  if (gated.stackTests && noStack) {
+    console.log(`            --no-stack: .env.e2e as it is (${envNow() === "none" ? "none: they skip" : `points at ${envNow() === "local" ? "this machine" : envNow()}`})`);
+  } else if (gated.stackTests) {
+    let check = "unchecked";
+    let why;
+    // --list stays read-only: `check` uses the connection this machine already has and opens none. A run asks
+    // `status`, which opens the connection and the port forwards `use` needs anyway. Neither starts a stack.
+    if (list || e2eRuns) {
+      const { code, output } = infra(list ? "check" : "status");
+      check = code === 0 ? "answers" : list && code === 3 ? "unchecked" : "silent";
+      why = code === 0 ? undefined : list && code === 3 ? `--list opens no connection to ${SHARED.name}, and none runs` : statusWhy(output);
+    } else why = "the e2e does not run";
+    stack = stackDecision({ tests: gated.stackTests, env: envNow(), check, why, list });
+    for (const line of stack.lines) console.log(`            ${line}`);
+  }
+}
 
 if (list) process.exit(0);
 
@@ -238,7 +279,9 @@ async function runE2e() {
   process.on("SIGINT", () => { stop(); process.exit(130); });
   try {
     if (needsExt && !(await run("e2e: build the extension", "npm", ["run", "build:extension"]))) return;
-    const env = { E2E_WEB_URL: url, E2E_WORKERS: String(E2E_WORKERS) };
+    if (stack.use) await joinStack();
+    // A stack .env.e2e names that does not answer: its variables go empty, so the gated tests skip.
+    const env = { E2E_WEB_URL: url, E2E_WORKERS: String(E2E_WORKERS), ...(stack.blank ? blanked(STACK_VARIABLES) : {}) };
     const pw = ["playwright", "test", "-c", "e2e/playwright.config.ts", `--workers=${E2E_WORKERS}`];
     if (p.e2e.mode === "whole") {
       await run(`e2e: every web and extension spec (${p.e2e.specs.length})`, "npx", [...pw, "--project=web", "--project=extension"], { env });
@@ -251,11 +294,27 @@ async function runE2e() {
   }
 }
 
+/** `npm run e2e:infra:use -- --host one`: port forwards and .env.e2e. It never starts a stack. */
+async function joinStack() {
+  console.log(`\n▶ e2e: join the shared stack on ${SHARED.name}\n  $ ${COMMANDS.use}`);
+  const start = Date.now();
+  const joined = spawnSync("npm", ["run", "e2e:infra:use", "--", "--host", SHARED.name], { cwd: ROOT, stdio: "inherit" }).status === 0 && envNow() === SHARED.host;
+  if (joined) {
+    results.push({ label: `e2e: joined the shared stack on ${SHARED.name}`, ok: true, seconds: (Date.now() - start) / 1000 });
+    stack = stackDecision({ tests: gated.stackTests, env: envNow(), check: "answers" });
+    return;
+  }
+  stack = stackDecision({ tests: gated.stackTests, env: envNow(), check: "unjoined", why: `${COMMANDS.use} failed, see above` });
+  for (const line of stack.lines) console.log(`  ${line}`);
+  skipped.push(`gated: ${stack.lines[0]}`);
+}
+
 // ---------- the summary ----------
 const mins = (s) => (s >= 60 ? `${Math.floor(s / 60)}m${String(Math.round(s % 60)).padStart(2, "0")}s` : `${s.toFixed(1)}s`);
 console.log(`\n── test:affected summary (${mins((Date.now() - started) / 1000)}) ──`);
 for (const r of results) console.log(`  ${r.ok ? "✓" : "✗"} ${r.label}  ${mins(r.seconds)}`);
 for (const s of skipped) console.log(`  · skipped ${s}`);
+if (e2eRuns && stack.lines.length && !skipped.some((s) => s.startsWith("gated:"))) console.log(`  · gated: ${stack.lines[0]}`);
 const failed = results.filter((r) => !r.ok);
 console.log(failed.length ? `\n${failed.length} step(s) failed. CI runs the full suite on every push.` : "\nAll affected checks passed. CI runs the full suite on every push.");
 process.exit(failed.length ? 1 : 0);
