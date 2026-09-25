@@ -144,7 +144,10 @@ describe.each([
     await contact.setTransportPreference("hyperdht/1", true);
     await vi.waitFor(() => expect([view().pairing?.transitionTarget, contactState().transitionTarget]).toEqual(["hyperdht/1", "hyperdht/1"]));
     // A message still on the wire when the link drops is lost with it, and must go again once the chat is back.
+    // A slow wire for that one frame keeps it on the way whatever the send path costs.
+    net.latencyMs = 5_000;
     expect((await node.sendMessage({ linkId: id, text: "in flight at the drop" })).error).toBeNull();
+    net.latencyMs = 2;
     contact.disconnect();
     await vi.waitFor(() => expect(lines(view()).at(-1)).toEqual(["lost", null, null]));
     release();
