@@ -22,7 +22,7 @@ class PubkyNet {
   down = new Set<string>();
 
   publish(identity: Identity, records: Parameters<typeof encodeSvcbPacket>[0], { relays = [...this.relays.keys()], at }: { relays?: string[]; at?: bigint } = {}) {
-    const payload = signRelayPayload(identity, encodeSvcbPacket(records), at);
+    const payload = signRelayPayload(identity, encodeSvcbPacket(records), at ?? BigInt(Date.now()) * 1000n);
     for (const relay of relays) this.relays.get(relay)!.set(identity.pubKeyZ32, payload);
   }
   homeserver(host = "hs.example.com", port?: number): Identity {
@@ -145,7 +145,7 @@ describe("Pubky proofs: verify", () => {
     net.down.add("https://pkarr.pubky.org");
     await expect(verify(net, s, { folder })).resolves.toBeTruthy();
     // The other relay now serves a packet for my key that someone else signed.
-    net.relays.get("https://pkarr.pubky.app")!.set(me.pubKeyZ32, signRelayPayload(createIdentity(), encodeSvcbPacket([{ name: "_pubky", priority: 0, target: createIdentity().pubKeyZ32 }])));
+    net.relays.get("https://pkarr.pubky.app")!.set(me.pubKeyZ32, signRelayPayload(createIdentity(), encodeSvcbPacket([{ name: "_pubky", priority: 0, target: createIdentity().pubKeyZ32 }]), 1n));
     await expect(verify(net, s, { folder })).rejects.toThrow(/no records/);
   });
 
@@ -183,5 +183,12 @@ describe("Pubky proofs: offline", () => {
   it("says it is offline rather than that the key has no records", async () => {
     const offline = boundedIdentityFetch({ online: () => false });
     await expect(pubkyRecords(createIdentity().pubKeyZ32, offline)).rejects.toThrow(/Offline/);
+  });
+});
+
+describe("Pubky proofs: the public URI", () => {
+  it("is the key as a pubky:// URI, for the profile's DID to list", () => {
+    const key = createIdentity().pubKeyZ32;
+    expect(createPubkyIdentityProvider().publicUri!(key)).toBe(`pubky://${key}`);
   });
 });

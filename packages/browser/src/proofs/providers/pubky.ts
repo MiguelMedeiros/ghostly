@@ -78,6 +78,8 @@ export function createPubkyIdentityProvider(options: PubkyIdentityOptions = {}):
     recheck: { afterSeconds: 86_400 },
     privacy: "Your contact’s app reads your key’s records from Pubky’s Pkarr relays (pkarr.pubky.org, pkarr.pubky.app) and the proof file from your homeserver, which sees the contact’s IP address.",
     signers: [signer],
+    // Pubky's own URI form for a key, as its SDK writes resources (`pubky://<key>/…`).
+    publicUri: key => `pubky://${key}`,
     parseEvidence(raw) {
       const e = raw as PubkyEvidence;
       if (!raw || typeof raw !== "object" || Array.isArray(raw) || Object.keys(raw).join(",") !== "folder" || !isPubkyProofFolder(e.folder))

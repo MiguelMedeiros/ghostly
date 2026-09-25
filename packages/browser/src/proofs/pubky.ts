@@ -31,7 +31,7 @@ export async function pubkyRecords(key: string, fetch: IdentityFetch, signal?: A
     catch (e) { failed.push(e); return undefined; }
     try { return r.status === 200 ? openRelayPayload(key, r.bytes) : undefined; } catch { return undefined; }
   }));
-  const newest = answers.filter(a => !!a).sort((a, b) => (b.timestampMicros > a.timestampMicros ? 1 : b.timestampMicros < a.timestampMicros ? -1 : 0))[0];
+  const newest = answers.filter(a => !!a).sort((a, b) => (b.seq > a.seq ? 1 : b.seq < a.seq ? -1 : 0))[0];
   // No relay answered at all (offline, a time-out): say that, not that the key has no records.
   if (!newest && failed.length === relays.length && failed[0] instanceof Error) throw failed[0];
   if (!newest) throw new Error("This Pubky key has no records on the Pkarr relays");
