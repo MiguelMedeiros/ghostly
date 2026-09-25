@@ -12,6 +12,7 @@ import { AddIdentityDialog } from "./AddIdentityDialog";
 import { AddIdCardFace, IdCardFace, IdCardMark } from "./IdCardFace";
 import { GHOSTLY, ghostlyCard, idCard, idCardTone, type IdCardContent } from "./idCard";
 import { ProviderMark, StatusPill } from "./ProviderMark";
+import { PublicDid } from "./PublicDid";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
 
 /** The last card: a blank one that adds an identity. */
@@ -102,6 +103,7 @@ export function IdentityProofsSection() {
                 <Button data-testid="identity-ghostly-edit" onClick={() => nav.open("/profile")}>{t("identities.ghostly.editProfile")}</Button>
               </div>
             </Block>
+            <PublicDid state={state} />
           </div>
         ) : (() => {
           const { proof: p, card } = entry;

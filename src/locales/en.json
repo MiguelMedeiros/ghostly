@@ -325,6 +325,26 @@
       "notVerified": "Not verified",
       "verifiedExplain": "You compared codes with them: their key is the one you verified.",
       "notVerifiedExplain": "You have not compared codes with them yet; the chat's connection panel offers it."
+    },
+    "did": {
+      "title": "Public DID",
+      "hint": "An identifier for this profile that anyone can look up (a W3C DID, did:dht). It has a key of its own: no chat uses it, so it ties none of them together.",
+      "live": "Published",
+      "notLive": "Not published",
+      "copy": "Copy DID",
+      "showQr": "Show QR code",
+      "hideQr": "Hide QR code",
+      "qrTitle": "QR code of your DID",
+      "published": "Published {{time}}. It goes out again every hour while the app runs.",
+      "updating": "Publishing the change…",
+      "publishing": "Publishing…",
+      "offline": "Not published while the network is off.",
+      "failed": "Could not publish: {{error}}. Trying again in a few minutes.",
+      "listTitle": "List identities publicly in my DID",
+      "warning": "Anything listed here is public to everyone, for good: anyone with your DID sees it, and some resolvers keep copies even after you take it out. Chats never need it. Leave these off to share each identity with one contact at a time.",
+      "none": "No identity to list yet. Nostr keys, domains, OpenPGP keys, Bitcoin addresses and GitHub or GitLab accounts can be listed once you add them.",
+      "expired": "Expired: not listed until you renew it",
+      "listOne": "List {{identity}} publicly in my DID"
     }
   },
   "profileSwitcher": {

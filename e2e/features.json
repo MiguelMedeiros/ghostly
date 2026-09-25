@@ -589,6 +589,7 @@
     "src/components/identities/**/*": ["proofs.*","sdk.plugin.identity"],
     "src/components/identities/IdentitiesIcon.tsx": ["app.navigation","app.mobile-layout"],
     "src/components/identities/ChatIdentitiesDialog.tsx": ["nostr.*"],
+    "src/components/identities/PublicDid.tsx": ["did.*"],
     "src/components/nostr/**/*": ["nostr.*","proofs.nostr","proofs.share"],
     "packages/core/src/index.ts": ["*"],
     "packages/core/src/{bytes,crypto,identity,invite,link,records,pkarr,relay,dns,transport,frames,datalink,signal,ghostlink,pairedSession,pairedSignal,pairedTransports}.ts": ["*"],
