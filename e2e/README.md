@@ -199,6 +199,7 @@ npm run e2e:infra:up && npm run test:e2e      # .env.e2e sets E2E_MINT_URL
 | `extension/services.spec.ts` | a local web app shared by one extension and opened by another over WebRTC, stopped, offline, gone |
 | `extension/paired-services.spec.ts` · `services-extras.spec.ts` | sharing from the chat itself; the contact opens it from Services; removed, it is gone everywhere |
 | `desktop/smoke.spec.ts` | the bundled Tauri app opens, and the peer behind it is the one Rust backs |
+| `desktop-macos/calls-services.spec.ts` | macOS only: two Desktop apps in the system WKWebView pair (ghostly1 invite), place a video call with media both ways, open a local app one of them shares, and show why calls are off on the DHT — see [Desktop on macOS](#desktop-on-macos) |
 
 ## Desktop
 
@@ -215,7 +216,7 @@ xvfb-run -a npm run test:e2e:desktop
 |---|---|
 | Linux | yes, through `WebKitWebDriver` (`webkit2gtk-driver`). This is where CI runs it. |
 | Windows | should work, through `msedgedriver`; nothing runs it yet |
-| macOS | **no.** WKWebView has no WebDriver, so there is nothing for `tauri-driver` to drive. |
+| macOS | **no.** WKWebView has no WebDriver, so there is nothing for `tauri-driver` to drive. A build with the test driver does run there: [Desktop on macOS](#desktop-on-macos). |
 
 Two things to know:
 
@@ -247,6 +248,46 @@ both for a private network as much as for tests:
 
 `DesktopApp` clicks, types (`type`, with `\uE007` for Enter), reads text and attributes, and runs a script in the
 page (`execute`): enough for `matrix/people.ts` to drive a chat.
+
+## Desktop on macOS
+
+Calls and shared apps need a live chat, and a Linux Desktop pair never goes live (WebKitGTK has no WebRTC), so
+the Linux harness only sees their buttons say why not. `desktop-macos/calls-services.spec.ts` runs them where most
+Desktop users are: two apps on one Mac, in the system WKWebView.
+
+```bash
+npm run desktop:macos:build        # a debug build with the test driver, as tools.ghostly.e2e (about 1.5 min warm)
+npm run test:e2e:desktop-macos     # about 15 s once built
+```
+
+- **Driving without WebDriver.** `npm run desktop:macos:build` is `tauri build --debug --bundles app --features
+  e2e-driver --config src-tauri/tauri.e2e.conf.json`. The feature compiles in `src-tauri/src/e2e_driver.rs`: an HTTP
+  server on 127.0.0.1 (only when the app starts with `GHOSTLY_E2E_DRIVER=<port>`, and only for requests carrying
+  `GHOSTLY_E2E_DRIVER_TOKEN`) that runs a script in a window (`eval_with_callback`) and answers with its value. A
+  release build with the feature does not compile. The same build reads an empty clipboard, never the Mac's.
+  `support/desktopMac.ts` (`openMacDesktop`, `MacDriver`) speaks to it and implements `DesktopApp`, so
+  `matrix/people.ts`'s `desktopPerson(name, { open })` drives it like the Linux one; `MacDriver.in(label)` reaches
+  another window, such as the one a shared app opens in.
+- **Two apps.** The bundle is copied once per person with a bundle id of its own (`tools.ghostly.e2e.a`, `.b`;
+  never the real app's, nor anyone's `app.ghostly.chattesta/b`) and signed again ad hoc: WebKit keeps a page's
+  storage per bundle id, so the copies share nothing. Each starts with its own `GHOSTLY_PROFILE`, stays out of the
+  Dock and never takes the focus (the driver sets the accessory activation policy), and is removed with what it
+  stored (`~/Library/WebKit/<id>` and the rest) when it stops, and before it starts in case a run stopped halfway.
+  Nobody has to be at the Mac; the windows do show on its screen.
+- **Network.** The Pkarr relay, a HyperDHT testnet and the shared app ("Atlas", `extension/test/atlas.mjs`) are in
+  the test process on 49701-49703, the drivers on 49710-49711. The call's STUN lookups and the wallets' providers
+  go out as the apps always do.
+- **Camera and microphone.** None are used. WKWebView has no fake-device flags, so the test answers
+  `getUserMedia` with a synthetic stream — an oscillator through Web Audio and a canvas that changes every frame
+  (`captureStream`). Replace it on `MediaDevices.prototype`: on the `navigator.mediaDevices` instance, the answering
+  app sometimes still reached WebKit's own, which with no camera fails "OverconstrainedError: Invalid constraint".
+  Media flowing is read from each side's `RTCPeerConnection` stats (inbound audio and video bytes, decoded frames,
+  still growing) and from the remote `<video>`'s size.
+- **When it fails** the report has, per app, the page's text and console, the call's local and remote SDP, and the
+  app's log.
+
+In CI it is the `Desktop on macOS` workflow (`macos-15`): pushes to `dev`, nightly, by hand (with `repeat` to run
+it several times on one build), and pull requests that touch it.
 
 ## The combination matrix
 
@@ -308,6 +349,9 @@ build on port 47300 (`MATRIX_WEB_PORT`), and its test domain uses 47320-47399.
   `npm run e2e:full`. On `ubuntu-24.04` it took about 42 minutes on 2026-09-24: the environment up and funded in
   53 s, the vitest contracts in 37 s, Playwright (2 workers, one retry) in 39 minutes — well inside a runner's
   six hours and the workflow's 150-minute cap. On a 14-core Mac with 7 workers, about 22–28 minutes.
+
+- Desktop on macOS: its own workflow, on pushes to `dev`, nightly and by hand; on pull requests only when they touch
+  it ([Desktop on macOS](#desktop-on-macos)).
 
 Not on pull requests: at about four minutes it would hold up every merge. `npm run check:desktop-bundle` is the exception — it is fast enough to run there.
 

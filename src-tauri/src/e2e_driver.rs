@@ -8,7 +8,9 @@
 //! clipboard, so a test never sees what is on the clipboard of the machine running it.
 
 #[cfg(all(feature = "e2e-driver", not(debug_assertions)))]
-compile_error!("the e2e driver is for debug builds only: `tauri build --debug --features e2e-driver`");
+compile_error!(
+    "the e2e driver is for debug builds only: `tauri build --debug --features e2e-driver`"
+);
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -41,7 +43,10 @@ struct Eval {
 
 /// Starts the driver when `GHOSTLY_E2E_DRIVER` names a port (with its token in `GHOSTLY_E2E_DRIVER_TOKEN`).
 pub fn start<R: Runtime>(app: &AppHandle<R>) {
-    let Some(port) = std::env::var("GHOSTLY_E2E_DRIVER").ok().and_then(|p| p.parse::<u16>().ok()) else {
+    let Some(port) = std::env::var("GHOSTLY_E2E_DRIVER")
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok())
+    else {
         return;
     };
     let token = std::env::var("GHOSTLY_E2E_DRIVER_TOKEN").unwrap_or_default();
@@ -110,7 +115,14 @@ fn answer<R: Runtime>(app: &AppHandle<R>, request: &Request) -> (u16, String) {
                 return (400, error(&e.to_string()));
             }
             match rx.recv_timeout(EVAL_TIMEOUT) {
-                Ok(value) => (200, if value.is_empty() { "null".into() } else { value }),
+                Ok(value) => (
+                    200,
+                    if value.is_empty() {
+                        "null".into()
+                    } else {
+                        value
+                    },
+                ),
                 Err(_) => (504, error("the script did not answer")),
             }
         }
@@ -156,7 +168,12 @@ pub fn read_request(stream: impl Read) -> Result<Request, String> {
     }
     let mut body = vec![0; length];
     reader.read_exact(&mut body).map_err(|e| e.to_string())?;
-    Ok(Request { method, path, token, body })
+    Ok(Request {
+        method,
+        path,
+        token,
+        body,
+    })
 }
 
 #[cfg(test)]
@@ -169,7 +186,12 @@ mod tests {
         let request = read_request(&raw[..]).unwrap();
         assert_eq!(
             request,
-            Request { method: "POST".into(), path: "/eval".into(), token: Some("secret".into()), body: b"hello".to_vec() }
+            Request {
+                method: "POST".into(),
+                path: "/eval".into(),
+                token: Some("secret".into()),
+                body: b"hello".to_vec()
+            }
         );
     }
 
@@ -183,9 +205,17 @@ mod tests {
     fn refuses_what_is_not_a_request() {
         assert!(read_request(&b""[..]).is_err());
         assert!(read_request(&b"GET /windows HTTP/1.1\r\nno colon\r\n\r\n"[..]).is_err());
-        assert!(read_request(&b"GET / HTTP/1.1\r\nHost: x\r\n"[..]).is_err(), "headers that never end");
-        let huge = format!("POST /eval HTTP/1.1\r\ncontent-length: {}\r\n\r\n", MAX_BODY + 1);
+        assert!(
+            read_request(&b"GET / HTTP/1.1\r\nHost: x\r\n"[..]).is_err(),
+            "headers that never end"
+        );
+        let huge = format!(
+            "POST /eval HTTP/1.1\r\ncontent-length: {}\r\n\r\n",
+            MAX_BODY + 1
+        );
         assert!(read_request(huge.as_bytes()).is_err());
-        assert!(read_request(&b"POST /eval HTTP/1.1\r\ncontent-length: 10\r\n\r\nshort"[..]).is_err());
+        assert!(
+            read_request(&b"POST /eval HTTP/1.1\r\ncontent-length: 10\r\n\r\nshort"[..]).is_err()
+        );
     }
 }

@@ -4,7 +4,7 @@
 |---|---|
 | Candidate number | 601; editorial family allocation |
 | Status | Draft |
-| Revision | 0.3 |
+| Revision | 0.4 |
 | Updated | 2026-09-25 |
 | Document kind | Profile |
 | Dependencies | [600](600-media.md) |
@@ -34,6 +34,7 @@ This covers the calls of compatibility chats ([402](402-legacy-chat.md)) and of 
 
 ## Revision log
 
+- 0.4 (2026-09-25): signals carry the Opus/VP8 payload types when not 111/96 (`ap`, `vp`; PROTOCOL.md §4.2) and accept an IPv6 related address: WebKit's offers rang nowhere or showed one picture. Found by two Desktop apps on a Mac (e2e/desktop-macos/).
 - 0.3 (2026-09-25): paired profile: `paired-call` signals on the live session, media on a WebRTC connection of its own whatever carries the chat.
 - 0.2 (2026-09-25): scope named as compatibility chats; calls in the chat session being implemented.
 - 0.1 (2026-09-22): WebRTC media profile.
