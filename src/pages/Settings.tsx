@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
 import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
 import { useLockScreen } from "../contexts/LockScreenContext";
@@ -33,9 +32,10 @@ import {
   type Language,
 } from "../lib/settings";
 import { deleteAllSessions, listSessions } from "../lib/storage";
+import { useAppNavigation } from "../hooks/useAppNavigation";
 
 export function Settings() {
-  const navigate = useNavigate();
+  const nav = useAppNavigation();
   const { settings, updateColorScheme, updateColorTheme, updateLanguage, updateLockScreen, updateNotifications, updateDefaultNickname,
     updateReduceMotion, updateChatListDensity, updateCheckForUpdates, randomizeNickname } =
     useSettings();
@@ -205,7 +205,7 @@ export function Settings() {
         {/* A phone has no account bar, and Profile no tab of its own (the bar is full): this is the way there. */}
         {isMobile && (
           <LinkRow testId="settings-profile-link" leading={<ProfileBadge entry={profile} size={36} avatar={myAvatar} />}
-            label={profile.name} hint={t("settings.profileLinkHint")} onClick={() => navigate("/profile")} />
+            label={profile.name} hint={t("settings.profileLinkHint")} onClick={() => nav.open("/profile")} />
         )}
         {/* The account switcher, where a phone's tab bar holds it (holding Settings opens it too). */}
         {isMobile && canSwitch && (
@@ -341,7 +341,7 @@ export function Settings() {
         )}
         {hasPassword && lockEnabled && (
           <Block>
-            <button onClick={() => { lock(); navigate("/"); }} className={`${button} w-full flex items-center justify-center gap-2 bg-surface-alt hover:bg-surface-hover text-text-primary`}>
+            <button onClick={() => { lock(); nav.home(); }} className={`${button} w-full flex items-center justify-center gap-2 bg-surface-alt hover:bg-surface-hover text-text-primary`}>
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
               </svg>

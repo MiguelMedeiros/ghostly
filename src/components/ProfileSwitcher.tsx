@@ -1,11 +1,11 @@
 import { useEffect, useRef, type KeyboardEvent } from "react";
-import { useNavigate } from "react-router-dom";
 import { useI18n } from "../contexts/I18nContext";
 import { useSettings } from "../contexts/SettingsContext";
 import { useMyAvatar } from "../hooks/useAvatars";
 import { shortcutLabel, type OtherProfile, type useProfileGlances } from "../hooks/useProfileSwitcher";
 import { THEME_COLOR, switchProfile, themeOf } from "../lib/profiles";
 import { ProfileBadge } from "./ProfileBadge";
+import { useAppNavigation } from "../hooks/useAppNavigation";
 
 const LockIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
@@ -23,7 +23,7 @@ export function ProfileSwitcherMenu({ variant, glances, onClose }: {
   onClose: (restoreFocus?: boolean) => void;
 }) {
   const { t } = useI18n();
-  const navigate = useNavigate();
+  const nav = useAppNavigation();
   const { settings } = useSettings();
   const myAvatar = useMyAvatar();
   const menuRef = useRef<HTMLDivElement>(null);
@@ -52,7 +52,9 @@ export function ProfileSwitcherMenu({ variant, glances, onClose }: {
     else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose(); }
     else if (e.key === "Tab") onClose(false);
   };
-  const go = (path: string, state?: unknown) => { onClose(false); navigate(path, { state }); };
+  // On a phone the Profile page has no tab: it lives under Settings, whose tab holds this sheet. On a wide
+  // screen it is a place of the account bar.
+  const go = (path: string, state?: Record<string, unknown>) => { onClose(false); if (variant === "sheet") nav.openUnder("/settings", path, state); else nav.place(path, state); };
   const switchTo = (other: OtherProfile) => switchProfile(other.entry.id, { avatar: other.glance?.avatar });
 
   const itemClass = "w-full flex items-center gap-3 px-3 text-left rounded-lg cursor-pointer hover:bg-surface-hover focus-visible:outline-none focus-visible:bg-surface-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent";

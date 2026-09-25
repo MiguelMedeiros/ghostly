@@ -1,5 +1,4 @@
 import { useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
 import type { NostrContactView } from "@ghostly/browser/nostr/types";
@@ -8,6 +7,7 @@ import { categoryLabel, currentStatus, date, dateTime, providerLabel, providerOf
 import { Button, Notice } from "../wallet/ui";
 import { NostrContactCard } from "../nostr/NostrContactCard";
 import { ProviderMark, StatusPill } from "./ProviderMark";
+import { useAppNavigation } from "../../hooks/useAppNavigation";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -17,7 +17,7 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
  */
 export function ChatIdentitiesDialog({ peerKey, name, onClose }: { peerKey: string; name: string; onClose: () => void }) {
   const state = useEngineState();
-  const navigate = useNavigate();
+  const nav = useAppNavigation();
   const link: LinkView | undefined = state?.links.find(l => l.peerPubKeyZ32 === peerKey);
   const ids = link?.identities;
   const [busy, setBusy] = useState(""), [error, setError] = useState("");
@@ -51,13 +51,13 @@ export function ChatIdentitiesDialog({ peerKey, name, onClose }: { peerKey: stri
           <div className="flex flex-wrap items-center justify-between gap-x-3">
             <h3 className="text-xs font-medium text-text-muted">Yours, for this contact</h3>
             {/* Adding, renewing and removing happen on the Identities page; this dialog only shares. */}
-            <button type="button" data-testid="chat-identities-manage" onClick={() => { onClose(); navigate("/identities"); }}
+            <button type="button" data-testid="chat-identities-manage" onClick={() => { onClose(); nav.open("/identities"); }}
               className="min-h-10 text-xs text-accent hover:underline cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded">All your identities</button>
           </div>
           {!link?.identities ? <Notice>Identities can be shared in paired chats only.</Notice>
             : connected && !ids?.support ? <Notice testId="chat-identities-unsupported">{name}’s app cannot receive identities yet.</Notice> : null}
           {mine.length === 0 ? (
-            <div className="flex flex-wrap items-center gap-3"><p className="flex-1 min-w-[12rem] text-xs text-text-muted">You have no identities in this profile yet.</p><Button onClick={() => { onClose(); navigate("/identities"); }}>Add an identity</Button></div>
+            <div className="flex flex-wrap items-center gap-3"><p className="flex-1 min-w-[12rem] text-xs text-text-muted">You have no identities in this profile yet.</p><Button onClick={() => { onClose(); nav.open("/identities"); }}>Add an identity</Button></div>
           ) : mine.map(p => {
             const shared = ids?.shared.find(s => s.id === p.id);
             const on = !!shared && shared.status !== "withdrawn" && shared.status !== "withdrawal-pending";

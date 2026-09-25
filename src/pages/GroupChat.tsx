@@ -16,6 +16,8 @@ import { markGroupRead, memberName } from "../lib/groups";
 import type { ChatMessage } from "../lib/types";
 import { useSettings } from "../contexts/SettingsContext";
 import { GroupAvatar } from "../components/GroupAvatar";
+import { useAppNavigation } from "../hooks/useAppNavigation";
+import { navOnly } from "../lib/navigation";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -66,6 +68,7 @@ function joiningText(stage: GroupJoinStage, name: string, community: boolean): {
 export function GroupChat() {
   const { groupId = "" } = useParams();
   const navigate = useNavigate();
+  const nav = useAppNavigation();
   const state = useSyncExternalStore(subscribe, snapshot);
   const group = state?.groups.find(g => g.id === groupId);
   const [messages, setMessages] = useState<StoredMessage[]>([]);
@@ -79,7 +82,7 @@ export function GroupChat() {
   useEffect(() => {
     if ((location.state as { share?: string } | null)?.share !== "created") return;
     setSharing("created");
-    navigate(location.pathname, { replace: true, state: null });
+    navigate(location.pathname, { replace: true, state: navOnly(location.state) });
   }, [location.state, location.pathname, navigate]);
   const [error, setError] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
@@ -146,7 +149,7 @@ export function GroupChat() {
     <div className="flex-1 flex flex-col h-full bg-chat-bg" data-testid="group-chat" data-status={group.status ?? "invitation"}>
       <div className="h-14 header-safe flex items-center justify-between px-4 max-md:pl-1 max-md:pr-1 bg-panel-header border-b border-border shrink-0">
         <div className="flex items-center gap-3 max-md:gap-1.5 min-w-0">
-          <button onClick={() => navigate("/")} className="md:hidden w-11 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0" title="Back" data-testid="chat-back">
+          <button onClick={nav.up} className="md:hidden w-11 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0" title="Back" data-testid="chat-back">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 19l-7-7 7-7" /></svg>
           </button>
           <button onClick={() => setShowMembers(true)} className="relative rounded-full shrink-0" title="Members" aria-label="Members">
@@ -204,7 +207,7 @@ export function GroupChat() {
               </li>;
             })}
           </ol>
-          <button onClick={() => { void engine.call("forgetGroup", { groupId }).catch(() => {}); navigate("/"); }} data-testid="group-joining-cancel"
+          <button onClick={() => { void engine.call("forgetGroup", { groupId }).catch(() => {}); nav.home(); }} data-testid="group-joining-cancel"
             className="mt-4 rounded px-2 py-1 text-xs text-text-muted hover:bg-danger/10 hover:text-danger">Cancel joining</button>
         </div>
       </div> : <div className="flex-1 overflow-y-auto chat-wallpaper">
@@ -231,9 +234,9 @@ export function GroupChat() {
       {showMembers && <GroupMembersDialog group={group} onClose={() => setShowMembers(false)} />}
       {sharing && group.entryLink && <GroupShareDialog group={group} created={sharing === "created"} onClose={() => setSharing("")} />}
       {confirmLeave && <LeaveGroupDialog group={group} onClose={() => setConfirmLeave(false)}
-        onConfirm={async () => { await engine.call("leaveGroup", { groupId }); setConfirmLeave(false); navigate("/"); }} />}
+        onConfirm={async () => { await engine.call("leaveGroup", { groupId }); setConfirmLeave(false); nav.home(); }} />}
       {confirmForget && <DeleteChatDialog name={group.name} onClose={() => setConfirmForget(false)}
-        onConfirm={() => { setConfirmForget(false); void engine.call("forgetGroup", { groupId }).catch(() => {}); navigate("/"); }} />}
+        onConfirm={() => { setConfirmForget(false); void engine.call("forgetGroup", { groupId }).catch(() => {}); nav.home(); }} />}
     </div>
   );
 }

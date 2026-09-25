@@ -14,7 +14,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { InviteCard } from "../components/InviteCard";
 import { PairingBanner } from "../components/PairingBanner";
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { useNavigate, Navigate } from "react-router-dom";
+import { Navigate } from "react-router-dom";
 import { useChat } from "../hooks/useChat";
 import { useWebRTC } from "../hooks/useWebRTC";
 import { useSettings } from "../contexts/SettingsContext";
@@ -40,6 +40,7 @@ import {
 import { chatPath } from "../lib/url";
 import { parseCallSignal, signalHasVideo } from "@ghostly/core";
 import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
+import { useAppNavigation } from "../hooks/useAppNavigation";
 
 interface ChatProps {
   /** The stored session this chat is. `App` reads it off the address. */
@@ -53,7 +54,7 @@ interface ChatProps {
 }
 
 export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps) {
-  const navigate = useNavigate();
+  const nav = useAppNavigation();
   const { t, language } = useI18n();
   const { settings } = useSettings();
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -334,7 +335,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
       deleteSession(params.sessionId);
       // The chat list keeps its own copy: without this it shows the deleted chat until its next refresh.
       window.dispatchEvent(new Event("session-updated"));
-      navigate("/");
+      nav.home();
     } else {
       setConfirmDelete(true);
     }
@@ -356,7 +357,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
       <div className="h-14 header-safe flex items-center justify-between px-4 max-md:ps-1 max-md:pe-1 bg-panel-header border-b border-border shrink-0">
         <div className="flex items-center gap-3 max-md:gap-1.5 min-w-0">
           <button
-            onClick={() => navigate("/")}
+            onClick={nav.up}
             className="md:hidden w-11 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0"
             title="Back"
             data-testid="chat-back"
@@ -705,8 +706,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         <IncomingCallNotification
           peerName={shownName}
           hasVideo={incomingHasVideo}
-          onAcceptAudio={() => { webrtc.acceptCall(false); if (!visible) navigate(chatPath(sessionId)); }}
-          onAcceptVideo={() => { webrtc.acceptCall(true); if (!visible) navigate(chatPath(sessionId)); }}
+          onAcceptAudio={() => { webrtc.acceptCall(false); if (!visible) nav.conversation(chatPath(sessionId)); }}
+          onAcceptVideo={() => { webrtc.acceptCall(true); if (!visible) nav.conversation(chatPath(sessionId)); }}
           onReject={webrtc.rejectCall}
         />,
         callLayer ?? document.body,
@@ -720,7 +721,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         <CallOverlay
           layer={callLayer}
           pinned={!visible}
-          onReturnToChat={() => navigate(chatPath(sessionId))}
+          onReturnToChat={() => nav.conversation(chatPath(sessionId))}
           callState={webrtc.callState}
           localStream={webrtc.localStream}
           remoteStream={webrtc.remoteStream}

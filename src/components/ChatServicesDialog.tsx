@@ -1,8 +1,8 @@
 import { useRef } from "react";
-import { useNavigate } from "react-router-dom";
 import { useBackdropDismiss, useDialogFocus } from "../hooks/useDismiss";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { Switch } from "./wallet/ui";
+import { useAppNavigation } from "../hooks/useAppNavigation";
 
 const GLOBE = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>;
 
@@ -12,7 +12,7 @@ const GLOBE = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke
  */
 export function ChatServicesDialog({ peerPubKey, name, onClose }: { peerPubKey: string; name: string; onClose: () => void }) {
   const platform = useServicesPlatform();
-  const navigate = useNavigate();
+  const nav = useAppNavigation();
   const backdrop = useBackdropDismiss(onClose);
   const dialogRef = useRef<HTMLDivElement>(null);
   useDialogFocus(dialogRef, onClose);
@@ -51,7 +51,7 @@ export function ChatServicesDialog({ peerPubKey, name, onClose }: { peerPubKey: 
               );
             })}
             {platform.features.shareLocalServices && (
-              <button type="button" onClick={() => { onClose(); navigate("/services"); }} className="w-full px-4 py-3 text-sm text-text-secondary hover:text-accent hover:bg-surface-alt text-left cursor-pointer rounded-b-xl">
+              <button type="button" onClick={() => { onClose(); nav.open("/services"); }} className="w-full px-4 py-3 text-sm text-text-secondary hover:text-accent hover:bg-surface-alt text-left cursor-pointer rounded-b-xl">
                 + Add an app
               </button>
             )}

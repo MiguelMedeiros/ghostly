@@ -18,6 +18,21 @@ and a new card or panel holds together at every width for free.
 | `FieldGrid` (`min`, `max`) | Several fields in columns of at least `min` (12rem), at most `max` (2), one column when narrow. |
 | `Truncate` | A URL or host on one line with an ellipsis; the whole value is in the tooltip. |
 
+## Where Back goes
+
+`Page`'s Back never walks the history (`src/lib/navigation.ts`, run by `useAppNavigation`):
+
+| Level | What | Opened with | Back |
+| --- | --- | --- | --- |
+| home | `/`: the chat list, New and Join | `nav.home()` | — |
+| conversation | `/chat/…`, `/group/…` | `nav.conversation(path)`: always on home | home |
+| place | Wallet, Identities, Services, Settings, Profile | `nav.place(path)` (account bar, tab bar): on home, or over the chat open now; places replace each other | home |
+| sub-page | a page opened from inside another (Settings → Profile, Profile → Wallets, a chat's "Manage identities") | `nav.open(path)`: pushed on its parent; a page already below is gone back to | its parent |
+
+Going home is going *back* (each entry records what is under it), so the browser's Back from a place is home
+and from home it leaves the app's pages. A deep link gets home put under it. On a phone the header's Back
+shows only on a sub-page: the tab bar is the way home. Never `navigate(-1)` or push `/` from a page.
+
 `wallet/ui.tsx` re-exports `Section`, `Row` and `Block`, and keeps the controls (`Button`, `Switch`,
 `Segmented` — `compact` for a header —, `Amount`, `Address`, `input`).
 

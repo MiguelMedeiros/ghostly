@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { IdentityProofView, LinkView } from "@ghostly/browser/shared/types";
 import { useOutsideDismiss } from "../../hooks/useDismiss";
@@ -15,6 +14,7 @@ import { idCard, idCardTone, machineLine, type IdCardContent } from "./idCard";
 import { IdentitiesIcon } from "./IdentitiesIcon";
 import { ProviderMark } from "./ProviderMark";
 import "./composer-identities.css";
+import { useAppNavigation } from "../../hooks/useAppNavigation";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 type Shared = NonNullable<LinkView["identities"]>["shared"][number];
@@ -61,7 +61,7 @@ const spoken = (card: IdCardContent) => `your ${card.attested ? "account" : card
  */
 export function ComposerIdentityPicker({ peerKey, contact, onClose, anchorRef }: { peerKey: string; contact: string; onClose: () => void; anchorRef?: RefObject<HTMLElement | null> }) {
   const state = useEngineState();
-  const navigate = useNavigate();
+  const nav = useAppNavigation();
   const link = state?.links.find(l => l.peerPubKeyZ32 === peerKey);
   const ids = link?.identities;
   const mine = state?.identityProofs ?? [];
@@ -98,7 +98,7 @@ export function ComposerIdentityPicker({ peerKey, contact, onClose, anchorRef }:
   const connected = link?.dataLink === "open" && link.pairing?.status === "ready";
   const unsupported = connected && !ids?.support;
   const canAdd = addableProviders().length > 0;
-  const manage = () => { onClose(); navigate("/identities"); };
+  const manage = () => { onClose(); nav.open("/identities"); };
   const toggle = (p: IdentityProofView, on: boolean) => {
     if (!link || busy) return;
     setBusy(p.id); setError("");

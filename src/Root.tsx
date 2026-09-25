@@ -22,6 +22,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { chatPath, parseChatRoute } from "./lib/url";
 import { groupPath } from "./lib/groups";
 import { engine } from "@ghostly/browser/platform/engine";
+import { useAnchorHome, useAppNavigation } from "./hooks/useAppNavigation";
 import "./index.css";
 
 /**
@@ -77,6 +78,7 @@ function ChatLinkIntake() {
 function GroupLinkIntake() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  const nav = useAppNavigation();
   const { hasUnlocked } = useLockScreen();
   const [code, setCode] = useState("");
   const [problem, setProblem] = useState("");
@@ -90,9 +92,10 @@ function GroupLinkIntake() {
     if (!code || !hasUnlocked) return;
     setCode("");
     engine.call("joinGroupByLink", { link: code })
-      .then(({ groupId }) => navigate(groupPath(groupId)))
+      .then(({ groupId }) => nav.conversation(groupPath(groupId)))
       .catch((cause: unknown) => setProblem(cause instanceof Error ? cause.message : "This link to a group does not work"));
-  }, [code, hasUnlocked, navigate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `nav` changes with every location
+  }, [code, hasUnlocked]);
   useEffect(() => {
     if (!problem) return;
     const timer = setTimeout(() => setProblem(""), 6000);
@@ -104,6 +107,21 @@ function GroupLinkIntake() {
       {problem}
     </div>
   ) : null;
+}
+
+/**
+ * An address the intakes above take out of the history at once: an invite's keys, a group's link, a chat
+ * this device does not have. Everything else opened directly gets home put under it (`useAnchorHome`).
+ */
+function isIntake(pathname: string): boolean {
+  if (pathname.startsWith("/join/")) return true;
+  const rest = pathname.match(/^\/chat\/(.+)$/)?.[1];
+  return !!rest && (rest.includes("/") || !loadSession(decodeURIComponent(rest)));
+}
+
+function HomeAnchor() {
+  useAnchorHome(isIntake);
+  return null;
 }
 
 /**
@@ -140,6 +158,7 @@ export function Root() {
               <ErrorBoundary>
               <ChatLinkIntake />
               <GroupLinkIntake />
+              <HomeAnchor />
               <LockGate>
                 {/* Asking for updates says this device runs Ghostly: not before the password. */}
                 <UpdateProvider>

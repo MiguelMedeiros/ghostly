@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 import { useMyAvatar } from "../hooks/useAvatars";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { useI18n } from "../contexts/I18nContext";
 import { useSettings } from "../contexts/SettingsContext";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
@@ -9,6 +9,7 @@ import { useIdentityAttention } from "../lib/identities";
 import { IdentitiesIcon } from "./identities/IdentitiesIcon";
 import { ProfileSwitcherMenu } from "./ProfileSwitcher";
 import { SWITCHER_SHORTCUT, useProfileGlances, useProfileSwitcher } from "../hooks/useProfileSwitcher";
+import { useAppNavigation } from "../hooks/useAppNavigation";
 
 
 /**
@@ -27,7 +28,7 @@ function useCurrentProfile() {
 const compact = (sats: number) => new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(sats);
 
 export function AccountBar() {
-  const navigate = useNavigate();
+  const nav = useAppNavigation();
   const location = useLocation();
   const { t } = useI18n();
   const { settings } = useSettings();
@@ -104,7 +105,7 @@ export function AccountBar() {
       <nav ref={navRef} aria-label="Account" className="account-actions" data-compact={labelsHidden || undefined}>
         <button
           data-testid="account-profile"
-          onClick={canSwitch ? switcher.toggle : () => navigate(onProfile ? "/" : "/profile")}
+          onClick={canSwitch ? switcher.toggle : () => (onProfile ? nav.home() : nav.place("/profile"))}
           {...(canSwitch ? { "data-switcher-opener": "", "aria-haspopup": "menu" as const, "aria-expanded": switcher.open, "aria-keyshortcuts": SWITCHER_SHORTCUT } : {})}
           aria-label={profileLabel}
           aria-current={onProfile ? "page" : undefined}
@@ -132,7 +133,7 @@ export function AccountBar() {
         {wallet && (
           <button
             data-testid="wallet-chip"
-            onClick={() => navigate(onWallet ? "/" : "/wallet")}
+            onClick={() => (onWallet ? nav.home() : nav.place("/wallet"))}
             aria-label={`${t("tabs.wallets")}${unseenLabel ? `, ${unseenTitle}` : ""}`}
             aria-current={onWallet ? "page" : undefined}
             className={`account-action relative ${
@@ -156,7 +157,7 @@ export function AccountBar() {
 
         <button
           data-testid="account-identities"
-          onClick={() => navigate(onIdentities ? "/" : "/identities")}
+          onClick={() => (onIdentities ? nav.home() : nav.place("/identities"))}
           aria-label={`${t("tabs.identities")}${identityAttention ? `, ${t("identities.attention")}` : ""}`}
           aria-current={onIdentities ? "page" : undefined}
           className="account-action text-text-muted hover:text-text-primary hover:bg-surface-alt"
@@ -173,7 +174,7 @@ export function AccountBar() {
         {platform && (
           <button
             data-testid="account-services"
-            onClick={() => navigate(location.pathname === "/services" ? "/" : "/services")}
+            onClick={() => (location.pathname === "/services" ? nav.home() : nav.place("/services"))}
             aria-label={t("tabs.services")}
             aria-current={location.pathname === "/services" ? "page" : undefined}
             className={`account-action ${
@@ -193,7 +194,7 @@ export function AccountBar() {
           data-testid="account-settings"
           aria-label={t("sidebar.settings")}
           aria-current={location.pathname === "/settings" ? "page" : undefined}
-          onClick={() => navigate("/settings")}
+          onClick={() => nav.place("/settings")}
           className="account-action text-text-muted hover:text-text-primary hover:bg-surface-alt"
           title={t("sidebar.settings")}
         >
