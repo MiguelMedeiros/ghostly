@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createIdentity, createLink, createRelayPayload, parseRelayPayload, HOLD_LIMITS, type PaymentRequest, type PkarrTransport, type SignedPacket } from "@ghostly/core";
+import { createIdentity, createLink, createRelayPayload, parseRelayPayload, DiscoveryBudgetError, HOLD_LIMITS, type PaymentRequest, type PkarrTransport, type SignedPacket } from "@ghostly/core";
 import { HoldEngine, emptyHoldState, type HoldHost } from "../src/engine/hold";
 import { presignS3 } from "../src/backup/s3";
 import { manifestName, type HoldStore } from "../src/backup/storage";
@@ -33,12 +33,17 @@ function bucket() {
   return { store, fetcher };
 }
 
-function relay(): PkarrTransport & { packets: Map<string, SignedPacket>; puts: number; fail?: string } {
+/** `held`: how many requests the relays' budget refuses next (a wait of a minute each), reads and publishes alike. */
+function relay(): PkarrTransport & { packets: Map<string, SignedPacket>; puts: number; fail?: string; held: number } {
   const packets = new Map<string, SignedPacket>();
   return {
-    packets, puts: 0,
-    async publish(identity, records) { if (this.fail) throw new Error(this.fail); this.puts++; packets.set(identity.pubKeyZ32, parseRelayPayload(identity.pubKeyZ32, createRelayPayload(identity, records))); },
-    async resolve(key) { return packets.get(key) ?? null; },
+    packets, puts: 0, held: 0,
+    async publish(identity, records) {
+      if (this.held > 0) { this.held--; throw new DiscoveryBudgetError(60_000); }
+      if (this.fail) throw new Error(this.fail);
+      this.puts++; packets.set(identity.pubKeyZ32, parseRelayPayload(identity.pubKeyZ32, createRelayPayload(identity, records)));
+    },
+    async resolve(key) { if (this.held > 0) { this.held--; throw new DiscoveryBudgetError(60_000); } return packets.get(key) ?? null; },
     describe: () => ({ protocol: "memory", relays: [] }),
   };
 }
@@ -157,6 +162,30 @@ describe("the sender's queue", () => {
     transport.fail = undefined;
     expect(await a.engine.retry("link-a", "m1")).toBe(true);
     expect(a.delivery.get("m1")?.state).toBe("held");
+  });
+
+  it("a pointer the relays' budget held back is no failure: the item is held, and its pointer goes out on the next look", async () => {
+    const { a, b, transport, look, holdText } = setup();
+    transport.held = 1;
+    await holdText("m1", "one");
+    expect(a.delivery.get("m1")?.state).toBe("held");
+    expect(a.engine.view("link-a")!.error).toBeUndefined();
+    expect(transport.puts, "the pointer waits for the budget").toBe(0);
+    await look(a);
+    expect(transport.puts).toBe(1);
+    await look(b);
+    expect(b.received.map((r) => r.text)).toEqual(["one"]);
+  });
+
+  it("a pointer read the relays' budget held back is no error, and read again", async () => {
+    const { b, transport, look, holdText } = setup();
+    await holdText("m1", "one");
+    transport.held = 1;
+    await look(b);
+    expect(b.engine.view("link-b")!.error).toBeUndefined();
+    expect(b.received).toEqual([]);
+    await look(b, 1_000);
+    expect(b.received.map((r) => r.text)).toEqual(["one"]);
   });
 
   it("an item cut off by a crash before its upload goes up on the next look", async () => {

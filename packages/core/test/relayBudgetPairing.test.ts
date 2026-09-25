@@ -26,8 +26,11 @@ const yieldToLoop = () => new Promise<void>(resolve => realSetTimeout(resolve, 0
 class MemoryRelay {
   packets = new Map<string, Uint8Array>();
   requests: { at: number; who: string; method: string }[] = [];
+  /** Whose publications fail at the network level (a relay down for them), as a browser sees it. */
+  putsDown = new Set<string>();
   fetchFor(who: string): typeof fetch {
     return (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PUT" && this.putsDown.has(who)) throw new TypeError("Failed to fetch");
       const key = new URL(String(input)).pathname.slice(1);
       this.requests.push({ at: Date.now(), who, method: init?.method ?? "GET" });
       if (init?.method === "PUT") { this.packets.set(key, new Uint8Array(init.body as ArrayBuffer)); return new Response(null, { status: 204 }); }
@@ -100,6 +103,8 @@ interface Side { name: string; params: LinkParams; seedB64: string; peerKey: str
 
 /** What either side ever said was wrong. */
 const trouble: string[] = [];
+/** Every pairing state either side reported, in order. */
+const states: { who: string; at: number; status: string; error?: string }[] = [];
 const links: GhostLink[] = [];
 
 function side(name: string, relay: MemoryRelay, params: LinkParams, me: Identity, peer: Identity): Side {
@@ -120,7 +125,10 @@ function open(s: Side): GhostLink {
     createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
     localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
     events: {
-      onPairingState: state => { if (state.status === "error") trouble.push(`${s.name} pairing: ${state.error}`); },
+      onPairingState: state => {
+        states.push({ who: s.name, at: Date.now(), status: state.status, error: state.error });
+        if (state.status === "error") trouble.push(`${s.name} pairing: ${state.error}`);
+      },
       onDiscoveryError: error => { if (error) trouble.push(`${s.name} discovery: ${error}`); },
       onDhtDelivery: view => { if (view.error) trouble.push(`${s.name} dht: ${view.error}`); },
       onStatus: status => { if (status === "error") trouble.push(`${s.name} status: error`); },
@@ -154,7 +162,7 @@ async function spendBudget(relays: RelayTransport): Promise<void> {
   throw new Error("the budget never ran out");
 }
 
-beforeEach(() => { vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] }); trouble.length = 0; });
+beforeEach(() => { vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] }); trouble.length = 0; states.length = 0; });
 afterEach(async () => {
   await Promise.all(links.splice(0).map(link => link.stop(false)));
   byFingerprint.clear();
@@ -205,5 +213,28 @@ describe("the relays' request budget runs out in the middle of a pairing", () =>
     expect(took, "live once the budget frees requests").toBeLessThanOrEqual(75_000);
     expect(took, "the budget did hold it back").toBeGreaterThanOrEqual(55_000);
     expect(trouble).toEqual([]);
+  }, 60_000);
+
+  it("connection details that really could not go out (a relay down) are an error until a later packet gets out, then the pairing carries on", async () => {
+    const relay = new MemoryRelay();
+    const invitation = createLink();
+    const [pa, pb] = [createIdentity(), createIdentity()];
+    const A = side("A", relay, invitation.mine, pa, pb), B = side("B", relay, invitation.invite, pb, pa);
+    const a = open(A), b = open(B);
+    expect(await untilLive(a, b, 30_000)).toBeLessThan(30_000);
+    // The live link drops and, while A's publications fail, a new offer or answer has to go out.
+    relay.putsDown.add("A");
+    a.disconnect();
+    await run(15_000);
+    const failed = states.findIndex(s => s.who === "A" && s.status === "error" && /Could not publish connection details/.test(s.error ?? ""));
+    expect(failed, "a real failure is still said").toBeGreaterThanOrEqual(0);
+    expect(states[failed].error).not.toMatch(/Reconnect/);
+    relay.putsDown.delete("A");
+    expect(await untilLive(a, b, 90_000), "live again without a Reconnect").toBeLessThanOrEqual(60_000);
+    // The packet that got out ended the error by itself, before the link was live again (not only the `ready` of going live).
+    const recovered = states.findIndex((s, i) => i > failed && s.who === "A" && s.status !== "error");
+    expect(recovered, "the error ended").toBeGreaterThan(failed);
+    expect(states[recovered].status).not.toBe("ready");
+    expect(states.filter(s => s.who === "A").at(-1)?.status).toBe("ready");
   }, 60_000);
 });
