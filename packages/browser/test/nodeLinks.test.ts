@@ -89,7 +89,8 @@ describe("a chat as the contact drives it", () => {
     expect(await db.getMessages(chat.id)).toMatchObject([{ id: "peer_w1", text: "hello", sender: "peer" }]);
     expect(node.getState().links[0].inviteCode).toBeUndefined();
     await vi.waitFor(async () => expect((await saved(chat.id))?.inviteCode).toBeUndefined());
-    expect(events.onAttention).toHaveBeenCalledWith(expect.objectContaining({ type: "message" }));
+    // It names its chat, so a page can mute that one chat's notifications (src/lib/chatMute.ts).
+    expect(events.onAttention).toHaveBeenCalledWith(expect.objectContaining({ type: "message", linkId: chat.id }));
   });
 
   it("remembers the contact's nick and picture, and writes only what changed", async () => {

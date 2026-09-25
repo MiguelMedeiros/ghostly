@@ -73,22 +73,22 @@ test("every row of the chat, group and New menus is one line and whole, in every
       const at = `${language} at ${viewport.width}px`;
       const sheet = viewport === PHONE ? "sheet" : "popover";
 
-      // The chat's ⋮: Pin, Payments, Hold messages, Identities, Connection, Services, Refresh, Tech Info, Delete.
+      // The chat's ⋮: Pin, Mute notifications, Payments, Hold messages, Identities, Connection, Services, Refresh, Tech Info, Delete.
       await go(chatHash);
       await page.getByTestId("chat-options").click();
       const chatMenu = page.getByTestId("chat-options-menu");
       await expect(chatMenu).toHaveAttribute("data-menu", sheet);
       await expect(chatMenu.getByTestId("chat-hold-open")).toBeVisible();
-      await oneLineEach(chatMenu, 9, `chat menu, ${at}`);
+      await oneLineEach(chatMenu, 10, `chat menu, ${at}`);
       if (language !== "ar") await page.screenshot({ path: testInfo.outputPath(`chat-menu-${language}-${viewport.width}.png`) });
       await close(page, chatMenu);
 
-      // The group's ⋮: Members, Rotate keys, Leave group, Delete from this device.
+      // The group's ⋮: Members, Mute notifications, Rotate keys, Leave group, Delete from this device.
       await go(groupHash);
       await page.getByTestId("group-options").click();
       const groupMenu = page.getByTestId("group-options-menu");
       await expect(groupMenu).toHaveAttribute("data-menu", sheet);
-      await oneLineEach(groupMenu, 4, `group menu, ${at}`);
+      await oneLineEach(groupMenu, 5, `group menu, ${at}`);
       await close(page, groupMenu);
 
       // New ▾: Chat and Group, each with a line saying what it is.

@@ -12,6 +12,8 @@ import { GroupConnection } from "../components/GroupConnection";
 import { GroupPaymentComposer } from "../components/GroupPaymentComposer";
 import { GroupPaymentCaption, GroupPaymentNote } from "../components/GroupPaymentNote";
 import { Menu, MenuItem, MenuSeparator } from "../components/Menu";
+import { MuteMenu, MuteMenuItem, MutedBell } from "../components/ChatMute";
+import { forgetChatMute, groupChat } from "../lib/chatMute";
 import { useI18n } from "../contexts/I18nContext";
 import { markGroupRead, memberName } from "../lib/groups";
 import type { ChatMessage } from "../lib/types";
@@ -82,6 +84,7 @@ export function GroupChat() {
   const [messages, setMessages] = useState<StoredMessage[]>([]);
   const [showMembers, setShowMembers] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [showMute, setShowMute] = useState(false);
   const [confirmForget, setConfirmForget] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
   // A new group opens on its link (the sidebar says so in the navigation's state); the header's Share link opens it again.
@@ -166,7 +169,10 @@ export function GroupChat() {
             <GroupAvatar picture={group.picture} size={40} glyph={20} testId="group-avatar" className="bg-accent/15" />
           </button>
           <div className="min-w-0">
-            <p className="text-[15px] m-0 leading-tight truncate text-text-primary" data-testid="group-name">{group.name || "A group"}</p>
+            <div className="flex min-w-0 items-center gap-1.5">
+              <p className="text-[15px] m-0 leading-tight truncate text-text-primary" data-testid="group-name">{group.name || "A group"}</p>
+              <MutedBell chat={groupChat(group.id)} />
+            </div>
             <button onClick={() => setShowMembers(true)} data-testid="group-members" className="text-xs text-text-muted/80 truncate hover:text-accent cursor-pointer max-w-[60vw]">{subtitle}</button>
           </div>
         </div>
@@ -183,11 +189,13 @@ export function GroupChat() {
             </button>
             <Menu testId="group-options-menu" open={menuOpen} onClose={closeMenu} anchorRef={menuRef}>
               <MenuItem onClick={() => { setShowMembers(true); closeMenu(); }}>{t("group.menu.members")}</MenuItem>
+              <MuteMenuItem chat={groupChat(group.id)} onChoose={() => { closeMenu(); setShowMute(true); }} onDone={closeMenu} />
               {group.isAdmin && <MenuItem testId="group-rotate" onClick={() => void act(() => engine.call("rotateGroup", { groupId }))}>{t("group.menu.rotate")}</MenuItem>}
               <MenuSeparator />
               {group.status === "active" && <MenuItem danger testId="group-leave" onClick={() => { closeMenu(); setConfirmLeave(true); }}>{t("group.menu.leave")}</MenuItem>}
               <MenuItem danger testId="group-forget" onClick={() => { closeMenu(); setConfirmForget(true); }}>{t("group.menu.forget")}</MenuItem>
             </Menu>
+            <MuteMenu chat={groupChat(group.id)} open={showMute} onClose={() => setShowMute(false)} anchorRef={menuRef} />
           </div>
         </div>
       </div>
@@ -246,7 +254,7 @@ export function GroupChat() {
       {confirmLeave && <LeaveGroupDialog group={group} onClose={() => setConfirmLeave(false)}
         onConfirm={async () => { await engine.call("leaveGroup", { groupId }); setConfirmLeave(false); nav.home(); }} />}
       {confirmForget && <DeleteChatDialog name={group.name} onClose={() => setConfirmForget(false)}
-        onConfirm={() => { setConfirmForget(false); void engine.call("forgetGroup", { groupId }).catch(() => {}); nav.home(); }} />}
+        onConfirm={() => { setConfirmForget(false); forgetChatMute(groupChat(groupId)); void engine.call("forgetGroup", { groupId }).catch(() => {}); nav.home(); }} />}
     </div>
   );
 }

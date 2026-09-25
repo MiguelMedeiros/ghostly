@@ -5,8 +5,10 @@ import { PeerAvatar } from "./Avatar";
 import { GroupAvatar } from "./GroupAvatar";
 import { ContactMarks } from "./identities/ContactMarks";
 import { PinIcon } from "./PinIcon";
+import { BellIcon } from "./ChatMute";
 import { useI18n } from "../contexts/I18nContext";
 import { formatListTime, previewText } from "../lib/chatList";
+import { groupChat, useChatMute } from "../lib/chatMute";
 import { groupReadAt } from "../lib/groups";
 import type { ChatListDensity } from "../lib/settings";
 import type { ChatMessage } from "../lib/types";
@@ -50,9 +52,10 @@ export function DeliveryMark({ delivery }: { delivery?: ChatMessage["delivery"] 
   );
 }
 
-function UnreadBadge({ count }: { count: number }) {
+/** The unread count; grey in a muted chat, a quiet cue rather than a call for attention. */
+function UnreadBadge({ count, muted }: { count: number; muted: boolean }) {
   return (
-    <span data-testid="chat-row-unread" className="min-w-5 h-5 inline-flex items-center justify-center rounded-full bg-accent px-1.5 text-[11px] font-bold leading-none text-on-accent">
+    <span data-testid="chat-row-unread" data-muted={muted || undefined} className={`min-w-5 h-5 inline-flex items-center justify-center rounded-full px-1.5 text-[11px] font-bold leading-none ${muted ? "bg-text-secondary text-sidebar-bg" : "bg-accent text-on-accent"}`}>
       {count > 99 ? "99+" : count}
     </span>
   );
@@ -64,6 +67,11 @@ function UnreadBadge({ count }: { count: number }) {
  */
 export function StatusMark({ label, testId, children }: { label: string; testId: string; children: ReactNode }) {
   return <span role="img" aria-label={label} data-testid={testId} className="inline-flex h-3 w-3 items-center justify-center">{children}</span>;
+}
+
+/** A muted chat's bell, first among the status marks. */
+function MutedMark({ label }: { label: string }) {
+  return <StatusMark label={label} testId="chat-row-muted"><BellIcon muted size={12} /></StatusMark>;
 }
 
 /** The two (or, comfortable, three) lines beside the avatar, shared by chats and groups. */
@@ -103,6 +111,8 @@ const rowClass = (active: boolean, density: ChatListDensity) =>
   `group relative flex items-center gap-3 ps-3 pe-3 cursor-pointer transition-colors ${ROW[density]} ${active ? "bg-surface-hover" : "hover:bg-surface-alt has-[:focus-visible]:bg-surface-alt"}`;
 
 export interface ChatRowProps {
+  /** The chat's session id: what its mute is kept under. */
+  chatId: string;
   density: ChatListDensity;
   active: boolean;
   /** What the contact goes by here, or the "Contact · xxxxxx" fallback when `named` is false. */
@@ -126,10 +136,11 @@ export interface ChatRowProps {
 /** A 1:1 chat in the list. */
 export function ChatRow(p: ChatRowProps) {
   const { t } = useI18n();
+  const muted = useChatMute(p.chatId) !== undefined;
   const size = AVATAR[p.density];
   const pinLabel = p.pinned ? t("chat.menu.unpin") : t("chat.menu.pin");
   return (
-    <div data-testid="chat-row" onClick={p.onOpen} title={`${p.label} · ${p.keyLabel}`} className={rowClass(p.active, p.density)}>
+    <div data-testid="chat-row" data-muted={muted || undefined} onClick={p.onOpen} title={`${p.label} · ${p.keyLabel}`} className={rowClass(p.active, p.density)}>
       <div className={`relative shrink-0 rounded-full flex items-center justify-center ${p.active ? "bg-surface-alt" : "bg-surface-hover"}`} style={{ width: size, height: size }}>
         <PeerAvatar peerPubKey={p.peerPubKey} label={p.label} named={p.named} testId="chat-row-avatar" />
         {p.syncing && (
@@ -159,7 +170,7 @@ export function ChatRow(p: ChatRowProps) {
         marks={<ContactMarks peerKey={p.peerPubKey} />}
         nameClass={!p.named ? "text-text-muted/60 italic" : p.unread > 0 ? "text-text-primary font-semibold" : "text-text-primary"}
         time={p.time}
-        timeClass={p.unread > 0 ? "text-accent font-medium" : "text-text-muted"}
+        timeClass={p.unread > 0 && !muted ? "text-accent font-medium" : "text-text-muted"}
         sub={<>
           {/* The key, for whoever needs it: its own line when comfortable, else read out with the name. */}
           {p.density === "comfortable"
@@ -172,8 +183,11 @@ export function ChatRow(p: ChatRowProps) {
               {previewText(p.lastMessage.text)}
             </span>
           : <span className="italic text-text-muted">No messages</span>}
-        status={p.pinned && <StatusMark label={t("sidebar.pinned")} testId="chat-row-pinned"><PinIcon active size={12} /></StatusMark>}
-        trailing={p.unread > 0 && <UnreadBadge count={p.unread} />}
+        status={(muted || p.pinned) && <>
+          {muted && <MutedMark label={t("mute.bell")} />}
+          {p.pinned && <StatusMark label={t("sidebar.pinned")} testId="chat-row-pinned"><PinIcon active size={12} /></StatusMark>}
+        </>}
+        trailing={p.unread > 0 && <UnreadBadge count={p.unread} muted={muted} />}
         timeCover={
           // Pointer devices only: a phone opens the chat on a tap and pins from the chat's Options. The layer covers
           // the marks too, so a pinned chat's mark turns into its Unpin button in place. Keyboard focus shows it, a
@@ -201,7 +215,9 @@ export function ChatRow(p: ChatRowProps) {
 
 /** A group (private or community), or an invitation to one, in the chat list. */
 export function GroupRow({ group, active, density, onOpen }: { group: GroupView; active: boolean; density: ChatListDensity; onOpen(): void }) {
+  const { t } = useI18n();
   const [busy, setBusy] = useState(false);
+  const muted = useChatMute(groupChat(group.id)) !== undefined;
   const invitation = group.invitation;
   const unread = !active && !invitation && group.lastMessageAt > groupReadAt(group.id);
   const answer = async (method: "acceptGroupInvitation" | "declineGroupInvitation") => {
@@ -212,7 +228,7 @@ export function GroupRow({ group, active, density, onOpen }: { group: GroupView;
     : group.status !== "active" ? group.statusReason ?? group.status : `${group.members.length} member${group.members.length === 1 ? "" : "s"}`;
   const size = AVATAR[density];
   return (
-    <div data-testid="group-row" data-group={group.id} onClick={onOpen} title={group.name || "A group"} className={rowClass(active, density)}>
+    <div data-testid="group-row" data-group={group.id} data-muted={muted || undefined} onClick={onOpen} title={group.name || "A group"} className={rowClass(active, density)}>
       <div className="relative shrink-0">
         <GroupAvatar picture={group.picture} size={size} glyph={Math.round(size * 0.46)} testId="group-row-avatar" className={active ? "bg-surface-alt" : "bg-surface-hover"} />
       </div>
@@ -221,9 +237,10 @@ export function GroupRow({ group, active, density, onOpen }: { group: GroupView;
           name={group.name || "A group"}
           nameClass={unread ? "text-text-primary font-semibold" : "text-text-primary"}
           time={group.lastMessageAt > 0 ? formatListTime(group.lastMessageAt) : undefined}
-          timeClass={unread ? "text-accent font-medium" : "text-text-muted"}
+          timeClass={unread && !muted ? "text-accent font-medium" : "text-text-muted"}
+          status={muted && <MutedMark label={t("mute.bell")} />}
           preview={<span className="text-text-muted">{status}</span>}
-          trailing={unread && <span data-testid="group-row-unread" aria-label="Unread messages" role="img" className="w-2.5 h-2.5 rounded-full bg-accent" />}
+          trailing={unread && <span data-testid="group-row-unread" data-muted={muted || undefined} aria-label="Unread messages" role="img" className={`w-2.5 h-2.5 rounded-full ${muted ? "bg-text-secondary" : "bg-accent"}`} />}
         />
         {invitation && !invitation.accepted && <div className="mt-1.5 flex gap-2">
           <button disabled={busy} data-testid="group-accept" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }} className="rounded-lg bg-accent px-3 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40">Accept</button>

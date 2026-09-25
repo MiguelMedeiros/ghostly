@@ -263,6 +263,7 @@ export function Sidebar() {
           return (
             <ChatRow
               key={session.id}
+              chatId={session.id}
               density={density}
               active={isActive}
               label={peerLabel}

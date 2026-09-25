@@ -48,6 +48,8 @@ import { fileMessageText, parseCallSignal, signalHasVideo, type VoiceMeta } from
 import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { TransportChip, TransportMenu } from "../components/TransportMenu";
+import { MuteMenu, MuteMenuItem, MutedBell } from "../components/ChatMute";
+import { callRings } from "../lib/chatMute";
 import { TransportIcon } from "../components/TransportIcon";
 import { useChatLink } from "../hooks/useChatLink";
 import { TransportLine } from "../components/TransportTimeline";
@@ -152,10 +154,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   useEffect(() => {
     const before = previousCallState.current;
     previousCallState.current = callState;
-    if (callState === "incoming") return startRinging("ring");
+    // A muted chat still rings (lib/chatMute.ts, MUTE_SILENCES).
+    if (callState === "incoming") return callRings(sessionId) ? startRinging("ring") : undefined;
     if (callState === "offering") return startRinging("ringback");
     if (callState === "idle" && before !== "idle") playSound("hangup");
-  }, [callState]);
+  }, [callState, sessionId]);
 
   // A chat on a call is kept loaded by `App` wherever the person goes next,
   // so the call itself — and the signaling that ends it — survives the trip.
@@ -265,6 +268,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const [showServices, setShowServices] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showTransport, setShowTransport] = useState(false);
+  const [showMute, setShowMute] = useState(false);
   const [connectionOpen, setConnectionOpen] = useState(false);
   const connectionRef = useRef<HTMLDivElement>(null);
   const connectionButtonRef = useRef<HTMLButtonElement>(null);
@@ -463,6 +467,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 )}
               </p>
               {paired && <IdentityStack peerKey={params.peerPubKeyB64} open={showIdentities} onOpen={() => setShowIdentities(open => !open)} />}
+              <MutedBell chat={sessionId} />
               {compat && <span data-testid="compat-chat" title={t("chat.compat.hint")}
                 className="shrink-0 rounded bg-surface-hover px-1.5 py-0.5 text-[10px] leading-none text-text-muted whitespace-nowrap max-md:hidden">{t("chat.compat.label")}</span>}
               </div>
@@ -595,6 +600,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               <MenuItem onClick={() => { setSessionPinned(sessionId, !isSessionPinned(sessionId)); closeMenu(); }} icon={<PinIcon active={isSessionPinned(sessionId)} />}>
                 {isSessionPinned(sessionId) ? t("chat.menu.unpin") : t("chat.menu.pin")}
               </MenuItem>
+              <MuteMenuItem chat={sessionId} onChoose={() => { closeMenu(); setShowMute(true); }} onDone={closeMenu} />
               {inviteCode && !pairedReady && (
                 <MenuItem onClick={() => { handleCopyCode(inviteShareText(inviteCode)); closeMenu(); }}
                   icon={codeCopied
@@ -660,6 +666,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               </MenuItem>
             </Menu>
             {paired && chatLink && <TransportMenu link={chatLink} open={showTransport} onClose={() => setShowTransport(false)} anchorRef={menuRef} />}
+            <MuteMenu chat={sessionId} open={showMute} onClose={() => setShowMute(false)} anchorRef={menuRef} />
           </div>
         </div>
       </div>
