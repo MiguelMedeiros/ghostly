@@ -276,5 +276,58 @@
     "othersUnread": "messages non lus dans un autre profil",
     "switching": "Ouverture de {{name}}…",
     "holdHint": "Ou maintenez Paramètres dans la barre d’onglets"
+  },
+  "pairing": {
+    "you": "Vous",
+    "contact": "Votre contact",
+    "steps": "Étapes de l’appairage",
+    "done": "terminée",
+    "elapsed": "{{time}} dans cette étape",
+    "attempt": "tentative {{n}}",
+    "indicator": "Appairage : {{stage}}",
+    "retry": "Réessayer",
+    "retrying": "Nouvel essai…",
+    "newInvite": "Demandez une nouvelle invitation à votre contact.",
+    "sayHello": "Vous pouvez discuter. Dites bonjour !",
+    "stage": {
+      "publishing": "Publication de votre invitation sur le réseau…",
+      "waiting": "En attente que votre contact ouvre l’invitation",
+      "resolving": "Recherche de l’invitation sur le réseau…",
+      "knocking": "On frappe à la porte de votre contact…",
+      "answeringInviter": "Votre contact a frappé. Réponse en cours…",
+      "answeringJoiner": "Votre contact répond…",
+      "connecting": "Ouverture d’un lien direct et chiffré…",
+      "live": "Connecté",
+      "failed": "Connexion impossible"
+    },
+    "step": {
+      "publishing": "Publier",
+      "waiting": "Attendre",
+      "resolving": "Chercher",
+      "knocking": "Frapper",
+      "answering": "Répondre",
+      "connecting": "Connecter",
+      "live": "En direct",
+      "failed": "Échec"
+    },
+    "slow": {
+      "publishing": "Publication toujours en cours. Le réseau tarde à répondre.",
+      "waiting": "Votre contact n’a pas encore ouvert l’invitation. Elle reste valable : vous pouvez la partager à nouveau.",
+      "resolving": "Toujours à la recherche de votre contact sur le réseau…",
+      "knocking": "L’app de votre contact n’a pas encore répondu. Elle est peut-être fermée ou hors ligne.",
+      "answering": "Échange de clés avec votre contact toujours en cours…",
+      "connecting": "Ouverture du lien direct toujours en cours. Les réseaux stricts peuvent prendre plus de temps."
+    },
+    "reason": {
+      "publish": "Impossible de publier votre invitation sur le réseau. Vérifiez votre connexion.",
+      "resolve": "Invitation introuvable sur le réseau. Elle est peut-être ancienne ou mal copiée.",
+      "timeout": "L’app de votre contact n’a pas répondu à temps.",
+      "offline": "Vous êtes hors ligne.",
+      "transport": "Aucun lien direct n’a pu être ouvert entre vos appareils.",
+      "rejected": "L’app de votre contact a refusé la connexion.",
+      "keyMismatch": "La clé de ce contact ne correspond pas à celle enregistrée. Rien n’a été accepté.",
+      "expired": "Cette invitation a expiré.",
+      "unknown": "Un problème est survenu pendant la connexion."
+    }
   }
 }

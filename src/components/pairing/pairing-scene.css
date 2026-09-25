@@ -1,0 +1,226 @@
+/*
+ * The pairing scene (PairingScene.tsx): two ghosts, the network between them, and the packets of the current
+ * stage. Colours come from the theme, so every colour theme and Testnet's look right. Motion is only CSS
+ * transforms and opacity on a few shapes; it pauses off screen ([data-paused]) and turns into a still picture
+ * under reduced motion, where the stage's routes keep their arrowheads.
+ */
+.ps {
+  --ps-accent: var(--theme-accent);
+  --ps-line: var(--theme-border-bright);
+  --ps-node: var(--theme-surface-hover);
+  --ps-text: var(--theme-text-primary);
+  --ps-muted: var(--theme-text-secondary);
+  --ps-danger: var(--color-danger);
+  --ps-eye: #0b141a;
+  container: pairing-scene / inline-size;
+  margin: 12px auto;
+  width: calc(100% - 2rem);
+  max-width: 24rem;
+  padding: 12px 12px 14px;
+  border: 1px solid var(--theme-border);
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--theme-surface-alt) 95%, transparent);
+  color: var(--ps-text);
+  text-align: center;
+}
+.ps[data-leaving] { animation: ps-leave 320ms ease-in both; }
+@keyframes ps-leave { to { opacity: 0; transform: scale(0.96); } }
+
+.ps-svg { display: block; width: 100%; height: auto; overflow: visible; }
+/* Me on the reading start side: in a right-to-left language the whole picture mirrors (it has no text). */
+:root[dir="rtl"] .ps-svg { transform: scaleX(-1); }
+
+/* The network. */
+.ps-mesh, .ps-edge { fill: none; stroke: var(--ps-line); stroke-width: 1; stroke-linecap: round; stroke-linejoin: round; }
+.ps-mesh { opacity: 0.45; stroke-dasharray: 2 4; }
+.ps-edge { opacity: 0.8; }
+.ps-dot { fill: var(--ps-line); opacity: 0.7; }
+.ps-node { fill: var(--ps-node); stroke: var(--ps-line); stroke-width: 1.5; transition: fill 400ms, stroke 400ms; }
+.ps-net { transition: opacity 500ms; }
+.ps:is([data-stage="connecting"], [data-stage="live"], [data-stage="failed"]) .ps-net { opacity: 0.4; }
+
+/* Nodes that carry the invite, lit. */
+.ps:is([data-stage="publishing"], [data-stage="resolving"]) :is(.ps-n1, .ps-n2, .ps-n3, .ps-n6),
+.ps[data-stage="waiting"] :is(.ps-n3, .ps-n6, .ps-n4, .ps-n5),
+.ps:is([data-stage="knocking"], [data-stage="answering"]) .ps-node { fill: var(--ps-accent); stroke: var(--ps-accent); }
+.ps[data-stage="publishing"] .ps-node { animation: ps-light 2.4s ease-in-out infinite; }
+.ps[data-stage="publishing"] :is(.ps-n3, .ps-n6) { animation-delay: 0.9s; }
+.ps[data-stage="resolving"] .ps-node { animation: ps-light 1.8s ease-in-out infinite; }
+.ps[data-stage="resolving"] :is(.ps-n3, .ps-n6) { animation-delay: 0.6s; }
+@keyframes ps-light { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+
+/* Routes: which way the stage's packets go. Faint while packets move, the whole story when still. */
+.ps-route { fill: none; stroke: var(--ps-accent); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; opacity: 0; transition: opacity 300ms; }
+.ps-arrow path { fill: var(--ps-accent); }
+.ps:is([data-stage="publishing"], [data-stage="resolving"]) .ps-route-pub,
+.ps[data-stage="knocking"] :is(.ps-route-up, .ps-route-low),
+.ps[data-stage="answering"] :is(.ps-route-in, .ps-route-low) { opacity: 0.35; }
+
+/* The invite resting on the network. */
+.ps-invite { opacity: 0; transition: opacity 400ms; }
+.ps-invite rect { fill: var(--ps-accent); }
+.ps-invite path { fill: none; stroke: var(--ps-eye); stroke-width: 1.4; stroke-linejoin: round; }
+.ps-ping { fill: none; stroke: var(--ps-accent); stroke-width: 1.5; opacity: 0; transform-box: fill-box; transform-origin: center; }
+.ps:is([data-stage="waiting"], [data-stage="resolving"], [data-stage="publishing"]) .ps-invite { opacity: 1; }
+.ps[data-stage="publishing"] .ps-invite { animation: ps-arrive 2.4s ease-out infinite; }
+.ps:is([data-stage="waiting"], [data-stage="resolving"]) .ps-ping { animation: ps-ping 2.2s ease-out infinite; }
+@keyframes ps-ping { 0% { transform: scale(0.8); opacity: 0.8; } 100% { transform: scale(2.6); opacity: 0; } }
+@keyframes ps-arrive { 0%, 40% { opacity: 0; } 60%, 100% { opacity: 1; } }
+
+/* The direct link between the two ghosts. */
+.ps-direct path { fill: none; stroke-linecap: round; opacity: 0; transition: opacity 400ms; }
+.ps-direct-line { stroke: var(--ps-accent); stroke-width: 2.5; stroke-dasharray: 6 6; }
+.ps-direct-glow { stroke: var(--ps-accent); stroke-width: 10; }
+.ps-direct-broken { stroke: var(--ps-danger); stroke-width: 2; stroke-dasharray: 4 5; }
+.ps-cross { stroke: var(--ps-danger); stroke-width: 2.5; }
+.ps[data-stage="connecting"] .ps-direct-line { opacity: 1; animation: ps-dash 0.9s linear infinite; }
+.ps[data-stage="live"] .ps-direct-line { opacity: 1; stroke-dasharray: none; }
+.ps[data-stage="live"] .ps-direct-glow { opacity: 0.18; animation: ps-glow 1.8s ease-out both; }
+.ps[data-stage="failed"] :is(.ps-direct-broken, .ps-cross) { opacity: 1; }
+@keyframes ps-dash { to { stroke-dashoffset: -12; } }
+@keyframes ps-glow { 0% { opacity: 0; } 30% { opacity: 0.4; } 100% { opacity: 0.18; } }
+
+/* Packets: positioned only by the animation, so they show only while one plays. */
+.ps-pk { fill: var(--ps-accent); opacity: 0; }
+.ps[data-stage="publishing"] .ps-pk-pub-a,
+.ps[data-stage="resolving"] .ps-pk-pub-a { animation: ps-pub-a 2.4s ease-in-out infinite; }
+.ps[data-stage="publishing"] .ps-pk-pub-b,
+.ps[data-stage="resolving"] .ps-pk-pub-b { animation: ps-pub-b 2.4s ease-in-out 0.5s infinite; }
+.ps[data-stage="publishing"] .ps-pk-pub-c { animation: ps-pub-c 2.4s ease-in-out 1.2s infinite; }
+.ps[data-stage="publishing"] .ps-pk-pub-d { animation: ps-pub-d 2.4s ease-in-out 1.7s infinite; }
+/* While waiting the invite is kept alive on the network: a slow packet now and then. */
+.ps[data-stage="waiting"] .ps-pk-pub-c { animation: ps-pub-c 5s ease-in-out 1s infinite; }
+.ps[data-stage="waiting"] .ps-pk-pub-d { animation: ps-pub-d 5s ease-in-out 3.5s infinite; }
+.ps[data-stage="knocking"] .ps-pk-up { animation: ps-up 2s ease-in-out infinite; }
+.ps[data-stage="knocking"] .ps-pk-low { animation: ps-low 2s ease-in-out 1s infinite; }
+.ps[data-stage="answering"] .ps-pk-up { animation: ps-up 1.8s ease-in-out infinite reverse; }
+.ps[data-stage="answering"] .ps-pk-low { animation: ps-low 1.8s ease-in-out 0.9s infinite; }
+.ps[data-stage="connecting"] .ps-pk-direct-out { animation: ps-direct 1.4s ease-in-out infinite; }
+.ps[data-stage="connecting"] .ps-pk-direct-in { animation: ps-direct 1.4s ease-in-out 0.7s infinite reverse; }
+@keyframes ps-pub-a { 0% { transform: translate(66px, 76px); opacity: 0; } 10% { opacity: 1; } 48% { transform: translate(104px, 38px); } 90% { opacity: 1; } 100% { transform: translate(160px, 52px); opacity: 0; } }
+@keyframes ps-pub-b { 0% { transform: translate(66px, 84px); opacity: 0; } 10% { opacity: 1; } 50% { transform: translate(106px, 122px); } 90% { opacity: 1; } 100% { transform: translate(160px, 110px); opacity: 0; } }
+@keyframes ps-pub-c { 0% { transform: translate(160px, 52px); opacity: 0; } 15% { opacity: 1; } 85% { opacity: 1; } 100% { transform: translate(216px, 36px); opacity: 0; } }
+@keyframes ps-pub-d { 0% { transform: translate(160px, 110px); opacity: 0; } 15% { opacity: 1; } 85% { opacity: 1; } 100% { transform: translate(214px, 124px); opacity: 0; } }
+@keyframes ps-up { 0% { transform: translate(66px, 76px); opacity: 0; } 6% { opacity: 1; } 24% { transform: translate(104px, 38px); } 50% { transform: translate(160px, 52px); } 76% { transform: translate(216px, 36px); } 94% { opacity: 1; } 100% { transform: translate(254px, 76px); opacity: 0; } }
+@keyframes ps-low { 0% { transform: translate(66px, 84px); opacity: 0; } 6% { opacity: 1; } 25% { transform: translate(106px, 122px); } 50% { transform: translate(160px, 110px); } 75% { transform: translate(214px, 124px); } 94% { opacity: 1; } 100% { transform: translate(254px, 84px); opacity: 0; } }
+@keyframes ps-direct { 0% { transform: translate(70px, 80px); opacity: 0; } 12% { opacity: 1; } 88% { opacity: 1; } 100% { transform: translate(250px, 80px); opacity: 0; } }
+
+/* A knock on the contact's door: rings around the empty place it will take. */
+.ps-knock circle { fill: none; stroke: var(--ps-accent); stroke-width: 1.5; opacity: 0; transform-box: fill-box; transform-origin: center; }
+.ps[data-stage="knocking"] .ps-knock circle { animation: ps-knock 1s ease-out infinite; }
+.ps[data-stage="knocking"] .ps-knock circle + circle { animation-delay: 0.25s; }
+@keyframes ps-knock { 0% { transform: scale(0.9); opacity: 0.7; } 70%, 100% { transform: scale(1.5); opacity: 0; } }
+
+/* The "connected" moment: rings burst once from both ghosts and the middle of the link. */
+.ps-burst circle { fill: none; stroke: var(--ps-accent); stroke-width: 2; opacity: 0; transform-box: fill-box; transform-origin: center; }
+.ps[data-stage="live"] .ps-burst circle { animation: ps-burst 900ms cubic-bezier(0.2, 0.8, 0.3, 1) both; }
+.ps[data-stage="live"] .ps-burst circle:nth-child(3) { animation-delay: 150ms; }
+@keyframes ps-burst { 0% { transform: scale(0.6); opacity: 0.9; } 100% { transform: scale(2); opacity: 0; } }
+
+/* The ghosts. */
+.ps-body { fill: var(--ps-accent); transition: fill 400ms, opacity 400ms; }
+.ps-outline { fill: none; stroke: var(--ps-muted); stroke-width: 3; stroke-dasharray: 6 6; opacity: 0; transition: opacity 400ms; }
+.ps-eyes { fill: var(--ps-eye); stroke: var(--ps-eye); transition: opacity 400ms; }
+.ps-eyes circle { stroke: none; }
+.ps-eyes .ps-shine { fill: #fff; }
+.ps-halo { fill: var(--ps-accent); opacity: 0.1; }
+.ps-shadow { fill: #000; opacity: 0.18; }
+.ps-float { animation: ps-float 3.2s ease-in-out infinite; }
+.ps-peer .ps-float { animation-delay: -1.6s; }
+@keyframes ps-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+.ps-blink { transform-box: fill-box; transform-origin: center; animation: ps-blink 5s infinite; }
+@keyframes ps-blink { 0%, 94%, 100% { transform: scaleY(1); } 97% { transform: scaleY(0.1); } }
+.ps[data-stage="live"] .ps-ghost .ps-float { animation: ps-hop 700ms cubic-bezier(0.3, 1.6, 0.5, 1) both; }
+@keyframes ps-hop { 0% { transform: translateY(0); } 40% { transform: translateY(-10px); } 100% { transform: translateY(-2px); } }
+
+/* The contact is only an outline until its app answers. */
+.ps:is([data-stage="publishing"], [data-stage="waiting"], [data-stage="resolving"], [data-stage="knocking"], [data-stage="failed"]) .ps-peer :is(.ps-body, .ps-eyes, .ps-halo) { opacity: 0; }
+.ps:is([data-stage="publishing"], [data-stage="waiting"], [data-stage="resolving"], [data-stage="knocking"], [data-stage="failed"]) .ps-peer .ps-outline { opacity: 0.8; }
+.ps:is([data-stage="publishing"], [data-stage="waiting"], [data-stage="resolving"], [data-stage="knocking"], [data-stage="failed"]) .ps-peer .ps-float { animation: none; }
+.ps[data-stage="answering"] .ps-peer .ps-body { animation: ps-appear 900ms ease-out both; }
+@keyframes ps-appear { from { opacity: 0; } to { opacity: 1; } }
+.ps[data-stage="failed"] .ps-me .ps-body { fill: var(--ps-muted); }
+.ps[data-stage="failed"] .ps-me .ps-halo { opacity: 0; }
+
+/* Words. */
+.ps-names { display: flex; justify-content: space-between; margin-top: -2px; font-size: 11px; line-height: 14px; color: var(--ps-muted); }
+.ps-names span { width: 28.75%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+.ps-caption { margin-top: 8px; }
+.ps-label { margin: 0; font-size: 14px; font-weight: 600; line-height: 20px; }
+.ps-time { margin: 2px 0 0; font-size: 12px; color: var(--ps-muted); font-variant-numeric: tabular-nums; }
+.ps-slow { margin: 6px auto 0; max-width: 20rem; font-size: 12px; line-height: 17px; color: var(--ps-muted); }
+.ps-failure { margin-top: 8px; font-size: 12px; line-height: 17px; color: var(--ps-danger); }
+.ps-failure p { margin: 0; }
+.ps-detail { margin-top: 4px !important; color: var(--ps-muted); overflow-wrap: anywhere; }
+.ps-retry {
+  margin-top: 10px; min-height: 40px; padding: 0 18px; border-radius: 10px; cursor: pointer;
+  background: var(--ps-accent); color: var(--theme-panel-header); font-size: 13px; font-weight: 600;
+}
+.ps-retry:hover { background: var(--theme-accent-hover); }
+.ps-retry:focus-visible { outline: 2px solid var(--ps-accent); outline-offset: 2px; }
+.ps-retry:disabled { opacity: 0.5; cursor: default; }
+
+/* The steps, in order, with the current one marked. */
+.ps-steps { display: flex; margin: 12px 0 0; padding: 0; list-style: none; }
+.ps-steps li { position: relative; flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 10px; line-height: 12px; color: var(--ps-muted); }
+.ps-steps li + li::before { content: ""; position: absolute; top: 3.5px; inset-inline-end: 50%; width: 100%; height: 1px; background: var(--ps-line); }
+.ps-steps li[data-state="done"]::before, .ps-steps li[data-state="current"]::before { background: var(--ps-accent); }
+.ps-step-dot { position: relative; z-index: 1; width: 8px; height: 8px; border-radius: 999px; background: var(--ps-node); box-shadow: 0 0 0 1.5px var(--ps-line); }
+.ps-steps li[data-state="done"] .ps-step-dot { background: var(--ps-accent); box-shadow: none; }
+.ps-steps li[data-state="current"] { color: var(--ps-text); font-weight: 600; }
+.ps-steps li[data-state="current"] .ps-step-dot { background: var(--ps-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ps-accent) 30%, transparent); }
+.ps-step-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ps[data-stage="failed"] .ps-steps { opacity: 0.6; }
+
+/* Narrow chats: the step names give way to dots, except the current one's, which the label above says. */
+@container pairing-scene (max-width: 250px) {
+  .ps-step-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .ps-names { font-size: 10px; }
+}
+
+/* Off screen, nothing moves. */
+.ps[data-paused] *, .ps[data-paused] { animation-play-state: paused !important; }
+
+/* Reduced motion (the system's, or the app's setting): a still picture of the stage, arrows on its routes. */
+@media (prefers-reduced-motion: reduce) {
+  .ps, .ps * { animation: none !important; transition: none !important; }
+  .ps .ps-pk, .ps .ps-ping, .ps .ps-knock circle, .ps .ps-burst circle { opacity: 0 !important; }
+  .ps:is([data-stage="publishing"], [data-stage="resolving"]) .ps-route-pub,
+  .ps[data-stage="knocking"] :is(.ps-route-up, .ps-route-low),
+  .ps[data-stage="answering"] :is(.ps-route-in, .ps-route-low) { opacity: 0.9; }
+}
+:root[data-reduce-motion="true"] .ps, :root[data-reduce-motion="true"] .ps * { animation: none !important; transition: none !important; }
+:root[data-reduce-motion="true"] .ps :is(.ps-pk, .ps-ping, .ps-knock circle, .ps-burst circle) { opacity: 0 !important; }
+:root[data-reduce-motion="true"] .ps:is([data-stage="publishing"], [data-stage="resolving"]) .ps-route-pub,
+:root[data-reduce-motion="true"] .ps[data-stage="knocking"] :is(.ps-route-up, .ps-route-low),
+:root[data-reduce-motion="true"] .ps[data-stage="answering"] :is(.ps-route-in, .ps-route-low) { opacity: 0.9; }
+:root[data-reduce-motion="true"] .ps[data-stage="knocking"] .ps-knock circle:first-child,
+:root[data-reduce-motion="true"] .ps[data-stage="live"] .ps-direct-glow { opacity: 0.3 !important; }
+@media (prefers-reduced-motion: reduce) {
+  .ps[data-stage="knocking"] .ps-knock circle:first-child, .ps[data-stage="live"] .ps-direct-glow { opacity: 0.3 !important; }
+}
+
+/* The header's small version (PairingIndicator.tsx). */
+.pi { position: relative; display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding: 2px 6px; border-radius: 999px; cursor: pointer;
+  color: var(--theme-text-secondary); font-size: 11px; line-height: 16px; background: color-mix(in srgb, var(--theme-accent) 12%, transparent); }
+.pi:hover { color: var(--theme-accent); }
+.pi:focus-visible { outline: 2px solid var(--theme-accent); outline-offset: 1px; }
+.pi[data-stage="failed"] { color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 12%, transparent); }
+.pi svg { flex-shrink: 0; overflow: visible; }
+.pi-end { fill: currentColor; opacity: 0.55; }
+.pi-me { fill: var(--theme-accent); }
+.pi[data-stage="failed"] .pi-me { fill: currentColor; }
+.pi-line { stroke: currentColor; stroke-width: 1.2; stroke-dasharray: 2 2; opacity: 0.5; }
+.pi-packet { fill: var(--theme-accent); animation: pi-move 1.4s ease-in-out infinite; }
+.pi[data-direction="in"] .pi-packet { animation-direction: reverse; }
+.pi[data-stage="waiting"] .pi-packet { animation: pi-wait 2.4s ease-in-out infinite; }
+.pi[data-stage="failed"] .pi-packet, .pi[data-stage="live"] .pi-packet { display: none; }
+.pi[data-stage="live"] .pi-line { stroke-dasharray: none; opacity: 1; stroke: var(--theme-accent); }
+@keyframes pi-move { 0% { transform: translateX(0); opacity: 0; } 20%, 80% { opacity: 1; } 100% { transform: translateX(16px); opacity: 0; } }
+@keyframes pi-wait { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+.pi-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pi-tip { position: absolute; top: calc(100% + 6px); inset-inline-start: 0; z-index: 50; width: max-content; max-width: min(16rem, 70vw); padding: 4px 8px;
+  border: 1px solid var(--theme-border); border-radius: 6px; background: var(--theme-surface-alt); color: var(--theme-text-primary);
+  font-size: 11px; line-height: 16px; text-align: start; white-space: normal; box-shadow: 0 8px 20px rgb(0 0 0 / 0.25); pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .pi-packet { animation: none !important; transform: translateX(8px); opacity: 1; } }
+:root[data-reduce-motion="true"] .pi-packet { animation: none !important; transform: translateX(8px); opacity: 1; }
