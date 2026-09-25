@@ -47,6 +47,8 @@ function libraryPaths(bundleId: string): string[] {
     join(library, "Application Support", bundleId),
     join(library, "Preferences", `${bundleId}.plist`),
     join(library, "Saved Application State", `${bundleId}.savedState`),
+    // The app's own log goes by the identifier it was built with (src-tauri/tauri.e2e.conf.json), the copies' shared one.
+    join(library, "Logs", BUNDLE_PREFIX.slice(0, -1)),
   ];
 }
 
