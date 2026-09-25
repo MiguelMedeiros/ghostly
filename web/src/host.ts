@@ -20,6 +20,15 @@ function testPace(): Pick<NodeOptions, "pollIntervals" | "transport"> {
 }
 
 /**
+ * Tests only: `localStorage["ghostly-test-iroh"] = "off"` keeps Iroh out of this page's peer, so the suite stays
+ * offline (Iroh would reach its public relays) and a browser is WebRTC only, as specs written before Iroh expect.
+ * The fixtures set it unless a spec asks for Iroh (and then points it at the test relay). Read once.
+ */
+function testIroh(): boolean {
+  try { return localStorage.getItem("ghostly-test-iroh") !== "off"; } catch { return true; }
+}
+
+/**
  * Ghostly on the web: the peer runs in this page and lives as long as the tab.
  * Two things a web page cannot do stay with the extension and the desktop app:
  * reaching web apps on the user's machine (no way to be granted access, only
@@ -29,7 +38,8 @@ export const webHost = createInPageHost({
   version: __APP_VERSION__,
   notice: "Beta. Keys and wallet data live in this browser. Pocket money only.",
   features: { shareLocalServices: false, openServices: false, profiles: true },
-  node: testPace(),
+  // Iroh through a relay (WISP 102): where WebRTC cannot connect, before the chat drops to the DHT.
+  node: { ...testPace(), irohWeb: testIroh() },
 
   /**
    * The deployed build says what it is in `/version.json`, on this origin and

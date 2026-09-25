@@ -43,6 +43,7 @@ services:
   anvil: *node
   s3: *node
   mint: *small
+  iroh-relay: *small
   fedimintd: *node
   fedimint-lnd: *node
   fedimint-lnd-peer: *node

@@ -249,8 +249,9 @@ export const servicesPlatform: ServicesPlatform | null = {
       relays: state.settings.relays,
       defaultRelays: DEFAULT_RELAYS,
       turn: state.settings.iceServers[0] ?? null,
+      ...(state.transport.iroh ? { iroh: { relays: state.settings.irohRelays ?? [], defaultRelays: state.transport.iroh.defaults } } : {}),
     };
   },
-  setNetwork: ({ relays, turn }) =>
-    engine.call("updateSettings", { settings: { relays, iceServers: turn?.urls ? [turn] : [] } }),
+  setNetwork: ({ relays, turn, irohRelays }) =>
+    engine.call("updateSettings", { settings: { relays, iceServers: turn?.urls ? [turn] : [], ...(irohRelays ? { irohRelays } : {}) } }),
 };

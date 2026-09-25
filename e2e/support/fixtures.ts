@@ -27,6 +27,11 @@ export interface PeerOptions {
    * holds the switch to Testnet behind it.
    */
   offlineMainnet?: boolean;
+  /**
+   * Runs Iroh through this relay (the e2e infra's, `endpoints.irohRelay`). Without it the page's peer has no Iroh:
+   * the suite stays offline, and a browser is WebRTC only, as most specs expect.
+   */
+  irohRelay?: string;
 }
 
 /** Where the Mainnet Ark and USDT wallets a new profile makes by itself go: the Ark server, its explorer, the Ethereum RPC. */
@@ -50,11 +55,23 @@ export async function openPeer(browser: Browser, relay: LocalRelay, baseURL: str
   await attachMint(context);
   await stubGifServices(context);
   if (options.offlineMainnet) for (const service of MAINNET_SERVICES) await context.route(service, (route) => route.abort("connectionrefused"));
+  if (!options.irohRelay) await context.addInitScript(() => { try { localStorage.setItem("ghostly-test-iroh", "off"); } catch { /* opaque origin */ } });
   const page = await context.newPage();
   page.on("pageerror", (error) => console.log(`  [${name}] ${error.message}`));
   await page.goto("/");
   await expect(page.getByTitle("New Chat")).toBeVisible();
+  if (options.irohRelay) await setIrohRelay(page, options.irohRelay);
   return { name, context, page };
+}
+
+/** Points this peer's Iroh at `relay` (Settings → Network), before it has a chat to start an endpoint for. */
+export async function setIrohRelay(page: Page, relay: string): Promise<void> {
+  await page.goto("/#/settings");
+  await page.getByTestId("network-iroh-relays").fill(relay);
+  await page.getByTestId("network-save").click();
+  await expect(page.getByTestId("network-saved")).toBeVisible();
+  await page.goto("/#/");
+  await expect(page.getByTitle("New Chat")).toBeVisible();
 }
 
 /** A 1×1 GIF. */

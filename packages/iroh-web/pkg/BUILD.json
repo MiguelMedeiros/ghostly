@@ -1,0 +1,9 @@
+{
+  "iroh": "1.2.0",
+  "wasmBindgen": "0.2.106",
+  "rustc": "rustc 1.92.0 (ded5c06cf 2025-12-08)",
+  "source": "79fa2afd9723859e47bcd87e3a4f215d9840fe1e3d9ed0f85e556b1d4820bba1",
+  "sha256": "66eced6db3c7179eeaec04e7a436ff828567566531703738261b42da9d44e28d",
+  "bytes": 2889578,
+  "gzipBytes": 1077768
+}

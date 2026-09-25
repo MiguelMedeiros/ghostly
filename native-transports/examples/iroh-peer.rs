@@ -55,7 +55,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     let init: Value = serde_json::from_str(&lines.next_line().await?.ok_or("Missing init")?)?;
     let seed: [u8; 32] = serde_json::from_value(init["seed"].clone())?;
-    let endpoint = wire::endpoint(seed, true).await?;
+    // `relays` homes the peer on those relays (a browser peer can only reach
+    // it there); without it the peer stays on loopback.
+    let relays: Option<Vec<String>> = serde_json::from_value(init["relays"].clone())?;
+    let endpoint = match relays {
+        Some(relays) => {
+            let endpoint = wire::endpoint_with_relays(seed, &relays).await?;
+            endpoint.online().await;
+            endpoint
+        }
+        None => wire::endpoint(seed, true).await?,
+    };
     let sockets: Sockets = Arc::default();
     let next = Arc::new(AtomicU64::new(1));
     println!(

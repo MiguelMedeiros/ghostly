@@ -1,6 +1,6 @@
 use iroh::{
     endpoint::{presets, Connection},
-    Endpoint, EndpointAddr, SecretKey,
+    Endpoint, EndpointAddr, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey,
 };
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, time::Duration};
@@ -58,6 +58,29 @@ pub async fn endpoint(seed: [u8; 32], local_only: bool) -> Result<Endpoint, Stri
         Endpoint::builder(presets::N0)
     };
     builder
+        .secret_key(SecretKey::from_bytes(&seed))
+        .alpns(vec![ALPN.to_vec()])
+        .bind()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// An endpoint homed on the given relays instead of n0's defaults: a
+/// self-hosted `iroh-relay`, or the e2e one. Direct paths are kept, so two
+/// native peers still hole-punch; a browser peer reaches it through the relay.
+pub async fn endpoint_with_relays(seed: [u8; 32], relays: &[String]) -> Result<Endpoint, String> {
+    if relays.is_empty() || relays.len() > 4 {
+        return Err("Between one and four relays are needed".into());
+    }
+    let urls = relays
+        .iter()
+        .map(|url| url.parse::<RelayUrl>())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| "Invalid Iroh relay URL")?;
+    Endpoint::builder(presets::Minimal)
+        .relay_mode(RelayMode::Custom(RelayMap::from_iter(
+            urls.into_iter().map(RelayConfig::from),
+        )))
         .secret_key(SecretKey::from_bytes(&seed))
         .alpns(vec![ALPN.to_vec()])
         .bind()

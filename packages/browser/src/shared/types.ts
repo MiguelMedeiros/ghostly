@@ -543,6 +543,11 @@ export interface Settings {
   relays: string[];
   /** Extra ICE servers (typically TURN) on top of the built-in STUN set. */
   iceServers: IceServerSetting[];
+  /**
+   * The Iroh relays a browser build homes on (WISP 102, relay only): a page cannot send UDP, so every Iroh
+   * packet goes through one. Absent or empty means the defaults (n0's public relays, as the desktop app's).
+   */
+  irohRelays?: string[];
   /** Cashu mints this peer holds ecash at and accepts ecash from. The first is where invoices are created. */
   mints: string[];
   /** False until the default mints were put in place once; after that the list is the user's. */
@@ -682,6 +687,11 @@ export interface LinkView {
   peerTransports?: PairedTransport[];
   /** Round trip on the live session, once measured. */
   transportRttMs?: number;
+  /**
+   * The live session goes through relays, never directly (WISP 100, "Relayed"): a browser's Iroh. The relays'
+   * hosts, this app's first. They see who talks to whom and when, not what is said.
+   */
+  transportRelayed?: { relays: string[] };
   /** While live: since when the current transport carries the chat, and why it was chosen (see engine/transportLog.ts). */
   transportLive?: { since: number; cause?: TransportCause };
   /** The chat's connection story, newest last; only for the chat on screen (`setActiveLink`). */
@@ -721,7 +731,11 @@ export interface ServiceView extends StoredService {
 
 export interface EngineState {
   settings: Settings;
-  transport: { protocol: string; relays: string[] };
+  transport: {
+    protocol: string; relays: string[];
+    /** Present where Iroh runs in the browser (web app, extension): the relays it uses and the defaults. */
+    iroh?: { relays: string[]; defaults: string[] };
+  };
   links: LinkView[];
   services: ServiceView[];
   /** Transfers since the peer started, by file id. */

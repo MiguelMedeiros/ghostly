@@ -110,6 +110,7 @@ import type { HoldStore } from "../backup/storage";
 import { PaymentDesk } from "./payments";
 import { CashuWallet } from "./wallet";
 import { traceJoin } from "./joinTrace";
+import { DEFAULT_IROH_RELAYS, createIrohWebEndpoint, irohRelayProblem } from "../platform/irohWeb";
 
 const DEFAULT_SETTINGS: Settings = {
   online: true,
@@ -201,6 +202,11 @@ const PAYMENT_METHODS: PaymentMethodName[] = ["cashu", "lightning", "arkade", "u
 
 export interface NodeOptions {
   nativeTransports?: Partial<Record<NativeTransport, (seedB64: string) => Promise<NativeEndpoint>>>;
+  /**
+   * Run Iroh in the page (web app, extension): the wasm build, relay only, on the relays in the settings
+   * (WISP 102). It loads when a chat first starts an endpoint, not with the app.
+   */
+  irohWeb?: boolean;
   /** How to reach Pkarr. Default: HTTP relays, the only way out of a browser. */
   transport?: PkarrTransport;
   pollIntervals?: PollIntervals;
@@ -741,7 +747,7 @@ export class GhostlyNode implements EngineImplementation {
     const groups = this.groups.views();
     return {
       settings: this.settings,
-      transport: this.transport.describe(),
+      transport: { ...this.transport.describe(), ...(this.options.irohWeb ? { iroh: { relays: this.irohRelays, defaults: [...DEFAULT_IROH_RELAYS] } } : {}) },
       // Group edges are links the engine runs, not chats anyone sees.
       links: [...this.links.values()].filter((live) => !live.stored.group).map((live) => this.viewOf(live)).sort((a, b) => b.createdAt - a.createdAt),
       services: this.services
@@ -1879,12 +1885,19 @@ export class GhostlyNode implements EngineImplementation {
     for (const server of settings.iceServers ?? []) { const problem = iceServerProblem(server); if (problem) throw new Error(problem); }
     if (settings.avatar !== undefined && settings.avatar !== "" && typeof sanitizeAvatar(settings.avatar) !== "string") throw new Error("Use a small JPEG picture");
     if (settings.relays && this.relays && !settings.relays.some((relay) => normalizeRelayUrl(relay))) throw new Error("Enter at least one relay address (https://…)");
+    if (settings.irohRelays) {
+      if (settings.irohRelays.length > 4) throw new Error("Use at most four Iroh relays");
+      for (const relay of settings.irohRelays) { const problem = irohRelayProblem(relay); if (problem) throw new Error(problem); }
+    }
+    const irohRelaysChanged = settings.irohRelays !== undefined && JSON.stringify(settings.irohRelays) !== JSON.stringify(this.settings.irohRelays ?? []);
     // Of the Nostr settings, only what the patch names changes; the rest stays as stored (or the defaults).
     if (nostr) {
       const current = effectiveNostrSettings(this.settings.nostr);
       settings.nostr = { relays: normalizeNostrRelays(nostr.relays ?? current.relays), autoLoadProfiles: (nostr.autoLoadProfiles ?? current.autoLoadProfiles) === true, publish: (nostr.publish ?? current.publish) === true };
     }
     this.settings = { ...this.settings, ...settings };
+    if (!this.settings.irohRelays?.length) delete this.settings.irohRelays;
+    if (irohRelaysChanged) void this.rehomeIroh();
     if (settings.relays) {
       this.relays?.setRelays(settings.relays);
       if (this.relays) this.settings.relays = this.relays.describe().relays;
@@ -2385,12 +2398,32 @@ export class GhostlyNode implements EngineImplementation {
     this.emitState();
   }
 
+  /** The native transports this engine runs: the host's, and Iroh's browser build where it runs in the page. */
+  private get nativeFactories(): Partial<Record<NativeTransport, (seedB64: string) => Promise<NativeEndpoint>>> {
+    return {
+      ...this.options.nativeTransports,
+      ...(this.options.irohWeb ? { "iroh/1": (seedB64: string) => createIrohWebEndpoint(seedB64, { relays: this.irohRelays }) } : {}),
+    };
+  }
+  private get irohRelays(): string[] { return this.settings.irohRelays?.length ? this.settings.irohRelays : [...DEFAULT_IROH_RELAYS]; }
+
+  /** New Iroh relays: idle endpoints move now; one carrying a chat keeps its relay until that session ends. */
+  private async rehomeIroh(): Promise<void> {
+    if (!this.options.irohWeb) return;
+    for (const [linkId, live] of this.links) {
+      const link = live.link;
+      if (!link?.availableTransports.includes("iroh/1") || !link.canReleaseEndpoint("iroh/1")) continue;
+      await link.releaseEndpoint("iroh/1");
+      void this.ensureNativeEndpoints(linkId);
+    }
+  }
+
   private ensureNativeEndpoints(linkId: string): Promise<void> {
     const expected = this.links.get(linkId)?.link;
     const operation = this.nativeQueue.then(async () => {
       const live = this.links.get(linkId), link = live?.link;
       if (this.shuttingDown || !live?.stored.profile || live.stored.group || live.stored.deliveryMode === "dht" || !link || link !== expected) return;
-      for (const [transport, factory] of Object.entries(this.options.nativeTransports ?? {})) {
+      for (const [transport, factory] of Object.entries(this.nativeFactories)) {
         const key = transport as NativeTransport;
         if (!factory || link.availableTransports.includes(key)) continue;
         live.transportErrors ??= {};
@@ -2485,6 +2518,7 @@ export class GhostlyNode implements EngineImplementation {
       transportAutomatic: live.stored.preferredTransport === undefined,
       peerTransports: live.link?.peerAvailableTransports,
       transportRttMs: live.link?.rttMs,
+      transportRelayed: live.link?.relayedPath,
       transportLive: live.transportLog?.liveNow(),
       // The whole story only for the chat on screen: every state push carries every link.
       transportLog: stored.id === this.activeLinkId && stored.profile && !stored.group ? stored.transportLog ?? [] : undefined,

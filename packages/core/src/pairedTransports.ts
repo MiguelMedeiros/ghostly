@@ -23,11 +23,30 @@ export interface NativeEndpoint {
 }
 export type TransportDescriptors = Partial<Record<NativeTransport, unknown>>;
 
+/**
+ * Relay only (WISP 100, "Relayed"): the transport reaches this contact only through a relay server, never
+ * directly. A descriptor says so with `relayed: true`, and an Iroh descriptor with no direct address is relayed
+ * too (a browser's, WISP 102). Either side being relay only makes the whole path relayed. Both sides hold both
+ * descriptors after the exchange, so they agree, and the rank stays symmetric.
+ */
+export function relayedTransports(local: TransportDescriptors, remote: TransportDescriptors): NativeTransport[] {
+  const relayOnly = (transport: NativeTransport, descriptor: unknown): boolean => {
+    if (!descriptor || typeof descriptor !== "object") return false;
+    const d = descriptor as { relayed?: unknown; addresses?: unknown };
+    return d.relayed === true || (transport === "iroh/1" && Array.isArray(d.addresses) && d.addresses.length === 0);
+  };
+  return (["iroh/1", "hyperdht/1"] as const).filter(t => relayOnly(t, local[t]) || relayOnly(t, remote[t]));
+}
+
 /** Symmetric rank sum; the fixed order breaks ties deterministically. Neither
- * a remote list nor a preference can add an unavailable local adapter. */
-export function rankTransports(local: readonly string[], remote: readonly string[]): PairedTransport[] {
+ * a remote list nor a preference can add an unavailable local adapter. A
+ * relayed transport ranks after every direct one: it is where a failed direct
+ * path goes, never ahead of one that works. */
+export function rankTransports(local: readonly string[], remote: readonly string[], relayed: readonly string[] = []): PairedTransport[] {
+  const penalty = (t: PairedTransport) => relayed.includes(t) ? 1 : 0;
   return TRANSPORTS.filter(t => local.includes(t) && remote.includes(t))
-    .sort((a, b) => (local.indexOf(a) + remote.indexOf(a)) - (local.indexOf(b) + remote.indexOf(b))
+    .sort((a, b) => penalty(a) - penalty(b)
+      || (local.indexOf(a) + remote.indexOf(a)) - (local.indexOf(b) + remote.indexOf(b))
       || TRANSPORTS.indexOf(a) - TRANSPORTS.indexOf(b));
 }
 

@@ -6,7 +6,7 @@
   },
   "rankTransports": {
     "file": "packages/core/src/pairedTransports.ts",
-    "line": 26,
-    "code": "/** Symmetric rank sum; the fixed order breaks ties deterministically. Neither\n * a remote list nor a preference can add an unavailable local adapter. */\nexport function rankTransports(local: readonly string[], remote: readonly string[]): PairedTransport[] {\n  return TRANSPORTS.filter(t => local.includes(t) && remote.includes(t))\n    .sort((a, b) => (local.indexOf(a) + remote.indexOf(a)) - (local.indexOf(b) + remote.indexOf(b))\n      || TRANSPORTS.indexOf(a) - TRANSPORTS.indexOf(b));\n}"
+    "line": 41,
+    "code": "/** Symmetric rank sum; the fixed order breaks ties deterministically. Neither\n * a remote list nor a preference can add an unavailable local adapter. A\n * relayed transport ranks after every direct one: it is where a failed direct\n * path goes, never ahead of one that works. */\nexport function rankTransports(local: readonly string[], remote: readonly string[], relayed: readonly string[] = []): PairedTransport[] {\n  const penalty = (t: PairedTransport) => relayed.includes(t) ? 1 : 0;\n  return TRANSPORTS.filter(t => local.includes(t) && remote.includes(t))\n    .sort((a, b) => penalty(a) - penalty(b)\n      || (local.indexOf(a) + remote.indexOf(a)) - (local.indexOf(b) + remote.indexOf(b))\n      || TRANSPORTS.indexOf(a) - TRANSPORTS.indexOf(b));\n}"
   }
 }

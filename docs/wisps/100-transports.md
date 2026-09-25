@@ -4,7 +4,7 @@
 |---|---|
 | Candidate number | 100; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.2 |
+| Revision | 0.3 |
 | Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [03](03-capabilities.md), [403](403-dht-text.md) |
@@ -60,6 +60,18 @@ While `live`, the chat does not probe for a higher-ranked transport by itself; i
 
 **After a drop, both sides end on the same transport, whichever side dials.** A standing explicit choice is one made in the Connection menu and carried as a switch intent (the higher intent wins; on a tie, the lower rendezvous key). The redial tries that choice's transport first, then the rest by rank sum. With both sides on Automatic, the rank sum alone decides, and it is symmetric. When the new session is ready, both sides agree again from their current policies, as for any fresh session. A switch still in flight when the link dropped, or one that was kept on a fallback transport, does not carry over. If the session is not on the agreed transport, the coordinator moves it once, and the timeline shows one line for coming back. This is not probing: it applies choices already made, at the moment the chat changes transport anyway. With no explicit choice on either side, nothing moves.
 
+### Relayed transports (revision 0.3)
+
+A transport is **relayed** on a chat when either side's descriptor says it reaches the contact only through a relay server: `"relayed": true`, or an Iroh descriptor with no direct address (a browser's, [102](102-iroh.md#browser-profile-relay-only-revision-03)). Both sides hold both descriptors after the exchange, so both reach the same verdict.
+
+1. **Rank.** A relayed transport ranks after every direct one; within each group the rank sum and the fixed order decide as before. The result stays the same from either side. A relayed path is never chosen over a working direct one by the rule alone.
+2. **Explicit choice wins.** A transport chosen in the Connection menu is used even when relayed.
+3. **Fallback after WebRTC.** WebRTC settles late (ICE can fail long after the offer). When the dialling side's WebRTC attempt ends without opening, it goes on to the next ranked transports, typically a relayed Iroh, before the chat is left `on-dht`. With **Allow fallback** off on either side, it does not.
+4. **No probing.** A live relayed session is kept while it works, as any other (above, and [open decisions](#open-decisions)). The next dial, after a drop or a restart, ranks direct paths first again, so a network that lets WebRTC through again is used then.
+5. **Shown.** The connection indicator says "relayed" and names the relays, which see who talks to whom and when, never what is said.
+
+The same flag serves any relayed transport (HyperDHT through a DHT relay in a browser, for example).
+
 ### DHT only as a choice
 
 The per-chat Connection menu lists **DHT only** beside Automatic and the transports both apps support ([400](400-chat.md#pairing-progress-and-transport-rows)). Choosing it closes layer 1 and releases native endpoints for that chat, exactly as today's DHT-only mode does. It travels as the envelope's `mode` ([403](403-dht-text.md)), not as a `paired-policy` intent, because it must reach a contact that has no layer-1 session.
@@ -110,5 +122,6 @@ Reverse offer arrival order and still choose the same result; exercise disjoint 
 
 ## Revision log
 
+- 0.3 (2026-09-25): relayed transports: rank after direct ones, fallback after a failed WebRTC attempt, shown as relayed.
 - 0.2 (2026-09-25): the DHT as the floor under every transport, never a candidate; inputs from the layer-0 capability record; upgrade, downgrade and background retry rules; DHT only as a per-chat choice; after a drop, the redial and the agreement that follows it.
 - 0.1 (2026-09-20): initial review draft.

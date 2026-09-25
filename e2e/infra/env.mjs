@@ -68,6 +68,9 @@ export const VARIABLES = {
   GHOSTLY_USDT_RPC_URL: ["http://127.0.0.1:47070", "Anvil, chain 31337"],
   GHOSTLY_USDT_TOKEN: ["0x5FbDB2315678afecb367f032d93F642f64180aa3", "TestUSDT contract (first deployment of Anvil's first account)"],
 
+  // Iroh (WISP 102): the relay the browsers' Iroh goes through, and the native test peer homes on.
+  GHOSTLY_IROH_RELAY_URL: ["http://127.0.0.1:47085", "Iroh relay (iroh-relay 1.2 --dev, plain HTTP): browser Iroh suites"],
+
   // S3 (held messages, profile backups): RustFS with throwaway keys.
   GHOSTLY_S3_ENDPOINT: ["http://127.0.0.1:47080", "S3-compatible endpoint (RustFS)"],
   GHOSTLY_S3_KEY: ["ghostly-e2e", "S3 access key (local server)"],
@@ -116,6 +119,7 @@ export const endpoints = {
   },
   fedimint: { api: read("GHOSTLY_FEDIMINT_API_URL"), gateway: read("GHOSTLY_FEDIMINT_GATEWAY_URL") },
   usdt: { rpc: read("GHOSTLY_USDT_RPC_URL"), token: read("GHOSTLY_USDT_TOKEN") },
+  irohRelay: read("GHOSTLY_IROH_RELAY_URL"),
   s3: { endpoint: read("GHOSTLY_S3_ENDPOINT"), key: read("GHOSTLY_S3_KEY"), secret: read("GHOSTLY_S3_SECRET") },
 };
 

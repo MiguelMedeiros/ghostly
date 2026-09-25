@@ -55,7 +55,7 @@ export function PairingBanner({ peerKey }: { peerKey: string }) {
   const preferred = link?.preferredTransport ?? "webrtc/1";
   const pinned = !!link?.peerParticipationKey, canCompare = !!pair?.code && !!pair.peerKey && (pair.status === "ready" || pair.status === "waiting");
   const awaitingJoin = !pinned && !pair?.peerKey && link?.dataLink === "idle";
-  const label = !online ? "Offline" : connectionFailure ? "Connection issue" : discoveryFailure ? (discoveryFailure.startsWith("Could not publish discovery:") && !discoveryFailure.includes("Could not read discovery:") ? "Publication unavailable" : "Discovery unavailable") : dht ? "DHT only" : textDht ? "DHT · offline text" : pair?.transitionTarget ? `Switching · ${name(pair.transitionTarget)}` : ready ? `Connected · ${name(pair?.transport)}` : pair?.status === "confirm" ? "Confirm peer" : awaitingJoin ? "No contact yet" : !link?.peerOnline && link?.dataLink === "idle" ? "Waiting for contact" : "Connecting…";
+  const label = !online ? "Offline" : connectionFailure ? "Connection issue" : discoveryFailure ? (discoveryFailure.startsWith("Could not publish discovery:") && !discoveryFailure.includes("Could not read discovery:") ? "Publication unavailable" : "Discovery unavailable") : dht ? "DHT only" : textDht ? "DHT · offline text" : pair?.transitionTarget ? `Switching · ${name(pair.transitionTarget)}` : ready ? `Connected · ${name(pair?.transport)}${link?.transportRelayed ? " (relayed)" : ""}` : pair?.status === "confirm" ? "Confirm peer" : awaitingJoin ? "No contact yet" : !link?.peerOnline && link?.dataLink === "idle" ? "Waiting for contact" : "Connecting…";
   const kind: ConnectionKind = !online ? "offline" : failure ? "failure" : dht || textDht ? "dht" : ready && !pair?.transitionTarget ? "connected" : "waiting";
   const connecting = kind === "waiting" && (label === "Connecting…" || !!pair?.transitionTarget);
   // Live, or live and moving to another transport: the transport's own mark, and what it is at a glance.
@@ -78,7 +78,7 @@ export function PairingBanner({ peerKey }: { peerKey: string }) {
     if (e.key !== "Escape") return;
     if (root.current?.open) { e.stopPropagation(); close(); } else if (tip) { e.stopPropagation(); setTip(false); }
   }} className="relative" data-testid="connection-menu">
-    <summary ref={trigger} onClick={() => { setTip(false); setMenuOpen(!root.current?.open); }} data-testid="connection-options" data-state={kind} data-transport={liveOn ?? (holding ? "hold" : undefined)} aria-label={`Connection options: ${label}`} aria-describedby={`${id}-tip`}
+    <summary ref={trigger} onClick={() => { setTip(false); setMenuOpen(!root.current?.open); }} data-testid="connection-options" data-state={kind} data-transport={liveOn ?? (holding ? "hold" : undefined)} data-relayed={liveOn && link?.transportRelayed ? "" : undefined} aria-label={`Connection options: ${label}`} aria-describedby={`${id}-tip`}
       onPointerEnter={e => { if (e.pointerType !== "touch") setTip(true); }} onPointerLeave={() => setTip(false)}
       onFocus={e => { if (e.currentTarget.matches(":focus-visible")) setTip(true); }} onBlur={() => setTip(false)}
       className={`relative flex cursor-pointer list-none items-center justify-center rounded-full p-2 transition-colors max-md:p-2.5 hover:bg-surface-hover [&::-webkit-details-marker]:hidden ${focus} ${kind === "failure" ? "text-danger" : kind === "offline" ? "text-text-muted hover:text-accent" : "text-text-secondary hover:text-accent"}`}>
@@ -92,6 +92,7 @@ export function PairingBanner({ peerKey }: { peerKey: string }) {
       </div>
       {summary && <dl data-testid="connection-summary" className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[11px]">
         <dt>Transport</dt><dd className="text-text-primary">{summary.name}</dd>
+        {summary.relays && <><dt>Path</dt><dd data-testid="connection-relayed" className="text-text-primary break-words">Relayed{summary.relays.length ? ` via ${summary.relays.join(", ")}` : ""}</dd></>}
         {summary.rttMs !== undefined && <><dt>Round trip</dt><dd className="text-text-primary">{summary.rttMs} ms</dd></>}
         {summary.since !== undefined && <><dt>Live since</dt><dd className="text-text-primary">{new Date(summary.since).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} ({lasting(Date.now() - summary.since)})</dd></>}
         <dt>Why</dt><dd className="text-text-primary">{summary.why}</dd>
