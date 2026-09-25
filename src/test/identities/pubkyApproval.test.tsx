@@ -140,8 +140,9 @@ describe("Pubky approval in the UI", () => {
     await user.click(screen.getByTestId("identity-proof-remove-unpublish"));
     const approval = await within(notes).findByTestId("approval");
     expect(sdk.capabilities).toEqual([`/pub/ghostly.app/proofs/${folder}/:w`]);
-    // Nothing removed until it is approved.
+    // Nothing removed until it is approved, and the card does not say it is revoking while it waits.
     expect(engine.callsTo("removeIdentityProof")).toEqual([]);
+    expect(screen.getByTestId("identity-proof")).not.toHaveTextContent("Revoking");
     fireEvent.click(within(approval).getByTestId("approval-open"));
     expect(open).toHaveBeenCalledWith(PASSPORT, "pubky-passport", expect.stringMatching(/popup/));
 
