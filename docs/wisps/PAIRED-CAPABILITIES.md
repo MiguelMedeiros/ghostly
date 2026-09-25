@@ -1,4 +1,4 @@
-# Files and sats in paired chat
+# Files and sats in the chat session
 
 `paired-chat/1` now negotiates `files/2` and `payments/1` in its authenticated offer. Both endpoints must advertise support. Old text-only endpoints still pair and chat; new actions stay unavailable with them. Calls, hosted HTTP, external proofs and identities remain outside this change. Pair confirmation, pins, bootstrap and transport preferences are unchanged.
 

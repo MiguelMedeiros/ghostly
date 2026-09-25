@@ -8,7 +8,7 @@
 | Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [03](03-capabilities.md), [100](100-transports.md), [800](800-invite-join.md) |
-| Implementation | Existing 1:1 messages over two separate profiles; the single layered chat of revision 0.2 is proposed |
+| Implementation | Existing 1:1 messages; DHT text after a live link drops. The single layered chat of revision 0.2 (decided 2026-09-25; being implemented) |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 
@@ -122,8 +122,8 @@ sequenceDiagram
 | Files and voice messages | Yes (`files/2`, [501](501-paired-files.md)) | Held if both allow (8 MiB each); otherwise queued for layer 1 (new) | Attach stays enabled; the bubble says "Sends when live" or "Held for <contact>" |
 | Payment requests | Yes (`payments/1`) | Held if both allow (Cashu and Lightning requests); otherwise queued | As files |
 | Paying (ecash, Lightning, Ark, Spark, on-chain) | Yes, per [200](200-payments.md) | No. Bearer tokens never enter the DHT or a hold, and a payment is not queued | ⚡ disabled: "Payments need a live connection" |
-| Calls, voice and video | Not yet in this profile ([600](600-media.md); compatibility chats only) | No | Call buttons disabled: "Calls need a live connection" |
-| Hosted local services | Not yet in this profile ([700](700-local-services.md); compatibility chats only) | No | Hidden |
+| Calls, voice and video | Not yet in this profile ([600](600-media.md); compatibility chats only; being implemented) | No | Call buttons disabled: "Calls need a live connection" |
+| Hosted local services | Yes (`ph` frames, [701](701-http-services.md)) | No | Opening a contact's app says "Needs a live connection" |
 | Identity proofs shared with the contact | Yes | No; they wait for layer 1 | Unchanged |
 
 A Lightning invoice pasted as text is text: it fits the DHT when short enough, and sending it starts no payment. Cashu tokens are refused as DHT text.
@@ -180,5 +180,6 @@ Exercise equal timestamps, out-of-order arrivals, duplicated messages across DHT
 
 ## Revision log
 
+- 0.2.1 (2026-09-25): hosted local services run in the chat session today; only calls are the gap. Implementation status updated.
 - 0.2 (2026-09-25): one chat with a DHT layer and a peer-to-peer layer; chat states; what each state carries; the pairing-progress and transport-row wording; decisions Q1 to Q7 (decided 2026-09-25).
 - 0.1 (2026-09-20): initial review draft.

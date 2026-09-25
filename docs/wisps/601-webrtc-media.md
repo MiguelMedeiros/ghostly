@@ -4,11 +4,11 @@
 |---|---|
 | Candidate number | 601; editorial family allocation |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-22 |
+| Revision | 0.2 |
+| Updated | 2026-09-25 |
 | Document kind | Profile |
 | Dependencies | [600](600-media.md) |
-| Implementation | Compatible legacy WebRTC chats; capture varies by platform; not current paired sessions. |
+| Implementation | Compatibility chats (Ghostly 0.4 contacts); capture varies by platform; not yet in the chat session of new chats (being implemented). |
 
 > This Draft documents a bounded existing profile, not full contract conformance or an independent implementation certification.
 
@@ -20,4 +20,9 @@ WebRTC is the media path. Voice, camera and screen permission must remain separa
 
 ## Scope and evidence
 
-This is a legacy WebRTC capability, not an implemented paired/Iroh/HyperDHT media adapter. It does not add group calls, an SFU or an end-to-end encrypted forwarding-service claim. See [React call hooks](../../packages/react). Exercise accept/reject/hangup, stale signals, simultaneous calls, denied permissions and camera/screen transitions on supported platforms.
+This is the calls capability of compatibility chats ([402](402-legacy-chat.md)), not yet a media capability of the chat session ([401](401-paired-chat.md)) or of Iroh/HyperDHT. It does not add group calls, an SFU or an end-to-end encrypted forwarding-service claim. See [React call hooks](../../packages/react). Exercise accept/reject/hangup, stale signals, simultaneous calls, denied permissions and camera/screen transitions on supported platforms.
+
+## Revision log
+
+- 0.2 (2026-09-25): scope named as compatibility chats; calls in the chat session being implemented.
+- 0.1 (2026-09-22): WebRTC media profile.

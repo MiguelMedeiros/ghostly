@@ -49,24 +49,28 @@ const D = " · ";
 export const BLOCKS: Block[] = [
   // Rendezvous, keys & negotiation
   b("core", "base", "Ghost core", "available", ["01-ghost-core"], "Find a peer through small signed records on Pkarr / Mainline DHT.", "Encontrar um peer por pequenos registros assinados no Pkarr / DHT Mainline."),
-  b("keys", "base", "Peer keys", "available", ["02-peer-keys"], "A fresh participation key per connection. Paired chats also pin the other side's key.", "Uma chave de participação nova por conexão. Chats pareados também fixam a chave do outro lado."),
+  b("keys", "base", "Peer keys", "available", ["02-peer-keys"], "A fresh participation key per connection; every chat pins the other side's key.", "Uma chave de participação nova por conexão; todo chat fixa a chave do outro lado."),
   b("invite", "base", "Invitations", "available", ["800-invite-join", "801-invitation-profiles"], "Turn a private link or code into a mutually admitted connection.", "Transformar um link ou código privado numa conexão admitida pelos dois lados."),
-  b("qrinvite", "base", "QR invitations", "available", ["801-invitation-profiles"], "The paired invitation as a QR code to scan: the same code as the one you copy.", "O convite pareado como um QR code para escanear: o mesmo código que você copia."),
+  b("qrinvite", "base", "QR invitations", "available", ["801-invitation-profiles"], "The invitation as a QR code to scan: the same code as the one you copy.", "O convite como um QR code para escanear: o mesmo código que você copia."),
+  b("ghostly1", "base", "ghostly1 invite", "planned", ["800-invite-join", "801-invitation-profiles"], "One invite code, ghostly1…, checked for typos, and a ghostly.tools link that opens the app.", "Um único código de convite, ghostly1…, que detecta erros de digitação, e um link em ghostly.tools que abre o app."),
   b("caps", "base", "Capabilities", "available", ["03-capabilities"], "Both sides offer versioned abilities (chat/1, files/2, payments-cashu/1, hold/1 …) and use only the ones they share.", "Os dois lados oferecem capacidades versionadas (chat/1, files/2, payments-cashu/1, hold/1 …) e usam só as que têm em comum."),
 
   // Transports
   b("webrtc", "transport", "WebRTC", "available", ["100-transports", "101-webrtc"], "A data channel every Ghostly app has: browser, extension, desktop.", "Um canal de dados que todo app Ghostly tem: navegador, extensão, desktop."),
-  b("iroh", "transport", "Iroh", "available", ["100-transports", "102-iroh"], "QUIC between desktop apps, bound to Ghostly authentication. In paired chats, after a first WebRTC pairing.", "QUIC entre apps desktop, amarrado à autenticação do Ghostly. Em chats pareados, depois de um primeiro pareamento por WebRTC."),
+  b("iroh", "transport", "Iroh", "available", ["100-transports", "102-iroh"], "QUIC between desktop apps, bound to Ghostly authentication. After a first WebRTC pairing, for now.", "QUIC entre apps desktop, amarrado à autenticação do Ghostly. Depois de um primeiro pareamento por WebRTC, por enquanto."),
   b("hyperdht", "transport", "HyperDHT", "available", ["100-transports", "103-hyperdht"], "An authenticated Noise stream found through HyperDHT, between desktop apps.", "Um fluxo Noise autenticado encontrado pela HyperDHT, entre apps desktop."),
-  b("dhttext", "transport", "DHT text", "available", ["403-dht-text"], "Very short text in DHT records when no live link is up. Bounded, not a mailbox.", "Textos bem curtos em registros da DHT quando não há link ao vivo. Limitado, não é caixa postal."),
+  b("dhttext", "transport", "DHT text", "available", ["403-dht-text"], "The floor of every chat: very short text in DHT records when no live link is up. Bounded, not a mailbox.", "O piso de todo chat: textos bem curtos em registros da DHT quando não há link direto. Limitado, não é caixa postal."),
   b("tor", "transport", "Tor", "research", [], "Reaching peers over Tor. An open question, not a plan yet.", "Alcançar peers pelo Tor. Uma pergunta em aberto, ainda não um plano.", ["adapter-roadmap"]),
 
   // Chat, files & media
-  b("chat", "talk", "Chat", "available", ["400-chat", "402-legacy-chat"], "Messages with storage receipts and retries, over a live link or the bounded DHT path.", "Mensagens com confirmação de armazenamento e novas tentativas, por um link ao vivo ou pelo caminho limitado da DHT."),
-  b("paired", "talk", "Paired chats", "available", ["401-paired-chat", "501-paired-files"], "Authenticated one-to-one chats: pinned keys, a durable outbox, names and pictures, negotiated files. No calls in them yet.", "Chats um a um autenticados: chaves fixadas, caixa de saída durável, nomes e fotos, arquivos negociados. Ainda sem chamadas neles."),
+  b("chat", "talk", "Chat", "available", ["400-chat"], "One kind of chat: messages with storage receipts and retries, over a live link or through the DHT.", "Um só tipo de chat: mensagens com confirmação de armazenamento e novas tentativas, por um link direto ou pela DHT."),
+  b("paired", "talk", "Chat sessions", "available", ["401-paired-chat", "501-paired-files"], "The live session of every chat: pinned keys, a durable outbox, names and pictures, negotiated files. No calls in it yet.", "A sessão ao vivo de todo chat: chaves fixadas, caixa de saída durável, nomes e fotos, arquivos negociados. Ainda sem chamadas nela."),
+  b("compat", "talk", "Compatibility chats", "available", ["402-legacy-chat", "502-legacy-files"], "Chats with Ghostly 0.4 contacts and the CLI keep their older wire: DHT text and, on a live link, files and calls. Never created for a new chat.", "Chats com contatos no Ghostly 0.4 e a CLI mantêm o formato antigo: texto pela DHT e, num link direto, arquivos e chamadas. Nunca criados para um chat novo."),
+  b("onechat", "talk", "DHT fallback and upgrade", "planned", ["400-chat", "403-dht-text", "100-transports"], "A first pairing with no direct path starts on the DHT, and every chat moves to a live link by itself when one connects.", "Um primeiro pareamento sem caminho direto começa na DHT, e todo chat passa sozinho para um link direto quando algum conecta."),
+  b("callsall", "talk", "Calls in every chat", "planned", ["600-media", "401-paired-chat"], "Voice, video and screen sharing in the chat session, not only with Ghostly 0.4 contacts.", "Voz, vídeo e tela compartilhada na sessão do chat, não só com contatos no Ghostly 0.4."),
   b("hold", "talk", "Held messages", "available", ["4xx-store-and-forward"], "Text, a file up to 8 MiB or a Cashu/Lightning request, held for an away contact in your own S3 bucket and found through a DHT pointer. Opt-in per chat; up to seven days after you were last online.", "Texto, um arquivo de até 8 MiB ou um pedido Cashu/Lightning, guardados para um contato ausente no seu próprio bucket S3 e achados por um ponteiro na DHT. Opcional por chat; até sete dias depois da sua última vez online."),
-  b("files", "talk", "Files", "available", ["500-files", "502-legacy-files"], "Verified transfers up to 100 MiB while both peers are online. A voice message is a file too.", "Transferências verificadas de até 100 MiB com os dois peers online. Uma mensagem de voz também é um arquivo."),
-  b("media", "talk", "Voice & video", "available", ["600-media", "601-webrtc-media"], "One-to-one calls and screen sharing over WebRTC media, in unpaired chats.", "Chamadas um a um e compartilhamento de tela por mídia WebRTC, nos chats não pareados."),
+  b("files", "talk", "Files", "available", ["500-files", "501-paired-files"], "Verified transfers up to 100 MiB while both peers are online. A voice message is a file too.", "Transferências verificadas de até 100 MiB com os dois peers online. Uma mensagem de voz também é um arquivo."),
+  b("media", "talk", "Voice & video", "available", ["600-media", "601-webrtc-media"], "One-to-one calls and screen sharing over WebRTC media, in chats with Ghostly 0.4 contacts for now.", "Chamadas um a um e compartilhamento de tela por mídia WebRTC, por enquanto em chats com contatos no Ghostly 0.4."),
 
   // Payments
   b("cashu", "pay", "Cashu", "available", ["200-payments", "201-cashu"], "Ecash tokens in the chat; a mint you choose holds the funds.", "Tokens de ecash no chat; um mint escolhido por você guarda os fundos."),
@@ -92,7 +96,7 @@ export const BLOCKS: Block[] = [
   b("keet", "identity", "Keet", "research", ["303-keet"], "A Keet relationship; blocked on a signer API for existing accounts.", "Uma relação com o Keet; depende de uma API de assinatura para contas existentes."),
 
   // Local services
-  b("http", "services", "Local HTTP apps", "available", ["700-local-services", "701-http-services"], "A contact opens a web app running on your computer, in a paired chat too; you choose who sees each app and can take it back. Desktop and extension.", "Um contato abre um app web que roda no seu computador, também num chat pareado; você escolhe quem vê cada app e pode retirar o acesso. Desktop e extensão."),
+  b("http", "services", "Local HTTP apps", "available", ["700-local-services", "701-http-services"], "A contact opens a web app running on your computer; you choose who sees each app and can take it back. Desktop and extension.", "Um contato abre um app web que roda no seu computador; você escolhe quem vê cada app e pode retirar o acesso. Desktop e extensão."),
 
   // Profiles, backup & storage
   b("profiles", "keep", "Local profiles", "available", ["04-profiles"], "Separate lives on one device, never announced to contacts.", "Vidas separadas no mesmo aparelho, sem anunciar isso aos contatos."),
@@ -123,7 +127,7 @@ export const PRESETS: { id: PresetId; blocks: (bl: Block) => boolean; title: Loc
   },
   {
     id: "cli",
-    blocks: (bl) => ["core", "keys", "invite", "dhttext", "chat"].includes(bl.id),
+    blocks: (bl) => ["core", "keys", "invite", "compat"].includes(bl.id),
     title: { en: "The CLI today", "pt-br": "A CLI hoje" },
     blurb: {
       en: "The real command-line client: short text over DHT records, no live transport. Its invitations don't open in the app.",
@@ -135,8 +139,8 @@ export const PRESETS: { id: PresetId; blocks: (bl: Block) => boolean; title: Loc
     blocks: (bl) => bl.level === "available",
     title: { en: "Ghostly today", "pt-br": "O Ghostly hoje" },
     blurb: {
-      en: "Everything the app runs: paired chats, groups and communities, held messages, profiles and backups, many ways to pay, identity proofs with Nostr social, local apps and the SDK.",
-      "pt-br": "Tudo o que o app roda: chats pareados, grupos e comunidades, mensagens guardadas, perfis e backups, muitas formas de pagar, provas de identidade com o social do Nostr, apps locais e o SDK.",
+      en: "Everything the app runs: one-to-one chats, groups and communities, held messages, profiles and backups, many ways to pay, identity proofs with Nostr social, local apps and the SDK.",
+      "pt-br": "Tudo o que o app roda: chats um a um, grupos e comunidades, mensagens guardadas, perfis e backups, muitas formas de pagar, provas de identidade com o social do Nostr, apps locais e o SDK.",
     },
   },
   {

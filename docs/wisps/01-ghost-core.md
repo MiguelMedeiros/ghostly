@@ -8,7 +8,7 @@
 | Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [00](00-process.md) |
-| Implementation | Existing rendezvous and DHT text; the DHT as rendezvous and floor of every chat (revision 0.2) proposed |
+| Implementation | Existing rendezvous and DHT text; the DHT as rendezvous and floor of every chat (decided 2026-09-25; being implemented) |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 

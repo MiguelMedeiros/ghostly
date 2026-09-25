@@ -24,7 +24,7 @@
     "title": "WISP 01: Ghost Core Protocol",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "Existing rendezvous and DHT text; the DHT as rendezvous and floor of every chat (revision 0.2) proposed",
+    "implementation": "Existing rendezvous and DHT text; the DHT as rendezvous and floor of every chat (decided 2026-09-25; being implemented)",
     "dependencies": [
       "00-process.md"
     ],
@@ -58,7 +58,7 @@
     "title": "WISP 03: Capability Negotiation",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "Existing advertisements and the paired pair-offer; the layer-0 capability record is proposed",
+    "implementation": "Existing advertisements and the paired pair-offer; the layer-0 capability record (decided 2026-09-25; being implemented)",
     "dependencies": [
       "01-ghost-core.md",
       "02-peer-keys.md",
@@ -112,7 +112,7 @@
     "title": "WISP 100: Transport Negotiation",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "Experimental paired-chat negotiation; see increment",
+    "implementation": "Experimental rank-sum negotiation in every new chat; the DHT floor, background retry and upgrade (decided 2026-09-25; being implemented)",
     "dependencies": [
       "01-ghost-core.md",
       "02-peer-keys.md",
@@ -197,7 +197,7 @@
     "title": "WISP 102: Iroh",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "Experimental native paired-chat adapter; see increment",
+    "implementation": "Experimental native adapter of the chat session (desktop); descriptors on the DHT (decided 2026-09-25; being implemented)",
     "dependencies": [
       "100-transports.md"
     ],
@@ -214,7 +214,7 @@
     "title": "WISP 103: HyperDHT",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "Experimental native paired-chat adapter; see increment",
+    "implementation": "Experimental native adapter of the chat session (desktop); descriptors on the DHT (decided 2026-09-25; being implemented)",
     "dependencies": [
       "100-transports.md"
     ],
@@ -533,7 +533,7 @@
     "title": "WISP 400: Chat Messaging",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "Existing 1:1 messages over two separate profiles; the single layered chat of revision 0.2 is proposed",
+    "implementation": "Existing 1:1 messages; DHT text after a live link drops. The single layered chat of revision 0.2 (decided 2026-09-25; being implemented)",
     "dependencies": [
       "01-ghost-core.md",
       "02-peer-keys.md",
@@ -552,7 +552,7 @@
     "title": "WISP 401: Chat Session",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "The layer-1 session of every new chat (paired-chat/1): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT and automatic upgrade are proposed.",
+    "implementation": "The layer-1 session of every new chat (paired-chat/1): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT and automatic upgrade (decided 2026-09-25; being implemented); calls planned.",
     "documentKind": "Profile",
     "dependencies": [
       "400-chat.md",
@@ -586,7 +586,7 @@
     "title": "WISP 403: DHT Text",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "Existing envelope, limits and DHT-only mode (pair2d/ chats and paired fallback); as the floor and first contact of every chat, proposed. Native DHT versus browser relays differ.",
+    "implementation": "Existing envelope, limits and DHT-only mode (pair2d/ chats and paired fallback); as the floor and first contact of every chat (decided 2026-09-25; being implemented). Native DHT versus browser relays differ.",
     "documentKind": "Profile",
     "dependencies": [
       "400-chat.md",
@@ -660,7 +660,7 @@
     "title": "WISP 502: Compatibility File Frames",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "Legacy live data links; both peers online.",
+    "implementation": "Compatibility chats' live data links; both peers online.",
     "documentKind": "Profile",
     "dependencies": [
       "500-files.md"
@@ -677,8 +677,8 @@
     "slug": "600-media",
     "title": "WISP 600: Voice and Video",
     "status": "Draft",
-    "updated": "2026-09-20",
-    "implementation": "Existing 1:1 calls and screen sharing",
+    "updated": "2026-09-25",
+    "implementation": "Existing 1:1 calls and screen sharing in compatibility chats (Ghostly 0.4 contacts); calls in every chat being implemented",
     "dependencies": [
       "03-capabilities.md",
       "100-transports.md"
@@ -693,8 +693,8 @@
     "slug": "601-webrtc-media",
     "title": "WISP 601: WebRTC Media",
     "status": "Draft",
-    "updated": "2026-09-22",
-    "implementation": "Compatible legacy WebRTC chats; capture varies by platform; not current paired sessions.",
+    "updated": "2026-09-25",
+    "implementation": "Compatibility chats (Ghostly 0.4 contacts); capture varies by platform; not yet in the chat session of new chats (being implemented).",
     "documentKind": "Profile",
     "dependencies": [
       "600-media.md"
@@ -711,8 +711,8 @@
     "slug": "700-local-services",
     "title": "WISP 700: Local Services",
     "status": "Draft",
-    "updated": "2026-09-20",
-    "implementation": "Existing HTTP proxy",
+    "updated": "2026-09-25",
+    "implementation": "Existing HTTP proxy, in every chat (desktop and extension hosts)",
     "dependencies": [
       "03-capabilities.md",
       "100-transports.md"
@@ -727,8 +727,8 @@
     "slug": "701-http-services",
     "title": "WISP 701: HTTP Local Service Profile",
     "status": "Draft",
-    "updated": "2026-09-22",
-    "implementation": "Legacy desktop/extension hosting; web viewer where supported; not paired hosted HTTP.",
+    "updated": "2026-09-25",
+    "implementation": "Desktop/extension hosting in every chat: data-link frames in compatibility chats, the same frames inside ph frames in the chat session; web viewer where supported.",
     "documentKind": "Profile",
     "dependencies": [
       "700-local-services.md"
@@ -762,7 +762,7 @@
     "title": "WISP 801: Implemented Invitation Profiles",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "Today: pair1/ and pair2d/ creation plus v0.4 imports. Proposed: one bech32m format, ghostly1…, and the reading rules below",
+    "implementation": "Today: pair1/ and pair2d/ creation plus v0.4 imports. One bech32m format, ghostly1…, and the reading rules below (decided 2026-09-25; being implemented)",
     "documentKind": "Profile",
     "dependencies": [
       "800-invite-join.md",
@@ -904,7 +904,7 @@
     "sourcePath": "docs/wisps/PAIRED-CAPABILITIES.md",
     "aliases": [],
     "slug": "paired-capabilities",
-    "title": "Files and sats in paired chat",
+    "title": "Files and sats in the chat session",
     "dependencies": [],
     "notices": []
   },

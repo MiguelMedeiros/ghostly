@@ -4,11 +4,11 @@
 |---|---|
 | Candidate number | 600; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-20 |
+| Revision | 0.2 |
+| Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [03](03-capabilities.md), [100](100-transports.md) |
-| Implementation | Existing 1:1 calls and screen sharing |
+| Implementation | Existing 1:1 calls and screen sharing in compatibility chats (Ghostly 0.4 contacts); calls in every chat being implemented |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 
@@ -37,3 +37,8 @@ Test independent WebRTC engines, accept/reject/hangup, stale call replay, simult
 ## References
 
 [Call signal validation](../../packages/core/src/callSignal.ts), [shared React hooks](../../packages/react), [current calls](../PROTOCOL.md), [WebRTC](101-webrtc.md).
+
+## Revision log
+
+- 0.2 (2026-09-25): implementation line: calls exist in compatibility chats ([402](402-legacy-chat.md)) only; the chat session of every new chat ([401](401-paired-chat.md)) has none yet.
+- 0.1 (2026-09-20): initial review draft.

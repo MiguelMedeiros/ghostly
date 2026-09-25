@@ -711,7 +711,7 @@
     "status": "Planned",
     "range": "5xx",
     "section": "Communication, groups and storage",
-    "body": "**Composition and provider/runtime options**\n\nCurrent 500 / paired files/2; future disk streaming, range resume and storage adapters\n\n**Dependencies and criteria for readiness**\n\nIntegrity digest, byte limits, receiver consent and durable receipt; current retry restarts the file, not a range resume. File delivery need not imply permanent backup.",
+    "body": "**Composition and provider/runtime options**\n\nCurrent 500 / chat files/2 ([501](501-paired-files.md)); future disk streaming, range resume and storage adapters\n\n**Dependencies and criteria for readiness**\n\nIntegrity digest, byte limits, receiver consent and durable receipt; current retry restarts the file, not a range resume. File delivery need not imply permanent backup.",
     "sourceAnchor": "communication-groups-and-storage"
   },
   {

@@ -82,7 +82,8 @@ This works today in **[Ghostly Browser](docs/BROWSER.md)**, a Chromium extension
 - **E2E Encrypted** — 256-bit NaCl secretbox encryption
 - **Ephemeral presence** — Records stop being refreshed when offline; local history and retained network copies can remain
 - **No account required** — Optional connectivity infrastructure has explicit privacy and availability tradeoffs
-- **Calls** — Voice, video and screen sharing, peer to peer, in a window you can put aside
+- **One chat** — Meets on the DHT, talks peer to peer over WebRTC (or Iroh and HyperDHT between desktops), and keeps short texts going over the DHT when the direct link drops ([WISP 400](docs/wisps/400-chat.md))
+- **Calls** — Voice, video and screen sharing, peer to peer, in a window you can put aside (in development builds, with Ghostly 0.4 contacts until calls reach every chat)
 - **Share localhost** — A contact opens a web app running on your machine, while you are online
 - **Files** — Up to 100 MiB, straight to your contact
 - **Sats** — An ecash wallet with Lightning in and out; pasted invoices and tokens become cards you can pay or redeem
@@ -120,8 +121,8 @@ This works today in **[Ghostly Browser](docs/BROWSER.md)**, a Chromium extension
 
 - [Installation](docs/INSTALLATION.md) — Web app, extension, desktop downloads, CLI, build from source
 - [Architecture](docs/ARCHITECTURE.md) — How it works, tech stack, security model
-- [Experimental native transports](docs/wisps/TRANSPORT-INCREMENT.md) — Paired chat over Iroh and HyperDHT, exact scope and validation
-- [WISP drafts](docs/wisps/README.md) — Proposed modular protocol catalogue, group architecture, evidence and conformance plan
+- [Experimental native transports](docs/wisps/TRANSPORT-INCREMENT.md) — Chats over Iroh and HyperDHT, exact scope and validation
+- [WISP drafts](docs/wisps/README.md) — The protocol catalogue: one chat, one `ghostly1` invite, what is implemented and what is being built
 - [Protocol](docs/PROTOCOL.md) — Records, service advertisements, WebRTC data link, HTTP over WebRTC
 - [SDK](docs/SDK.md) — Build a wallet source, an identity proof or a client outside the app: contracts, contract tests, plugins
 - [Ghostly Browser](docs/BROWSER.md) — Run the extension, share a local app, limitations

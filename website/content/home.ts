@@ -44,7 +44,7 @@ const en = {
       {
         title: "Share it your way.",
         body: "As a link, a QR code or a text code. In person, by message, however you like. Only share it with the person you want to meet.",
-        note: "The QR code scans with a camera or from an image.",
+        note: "The QR code scans with a camera or from an image. Planned: one code that starts with ghostly1 and catches typos, and a ghostly.tools link.",
       },
       {
         title: "Connect.",
@@ -92,7 +92,7 @@ const en = {
       {
         title: "A plan both agreed to.",
         body: "Chat, files and Cashu, over WebRTC, because that's what these two have in common. Change the apps, and the plan changes with them.",
-        note: "Negotiated abilities come with paired chats. Chats started with an older version keep a fixed set.",
+        note: "Every new chat negotiates its abilities. Chats with Ghostly 0.4 contacts keep a fixed set.",
       },
     ],
     boo: "Boo · desktop",
@@ -113,8 +113,8 @@ const en = {
       },
       {
         title: "Honest about the route.",
-        body: "Public STUN servers help the two devices find a route through home routers. If a direct path isn't possible, the connection can fail. You can add your own TURN relay in settings.",
-        note: "Very short texts can still travel as DHT records when no live link is up: up to 500 bytes today, 256 bytes in paired chats.",
+        body: "Public STUN servers help the two devices find a route through home routers. When the direct path is lost, short texts keep going through the DHT while the apps look for it again. You can add your own TURN relay in settings.",
+        note: "DHT texts are short: 256 bytes (500 with Ghostly 0.4 contacts). Planned: a first meeting with no direct path starts on the DHT too, and the chat goes live by itself once a path appears.",
       },
     ],
     pipe: "live connection",
@@ -148,7 +148,7 @@ const en = {
         icon: "video",
         title: "Be a little closer.",
         body: "Voice, video and screen sharing, one to one. Turn the camera on or share your screen without calling again.",
-        extra: "Screen sharing needs a computer. Calls ring in chats over WebRTC; paired chats and groups don't ring yet.",
+        extra: "Screen sharing needs a computer. Calls ring today in chats with Ghostly 0.4 contacts; calls in every chat are planned, and groups don't ring yet.",
       },
       {
         id: "sats",
@@ -389,7 +389,7 @@ const ptBr: HomeCopy = {
       {
         title: "Compartilhe do seu jeito.",
         body: "Como link, QR code ou código de texto, pessoalmente ou por mensagem, como preferir. Compartilhe só com quem você quer encontrar.",
-        note: "O QR code é lido pela câmera ou de uma imagem.",
+        note: "O QR code é lido pela câmera ou de uma imagem. Planejado: um único código que começa com ghostly1 e detecta erros de digitação, e um link em ghostly.tools.",
       },
       {
         title: "Conecte.",
@@ -437,7 +437,7 @@ const ptBr: HomeCopy = {
       {
         title: "Um plano que os dois aceitaram.",
         body: "Chat, arquivos e Cashu, por WebRTC, porque é isso que esses dois têm em comum. Troque os apps, e o plano muda junto.",
-        note: "Capacidades negociadas vêm com os chats pareados. Chats iniciados numa versão anterior mantêm um conjunto fixo.",
+        note: "Todo chat novo negocia suas capacidades. Chats com contatos no Ghostly 0.4 mantêm um conjunto fixo.",
       },
     ],
     boo: "Boo · desktop",
@@ -458,8 +458,8 @@ const ptBr: HomeCopy = {
       },
       {
         title: "Sincero sobre o caminho.",
-        body: "Servidores STUN públicos ajudam os aparelhos a achar uma rota através dos roteadores de casa. Se não houver caminho direto, a conexão pode falhar. Dá para adicionar seu próprio relay TURN nos ajustes.",
-        note: "Textos bem curtos ainda podem viajar como registros na DHT quando não há link ao vivo: até 500 bytes hoje, 256 bytes nos chats pareados.",
+        body: "Servidores STUN públicos ajudam os aparelhos a achar uma rota através dos roteadores de casa. Quando o caminho direto se perde, textos curtos continuam passando pela DHT enquanto os apps procuram de novo. Dá para adicionar seu próprio relay TURN nos ajustes.",
+        note: "Textos pela DHT são curtos: 256 bytes (500 com contatos no Ghostly 0.4). Planejado: um primeiro encontro sem caminho direto também começa na DHT, e o chat passa sozinho ao link direto quando um caminho aparece.",
       },
     ],
     pipe: "conexão ao vivo",
@@ -493,7 +493,7 @@ const ptBr: HomeCopy = {
         icon: "video",
         title: "Fique mais perto.",
         body: "Voz, vídeo e compartilhamento de tela, um a um. Ligue a câmera ou mostre a tela sem ligar de novo.",
-        extra: "Compartilhar a tela exige um computador. Chamadas tocam nos chats por WebRTC; chats pareados e grupos ainda não tocam.",
+        extra: "Compartilhar a tela exige um computador. Hoje as chamadas tocam em chats com contatos no Ghostly 0.4; chamadas em todo chat estão planejadas, e grupos ainda não tocam.",
       },
       {
         id: "sats",

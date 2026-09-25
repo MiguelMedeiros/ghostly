@@ -8,7 +8,7 @@
 | Updated | 2026-09-25 |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [100](100-transports.md), [403](403-dht-text.md) |
-| Implementation | The layer-1 session of every new chat (`paired-chat/1`): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT and automatic upgrade are proposed. |
+| Implementation | The layer-1 session of every new chat (`paired-chat/1`): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT and automatic upgrade (decided 2026-09-25; being implemented); calls planned. |
 
 > This Draft documents a bounded existing profile, not full contract conformance or an independent implementation certification.
 
@@ -47,7 +47,7 @@ The side that dials waits 20 seconds after a failed attempt, doubling up to 3 mi
 
 The `pair-offer` lists what this session can carry: `chat/1`, `signed-signal/1`, and, when both apps offer them, `tofu/1`, `files/2`, `payments/1` with its per-method entries, `transport-switch/1`, `transport-fallback/1`, `hold/1`, proof and identity entries. Apps before 0.5 cap `capabilities` at 16 entries, so behaviour that grants nothing goes in `extensions` ([liveness](#liveness-and-reconnection)). The layer-0 capability record ([03](03-capabilities.md#layer-0-capability-record)) repeats the same identifiers so the DHT side knows them before this session exists; once this session is ready, its transcript-bound offer is authoritative for what the session carries.
 
-Calls (`calls/1`, [600](600-media.md)) and hosted local services ([700](700-local-services.md)) are not negotiated on this session yet; today they exist only in compatibility chats ([402](402-legacy-chat.md)). Bringing them here is required before the one chat can claim everything the old chat did (see [400](400-chat.md#what-each-state-can-carry)).
+Hosted local services ([700](700-local-services.md)) already run on this session: the HTTP frames of [701](701-http-services.md) travel inside `ph` application frames, without a negotiated capability, so an older app drops them ([pairedHttp.ts](../../packages/core/src/pairedHttp.ts)). Calls ([600](600-media.md)) do not: the app ignores call signals in a chat with this profile, so today calls exist only in compatibility chats ([402](402-legacy-chat.md)). Bringing calls here is required before the one chat can claim everything the old chat did (see [400](400-chat.md#what-each-state-can-carry)); it is being implemented.
 
 ## Runtime boundary and compatibility
 
@@ -59,5 +59,6 @@ Initial pairing currently uses WebRTC; revision 0.2 proposes first contact on th
 
 ## Revision log
 
+- 0.2.1 (2026-09-25): hosted local services already run on this session (`ph` frames); only calls are the gap. Implementation status updated.
 - 0.2 (2026-09-25): renamed Chat Session; the layer-1 session of the one chat; first contact may complete on the DHT; the `no-dht-payload` transcript constant explained; capabilities list; calls and hosted services named as gaps.
 - 0.1 (2026-09-22): paired chat profile.

@@ -140,7 +140,7 @@ A group has **metadata** besides its roster: today, a picture. It is not in the 
 
 **The box.** The body is encrypted with XChaCha20-Poly1305 under the message key of epoch `k`, with the JSON of `["ghostly-group meta", g, k, d]` as associated data. The signature covers the body's hash, not the box, so any member can seal the same statement again under an epoch the recipient holds. Someone taken out of the group gets no later epoch key, so it cannot read a picture set after its removal.
 
-**The picture** is what a profile picture may be ([paired chat's `paired-avatar`](401-paired-chat.md)): a `data:image/jpeg;base64,` URL whose JPEG frame header declares at most 512×512, never a URL to fetch. It is also at most 40,000 characters, so the sealed frame stays within the 60 KiB an edge carries. Ghostly makes it by cropping the chosen image to its centre square and redrawing it at 128×128 as a fresh JPEG (a few KB, with no metadata of the original file). A body with anything else (a URL, another format, larger dimensions) is refused whole.
+**The picture** is what a profile picture may be ([the chat session's `paired-avatar`](401-paired-chat.md)): a `data:image/jpeg;base64,` URL whose JPEG frame header declares at most 512×512, never a URL to fetch. It is also at most 40,000 characters, so the sealed frame stays within the 60 KiB an edge carries. Ghostly makes it by cropping the chosen image to its centre square and redrawing it at 128×128 as a fresh JPEG (a few KB, with no metadata of the original file). A body with anything else (a URL, another format, larger dimensions) is refused whole.
 
 **Which statement a member keeps.** A statement is taken only if all of these hold:
 
@@ -184,4 +184,4 @@ Private payments in a group (no note, or amounts hidden); more metadata (renamin
 
 ## References
 
-[Group contract](900-group-sessions.md), [paired chat](401-paired-chat.md), [invite/join](800-invite-join.md), [protocol](../PROTOCOL.md#65-private-groups-group-mesh1), [session](../../packages/core/src/groupSession.ts), [commits](../../packages/core/src/groupCommits.ts), [crypto](../../packages/core/src/groupCrypto.ts).
+[Group contract](900-group-sessions.md), [chat session](401-paired-chat.md), [invite/join](800-invite-join.md), [protocol](../PROTOCOL.md#65-private-groups-group-mesh1), [session](../../packages/core/src/groupSession.ts), [commits](../../packages/core/src/groupCommits.ts), [crypto](../../packages/core/src/groupCrypto.ts).
