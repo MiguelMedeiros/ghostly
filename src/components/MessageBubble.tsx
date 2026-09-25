@@ -477,10 +477,12 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
         )}
 
         {isMe && message.delivery && <div className="clear-both pt-1 text-xs text-text-primary/65" role="status">
-          {message.delivery === "delivered" ? "Received by peer" : message.delivery === "held" ? "Held · waiting for your contact" : message.delivery === "sent" ? "Sent · waiting for receipt" : message.delivery === "sending" ? "Sending…" : message.delivery === "queued" ? "Not confirmed yet · sends again by itself" : message.delivery === "waiting" ? "Sends when live" : "Delivery unconfirmed"}
+          <span>{message.delivery === "delivered" ? "Received by peer" : message.delivery === "held" ? "Held · waiting for your contact" : message.delivery === "sent" ? "Sent · waiting for receipt" : message.delivery === "sending" ? "Sending…" : message.delivery === "queued" ? "Not confirmed yet · sends again by itself" : message.delivery === "waiting" ? "Sends when live" : "Delivery unconfirmed"}</span>
           {message.delivery === "waiting" && <>
             {message.deliveryError && <span className="block" data-testid="waiting-reason">{message.deliveryError}</span>}
+            {/* Cancelling is deleting what never left: the chat's own delete, so the list forgets it too. */}
             <button className="underline text-link cursor-pointer" data-testid="cancel-waiting" onClick={() => {
+              if (onDelete) { onDelete(); return; }
               const link = engine.linkByPeer(peerPubKey);
               if (link) void engine.call("deleteMessage", { linkId: link.id, messageId: message.id }).catch(() => {});
             }}>Cancel</button>
