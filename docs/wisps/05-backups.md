@@ -4,8 +4,8 @@
 |---|---|
 | Candidate number | 05; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-23 |
+| Revision | 0.2 |
+| Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [04](04-profiles.md), [200](200-payments.md), [1000](1000-storage.md) |
 | Implementation | Experimental: web and desktop clients |
@@ -59,6 +59,7 @@ The decrypted, decompressed payload is JSON:
 - `databases.peer` is a snapshot of the profile's peer database: for each object store its name, key path, auto-increment flag, indexes, keys and values. `databases.ark` holds each Ark wallet's own database ([202](202-arkade.md)), keyed by wallet id.
 - Values that JSON cannot carry are tagged: `{"$ghostly":"bigint","value":"…"}`, `{"$ghostly":"bytes","value":"<base64url>"}`, `{"$ghostly":"blob","type":"<mime>","value":"<base64url>"}`.
 - Data of the profile's own that has a `$ghostly` key (a contact can send anything) is escaped as `{"$ghostly":"object","entries":[[key, value], …]}`, so it comes back as it was and never as a tag. A reader leaves a tag it cannot read as it is instead of failing the restore.
+- Files whose bytes are in the platform's file storage (the origin-private file system, or real files on Desktop; see [500](500-files.md)) rather than in the database travel as a `blob` on their record when they are at most 16 MiB, so pictures and voice messages come back. Larger ones stay out and show as no longer available after a restore. The store of file pieces is kept empty in the bundle.
 - Wallet seeds inside the peer database stay sealed as they are on the device; their device keys travel with them, inside the encrypted bundle. The bundle passphrase therefore protects the funds: anyone with bundle and passphrase can spend them.
 
 ## Restore
@@ -81,4 +82,9 @@ The web and desktop clients create bundles from the active profile (or another o
 
 ## Open decisions
 
-Incremental and scheduled backups; excluding large files by choice; a passphrase-less mode tied to a hardware key; key rotation; restoring into an existing profile by merge.
+Incremental and scheduled backups; including files over 16 MiB by choice; a passphrase-less mode tied to a hardware key; key rotation; restoring into an existing profile by merge.
+
+## Revision log
+
+- 0.2 (2026-09-25): files kept in file storage travel up to 16 MiB; larger ones stay out.
+- 0.1 (2026-09-23): initial review draft.

@@ -677,7 +677,7 @@
     "web/{oidc-callback.html,src/oidcCallback.ts}": ["proofs.oidc","proofs.oidc.callback.web","proofs.oidc.callback.desktop"],
     "web/public/**/*": ["app.home","app.updates.web"],
     "packages/browser/src/shared/idb.ts": ["*"],
-    "packages/browser/src/shared/{fileBytes,fileBytesIdb,fileBytesOpfs,fileBytesNative,fileBytesWorker,storedFiles}.ts": ["files.*","delivery.hold.picture"],
+    "packages/browser/src/shared/{fileBytes,fileBytesCommon,fileBytesIdb,fileBytesOpfs,fileBytesNative,fileBytesWorker,storedFiles}.ts": ["files.*","delivery.hold.picture"],
     "packages/browser/src/shared/{rpc,types}.ts": []
   }
 }

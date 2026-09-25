@@ -5,7 +5,7 @@
  * written, and is closed before anyone reads the file as a Blob.
  */
 import { sha256 } from "@noble/hashes/sha2.js";
-import { FILE_BYTES_STEP, digestText } from "./fileBytes";
+import { FILE_BYTES_STEP, digestText } from "./fileBytesCommon";
 
 interface SyncHandle {
   read(buffer: Uint8Array, options?: { at?: number }): number;

@@ -73,6 +73,28 @@ it("backs up a whole profile and restores it as a new one, wallets relocated and
   expect(storage.getItem(`ghostly_${restored.id}_0123456789abcdef0123456789abcdef`)).toContain("peerPubKeyB64");
 });
 
+it("files kept in file storage travel in the bundle up to 16 MiB, whole; larger ones and the pieces stay out", async () => {
+  const { fileBytes } = await import("../src/shared/fileBytes");
+  const { SMALL_FILE_BYTES } = await import("../src/shared/fileBytes");
+  await openDb();
+  const bytes = await fileBytes();
+  await bytes.append("link2-in-small", 0, new Uint8Array([9, 8, 7]));
+  await bytes.close("link2-in-small");
+  await transact([STORES.files], (s) => {
+    s[STORES.files].put({ id: "link2-in-small", linkId: "link2", bytes: bytes.kind, createdAt: 1, metadata: { name: "a.png", size: 3, mime: "image/png", timestamp: 1 } });
+    // Never read: its size alone keeps it out.
+    s[STORES.files].put({ id: "link2-in-large", linkId: "link2", bytes: bytes.kind, createdAt: 1, metadata: { name: "b.bin", size: SMALL_FILE_BYTES + 1, mime: "", timestamp: 1 } });
+  });
+  const restored = await restoreProfileBackup(await createProfileBackup("a long backup passphrase"), "a long backup passphrase");
+  const db = `ghostly_${restored.id}`;
+  const files = await readAll(db, STORES.files) as { id: string; blob?: Blob }[];
+  const small = files.find((f) => f.id === "link2-in-small")!, large = files.find((f) => f.id === "link2-in-large")!;
+  expect(new Uint8Array(await small.blob!.arrayBuffer())).toEqual(new Uint8Array([9, 8, 7]));
+  expect(small.blob!.type).toBe("image/png");
+  expect(large.blob).toBeUndefined();
+  expect(await readAll(db, STORES.fileChunks), "the pieces are not copied twice").toEqual([]);
+});
+
 it("deletes another profile completely, after an optional backup of it, and never the active or first one", async () => {
   const { createProfile, activeProfileId } = await import("../../../src/lib/profiles");
   const { deleteProfile, profileSummary } = await import("../../../src/lib/profileData");

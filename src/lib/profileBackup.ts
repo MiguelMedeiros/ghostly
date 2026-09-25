@@ -1,7 +1,9 @@
 import { decode, encode } from "@ghostly/browser/backup/codec";
 import { open, seal } from "@ghostly/browser/backup/envelope";
 import { databaseExists, restoreDatabase, snapshotDatabase, type DatabaseSnapshot } from "@ghostly/browser/backup/database";
-import { databaseName } from "@ghostly/browser/shared/idb";
+import { databaseName, type StoredFile } from "@ghostly/browser/shared/idb";
+import { SMALL_FILE_BYTES } from "@ghostly/browser/shared/fileBytes";
+import { storedBlob, storedSize } from "@ghostly/browser/shared/storedFiles";
 import { restoreArkDatabase, snapshotArkDatabase, type ArkDatabaseSnapshot } from "@ghostly/browser/engine/paymentAdapters/backup";
 import { getPrefix, getStorageProfile, ownsKey } from "./storage";
 import { assertUnlocked } from "./profileData";
@@ -16,6 +18,26 @@ interface ProfilePayload {
   /** The profile's local keys, without its prefix. */
   storage: Record<string, string>;
   databases: { peer: DatabaseSnapshot | null; ark: Record<string, ArkDatabaseSnapshot> };
+}
+
+/**
+ * Files whose bytes are in file storage rather than in IndexedDB: those up to 16 MiB go in the bundle as
+ * Blobs (a picture, a voice message), as every file did before file storage; larger ones stay out, and
+ * show as no longer available where the bundle is restored. The pieces store is emptied: its files are in
+ * the bundle whole, or not at all. Only the active profile's storage can be read here.
+ */
+async function withFileBytes(peer: DatabaseSnapshot | null, active: boolean): Promise<void> {
+  const files = peer?.stores.find((store) => store.name === "files");
+  if (files && active) {
+    files.values = await Promise.all(files.values.map(async (value) => {
+      const file = value as StoredFile;
+      if (!file?.bytes || file.blob || storedSize(file) > SMALL_FILE_BYTES) return value;
+      const blob = await storedBlob(file, file.metadata?.mime ?? "").catch(() => null);
+      return blob ? { ...file, blob: new Blob([await blob.arrayBuffer()], { type: blob.type }) } : value;
+    }));
+  }
+  const pieces = peer?.stores.find((store) => store.name === "fileChunks");
+  if (pieces) { pieces.keys = []; pieces.values = []; }
 }
 
 const isArkRecord = (key: IDBValidKey) => key === "arkWallet" || (typeof key === "string" && (key.startsWith("arkWallet-retired-") || key.startsWith("arkWallet-mode-")));
@@ -46,6 +68,7 @@ export async function createProfileBackup(passphrase: string, id?: string, lockP
     storage[suffix] = value;
   }
   const peer = await snapshotDatabase(active ? databaseName() : `ghostly_${ns}`);
+  await withFileBytes(peer, active);
   const ark: Record<string, ArkDatabaseSnapshot> = {};
   const settingsStore = peer?.stores.find((s) => s.name === "settings");
   // The peer's copy of the storage credentials (for held messages, WISP 4xx) stays out too, like the page's.

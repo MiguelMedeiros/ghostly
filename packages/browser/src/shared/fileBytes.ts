@@ -1,5 +1,6 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { databaseName } from "./idb";
+import { digestText } from "./fileBytesCommon";
 
 /**
  * Where the bytes of a file live when they may be more than memory holds: a file sent or received in a chat.
@@ -50,8 +51,7 @@ export type FileBytesKind = "opfs" | "native" | "idb";
 /** Files sent from memory-sized sources stay whole in IndexedDB; anything larger goes through a `FileBytes`. */
 export const SMALL_FILE_BYTES = 16 * 1024 * 1024;
 
-/** Reads and copies move this much at a time. */
-export const FILE_BYTES_STEP = 1024 * 1024;
+export { FILE_BYTES_STEP, digestText } from "./fileBytesCommon";
 
 const ID = /^[A-Za-z0-9_-]{1,200}$/;
 const SPACE = /^[A-Za-z0-9_.-]{1,100}$/;
@@ -67,20 +67,6 @@ export function fileSpace(): string {
   const space = databaseName();
   if (!SPACE.test(space)) throw new Error("Invalid profile space");
   return space;
-}
-
-const BASE64URL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-
-/** base64url without padding (the worker has no @ghostly/core). */
-export function digestText(bytes: Uint8Array): string {
-  let out = "";
-  for (let i = 0; i < bytes.length; i += 3) {
-    const n = (bytes[i] << 16) | ((bytes[i + 1] ?? 0) << 8) | (bytes[i + 2] ?? 0);
-    out += BASE64URL[(n >> 18) & 63] + BASE64URL[(n >> 12) & 63];
-    if (i + 1 < bytes.length) out += BASE64URL[(n >> 6) & 63];
-    if (i + 2 < bytes.length) out += BASE64URL[n & 63];
-  }
-  return out;
 }
 
 /** SHA-256 of a Blob, read as a stream: memory stays at one read. */
