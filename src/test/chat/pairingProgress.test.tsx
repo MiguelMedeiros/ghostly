@@ -8,17 +8,22 @@ import { PairingIndicator } from "../../components/pairing/PairingIndicator";
 import { PairingScene } from "../../components/pairing/PairingScene";
 import { CELEBRATE_MS, usePairingProgress } from "../../hooks/usePairingProgress";
 import { deriveStage, failureReason, formatElapsed, type PairingProgress } from "../../lib/pairingProgress";
+import { loadSettings, saveSettings } from "../../lib/settings";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
-// covers: chat.paired.pairing-progress, chat.one-chat
+// The sounds module plays through Web Audio, which happy-dom has not: the test hears what is asked of it.
+const { playSound } = vi.hoisted(() => ({ playSound: vi.fn((_name: string) => () => {}) }));
+vi.mock("../../lib/sounds", async (importOriginal) => ({ ...(await importOriginal<typeof import("../../lib/sounds")>()), playSound }));
+
+// covers: chat.paired.pairing-progress, chat.one-chat, app.attention.sounds
 
 type Pairing = NonNullable<LinkView["pairing"]>;
 const pairing = (patch: Partial<Pairing>) => patch as Pairing;
 
 /** Chat.tsx's use of the scene, without the rest of the chat. */
-function Pairing({ inviter = true, createdAt }: { inviter?: boolean; createdAt?: number }) {
-  const p = usePairingProgress("peer", { inviter, enabled: true, createdAt });
+function Pairing({ inviter = true, createdAt, muted }: { inviter?: boolean; createdAt?: number; muted?: boolean }) {
+  const p = usePairingProgress("peer", { inviter, enabled: true, createdAt, muted });
   if (!p.show || !p.progress) return <p>the chat</p>;
   return <>
     <PairingIndicator progress={p.progress} />
@@ -41,7 +46,7 @@ const label = () => screen.getByTestId("pairing-stage-label").textContent;
 const currentStep = () => screen.getByTestId("pairing-steps").querySelector("[aria-current=step]")?.getAttribute("data-step");
 const scene = () => screen.queryByTestId("pairing-scene");
 
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); playSound.mockClear(); });
 
 describe("the stage, read off today's link fields", () => {
   it.each<[string, Partial<LinkView> | undefined, "inviter" | "joiner", string]>([
@@ -311,6 +316,98 @@ describe("a pairing that ends on the DHT (WISP 400)", () => {
       show(onDht(reason), engine);
       expect(screen.getByTestId("pairing-indicator-tip")).toHaveTextContent(words);
     }
+  });
+});
+
+describe("the connected sound", () => {
+  const sounds = () => playSound.mock.calls.map(([name]) => name);
+  const walk = (engine: ReturnType<typeof renderApp>["engine"]) => { for (const link of [fresh, published, knocked, connecting]) show(link, engine); };
+
+  it("plays once, in the same change that starts the connected moment, and never during the waiting stages", () => {
+    const { engine } = renderApp(<Pairing inviter />);
+    walk(engine);
+    expect(sounds()).toEqual([]);
+    show(live, engine);
+    expect(scene()).toHaveAttribute("data-stage", "live");
+    expect(sounds()).toEqual(["connected"]);
+  });
+
+  it("not again when the first pairing drops and comes back, during the moment or after it", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+    const { engine } = renderApp(<Pairing inviter={false} />);
+    walk(engine);
+    show(live, engine);
+    show(connecting, engine);
+    show(live, engine);
+    act(() => vi.advanceTimersByTime(CELEBRATE_MS + 100));
+    show(connecting, engine);
+    show(live, engine);
+    expect(sounds()).toEqual(["connected"]);
+  });
+
+  it("not for a transport switch: the link goes over another transport, the pairing stays live", () => {
+    const { engine } = renderApp(<Pairing inviter />);
+    walk(engine);
+    show(live, engine);
+    show({ ...live, dataLink: "connecting", pairing: pairing({ status: "negotiating", transport: "iroh/1", peerKey: "p" }) }, engine);
+    show({ ...live, pairing: pairing({ status: "ready", transport: "iroh/1", peerKey: "p" }) }, engine);
+    expect(sounds()).toEqual(["connected"]);
+  });
+
+  it("not for a reconnect of a contact already paired", () => {
+    fakeEngine.update({ links: [linkView({ createdAt: Date.now() - 86_400_000, ...connecting, peerParticipationKey: "p" })] });
+    const { engine } = renderApp(<Pairing inviter={false} />);
+    show({ ...fresh, peerParticipationKey: "p" }, engine);
+    show(live, engine);
+    expect(sounds()).toEqual([]);
+  });
+
+  it("not after a restart: live when the chat opens, nor when that link drops and comes back", () => {
+    fakeEngine.update({ links: [linkView({ createdAt: Date.now() - 60_000, ...live, peerParticipationKey: undefined })] });
+    const { engine } = renderApp(<Pairing inviter />);
+    show({ ...connecting, peerParticipationKey: undefined }, engine);
+    show({ ...live, peerParticipationKey: undefined }, engine);
+    expect(sounds()).toEqual([]);
+    expect(scene()).toBeNull();
+  });
+
+  it("not for a pairing that ends on the DHT", () => {
+    const { engine } = renderApp(<Pairing inviter={false} createdAt={Date.now()} />);
+    show({ ...published, pairingProgress: { role: "joiner", stage: "on-dht", reason: "transport", retryable: true, since: Date.now(), startedAt: Date.now(), attempt: 2 } } as Partial<LinkView>, engine);
+    expect(sounds()).toEqual([]);
+  });
+
+  it("from the engine's own report too", () => {
+    const { engine } = renderApp(<Pairing inviter={false} />);
+    const report = (stage: PairingProgress["stage"]) => ({ ...published, pairingProgress: { role: "joiner", stage, since: Date.now(), startedAt: Date.now(), attempt: 1 } } as Partial<LinkView>);
+    show(report("knocking"), engine);
+    show(report("connecting"), engine);
+    show(report("live"), engine);
+    expect(sounds()).toEqual(["connected"]);
+  });
+
+  it("not with sounds off, nor in a chat whose sounds are muted; the moment itself still comes", () => {
+    saveSettings({ ...loadSettings(), notifications: { ...loadSettings().notifications, soundEnabled: false } });
+    const off = renderApp(<Pairing inviter />);
+    walk(off.engine);
+    show(live, off.engine);
+    expect(scene()).toHaveAttribute("data-stage", "live");
+    off.unmount();
+    saveSettings({ ...loadSettings(), notifications: { ...loadSettings().notifications, soundEnabled: true } });
+    fakeEngine.reset();
+    const muted = renderApp(<Pairing inviter muted />);
+    walk(muted.engine);
+    show(live, muted.engine);
+    expect(scene()).toHaveAttribute("data-stage", "live");
+    expect(sounds()).toEqual([]);
+  });
+
+  it("with reduced motion: the scene is still, the sound follows the sound setting", () => {
+    document.documentElement.dataset.reduceMotion = "true";
+    const { engine } = renderApp(<Pairing inviter={false} />);
+    walk(engine);
+    show(live, engine);
+    expect(sounds()).toEqual(["connected"]);
   });
 });
 

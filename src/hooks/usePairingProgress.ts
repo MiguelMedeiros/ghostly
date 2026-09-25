@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { deriveStage, reportedProgress, type PairingProgress, type PairingRole, type PairingStage } from "../lib/pairingProgress";
+import { loadSettings } from "../lib/settings";
+import { playSound } from "../lib/sounds";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -30,9 +32,10 @@ export interface PairingPresence {
 
 /**
  * The pairing progress of the paired chat with `peerKey`, and whether its scene is on. Only a chat's first
- * pairing gets the scene: a contact already paired reconnects under the header's connection control.
+ * pairing gets the scene: a contact already paired reconnects under the header's connection control. The
+ * scene's "connected" moment comes with one short sound, unless sounds are off, or `muted` for this chat.
  */
-export function usePairingProgress(peerKey: string | undefined, { inviter, enabled, createdAt }: { inviter: boolean; enabled: boolean; createdAt?: number }): PairingPresence {
+export function usePairingProgress(peerKey: string | undefined, { inviter, enabled, createdAt, muted = false }: { inviter: boolean; enabled: boolean; createdAt?: number; muted?: boolean }): PairingPresence {
   const state = useSyncExternalStore(subscribe, snapshot);
   const link = peerKey ? state?.links.find(l => l.peerPubKeyZ32 === peerKey) : undefined;
   const reported = reportedProgress(link);
@@ -45,7 +48,8 @@ export function usePairingProgress(peerKey: string | undefined, { inviter, enabl
   const since = useRef<{ stage: PairingStage; at: number; linked: boolean } | null>(null);
   const wasLive = useRef<boolean | null>(null);
   const shown = useRef(false);
-  if (owner.current !== peerKey) { owner.current = peerKey; role.current = first.current = since.current = wasLive.current = null; shown.current = false; }
+  const celebrated = useRef(false);
+  if (owner.current !== peerKey) { owner.current = peerKey; role.current = first.current = since.current = wasLive.current = null; shown.current = celebrated.current = false; }
 
   // The role is what this device did first; the invite code is forgotten once the contact shows up.
   role.current ??= reported?.role ?? (inviter ? "inviter" : "joiner");
@@ -72,10 +76,18 @@ export function usePairingProgress(peerKey: string | undefined, { inviter, enabl
   useEffect(() => {
     if (!enabled || !firstPairing) return;
     const live = stage === "live";
-    if (wasLive.current === false && live) setCelebrating(true);
-    else if (wasLive.current === null && live) setDone(true);
+    // The connected moment comes once, when the first pairing goes live in front of this page. Live already when the
+    // chat opened (a restart), or live again after a drop or a transport switch: connection state, quiet like its timeline.
+    if (live && !celebrated.current) {
+      celebrated.current = true;
+      if (wasLive.current === false) {
+        setCelebrating(true);
+        // Heard as the scene bursts. Reduced motion stills the scene, not the sound: that is the sound setting's.
+        if (!muted && loadSettings().notifications.soundEnabled) playSound("connected");
+      } else setDone(true);
+    }
     wasLive.current = live;
-  }, [enabled, firstPairing, stage]);
+  }, [enabled, firstPairing, stage, muted]);
   useEffect(() => {
     if (!celebrating) return;
     const timer = window.setTimeout(() => { setCelebrating(false); setDone(true); }, CELEBRATE_MS);

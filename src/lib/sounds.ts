@@ -42,6 +42,12 @@ const SOUNDS = {
     { frequency: 440, at: 0, duration: 0.12, gain: 0.1 },
     { frequency: 330, at: 0.12, duration: 0.2, gain: 0.1 },
   ],
+  /** A chat's first pairing went live: two light taps, then the note they resolve to. */
+  connected: [
+    { frequency: 587, at: 0, duration: 0.05, gain: 0.05 },
+    { frequency: 784, at: 0.03, duration: 0.05, gain: 0.06 },
+    { frequency: 784, at: 0.12, duration: 0.5, gain: 0.12 },
+  ],
 } satisfies Record<string, Note[]>;
 
 export type SoundName = keyof typeof SOUNDS;
@@ -63,6 +69,14 @@ function load(name: SoundName): Promise<AudioBuffer> | undefined {
     }).then(bytes=>ctx.decodeAudioData(bytes)));
   }
   return decoded.get(name);
+}
+
+/**
+ * Whether the sounds of one chat (its session id) are off. Per-chat mute is not in the app yet: when it lands,
+ * this reads it, and a sound played for one chat asks here first.
+ */
+export function chatSoundsMuted(_chat: string): boolean {
+  return false;
 }
 
 /** Autoplay unlock is attempted only on an actual user gesture. */

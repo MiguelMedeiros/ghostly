@@ -29,7 +29,7 @@ import { IncomingCallNotification } from "../components/IncomingCallNotification
 import { contactStatus } from "../lib/contactStatus";
 import { PeerServices } from "../components/PeerServices";
 import { formatFileSize } from "../lib/format";
-import { playSound, startRinging } from "../lib/sounds";
+import { chatSoundsMuted, playSound, startRinging } from "../lib/sounds";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import {
   isSessionPinned,
@@ -193,6 +193,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     // A DHT-only chat has no live link to wait for: its messages go over the DHT from the start.
     enabled: paired && (deliveryPeer?.deliveryMode ?? session?.deliveryMode) !== "dht",
     createdAt: session?.createdAt,
+    muted: chatSoundsMuted(sessionId),
   });
   const pairingSceneId = `pairing-${sessionId}`;
   // Once the contact knocked, the invite has done its job.
