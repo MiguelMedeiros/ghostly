@@ -68,14 +68,12 @@ test("a second tab stays out of the way: one peer per browser", { tag: ["@featur
 test("creating a chat shows an invite code, the options menu copies it", { tag: ["@feature:invite.create"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   const invite = await createChat(page);
-  // A new chat is a paired one: `pair1/<seed>/<peer public key>/<encryption key>`.
-  const parts = invite.split("/");
-  expect(parts).toHaveLength(4);
-  expect(parts[0]).toBe("pair1");
-  // The chat's keys stay out of the address bar and the history. The seed is
-  // the secret half of the invite, so it is the one that must not be there.
+  // A new chat's invite is one ghostly1 code (WISP 801), copied as its link on ghostly.tools.
+  expect(invite).toMatch(/^https:\/\/ghostly\.tools\/#ghostly1p[02-9ac-hj-np-z]{211}$/);
+  await expect(page.getByTestId("invite-link")).toHaveText(invite.replace("https://", ""));
+  // The chat's keys stay out of the address bar and the history.
   await expect(page).toHaveURL(/#\/chat\/[^/]+$/);
-  expect(page.url()).not.toContain(parts[1]);
+  expect(page.url()).not.toContain(invite.split("#")[1].slice(9, 60));
 
   await page.getByRole("button", { name: /^(Copy invite|Copied!)$/ }).click();
   await expect(page.getByRole("button", { name: "Copied!" })).toBeVisible();
@@ -92,7 +90,7 @@ test("a bad invite code is refused", { tag: ["@feature:invite.invalid"] }, async
   await manualFallback(page);
   await page.getByPlaceholder("Paste invite…").fill("not an invite");
   await page.getByRole("dialog").getByRole("button",{ name: "Join chat", exact: true }).click();
-  await expect(page.getByText("Invalid invite. Ask for a new one.")).toBeVisible();
+  await expect(page.getByText("This is not a Ghostly invite.")).toBeVisible();
 });
 
 test("chats can be named and found", { tag: ["@feature:chats.list.rename", "@feature:chats.list.search"] }, async ({ peer }) => {

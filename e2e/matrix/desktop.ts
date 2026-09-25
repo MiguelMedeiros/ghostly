@@ -54,7 +54,7 @@ const connected = (p: Person, transport: string, timeout = 180_000) =>
 async function pair({ a, b }: DesktopWorld): Promise<void> {
   await a.press("New Chat");
   const invite = await a.copyInvite();
-  expect(invite).toMatch(/^pair1\//);
+  expect(invite).toMatch(/^https:\/\/ghostly\.tools\/#ghostly1p/);
   await b.join(invite);
   for (const p of [a, b]) {
     await expect.poll(() => p.canWrite(), { timeout: 120_000, message: `${p.name}'s chat is up` }).toBe(true);

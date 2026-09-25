@@ -91,7 +91,7 @@ export const pair: Block = {
     await a.page.getByTitle(either("New Chat")).click();
     if (combo.delivery === "dht") {
       await a.page.getByRole("radio", { name: either("Text only") }).click();
-      await expect.poll(() => copyInvite(a)).toMatch(/^pair2d\//);
+      await expect.poll(() => copyInvite(a)).toMatch(/^https:\/\/ghostly\.tools\/#ghostly1p/);
     }
     const invite = await copyInvite(a);
     await joinWith(b, invite);

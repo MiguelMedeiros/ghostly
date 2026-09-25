@@ -27,7 +27,7 @@ for(const value of [null,"","not-an-invite"]) test(`clipboard fallback is editab
  await expect(page.getByPlaceholder("Paste invite…")).toBeFocused();
  await page.getByPlaceholder("Paste invite…").fill("still invalid");
  await page.getByRole("dialog").getByRole("button",{name:"Join chat",exact:true}).click();
- await expect(page.getByRole("alert")).toHaveText("Invalid invite. Ask for a new one.");
+ await expect(page.getByRole("alert")).toHaveText("This is not a Ghostly invite.");
  if(value === null) {
    const owner=await peer("manual-owner");
    await owner.page.getByTitle("New Chat").click();

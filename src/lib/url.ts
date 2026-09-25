@@ -74,7 +74,8 @@ export function buildInviteUrl(
  */
 export function chatRouteSession(pathname: string): string | null {
   const match = pathname.match(/^\/chat\/([^/]+)\/?$/);
-  return match ? decodeURIComponent(match[1]) : null;
+  // A `ghostly1` code is one segment too, but it is keys, never a session id.
+  return match && !/^ghostly1/i.test(match[1]) ? decodeURIComponent(match[1]) : null;
 }
 
 /** What Copy and Share hand over: a `ghostly1` code as its link on ghostly.tools, an older code as it is. */

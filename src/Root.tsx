@@ -114,7 +114,7 @@ function GroupLinkIntake() {
  * this device does not have. Everything else opened directly gets home put under it (`useAnchorHome`).
  */
 function isIntake(pathname: string): boolean {
-  if (pathname.startsWith("/join/")) return true;
+  if (pathname.startsWith("/join/") || /^\/?ghostly1/i.test(pathname)) return true;
   const rest = pathname.match(/^\/chat\/(.+)$/)?.[1];
   return !!rest && (rest.includes("/") || !loadSession(decodeURIComponent(rest)));
 }

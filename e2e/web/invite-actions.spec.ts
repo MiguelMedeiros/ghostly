@@ -20,8 +20,9 @@ for(const mobile of [false,true]) test(`invite actions preserve full live and DH
    await expect(card.getByRole("radio",{name:mode,exact:true})).toBeChecked();
    const copied=await copyInvite(page);
    const expected=await page.evaluate(()=>localStorage.getItem("ghostly_invite_"+location.hash.split("/").at(-1)));
-   expect(copied).toBe(expected);
-   expect(copied).toMatch(mode==="Live chat"?/^pair1\//:/^pair2d\//);
+   // One ghostly1 code whatever the choice (it sets this side's delivery), shared as its link in full.
+   expect(copied).toBe(`https://ghostly.tools/#${expected}`);
+   expect(expected).toMatch(/^ghostly1p[02-9ac-hj-np-z]{211}$/);
    await card.getByRole("button",{name:"Share",exact:true}).click();
    expect(await page.evaluate(()=>(window as unknown as {qaShare:ShareData}).qaShare.text)).toBe(copied);
  }

@@ -64,7 +64,7 @@ test("time leaving DHT-only after the contact reloaded, step by step", { tag: ["
     });
     await alice.page.getByTestId("invite-card").getByRole("button", { name: "Copy invite" }).click();
     const invite = await alice.page.evaluate(() => (window as unknown as { qaInvite: string }).qaInvite);
-    expect(invite).toMatch(/^pair2d\//);
+    expect(invite).toMatch(/^https:\/\/ghostly\.tools\/#ghostly1p/);
     await bob.page.getByRole("button", { name: "Join chat" }).first().click();
     await bob.page.evaluate(text => {
       Object.defineProperty(navigator, "clipboard", { configurable: true, value: { readText: async () => text } });
