@@ -19,7 +19,7 @@ flowchart TB
     Agree --> Rules["Group admission, permissions and epoch security"]
     Rules --> Overlay["Common distribution profile: mesh prototype / GossipSub / future adapters"]
     Edge --> Path["Compatible authenticated data path"]
-    Edge -.->|none connects or it drops| Base
+    Edge -. none connects or it drops .-> Base
     Overlay --> Path
     Path --> Apps["Selected application formats: chat / files / media / local services"]
     Apps --> Pay["Optional payment operation: compatible Cashu / Lightning component"]

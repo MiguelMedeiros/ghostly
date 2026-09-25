@@ -38,7 +38,7 @@ A chat is always in exactly one of these states, on each side. The UI shows the 
 
 | State | Meaning | Text | Shown as |
 |---|---|---|---|
-| `rendezvous` | The invite was made or used; the contact's participation key is not pinned yet | The joiner MAY send first-contact text on the DHT ([403](403-dht-text.md)); nothing else | The pairing progress ([#201 contract](#pairing-progress-and-transport-rows)) |
+| `rendezvous` | The invite was made or used; the contact's participation key is not pinned yet | The joiner MAY send first-contact text on the DHT ([403](403-dht-text.md)); nothing else | The pairing progress ([below](#pairing-progress-and-transport-rows)) |
 | `live` | Pinned, and an authenticated layer-1 session is ready over transport *T* | Everything both apps negotiated ([401](401-paired-chat.md)) | "Live · Iroh" (the transport's name) |
 | `on-dht` | Pinned, no layer-1 session, and neither side chose DHT only; layer 1 is being retried | Short text and receipts; held items where both allow them | "On DHT · retrying live" |
 | `dht-chosen` | Pinned, and this side or the contact chose DHT only for this chat | As `on-dht`; layer 1 is not dialled | "DHT only · chosen by you" or "by <contact>" |
@@ -46,16 +46,15 @@ A chat is always in exactly one of these states, on each side. The UI shows the 
 Transitions:
 
 ```mermaid
-stateDiagram-v2
-    [*] --> rendezvous: invite made or used
-    rendezvous --> live: stream handshake verified first
-    rendezvous --> on_dht: first-contact envelope verified first
-    on_dht --> live: layer 1 connects and authenticates
-    live --> on_dht: stream closes or 3 pings missed
-    on_dht --> dht_chosen: either side picks DHT only
-    live --> dht_chosen: either side picks DHT only
-    dht_chosen --> on_dht: both sides leave DHT only
-    rendezvous --> failed: security rejection or the DHT unreachable
+flowchart LR
+    R["rendezvous"] -. stream handshake verified first .-> L["live"]
+    R -. first-contact envelope verified first .-> D["on-dht"]
+    D -. layer 1 connects and authenticates .-> L
+    L -. stream closes or 3 pings missed .-> D
+    D -. either side picks DHT only .-> C["dht-chosen"]
+    L -. either side picks DHT only .-> C
+    C -. both sides leave DHT only .-> D
+    R -. security rejection or the DHT unreachable .-> F["failed"]
 ```
 
 `failed` is reserved for a security rejection (a participation key that does not match the pin, a forged or tampered record) or for not reaching the DHT at all (every relay and the native DHT refuse or time out). A first pairing whose streams do not connect is **not** a failure: it ends in `on-dht`.
@@ -81,7 +80,7 @@ sequenceDiagram
         A->>B: pair-offer, pair-proof, pair-ready (401)
     end
     Note over A,B: Pinned on whichever path verified first. Same keys on both paths, or a security rejection.
-    alt A stream connected
+    alt A stream connects
         A->>B: chat over layer 1 (WebRTC, Iroh or HyperDHT by rank sum)
     else No stream connected
         A->>D: short text envelopes (403), 256 bytes each
