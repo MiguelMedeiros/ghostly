@@ -95,7 +95,9 @@ export function webPerson(actor: Actor): Person {
       const dialog = page().getByRole("dialog", { name: "Connection options" });
       const offered: string[] = [];
       for (const name of ["WebRTC", "Iroh", "HyperDHT"]) if (await dialog.getByRole("radio", { name, exact: true }).isEnabled()) offered.push(name);
-      if (preferred) await dialog.getByRole("radio", { name: preferred, exact: true }).check();
+      // One this app or the contact's lacks cannot be chosen: its option is off, and says why (a Desktop on Linux has
+      // no WebRTC, and its capability record says so from the start).
+      if (preferred && offered.includes(preferred)) await dialog.getByRole("radio", { name: preferred, exact: true }).check();
       const toggle = dialog.getByRole("switch", { name: "Fallback" });
       if ((await toggle.isChecked()) !== fallback) await toggle.click();
       await expect(toggle).toBeChecked({ checked: fallback });

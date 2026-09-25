@@ -147,7 +147,8 @@ async function transport({ a, b, combo }: DesktopWorld): Promise<void> {
     const preferred = p.kind === "desktop" ? want.preferred : want.preferred === "WebRTC" ? "WebRTC" : undefined;
     const fallback = p.kind === "desktop" || want.preferred === "WebRTC" ? want.fallback : true;
     // The options are off for what this app lacks, and for what the contact's lacks (as far as it has learned): a
-    // Desktop offers its native transports to a Desktop, and nothing to a browser, which has WebRTC only.
+    // Desktop offers its native transports to a Desktop, and nothing to a browser, which has WebRTC only; a browser
+    // offers a Desktop nothing either, once the Desktop's record says it has no WebRTC.
     await expect(async () => {
       const offered = await p.preferTransport(preferred, fallback);
       if (p.kind === "desktop") expect(offered, `${p.name} (Desktop) offers what both apps have`).toEqual(both ? ["Iroh", "HyperDHT"] : []);
