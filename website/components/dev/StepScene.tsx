@@ -16,7 +16,6 @@ export type SceneCopy = {
   oob: string;
   pinned: string;
   common: string;
-  off: string;
   live: string;
   onDht: string;
   onDhtShort: string;
