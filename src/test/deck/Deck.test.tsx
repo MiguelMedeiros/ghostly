@@ -1,4 +1,6 @@
 import { screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Deck } from "../../components/deck/Deck";
@@ -139,6 +141,20 @@ describe("the deck's switch motion", () => {
     const { user } = show();
     await user.click(card("b"));
     expect(animate).not.toHaveBeenCalled();
+  });
+
+  // A screen-blended sheen crossing a card that swings (the face's rotate) was drawn by Chrome against a shifted copy
+  // of the card: a second card edge, with square corners, on the side the light came in from. Only pixels show it
+  // (website/e2e/wallet-deck.spec.ts films a switch); this keeps the blend mode from coming back on any deck's sheen.
+  it("lights the new card with plain alpha: no stylesheet gives a sheen a blend mode", () => {
+    const sheets = ["deck/deck.css", "wallet-deck.css", "identities/id-deck.css"];
+    const sheenRules = sheets.flatMap(sheet => {
+      const css = readFileSync(join(import.meta.dirname, "../../components", sheet), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+      return [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selector]) => /sheen/.test(selector)).map(([, selector, body]) => ({ sheet, selector: selector.trim(), body }));
+    });
+    // The deck's own rule, and each face's (the identities raise theirs over the seal).
+    expect(sheenRules.map(rule => rule.selector)).toEqual(expect.arrayContaining(["[data-deck=sheen]", ".id-card-sheen"]));
+    expect(sheenRules.filter(rule => /mix-blend-mode/.test(rule.body))).toEqual([]);
   });
 });
 
