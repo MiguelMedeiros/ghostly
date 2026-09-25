@@ -457,7 +457,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                   </svg>
                 )}
               </p>
-              {paired && <IdentityStack peerKey={params.peerPubKeyB64} open={showIdentities} onOpen={() => setShowIdentities(open => !open)} />}
+              {paired && <IdentityStack peerKey={params.peerPubKeyB64} name={shownName} open={showIdentities} onOpen={() => setShowIdentities(open => !open)} />}
               {compat && <span data-testid="compat-chat" title={t("chat.compat.hint")}
                 className="shrink-0 rounded bg-surface-hover px-1.5 py-0.5 text-[10px] leading-none text-text-muted whitespace-nowrap max-md:hidden">{t("chat.compat.label")}</span>}
               </div>

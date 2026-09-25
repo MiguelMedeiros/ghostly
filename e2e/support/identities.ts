@@ -3,16 +3,21 @@ import { expect, type Peer } from "./fixtures";
 
 /**
  * A chat's identities panel (src/components/identities/ContactIdentitiesPanel.tsx), the way a person uses it: opened
- * from the chat's ⋮ menu, the contact's ID cards on top (a click turns one over), and under "Yours, for this contact"
- * the chat's identity picker (a click on a card turns it over to Share or Stop sharing).
+ * from the contact's marks in the chat's header, the contact's ID cards on top (a click turns one over), and under
+ * "Yours, for this contact" the chat's identity picker (a click on a card turns it over to Share or Stop sharing).
  */
 
-/** The chat's ⋮ → Identities…; the panel beside the chat. */
+/**
+ * The contact's marks in the chat's header (ContactMarks.tsx `IdentityStack`), always there in a paired chat: the
+ * proofs they shared (`chat-identity-badge`), or their Ghostly mark alone (`chat-identity-ghostly-mark`) when none.
+ */
+export const headerMarks = (peer: Peer) => peer.page.getByTestId("chat-identity-badges");
+
+/** A click on the header's marks; the panel beside the chat. */
 export async function openIdentities(peer: Peer) {
   const panel = peer.page.getByTestId("chat-identities");
   if (await panel.count()) return panel;
-  await peer.page.getByTestId("chat-options").click();
-  await peer.page.getByTestId("chat-identities-open").click();
+  await headerMarks(peer).click();
   await expect(panel).toBeVisible();
   return panel;
 }

@@ -39,6 +39,10 @@
 .identity-stack-marks>.badge-mark:nth-child(3){z-index:1}
 .identity-stack-check{display:grid;place-items:center;color:var(--theme-accent)}
 .identity-stack .contact-marks-more{line-height:16px}
+/* A contact who shared no proof: their Ghostly identity, quiet on a plain tile, its eyes cut out of it. */
+.badge-mark[data-state=ghostly] .badge-mark-plain{color:var(--theme-text-muted)}
+.badge-mark[data-state=ghostly] circle{fill:var(--theme-surface-alt)}
+.identity-stack:hover .badge-mark[data-state=ghostly] .badge-mark-plain,.identity-stack[aria-expanded=true] .badge-mark[data-state=ghostly] .badge-mark-plain{color:var(--theme-text-secondary)}
 .identity-stack [data-upto]{display:none;align-items:center;gap:4px}
 .identity-stack [data-upto="3"]{display:inline-flex}
 @container chat-column (max-width: 639px){

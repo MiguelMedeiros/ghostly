@@ -58,7 +58,7 @@ test("a domain proven by a DNS TXT record is verified by the one contact it is s
   await shareIdentity(alice);
   await closeIdentities(alice);
 
-  await expect(bob.page.getByTestId("chat-identity-badges")).toBeVisible();
+  await expect(bob.page.getByTestId("chat-identity-badge").first()).toBeVisible();
   await openIdentities(bob);
   await expect(theirCards(bob)).toHaveCount(1);
   await expect(theirFace(bob)).toHaveAttribute("data-status", "verified");
@@ -75,7 +75,7 @@ test("a domain proven by a DNS TXT record is verified by the one contact it is s
   await openIdentities(carol);
   await expect(theirCards(carol)).toHaveCount(0);
   await closeIdentities(carol);
-  await expect(carol.page.getByTestId("chat-identity-badges")).toHaveCount(0);
+  await expect(carol.page.getByTestId("chat-identity-ghostly-mark")).toBeVisible();
 
   // The record is removed: Bob's next check no longer confirms it, and says why.
   site.unpublish();

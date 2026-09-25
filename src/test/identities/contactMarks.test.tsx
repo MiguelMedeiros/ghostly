@@ -1,7 +1,9 @@
-import { act, fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
 import { badgeRank, badgeState, BADGE_ORDER, contactBadges, takeBadges } from "../../components/identities/contactBadges";
+import { ContactIdentitiesPanel } from "../../components/identities/ContactIdentitiesPanel";
 import { ContactMarks, IdentityStack } from "../../components/identities/ContactMarks";
 import { GroupMembersDialog } from "../../components/GroupMembersDialog";
 import { Sidebar } from "../../components/Sidebar";
@@ -127,8 +129,7 @@ describe("ContactMarks (the chat list, a group's members)", () => {
 describe("IdentityStack (the chat's header)", () => {
   it("stacks up to three marks, every state, with +N and one check per width", async () => {
     const onOpen = vi.fn();
-    const { engine, user } = renderApp(<IdentityStack peerKey="peer" onOpen={onOpen} />);
-    expect(screen.queryByTestId("chat-identity-badges")).not.toBeInTheDocument();
+    const { engine, user } = renderApp(<IdentityStack peerKey="peer" name="Alice" onOpen={onOpen} />);
     act(() => engine.update(withReceived(everyKind())));
     const stack = screen.getByTestId("chat-identity-badges");
     expect(screen.getAllByTestId("chat-identity-badge").map(m => m.dataset.icon)).toEqual(["domain", "ssh-github", "oidc:google"]);
@@ -137,13 +138,15 @@ describe("IdentityStack (the chat's header)", () => {
     expect(screen.getByTestId("chat-identity-more-2")).toHaveTextContent("+5");
     expect(screen.getByTestId("chat-identity-more-1")).toHaveTextContent("+6");
     for (const n of [1, 2, 3]) expect(screen.getByTestId(`chat-identity-check-${n}`)).toBeInTheDocument();
-    expect(stack).toHaveAccessibleName(/^Identities: Domain: example.org · verified .*; GitHub \(SSH key\): octocat · verified/);
+    expect(stack).toHaveAccessibleName(/^Identities with Alice: Domain: example.org · verified .*; GitHub \(SSH key\): octocat · verified/);
+    // Proofs take the Ghostly mark's place: it is for a contact who shared none.
+    expect(screen.queryByTestId("chat-identity-ghostly-mark")).not.toBeInTheDocument();
     await user.click(stack);
     expect(onOpen).toHaveBeenCalledOnce();
   });
 
   it("shows revoked and failed ones too, and no check over them", () => {
-    const { engine } = renderApp(<IdentityStack peerKey="peer" onOpen={() => {}} />);
+    const { engine } = renderApp(<IdentityStack peerKey="peer" name="Alice" onOpen={() => {}} />);
     act(() => engine.update(withReceived([
       receivedView({ id: "domain" }),
       receivedView({ id: "nostr", provider: "nostr", subject: "npub1x", status: "unconfirmed" }),
@@ -161,7 +164,7 @@ describe("IdentityStack (the chat's header)", () => {
   });
 
   it("names a mark on hover", () => {
-    const { engine } = renderApp(<IdentityStack peerKey="peer" onOpen={() => {}} />);
+    const { engine } = renderApp(<IdentityStack peerKey="peer" name="Alice" onOpen={() => {}} />);
     act(() => engine.update(withReceived([receivedView({ provider: "ssh-github", subject: "mmedeiros", verified: { subject: "mmedeiros", source: "SSH" }, checkedAt: now() - 7200 })])));
     fireEvent.pointerOver(screen.getByTestId("chat-identity-badge"), { pointerType: "mouse" });
     expect(screen.getByRole("tooltip")).toHaveTextContent("GitHub (SSH key): mmedeiros · verified 2 hr. ago");
@@ -173,7 +176,7 @@ describe("IdentityStack (the chat's header)", () => {
     vi.useFakeTimers();
     try {
       const onOpen = vi.fn();
-      const { engine } = renderApp(<IdentityStack peerKey="peer" onOpen={onOpen} />);
+      const { engine } = renderApp(<IdentityStack peerKey="peer" name="Alice" onOpen={onOpen} />);
       act(() => engine.update(withReceived([receivedView()])));
       const mark = screen.getByTestId("chat-identity-badge");
       fireEvent.pointerDown(mark, { pointerType: "touch" });
@@ -190,6 +193,104 @@ describe("IdentityStack (the chat's header)", () => {
       fireEvent.click(mark);
       expect(onOpen).toHaveBeenCalledOnce();
     } finally { vi.useRealTimers(); }
+  });
+});
+
+/** Chat.tsx's header and panel: the stack beside the contact's name toggles the contact's identities. */
+function Header() {
+  const [open, setOpen] = useState(false);
+  return <>
+    <IdentityStack peerKey="peer" name="Alice" open={open} onOpen={() => setOpen(o => !o)} />
+    {open && <ContactIdentitiesPanel peerKey="peer" name="Alice" onClose={() => setOpen(false)} />}
+  </>;
+}
+
+describe("IdentityStack for a contact who shared no proof", () => {
+  const NOTHING = "Their Ghostly identity. Nothing else shared by Alice yet.";
+
+  it("still has a mark, their Ghostly identity: quiet, no check, no +N, named for what it opens", () => {
+    const { engine } = renderApp(<IdentityStack peerKey="peer" name="Alice" onOpen={() => {}} />);
+    // Before the engine's state, and once it says the chat has no proof (a withdrawn one has no mark either).
+    for (const received of [undefined, [], [receivedView({ status: "withdrawn" })]]) {
+      if (received) act(() => engine.update(withReceived(received)));
+      const stack = screen.getByTestId("chat-identity-badges");
+      expect(stack).toHaveAttribute("data-count", "0");
+      expect(stack).toHaveAccessibleName(`Identities with Alice: ${NOTHING}`);
+      const mark = within(stack).getByTestId("chat-identity-ghostly-mark");
+      expect(mark).toHaveAttribute("data-icon", "ghostly");
+      expect(mark.querySelector(".badge-mark-plain")).not.toBeNull();
+      expect(within(stack).queryAllByTestId("chat-identity-badge")).toHaveLength(0);
+      for (const n of [1, 2, 3]) {
+        expect(within(stack).queryByTestId(`chat-identity-check-${n}`)).not.toBeInTheDocument();
+        expect(within(stack).queryByTestId(`chat-identity-more-${n}`)).not.toBeInTheDocument();
+      }
+    }
+  });
+
+  it("gives way to the first proof, and comes back when it is withdrawn", () => {
+    const { engine } = renderApp(<IdentityStack peerKey="peer" name="Alice" onOpen={() => {}} />);
+    act(() => engine.update(withReceived([receivedView()])));
+    expect(screen.getByTestId("chat-identity-badge")).toHaveAttribute("data-icon", "domain");
+    expect(screen.queryByTestId("chat-identity-ghostly-mark")).not.toBeInTheDocument();
+    act(() => engine.update(withReceived([receivedView({ status: "withdrawn" })])));
+    expect(screen.getByTestId("chat-identity-ghostly-mark")).toBeInTheDocument();
+    expect(screen.queryByTestId("chat-identity-badge")).not.toBeInTheDocument();
+  });
+
+  it("is named on hover and on a long press, and a tap opens", () => {
+    vi.useFakeTimers();
+    try {
+      const onOpen = vi.fn();
+      const { engine } = renderApp(<IdentityStack peerKey="peer" name="Alice" onOpen={onOpen} />);
+      act(() => engine.update(withReceived([])));
+      const mark = screen.getByTestId("chat-identity-ghostly-mark");
+      fireEvent.pointerOver(mark, { pointerType: "mouse" });
+      expect(screen.getByRole("tooltip")).toHaveTextContent(NOTHING);
+      fireEvent.pointerLeave(screen.getByTestId("chat-identity-badges"), { pointerType: "mouse" });
+      expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+      fireEvent.pointerDown(mark, { pointerType: "touch" });
+      act(() => { vi.advanceTimersByTime(500); });
+      expect(screen.getByRole("tooltip")).toHaveTextContent(NOTHING);
+      fireEvent.pointerUp(mark, { pointerType: "touch" });
+      fireEvent.click(mark);
+      expect(onOpen).not.toHaveBeenCalled();
+      fireEvent.pointerDown(mark, { pointerType: "touch" });
+      fireEvent.pointerUp(mark, { pointerType: "touch" });
+      fireEvent.click(mark);
+      expect(onOpen).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("opens the contact's identities on their Ghostly card", async () => {
+    const { engine, user } = renderApp(<Header />);
+    act(() => engine.update(withReceived([])));
+    const stack = screen.getByTestId("chat-identity-badges");
+    expect(stack).toHaveAttribute("aria-expanded", "false");
+    await user.click(stack);
+    expect(stack).toHaveAttribute("aria-expanded", "true");
+    const panel = screen.getByRole("dialog", { name: "Identities with Alice" });
+    expect(within(panel).getByTestId("chat-identity-ghostly")).toHaveAttribute("aria-checked", "true");
+    expect(within(panel).getByTestId("chat-identities-none")).toHaveTextContent("Nothing else shared by Alice yet.");
+    // A second click on the header closes it, as the chat's header does.
+    await user.click(stack);
+    expect(screen.queryByTestId("chat-identities")).not.toBeInTheDocument();
+  });
+
+  it("is reached and opened from the keyboard, and the panel gives focus back to it", async () => {
+    const { engine, user } = renderApp(<Header />);
+    act(() => engine.update(withReceived([])));
+    const stack = screen.getByTestId("chat-identity-badges");
+    await user.tab();
+    expect(stack).toHaveFocus();
+    await user.keyboard("{Enter}");
+    const panel = screen.getByRole("dialog", { name: "Identities with Alice" });
+    expect(panel).toContainElement(document.activeElement as HTMLElement);
+    expect(within(panel).getByTestId("chat-identity-ghostly")).toHaveAttribute("aria-checked", "true");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("chat-identities")).not.toBeInTheDocument();
+    expect(stack).toHaveFocus();
+    await user.keyboard(" ");
+    expect(screen.getByRole("dialog", { name: "Identities with Alice" })).toBeInTheDocument();
   });
 });
 
