@@ -93,7 +93,7 @@ import { fileStore, type StoredFile } from "../shared/idb";
 import { fileBytes } from "../shared/fileBytes";
 import { FileAppender, readStored, removeStored, storedSize, streamStored } from "../shared/storedFiles";
 import { FileDesk } from "./fileDesk";
-import { DEFAULT_MINTS, TEST_MINT, isWorthlessMint, mintNetwork, type WalletMode } from "../shared/mints";
+import { DEFAULT_MINTS, TEST_MINT, mintNetwork, type WalletMode } from "../shared/mints";
 import type {
   EngineState,
   GroupEdgeView,
@@ -443,6 +443,7 @@ export class GhostlyNode implements EngineImplementation {
     storeMessage: (message) => this.storeMessage(message),
     heldPaymentMethods: (linkId): PaymentMethodName[] | null => { const live = this.links.get(linkId); return live && this.holdingFor(live) ? this.hold.heldPaymentMethods(linkId) : null; },
     // What the contact allowed at the last session; before any, Cashu and Lightning, as a chat that negotiated nothing.
+    acceptsNetwork: (linkId, method, network) => this.acceptsNetwork(this.links.get(linkId)?.stored, method, network),
     waitingPaymentMethods: (linkId): PaymentMethodName[] | null => {
       const live = this.links.get(linkId);
       if (!live?.stored.profile || !live.link || live.link.isDataLinkOpen || live.stored.group || this.chatStopped(live)) return null;
@@ -756,11 +757,8 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   async start(): Promise<void> {
+    // A new profile has no wallet until one is made (New, or the first-run setup): no mint is added by itself.
     this.settings = { ...DEFAULT_SETTINGS, ...(await db.getSettings()) };
-    if (!this.settings.mintsInitialized) {
-      this.settings = { ...this.settings, mints: [...new Set([...this.settings.mints, ...DEFAULT_MINTS])], mintsInitialized: true };
-      await db.putSettings(this.settings);
-    }
     this.relays?.setRelays(this.settings.relays);
     this.services = await db.getServices();
     await this.identities.load();
@@ -821,17 +819,13 @@ export class GhostlyNode implements EngineImplementation {
     }
   }
 
-  /**
-   * Opens the wallets of a network that exist. The legacy page's network also gets its default wallets made when it
-   * has none (what every profile had before wallets were made one at a time).
-   */
+  /** Opens the wallets of a network that exist. None is made here: wallets are made one at a time, with New. */
   private openWallets(network: WalletNetwork) {
-    const create = this.options.automaticWallets !== false && network === this.viewNetwork;
-    if (!create && this.options.automaticWallets === false) return;
-    void this.arkWallets[network].ensureReady(create);
-    void this.barkWallets[network].ensureReady(create);
-    void this.sparkWallets[network].ensureReady(create);
-    void this.usdtWallets[network].ensureReady(create);
+    if (this.options.automaticWallets === false) return;
+    void this.arkWallets[network].ensureReady();
+    void this.barkWallets[network].ensureReady();
+    void this.sparkWallets[network].ensureReady();
+    void this.usdtWallets[network].ensureReady();
   }
 
   /** Tells every peer we are leaving. Best effort: the browser may already be closing. */
@@ -1778,14 +1772,18 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** Which ways of paying one chat allows. */
-  async setChatPaymentMethods({ linkId, methods }: { linkId: string; methods: Partial<Record<PaymentMethodName, boolean>> }): Promise<void> {
+  /** `networks`: for a way of paying, the networks this chat takes it on (the Accept side's cards); the others are kept. */
+  async setChatPaymentMethods({ linkId, methods, networks }: { linkId: string; methods: Partial<Record<PaymentMethodName, boolean>>; networks?: Partial<Record<PaymentMethodName, WalletNetwork[]>> }): Promise<void> {
     const live = this.links.get(linkId);
     if (!live || !methods || Object.entries(methods).some(([m, on]) => !PAYMENT_METHODS.includes(m as PaymentMethodName) || typeof on !== "boolean")) throw new Error("Chat not found");
+    if (networks && Object.entries(networks).some(([m, list]) => !PAYMENT_METHODS.includes(m as PaymentMethodName) || !Array.isArray(list) || !list.every((n) => n === "mainnet" || n === "testnet"))) throw new Error("Chat not found");
     const paymentMethods = { ...live.stored.paymentMethods, ...methods };
-    await db.patchLink(linkId, { paymentMethods });
-    live.stored = { ...live.stored, paymentMethods };
+    const paymentNetworks = networks ? { ...live.stored.paymentNetworks, ...Object.fromEntries(Object.entries(networks).map(([m, list]) => [m, [...new Set(list)]])) } : live.stored.paymentNetworks;
+    await db.patchLink(linkId, { paymentMethods, ...(networks ? { paymentNetworks } : {}) });
+    live.stored = { ...live.stored, paymentMethods, paymentNetworks };
     // A connected contact is told on the open session; nothing reconnects.
     live.link?.setPaymentMethods(paymentMethods);
+    live.link?.setPaymentNetworks?.(this.chatNetworks(live.stored));
     this.capsChanged(linkId);
     this.emitState();
   }
@@ -1861,17 +1859,12 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /**
-   * The legacy page's network (the old Mainnet/Testnet switch): which network's wallets it shows, and what a call
-   * naming no network acts on. Nothing is parked any more: every wallet stays open on its own network. The network
-   * chosen gets its default wallets when it has none, as the switch always did (Testnet brings the public test mint).
+   * What a call naming no network acts on (the network older pages showed with the Mainnet/Testnet switch). Nothing
+   * is parked, closed or made: every wallet stays open on its own network, and the page names the network of each.
    */
   async walletSetMode({ mode }: { mode: WalletMode }): Promise<void> {
     if (mode !== "mainnet" && mode !== "testnet") throw new Error("Unknown wallet mode");
-    const mints = mode === "testnet" && !this.settings.mints.some(isWorthlessMint) ? [...this.settings.mints, TEST_MINT] : this.settings.mints;
-    await this.updateSettings({ settings: { walletMode: mode, mints } });
-    this.openWallets(mode);
-    // Names, fees and limits of this network's mints (a mint just added has none yet).
-    for (const mint of this.networkMints(mode)) void this.wallet.checkMint(mint).then(() => this.refreshWallet(), () => {});
+    await this.updateSettings({ settings: { walletMode: mode } });
     await this.refreshWallet();
   }
 
@@ -1969,15 +1962,21 @@ export class GhostlyNode implements EngineImplementation {
 
   /** The networks of this profile's wallets, per way of paying: every chat tells its contact (paired-payments). */
   private announcePaymentNetworks(wallets: WalletInstanceView[]) {
-    const networks = paymentNetworksOf(wallets);
-    const key = JSON.stringify(networks);
+    const key = JSON.stringify(paymentNetworksOf(wallets));
     if (key === this.announcedNetworks) return;
     this.announcedNetworks = key;
-    for (const live of this.links.values()) live.link?.setPaymentNetworks?.(networks);
+    for (const live of this.links.values()) live.link?.setPaymentNetworks?.(this.chatNetworks(live.stored));
   }
   private announcedNetworks = "";
-  /** What a new chat link starts announcing. */
-  private get paymentNetworks(): PaymentNetworks { return paymentNetworksOf(this.walletView.wallets ?? []); }
+  /** What a chat announces: the networks of this profile's wallets, per way of paying, that the chat accepts. */
+  private chatNetworks(stored: StoredLink): PaymentNetworks {
+    const mine = paymentNetworksOf(this.walletView.wallets ?? []);
+    return Object.fromEntries(Object.entries(mine).map(([method, networks]) => [method, networks!.filter((n) => this.acceptsNetwork(stored, method as PaymentMethodName, n))]));
+  }
+  /** This chat takes this way of paying on this network (a card on its Accept side). */
+  private acceptsNetwork(stored: StoredLink | undefined, method: PaymentMethodName, network: WalletNetwork): boolean {
+    return stored?.paymentNetworks?.[method]?.includes(network) ?? true;
+  }
 
   async walletSetPrimaryMint({ url }: { url: string }): Promise<void> {
     if (!this.settings.mints.includes(url)) return;
@@ -2594,7 +2593,7 @@ export class GhostlyNode implements EngineImplementation {
       verifiedPeerKey: stored.peerTrust ? stored.peerTrust.verifiedKey : stored.pairedPeerKey, expectedPeerKey: stored.peerParticipationKeyZ32 } : undefined;
     live.link = new GhostLink({
       paymentMethods: stored.paymentMethods,
-      paymentNetworks: this.paymentNetworks,
+      paymentNetworks: this.chatNetworks(stored),
       holdSupport: !!stored.hold?.enabled,
       arkPaymentsSupport: true,
       usdtPaymentsSupport: true,
@@ -3038,6 +3037,7 @@ export class GhostlyNode implements EngineImplementation {
       peerFileRoom: stored.profile ? this.fileDesk.status(stored.id).peerRoom : undefined,
       hold: this.hold.view(stored.id),
       paymentMethods: Object.fromEntries(PAYMENT_METHODS.map(m => [m, stored.paymentMethods?.[m] !== false])) as Record<PaymentMethodName, boolean>,
+      paymentNetworks: Object.fromEntries(PAYMENT_METHODS.map(m => [m, WALLET_NETWORKS.filter((n) => this.acceptsNetwork(stored, m, n))])) as Record<PaymentMethodName, WalletNetwork[]>,
       groups: live.link?.groupsSupport ?? false,
       sessionOffers: stored.profile ? live.link?.sessionOffers : undefined,
       callsUnavailable: !stored.profile ? undefined : live.link ? live.link.callsUnavailable : "Calls need a live connection",

@@ -70,6 +70,11 @@ export interface StoredLink {
   deletedIds?: string[];
   /** Ways of paying this device allows in this chat. Absent or true: allowed. */
   paymentMethods?: Partial<Record<PaymentMethodName, boolean>>;
+  /**
+   * For a way of paying, the networks this chat accepts it on (its cards on the Accept side). Absent for a method:
+   * every network. A request, a payment or an ask of a network off here is refused, and the contact is told.
+   */
+  paymentNetworks?: Partial<Record<PaymentMethodName, WalletNetwork[]>>;
   /** Store-and-forward for this contact (WISP 4xx, `hold/1`). Absent: off, as for every chat from before it. */
   hold?: HoldState;
   /** An edge of a private group (WISP 900): the group, and the member at the other end. Not a chat. */
@@ -899,6 +904,8 @@ export interface LinkView {
   peerFileRoom?: number | null;
   /** Ways of paying this device allows in this chat. */
   paymentMethods?: Record<PaymentMethodName, boolean>;
+  /** For each way of paying, the networks this chat accepts it on. */
+  paymentNetworks?: Record<PaymentMethodName, WalletNetwork[]>;
   /** Both sides announced private groups on the open session: this contact can be invited. */
   groups?: boolean;
   /** Paired chats: what each side offers after the handshake (`paired-capabilities`); `peer` is null until it says. */

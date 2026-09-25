@@ -65,6 +65,8 @@ export interface PaymentDeskHost {
   onReviewedPaymentRefused?(id:string,reason:string):Promise<void>;
   /** The network of a request or a send that names none (a caller from before wallets had their own). Default: Mainnet. */
   defaultNetwork?(): WalletNetwork;
+  /** This chat takes this way of paying on this network (its Accept side). Absent: every network. */
+  acceptsNetwork?(linkId: string, method: PaymentMethodName, network: WalletNetwork): boolean;
 }
 
 /**
@@ -129,6 +131,7 @@ const ENDPOINT_OF: Record<Exclude<AskMethod, "usdt" | "fedimint">, string> = { a
 const CHECK_PAYLOAD = JSON.stringify({ check: true });
 const isCheck = (payload: string) => { try { return JSON.parse(payload)?.check === true; } catch { return false; } };
 const RAIL_NAME: Record<AskMethod, string> = { arkade: "Ark", usdt: "USDT", bark: "Bark", bitcoin: "on-chain Bitcoin", fedimint: "Fedimint", spark: "Spark" };
+const METHOD_NAME: Record<PaymentMethodName, string> = { cashu: "Cashu", lightning: "Lightning", arkade: "Ark", usdt: "USDT", bark: "Bark", bitcoin: "on-chain Bitcoin", fedimint: "Fedimint", spark: "Spark" };
 /** Both sides allow this way of paying on the open data link. */
 const allows = (link: PaymentLink, method: AskMethod) => method === "arkade" ? link.supportsArkPayments : method === "bark" ? link.supportsBarkPayments : method === "bitcoin" ? link.supportsBitcoinPayments : method === "fedimint" ? link.supportsFedimintPayments : method === "spark" ? link.supportsSparkPayments : link.supportsUsdtPayments;
 /** Federation ecash is counted in msats; a chat counts whole sats. */
@@ -175,6 +178,19 @@ export class PaymentDesk {
   }
 
   private defaultNetwork(): WalletNetwork { return this.host.defaultNetwork?.() ?? "mainnet"; }
+  /** This chat takes the method on the network (its Accept side). */
+  private accepts(linkId: string, method: PaymentMethodName, network: WalletNetwork): boolean { return this.host.acceptsNetwork?.(linkId, method, network) ?? true; }
+  /** The contact has a wallet of that network for the method, as it said; an older contact says nothing, and may. */
+  private meets(link: PaymentLink, method: PaymentMethodName, network: WalletNetwork): boolean {
+    const theirs = (link as Partial<Pick<GhostLink, "peerPaymentNetworks">>).peerPaymentNetworks?.(method);
+    return !theirs || theirs.includes(network);
+  }
+  /** Why a way of paying cannot be used with this contact on this network, or undefined when it can. */
+  private offNetwork(linkId: string, link: PaymentLink, method: PaymentMethodName, network: WalletNetwork): string | undefined {
+    if (!this.accepts(linkId, method, network)) return `${networkLabel(network)} ${METHOD_NAME[method]} is off in this chat`;
+    if (!this.meets(link, method, network)) return `Your contact has no ${networkLabel(network)} ${METHOD_NAME[method]} wallet`;
+    return undefined;
+  }
   /** The Fedimint wallet that joined this federation, whichever network it is on. */
   private fedimintOf(federation: string | undefined): FedimintWallet | undefined {
     return federation && this.fedimint ? distinct(this.fedimint).find((w) => w.federation(federation)) : undefined;
@@ -208,7 +224,10 @@ export class PaymentDesk {
     // Reach the peer before taking ecash out of the wallet.
     await link.requirePaymentSupport();
     if (!link.allowsPayment("cashu")) throw new Error("Cashu is off in this chat");
-    const paymentId = await this.sendEcash(link, { ...params, network: params.network ?? this.defaultNetwork() });
+    const network = params.network ?? this.defaultNetwork();
+    const off = this.offNetwork(params.linkId, link, "cashu", network);
+    if (off) throw new Error(off);
+    const paymentId = await this.sendEcash(link, { ...params, network });
     return { paymentId };
   }
 
@@ -225,6 +244,7 @@ export class PaymentDesk {
 
     const id = newId();
     const memo = params.memo?.trim().slice(0, 140) || undefined;
+    if (params.method && params.method !== "cashu") { const off = this.offNetwork(params.linkId, link, params.method, network); if (off) throw new Error(off); }
     if (params.method === "usdt") {
       if(!link.supportsUsdtPayments || !this.usdt)throw new Error("Both peers need USDT support on a connected data link");
       const usdt=this.usdt[network];
@@ -291,9 +311,11 @@ export class PaymentDesk {
     // Each way of paying goes in only if this chat allows it on both sides. While the contact is away and the
     // request can be held for them, "both sides" is what their app allowed at the last session.
     const known = held ?? waiting;
-    const ecash = params.rail !== "lightning" && (known ? known.includes("cashu") && link.paymentEnabled("cashu") : link.allowsPayment("cashu"));
-    const lightning = params.rail !== "cashu" && (known ? known.includes("lightning") && link.paymentEnabled("lightning") : link.allowsPayment("lightning"));
-    if (!ecash && !lightning) throw new Error(params.rail ? `${params.rail === "cashu" ? "Cashu" : "Lightning"} is not allowed by both of you here` : held ? "Your contact allowed neither Cashu nor Lightning in this chat" : "Cashu and Lightning are off in this chat");
+    // And only on this request's network: a way this chat has off there, or the contact has no wallet of, is left out.
+    const offHere = { cashu: this.offNetwork(params.linkId, link, "cashu", network), lightning: this.offNetwork(params.linkId, link, "lightning", network) };
+    const ecash = params.rail !== "lightning" && !offHere.cashu && (known ? known.includes("cashu") && link.paymentEnabled("cashu") : link.allowsPayment("cashu"));
+    const lightning = params.rail !== "cashu" && !offHere.lightning && (known ? known.includes("lightning") && link.paymentEnabled("lightning") : link.allowsPayment("lightning"));
+    if (!ecash && !lightning) throw new Error(params.rail && offHere[params.rail] ? offHere[params.rail]! : params.rail ? `${params.rail === "cashu" ? "Cashu" : "Lightning"} is not allowed by both of you here` : held ? "Your contact allowed neither Cashu nor Lightning in this chat" : offHere.cashu && offHere.lightning ? offHere.cashu : "Cashu and Lightning are off in this chat");
     const quote = lightning ? await this.lightning[network].createInvoice(params.amount, id) : undefined;
     // A request is in real sats or in test sats, never both: ecash from a test mint, worth nothing, must
     // never settle a request for real money. Only this network's mints are named.
@@ -516,6 +538,8 @@ export class PaymentDesk {
     const link = this.requireLink(params.linkId);
     await link.requirePaymentSupport();
     if (!allows(link, params.method)) throw new Error(`Your contact does not accept ${RAIL_NAME[params.method]} in this chat`);
+    const off = this.offNetwork(params.linkId, link, params.method, network);
+    if (off) throw new Error(off);
     const askId = newId();
     this.asks.set(askId, { linkId: params.linkId, amount: params.amount, method: params.method, network, expiresAt: Date.now() + 2 * 60_000 });
     const memo = params.memo?.trim().slice(0, 140) || undefined;
@@ -546,6 +570,8 @@ export class PaymentDesk {
     if (open >= 5 || !/^[1-9]\d{0,15}$/.test(ask.amount.value)) return;
     if (ask.amount.asset !== (ask.method === "usdt" ? "usdtbase" : UNIT)) return;
     if (!allows(link, ask.method)) return;
+    // Asked on a network this chat has off for that way of paying: no answer, as for a way that is off.
+    if (!this.accepts(linkId, ask.method, ask.network ?? this.defaultNetwork())) return;
     // Answered from this side's wallet of the network the contact pays from (older apps say none: the default).
     await this.request({ linkId, amount: Number(ask.amount.value), method: ask.method, memo: ask.memo, timestamp: now, ask: ask.id, network: ask.network ?? this.defaultNetwork() }).catch(() => {});
   }
@@ -595,8 +621,13 @@ export class PaymentDesk {
       // Only an invoice for exactly this amount, in sats: what is asked is what the invoice asks.
       try {target=validatePaymentTarget(JSON.parse(sparkPayload));const asked=target.method==="spark" ? sparkInvoiceDetails(target.address,target.network as SparkNetwork) : undefined;if(!asked || asked.token || asked.amount!==amount)return;} catch {return;}
     }
+    // The network that pays it: what the contact said, else what it carries (older apps say nothing).
+    const network = request.network ?? paymentNetwork({ target, mints: parseCashuRequestPayload(findEndpoint(request.endpoints, ENDPOINT.cashu) ?? ""), invoice: findEndpoint(request.endpoints, ENDPOINT.bolt11) });
+    // A way of paying this chat has off on that network is left out, like one off altogether.
+    if (target && !this.accepts(linkId, target.method, network)) return;
+    if (federations && !this.accepts(linkId, "fedimint", network)) { federations = undefined; target = undefined; }
     // Keep only the ways of paying this chat allows; a request with none left is dropped.
-    const allowed = (method: "lightning" | "cashu") => held ? !!link?.paymentEnabled(method) : !!link?.allowsPayment(method);
+    const allowed = (method: "lightning" | "cashu") => (held ? !!link?.paymentEnabled(method) : !!link?.allowsPayment(method)) && this.accepts(linkId, method, network);
     const invoice = allowed("lightning") ? findEndpoint(request.endpoints, ENDPOINT.bolt11) : undefined;
     const mints = allowed("cashu") ? parseCashuRequestPayload(findEndpoint(request.endpoints, ENDPOINT.cashu) ?? "") : [];
     if (!target && !invoice && !mints.length && !federations) return;
@@ -615,8 +646,7 @@ export class PaymentDesk {
       createdAt: request.timestamp,
       invoice,
       mints,
-      // What the contact said, else what it carries (older apps say nothing).
-      network: request.network ?? paymentNetwork({ target, mints, invoice }),
+      network,
     });
     await this.host.storeMessage({
       linkId,
@@ -665,6 +695,11 @@ export class PaymentDesk {
     if (!link?.allowsPayment("cashu")) {
       // Not redeemed: the token stays the contact's, and they can take it back.
       link?.sendPaymentResult({ id: payment.id, ok: false, error: "Cashu is off in this chat" });
+      return;
+    }
+    const inspected = this.wallet.inspect?.(payment.endpoint[1]);
+    if (inspected?.kind === "token" && !this.accepts(linkId, "cashu", mintNetwork(inspected.mint))) {
+      link.sendPaymentResult({ id: payment.id, ok: false, error: `${networkLabel(mintNetwork(inspected.mint))} Cashu is off in this chat` });
       return;
     }
     const forGroup = payment.requestId ? this.payments.get(payment.requestId) : undefined;
@@ -1149,6 +1184,7 @@ export class PaymentDesk {
     const amount = fedimintSats(found.amountMsats);
     if (amount < 1) { await refuse("These notes are worth less than a sat"); return; }
     const network = this.fedimintOf(found.federation)?.federation(found.federation)?.network;
+    if (network && !this.accepts(linkId, "fedimint", walletNetworkOf(network))) { await refuse(`${networkLabel(walletNetworkOf(network))} Fedimint is off in this chat`); return; }
     await this.save({ id: payment.id, linkId, kind: "payment", direction: "in", amount, unit: UNIT, memo: payment.memo, state: "pending", createdAt: payment.timestamp, requestId: payment.requestId, federation: found.federation, token: notes });
     await this.host.storeMessage({ linkId, id: `peer_${payment.timestamp}`, text: `⚡ ${amount.toLocaleString()} ${network === "bitcoin" ? "sats" : "test sats"} on Fedimint`, sender: "peer", timestamp: payment.timestamp, via: "datalink", paymentId: payment.id });
     await this.finishRedeem(this.payments.get(payment.id)!);
