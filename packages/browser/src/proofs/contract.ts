@@ -49,6 +49,19 @@ export interface SubjectSpec {
   normalize(input: string): string;
   /** Short form for badges and lists ("npub1x…4f2"). Defaults to the subject. */
   short?(subject: string): string;
+  /**
+   * What the (normalized) subject turns out to be, shown under the field before anything is signed: a DID's
+   * method, its keys and its domain. Runs in the UI on the person's input; may reach the network (the
+   * person's own identity). Throw a message they can act on.
+   */
+  preview?(subject: string, options: { signal: AbortSignal }): Promise<SubjectPreview>;
+}
+
+export interface SubjectPreview {
+  /** Short facts, in order: "Method" → "did:web", "Keys" → "#key-1 (Ed25519)". */
+  facts: readonly { label: string; value: string }[];
+  /** The ids of the signers that apply to this subject; every signer when omitted. */
+  signers?: readonly string[];
 }
 
 /** A field an in-app signer needs (a NIP-46 connection link). `secret` values are never stored or logged. */
@@ -164,6 +177,8 @@ export interface IdentityProofProvider<E = unknown> {
   privacy: string;
   /** Mark providers whose flows are not proven against real-world tools yet. */
   experimental?: boolean;
+  /** Listed under "Advanced" in the picker, for people who know what it is (DIDs), so it does not crowd newcomers. */
+  advanced?: boolean;
   signers: readonly IdentitySigner<E>[];
   /**
    * Untrusted evidence off the wire → typed evidence. Strict: exact shape, bounded sizes, no extra keys.

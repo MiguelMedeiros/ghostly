@@ -385,6 +385,7 @@
     {"id":"proofs.oidc.callback.web","wisp":"308","kind":"feature","clients":["web"],"infra":[],"title":"The OIDC callback page hands the answer to the waiting tab and clears the address"},
     {"id":"proofs.oidc.callback.desktop","wisp":"308","kind":"feature","clients":["web","desktop"],"infra":[],"title":"Desktop sign-in: the web callback page forwards to a 127.0.0.1 loopback on the port its state names, nowhere else"},
     {"id":"proofs.oidc.callback.extension","wisp":"308","kind":"feature","clients":["extension"],"infra":[],"title":"Extension sign-in through chromiumapp.org redirect"},
+    {"id":"proofs.did","wisp":"311","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"A DID proven once: did:key, did:jwk and did:dht by a key of its document (JWS or raw signature), did:web also by a file or a service beside did.json; the resolved method and keys shown first, the own Ghostly did:dht refused"},
     {"id":"proofs.pubky","wisp":"302","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Pubky: local import and the retired Ring delegated proof (old evidence still verifies; experimental, disabled)"},
     {"id":"proofs.keet","wisp":"303","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Keet-compatible local import (experimental, disabled)"},
     {"id":"proofs.peer-proofs","wisp":"300","kind":"protocol","clients":["web","extension","desktop"],"infra":[],"title":"Legacy peer proofs ledger (prepare / submit / withdraw)"},

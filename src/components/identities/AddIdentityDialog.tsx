@@ -9,6 +9,8 @@ import { FieldGrid } from "../layout";
 import { Button, Notice, input } from "../wallet/ui";
 import { ProviderMark, StatusPill } from "./ProviderMark";
 import { Select } from "../ui/Select";
+import { SubjectPreviewFacts } from "./SubjectPreview";
+import { applicableSigners, useSubjectPreview } from "./useSubjectPreview";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const VALIDITY = [7, 30, 90, 180, 365];
@@ -28,10 +30,14 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
   const [provider, setProvider] = useState<IdentityProofProvider | null>(null);
   /** The card whose details are open in the picker (reading, not adding). */
   const [about, setAbout] = useState<string | null>(null);
-  const signers = provider ? availableSigners(provider, platform) : [];
+  const [advanced, setAdvanced] = useState(false);
+  const [subject, setSubject] = useState("");
+  // A subject the provider can look up first (a DID) shows what it is, and decides which signers apply.
+  const preview = useSubjectPreview(provider, subject);
+  const previewFirst = !!provider?.subject.preview;
+  const signers = provider ? applicableSigners(availableSigners(provider, platform), preview) : [];
   const [signerId, setSignerId] = useState("");
   const signer: IdentitySigner<unknown> | undefined = signers.find(s => s.id === signerId) ?? signers[0];
-  const [subject, setSubject] = useState("");
   const [days, setDays] = useState(0);
   const [values, setValues] = useState<Record<string, string>>({});
   const [pasted, setPasted] = useState("");
@@ -107,6 +113,17 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
   });
 
   const needsSubject = signer && signer.kind !== "in-app";
+  const card = (p: IdentityProofProvider) => <ProviderCard key={p.id} provider={p} open={about === p.id} onAbout={() => setAbout(about === p.id ? null : p.id)} onChoose={() => choose(p)} />;
+  const basic = providers.filter(p => !p.advanced), more = providers.filter(p => p.advanced);
+  const signerChoice = <>
+    {signers.length > 1 && (
+      <label className="block space-y-1 text-xs text-text-muted">Sign with
+        <Select data-testid="add-identity-signer" aria-label="Sign with" value={signer?.id ?? ""} disabled={busy} onChange={id => { setSignerId(id); setError(""); }}
+          options={signers.map(s => ({ value: s.id, label: s.label }))} />
+      </label>
+    )}
+    {signer?.description && <p className="text-xs text-text-muted">{signer.description}</p>}
+  </>;
   const fieldsFilled = signer?.kind !== "in-app" || (signer.fields ?? []).every(f => f.optional || values[f.name]?.trim());
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 animate-fade-in" {...backdrop}>
@@ -122,10 +139,11 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
 
         {!provider ? (
           providers.length ? (
-            <div role="list" aria-label="Kinds of identity">
-              <FieldGrid min="22rem" max={2}>
-                {providers.map(p => <ProviderCard key={p.id} provider={p} open={about === p.id} onAbout={() => setAbout(about === p.id ? null : p.id)} onChoose={() => choose(p)} />)}
-              </FieldGrid>
+            <div className="space-y-3">
+              {basic.length > 0 && <div role="list" aria-label="Kinds of identity"><FieldGrid min="22rem" max={2}>{basic.map(card)}</FieldGrid></div>}
+              {more.length > 0 && <AdvancedProviders open={advanced || !basic.length} onToggle={() => setAdvanced(!advanced)} labels={more.map(p => p.label)}>
+                <FieldGrid min="22rem" max={2}>{more.map(card)}</FieldGrid>
+              </AdvancedProviders>}
             </div>
           ) : <Notice>No kind of identity can be added in this app yet.</Notice>
         ) : pending ? (
@@ -163,13 +181,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
               <Button disabled={busy} onClick={() => { setProvider(null); setError(""); }}>Back</Button>
             </div>
             <ProviderAbout provider={provider} testId="add-identity-about" />
-            {signers.length > 1 && (
-              <label className="block space-y-1 text-xs text-text-muted">Sign with
-                <Select data-testid="add-identity-signer" aria-label="Sign with" value={signer?.id ?? ""} disabled={busy} onChange={id => { setSignerId(id); setError(""); }}
-                  options={signers.map(s => ({ value: s.id, label: s.label }))} />
-              </label>
-            )}
-            {signer?.description && <p className="text-xs text-text-muted">{signer.description}</p>}
+            {!previewFirst && signerChoice}
             {signer?.kind === "in-app" && signer.fields?.map(f => (
               <label key={f.name} className="block text-xs text-text-muted">{f.label}
                 <input data-testid={`add-identity-field-${f.name}`} className={`${input} mt-1`} type={f.kind === "secret" ? "password" : "text"} autoComplete="off" spellCheck={false}
@@ -194,6 +206,8 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
                 {provider.subject.help && <span className="block mt-1">{provider.subject.help}</span>}
               </label>
             ))}
+            {previewFirst && <SubjectPreviewFacts state={preview} />}
+            {previewFirst && preview.status === "ok" && signerChoice}
             <label className="block space-y-1 text-xs text-text-muted">Valid for
               <Select data-testid="add-identity-validity" aria-label="Valid for" value={String(validity)} disabled={busy} onChange={d => setDays(Number(d))}
                 options={validityOptions.map(d => ({ value: String(d), label: `${d} days` }))} />
@@ -202,7 +216,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
             {provider.experimental && <Notice tone="warning">Experimental: not yet tested with every tool.</Notice>}
             <div className="flex flex-wrap justify-end gap-2">
               {busy && <Button onClick={() => { abort.current?.abort(); setProgress(""); setError("Cancelled. Nothing was saved."); }}>Cancel</Button>}
-              <Button variant="primary" data-testid="add-identity-start" disabled={busy || !signer || !fieldsFilled || (needsSubject && !subject.trim())} onClick={start}>
+              <Button variant="primary" data-testid="add-identity-start" disabled={busy || !signer || !fieldsFilled || (needsSubject && !subject.trim()) || (previewFirst && preview.status !== "ok")} onClick={start}>
                 {busy ? "Waiting…" : signer?.kind === "in-app" ? `Sign with ${signer.label.replace(/ \(.*\)$/, "")}` : "Continue"}
               </Button>
             </div>
@@ -212,6 +226,20 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
         {progress && <Notice testId="add-identity-progress">{progress}</Notice>}
         {error && <Notice tone="error" testId="add-identity-error">{error}</Notice>}
       </div>
+    </div>
+  );
+}
+
+/** Kinds of identity for people who know what they are (DIDs): folded under "Advanced" so they do not crowd the picker. */
+function AdvancedProviders({ open, onToggle, labels, children }: { open: boolean; onToggle: () => void; labels: string[]; children: React.ReactNode }) {
+  return (
+    <div className="space-y-2">
+      <button type="button" data-testid="add-identity-advanced" aria-expanded={open} aria-controls="add-identity-advanced-list" onClick={onToggle}
+        className="flex items-center gap-1.5 min-h-11 text-xs font-medium text-text-secondary hover:text-text-primary cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${open ? "rotate-90" : ""}`}><path d="m9 6 6 6-6 6" /></svg>
+        Advanced<span className="font-normal text-text-muted">· {labels.join(", ")}</span>
+      </button>
+      {open && <div id="add-identity-advanced-list" role="list" aria-label="Advanced kinds of identity">{children}</div>}
     </div>
   );
 }

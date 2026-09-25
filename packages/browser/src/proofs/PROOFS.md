@@ -109,6 +109,12 @@ The UI renders every provider from its descriptor: the picker card (label, summa
 field (`subject`), the validity choice (`validity`), the signer flow by `kind`, the badges (`short`,
 `category`, `source`, `attester`). No component to write.
 
+Two optional fields shape the dialog. `advanced: true` folds the provider under "Advanced" in the picker, for
+kinds most people do not need (DIDs). `subject.preview(subject, { signal })` looks the subject up before
+anything is signed: the dialog shows the subject field first, then the preview's `facts` (a DID's method,
+domain and keys) or its error, and only then the signers, keeping those whose ids the preview lists in
+`signers` (a did:key cannot publish a file). It runs in the UI, on the person's own identity.
+
 ### Signers: how the evidence is made
 
 A provider has one or more signers; the UI shows the ones whose `platforms` include this one and whose
@@ -214,7 +220,7 @@ storing the outcome are one transaction.
   account. `e2e/web/identity-proof-kinds.spec.ts` drives the paste-back and redirect flows with the fakes.
   Test ids: Profile `identity-add` → `add-identity` with `add-identity-<provider>`, `add-identity-signer`,
   `add-identity-subject`, `add-identity-validity`, `add-identity-field-<name>`, `add-identity-start`, then
-  `add-identity-copy-<step>`, `add-identity-paste`, `add-identity-finish`, `add-identity-error`; saved rows
+  `add-identity-copy-<step>`, `add-identity-paste`, `add-identity-finish`, `add-identity-error`; `add-identity-advanced` unfolds the providers marked `advanced`, and a provider with `subject.preview` shows `add-identity-preview` (`data-status`, one `add-identity-preview-<fact>` per fact) or `add-identity-preview-error` before its signers; saved rows
   `identity-proof`. Chat: Options → `chat-identities-open` → `chat-identities` with `chat-identity-share`,
   `chat-identity-withdraw`, `chat-identity-mine-status`, `chat-identity-received` (`data-status`),
   `chat-identity-recheck`, `chat-identity-lookup`; header `chat-identity-badges`.
@@ -233,3 +239,4 @@ storing the outcome are one transaction.
 | `ssh-github` | self-custodied | same | `api.github.com/users/<login>/keys`; re-checked after 10 min | experimental |
 | `ssh-gitlab` | self-custodied | same | `gitlab.com/api/v4/users?username=` then `/users/<id>/keys`; re-checked after 10 min | experimental |
 | `oidc` | provider-attested | redirect: sign in with Google, Microsoft, Apple, GitLab, Twitch (account only / + email / + email and name) | the provider's JWKS (pinned URL) | in development; no client ID registered yet ([checklist](../../../../docs/OIDC-PROVIDERS.md), [draft](../../../../docs/wisps/3xx-oidc-proofs.md)) |
+| `did` | self-custodied | sign with a key of the DID document (JWS or raw signature, pasted back); did:web also: a file beside did.json, a service in it (publish). Listed under Advanced; `subject.preview` resolves the DID first | did:key/did:jwk: nothing; did:web: the DoH resolver and the domain's server; did:dht: a Pkarr relay; re-checked after a day | experimental, [draft 3xx](../../../../docs/wisps/3xx-did.md) |

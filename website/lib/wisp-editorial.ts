@@ -424,6 +424,18 @@ export const editorial: Record<string, Entry> = {
       "pt-br": "Experimental. Nunca dá acesso a servidor nenhum. Número ainda não atribuído.",
     },
   },
+  "3xx-did": {
+    group: "identity",
+    benefit: {
+      en: "A decentralized identifier (did:key, did:jwk, did:dht or did:web) signs once with one of its keys, or a did:web publishes beside its did.json.",
+      "pt-br": "Um identificador descentralizado (did:key, did:jwk, did:dht ou did:web) assina uma vez com uma das suas chaves, ou um did:web publica ao lado do seu did.json.",
+    },
+    level: "available",
+    note: {
+      en: "Experimental, under Advanced. Each contact resolves the DID again. Number not yet assigned.",
+      "pt-br": "Experimental, em Avançado. Cada contato resolve o DID de novo. Número ainda não atribuído.",
+    },
+  },
   "3xx-oidc-proofs": {
     group: "identity",
     benefit: {

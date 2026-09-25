@@ -24,6 +24,7 @@ import type { ProviderHost, ProviderPlatform } from "./paymentAdapters/providers
 import type { EngineApi } from "../shared/rpc";
 import { EXTERNAL_IDENTITIES_ENABLED } from '../shared/features';
 import { IdentityProofs } from './identities';
+import { setOwnDidSource } from '../proofs/providers/did';
 import { ProfileDid } from './did';
 import { NostrSocial, effectiveNostrSettings } from './nostrSocial';
 import { normalizeNostrRelays } from '../nostr/relay';
@@ -719,6 +720,8 @@ export class GhostlyNode implements EngineImplementation {
     await this.identities.load();
     this.identities.start();
     await this.did.load();
+    // The DID provider refuses this profile's own did:dht as an external identity.
+    setOwnDidSource(() => this.did.id);
     this.did.start();
     await this.nostrSocial.load();
     await this.arkWallet.start();
