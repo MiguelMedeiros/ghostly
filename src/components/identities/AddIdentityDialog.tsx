@@ -217,7 +217,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
             <div className="flex flex-wrap justify-end gap-2">
               {busy && <Button onClick={() => { abort.current?.abort(); setProgress(""); setError("Cancelled. Nothing was saved."); }}>Cancel</Button>}
               <Button variant="primary" data-testid="add-identity-start" disabled={busy || !signer || !fieldsFilled || (needsSubject && !subject.trim()) || (previewFirst && preview.status !== "ok")} onClick={start}>
-                {busy ? "Waiting…" : signer?.kind === "in-app" ? `Sign with ${signer.label.replace(/ \(.*\)$/, "")}` : "Continue"}
+                {busy ? "Waiting…" : signer?.action ?? (signer?.kind === "in-app" ? `Sign with ${signer.label.replace(/ \(.*\)$/, "")}` : "Continue")}
               </Button>
             </div>
           </div>

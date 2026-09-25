@@ -150,6 +150,8 @@ pub fn serve(
     }
 }
 
+/// A provider's sign-in page: https, no credentials, and naming where it returns (`redirect_uri`), or,
+/// for AT Protocol's pushed authorization requests, the request the server holds (`request_uri`).
 fn is_allowed_authorize_url(url: &str) -> bool {
     let Ok(parsed) = url::Url::parse(url) else {
         return false;
@@ -157,7 +159,9 @@ fn is_allowed_authorize_url(url: &str) -> bool {
     let loopback = matches!(parsed.host_str(), Some("127.0.0.1") | Some("localhost"));
     parsed.username().is_empty()
         && parsed.password().is_none()
-        && parsed.query_pairs().any(|(k, _)| k == "redirect_uri")
+        && parsed
+            .query_pairs()
+            .any(|(k, _)| k == "redirect_uri" || k == "request_uri")
         && (parsed.scheme() == "https"
             || (cfg!(debug_assertions) && parsed.scheme() == "http" && loopback))
 }
@@ -209,7 +213,8 @@ pub async fn oidc_loopback_wait(
     if !is_allowed_authorize_url(&url) {
         return Err("Not a sign-in address".into());
     }
-    if expected_state.len() < 43 || expected_state.len() > 64 {
+    // OpenID Connect states are 43+ characters; AT Protocol's OAuth client makes 22 (128 bits).
+    if expected_state.len() < 22 || expected_state.len() > 64 {
         return Err("Invalid sign-in state".into());
     }
     let (listener, cancelled) = {
@@ -345,6 +350,10 @@ mod tests {
         assert!(!is_allowed_authorize_url(
             "https://accounts.google.com/o/oauth2/v2/auth"
         ));
+        // AT Protocol: a pushed authorization request, held by the server.
+        assert!(is_allowed_authorize_url(
+            "https://bsky.social/oauth/authorize?client_id=a&request_uri=urn%3Aietf%3Aparams%3Aoauth%3Arequest_uri%3Areq-1"
+        ));
         assert!(!is_allowed_authorize_url(
             "file:///etc/passwd?redirect_uri=b"
         ));
@@ -434,7 +443,7 @@ mod command_tests {
                 "{url}"
             );
         }
-        for state in ["", &STATE[..42], &"A".repeat(65)] {
+        for state in ["", &STATE[..21], &"A".repeat(65)] {
             assert_eq!(
                 wait(AUTHORIZE, state, port).await.unwrap_err(),
                 "Invalid sign-in state"

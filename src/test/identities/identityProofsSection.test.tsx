@@ -1,13 +1,14 @@
 import { act, screen, within } from "@testing-library/react";
 import { useLocation } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { IDENTITY_PROVIDERS } from "@ghostly/browser/proofs/registry";
 import { IdentityProofsSection } from "../../components/identities/IdentityProofsSection";
 import { date } from "../../lib/identities";
 import { linkView } from "../fakeEngine";
 import { renderApp as render } from "../render";
 import { DAY, identitiesView, now, proofView, sharedView } from "./views";
 
-// covers: proofs.deck, proofs.revoke, proofs.expiry, proofs.withdraw, proofs.ghostly-card
+// covers: proofs.deck, proofs.revoke, proofs.expiry, proofs.withdraw, proofs.ghostly-card, proofs.atproto.remove
 
 /**
  * The swing a card makes as it comes up is skipped with reduced motion: only the choice is tested. Set after the
@@ -186,6 +187,48 @@ describe("IdentityProofsSection", () => {
     expect(screen.getByTestId("identity-proof-remove")).toBeInTheDocument();
     expect(screen.queryByText(/a revocation is published/)).not.toBeInTheDocument();
     expect(engine.callsTo("removeIdentityProof")).toEqual([]);
+  });
+
+  describe("a proof whose provider published something (an AT Protocol record)", () => {
+    const atproto = IDENTITY_PROVIDERS.find(p => p.id === "atproto")!;
+    const bluesky = () => proofView({ id: "bsky", provider: "atproto", subject: "did:plc:z72i7hdynmk6r22z27h6tvur", key: "k".repeat(52),
+      verified: { subject: "did:plc:z72i7hdynmk6r22z27h6tvur", source: "Record signed with the account's key, from pds.example.com", display: { name: "@alice.bsky.social", source: "Handle checked both ways", fetchedAt: now() } } });
+
+    it("deletes the record first, from the click, then removes and revokes", async () => {
+      const { user, engine } = renderApp(<IdentityProofsSection />);
+      engine.on("removeIdentityProof", () => undefined);
+      let finish!: () => void;
+      const run = vi.spyOn(atproto.unpublish!, "run").mockImplementation((_proof, ctx) => { ctx.onProgress("Deleting the record on pds.example.com…"); return new Promise<void>(resolve => { finish = resolve; }); });
+      act(() => engine.update({ identityProofs: [bluesky()] }));
+      await user.click(cards()[0]);
+      await user.click(screen.getByTestId("identity-proof-remove"));
+      expect(screen.getByText(/Also deletes the record on your server/)).toBeInTheDocument();
+      await user.click(screen.getByTestId("identity-proof-remove-confirm"));
+      expect(run).toHaveBeenCalledWith({ id: "bsky", subject: "did:plc:z72i7hdynmk6r22z27h6tvur", key: "k".repeat(52) }, expect.anything());
+      expect(screen.getByTestId("identity-proof-remove-progress")).toHaveTextContent("Deleting the record on pds.example.com…");
+      // The proof stays until its record is gone.
+      expect(engine.callsTo("removeIdentityProof")).toEqual([]);
+      await act(async () => { finish(); });
+      expect(engine.callsTo("removeIdentityProof")).toEqual([{ id: "bsky" }]);
+      run.mockRestore();
+    });
+
+    it("when the record cannot be deleted, says so and can remove the proof without it", async () => {
+      const { user, engine } = renderApp(<IdentityProofsSection />);
+      engine.on("removeIdentityProof", () => undefined);
+      const run = vi.spyOn(atproto.unpublish!, "run").mockRejectedValue(new Error("You declined on your server."));
+      act(() => engine.update({ identityProofs: [bluesky()] }));
+      await user.click(cards()[0]);
+      await user.click(screen.getByTestId("identity-proof-remove"));
+      await user.click(screen.getByTestId("identity-proof-remove-confirm"));
+      expect(await screen.findByRole("alert")).toHaveTextContent("You declined on your server.");
+      expect(screen.getByText(/contacts still see it revoked/)).toBeInTheDocument();
+      expect(engine.callsTo("removeIdentityProof")).toEqual([]);
+      await user.click(screen.getByTestId("identity-proof-remove-anyway"));
+      expect(engine.callsTo("removeIdentityProof")).toEqual([{ id: "bsky" }]);
+      expect(run).toHaveBeenCalledTimes(1);
+      run.mockRestore();
+    });
   });
 
   it("shows why a removal failed and keeps asking", async () => {

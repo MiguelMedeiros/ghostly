@@ -2,6 +2,7 @@ import type { BrowserHost } from "@ghostly/browser/host";
 import { UI_PORT, type RuntimeMessage } from "./messages";
 import { extensionUpdates } from "./updates";
 import { extensionOidc } from "./oidc";
+import { extensionAtproto } from "./atproto";
 import { pageProfileIsCurrent } from "./profile";
 
 /** Ghostly Browser: the peer lives in the offscreen document, reached through extension messaging. */
@@ -10,6 +11,7 @@ export const extensionHost: BrowserHost = {
   features: { shareLocalServices: true, openServices: true, profiles: true },
   updates: extensionUpdates,
   oidc: extensionOidc,
+  atproto: extensionAtproto,
 
   async connect(onMessage, onDisconnect) {
     // Another tab switched profiles since this page started: it starts again as that one (ui/main.tsx)

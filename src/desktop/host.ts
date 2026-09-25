@@ -19,6 +19,7 @@ import { createInPageHost } from "@ghostly/browser/inPageHost";
 import { createIrohEndpoint, createHyperEndpoint } from "./nativeTransports";
 import { desktopUpdates } from "./updates";
 import { desktopOidc } from "./oidc";
+import { desktopAtproto } from "./atproto";
 import { engine } from "@ghostly/browser/platform/engine";
 import { registerFileBytes } from "@ghostly/browser/shared/fileBytes";
 import { NativeFileBytes, type NativeInvoke } from "@ghostly/browser/shared/fileBytesNative";
@@ -126,6 +127,7 @@ export function createDesktopHost(version: string) {
     node: { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, transport: tauriTransport, pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke },
     onServer: serveServiceWindows,
     oidc: desktopOidc,
+    atproto: desktopAtproto,
     // A WebView cannot hand a lightning: or bitcoin: link to the system; Rust does, for those two schemes only.
     openPaymentLink: (uri) => invoke("open_payment_link", { url: uri }),
     // WKWebView has no Web Share API; the system's share sheet is shown by Rust (macOS; elsewhere false: the page copies).

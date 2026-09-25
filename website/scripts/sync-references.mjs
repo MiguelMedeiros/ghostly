@@ -27,7 +27,7 @@ All ${numbering.length} specifications remain Draft. Family numbering was approv
 | 00-99 | Foundations: process, Ghost Core, peer keys, common capabilities |
 | 100-199 | Transport negotiation (100), WebRTC (101), Iroh (102), HyperDHT (103) |
 | 200-299 | Payment negotiation (200), Cashu (201), experimental Arkade (202), Lightning (203), Bark (204), Lightning addresses (205) |
-| 300-399 | Identity proofs (300; external proofs optional), Nostr (301), Pubky, Keet, domain, OpenPGP, Bitcoin address, SSH and OpenID Connect providers, and the Nostr social layer (3xx; planned, number to be defined) |
+| 300-399 | Identity proofs (300; external proofs optional), Nostr (301), Pubky, Keet, domain, OpenPGP, Bitcoin address, SSH, OpenID Connect and AT Protocol (Bluesky) providers, and the Nostr social layer (3xx; planned, number to be defined) |
 | 400-499 | Chat messaging (400), an independent application capability; store-and-forward for an away contact (4xx; planned, number to be defined) |
 | 500-599 | File transfer (500), an independent application capability |
 | 600-699 | Voice and video (600), an independent application capability |

@@ -10,7 +10,7 @@ import { renderApp } from "../render";
 import { proofView } from "./views";
 import { choose, optionsOf } from "../select";
 
-// covers: proofs.picker, proofs.domain.dns, proofs.ssh, proofs.oidc, proofs.did
+// covers: proofs.picker, proofs.domain.dns, proofs.ssh, proofs.oidc, proofs.did, proofs.atproto
 
 
 const provider = (id: string) => IDENTITY_PROVIDERS.find((p) => p.id === id)!;
@@ -276,6 +276,30 @@ describe("AddIdentityDialog", () => {
       // The popup opens from the next click, which keeps the browser's user activation.
       expect(await screen.findByTestId("add-identity-finish")).toHaveTextContent("Continue with Account at a provider");
       expect(screen.getByText(/your password never reaches Ghostly/)).toBeInTheDocument();
+    });
+  });
+
+  describe("Bluesky / AT Protocol", () => {
+    it("asks for a handle, and opens the server's window straight from the click", async () => {
+      const opened: string[] = [];
+      const saved = (fakeEngine as BrowserHost).atproto;
+      (fakeEngine as BrowserHost).atproto = { platform: "web", open: () => { opened.push("open"); return new Promise(() => {}); } };
+      restore = () => { (fakeEngine as BrowserHost).atproto = saved; };
+      const { user, engine } = dialog();
+      await user.click(screen.getByTestId("add-identity-atproto"));
+      expect(await optionsOf(user, screen.getByTestId("add-identity-signer"))).toEqual([
+        expect.objectContaining({ label: "Your server (Bluesky or another PDS)" }), expect.objectContaining({ label: "Your server, full access (older servers)" })]);
+      expect(screen.getByText(/never to post, read your messages or edit your profile/)).toBeInTheDocument();
+      // The DID comes from the server, not a subject field: a handle is typed instead.
+      expect(screen.queryByTestId("add-identity-subject")).not.toBeInTheDocument();
+      const start = screen.getByTestId("add-identity-start");
+      expect(start).toHaveTextContent("Continue on your server");
+      expect(start).toBeDisabled();
+      await user.type(screen.getByTestId("add-identity-field-handle"), "alice.bsky.social");
+      await user.click(start);
+      expect(opened).toEqual(["open"]);
+      expect(screen.getByTestId("add-identity-start")).toHaveTextContent("Waiting…");
+      expect(engine.callsTo("beginIdentityProof")).toEqual([]);
     });
   });
 

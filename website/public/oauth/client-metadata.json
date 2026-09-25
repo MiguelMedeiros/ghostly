@@ -1,0 +1,17 @@
+{
+  "client_id": "https://ghostly.tools/oauth/client-metadata.json",
+  "client_name": "Ghostly",
+  "client_uri": "https://ghostly.tools",
+  "logo_uri": "https://ghostly.tools/icon-192.png",
+  "application_type": "native",
+  "grant_types": ["authorization_code"],
+  "response_types": ["code"],
+  "scope": "atproto repo:tools.ghostly.proof?action=create&action=delete transition:generic",
+  "token_endpoint_auth_method": "none",
+  "dpop_bound_access_tokens": true,
+  "redirect_uris": [
+    "https://app.ghostly.tools/oidc-callback.html",
+    "https://nbedaagicniejlmfcncndfjcejaidbcf.chromiumapp.org/atproto",
+    "http://127.0.0.1/oidc-callback"
+  ]
+}
