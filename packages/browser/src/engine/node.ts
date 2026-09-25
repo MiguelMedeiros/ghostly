@@ -18,7 +18,7 @@ import type { ProviderHost, ProviderPlatform } from "./paymentAdapters/providers
 import type { EngineApi } from "../shared/rpc";
 import { EXTERNAL_IDENTITIES_ENABLED } from '../shared/features';
 import { IdentityProofs } from './identities';
-import { NostrSocial } from './nostrSocial';
+import { NostrSocial, effectiveNostrSettings } from './nostrSocial';
 import { normalizeNostrRelays } from '../nostr/relay';
 import type { NostrDraft, NostrDraftRequest, NostrPublishResult } from '../nostr/types';
 import { readPubkyProof } from '../proofs/storage';
@@ -79,6 +79,7 @@ import type {
   MessageFile,
   GroupView,
   Settings,
+  SettingsPatch,
   StoredLink,
   StoredMessage,
   StoredService,
@@ -1558,14 +1559,20 @@ export class GhostlyNode implements EngineImplementation {
   private get sharedNick(): string | undefined { return this.settings.shareProfile === false ? undefined : this.settings.nick || undefined; }
   private get sharedAvatar(): string | undefined { return this.settings.shareProfile === false ? undefined : this.settings.avatar || undefined; }
 
-  async updateSettings({ settings }: { settings: Partial<Settings> }): Promise<void> {
+  async updateSettings({ settings: patch }: { settings: SettingsPatch }): Promise<void> {
+    const { nostr, ...rest } = patch;
+    const settings: Partial<Settings> = rest;
     const wasOnline = this.settings.online;
     // Checked before anything changes: a relay list with no relay, or a TURN server a browser rejects,
     // would leave this peer unreachable or without WebRTC.
     for (const server of settings.iceServers ?? []) { const problem = iceServerProblem(server); if (problem) throw new Error(problem); }
     if (settings.avatar !== undefined && settings.avatar !== "" && typeof sanitizeAvatar(settings.avatar) !== "string") throw new Error("Use a small JPEG picture");
     if (settings.relays && this.relays && !settings.relays.some((relay) => normalizeRelayUrl(relay))) throw new Error("Enter at least one relay address (https://…)");
-    if (settings.nostr) settings = { ...settings, nostr: { relays: normalizeNostrRelays(settings.nostr.relays), autoLoadProfiles: settings.nostr.autoLoadProfiles === true, publish: settings.nostr.publish === true } };
+    // Of the Nostr settings, only what the patch names changes; the rest stays as stored (or the defaults).
+    if (nostr) {
+      const current = effectiveNostrSettings(this.settings.nostr);
+      settings.nostr = { relays: normalizeNostrRelays(nostr.relays ?? current.relays), autoLoadProfiles: (nostr.autoLoadProfiles ?? current.autoLoadProfiles) === true, publish: (nostr.publish ?? current.publish) === true };
+    }
     this.settings = { ...this.settings, ...settings };
     if (settings.relays) {
       this.relays?.setRelays(settings.relays);

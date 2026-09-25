@@ -8,7 +8,7 @@ import type { BarkConfig } from "../engine/paymentAdapters/bark";
 import type { ProfileChoice } from '../profiles/public';
 import type { ProofChallenge, ProofEvidence, ProofAdapter } from "@ghostly/core";
 import type { LinkParams, PairedTransport, DeliveryMode } from "@ghostly/core";
-import type { CashuInspection, EngineState, MessageFile, Settings, StoredMessage } from "./types";
+import type { CashuInspection, EngineState, MessageFile, SettingsPatch, StoredMessage } from "./types";
 import type { NostrDraft, NostrDraftRequest, NostrPublishResult } from "../nostr/types";
 
 /** UI → engine calls. The extension carries them over a runtime port, the web app calls the peer in the same page. */
@@ -151,7 +151,7 @@ export interface EngineApi {
   removeService(params: { serviceId: string }): void;
   setServiceEnabled(params: { serviceId: string; enabled: boolean }): void;
   setServiceShared(params: { serviceId: string; peerPubKeyZ32: string; shared: boolean }): void;
-  updateSettings(params: { settings: Partial<Settings> }): void;
+  updateSettings(params: { settings: SettingsPatch }): void;
   setCallSignal(params: { linkId: string; signal: string | null }): void;
   setFastPoll(params: { linkId: string; fast: boolean }): void;
 

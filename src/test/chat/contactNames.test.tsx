@@ -1,5 +1,6 @@
 import { act, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import type { Settings } from "@ghostly/browser/shared/types";
 import { Sidebar } from "../../components/Sidebar";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { saveSession } from "../../lib/storage";
@@ -54,7 +55,7 @@ describe("the chat list names every contact", () => {
 describe("Profile: sharing the name and picture", () => {
   it("is on by default and switches off and on again for this profile", async () => {
     const { user, engine } = renderApp(<Profile />);
-    engine.on("updateSettings", ({ settings }) => { act(() => engine.update({ settings: { ...engine.state.settings, ...settings } })); });
+    engine.on("updateSettings", ({ settings }) => { act(() => engine.update({ settings: { ...engine.state.settings, ...settings as Partial<Settings> } })); });
     const share = screen.getByTestId("profile-share");
     expect(share).toHaveAttribute("aria-checked", "true");
     expect(share).toHaveAccessibleName("Share my name and picture with contacts");
