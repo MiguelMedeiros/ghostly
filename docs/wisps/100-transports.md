@@ -8,7 +8,7 @@
 | Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [03](03-capabilities.md), [403](403-dht-text.md) |
-| Implementation | Experimental paired-chat negotiation; see increment |
+| Implementation | Experimental rank-sum negotiation in every new chat; the DHT floor, background retry and upgrade (decided 2026-09-25; being implemented) |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 
@@ -68,7 +68,7 @@ The [native transport increment](TRANSPORT-INCREMENT.md) documents the implement
 
 ## Local experimental increment
 
-The opt-in [paired chat increment](PAIRED-CHAT-INCREMENT.md) now exercises a limited subset of this draft. It is not full conformance or a replacement for the broader candidate design below. Read its exact wire profile, local admission boundary and limitations separately from the legacy baseline.
+The [chat session increment](PAIRED-CHAT-INCREMENT.md), now the live session of every new chat ([401](401-paired-chat.md)), exercises a limited subset of this draft. It is not full conformance or a replacement for the broader candidate design below. Read its exact wire profile, local admission boundary and limitations separately from the legacy baseline.
 
 ## Scope and baseline
 

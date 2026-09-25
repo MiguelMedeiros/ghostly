@@ -16,9 +16,9 @@ const INK = "#060a10";
 const PAPER = "#e8edf5";
 const DIM = "#8b98ab";
 
-// The invitation as it appears in the app: the link, the QR and the text code are the same secret three ways.
-const LINK = "app.ghostly.tools/#/…";
-const CODE = "pair1/k7Qx…";
+// The invitation in the one format of WISP 801: the link, the QR and the text code are the same secret three ways.
+const LINK = "ghostly.tools/#ghostly1p…";
+const CODE = "ghostly1pk7qx…";
 
 const round = (v: number) => Math.round(v * 100) / 100;
 

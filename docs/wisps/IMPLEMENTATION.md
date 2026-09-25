@@ -53,16 +53,16 @@ Use a shared library for validated wire objects, version agreement and state mac
 Next, prove a second data adapter before claiming interchangeable transports. Groups follow with three peers, an agreed distribution/security profile, admission/removal and bounded failure cases. Runtime availability and negotiated compatibility should produce different user-visible unavailable/incompatible states. Reusing core across clients proves portability; independent implementation is a separate interoperability gate.
 
 
-## One chat, revision 0.2 (2026-09-25): implemented versus proposed
+## One chat, revision 0.2 (2026-09-25): implemented versus decided
 
-Inspection of `dev` at `802b48bc`. The chat family's revision 0.2 describes one chat with the DHT as rendezvous and floor ([400](400-chat.md)). Much of it exists; this table separates what the code does from what the Drafts propose.
+Inspection of `dev` at `802b48bc`, rechecked at `8670aeab`. The chat family's revision 0.2 describes one chat with the DHT as rendezvous and floor ([400](400-chat.md)); its decisions were recorded on 2026-09-25, and three implementation cards are queued: the `ghostly1` invite and its ghostly.tools link, DHT fallback and self-upgrade in every chat, and calls in the chat session. Much of the model exists; this table separates what the code does from what is decided.
 
-| Behaviour | Today | Revision 0.2 |
+| Behaviour | Today | Decided (2026-09-25) |
 |---|---|---|
 | Invite formats created | `pair1/` (streams first) or `pair2d/` (DHT only), chosen at creation ([invite.ts](../../packages/core/src/invite.ts)) | One bech32m `ghostly1…` string (or `https://ghostly.tools/#ghostly1…`), no choice; `pair1/`, `pair2d/` and prefix-less still read ([801](801-invitation-profiles.md)) |
 | First contact | `pair1/`: needs a stream (WebRTC in the product). `pair2d/`: DHT envelope with recipient `invite` ([dhtDelivery.ts](../../packages/core/src/dhtDelivery.ts)) | Both at once; pin on whichever verifies first; same key required on both |
 | First pairing without a stream | `pair1/` does not finish | Ends `on-dht` and chats |
-| Short-text fallback after a drop | Exists for paired chats once the contact announced DHT support (`GhostLink.textDelivery`, [ghostlink.ts](../../packages/core/src/ghostlink.ts)) | The rule for every chat; every contact announces it from the first contact |
+| Short-text fallback after a drop | Exists for `pair1/` chats once the contact announced DHT support (`GhostLink.textDelivery`, [ghostlink.ts](../../packages/core/src/ghostlink.ts)) | The rule for every chat; every contact announces it from the first contact |
 | Upgrade from DHT to a stream | Automatic after a drop in a `pair1/` chat; never automatic in a `pair2d/` chat (a person switches) | Automatic in every chat that is not `dht-chosen` |
 | DHT only as a choice | Per chat, `setDeliveryMode("dht")`; either side blocks both | Same, listed as **DHT only** in the per-chat Connection menu |
 | Capabilities before a stream exists | Only the envelope's `mode` | Layer-0 capability record: transports, capabilities, native descriptors, name ([03](03-capabilities.md#layer-0-capability-record)) |
@@ -70,8 +70,9 @@ Inspection of `dev` at `802b48bc`. The chat family's revision 0.2 describes one 
 | Second DHT text while one awaits a receipt | Stays in the composer | Queued in the outbox |
 | Files, long text, requests while on the DHT | Held if both allow `hold/1` and the chat is not DHT-only; otherwise attach is refused | Held in `on-dht` and `dht-chosen`; otherwise queued for layer 1 |
 | Mailbox reads while live | Every 30 s | Every 5 min, at once on a drop |
-| Legacy (prefix-less) chats | Read and written; `_msgs` text, legacy WebRTC, calls, legacy files, hosted HTTP | Same, named compatibility chats; never created; "Continue in a new chat" proposed |
-| Calls and hosted HTTP in new chats | Not negotiated on `paired-chat/1` | Still a gap; required before the one chat does all the old one did |
+| Compatibility (prefix-less, v0.4) chats | Read and written; `_msgs` text, legacy WebRTC, calls, legacy files, hosted HTTP | Same; never created; "Continue in a new chat" |
+| Hosted HTTP in new chats | Yes: `ph` frames on the chat session ([pairedHttp.ts](../../packages/core/src/pairedHttp.ts)), no negotiated capability | Unchanged |
+| Calls in new chats | No: `GhostLink` drops call signals when the chat has a profile | Being implemented (`calls/1` on the chat session) |
 | Pairing progress | Stages end `live` or `failed` | Adds terminal `on-dht`; `failed` only for security or an unreachable DHT |
 | CLI | Legacy `_msgs` only | Unchanged by the Drafts; a DHT-only client of 403 is the natural next step |
 

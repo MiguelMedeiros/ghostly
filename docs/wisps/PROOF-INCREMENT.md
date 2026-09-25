@@ -48,7 +48,7 @@ Proof failures do not replace pins, clear history, weaken transport policy, or d
 
 | Flow | Implemented | Actual validation | Remaining limits |
 |---|---|---|---|
-| Default Ghostly identity, no external proof | Yes | Existing paired chat + updated native chats | No external account necessary |
+| Default Ghostly identity, no external proof | Yes | The chat session over WebRTC and native transports | No external account necessary |
 | NIP-46 bunker signer | Yes | Real local WebSocket/NIP-44 exchange with separate ephemeral signer/user keys; two native Tauri UIs over HyperDHT and web → native over WebRTC accepted scoped proofs; withdrawal acknowledged both native sides | Fixture is not an independent commercial signer; no user's real account was used |
 | NIP-07 injected browser signer | Yes, availability detected in current window | API fixture tests for refusal and late cancellation; browser/extension builds | No installed real NIP-07 extension was exercised; a signer injected into ordinary websites is not assumed available inside another extension or native WebView |
 | Pubky local import | Experimental | SDK key conversion, real Ed25519 verification, native peer UI | Not Pubky Ring or homeserver login |

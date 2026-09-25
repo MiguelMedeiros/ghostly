@@ -8,7 +8,7 @@
 | Updated | 2026-09-25 |
 | Document kind | Profile |
 | Dependencies | [800](800-invite-join.md), [400](400-chat.md), [403](403-dht-text.md) |
-| Implementation | Today: `pair1/` and `pair2d/` creation plus v0.4 imports. Proposed: one bech32m format, `ghostly1…`, and the reading rules below |
+| Implementation | Today: `pair1/` and `pair2d/` creation plus v0.4 imports. One bech32m format, `ghostly1…`, and the reading rules below (decided 2026-09-25; being implemented) |
 
 > This Draft documents a bounded existing profile, not full contract conformance or an independent implementation certification.
 

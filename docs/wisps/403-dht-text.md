@@ -8,7 +8,7 @@
 | Updated | 2026-09-25 |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [01](01-ghost-core.md), [03](03-capabilities.md) |
-| Implementation | Existing envelope, limits and DHT-only mode (`pair2d/` chats and paired fallback); as the floor and first contact of every chat, proposed. Native DHT versus browser relays differ. |
+| Implementation | Existing envelope, limits and DHT-only mode (`pair2d/` chats and paired fallback); as the floor and first contact of every chat (decided 2026-09-25; being implemented). Native DHT versus browser relays differ. |
 
 > This Draft documents a bounded existing profile, not full contract conformance or an independent implementation certification.
 
@@ -57,7 +57,7 @@ A text already sent on layer 1 that loses its session before the receipt is sent
 
 **Queueing (new; Q4 of [400](400-chat.md#compatibility-security-and-decisions)).** Only one DHT text per direction may await a receipt. Today a second text stays in the composer until then. In this revision it goes to the outbox as `queued`, in order, and is published when the previous one is confirmed or expires, or sent on layer 1 when that comes back. The wire rule does not change.
 
-**Expiry.** A DHT text that expires unconfirmed is queued for layer 1 in `on-dht` (exists today for paired chats), and becomes **Delivery unconfirmed** at once in `dht-chosen` (exists today for DHT-only chats), because nothing else would carry it.
+**Expiry.** A DHT text that expires unconfirmed is queued for layer 1 in `on-dht` (exists today for `pair1/` chats), and becomes **Delivery unconfirmed** at once in `dht-chosen` (exists today for DHT-only chats), because nothing else would carry it.
 
 ## Choosing DHT only
 

@@ -4,11 +4,11 @@
 |---|---|
 | Candidate number | 700; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-20 |
+| Revision | 0.2 |
+| Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [03](03-capabilities.md), [100](100-transports.md) |
-| Implementation | Existing HTTP proxy |
+| Implementation | Existing HTTP proxy, in every chat (desktop and extension hosts) |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 
@@ -37,3 +37,8 @@ Test path traversal, alternate URL/header injection, redirects, local credential
 ## References
 
 [HTTP core](../../packages/core/src/http.ts), [native local fetch](../../src-tauri/src/local_fetch.rs), [browser limitations](../BROWSER.md), [current HTTP protocol](../PROTOCOL.md).
+
+## Revision log
+
+- 0.2 (2026-09-25): implementation line: hosting works in compatibility chats and in the chat session of every new chat.
+- 0.1 (2026-09-20): initial review draft.

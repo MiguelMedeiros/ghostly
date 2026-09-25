@@ -54,8 +54,8 @@ export const GROUPS: {
     icon: "chat",
     title: { en: "Chat", "pt-br": "Conversa" },
     blurb: {
-      en: "Messages with explicit receipts and retries: over a live link, the bounded DHT path, or held in your own storage for a contact who is away.",
-      "pt-br": "Mensagens com confirmações e novas tentativas explícitas: por um link ao vivo, pelo caminho limitado da DHT ou guardadas no seu próprio armazenamento para um contato ausente.",
+      en: "One kind of chat: a live peer-to-peer link when one connects, short text through the DHT when none does, and items held in your own storage for a contact who is away.",
+      "pt-br": "Um só tipo de chat: um link direto entre os dois quando algum conecta, textos curtos pela DHT quando nenhum conecta, e itens guardados no seu próprio armazenamento para um contato ausente.",
     },
   },
   {
@@ -64,8 +64,8 @@ export const GROUPS: {
     icon: "file",
     title: { en: "Files", "pt-br": "Arquivos" },
     blurb: {
-      en: "Bounded, verified file transfer while both people are online.",
-      "pt-br": "Transferência de arquivos limitada e verificada, com as duas pessoas online.",
+      en: "Bounded, verified file transfer over the live link, or held for a contact who is away.",
+      "pt-br": "Transferência de arquivos limitada e verificada pelo link direto, ou guardada para um contato ausente.",
     },
   },
   {
@@ -180,8 +180,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "available",
     note: {
-      en: "Negotiated offers are part of paired chats. Chats started with an older version keep a fixed set.",
-      "pt-br": "As ofertas negociadas fazem parte dos chats pareados. Chats iniciados numa versão anterior mantêm um conjunto fixo.",
+      en: "Every new chat negotiates its abilities on its live link. Chats with Ghostly 0.4 contacts keep a fixed set. Planned: announcing them on the DHT before a live link exists.",
+      "pt-br": "Todo chat novo negocia suas capacidades no link direto. Chats com contatos no Ghostly 0.4 mantêm um conjunto fixo. Planejado: anunciá-las na DHT antes de existir um link direto.",
     },
     feature: inApp("agree", "The agreement", "O acordo"),
   },
@@ -235,8 +235,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "available",
     note: {
-      en: "Desktop app only, in paired chats, after a first WebRTC pairing.",
-      "pt-br": "Só no app desktop, em chats pareados, depois de um primeiro pareamento por WebRTC.",
+      en: "Desktop app only, after a first WebRTC pairing. Planned: tried from the first contact, without WebRTC first.",
+      "pt-br": "Só no app desktop, depois de um primeiro pareamento por WebRTC. Planejado: tentado desde o primeiro contato, sem WebRTC antes.",
     },
   },
   "103-hyperdht": {
@@ -246,8 +246,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "available",
     note: {
-      en: "Desktop app only, in paired chats, after a first WebRTC pairing.",
-      "pt-br": "Só no app desktop, em chats pareados, depois de um primeiro pareamento por WebRTC.",
+      en: "Desktop app only, after a first WebRTC pairing. Planned: tried from the first contact, without WebRTC first.",
+      "pt-br": "Só no app desktop, depois de um primeiro pareamento por WebRTC. Planejado: tentado desde o primeiro contato, sem WebRTC antes.",
     },
   },
   "200-payments": {
@@ -257,8 +257,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "available",
     note: {
-      en: "Methods are negotiated in paired chats, and in groups between two members. Any wallet can pay a request from its QR code or link; it is settled only when the payee's own wallet sees the money.",
-      "pt-br": "Os métodos são negociados nos chats pareados, e nos grupos entre dois membros. Qualquer carteira paga um pedido pelo QR code ou link; ele só é liquidado quando a carteira de quem recebe vê o dinheiro.",
+      en: "Methods are negotiated in every chat, and in groups between two members. Any wallet can pay a request from its QR code or link; it is settled only when the payee's own wallet sees the money.",
+      "pt-br": "Os métodos são negociados em todo chat, e nos grupos entre dois membros. Qualquer carteira paga um pedido pelo QR code ou link; ele só é liquidado quando a carteira de quem recebe vê o dinheiro.",
     },
     feature: inApp("next", "Send sats", "Enviar sats"),
   },
@@ -460,40 +460,44 @@ export const editorial: Record<string, Entry> = {
   },
   "400-chat": {
     benefit: {
-      en: "Exchange messages with explicit storage receipts and retries.",
-      "pt-br": "Trocar mensagens com confirmação de armazenamento e novas tentativas explícitas.",
+      en: "One chat for everyone: the DHT to meet, a live link when one connects, the DHT again when none does.",
+      "pt-br": "Um só chat para todos: a DHT para se encontrar, um link direto quando algum conecta, a DHT de novo quando nenhum conecta.",
     },
     level: "available",
+    note: {
+      en: "Messages with storage receipts and retries work today, and short texts fall back to the DHT when a live link drops. Planned: a first pairing that finds no direct path starts on the DHT, and every chat returns to a live link by itself.",
+      "pt-br": "Mensagens com confirmação de armazenamento e novas tentativas já funcionam, e textos curtos passam pela DHT quando o link direto cai. Planejado: um primeiro pareamento sem caminho direto começa na DHT, e todo chat volta sozinho a um link direto.",
+    },
     feature: inApp("next", "Chat", "Conversar"),
   },
   "401-paired-chat": {
     benefit: {
-      en: "Authenticated one-to-one chats with pinned keys, a durable outbox, names and pictures.",
-      "pt-br": "Chats um a um autenticados, com chaves fixadas, caixa de saída durável, nomes e fotos.",
+      en: "The live session of every chat: pinned keys, a durable outbox, names and pictures, over WebRTC, Iroh or HyperDHT.",
+      "pt-br": "A sessão ao vivo de todo chat: chaves fixadas, caixa de saída durável, nomes e fotos, por WebRTC, Iroh ou HyperDHT.",
     },
     level: "available",
     note: {
-      en: "The default for new chats on web, desktop and extension. No calls in them yet.",
-      "pt-br": "O padrão para novos chats na web, no desktop e na extensão. Ainda sem chamadas neles.",
+      en: "Every new chat on web, desktop and extension. Calls in it are planned.",
+      "pt-br": "Todo chat novo na web, no desktop e na extensão. Chamadas nela estão planejadas.",
     },
     feature: inApp("next", "Chat", "Conversar"),
   },
   "402-legacy-chat": {
     benefit: {
-      en: "The chat profile of every public release so far; older contacts keep working.",
-      "pt-br": "O perfil de chat de todas as versões públicas até agora; contatos antigos continuam funcionando.",
+      en: "Chats with Ghostly 0.4 contacts keep working, calls included. A new chat never uses it.",
+      "pt-br": "Chats com contatos no Ghostly 0.4 continuam funcionando, com chamadas. Um chat novo nunca o usa.",
     },
     level: "available",
   },
   "403-dht-text": {
     benefit: {
-      en: "Very short text through DHT records when no live link is up. Bounded, not a mailbox.",
-      "pt-br": "Textos bem curtos por registros na DHT quando não há link ao vivo. É limitado, não é caixa postal.",
+      en: "The floor of every chat: very short text through DHT records when no live link is up. Bounded, not a mailbox.",
+      "pt-br": "O piso de todo chat: textos bem curtos por registros na DHT quando não há link direto. É limitado, não é caixa postal.",
     },
     level: "available",
     note: {
-      en: "Legacy chats: up to 500 bytes. Paired chats: 256 bytes, retried for five minutes.",
-      "pt-br": "Chats legados: até 500 bytes. Chats pareados: 256 bytes, com novas tentativas por cinco minutos.",
+      en: "256 bytes, retried for five minutes: after a live link drops, or in a chat set to DHT only. Planned: the first contact of every chat. Chats with 0.4 contacts: up to 500 bytes (WISP 402).",
+      "pt-br": "256 bytes, com novas tentativas por cinco minutos: depois que o link direto cai, ou num chat só na DHT. Planejado: o primeiro contato de todo chat. Chats com contatos no 0.4: até 500 bytes (WISP 402).",
     },
   },
   "4xx-store-and-forward": {
@@ -504,8 +508,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "available",
     note: {
-      en: "Experimental, paired chats with the switch on at both ends; web, desktop and extension. Picked up until seven days after you were last online. Ecash is never held. Number not yet assigned.",
-      "pt-br": "Experimental, chats pareados com a opção ligada nas duas pontas; web, desktop e extensão. Pode ser buscado até sete dias depois da última vez que você esteve online. Ecash nunca fica guardado. Número ainda não atribuído.",
+      en: "Experimental, in chats with the switch on at both ends; web, desktop and extension. Picked up until seven days after you were last online. Ecash is never held. Number not yet assigned.",
+      "pt-br": "Experimental, em chats com a opção ligada nas duas pontas; web, desktop e extensão. Pode ser buscado até sete dias depois da última vez que você esteve online. Ecash nunca fica guardado. Número ainda não atribuído.",
     },
   },
   "500-files": {
@@ -522,15 +526,15 @@ export const editorial: Record<string, Entry> = {
   },
   "501-paired-files": {
     benefit: {
-      en: "Negotiated file transfer in paired chats, chunk by chunk with integrity checks.",
-      "pt-br": "Transferência negociada nos chats pareados, pedaço por pedaço, com verificação de integridade.",
+      en: "How files travel in every chat: negotiated, chunk by chunk, with integrity checks.",
+      "pt-br": "Como os arquivos viajam em todo chat: negociados, pedaço por pedaço, com verificação de integridade.",
     },
     level: "available",
   },
   "502-legacy-files": {
     benefit: {
-      en: "File frames of the released chats, so older contacts can still receive files.",
-      "pt-br": "Os frames de arquivo dos chats já lançados, para contatos antigos ainda receberem arquivos.",
+      en: "File frames of chats with Ghostly 0.4 contacts, so they can still send and receive files.",
+      "pt-br": "Os frames de arquivo dos chats com contatos no Ghostly 0.4, para eles ainda enviarem e receberem arquivos.",
     },
     level: "available",
   },
@@ -541,8 +545,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "available",
     note: {
-      en: "In chats over WebRTC (legacy profile). Paired chats do not have calls yet.",
-      "pt-br": "Em chats sobre WebRTC (perfil legado). Os chats pareados ainda não têm chamadas.",
+      en: "Today only in chats with Ghostly 0.4 contacts. Calls in every chat are planned.",
+      "pt-br": "Hoje só em chats com contatos no Ghostly 0.4. Chamadas em todo chat estão planejadas.",
     },
     feature: inApp("next", "Calls", "Chamadas"),
   },
@@ -564,8 +568,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "available",
     note: {
-      en: "Desktop app and extension, at both ends; not the web app. You choose which contacts see each app, in paired chats too.",
-      "pt-br": "App desktop e extensão, nas duas pontas; não no app web. Você escolhe quais contatos veem cada app, também nos chats pareados.",
+      en: "Desktop app and extension, at both ends; not the web app. You choose which contacts see each app.",
+      "pt-br": "App desktop e extensão, nas duas pontas; não no app web. Você escolhe quais contatos veem cada app.",
     },
     feature: inApp("next", "Share a local app", "Compartilhar um app local"),
   },
@@ -595,8 +599,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "available",
     note: {
-      en: "Invite links, and paired invitations as a QR code you scan with a camera or from an image.",
-      "pt-br": "Links de convite, e convites pareados como QR code lido pela câmera ou de uma imagem.",
+      en: "Today: an invite link, a text code and a QR code you scan with a camera or from an image. Planned: one ghostly1… code, checked for typos, and a ghostly.tools link.",
+      "pt-br": "Hoje: um link de convite, um código de texto e um QR code lido pela câmera ou de uma imagem. Planejado: um único código ghostly1…, que detecta erros de digitação, e um link em ghostly.tools.",
     },
     feature: inApp("invite", "The invitation", "O convite"),
   },

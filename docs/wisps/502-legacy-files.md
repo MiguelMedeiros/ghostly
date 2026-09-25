@@ -9,7 +9,7 @@
 | Document kind | Profile |
 | Dependencies | [500](500-files.md) |
 | Disposition | Retained for compatibility chats ([402](402-legacy-chat.md)) only; never negotiated in a new chat |
-| Implementation | Legacy live data links; both peers online. |
+| Implementation | Compatibility chats' live data links; both peers online. |
 
 > This Draft documents a bounded existing profile, not full contract conformance or an independent implementation certification.
 

@@ -4,11 +4,11 @@
 |---|---|
 | Candidate number | 701; editorial family allocation |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-22 |
+| Revision | 0.2 |
+| Updated | 2026-09-25 |
 | Document kind | Profile |
 | Dependencies | [700](700-local-services.md) |
-| Implementation | Legacy desktop/extension hosting; web viewer where supported; not paired hosted HTTP. |
+| Implementation | Desktop/extension hosting in every chat: data-link frames in compatibility chats, the same frames inside `ph` frames in the chat session; web viewer where supported. |
 
 > This Draft documents a bounded existing profile, not full contract conformance or an independent implementation certification.
 
@@ -20,8 +20,13 @@ Control `req` frames carry request ID, service ID, method, path, sanitized heade
 
 ## Runtime limits
 
-Desktop uses native local fetch; extension can host permitted local services. An ordinary web tab does not gain arbitrary loopback access. The implemented legacy profile is distinct from paired sessions. Redirect containment differs across fetch implementations: browser follow-then-validate can observe a redirect only after it was followed. No WebSocket upgrade, SSE or end-to-end response-streaming support is implied by binary chunk framing.
+Desktop uses native local fetch; extension can host permitted local services. An ordinary web tab does not gain arbitrary loopback access. In compatibility chats ([402](402-legacy-chat.md)) these frames ride the legacy data link; in the chat session of every new chat ([401](401-paired-chat.md)) the same frames travel inside `ph` application frames ([pairedHttp.ts](../../packages/core/src/pairedHttp.ts)), with no negotiated capability, so an older app drops them. Redirect containment differs across fetch implementations: browser follow-then-validate can observe a redirect only after it was followed. No WebSocket upgrade, SSE or end-to-end response-streaming support is implied by binary chunk framing.
 
 ## Evidence
 
 [HTTP core](../../packages/core/src/http.ts), [service authorization](../../packages/browser/src/engine/node.ts), [native fetch](../../src-tauri/src/local_fetch.rs), [browser boundaries](../BROWSER.md). Check traversal, header/URL injection, wrong audience, disabled sharing, redirect escape and resource cleanup; document platform differences.
+
+## Revision log
+
+- 0.2 (2026-09-25): hosting in the chat session (`ph` frames) recorded; the earlier "not paired hosted HTTP" was wrong.
+- 0.1 (2026-09-22): HTTP local service profile.
