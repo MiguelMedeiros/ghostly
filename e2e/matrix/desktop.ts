@@ -94,37 +94,60 @@ async function delivery({ a, b }: DesktopWorld): Promise<void> {
 type Name = "WebRTC" | "Iroh" | "HyperDHT";
 
 /**
- * What a transport value asks of the Desktop side(s), and what the pair should settle on. The browsers have
- * WebRTC only, so a desktop-web pair can only ever meet there; asked for Iroh or HyperDHT alone, it has no
- * live transport in common and must stay usable (texts over the DHT).
+ * What a transport value asks of each side, and where the pair should end up (a pattern of transport names), or
+ * nowhere live. The matrix's Desktop runs on Linux, whose WebKitGTK has no WebRTC at all:
+ *
+ * - Desktop ↔ Desktop opens on the DHT and goes live natively from the descriptors in each other's capability
+ *   record (e2e/desktop/native-upgrade.spec.ts). The default (`webrtc`: Automatic, fallback on) settles on
+ *   either native transport. Asked for WebRTC only, a Desktop cannot choose it (its option is off, with the
+ *   reason), and Fallback off keeps it to the app's first transport: Iroh. Iroh alone, or first, settles on Iroh;
+ *   HyperDHT alone on HyperDHT.
+ * - Desktop ↔ web: the browser has WebRTC only (its fixture keeps Iroh off, and HyperDHT needs a relay it is not
+ *   given), the Desktop has no WebRTC, so whatever is asked they have no live transport in common and the chat
+ *   stays usable on the DHT.
  */
-function wanted(combo: Combination): { preferred?: Name; fallback: boolean; settles?: Name } {
+function wanted(combo: Combination): { preferred?: Name; fallback: boolean; settles?: string } {
   const both = combo.client === "desktop-desktop";
   switch (combo.transport) {
-    case "webrtc": return { fallback: true, settles: "WebRTC" };
-    case "webrtc-strict": return { preferred: "WebRTC", fallback: false, settles: "WebRTC" };
-    case "native-fallback": return { preferred: "Iroh", fallback: true, settles: both ? "Iroh" : "WebRTC" };
+    case "webrtc": return { fallback: true, settles: both ? "Iroh|HyperDHT" : undefined };
+    case "webrtc-strict": return { preferred: "WebRTC", fallback: false, settles: both ? "Iroh" : undefined };
+    case "native-fallback": return { preferred: "Iroh", fallback: true, settles: both ? "Iroh" : undefined };
     case "iroh-only": return { preferred: "Iroh", fallback: false, settles: both ? "Iroh" : undefined };
     case "hyperdht-only": return { preferred: "HyperDHT", fallback: false, settles: both ? "HyperDHT" : undefined };
   }
 }
 
+const notLive = (p: Person) => expect.poll(() => p.connection(), { message: `${p.name} is not live` }).not.toMatch(/Connected ·/);
+
 async function transport({ a, b, combo }: DesktopWorld): Promise<void> {
   const want = wanted(combo);
+  const both = combo.client === "desktop-desktop";
+  for (const p of [a, b]) await p.go(p.chatHash!);
+  // Two Desktops go live by themselves first, natively from the DHT (native-upgrade.spec.ts): the preferences act on
+  // that. Asked for too early, an option could still be off for want of the contact's record.
+  if (both) for (const p of [a, b]) await connected(p, "(?:Iroh|HyperDHT)");
   for (const p of [a, b]) {
-    await p.go(p.chatHash!);
+    // The premise of `wanted`: Desktop here is Linux, with no WebRTC.
+    if (p.kind === "desktop") expect((await p.callButton()).rtc, `${p.name} (Desktop on Linux) has no WebRTC`).toBe(false);
     // Only Desktop is asked for a native transport; a browser keeps WebRTC, strict when the value says so.
     const preferred = p.kind === "desktop" ? want.preferred : want.preferred === "WebRTC" ? "WebRTC" : undefined;
-    const offered = await p.preferTransport(preferred, p.kind === "desktop" || want.preferred === "WebRTC" ? want.fallback : true);
-    if (p.kind === "desktop") expect(offered, `${p.name} (Desktop) offers the native transports`).toEqual(expect.arrayContaining(["Iroh", "HyperDHT"]));
-    else expect(offered, `${p.name} (${p.kind}) offers WebRTC only`).toEqual(["WebRTC"]);
+    const fallback = p.kind === "desktop" || want.preferred === "WebRTC" ? want.fallback : true;
+    // The options are off for what this app lacks, and for what the contact's lacks (as far as it has learned): a
+    // Desktop offers its native transports to a Desktop, and nothing to a browser, which has WebRTC only.
+    await expect(async () => {
+      const offered = await p.preferTransport(preferred, fallback);
+      if (p.kind === "desktop") expect(offered, `${p.name} (Desktop) offers what both apps have`).toEqual(both ? ["Iroh", "HyperDHT"] : []);
+      else expect(["WebRTC"], `${p.name} (${p.kind}) offers WebRTC at most`).toEqual(expect.arrayContaining(offered));
+    }).toPass({ timeout: 60_000 });
   }
-  if (want.settles) for (const p of [a, b]) await connected(p, want.settles);
-  else for (const p of [a, b]) await expect.poll(() => p.connection(), { timeout: 30_000 }).not.toMatch(/Connected ·/);
+  if (want.settles) for (const p of [a, b]) await connected(p, `(?:${want.settles})`);
+  else for (const p of [a, b]) await notLive(p);
   // Live or not, the chat carries text both ways.
   await says(a, b, `over ${combo.transport}`);
   await says(b, a, `back over ${combo.transport}`);
-  if (want.settles) for (const p of [a, b]) await connected(p, want.settles);
+  // And stays where it settled: the texts over the DHT took minutes, time enough to have gone live if it could.
+  if (want.settles) for (const p of [a, b]) await connected(p, `(?:${want.settles})`);
+  else for (const p of [a, b]) await notLive(p);
 }
 
 /**

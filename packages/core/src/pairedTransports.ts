@@ -50,6 +50,14 @@ export function rankTransports(local: readonly string[], remote: readonly string
       || TRANSPORTS.indexOf(a) - TRANSPORTS.indexOf(b));
 }
 
+/**
+ * What a chat prefers when nobody chose (Automatic): WebRTC where the app has it, else the first transport it has
+ * (a Linux Desktop: WebKitGTK has no WebRTC). With nothing at all, WebRTC, which the offer then leaves out.
+ */
+export function automaticTransport(available: readonly PairedTransport[]): PairedTransport {
+  return available.includes("webrtc/1") ? "webrtc/1" : TRANSPORTS.find(t => available.includes(t)) ?? "webrtc/1";
+}
+
 export function transportOrder(available: readonly PairedTransport[], preferred: PairedTransport,
   fallback: boolean): PairedTransport[] {
   const rest = TRANSPORTS.filter(t => available.includes(t) && t !== preferred);

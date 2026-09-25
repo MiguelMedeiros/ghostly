@@ -35,8 +35,9 @@ export const DIMENSIONS = [
       { id: "extension-web", label: "extension hosts, web app joins" },
       { id: "extension-extension", label: "extension ↔ extension" },
       // Desktop is driven through WebDriver (support/desktop.ts), on Linux: two apps side by side, each with
-      // a home of its own. Desktop↔Desktop is the only pair where Iroh and HyperDHT can connect.
-      { id: "desktop-web", label: "Desktop hosts, web app joins", requires: ["desktop"] },
+      // a home of its own. Linux's WebKitGTK has no WebRTC: Desktop↔Desktop goes live on Iroh or HyperDHT from the
+      // DHT, and Desktop↔web, with no live transport in common (the web's Iroh is off without a relay), stays on the DHT.
+      { id: "desktop-web", label: "Desktop hosts, web app joins: no live transport in common, the chat stays on the DHT", requires: ["desktop"] },
       { id: "desktop-desktop", label: "Desktop ↔ Desktop", requires: ["desktop"] },
     ],
   },
@@ -44,11 +45,11 @@ export const DIMENSIONS = [
     id: "transport",
     label: "transport",
     values: [
-      { id: "webrtc", label: "WebRTC preferred, fallback on (the default)" },
-      { id: "webrtc-strict", label: "WebRTC only, fallback off on both sides" },
-      { id: "native-fallback", label: "Desktop prefers Iroh with fallback: the pair settles on WebRTC" },
-      { id: "iroh-only", label: "Desktop wants Iroh only, the web has none: refused cleanly, chat stays usable" },
-      { id: "hyperdht-only", label: "Desktop wants HyperDHT only, the web has none: refused cleanly" },
+      { id: "webrtc", label: "WebRTC preferred, fallback on (the default); two Linux Desktops, with no WebRTC, go live on Iroh or HyperDHT" },
+      { id: "webrtc-strict", label: "WebRTC only, fallback off on both sides; a Linux Desktop cannot choose WebRTC and keeps to Iroh" },
+      { id: "native-fallback", label: "Desktop prefers Iroh with fallback: two Desktops settle on Iroh" },
+      { id: "iroh-only", label: "Desktop wants Iroh only: two Desktops settle on Iroh" },
+      { id: "hyperdht-only", label: "Desktop wants HyperDHT only: two Desktops settle on HyperDHT" },
     ],
   },
   {

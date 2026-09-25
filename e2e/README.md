@@ -345,11 +345,13 @@ that reason otherwise.
 A scenario with a Desktop peer needs Linux (or Windows), `tauri-driver` and a built app; elsewhere it is skipped
 with that reason. Desktop only chats in it — it pairs, talks, goes away and back, and picks a transport — so its
 files and wallet steps are skipped with the reason, and every other dimension stays at its plainest value. On
-Linux, WebKitGTK has no WebRTC at all, and a first live session needs WebRTC on both sides, so these pairs chat over
-the DHT; see docs/TESTING.md for what that means for Iroh and HyperDHT.
+Linux, WebKitGTK has no WebRTC at all: two Desktops open on the DHT and go live on Iroh or HyperDHT from each
+other's capability record, while a Desktop and a browser (WebRTC only) have no live transport in common and stay on
+the DHT (docs/TESTING.md has what each transport value settles on).
 
 The matrix runs every night with the ephemeral environment (`e2e-full.yml`: four shards, the Desktop scenarios in a
-job of their own on ubuntu-22.04, then one report with the matrix in the run's summary), not on pull requests. It serves its own
+job of their own on ubuntu-22.04, then one report with the matrix in the run's summary), not on pull requests. By
+hand, `gh workflow run e2e-full.yml --ref <branch> -f jobs=desktop` runs only the Desktop job and the report. It serves its own
 build on port 47300 (`MATRIX_WEB_PORT`), and its test domain uses 47320-47399.
 
 ## Compatibility with v0.4

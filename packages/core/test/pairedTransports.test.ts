@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { createIdentity } from "../src/identity";
 import { PairedSession } from "../src/pairedSession";
-import { rankTransports, transportOrder, type NativeBinding, type PairedTransport } from "../src/pairedTransports";
+import { automaticTransport, rankTransports, transportOrder, type NativeBinding, type PairedTransport } from "../src/pairedTransports";
 import { createChannelPair } from "./helpers";
 // covers: transport.switch, transport.preference, transport.iroh
 
@@ -26,6 +26,13 @@ it("uses a symmetric preference ranking and never invents available adapters", (
   expect(rankTransports(["iroh/1", "webrtc/1"], ["webrtc/1", "iroh/1"])).toEqual(["iroh/1", "webrtc/1"]);
   expect(transportOrder(["webrtc/1"], "iroh/1", false)).toEqual([]);
   expect(transportOrder(["webrtc/1"], "iroh/1", true)).toEqual(["webrtc/1"]);
+});
+it("prefers WebRTC when nobody chose, and the app's first native transport where there is no WebRTC", () => {
+  expect(automaticTransport(["iroh/1", "webrtc/1"])).toBe("webrtc/1");
+  // A Linux Desktop, whichever endpoint came up first.
+  expect(automaticTransport(["hyperdht/1", "iroh/1"])).toBe("iroh/1");
+  expect(automaticTransport(["hyperdht/1"])).toBe("hyperdht/1");
+  expect(automaticTransport([])).toBe("webrtc/1");
 });
 it("authenticates an Iroh TLS binding with existing participation pins", async () => {
   const [a,b] = pair();
