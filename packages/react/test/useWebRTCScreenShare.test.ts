@@ -168,16 +168,19 @@ describe("sharing the screen in a video call", () => {
     expect(pictures(call)).toEqual(["1s", "1c"]);
   });
 
-  it("the browser's own Stop sharing turns the camera back on too", async () => {
+  it("the browser's own Stop sharing turns the camera back on too, and a press meanwhile asks for it once", async () => {
     const { call, sender } = await connectedCall(true);
     const screen = await share(call);
 
     endedByBrowser(screen);
+    act(() => { void call.result.current.toggleScreenShare(); });
     const back = devices.userMedia[1].grant().getVideoTracks()[0];
     await settle();
 
+    expect(devices.getUserMedia).toHaveBeenCalledTimes(2);
     expect(sender.replaceTrack).toHaveBeenLastCalledWith(back);
     expect(pictures(call)).toEqual(["1s", "1c"]);
+    expect(call.result.current.isScreenSharing).toBe(false);
   });
 
   it("a camera that cannot come back still ends the share, as a voice call", async () => {

@@ -275,7 +275,9 @@ export function useWebRTC({
         track.contentHint = "detail";
         // The browser's (or the system's) own "Stop sharing" ends the track without telling anyone else.
         track.onended = () => {
-          if (callStateRef.current !== "idle") void stopSharingRef.current().catch(() => {});
+          if (callStateRef.current === "idle" || shareBusyRef.current) return;
+          shareBusyRef.current = true;
+          void stopSharingRef.current().catch(() => {}).finally(() => { shareBusyRef.current = false; });
         };
       }
 
