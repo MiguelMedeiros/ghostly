@@ -19,7 +19,7 @@ import {
   type SwapPreview,
 } from "@cashu/cashu-ts";
 import { STORES, openDb, store, transact, wrap } from "../shared/idb";
-import type { PaymentReview } from "@ghostly/core";
+import type { PaymentReview, WalletNetwork } from "@ghostly/core";
 import { isTestMint } from "../shared/mints";
 import type {
   CashuInspection,
@@ -140,12 +140,12 @@ export class CashuWallet {
   private meltTimer: ReturnType<typeof setTimeout> | null = null;
 
   /**
-   * `getMints`: the mints of the wallet mode in use, primary first (balances, invoices, payments).
-   * `getKnownMints`: every mint the user added, whatever the mode: ecash from any of them is taken in,
-   * and shows once its mode is the one in use.
+   * `getMints`: the mints of one network (the engine's default when none is named), primary first: balances,
+   * invoices, payments of that network's Cashu wallet. `getKnownMints`: every mint the user added, whatever its
+   * network: ecash from any of them is taken in, and counts in its own network's wallet.
    */
   constructor(
-    private readonly getMints: () => string[],
+    private readonly getMints: (network?: WalletNetwork) => string[],
     private readonly events: WalletEvents,
     private readonly getKnownMints: () => string[] = getMints,
   ) {}
@@ -154,12 +154,13 @@ export class CashuWallet {
     void this.pollQuotes();
     void this.pollMelts();
     // Names, fees and limits for the UI; a mint that is down simply stays without them.
-    for (const mint of this.getMints()) void this.checkMint(mint).then(() => this.events.onChange(), () => {});
+    for (const mint of this.getKnownMints()) void this.checkMint(mint).then(() => this.events.onChange(), () => {});
   }
 
-  async view(): Promise<WalletView> {
+  /** The Cashu wallet of one network: its mints and their balance. History is every network's, newest first. */
+  async view(network?: WalletNetwork): Promise<WalletView> {
     const proofs = await this.allProofs();
-    const mints: MintView[] = this.getMints().map((url) => ({
+    const mints: MintView[] = this.getMints(network).map((url) => ({
       url,
       name: this.names.get(url) ?? new URL(url).hostname,
       balance: total(proofs.filter((p) => p.mint === url && !p.reserved)),
@@ -210,12 +211,12 @@ export class CashuWallet {
 
   // -- Lightning in ----------------------------------------------------------
 
-  async receiveLightning(amount: number, paymentId?: string): Promise<StoredQuote> {
+  async receiveLightning(amount: number, paymentId?: string, network?: WalletNetwork): Promise<StoredQuote> {
     assertAmount(amount);
     // The primary mint comes first; if it is down the next one takes the invoice.
     let created: { mint: string; response: Awaited<ReturnType<Wallet["createMintQuoteBolt11"]>> } | null = null;
     let lastError: unknown = new Error("No mint configured");
-    for (const candidate of this.getMints()) {
+    for (const candidate of this.getMints(network)) {
       try {
         created = { mint: candidate, response: await within(MINT_TIMEOUT_MS, (await this.wallet(candidate)).createMintQuoteBolt11(amount, "Ghostly"), candidate) };
         break;
@@ -325,9 +326,11 @@ export class CashuWallet {
     preferred?: string[],
     note?: string,
     outbox?: (token: string, mint: string) => StoredPayment,
+    network?: WalletNetwork,
   ): Promise<{ token: string; mint: string }> {
     assertAmount(amount);
-    const mine = this.getMints();
+    // A request names its mints, and so its network; a send without one comes from this network's mints.
+    const mine = preferred ? this.getKnownMints() : this.getMints(network);
     const candidates = preferred ? preferred.map((m) => m.replace(/\/+$/, "")).filter((m) => mine.includes(m)) : mine;
     for (const mint of candidates) {
       if ((await this.balanceAt(mint)) < amount) continue;
@@ -356,7 +359,7 @@ export class CashuWallet {
 
   async prepareReviewedCashu(mint:string,amount:number):Promise<{fee:number;prepared:CashuPrepared}> {
     assertAmount(amount);
-    if(!this.getMints().includes(mint))throw new Error("Select a configured mint");
+    if(!this.getKnownMints().includes(mint))throw new Error("Select a configured mint");
     return this.locked(mint,async()=>{
       const wallet=await this.wallet(mint);
       const preview=await wallet.ops.send(amount,asProofLike(await this.proofsAt(mint))).includeFees(true).prepare();
@@ -503,9 +506,9 @@ export class CashuWallet {
   // -- Lightning out -----------------------------------------------------------
 
   /** What paying this invoice would cost, from the first mint that can afford it. */
-  async quoteInvoice(invoice: string): Promise<{ quote: string; mint: string; amount: number; feeReserve: number }> {
+  async quoteInvoice(invoice: string, network?: WalletNetwork): Promise<{ quote: string; mint: string; amount: number; feeReserve: number }> {
     let lastError: unknown = new Error("Add a mint in Settings first");
-    for (const mint of this.getMints()) {
+    for (const mint of this.getMints(network)) {
       try {
         const wallet = await this.wallet(mint);
         const quote = await wallet.createMeltQuoteBolt11(invoice.trim());

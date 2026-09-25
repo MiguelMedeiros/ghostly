@@ -30,11 +30,11 @@ export class CashuMintLightning implements LightningProvider {
 
   async info() {
     // Test mints issue invoices for worthless sats (often with a mainnet prefix): the mode says which it is.
-    return { network: this.mode === "mainnet" ? "bitcoin" as const : "testnet" as const, balance: (await this.wallet.view()).balance };
+    return { network: this.mode === "mainnet" ? "bitcoin" as const : "testnet" as const, balance: (await this.wallet.view(this.mode)).balance };
   }
 
   async createInvoice(amount: number): Promise<LightningInvoice> {
-    const quote = await this.wallet.receiveLightning(amount);
+    const quote = await this.wallet.receiveLightning(amount, undefined, this.mode);
     const decoded = decodeBolt11(quote.invoice);
     if (!decoded?.paymentHash) throw new Error("The mint returned an invoice that cannot be read");
     return { invoice: quote.invoice, paymentHash: decoded.paymentHash, amount, expiresAt: quote.expiresAt ?? decoded.expiresAt * 1000, ref: JSON.stringify({ mint: quote.mint, quote: quote.quote }) };
@@ -49,7 +49,7 @@ export class CashuMintLightning implements LightningProvider {
 
   /** A real melt quote: its fee reserve is what paying may cost at most. It is kept for `payInvoice`. */
   async estimateFee(invoice: string) {
-    const quote = await this.wallet.quoteInvoice(invoice);
+    const quote = await this.wallet.quoteInvoice(invoice, this.mode);
     this.quotes.set(invoice.trim().toLowerCase(), quote);
     return quote.feeReserve;
   }
@@ -64,7 +64,7 @@ export class CashuMintLightning implements LightningProvider {
     let quote = this.quotes.get(key);
     // Nothing reaches the mint's melt before `payQuote`, and it throws only when the sats did not leave.
     try {
-      quote ??= await this.wallet.quoteInvoice(invoice);
+      quote ??= await this.wallet.quoteInvoice(invoice, this.mode);
       if (quote.feeReserve > maxFee) throw new Error(`The Lightning fee (${quote.feeReserve} sats) is too high`);
     } catch (error) {
       throw new NothingSpentError(error instanceof Error ? error.message : String(error));

@@ -61,6 +61,8 @@ interface Connectable { info(): Promise<{ network: ProviderNetwork; alias?: stri
 
 export interface SourcesOptions<P> {
   kind: ProviderKind;
+  /** The network this source belongs to: Mainnet and Testnet each have their own, both connected at once. */
+  network: WalletMode;
   descriptors: () => readonly ProviderDescriptor<P>[];
   /** Read each time a source connects. */
   host: () => Omit<ProviderHost, "mode" | "signal">;
@@ -112,13 +114,11 @@ function abortable<P extends Connectable>(work: Promise<P>, signal: AbortSignal)
 }
 
 /**
- * The active source of one kind (Lightning, on-chain), one per wallet mode: Mainnet and Testnet keep
- * their own, and switching modes closes one and opens the other, nothing is replaced. Every change is
- * serialized, and a connection still waiting when the mode switches is abandoned (and closed when it
- * arrives), like the Ark and USDT wallets do.
+ * The active source of one kind (Lightning, on-chain) of one network: Mainnet and Testnet each have their
+ * own, both connected at once. Every change is serialized.
  */
 export class ProviderSources<P extends Connectable> {
-  private mode: WalletMode = "mainnet";
+  private readonly mode: WalletMode;
   private stored?: StoredSource;
   private descriptor?: ProviderDescriptor<P>;
   private provider?: P;
@@ -137,7 +137,7 @@ export class ProviderSources<P extends Connectable> {
   private stopped = false;
   view: SourceView = { mode: "mainnet", status: "none", offered: [] };
 
-  constructor(private readonly options: SourcesOptions<P>) {}
+  constructor(private readonly options: SourcesOptions<P>) { this.mode = options.network; this.view = { mode: options.network, status: "none", offered: [] }; }
 
   private serial<T>(run: () => Promise<T>): Promise<T> { const next = this.queue.then(run, run); this.queue = next.catch(() => {}); return next; }
   private find(id: string) { return this.options.descriptors().find((d) => d.id === id); }
@@ -164,22 +164,10 @@ export class ProviderSources<P extends Connectable> {
     };
   }
 
-  async start(mode: WalletMode) { this.mode = mode; this.gate.switching(mode); await this.load(mode); this.view = this.idle(); }
+  async start() { await this.load(this.mode); this.view = this.idle(); }
 
   /** The list of providers changed (a plugin registered): the picker is told, nothing reconnects. */
   refreshOffered() { this.view = { ...this.view, offered: this.offered() }; this.options.changed(); }
-
-  /** Closes the source of the mode being left and loads this mode's. `ensureReady` connects it. */
-  setMode(mode: WalletMode): Promise<void> {
-    this.gate.switching(mode);
-    return this.serial(async () => {
-      if (mode === this.mode && this.view.mode === mode) return;
-      await this.disconnect();
-      this.mode = mode;
-      await this.load(mode);
-      this.view = this.idle(); this.options.changed();
-    });
-  }
 
   /**
    * Connects the mode's source in the background, and keeps trying while it cannot be reached: "Connecting…"
@@ -246,7 +234,7 @@ export class ProviderSources<P extends Connectable> {
     try {
       const { network, alias } = await this.gate.within(provider.info());
       if (!descriptor.networks.includes(network)) throw new Error(`it runs on ${network}, which ${descriptor.label} does not support here`);
-      if (networkMode(network) !== this.mode) throw new Error(this.mode === "mainnet" ? `it runs on ${network}, a test network: switch the wallets to Testnet to use it` : "it runs on Bitcoin, real money: switch the wallets to Mainnet to use it");
+      if (networkMode(network) !== this.mode) throw new Error(this.mode === "mainnet" ? `it runs on ${network}, a test network: set it up as a Testnet wallet instead` : "it runs on Bitcoin, real money: set it up as a Mainnet wallet instead");
       return { provider, network, alias };
     } catch (error) { await provider.close().catch(() => {}); throw error; }
   }
@@ -373,6 +361,9 @@ export class ProviderSources<P extends Connectable> {
     return { provider: this.provider, descriptor: this.descriptor };
   }
 
+  /** A change waiting on its connection gives up now (a creation that took too long); nothing is saved. */
+  cutShort() { this.gate.interrupt(); }
+
   /** The connected source's id, when one is connected right now. */
   get activeId(): string | undefined { return this.provider ? this.descriptor?.id : undefined; }
   get active(): P | undefined { return this.provider; }
@@ -415,5 +406,5 @@ export class ProviderSources<P extends Connectable> {
   }
 
   /** Shutting down: nothing reconnects afterwards. */
-  async stop() { this.stopped = true; await this.serial(() => this.disconnect()); }
+  async stop() { this.stopped = true; this.gate.close(); await this.serial(() => this.disconnect()); }
 }

@@ -51,6 +51,8 @@ export interface PaymentRequest {
   endpoints: WireEndpoint[];
   /** The ask this request answers, when the contact asked to pay (see {@link PaymentAsk}). */
   ask?: string;
+  /** Real money or test coins: only a wallet of this network pays it. Absent from older apps. */
+  network?: "mainnet" | "testnet";
 }
 
 /**
@@ -64,6 +66,8 @@ export interface PaymentAsk {
   amount: PaymentAmount;
   method: "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark";
   memo?: string;
+  /** The network the payer pays from. Absent from older apps. */
+  network?: "mainnet" | "testnet";
 }
 
 export interface Payment {

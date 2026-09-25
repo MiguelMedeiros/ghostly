@@ -1,9 +1,10 @@
 import { generateMnemonic, validateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
-import { SPARK_NETWORKS, SPARK_PROVIDER, type PaymentTarget, type SparkNetwork } from "@ghostly/core";
+import { SPARK_NETWORKS, SPARK_PROVIDER, type PaymentTarget, type SparkNetwork, type WalletNetwork } from "@ghostly/core";
 import { store, STORES, transact, wrap } from "../../shared/idb";
 import type { WalletMode } from "../../shared/mints";
-import { ModeChanged, ModeGate } from "./modeGate";
+import { ModeChanged, ModeGate, WrongNetworkError, networkLabel } from "./modeGate";
+import { walletKey } from "./walletNetworks";
 import { intentRepository, newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "./persistence";
 import { loadBreezSdk, type BreezSdkModule } from "./providers/breezSdk";
 import { SPARK_INVOICE_SECS, SparkAdapter, type SparkHistoryEntry } from "./spark";
@@ -11,7 +12,7 @@ import type { SavedIntent } from "./coordinator";
 
 export interface SparkWalletView {
   configured: boolean; locked: boolean;
-  /** Why there is no Spark wallet in this mode yet (Mainnet without a Breez API key), shown instead of one. */
+  /** Why there is no Spark wallet on this network yet (Mainnet without a Breez API key), shown instead of one. */
   unavailable?: string;
   /** Mainnet: a Breez API key would make one. */
   needsKey?: boolean;
@@ -27,16 +28,16 @@ export interface SparkCreate { network: SparkNetwork; mnemonic?: string; apiKey?
 
 export const SPARK_MAINNET_NEEDS_KEY = "Spark on Mainnet needs a Breez API key (free, from Breez). Mainnet moves real bitcoin.";
 export const sparkMode = (network: SparkNetwork): WalletMode => network === "bitcoin" ? "mainnet" : "testnet";
-const modeNetwork = (mode: WalletMode): SparkNetwork => mode === "mainnet" ? "bitcoin" : "regtest";
+export const sparkNetworkFor = (network: WalletNetwork): SparkNetwork => network === "mainnet" ? "bitcoin" : "regtest";
 /** How often the page's balance and history are read while the wallet is open. */
 export const sparkTiming = { pollMs: 10_000, retryMs: 30_000 };
 
 /**
- * The profile's Spark wallet, one per wallet mode: Testnet opens one on Breez's regtest by itself; Mainnet makes
- * one only once the person gave a Breez API key. Switching modes parks the wallet, never replaces it.
+ * The Spark wallet of one network, under its own key: Testnet's runs on Breez's regtest with no key; Mainnet's needs
+ * a Breez API key.
  */
 export class SparkWallet {
-  private mode: WalletMode = "mainnet";
+  private readonly key: string;
   private saved?: StoredSpark;
   private timer?: ReturnType<typeof setTimeout>;
   private retry?: ReturnType<typeof setTimeout>;
@@ -46,30 +47,33 @@ export class SparkWallet {
   private gate = new ModeGate();
   adapter?: SparkAdapter;
   view: SparkWalletView = { configured: false, locked: true, balance: 0 };
-  constructor(private changed: () => void, private sdk: () => Promise<BreezSdkModule> = loadBreezSdk) {}
+  constructor(readonly network: WalletNetwork, private changed: () => void, private sdk: () => Promise<BreezSdkModule> = loadBreezSdk) { this.key = walletKey("sparkWallet", network); }
   private serial<T>(run: () => Promise<T>): Promise<T> { const next = this.queue.then(run, run); this.queue = next.catch(() => {}); return next; }
   private idle(saved?: StoredSpark): SparkWalletView {
-    const needsKey = !saved && this.mode === "mainnet";
-    return { configured: !!saved, locked: true, balance: 0, network: saved?.network ?? modeNetwork(this.mode), ...(needsKey ? { needsKey, unavailable: SPARK_MAINNET_NEEDS_KEY } : {}) };
+    const needsKey = !saved && this.network === "mainnet";
+    return { configured: !!saved, locked: true, balance: 0, network: saved?.network ?? sparkNetworkFor(this.network), ...(needsKey ? { needsKey, unavailable: SPARK_MAINNET_NEEDS_KEY } : {}) };
   }
-  async start() { this.saved = await wrap<StoredSpark | undefined>((await store(STORES.settings, "readonly")).get("sparkWallet")); this.view = this.idle(this.saved); }
+  async start() { this.saved = await wrap<StoredSpark | undefined>((await store(STORES.settings, "readonly")).get(this.key)); this.view = this.idle(this.saved); }
+  get configured() { return !!this.saved; }
+  /** A creation waiting on Spark gives up now, saving nothing. */
+  cutShort() { this.gate.interrupt(); }
 
-  /** Creates Testnet's wallet on first run and opens the mode's wallet. Retries while Spark is unreachable. */
-  ensureReady(): Promise<void> {
-    if (this.readying) return this.readying.then(() => this.needsReady() ? this.startReady() : undefined);
-    return this.startReady();
+  /** Opens the wallet; `create`: makes Testnet's regtest wallet first when there is none. Retries while Spark is unreachable. */
+  ensureReady(create = false): Promise<void> {
+    if (this.readying) return this.readying.then(() => this.needsReady(create) ? this.startReady(create) : undefined);
+    return this.startReady(create);
   }
-  private startReady(): Promise<void> { return this.readying ??= this.ready().finally(() => { this.readying = undefined; }); }
-  private needsReady() { return !this.stopped && (this.saved ? !this.adapter : this.mode === "testnet"); }
-  private async ready() {
+  private startReady(create: boolean): Promise<void> { return this.readying ??= this.ready(create).finally(() => { this.readying = undefined; }); }
+  private needsReady(create: boolean) { return !this.stopped && (this.saved ? !this.adapter : create && this.network === "testnet"); }
+  private async ready(create: boolean) {
     clearTimeout(this.retry);
     try {
-      if (!this.saved) await this.serial(async () => { if (!this.saved && this.mode === "testnet") await this.createNow({ network: "regtest" }); });
+      if (!this.saved) { if (create) await this.serial(async () => { if (!this.saved && this.network === "testnet") await this.createNow({ network: "regtest" }); }); }
       else if (!this.adapter) await this.serial(() => this.stopped ? Promise.resolve() : this.open());
     } catch (error) {
       if (this.stopped || error instanceof ModeChanged) return;
       this.view = { ...this.view, error: `Connecting to Spark… ${error instanceof Error ? error.message : ""}`.trim() }; this.changed();
-      this.retry = setTimeout(() => void this.ensureReady(), sparkTiming.retryMs);
+      this.retry = setTimeout(() => void this.ensureReady(create), sparkTiming.retryMs);
     }
   }
 
@@ -77,7 +81,7 @@ export class SparkWallet {
   create(params: SparkCreate) { return this.serial(() => this.createNow(params)); }
   private async createNow(params: SparkCreate) {
     if (!SPARK_NETWORKS.includes(params.network)) throw new Error("Unsupported Spark network");
-    if (sparkMode(params.network) !== this.mode) throw new Error(this.mode === "mainnet" ? "Switch the wallets to Testnet to use a test network" : "Switch the wallets to Mainnet to use Bitcoin");
+    if (sparkMode(params.network) !== this.network) throw new WrongNetworkError(sparkMode(params.network), `${params.network === "bitcoin" ? "Bitcoin" : params.network} is a ${networkLabel(sparkMode(params.network))} network: this is the ${networkLabel(this.network)} Spark wallet`);
     const apiKey = params.apiKey?.trim() || undefined;
     if (params.network === "bitcoin" && !apiKey) throw new Error(SPARK_MAINNET_NEEDS_KEY);
     const mnemonic = params.mnemonic?.trim().toLowerCase().split(/\s+/).join(" ") || generateMnemonic(wordlist);
@@ -109,25 +113,7 @@ export class SparkWallet {
     return { mnemonic: await unsealSeed(saved.seed, saved.deviceKey), apiKey: saved.apiKey ? await unsealSeed(saved.apiKey, saved.deviceKey) : undefined };
   }
 
-  /** Opens the wallet of this mode, parking the other one under `sparkWallet-mode-<mode>` (kept: it may hold money). */
-  setMode(mode: WalletMode): Promise<void> {
-    this.gate.switching(mode);
-    return this.serial(async () => {
-      this.mode = mode; this.gate.entered(mode);
-      const current = this.saved;
-      if (current && sparkMode(current.network) === mode) { this.view = { ...this.view, ...(this.adapter ? {} : this.idle(current)) }; return; }
-      const parked = await wrap<StoredSpark | undefined>((await store(STORES.settings, "readonly")).get(`sparkWallet-mode-${mode}`));
-      clearTimeout(this.retry); void this.lock().catch(() => {});
-      await transact([STORES.settings], (stores) => {
-        if (current) stores[STORES.settings].put(current, `sparkWallet-mode-${sparkMode(current.network)}`);
-        if (parked) { stores[STORES.settings].put(parked, "sparkWallet"); stores[STORES.settings].delete(`sparkWallet-mode-${mode}`); }
-        else stores[STORES.settings].delete("sparkWallet");
-      });
-      this.saved = parked;
-      this.view = this.idle(parked); this.changed();
-    });
-  }
-  async stop() { this.stopped = true; await this.serial(() => this.lock()); }
+  async stop() { this.stopped = true; this.gate.close(); await this.serial(() => this.lock()); }
   async lock() { clearTimeout(this.timer); clearTimeout(this.retry); const adapter = this.adapter; this.adapter = undefined; this.view = { ...this.view, locked: true }; this.changed(); await adapter?.close(); }
 
   async refresh() { await this.poll().catch((error) => { if (!(error instanceof ModeChanged)) throw error; }); }
@@ -164,7 +150,7 @@ export class SparkWallet {
   async exportBackup(password: string): Promise<string> {
     if (password.length < 12) throw new Error("Use at least 12 characters for the backup password");
     const { mnemonic, network } = await this.backup();
-    const intents = (await intentRepository.list()).filter((i) => i.review.method === "spark");
+    const intents = (await intentRepository.list()).filter((i) => i.review.method === "spark" && sparkMode(i.review.network as SparkNetwork) === this.network);
     return JSON.stringify({ format: "ghostly-spark-encrypted", version: 1, vault: await sealSeed(JSON.stringify({ format: "ghostly-spark", version: 1, mnemonic, network, intents }), password) });
   }
   /** The API key is not in the file: it is Breez's to Ghostly's user, asked again on Mainnet. */
@@ -175,7 +161,7 @@ export class SparkWallet {
     const payload = JSON.parse(await unsealSeed(envelope.vault, password)) as { format: string; version: number; mnemonic: string; network: SparkNetwork; intents: SavedIntent[] };
     if (payload.format !== "ghostly-spark" || payload.version !== 1 || !validateMnemonic(payload.mnemonic, wordlist) || !Array.isArray(payload.intents)) throw new Error("Invalid Spark backup");
     if (!SPARK_NETWORKS.includes(payload.network)) throw new Error("Unsupported Spark network in backup");
-    if (sparkMode(payload.network) !== this.mode) throw new Error(`This backup is a ${sparkMode(payload.network) === "mainnet" ? "Mainnet" : "Testnet"} wallet: switch the wallets to it first`);
+    if (sparkMode(payload.network) !== this.network) throw new WrongNetworkError(sparkMode(payload.network), `This backup is a ${networkLabel(sparkMode(payload.network))} Spark wallet`);
     if (payload.intents.some((i) => i.review.method !== "spark" || i.review.network !== payload.network)) throw new Error("Backup payments do not match its wallet");
     const key = apiKey?.trim() || (this.saved?.apiKey ? await unsealSeed(this.saved.apiKey, this.saved.deviceKey) : undefined);
     if (payload.network === "bitcoin" && !key) throw new Error(SPARK_MAINNET_NEEDS_KEY);
@@ -199,7 +185,7 @@ export class SparkWallet {
   private async save(saved: StoredSpark, retired?: StoredSpark, intents: SavedIntent[] = []) {
     await transact([STORES.settings, STORES.intents], (stores) => {
       if (retired) stores[STORES.settings].put(retired, `sparkWallet-retired-${Date.now()}`);
-      stores[STORES.settings].put(saved, "sparkWallet");
+      stores[STORES.settings].put(saved, this.key);
       for (const intent of intents) stores[STORES.intents].add(intent);
     });
   }

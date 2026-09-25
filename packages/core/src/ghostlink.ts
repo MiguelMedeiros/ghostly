@@ -232,9 +232,31 @@ export interface GhostLinkEvents {
 
 const PAYMENT_METHODS: PaymentMethodName[] = ["cashu", "lightning", "arkade", "usdt", "bark", "bitcoin", "fedimint", "spark"];
 
+/** For each way of paying, the networks (real money, test coins) this side has a wallet on. */
+export type PaymentNetworks = Partial<Record<PaymentMethodName, ("mainnet" | "testnet")[]>>;
+
+/** A `paired-payments` networks map from the contact, or null when it is not a valid one (it is then ignored). */
+export function parsePaymentNetworks(value: unknown): PaymentNetworks | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length > 16) return null;
+  const networks: PaymentNetworks = {};
+  for (const [method, list] of entries) {
+    if (!Array.isArray(list) || list.length > 2 || !list.every((n) => n === "mainnet" || n === "testnet")) return null;
+    // A method this app does not know yet is left out, like in the methods list.
+    if (PAYMENT_METHODS.includes(method as PaymentMethodName)) networks[method as PaymentMethodName] = [...new Set(list as ("mainnet" | "testnet")[])];
+  }
+  return networks;
+}
+
 export interface GhostLinkOptions {
   /** Ways of paying this chat allows. One that is off is not offered in the handshake, sent or accepted. Absent: allowed. */
   paymentMethods?: Partial<Record<PaymentMethodName, boolean>>;
+  /**
+   * The networks of this side's wallets, per way of paying: said with the methods on the open session, so the
+   * contact offers only cards whose networks meet. Older apps ignore it.
+   */
+  paymentNetworks?: PaymentNetworks;
   arkPaymentsSupport?: boolean;
   usdtPaymentsSupport?: boolean;
   barkPaymentsSupport?: boolean;
@@ -358,6 +380,8 @@ export class GhostLink {
   /** A paired peer's name arrives over the channel; nothing about it is published. */
   /** Ways of paying the contact allows, as it last said on this session; null until it does. */
   private peerPaymentMethods: Set<PaymentMethodName> | null = null;
+  /** The contact's networks per way of paying, as it last said; null while it said none (an older app). */
+  private peerNetworks: PaymentNetworks | null = null;
   /** The contact's word on held items on this session; null until it says. */
   private peerHoldOverride: boolean | null = null;
   private peerNickOverride: string | null = null;
@@ -1379,6 +1403,7 @@ export class GhostLink {
         memo: request.memo,
         e: request.endpoints,
         a: request.ask,
+        n: request.network,
       }),
     );
   }
@@ -1388,7 +1413,7 @@ export class GhostLink {
     await this.requirePaymentSupport();
     if (!this.options.params.profile) throw new Error("Paying without a request needs a paired chat");
     if (!this.channel) throw new Error("Data link is closed");
-    this.channel.send(encodeControl({ t: "pay-ask", id: ask.id, ts: ask.timestamp, v: ask.amount.value, u: ask.amount.asset, m: ask.method, memo: ask.memo }));
+    this.channel.send(encodeControl({ t: "pay-ask", id: ask.id, ts: ask.timestamp, v: ask.amount.value, u: ask.amount.asset, m: ask.method, memo: ask.memo, n: ask.network }));
   }
 
   async sendPayment(payment: Payment): Promise<void> {
@@ -1609,6 +1634,16 @@ export class GhostLink {
   }
   /** Takes effect at once, and a connected contact is told on the open session; the next handshake offers it too. */
   setPaymentMethods(methods: Partial<Record<PaymentMethodName, boolean>>): void { this.options.paymentMethods = { ...methods }; this.sendPaymentMethods(); }
+  /** This side's wallets changed (one was created): a connected contact is told at once. */
+  setPaymentNetworks(networks: PaymentNetworks): void {
+    if (JSON.stringify(networks) === JSON.stringify(this.options.paymentNetworks ?? null)) return;
+    this.options.paymentNetworks = networks; this.sendPaymentMethods();
+  }
+  /**
+   * The networks the contact has a wallet on for this way of paying, as it said on this session. Undefined: it did
+   * not say (an older app, or before its first word): any network may meet.
+   */
+  peerPaymentNetworks(method: PaymentMethodName): ("mainnet" | "testnet")[] | undefined { return this.peerNetworks ? this.peerNetworks[method] ?? [] : undefined; }
   /** The apps this contact may reach, said on the open session. Older apps drop the frame (no id). */
   private sendPairedServices(): void {
     if (!this.options.params.profile || !this.channel || !this.supportsServices || this.paired?.state.status !== "ready") return;
@@ -1689,7 +1724,8 @@ export class GhostLink {
   /** Older apps drop this frame (it carries no id) and keep using the handshake offer. */
   private sendPaymentMethods(): void {
     if (!this.options.params.profile || !this.channel || !this.isDataLinkOpen || this.paired?.state.status !== "ready") return;
-    try { this.channel.send(JSON.stringify({ t: "paired-payments", m: PAYMENT_METHODS.filter(m => this.paymentEnabled(m)) })); } catch { /* the next session offers it */ }
+    const methods = PAYMENT_METHODS.filter(m => this.paymentEnabled(m)), networks = this.options.paymentNetworks;
+    try { this.channel.send(JSON.stringify({ t: "paired-payments", m: methods, ...(networks ? { n: Object.fromEntries(methods.filter(m => networks[m]).map(m => [m, networks[m]])) } : {}) })); } catch { /* the next session offers it */ }
   }
   async requirePaymentSupport(): Promise<void> {
     if (!PAYMENT_METHODS.some(m => this.paymentEnabled(m))) throw new Error("Payments are turned off in this chat.");
@@ -1833,7 +1869,7 @@ export class GhostLink {
           this.peerPolicySeen = null;
           if (paired.peerTransportSwitchSupport) this.switcher.begin(paired.proofSession, paired.state.transport!, !!migration);
           else this.advertiseTransports();
-          this.peerPaymentMethods = null;
+          this.peerPaymentMethods = null; this.peerNetworks = null;
           this.peerHoldOverride = null;
           this.sessionCapabilities.reset();
           this.pairedHttp?.close();
@@ -1899,8 +1935,8 @@ export class GhostLink {
             if (this.supportsPayments) {
               const payment = decodeControl(data);
               if (payment?.t === "pay") await this.options.events?.onPayment?.({ id: payment.id, timestamp: payment.ts, requestId: payment.rid, amount: { value: payment.v, asset: payment.u }, memo: payment.memo, endpoint: payment.e });
-              else if (payment?.t === "pay-req") await this.options.events?.onPaymentRequest?.({ id: payment.id, timestamp: payment.ts, amount: { value: payment.v, asset: payment.u }, memo: payment.memo, endpoints: payment.e, ask: payment.a });
-              else if (payment?.t === "pay-ask") await this.options.events?.onPaymentAsk?.({ id: payment.id, timestamp: payment.ts, amount: { value: payment.v, asset: payment.u }, method: payment.m, memo: payment.memo });
+              else if (payment?.t === "pay-req") await this.options.events?.onPaymentRequest?.({ id: payment.id, timestamp: payment.ts, amount: { value: payment.v, asset: payment.u }, memo: payment.memo, endpoints: payment.e, ask: payment.a, network: payment.n });
+              else if (payment?.t === "pay-ask") await this.options.events?.onPaymentAsk?.({ id: payment.id, timestamp: payment.ts, amount: { value: payment.v, asset: payment.u }, method: payment.m, memo: payment.memo, network: payment.n });
               else if (payment?.t === "pay-res") await this.options.events?.onPaymentResult?.({ id: payment.id, ok: payment.ok, credited: payment.v, error: payment.err });
             }
             return;
@@ -1946,6 +1982,7 @@ export class GhostLink {
             // A method this app does not know yet (a newer contact) is left out, not a reason to drop the list.
             if (!Array.isArray(frame.m) || frame.m.length > 16 || !frame.m.every(m => typeof m === "string")) return;
             this.peerPaymentMethods = new Set((frame.m as string[]).filter((m): m is PaymentMethodName => PAYMENT_METHODS.includes(m as PaymentMethodName)));
+            this.peerNetworks = frame.n === undefined ? null : parsePaymentNetworks(frame.n) ?? this.peerNetworks;
             this.emitPairingState();
             return;
           }

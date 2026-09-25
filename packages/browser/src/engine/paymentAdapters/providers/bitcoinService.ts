@@ -15,17 +15,17 @@ export interface BitcoinView extends SourceView {
 export type BitcoinPrepared = OnchainPrepared & { providerId: string };
 
 /**
- * On-chain Bitcoin for the whole engine: the Bitcoin card and the "bitcoin" payment method, through the
- * active on-chain source of the wallet mode in use. There is none until one is set up.
+ * On-chain Bitcoin of one network: its Bitcoin card and the "bitcoin" payment method on that network, through
+ * its active on-chain source. There is none until one is set up. The engine has one per network.
  */
 export class BitcoinService {
   readonly sources: ProviderSources<OnchainProvider>;
   private address?: string;
   private history: OnchainTx[] = [];
 
-  constructor(descriptors: () => readonly OnchainProviderDescriptor[], host: () => Omit<ProviderHost, "mode" | "signal">, changed: () => void) {
+  constructor(readonly network: WalletMode, descriptors: () => readonly OnchainProviderDescriptor[], host: () => Omit<ProviderHost, "mode" | "signal">, changed: () => void) {
     this.sources = new ProviderSources<OnchainProvider>({
-      kind: "onchain", descriptors, host, changed: () => { if (!this.sources.active) { this.address = undefined; this.history = []; } changed(); },
+      kind: "onchain", network, descriptors, host, changed: () => { if (!this.sources.active) { this.address = undefined; this.history = []; } changed(); },
       // Only the source that signed a transaction can say what became of it (and re-broadcast it).
       refuseReplacing: async (providerId) => {
         const open = (await intentRepository.list()).filter(({ review, prepared }) => review.method === "bitcoin" && ["pending", "submitted", "unknown"].includes(review.state) && (prepared as BitcoinPrepared | undefined)?.providerId === providerId);
@@ -40,8 +40,7 @@ export class BitcoinService {
   }
 
   get view(): BitcoinView { return { ...this.sources.view, address: this.address, history: this.history }; }
-  start(mode: WalletMode) { return this.sources.start(mode); }
-  setMode(mode: WalletMode) { this.address = undefined; this.history = []; return this.sources.setMode(mode); }
+  start() { return this.sources.start(); }
   ensureReady() { return this.sources.ensureReady(); }
   stop() { return this.sources.stop(); }
   refreshOffered() { this.sources.refreshOffered(); }

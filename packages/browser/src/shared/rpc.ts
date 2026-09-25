@@ -8,64 +8,65 @@ import type { BarkConfig } from "../engine/paymentAdapters/bark";
 import type { FedimintFederationView } from "../engine/paymentAdapters/fedimintWallet";
 import type { FederationInfo } from "../engine/paymentAdapters/fedimintSdk";
 import type { SparkCreate } from "../engine/paymentAdapters/sparkWallet";
-import type { SparkNetwork } from "@ghostly/core";
+import type { SparkNetwork, WalletNetwork } from "@ghostly/core";
 import type { ProfileChoice } from '../profiles/public';
 import type { ProofChallenge, ProofEvidence, ProofAdapter } from "@ghostly/core";
 import type { LinkParams, PairedTransport, DeliveryMode } from "@ghostly/core";
-import type { CashuInspection, EngineState, MessageDetailsView, MessageFile, SettingsPatch, StoredMessage } from "./types";
+import type { CashuInspection, EngineState, MessageDetailsView, MessageFile, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView } from "./types";
 import type { NostrDraft, NostrDraftRequest, NostrPublishResult } from "../nostr/types";
 
 /** UI → engine calls. The extension carries them over a runtime port, the web app calls the peer in the same page. */
 export interface EngineApi {
   usdtCreate(params:UsdtCreate):void;
-  usdtUnlock(params:{password:string}):void;
-  usdtReveal(params:{password?:string}):string;
-  usdtLock():void;
-  usdtRefresh():void;
+  usdtUnlock(params:{password:string;network?:WalletNetwork}):void;
+  usdtReveal(params:{password?:string;network?:WalletNetwork}):string;
+  usdtLock(params?:{network?:WalletNetwork}):void;
+  usdtRefresh(params?:{network?:WalletNetwork}):void;
   /** Sepolia only: test USDT from a public faucet; returns the transaction hash. */
-  usdtGetTestTokens():string;
-  usdtExportBackup(params:{password:string}):string;
-  usdtRestoreBackup(params:{text:string;password:string}):void;
+  usdtGetTestTokens(params?:{network?:WalletNetwork}):string;
+  usdtExportBackup(params:{password:string;network?:WalletNetwork}):string;
+  usdtRestoreBackup(params:{text:string;password:string;network?:WalletNetwork}):void;
   arkCreate(params: ArkCreate): void;
-  arkUnlock(params: {password:string}): void;
-  arkLock(): void;
-  arkBackup(params: {password?:string}): {mnemonic:string;config:ArkConfig};
-  arkExportBackup(params:{password:string}):string;
-  arkRestoreBackup(params:{text:string;password:string}):void;
-  arkRefresh(): void;
+  arkUnlock(params: {password:string;network?:WalletNetwork}): void;
+  arkLock(params?: {network?:WalletNetwork}): void;
+  arkBackup(params: {password?:string;network?:WalletNetwork}): {mnemonic:string;config:ArkConfig};
+  arkExportBackup(params:{password:string;network?:WalletNetwork}):string;
+  arkRestoreBackup(params:{text:string;password:string;network?:WalletNetwork}):void;
+  arkRefresh(params?: {network?:WalletNetwork}): void;
   /** Expired Ark outputs back into the balance; returns the settlement txid. */
-  arkRecover(): string;
+  arkRecover(params?: {network?:WalletNetwork}): string;
   barkCreate(params: BarkCreate): void;
-  barkBackup(): {mnemonic:string;config:BarkConfig};
-  barkExportBackup(params:{password:string}):string;
-  barkRestoreBackup(params:{text:string;password:string}):void;
-  barkRefresh(): void;
+  barkBackup(params?: {network?:WalletNetwork}): {mnemonic:string;config:BarkConfig};
+  barkExportBackup(params:{password:string;network?:WalletNetwork}):string;
+  barkRestoreBackup(params:{text:string;password:string;network?:WalletNetwork}):void;
+  barkRefresh(params?: {network?:WalletNetwork}): void;
   /** On-chain coins of the Bark wallet into Ark; returns the board txid. */
-  barkBoard(): string;
+  barkBoard(params?: {network?:WalletNetwork}): string;
   /** What an invite code leads to, before joining: the federation's name, guardians, version, network, modules. */
-  fedimintPreview(params: { invite: string }): FederationInfo;
-  fedimintJoin(params: { invite: string; recover?: boolean }): FedimintFederationView;
+  fedimintPreview(params: { invite: string; network?:WalletNetwork }): FederationInfo;
+  fedimintJoin(params: { invite: string; recover?: boolean; network?:WalletNetwork }): FedimintFederationView;
   fedimintLeave(params: { federation: string }): void;
-  fedimintRefresh(): void;
+  fedimintRefresh(params?: { network?:WalletNetwork }): void;
   /** Out-of-band notes of that federation, to hand over. They come back by themselves if nobody redeems them in a week. */
   fedimintSpendNotes(params: { federation: string; amount: number }): { notes: string; operation: string };
-  fedimintReceiveNotes(params: { notes: string }): { federation: string; amount: number };
+  fedimintReceiveNotes(params: { notes: string; network?:WalletNetwork }): { federation: string; amount: number };
   fedimintInvoice(params: { federation: string; amount: number; memo?: string }): { invoice: string };
   fedimintTakeBack(params: { federation: string; operation: string }): "canceled" | "taken" | "pending";
-  fedimintBackup(): { mnemonic: string; federations: { id: string; name?: string; invite: string }[] };
-  fedimintExportBackup(params: { password: string }): string;
-  fedimintRestoreBackup(params: { text: string; password: string }): { joined: number; failed: string[] };
-  fedimintRestorePhrase(params: { mnemonic: string; invites: string[] }): { joined: number; failed: string[] };
-  /** Mainnet's Spark wallet (with a Breez API key), or a wallet restored from a phrase. Testnet's is made by itself. */
+  fedimintBackup(params?: { network?:WalletNetwork }): { mnemonic: string; federations: { id: string; name?: string; invite: string }[] };
+  fedimintExportBackup(params: { password: string; network?:WalletNetwork }): string;
+  fedimintRestoreBackup(params: { text: string; password: string; network?:WalletNetwork }): { joined: number; failed: string[] };
+  fedimintRestorePhrase(params: { mnemonic: string; invites: string[]; network?:WalletNetwork }): { joined: number; failed: string[] };
+  /** A Spark wallet on the chain named (Mainnet with a Breez API key), or a wallet restored from a phrase. */
   sparkCreate(params: SparkCreate): void;
-  sparkBackup(): { mnemonic: string; network: SparkNetwork };
-  sparkExportBackup(params: { password: string }): string;
+  sparkBackup(params?: { network?:WalletNetwork }): { mnemonic: string; network: SparkNetwork };
+  sparkExportBackup(params: { password: string; network?:WalletNetwork }): string;
   /** `apiKey`: Mainnet's Breez key, not in the file. */
-  sparkRestoreBackup(params: { text: string; password: string; apiKey?: string }): void;
-  sparkRefresh(): void;
-  /** The Spark wallet of this mode becomes the Breez Lightning source too: one seed, one wallet, one balance. */
-  sparkUseForLightning(): void;
-  preparePayment(params: {target:PaymentTarget;amount:number;feeCap:number;payee:string;linkId?:string;requestId?:string;memo?:string}): PaymentReview;
+  sparkRestoreBackup(params: { text: string; password: string; apiKey?: string; network?:WalletNetwork }): void;
+  sparkRefresh(params?: { network?:WalletNetwork }): void;
+  /** A network's Spark wallet becomes its Breez Lightning source too: one seed, one wallet, one balance. */
+  sparkUseForLightning(params?: { network?:WalletNetwork }): void;
+  /** `network`: the card chosen; a target of the other network is refused before anything is prepared. */
+  preparePayment(params: {target:PaymentTarget;amount:number;feeCap:number;payee:string;linkId?:string;requestId?:string;memo?:string;network?:WalletNetwork}): PaymentReview;
   approvePayment(params: {id:string}): PaymentReview;
   reconcilePayment(params: {id:string}): PaymentReview;
   cancelPayment(params: {id:string}): PaymentReview;
@@ -138,54 +139,56 @@ export interface EngineApi {
   setChatHold(params: { linkId: string; enabled: boolean }): void;
   connect(params: { linkId: string }): void;
   walletAddMint(params: { url: string; primary?: boolean }): { url: string; name: string };
-  /** Real money or test networks, for every wallet at once. */
+  /** The network the legacy wallet page shows, and what a call naming no network acts on. Every wallet stays open. */
   walletSetMode(params: { mode: "mainnet" | "testnet" }): void;
+  /** New → a type → a network: made in one click and checked before its card appears; nothing saved on failure. */
+  walletCreate(params: WalletCreate): WalletInstanceView;
   /** The app is in front again: chats look now, and dropped ones reconnect at once. */
   wake(): void;
   /** The primary mint is where Lightning invoices are created. */
   walletSetPrimaryMint(params: { url: string }): void;
   walletRemoveMint(params: { url: string }): void;
   /** A Lightning invoice from the active source (`via: "cashu"`: from the mints, landing as ecash). */
-  walletReceiveLightning(params: { amount: number; via?: "cashu" }): { quote: string; invoice: string; expiresAt: number | null; paymentHash?: string; source: string };
-  walletQuoteInvoice(params: { invoice: string; via?: "cashu" }): { quote: string; mint: string; amount: number; feeReserve: number; source?: string };
+  walletReceiveLightning(params: { amount: number; via?: "cashu"; network?:WalletNetwork }): { quote: string; invoice: string; expiresAt: number | null; paymentHash?: string; source: string };
+  walletQuoteInvoice(params: { invoice: string; via?: "cashu"; network?:WalletNetwork }): { quote: string; mint: string; amount: number; feeReserve: number; source?: string };
   /** `note`: what the payment was for, kept with the wallet's own record of it (a Lightning address, for one). */
   walletPayQuote(params: { quote: string; mint: string; note?: string }): { paid: boolean };
   /** Reads a Lightning address or LNURL and fetches what it asks for. Its domain learns of the request. */
-  lnurlResolve(params: { text: string }): LnurlView;
+  lnurlResolve(params: { text: string; network?:WalletNetwork }): LnurlView;
   /** The invoice for `amount` sats from a resolved address, checked before it is quoted. */
-  lnurlInvoice(params: { id: string; amount: number; comment?: string }): { invoice: string; successAction?: LnurlSuccessAction; note: string };
+  lnurlInvoice(params: { id: string; amount: number; comment?: string; network?:WalletNetwork }): { invoice: string; successAction?: LnurlSuccessAction; note: string };
   /** "I paid it from another wallet": the contact's app looks now. Only its wallet marks the request paid. */
   checkPayment(params: { linkId: string; paymentId: string }): void;
-  /** Makes a provider this mode's Lightning source. `values`: its form; secret fields are sealed, never returned. */
-  lightningSetSource(params: { providerId: string; values: Record<string, string> }): void;
-  lightningClearSource(): void;
-  /** Tries the mode's Lightning source again now, instead of after the wait between attempts. */
-  lightningRetrySource(): void;
+  /** Makes a provider a network's Lightning source. `values`: its form; secret fields are sealed, never returned. */
+  lightningSetSource(params: { providerId: string; values: Record<string, string>; network?:WalletNetwork }): void;
+  lightningClearSource(params?: { network?:WalletNetwork }): void;
+  /** Tries a network's Lightning source again now, instead of after the wait between attempts. */
+  lightningRetrySource(params?: { network?:WalletNetwork }): void;
   /** Changes the server of the saved Lightning source (its `changeable` fields), keeping its secrets. */
-  lightningReconfigureSource(params: { values: Record<string, string> }): void;
-  lightningRefresh(): void;
-  bitcoinSetSource(params: { providerId: string; values: Record<string, string> }): void;
-  bitcoinClearSource(): void;
-  bitcoinRetrySource(): void;
+  lightningReconfigureSource(params: { values: Record<string, string>; network?:WalletNetwork }): void;
+  lightningRefresh(params?: { network?:WalletNetwork }): void;
+  bitcoinSetSource(params: { providerId: string; values: Record<string, string>; network?:WalletNetwork }): void;
+  bitcoinClearSource(params?: { network?:WalletNetwork }): void;
+  bitcoinRetrySource(params?: { network?:WalletNetwork }): void;
   /** Changes the server of the saved Bitcoin source (a BDK wallet's Esplora), keeping the wallet. */
-  bitcoinReconfigureSource(params: { values: Record<string, string> }): void;
-  bitcoinReceiveAddress(): string;
-  bitcoinRefresh(): void;
+  bitcoinReconfigureSource(params: { values: Record<string, string>; network?:WalletNetwork }): void;
+  bitcoinReceiveAddress(params?: { network?:WalletNetwork }): string;
+  bitcoinRefresh(params?: { network?:WalletNetwork }): void;
   /** Redeems a token pasted by the user. Only mints the user added are accepted. */
   walletReceiveToken(params: { token: string }): { amount: number };
   walletInspectCashu(params: { text: string }): { inspection: CashuInspection | null };
   /** Everything held, as tokens: the only backup there is for now. */
   walletExport(): { mint: string; token: string; amount: number }[];
-  sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number }): { paymentId: string };
-  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark"; rail?: "cashu" | "lightning" }): { paymentId: string };
+  sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; network?:WalletNetwork }): { paymentId: string };
+  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark"; rail?: "cashu" | "lightning"; network?:WalletNetwork }): { paymentId: string };
   /** A request any member of a group may pay, once (WISP 9xx § Payments). */
-  requestGroupPayment(params: { groupId: string; amount: number; memo?: string; timestamp: number; rail: "cashu" | "lightning" }): { paymentId: string };
+  requestGroupPayment(params: { groupId: string; amount: number; memo?: string; timestamp: number; rail: "cashu" | "lightning"; network?:WalletNetwork }): { paymentId: string };
   /** The payment composer opened on a member of a community group: their app is asked what ways of paying it takes. */
   groupPaymentHello(params: { groupId: string; member: string }): void;
   /** Asks the contact for a way to pay it (Ark, USDT); its answer is a request carrying `askId`. */
-  askToPay(params: { linkId: string; amount: number; method: "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark"; memo?: string; timestamp: number }): { askId: string };
+  askToPay(params: { linkId: string; amount: number; method: "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark"; memo?: string; timestamp: number; network?:WalletNetwork }): { askId: string };
   /** `via: "lightning"`: the Lightning payment the person reviewed, never ecash instead, within `maxFee`. */
-  payRequest(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number }): void;
+  payRequest(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number; network?:WalletNetwork }): void;
   reclaimPayment(params: { paymentId: string }): void;
   disconnect(params: { linkId: string }): void;
   addService(params: { name: string; target: string }): { serviceId: string };

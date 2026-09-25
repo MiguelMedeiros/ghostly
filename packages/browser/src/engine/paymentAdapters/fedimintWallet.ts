@@ -1,19 +1,19 @@
 import { generateMnemonic, validateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
-import { decodeBolt11, isFederationId, type BitcoinNetwork, type PaymentTarget } from "@ghostly/core";
+import { decodeBolt11, isFederationId, type BitcoinNetwork, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { store, STORES, transact, wrap } from "../../shared/idb";
 import type { WalletMode } from "../../shared/mints";
 import { fedimintDatabase, loadFedimintSdk, type FederationInfo, type FedimintClient, type FedimintOperation, type FedimintSdk, type RedeemState, type SpendState } from "./fedimintSdk";
-import { ModeChanged, ModeGate } from "./modeGate";
+import { ModeChanged, ModeGate, WrongNetworkError } from "./modeGate";
 import { intentRepository, newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "./persistence";
 
 /**
- * The Fedimint wallet of a profile: federations joined with an invite code, per wallet mode, each holding ecash
+ * The Fedimint wallet of a profile: federations joined with an invite code, per network, each holding ecash
  * of its own. Joining a federation is trusting its guardians with the sats (custodial, like a Cashu mint, but
  * run by several guardians who must agree), so the person joins each one themselves; nothing is joined by default.
  *
- * One mnemonic per profile and mode, sealed with a device key like the other wallets' seeds, set on the database
- * of every federation of that mode (the client derives a secret per federation from it). A federation is never
+ * One mnemonic per profile and network, sealed with a device key like the other wallets' seeds, set on the database
+ * of every federation of that network (the client derives a secret per federation from it). A federation is never
  * joined fresh twice with the same mnemonic: joining one again, or restoring, goes through the federation's own
  * recovery, which rebuilds the ecash from the backup the client keeps with the guardians.
  */
@@ -49,10 +49,10 @@ export interface FedimintTx {
   paymentId?: string;
 }
 export interface FedimintWalletView {
-  /** Why there is no Fedimint wallet in this mode (Mainnet today), shown instead of one. */
+  /** Why there is no Fedimint wallet on this network (Mainnet today), shown instead of one. */
   unavailable?: string;
   federations: FedimintFederationView[];
-  /** Sats, every federation of the mode. */
+  /** Sats, every federation of the network. */
   balance: number;
   history: FedimintTx[];
   error?: string;
@@ -63,7 +63,7 @@ export interface FedimintWalletView {
  * no federation yet. Setting this is the whole switch.
  */
 export const FEDIMINT_MAINNET = false;
-export const FEDIMINT_MAINNET_UNAVAILABLE = "Fedimint on Mainnet is not available yet. Switch the wallets to Testnet to join a test federation.";
+export const FEDIMINT_MAINNET_UNAVAILABLE = "Fedimint on Mainnet is not available yet: it has only been tried on test federations. Create a Testnet Fedimint wallet instead.";
 export const MAX_FEDERATIONS = 8;
 /** How long to wait before asking again about an invoice the client answered about at once (tests shorten it). */
 export const fedimintTiming = { pollMs: 10_000 };
@@ -115,8 +115,8 @@ export interface FedimintEvents {
   received(paymentId: string, federation: string): void;
 }
 
+/** The Fedimint wallet of one network: its federations and their ecash, under `fedimintWallet-<network>`. */
 export class FedimintWallet {
-  private mode: WalletMode = "mainnet";
   private saved?: StoredFedimint;
   private readonly clients = new Map<string, FedimintClient>();
   private readonly opening = new Map<string, Promise<FedimintClient>>();
@@ -131,21 +131,20 @@ export class FedimintWallet {
   private readonly gate = new ModeGate();
   view: FedimintWalletView = { federations: [], balance: 0, history: [] };
 
-  constructor(private readonly events: FedimintEvents, private readonly sdk: () => Promise<FedimintSdk> = loadFedimintSdk) {}
+  constructor(readonly network: WalletNetwork, private readonly events: FedimintEvents, private readonly sdk: () => Promise<FedimintSdk> = loadFedimintSdk) {}
   /** Joining, leaving and restoring never interleave: two joins could each think the profile had no mnemonic. */
   private serial<T>(run: () => Promise<T>): Promise<T> { const next = this.queue.then(run, run); this.queue = next.catch(() => {}); return next; }
 
-  async start() { this.saved = await this.load(this.mode); this.render(); }
+  async start() { this.saved = await this.load(this.network); this.render(); }
   private async load(mode: WalletMode) { return wrap<StoredFedimint | undefined>((await store(STORES.settings, "readonly")).get(key(mode))); }
-  private unavailable() { return this.mode === "mainnet" && !FEDIMINT_MAINNET ? FEDIMINT_MAINNET_UNAVAILABLE : undefined; }
+  private unavailable() { return this.network === "mainnet" && !FEDIMINT_MAINNET ? FEDIMINT_MAINNET_UNAVAILABLE : undefined; }
 
-  /** Opens every federation of this mode. One that does not answer is tried again, the others work meanwhile. */
+  /** Opens every federation of this network. One that does not answer is tried again, the others work meanwhile. */
   ensureReady(): Promise<void> {
     clearTimeout(this.retry);
     if (this.stopped || this.unavailable()) return Promise.resolve();
-    const mode = this.mode;
     return Promise.all((this.saved?.federations ?? []).map((f) => this.open(f).catch(() => undefined))).then(() => {
-      if (this.stopped || mode !== this.mode) return;
+      if (this.stopped) return;
       void this.refresh();
       if (this.saved?.federations.some((f) => !this.clients.has(f.id))) this.retry = setTimeout(() => void this.ensureReady(), 30_000);
     });
@@ -185,18 +184,11 @@ export class FedimintWallet {
     this.render();
   }
 
-  /** Closes this mode's clients and opens the other mode's record. Nothing is replaced: each mode keeps its own. */
-  setMode(mode: WalletMode): Promise<void> {
-    this.gate.switching(mode);
-    return this.serial(async () => {
-      this.mode = mode; this.gate.entered(mode);
-      await this.closeAll();
-      this.saved = await this.load(mode);
-      this.history = [];
-      this.render();
-    });
-  }
-  async stop() { this.stopped = true; clearTimeout(this.retry); await this.serial(() => this.closeAll()); }
+  async stop() { this.stopped = true; clearTimeout(this.retry); this.gate.close(); await this.serial(() => this.closeAll()); }
+  /** Joined at least one federation: a card of its own on the wallet page. */
+  get configured() { return !!this.saved?.federations.length; }
+  /** A join waiting on its federation gives up now, saving nothing. */
+  cutShort() { this.gate.interrupt(); }
   private async closeAll() {
     clearTimeout(this.retry);
     for (const stop of this.unsubscribe.values()) stop();
@@ -247,7 +239,7 @@ export class FedimintWallet {
     if (!isFederationId(info.federationId)) throw new Error("The federation answered with an invalid id");
     if (!info.modules.includes("mint")) throw new Error("This federation has no ecash module this app can use (the v1 mint module)");
     if (!info.network) throw new Error("Could not tell which Bitcoin network this federation is on");
-    if (fedimintMode(info.network) !== this.mode) throw new Error(this.mode === "mainnet" ? `This federation is on ${info.network}, a test network: switch the wallets to Testnet to join it` : "This federation holds real bitcoin: switch the wallets to Mainnet to join it");
+    if (fedimintMode(info.network) !== this.network) throw new WrongNetworkError(fedimintMode(info.network), fedimintMode(info.network) === "mainnet" ? "This federation holds real bitcoin: it belongs in a Mainnet Fedimint wallet" : `This federation is on ${info.network}, a test network: it belongs in a Testnet Fedimint wallet`);
   }
 
   /**
@@ -274,7 +266,7 @@ export class FedimintWallet {
       const federation: StoredFederation = { ...info, ...rest, network: info.network, id: info.federationId, database, invite: code, joinedAt: Date.now() };
       delete (federation as Partial<FederationInfo>).federationId;
       const next = { ...saved, federations: [...saved.federations, federation] };
-      await transact([STORES.settings], (stores) => { stores[STORES.settings].put(next, key(this.mode)); });
+      await transact([STORES.settings], (stores) => { stores[STORES.settings].put(next, key(this.network)); });
       this.saved = next;
       this.attach(federation.id, client);
       void this.refresh();
@@ -290,14 +282,14 @@ export class FedimintWallet {
   private async newSeed(): Promise<StoredFedimint> {
     const deviceKey = newDeviceKey();
     const saved: StoredFedimint = { seed: await sealSeed(generateMnemonic(wordlist), deviceKey), deviceKey, federations: [] };
-    await transact([STORES.settings], (stores) => { stores[STORES.settings].put(saved, key(this.mode)); });
+    await transact([STORES.settings], (stores) => { stores[STORES.settings].put(saved, key(this.network)); });
     this.saved = saved;
     return saved;
   }
   private async retiredIds(): Promise<string[]> {
     const keys = await wrap<IDBValidKey[]>((await store(STORES.settings, "readonly")).getAllKeys());
-    const retired = keys.filter((k): k is string => typeof k === "string" && k.startsWith(`fedimintRetired-${this.mode}-`));
-    return retired.map((k) => k.slice(`fedimintRetired-${this.mode}-`.length));
+    const retired = keys.filter((k): k is string => typeof k === "string" && k.startsWith(`fedimintRetired-${this.network}-`));
+    return retired.map((k) => k.slice(`fedimintRetired-${this.network}-`.length));
   }
 
   /**
@@ -321,23 +313,23 @@ export class FedimintWallet {
     await client.close().catch(() => {});
     const next = { ...saved, federations: saved.federations.filter((f) => f.id !== federationId) };
     await transact([STORES.settings], (stores) => {
-      stores[STORES.settings].put(federation, `fedimintRetired-${this.mode}-${federationId}`);
-      stores[STORES.settings].put(next, key(this.mode));
+      stores[STORES.settings].put(federation, `fedimintRetired-${this.network}-${federationId}`);
+      stores[STORES.settings].put(next, key(this.network));
     });
     this.saved = next;
     this.history = this.history.filter((tx) => tx.federation !== federationId);
     this.render();
   }); }
 
-  /** The open client of a federation of this mode. */
+  /** The open client of a federation of this network. */
   client(federationId: string): FedimintClient {
     const client = this.clients.get(federationId);
     if (client) return client;
-    if (!this.saved?.federations.some((f) => f.id === federationId)) throw new Error("You have not joined this federation in this wallet mode");
+    if (!this.saved?.federations.some((f) => f.id === federationId)) throw new Error(`You have not joined this federation in your ${this.network === "mainnet" ? "Mainnet" : "Testnet"} Fedimint wallet`);
     throw new Error(this.problems.get(federationId) ?? "Wait for the federation to connect");
   }
   federation(federationId: string): StoredFederation | undefined { return this.saved?.federations.find((f) => f.id === federationId); }
-  /** Joined federations of this mode that are open now, in the order they were joined. */
+  /** Joined federations of this network that are open now, in the order they were joined. */
   ready(): StoredFederation[] { return (this.saved?.federations ?? []).filter((f) => this.clients.has(f.id)); }
   /** The ones a chat request names: the payee takes ecash of any of them. */
   requestFederations(): string[] { return this.ready().map((f) => f.id); }
@@ -354,7 +346,7 @@ export class FedimintWallet {
     return spent;
   }
 
-  /** Which federation of this mode issued these notes, and how much they are worth (msats). Null: none we joined. */
+  /** Which federation of this network issued these notes, and how much they are worth (msats). Null: none we joined. */
   async inspectNotes(notes: string): Promise<{ federation: string; amountMsats: number } | null> {
     const text = notes.trim();
     if (!text || text.length > 32 * 1024) return null;
@@ -376,10 +368,10 @@ export class FedimintWallet {
   }
   async redeemState(federationId: string, operationId: string, waitMs: number) { return this.client(federationId).redeemState(operationId, waitMs); }
 
-  /** Pasted on the wallet page: notes of any federation of this mode. */
+  /** Pasted on the wallet page: notes of any federation of this network. */
   async receiveNotes(notes: string): Promise<{ federation: string; amount: number }> {
     const found = await this.inspectNotes(notes);
-    if (!found) throw new Error(this.clients.size ? "These notes are not from a federation you joined in this wallet mode" : "Join the federation these notes are from first");
+    if (!found) throw new Error(this.clients.size ? "These notes are not from a federation you joined in this wallet" : "Join the federation these notes are from first");
     const { state } = await this.redeemNotes(found.federation, notes, `wallet-${crypto.randomUUID()}`);
     if (state === "failed") throw new Error("These notes were already redeemed by someone");
     if (state !== "done") throw new Error("The federation is still redeeming these notes: they will show in the balance");
@@ -418,7 +410,7 @@ export class FedimintWallet {
     }
     return made;
   }
-  /** The first federation of this mode with a gateway module: where a chat request's invoice is made. */
+  /** The first federation of this network with a gateway module: where a chat request's invoice is made. */
   invoiceFederation(): string | undefined { return this.ready().find((f) => f.modules.includes("ln"))?.id; }
 
   private async resumeReceives() {
@@ -460,7 +452,7 @@ export class FedimintWallet {
   /** A target naming one of our federations, for a review (the chat's Send answers a request with one). */
   target(federationId: string, address: string): PaymentTarget {
     const federation = this.federation(federationId);
-    if (!federation?.network) throw new Error("You have not joined this federation in this wallet mode");
+    if (!federation?.network) throw new Error("You have not joined this federation in this wallet");
     return { method: "fedimint", network: federation.network, provider: federationId, asset: "BTC", unit: "sat", address, expiresAt: Date.now() + 23 * 60 * 60 * 1000 };
   }
 
@@ -477,16 +469,16 @@ export class FedimintWallet {
   async exportBackup(password: string): Promise<string> {
     if (password.length < 12) throw new Error("Use at least 12 characters for the backup password");
     const { mnemonic, federations } = await this.backup();
-    const intents = (await intentRepository.list()).filter((i) => i.review.method === "fedimint");
-    return JSON.stringify({ format: "ghostly-fedimint-encrypted", version: 1, mode: this.mode, vault: await sealSeed(JSON.stringify({ format: "ghostly-fedimint", version: 1, mnemonic, federations, intents }), password) });
+    const intents = (await intentRepository.list()).filter((i) => i.review.method === "fedimint" && fedimintMode(i.review.network as BitcoinNetwork) === this.network);
+    return JSON.stringify({ format: "ghostly-fedimint-encrypted", version: 1, mode: this.network, vault: await sealSeed(JSON.stringify({ format: "ghostly-fedimint", version: 1, mnemonic, federations, intents }), password) });
   }
-  /** Into a mode without a Fedimint wallet yet: the mnemonic is kept, and every federation is joined again through recovery. */
+  /** Into a network without a Fedimint wallet yet: the mnemonic is kept, and every federation is joined again through recovery. */
   restoreBackup(text: string, password: string): Promise<{ joined: number; failed: string[] }> {
     return this.restore(async () => {
       if (text.length > 1024 * 1024) throw new Error("Fedimint backup is too large");
       const envelope = JSON.parse(text);
       if (envelope.format !== "ghostly-fedimint-encrypted" || envelope.version !== 1) throw new Error("Unsupported Fedimint backup");
-      if (envelope.mode !== this.mode) throw new Error(`This backup is a ${envelope.mode === "mainnet" ? "Mainnet" : "Testnet"} wallet: switch the wallets to it first`);
+      if (envelope.mode !== this.network) throw new WrongNetworkError(envelope.mode === "mainnet" ? "mainnet" : "testnet", `This backup is a ${envelope.mode === "mainnet" ? "Mainnet" : "Testnet"} Fedimint wallet`);
       const payload = JSON.parse(await unsealSeed(envelope.vault, password)) as { format: string; version: number; mnemonic: string; federations: { invite: string }[] };
       if (payload.format !== "ghostly-fedimint" || payload.version !== 1 || !Array.isArray(payload.federations)) throw new Error("Invalid Fedimint backup");
       return { mnemonic: payload.mnemonic, invites: payload.federations.map((f) => f.invite) };
@@ -502,11 +494,11 @@ export class FedimintWallet {
     await this.serial(async () => {
       const unavailable = this.unavailable();
       if (unavailable) throw new Error(unavailable);
-      if (this.saved?.federations.length) throw new Error("Restore into a wallet mode that has joined no federation yet; this one will not be replaced");
-      if (this.saved) await transact([STORES.settings], (stores) => { stores[STORES.settings].put(this.saved!, `fedimintWallet-retired-${this.mode}-${Date.now()}`); });
+      if (this.saved?.federations.length) throw new Error("Restore into a Fedimint wallet that has joined no federation yet; this one will not be replaced");
+      if (this.saved) await transact([STORES.settings], (stores) => { stores[STORES.settings].put(this.saved!, `fedimintWallet-retired-${this.network}-${Date.now()}`); });
       const deviceKey = newDeviceKey();
       const saved: StoredFedimint = { seed: await sealSeed(phrase, deviceKey), deviceKey, federations: [] };
-      await transact([STORES.settings], (stores) => { stores[STORES.settings].put(saved, key(this.mode)); });
+      await transact([STORES.settings], (stores) => { stores[STORES.settings].put(saved, key(this.network)); });
       this.saved = saved;
     });
     const failed: string[] = [];
