@@ -10,7 +10,7 @@
  *
  * The stages are the app's pairing scene (src/components/pairing/PairingScene.tsx:
  * two ghosts, the DHT mesh between them, the routes packets take) mapped onto
- * two boxes: landscape 800 × 380 and portrait 340 × 330. Labels are 14 units,
+ * two boxes: landscape 800 × 362 and portrait 340 × 330. Labels are 14 units,
  * which stays at 12px or more wherever each stage is shown.
  */
 
@@ -169,16 +169,16 @@ function stage(o: { w: number; h: number; kx: number; ky: number; oy: number; s:
   };
 }
 
-export const LAND: Stage = stage({ w: 800, h: 380, kx: 2.5, ky: 1.7, oy: 44, s: 1.1 }, () => ({
+export const LAND: Stage = stage({ w: 800, h: 362, kx: 2.5, ky: 1.7, oy: 44, s: 1.1 }, () => ({
   nameY: 262,
   label: [400, 22],
   tagTop: [400, 52],
   tagLow: [400, 306],
   oob: {
-    d: "M160 228 Q176 330 236 330 L564 330 Q624 330 640 228",
-    pts: [[160, 228], [172, 290], [200, 322], [236, 330], [564, 330], [600, 322], [628, 290], [640, 228]],
-    code: [400, 330],
-    tag: [400, 360],
+    d: "M160 228 Q174 318 232 318 L568 318 Q626 318 640 228",
+    pts: [[160, 228], [170, 284], [196, 312], [232, 318], [568, 318], [604, 312], [630, 284], [640, 228]],
+    code: [400, 318],
+    tag: [400, 348],
   },
   chips: { w: 116, h: 22, ys: [16, 42, 68, 94], me: 115, peer: 685 },
   lanes: [180, 214],
