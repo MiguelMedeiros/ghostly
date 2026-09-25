@@ -1,15 +1,21 @@
 import type { PairedTransport } from "@ghostly/core";
 
 /**
- * A chat's connection story: one short line in its timeline each time the live transport changes (the first
- * connection, a switch and why, a lost link and what carries text meanwhile, coming back, a switch that failed).
+ * A chat's connection story, in two places (WISP 400 § "Pairing progress and transport rows").
+ *
+ * - **Rows** (`entries`), in the chat's timeline, for what matters to the people in it: the first live connection,
+ *   the transport actually changing, someone's choice, a switch that failed, and a real outage (one row, when it
+ *   ends). An app restart or a short drop that comes back on the same transport is not a row.
+ * - **History** (`history`), in the connection panel: every event, drops, restarts, failed attempts and round trips
+ *   included, so nothing is lost by keeping the timeline quiet.
  *
  * Derived on each side from its own engine events; nothing goes on the wire for it (a contact's explicit choice is
- * read from the transport policy it already sends). The lines are kept on the link, not among the messages: they
- * never count as unread, never become the chat's preview, are never sent, and go when the chat goes. The app has
- * no disappearing-message timer; if it gets one, these lines follow it like any other row.
+ * read from the transport policy it already sends). Both are kept on the link, not among the messages: they never
+ * count as unread, never become the chat's preview, are never sent, and go when the chat goes.
  */
-export type TransportEntryKind = "connected" | "switched" | "failed" | "lost" | "back" | "flapping" | "dht-only" | "dht-left";
+export type TransportEntryKind = "connected" | "switched" | "chose" | "failed" | "back" | "dht-only" | "dht-left"
+  /** Written by older releases only; compacted away on load (`compactTransportRows`). */
+  | "lost" | "flapping";
 /** Why a switch happened: someone chose it, the link it replaced dropped, or the app moved on its own. */
 export type TransportCause = "you" | "contact" | "dropped" | "automatic";
 
@@ -18,25 +24,49 @@ export interface TransportEntry {
   at: number;
   kind: TransportEntryKind;
   /**
-   * The transport carrying the chat after this line; absent while it is not live. `dht-left`: the transport the
-   * chat is set to from now on, absent when back to automatic.
+   * The transport carrying the chat after this row; absent while it is not live. `dht-left`: the transport the
+   * chat is set to from now on, absent when back to automatic. `chose`: where the chat is live, if it is.
    */
   transport?: PairedTransport;
-  /** `switched`: the one before. `lost`: the one that dropped. */
+  /** `switched`: the one before. `back`: the one that dropped, when the chat came back on another. */
   from?: PairedTransport;
-  /** `failed`: the transport it tried to move to. */
+  /** `failed`: the transport it tried to move to. `chose`: the one chosen; absent: back to automatic. */
   target?: PairedTransport;
   cause?: TransportCause;
   /** `failed`: why, in the app's words. */
   reason?: string;
-  /** `lost` (and a `flapping` line that ended lost): what carries text meanwhile. `dht-only`: this side chose DHT-only. */
+  /** `back` after an outage: what carried text meanwhile. `dht-only`: this side chose DHT only. */
   fallback?: "dht" | "hold" | "dht-only";
+  /** `back`: how long the chat had no live connection. */
+  downMs?: number;
   /** Round trip measured on this transport, once known. */
   rttMs?: number;
-  /** `flapping`: how many times the link came back, since when; `live`: whether it was live at the last change. */
+  /** Legacy `flapping` rows: how many times the link came back, since when, and whether it was live at the end. */
   count?: number;
   since?: number;
   live?: boolean;
+}
+
+/** One event in the connection panel's history: everything, including what the timeline leaves out. */
+export type TransportEventKind = "live" | "down" | "switched" | "chose" | "failed" | "attempt" | "dht-only" | "dht-left";
+
+export interface TransportEvent {
+  at: number;
+  kind: TransportEventKind;
+  transport?: PairedTransport;
+  from?: PairedTransport;
+  target?: PairedTransport;
+  cause?: TransportCause;
+  /** `failed`, `attempt`: why. */
+  reason?: string;
+  /** `down`: what carries text meanwhile. */
+  text?: "dht" | "hold";
+  /** `live`: how long the chat had no live connection before it (unknown after this app started). */
+  downMs?: number;
+  /** `live`: the first live connection since this app started. */
+  started?: boolean;
+  /** `live`, `switched`: the latest round trip measured on it. */
+  rttMs?: number;
 }
 
 /** What the chat's link looks like now, as the engine sees it. */
@@ -53,64 +83,150 @@ export interface TransportSnapshot {
   preferred?: PairedTransport;
   transitionError?: string;
   transitionTarget?: PairedTransport;
+  /** Why the last attempt to connect failed, while not live. */
+  error?: string;
 }
 
-/** Changes closer together than this are one flapping line. */
-export const FLAP_WINDOW_MS = 60_000;
-/** Lines about the link dropping and coming back, within the window, before they become one. */
-export const FLAP_MIN_LINES = 4;
+/** A drop the chat comes back from this soon, on the same transport, is not a row. */
+export const QUIET_DROP_MS = 5 * 60_000;
 /** A choice explains a switch that lands this soon after it. */
 export const CHOICE_TTL_MS = 2 * 60_000;
-/** A "lost" line this recent is replaced by the DHT-only choice that explains it. */
-export const DHT_REASON_MS = 30_000;
-/** Lines kept per chat. */
+/** Rows kept per chat. */
 export const TRANSPORT_LOG_MAX = 50;
-
-const churn = (e: TransportEntry) => e.kind === "lost" || e.kind === "back" || e.kind === "flapping" || (e.kind === "switched" && e.cause === "dropped");
-const liveLine = (e: TransportEntry) => e.kind === "flapping" ? !!e.live : e.kind !== "lost" && e.kind !== "dht-only" && e.kind !== "dht-left" && !!e.transport;
+/** History events kept per chat. */
+export const TRANSPORT_HISTORY_MAX = 200;
+/** A round trip that moved less than this is not news in the history. */
+const RTT_STEP_MS = 10;
 
 let sequence = 0;
 const lineId = (at: number) => `${at.toString(36)}-${(++sequence).toString(36)}`;
 
+/** A row that says the chat is live on its transport from then on. */
+const liveRow = (e: TransportEntry) => e.kind === "flapping" ? !!e.live
+  : e.kind !== "lost" && e.kind !== "dht-only" && e.kind !== "dht-left" && e.kind !== "failed" && !!e.transport;
+
+/**
+ * Rows written by older releases, by today's rules: a restart or a short drop on the same transport goes, a
+ * "lost" row goes (a long outage becomes one "back" row with how long it lasted), and a flapping run becomes what
+ * it ended on. Rows of today's rules pass unchanged.
+ */
+export function compactTransportRows(rows: readonly TransportEntry[]): TransportEntry[] {
+  const out: TransportEntry[] = [];
+  let logged: PairedTransport | undefined;
+  let down: { at: number; from?: PairedTransport; fallback?: TransportEntry["fallback"] } | null = null;
+  let dhtLeft = false;
+  const push = (e: TransportEntry) => { out.push(e); if (liveRow(e)) logged = e.transport; };
+  /** The chat came back live on `transport` at `at`: a row only if that is news. */
+  const cameBack = (e: TransportEntry, transport: PairedTransport, at: number) => {
+    const gap = down ? at - down.at : undefined, fallback = down?.fallback === "dht" || down?.fallback === "hold" ? down.fallback : undefined;
+    down = null;
+    if (dhtLeft) { dhtLeft = false; return push({ id: e.id, at, kind: "back", transport, ...(e.rttMs !== undefined ? { rttMs: e.rttMs } : {}) }); }
+    if (!logged) return push({ id: e.id, at, kind: "connected", transport });
+    const moved = logged !== transport;
+    if (gap !== undefined && gap > QUIET_DROP_MS)
+      return push({ id: e.id, at, kind: "back", transport, downMs: gap, ...(moved ? { from: logged } : {}), ...(fallback ? { fallback } : {}), ...(e.rttMs !== undefined ? { rttMs: e.rttMs } : {}) });
+    if (moved) push({ id: e.id, at, kind: "switched", from: logged, transport, cause: gap === undefined ? "automatic" : "dropped", ...(e.rttMs !== undefined ? { rttMs: e.rttMs } : {}) });
+  };
+  for (const e of rows) {
+    if (e.kind === "lost") { if (!down) down = { at: e.at, from: e.from, fallback: e.fallback }; continue; }
+    if (e.kind === "flapping") {
+      // It ended live on a transport, or down since its last change.
+      if (e.live && e.transport) { if (!down) down = { at: e.since ?? e.at }; cameBack(e, e.transport, e.at); }
+      else if (!down) down = { at: e.at, from: e.from, fallback: e.fallback };
+      continue;
+    }
+    if (e.kind === "connected" && e.transport) { if (!logged) push({ ...e }); else { down = null; cameBack(e, e.transport, e.at); } continue; }
+    if (e.kind === "back" && e.transport) { if (e.downMs !== undefined) { down = null; push({ ...e }); } else cameBack(e, e.transport, e.at); continue; }
+    if (e.kind === "switched" && e.cause === "dropped" && e.transport) { if (!down) down = { at: e.at }; cameBack(e, e.transport, e.at); continue; }
+    if (e.kind === "dht-only") down = null;
+    if (e.kind === "dht-left") dhtLeft = true;
+    push({ ...e });
+  }
+  return out.slice(-TRANSPORT_LOG_MAX);
+}
+
+/** The history an older release left no room for: its rows, as events. */
+function historyFromRows(rows: readonly TransportEntry[]): TransportEvent[] {
+  const events: TransportEvent[] = [];
+  for (const e of rows) {
+    const base = { at: e.at, ...(e.transport ? { transport: e.transport } : {}), ...(e.from ? { from: e.from } : {}), ...(e.cause ? { cause: e.cause } : {}), ...(e.rttMs !== undefined ? { rttMs: e.rttMs } : {}) };
+    if (e.kind === "lost") events.push({ ...base, kind: "down", ...(e.fallback === "dht" || e.fallback === "hold" ? { text: e.fallback } : {}) });
+    else if (e.kind === "flapping") events.push({ ...base, kind: e.live ? "live" : "down", reason: `Dropped and came back ${e.count ?? 0} times` });
+    else if (e.kind === "connected" || e.kind === "back") events.push({ ...base, kind: "live", ...(e.downMs !== undefined ? { downMs: e.downMs } : {}) });
+    else if (e.kind === "failed") events.push({ ...base, kind: "failed", ...(e.target ? { target: e.target } : {}), ...(e.reason ? { reason: e.reason } : {}) });
+    else if (e.kind === "chose") events.push({ ...base, kind: "chose", ...(e.target ? { target: e.target } : {}) });
+    else events.push({ ...base, kind: e.kind });
+  }
+  return events;
+}
+
 export class TransportLog {
   entries: TransportEntry[];
+  history: TransportEvent[];
+  /** Loading rewrote rows an older release stored (or seeded the history from them): worth saving as is. */
+  readonly compacted: boolean;
   private snapshot: TransportSnapshot | null = null;
   private choice: { by: "you" | "contact"; transport: PairedTransport; at: number } | null = null;
+  /** Since when the chat has no live connection (a drop seen by this app, not a restart of it). */
+  private down: { at: number; from?: PairedTransport; text?: "dht" | "hold" } | null = null;
+  /** A fresh "back to automatic" row: the automatic move it causes is told on that row. */
+  private autoRow: { id: string; at: number } | null = null;
+  /** Since when the current transport carries the chat, in this run of the app. */
+  private liveSince?: number;
+  private seenLive = false;
 
-  constructor(entries: readonly TransportEntry[] = []) {
-    this.entries = entries.slice(-TRANSPORT_LOG_MAX).map(e => ({ ...e }));
+  constructor(entries: readonly TransportEntry[] = [], history?: readonly TransportEvent[]) {
+    const compact = compactTransportRows(entries);
+    this.entries = compact.map(e => ({ ...e }));
+    this.history = history ? history.slice(-TRANSPORT_HISTORY_MAX).map(e => ({ ...e })) : historyFromRows(entries).slice(-TRANSPORT_HISTORY_MAX);
+    this.compacted = (!history && entries.length > 0)
+      || compact.length !== entries.length || compact.some((e, i) => e.id !== entries[i].id || e.kind !== entries[i].kind);
   }
 
   /**
-   * Someone chose a transport for this chat just now: a live switch to it soon after is theirs. Choosing the one
-   * already carrying the chat moves nothing, so there is nothing for it to explain later.
+   * Someone chose a transport for this chat just now (`automatic`: back to the app's rule). Always a row; a live
+   * switch to it soon after turns that row into the switch. Choosing the one already carrying the chat moves
+   * nothing, so there is nothing for it to explain later.
    */
-  chose(by: "you" | "contact", transport: PairedTransport, now: number): void {
-    if (this.snapshot?.live && this.snapshot.transport === transport) { this.choice = null; return; }
-    this.choice = { by, transport, at: now };
+  chose(by: "you" | "contact", transport: PairedTransport | "automatic", now: number): boolean {
+    const on = this.snapshot?.live ? this.snapshot.transport : undefined;
+    const target = transport === "automatic" ? undefined : transport;
+    this.event({ at: now, kind: "chose", cause: by, ...(target ? { target } : {}), ...(on ? { transport: on } : {}) });
+    this.choice = !target || target === on ? null : { by, transport: target, at: now };
+    // Leaving DHT only for this choice: the row that says so already names it.
+    const last = this.entries[this.entries.length - 1] as TransportEntry | undefined;
+    if (last?.kind === "dht-left" && last.transport === target && now - last.at <= CHOICE_TTL_MS) return true;
+    const row = this.add({ kind: "chose", at: now, cause: by, ...(target ? { target } : {}), ...(on ? { transport: on } : {}) });
+    // Back to automatic may move the chat: the same row says where it landed.
+    this.autoRow = target ? null : { id: row.id, at: now };
+    return true;
   }
 
-  /** The link changed (or may have). True when a line was added or changed. */
+  /** The link changed (or may have). True when a row or the history changed. */
   observe(next: TransportSnapshot, now: number): boolean {
     const prev = this.snapshot;
     this.snapshot = { ...next };
     const last = this.entries[this.entries.length - 1] as TransportEntry | undefined;
-    // DHT only (WISP 400): either side choosing it keeps both off the live link; each choice, and the way out, is a line.
+    // DHT only (WISP 400): either side choosing it keeps both off the live link; each choice, and the way out, is a row.
     const dhtBefore = prev ? prev.dhtOnly || !!prev.peerDhtOnly : last?.kind === "dht-only";
     const dhtNow = next.dhtOnly || !!next.peerDhtOnly;
     if (dhtNow) {
       const you = next.dhtOnly && !(prev ? prev.dhtOnly : dhtBefore);
       const contact = !!next.peerDhtOnly && !(prev ? prev.peerDhtOnly : dhtBefore);
       if (!you && !contact) return false;
-      // The link dropped a moment before the reason was known: the choice replaces the "lost" line.
-      if (last?.kind === "lost" && now - last.at <= DHT_REASON_MS) this.entries.pop();
-      if (you) this.add({ kind: "dht-only", at: now, cause: "you", from: prev?.live ? prev.transport : undefined });
-      if (contact) this.add({ kind: "dht-only", at: now, cause: "contact", from: prev?.live ? prev.transport : undefined });
+      // The choice is the reason the link went: no outage to tell when it comes back.
+      this.down = null; this.liveSince = undefined;
+      const from = prev?.live ? prev.transport : undefined;
+      for (const cause of [...(you ? ["you" as const] : []), ...(contact ? ["contact" as const] : [])]) {
+        this.add({ kind: "dht-only", at: now, cause, ...(from ? { from } : {}) });
+        this.event({ at: now, kind: "dht-only", cause, ...(from ? { from } : {}) });
+      }
       return true;
     }
     if (dhtBefore) {
       this.add({ kind: "dht-left", at: now, transport: next.preferred });
-      if (next.live && next.transport) this.add({ kind: "back", at: now, transport: next.transport });
+      this.event({ at: now, kind: "dht-left", ...(next.preferred ? { transport: next.preferred } : {}) });
+      if (next.live && next.transport) this.cameBack(next.transport, now);
       return true;
     }
     if (next.live && next.transport) {
@@ -120,39 +236,44 @@ export class TransportLog {
           return this.failed(prev.transitionTarget ?? this.choice?.transport, next.transitionError, next.transport, now);
         return false;
       }
-      if (prev?.live && prev.transport) return this.add({ kind: "switched", at: now, from: prev.transport, transport: next.transport, cause: this.cause(next.transport, now) ?? "automatic" });
-      // Out of DHT only, the live link is back, over whatever the apps agree on now.
-      if (last?.kind === "dht-left") return this.add({ kind: "back", at: now, transport: next.transport });
-      const wasLost = !!last && !liveLine(last);
-      const before = this.lastTransport();
-      if (!last || !wasLost) return this.add({ kind: "connected", at: now, transport: next.transport });
-      // Back after a drop is the app reconnecting, never someone's switch (WISP 400: "Back live over X", or
-      // "Switched to X: Y dropped"), even when it lands where someone chose: that choice is spent.
-      if (this.choice?.transport === next.transport) this.choice = null;
-      if (before && before !== next.transport) return this.add({ kind: "switched", at: now, from: before, transport: next.transport, cause: "dropped" });
-      return this.add({ kind: "back", at: now, transport: next.transport });
+      if (prev?.live && prev.transport) return this.switched(prev.transport, next.transport, now);
+      return this.cameBack(next.transport, now);
     }
-    const fallback = next.text === "dht" ? "dht" as const : next.text === "hold" ? "hold" as const : undefined;
-    if (prev?.live) return this.add({ kind: "lost", at: now, from: prev.transport, fallback });
-    // Not live before either: what carries text meanwhile may have become known since the link dropped.
-    if (last && !liveLine(last) && (last.kind === "lost" || last.kind === "flapping") && last.fallback !== fallback) {
-      last.fallback = fallback;
-      return true;
+    let changed = false;
+    if (prev?.live) {
+      // Not a row: the header says the chat is off live; a row comes only if the outage lasts (`cameBack`).
+      const text = next.text === "dht" ? "dht" as const : next.text === "hold" ? "hold" as const : undefined;
+      this.down = { at: now, from: prev.transport, ...(text ? { text } : {}) };
+      this.liveSince = undefined;
+      this.event({ at: now, kind: "down", ...(prev.transport ? { from: prev.transport } : {}), ...(text ? { text } : {}) });
+      changed = true;
+    } else if (this.down && prev) {
+      // What carries text meanwhile may have become known since the link dropped.
+      const text = next.text === "dht" ? "dht" as const : next.text === "hold" ? "hold" as const : undefined;
+      if (text && text !== this.down.text) {
+        this.down.text = text;
+        const drop = this.lastEvent("down");
+        if (drop) drop.text = text;
+        changed = true;
+      }
     }
+    if (next.error && next.error !== prev?.error) { this.event({ at: now, kind: "attempt", reason: next.error }); changed = true; }
     if (next.transitionError && next.transitionError !== prev?.transitionError)
-      return this.failed(prev?.transitionTarget ?? this.choice?.transport, next.transitionError, undefined, now);
-    return false;
+      return this.failed(prev?.transitionTarget ?? this.choice?.transport, next.transitionError, undefined, now) || changed;
+    return changed;
   }
 
-  /** The live transport now: since when it carries the chat and why it was chosen (the line that started it). */
+  /** The live transport now: since when it carries the chat and why it was chosen (the last row about it). */
   liveNow(): { since: number; cause?: TransportCause } | undefined {
-    if (!this.snapshot?.live) return undefined;
+    if (!this.snapshot?.live || !this.snapshot.transport || this.liveSince === undefined) return undefined;
     for (let i = this.entries.length - 1; i >= 0; i--) {
       const e = this.entries[i];
       if (e.kind === "failed") continue;
-      return liveLine(e) ? { since: e.at, cause: e.cause } : undefined;
+      if (e.kind === "chose" && e.transport !== this.snapshot.transport) continue;
+      if (!liveRow(e) || e.transport !== this.snapshot.transport) break;
+      return { since: this.liveSince, cause: e.kind === "chose" ? undefined : e.kind === "back" && e.from ? "dropped" : e.cause };
     }
-    return undefined;
+    return { since: this.liveSince };
   }
 
   /** A switch to `target` could not connect, and the chat stayed on the transport it was on. */
@@ -160,21 +281,81 @@ export class TransportLog {
     return this.failed(target, reason, this.snapshot?.live ? this.snapshot.transport : undefined, now);
   }
 
-  /** A round trip measured on the current transport: the line that started it shows it. */
+  /**
+   * A round trip measured on the current transport: the history keeps the latest for the stretch it belongs to,
+   * and the row that started that transport shows it. True when either changed enough to keep.
+   */
   rtt(ms: number): boolean {
+    const on = this.snapshot?.live ? this.snapshot.transport : undefined;
+    if (!on) return false;
+    let changed = false;
     const last = this.entries[this.entries.length - 1] as TransportEntry | undefined;
-    if (!last || !liveLine(last) || last.kind === "failed" || last.rttMs === ms) return false;
-    last.rttMs = ms;
+    if (last && liveRow(last) && last.transport === on && last.rttMs === undefined) { last.rttMs = ms; changed = true; }
+    const stretch = [...this.history].reverse().find(e => e.kind === "live" || e.kind === "switched" || e.kind === "down");
+    if (stretch && stretch.kind !== "down" && stretch.transport === on && (stretch.rttMs === undefined || Math.abs(stretch.rttMs - ms) >= RTT_STEP_MS)) {
+      stretch.rttMs = ms; changed = true;
+    }
+    return changed;
+  }
+
+  /** Live over `transport` again after not being live (a drop, a restart of this app, or the end of DHT only). */
+  private cameBack(transport: PairedTransport, now: number): boolean {
+    const down = this.down, started = !this.seenLive;
+    this.down = null; this.liveSince = now; this.seenLive = true;
+    const gap = down ? now - down.at : undefined;
+    this.event({ at: now, kind: "live", transport, ...(down?.from && down.from !== transport ? { from: down.from } : {}), ...(gap !== undefined ? { downMs: gap } : {}), ...(started ? { started: true } : {}) });
+    // Back after a drop is the app reconnecting, never someone's switch, even when it lands where someone chose:
+    // that choice is spent.
+    if (this.choice?.transport === transport) this.choice = null;
+    const last = this.entries[this.entries.length - 1] as TransportEntry | undefined;
+    if (last?.kind === "dht-left") { this.add({ kind: "back", at: now, transport }); return true; }
+    const before = this.lastTransport();
+    if (!before) { this.add({ kind: "connected", at: now, transport }); return true; }
+    if (gap !== undefined && gap > QUIET_DROP_MS) {
+      const fallback = down?.text;
+      this.add({ kind: "back", at: now, transport, downMs: gap, ...(before !== transport ? { from: before } : {}), ...(fallback ? { fallback } : {}) });
+      return true;
+    }
+    // A short drop, or this app starting: news only if the chat is on another transport than its last row says.
+    if (before === transport) return true;
+    this.add({ kind: "switched", at: now, from: before, transport, cause: gap === undefined ? "automatic" : "dropped" });
+    return true;
+  }
+
+  /** A live session moved from one transport to another without dropping. */
+  private switched(from: PairedTransport, transport: PairedTransport, now: number): boolean {
+    this.liveSince = now;
+    const cause = this.cause(transport, now) ?? "automatic";
+    this.event({ at: now, kind: "switched", from, transport, cause });
+    // The row of the choice becomes the switch it caused, or the automatic row says where it landed.
+    const last = this.entries[this.entries.length - 1] as TransportEntry | undefined;
+    if (last && (cause === "you" || cause === "contact") && last.kind === "chose" && last.target === transport) {
+      Object.assign(last, { kind: "switched", from, transport, at: now });
+      delete last.target;
+      return true;
+    }
+    if (last && this.autoRow?.id === last.id && now - this.autoRow.at <= CHOICE_TTL_MS && cause === "automatic") {
+      Object.assign(last, { from, transport });
+      this.autoRow = null;
+      return true;
+    }
+    this.add({ kind: "switched", at: now, from, transport, cause });
     return true;
   }
 
   private lastTransport(): PairedTransport | undefined {
     for (let i = this.entries.length - 1; i >= 0; i--) {
       const e = this.entries[i];
+      // A chosen transport is not a live one; a choice's row and a failed switch name where the chat was.
       if (e.kind === "dht-left") continue;
       if (e.transport) return e.transport;
       if (e.from) return e.from;
     }
+    return undefined;
+  }
+
+  private lastEvent(kind: TransportEventKind): TransportEvent | undefined {
+    for (let i = this.history.length - 1; i >= 0; i--) if (this.history[i].kind === kind) return this.history[i];
     return undefined;
   }
 
@@ -189,33 +370,20 @@ export class TransportLog {
     const last = this.entries[this.entries.length - 1] as TransportEntry | undefined;
     if (last?.kind === "failed" && last.reason === reason && last.target === target) return false;
     if (target && this.choice?.transport === target) this.choice = null;
-    return this.add({ kind: "failed", at: now, target, reason, transport });
+    this.add({ kind: "failed", at: now, target, reason, transport });
+    this.event({ at: now, kind: "failed", reason, ...(target ? { target } : {}), ...(transport ? { transport } : {}) });
+    return true;
   }
 
-  private add(line: Omit<TransportEntry, "id">): boolean {
+  private event(event: TransportEvent): void {
+    this.history.push(event);
+    if (this.history.length > TRANSPORT_HISTORY_MAX) this.history.splice(0, this.history.length - TRANSPORT_HISTORY_MAX);
+  }
+
+  private add(line: Omit<TransportEntry, "id">): TransportEntry {
     const entry: TransportEntry = { id: lineId(line.at), ...line };
-    const tail = this.entries[this.entries.length - 1] as TransportEntry | undefined;
-    if (churn(entry) && tail?.kind === "flapping" && entry.at - tail.at <= FLAP_WINDOW_MS) {
-      tail.at = entry.at;
-      if (entry.kind === "lost") { tail.live = false; tail.from = entry.from; tail.transport = undefined; tail.fallback = entry.fallback; }
-      else { tail.count = (tail.count ?? 0) + 1; tail.live = true; tail.transport = entry.transport; tail.from = undefined; tail.fallback = undefined; tail.rttMs = undefined; }
-      return true;
-    }
-    if (churn(entry)) {
-      let start = this.entries.length;
-      while (start > 0 && churn(this.entries[start - 1]) && this.entries[start - 1].kind !== "flapping" && entry.at - this.entries[start - 1].at <= FLAP_WINDOW_MS) start--;
-      const run = [...this.entries.slice(start), entry];
-      if (run.length >= FLAP_MIN_LINES) {
-        const live = entry.kind !== "lost";
-        this.entries.splice(start, this.entries.length - start, {
-          id: run[0].id, kind: "flapping", at: entry.at, since: run[0].at, count: run.filter(e => e.kind !== "lost").length, live,
-          ...(live ? { transport: entry.transport } : { from: entry.from, fallback: entry.fallback }),
-        });
-        return true;
-      }
-    }
     this.entries.push(entry);
     if (this.entries.length > TRANSPORT_LOG_MAX) this.entries.splice(0, this.entries.length - TRANSPORT_LOG_MAX);
-    return true;
+    return entry;
   }
 }

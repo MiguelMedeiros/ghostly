@@ -8,6 +8,7 @@ import { dots, focus, transportName, type ConnectionKind } from "../lib/connecti
 import { connectionSummary, lasting } from "../lib/transportEvents";
 import { TransportIcon } from "./TransportIcon";
 import { TransportOptions } from "./TransportMenu";
+import { ConnectionHistory } from "./TransportTimeline";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -129,6 +130,7 @@ export function PairingBanner({ peerKey }: { peerKey: string }) {
           </div>}
         </>}
       </div>}
+      {!!link?.transportHistory?.length && <ConnectionHistory events={link.transportHistory} contact={link.peerNick || "Your contact"} />}
       <div className="mt-1 flex items-start justify-between gap-2 border-t border-border pt-1">
         <details className="min-w-0 flex-1 text-[11px]" data-testid="connection-details">
           <summary className={`w-fit cursor-pointer rounded-md py-2 pr-2 text-text-secondary ${focus}`}>Details</summary>

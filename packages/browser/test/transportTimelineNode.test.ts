@@ -9,8 +9,9 @@ import { FakeNativeNet } from "./helpers/fakeNative";
 
 /**
  * The engine's side of the chat's connection story: a real node (the app) and its contact's link over stand-ins for
- * Iroh and HyperDHT. Each change the node lives through becomes a line in the chat's transport log, with who and
- * why; none of them is a message.
+ * Iroh and HyperDHT. What matters (the first connection, a change of transport, a choice) becomes a row in the
+ * chat's transport log, with who and why; a drop it comes back from on the same transport is only in the
+ * connection history. None of them is a message.
  */
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -56,8 +57,9 @@ async function setup({ appCoordinates }: { appCoordinates?: boolean } = {}) {
 }
 
 const lines = (view: LinkView) => (view.transportLog ?? []).map(e => [e.kind, e.cause ?? null, e.transport ?? null]);
+const history = (view: LinkView) => (view.transportHistory ?? []).map(e => e.kind);
 
-it("tells the chat's connection story: first connection, the contact's switch, yours, a failed one, a drop and back", async () => {
+it("tells the chat's connection story: first connection, the contact's switch, yours, a failed one, automatic, and a drop only in the history", async () => {
   const { net, node, contact, id, view, contactState, dropContact } = await setup();
   await vi.waitFor(() => expect(lines(view())).toEqual([["connected", null, "iroh/1"]]));
   expect(view().peerTransports).toEqual(expect.arrayContaining(["iroh/1", "hyperdht/1"]));
@@ -84,27 +86,34 @@ it("tells the chat's connection story: first connection, the contact's switch, y
   await node.setChatTransport({ linkId: id, transport: "auto" });
   expect(view().transportAutomatic).toBe(true);
   expect((await db.getLinks()).find(l => l.id === id)?.preferredTransport).toBeUndefined();
-  await vi.waitFor(() => expect(lines(view()).at(-1)).toEqual(["switched", "automatic", "hyperdht/1"]));
+  // One row for the choice, which says where the apps took the chat.
+  await vi.waitFor(() => expect(lines(view()).at(-1)).toEqual(["chose", "you", "hyperdht/1"]));
+  expect(view().transportLog!.at(-1)).toMatchObject({ from: "iroh/1" });
+  expect(view().transportLog!.at(-1)!.target).toBeUndefined();
 
+  // The contact's app goes away and comes back at once: the history has it, the timeline does not.
+  const rows = lines(view());
   dropContact();
-  await vi.waitFor(() => expect(lines(view()).at(-1)).toEqual(["lost", null, null]));
-  // It comes back where the agreement put it, in one line: the redial starts on the contact's choice.
+  await vi.waitFor(() => expect(history(view()).at(-1)).toBe("down"));
   void contact.connect(5_000).catch(() => {});
   await vi.waitFor(() => expect([view().pairing?.status, view().pairing?.transport, contactState().status, contactState().transport])
     .toEqual(["ready", "hyperdht/1", "ready", "hyperdht/1"]));
-  const after = view().transportLog!.slice(view().transportLog!.findIndex(e => e.kind === "lost") + 1);
-  expect(after.map(e => [e.kind, e.transport])).toEqual([["back", "hyperdht/1"]]);
+  await vi.waitFor(() => expect(view().transportHistory!.at(-1)).toMatchObject({ kind: "live", transport: "hyperdht/1" }));
+  expect(view().transportHistory!.at(-1)!.downMs).toBeGreaterThanOrEqual(0);
+  expect(lines(view())).toEqual(rows);
 
   // Kept with the chat, and never a message: nothing to count as unread, nothing to preview.
-  expect((await db.getLinks()).find(l => l.id === id)?.transportLog?.map(e => e.kind).slice(0, 5))
-    .toEqual(["connected", "switched", "switched", "failed", "switched"]);
+  const stored = (await db.getLinks()).find(l => l.id === id);
+  expect(stored?.transportLog?.map(e => e.kind)).toEqual(["connected", "switched", "switched", "chose", "failed", "chose"]);
+  expect(stored?.transportHistory?.map(e => e.kind)).toEqual(expect.arrayContaining(["live", "switched", "chose", "failed", "down"]));
   expect(await db.getMessages(id)).toEqual([]);
   // Only the chat on screen carries it in the state.
   node.setActiveLink({ linkId: null });
   expect(view().transportLog).toBeUndefined();
+  expect(view().transportHistory).toBeUndefined();
 }, 40_000);
 
-it("DHT only from the chat's menu: a line for the choice, one for leaving it, then live again", async () => {
+it("DHT only from the chat's menu: a row for the choice, one for leaving it, then live again", async () => {
   const { node, contact, id, view } = await setup();
   await vi.waitFor(() => expect(lines(view())).toEqual([["connected", null, "iroh/1"]]));
   await node.setChatTransport({ linkId: id, transport: "dht" });
@@ -136,7 +145,7 @@ describe.each([
   { appCoordinates: true, dialer: "both", who: "both redial at once" },
   { appCoordinates: false, dialer: "both", who: "both redial at once" },
 ] as const)("a drop mid-switch (the app plans switches: $appCoordinates), $who", ({ appCoordinates, dialer }) => {
-  it("ends on the contact's choice on both sides, with one line for coming back", async () => {
+  it("ends on the contact's choice on both sides, with one row for coming back", async () => {
     const { net, node, contact, id, view, contactState, contactGot, dropContact } = await setup({ appCoordinates });
     await vi.waitFor(() => expect(lines(view())).toEqual([["connected", null, "iroh/1"]]));
     await node.setChatTransport({ linkId: id, transport: "auto" });
@@ -151,7 +160,7 @@ describe.each([
     expect((await node.sendMessage({ linkId: id, text: "in flight at the drop" })).error).toBeNull();
     net.latencyMs = 2;
     dropContact();
-    await vi.waitFor(() => expect(lines(view()).at(-1)).toEqual(["lost", null, null]));
+    await vi.waitFor(() => expect(history(view()).at(-1)).toBe("down"));
     release();
     expect(contactGot).toEqual([]);
 
@@ -164,8 +173,11 @@ describe.each([
     await new Promise(resolve => setTimeout(resolve, 300));
     expect([view().pairing?.transport, view().pairing?.transitionTarget, contactState().transport, contactState().transitionTarget])
       .toEqual(["hyperdht/1", undefined, "hyperdht/1", undefined]);
-    const after = view().transportLog!.slice(view().transportLog!.findIndex(e => e.kind === "lost") + 1);
-    // The app reconnecting, not the contact switching, though it lands on the contact's choice.
+    // The contact's choice is a row of its own; after it, the app reconnecting, not the contact switching, though
+    // it lands on the contact's choice.
+    const log = view().transportLog!, choice = log.findIndex(e => e.kind === "chose" && e.cause === "contact");
+    expect(log[choice]).toMatchObject({ target: "hyperdht/1" });
+    const after = log.slice(choice + 1);
     expect(after.map(e => [e.kind, e.cause, e.from, e.transport])).toEqual([["switched", "dropped", "iroh/1", "hyperdht/1"]]);
     expect(contactGot).toEqual(["in flight at the drop"]);
   }, 20_000);

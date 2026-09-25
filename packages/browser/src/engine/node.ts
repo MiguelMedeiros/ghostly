@@ -1340,7 +1340,8 @@ export class GhostlyNode implements EngineImplementation {
     const patch = { preferredTransport: preferred, transportFallback: fallback };
     await db.patchLink(linkId, patch);
     live.stored = { ...live.stored, ...patch }; this.emitState();
-    this.transportLogOf(live)?.chose("you", preferred, Date.now());
+    const log = this.transportLogOf(live);
+    if (log?.chose("you", preferred, Date.now())) this.saveTransportLog(live, log);
     await live.link.setTransportPreference(preferred, fallback);
   }
 
@@ -1370,6 +1371,8 @@ export class GhostlyNode implements EngineImplementation {
     const patch = { preferredTransport: undefined, transportFallback: undefined };
     await db.patchLink(linkId, patch);
     live.stored = { ...live.stored, ...patch }; this.emitState();
+    const log = this.transportLogOf(live);
+    if (log?.chose("you", "automatic", Date.now())) this.saveTransportLog(live, log);
     // The app's rule: WebRTC first where there is one (Linux WebKitGTK has none), fallback on.
     const available = live.link.availableTransports;
     await live.link.setTransportPreference(available.includes("webrtc/1") ? "webrtc/1" : available[0], true, true);
@@ -1378,7 +1381,11 @@ export class GhostlyNode implements EngineImplementation {
   /** The chat's connection story, for paired chats (not group edges). */
   private transportLogOf(live: LiveLink): TransportLog | undefined {
     if (!live.stored.profile || live.stored.group) return undefined;
-    return live.transportLog ??= new TransportLog(live.stored.transportLog);
+    if (live.transportLog) return live.transportLog;
+    const log = live.transportLog = new TransportLog(live.stored.transportLog, live.stored.transportHistory);
+    // Rows an older release stored by its rules (every restart and reconnect): kept by today's, messages untouched.
+    if (log.compacted) this.saveTransportLog(live, log);
+    return log;
   }
 
   /** Looks at the chat's link and adds a line to its story when the transport changed. */
@@ -1395,14 +1402,15 @@ export class GhostlyNode implements EngineImplementation {
       preferred: live.stored.preferredTransport,
       transitionError: pairing?.transitionError,
       transitionTarget: pairing?.transitionTarget,
+      error: pairing?.status === "error" ? pairing.error : undefined,
     }, Date.now());
     if (changed) this.saveTransportLog(live, log);
   }
 
   private saveTransportLog(live: LiveLink, log: TransportLog): void {
-    const transportLog = log.entries.map(e => ({ ...e }));
-    live.stored = { ...live.stored, transportLog };
-    void db.patchLink(live.stored.id, { transportLog }).catch(() => {});
+    const transportLog = log.entries.map(e => ({ ...e })), transportHistory = log.history.map(e => ({ ...e }));
+    live.stored = { ...live.stored, transportLog, transportHistory };
+    void db.patchLink(live.stored.id, { transportLog, transportHistory }).catch(() => {});
     this.emitState();
   }
 
@@ -2093,7 +2101,7 @@ export class GhostlyNode implements EngineImplementation {
         onPeerProof: EXTERNAL_IDENTITIES_ENABLED ? async frame => { await (await this.proofsFor(linkId)).receive(frame); } : undefined,
         onIdentityProof: stored.profile ? frame => this.identities.frame(linkId, frame) : undefined,
         onTransportsChanged: () => this.emitState(),
-        onPeerTransportChoice: transport => { this.transportLogOf(live)?.chose("contact", transport, Date.now()); },
+        onPeerTransportChoice: transport => { const log = this.transportLogOf(live); if (log?.chose("contact", transport, Date.now())) this.saveTransportLog(live, log); },
         onTransportSwitched: () => {
           // Frames of the old channel may have been cut short: what the contact has not confirmed goes again at
           // once over the new one (it acknowledges a repeated id without showing it twice), and so do payments.
@@ -2320,6 +2328,7 @@ export class GhostlyNode implements EngineImplementation {
       transportLive: live.transportLog?.liveNow(),
       // The whole story only for the chat on screen: every state push carries every link.
       transportLog: stored.id === this.activeLinkId && stored.profile && !stored.group ? stored.transportLog ?? [] : undefined,
+      transportHistory: stored.id === this.activeLinkId && stored.profile && !stored.group ? stored.transportHistory ?? [] : undefined,
       myPubKeyZ32: live.myPubKeyZ32,
       peerPubKeyZ32: stored.peerPubKeyZ32,
       label: stored.label,

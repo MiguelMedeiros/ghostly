@@ -297,3 +297,47 @@ describe("PairingBanner: what the popover does", () => {
     expect(screen.queryByTestId("pair-verify")).not.toBeInTheDocument();
   });
 });
+
+describe("PairingBanner: the connection history", () => {
+  const t0 = Date.now() - 60 * 60_000;
+  const history: NonNullable<LinkView["transportHistory"]> = [
+    { at: t0, kind: "live", transport: "webrtc/1", started: true, rttMs: 30 },
+    { at: t0 + 60_000, kind: "down", from: "webrtc/1", text: "dht" },
+    { at: t0 + 90_000, kind: "attempt", reason: "Timed out" },
+    { at: t0 + 100_000, kind: "live", transport: "webrtc/1", downMs: 40_000 },
+    { at: t0 + 200_000, kind: "chose", cause: "contact", target: "iroh/1", transport: "webrtc/1" },
+    { at: t0 + 201_000, kind: "switched", from: "webrtc/1", transport: "iroh/1", cause: "contact", rttMs: 12 },
+    { at: t0 + 300_000, kind: "failed", target: "hyperdht/1", reason: "hyperdht/1 unreachable", transport: "iroh/1" },
+  ];
+
+  it("lists every event, newest first, drops and restarts included", async () => {
+    const { user } = banner({ pairing: ready({ transport: "iroh/1" }), peerNick: "Ana", transportHistory: history });
+    const panel = screen.getByTestId("connection-history");
+    expect(within(panel).getByText("Connection history (7)")).toBeInTheDocument();
+    await user.click(within(panel).getByText("Connection history (7)"));
+    expect(within(panel).getAllByTestId("connection-history-event").map(e => [e.dataset.kind, e.querySelector("span")!.textContent])).toEqual([
+      ["failed", "Couldn't switch to HyperDHT: HyperDHT unreachable"],
+      ["switched", "Moved from WebRTC to Iroh · Ana's choice · 12 ms"],
+      ["chose", "Ana chose Iroh"],
+      ["live", "Live over WebRTC · after 40 s down"],
+      ["attempt", "Connection attempt failed: Timed out"],
+      ["down", "Live connection lost (WebRTC) · texts go through the DHT"],
+      ["live", "Live over WebRTC · this app started · 30 ms"],
+    ]);
+    expect(within(panel).queryByTestId("connection-history-more")).toBeNull();
+  });
+
+  it("shows the latest twenty, and the rest on request", async () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({ at: t0 + i * 1_000, kind: i % 2 ? "down" as const : "live" as const, transport: "webrtc/1" as const }));
+    const { user } = banner({ pairing: ready(), transportHistory: many });
+    await user.click(screen.getByText("Connection history (25)"));
+    expect(screen.getAllByTestId("connection-history-event")).toHaveLength(20);
+    await user.click(screen.getByTestId("connection-history-more"));
+    expect(screen.getAllByTestId("connection-history-event")).toHaveLength(25);
+  });
+
+  it("is not there before the chat has any", () => {
+    banner({ pairing: ready() });
+    expect(screen.queryByTestId("connection-history")).toBeNull();
+  });
+});
