@@ -1,15 +1,9 @@
 import { expect, test, type Peer } from "../support/fixtures";
 import { injectNostrSigner } from "../support/nostrSigner";
+import { closeIdentities, openIdentities, theirFace, turnTheirs } from "../support/identities";
 import { pair } from "../support/paired";
 
 const chatId = (peer: Peer) => peer.page.evaluate(() => location.hash);
-async function received(peer: Peer) {
-  await peer.page.getByTitle("Options").click();
-  await peer.page.getByTestId("chat-identities-open").click();
-  const dialog = peer.page.getByTestId("chat-identities");
-  const row = dialog.getByTestId("chat-identity-received");
-  return { row, close: () => dialog.getByRole("button", { name: "Close" }).click() };
-}
 
 /**
  * The composer's identity button, beside ⚡: the profile's identities as ID cards, step for step as ⚡ pays. With none
@@ -69,9 +63,9 @@ test("an identity is added, shared and withdrawn from the chat's composer", { ta
   await expect(nostr).toBeFocused();
   await expect(button.getByTestId("composer-identities-count")).toHaveText("1");
   await expect(bob.page.getByTestId("chat-identity-badges")).toBeVisible();
-  let bobs = await received(bob);
-  await expect(bobs.row).toHaveAttribute("data-status", "verified");
-  await bobs.close();
+  await openIdentities(bob);
+  await expect(theirFace(bob)).toHaveAttribute("data-status", "verified");
+  await closeIdentities(bob);
 
   // From the same picker, still open: turned over again, it is shared and verified; Stop sharing.
   await expect(picker.getByTestId("composer-identity-hint")).toContainText(/ sees your Nostr npub1/);
@@ -84,10 +78,11 @@ test("an identity is added, shared and withdrawn from the chat's composer", { ta
   await expect(nostr.getByTestId("id-card-shared")).toHaveCount(0);
   await expect(button.getByTestId("composer-identities-count")).toHaveCount(0);
   await expect(bob.page.getByTestId("chat-identity-badges")).toHaveCount(0);
-  bobs = await received(bob);
-  await expect(bobs.row).toHaveAttribute("data-status", "withdrawn");
-  await expect(bobs.row.getByTestId("chat-identity-received-status")).toHaveText("No longer shared");
-  await bobs.close();
+  await openIdentities(bob);
+  await expect(theirFace(bob)).toHaveAttribute("data-status", "withdrawn");
+  const bobsCard = await turnTheirs(bob);
+  await expect(bobsCard.getByTestId("chat-identity-received-status")).toHaveText("No longer shared");
+  await closeIdentities(bob);
 
   // Escape closes it and gives the focus back to the button; opened again, the keys start on the chosen card.
   await alice.page.keyboard.press("Escape");

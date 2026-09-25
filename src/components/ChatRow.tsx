@@ -3,6 +3,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { PeerAvatar } from "./Avatar";
 import { GroupAvatar } from "./GroupAvatar";
+import { ContactMarks } from "./identities/ContactMarks";
 import { PinIcon } from "./PinIcon";
 import { formatListTime, previewText } from "../lib/chatList";
 import { groupReadAt } from "../lib/groups";
@@ -56,15 +57,20 @@ function UnreadBadge({ count }: { count: number }) {
 }
 
 /** The two (or, comfortable, three) lines beside the avatar, shared by chats and groups. */
-function RowText({ name, nameClass, time, timeClass = "text-text-muted", sub, preview, trailing, timeCover }: {
-  name: ReactNode; nameClass: string; time?: string; timeClass?: string; sub?: ReactNode; preview: ReactNode; trailing?: ReactNode;
+function RowText({ name, nameClass, marks, time, timeClass = "text-text-muted", sub, preview, trailing, timeCover }: {
+  name: ReactNode; nameClass: string;
+  /** After the name: the contact's verified identities (identities/ContactMarks.tsx), which give way before the time does. */
+  marks?: ReactNode; time?: string; timeClass?: string; sub?: ReactNode; preview: ReactNode; trailing?: ReactNode;
   /** Laid over the time while the row is hovered: the row's actions, which so never move anything. */
   timeCover?: ReactNode;
 }) {
   return (
     <div className="flex-1 min-w-0">
-      <div className="relative flex items-baseline gap-2">
-        <span data-testid="chat-row-name" className={`flex-1 min-w-0 truncate text-[15px] leading-5 ${nameClass}`}>{name}</span>
+      <div className="contact-row relative flex items-baseline gap-2">
+        <span className="flex flex-1 min-w-0 items-center gap-1.5">
+          <span data-testid="chat-row-name" className={`min-w-0 truncate text-[15px] leading-5 ${nameClass}`}>{name}</span>
+          {marks}
+        </span>
         {time && <span data-testid="chat-row-time" className={`shrink-0 text-xs leading-5 ${timeClass}`}>{time}</span>}
         {timeCover}
       </div>
@@ -141,6 +147,7 @@ export function ChatRow(p: ChatRowProps) {
       </div>
       <RowText
         name={p.label}
+        marks={<ContactMarks peerKey={p.peerPubKey} />}
         nameClass={!p.named ? "text-text-muted/60 italic" : p.unread > 0 ? "text-text-primary font-semibold" : "text-text-primary"}
         time={p.time}
         timeClass={p.unread > 0 ? "text-accent font-medium" : "text-text-muted"}

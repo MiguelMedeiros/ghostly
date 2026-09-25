@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { IdentityProofView, LinkView } from "@ghostly/browser/shared/types";
@@ -60,34 +60,56 @@ const spoken = (card: IdCardContent) => `your ${card.attested ? "account" : card
  * chat; removing or renewing one happens on the Identities page.
  */
 export function ComposerIdentityPicker({ peerKey, contact, onClose, anchorRef }: { peerKey: string; contact: string; onClose: () => void; anchorRef?: RefObject<HTMLElement | null> }) {
-  const state = useEngineState();
   const nav = useAppNavigation();
+  const [adding, setAdding] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  // While an identity is being added, its dialog is the one on top: a click in it does not close the picker.
+  useOutsideDismiss(ref, !adding, onClose, anchorRef);
+  // Closing gives the focus back to the button that opened it.
+  useEffect(() => {
+    const anchor = anchorRef?.current;
+    return () => { if (anchor?.isConnected) anchor.focus({ preventScroll: true }); };
+  }, [anchorRef]);
+  return <IdentityPicker peerKey={peerKey} contact={contact} onManage={() => { onClose(); nav.open("/identities"); }} onAdding={setAdding} head focusOnOpen
+    frame={({ side, tone }, children) => (
+      <ComposerSheet ref={ref} tabIndex={-1} role="dialog" aria-label="Your identities" data-testid="composer-identities" data-side={side}
+        className={`composer-identities ${tone} focus:outline-none max-h-[70dvh] overflow-y-auto`}>{children}</ComposerSheet>
+    )} />;
+}
+
+/**
+ * The identity picker itself, wherever it is shown: in the composer's sheet (ComposerIdentityPicker), and under
+ * "Yours, for this contact" in the chat's identities panel (ContactIdentitiesPanel.tsx). `frame` wraps it (the sheet,
+ * or the panel's section), wearing the chosen card's colour; `head` shows the sheet's title over the cards. With
+ * `focusOnOpen` the keys start on the chosen card as it opens (the sheet); the panel keeps its own focus.
+ */
+export function IdentityPicker({ peerKey, contact, onManage, onAdding, frame, head = false, focusOnOpen = false }: {
+  peerKey: string; contact: string; onManage: () => void; onAdding?: (adding: boolean) => void;
+  frame: (place: { side: "cards" | "back"; tone: string }, children: ReactNode) => ReactNode; head?: boolean; focusOnOpen?: boolean;
+}) {
+  const state = useEngineState();
   const link = state?.links.find(l => l.peerPubKeyZ32 === peerKey);
   const ids = link?.identities;
   const mine = state?.identityProofs ?? [];
   const [chosen, setChosen] = useState<string>();
-  const [adding, setAdding] = useState(false);
+  const [adding, setAddingState] = useState(false);
+  const setAdding = (on: boolean) => { setAddingState(on); onAdding?.(on); };
   const [busy, setBusy] = useState(""), [error, setError] = useState("");
   /** What the back last did, said on it until the card turns face up again. */
   const [done, setDone] = useState<"shared" | "stopped" | null>(null);
   const { side, flipped, turn, turnBack } = useCardFlip();
   const ref = useRef<HTMLDivElement>(null), actionRef = useRef<HTMLButtonElement>(null);
-  // While an identity is being added, its dialog is the one on top: a click in it does not close the picker.
-  useOutsideDismiss(ref, !adding, onClose, anchorRef);
   useNewProof(state, setChosen);
-  // On the cards, the keys start on the chosen one (as the picker opens, after adding one, back from its back): the
+  // On the cards, the keys start on the chosen one (as the sheet opens, after adding one, back from its back): the
   // dialog replaces the sheet while it is open, since a phone's sheet sits above any dialog. Once a card has turned,
-  // on its action (not as the back mounts: a face-down back takes no focus). Closing gives the focus back to the
-  // button that opened it.
+  // on its action (not as the back mounts: a face-down back takes no focus).
+  const opened = useRef(false);
   useEffect(() => {
     if (adding) return;
-    if (side === "cards") (ref.current?.querySelector<HTMLElement>('[role=radio][tabindex="0"]') ?? ref.current)?.focus({ preventScroll: true });
+    const first = !opened.current; opened.current = true;
+    if (side === "cards") { if (!first || focusOnOpen) ref.current?.querySelector<HTMLElement>('[role=radio][tabindex="0"]')?.focus({ preventScroll: true }); }
     else if (flipped) actionRef.current?.focus({ preventScroll: true });
-  }, [adding, side, flipped]);
-  useEffect(() => {
-    const anchor = anchorRef?.current;
-    return () => { if (anchor?.isConnected) anchor.focus({ preventScroll: true }); };
-  }, [anchorRef]);
+  }, [adding, side, flipped, focusOnOpen]);
   useEffect(() => {
     if (!done) return;
     const timer = setTimeout(turnBack, DONE_MS);
@@ -98,7 +120,7 @@ export function ComposerIdentityPicker({ peerKey, contact, onClose, anchorRef }:
   const connected = link?.dataLink === "open" && link.pairing?.status === "ready";
   const unsupported = connected && !ids?.support;
   const canAdd = addableProviders().length > 0;
-  const manage = () => { onClose(); nav.open("/identities"); };
+  const manage = onManage;
   const toggle = (p: IdentityProofView, on: boolean) => {
     if (!link || busy) return;
     setBusy(p.id); setError("");
@@ -139,14 +161,13 @@ export function ComposerIdentityPicker({ peerKey, contact, onClose, anchorRef }:
   if (adding) return createPortal(<AddIdentityDialog onClose={() => setAdding(false)} />, document.body);
   const blocked = why(entry);
   return (
-    <ComposerSheet ref={ref} tabIndex={-1} role="dialog" aria-label="Your identities" data-testid="composer-identities" data-side={showing ? "back" : "cards"}
-      className={`composer-identities ${tone(entry)} focus:outline-none max-h-[70dvh] overflow-y-auto`}>
+    frame({ side: showing ? "back" : "cards", tone: tone(entry) }, <div ref={ref} className="identity-picker">
       {showing ? <CardFlip className="composer-identity" flipped={flipped} tone={tone(showing)}
         front={<IdCardFace card={showing.card} shared={showing.on} />}
         back={<IdentityBack entry={showing} contact={contact} now={now} busy={busy} done={done} error={error} actionRef={actionRef}
           status={ids?.shared.find(s => s.id === showing.id)} onToggle={() => toggle(showing.proof, showing.on)} onCards={backToCards} />} />
       : <>
-        <ComposerSheetHead title="Your identities" who={`shown to ${contact} only`} />
+        {head && <ComposerSheetHead title="Your identities" who={`shown to ${contact} only`} />}
         <Deck<Entry> compact cards={entries} selected={entry.id} onSelect={select} onChoose={use}
           kind="radios" label="Your identities" name="composer-identity-deck" className="id-deck" size={{ max: 250, share: .62 }}
           testId={e => (e.add ? "composer-identity-add" : "composer-identity")} blocked={why}
@@ -171,7 +192,7 @@ export function ComposerIdentityPicker({ peerKey, contact, onClose, anchorRef }:
         {ids?.error && <p role="alert" className="px-1 m-0 text-xs text-danger" data-testid="composer-identities-error">{ids.error}</p>}
         {mine.length > 0 && <button type="button" data-testid="composer-identities-manage" onClick={manage} className="composer-identities-manage">Manage identities</button>}
       </>}
-    </ComposerSheet>
+    </div>)
   );
 }
 

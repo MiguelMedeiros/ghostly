@@ -1,6 +1,7 @@
-import type { IdentityProofView } from "@ghostly/browser/shared/types";
+import type { IdentityProofView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
 import { providerIcon } from "./ProviderIcons";
-import { date, daysLeft, expiringSoon, providerLabel, providerOf, shortSubject } from "../../lib/identities";
+import { date, daysLeft, expiringSoon, providerLabel, providerOf, RECEIVED_STATUS, shortSubject } from "../../lib/identities";
+import { ago, badgeState } from "./contactBadges";
 
 /**
  * What an identity's ID card says (IdCardFace.tsx), worked out once so the card, its panel and the tests agree.
@@ -8,9 +9,10 @@ import { date, daysLeft, expiringSoon, providerLabel, providerOf, shortSubject }
  * Its status, the worst first: `revoking` while its removal publishes the revocation (the card then leaves the
  * deck: a removed proof is not kept), `expired`, `failed` when a contact's app checked it and refused it,
  * `expiring` in its last days (lib/identities.ts's rule) and otherwise `verified`: it was checked, the way
- * contacts check it, when it was made.
+ * contacts check it, when it was made. A contact's card (receivedIdCard) can also be `revoked` by its owner, or
+ * `withdrawn`: no longer shared, or made with a key the contact has since replaced.
  */
-export type IdCardStatus = "verified" | "expiring" | "expired" | "failed" | "revoking";
+export type IdCardStatus = "verified" | "expiring" | "expired" | "failed" | "revoking" | "revoked" | "withdrawn";
 
 export interface IdCardContent {
   id: string;
@@ -70,6 +72,44 @@ export function idCard(p: IdentityProofView, { now = Date.now() / 1000, refusedB
     issued: date(p.issuedAt),
     shared: p.sharedWith === 0 ? "Not shared" : `Shared in ${plural(p.sharedWith, "chat", "chats")}`,
     refusedBy,
+  };
+}
+
+/**
+ * A contact's identity as an ID card: the same card as one's own, its status as this app last checked it
+ * (contactBadges.ts's states), "Their own key" or who attests it, and when it was checked in the last field.
+ */
+export function receivedIdCard(r: ReceivedIdentityView, now = Date.now() / 1000): IdCardContent {
+  const attested = providerOf(r.provider)?.category === "provider-attested";
+  const badge = badgeState(r, now);
+  const status: IdCardStatus = badge === "revoked" ? "revoked" : badge ?? "withdrawn";
+  const statusLabel = {
+    verified: "Verified",
+    expiring: `Expires in ${plural(daysLeft(r.expiresAt, now), "day", "days")}`,
+    failed: "Check failed",
+    revoked: "Revoked",
+    expired: "Expired",
+    withdrawn: RECEIVED_STATUS[r.status],
+    revoking: "",
+  }[status];
+  const avatar = r.display?.avatar ?? r.verified.display?.avatar;
+  return {
+    id: r.id,
+    provider: r.provider,
+    label: providerLabel(r.provider),
+    subject: r.verified.subject,
+    short: shortSubject(r.provider, r.verified.subject),
+    bound: r.subject,
+    name: r.display?.name ?? r.verified.display?.name,
+    photo: avatar?.startsWith("data:image/") ? avatar : undefined,
+    category: attested ? `Attested by ${r.verified.attester ?? "the provider"}` : "Their own key",
+    attested,
+    status,
+    statusLabel,
+    validity: `${r.expiresAt <= now ? "Expired" : "Valid until"} ${date(r.expiresAt)}`,
+    issued: date(r.verifiedAt),
+    shared: `Checked ${ago(r.checkedAt, now)}`,
+    refusedBy: [],
   };
 }
 

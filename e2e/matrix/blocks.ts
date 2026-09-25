@@ -9,6 +9,7 @@ import { strangerInvoice } from "../support/bolt11";
 import { setClipboard } from "../support/clipboard";
 import { startTestDomain, type TestDomain } from "../support/domain";
 import { GIF } from "../support/fixtures";
+import { closeIdentities, openIdentities, shareIdentity, theirCards, theirFace } from "../support/identities";
 import { injectNostrSigner } from "../support/nostrSigner";
 import { LocalOidcIssuer } from "../support/oidcIssuer";
 import type { LocalRelay } from "../support/relay";
@@ -421,18 +422,16 @@ export const identity: Block = {
     if (!w.identity) return;
     await w.identity.add();
     await openChat(a);
-    await chatOption(a, "chat-identities-open");
-    await a.page.getByTestId("chat-identities").getByTestId("chat-identity-share").click();
-    await expect(a.page.getByTestId("chat-identity-mine-status")).toHaveText("Shared · verified by your contact", { timeout: 90_000 });
-    await a.page.getByTestId("chat-identities").getByRole("button", { name: either("Close") }).click();
+    await shareIdentity(a, undefined, { timeout: 90_000 });
+    await closeIdentities(a);
     await openChat(b);
     await expect(b.page.getByTestId("chat-identity-badges")).toBeVisible({ timeout: 60_000 });
-    await chatOption(b, "chat-identities-open");
-    const received = b.page.getByTestId("chat-identity-received");
+    await openIdentities(b);
+    const received = theirCards(b);
     await expect(received).toHaveCount(1);
-    await expect(received).toHaveAttribute("data-status", "verified");
+    await expect(theirFace(b)).toHaveAttribute("data-status", "verified");
     if (w.identity.seen) await expect(received).toContainText(w.identity.seen);
-    await b.page.getByTestId("chat-identities").getByRole("button", { name: either("Close") }).click();
+    await closeIdentities(b);
   },
 };
 

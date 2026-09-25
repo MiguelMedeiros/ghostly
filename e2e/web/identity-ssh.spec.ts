@@ -1,4 +1,5 @@
 import { expect, test, type Peer } from "../support/fixtures";
+import { closeIdentities, openIdentities, shareIdentity, theirCards, theirFace, turnTheirs } from "../support/identities";
 import { pair } from "../support/paired";
 import { testSshKey, type TestSshKey } from "../support/ssh";
 
@@ -9,12 +10,6 @@ import { testSshKey, type TestSshKey } from "../support/ssh";
  */
 const chatId = (peer: Peer) => peer.page.evaluate(() => location.hash);
 const go = (peer: Peer, hash: string) => peer.page.evaluate(h => { location.hash = h; }, hash);
-async function identities(peer: Peer) {
-  await peer.page.getByTitle("Options").click();
-  await peer.page.getByTestId("chat-identities-open").click();
-  return peer.page.getByTestId("chat-identities");
-}
-const close = (peer: Peer) => peer.page.getByTestId("chat-identities").getByRole("button", { name: "Close" }).click();
 
 async function stubGitHub(peer: Peer, published: Map<string, string[]>, asked: string[]) {
   await peer.context.route("https://api.github.com/**", route => {
@@ -73,32 +68,29 @@ test("an SSH key proves a GitHub account, shared with one contact only, and a re
 
   // Shared with Bob only. His app checks the signature and GitHub's key list itself.
   await go(alice, withBob);
-  let dialog = await identities(alice);
-  await dialog.getByTestId("chat-identity-share").click();
-  await expect(dialog.getByTestId("chat-identity-mine-status")).toHaveText("Shared · verified by your contact");
-  await close(alice);
+  await shareIdentity(alice);
+  await closeIdentities(alice);
   await expect(bob.page.getByTestId("chat-identity-badges")).toBeVisible();
-  dialog = await identities(bob);
-  const received = dialog.getByTestId("chat-identity-received");
-  await expect(received).toHaveCount(1);
-  await expect(received).toHaveAttribute("data-status", "verified");
-  await expect(received).toHaveAttribute("data-provider", "ssh-github");
-  await received.getByText("Details").click();
-  await expect(received.getByTestId("chat-identity-received-subject")).toHaveText("octo-cat");
-  await expect(received).toContainText("GitHub: octo-cat (via published SSH key)");
+  await openIdentities(bob);
+  await expect(theirCards(bob)).toHaveCount(1);
+  await expect(theirFace(bob)).toHaveAttribute("data-status", "verified");
+  const back = await turnTheirs(bob);
+  await expect(back).toHaveAttribute("data-provider", "ssh-github");
+  await expect(back.getByTestId("chat-identity-received-subject")).toHaveAttribute("title", "octo-cat");
+  await expect(back).toContainText("GitHub: octo-cat (via published SSH key)");
   expect(asked.filter(a => a.startsWith("ssh-bob"))).toEqual(["ssh-bob https://api.github.com/users/octo-cat/keys?per_page=100"]);
 
   // The key leaves the account: Bob's re-check says it can no longer be confirmed, never "verified".
   published.set("octo-cat", [other.publicKey]);
-  await received.getByTestId("chat-identity-recheck").click();
-  await expect(received).toHaveAttribute("data-status", "unconfirmed");
-  await expect(received).toContainText("does not list the key that signed");
-  await close(bob);
+  await back.getByTestId("chat-identity-recheck").click();
+  await expect(back).toHaveAttribute("data-status", "failed");
+  await expect(back).toContainText("does not list the key that signed");
+  await closeIdentities(bob);
 
   // Carol was never shown it, and her app never asked GitHub about anyone.
-  dialog = await identities(carol);
-  await expect(dialog.getByTestId("chat-identity-received")).toHaveCount(0);
-  await close(carol);
+  await openIdentities(carol);
+  await expect(theirCards(carol)).toHaveCount(0);
+  await closeIdentities(carol);
   await expect(carol.page.getByTestId("chat-identity-badges")).toHaveCount(0);
   expect(asked.filter(a => a.startsWith("ssh-carol") || a.includes("UNEXPECTED"))).toEqual([]);
 });
@@ -127,17 +119,15 @@ test("a bare SSH key is proven on the device, and another key's signature is ref
   await expect(add).toHaveCount(0);
 
   await go(alice, chat);
-  const dialog = await identities(alice);
-  await dialog.getByTestId("chat-identity-share").click();
-  await expect(dialog.getByTestId("chat-identity-mine-status")).toHaveText("Shared · verified by your contact");
-  await close(alice);
-  const received = (await identities(bob)).getByTestId("chat-identity-received");
-  await expect(received).toHaveAttribute("data-status", "verified");
-  await received.getByText("Details").click();
-  await expect(received).toContainText("SSH signature (nistp256)");
+  await shareIdentity(alice);
+  await closeIdentities(alice);
+  await openIdentities(bob);
+  await expect(theirFace(bob)).toHaveAttribute("data-status", "verified");
+  const back = await turnTheirs(bob);
+  await expect(back).toContainText("SSH signature (nistp256)");
   // A re-check looks for a revocation of the proof key; the signature itself needs no forge.
-  await received.getByTestId("chat-identity-recheck").click();
-  await expect(received.getByTestId("chat-identity-recheck")).toHaveText("Check again");
-  await expect(received).toHaveAttribute("data-status", "verified");
+  await back.getByTestId("chat-identity-recheck").click();
+  await expect(back.getByTestId("chat-identity-recheck")).toHaveText("Check again");
+  await expect(back).toHaveAttribute("data-status", "verified");
   expect(asked).toEqual([]);
 });

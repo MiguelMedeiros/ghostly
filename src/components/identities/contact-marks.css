@@ -1,0 +1,57 @@
+/* A contact's identities as small marks (ContactMarks.tsx): beside a name in the chat list and a group's member list,
+   and stacked in the chat's header. The tiles are ProviderIcons.tsx's; the states are drawn over them. */
+.badge-mark{position:relative;display:inline-grid;place-items:center;flex:none;width:var(--mark,14px);height:var(--mark,14px);border-radius:calc(var(--mark,14px) * .28);forced-color-adjust:none}
+.badge-mark-tile{display:grid;place-items:center;width:100%;height:100%;border-radius:inherit;overflow:hidden}
+.badge-mark-tile svg{width:calc(var(--mark,14px) * .66);height:calc(var(--mark,14px) * .66)}
+.badge-mark-plain{background:var(--theme-surface-alt);color:var(--theme-text-secondary);box-shadow:inset 0 0 0 1px var(--theme-border)}
+
+/* Revoked: greyed and struck through. Expired: greyed. */
+.badge-mark[data-state=revoked] .badge-mark-tile,.badge-mark[data-state=expired] .badge-mark-tile{filter:grayscale(1);opacity:.45}
+.badge-mark[data-state=revoked]::after{content:"";position:absolute;left:-1px;right:-1px;top:50%;height:1.5px;border-radius:1px;background:var(--theme-text-secondary);transform:rotate(-45deg)}
+/* Expiring soon: a small clock on the corner. Check failed: an amber dot there. */
+.badge-mark-flag{position:absolute;right:calc(var(--mark,14px) * -.22);bottom:calc(var(--mark,14px) * -.22);display:grid;place-items:center;width:calc(var(--mark,14px) * .55);height:calc(var(--mark,14px) * .55);min-width:7px;min-height:7px;border-radius:999px;box-shadow:0 0 0 1.5px var(--ring,var(--theme-sidebar-bg))}
+.badge-mark-flag[data-flag=expiring]{background:#f59e0b;color:#1a1204}
+.badge-mark-flag[data-flag=failed]{background:#f59e0b}
+.badge-mark-flag svg{width:80%;height:80%}
+
+/* The row: two marks and "+N"; in a narrow row one mark, the "+N" counting the other. The row is the container. */
+.contact-row{container:contact-row / inline-size}
+.contact-marks{display:inline-flex;align-items:center;gap:3px;flex:none;line-height:1}
+.contact-marks-more{flex:none;padding:0 4px;border-radius:999px;background:var(--theme-surface-hover);color:var(--theme-text-secondary);font-size:10px;font-weight:600;line-height:14px;font-variant-numeric:tabular-nums}
+.contact-marks [data-narrow]{display:none}
+@container contact-row (max-width: 240px){
+ .contact-marks [data-wide]{display:none}
+ .contact-marks [data-narrow]{display:inline-block}
+}
+
+/* The header's stack: marks overlapping like avatars, then one check when every mark shown is verified. 3 marks in a
+   wide column, 2 in a narrow one, 1 on a phone; the "+N" counts the rest. The chat's column is the container. */
+.chat-column{container:chat-column / inline-size}
+.identity-stack{--mark:20px;--ring:var(--theme-panel-header);display:inline-flex;align-items:center;flex:none;gap:4px;padding:2px 4px 2px 2px;border-radius:999px;cursor:pointer;background:transparent;border:0;color:inherit}
+.identity-stack:hover{background:var(--theme-surface-hover)}
+.identity-stack:focus-visible{outline:2px solid var(--theme-accent);outline-offset:1px}
+.identity-stack-marks{display:inline-flex;align-items:center}
+.identity-stack-marks>.badge-mark{box-shadow:0 0 0 2px var(--ring);border-radius:999px}
+.identity-stack-marks>.badge-mark .badge-mark-tile{border-radius:999px}
+.identity-stack-marks>.badge-mark+.badge-mark{margin-inline-start:-6px}
+.identity-stack-marks>.badge-mark:nth-child(1){z-index:3}
+.identity-stack-marks>.badge-mark:nth-child(2){z-index:2}
+.identity-stack-marks>.badge-mark:nth-child(3){z-index:1}
+.identity-stack-check{display:grid;place-items:center;color:var(--theme-accent)}
+.identity-stack .contact-marks-more{line-height:16px}
+.identity-stack [data-upto]{display:none;align-items:center;gap:4px}
+.identity-stack [data-upto="3"]{display:inline-flex}
+@container chat-column (max-width: 639px){
+ .identity-stack [data-upto="3"]{display:none}
+ .identity-stack [data-upto="2"]{display:inline-flex}
+}
+@container chat-column (max-width: 479px){
+ .identity-stack [data-upto="2"]{display:none}
+ .identity-stack [data-upto="1"]{display:inline-flex}
+}
+/* The marks themselves: the first always, the second from 480px, the third from 640px. */
+@container chat-column (max-width: 639px){ .identity-stack-marks>.badge-mark:nth-child(3){display:none} }
+@container chat-column (max-width: 479px){ .identity-stack-marks>.badge-mark:nth-child(2){display:none} }
+
+/* A mark's tooltip: on hover, or a long press on a touch screen. */
+.badge-tip{position:fixed;z-index:70;max-width:min(280px,calc(100vw - 16px));padding:5px 8px;border-radius:8px;background:var(--theme-surface-alt);color:var(--theme-text-primary);border:1px solid var(--theme-border);box-shadow:0 8px 24px rgba(0,0,0,.35);font-size:11px;line-height:1.35;pointer-events:none;white-space:normal}

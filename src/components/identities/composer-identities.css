@@ -29,3 +29,7 @@
 .composer-identities-manage{justify-self:center;min-height:32px;padding:0 8px;border:0;border-radius:6px;background:none;font-size:12px;color:var(--theme-text-muted);cursor:pointer}
 .composer-identities-manage:hover{color:var(--theme-text-primary);text-decoration:underline}
 .composer-identities-manage:focus-visible{outline:2px solid var(--theme-accent,#00c49a);outline-offset:1px}
+
+/* The picker's body (IdentityPicker) lays out in whatever frames it: the composer's sheet, or the chat's identities panel. */
+.identity-picker{display:contents}
+.contact-picker{display:grid;gap:10px;min-width:0}

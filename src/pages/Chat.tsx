@@ -6,8 +6,8 @@ import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { createPortal } from "react-dom";
 import { ChatPaymentsDialog } from "../components/ChatPaymentsDialog";
 import { ChatHoldDialog } from "../components/ChatHoldDialog";
-import { ChatIdentitiesDialog } from "../components/identities/ChatIdentitiesDialog";
-import { IdentityBadges } from "../components/identities/IdentityBadges";
+import { ContactIdentitiesPanel } from "../components/identities/ContactIdentitiesPanel";
+import { IdentityStack } from "../components/identities/ContactMarks";
 import { ChatServicesDialog } from "../components/ChatServicesDialog";
 import { PinIcon } from "../components/PinIcon";
 import { useI18n } from "../contexts/I18nContext";
@@ -352,7 +352,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const showKeySubtitle = true;
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-chat-bg">
+    // The chat's column, and beside it (over it when narrow) the contact's identities: the page is their container.
+    <div className="chat-pane flex-1 h-full">
+    <div className="chat-column flex-1 flex flex-col h-full min-w-0 bg-chat-bg">
       {/* Chat Header */}
       <div className="h-14 header-safe flex items-center justify-between px-4 max-md:ps-1 max-md:pe-1 bg-panel-header border-b border-border shrink-0">
         <div className="flex items-center gap-3 max-md:gap-1.5 min-w-0">
@@ -420,7 +422,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                   </svg>
                 )}
               </p>
-              {paired && <IdentityBadges peerKey={params.peerPubKeyB64} onOpen={() => setShowIdentities(true)} />}
+              {paired && <IdentityStack peerKey={params.peerPubKeyB64} open={showIdentities} onOpen={() => setShowIdentities(open => !open)} />}
               </div>
             )}
             <div ref={connectionRef} className="relative">
@@ -743,9 +745,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
       {showServices && params && (
         <ChatServicesDialog peerPubKey={params.peerPubKeyB64} name={shownName} onClose={() => setShowServices(false)} />
       )}
-      {showIdentities && params && (
-        <ChatIdentitiesDialog peerKey={params.peerPubKeyB64} name={shownName} onClose={() => setShowIdentities(false)} />
-      )}
       {showHold && chatPeer && params && platform && (
         <ChatHoldDialog peer={chatPeer} name={shownName} onClose={() => setShowHold(false)}
           onSave={(enabled) => platform.setChatHold(params.peerPubKeyB64, enabled)} />
@@ -812,6 +811,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           </div>
         </div>
       )}
+    </div>
+    {showIdentities && params && (
+      <ContactIdentitiesPanel peerKey={params.peerPubKeyB64} name={shownName} onClose={() => setShowIdentities(false)} />
+    )}
     </div>
   );
 }

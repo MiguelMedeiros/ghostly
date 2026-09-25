@@ -9,6 +9,7 @@ import { edgeDot, edgeLabel, memberName } from "../lib/groups";
 import { GroupLinkPanel } from "./GroupLinkPanel";
 import { GroupAvatar } from "./GroupAvatar";
 import { avatarFromFile } from "../lib/avatarImage";
+import { ContactMarks } from "./identities/ContactMarks";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -32,6 +33,11 @@ export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClo
   // Contacts: paired chats, minus members and pending invitations. Those without groups are shown, and say why.
   const contacts = (state?.links ?? []).filter(l => l.profile && !live.memberLinks[l.id]);
   const invited = new Set(live.invited);
+  // A member who is also a contact: the identities they shared in that chat. Community members are not contacts.
+  const contactKey = (key: string) => {
+    const linkId = Object.keys(live.memberLinks).find(id => live.memberLinks[id] === key);
+    return linkId ? state?.links.find(l => l.id === linkId)?.peerPubKeyZ32 : undefined;
+  };
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); onClose(); }} aria-labelledby={`${id}-title`} data-testid="group-members-dialog"
     className="m-auto w-[calc(100%_-_2rem)] max-w-md max-h-[90dvh] overflow-y-auto rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <div className="flex items-start justify-between gap-3">
@@ -60,8 +66,8 @@ export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClo
     <ul className="mt-3 max-h-56 space-y-1 overflow-y-auto" data-testid="group-member-list">
       {live.members.map(m => <li key={m.key} data-testid="group-member" data-key={m.key} data-role={m.role} className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-surface-hover">
         <span role="img" aria-label={m.online ? "reachable" : "not reachable"} className={`h-2 w-2 shrink-0 rounded-full ${m.edge || m.me ? edgeDot(m) : m.online ? "bg-accent" : "bg-text-muted"}`} />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm">{memberName(m)}<span className="ml-1.5 font-mono text-[10px] text-text-muted/60">{publicKeyLabel(m.key)}</span></span>
+        <span className="contact-row min-w-0 flex-1">
+          <span className="flex min-w-0 items-center gap-1.5 text-sm"><span className="min-w-0 truncate">{memberName(m)}</span>{!m.me && <ContactMarks peerKey={contactKey(m.key)} testId="group-member-marks" />}<span className="shrink-0 font-mono text-[10px] text-text-muted/60">{publicKeyLabel(m.key)}</span></span>
           {!m.me && <span className="block truncate text-[11px] text-text-muted" data-testid="group-member-status">{edgeLabel(m)}</span>}
         </span>
         {m.role === "admin" && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-accent">admin</span>}
