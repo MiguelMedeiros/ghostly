@@ -1,0 +1,163 @@
+/* Voice messages: the waveform shared by the bubble and the recorder, the recorder's bar, the player. */
+
+.voice-wave {
+  --voice-progress: 0;
+  position: relative;
+  display: block;
+  height: 28px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.voice-wave-bars {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.voice-wave-bar {
+  flex: 1 1 0;
+  min-width: 1.5px;
+  max-width: 3px;
+  border-radius: 2px;
+  background: currentColor;
+}
+.voice-wave-base { color: hsla(0, 0%, 100%, 0.32); }
+.voice-wave-fill {
+  color: var(--voice-fill, var(--color-accent-hover));
+  clip-path: inset(0 calc((1 - var(--voice-progress)) * 100%) 0 0);
+}
+.voice-wave-knob {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--voice-progress) * 100%);
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border-radius: 50%;
+  background: var(--voice-fill, var(--color-accent-hover));
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.12);
+  pointer-events: none;
+}
+.voice-wave:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; border-radius: 4px; }
+
+/* The live waveform while recording: newest on the right, bars that grow in. */
+.voice-live {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  height: 24px;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+}
+.voice-live span {
+  flex: 0 0 2px;
+  border-radius: 2px;
+  background: currentColor;
+  transition: height 80ms linear;
+}
+
+/* The recording bar sits over the composer row; the mic button stays where the finger is. */
+.voice-bar {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inset-inline-end: 48px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-inline: 6px;
+  background: var(--color-panel-header);
+  animation: fade-in 120ms ease-out;
+}
+@media (max-width: 767px) { .voice-bar { inset-inline-end: 52px; } }
+.voice-bar-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--color-danger);
+  animation: voice-blink 1s ease-in-out infinite;
+  flex: none;
+}
+.voice-bar[data-phase="paused"] .voice-bar-dot { animation: none; opacity: 0.45; }
+@keyframes voice-blink { 50% { opacity: 0.2; } }
+
+.voice-slide {
+  margin-inline-start: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  transition: opacity 80ms linear;
+}
+.voice-slide-arrow { animation: voice-nudge 1.2s ease-in-out infinite; }
+@keyframes voice-nudge { 50% { transform: translateX(-4px); } }
+:dir(rtl) .voice-slide-arrow { transform: scaleX(-1); animation: none; }
+
+.voice-record-button[data-mode="hold"] {
+  transform: scale(1.45);
+  transition: transform 120ms ease-out;
+  z-index: 20;
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+.voice-lock {
+  position: absolute;
+  bottom: calc(100% + 16px);
+  inset-inline-end: 4px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 36px;
+  padding: 8px 0;
+  border-radius: 18px;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  animation: fade-in 120ms ease-out;
+}
+.voice-lock[data-near="true"] { color: var(--color-accent); }
+
+.voice-hint {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  inset-inline-end: 0;
+  z-index: 30;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font-size: 13px;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  animation: fade-in 120ms ease-out;
+}
+
+.voice-icon-button {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.voice-icon-button:hover { background: var(--color-surface-hover); color: var(--color-text-primary); }
+.voice-icon-button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.voice-icon-button:disabled { opacity: 0.35; cursor: not-allowed; }
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-bar-dot, .voice-slide-arrow { animation: none; }
+  .voice-record-button[data-mode="hold"] { transition: none; }
+}

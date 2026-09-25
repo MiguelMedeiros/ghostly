@@ -39,7 +39,7 @@ import {
   updateSessionLabel,
 } from "../lib/storage";
 import { chatPath } from "../lib/url";
-import { parseCallSignal, signalHasVideo } from "@ghostly/core";
+import { fileMessageText, parseCallSignal, signalHasVideo, type VoiceMeta } from "@ghostly/core";
 import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 
@@ -167,14 +167,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const textReady = deliveryPeer?.canSendText ?? pairedReady;
   const peerKey = params?.peerPubKeyB64;
   const sendFile = useCallback(
-    async (source: File): Promise<string | null> => {
+    async (source: File, voice?: VoiceMeta): Promise<string | null> => {
       if (!platform || !peerKey) return null;
       if (source.size > platform.maxFileBytes) {
         return `That file is too large (max ${formatFileSize(platform.maxFileBytes)}).`;
       }
       try {
-        const { timestamp, file } = await platform.sendFile(peerKey, source);
-        addSystemMessage({ id: `me_${timestamp}`, text: `📎 ${file.name}`, sender: "me", timestamp, file });
+        const { timestamp, file } = await platform.sendFile(peerKey, source, { voice });
+        addSystemMessage({ id: `me_${timestamp}`, text: fileMessageText(file), sender: "me", timestamp, file });
         window.dispatchEvent(new Event("session-updated"));
         return null;
       } catch (e) {
