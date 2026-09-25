@@ -9,12 +9,13 @@ import { NewGroupDialog } from "./NewGroupDialog";
 import { groupPath, groupRouteId } from "../lib/groups";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { Menu, MenuItem } from "./Menu";
-import { useLocation, Link } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { JoinDialog } from "./JoinDialog";
 import { useBackgroundPoller } from "../hooks/useBackgroundPoller";
 import { useI18n } from "../contexts/I18nContext";
 import { useSettings } from "../contexts/SettingsContext";
 import { AccountBar } from "./AccountBar";
+import { AppBrand } from "./AppBrand";
 import { UpdateBanner } from "./UpdateBanner";
 import {
   listSessions,
@@ -54,7 +55,8 @@ export function Sidebar() {
   const [newMenuOpen, setNewMenuOpen] = useState(false);
   const newMenuRef = useRef<HTMLDivElement>(null);
   const closeNewMenu = () => setNewMenuOpen(false);
-  const groups = useSyncExternalStore(subscribeEngine, engineSnapshot)?.groups ?? [];
+  const engineState = useSyncExternalStore(subscribeEngine, engineSnapshot);
+  const groups = engineState?.groups ?? [];
   const activeGroupId = groupRouteId(location.pathname);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
@@ -148,28 +150,7 @@ export function Sidebar() {
     >
       {/* Header */}
       <div className="sidebar-header h-14 header-safe shrink-0 flex items-center justify-between px-4 bg-panel-header">
-        {/* The brand; in Testnet a small badge sits under the wordmark, out of the header's row, so it never takes the buttons' width. */}
-        <div className="relative flex shrink-0 items-center">
-        <Link to="/" onClick={(e) => { e.preventDefault(); nav.home(); }} aria-label="Go home" title="Go home" className="sidebar-home flex items-center gap-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
-          <svg width="28" height="28" viewBox="0 0 64 64" className="shrink-0">
-            <g transform="translate(12, 8)">
-              <path d="M20 4C10.059 4 2 12.059 2 22v18c0 1.5 1.2 2 2 1.2l4-3.2 4 3.2c.8.6 1.6.6 2.4 0L18 38l3.6 3.2c.8.6 1.6.6 2.4 0L28 38l4 3.2c.8.8 2 .3 2-1.2V22C34 12.059 25.941 4 20 4z" fill="currentColor" className="text-accent"/>
-              <circle cx="13" cy="20" r="3" fill="currentColor" className="text-sidebar-bg"/>
-              <circle cx="27" cy="20" r="3" fill="currentColor" className="text-sidebar-bg"/>
-            </g>
-          </svg>
-          <span className={`sidebar-wordmark whitespace-nowrap text-accent font-bold text-base tracking-tight ${walletMode === "testnet" ? "-translate-y-[7px]" : ""}`}>
-            GHOSTLY
-          </span>
-        </Link>
-        {/* Wherever the app is, it says when its wallets are on test networks: nothing there is money. */}
-        {walletMode === "testnet" && (
-          <Link to="/wallet" onClick={(e) => { e.preventDefault(); nav.place("/wallet"); }} data-testid="testnet-badge" title="Wallets are on test networks: test coins, worth nothing"
-            className="absolute start-9 top-[calc(50%+3px)] rounded-full border border-amber-500/60 bg-amber-500/15 px-1.5 py-px text-[9px] font-bold uppercase leading-[12px] tracking-wider text-amber-500 hover:bg-amber-500/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500">
-            Testnet
-          </Link>
-        )}
-        </div>
+        <AppBrand testnet={walletMode === "testnet"} ready={engineState != null} onHome={() => nav.home()} onWallet={() => nav.place("/wallet")} />
         <div className="grid shrink-0 grid-cols-2 items-stretch gap-1 whitespace-nowrap" data-testid="sidebar-chat-actions">
           {/* New: one click is a chat, as always; the arrow beside it also offers a group. */}
           <div ref={newMenuRef} role="group" aria-label={t("sidebar.new")} data-testid="sidebar-new" className="sidebar-new-split relative flex min-w-0">
