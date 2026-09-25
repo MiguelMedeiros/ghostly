@@ -32,8 +32,8 @@ export function IdCardFace({ card, after, shared }: { card: IdCardContent; after
   return (
     <span className="id-card-face" data-deck="face" data-after={after || undefined} data-status={card.status} data-shared={shared || undefined}>
       <span className="id-card-band">
-        <span className="id-card-issuer">Ghostly · Identity</span>
-        <span className="id-card-status" data-testid={card.status === "expiring" ? "identity-proof-expiring" : undefined}><StatusIcon status={card.status} />{card.statusLabel}</span>
+        <span className="id-card-issuer">Ghostly<span className="id-card-issuer-kind"> · Identity</span></span>
+        <span className="id-card-status" data-testid={card.status === "expiring" ? "identity-proof-expiring" : undefined}><StatusIcon status={card.status} /><span className="id-card-status-text">{card.statusLabel}</span></span>
         <span className="id-card-mark-end" aria-hidden="true">{shared && <span className="id-card-check id-card-check-small">{CHECK}</span>}<ProviderMark provider={card.provider} subject={card.bound} small /></span>
       </span>
       <span className="id-card-photo" aria-hidden="true">
@@ -46,9 +46,9 @@ export function IdCardFace({ card, after, shared }: { card: IdCardContent; after
         <span className="id-card-provider">{card.label}</span>
         {card.name && <span className="id-card-name">{card.name}</span>}
         <span className="id-card-subject" data-testid="identity-proof-subject" title={card.subject}>{card.short}</span>
-        <span className="id-card-field">{card.category}</span>
-        <span className="id-card-field">{card.validity}</span>
-        <span className="id-card-field">{card.shared}</span>
+        <span className="id-card-field id-card-field-category">{card.category}</span>
+        <span className="id-card-field id-card-field-validity">{card.validity}</span>
+        <span className="id-card-field id-card-field-shared">{card.shared}</span>
       </span>
       <span className="id-card-mrz" aria-hidden="true">{machineLine(card.label, card.subject)}</span>
       <span className="id-card-seal" data-deck="ghost" aria-hidden="true">{GHOST}</span>
@@ -61,12 +61,12 @@ export function IdCardFace({ card, after, shared }: { card: IdCardContent; after
 export function AddIdCardFace({ first }: { first: boolean }) {
   return (
     <span className="id-card-face id-card-blank" data-deck="face">
-      <span className="id-card-band"><span className="id-card-issuer">Ghostly · Identity</span></span>
+      <span className="id-card-band"><span className="id-card-issuer">Ghostly<span className="id-card-issuer-kind"> · Identity</span></span></span>
       <span className="id-card-photo" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg></span>
       <span className="id-card-fields">
         <span className="id-card-provider">{first ? "Add your first identity" : "Add identity"}</span>
-        <span className="id-card-field">A Nostr key, a domain, an account…</span>
-        <span className="id-card-field">Shown only in the chats you choose</span>
+        <span className="id-card-field id-card-field-validity">A Nostr key, a domain, an account…</span>
+        <span className="id-card-field id-card-field-shared">Shown only in the chats you choose</span>
       </span>
       <span className="id-card-mrz" aria-hidden="true">{"ID<GHOSTLY<<".padEnd(44, "<")}</span>
       <span className="id-card-seal" data-deck="ghost" aria-hidden="true">{GHOST}</span>

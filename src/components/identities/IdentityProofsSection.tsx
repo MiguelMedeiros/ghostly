@@ -66,7 +66,7 @@ export function IdentityProofsSection() {
       <h2 className="text-sm font-semibold text-accent uppercase tracking-wide">Yours</h2>
       {!entry ? <p className="text-xs text-text-muted">No identity can be added on this device.</p> : <>
         <Deck<Entry> cards={entries} selected={entry.id} onSelect={select} onChoose={id => { if (id === ADD) setAdding(true); }}
-          kind="tabs" panel={PANEL} label="Your identities" name="identity-deck" className="id-deck" hoverDelay={90}
+          kind="tabs" panel={PANEL} label="Your identities" name="identity-deck" className="id-deck"
           testId={e => (e.add ? "identity-add" : "identity-proof")}
           face={(e, { after }) => (e.add ? <AddIdCardFace first={proofs.length === 0} /> : <IdCardFace card={e.card} after={after} />)}
           mark={e => <IdCardMark provider={e.add ? undefined : e.proof.provider} subject={e.add ? undefined : e.card.bound} />} tone={e => (e.add ? "id-card-add" : idCardTone({ provider: e.card.provider, subject: e.card.bound, attested: e.card.attested }))} />

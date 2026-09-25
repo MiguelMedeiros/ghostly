@@ -37,8 +37,6 @@ export interface CardDeckProps {
  blocked?:(card:WalletCard)=>string|undefined;
  /** Largest card and its share of the deck's width. */
  size?:{max:number;share:number};
- /** How long the pointer rests on a card before it comes up, so a pass across the deck does not flip every card. */
- hoverDelay?:number;
  /** The deck's own name for its arrows' test ids. */
  name:string;
  compact?:boolean;
@@ -55,5 +53,5 @@ export function CardDeck({onSelect,onChoose,testId,...props}:CardDeckProps) {
 /** The wallet page's deck: tabs over the chosen card's panel. */
 export function WalletDeck({state,selected,onSelect,testMints}:{state:WalletState;selected:WalletRail;onSelect:(rail:WalletRail)=>void;testMints:readonly string[]}) {
  return <CardDeck cards={walletCards(state,testMints,{badged:true})} selected={selected} onSelect={onSelect} kind="tabs" label="Wallet integrations" name="wallet-deck"
-  testId={rail=>`wallet-card-${rail}`} hoverDelay={90}/>;
+  testId={rail=>`wallet-card-${rail}`}/>;
 }

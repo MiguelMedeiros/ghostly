@@ -23,6 +23,12 @@ import './deck.css';
  */
 /** How far the chosen card rises: less than a card's bottom padding, so no text of the card behind shows under it. */
 const LIFT=9;
+/**
+ * The narrowest a card of the stack may be. Under it (a page squeezed by the chat list, a phone-wide column with a
+ * mouse) the deck is the snapping track instead, one card whole in the centre: cards shrunk to fit a stack are
+ * cards nobody can read.
+ */
+export const STACK_MIN_CARD=210;
 /** The width each deck (by name) last had: a deck opened again starts at it instead of measuring itself first. */
 const lastWidth=new Map<string,number>();
 
@@ -59,8 +65,6 @@ export interface DeckProps<C extends DeckCard> {
  blocked?:(card:C)=>string|undefined;
  /** Largest card and its share of the deck's width. */
  size?:{max:number;share:number};
- /** How long the pointer rests on a card before it comes up, so a pass across the deck does not flip every card. */
- hoverDelay?:number;
  /** The deck's own name: its arrows' test ids (`<name>-prev`/`-next`). */
  name:string;
  /** The kind of deck, as a class on the deck and, suffixed, on its parts (`wallet-deck`, `wallet-deck-track`…). */
@@ -68,16 +72,17 @@ export interface DeckProps<C extends DeckCard> {
  compact?:boolean;
 }
 
-export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,panel,label,testId,face,mark,tone,blocked,size,hoverDelay=0,name,className,compact}:DeckProps<C>) {
+export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,panel,label,testId,face,mark,tone,blocked,size,name,className,compact}:DeckProps<C>) {
  const part=(p:string)=>`deck-${p} ${className}-${p}`;
  const active=Math.max(0,cards.findIndex(card=>card.id===selected));
  const root=useRef<HTMLDivElement>(null),track=useRef<HTMLDivElement>(null),tabs=useRef<(HTMLButtonElement|null)[]>([]);
  const [width,setWidth]=useState(()=>lastWidth.get(name)??0);
  const fine=useFinePointer();
- const mode=fine?'stack':'track';
+ const layout=useMemo(()=>stackLayout(width,cards.length,size&&{max:size.max,share:size.share}),[width,cards.length,size?.max,size?.share]); // eslint-disable-line react-hooks/exhaustive-deps
+ // A mouse gets the stack while its cards stay readable (not yet measured: as it was last time, or a stack).
+ const mode=fine&&(width===0||layout.width>=STACK_MIN_CARD)?'stack':'track';
  const latest=useRef({onSelect,ids:cards.map(card=>card.id),selected,mode});
  latest.current={onSelect,ids:cards.map(card=>card.id),selected,mode};
- const layout=useMemo(()=>stackLayout(width,cards.length,size&&{max:size.max,share:size.share}),[width,cards.length,size?.max,size?.share]); // eslint-disable-line react-hooks/exhaustive-deps
  const strips=useMemo(()=>stackStrips(layout,active),[layout,active]);
  const cardWidth=mode==='track'?Math.round(width*.76):layout.width,cardHeight=Math.round(cardWidth/1.586);
  const trackHeight=cardHeight+LIFT+14;
@@ -171,21 +176,20 @@ export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,
   return ()=>{clearTimeout(timer);el.removeEventListener('scrollend',pick);el.removeEventListener('scroll',debounced);for(const type of ['pointerdown','touchstart','wheel'])el.removeEventListener(type,touched);};
  },[mode,centre]);
 
- // Stack: the card under a resting pointer comes up. Only a pointer that moved counts, never a card moving under a
- // still one, and the strips it reads are the ones on screen now.
- const hover=useRef<{x:number;y:number;timer?:ReturnType<typeof setTimeout>}>({x:NaN,y:NaN});
- useEffect(()=>()=>clearTimeout(hover.current.timer),[]);
+ // Stack: the card under the pointer comes up at once, on every deck alike (the page's and the chat's): the lift's
+ // own spring is the only easing. Only a pointer that moved counts, never a card moving under a still one, and the
+ // strips it reads are the ones on screen now.
+ const hover=useRef({x:NaN,y:NaN});
  const onPointerMove=(e:PointerEvent<HTMLDivElement>)=>{
   const h=hover.current;
   if(mode!=='stack'||e.pointerType!=='mouse'||(e.clientX===h.x&&e.clientY===h.y))return;
   h.x=e.clientX;h.y=e.clientY;
-  clearTimeout(h.timer);
   const i=stripAt(strips,e.clientX-(track.current?.getBoundingClientRect().left??0));
   if(i<0||i===active)return;
-  const id=cards[i].id,go=()=>{if(latest.current.selected!==id){own.current=id;latest.current.onSelect(id);}};
-  if(hoverDelay>0)h.timer=setTimeout(go,hoverDelay);else go();
+  const id=cards[i].id;
+  if(latest.current.selected!==id){own.current=id;latest.current.onSelect(id);}
  };
- const onPointerLeave=()=>{clearTimeout(hover.current.timer);hover.current.x=hover.current.y=NaN;};
+ const onPointerLeave=()=>{hover.current.x=hover.current.y=NaN;};
 
  // The chosen card's panel may focus a field as it mounts (Cashu's amount): after an arrow key, the card keeps the focus.
  const focusAfter=useRef<number|null>(null);

@@ -54,8 +54,8 @@
  background:conic-gradient(from 200deg,#8fd3ff,#c6a5ff,#ffb3d9,#ffe29a,#9ff5c9,#8fd3ff);box-shadow:inset 0 0 0 2px rgba(255,255,255,.35),0 2px 8px -2px rgba(0,0,0,.6);mix-blend-mode:screen}
 .id-card-seal>svg{width:58%;height:auto}
 .id-card-sheen{z-index:3}
-/* A small card (a chat's picker): the fields under the seal stop short of it rather than run beneath it. */
-.id-deck.deck-compact .id-card-field{padding-right:calc(clamp(26px,calc(var(--card-w) * .105),40px) + 4px)}
+/* The fields under the seal stop short of it rather than run beneath it. */
+.id-card-field{padding-right:calc(clamp(26px,calc(var(--card-w) * .105),40px) + 4px)}
 
 /* Shared in this chat (the chat's picker): a check seal in the app's accent, pinned to the photo's corner so it shows
    on the strip of every card before the chosen one, and beside the mark on the trailing edge of the ones after it. */
@@ -78,3 +78,27 @@
 .id-deck-marks span.id-deck-mark{display:grid;place-items:center;width:14px;height:14px;border-radius:4px;overflow:hidden;opacity:1;transition:none;transform:none;color:#fff}
 .id-deck-marks span.id-deck-mark-plain{color:inherit}
 .id-deck-marks .id-deck-mark svg{width:10px;height:10px}
+
+/* The card chooses what it shows by its own width (a container query on the face), wherever it is: a page's stack, a
+   narrow column's track, a chat's picker, a flipped card's front. Large (250px and up): everything. Medium: the band,
+   the photo, the identity and one status line (its validity); no machine line. Small (under 190px): the provider's
+   mark and name and the status seal alone. Text a size leaves out stays in the card's accessible name (hidden to the
+   eye only); what is decoration goes. Every line is one line, cut with an ellipsis, never mid-word or under the seal. */
+.id-card-face{container:id-card/inline-size}
+.id-card-issuer-kind,.id-card-status-text{white-space:nowrap}
+@container id-card (width < 250px){
+ .id-card-mrz{display:none}
+ .id-card-face{grid-template-rows:auto minmax(0,1fr)}
+ .id-card-issuer-kind,.id-card-field-category,.id-card-field-shared{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+ .id-card-fields{align-content:center}
+}
+@container id-card (width < 190px){
+ .id-card-face{grid-template-columns:minmax(0,1fr);grid-template-areas:"band" "fields";column-gap:0}
+ .id-card-photo,.id-card-seal{display:none}
+ .id-card-issuer{flex:1;min-width:0}
+ .id-card-status{padding:3px;margin-left:auto}
+ .id-card-status-text,.id-card-name,.id-card-subject,.id-card-field-validity{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+ .id-card-mark-end{display:flex;align-items:center;gap:4px}
+ .id-card-field{padding-right:0}
+ .id-card-provider{font-size:16px}
+}
