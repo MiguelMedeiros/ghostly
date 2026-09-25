@@ -209,11 +209,11 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, polling 
 function KeyRow({ label, value, testId }: { label: string; value: string; testId: string }) {
   const { copied, copy } = useCopyKey(value);
   return (
-    <div className="flex justify-between gap-3">
-      <dt className="shrink-0">{label}</dt>
+    <div className="grid grid-cols-[5.5rem_1fr] gap-x-3">
+      <dt>{label}</dt>
       <dd className="min-w-0">
         <button type="button" data-testid={testId} onClick={copy} title="Click to copy" aria-label={`${label}: ${value}. Copy`}
-          className={`break-all bg-transparent p-0 text-end font-mono transition-colors hover:text-accent ${copied ? "text-accent" : "text-text-secondary"} ${focus}`}>
+          className={`break-all rounded bg-transparent p-0 text-start font-mono transition-colors hover:text-accent ${copied ? "text-accent" : "text-text-secondary"} ${focus}`}>
           {copied ? "Copied!" : value}
         </button>
       </dd>
