@@ -239,7 +239,7 @@ describe("Pubky removal", () => {
     const folder = "9".repeat(64);
     const approved = session();
     sdk.next = async () => approved;
-    await provider.unpublish!.run({ statement, evidence: { folder } }, context().ctx);
+    await provider.unpublish!.run({ id: statement.id, subject: me, evidence: { folder } }, context().ctx);
     expect(sdk.started[0].capabilities).toBe(`/pub/ghostly.app/proofs/${folder}/:w`);
     expect(approved.storage.delete).toHaveBeenCalledWith(pubkyProofPath(folder, statement.id));
     expect(approved.storage.putText).not.toHaveBeenCalled();
@@ -250,7 +250,7 @@ describe("Pubky removal", () => {
     const provider = createPubkyIdentityProvider();
     const approved = session(createIdentity().pubKeyZ32);
     sdk.next = async () => approved;
-    await expect(provider.unpublish!.run({ statement: statementFor(me), evidence: { folder: "9".repeat(64) } }, context().ctx)).rejects.toThrow(/another Pubky identity/);
+    await expect(provider.unpublish!.run({ id: statementFor(me).id, subject: me, evidence: { folder: "9".repeat(64) } }, context().ctx)).rejects.toThrow(/another Pubky identity/);
     expect(approved.storage.delete).not.toHaveBeenCalled();
   });
 });

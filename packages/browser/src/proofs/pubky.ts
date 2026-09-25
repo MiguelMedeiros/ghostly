@@ -135,7 +135,10 @@ export async function withPubkyApproval<T>(options: PubkyApprovalOptions, work: 
       run: () => { opened.window = (options.openPassport ?? openPassportWindow)(passportUrl(url)) ?? null; },
     },
     qr: { value: url, label: "Or scan with Pubky Ring" },
-    notes: ["An identity Passport makes with Google is recovered with Google plus Passport: both are needed, neither alone can."],
+    notes: [
+      "An identity Passport makes with Google is recovered with Google plus Passport: both are needed, neither alone can.",
+      "The code is your request: scan it yourself, and do not share it.",
+    ],
   });
 
   // A poll can hold the relay's long poll open; a cancel does not wait for it (what lands later is signed out).

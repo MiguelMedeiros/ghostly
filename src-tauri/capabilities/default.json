@@ -37,6 +37,7 @@
     "allow-updater-can-install",
     "allow-open-project-link",
     "allow-open-payment-link",
+    "allow-open-pubky-passport",
     "allow-share-text",
     "allow-read-clipboard-text",
     "allow-oidc-loopback-start",

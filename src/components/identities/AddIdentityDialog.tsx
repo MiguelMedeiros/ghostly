@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { identityStatement, type IdentityStatement } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import { availableSigners } from "@ghostly/browser/proofs/verify";
-import type { IdentityProofProvider, IdentitySigner, SignerContext, SignerInstructions } from "@ghostly/browser/proofs/contract";
+import type { ApprovalRequest, IdentityProofProvider, IdentitySigner, SignerContext, SignerInstructions } from "@ghostly/browser/proofs/contract";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
 import { addableProviders, identityPlatform } from "../../lib/identities";
 import { FieldGrid } from "../layout";
 import { Button, Notice, input } from "../wallet/ui";
 import { ProviderMark, StatusPill } from "./ProviderMark";
+import { ApprovalPanel } from "./ApprovalPanel";
 import { Select } from "../ui/Select";
 import { SubjectPreviewFacts } from "./SubjectPreview";
 import { applicableSigners, useSubjectPreview } from "./useSubjectPreview";
@@ -43,6 +44,8 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
   const [pasted, setPasted] = useState("");
   const [pending, setPending] = useState<Pending | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState(""), [progress, setProgress] = useState(""), [authUrl, setAuthUrl] = useState("");
+  /** A request the signer waits on elsewhere (Pubky Passport, Pubky Ring): shown in place of the form. */
+  const [approval, setApproval] = useState<ApprovalRequest | null>(null);
   const abort = useRef<AbortController | null>(null);
   const draft = useRef<string | null>(null);
   const dialog = useRef<HTMLDivElement>(null);
@@ -74,11 +77,12 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
   }
   async function run(work: (ctx: SignerContext) => Promise<void>) {
     const controller = new AbortController(); abort.current = controller;
-    setBusy(true); setError(""); setProgress(""); setAuthUrl("");
-    const ctx: SignerContext = { values, signal: controller.signal, onAuthUrl: setAuthUrl, onProgress: setProgress };
+    setBusy(true); setError(""); setProgress(""); setAuthUrl(""); setApproval(null);
+    const ctx: SignerContext = { values, signal: controller.signal, onAuthUrl: setAuthUrl, onProgress: setProgress,
+      onApproval: request => { if (!controller.signal.aborted) setApproval(request); } };
     try { await work(ctx); }
     catch (e) { if (!controller.signal.aborted) setError(message(e)); setProgress(""); }
-    finally { setBusy(false); if (abort.current === controller) abort.current = null; setValues(v => Object.fromEntries(Object.keys(v).map(k => [k, signer?.kind === "in-app" && signer.fields?.find(f => f.name === k)?.kind === "secret" ? "" : v[k]]))); }
+    finally { setBusy(false); setApproval(null); if (abort.current === controller) abort.current = null; setValues(v => Object.fromEntries(Object.keys(v).map(k => [k, signer?.kind === "in-app" && signer.fields?.find(f => f.name === k)?.kind === "secret" ? "" : v[k]]))); }
   }
 
   const start = () => void run(async ctx => {
@@ -169,6 +173,14 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
               <Button onClick={close}>Cancel</Button>
               <Button variant="primary" data-testid="add-identity-finish" disabled={busy || (signer?.kind === "external-tool" && !pasted.trim())} onClick={finish}>{busy ? (signer?.kind === "redirect" ? "Waiting…" : "Checking…") : signer?.kind === "publish" ? "Check and save" : signer?.kind === "redirect" ? `Continue with ${provider!.label}` : "Verify and save"}</Button>
             </div>
+          </div>
+        ) : approval ? (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <ProviderMark provider={provider.id} />
+              <p className="min-w-0 flex-1 text-sm text-text-primary">{provider.label}</p>
+            </div>
+            <ApprovalPanel request={approval} onCancel={() => { abort.current?.abort(); setApproval(null); setProgress(""); setError("Cancelled. Nothing was saved."); }} />
           </div>
         ) : (
           <div className="space-y-4">

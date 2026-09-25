@@ -15,6 +15,8 @@ import { providerForIssuer } from "@ghostly/browser/proofs/oidc/providers";
  *  - Google "G" and the Microsoft four squares: drawn after the brands' sign-in
  *    guidelines (full colour on white), not recoloured. They stay their owners' trademarks.
  *  - Nostr: the community mark by bembureda (mbarulli/nostr-logo, CC0), as before.
+ *  - Pubky: the Pubky brand mark (src/assets/identities/pubky.svg, from pubky.org), white on Pubky's near-black,
+ *    as pubky.org shows it; it stays Pubky's trademark.
  *  - Domain, OpenPGP, SSH, DID (a key at the centre of a graph) and the neutral account mark: original line drawings.
  *
  * `ghostly` is not a proof provider: it is the mark of the profile's own Ghostly identity (its ID card, the
@@ -47,6 +49,9 @@ const BITCOIN_B = "M17.288 10.291c.24-1.59-.974-2.45-2.64-3.03l.54-2.153-1.315-.
 const BLUESKY = "M5.202 2.857C7.954 4.922 10.913 9.11 12 11.358c1.087-2.247 4.046-6.436 6.798-8.501C20.783 1.366 24 .213 24 3.883c0 .732-.42 6.156-.667 7.037-.856 3.061-3.978 3.842-6.755 3.37 4.854.826 6.089 3.562 3.422 6.299-5.065 5.196-7.28-1.304-7.847-2.97-.104-.305-.152-.448-.153-.327 0-.121-.05.022-.153.327-.568 1.666-2.782 8.166-7.847 2.97-2.667-2.737-1.432-5.473 3.422-6.3-2.777.473-5.899-.308-6.755-3.369C.42 10.04 0 4.615 0 3.883c0-3.67 3.217-2.517 5.202-1.026";
 const NOSTR = "M210.8 199.4c0 3.1-2.5 5.7-5.7 5.7h-68c-3.1 0-5.7-2.5-5.7-5.7v-15.5c.3-19 2.3-37.2 6.5-45.5 2.5-5 6.7-7.7 11.5-9.1 9.1-2.7 24.9-.9 31.7-1.2 0 0 20.4.8 20.4-10.7s-9.1-8.6-9.1-8.6c-10 .3-17.7-.4-22.6-2.4-8.3-3.3-8.6-9.2-8.6-11.2-.4-23.1-34.5-25.9-64.5-20.1-32.8 6.2.4 53.3.4 116.1v8.4c0 3.1-2.6 5.6-5.7 5.6H57.7c-3.1 0-5.7-2.5-5.7-5.7v-144c0-3.1 2.5-5.7 5.7-5.7h31.7c3.1 0 5.7 2.5 5.7 5.7 0 4.7 5.2 7.2 9 4.5 11.4-8.2 26-12.5 42.4-12.5 36.6 0 64.4 21.4 64.4 68.7v83.2ZM150 99.3c0-6.7-5.4-12.1-12.1-12.1s-12.1 5.4-12.1 12.1 5.4 12.1 12.1 12.1S150 106 150 99.3Z";
 
+/** The Pubky brand mark (src/assets/identities/pubky.svg), in its own 23.58 × 36 box. */
+const PUBKY = "M11.7881 10.7363C16.7749 10.7363 20.8184 14.7761 20.8184 19.7598C20.8183 21.9163 20.06 23.8939 18.8008 25.4434L22.2559 36H1.32129L4.77539 25.4434C3.51626 23.8939 2.75889 21.9161 2.75879 19.7598C2.75879 14.7762 6.80135 10.7365 11.7881 10.7363ZM11.7881 14.9863C9.14981 14.9865 7.01172 17.1237 7.01172 19.7598C7.01184 21.5865 8.03833 23.174 9.54785 23.9766L9.70312 24.0586L7.18652 31.75H16.3906L13.873 24.0586L14.0283 23.9766C15.538 23.1741 16.5653 21.5866 16.5654 19.7598C16.5654 17.1236 14.4265 14.9863 11.7881 14.9863ZM11.791 0.00390625L11.792 0.00488281L14.6377 3.7334L18.3076 1.42383L19.3174 5.31348L23.5771 4.41992L19.7031 10.7432C17.5912 8.88986 14.8222 7.76655 11.792 7.76562H11.7852C8.75499 7.76654 5.986 8.88989 3.87402 10.7432L0 4.41992L4.25879 5.31348L5.26953 1.42383L8.93848 3.7334L11.7881 0L11.791 0.00390625Z";
+
 /** The Ghostly ghost (src/assets/identities/ghostly.svg, drawn in a 24-unit box), eyes cut out of its tile. */
 const GHOST = "M12 2C7.582 2 4 5.582 4 10v8c0 .75.6 1 1 .6l2-1.6 2 1.6c.4.3.8.3 1.2 0L12 17l1.8 1.6c.4.3.8.3 1.2 0l2-1.6 2 1.6c.4.4 1 .15 1-.6v-8c0-4.418-3.582-8-8-8z";
 
@@ -58,6 +63,8 @@ const gitlab: ProviderIcon = { tile: `bg-[#fc6d26] ${white}`, mark: simple(GITLA
 
 export const PROVIDER_ICONS: Record<string, ProviderIcon> = {
   nostr: { tile: `bg-[#7138b7] ${white}`, fill: 0.7, mark: size => svg(size, "0 0 256 256", <path fill="currentColor" d={NOSTR} />) },
+  // A hairline keeps the near-black tile from vanishing on a dark theme.
+  pubky: { tile: `bg-[#05050a] ring-1 ring-inset ring-white/15 ${white}`, fill: 0.66, mark: size => svg(size, "0 0 23.5771 36", <path fill="currentColor" d={PUBKY} />) },
   domain: {
     tile: `bg-[#0e7490] ${white}`,
     mark: size => svg(size, "0 0 24 24", <g {...stroke}><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a13.5 13.5 0 0 1 3.5 9 13.5 13.5 0 0 1-3.5 9 13.5 13.5 0 0 1-3.5-9A13.5 13.5 0 0 1 12 3Z" /></g>),

@@ -31,6 +31,7 @@ export function createPubkyIdentityProvider(options: PubkyIdentityOptions = {}):
   const signer: InAppSigner<PubkyEvidence> = {
     id: "pubky-auth", kind: "in-app",
     label: "Pubky Ring or Pubky Passport",
+    action: "Continue",
     description: "One request: approve it in Pubky Passport in your browser, or scan it with Pubky Ring. Ghostly only asks to write one small file to a new folder of your homeserver.",
     run(ctx, work) {
       const folder = newPubkyProofFolder();
@@ -93,11 +94,12 @@ export function createPubkyIdentityProvider(options: PubkyIdentityOptions = {}):
     },
     unpublish: {
       label: "Approve and remove",
-      description: "The proof file stays on your homeserver until it is deleted, and deleting it needs one more approval in Pubky Ring or Passport: Ghostly kept no access. Either way, a revocation is published that contacts check.",
-      run({ statement, evidence }, ctx) {
-        const path = pubkyProofPath(evidence.folder, statement.id);
+      skipLabel: "Remove, keep the file",
+      description: "The proof file stays on your homeserver until it is deleted, and deleting it takes one more approval in Pubky Ring or Passport: Ghostly kept no access to it. Either way, a revocation is published for your contacts’ apps to find.",
+      run({ id, subject, evidence }, ctx) {
+        const path = pubkyProofPath(evidence.folder, id);
         return approve(pubkyProofCapability(evidence.folder), ctx, async session => {
-          if (session.key !== statement.binding.subject) throw new Error("That is another Pubky identity: approve with the one this proof is for");
+          if (session.key !== subject) throw new Error("That is another Pubky identity: approve with the one this proof is for");
           ctx.onProgress("Deleting the proof file from your homeserver…");
           await session.delete(path);
         });

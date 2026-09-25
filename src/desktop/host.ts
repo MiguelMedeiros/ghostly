@@ -130,6 +130,8 @@ export function createDesktopHost(version: string) {
     atproto: desktopAtproto,
     // A WebView cannot hand a lightning: or bitcoin: link to the system; Rust does, for those two schemes only.
     openPaymentLink: (uri) => invoke("open_payment_link", { url: uri }),
+    // Passport in the system browser: the SDK's relay brings the approval back either way.
+    openPubkyPassport: (url) => invoke("open_pubky_passport", { url }),
     // WKWebView has no Web Share API; the system's share sheet is shown by Rust (macOS; elsewhere false: the page copies).
     shareText: (text, anchor) => invoke<boolean>("share_text", { text, anchor }),
     // WKWebView's readText() shows a "Paste" callout that needs a second click; Rust reads the text (main window only, bounded).

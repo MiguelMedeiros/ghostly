@@ -208,7 +208,7 @@ export class IdentityProofs {
     const sharedWith = this.host.linkIds().filter(l => this.host.ledger(l)?.shared.some(s => s.id === id && s.status !== "withdrawn" && s.status !== "withdrawal-pending" && s.status !== "rejected")).length;
     const publicUri = this.publicUri(p);
     return { id, provider: p.binding.provider, subject: p.binding.subject, key: p.binding.key, verified: p.verified,
-      issuedAt: p.binding.issuedAt, expiresAt: Math.min(p.binding.expiresAt, p.verified.expiresAt ?? Infinity), createdAt: p.createdAt, sharedWith,
+      issuedAt: p.binding.issuedAt, expiresAt: Math.min(p.binding.expiresAt, p.verified.expiresAt ?? Infinity), createdAt: p.createdAt, sharedWith, evidence: p.evidence,
       ...(publicUri ? { publicUri } : {}) };
   }
 

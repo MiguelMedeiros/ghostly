@@ -14,6 +14,7 @@
 
 /* Each provider's ink, lighter than its brand colour where that is dark, so it reads on the card. */
 .id-card-nostr{--card-rgb:176,128,245}
+.id-card-pubky{--card-rgb:224,224,227}
 .id-card-domain{--card-rgb:56,189,214}
 .id-card-openpgp{--card-rgb:106,160,235}
 .id-card-bitcoin{--card-rgb:247,147,26}

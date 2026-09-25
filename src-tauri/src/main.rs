@@ -84,6 +84,7 @@ macro_rules! commands {
             commands::updater_can_install,
             commands::open_project_link,
             commands::open_payment_link,
+            commands::open_pubky_passport,
             share::share_text,
             clipboard::read_clipboard_text,
             oidc::oidc_loopback_start,
