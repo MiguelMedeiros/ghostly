@@ -103,6 +103,19 @@ export class TransportSwitch {
     this.failed = "";
     this.announce(); this.reconcile();
   }
+  /**
+   * This side's user chose the transport its policy now names. `again`: the one it named already. Choosing again
+   * what this side's standing choice names raises no intent: it would move nothing, and a raised intent could beat
+   * a newer choice of the contact's still on its way (the tie goes to the lower key). It still counts as a retry.
+   * Choosing again while the contact's choice stands is an override, and raises it.
+   */
+  chose(again = false): void { this.changed(!(again && this.standing)); }
+  /** This side's explicit choice is the one that stands (its intent is the higher, or wins the tie). */
+  get standing(): boolean {
+    if (this.intent === 0) return false;
+    const local = this.local();
+    return !this.remote || this.winner(local, this.remote) === local;
+  }
   keep(reason?: string): void {
     const target = this.plan?.choices[0];
     if (this.plan) this.settled = this.signature(this.plan.local, this.plan.remote);

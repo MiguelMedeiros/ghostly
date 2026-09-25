@@ -167,9 +167,12 @@ describe("one chat's choices", () => {
     const chat = await addChat(node, link);
     await expect(node.setTransportPreference({ linkId: chat.id, preferred: "hyperdht/1", fallback: true })).rejects.toThrow("Transport unavailable");
     await expect(node.setTransportPreference({ linkId: chat.id, preferred: "iroh/1", fallback: "no" as never })).rejects.toThrow("Transport unavailable");
+    // A new transport is a choice; the same one with another fallback (the Fallback switch) is not.
     await node.setTransportPreference({ linkId: chat.id, preferred: "iroh/1", fallback: false });
-    expect(link.setTransportPreference).toHaveBeenCalledWith("iroh/1", false);
+    expect(link.setTransportPreference).toHaveBeenLastCalledWith("iroh/1", false, false, true);
     expect(await saved(chat.id)).toMatchObject({ preferredTransport: "iroh/1", transportFallback: false });
+    await node.setTransportPreference({ linkId: chat.id, preferred: "iroh/1", fallback: true });
+    expect(link.setTransportPreference).toHaveBeenLastCalledWith("iroh/1", true, false, false);
   });
 
   it("ways of paying: only known methods and yes/no, merged, saved and told to the contact", async () => {
