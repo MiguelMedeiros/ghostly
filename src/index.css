@@ -784,8 +784,9 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
 }
 .contact-fetch-pulse { animation: contact-fetch-pulse 400ms ease-out 1; }
 
-/* The desktop header follows the resizable column, not the window width. */
-.sidebar-desktop .sidebar-header { container: chat-sidebar / inline-size; gap: 16px; }
+/* The desktop header follows the resizable column, not the window width. The logo and the buttons keep at least 8px
+   between them there; wherever the row has room, it spreads them further apart. */
+.sidebar-desktop .sidebar-header { container: chat-sidebar / inline-size; gap: 8px; }
 .sidebar-desktop .sidebar-home { min-width: 40px; min-height: 40px; flex-shrink: 0; }
 /* Connection controls keep native checkbox behavior with an explicit WebKit-safe visual. */
 .connection-switch-row { cursor: pointer; }
@@ -805,6 +806,13 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
   .sidebar-action-label { display: none; }
   .sidebar-header-action { width: 40px; gap: 0; }
   /* New and its arrow share one cell; Join fills the other, so both read the same size. */
+  .sidebar-new-split > .sidebar-header-action { width: auto; }
+  [data-testid="sidebar-chat-actions"] > .sidebar-header-action { width: 100%; }
+}
+/* The narrowest phones, the same: with their labels, the buttons leave no room for the logo. */
+@media (max-width: 343px) {
+  .sidebar-action-label { display: none; }
+  .sidebar-header-action { width: 40px; gap: 0; }
   .sidebar-new-split > .sidebar-header-action { width: auto; }
   [data-testid="sidebar-chat-actions"] > .sidebar-header-action { width: 100%; }
 }
