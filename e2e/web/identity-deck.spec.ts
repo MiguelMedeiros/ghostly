@@ -120,6 +120,8 @@ test("with a mouse the identities are a stack of ID cards: the pointer, a click,
   // Coming up is not choosing: the dialog opens on Enter, not on the arrow.
   await expect(page.getByTestId("add-identity")).toHaveCount(0);
   await page.keyboard.press("ArrowRight");
+  await chosen(page, ghostlyCard(page));
+  await page.keyboard.press("ArrowRight");
   await chosen(page, nostr);
   await page.keyboard.press("End");
   await chosen(page, addCard(page));

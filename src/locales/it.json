@@ -289,10 +289,6 @@
       "usedInOneChat": "Usata in 1 chat",
       "usedInChats": "Usata in {{count}} chat",
       "sharedWith": "Condivisa con {{contact}}",
-      "pinned": "Chiave fissata",
-      "notPinned": "Chiave non fissata",
-      "pinnedExplain": "La sua chiave è stata fissata all'abbinamento: un messaggio da un'altra chiave viene rifiutato.",
-      "notPinnedExplain": "La sua chiave non è ancora fissata: lo sarà quando l'abbinamento è completo.",
       "nameAsSaid": "Nome e foto come li ha inviati; non sono una prova.",
       "explain": "La tua identità Ghostly è ciò che i contatti vedono se non ne condividi un'altra: il tuo nome e la tua foto, e una coppia di chiavi creata per ogni chat, così nessuna chiave collega le tue chat.",
       "keysHint": "Apri le Identità di una chat per vedere la chiave che usa lì.",
@@ -311,7 +307,11 @@
       "addHint": "Dimostra di possedere una chiave Nostr, un dominio o un account, poi mostralo ai contatti che scegli, una chat alla volta.",
       "chosenChats": "Mostrata solo nelle chat che scegli",
       "noOthers": "Ancora nessun'altra identità.",
-      "nothingElse": "{{name}} non ha ancora condiviso altro."
+      "nothingElse": "{{name}} non ha ancora condiviso altro.",
+      "verified": "Verificato",
+      "notVerified": "Non verificato",
+      "verifiedExplain": "Hai confrontato i codici con il contatto: la sua chiave è quella che hai verificato.",
+      "notVerifiedExplain": "Non hai ancora confrontato i codici con il contatto; il pannello di connessione della chat lo permette."
     }
   },
   "profileSwitcher": {

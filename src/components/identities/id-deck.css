@@ -40,7 +40,7 @@
 .id-card-face[data-status=revoked] .id-card-status,.id-card-face[data-status=withdrawn] .id-card-status{color:rgba(255,255,255,.7)}
 .id-card-face[data-status=revoked] .id-card-subject{text-decoration:line-through;text-decoration-thickness:1.5px}
 .id-card-face[data-status=revoking] .id-card-status{color:rgba(255,255,255,.75)}
-/* The Ghostly card's "Default" (what contacts see unless another is shared), and a contact's pinned key: the card's ink. */
+/* The Ghostly card's "Default" (what contacts see unless another is shared), and a contact's Verified: the card's ink. */
 .id-card-face[data-status=default] .id-card-status{color:rgb(var(--card-rgb))}
 .id-card-mark-end{display:none}
 

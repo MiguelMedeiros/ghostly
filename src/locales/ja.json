@@ -289,10 +289,6 @@
       "usedInOneChat": "1 件のチャットで使用中",
       "usedInChats": "{{count}} 件のチャットで使用中",
       "sharedWith": "{{contact}} と共有中",
-      "pinned": "鍵は固定済み",
-      "notPinned": "鍵は未固定",
-      "pinnedExplain": "相手の鍵はペアリング時に固定されました。別の鍵からのメッセージは拒否されます。",
-      "notPinnedExplain": "相手の鍵はまだ固定されていません。ペアリングが完了すると固定されます。",
       "nameAsSaid": "名前と写真は相手が送ったままのものです。証明ではありません。",
       "explain": "別の ID を共有しない限り、連絡先に見えるのはあなたの Ghostly ID です。名前と写真、そしてチャットごとに作られる鍵ペアで、どの鍵もチャット同士を結び付けません。",
       "keysHint": "チャットの「ID」を開くと、そこで使われている鍵を確認できます。",
@@ -311,7 +307,11 @@
       "addHint": "Nostr 鍵、ドメイン、アカウントを持っていることを証明し、選んだ連絡先にチャットごとに見せられます。",
       "chosenChats": "選んだチャットにだけ表示",
       "noOthers": "他の ID はまだありません。",
-      "nothingElse": "{{name}} はまだ他に何も共有していません。"
+      "nothingElse": "{{name}} はまだ他に何も共有していません。",
+      "verified": "確認済み",
+      "notVerified": "未確認",
+      "verifiedExplain": "相手とコードを照合済みです。この鍵は確認したものです。",
+      "notVerifiedExplain": "まだ相手とコードを照合していません。チャットの接続パネルから行えます。"
     }
   },
   "profileSwitcher": {

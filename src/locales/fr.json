@@ -289,10 +289,6 @@
       "usedInOneChat": "Utilisée dans 1 discussion",
       "usedInChats": "Utilisée dans {{count}} discussions",
       "sharedWith": "Partagée avec {{contact}}",
-      "pinned": "Clé épinglée",
-      "notPinned": "Clé non épinglée",
-      "pinnedExplain": "Sa clé a été épinglée à l'appairage : un message d'une autre clé est refusé.",
-      "notPinnedExplain": "Sa clé n'est pas encore épinglée : elle l'est une fois l'appairage terminé.",
       "nameAsSaid": "Nom et photo tels qu'envoyés ; ce n'est pas une preuve.",
       "explain": "Votre identité Ghostly est ce que les contacts voient sauf si vous en partagez une autre : votre nom et votre photo, et une paire de clés créée pour chaque discussion, pour qu'aucune clé ne relie vos discussions.",
       "keysHint": "Ouvrez les Identités d'une discussion pour voir la clé qu'elle utilise.",
@@ -311,7 +307,11 @@
       "addHint": "Prouvez que vous détenez une clé Nostr, un domaine ou un compte, puis montrez-le aux contacts de votre choix, une discussion à la fois.",
       "chosenChats": "Montrée seulement dans les discussions de votre choix",
       "noOthers": "Pas encore d'autre identité.",
-      "nothingElse": "{{name}} n'a encore rien partagé d'autre."
+      "nothingElse": "{{name}} n'a encore rien partagé d'autre.",
+      "verified": "Vérifié",
+      "notVerified": "Non vérifié",
+      "verifiedExplain": "Vous avez comparé les codes avec le contact : sa clé est celle que vous avez vérifiée.",
+      "notVerifiedExplain": "Vous n'avez pas encore comparé les codes avec le contact ; le panneau de connexion de la discussion le propose."
     }
   },
   "profileSwitcher": {

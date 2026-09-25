@@ -289,10 +289,6 @@
       "usedInOneChat": "用于 1 个聊天",
       "usedInChats": "用于 {{count}} 个聊天",
       "sharedWith": "已与 {{contact}} 共享",
-      "pinned": "密钥已固定",
-      "notPinned": "密钥未固定",
-      "pinnedExplain": "配对时已固定对方的密钥：来自其他密钥的消息会被拒绝。",
-      "notPinnedExplain": "对方的密钥尚未固定：配对完成后会固定。",
       "nameAsSaid": "名称和头像为对方所发送；它们不是证明。",
       "explain": "除非你共享另一个身份，联系人看到的就是你的 Ghostly 身份：你的名称和头像，以及为每个聊天单独生成的密钥对，因此没有任何密钥会把你的聊天关联起来。",
       "keysHint": "打开某个聊天的“身份”即可查看它使用的密钥。",
@@ -311,7 +307,11 @@
       "addHint": "证明你持有某个 Nostr 密钥、域名或账户，然后逐个聊天地展示给你选择的联系人。",
       "chosenChats": "只在你选择的聊天中显示",
       "noOthers": "尚无其他身份。",
-      "nothingElse": "{{name}} 尚未共享其他内容。"
+      "nothingElse": "{{name}} 尚未共享其他内容。",
+      "verified": "已验证",
+      "notVerified": "未验证",
+      "verifiedExplain": "你已与对方比对过验证码：这把密钥就是你验证过的那把。",
+      "notVerifiedExplain": "你还没有与对方比对验证码；聊天的连接面板提供此功能。"
     }
   },
   "profileSwitcher": {

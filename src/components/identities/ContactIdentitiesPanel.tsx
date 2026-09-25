@@ -117,7 +117,7 @@ function TheirCards({ t, entries, link, name, nostr }: { t: Translate; entries: 
 
 /**
  * The contact's Ghostly card turned over: the name and picture as they sent them (not a proof), their key in this
- * chat in full, to copy, whether it is pinned, and since when the chat exists.
+ * chat in full, to copy, whether it is verified (codes compared), and since when the chat exists.
  */
 function TheirGhostlyBack({ t, card, link, name, onCards }: { t: Translate; card: IdCardContent; link: LinkView; name: string; onCards: () => void }) {
   const { copied, copy } = useCopyKey(card.subject);
@@ -141,7 +141,7 @@ function TheirGhostlyBack({ t, card, link, name, onCards }: { t: Translate; card
           <dt>Name</dt>
           <dd>{t("identities.ghostly.nameAsSaid")}</dd>
           <dt>Key</dt>
-          <dd data-testid="chat-identity-received-status" data-status={link.peerVerified ? "pinned" : "unpinned"}>{card.statusLabel}. {link.peerVerified ? t("identities.ghostly.pinnedExplain") : t("identities.ghostly.notPinnedExplain")}</dd>
+          <dd data-testid="chat-identity-received-status" data-status={link.peerVerified ? "verified" : "unverified"}>{card.statusLabel}. {link.peerVerified ? t("identities.ghostly.verifiedExplain") : t("identities.ghostly.notVerifiedExplain")}</dd>
           {card.issued && <><dt>Since</dt><dd>{card.validity}</dd></>}
         </dl>
         <div className="flex flex-wrap gap-2">

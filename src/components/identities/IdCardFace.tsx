@@ -9,7 +9,7 @@ const GHOST = <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C7.582 
 const CHECK = <svg viewBox="0 0 16 16" fill="none"><path d="m3.5 8.5 3 3 6-7" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 
 function StatusIcon({ status }: { status: IdCardContent["status"] }) {
-  // The Ghostly card's "Default" (and a contact's pinned key): a small ghost, the card's own mark.
+  // The Ghostly card's "Default" (and a contact's Verified / Not verified): a small ghost, the card's own mark.
   if (status === "default") return <svg aria-hidden="true" width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2a4.5 4.5 0 0 0-4.5 4.5V13c0 .5.4.7.7.4L5.75 12l1.5 1.4c.2.2.5.2.75 0L8 13l.75.4c.25.2.55.2.75 0l1.5-1.4 1.55 1.4c.3.3.7.1.7-.4V6.5A4.5 4.5 0 0 0 8 2z" /></svg>;
   const d = status === "verified" ? "m3 8 3 3 7-7" : status === "expiring" ? "M8 4v4.5l3 2" : status === "revoking" || status === "withdrawn" ? "M4 8h8" : status === "revoked" ? "M4 12 12 4" : "M8 4v5M8 11.5v.5";
   return <svg aria-hidden="true" width="10" height="10" viewBox="0 0 16 16" fill="none"><path d={d} stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>;

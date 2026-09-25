@@ -289,10 +289,6 @@
       "usedInOneChat": "Usada en 1 chat",
       "usedInChats": "Usada en {{count}} chats",
       "sharedWith": "Compartida con {{contact}}",
-      "pinned": "Clave fijada",
-      "notPinned": "Clave no fijada",
-      "pinnedExplain": "Su clave se fijó al emparejar: un mensaje de otra clave se rechaza.",
-      "notPinnedExplain": "Su clave aún no está fijada: se fija cuando el emparejamiento termina.",
       "nameAsSaid": "Nombre y foto tal como los envió; no son una prueba.",
       "explain": "Tu identidad Ghostly es lo que ven los contactos a menos que compartas otra: tu nombre y tu foto, y un par de claves creado para cada chat, de modo que ninguna clave una tus chats.",
       "keysHint": "Abre las Identidades de un chat para ver la clave que usa allí.",
@@ -311,7 +307,11 @@
       "addHint": "Demuestra que tienes una clave Nostr, un dominio o una cuenta, y muéstralo a los contactos que elijas, un chat a la vez.",
       "chosenChats": "Se muestra solo en los chats que elijas",
       "noOthers": "Aún no hay otras identidades.",
-      "nothingElse": "{{name}} aún no ha compartido nada más."
+      "nothingElse": "{{name}} aún no ha compartido nada más.",
+      "verified": "Verificado",
+      "notVerified": "No verificado",
+      "verifiedExplain": "Comparaste los códigos con el contacto: su clave es la que verificaste.",
+      "notVerifiedExplain": "Aún no has comparado los códigos con el contacto; el panel de conexión del chat lo ofrece."
     }
   },
   "profileSwitcher": {

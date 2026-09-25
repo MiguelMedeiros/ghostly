@@ -289,10 +289,6 @@
       "usedInOneChat": "Used in 1 chat",
       "usedInChats": "Used in {{count}} chats",
       "sharedWith": "Shared with {{contact}}",
-      "pinned": "Key pinned",
-      "notPinned": "Key not pinned",
-      "pinnedExplain": "Their key was pinned when you paired: a message from another key is refused.",
-      "notPinnedExplain": "Their key is not pinned yet: it is pinned once the chat is fully paired.",
       "nameAsSaid": "Name and picture as they sent them; they are not a proof.",
       "explain": "Your Ghostly identity is what contacts see unless you share another: your name and picture, and a key pair made for each chat, so no key ties your chats together.",
       "keysHint": "Open a chat's Identities to see the key it uses there.",
@@ -311,7 +307,11 @@
       "addHint": "Prove that you hold a Nostr key, a domain or an account, then show it to the contacts you choose, one chat at a time.",
       "chosenChats": "Shown only in the chats you choose",
       "noOthers": "No other identities yet.",
-      "nothingElse": "Nothing else shared by {{name}} yet."
+      "nothingElse": "Nothing else shared by {{name}} yet.",
+      "verified": "Verified",
+      "notVerified": "Not verified",
+      "verifiedExplain": "You compared codes with them: their key is the one you verified.",
+      "notVerifiedExplain": "You have not compared codes with them yet; the chat's connection panel offers it."
     }
   },
   "profileSwitcher": {

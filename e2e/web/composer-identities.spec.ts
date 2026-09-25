@@ -79,9 +79,11 @@ test("an identity is added, shared and withdrawn from the chat's composer", { ta
   await expect(await row()).toContainText("1 shared in this chat");
   await (await row()).click();
 
-  // Turned over again, it is shared and verified; Stop sharing.
-  await expect(picker.getByTestId("composer-identity-hint")).toContainText(/ sees your Nostr npub1/);
-  await use.click();
+  // Opened again it starts on the Ghostly card; a click on the Nostr card, wearing the seal, turns it over: it is
+  // shared and verified; Stop sharing.
+  await expect(picker.getByTestId("composer-identity-ghostly")).toHaveAttribute("aria-checked", "true");
+  await expect(nostr.getByTestId("id-card-shared")).toBeVisible();
+  await nostr.click();
   await expect(status).toHaveText("Shared · verified by your contact");
   await expect(back).toContainText("a copy they kept stays");
   await expect(share).toHaveText("Stop sharing");
@@ -101,7 +103,7 @@ test("an identity is added, shared and withdrawn from the chat's composer", { ta
   await expect(plus).toBeFocused();
   await expect(await row()).toHaveAttribute("data-count", "0");
   await (await row()).click();
-  await expect(nostr).toBeFocused();
+  await expect(picker.getByTestId("composer-identity-ghostly")).toBeFocused();
   await alice.page.keyboard.press("Escape");
   await expect(picker).toHaveCount(0);
 
@@ -127,7 +129,8 @@ test("an identity is added, shared and withdrawn from the chat's composer", { ta
     expect(box!.x).toBeGreaterThanOrEqual(0);
     expect(box!.x + box!.width).toBeLessThanOrEqual(390);
   }
-  await use.click();
+  // The sheet opens on the Ghostly card; a tap on the Nostr card turns that one over.
+  await nostr.click();
   await expect(share).toBeFocused();
   for (const part of [back, share]) {
     const box = await part.boundingBox();

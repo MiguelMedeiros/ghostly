@@ -175,7 +175,8 @@ export function ghostlyCard(t: Translate, profile: GhostlyProfile, place: { chat
 
 /**
  * A contact's Ghostly identity as an ID card, the first of their cards in a chat: the name and picture they sent
- * (`fallback` names them when they sent none), their key in this chat, and whether that key is pinned.
+ * (`fallback` names them when they sent none), their key in this chat, and whether it is verified: codes compared
+ * in the chat's connection panel, and the key unchanged since (`LinkView.peerVerified`).
  */
 export function contactGhostlyCard(t: Translate, link: Pick<LinkView, "peerNick" | "peerAvatar" | "peerPubKeyZ32" | "peerVerified" | "createdAt">, fallback: string): IdCardContent {
   const nick = link.peerNick?.trim() ?? "";
@@ -194,7 +195,7 @@ export function contactGhostlyCard(t: Translate, link: Pick<LinkView, "peerNick"
     category: t("identities.ghostly.theirKeyInChat"),
     attested: false,
     status: "default",
-    statusLabel: link.peerVerified ? t("identities.ghostly.pinned") : t("identities.ghostly.notPinned"),
+    statusLabel: link.peerVerified ? t("identities.ghostly.verified") : t("identities.ghostly.notVerified"),
     validity: since ? t("identities.ghostly.chatSince", { date: since }) : t("identities.ghostly.theirDefault"),
     issued: since,
     shared: t("identities.ghostly.theirDefault"),

@@ -166,15 +166,15 @@ describe("the Ghostly card", () => {
     expect(ghostlyCard(t, { nick: "Ghost", avatar: "https://example.com/x.png", shareProfile: true }, {}).photo).toBeUndefined();
   });
 
-  it("a contact's is the name and picture they sent, their key in this chat, and whether it is pinned", () => {
+  it("a contact's is the name and picture they sent, their key in this chat, and whether it is verified", () => {
     const since = Date.UTC(2026, 2, 3);
     const card = contactGhostlyCard(t, { peerNick: "Alice", peerAvatar: "data:image/jpeg;base64,BBBB", peerPubKeyZ32: KEY, peerVerified: true, createdAt: since }, "Contact · yzk3gq");
     expect(card).toMatchObject({ id: "ghostly", provider: "ghostly", name: "Alice", photo: "data:image/jpeg;base64,BBBB", subject: KEY, short: shortKey(KEY),
-      category: "Their key in this chat", status: "default", statusLabel: "Key pinned", validity: `Chat since ${date(since / 1000)}` });
+      category: "Their key in this chat", status: "default", statusLabel: "Verified", validity: `Chat since ${date(since / 1000)}` });
     expect(card.mrz).toBe("ID<GHOSTLY<<GHOSTLY<<ALICE".padEnd(44, "<"));
     // No name sent: the fallback names them, and the machine line carries the key instead.
     const unnamed = contactGhostlyCard(t, { peerNick: "", peerPubKeyZ32: KEY, peerVerified: false, createdAt: 0 }, "Contact · yzk3gq");
-    expect(unnamed).toMatchObject({ name: "Contact · yzk3gq", monogram: undefined, statusLabel: "Key not pinned", validity: "What they show you by default", issued: "" });
+    expect(unnamed).toMatchObject({ name: "Contact · yzk3gq", monogram: undefined, statusLabel: "Not verified", validity: "What they show you by default", issued: "" });
     expect(unnamed.mrz).toMatch(/^ID<GHOSTLY<<GHOSTLY<<YZK3GQ8Q<1MIO<+$/);
   });
 });
