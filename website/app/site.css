@@ -36,6 +36,13 @@
   --dur-slow: 0.56s;
   --dur-beat: 1.8s;
   --stagger: 0.06s;
+  --ease-burst: cubic-bezier(0.2, 0.8, 0.3, 1);
+  --ease-hop: cubic-bezier(0.3, 1.6, 0.5, 1);
+  /* The app's pairing scene's look (src/components/pairing/pairing-scene.css), shared by the site's pictures:
+     mirror PAIR in lib/motion.ts. */
+  --pair-eye: #0b141a;
+  --pair-mesh: #2b3b52;
+  --pair-node: #131c29;
   /* One type voice at different volumes. Mono is for eyebrows, captions, chips and code only. */
   --t-display: clamp(56px, 9.5vw, 148px);
   --t-section: clamp(40px, 5.4vw, 72px);
@@ -373,12 +380,13 @@ body {
   align-items: center;
   gap: 24px;
 }
-/* The app's lockup (components/site/Brand.tsx): its icon, GHOSTLY in the app's font stack, 700, tracking-tight,
-   both in the accent, the text 16/28 of the icon as in the app's sidebar, scaled up 1.125 for the nav. */
+/* The app's lockup (components/site/Brand.tsx, from the app's AppBrand.tsx): its icon, GHOSTLY in the app's font
+   stack, 700, tracking-tight, both in the accent, the text 17/36 of the icon as in the app's chat list (36px ghost,
+   17px word, 8px apart), scaled to the nav's 18px. It stays still: the app's opening motion is not the site's. */
 .brand {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   font-weight: 700;
   font-size: 18px;
@@ -390,8 +398,8 @@ body {
 }
 .brand-icon {
   flex-shrink: 0;
-  width: 31.5px;
-  height: 31.5px;
+  width: 38px;
+  height: 38px;
 }
 .nav-links {
   display: flex;
@@ -554,10 +562,11 @@ body {
 .ghost--float {
   animation: ghost-bob 4.2s ease-in-out infinite;
 }
+/* The app's blink (pairing-scene.css): every 5 s, shut at 97%. */
 .ghost-eyes--blink {
   transform-box: fill-box;
   transform-origin: center;
-  animation: ghost-blink 5.3s infinite;
+  animation: ghost-blink 5s infinite;
 }
 .ghost-pupils {
   transition: transform var(--dur-slow) var(--ease-enter);
@@ -580,12 +589,11 @@ body {
 }
 @keyframes ghost-blink {
   0%,
-  94.5%,
-  98.5%,
+  94%,
   100% {
     transform: scaleY(1);
   }
-  96.5% {
+  97% {
     transform: scaleY(0.1);
   }
 }

@@ -4,7 +4,7 @@ import { useId } from "react";
 import { motion, useTransform, type MotionValue } from "motion/react";
 import { SceneFrame, useScene, type SceneStep } from "@/components/story/SceneFrame";
 import { StaticActors } from "@/components/story/StaticActors";
-import { ease } from "@/lib/motion";
+import { ease, PAIR } from "@/lib/motion";
 import { scatter, Stage, StageGhost, useStep } from "./stage";
 
 type Pt = [number, number];
@@ -68,7 +68,7 @@ function layout(portrait: boolean): Layout {
         nodes, edges, picks, read, head,
         hand: [122, 432], bends: [[170, 330], [150, 280], [200, 320]],
         ring: 330, catch: [270, 436], catchBend: [248, 330],
-        ground: [118, 272, 456],
+        ground: [118, 272, 443],
         shade: { from: [10, 252], to: [160, 252], size: 46, tag: [54, 16] },
         clock: [350, 162, 20], caption: [195, 400], record: [34, 26],
       }
@@ -76,7 +76,7 @@ function layout(portrait: boolean): Layout {
         nodes, edges, picks, read, head,
         hand: [345, 688], bends: [[440, 450], [420, 380], [520, 430]],
         ring: 640, catch: [748, 690], catchBend: [752, 480],
-        ground: [345, 625, 718],
+        ground: [345, 625, 702],
         shade: { from: [200, 300], to: [400, 300], size: 60, tag: [68, 22] },
         clock: [1090, 232, 40], caption: [560, 548], record: [44, 32],
       };
@@ -213,7 +213,7 @@ function Visual({ tags }: { tags: { sealed: string; ttl: string } }) {
       {[0, 1, 2].map((bucket) => (
         <g key={bucket} className="dht-node" style={{ animationDelay: `${-bucket * 1.3}s` }}>
           {L.nodes.filter((_, i) => i % 3 === bucket).map((node, i) => (
-            <Node key={i} node={node} r={portrait ? 2 + node.t * 2 : 2.4 + node.t * 2.6} picked={L.picks.includes(node)} light={light} dim={dim} />
+            <Node key={i} node={node} r={portrait ? 2.4 + node.t * 1.8 : 3 + node.t * 2.5} picked={L.picks.includes(node)} light={light} dim={dim} />
           ))}
         </g>
       ))}
@@ -267,11 +267,13 @@ function Visual({ tags }: { tags: { sealed: string; ttl: string } }) {
 function Edge({ a, b, light }: { a: Peer; b: Peer; light: MotionValue<number> }) {
   const t = Math.max(a.t, b.t);
   const opacity = useTransform(light, (v) => Math.max(0, Math.min(1, (v - t * 0.8) * 5)));
-  return <motion.line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#22d3ee" strokeOpacity="0.14" strokeWidth="1" style={{ opacity }} />;
+  // The app's mesh (pairing-scene.css .ps-mesh): a dotted line in the mesh tone.
+  return <motion.line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PAIR.mesh} strokeWidth={PAIR.stroke.mesh} strokeDasharray={PAIR.meshDash} strokeLinecap="round" style={{ opacity }} />;
 }
 function Node({ node, r, picked, light, dim }: { node: Peer; r: number; picked: boolean; light: MotionValue<number>; dim: MotionValue<number> }) {
   const opacity = useTransform([light, dim], ([l, d]) => Math.max(0, Math.min(1, ((l as number) - node.t * 0.8) * 5)) * (picked ? 1 : (d as number)));
-  return <motion.circle cx={node.x} cy={node.y} r={r} fill={picked ? "#22d3ee" : "#4c5f7a"} style={{ opacity }} />;
+  // The app's nodes (.ps-node): the node colour ringed in the mesh tone; the ones holding a record lit in the accent.
+  return <motion.circle cx={node.x} cy={node.y} r={r} fill={picked ? "#22d3ee" : PAIR.node} stroke={picked ? "#22d3ee" : PAIR.dot} strokeWidth={PAIR.stroke.node} style={{ opacity }} />;
 }
 
 export function DhtScene({ eyebrow, label, steps, tags }: { eyebrow: string; label: string; steps: SceneStep[]; tags: { sealed: string; ttl: string } }) {

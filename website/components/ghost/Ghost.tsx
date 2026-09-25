@@ -3,6 +3,7 @@
 import { memo, useId } from "react";
 import { motion, type MotionValue } from "motion/react";
 import { useCalm } from "@/lib/useCalm";
+import { PAIR } from "@/lib/motion";
 
 /**
  * Boo and Casper: the original Ghostly silhouette (round head, eyes set wide,
@@ -51,30 +52,37 @@ type Props = {
   phase?: number;
 };
 
-// The hem is cut into points, like the arcade ghosts' feet and the app's own ghost (GHOST_PATH in the app's
-// PairingScene, the site's GhostPet): five points (the two corners and three between) and four notches, on the
-// same 16-unit rhythm. Frame 0 is the clean cut (the still, for reduced motion); the others nudge the notches
-// sideways and the inner points up or down by about a unit, so the hem stirs without rippling. The corners and
-// the sides stay put.
-const TIP = 80;
-const NOTCH = 71;
+/**
+ * The app's ghost (GHOST_PATH in the app's src/components/pairing/PairingScene.tsx, the same 80×100 box): a round
+ * head and a hem cut into points like the arcade ghosts' feet, five points (the corners and three between) and four
+ * notches. The site's GhostPet draws it as is; the story's ghosts and the swarm draw it here.
+ */
+export const GHOST_PATH = "M40 8 C18 8 8 22 8 40 L8 72 L16 64 L24 72 L32 64 L40 72 L48 64 L56 72 L64 64 L72 72 L72 40 C72 22 62 8 40 8Z";
+
+// The same outline, stirring: frame 0 is GHOST_PATH (the still, for reduced motion); the others nudge the notches
+// sideways and the inner points up or down by about a unit, so the hem moves without rippling. The corners and the
+// sides stay put, and every frame has GHOST_PATH's commands, so SMIL can morph between them.
+const TIP = 72;
+const NOTCH = 64;
 function bodyPath(frame: number): string {
+  if (frame === 0) return GHOST_PATH;
   const f = (v: number) => v.toFixed(2);
-  let d = `M8 ${TIP} L8 40 C8 21 20 8 40 8 C60 8 72 21 72 40 L72 ${TIP}`;
   // A small wave that is zero at frame 0 (at most twice `size` either way).
   const wave = (speed: number, phase: number, size: number) => (Math.sin(frame * speed + phase) - Math.sin(phase)) * size;
+  let d = `M40 8 C18 8 8 22 8 40 L8 ${TIP}`;
   for (let i = 0; i < 4; i++) {
-    const x = 64 - i * 16;
+    const x = 16 + i * 16;
     const sway = wave(1, i * 0.8, 0.6);
     d += ` L${f(x + sway)} ${f(NOTCH + wave(1.7, i * 1.3, 0.55))}`;
-    if (i < 3) d += ` L${f(x - 8 + sway * 0.6)} ${f(TIP + wave(1.3, i, 0.45))}`;
+    if (i < 3) d += ` L${f(x + 8 + sway * 0.6)} ${f(TIP + wave(1.3, i, 0.45))}`;
   }
-  return d + " Z";
+  return d + ` L72 ${TIP} L72 40 C72 22 62 8 40 8Z`;
 }
 
 const FRAMES = [0, 1.6, 3.2, 4.8].map(bodyPath);
 const STILL = FRAMES[0];
-const INK = "#0b1622";
+/** The eyes' ink: the app's (--ps-eye in its pairing-scene.css). */
+const INK = PAIR.eye;
 
 function isMotionLook(look: Look): look is { x: MotionValue<number>; y: MotionValue<number> } {
   return typeof look.x !== "number";
@@ -205,10 +213,10 @@ export const Ghost = memo(function Ghost({
 /** A small ghost for a flock (the swarm): the characters' silhouette, hem and eyes in one colour, nothing animated. */
 export function GhostSprite({ className = "" }: { className?: string }) {
   return (
-    <svg className={className} viewBox="4 4 72 80" fill="currentColor" aria-hidden="true">
+    <svg className={className} viewBox="6 6 68 68" fill="currentColor" aria-hidden="true">
       <path d={STILL} />
-      <ellipse cx="29" cy="36" rx="6" ry="6.5" fill="var(--bg, #060a10)" />
-      <ellipse cx="51" cy="36" rx="6" ry="6.5" fill="var(--bg, #060a10)" />
+      <circle cx="29" cy="36" r="6" fill="var(--pair-eye)" />
+      <circle cx="51" cy="36" r="6" fill="var(--pair-eye)" />
     </svg>
   );
 }

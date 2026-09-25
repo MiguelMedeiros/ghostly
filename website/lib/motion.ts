@@ -14,6 +14,10 @@ export const EASE = {
   exit: [0.55, 0, 1, 0.45],
   /** Travelling from A to B while on screen: a beat in a chapter, a loop, a demo. */
   move: [0.65, 0, 0.35, 1],
+  /** A ring bursting out once: the app's pairing scene's "connected" rings (pairing-scene.css ps-burst). */
+  burst: [0.2, 0.8, 0.3, 1],
+  /** A small hop that overshoots and lands: the app's ghosts when they connect (ps-hop), a chip or a check popping in. */
+  hop: [0.3, 1.6, 0.5, 1],
 } as const satisfies Record<string, readonly [number, number, number, number]>;
 
 /** Durations in seconds. Nothing on the site animates for longer than `beat` unless it is scrubbed by scroll or loops. */
@@ -131,4 +135,22 @@ export const ease = {
   enter: bezier(EASE.enter),
   exit: bezier(EASE.exit),
   move: bezier(EASE.move),
+  burst: bezier(EASE.burst),
+  hop: bezier(EASE.hop),
+} as const;
+
+/**
+ * The look the site's pictures share with the app's pairing scene (src/components/pairing/pairing-scene.css):
+ * the eyes' ink, the network's mesh and nodes, and the strokes. CSS mirrors them as --pair-* in app/site.css.
+ */
+export const PAIR = {
+  eye: "#0b141a",
+  mesh: "#2b3b52",
+  node: "#131c29",
+  /** A node's ring and a loose dot: the mesh tone, lifted a little so it reads on the site's darker page. */
+  dot: "#4c5f7a",
+  /** The mesh between nodes is dotted; the routes packets travel are solid. */
+  meshDash: "2 4",
+  /** Stroke widths at the app's scale, for a stage drawn 1:1: mesh, route, node ring, live link, burst ring. */
+  stroke: { mesh: 1, route: 1.5, node: 1.5, link: 2.5, ring: 2 },
 } as const;

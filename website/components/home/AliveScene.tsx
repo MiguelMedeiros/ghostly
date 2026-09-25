@@ -42,7 +42,7 @@ type Layout = {
 };
 
 // Landscape: actors at x 690-950 and 1130-1390 (cloth ends 928 / starts 1152 after the slide),
-// heads at y ≈ 382, eyes ≈ 459, hems ≈ 584. The pipe sits in the gap between the bodies.
+// heads at y ≈ 382, eyes ≈ 459, hems ≈ 558. The pipe sits in the gap between the bodies.
 const L: Layout = {
   pipe: "M952 520 H1128",
   pipeX: [952, 1128],
@@ -64,11 +64,11 @@ const L: Layout = {
   labelKeep: 1,
   font: 13,
 };
-// Portrait: actors at x 30-160 and 230-360, heads at y ≈ 203, hems ≈ 323; the gap is too narrow
+// Portrait: actors at x 30-160 and 230-360, heads at y ≈ 203, hems ≈ 307; the gap is too narrow
 // for a pipe, so two drops hang from the hem centres to a bus bar under them. The sheet starts ≈ 480.
 // Short phones (360×640) hide stage y < ~145 under the nav: the caption's glyphs start at y ≈ 152.
 const P: Layout = {
-  pipe: "M95 336 V378 Q95 392 109 392 H281 Q295 392 295 378 V336",
+  pipe: "M95 323 V378 Q95 392 109 392 H281 Q295 392 295 378 V323",
   pipeX: [95, 295],
   track: [113, 277],
   trackY: 392,

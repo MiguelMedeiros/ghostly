@@ -5,7 +5,7 @@ import { animate as tween, motion, useInView, useMotionValue, useMotionValueEven
 import { Ghost, type GhostMood } from "@/components/ghost/Ghost";
 import { EXIT, orientationOf, scatter, stepOf, useCards, usePortrait, VIEW_BOX_ORIGIN } from "@/components/home/stage";
 import { useCalm } from "@/lib/useCalm";
-import { DUR, EASE, HERO, SPRING } from "@/lib/motion";
+import { DUR, EASE, HERO, PAIR, SPRING } from "@/lib/motion";
 import { useBeats, usePlayheadProgress } from "@/lib/playhead";
 import { BLOCKING, blockingFor, poseAt, ROOMS, STAGE, valueAt, type Chapter, type Frame } from "./poses";
 import { IDENTITY, lerpFraming, measureFraming, sameFraming, type Framing } from "./framing";
@@ -297,11 +297,12 @@ function LiveAct({ id, chapters, field, bubble, bubbleAvoid, children }: { id: s
           <motion.div className="act-field" style={{ y: fieldY }}>
             <div className="act-field-drift">
               <svg className="stage" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="xMidYMid slice">
+                {/* The app's network look (pairing-scene.css): a dotted mesh in the mesh tone, loose dots on it. */}
                 {edges.map(([a, b]) => (
-                  <line key={`${a}-${b}`} x1={nodes[a].x} y1={nodes[a].y} x2={nodes[b].x} y2={nodes[b].y} stroke="#22d3ee" strokeOpacity="0.08" />
+                  <line key={`${a}-${b}`} x1={nodes[a].x} y1={nodes[a].y} x2={nodes[b].x} y2={nodes[b].y} stroke={PAIR.mesh} strokeOpacity="0.7" strokeWidth={PAIR.stroke.mesh} strokeDasharray={PAIR.meshDash} strokeLinecap="round" />
                 ))}
                 {nodes.map((n, i) => (
-                  <circle key={i} cx={n.x} cy={n.y} r={1.6 + n.t * 2} fill="#4c5f7a" opacity={0.55 + n.t * 0.45} />
+                  <circle key={i} cx={n.x} cy={n.y} r={1.6 + n.t * 2} fill={PAIR.dot} opacity={0.55 + n.t * 0.45} />
                 ))}
               </svg>
             </div>

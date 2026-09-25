@@ -38,6 +38,9 @@ is checked (see the end).
 | `EASE.enter` | `0.22, 1, 0.36, 1` | Arriving, popping, settling, hover in. The default (`--ease`). |
 | `EASE.exit` | `0.55, 0, 1, 0.45` | Leaving, hover out. |
 | `EASE.move` | `0.65, 0, 0.35, 1` | A trip from A to B while on screen: a beat, a loop, a camera move. |
+| `EASE.burst` | `0.2, 0.8, 0.3, 1` | A ring bursting out once (the app's pairing "connected" rings). |
+| `EASE.hop` | `0.3, 1.6, 0.5, 1` | A hop or pop that overshoots and lands (the app's ghosts connecting; chips, checks). |
+| `PAIR` | see `lib/motion.ts` | The app's pairing look: eye ink, mesh and node tones, stroke widths. |
 | `DUR.fast` | 0.14 s | Hover, press, focus; a step's copy leaving. |
 | `DUR.base` | 0.28 s | A chip, a caption swap, a cross-fade, a step's copy arriving. |
 | `DUR.slow` | 0.56 s | A card, a panel, a large element or a scene arriving; the swarm in and out. |
@@ -164,21 +167,37 @@ watches:
   never edited here); it keeps the app's springs. The site only deals its
   cards every 3.8 s while nobody is pointing at it.
 
-### The ghosts and the brand
+### The ghosts and the brand: the app's pairing look
 
-- Every character ghost on the site has the same cut hem, like the arcade
-  ghosts' feet (`components/ghost/Ghost.tsx`): five points (the corners and
-  three between) and four notches on the rhythm of the app's `GHOST_PATH`,
-  which the footer's `GhostPet` draws as is. The swarm flies the same
-  silhouette (`GhostSprite`). Rounded, cloth-like folds are gone.
-- The hem stirs, it does not ripple: over 3.2 s the notches move sideways and
-  the points up or down by about a unit, the corners and sides stay put, and
-  the loop rests off screen (`IdleLoops`). Reduced motion shows the clean cut.
+The site's pictures share one visual language with the app's pairing scene
+(`src/components/pairing/PairingScene.tsx` and `pairing-scene.css`, read,
+never changed from here). Each page tells its own story; what they share is
+the look:
+
+- **The ghost.** Every character ghost on the site is the app's `GHOST_PATH`
+  (exported from `components/ghost/Ghost.tsx`): a round head and a hem cut
+  into points like the arcade ghosts' feet, five points and four notches. The
+  story's ghosts, the swarm (`GhostSprite`), the footer's `GhostPet` and the
+  404 draw it. Rounded, cloth-like folds are gone. The hem stirs, it does not
+  ripple: over 3.2 s the notches move sideways and the points up or down by
+  about a unit (the corners and sides stay put), the loop rests off screen
+  (`IdleLoops`), and reduced motion shows `GHOST_PATH` itself. The eyes take
+  the app's ink (`PAIR.eye`) and its blink: every 5 s, shut at 97%.
+- **Colour and line.** `PAIR` in `lib/motion.ts` (`--pair-*` in site.css)
+  holds the app's eye ink, mesh and node tones and stroke widths. A network
+  is a dotted mesh (`2 4`) in the mesh tone with ringed nodes, lit in the
+  accent where something is held; routes and links are solid.
+- **Easing.** `EASE.burst` is the app's "connected" ring, `EASE.hop` its
+  ghosts' hop; chips and checks pop on `hop`, rings go out on `burst`.
+- **The connected moment.** When the invitation connects, a ring bursts once
+  from each ghost and then from the middle of the link, as in the app,
+  inside the step's beat and inside the chapter's picture (never across the
+  copy).
 - The brand lockup in the nav and the footer is the app's
-  (`components/site/Brand.tsx`, from `src/components/Sidebar.tsx`): the app's
+  (`components/site/Brand.tsx`, from `src/components/AppBrand.tsx`): the app's
   ghost icon and GHOSTLY in the app's system font stack, 700, tracking-tight,
-  both in the accent (cyan, about 11:1 on the page), the text 16/28 of the
-  icon. It does not move.
+  both in the accent (cyan, about 11:1 on the page), the text 17/36 of the
+  icon. It does not move: the app's opening motion stays the app's.
 
 ### The swarm (page changes and long jumps)
 
