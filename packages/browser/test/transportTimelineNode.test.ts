@@ -67,6 +67,9 @@ it("tells the chat's connection story: first connection, the contact's switch, y
   // The round trip is on the line of the transport in use, and in the view.
   await vi.waitFor(() => expect(view().transportRttMs).toBeGreaterThanOrEqual(0));
   await vi.waitFor(() => expect(view().transportLog![0].rttMs).toBeGreaterThanOrEqual(0));
+  // The Fallback switch sends the same preference again: not a choice, not a row.
+  await node.setTransportPreference({ linkId: id, preferred: "iroh/1", fallback: true });
+  expect(lines(view())).toEqual([["connected", null, "iroh/1"]]);
 
   await contact.setTransportPreference("hyperdht/1", true);
   await vi.waitFor(() => expect(lines(view()).at(-1)).toEqual(["switched", "contact", "hyperdht/1"]));

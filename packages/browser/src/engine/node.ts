@@ -1334,13 +1334,18 @@ export class GhostlyNode implements EngineImplementation {
     this.emitState();
   }
 
-  async setTransportPreference({ linkId, preferred, fallback }: { linkId: string; preferred: PairedTransport; fallback: boolean }): Promise<void> {
+  /**
+   * `chosen`: a choice from the chat's Connection menu, a row in its timeline even when it names the transport already
+   * set. Left out (the RPC), only a change of transport is: the Fallback switch sends the same preference again.
+   */
+  async setTransportPreference({ linkId, preferred, fallback }: { linkId: string; preferred: PairedTransport; fallback: boolean }, chosen?: boolean): Promise<void> {
     const live = this.links.get(linkId);
     if (!live?.stored.profile || !live.link?.availableTransports.includes(preferred) || typeof fallback !== "boolean") throw new Error("Transport unavailable");
+    chosen ??= live.stored.preferredTransport !== preferred;
     const patch = { preferredTransport: preferred, transportFallback: fallback };
     await db.patchLink(linkId, patch);
     live.stored = { ...live.stored, ...patch }; this.emitState();
-    const log = this.transportLogOf(live);
+    const log = chosen ? this.transportLogOf(live) : undefined;
     if (log?.chose("you", preferred, Date.now())) this.saveTransportLog(live, log);
     await live.link.setTransportPreference(preferred, fallback);
   }
@@ -1355,7 +1360,8 @@ export class GhostlyNode implements EngineImplementation {
   async setChatTransport({ linkId, transport }: { linkId: string; transport: PairedTransport | "auto" | "dht" }): Promise<void> {
     const live = this.links.get(linkId);
     if (transport === "dht") { await this.setDeliveryMode({ linkId, mode: "dht" }); return; }
-    if (live?.stored.deliveryMode === "dht") {
+    const leftDht = live?.stored.deliveryMode === "dht";
+    if (leftDht) {
       // The choice is recorded first, so the line that says the chat left DHT only names it. The native adapters
       // were released with DHT only: the preference reaches the link once they are back.
       const preferredTransport = transport === "auto" ? undefined : transport;
@@ -1364,7 +1370,8 @@ export class GhostlyNode implements EngineImplementation {
       await this.setDeliveryMode({ linkId, mode: "stream" });
     }
     if (transport !== "auto") {
-      await this.setTransportPreference({ linkId, preferred: transport, fallback: live?.stored.transportFallback ?? true });
+      // Out of DHT only, the row that says so already names the transport.
+      await this.setTransportPreference({ linkId, preferred: transport, fallback: live?.stored.transportFallback ?? true }, !leftDht);
       return;
     }
     if (!live?.stored.profile || !live.link) throw new Error("Transport unavailable");
