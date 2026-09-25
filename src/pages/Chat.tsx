@@ -4,7 +4,6 @@ import { PeerAvatar } from "../components/Avatar";
 import { useBackdropDismiss } from "../hooks/useDismiss";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { createPortal } from "react-dom";
-import { ChatPaymentsDialog } from "../components/ChatPaymentsDialog";
 import { ChatHoldDialog } from "../components/ChatHoldDialog";
 import { ContactIdentitiesPanel } from "../components/identities/ContactIdentitiesPanel";
 import { IdentityStack } from "../components/identities/ContactMarks";
@@ -263,7 +262,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const chatLink = useChatLink(params?.peerPubKeyB64 ?? "");
   const timeline = useMemo(() => mergeTimeline(messages, paired ? chatLink?.transportLog ?? [] : []), [messages, paired, chatLink?.transportLog]);
   const paymentsOn = !chatPeer?.paymentMethods || Object.values(chatPeer.paymentMethods).some(Boolean);
-  const [showPayments, setShowPayments] = useState(false);
   const [showHold, setShowHold] = useState(false);
   const [showIdentities, setShowIdentities] = useState(false);
   const [showServices, setShowServices] = useState(false);
@@ -515,12 +513,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                   {codeCopied ? t("common.copied") : t("sidebar.copyInvite")}
                 </MenuItem>
               )}
-              {platform?.wallet && platform.getPeer(params.peerPubKeyB64) && (
-                <MenuItem testId="chat-payments-open" onClick={() => { setShowPayments(true); closeMenu(); }}
-                  icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>}>
-                  {t("chat.menu.payments")}
-                </MenuItem>
-              )}
               {paired && platform?.getPeer(params.peerPubKeyB64) && (
                 <MenuItem testId="chat-hold-open" onClick={() => { setShowHold(true); closeMenu(); }}
                   icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 8v13H3V8" /><path d="M1 3h22v5H1z" /><path d="M10 12h4" /></svg>}>
@@ -706,10 +698,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
       {showHold && chatPeer && params && platform && (
         <ChatHoldDialog peer={chatPeer} name={shownName} onClose={() => setShowHold(false)}
           onSave={(enabled) => platform.setChatHold(params.peerPubKeyB64, enabled)} />
-      )}
-      {showPayments && chatPeer && params && platform && (
-        <ChatPaymentsDialog peer={chatPeer} name={shownName} onClose={() => setShowPayments(false)}
-          onSave={(methods) => platform.setChatPaymentMethods(params.peerPubKeyB64, methods)} />
       )}
       {confirmDelete && <DeleteChatDialog name={`${shownName} · ${truncatedPeerKey}`} onClose={()=>setConfirmDelete(false)} onConfirm={handleDelete} />}
       {/* Tech Info Modal */}

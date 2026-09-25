@@ -12,7 +12,7 @@ import { WALLET_RAILS, type WalletCard, type WalletRail } from "./walletCardType
  * Nothing is paid or asked for here. Save tells the contact: at once when the chat is connected, otherwise in the
  * next handshake. Only this chat changes.
  *
- * It is the same list the chat's ⋮ → Payments dialog edits (the engine's per-chat `paymentMethods`): a way works
+ * It edits the engine's per-chat list (`paymentMethods`), the only place that does since the chat's ⋮ lost Payments: a way works
  * only when both sides have it on, so one turned off here is not used to pay the contact either, and the hints say so.
  */
 export function ChatPaymentAccept({ peer, contact, cards, onSave }: {

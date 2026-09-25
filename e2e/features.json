@@ -583,7 +583,6 @@
     "src/components/PaymentBubble.tsx": ["app.theme.bubbles","wallet.*","payments.*","groups.payments.*","groups.community.payments.*"],
     "src/components/InvoiceBubble.tsx": ["app.theme.bubbles","payments.*","wallet.lnurl.*","wallet.cashu.pay-invoice","wallet.cashu.receive-token"],
     "src/components/PayExternally.tsx": ["payments.external","payments.uri","payments.lnurl.card","wallet.lightning.*","wallet.onchain.*","wallet.cashu.receive-lightning"],
-    "src/components/ChatPaymentsDialog.tsx": ["payments.chat.*","payments.*"],
     "src/components/ChatPaymentAccept.tsx": ["payments.chat.*","payments.*"],
     "src/lib/chatPayments.ts": ["payments.chat.*"],
     "src/components/{WalletDeck.tsx,wallet-deck.css}": ["wallet.*","payments.*","groups.payments.*","groups.community.payments.*","app.sidebar-resize"],
