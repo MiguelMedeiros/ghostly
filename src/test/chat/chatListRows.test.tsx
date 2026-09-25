@@ -75,19 +75,86 @@ describe("the chat list's rows (compact, the default)", () => {
     expect(within(rowOf("Fay")).getByTestId("chat-row-unread")).toHaveTextContent("99+");
   });
 
-  it("keeps the pin and delete buttons in a layer over the time, and a pinned chat's pin beside the message", async () => {
+  it("keeps the pin and delete buttons in a layer over the time; a pinned chat says so with a quiet mark before the time", async () => {
     saveSession(chat("g", { nick: "Gus" }));
     const { user } = list();
     const actions = within(rowOf("Gus")).getByTestId("chat-row-actions");
-    expect(actions).toHaveClass("absolute");
+    expect(actions).toHaveClass("absolute", "min-w-full");
     expect(within(actions).getByRole("button", { name: "Delete chat" })).toBeInTheDocument();
+    expect(within(rowOf("Gus")).queryByTestId("chat-row-pinned")).not.toBeInTheDocument();
     await user.click(within(actions).getByRole("button", { name: "Pin chat" }));
     expect(isSessionPinned("g")).toBe(true);
-    const pinned = await within(rowOf("Gus")).findByRole("button", { name: "Unpin chat" });
-    expect(pinned).toHaveAttribute("aria-pressed", "true");
-    expect(within(rowOf("Gus")).getByTestId("chat-row-actions")).not.toContainElement(pinned);
+
+    const row = rowOf("Gus");
+    const mark = await within(row).findByRole("img", { name: "Pinned" });
+    expect(mark).toHaveAttribute("data-testid", "chat-row-pinned");
+    // Muted, the size of the delivery ticks, on the name's line just before the time — not under it.
+    const status = within(row).getByTestId("chat-row-status");
+    expect(status).toContainElement(mark);
+    expect(status).toHaveClass("text-text-muted");
+    expect(mark.querySelector("svg")).toHaveAttribute("width", "12");
+    const time = within(row).getByTestId("chat-row-time");
+    expect(status.compareDocumentPosition(time) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(status.closest(".contact-row")).toContainElement(time);
+    expect(row.querySelector("p")!.parentElement).not.toContainElement(mark);
+    // The same layer holds its Unpin button, over the mark and the time, and says it is pressed.
+    const unpin = within(within(row).getByTestId("chat-row-actions")).getByRole("button", { name: "Unpin chat" });
+    expect(unpin).toHaveAttribute("aria-pressed", "true");
+    expect(unpin).toHaveAttribute("title", "Unpin chat");
+    expect(within(row).getAllByRole("button", { name: /pin chat/i })).toEqual([unpin]);
     // Pinning does not open the chat.
-    expect(rowOf("Gus")).not.toHaveClass("bg-surface-hover");
+    expect(row).not.toHaveClass("bg-surface-hover");
+
+    await user.click(unpin);
+    expect(isSessionPinned("g")).toBe(false);
+    expect(within(rowOf("Gus")).queryByTestId("chat-row-pinned")).not.toBeInTheDocument();
+    expect(within(rowOf("Gus")).getByRole("button", { name: "Pin chat" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("pins and unpins from the keyboard, the layer showing while a button in it has focus", async () => {
+    saveSession(chat("k", { nick: "Kim" }));
+    const { user } = list();
+    const actions = within(rowOf("Kim")).getByTestId("chat-row-actions");
+    expect(actions).toHaveClass("group-focus-within:opacity-100");
+    within(actions).getByRole("button", { name: "Pin chat" }).focus();
+    await user.keyboard("{Enter}");
+    expect(isSessionPinned("k")).toBe(true);
+    const unpin = await within(rowOf("Kim")).findByRole("button", { name: "Unpin chat" });
+    expect(unpin).toHaveFocus();
+    expect(unpin).toHaveAttribute("aria-pressed", "true");
+    await user.keyboard(" ");
+    expect(isSessionPinned("k")).toBe(false);
+    expect(within(rowOf("Kim")).getByRole("button", { name: "Pin chat" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("the pinned mark takes nothing from the time or the row: its own lane, shrinking never, the name giving way", () => {
+    saveSession(chat("l", { nick: "Lou with a name long enough to need cutting", messages: [message({ text: "one" }), message({ text: "two" })] }));
+    localStorage.setItem("ghostly_pin_l", "1");
+    list();
+    const row = rowOf("Lou with a name long enough to need cutting");
+    const time = within(row).getByTestId("chat-row-time");
+    const status = within(row).getByTestId("chat-row-status");
+    // The marks and the time sit together in a lane that never shrinks; the name is what truncates.
+    expect(time.parentElement).toBe(status.parentElement);
+    expect(time.parentElement).toHaveClass("shrink-0");
+    expect(within(row).getByTestId("chat-row-name")).toHaveClass("min-w-0", "truncate");
+    // Line-high at most (h-5 = the time's leading-5), so the row keeps its height; the count keeps the second line.
+    expect(status).toHaveClass("h-5");
+    expect(time).toHaveClass("leading-5");
+    expect(within(row).getByTestId("chat-row-unread")).toHaveTextContent("2");
+    expect(within(row).getByTestId("chat-row-unread").parentElement!.children).toHaveLength(1);
+    // An unread chat's time turns accent; the mark stays quiet.
+    expect(time).toHaveClass("text-accent");
+    expect(status).not.toHaveClass("text-accent");
+  });
+
+  it("names the mark and the buttons in the app's language", () => {
+    saveSession(chat("m", { nick: "Mia" }));
+    localStorage.setItem("ghostly_pin_m", "1");
+    renderApp(<UpdateProvider><Sidebar /></UpdateProvider>, { language: "pt" });
+    const row = rowOf("Mia");
+    expect(within(row).getByTestId("chat-row-pinned")).toHaveAccessibleName("Fixada");
+    expect(within(row).getByTestId("chat-row-pin")).toHaveAccessibleName("Desafixar conversa");
   });
 
   it("a group with messages shows when, and its members as the second line", () => {

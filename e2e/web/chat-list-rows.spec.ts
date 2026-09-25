@@ -5,7 +5,8 @@ import { pair } from "../support/paired";
 /**
  * The chat list's rows, as a messenger draws them: two lines (name and time; the last message with its
  * delivery mark, and the unread count), the contact's key out of the row but in its tooltip. Checked at the
- * list's narrowest (280px), wide, and on a phone; and the Comfortable density that brings the key line back.
+ * list's narrowest (280px), wide, and on a phone; a pinned chat's quiet mark before the time; and the Comfortable
+ * density that brings the key line back.
  */
 
 const rows = (page: Page) => page.getByTestId("sidebar").getByTestId("chat-row");
@@ -41,7 +42,7 @@ async function rowProblems(row: Locator): Promise<string[]> {
   });
 }
 
-test("a chat's row is two lines, the key in its tooltip, and the pin and delete buttons move nothing", { tag: ["@feature:chats.list.rows", "@feature:chats.list.pin"] }, async ({ peer }) => {
+test("a chat's row is two lines, the key in its tooltip, the pin and delete buttons move nothing, and a pin is a quiet mark", { tag: ["@feature:chats.list.rows", "@feature:chats.list.pin"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob", { viewport: { width: 1100, height: 800 } })]);
   await pair(alice, bob);
   // Bob is elsewhere when it arrives: the list counts it.
@@ -83,12 +84,58 @@ test("a chat's row is two lines, the key in its tooltip, and the pin and delete 
     expect(cover.x + cover.width).toBeGreaterThanOrEqual(time.x + time.width - 1);
   }
 
-  // Pinning from the row: the pin stays beside the count, the row keeps its height.
+  // Pinning from the row: a quiet mark just before the time, in the muted tone; the row keeps its height and the
+  // time all of its width, even at the list's narrowest.
+  await sidebarWidth(bob.page, 280);
+  await bob.page.mouse.move(900, 700);
   const height = (await box(row)).height;
+  await row.hover();
   await row.getByRole("button", { name: "Pin chat", exact: true }).click();
   await bob.page.mouse.move(900, 700);
-  const unpin = row.getByRole("button", { name: "Unpin chat", exact: true });
-  await expect(unpin).toHaveCSS("opacity", "1");
+  const mark = row.getByTestId("chat-row-pinned");
+  await expect(mark).toBeVisible();
+  await expect(row.getByTestId("chat-row-actions")).toHaveCSS("opacity", "0");
+  expect((await box(row)).height).toBe(height);
+  expect(await rowProblems(row), "pinned row at 280px").toEqual([]);
+  const time = row.getByTestId("chat-row-time");
+  const [m, t] = [await box(mark), await box(time)];
+  expect(m.x + m.width, "the mark ends before the time").toBeLessThanOrEqual(t.x);
+  expect(Math.abs(m.y + m.height / 2 - (t.y + t.height / 2)), "the mark sits on the time's line").toBeLessThanOrEqual(3);
+  expect(m.height).toBeLessThanOrEqual(14);
+  expect(await time.evaluate((el) => el.scrollWidth <= el.clientWidth), "the time is not cut").toBe(true);
+  const muted = await row.evaluate((el) => {
+    const probe = document.createElement("span");
+    probe.className = "text-text-muted";
+    el.append(probe);
+    const color = getComputedStyle(probe).color;
+    probe.remove();
+    return color;
+  });
+  await expect(row.getByTestId("chat-row-status")).toHaveCSS("color", muted);
+  await expect(row.getByTestId("chat-row-unread")).toBeVisible();
+
+  // Hovering turns the mark into the Unpin button: the layer covers the mark and the time.
+  await row.hover();
+  const actions = row.getByTestId("chat-row-actions");
+  await expect(actions).toHaveCSS("opacity", "1");
+  const cover = await box(actions);
+  expect(cover.x).toBeLessThanOrEqual(m.x);
+  expect(cover.x + cover.width).toBeGreaterThanOrEqual(t.x + t.width - 1);
+  const unpin = actions.getByRole("button", { name: "Unpin chat", exact: true });
+  await expect(unpin).toHaveAttribute("aria-pressed", "true");
+  await unpin.click();
+  await expect(mark).toHaveCount(0);
+
+  // And from the keyboard: focus shows the layer, Enter pins and unpins.
+  await bob.page.mouse.move(900, 700);
+  await row.getByTestId("chat-row-pin").focus();
+  await expect(actions).toHaveCSS("opacity", "1");
+  await bob.page.keyboard.press("Enter");
+  await expect(mark).toBeVisible();
+  await expect(row.getByTestId("chat-row-pin")).toHaveAttribute("aria-pressed", "true");
+  await bob.page.keyboard.press("Enter");
+  await expect(mark).toHaveCount(0);
+  await expect(row.getByTestId("chat-row-pin")).toHaveAttribute("aria-pressed", "false");
   expect((await box(row)).height).toBe(height);
   await expect(bob.page).toHaveURL(/#\/settings$/);
 });
@@ -105,13 +152,13 @@ test("on a phone the whole row is the target, at least 40px tall, with nothing c
   expect(r.height).toBeLessThanOrEqual(70);
   expect(r.width).toBeGreaterThan(360);
   expect(await rowProblems(row)).toEqual([]);
-  // No hover on a phone: the actions stay out of the way.
+  // No hover on a phone: the actions stay out of the way (a phone pins from the chat's Options).
   await expect(row.getByTestId("chat-row-actions")).toBeHidden();
   await row.tap();
   await expect(bob.page.getByPlaceholder("Message…")).toBeVisible();
 });
 
-test("Comfortable brings the key back as a line of its own, and the choice survives a reload", { tag: ["@feature:settings.chat-list-density"] }, async ({ peer }) => {
+test("Comfortable brings the key back as a line of its own, and the choice survives a reload", { tag: ["@feature:settings.chat-list-density", "@feature:chats.list.pin"] }, async ({ peer }) => {
   const { page } = await peer("density");
   await page.getByRole("button", { name: "New chat", exact: true }).click();
   const row = rows(page).first();
@@ -125,6 +172,17 @@ test("Comfortable brings the key back as a line of its own, and the choice survi
   await choice.getByRole("button", { name: "Comfortable" }).click();
   await expect(row.getByTestId("chat-row-key")).toBeVisible();
   expect((await box(row)).height).toBeGreaterThan(compact);
+
+  // Pinned, the row keeps its Comfortable height: the mark shares the name's line with the time.
+  const comfortable = (await box(row)).height;
+  await row.hover();
+  await row.getByRole("button", { name: "Pin chat", exact: true }).click();
+  await page.mouse.move(900, 700);
+  await expect(row.getByTestId("chat-row-pinned")).toBeVisible();
+  expect((await box(row)).height).toBe(comfortable);
+  const [m, t] = [await box(row.getByTestId("chat-row-pinned")), await box(row.getByTestId("chat-row-time"))];
+  expect(m.x + m.width).toBeLessThanOrEqual(t.x);
+  expect(Math.abs(m.y + m.height / 2 - (t.y + t.height / 2))).toBeLessThanOrEqual(3);
 
   await page.reload();
   await expect(rows(page).first().getByTestId("chat-row-key")).toBeVisible();
