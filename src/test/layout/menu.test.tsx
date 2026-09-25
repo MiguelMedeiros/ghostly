@@ -12,12 +12,12 @@ import { renderApp } from "../render";
 /** How wide the window is, as matchMedia and layout read it. */
 const viewport = (width: number, height = 800) => (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height });
 
-function Harness({ onPick = () => {} }: { onPick?: () => void }) {
+function Harness({ onPick = () => {}, portal, align }: { onPick?: () => void; portal?: boolean; align?: "start" | "end" }) {
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLDivElement>(null);
   return <div ref={anchor} data-testid="anchor" className="relative">
     <button onClick={() => setOpen(o => !o)}>Options</button>
-    <Menu testId="menu" open={open} onClose={() => setOpen(false)} anchorRef={anchor}>
+    <Menu testId="menu" open={open} onClose={() => setOpen(false)} anchorRef={anchor} portal={portal} align={align}>
       <MenuItem testId="short" onClick={() => { onPick(); setOpen(false); }}>Refresh</MenuItem>
       <MenuSeparator />
       <MenuItem testId="long" hint="Uma pessoa, com um convite" onClick={() => setOpen(false)}>Informações técnicas</MenuItem>
@@ -67,6 +67,47 @@ describe("Menu: one line per row", () => {
     const menu = screen.getByTestId("menu");
     expect(menu.style.translate).toBe(`${800 - 8 - 852}px 0`);
     expect(menu.className).toMatch(/\bbottom-full\b/);
+  });
+
+  it("portal: drawn over the page by its opener, kept in the window, and following it when the list scrolls", async () => {
+    viewport(800, 300);
+    let opener = { left: 760, right: 792, top: 240, bottom: 276 };
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      // A 192 × 200 menu; its opener low at the window's right edge, as a row's button in the chat list is.
+      const box = this.dataset.testid === "menu" ? { left: 0, right: 192, top: 0, bottom: 200 } : this.dataset.testid === "anchor" ? opener : { left: 0, right: 0, top: 0, bottom: 0 };
+      return { ...box, x: box.left, y: box.top, width: box.right - box.left, height: box.bottom - box.top, toJSON: () => box } as DOMRect;
+    });
+    const pick = vi.fn();
+    const { user } = renderApp(<Harness portal onPick={pick} />);
+    await user.click(screen.getByRole("button", { name: "Options" }));
+    const menu = screen.getByTestId("menu");
+    expect(menu).toHaveAttribute("data-menu", "popover");
+    expect(screen.getByTestId("anchor")).not.toContainElement(menu);
+    expect(menu.parentElement).toBe(document.body);
+    expect(menu.className).toMatch(/\bfixed\b/);
+    // Its end on the opener's end; no room below, so above it (the gap is mt-1's 4px).
+    expect(menu.style.left).toBe(`${792 - 192}px`);
+    expect(menu.style.top).toBe(`${240 - 4 - 200}px`);
+
+    // The list scrolls: the menu goes with its opener, now with room below.
+    opener = { left: 760, right: 792, top: 40, bottom: 76 };
+    act(() => { window.dispatchEvent(new Event("scroll")); });
+    expect(menu.style.top).toBe(`${76 + 4}px`);
+    // A click in it is not a click outside it.
+    await user.click(screen.getByTestId("short"));
+    expect(pick).toHaveBeenCalledOnce();
+  });
+
+  it("portal: lined up with the opener's start, it moves over to stay inside the window", async () => {
+    viewport(800, 600);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const box = this.dataset.testid === "menu" ? { left: 0, right: 192, top: 0, bottom: 200 } : this.dataset.testid === "anchor" ? { left: 700, right: 732, top: 40, bottom: 76 } : { left: 0, right: 0, top: 0, bottom: 0 };
+      return { ...box, x: box.left, y: box.top, width: box.right - box.left, height: box.bottom - box.top, toJSON: () => box } as DOMRect;
+    });
+    const { user } = renderApp(<Harness portal align="start" />);
+    await user.click(screen.getByRole("button", { name: "Options" }));
+    expect(screen.getByTestId("menu").style.left).toBe(`${800 - 8 - 192}px`);
+    expect(screen.getByTestId("menu").style.top).toBe(`${76 + 4}px`);
   });
 
   it("is a sheet from the bottom on a phone, with full-width rows; the backdrop closes it", async () => {

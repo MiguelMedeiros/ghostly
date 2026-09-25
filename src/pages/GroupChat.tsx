@@ -12,7 +12,7 @@ import { GroupConnection } from "../components/GroupConnection";
 import { GroupPaymentComposer } from "../components/GroupPaymentComposer";
 import { GroupPaymentCaption, GroupPaymentNote } from "../components/GroupPaymentNote";
 import { Menu, MenuItem, MenuSeparator } from "../components/Menu";
-import { MuteMenu, MuteMenuItem, MutedBell } from "../components/ChatMute";
+import { MuteMenu, MuteMenuItem } from "../components/ChatMute";
 import { forgetChatMute, groupChat } from "../lib/chatMute";
 import { useI18n } from "../contexts/I18nContext";
 import { markGroupRead, memberName } from "../lib/groups";
@@ -171,7 +171,6 @@ export function GroupChat() {
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-1.5">
               <p className="text-[15px] m-0 leading-tight truncate text-text-primary" data-testid="group-name">{group.name || "A group"}</p>
-              <MutedBell chat={groupChat(group.id)} />
             </div>
             <button onClick={() => setShowMembers(true)} data-testid="group-members" className="text-xs text-text-muted/80 truncate hover:text-accent cursor-pointer max-w-[60vw]">{subtitle}</button>
           </div>

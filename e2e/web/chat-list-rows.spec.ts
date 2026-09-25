@@ -5,8 +5,8 @@ import { pair } from "../support/paired";
 /**
  * The chat list's rows, as a messenger draws them: two lines (name and time; the last message with its
  * delivery mark, and the unread count), the contact's key out of the row but in its tooltip. Checked at the
- * list's narrowest (280px), wide, and on a phone; a pinned chat's quiet mark before the time; and the Comfortable
- * density that brings the key line back.
+ * list's narrowest (280px), wide, and on a phone; a pinned or muted chat's quiet marks before the time; muting from
+ * the row; and the Comfortable density that brings the key line back.
  */
 
 const rows = (page: Page) => page.getByTestId("sidebar").getByTestId("chat-row");
@@ -145,6 +145,79 @@ test("a chat's row is two lines, the key in its tooltip, the pin and delete butt
   await expect(row.getByTestId("chat-row-pin")).toHaveAttribute("aria-pressed", "false");
   expect((await box(row)).height).toBe(height);
   await expect(bob.page).toHaveURL(/#\/settings$/);
+});
+
+test("a row mutes and unmutes its chat without opening it, and its marks keep room between them", { tag: ["@feature:chats.list.rows", "@feature:chats.mute", "@feature:chats.list.pin"] }, async ({ peer }, testInfo) => {
+  const { page } = await peer("row-mute", { viewport: { width: 1100, height: 800 } });
+  await page.getByRole("button", { name: "New chat", exact: true }).click();
+  const row = rows(page).first();
+  await expect(row).toBeVisible();
+  // Somewhere else: whatever the row's actions do, the chat stays closed.
+  await page.goto("/#/settings");
+  await sidebarWidth(page, 280);
+  await page.mouse.move(900, 700);
+  const height = (await box(row)).height;
+
+  // Hovered, the bell comes first among the actions, each a target of its own.
+  await row.hover();
+  const actions = row.getByTestId("chat-row-actions");
+  await expect(actions).toHaveCSS("opacity", "1");
+  const bell = actions.getByTestId("chat-row-mute");
+  await expect(bell).toHaveAccessibleName("Mute notifications…");
+  const [b, p] = [await box(bell), await box(row.getByTestId("chat-row-pin"))];
+  expect(p.x - (b.x + b.width), "room between the bell and the pin").toBeGreaterThanOrEqual(3);
+
+  // Its menu: the durations, whole and on top, and the actions stay up while the pointer is on it.
+  await bell.click();
+  const menu = page.getByTestId("mute-menu");
+  await expect(menu).toBeVisible();
+  await expect(bell).toHaveAttribute("aria-expanded", "true");
+  const last = menu.getByTestId("mute-forever");
+  const onTop = await last.evaluate((el) => { const r = el.getBoundingClientRect(); return el.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)); });
+  expect(onTop, "the menu's last row is not covered or cut").toBe(true);
+  await menu.hover();
+  await expect(actions).toHaveCSS("opacity", "1");
+  await page.screenshot({ path: testInfo.outputPath("row-mute-menu.png"), clip: { x: 0, y: 0, width: 520, height: 360 } });
+  await menu.getByTestId("mute-1h").click();
+  await expect(menu).toHaveCount(0);
+  await page.mouse.move(900, 700);
+  await expect(row).toHaveAttribute("data-muted", "true");
+  await expect(row.getByTestId("chat-row-muted")).toBeVisible();
+  // A click's leftover focus does not keep the layer over the new mark.
+  await expect(actions).toHaveCSS("opacity", "0");
+  await expect(page).toHaveURL(/#\/settings$/);
+
+  // Muted and pinned: bell, pin and time side by side with room between them, on the time's line, the row as tall.
+  await row.hover();
+  await row.getByTestId("chat-row-pin").click();
+  await page.mouse.move(900, 700);
+  const [bellMark, pinMark, time] = [await box(row.getByTestId("chat-row-muted")), await box(row.getByTestId("chat-row-pinned")), await box(row.getByTestId("chat-row-time"))];
+  expect(pinMark.x - (bellMark.x + bellMark.width), "room between the bell and the pin").toBeGreaterThanOrEqual(5);
+  expect(time.x - (pinMark.x + pinMark.width), "room between the pin and the time").toBeGreaterThanOrEqual(7);
+  for (const mark of [bellMark, pinMark]) expect(Math.abs(mark.y + mark.height / 2 - (time.y + time.height / 2))).toBeLessThanOrEqual(3);
+  expect((await box(row)).height).toBe(height);
+  expect(await rowProblems(row), "muted and pinned row at 280px").toEqual([]);
+  await row.screenshot({ path: testInfo.outputPath("row-muted-pinned.png") });
+  await row.hover();
+  await row.screenshot({ path: testInfo.outputPath("row-muted-pinned-hover.png") });
+  await page.mouse.move(900, 700);
+
+  // From the keyboard: Shift+Tab from the pin to the bell shows the layer; Enter opens the way back on its one row,
+  // Enter unmutes, and the focus is on the bell again, the layer still up.
+  await page.keyboard.press("Shift+Tab");
+  await expect(bell).toBeFocused();
+  await expect(actions).toHaveCSS("opacity", "1");
+  await expect(bell).toHaveAccessibleName(/^Notifications muted until \d{1,2}:\d{2}/);
+  await page.keyboard.press("Enter");
+  await expect(menu.getByTestId("mute-off")).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(menu).toHaveCount(0);
+  await expect(row).not.toHaveAttribute("data-muted");
+  await expect(row.getByTestId("chat-row-muted")).toHaveCount(0);
+  await expect(bell).toBeFocused();
+  await expect(actions).toHaveCSS("opacity", "1");
+  await expect(bell).toHaveAccessibleName("Mute notifications…");
+  await expect(page).toHaveURL(/#\/settings$/);
 });
 
 test("on a phone the whole row is the target, at least 40px tall, with nothing cut off", { tag: ["@feature:chats.list.rows"] }, async ({ peer }) => {

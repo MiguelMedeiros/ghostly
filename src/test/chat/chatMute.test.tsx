@@ -1,5 +1,5 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
-import { Route, Routes } from "react-router-dom";
+import { Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AttentionEvent } from "@ghostly/browser/shared/rpc";
 import type { GroupView } from "@ghostly/browser/shared/types";
@@ -199,9 +199,8 @@ const activeGroup = () => groupView({ status: "active", epoch: 1, members: [{ ke
 const rowTexts = (menu: HTMLElement) => within(menu).getAllByRole("button").map(b => b.querySelector("[data-menu-text]")?.textContent);
 
 describe("muting from the chat's menu", () => {
-  it("⋮ → Mute notifications… → a duration: the header's bell says until when, and ⋮ unmutes", async () => {
+  it("⋮ → Mute notifications… → a duration: the header says nothing of it, and ⋮ says until when and unmutes", async () => {
     const { user } = openGroup(activeGroup());
-    expect(screen.queryByTestId("chat-muted")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("group-options"));
     await user.click(screen.getByTestId("chat-mute-open"));
     expect(screen.queryByTestId("group-options-menu")).not.toBeInTheDocument();
@@ -218,44 +217,19 @@ describe("muting from the chat's menu", () => {
     const until = mutedUntil(groupChat("group-1")) as number;
     expect(until - before).toBeGreaterThanOrEqual(15 * MIN);
     expect(until - before).toBeLessThan(15 * MIN + 5_000);
-    const bell = screen.getByTestId("chat-muted");
-    expect(bell).toHaveAccessibleName(`Notifications muted until ${muteEndText(until, "en")}`);
-    expect(bell).toHaveAttribute("title", `Notifications muted until ${muteEndText(until, "en")}`);
+    // No bell by the name: the list's row marks a muted chat, and ⋮ (or the row) is the way back.
+    const chatPane = screen.getByTestId("group-chat");
+    expect(within(chatPane).queryByRole("button", { name: /Notifications muted/ })).not.toBeInTheDocument();
+    expect(within(chatPane).queryByRole("img", { name: /Notifications muted/ })).not.toBeInTheDocument();
 
     await user.click(screen.getByTestId("group-options"));
     const row = screen.getByTestId("chat-unmute");
     expect(row).toHaveTextContent(`Unmute notifications`);
     expect(row).toHaveTextContent(`Muted until ${muteEndText(until, "en")}`);
     await user.click(row);
-    expect(screen.queryByTestId("chat-muted")).not.toBeInTheDocument();
     expect(mutedUntil(groupChat("group-1"))).toBeUndefined();
     await user.click(screen.getByTestId("group-options"));
     expect(screen.getByTestId("chat-mute-open")).toBeInTheDocument();
-  });
-
-  it("Until I unmute: the bell says muted with no end, and opens the way back", async () => {
-    const { user } = openGroup(activeGroup());
-    await user.click(screen.getByTestId("group-options"));
-    await user.click(screen.getByTestId("chat-mute-open"));
-    await user.click(screen.getByTestId("mute-forever"));
-    const bell = screen.getByTestId("chat-muted");
-    expect(bell).toHaveAccessibleName("Notifications muted");
-    expect(bell).toHaveAttribute("data-muted", "forever");
-    expect(bell).toHaveAttribute("aria-expanded", "false");
-    await user.click(bell);
-    expect(bell).toHaveAttribute("aria-expanded", "true");
-    const menu = screen.getByTestId("mute-menu");
-    expect(menu).toHaveAccessibleName("Muted");
-    await user.click(within(menu).getByTestId("mute-off"));
-    expect(screen.queryByTestId("chat-muted")).not.toBeInTheDocument();
-    expect(mutedUntil(groupChat("group-1"))).toBeUndefined();
-  });
-
-  it("takes the bell away by itself when the mute ends", async () => {
-    setChatMute(groupChat("group-1"), Date.now() + 150);
-    openGroup(activeGroup());
-    expect(screen.getByTestId("chat-muted")).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByTestId("chat-muted")).not.toBeInTheDocument(), { timeout: 2_000 });
   });
 
   it("speaks the app's language", async () => {
@@ -268,7 +242,9 @@ describe("muting from the chat's menu", () => {
 });
 
 describe("a muted chat in the list", () => {
-  const list = () => renderApp(<UpdateProvider><Sidebar /></UpdateProvider>);
+  /** Where the app is: the list's own actions never open the chat. */
+  function Where() { return <p data-testid="where">{useLocation().pathname}</p>; }
+  const list = () => renderApp(<UpdateProvider><Sidebar /><Where /></UpdateProvider>);
 
   it("keeps its unread count and its place, with a bell by the time and the count in grey", async () => {
     saveSession(chat("a", { nick: "Alice", nickSource: "profile", lastSyncAt: NOW, messages: [message(), message()] }));
@@ -302,5 +278,112 @@ describe("a muted chat in the list", () => {
     expect(row).toHaveAttribute("data-muted", "true");
     expect(within(row).getByTestId("chat-row-muted")).toBeInTheDocument();
     expect(within(row).getByTestId("group-row-unread")).toHaveClass("bg-text-secondary");
+  });
+
+  it("mutes and unmutes from the row's bell, in the row's actions, without opening the chat", async () => {
+    saveSession(chat("a", { nick: "Alice", nickSource: "profile" }));
+    const { user } = list();
+    const row = screen.getByTestId("chat-row");
+    const actions = within(row).getByTestId("chat-row-actions");
+    const bell = within(actions).getByTestId("chat-row-mute");
+    expect(bell).toHaveAccessibleName("Mute notifications…");
+    expect(bell).toHaveAttribute("aria-haspopup", "true");
+    expect(bell).toHaveAttribute("aria-expanded", "false");
+    // First in the actions, where the muted mark sits first among the marks.
+    expect(within(actions).getAllByRole("button")[0]).toBe(bell);
+
+    await user.click(bell);
+    expect(bell).toHaveAttribute("aria-expanded", "true");
+    // The actions stay up while the menu is open, even once the pointer is on the menu.
+    expect(actions).toHaveClass("has-[[aria-expanded=true]]:opacity-100");
+    const menu = screen.getByTestId("mute-menu");
+    // Over the page rather than in the row, which the list would cut off and the rows below would cover.
+    expect(row).not.toContainElement(menu);
+    expect(within(menu).getByTestId("mute-menu-head")).toHaveTextContent("Messages still arrive. Calls still ring.");
+    expect(rowTexts(menu)).toEqual(["15 minutes", "1 hour", "1 day", "Until I unmute"]);
+    const before = Date.now();
+    await user.click(within(menu).getByTestId("mute-1h"));
+    expect(screen.queryByTestId("mute-menu")).not.toBeInTheDocument();
+    const until = mutedUntil("a") as number;
+    expect(until - before).toBeGreaterThanOrEqual(60 * MIN);
+    expect(until - before).toBeLessThan(60 * MIN + 5_000);
+    expect(row).toHaveAttribute("data-muted", "true");
+    expect(within(row).getByTestId("chat-row-muted")).toHaveAccessibleName("Notifications muted");
+    expect(bell).toHaveAccessibleName(`Notifications muted until ${muteEndText(until, "en")}`);
+    expect(bell).toHaveAttribute("title", `Notifications muted until ${muteEndText(until, "en")}`);
+    expect(bell).toHaveAttribute("data-muted", "until");
+    expect(screen.getByTestId("where")).toHaveTextContent(/^\/$/);
+
+    // Muted, the bell says until when and opens the way back.
+    await user.click(bell);
+    const back = screen.getByTestId("mute-menu");
+    expect(back).toHaveAccessibleName(`Muted until ${muteEndText(until, "en")}`);
+    await user.click(within(back).getByTestId("mute-off"));
+    expect(mutedUntil("a")).toBeUndefined();
+    expect(row).not.toHaveAttribute("data-muted");
+    expect(within(row).queryByTestId("chat-row-muted")).not.toBeInTheDocument();
+    expect(bell).toHaveAccessibleName("Mute notifications…");
+    expect(bell).not.toHaveAttribute("data-muted");
+    expect(screen.getByTestId("where")).toHaveTextContent(/^\/$/);
+  });
+
+  it("mutes and unmutes from the keyboard, focus coming back to the bell each time", async () => {
+    saveSession(chat("k", { nick: "Kim" }));
+    const { user } = list();
+    const bell = within(screen.getByTestId("chat-row")).getByTestId("chat-row-mute");
+    bell.focus();
+    await user.keyboard("{Enter}");
+    const menu = screen.getByTestId("mute-menu");
+    expect(within(menu).getByTestId("mute-15m")).toHaveFocus();
+    await user.keyboard("{End}");
+    expect(within(menu).getByTestId("mute-forever")).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(mutedUntil("k")).toBe("forever");
+    expect(screen.queryByTestId("mute-menu")).not.toBeInTheDocument();
+    expect(bell).toHaveFocus();
+    expect(bell).toHaveAccessibleName("Notifications muted");
+    expect(bell).toHaveAttribute("data-muted", "forever");
+
+    // Escape leaves it as it was, the focus on the bell.
+    await user.keyboard("{Enter}");
+    expect(within(screen.getByTestId("mute-menu")).getByTestId("mute-off")).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("mute-menu")).not.toBeInTheDocument();
+    expect(bell).toHaveFocus();
+    expect(mutedUntil("k")).toBe("forever");
+
+    await user.keyboard("{Enter}{Enter}");
+    expect(mutedUntil("k")).toBeUndefined();
+    expect(bell).toHaveFocus();
+    expect(bell).toHaveAccessibleName("Mute notifications…");
+    expect(screen.getByTestId("where")).toHaveTextContent(/^\/$/);
+  });
+
+  it("turns the mark and the bell back by themselves when the mute ends", async () => {
+    saveSession(chat("a", { nick: "Alice" }));
+    setChatMute("a", Date.now() + 150);
+    list();
+    const row = screen.getByTestId("chat-row");
+    expect(within(row).getByTestId("chat-row-muted")).toBeInTheDocument();
+    expect(within(row).getByTestId("chat-row-mute")).toHaveAttribute("data-muted", "until");
+    await waitFor(() => expect(within(row).queryByTestId("chat-row-muted")).not.toBeInTheDocument(), { timeout: 2_000 });
+    expect(within(row).getByTestId("chat-row-mute")).toHaveAccessibleName("Mute notifications…");
+  });
+
+  it("mutes a group from its row the same way; an invitation has nothing to mute yet", async () => {
+    fakeEngine.update({ groups: [
+      groupView({ status: "active", lastMessageAt: NOW }),
+      groupView({ id: "group-2", name: "Invited", canSend: false, invitation: { linkId: "link-1", contact: "Alice", admin: key("y"), members: 3, accepted: false } }),
+    ] });
+    const { user } = list();
+    const [group, invited] = screen.getAllByTestId("group-row");
+    expect(within(invited).queryByTestId("chat-row-actions")).not.toBeInTheDocument();
+    await user.click(within(group).getByTestId("chat-row-mute"));
+    await user.click(within(screen.getByTestId("mute-menu")).getByTestId("mute-forever"));
+    expect(mutedUntil(groupChat("group-1"))).toBe("forever");
+    expect(group).toHaveAttribute("data-muted", "true");
+    expect(within(group).getByTestId("chat-row-muted")).toBeInTheDocument();
+    expect(within(group).getByTestId("chat-row-mute")).toHaveAccessibleName("Notifications muted");
+    expect(screen.getByTestId("where")).toHaveTextContent(/^\/$/);
   });
 });

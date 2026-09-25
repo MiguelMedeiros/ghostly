@@ -5,6 +5,8 @@ import { useIsMobile } from "../hooks/useIsMobile";
 
 /** Space kept between a menu and the edges of the window. */
 const MARGIN = 8;
+/** Space between a menu and its opener (mt-1 / mb-1). */
+const GAP = 4;
 
 /**
  * A dropdown of actions. Every row is one line in every language: the menu is as wide as its longest row
@@ -13,7 +15,7 @@ const MARGIN = 8;
  * sheet from the bottom with full-width rows. Outside clicks and Escape close it; the arrow keys, Home and End
  * move between the rows that can be used.
  */
-export function Menu({ open, onClose, anchorRef, testId, id, align = "end", prefer = "down", focusFirst, label, className = "", children }: {
+export function Menu({ open, onClose, anchorRef, testId, id, align = "end", prefer = "down", focusFirst, label, portal, className = "", children }: {
   open: boolean;
   onClose: () => void;
   /** The opener and its positioned wrapper: the menu drops from its end edge, and clicks on it are not "outside". */
@@ -28,6 +30,12 @@ export function Menu({ open, onClose, anchorRef, testId, id, align = "end", pref
   focusFirst?: boolean;
   /** What a screen reader calls the menu. */
   label?: string;
+  /**
+   * On a wide screen too, drawn over the whole page (placed by its opener, and following it on scroll) rather than
+   * inside the opener's wrapper: for an opener in a scrolling list or a row, which would cut the popover off or
+   * draw over it.
+   */
+  portal?: boolean;
   className?: string;
   children: ReactNode;
 }) {
@@ -35,12 +43,24 @@ export function Menu({ open, onClose, anchorRef, testId, id, align = "end", pref
   const ref = useRef<HTMLDivElement>(null);
   useOutsideDismiss(ref, open, onClose, anchorRef);
   const [place, setPlace] = useState<{ shift: number; up: boolean }>({ shift: 0, up: prefer === "up" });
+  const [fixed, setFixed] = useState<{ left: number; top: number }>();
 
   useLayoutEffect(() => {
     if (!open || phone) return;
     const fit = () => {
       const menu = ref.current, anchor = anchorRef.current;
       if (!menu || !anchor) return;
+      if (portal) {
+        const rect = menu.getBoundingClientRect(), opener = anchor.getBoundingClientRect();
+        const width = document.documentElement.clientWidth || window.innerWidth, height = window.innerHeight;
+        const below = opener.bottom + rect.height + MARGIN <= height, above = opener.top - rect.height - MARGIN >= 0;
+        const up = prefer === "up" ? above || !below : !below && above;
+        // Lined up with the opener's start or end edge (the end is the left one in a right-to-left page), kept in the window.
+        const left = (align === "start") === (getComputedStyle(anchor).direction !== "rtl") ? opener.left : opener.right - rect.width;
+        const next = { left: Math.max(MARGIN, Math.min(left, width - MARGIN - rect.width)), top: up ? opener.top - GAP - rect.height : opener.bottom + GAP };
+        setFixed(was => was?.left === next.left && was.top === next.top ? was : next);
+        return;
+      }
       // Measured where it would open without any correction.
       const before = menu.style.translate;
       menu.style.translate = "0";
@@ -54,8 +74,12 @@ export function Menu({ open, onClose, anchorRef, testId, id, align = "end", pref
     };
     fit();
     window.addEventListener("resize", fit);
-    return () => window.removeEventListener("resize", fit);
-  }, [open, phone, anchorRef, prefer]);
+    if (portal) window.addEventListener("scroll", fit, true);
+    return () => {
+      window.removeEventListener("resize", fit);
+      window.removeEventListener("scroll", fit, true);
+    };
+  }, [open, phone, anchorRef, prefer, portal, align]);
 
   useEffect(() => {
     if (open && focusFirst) usable(ref.current)[0]?.focus({ preventScroll: true });
@@ -81,6 +105,13 @@ export function Menu({ open, onClose, anchorRef, testId, id, align = "end", pref
       {children}
     </div>
   </>, document.body);
+
+  if (portal) return createPortal(
+    <div ref={ref} id={id} data-testid={testId} data-menu="popover" role={label ? "group" : undefined} aria-label={label} onKeyDown={keys}
+      style={{ left: fixed?.left ?? 0, top: fixed?.top ?? 0 }}
+      className={`fixed z-50 w-max min-w-44 max-w-[min(20rem,calc(100vw-1rem))] rounded-lg border border-border bg-surface-alt py-1 shadow-lg animate-fade-in ${className}`}>
+      {children}
+    </div>, document.body);
 
   return (
     <div ref={ref} id={id} data-testid={testId} data-menu="popover" role={label ? "group" : undefined} aria-label={label} onKeyDown={keys}
