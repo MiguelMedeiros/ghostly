@@ -30,6 +30,9 @@ vi.mock("@ghostly/core", async (importOriginal) => {
     identitySupport = false;
     peerProofAdapters: string[] = [];
     session = { setActive: vi.fn(), pollNow: vi.fn(), setFastPoll: vi.fn() };
+    setChatActive = (active: boolean) => this.session.setActive(active);
+    learnPeerTransports = vi.fn();
+    nativeDescriptors = {};
     start = vi.fn();
     stop = vi.fn(async () => {});
     wake = vi.fn();

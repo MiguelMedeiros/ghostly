@@ -84,10 +84,6 @@
     }
   },
   "invite": {
-    "live": "Chat en direct",
-    "text": "Texte seul",
-    "details": "Détails de l’envoi",
-    "textDetails": "Texte seul publie des messages courts chiffrés sur la DHT, même si votre contact est hors ligne. Jusqu’à 256 octets UTF-8, valables 5 minutes. La livraison n’est pas garantie.",
     "copy": "Copier l’invitation",
     "copyFailed": "Copie impossible. Réessayez ou partagez l’invitation.",
     "shareFailed": "Partage impossible. Copiez l’invitation."
@@ -310,7 +306,8 @@
       "answeringJoiner": "Votre contact répond…",
       "connecting": "Ouverture d’un lien direct et chiffré…",
       "live": "Connecté",
-      "failed": "Connexion impossible"
+      "failed": "Connexion impossible",
+      "onDht": "Sur la DHT. Vous pouvez discuter ; une liaison directe est tentée"
     },
     "step": {
       "publishing": "Publier",
@@ -320,7 +317,8 @@
       "answering": "Répondre",
       "connecting": "Connecter",
       "live": "En direct",
-      "failed": "Échec"
+      "failed": "Échec",
+      "onDht": "Sur la DHT · liaison directe en cours"
     },
     "slow": {
       "publishing": "Publication toujours en cours. Le réseau tarde à répondre.",
@@ -340,6 +338,12 @@
       "keyMismatch": "La clé de ce contact ne correspond pas à celle enregistrée. Rien n’a été accepté.",
       "expired": "Cette invitation a expiré.",
       "unknown": "Un problème est survenu pendant la connexion."
+    },
+    "onDht": {
+      "noCommonTransport": "Vos applications n'ont aucun transport direct en commun. Les textes courts passent par la DHT.",
+      "transport": "Aucune liaison directe pour l'instant. Elle est retentée en arrière-plan.",
+      "chosen": "DHT seule a été choisie pour cette discussion.",
+      "waiting": "Une liaison directe est tentée en arrière-plan."
     }
   },
   "composer": {

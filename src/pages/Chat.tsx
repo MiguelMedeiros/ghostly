@@ -193,7 +193,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   });
   const pairingSceneId = `pairing-${sessionId}`;
   // Once the contact knocked, the invite has done its job.
-  const invitePast = pairing.show && ["answering", "connecting", "live"].includes(pairing.progress?.stage ?? "");
+  const invitePast = pairing.show && ["answering", "connecting", "live", "on-dht"].includes(pairing.progress?.stage ?? "");
   const peerKey = params?.peerPubKeyB64;
   const sendFile = useCallback(
     async (source: File, voice?: VoiceMeta): Promise<string | null> => {
@@ -355,7 +355,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   }, [messages]);
 
   // A chat still pairing opens on its scene, not on the bottom of an empty history.
-  const sceneOn = pairing.show;
+  const sceneOn = pairing.scene;
   useEffect(() => {
     if (sceneOn && messages.length === 0) document.getElementById(pairingSceneId)?.scrollIntoView({ block: "nearest" });
   }, [sceneOn, messages.length, pairingSceneId]);
@@ -685,12 +685,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           )}
           {/* The scene and the invite it waits on: side by side where the column has room for both. */}
           <div className="pairing-invite"><div className="pairing-invite-row">
-          {pairing.show && pairing.progress && (
+          {pairing.scene && pairing.progress && (
             <PairingScene id={pairingSceneId} progress={pairing.progress} contact={shownName}
               retry={() => void pairing.retry()} retrying={pairing.retrying} retryError={pairing.retryError} />
           )}
           {inviteCode && !pairedReady && !invitePast && messages.length === 0 && (
-            <InviteCard code={inviteCode} sessionId={sessionId} linkId={deliveryPeer?.id} mode={deliveryPeer?.deliveryMode ?? session?.deliveryMode ?? "stream"} onChange={setInviteCode} />
+            <InviteCard code={inviteCode} />
           )}
           </div></div>
           {!inviteCode && !pairing.show && messages.length === 0 && (

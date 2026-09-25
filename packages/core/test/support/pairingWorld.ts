@@ -6,6 +6,8 @@ import { createIdentity, type Identity } from "../../src/identity";
 import type { GhostRecord, SignedPacket } from "../../src/pkarr";
 import type { PkarrRequestOptions, PkarrTransport } from "../../src/transport";
 import type { PairingProgress } from "../../src/pairingProgress";
+import { emptyDhtDeliveryState, type DhtDeliveryState } from "../../src/dhtDelivery";
+import type { PairingCredentials, PairingState } from "../../src/pairedSession";
 
 /**
  * Two links pairing from an invite, in one process: an in-memory Pkarr with the network's timing
@@ -40,6 +42,8 @@ export class MemoryPkarr {
   publishes = 0;
   reads = 0;
   readsBackground = 0;
+  /** Reads per key: which records a budget goes on. */
+  readsByKey = new Map<string, number>();
   constructor(private readonly model: NetworkModel) {}
 
   transport(): PkarrTransport {
@@ -53,6 +57,7 @@ export class MemoryPkarr {
       },
       resolve: async (key: string, options?: PkarrRequestOptions) => {
         this.reads++;
+        this.readsByKey.set(key, (this.readsByKey.get(key) ?? 0) + 1);
         if (options?.background) this.readsBackground++;
         await after(this.model.readMs);
         const entry = this.packets.get(key);
@@ -97,6 +102,8 @@ class FakeChannel extends EventTarget {
 
 /** ICE and DTLS take this long once offer and answer met (fake ms). */
 export const CONNECT_MS = 600;
+/** While true, offer and answer meet but nothing connects: every WebRTC attempt fails (a NAT that lets nothing through). */
+export const rtc = { blocked: false };
 
 class FakePeerConnection extends EventTarget {
   localDescription: RTCSessionDescriptionInit | null = null;
@@ -117,6 +124,7 @@ class FakePeerConnection extends EventTarget {
     // The answer came back to the offer it answers: the two connect.
     const answerer = byFingerprint.get(fingerprintOf(description.sdp!));
     if (!answerer || answerer.closed || fingerprintOf(answerer.remoteDescription!.sdp!) !== fingerprintOf(this.localDescription!.sdp!)) return;
+    if (rtc.blocked) return;
     this.channel.peer = answerer.channel; answerer.channel.peer = this.channel;
     setTimeout(() => {
       if (this.closed || answerer.closed) return;
@@ -147,31 +155,47 @@ export function invitationWhere(dialer: "inviter" | "joiner"): { inviter: Side; 
   }
 }
 
-export interface Opened { link: GhostLink; progress: PairingProgress[]; pinned: string[] }
+export interface Opened {
+  link: GhostLink; progress: PairingProgress[]; pinned: string[];
+  /** With `dht`: the credentials both layers share, what arrived (by id, in order), receipts, pairing states. */
+  credentials: PairingCredentials; received: { id?: string; text: string; via: string }[]; receipts: string[]; states: PairingState[];
+  dhtState: DhtDeliveryState;
+}
 
 const opened: GhostLink[] = [];
 
 /** One side's link, as the engine opens it for a chat never paired (node.ts `startLink` + the joiner's `expectPeer`). */
-export function open(side: Side, pkarr: MemoryPkarr, options: { active?: boolean; pollIntervals?: PollIntervals; dht?: boolean } = {}): Opened {
+export function open(side: Side, pkarr: MemoryPkarr, options: { active?: boolean; pollIntervals?: PollIntervals; dht?: boolean; credentials?: PairingCredentials; dhtState?: DhtDeliveryState } = {}): Opened {
   const progress: PairingProgress[] = [], pinned: string[] = [];
+  const received: Opened["received"] = [], receipts: string[] = [], states: PairingState[] = [];
+  const credentials: PairingCredentials = options.credentials ?? { seedB64: side.seedB64 };
+  const result = { dhtState: options.dhtState ?? emptyDhtDeliveryState() } as Opened;
   const link = new GhostLink({
     params: side.params,
-    pairing: { credentials: { seedB64: side.seedB64 }, pinPeer: async key => { pinned.push(key); }, trustOnFirstUse: true },
+    // Pinned once, by whichever layer verifies first; the engine refuses another key the same way (node.ts pinPeer).
+    pairing: { credentials, pinPeer: async key => {
+      if (options.dht && pinned.length && pinned[0] !== key) throw new Error("Already paired");
+      pinned.push(key);
+    }, trustOnFirstUse: true },
+    dht: options.dht ? { state: result.dhtState, save: async state => { result.dhtState = state; } } : undefined,
     pairingProgress: side.old ? undefined : { role: side.role, startedAt: side.createdAt },
     transport: pkarr.transport(),
-    // The DHT mailbox too (WISP 403), as the engine opens it for every paired chat.
-    ...(options.dht ? { dht: { save: async () => {}, pollMs: 1_000 } } : {}),
     pollIntervals: options.pollIntervals ?? DHT_POLL_INTERVALS,
     autoConnect: true,
     createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
     localFetch: vi.fn(), getServices: () => [{ id: "chat", type: "chat" }], getHostedHttpService: () => undefined,
-    events: { onPairingProgress: p => progress.push(p) },
+    events: {
+      onPairingProgress: p => progress.push(p),
+      onMessage: m => { received.push({ id: m.id, text: m.text, via: m.via }); },
+      onMessageReceipt: id => { receipts.push(id); },
+      onPairingState: state => { states.push(state); },
+    },
   });
   opened.push(link);
   link.start();
   link.session.setActive(options.active ?? true);
   if (!side.old) link.expectPeer();
-  return { link, progress, pinned };
+  return Object.assign(result, { link, progress, pinned, credentials, received, receipts, states });
 }
 
 export async function run(ms: number): Promise<void> {
@@ -196,7 +220,12 @@ export function useFakeWorld(): void {
 }
 
 export async function closeWorld(): Promise<void> {
-  await Promise.all(opened.splice(0).map(link => link.stop(false)));
+  // A stop waits for what is in flight (a DHT publish takes fake time too): time keeps running until it is done.
+  let stopped = false;
+  const stopping = Promise.all(opened.splice(0).map(link => link.stop(false))).finally(() => { stopped = true; });
+  for (let i = 0; !stopped && i < 200; i++) { await vi.advanceTimersByTimeAsync(100); await yieldToLoop(); }
+  await stopping;
   byFingerprint.clear();
+  rtc.blocked = false;
   vi.useRealTimers();
 }

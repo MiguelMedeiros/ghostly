@@ -1,9 +1,7 @@
 import { screen, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
-import { encodeInviteCode } from "@ghostly/core";
 import { MessageBubble } from "../../components/MessageBubble";
-import { InviteCard } from "../../components/InviteCard";
 import { GroupChat } from "../../pages/GroupChat";
 import { groupView } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -52,18 +50,6 @@ describe.each(LANGUAGES)("in %s", (language) => {
     expect(menu).toHaveTextContent(t(language, "chat.deleteMessageHint"));
     expect(within(menu).getByRole("button", { name: t(language, "common.cancel") })).toBeInTheDocument();
     expect(screen.getByTestId("message-delete-confirm")).toHaveTextContent(t(language, "common.delete"));
-    expect(rawKeys(container)).toEqual([]);
-  });
-
-  it("an invite's delivery choice and its details are translated, with no raw key", async () => {
-    const code = encodeInviteCode({ seedB64: "a".repeat(43), peerPubKeyZ32: "y".repeat(52), encKeyB64: "b".repeat(43), profile: "paired-chat/1" });
-    const { user, container } = renderApp(<InviteCard code={code} sessionId="s1" linkId="link-1" mode="stream" onChange={() => {}} />, { language });
-
-    await user.click(screen.getByRole("button", { name: t(language, "invite.details") }));
-
-    expect(screen.getByRole("radio", { name: t(language, "invite.live") })).toBeChecked();
-    expect(screen.getByRole("radio", { name: t(language, "invite.text") })).not.toBeChecked();
-    expect(screen.getByRole("region", { name: t(language, "invite.details") })).toHaveTextContent(t(language, "invite.textDetails"));
     expect(rawKeys(container)).toEqual([]);
   });
 

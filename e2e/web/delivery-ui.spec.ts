@@ -1,7 +1,7 @@
 import { copyInvite } from "../support/clipboard";
 import { manualFallback } from "../support/clipboard";
 import { pasteInvite } from "../support/clipboard";
-import { expect, openProfilePage, test } from "../support/fixtures";
+import { chooseDhtOnly, expect, openProfilePage, test } from "../support/fixtures";
 import { pair } from "../support/paired";
 
 const countChats = (page: import("@playwright/test").Page) => page.evaluate(() => Object.entries(localStorage).filter(([key, value]) => {try {return key.startsWith("ghostly_") && !!JSON.parse(value).mySeedB64;} catch {return false;}}).length);
@@ -131,10 +131,10 @@ test("mobile keeps its footer and compact header, with multiline text and QR ins
 });
 
 // A ghostly1 code carries no delivery mode (WISP 801): the contact learns "DHT only" from the inviter's first envelopes.
-test("a Text only chat's QR brings its contact onto the DHT", { tag: ["@feature:invite.dht", "@feature:invite.qr.image"] }, async ({peer})=>{
+test("a DHT-only chat's QR brings its contact onto the DHT", { tag: ["@feature:invite.dht", "@feature:invite.qr.image"] }, async ({peer})=>{
   const a=await peer("dht-qr-owner"),b=await peer("dht-qr-reader");
   await a.page.getByTitle("New Chat").click();
-  await a.page.getByRole("radio",{name:"Text only",exact:true}).click();
+  await chooseDhtOnly(a.page);
   await expect.poll(() => copyInvite(a.page)).toMatch(/^https:\/\/ghostly\.tools\/#ghostly1p/);
   await expect(a.page.getByTestId("connection-options")).toHaveAccessibleName(/DHT only/);
   const qr=await a.page.getByTestId("invite-qr").screenshot();

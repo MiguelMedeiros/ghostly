@@ -282,8 +282,8 @@ export class CapsExchange {
     if (this.running) return;
     this.running = true;
     void this.update().catch(() => {});
-    // Paired, and the contact's record never read: once. After that, a drop or a new pin is what reads it
-    // again, not every start.
+    // Paired, and the contact's record never read: once. After that, a newer revision named in an envelope,
+    // a drop or a new pin is what reads it again, not every start.
     if (this.options.credentials.peerKey && !this.state.peer) this.refresh(true);
   }
   async stop(): Promise<void> {

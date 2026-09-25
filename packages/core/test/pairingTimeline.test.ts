@@ -90,7 +90,9 @@ describe("a first pairing, at desktop pace", () => {
     // Nothing answers: the attempt ends in PAIRING_ATTEMPT_MS, and the next one starts at once (the wait
     // between attempts counts from the last one, and that was long ago by then).
     await run(PAIRING_ATTEMPT_MS + 500);
-    expect(inviter.progress.find(p => p.stage === "failed")).toMatchObject({ attempt: 1, reason: "timeout", retryable: true });
+    // Not a failure (WISP 400): back between attempts, saying why.
+    expect(inviter.progress.find(p => p.stage === "failed")).toBeUndefined();
+    expect(inviter.progress.find(p => p.detail?.includes("not answered"))).toMatchObject({ attempt: 1, stage: "waiting" });
     expect(inviter.progress.at(-1)).toMatchObject({ stage: "knocking", attempt: 2 });
     // The joiner is back: the second attempt goes through.
     const joinerAgain = open(made.joiner, pkarr);
@@ -125,7 +127,7 @@ describe("a first pairing, at web pace", () => {
 
 describe("a contact who chose DHT only", () => {
   // A ghostly1 code carries no delivery mode (WISP 801): the joiner learns it from the first envelope.
-  it("pairs the joiner through the mailbox: its first pairing ends live, not failed on the stream nobody answers", async () => {
+  it("pairs the joiner through the mailbox: its first pairing ends on the DHT, chosen, not failed on the stream nobody answers", async () => {
     const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
     const made = invitation();
     made.inviter.params = { ...made.inviter.params, deliveryMode: "dht" };
@@ -133,7 +135,7 @@ describe("a contact who chose DHT only", () => {
     const joiner = open(made.joiner, pkarr, { dht: true });
     await run(2 * PAIRING_ATTEMPT_MS);
     expect(joiner.pinned.length).toBeGreaterThan(0);
-    expect(joiner.link.pairingProgress?.stage).toBe("live");
+    expect(joiner.link.pairingProgress).toMatchObject({ stage: "on-dht", reason: "chosen" });
     expect(joiner.progress.map(p => p.stage)).not.toContain("failed");
     expect(inviter.link.pairingProgress).toBeUndefined();
   }, 30_000);

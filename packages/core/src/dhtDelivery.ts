@@ -18,18 +18,23 @@ const MAX_ATTEMPTS = 8;
 /** The contact's mailbox is read this often while either side is DHT-only, and otherwise… */
 const DHT_POLL_MS = 4_000;
 const STREAM_POLL_MS = 30_000;
-/** …only this often while layer 1 carries the chat (WISP 403, Q7): the relays' per-IP budget is shared by every chat. */
-export const LIVE_POLL_MS = 5 * 60_000;
-/** A new chat reads the contact's mailbox at the signaling pace this long after it starts, until it pins a contact. */
-export const RENDEZVOUS_FAST_MS = 10 * 60_000;
-/** After layer 1 is lost, the mailbox is read at once and then at the signaling pace this long. */
-export const DROP_FAST_MS = 2 * 60_000;
 /**
  * …except for this long after this side leaves DHT-only while the contact is still there: its own
  * switch then shows in seconds, not at the next 30 s read (both sides are blocked from a live link until
  * each has seen the other leave).
  */
 export const LEAVING_DHT_FAST_MS = 2 * 60_000;
+/** Only this often while layer 1 carries the chat (WISP 403, Q7): the relays' per-IP budget is shared by every chat. */
+export const LIVE_POLL_MS = 5 * 60_000;
+/** A new chat reads the contact's mailbox at the signaling pace this long after it starts, until it pins a contact. */
+export const RENDEZVOUS_FAST_MS = 10 * 60_000;
+/**
+ * On the DHT with the chat open, the mailbox is read this often (WISP 403 proposes 4 s). The relays' per-IP budget
+ * (30 requests a minute per relay here, reads and publishes together) is shared with presence polling, which is at its
+ * fastest right then, while layer 1 is redialled; 4 s starved the publications of held items in the store-and-forward
+ * e2e. A text of ours awaiting its receipt still reads at 4 s, and a drop reads once, at once.
+ */
+export const ACTIVE_DHT_POLL_MS = 10_000;
 const ID = /^[A-Za-z0-9_-]{22}$/;
 type Message = [id: string, timestamp: number, text: string];
 /**
@@ -74,6 +79,8 @@ export class DhtDelivery {
   private rendezvousUntil = 0;
   private live = false;
   private active = false;
+  /** The next read was asked for (a refresh, a fresh packet of the contact): it is not a background one. */
+  private urgent = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private chain = Promise.resolve();
   private lastPublish = 0;
@@ -160,22 +167,23 @@ export class DhtDelivery {
     void this.tick();
   }
   /** Reads the contact's mailbox now: something says it may have changed its delivery method. */
-  refresh(): void { void this.tick(); }
+  refresh(): void { this.urgent = true; void this.tick(); }
   /** Reads the contact's mailbox at the signaling pace for a while (a fresh packet of a contact not pinned yet). */
-  expect(ms = DROP_FAST_MS): void {
+  expect(ms = 2 * 60_000): void {
     const until = Date.now() + ms;
     if (until <= this.fastUntil) return;
-    this.fastUntil = until; void this.tick();
+    this.fastUntil = until; this.urgent = true; void this.tick();
   }
   /**
    * Layer 1 carries the chat, or no longer does. While it does, the mailbox is read every 5 minutes; the
-   * moment it is lost, at once and then every 4 s for two minutes (WISP 403, poll pace).
+   * moment it is lost, at once (WISP 403, poll pace), and then at the chat's pace.
    */
   setLive(live: boolean): void {
     if (live === this.live) return;
     this.live = live;
     if (live) { this.fastUntil = 0; this.schedule(); return; }
-    this.expect(DROP_FAST_MS);
+    this.urgent = true;
+    void this.tick();
   }
   get isLive(): boolean { return this.live; }
   /** The chat is open with the app in front: on the DHT, its mailbox is read at the signaling pace. */
@@ -207,7 +215,8 @@ export class DhtDelivery {
       const now = Date.now(), pending = this.state.pending;
       const next = pending?.message[0] === id && pending.expires > now ? pending : { message: [id, timestamp, text] as Message, expires: now + DHT_MESSAGE_TTL, attempts: 0, next: now };
       await this.persist({ ...this.state, pending: next }); this.changed();
-      try { await this.publish(true); return null; }
+      // The next read comes at the pace for a text awaiting its receipt.
+      try { await this.publish(true); this.schedule(); return null; }
       catch (error) { this.errors.publish = `DHT publication failed: ${String(error instanceof Error ? error.message : error)}. Bounded retry continues until expiry.`; this.changed(); return this.errors.publish; }
     });
   }
@@ -296,7 +305,13 @@ export class DhtDelivery {
     if (this.timer) clearTimeout(this.timer); this.timer = null;
     try { await this.serialize(async () => {
       if (!this.running) return;
-      try { const packet = await this.options.transport.resolve(this.peerAddress); if (!this.running) return; if (packet) await this.receive(packet); delete this.errors.read; }
+      // Only the slow, periodic looks (every 5 minutes while live, every 30 s for a chat in the background) are
+      // background requests, served from the relays' background share; a chat on screen, a first contact, DHT
+      // only, a drop or a text awaiting its receipt reads as signaling. The share also carries held items'
+      // pointers, which a busy mailbox must not starve.
+      const background = !this.urgent && this.pollMs >= STREAM_POLL_MS;
+      this.urgent = false;
+      try { const packet = await this.options.transport.resolve(this.peerAddress, background ? { background } : undefined); if (!this.running) return; if (packet) await this.receive(packet); delete this.errors.read; }
       catch (error) { this.errors.read = `Could not read DHT delivery: ${error instanceof Error ? error.message : String(error)}`; }
       try { await this.publish(); }
       catch (error) { this.errors.publish = `Could not publish DHT delivery: ${error instanceof Error ? error.message : String(error)}`; }
@@ -314,7 +329,9 @@ export class DhtDelivery {
     if (this.mode === "dht" || (this.state.peerMode === "dht" && now < this.leavingUntil) || now < this.fastUntil) return DHT_POLL_MS;
     if (!this.options.credentials.peerKey && now < this.rendezvousUntil) return DHT_POLL_MS;
     if (this.live) return LIVE_POLL_MS;
-    return this.active ? DHT_POLL_MS : STREAM_POLL_MS;
+    // Our text awaits its receipt: the receipt is what the person is looking at.
+    if (this.state.pending && this.state.pending.expires > now) return DHT_POLL_MS;
+    return this.active ? ACTIVE_DHT_POLL_MS : STREAM_POLL_MS;
   }
   private schedule(): void {
     if (!this.running || this.ticking) return;

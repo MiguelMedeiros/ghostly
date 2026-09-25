@@ -53,6 +53,9 @@ import { PairingTracker, type PairingProgress, type PairingRole } from "./pairin
 /** Unanswered offers are repeated less and less often: 1.5, 3, 6, then every 12 minutes. */
 /** After a failed attempt: 20 s, then doubling up to 3 min. Someone opening the chat starts it over. */
 const AUTO_CONNECT_RETRY_MS = 20_000;
+/** A native transport that fails this many attempts in a row is skipped for `DEMOTE_MS`, while another remains (WISP 100). */
+export const DEMOTE_AFTER_FAILURES = 3;
+export const DEMOTE_MS = 60 * 60_000;
 const AUTO_CONNECT_MAX_RETRY_MS = 3 * 60_000;
 /**
  * A first pairing is different: the contact is right there, having just read the invite, so an attempt
@@ -176,7 +179,15 @@ export interface GhostLinkOptions {
   servicesSupport?: boolean;
   /** Offer `files/3` on paired sessions: files of any size, offered, resumed and checked (`chatFiles.ts`). */
   largeFilesSupport?: boolean;
-  dht?: { state?: DhtDeliveryState; save(state: DhtDeliveryState): Promise<void>; pollMs?: number };
+  dht?: {
+    state?: DhtDeliveryState; save(state: DhtDeliveryState): Promise<void>; pollMs?: number;
+    /** This side's capability-record revision, told in every envelope (WISP 03). */
+    capsRev?(): number | undefined;
+    /** An envelope from the contact named this revision of its capability record. */
+    peerCapsRev?(rev: number): void;
+    /** Whether the contact's capability record accepts DHT text; absent or unknown: it does. */
+    peerAcceptsText?(): boolean;
+  };
   rtcAvailable?: boolean;
   native?: { peerDescriptors?: TransportDescriptors; peerTransports?: PairedTransport[]; peerFallback?: boolean; preferred?: PairedTransport; fallback?: boolean };
   params: LinkParams;
@@ -220,6 +231,9 @@ export class GhostLink {
   private endpoints = new Map<PairedTransport, NativeEndpoint>();
   private activeBinding?: NativeBinding;
   private dialing = false;
+  /** Native attempts that failed in a row, and transports demoted until when (WISP 100, demotion). */
+  private nativeFailures = new Map<PairedTransport, number>();
+  private demotedUntil = new Map<PairedTransport, number>();
   private connectionEpoch = 0;
   private switchAllowedUntil = 0;
   private switchAck: (() => void) | null = null;
@@ -296,15 +310,22 @@ export class GhostLink {
       }) : null;
     this.dht = options.params.profile && options.pairing && options.dht ? new DhtDelivery({
       params: options.params, mode: this.deliveryMode, state: options.dht.state, credentials: options.pairing.credentials, transport: options.transport,
-      save: options.dht.save, pollMs: options.dht.pollMs, pin: key => options.pairing!.pinPeer(key, true),
+      save: options.dht.save, pollMs: options.dht.pollMs,
+      capsRev: options.dht.capsRev, peerCapsRev: options.dht.peerCapsRev, peerAcceptsText: options.dht.peerAcceptsText,
+      // A first contact verified on the DHT pins the contact: the pairing is on the DHT until a stream is up.
+      pin: async key => {
+        await options.pairing!.pinPeer(key, true);
+        if (!this.isDataLinkOpen) this.tracker?.onDht(this.deliveryMode === "dht" ? "chosen" : "waiting");
+      },
       message: async message => { await options.events?.onMessage?.({ ...message, via: "pkarr" }); },
       receipt: async id => { await options.events?.onMessageReceipt?.(id); },
       changed: view => {
         options.events?.onDhtDelivery?.(view);
+        if (view.error?.includes("does not match")) this.dhtKeyRejected();
         this.streamBlockChanged();
         // A contact who chose DHT only (a ghostly1 code carries no mode) paired through the mailbox: the first
-        // pairing is over, and the stream attempt it will never answer is not a failure.
-        if (this.dht?.peerMode === "dht" && options.pairing?.credentials.peerKey && this.tracker && !this.tracker.done) this.tracker.live();
+        // pairing ends on the DHT, chosen (WISP 400), and the stream attempt it will never answer is not a failure.
+        if (this.dht?.peerMode === "dht" && options.pairing?.credentials.peerKey && this.tracker && !this.tracker.done && this.tracker.progress.reason !== "chosen") this.tracker.onDht("chosen");
         if (this.streamBlocked) {
           if (this.channel || this.dialing || this.dataLink.state !== "idle") this.disconnect();
           this.emitDeliveryState();
@@ -337,6 +358,8 @@ export class GhostLink {
         },
         onPresence: (presence) => {
           if (presence.online) this.tracker?.sawPeer();
+          // A first contact under way: a fresh packet of the contact says its envelope is a read away.
+          if (presence.online && !options.pairing?.credentials.peerKey && Date.now() - presence.lastPacketAt < EXPECT_PEER_MS) this.dht?.expect();
           events.onPresence?.(this.mergePresence(presence));
           this.peerMayHaveLeftDht(presence);
           this.maybeAutoConnect(presence);
@@ -384,7 +407,7 @@ export class GhostLink {
       },
       setFastPoll: (fast) => this.session.setFastPoll(fast),
       onOpen: channel => {
-        if (this.streamBlocked) { channel.close(); return; }
+        if (this.streamBlocked || this.keyStopped) { channel.close(); return; }
         const plan = this.switcher.pending;
         if (plan?.choices.includes("webrtc/1") && this.paired?.state.status === "ready") {
           void this.attachCandidate(channel, undefined, plan).catch(() => {});
@@ -470,6 +493,8 @@ export class GhostLink {
       const keyMismatch = !!credentials.peerKey && !!verifyPairedSignal(signal,
         options.params.peerPubKeyZ32, this.myPubKeyZ32, undefined, true);
       this.securityRejected = true;
+      // Signed by another key than the one pinned (on either path): the chat stops on both layers.
+      if (keyMismatch) { this.keyStopped = true; traceLink(this.myPubKeyZ32, "key-stop", { path: "signal" }); }
       this.tracker?.failed(keyMismatch ? "key-mismatch" : "rejected", false);
       options.events?.onPairingState?.({ status: "error", keyMismatch, error: keyMismatch
         ? "This connection uses a different participation key. The saved contact has not been replaced; use a fresh invitation for a new contact."
@@ -527,6 +552,8 @@ export class GhostLink {
     const open = this.isDataLinkOpen;
     if (open !== this.applicationOpen) {
       this.applicationOpen = open;
+      // While layer 1 carries the chat its mailbox is read every 5 minutes; lost, at once (WISP 403).
+      this.dht?.setLive(open);
       if (!open) this.pairedFiles?.closeAll();
       this.options.events?.onDataLinkState?.(open ? "open" : "idle");
     }
@@ -542,9 +569,23 @@ export class GhostLink {
   }
 
   private get streamBlocked(): boolean { return this.deliveryMode === "dht" || this.dht?.peerMode === "dht"; }
+  /**
+   * The DHT path met a participation key other than the pinned one: a security rejection, which stops the chat
+   * on both layers until the person acts (WISP 400), never a reason to fall back to the other path.
+   */
+  private keyStopped = false;
+  private dhtKeyRejected(): void {
+    if (this.keyStopped) return;
+    this.keyStopped = true;
+    traceLink(this.myPubKeyZ32, "key-stop", { path: "dht" });
+    this.tracker?.failed("key-mismatch", false);
+    if (this.channel || this.dialing || this.dataLink.state !== "idle") this.disconnect();
+    this.options.events?.onPairingState?.({ status: "error", keyMismatch: true, peerKey: this.options.pairing?.credentials.peerKey,
+      error: "This chat met a participation key other than your contact's. It has stopped; the saved contact has not been replaced." });
+  }
   get textDelivery(): "stream" | "dht" | "unavailable" {
     if (this.isDataLinkOpen) return "stream";
-    if (!this.dht || this.securityRejected || this.dht.view.error?.includes("key does not match")) return "unavailable";
+    if (!this.dht || this.securityRejected || this.keyStopped || this.dht.view.error?.includes("key does not match")) return "unavailable";
     if (this.deliveryMode === "dht") return "dht";
     return !this.channel && !!this.options.pairing?.credentials.peerKey && !!this.dht.peerMode ? "dht" : "unavailable";
   }
@@ -554,6 +595,11 @@ export class GhostLink {
   }
   get canSendText(): boolean { return this.textDelivery !== "unavailable"; }
   get dhtDelivery(): DhtDeliveryView | undefined { return this.dht?.view; }
+  /** The chat is on screen: on the DHT its mailbox is read at the signaling pace (WISP 403, poll pace). */
+  setChatActive(active: boolean): void {
+    this.session.setActive(active);
+    this.dht?.setActive(active);
+  }
   private emitDeliveryState(): void {
     if (!this.streamBlocked) return;
     const credentials = this.options.pairing?.credentials;
@@ -672,6 +718,22 @@ export class GhostLink {
     return relayedTransports(this.localDescriptors(), this.switcher.peerPolicy?.descriptors ?? this.peerDescriptors);
   }
 
+  /** This side's native descriptors, for its capability record (WISP 03): what a contact dials without WebRTC first. */
+  get nativeDescriptors(): TransportDescriptors {
+    return Object.fromEntries([...this.endpoints].map(([transport, endpoint]) => [transport, endpoint.descriptor])) as TransportDescriptors;
+  }
+
+  /**
+   * The contact's capability record named its native transports and how to dial them: a chat whose WebRTC never
+   * connected can still try Iroh or HyperDHT. What a session said (fresher, transcript-bound) is not replaced.
+   */
+  learnPeerTransports(transports: PairedTransport[], descriptors: TransportDescriptors): void {
+    let changed = false;
+    for (const t of ["iroh/1", "hyperdht/1"] as const) if (descriptors[t] && !this.peerDescriptors[t]) { this.peerDescriptors = { ...this.peerDescriptors, [t]: descriptors[t] }; changed = true; }
+    if (!this.peerTransports && transports.length) { this.peerTransports = transports; this.peerFallback = true; changed = true; }
+    if (changed) traceLink(this.myPubKeyZ32, "record-transports", { transports });
+  }
+
   get availableTransports(): PairedTransport[] {
     return [...(this.options.rtcAvailable !== false ? ["webrtc/1" as const] : []), ...this.endpoints.keys()];
   }
@@ -777,12 +839,15 @@ export class GhostLink {
       if (!choices.length) throw new Error("No common available transport. Initial pairing requires WebRTC on both peers.");
       const fallback = this.fallback && this.peerFallback;
       let lastError: unknown;
-      for (const [index, transport] of choices.entries()) {
+      // A transport that keeps failing is tried last for an hour, not first on every attempt.
+      const now = Date.now(), demoted = (t: PairedTransport) => (this.demotedUntil.get(t) ?? 0) > now;
+      const ordered = choices.length > 1 ? [...choices.filter(t => !demoted(t)), ...choices.filter(demoted)] : choices;
+      for (const [index, transport] of ordered.entries()) {
         if (index > 0 && !fallback) break;
         if (transport === "webrtc/1") {
           // WebRTC settles later (ICE can fail minutes from now): what ranks after it is where a failed attempt
           // goes, typically a relayed Iroh behind a symmetric NAT (WISP 100, "Relayed"), before the DHT floor.
-          this.afterRtc = fallback && index + 1 < choices.length ? { epoch, rest: choices.slice(index + 1) } : undefined;
+          this.afterRtc = fallback && index + 1 < ordered.length ? { epoch, rest: ordered.slice(index + 1) } : undefined;
           await this.dataLink.connect();
           if (!this.afterRtc || this.dataLink.state !== "idle" || epoch !== this.connectionEpoch) return;
           this.afterRtc = undefined; continue;
@@ -806,10 +871,16 @@ export class GhostLink {
     if (!endpoint || !descriptor) return new Error("Peer native address unavailable; reconnect WebRTC once to exchange endpoints");
     try {
       const { channel, binding } = await endpoint.connect(descriptor);
+      this.nativeFailures.delete(transport); this.demotedUntil.delete(transport);
       if (this.stopped || epoch !== this.connectionEpoch || this.channel) { channel.close(); return true; }
       this.attach(channel, binding); return true;
     } catch (error) {
-      return epoch !== this.connectionEpoch ? true : error instanceof Error ? error : new Error(String(error));
+      if (epoch !== this.connectionEpoch) return true;
+      // Three failures in a row demote it for an hour (WISP 100).
+      const failures = (this.nativeFailures.get(transport) ?? 0) + 1;
+      if (failures >= DEMOTE_AFTER_FAILURES) { this.nativeFailures.delete(transport); this.demotedUntil.set(transport, Date.now() + DEMOTE_MS); traceLink(this.myPubKeyZ32, "demote", { transport }); }
+      else this.nativeFailures.set(transport, failures);
+      return error instanceof Error ? error : new Error(String(error));
     }
   }
 
@@ -975,8 +1046,9 @@ export class GhostLink {
    * the lower-key rule settles any collision, on both sides.
    */
   private maybeAutoConnect(presence: PeerPresence): void {
-    if (this.streamBlocked || !this.options.autoConnect || !presence.online || this.channel || this.dataLink.state !== "idle") return;
-    const pairing = !!this.tracker && !this.tracker.done;
+    if (this.streamBlocked || this.keyStopped || !this.options.autoConnect || !presence.online || this.channel || this.dataLink.state !== "idle") return;
+    // On the DHT the chat is usable: layer 1 is retried at the background pace (WISP 100), not the pairing's.
+    const pairing = !!this.tracker && !this.tracker.done && !this.tracker.pinnedOnDht;
     const role = pairing ? this.options.pairingProgress?.role : undefined;
     if (role === "inviter") {
       this.peerSeenAt ||= Date.now();
@@ -1309,6 +1381,8 @@ export class GhostLink {
         onState: () => { if (this.channel === channel) this.emitPairingState(); },
         onFailure: () => {
           this.securityRejected = true;
+          // Another key on the stream than the one pinned: the chat stops on both layers, the DHT's too.
+          if (paired.state.keyMismatch) { this.keyStopped = true; traceLink(this.myPubKeyZ32, "key-stop", { path: "stream" }); }
           this.tracker?.failed(paired.state.keyMismatch ? "key-mismatch" : "rejected", !paired.state.keyMismatch, paired.state.error);
           migration?.reject(new Error(paired.state.error ?? "Candidate authentication failed"));
           channel.close(); if (this.channel === channel) this.detach();
@@ -1611,6 +1685,7 @@ export class GhostLink {
     this.stopLiveness();
     const wasNative = !!this.activeBinding;
     this.applicationOpen = false;
+    this.dht?.setLive(false);
     // A replacement still authenticating may yet carry the chat. Without one, the session a plan meant to move is
     // gone, and so is the plan: its dial must not go on and open a session of its own, or settle the next one.
     if (!this.candidate) { this.cancelCandidate(); this.switcher.stop(); }

@@ -56,7 +56,7 @@ export const DIMENSIONS = [
     label: "delivery",
     values: [
       { id: "live", label: "live stream; B reloads and comes back" },
-      { id: "dht", label: "DHT text chat; B away while A writes, then both back to live" },
+      { id: "dht", label: "DHT only (chosen in the Connection menu); B away while A writes, then both back to live" },
       { id: "store-forward", label: "store-and-forward: A's S3 holds text and a picture while B is away", requires: ["s3"] },
     ],
   },

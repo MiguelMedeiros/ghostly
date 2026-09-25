@@ -84,10 +84,6 @@
     }
   },
   "invite": {
-    "live": "Live chat",
-    "text": "Text only",
-    "details": "Delivery details",
-    "textDetails": "Text only publishes short encrypted messages to the DHT, even when your contact is offline. Up to 256 UTF-8 bytes, valid for 5 minutes. Delivery is not guaranteed.",
     "copy": "Copy invite",
     "copyFailed": "Could not copy. Try again or share the invite.",
     "shareFailed": "Could not share. Copy the invite instead."
@@ -310,7 +306,8 @@
       "answeringJoiner": "Your contact is answering…",
       "connecting": "Opening a direct, encrypted link…",
       "live": "Connected",
-      "failed": "Could not connect"
+      "failed": "Could not connect",
+      "onDht": "On the DHT. You can chat now; a live link is being tried"
     },
     "step": {
       "publishing": "Publish",
@@ -320,7 +317,8 @@
       "answering": "Answer",
       "connecting": "Connect",
       "live": "Live",
-      "failed": "Failed"
+      "failed": "Failed",
+      "onDht": "On DHT · retrying live"
     },
     "slow": {
       "publishing": "Still publishing your invite. The network is slow to answer.",
@@ -340,6 +338,12 @@
       "keyMismatch": "This contact's key does not match the saved one. Nothing was accepted.",
       "expired": "This invite has expired.",
       "unknown": "Something went wrong while connecting."
+    },
+    "onDht": {
+      "noCommonTransport": "Your apps share no live transport. Short texts go through the DHT.",
+      "transport": "No live link came up yet. It is retried in the background.",
+      "chosen": "DHT only was chosen for this chat.",
+      "waiting": "A live link is being tried in the background."
     }
   },
   "composer": {

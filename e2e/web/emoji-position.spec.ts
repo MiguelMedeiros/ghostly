@@ -16,7 +16,7 @@ async function fits(page:Page){
 }
 
 test("the emoji/GIF panel follows the composer across sidebar and viewport changes",{ tag: ["@feature:app.emoji-picker", "@feature:app.composer.expressions", "@feature:chat.paired.emoji"] },async({peer},info)=>{
- const {page}=await peer("emoji desktop");await page.getByTitle("New Chat").click();await page.getByRole("radio",{name:"Text only",exact:true}).click();
+ const {page}=await peer("emoji desktop");await page.getByTitle("New Chat").click();
  const trigger=page.getByTestId("composer-expressions");await trigger.click();await fits(page);
  const panel=page.getByTestId("expression-panel");
  await expect(panel).toHaveAttribute("data-tab","emoji");
@@ -45,7 +45,7 @@ test("the emoji/GIF panel follows the composer across sidebar and viewport chang
 
 test("mobile emoji sheet stays visible and supports touch selection and dismissal",{ tag: ["@feature:app.emoji-picker", "@feature:app.composer.expressions", "@feature:chat.paired.emoji"] },async({peer},info)=>{
  const {page}=await peer("emoji phone",{mobile:true,viewport:{width:390,height:844}});
- await page.getByTitle("New Chat").click();await page.getByRole("radio",{name:"Text only",exact:true}).click();await page.getByTestId("composer-expressions").tap();await fits(page);
+ await page.getByTitle("New Chat").click();await page.getByTestId("composer-expressions").tap();await fits(page);
  const panel=page.getByTestId("expression-panel");
  await panel.getByTestId("expression-search").fill("ghost");
  await page.screenshot({path:info.outputPath("emoji-phone.png")});

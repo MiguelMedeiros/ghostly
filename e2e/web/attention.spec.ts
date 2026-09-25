@@ -18,7 +18,7 @@ test("notification permission is explicit and independent of persistent sound pr
 
 test("creation marker survives the first offline message and reload",{ tag: ["@feature:chats.created-marker"] },async({peer})=>{
  const {page}=await peer("created");
- await page.getByTitle("New Chat").click();await page.getByRole("radio",{name:"Text only",exact:true}).click();
+ await page.getByTitle("New Chat").click();
  const marker=page.getByTestId("chat-created");await expect(marker).toHaveCount(1);
  await expect(marker).not.toContainText("{date}");
  const initial=await marker.locator("time").getAttribute("datetime");expect(Date.parse(initial!)).toBeGreaterThan(0);

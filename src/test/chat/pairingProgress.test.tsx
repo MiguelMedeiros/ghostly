@@ -11,7 +11,7 @@ import { deriveStage, failureReason, formatElapsed, type PairingProgress } from 
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
-// covers: chat.paired.pairing-progress
+// covers: chat.paired.pairing-progress, chat.one-chat
 
 type Pairing = NonNullable<LinkView["pairing"]>;
 const pairing = (patch: Partial<Pairing>) => patch as Pairing;
@@ -279,6 +279,38 @@ describe("the header indicator", () => {
     const { user } = renderApp(<PairingIndicator onOpen={onOpen} progress={{ role: "inviter", stage: "waiting", since: Date.now(), startedAt: Date.now(), attempt: 1, derived: true }} />);
     await user.click(screen.getByTestId("pairing-indicator"));
     expect(onOpen).toHaveBeenCalledOnce();
+  });
+});
+
+describe("a pairing that ends on the DHT (WISP 400)", () => {
+  /** Chat.tsx's split: the indicator while `show`, the scene only while `scene`. */
+  function Chat() {
+    const p = usePairingProgress("peer", { inviter: false, enabled: true, createdAt: Date.now() });
+    return <>
+      {p.show && p.progress && <PairingIndicator progress={p.progress} />}
+      {p.scene && p.progress ? <PairingScene progress={p.progress} contact="Alice" retry={() => {}} retrying={false} retryError="" /> : <p>the chat</p>}
+    </>;
+  }
+  const onDht = (reason: string) => ({ ...published, pairingProgress: { role: "joiner", stage: "on-dht", reason, retryable: reason !== "chosen", since: Date.now(), startedAt: Date.now(), attempt: 2 } } as Partial<LinkView>);
+
+  it("is no failure: the chat takes over, and the header says it is on the DHT while live is retried", () => {
+    const { engine } = renderApp(<Chat />);
+    show(onDht("transport"), engine);
+    expect(scene()).toBeNull();
+    expect(screen.getByText("the chat")).toBeInTheDocument();
+    const indicator = screen.getByTestId("pairing-indicator");
+    expect(indicator).toHaveAttribute("data-stage", "on-dht");
+    expect(indicator).toHaveTextContent("On DHT · retrying live");
+    expect(screen.getByTestId("pairing-indicator-tip")).toHaveTextContent("No live link came up yet. It is retried in the background.");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("says why: no common transport, DHT only chosen, or still trying", () => {
+    const { engine } = renderApp(<Chat />);
+    for (const [reason, words] of [["no-common-transport", "share no live transport"], ["chosen", "DHT only was chosen"], ["waiting", "being tried in the background"]]) {
+      show(onDht(reason), engine);
+      expect(screen.getByTestId("pairing-indicator-tip")).toHaveTextContent(words);
+    }
   });
 });
 
