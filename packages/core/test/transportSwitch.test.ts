@@ -131,6 +131,8 @@ it("choosing again what this side's standing choice names raises no intent; an o
   h.switches[0].chose(true); h.flush();
   expect(intent(0)).toBe(3);
   expect(h.switches.every(s => s.pending?.choices[0] === "iroh/1")).toBe(true);
+  h.switches.forEach(s => s.stop());
+});
 it("falls back to a relayed transport only after the direct ones, and still honours an explicit choice of it", () => {
   const plain = peers(); plain.policies.forEach(p => p.preferred = "iroh/1"); plain.switches[1].changed(); plain.flush();
   expect((plain.prepare[0].mock.calls[0][0] as SwitchPlan).choices).toEqual(["iroh/1", "hyperdht/1", "webrtc/1"]);
