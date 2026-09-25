@@ -22,7 +22,7 @@ import { linkView } from "../test/fakeEngine";
 import { renderApp } from "../test/render";
 
 it("reconnects from the connection menu", async () => {
-  const { user, engine } = renderApp(<PairingBanner peerKey="peer" />);
+  const { user, engine } = renderApp(<ChatConnection peerKey="peer" />);
   engine.on("connect", () => undefined).update({ links: [linkView({ pairing: { status: "error", error: "Relay refused" } })] });
   await user.click(screen.getByTestId("connection-options"));
   await user.click(screen.getByRole("button", { name: "Reconnect" }));

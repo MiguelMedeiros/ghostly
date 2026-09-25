@@ -4,7 +4,7 @@ import type { GroupView } from "@ghostly/browser/shared/types";
 import { useOutsideDismiss } from "../hooks/useDismiss";
 import { edgeDot, edgeLabel, groupTransports, memberName } from "../lib/groups";
 import { dots, focus, type ConnectionKind } from "../lib/connection";
-import { ConnectionIcon } from "./PairingBanner";
+import { ConnectionIcon } from "./ConnectionIcon";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;

@@ -1,42 +1,44 @@
 import { act, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { LinkView } from "@ghostly/browser/shared/types";
-import { PairingBanner } from "../../components/PairingBanner";
+import { ChatConnection } from "../../components/ChatConnection";
 import { linkView, type StatePatch } from "../fakeEngine";
 import { renderApp } from "../render";
 
-// covers: chat.paired.status, chat.paired.verify, chat.paired.reconnect, transport.indicator, transport.chat-switch, transport.wait
+// covers: chat.paired.status, chat.paired.verify, chat.paired.reconnect, transport.indicator, transport.chat-switch, transport.wait, invite.delivery-mode
 
 type Pairing = NonNullable<LinkView["pairing"]>;
 const ready = (patch: Partial<Pairing> = {}): Pairing => ({ status: "ready", transport: "webrtc/1", ...patch } as Pairing);
 const all = ["webrtc/1", "iroh/1", "hyperdht/1"] as LinkView["availableTransports"];
 
-/** Renders the banner for the chat with "peer" in the given state. */
-function banner(link: Partial<LinkView>, state: StatePatch = {}) {
-  const view = renderApp(<PairingBanner peerKey="peer" />);
+/** Renders the connection control for the chat with "peer" in the given state. */
+function banner(link: Partial<LinkView>, state: StatePatch = {}, props: Partial<Parameters<typeof ChatConnection>[0]> = {}) {
+  const view = renderApp(<ChatConnection peerKey="peer" {...props} />);
   act(() => view.engine.update({ ...state, links: [linkView({ availableTransports: all, ...link })] }));
   return view;
 }
 
-/** Everything the header says about the state, in the four places it says it. */
+/** Everything the header says about the state, in the places it says it. */
 function header() {
   const trigger = screen.getByTestId("connection-options");
-  const dot = within(trigger).queryByTestId("connection-dot");
+  const dot = within(trigger).getByTestId("contact-status");
   return {
     kind: trigger.dataset.state,
     name: trigger.getAttribute("aria-label")!.replace("Connection options: ", ""),
     popover: screen.getByTestId("connection-state").textContent,
     // The label (and a failure), without the live connection's detail line.
     tooltip: screen.getByTestId("connection-tooltip").textContent!.replace(screen.queryByTestId("connection-tooltip-detail")?.textContent ?? "", ""),
-    dot: dot ? [...dot.classList].find(c => c.startsWith("bg-")) : null,
-    pulse: !!dot?.classList.contains("motion-safe:animate-pulse"),
+    dot: [...dot.classList].find(c => c.startsWith("bg-")),
+    pulse: dot.classList.contains("motion-safe:animate-pulse"),
+    // What the header shows beside the key: the transport in use and its round trip, or the state.
+    now: screen.queryByTestId("connection-now")?.textContent,
   };
 }
 
-describe("PairingBanner: what the header says", () => {
+describe("ChatConnection: what the header says", () => {
   // label, kind, dot colour and pulse for every branch of `label`, in the order the code checks them.
-  it.each<[string, Partial<LinkView>, StatePatch, { label: string; kind: string; dot: string | null; pulse: boolean; failure?: string }]>([
-    ["offline, even when connected", { pairing: ready() }, { settings: { online: false } }, { label: "Offline", kind: "offline", dot: null, pulse: false }],
+  it.each<[string, Partial<LinkView>, StatePatch, { label: string; kind: string; dot: string; pulse: boolean; failure?: string }]>([
+    ["offline, even when connected", { pairing: ready() }, { settings: { online: false } }, { label: "Offline", kind: "offline", dot: "bg-text-muted", pulse: false }],
     ["a pairing error", { dataLink: "idle", pairing: { status: "error", error: "Relay refused" } as Pairing }, {}, { label: "Connection issue", kind: "failure", dot: "bg-danger", pulse: false, failure: "Relay refused" }],
     ["a failed switch of transport", { pairing: ready({ transitionError: "Iroh did not answer" }) }, {}, { label: "Connection issue", kind: "failure", dot: "bg-danger", pulse: false, failure: "Iroh did not answer" }],
     ["a DHT error in DHT-only", { deliveryMode: "dht", dataLink: "idle", dhtDelivery: { error: "DHT put failed" } as LinkView["dhtDelivery"] }, {}, { label: "Connection issue", kind: "failure", dot: "bg-danger", pulse: false, failure: "DHT put failed" }],
@@ -44,23 +46,23 @@ describe("PairingBanner: what the header says", () => {
     ["discovery that could not be published", { dataLink: "idle", discoveryError: "Could not publish discovery: relay down" }, {}, { label: "Publication unavailable", kind: "failure", dot: "bg-danger", pulse: false, failure: "Could not publish discovery: relay down" }],
     ["discovery that could not be read", { dataLink: "idle", discoveryError: "Could not read discovery: timeout" }, {}, { label: "Discovery unavailable", kind: "failure", dot: "bg-danger", pulse: false, failure: "Could not read discovery: timeout" }],
     ["discovery that could be neither published nor read", { dataLink: "idle", discoveryError: "Could not publish discovery: a; Could not read discovery: b" }, {}, { label: "Discovery unavailable", kind: "failure", dot: "bg-danger", pulse: false, failure: "Could not publish discovery: a; Could not read discovery: b" }],
-    ["DHT-only delivery", { deliveryMode: "dht", dataLink: "idle" }, {}, { label: "DHT only · chosen by you", kind: "dht", dot: null, pulse: false }],
-    ["on the DHT while live is retried", { textDelivery: "dht", pairing: ready() }, {}, { label: "On DHT · retrying live", kind: "dht", dot: null, pulse: false }],
-    ["DHT only, chosen by the contact", { textDelivery: "dht", pairing: ready(), dhtDelivery: { mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 } }, {}, { label: "DHT only · chosen by your contact", kind: "dht", dot: null, pulse: false }],
+    ["DHT-only delivery", { deliveryMode: "dht", dataLink: "idle" }, {}, { label: "DHT only · chosen by you", kind: "dht", dot: "bg-text-muted", pulse: false }],
+    ["on the DHT while live is retried", { textDelivery: "dht", pairing: ready() }, {}, { label: "On DHT · retrying live", kind: "dht", dot: "bg-text-muted", pulse: false }],
+    ["DHT only, chosen by the contact", { textDelivery: "dht", pairing: ready(), dhtDelivery: { mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 } }, {}, { label: "DHT only · chosen by your contact", kind: "dht", dot: "bg-text-muted", pulse: false }],
     ["a switch to HyperDHT", { pairing: ready({ transitionTarget: "hyperdht/1" }) }, {}, { label: "Switching · HyperDHT", kind: "waiting", dot: "bg-text-muted", pulse: true }],
     // A chosen transport not reached yet (WISP 100): waited for, never a connection issue.
     ["waiting on the DHT for a HyperDHT chosen with Fallback off", { textDelivery: "dht", dataLink: "idle", pairing: { status: "negotiating", transport: "iroh/1" } as Pairing,
       transportWait: { transport: "hyperdht/1", by: "you", reason: "unreachable", failures: 1, error: "Transport change failed: hyperdht/1 unreachable." } }, {},
-      { label: "On DHT · waiting for HyperDHT", kind: "dht", dot: null, pulse: false }],
+      { label: "On DHT · waiting for HyperDHT", kind: "dht", dot: "bg-text-muted", pulse: false }],
     ["waiting for a chosen HyperDHT before text can take the DHT", { textDelivery: "unavailable", dataLink: "idle", pairing: { status: "negotiating", transport: "iroh/1" } as Pairing,
       transportWait: { transport: "hyperdht/1", by: "you", reason: "unknown", failures: 0 } }, {}, { label: "Waiting for HyperDHT", kind: "waiting", dot: "bg-text-muted", pulse: false }],
     ["the first attempt for a transport chosen with Fallback off", { textDelivery: "dht", dataLink: "idle", pairing: { status: "negotiating", transport: "iroh/1", transitionTarget: "hyperdht/1" } as Pairing,
       transportWait: { transport: "hyperdht/1", by: "you", reason: "connecting", failures: 0 } }, {}, { label: "Switching · HyperDHT", kind: "waiting", dot: "bg-text-muted", pulse: true }],
     ["live on a fallback while a chosen transport waits", { pairing: ready({ transport: "iroh/1" }),
-      transportWait: { transport: "hyperdht/1", by: "you", reason: "unreachable", live: "iroh/1", failures: 2 } }, {}, { label: "Connected · Iroh", kind: "connected", dot: "bg-accent", pulse: false }],
-    ["connected over WebRTC", { pairing: ready() }, {}, { label: "Connected · WebRTC", kind: "connected", dot: "bg-accent", pulse: false }],
-    ["connected over Iroh", { pairing: ready({ transport: "iroh/1" }) }, {}, { label: "Connected · Iroh", kind: "connected", dot: "bg-accent", pulse: false }],
-    ["connected over HyperDHT", { pairing: ready({ transport: "hyperdht/1" }) }, {}, { label: "Connected · HyperDHT", kind: "connected", dot: "bg-accent", pulse: false }],
+      transportWait: { transport: "hyperdht/1", by: "you", reason: "unreachable", live: "iroh/1", failures: 2 } }, {}, { label: "Connected · Iroh", kind: "connected", dot: "bg-green-500", pulse: false }],
+    ["connected over WebRTC", { pairing: ready() }, {}, { label: "Connected · WebRTC", kind: "connected", dot: "bg-green-500", pulse: false }],
+    ["connected over Iroh", { pairing: ready({ transport: "iroh/1" }) }, {}, { label: "Connected · Iroh", kind: "connected", dot: "bg-green-500", pulse: false }],
+    ["connected over HyperDHT", { pairing: ready({ transport: "hyperdht/1" }) }, {}, { label: "Connected · HyperDHT", kind: "connected", dot: "bg-green-500", pulse: false }],
     ["a peer to confirm", { dataLink: "connecting", pairing: { status: "confirm", peerKey: "other" } as Pairing }, {}, { label: "Confirm peer", kind: "waiting", dot: "bg-text-muted", pulse: false }],
     ["a new chat nobody joined", { dataLink: "idle", peerOnline: false, pairing: { status: "connecting" } as Pairing }, {}, { label: "No contact yet", kind: "waiting", dot: "bg-text-muted", pulse: false }],
     ["a known contact who is away", { dataLink: "idle", peerOnline: false, peerParticipationKey: "saved" }, {}, { label: "Waiting for contact", kind: "waiting", dot: "bg-text-muted", pulse: false }],
@@ -70,6 +72,8 @@ describe("PairingBanner: what the header says", () => {
     banner(link, state);
     const view = header();
     expect(view).toMatchObject({ kind: want.kind, name: want.label, popover: want.label, dot: want.dot, pulse: want.pulse });
+    // Beside the key, a live chat shows its transport; any other state, its label.
+    expect(view.now).toBe(want.kind === "connected" ? want.label.replace("Connected · ", "") : want.label);
     expect(view.tooltip).toBe(want.label + (want.failure ?? ""));
     if (want.failure) expect(screen.getByRole("alert")).toHaveTextContent(want.failure);
     else expect(screen.queryByRole("alert")).not.toBeInTheDocument();
@@ -88,9 +92,80 @@ describe("PairingBanner: what the header says", () => {
     expect(within(help).getByRole("link", { name: "review relay settings" })).toHaveAttribute("href", "/settings");
   });
 
-  it("names the preferred transport when the chat is connected over another", () => {
-    banner({ pairing: ready(), preferredTransport: "iroh/1" });
-    expect(screen.getByText("Preferred: Iroh")).toBeInTheDocument();
+  it("says what is in use apart from what is chosen: WebRTC chosen, live over Iroh at 333 ms", () => {
+    banner({ pairing: ready({ transport: "iroh/1" }), preferredTransport: "webrtc/1", transportAutomatic: false, transportRttMs: 333 });
+    // The header: the transport in use and its round trip, beside the key.
+    expect(screen.getByTestId("connection-now")).toHaveTextContent("Iroh· 333 ms");
+    expect(screen.getByTestId("connection-key")).toHaveTextContent("peer");
+    // The panel: in use and chosen, one line each.
+    expect(screen.getByTestId("connection-in-use")).toHaveTextContent("Iroh · 333 ms");
+    expect(screen.getByTestId("connection-chosen")).toHaveTextContent("WebRTC · not in use");
+    expect(within(screen.getByTestId("connection-summary")).getByText("Why").nextSibling).toHaveTextContent("You chose WebRTC for this chat; it is not available now, so the chat uses Iroh.");
+    // The choice is the checked one; the one in use is marked on its own row.
+    const webrtc = screen.getByRole("radio", { name: "WebRTC" }), iroh = screen.getByRole("radio", { name: "Iroh" });
+    expect(webrtc).toHaveAttribute("aria-checked", "true");
+    expect(webrtc).toHaveAttribute("title", "WebRTC: Chosen · not in use");
+    expect(webrtc).not.toHaveAttribute("data-in-use");
+    expect(iroh).toHaveAttribute("aria-checked", "false");
+    expect(iroh).toHaveAttribute("title", "Iroh: In use · 333 ms");
+    expect(iroh).toHaveAttribute("data-in-use", "");
+  });
+
+  it.each<[string, Partial<LinkView>, string, string]>([
+    ["automatic, live", { pairing: ready({ transport: "iroh/1" }), transportAutomatic: true, transportRttMs: 20 }, "Iroh · 20 ms", "Automatic"],
+    ["a transport chosen and in use", { pairing: ready({ transport: "iroh/1" }), preferredTransport: "iroh/1", transportAutomatic: false }, "Iroh", "Iroh · in use"],
+    ["a transport chosen and waited for", { pairing: ready(), preferredTransport: "hyperdht/1", transportAutomatic: false,
+      transportWait: { transport: "hyperdht/1", by: "you", reason: "unreachable", live: "webrtc/1", failures: 1 } }, "WebRTC", "HyperDHT · waiting for it"],
+    ["relayed", { pairing: ready({ transport: "hyperdht/1" }), transportRelayed: { relays: ["relay.example"] } }, "HyperDHT · relayed", "Automatic"],
+    ["DHT only", { deliveryMode: "dht", dataLink: "idle" }, "The DHT, for short texts · nothing live", "DHT only"],
+    ["held for an away contact", { dataLink: "idle", peerOnline: false, peerParticipationKey: "saved", textDelivery: "hold", peerNick: "Bea" }, "Nothing live · messages wait for Bea", "Automatic"],
+    ["a web app", { pairing: ready(), availableTransports: ["webrtc/1"] }, "WebRTC", "WebRTC · the only one this app runs"],
+  ])("says what is in use and what is chosen: %s", (_, link, inUse, chosen) => {
+    banner(link);
+    expect(screen.getByTestId("connection-in-use")).toHaveTextContent(inUse);
+    expect(screen.getByTestId("connection-chosen")).toHaveTextContent(chosen);
+  });
+
+  it("gives the contact's status dot its colour and name, and pulses it while a DHT read is on its way", () => {
+    const view = banner({ pairing: ready() }, {}, { status: "Connected", polling: true });
+    const dot = () => screen.getByTestId("contact-status");
+    expect(dot()).toHaveAttribute("aria-label", "Connected");
+    expect(dot()).toHaveClass("bg-green-500", "contact-fetch-pulse");
+    view.rerender(<ChatConnection peerKey="peer" status="Connection issue" />);
+    expect(dot()).toHaveAttribute("aria-label", "Connection issue");
+    expect(dot()).toHaveClass("bg-danger");
+    view.rerender(<ChatConnection peerKey="peer" status="Away · messages are held" />);
+    expect(dot()).toHaveClass("bg-text-muted");
+  });
+
+  it("leaves the story to the pairing indicator until the first pairing is live: the dot and the key only", () => {
+    banner({ dataLink: "idle", peerOnline: false, pairing: { status: "connecting" } as Pairing }, {}, { compact: true });
+    expect(screen.queryByTestId("connection-now")).not.toBeInTheDocument();
+    expect(screen.getByTestId("connection-key")).toHaveTextContent("peer");
+    expect(screen.getByTestId("connection-key")).toHaveClass("max-md:hidden");
+  });
+
+  it("has both keys to copy, as the chat's Tech Info has them", async () => {
+    const { user } = banner({ pairing: ready() }, {}, { myKey: "my-key-in-this-chat" });
+    await user.click(screen.getByTestId("connection-options"));
+    expect(screen.getByTestId("connection-key-you")).toHaveTextContent("my-key-in-this-chat");
+    expect(screen.getByTestId("connection-key-contact")).toHaveTextContent("peer");
+    await user.click(screen.getByTestId("connection-key-contact"));
+    expect(await navigator.clipboard.readText()).toBe("peer");
+    expect(screen.getByTestId("connection-key-contact")).toHaveTextContent("Copied!");
+  });
+
+  it("in a chat made with a v0.4 code, says its status and has the keys, with nothing to choose", async () => {
+    const { user } = banner({}, {}, { paired: false, status: "Connected", myKey: "mine" });
+    expect(screen.getByTestId("connection-options")).toHaveAttribute("aria-label", "Connection options: Connected");
+    expect(screen.queryByTestId("connection-now")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("connection-options"));
+    expect(screen.getByTestId("connection-state")).toHaveTextContent("Connected");
+    expect(screen.getByTestId("connection-key-you")).toHaveTextContent("mine");
+    expect(screen.getByTestId("connection-key-contact")).toHaveTextContent("peer");
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("connection-in-use")).not.toBeInTheDocument();
   });
 
   it("says why a transport is unavailable, on its option and below", () => {
@@ -135,8 +210,8 @@ describe("PairingBanner: what the header says", () => {
     const since = Date.now() - 12 * 60_000 - 5_000;
     banner({ pairing: ready({ transport: "iroh/1" }), preferredTransport: "iroh/1", transportAutomatic: false, transportRttMs: 42, transportLive: { since, cause: "you" } });
     expect(screen.getByTestId("connection-tooltip-detail")).toHaveTextContent("42 ms · live for 12 min · your choice");
+    expect(screen.getByTestId("connection-in-use")).toHaveTextContent("Iroh · 42 ms");
     const summary = screen.getByTestId("connection-summary");
-    expect(within(summary).getByText("Transport").nextSibling).toHaveTextContent("Iroh");
     expect(within(summary).getByText("Round trip").nextSibling).toHaveTextContent("42 ms");
     expect(within(summary).getByText("Live since").nextSibling).toHaveTextContent("(12 min)");
     expect(within(summary).getByText("Why").nextSibling).toHaveTextContent("You chose Iroh for this chat.");
@@ -159,7 +234,7 @@ describe("PairingBanner: what the header says", () => {
   });
 });
 
-describe("PairingBanner: what the popover does", () => {
+describe("ChatConnection: what the panel does", () => {
   it("opens from the header and closes on Escape, handing focus back to the header", async () => {
     const { user } = banner({ pairing: ready() });
     const menu = screen.getByTestId("connection-menu") as HTMLDetailsElement;
@@ -170,29 +245,39 @@ describe("PairingBanner: what the popover does", () => {
     expect(screen.getByTestId("connection-options")).toHaveFocus();
   });
 
-  it("turns DHT-only delivery on, and off again", async () => {
+  it("offers the five choices, one chosen: Automatic, WebRTC, Iroh, HyperDHT and DHT only", () => {
+    banner({ pairing: ready(), transportAutomatic: true, transportRttMs: 12 });
+    expect(screen.getAllByRole("radio").map(r => [r.getAttribute("aria-label"), r.getAttribute("aria-checked")])).toEqual([
+      ["Automatic", "true"], ["WebRTC", "false"], ["Iroh", "false"], ["HyperDHT", "false"], ["DHT only", "false"],
+    ]);
+    expect(screen.getByRole("radio", { name: "WebRTC" })).toHaveTextContent("In use · 12 ms");
+  });
+
+  it("turns DHT only on, and leaves it for a live connection", async () => {
     const { user, engine } = banner({ pairing: ready() });
-    engine.on("setDeliveryMode", () => undefined);
-    const toggle = screen.getByRole("switch", { name: "DHT-only delivery" });
-    expect(toggle).not.toBeChecked();
-    await user.click(toggle);
-    expect(engine.callsTo("setDeliveryMode")).toEqual([{ linkId: "link-1", mode: "dht" }]);
-    act(() => engine.update({ links: [linkView({ availableTransports: all, deliveryMode: "dht" })] }));
-    expect(screen.getByRole("switch", { name: "DHT-only delivery" })).toBeChecked();
-    await user.click(screen.getByRole("switch", { name: "DHT-only delivery" }));
-    expect(engine.callsTo("setDeliveryMode")[1]).toEqual({ linkId: "link-1", mode: "stream" });
+    engine.on("setChatTransport", () => undefined);
+    const choice = screen.getByRole("radio", { name: "DHT only" });
+    expect(choice).toHaveAttribute("aria-checked", "false");
+    await user.click(choice);
+    expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "dht" }]);
+    act(() => engine.update({ links: [linkView({ availableTransports: all, deliveryMode: "dht", dataLink: "idle", transportAutomatic: true })] }));
+    expect(screen.getByRole("radio", { name: "DHT only" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "Automatic" })).toHaveAttribute("aria-checked", "false");
+    await user.click(screen.getByRole("radio", { name: "Automatic" }));
+    expect(engine.callsTo("setChatTransport")[1]).toEqual({ linkId: "link-1", transport: "auto" });
   });
 
   it("cannot change delivery while Ghostly is offline", () => {
     banner({ pairing: ready() }, { settings: { online: false } });
-    expect(screen.getByRole("switch", { name: "DHT-only delivery" })).toBeDisabled();
-    for (const name of ["WebRTC", "Iroh", "HyperDHT"]) expect(screen.getByRole("radio", { name })).toBeDisabled();
+    for (const name of ["Automatic", "WebRTC", "Iroh", "HyperDHT", "DHT only"]) expect(screen.getByRole("radio", { name })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Fallback" })).toBeDisabled();
   });
 
-  it("locks the transports while DHT-only is on, and says how to unlock them", () => {
+  it("on DHT only, offers every way back to a live connection, and keeps Fallback for then", () => {
     banner({ deliveryMode: "dht", dataLink: "idle" });
-    expect(screen.getByText("Turn off DHT-only to choose a connection")).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "Iroh" })).toBeDisabled();
+    expect(screen.getAllByRole("radio").filter(r => r.getAttribute("aria-checked") === "true").map(r => r.getAttribute("aria-label"))).toEqual(["DHT only"]);
+    expect(screen.getAllByRole("radio").every(r => !(r as HTMLButtonElement).disabled)).toBe(true);
+    expect(screen.getByRole("radio", { name: "DHT only" })).toHaveAttribute("title", "DHT only: Short texts over the DHT, no live link · choose another to leave it");
     expect(screen.getByRole("switch", { name: "Fallback" })).toBeDisabled();
   });
 
@@ -248,10 +333,12 @@ describe("PairingBanner: what the popover does", () => {
     expect(engine.callsTo("setTransportPreference")).toEqual([{ linkId: "link-1", preferred: "iroh/1", fallback: false }]);
   });
 
-  it("shows what the engine refused, as a connection issue", async () => {
+  it("shows what the engine refused, as a connection issue, and stays open", async () => {
     const { user, engine } = banner({ pairing: ready() });
-    engine.on("setDeliveryMode", () => { throw new Error("The contact's app cannot do DHT-only"); });
-    await user.click(screen.getByRole("switch", { name: "DHT-only delivery" }));
+    engine.on("setChatTransport", () => { throw new Error("The contact's app cannot do DHT-only"); });
+    await user.click(screen.getByTestId("connection-options"));
+    await user.click(screen.getByRole("radio", { name: "DHT only" }));
+    expect((screen.getByTestId("connection-menu") as HTMLDetailsElement).open).toBe(true);
     expect(await screen.findByRole("alert")).toHaveTextContent("The contact's app cannot do DHT-only");
     expect(header()).toMatchObject({ kind: "failure", name: "Connection issue" });
   });
@@ -276,9 +363,9 @@ describe("PairingBanner: what the popover does", () => {
     const block = screen.getByTestId("connection-waiting");
     expect(within(block).getByTestId("connection-waiting-why")).toHaveTextContent("You chose HyperDHT. Bea's app doesn't have HyperDHT.");
     expect(block).toHaveTextContent("The chat stays on Iroh meanwhile.");
-    // Live on Iroh: the header says so, and "Preferred" is not said twice.
-    expect(header()).toMatchObject({ kind: "connected", name: "Connected · Iroh" });
-    expect(screen.queryByText(/^Preferred:/)).not.toBeInTheDocument();
+    // Live on Iroh: the header says so, and the choice is said once, waited for.
+    expect(header()).toMatchObject({ kind: "connected", name: "Connected · Iroh", now: "Iroh" });
+    expect(screen.getByTestId("connection-chosen")).toHaveTextContent("HyperDHT · waiting for it");
     await user.click(within(block).getByRole("button", { name: "Use Automatic" }));
     expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "auto" }]);
   });
@@ -336,7 +423,7 @@ describe("PairingBanner: what the popover does", () => {
   });
 });
 
-describe("PairingBanner: the connection history", () => {
+describe("ChatConnection: the connection history", () => {
   const t0 = Date.now() - 60 * 60_000;
   const history: NonNullable<LinkView["transportHistory"]> = [
     { at: t0, kind: "live", transport: "webrtc/1", started: true, rttMs: 30 },
