@@ -22,6 +22,9 @@ export interface Step {
 const always = () => true;
 const none = () => [];
 const guest = (c: Combination) => c.client.split("-")[1];
+const withDesktop = (c: Combination) => c.client.startsWith("desktop");
+/** Desktop is driven through WebDriver (support/desktop.ts): it pairs, talks, goes away and picks a transport. */
+const DESKTOP_CHATS_ONLY = "the Desktop peer (WebDriver) chats, goes away and picks a transport; files and wallets are driven in the browser clients";
 
 /**
  * Rails with a Testnet payment block (blocks.ts, rails.ts). Bitcoin Core is the one left: its source is
@@ -97,10 +100,19 @@ export const PLAN: readonly Step[] = [
     id: "transport",
     title: "the transport the pair asked for, and what the clients offer",
     applies: always,
-    features: (c) => ["transport.webrtc", ...(c.transport === "webrtc-strict" ? ["transport.switch"] : [])],
+    features: (c) => withDesktop(c)
+      ? ["transport.preference", ...({ webrtc: ["transport.webrtc"], "webrtc-strict": ["transport.webrtc"], "native-fallback": c.client === "desktop-desktop" ? ["transport.iroh"] : ["transport.webrtc", "transport.switch"], "iroh-only": ["transport.iroh"], "hyperdht-only": ["transport.hyperdht"] })[c.transport]]
+      : ["transport.webrtc", ...(c.transport === "webrtc-strict" ? ["transport.switch"] : [])],
     requires: none,
   },
-  { id: "files", title: "a file A→B, intact, and a picture B→A", applies: always, features: () => ["files.paired.send", "files.paired.images"], requires: none },
+  {
+    id: "files",
+    title: "a file A→B, intact, and a picture B→A",
+    applies: always,
+    features: () => ["files.paired.send", "files.paired.images"],
+    requires: none,
+    notYet: (c) => (withDesktop(c) ? DESKTOP_CHATS_ONLY : undefined),
+  },
   {
     id: "identity",
     title: "A proves an identity once and shares it; B's app verifies it",
@@ -115,7 +127,7 @@ export const PLAN: readonly Step[] = [
     features: (c) =>
       c.wallet === "mainnet" ? ["wallet.mode", "wallet.deck", "payments.chat.cards"] : ["wallet.mode", ...(RAIL_FEATURES[c.rail] ?? [])],
     requires: (c) => (c.wallet === "testnet" && RAIL_REQUIREMENT[c.rail] ? [RAIL_REQUIREMENT[c.rail]!] : []),
-    notYet: (c) => (c.wallet === "testnet" && !TESTNET_RAILS.includes(c.rail) ? `no Testnet payment block for ${c.rail} yet` : undefined),
+    notYet: (c) => (withDesktop(c) ? DESKTOP_CHATS_ONLY : c.wallet === "testnet" && !TESTNET_RAILS.includes(c.rail) ? `no Testnet payment block for ${c.rail} yet` : undefined),
   },
   {
     id: "group",
@@ -143,12 +155,11 @@ const INFRA = new Set(["mint", "s3", "lnd", "cln", "nwc", "breez", "ark", "bark"
  * test map's.)
  */
 export function tagsFor(c: Combination): string[] {
-  // A Desktop scenario cannot run yet (requirements.ts): it claims nothing.
-  const runs = !c.client.startsWith("desktop");
-  const steps = runs ? PLAN.filter((s) => s.applies(c) && !s.notYet?.(c)) : [];
+  const steps = PLAN.filter((s) => s.applies(c) && !s.notYet?.(c));
   const features = [...new Set(steps.flatMap((s) => s.features(c)))];
-  const clients = runs ? [...new Set(c.client.split("-"))] : [];
-  const gated = !runs || steps.some((s) => s.requires(c).some((r) => INFRA.has(r)));
+  const clients = [...new Set(c.client.split("-"))];
+  // A Desktop peer needs a built app and tauri-driver (requirements.ts): gated like the regtest stacks.
+  const gated = withDesktop(c) || steps.some((s) => s.requires(c).some((r) => INFRA.has(r)));
   return [
     ...features.map((f) => `@feature:${f}`),
     ...clients.map((client) => `@client:${client}`),

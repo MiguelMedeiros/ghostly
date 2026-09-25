@@ -705,8 +705,14 @@ export const restore: Block = {
 
 const BLOCKS = new Map([identityBefore, pair, talk, delivery, transport, files, identity, payments, group, restore].map((b) => [b.id, b]));
 
-/** Runs one step as a test step named after it and its features, or notes why it did not run. */
-export async function runStep(step: Step, w: World): Promise<void> {
+/** How the browser clients act each step out. */
+export const BROWSER_BLOCKS: ReadonlyMap<string, (w: World) => Promise<void>> = new Map([...BLOCKS].map(([id, b]) => [id, b.run]));
+
+/**
+ * Runs one step as a test step named after it and its features, or notes why it did not run. `blocks` is how
+ * the scenario's clients act the steps out: the browsers' (BROWSER_BLOCKS), or Desktop's (desktop.ts).
+ */
+export async function runStep<W extends { combo: Combination; info: TestInfo }>(step: Step, w: W, blocks: ReadonlyMap<string, (w: W) => Promise<void>>): Promise<void> {
   const features = step.features(w.combo);
   const title = `${step.title}${features.length ? ` [${features.join(", ")}]` : ""}`;
   const missing = unmet(step.requires(w.combo));
@@ -718,6 +724,6 @@ export async function runStep(step: Step, w: World): Promise<void> {
     return;
   }
   for (const f of features) w.info.annotations.push({ type: "feature", description: f });
-  const block = BLOCKS.get(step.id);
-  await test.step(title, () => (block ? block.run(w) : Promise.resolve()));
+  const block = blocks.get(step.id);
+  await test.step(title, () => (block ? block(w) : Promise.resolve()));
 }

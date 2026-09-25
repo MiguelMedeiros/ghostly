@@ -1,4 +1,7 @@
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { desktopBinary } from "../support/desktop";
 
 /**
  * What a block needs from outside the test process, and how to tell it is
@@ -19,6 +22,14 @@ const onPath = (tool: string, args: string[] = ["--version"]): boolean => {
 
 const env = (name: string) => process.env[name] ?? "";
 
+const desktopBuilt = () => {
+  try {
+    return existsSync(desktopBinary());
+  } catch {
+    return false;
+  }
+};
+
 export const REQUIREMENTS: Record<string, { met: () => boolean; missing: string }> = {
   mint: {
     met: () => env("E2E_MINT_URL") !== "" || env("MATRIX_NETWORK") === "1",
@@ -29,10 +40,14 @@ export const REQUIREMENTS: Record<string, { met: () => boolean; missing: string 
     missing: "a local S3 server: GHOSTLY_S3_ENDPOINT/KEY/SECRET (npm run e2e:infra:up)",
   },
   desktop: {
-    // support/desktop.ts drives one app through WebDriver, and that app reaches the real Mainline DHT
-    // rather than the test relay: a Desktop peer that pairs with a browser one is its own piece of work.
-    met: () => false,
-    missing: "a Desktop peer: the Linux harness drives one app and has no pairing adapter yet (Linux + tauri-driver only)",
+    // support/desktop.ts drives the bundled app through tauri-driver, which has a WebDriver to hand it to on
+    // Linux (WebKitWebDriver) and Windows, never on macOS. Its HyperDHT testnet comes from the runtime the
+    // Desktop build installs (scripts/prepare-native-runtime.mjs).
+    met: () =>
+      (process.platform === "linux" || process.platform === "win32") && desktopBuilt() &&
+      (process.env.TAURI_DRIVER ? existsSync(process.env.TAURI_DRIVER) : onPath(process.platform === "win32" ? "where" : "which", ["tauri-driver"])) &&
+      existsSync(join(import.meta.dirname, "..", "..", "native-transports", "hyperdht", "node_modules", "hyperdht", "testnet.js")),
+    missing: "a Desktop peer: Linux or Windows with tauri-driver and a built app (npm run tauri -- build --debug --no-bundle); macOS has no WebDriver for WKWebView, so the nightly Linux job runs these",
   },
   lnd: { met: () => env("GHOSTLY_LND_REGTEST") === "1", missing: "the LND regtest stack (GHOSTLY_LND_REGTEST=1)" },
   cln: { met: () => env("GHOSTLY_CLN_REGTEST") === "1", missing: "the Core Lightning regtest stack (GHOSTLY_CLN_REGTEST=1)" },

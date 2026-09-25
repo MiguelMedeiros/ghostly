@@ -642,6 +642,27 @@ New failures, each reproducible with `npm run e2e:matrix -- --only <id>` (or `--
 
 The harness learned, in this run: the extension's offscreen engine is not covered by a context's `ignoreHTTPSErrors` (it gets Chromium's `--ignore-certificate-errors`); two workers must not pay over one pair of Lightning nodes at once, nor mine next to an Ark payment (`rails.ts` locks); a slow local mint must not fail whatever test is running when the app polls it.
 
+The Desktop scenarios (2026-09-25, the Linux harness in an `ubuntu:22.04` container on the Mac, `--grep @clients:desktop`, one and then two workers). The client dimension gained `desktop-desktop`, so the table was generated again: the ids of the 82 browser scenarios in the table below are those of the run above, and are reproduced with `--combo` and their values. Desktop drives the chat only (pair, talk, go away and back, pick a transport); its files and wallet steps are skipped with that reason.
+
+| id | clients | transport | result |
+|---|---|---|---|
+| `mx-19d7784b` | desktop-web | webrtc | ❌ never live: "alice is connected over WebRTC" (Linux Desktop has no WebRTC) |
+| `mx-41eb51f3` | desktop-web | webrtc-strict | ❌ never live: "alice is connected over WebRTC" |
+| `mx-4b821dc6` | desktop-web | native-fallback | ❌ never live: "alice is connected over WebRTC" |
+| `mx-7ff28d43` | desktop-web | iroh-only | ✅ once (native refused cleanly, texts over the DHT); ❌ once: the web peer, back after closing its page, did not get Desktop's text within 4 min |
+| `mx-7cb6de71` | desktop-web | hyperdht-only | ✅ partial (files and wallet skipped) |
+| `mx-cd74c451` | desktop-desktop | webrtc | ❌ never live: "alice is connected over WebRTC" |
+| `mx-85475df9` | desktop-desktop | webrtc-strict | ❌ never live: "alice is connected over WebRTC" |
+| `mx-435b1b98` | desktop-desktop | native-fallback | ❌ never live: "alice is connected over Iroh" |
+| `mx-61e467e5` | desktop-desktop | iroh-only | ❌ never live: "alice is connected over Iroh" |
+| `mx-fd30bf3f` | desktop-desktop | hyperdht-only | ❌ never live: "alice is connected over HyperDHT" |
+
+What they found:
+
+- **On Linux, Desktop never has a live link, with anyone, so Iroh and HyperDHT are never used.** WebKitGTK (Ubuntu 22.04's `libwebkit2gtk-4.1`) has no `RTCPeerConnection` at all, and a first session needs WebRTC on both sides. `GhostLink.dial` says so: "No common available transport. Initial pairing requires WebRTC on both peers." The native transports' addresses are exchanged inside a session WebRTC authenticated first ("Peer native address unavailable; reconnect WebRTC once to exchange endpoints"). Two Linux Desktop apps pair, and they talk, go away and come back, but always over the DHT ("DHT · offline text"). Both offer Iroh and HyperDHT, show no transport error, and never dial either. A Linux Desktop and a browser meet the same way. On macOS (WKWebView) and Windows (WebView2) WebRTC exists, so this is Linux's own. Nothing here exercises Iroh or HyperDHT until a pair can start without WebRTC, or the harness drives Desktop on Windows.
+- The harness learned: WebKitGTK draws an emoji as an image, which a text match does not see (Desktop texts have none); Desktop reads the clipboard natively, so its join types the invite in the field an empty clipboard opens; two apps need a home each, or they share one WebKit store.
+- Intermittent (`mx-7ff28d43`): after the web peer closed its page and opened it again, the text the Desktop peer wrote meanwhile over the DHT did not arrive within 4 minutes. It arrived in the other run.
+
 <!-- matrix:begin (scripts/matrix-docs.mjs writes this section; edit the text above it) -->
 
 Last full run: 2026-09-24.

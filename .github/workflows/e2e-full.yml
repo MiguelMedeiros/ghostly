@@ -120,10 +120,11 @@ jobs:
       - name: Start the environment
         run: npm run e2e:infra:up
 
+      # The Desktop scenarios run in their own job (matrix-desktop): they need the app built, not the environment.
       - name: Run shard ${{ matrix.shard }} of the matrix
         env:
           MATRIX_WORKERS: "2"
-        run: npm run e2e:matrix -- --shard ${{ matrix.shard }}/4
+        run: npm run e2e:matrix -- --shard ${{ matrix.shard }}/4 --grep-invert @clients:desktop
 
       - name: Stop the environment
         if: ${{ always() }}
@@ -137,9 +138,86 @@ jobs:
           path: blob-report-matrix
           retention-days: 3
 
+  # The matrix's Desktop scenarios (desktop-web, desktop-desktop): the bundled app driven through tauri-driver,
+  # which only Linux and Windows can do (macOS has no WebDriver for WKWebView), two apps side by side with a home
+  # each. Their peers meet on the test's relay (GHOSTLY_PKARR_RELAYS) and a HyperDHT testnet in the test process
+  # (GHOSTLY_HYPERDHT_BOOTSTRAP), so nothing here needs e2e/infra or the network. The runner and the build are the
+  # E2E workflow's Desktop job's (ubuntu-22.04, `tauri build --debug --no-bundle`).
+  matrix-desktop:
+    name: Combination matrix (Desktop)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'dev' || github.ref }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            webkit2gtk-driver \
+            xvfb
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+      - name: Cache Cargo
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-desktop-e2e-${{ github.repository }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-desktop-e2e-${{ github.repository }}-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Install tauri-driver
+        run: command -v tauri-driver || cargo install tauri-driver --locked
+
+      # Also installs the HyperDHT runtime (scripts/prepare-native-runtime.mjs), whose testnet the scenarios use.
+      - name: Build the Desktop app
+        run: npm run tauri -- build --debug --no-bundle
+
+      - name: Run the Desktop scenarios
+        env:
+          MATRIX_WORKERS: "2"
+        run: xvfb-run -a npm run e2e:matrix -- --no-build --grep @clients:desktop
+
+      - name: Upload the results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: matrix-blob-desktop
+          path: blob-report-matrix
+          retention-days: 3
+
   matrix-report:
     name: Combination matrix report
-    needs: matrix
+    needs: [matrix, matrix-desktop]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15

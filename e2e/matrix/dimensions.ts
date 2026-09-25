@@ -34,9 +34,10 @@ export const DIMENSIONS = [
       { id: "web-extension", label: "web app hosts, extension joins" },
       { id: "extension-web", label: "extension hosts, web app joins" },
       { id: "extension-extension", label: "extension ↔ extension" },
-      // The Linux harness drives one Desktop app (support/desktop.ts), so Desktop↔Desktop — the only pair
-      // where Iroh and HyperDHT can actually connect — is out until it drives two.
+      // Desktop is driven through WebDriver (support/desktop.ts), on Linux: two apps side by side, each with
+      // a home of its own. Desktop↔Desktop is the only pair where Iroh and HyperDHT can connect.
       { id: "desktop-web", label: "Desktop hosts, web app joins", requires: ["desktop"] },
+      { id: "desktop-desktop", label: "Desktop ↔ Desktop", requires: ["desktop"] },
     ],
   },
   {
