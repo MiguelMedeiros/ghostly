@@ -59,8 +59,12 @@ test("each chat accepts its own ways of paying, chosen on the composer's cards",
   await say(bob, "still talking");
   await expect(chat(alice).getByText("still talking")).toBeVisible({ timeout: 60000 });
 
-  // Alice turns them all on again, from the same place.
+  // Alice turns them all on again, from the same place, and can pay with them at once.
   await chatPayments(alice.page, Object.fromEntries(ALL.map((id) => [id, true])));
+  await openPayments(alice.page);
+  await expect(card(alice, "cashu")).toBeEnabled();
+  await expect(card(alice, "cashu")).toHaveAttribute("aria-checked", "true");
+  await closePayments(alice.page);
   await openPayments(bob.page);
   await expect(card(bob, "cashu")).toBeEnabled({ timeout: 90000 });
   await closePayments(bob.page);
