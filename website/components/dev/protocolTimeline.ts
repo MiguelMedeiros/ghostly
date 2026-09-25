@@ -193,8 +193,8 @@ export const LAND: Stage = stage({ w: 800, h: 380, kx: 2.5, ky: 1.7, oy: 44, s: 
 
 export const PORT: Stage = stage({ w: 340, h: 330, kx: 340 / 320, ky: 1.5, oy: 30, s: 0.74 }, () => ({
   nameY: 210,
-  label: [170, 16],
-  tagTop: [170, 36],
+  label: [170, 12],
+  tagTop: [170, 38],
   tagLow: [170, 262],
   oob: {
     d: "M84 172 Q92 282 124 282 L216 282 Q248 282 256 172",

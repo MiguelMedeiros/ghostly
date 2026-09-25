@@ -21,6 +21,15 @@ export type SceneCopy = {
   onDht: string;
   onDhtShort: string;
   back: string;
+  presence: string;
+  dmEnvelope: string;
+  rtcOffer: string;
+  dmText: string;
+  dmShort: string;
+  direct: string;
+  relayed: string;
+  relayedShort: string;
+  pay: string;
 };
 
 /** The ghost of the app's icon (src/components/pairing/PairingScene.tsx), in an 80 × 100 box, with its cut hem. */
@@ -346,7 +355,7 @@ export function StepScene({ g, t, className }: { g: Stage; t: SceneCopy; classNa
         <Tag x={g.tagTop[0]} y={g.tagTop[1]} text="_caps" tone="boo" />
       </Win>
       <Win a={at(0, 0.65)} b={at(1, 0.2)} f={0.15}>
-        <Tag x={g.tagLow[0]} y={g.tagLow[1]} text="presence" tone="boo" />
+        <Tag x={g.tagLow[0]} y={g.tagLow[1]} text={t.presence} tone="boo" />
       </Win>
       <Packet pts={g.pubUp} {...pubA} r={g.pk} tone="boo" />
       <Packet pts={g.pubLow} {...pubB} r={g.pk} tone="boo" />
@@ -372,8 +381,8 @@ export function StepScene({ g, t, className }: { g: Stage; t: SceneCopy; classNa
 
       {/* Step 3: the knock on both layers, the pin, the answer on both. */}
       <Win a={at(2, 0.35)} b={gone3}>
-        <Tag x={g.tagTop[0]} y={g.tagTop[1]} text={g.short ? "_dm" : "_dm envelope"} tone="casper" />
-        <Tag x={g.tagLow[0]} y={g.tagLow[1]} text={g.short ? "_rtc" : "_rtc offer"} tone="casper" />
+        <Tag x={g.tagTop[0]} y={g.tagTop[1]} text={g.short ? "_dm" : t.dmEnvelope} tone="casper" />
+        <Tag x={g.tagLow[0]} y={g.tagLow[1]} text={g.short ? "_rtc" : t.rtcOffer} tone="casper" />
       </Win>
       <Packet pts={inUp} {...knock} r={g.pk} tone="casper" />
       <Packet pts={inLow} {...knock} r={g.pk} tone="casper" />
@@ -418,12 +427,12 @@ export function StepScene({ g, t, className }: { g: Stage; t: SceneCopy; classNa
       {/* Step 5: the shared transports and their sums; the relayed one steps back behind the direct one. */}
       <Win a={at(4, 0.35)} b={at(5, 0.15)} d={0.3} f={0.15}>
         <path className="sx-lane" d={laneD(yA)} />
-        <Tag x={cx} y={yA} text={g.short ? "webrtc/1 · 4" : "webrtc/1 · 3 + 1 = 4 · direct"} tone="line" />
+        <Tag x={cx} y={yA} text={g.short ? "webrtc/1 · 4" : `webrtc/1 · 3 + 1 = 4 · ${t.direct}`} tone="line" />
       </Win>
       <Win a={at(4, 0.6)} b={at(5, 0.2)} d={0.3} f={0.15}>
         <g className="sx-dim" style={v({ a: rank, b: EVER, d: 0.4, lv: 0.4 })}>
           <path className="sx-lane" d={laneD(yB)} />
-          <Tag x={cx} y={yB} text={g.short ? "iroh/1 · 3 · relayed" : "iroh/1 · 1 + 2 = 3 · relayed"} tone="dim" />
+          <Tag x={cx} y={yB} text={g.short ? `iroh/1 · 3 · ${t.relayedShort}` : `iroh/1 · 1 + 2 = 3 · ${t.relayed}`} tone="dim" />
         </g>
       </Win>
 
@@ -472,7 +481,7 @@ export function StepScene({ g, t, className }: { g: Stage; t: SceneCopy; classNa
           ["pair-ready", at(5, 2.0), round3(LIVE + 0.3)],
           ["paired-message", at(6, 0.3), at(6, 1.75)],
           [g.short ? "pf-data" : "files/3 · pf-data", at(6, 1.75), at(6, 3.0)],
-          [g.short ? "pay" : "pay · 2,100 sat", at(6, 3.0), at(6, 3.9)],
+          [g.short ? "pay" : t.pay, at(6, 3.0), at(6, 3.9)],
         ] as const
       ).map(([text, a, b], i) => (
         <Win key={text} a={i === 1 || i === 3 || i === 4 ? round3(a + SWAP) : a} b={b} d={0.2} f={0.12}>
@@ -515,7 +524,7 @@ export function StepScene({ g, t, className }: { g: Stage; t: SceneCopy; classNa
 
       {/* Step 8: short text over the DHT while the line is down. */}
       <Win a={at(7, 0.9)} b={EVER}>
-        <Tag x={g.tagTop[0]} y={g.tagTop[1]} text={g.short ? "_dm · 256 B" : "_dm · text up to 256 B"} tone="talk" />
+        <Tag x={g.tagTop[0]} y={g.tagTop[1]} text={g.short ? t.dmShort : t.dmText} tone="talk" />
       </Win>
       <g className="sx-go sx-trip" style={v(dmText, { transform: along(g.up) })}>
         <circle r={g.pk} className="sx-pk sx-talk" />

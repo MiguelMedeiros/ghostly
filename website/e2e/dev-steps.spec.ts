@@ -233,6 +233,9 @@ const VIEWPORTS = [
   { name: "tablet 768x1024", width: 768, height: 1024, stage: "land" },
   { name: "phone 390x844", width: 390, height: 844, stage: "port" },
   { name: "phone 360x740", width: 360, height: 740, stage: "port" },
+  // Portuguese runs longer.
+  { name: "desktop 1440x900 pt-br", width: 1440, height: 900, stage: "land", path: "/pt-br/developers" },
+  { name: "phone 360x740 pt-br", width: 360, height: 740, stage: "port", path: "/pt-br/developers" },
 ] as const;
 
 for (const vp of VIEWPORTS) {
@@ -244,7 +247,7 @@ for (const vp of VIEWPORTS) {
     test(`nothing overlaps or leaves the stage at ${vp.name}`, async ({
       page,
     }) => {
-      const root = await open(page);
+      const root = await open(page, "path" in vp ? vp.path : "/developers");
       const svg = root.locator(`svg.psx-svg--${vp.stage}`);
       await expect(svg).toBeVisible();
       await expect(
@@ -319,6 +322,15 @@ for (const vp of VIEWPORTS) {
               if (x > 1 && y > 1)
                 problems.push(`${items[a].what} overlaps ${items[b].what}`);
             }
+          // A tag's text stays inside its plate.
+          s.querySelectorAll(".sx-tag").forEach((el) => {
+            const text = el.querySelector("text");
+            const plate = el.querySelector("rect");
+            if (!text || !plate || !seen(el)) return;
+            const tr = text.getBoundingClientRect();
+            const pr = plate.getBoundingClientRect();
+            if (tr.left < pr.left - 1 || tr.right > pr.right + 1) problems.push(`tag "${el.textContent}" runs out of its plate`);
+          });
           // Rendered size of every visible text: its font size in stage units times the stage's scale.
           s.querySelectorAll("text").forEach((el) => {
             if (!seen(el)) return;

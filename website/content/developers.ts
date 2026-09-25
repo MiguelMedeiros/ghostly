@@ -42,6 +42,15 @@ const en = {
         onDht: "on DHT · retrying live",
         onDhtShort: "on DHT",
         back: "live again",
+        presence: "presence",
+        dmEnvelope: "_dm envelope",
+        rtcOffer: "_rtc offer",
+        dmText: "_dm · text up to 256 B",
+        dmShort: "_dm · 256 B",
+        direct: "direct",
+        relayed: "relayed",
+        relayedShort: "relayed",
+        pay: "pay · 2,100 sat",
       },
       list: [
         {
@@ -323,6 +332,15 @@ const ptBr: DevCopy = {
         onDht: "na DHT · tentando ao vivo",
         onDhtShort: "na DHT",
         back: "ao vivo de novo",
+        presence: "presença",
+        dmEnvelope: "_dm envelope",
+        rtcOffer: "_rtc oferta",
+        dmText: "_dm · texto até 256 B",
+        dmShort: "_dm · 256 B",
+        direct: "direto",
+        relayed: "via relay",
+        relayedShort: "relay",
+        pay: "pay · 2.100 sat",
       },
       list: [
         {
