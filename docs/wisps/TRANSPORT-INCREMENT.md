@@ -1,5 +1,7 @@
 # Experimental native transport increment
 
+> **Revision 0.2 of the chat family (2026-09-25).** The transports here are layer 1 of the one chat ([400](400-chat.md)); the DHT underneath is its rendezvous and floor ([100](100-transports.md#the-dht-floor-upgrade-and-downgrade-revision-02)). "No DHT message fallback" below is about the **Allow fallback** toggle between adapters: that toggle never picks the DHT. When no adapter connects, the chat falls to DHT text regardless of the toggle, as it already does after a drop, unless the contact refuses DHT text.
+
 Implemented locally on 2026-09-20, after the [paired-chat base](PAIRED-CHAT-INCREMENT.md). All WISPs remain Draft. This is the exact bounded implementation profile, not full conformance to every candidate requirement in WISPs 100 to 103.
 
 ## What runs

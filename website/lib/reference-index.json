@@ -23,12 +23,12 @@
     "slug": "01-ghost-core",
     "title": "WISP 01: Ghost Core Protocol",
     "status": "Draft",
-    "updated": "2026-09-20",
-    "implementation": "Existing rendezvous; modular boundary proposed",
+    "updated": "2026-09-25",
+    "implementation": "Existing rendezvous and DHT text; the DHT as rendezvous and floor of every chat (revision 0.2) proposed",
     "dependencies": [
       "00-process.md"
     ],
-    "summary": "Ghost is a minimal, ephemeral rendezvous and small-record exchange primitive over Pkarr/Mainline DHT. Records can contain small encrypted messages and signaling, not only pointers to a homeserver. Ghostly currently composes it with WebRTC and application services. Local history is separate from network presence.",
+    "summary": "Ghost is layer 0 of every 1:1 chat (400). It is always the rendezvous: where the invite's keys meet, where the first contact and handshake happen (403), where each side publishes its presence, its capability record (03) and the signaling or descriptors a peer-to-peer transport needs (100). It is also the floor: when no peer-to-peer transport connects, or the one in use drops, short text and its receipts travel in bou",
     "notices": []
   },
   {
@@ -57,13 +57,14 @@
     "slug": "03-capabilities",
     "title": "WISP 03: Capability Negotiation",
     "status": "Draft",
-    "updated": "2026-09-20",
-    "implementation": "Existing advertisements; negotiation proposed",
+    "updated": "2026-09-25",
+    "implementation": "Existing advertisements and the paired pair-offer; the layer-0 capability record is proposed",
     "dependencies": [
       "01-ghost-core.md",
-      "02-peer-keys.md"
+      "02-peer-keys.md",
+      "403-dht-text.md"
     ],
-    "summary": "The follow-up adds transcript-negotiated signed signaling, durable per-message delivery/retry state and observed extension interoperability; see the implementation profile for exact partial coverage and residual risks. This does not change Draft status.",
+    "summary": "The one chat of 400 negotiates capabilities in two places:",
     "notices": []
   },
   {
@@ -110,13 +111,15 @@
     "slug": "100-transports",
     "title": "WISP 100: Transport Negotiation",
     "status": "Draft",
-    "updated": "2026-09-20",
+    "updated": "2026-09-25",
     "implementation": "Experimental paired-chat negotiation; see increment",
     "dependencies": [
+      "01-ghost-core.md",
       "02-peer-keys.md",
-      "03-capabilities.md"
+      "03-capabilities.md",
+      "403-dht-text.md"
     ],
-    "summary": "The native transport increment documents the implemented wire profile, negotiation rule, platform evidence and remaining limitations. It does not make this Draft Final or establish independent implementation conformance. Baseline absence statements below describe the initial inspection before that increment.",
+    "summary": "Every 1:1 chat of 400 has two layers. Layer 0 is the DHT: the rendezvous, and the floor that carries short text (403) when nothing else connects. Layer 1 is the transport this document selects: WebRTC (101), Iroh (102) or HyperDHT (103).",
     "notices": []
   },
   {
@@ -176,12 +179,12 @@
     "slug": "101-webrtc",
     "title": "WISP 101: WebRTC",
     "status": "Draft",
-    "updated": "2026-09-20",
+    "updated": "2026-09-25",
     "implementation": "Existing adapter behavior; WISP binding proposed",
     "dependencies": [
       "100-transports.md"
     ],
-    "summary": "The follow-up adds transcript-negotiated signed signaling, durable per-message delivery/retry state and observed extension interoperability; see the implementation profile for exact partial coverage and residual risks. This does not change Draft status.",
+    "summary": "WebRTC is one layer-1 candidate of the one chat (400, 100), and the only one in browsers and the extension. Its rtc signaling rides layer 0, in the link's own signed record, as today. A WebRTC attempt that does not connect (no ICE path, no TURN, a blocked network) no longer fails a first pairing: the chat stays on-dht and retries in the background. A WebRTC session that drops sends the chat to on-dht until it or anot",
     "notices": []
   },
   {
@@ -193,12 +196,12 @@
     "slug": "102-iroh",
     "title": "WISP 102: Iroh",
     "status": "Draft",
-    "updated": "2026-09-20",
+    "updated": "2026-09-25",
     "implementation": "Experimental native paired-chat adapter; see increment",
     "dependencies": [
       "100-transports.md"
     ],
-    "summary": "The native transport increment documents the implemented wire profile, negotiation rule, platform evidence and remaining limitations. It does not make this Draft Final or establish independent implementation conformance. Baseline absence statements below describe the initial inspection before that increment.",
+    "summary": "Iroh is a native layer-1 candidate of the one chat (400, 100). Proposed: its endpoint id is published in the layer-0 capability record (03), so two desktops can try Iroh without a WebRTC session first (today its descriptor is exchanged only inside an authenticated session). The endpoint id is dialled through Iroh's own discovery; no address goes into the record. An Iroh attempt that fails leaves the chat on-dht, and ",
     "notices": []
   },
   {
@@ -210,12 +213,12 @@
     "slug": "103-hyperdht",
     "title": "WISP 103: HyperDHT",
     "status": "Draft",
-    "updated": "2026-09-20",
+    "updated": "2026-09-25",
     "implementation": "Experimental native paired-chat adapter; see increment",
     "dependencies": [
       "100-transports.md"
     ],
-    "summary": "The native transport increment documents the implemented wire profile, negotiation rule, platform evidence and remaining limitations. It does not make this Draft Final or establish independent implementation conformance. Baseline absence statements below describe the initial inspection before that increment.",
+    "summary": "HyperDHT is a native layer-1 candidate of the one chat (400, 100). Its DHT is not the chat's layer 0: layer 0 is Pkarr on the Mainline DHT, and a HyperDHT lookup is part of dialling this transport. Proposed: its public key is published in the layer-0 capability record (03), so it can be tried without a WebRTC session first. A failed attempt leaves the chat on-dht; a dropped session sends it there until a transport is",
     "notices": []
   },
   {
@@ -529,13 +532,16 @@
     "slug": "400-chat",
     "title": "WISP 400: Chat Messaging",
     "status": "Draft",
-    "updated": "2026-09-20",
-    "implementation": "Existing 1:1 messages; stronger semantics proposed",
+    "updated": "2026-09-25",
+    "implementation": "Existing 1:1 messages over two separate profiles; the single layered chat of revision 0.2 is proposed",
     "dependencies": [
+      "01-ghost-core.md",
       "02-peer-keys.md",
-      "03-capabilities.md"
+      "03-capabilities.md",
+      "100-transports.md",
+      "800-invite-join.md"
     ],
-    "summary": "This document defines common responsibilities and proposed extensions. Exact implemented encodings and runtime limits belong to 401 · Paired Chat, 402 · Legacy Timestamp Chat, 403 · Bounded DHT Text. Supporting a concrete profile does not establish full conformance to this Draft.",
+    "summary": "There is one kind of 1:1 chat and one invite format. Every chat has two layers:",
     "notices": []
   },
   {
@@ -543,15 +549,17 @@
     "sourcePath": "docs/wisps/401-paired-chat.md",
     "aliases": [],
     "slug": "401-paired-chat",
-    "title": "WISP 401: Paired Chat",
+    "title": "WISP 401: Chat Session",
     "status": "Draft",
-    "updated": "2026-09-22",
-    "implementation": "Current paired WebRTC; native Iroh/HyperDHT where supported.",
+    "updated": "2026-09-25",
+    "implementation": "The layer-1 session of every new chat (paired-chat/1): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT and automatic upgrade are proposed.",
     "documentKind": "Profile",
     "dependencies": [
-      "400-chat.md"
+      "400-chat.md",
+      "100-transports.md",
+      "403-dht-text.md"
     ],
-    "summary": "This profile binds the independent chat contract to the implemented paired-chat/1 session and negotiated chat/1 capability. Both peers authenticate participation keys and the agreed channel before application traffic. Data travels over the selected WebRTC, Iroh or HyperDHT adapter where that runtime provides it; a particular adapter is not part of the message identity.",
+    "summary": "This is the layer-1 session of the one chat of 400. Formerly \"paired chat\", it is no longer a kind of chat the person picks: every new chat is a paired-chat/1 chat, whose layer 0 is the DHT (403) and whose layer 1 is this session, when a transport connects. The wire identifiers (paired-chat/1, chat/1, the frame names) are unchanged.",
     "notices": []
   },
   {
@@ -559,15 +567,15 @@
     "sourcePath": "docs/wisps/402-legacy-chat.md",
     "aliases": [],
     "slug": "402-legacy-chat",
-    "title": "WISP 402: Legacy Timestamp Chat",
+    "title": "WISP 402: Compatibility Chat (v0.4 Timestamp Profile)",
     "status": "Draft",
-    "updated": "2026-09-22",
-    "implementation": "Existing legacy 1:1 clients.",
+    "updated": "2026-09-25",
+    "implementation": "Existing legacy 1:1 clients (v0.4 and earlier, the Rust CLI) and the read/write path kept in current apps",
     "documentKind": "Profile",
     "dependencies": [
       "400-chat.md"
     ],
-    "summary": "Legacy live text is {t:\"m\",ts,m} on the data channel. Offline small-record text uses encrypted msgs batches with timestamp acknowledgements. LinkSession.sendMessage limits input to 500 UTF-8 bytes; record packing can truncate a single message to 400 characters or omit older content to fit its total budget. The 500-byte input limit is therefore not a delivery guarantee. Live sender and parser bounds differ; callers mu",
+    "summary": "Formerly \"Legacy Timestamp Chat\". This profile is not withdrawn: withdrawing it would cut off every contact still on Ghostly 0.4 and every chat made with it. It is retained for compatibility with a narrowed scope:",
     "notices": []
   },
   {
@@ -575,15 +583,17 @@
     "sourcePath": "docs/wisps/403-dht-text.md",
     "aliases": [],
     "slug": "403-dht-text",
-    "title": "WISP 403: Bounded DHT Text",
+    "title": "WISP 403: DHT Text",
     "status": "Draft",
-    "updated": "2026-09-22",
-    "implementation": "Modern DHT-only and explicitly permitted fallback paths; native DHT versus browser relays differ.",
+    "updated": "2026-09-25",
+    "implementation": "Existing envelope, limits and DHT-only mode (pair2d/ chats and paired fallback); as the floor and first contact of every chat, proposed. Native DHT versus browser relays differ.",
     "documentKind": "Profile",
     "dependencies": [
-      "400-chat.md"
+      "400-chat.md",
+      "01-ghost-core.md",
+      "03-capabilities.md"
     ],
-    "summary": "This profile is a small-record delivery path, not an adapter pretending that the DHT is a live byte stream. It uses separate directional Pkarr mailboxes and the dm/dmk envelope described in DHT delivery. The envelope binds sender participation, intended recipient, sequence, times, delivery mode, message ID and receipt. Known participation keys must not be silently replaced.",
+    "summary": "This profile is the floor of every chat of 400: the delivery that works whenever both sides reach the DHT, whatever else fails. It carries:",
     "notices": []
   },
   {
@@ -593,13 +603,14 @@
     "slug": "4xx-store-and-forward",
     "title": "WISP 4xx: Store-and-Forward for an Away Contact",
     "status": "Draft",
-    "updated": "2026-09-24",
+    "updated": "2026-09-25",
     "implementation": "Experimental: hold/1 in web, extension and desktop clients; exercised against a local S3-compatible server",
     "documentKind": "Profile",
     "dependencies": [
       "400-chat.md",
       "401-paired-chat.md",
       "403-dht-text.md",
+      "03-capabilities.md",
       "1000-storage.md",
       "1002-s3-storage.md",
       "200-payments.md"
@@ -616,13 +627,13 @@
     "slug": "500-files",
     "title": "WISP 500: File Transfer",
     "status": "Draft",
-    "updated": "2026-09-20",
+    "updated": "2026-09-25",
     "implementation": "Existing 1:1 transfer",
     "dependencies": [
       "03-capabilities.md",
       "100-transports.md"
     ],
-    "summary": "This document defines common responsibilities and proposed extensions. Exact implemented encodings and runtime limits belong to 501 · Paired Files, 502 · Legacy File Frames. Supporting a concrete profile does not establish full conformance to this Draft.",
+    "summary": "In the one chat of 400, a file (a voice message included) travels over layer 1 with 501, or, while the chat is not live, in a hold (4xx, at most 8 MiB) when both sides allow it. It never travels in DHT records, split or whole: the floor of 403 carries text only. With neither available, the file waits in the sender's outbox with a cancel (\"Sends when live\") and goes when layer 1 is back (new; today attaching is refuse",
     "notices": []
   },
   {
@@ -630,15 +641,15 @@
     "sourcePath": "docs/wisps/501-paired-files.md",
     "aliases": [],
     "slug": "501-paired-files",
-    "title": "WISP 501: Paired Files",
+    "title": "WISP 501: Chat Files",
     "status": "Draft",
-    "updated": "2026-09-22",
+    "updated": "2026-09-25",
     "implementation": "Negotiated paired data links; WebRTC and supported native adapters.",
     "documentKind": "Profile",
     "dependencies": [
       "500-files.md"
     ],
-    "summary": "Both peers negotiate files/2. pf-start announces ID, sanitized metadata and exact byte length. pf-chunk carries offset plus base64url data; stop-and-wait credits allow one 16 KiB chunk in flight per sender. pf-end binds final offset and SHA-256 digest. pf-ack identifies phase and offset; pf-cancel identifies the sender/receiver side.",
+    "summary": "Formerly \"Paired Files\". This is how files travel in every chat of 400 while it is live. The wire (files/2, pf- frames) is unchanged. While the chat is on-dht or dht-chosen, files are held (4xx) or wait in the outbox for layer 1 (500); a transfer cut by a drop to the DHT fails as today and is retried whole when layer 1 is back, under its original ID.",
     "notices": []
   },
   {
@@ -646,15 +657,15 @@
     "sourcePath": "docs/wisps/502-legacy-files.md",
     "aliases": [],
     "slug": "502-legacy-files",
-    "title": "WISP 502: Legacy File Frames",
+    "title": "WISP 502: Compatibility File Frames",
     "status": "Draft",
-    "updated": "2026-09-22",
+    "updated": "2026-09-25",
     "implementation": "Legacy live data links; both peers online.",
     "documentKind": "Profile",
     "dependencies": [
       "500-files.md"
     ],
-    "summary": "A file control frame announces file ID, stream ID, name, size, MIME and timestamp. Binary kind-3 chunks carry content and END marks completion. Enforce announced length, 100 MiB per file, three incoming files per peer,500MiBreceived storage per peer and 30-second idle timeout. Unknown/duplicate stream IDs and excess/truncated bodies are errors.",
+    "summary": "Formerly \"Legacy File Frames\". Retained, not withdrawn: a compatibility chat (402) with a contact on Ghostly 0.4 still sends and receives files this way over its legacy WebRTC link. A new chat uses 501 only. The number and file name stay.",
     "notices": []
   },
   {
@@ -734,13 +745,13 @@
     "slug": "800-invite-join",
     "title": "WISP 800: Invite and Join",
     "status": "Draft",
-    "updated": "2026-09-20",
+    "updated": "2026-09-25",
     "implementation": "Existing bearer invite; admission protocol proposed",
     "dependencies": [
       "01-ghost-core.md",
       "02-peer-keys.md"
     ],
-    "summary": "This document defines common responsibilities and proposed extensions. Exact implemented encodings and runtime limits belong to 801 · Implemented Invitation Profiles. Supporting a concrete profile does not establish full conformance to this Draft.",
+    "summary": "Every new 1:1 chat starts from the same invite (801): one bech32m string, ghostly1…, also shareable as https://ghostly.tools/#ghostly1…. The invite no longer chooses how the chat is carried; the handshake does, on the DHT and on a stream in parallel (400). Its format version is the first data symbol, and the error rules go both ways: a current app answers a newer version with \"Update to join\", a failed checksum with ",
     "notices": []
   },
   {
@@ -750,13 +761,15 @@
     "slug": "801-invitation-profiles",
     "title": "WISP 801: Implemented Invitation Profiles",
     "status": "Draft",
-    "updated": "2026-09-22",
-    "implementation": "Current modern pair1/pair2d creation plus legacy imports.",
+    "updated": "2026-09-25",
+    "implementation": "Today: pair1/ and pair2d/ creation plus v0.4 imports. Proposed: one bech32m format, ghostly1…, and the reading rules below",
     "documentKind": "Profile",
     "dependencies": [
-      "800-invite-join.md"
+      "800-invite-join.md",
+      "400-chat.md",
+      "403-dht-text.md"
     ],
-    "summary": "Modern pair1/ invitations choose streams initially; pair2d/ chooses DHT-only. They bootstrap the same conversation, participation identity, durable peer pin and message history. Legacy connection strings remain readable and carry a joining seed, creator public key and encryption key. A copied invitation is a bearer capability; hiding a saved invite after a message does not invalidate other copies.",
+    "summary": "A current app creates exactly one kind of invite, for the one chat of 400. There is no \"Live chat\" or \"Text only\" choice: how the chat is carried is decided after the handshake, and can be changed per chat at any time.",
     "notices": []
   },
   {

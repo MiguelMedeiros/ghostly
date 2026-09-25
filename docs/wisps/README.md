@@ -4,6 +4,8 @@
 >
 > Update (2026-09-23): **identity proofs are back, rebuilt** ([WISP 300 implementation](300-peer-proofs.md#implementation-2026-09-23-identity-proofs)): made once per profile, shared per contact only by choice, with a provider contract ([PROOFS.md](../../packages/browser/src/proofs/PROOFS.md)). Nostr (NIP-07, NIP-46) is the first provider; domain, Bitcoin, SSH, PGP and OpenID Connect providers plug into the same contract. A public profile is looked up only on the person's request.
 
+> Revision 0.2 of the chat family (2026-09-25, review draft): **one chat, one invite.** The DHT is the rendezvous of every 1:1 chat and its floor; the apps upgrade to WebRTC, Iroh or HyperDHT when one connects, fall back to DHT text when none does, and come back by themselves. A person can keep a chat on the DHT only. The legacy chat becomes a compatibility profile for v0.4 contacts. Start at [400](400-chat.md); the invite is in [801](801-invitation-profiles.md).
+
 **All 31 entries remain Drafts.** The maintainer approved family-based numbering on 2026-09-22. This editorial migration does not assign new wire identifiers or claim new implementation support. See [numbering and compatibility](NUMBERING.md) for the old-to-new map and independent families. Future adapters need substantive contracts, not empty numbered placeholders.
 
 Ghost is the minimal Pkarr/DHT rendezvous and small-record primitive. Ghostly is the reference application composing that primitive with local state, transports and capabilities. WISPs make those boundaries reviewable; this series does not rename the current wire protocol or expand the WISP acronym by decree.
@@ -53,19 +55,19 @@ The implementation column is independent of document status. Existing features c
 | [Bitcoin address · 3xx planned](3xx-bitcoin.md) | Bitcoin Address Proof | Draft | Experimental provider: BIP-322 2.0.0 and legacy P2PKH, verified locally |
 | [SSH · 3xx planned](3xx-ssh.md) | SSH keys | Draft | Experimental `ssh`, `ssh-github`, `ssh-gitlab` providers |
 | [400](400-chat.md) | Chat Messaging | Draft | Existing 1:1 messages; stronger semantics proposed |
-| [401](401-paired-chat.md) | Paired Chat | Draft | Current paired WebRTC; native Iroh/HyperDHT where supported. |
-| [402](402-legacy-chat.md) | Legacy Timestamp Chat | Draft | Existing legacy 1:1 clients. |
-| [403](403-dht-text.md) | Bounded DHT Text | Draft | Modern DHT-only and explicitly permitted fallback paths; native DHT versus browser relays differ. |
+| [401](401-paired-chat.md) | Chat Session (formerly Paired Chat) | Draft | Layer-1 session of every new chat: WebRTC, native Iroh/HyperDHT where supported; DHT first contact and automatic upgrade proposed |
+| [402](402-legacy-chat.md) | Compatibility Chat (formerly Legacy Timestamp Chat) | Draft; retained for compatibility | v0.4 and CLI clients; existing chats and v0.4 codes only |
+| [403](403-dht-text.md) | DHT Text (formerly Bounded DHT Text) | Draft | Existing envelope and DHT-only mode; as floor and first contact of every chat, proposed |
 | [Store-and-forward · 4xx planned](4xx-store-and-forward.md) | Store-and-Forward for an Away Contact | Draft | Experimental `hold/1`: sealed items in the sender's own S3 storage, a signed DHT pointer; text, pictures and payment requests |
 | [500](500-files.md) | File Transfer | Draft | Existing 1:1 transfer |
-| [501](501-paired-files.md) | Paired Files | Draft | Negotiated paired data links; WebRTC and supported native adapters. |
-| [502](502-legacy-files.md) | Legacy File Frames | Draft | Legacy live data links; both peers online. |
+| [501](501-paired-files.md) | Chat Files (formerly Paired Files) | Draft | Negotiated paired data links; WebRTC and supported native adapters. |
+| [502](502-legacy-files.md) | Compatibility File Frames | Draft; retained for compatibility | Compatibility chats only; both peers online |
 | [600](600-media.md) | Voice and Video | Draft | Existing 1:1 calls and screen sharing |
 | [601](601-webrtc-media.md) | WebRTC Media | Draft | Compatible legacy WebRTC chats; capture varies by platform; not current paired sessions. |
 | [700](700-local-services.md) | Local Services | Draft | Existing HTTP proxy |
 | [701](701-http-services.md) | HTTP Local Service Profile | Draft | Legacy desktop/extension hosting; web viewer where supported; not paired hosted HTTP. |
 | [800](800-invite-join.md) | Invite and Join | Draft | Existing bearer invite; admission protocol proposed |
-| [801](801-invitation-profiles.md) | Implemented Invitation Profiles | Draft | Current modern pair1/pair2d creation plus legacy imports. |
+| [801](801-invitation-profiles.md) | Implemented Invitation Profiles | Draft | Today pair1/pair2d plus v0.4 imports; one bech32m `ghostly1…` format proposed |
 | [900](900-group-sessions.md) | Group Session Negotiation | Draft | Contract of the first profile; implemented as `group-mesh/1`, text only |
 | [Group Mesh · 9xx planned](9xx-group-mesh.md) | Group Mesh Distribution Profile | Draft | `group-mesh/1` and its entry link `group-entry/1`: core, engine and UI; unit and four-browser e2e; web, extension and desktop |
 | [Group Community · 9xx planned](9xx-group-community.md) | Group Community Distribution Profile | Draft | `group-community/1`: a link anyone can open, admission by any member, elected hubs, up to 256 members; core, engine and UI; unit, six-browser e2e and a headless load test |
@@ -90,6 +92,8 @@ Dependencies in headers describe the candidate modular design. Conditional depen
 The [local paired-chat base](PAIRED-CHAT-INCREMENT.md) and [native transport increment](TRANSPORT-INCREMENT.md) implement a bounded text-chat experiment separately from full draft conformance. No deployment, new wallet, public lobby or Ghostly OS is implemented. Preset wizards are product UX, not an extra WISP. PGP, passkeys/hardware signers, Tor research, centralized proofs, Bitcoin query/broadcast services and on-chain/Spark payment methods remain possible future work. [Ark via Arkade 202](202-arkade.md) documents the experimental implementation and real regtest evidence; exits and broader platform coverage remain release gates. The erroneous WebLN/gateway/backup/compliance catalogue is not adopted.
 
 ## Revision record
+
+2026-09-25: chat family revision 0.2 (01, 03, 100 to 103, 400 to 403, 4xx, 500 to 502, 800, 801): one chat with a DHT floor and a peer-to-peer upgrade, one invite format, compatibility profiles for v0.4. Numbers, file names and wire identifiers unchanged; all entries remain Draft.
 
 2026-09-22: approved editorial family migration; old reader URLs remain aliases; protocol identifiers and Draft status unchanged.
 

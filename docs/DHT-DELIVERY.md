@@ -1,5 +1,7 @@
 # DHT delivery for modern conversations
 
+> **Proposed change (WISP revision 0.2, 2026-09-25, review draft).** One chat and one invite: every chat runs this DHT delivery from its first contact, in parallel with a stream attempt, falls back to it whenever no stream connects, and upgrades to a stream by itself. `pair1/` and `pair2d/` give way to one bech32m `ghostly1…` invite, and DHT only becomes a per-chat choice instead of an invite type. See [WISP 400](wisps/400-chat.md) and [WISP 403](wisps/403-dht-text.md). This document still describes the code as it is.
+
 Implementation contract for the current work. Integration and public-network validation are tracked separately; this document is not a release or security-audit claim.
 
 ## One conversation, two delivery methods
