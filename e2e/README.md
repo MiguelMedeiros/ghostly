@@ -286,8 +286,10 @@ npm run test:e2e:desktop-macos     # about 15 s once built
 - **When it fails** the report has, per app, the page's text and console, the call's local and remote SDP, and the
   app's log.
 
-In CI it is the `Desktop on macOS` workflow (`macos-15`): pushes to `dev`, nightly, by hand (with `repeat` to run
-it several times on one build), and pull requests that touch it.
+In CI it is a required check: `ci.yml` calls `desktop-macos.yml` (`macos-15`, about 4 minutes with the build) on
+every pull request and push, and CI Success needs it. It became one after 20 runs in a row passed on GitHub's
+runners. It also runs nightly on `dev`, and by hand with `repeat` (Actions → Desktop on macOS → Run workflow) to run
+the test that many times on one build, which is how to measure a suspected flake.
 
 ## The combination matrix
 
@@ -350,8 +352,8 @@ build on port 47300 (`MATRIX_WEB_PORT`), and its test domain uses 47320-47399.
   53 s, the vitest contracts in 37 s, Playwright (2 workers, one retry) in 39 minutes — well inside a runner's
   six hours and the workflow's 150-minute cap. On a 14-core Mac with 7 workers, about 22–28 minutes.
 
-- Desktop on macOS: its own workflow, on pushes to `dev`, nightly and by hand; on pull requests only when they touch
-  it ([Desktop on macOS](#desktop-on-macos)).
+- Desktop on macOS: on every pull request and push, as part of CI (required), nightly, and by hand
+  ([Desktop on macOS](#desktop-on-macos)).
 
 Not on pull requests: at about four minutes it would hold up every merge. `npm run check:desktop-bundle` is the exception — it is fast enough to run there.
 

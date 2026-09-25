@@ -6,12 +6,17 @@ name: Desktop on macOS
 # WebDriver for WKWebView, so the app is built with the test driver (`npm run desktop:macos:build`, a debug
 # build with --features e2e-driver) and driven through it. See e2e/README.md → "Desktop on macOS".
 #
-# On probation: it runs on pushes to dev, nightly and by hand, and on pull requests that touch it. It becomes a
-# required check once it has passed ten runs in a row (`repeat` below runs the test that many times in one job).
+# A required check: CI (ci.yml) calls this workflow on every pull request and push, and CI Success needs it. It
+# passed 20 runs in a row on macos-15 before it became one (PR #230). It also runs nightly on dev, and by hand
+# with `repeat` to run the test that many times on one build, which is how a suspected flake is measured.
+# No concurrency group here: called from CI, it would share CI's and cancel itself.
 on:
-  push:
-    branches: [dev]
-    paths-ignore: ["website/**", "docs/**", "**/*.md"]
+  workflow_call:
+    inputs:
+      repeat:
+        required: false
+        default: "1"
+        type: string
   schedule:
     - cron: "41 4 * * *"
   workflow_dispatch:
@@ -21,24 +26,9 @@ on:
         required: false
         default: "1"
         type: string
-  pull_request:
-    branches: [dev]
-    paths:
-      - ".github/workflows/desktop-macos.yml"
-      - "e2e/desktop-macos/**"
-      - "e2e/playwright.desktop-macos.config.ts"
-      - "e2e/support/desktopMac.ts"
-      - "src-tauri/src/e2e_driver.rs"
-      - "packages/core/src/callSignal.ts"
-      - "packages/core/src/pairedCalls.ts"
-      - "packages/react/src/useWebRTC.ts"
 
 permissions:
   contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   desktop-macos:
@@ -83,7 +73,7 @@ jobs:
 
       - name: Two Desktop apps pair, call and share an app
         env:
-          REPEAT: ${{ inputs.repeat || '20' }}
+          REPEAT: ${{ inputs.repeat || '1' }}
         run: npx playwright test -c e2e/playwright.desktop-macos.config.ts --repeat-each "$REPEAT"
 
       - name: Say what failed
