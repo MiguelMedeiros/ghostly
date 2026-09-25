@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useId, useRef, useState } from "react";
 import { Ghost } from "@/components/ghost/Ghost";
+import { Icon } from "@/components/site/icons";
+import { Reveal } from "./Reveal";
 import { NEXT_VERSION } from "@/lib/status";
 import type { HomeCopy } from "@/content/home";
 import "@/app/next.css";
@@ -116,8 +118,6 @@ $ ghostly-cli send --seed "$SEED" --peer "$PEER" --key "$KEY" "Boo! 👻"
 $ ghostly-cli watch --seed "$SEED" --peer "$PEER" --key "$KEY"
 {"from":"…","text":"deploy?","timestamp":1790000000,"nick":"Casper"}`;
 
-const WIDE = "(min-width: 861px) and (prefers-reduced-motion: no-preference)";
-
 function Bar() {
   return (
     <div className="nx-bar" aria-hidden="true">
@@ -131,14 +131,8 @@ function Bar() {
 export function NextSection({ t }: { t: HomeCopy["next"] }) {
   const gradId = useId().replace(/:/g, "");
   const headRef = useRef<HTMLDivElement>(null);
-  const copyRefs = useRef<(HTMLDivElement | null)[]>([]);
-  const activeRef = useRef(0);
-  const [active, setActive] = useState(0);
-  const [dir, setDir] = useState<1 | -1>(1);
   const [drawn, setDrawn] = useState(false);
 
-  const items = t.items;
-  const cliIndex = items.findIndex((i) => !SHOTS[i.id]);
   const honesty = (id: string) => {
     const shot = SHOTS[id];
     if (!shot) return t.illustration;
@@ -166,50 +160,6 @@ export function NextSection({ t }: { t: HomeCopy["next"] }) {
     return () => io.disconnect();
   }, []);
 
-  // Which screen the window shows: the item whose copy crosses the middle of the
-  // viewport, so the reader never sees one item's words beside the next item's
-  // picture. A thin observer band at the centre catches the crossings; a second
-  // observer on the whole viewport catches jumps (anchors, flings) that skip the
-  // band, and then the copy nearest the middle wins.
-  useEffect(() => {
-    const mq = window.matchMedia(WIDE);
-    let observers: IntersectionObserver[] = [];
-    const stop = () => {
-      observers.forEach((io) => io.disconnect());
-      observers = [];
-    };
-    const start = () => {
-      stop();
-      if (!mq.matches) return;
-      const els = copyRefs.current.filter((el): el is HTMLDivElement => !!el);
-      const pick = () => {
-        const mid = window.innerHeight / 2;
-        let best = -1;
-        let bestDistance = Infinity;
-        els.forEach((el, i) => {
-          const r = el.getBoundingClientRect();
-          const d = r.top <= mid && r.bottom >= mid ? -1 : Math.min(Math.abs(r.top - mid), Math.abs(r.bottom - mid));
-          if (d < bestDistance) {
-            best = i;
-            bestDistance = d;
-          }
-        });
-        if (best < 0 || best === activeRef.current) return;
-        setDir(best > activeRef.current ? 1 : -1);
-        activeRef.current = best;
-        setActive(best);
-      };
-      observers = [new IntersectionObserver(pick, { rootMargin: "-45% 0px -45% 0px", threshold: 0 }), new IntersectionObserver(pick, { threshold: 0 })];
-      observers.forEach((io) => els.forEach((el) => io.observe(el)));
-    };
-    start();
-    mq.addEventListener("change", start);
-    return () => {
-      mq.removeEventListener("change", start);
-      stop();
-    };
-  }, []);
-
   return (
     <section className="section nx" id="next">
       <div className="wrap">
@@ -235,113 +185,53 @@ export function NextSection({ t }: { t: HomeCopy["next"] }) {
           </div>
           <p className="lead">{t.lead}</p>
         </div>
-
-        <div className="nx-body">
-          <ol className="nx-list">
-            {items.map((item, i) => {
-              const shot = SHOTS[item.id];
-              return (
-                <li key={item.id} id={`next-${item.id}`} className="nx-item" data-active={i === active}>
-                  <figure className="nx-row-media" data-phone={!!shot?.mobile}>
-                    <div className="nx-win nx-win--light">
-                      <Bar />
-                      {shot ? (
-                        <div className="nx-screen" style={cropVars(shot)}>
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img className="nx-shot" src={shot.src} alt={shot.alt} loading="lazy" decoding="async" width={shot.width} height={shot.height} />
-                        </div>
-                      ) : (
-                        <pre className="nx-term" aria-label="Example CLI session" tabIndex={0}>
-                          <code>{CLI}</code>
-                        </pre>
-                      )}
-                    </div>
-                    {shot?.mobile && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img className="nx-row-phone" src={shot.mobile} alt="" aria-hidden="true" loading="lazy" decoding="async" width={PHONE.width} height={PHONE.height} />
-                    )}
-                    <figcaption className="caption">{honesty(item.id)}</figcaption>
-                  </figure>
-                  <div
-                    className="nx-copy"
-                    ref={(el) => {
-                      copyRefs.current[i] = el;
-                    }}
-                  >
-                    <h3 className="h-card nx-title">{item.title}</h3>
-                    <p className="body">{item.body}</p>
-                    {item.extra && <p className="note nx-note">{item.extra}</p>}
-                    {"link" in item && item.link && (
-                      <Link className="link-arrow" href={item.link.href}>
-                        {item.link.label} →
-                      </Link>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ol>
-
-          <div className="nx-stage">
-            <div className="nx-sticky">
-              <div className="nx-device" style={{ "--dir": dir } as React.CSSProperties}>
-                <div className="nx-win nx-win--stage" data-cli={active === cliIndex}>
-                  <Bar />
-                  <div className="nx-screen">
-                    {items.map((item, i) => {
-                      const shot = SHOTS[item.id];
-                      if (!shot) {
-                        return (
-                          <pre key={item.id} className="nx-term nx-term--stage nx-swap" data-on={i === active} aria-hidden={i !== active || undefined} aria-label="Example CLI session">
-                            <code>{CLI}</code>
-                          </pre>
-                        );
-                      }
-                      return (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          key={item.id}
-                          className="nx-shot nx-swap"
-                          src={shot.src}
-                          alt={shot.alt}
-                          data-on={i === active}
-                          aria-hidden={i !== active || undefined}
-                          loading={i === 0 ? "eager" : "lazy"}
-                          decoding="async"
-                          width={shot.width}
-                          height={shot.height}
-                          style={cropVars(shot)}
-                        />
-                      );
-                    })}
-                  </div>
-                </div>
-                {/* One phone per screen, all standing in the same spot; only the active item's is shown. */}
-                {items.map((item, i) => {
-                  const mobile = SHOTS[item.id]?.mobile;
-                  if (!mobile) return null;
-                  return (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      key={item.id}
-                      className="nx-phone nx-swap"
-                      src={mobile}
-                      alt=""
-                      data-on={i === active}
-                      aria-hidden="true"
-                      loading={i === 0 ? "eager" : "lazy"}
-                      decoding="async"
-                      width={PHONE.width}
-                      height={PHONE.height}
-                    />
-                  );
-                })}
-              </div>
-              <p className="caption nx-honesty">{honesty(items[active]?.id ?? "")}</p>
-            </div>
-          </div>
-        </div>
       </div>
+
+      {/* One row per thing the app does: its words beside its screens, sides alternating down the page. */}
+      <ol className="wrap nx-list">
+        {t.items.map((item) => {
+          const shot = SHOTS[item.id];
+          return (
+            <Reveal as="li" key={item.id} id={`next-${item.id}`} className="nx-item">
+              <div className="nx-copy">
+                <span className="nx-icon" aria-hidden="true">
+                  <Icon name={item.icon} />
+                </span>
+                <h3 className="h-card nx-title">{item.title}</h3>
+                <p className="body">{item.body}</p>
+                {item.extra && <p className="note nx-note">{item.extra}</p>}
+                {"link" in item && item.link && (
+                  <Link className="link-arrow" href={item.link.href}>
+                    {item.link.label} →
+                  </Link>
+                )}
+              </div>
+              <figure className="nx-row-media" data-phone={!!shot?.mobile}>
+                <div className="nx-devices">
+                  <div className="nx-win">
+                    <Bar />
+                    {shot ? (
+                      <div className="nx-screen" style={cropVars(shot)}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img className="nx-shot" src={shot.src} alt={shot.alt} loading="lazy" decoding="async" width={shot.width} height={shot.height} />
+                      </div>
+                    ) : (
+                      <pre className="nx-term" aria-label="Example CLI session" tabIndex={0}>
+                        <code>{CLI}</code>
+                      </pre>
+                    )}
+                  </div>
+                  {shot?.mobile && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img className="nx-row-phone" src={shot.mobile} alt="" aria-hidden="true" loading="lazy" decoding="async" width={PHONE.width} height={PHONE.height} />
+                  )}
+                </div>
+                <figcaption className="caption">{honesty(item.id)}</figcaption>
+              </figure>
+            </Reveal>
+          );
+        })}
+      </ol>
     </section>
   );
 }
