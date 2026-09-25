@@ -6,8 +6,9 @@
 # it — the LND, WebLN and NWC tests assert exact channel balances, so they must not share a node while they
 # run in parallel — and the Lightning nodes of different implementations can still reach each other.
 #
-# Host ports stay in 47000-47199, all on 127.0.0.1; containers are ghostly-e2e-*. Ports are fixed on purpose:
-# the web app's Regtest options name them.
+# Host ports stay in 47000-47199, all on 127.0.0.1 — or, on another host (infra.mjs --host, with
+# docker-compose.remote.yml on top), on that host's Tailscale address (E2E_INFRA_ADDRESS) and never 0.0.0.0.
+# Containers are ghostly-e2e-*. Ports are fixed on purpose: the web app's Regtest options name them.
 name: ghostly-e2e
 
 x-lnd: &lnd
@@ -67,7 +68,7 @@ services:
       "-rpcbind=0.0.0.0", "-rpcallowip=0.0.0.0/0", "-rpcuser=ghostly", "-rpcpassword=regtest",
       "-rpcworkqueue=512", "-rpcthreads=32", "-whitelist=0.0.0.0/0", "-wallet=miner",
       "-zmqpubrawblock=tcp://0.0.0.0:28332", "-zmqpubrawtx=tcp://0.0.0.0:28333"]
-    ports: ["127.0.0.1:47001:18443"]
+    ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47001:18443"]
     healthcheck:
       test: ["CMD-SHELL", "bitcoin-cli -regtest -rpcuser=ghostly -rpcpassword=regtest getblockchaininfo >/dev/null || exit 1"]
       interval: 2s
@@ -81,7 +82,7 @@ services:
     command: ["--network", "regtest", "--daemon-rpc-addr", "bitcoind:18443", "--cookie", "ghostly:regtest",
       "--jsonrpc-import", "--db-dir", "/tmp/electrs", "--http-addr", "0.0.0.0:3000",
       "--electrum-rpc-addr", "0.0.0.0:50001", "--cors", "*"]
-    ports: ["127.0.0.1:47002:3000"]
+    ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47002:3000"]
     depends_on: { bitcoind: { condition: service_healthy } }
 
   # ── Ark (Arkade's arkd) ──────────────────────────────────────────────────────────────────────────────────
@@ -153,7 +154,7 @@ services:
       ARKD_SESSION_DURATION: 30
       ARKD_ROUND_MIN_PARTICIPANTS_COUNT: 1
       ARKD_LOG_LEVEL: 4
-    ports: ["127.0.0.1:47010:7070", "127.0.0.1:47011:7071"]
+    ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47010:7070", "${E2E_INFRA_ADDRESS:-127.0.0.1}:47011:7071"]
     depends_on: [ark-wallet, esplora]
 
   # ── Bark (Second's Ark) ──────────────────────────────────────────────────────────────────────────────────
@@ -166,7 +167,7 @@ services:
     environment: { CAPTAIND_CONFIG: /config/captaind.toml }
     entrypoint: ["/bin/sh", "/config/start.sh"]
     volumes: ["./config/captaind.toml:/config/captaind.toml:ro", "./config/captaind-start.sh:/config/start.sh:ro", "bark-captaind:/data/captaind", "bark-postgres:/var/lib/postgresql/data"]
-    ports: ["127.0.0.1:47020:3535"]
+    ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47020:3535"]
     depends_on: { bitcoind: { condition: service_healthy } }
 
   # A funder wallet (bark CLI) that boards regtest coins and pays the test wallets over Ark.
@@ -182,35 +183,35 @@ services:
     container_name: ghostly-e2e-lnd-alice
     command: ["--alias=ghostly-alice", "--tlsextradomain=lnd-alice",
 "--restcors=*"]
-    ports: ["127.0.0.1:47030:8080"]
+    ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47030:8080"]
   lnd-bob:
     <<: *lnd
     container_name: ghostly-e2e-lnd-bob
     command: ["--alias=ghostly-bob", "--tlsextradomain=lnd-bob",
 "--restcors=*"]
-    ports: ["127.0.0.1:47031:8080"]
+    ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47031:8080"]
 
   # ── Lightning: LND behind the browser wallets (WebLN, reached from the test process) ─────────────────────
   webln-alice:
     <<: *lnd
     container_name: ghostly-e2e-webln-alice
     command: ["--alias=ghostly-webln-alice", "--tlsextradomain=webln-alice"]
-    ports: ["127.0.0.1:47040:8080"]
+    ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47040:8080"]
   webln-bob:
     <<: *lnd
     container_name: ghostly-e2e-webln-bob
     command: ["--alias=ghostly-webln-bob", "--tlsextradomain=webln-bob"]
-    ports: ["127.0.0.1:47041:8080"]
+    ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47041:8080"]
 
   # ── Lightning: Core Lightning (Commando over a websocket) ────────────────────────────────────────────────
   cln-alice:
     <<: *cln
     container_name: ghostly-e2e-cln-alice
-    ports: ["127.0.0.1:47050:9740"]
+    ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47050:9740"]
   cln-bob:
     <<: *cln
     container_name: ghostly-e2e-cln-bob
-    ports: ["127.0.0.1:47051:9740"]
+    ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47051:9740"]
 
   # ── Lightning: Nostr Wallet Connect (an Alby Hub on an LND node each, over a local strfry relay) ─────────
   nwc-relay:
@@ -218,32 +219,32 @@ services:
     container_name: ghostly-e2e-nwc-relay
     restart: on-failure
     volumes: ["./config/strfry.conf:/etc/strfry.conf:ro", "nwc-relay:/app/strfry-db"]
-    ports: ["127.0.0.1:47060:7777"]
+    ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47060:7777"]
   nwc-lnd-alice:
     <<: *lnd
     container_name: ghostly-e2e-nwc-lnd-alice
     command: ["--alias=alice", "--tlsextradomain=nwc-lnd-alice"]
     volumes: ["nwc-lnd-alice:/root/.lnd"]
-    ports: ["127.0.0.1:47061:8080"]
+    ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47061:8080"]
   nwc-lnd-bob:
     <<: *lnd
     container_name: ghostly-e2e-nwc-lnd-bob
     command: ["--alias=bob", "--tlsextradomain=nwc-lnd-bob"]
     volumes: ["nwc-lnd-bob:/root/.lnd"]
-    ports: ["127.0.0.1:47062:8080"]
+    ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47062:8080"]
   nwc-hub-alice:
     <<: *hub
     container_name: ghostly-e2e-nwc-hub-alice
     environment: { <<: *hub-env, LND_ADDRESS: "nwc-lnd-alice:10009" }
     volumes: ["nwc-hub-alice:/data", "nwc-lnd-alice:/lnd:ro"]
-    ports: ["127.0.0.1:47063:8080"]
+    ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47063:8080"]
     depends_on: { nwc-lnd-alice: { condition: service_healthy }, nwc-relay: { condition: service_started } }
   nwc-hub-bob:
     <<: *hub
     container_name: ghostly-e2e-nwc-hub-bob
     environment: { <<: *hub-env, LND_ADDRESS: "nwc-lnd-bob:10009" }
     volumes: ["nwc-hub-bob:/data", "nwc-lnd-bob:/lnd:ro"]
-    ports: ["127.0.0.1:47064:8080"]
+    ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47064:8080"]
     depends_on: { nwc-lnd-bob: { condition: service_healthy }, nwc-relay: { condition: service_started } }
 
   # ── USDT: a local EVM chain (31337) the test token is deployed on ────────────────────────────────────────
@@ -252,7 +253,7 @@ services:
     container_name: ghostly-e2e-anvil
     entrypoint: ["anvil"]
     command: ["--host", "0.0.0.0", "--chain-id", "31337", "--block-time", "1", "--silent"]
-    ports: ["127.0.0.1:47070:8545"]
+    ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47070:8545"]
 
   # ── S3 (held messages, profile backups) ─────────────────────────────────────────────────────────────────
   # RustFS, an S3 server in MinIO's mould: MinIO no longer publishes images anyone can pull. The browser calls
@@ -261,7 +262,7 @@ services:
     image: rustfs/rustfs:1.0.0
     container_name: ghostly-e2e-s3
     environment: { RUSTFS_ACCESS_KEY: ghostly-e2e, RUSTFS_SECRET_KEY: ghostly-e2e-worthless, RUSTFS_CORS_ALLOWED_ORIGINS: "*" }
-    ports: ["127.0.0.1:47080:9000"]
+    ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47080:9000"]
 
   # ── Cashu: the test mint (fake Lightning backend: its invoices pay themselves), as CI runs it ────────────
   mint:
@@ -274,7 +275,7 @@ services:
       CDK_MINTD_MNEMONIC: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
       CDK_MINTD_MINT_NAME: Ghostly test mint
       CDK_MINTD_INPUT_FEE_PPK: "100"
-    ports: ["127.0.0.1:47090:3338"]
+    ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47090:3338"]
 
 volumes:
   bark-captaind:

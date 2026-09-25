@@ -31,6 +31,8 @@
     "e2e:infra:down": "node e2e/infra/infra.mjs down",
     "e2e:infra:reset": "node e2e/infra/infra.mjs reset",
     "e2e:infra:status": "node e2e/infra/infra.mjs status",
+    "e2e:infra:use": "node e2e/infra/infra.mjs use",
+    "e2e:infra:seed": "node e2e/infra/infra.mjs seed",
     "e2e:full": "node e2e/infra/infra.mjs full",
     "build:web": "npm run build -w @ghostly/web",
     "check:desktop-bundle": "node scripts/check-desktop-bundle.mjs",

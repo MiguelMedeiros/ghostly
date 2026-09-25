@@ -69,7 +69,27 @@ export const VARIABLES = {
   GHOSTLY_S3_SECRET: ["ghostly-e2e-worthless", "S3 secret key (local server)"],
 };
 
-const read = (name) => process.env[name] || VARIABLES[name][0];
+/** The suite's own ports: `npm run e2e:full` passes them to its children, `.env.e2e` leaves them out. */
+export const HARNESS_PORTS = ["E2E_WEB_PORT", "E2E_LNURL_PORT", "E2E_DOMAIN_PORT"];
+
+/**
+ * Every port the environment publishes for an endpoint above, in order, and arkd's admin API: the port after its
+ * public one (support/ark-regtest), which stays the next one here too.
+ */
+export const SERVICE_PORTS = [...new Set(Object.entries(VARIABLES).filter(([name]) => !HARNESS_PORTS.includes(name))
+  .flatMap(([, [value]]) => { const match = /^\w+:\/\/127\.0\.0\.1:(\d+)/.exec(value); return match ? [Number(match[1])] : []; }))]
+  .concat(Number(new URL(VARIABLES.GHOSTLY_ARK_SERVER_URL[0]).port) + 1).sort((a, b) => a - b);
+
+/**
+ * The port of this machine a published port is reached on. The same one, even with the environment on another host
+ * (remote.mjs forwards it here: the app takes plain HTTP and WS from loopback only); or, with
+ * E2E_INFRA_LOCAL_PORTS=<base>, base, base+1, … (19 ports) in SERVICE_PORTS order, to stay clear of ports held here.
+ */
+export const localPort = (port) => (process.env.E2E_INFRA_LOCAL_PORTS ? Number(process.env.E2E_INFRA_LOCAL_PORTS) + SERVICE_PORTS.indexOf(port) : port);
+const here = (value) => value.replace(/127\.0\.0\.1:(\d+)/, (_, port) => `127.0.0.1:${localPort(Number(port))}`);
+
+/** A variable's value: the shell's if set, the environment's default (at this machine's port for it) otherwise. */
+export const read = (name) => process.env[name] || here(VARIABLES[name][0]);
 
 /** Where each service is, as the host reaches it: the variable if set, the environment's default otherwise. */
 export const endpoints = {
@@ -95,15 +115,24 @@ export const endpoints = {
 /** `host:port` of a URL, the way the app shows where a service is. */
 export const hostOf = (url) => new URL(url).host;
 
-/** The suite's own ports: `npm run e2e:full` passes them to its children, `.env.e2e` leaves them out. */
-export const HARNESS_PORTS = ["E2E_WEB_PORT", "E2E_LNURL_PORT", "E2E_DOMAIN_PORT"];
+/** Written to `.env.e2e` only when the environment runs on another host (`--host`, remote.mjs). */
+export const REMOTE = {
+  E2E_INFRA_HOST: "SSH target the environment runs on (its Docker); unset: this machine",
+  E2E_INFRA_ADDRESS: "Its Tailscale address, where its ports are published (and forwarded here from)",
+  E2E_INFRA_LOCAL_PORTS: "First port of this machine the endpoints above were forwarded to, when not their own",
+  DOCKER_HOST: "Docker of that host, for the scripts and tests that `docker exec` into the environment",
+};
 
 /** The `.env.e2e` file: every variable of the environment with its value, commented. */
 export function dotenv(values = {}) {
   const lines = ["# Written by `npm run e2e:infra:up` (e2e/infra/infra.mjs); removed by `npm run e2e:infra:down`.",
     "# Worthless regtest coins, test tokens and throwaway keys only. Names are listed in e2e/infra/env.mjs."];
   for (const [name, [value, about]] of Object.entries(VARIABLES)) {
-    if (!HARNESS_PORTS.includes(name)) lines.push(`# ${about}`, `${name}=${values[name] ?? value}`);
+    if (!HARNESS_PORTS.includes(name)) lines.push(`# ${about}`, `${name}=${values[name] ?? here(value)}`);
+  }
+  // On another host (remote.mjs): where it is, and Docker pointed there for the scripts and tests that `docker exec`.
+  for (const [name, about] of Object.entries(REMOTE)) {
+    if (process.env[name]) lines.push(`# ${about}`, `${name}=${process.env[name]}`);
   }
   return `${lines.join("\n")}\n`;
 }
