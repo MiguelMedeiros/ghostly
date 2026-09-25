@@ -11,7 +11,7 @@
   inset: 0;
   background: var(--bg);
   opacity: 0;
-  transition: opacity 0.34s var(--ease-out) 0.12s;
+  transition: opacity var(--dur-base) var(--ease-enter) 0.12s;
 }
 .swarm[data-phase="in"] .swarm-veil,
 .swarm[data-phase="hold"] .swarm-veil {
@@ -19,7 +19,7 @@
 }
 .swarm[data-phase="out"] .swarm-veil {
   opacity: 0;
-  transition: opacity 0.4s var(--ease-in) 0.05s;
+  transition: opacity var(--dur-base) var(--ease-exit) 0.05s;
 }
 .swarm-ghost {
   position: absolute;
@@ -33,7 +33,7 @@
 }
 /* In: the flock rises from below-left and settles over the page. */
 .swarm[data-phase="in"] .swarm-ghost {
-  animation: swarm-in 0.42s var(--ease-out) var(--d) both;
+  animation: swarm-in var(--dur-slow) var(--ease-enter) var(--d) both;
 }
 /* Hold: a gentle bob while the page changes underneath. */
 .swarm[data-phase="hold"] .swarm-ghost {
@@ -41,7 +41,7 @@
 }
 /* Out: up and away to the right, the first ones in leave first. */
 .swarm[data-phase="out"] .swarm-ghost {
-  animation: swarm-out 0.52s var(--ease-in) var(--d) both;
+  animation: swarm-out var(--dur-slow) var(--ease-exit) var(--d) both;
 }
 @keyframes swarm-in {
   from {

@@ -158,8 +158,8 @@
   transform: translateX(24px);
 }
 .reveal[data-reveal="shown"] .sp-chip {
-  animation: sp-chip-in 0.7s var(--ease) both;
-  animation-delay: calc(0.25s + var(--i) * 0.12s);
+  animation: sp-chip-in var(--dur-slow) var(--ease-enter) both;
+  animation-delay: calc(0.2s + var(--i) * var(--stagger) * 2);
 }
 @keyframes sp-chip-in {
   from {
@@ -325,7 +325,7 @@
   height: 2px;
   border-radius: 2px;
   background: rgb(var(--card-rgb, 167, 139, 250));
-  transition: background-color 0.4s;
+  transition: background-color var(--dur-base) var(--ease-move);
 }
 .sp-desc .body {
   color: var(--muted);

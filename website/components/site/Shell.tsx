@@ -5,6 +5,7 @@ import { Nav } from "./Nav";
 import { SiteFooter } from "./Footer";
 import { GhostPet } from "./GhostPet";
 import { GhostSwarm } from "./GhostSwarm";
+import { IdleLoops } from "./IdleLoops";
 import { HtmlLang } from "./HtmlLang";
 import { JoinLanding } from "./JoinLanding";
 
@@ -21,6 +22,7 @@ export function Shell({ locale = "en", children }: { locale?: Locale; children: 
       <SiteFooter locale={locale} />
       <GhostPet label={t.pet} />
       <GhostSwarm />
+      <IdleLoops />
       <JoinLanding locale={locale} />
     </div>
   );

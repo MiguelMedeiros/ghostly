@@ -133,6 +133,8 @@ export function SceneFrame({
   const enter = useTransform(p, [0, 0.04], [0, 1]);
   const leave = useTransform(p, [EXIT - 0.04, EXIT], [1, 0]);
   const furniture = useTransform([enter, leave], ([a, b]) => (seams ? Math.min(a as number, b as number) : 1));
+  // The copy rises the last few pixels into place as it fades in, and slips up a little as it leaves.
+  const copyY = useTransform([enter, leave], ([a, b]) => (seams ? 12 * (1 - (a as number)) - 8 * (1 - (b as number)) : 0));
   const [hidden, setHidden] = useState(false);
   useMotionValueEvent(furniture, "change", (v) => setHidden(v < 0.05));
   const state = useMemo<SceneState>(() => ({ p, step, n, still: false, portrait, camera, focus }), [p, step, n, portrait, camera, focus]);
@@ -193,7 +195,7 @@ export function SceneFrame({
             <StageFramingContext.Provider value={framing}>{visual}</StageFramingContext.Provider>
           </motion.div>
           <motion.div className="scene-wash" aria-hidden="true" style={{ opacity: furniture }} />
-          <motion.div className="scene-copy" data-hidden={hidden} style={{ opacity: furniture }}>
+          <motion.div className="scene-copy" data-hidden={hidden} style={{ opacity: furniture, y: copyY }}>
             <h2 className="eyebrow" id={`${id}-eyebrow`}>
               {eyebrow}
             </h2>
@@ -234,7 +236,8 @@ function StaticFigure({ state, at, from, play, chapter, portrait, children }: { 
   const inView = useInView(ref, { amount: 0.55, once: true });
   useEffect(() => {
     if (!play || !inView) return;
-    const controls = tween(p, at, { duration: DUR.beat, ease: EASE.out });
+    // The beat as a trip: it leaves, travels and lands on the move curve, then holds.
+    const controls = tween(p, at, { duration: DUR.beat, ease: EASE.move });
     return () => controls.stop();
   }, [play, inView, at, p]);
   const b = BLOCKING[orientationOf(portrait)][chapter];

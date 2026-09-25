@@ -31,10 +31,12 @@ export function stepAt(i: number, f: number, n: number): number {
 /**
  * Map a range inside step i to an output: `useStep(p, 1, 3, [0.2, 0.6], [0, 1])`
  * is 0 until 20% into step 1, 1 from 60% on. Ranges may cross step edges
- * (`[-0.1, 0.3]`) for beats that bridge two steps.
+ * (`[-0.1, 0.3]`) for beats that bridge two steps. `curve` shapes every
+ * segment: `ease.move` for something travelling, `ease.enter` for something
+ * arriving or popping; a fade stays linear.
  */
-export function useStep(p: MotionValue<number>, i: number, n: number, range: number[], output: number[]) {
-  return useTransform(p, range.map((f) => stepAt(i, f, n)), output, { clamp: true });
+export function useStep(p: MotionValue<number>, i: number, n: number, range: number[], output: number[], curve?: (t: number) => number) {
+  return useTransform(p, range.map((f) => stepAt(i, f, n)), output, { clamp: true, ease: curve });
 }
 
 /**

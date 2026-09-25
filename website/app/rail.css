@@ -18,8 +18,8 @@
   opacity: 0;
   transform: translateY(6px);
   transition:
-    opacity var(--dur-sm) var(--ease-in),
-    transform var(--dur-sm) var(--ease-in);
+    opacity var(--dur-base) var(--ease-exit),
+    transform var(--dur-base) var(--ease-exit);
 }
 /* Out of sight, the marks stay in the tab order and bring the rail back when focused. */
 .rail[data-on="true"],
@@ -27,8 +27,8 @@
   opacity: 1;
   transform: none;
   transition:
-    opacity var(--dur-md) var(--ease-out),
-    transform var(--dur-md) var(--ease-out);
+    opacity var(--dur-slow) var(--ease-enter),
+    transform var(--dur-slow) var(--ease-enter);
 }
 .rail::before {
   /* The wash: page colour fading up, soft at the sides, only as wide as the rail. */
@@ -52,13 +52,13 @@
   height: 36px;
   margin-inline: auto;
   opacity: 0.5;
-  transition: opacity var(--dur-md) var(--ease-out);
+  transition: opacity var(--dur-slow) var(--ease-enter);
 }
 .rail[data-lit="true"] .rail-inner,
 .rail:hover .rail-inner,
 .rail:has(:focus-visible) .rail-inner {
   opacity: 1;
-  transition-duration: var(--dur-xs);
+  transition-duration: var(--dur-fast);
 }
 .rail-track {
   position: relative;
@@ -94,8 +94,8 @@
   background: rgba(122, 138, 166, 0.55);
   cursor: pointer;
   transition:
-    background-color var(--dur-xs),
-    transform var(--dur-xs) var(--ease-out);
+    background-color var(--dur-fast),
+    transform var(--dur-fast) var(--ease-enter);
 }
 .rail-mark::before {
   /* A 25px hit area around a 5px dot. */

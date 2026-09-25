@@ -102,12 +102,12 @@
 }
 
 /* ── One scenario: phase caption, stage, sub-caption. Remounts per scenario,
-   so it fades in; data-leaving fades it out (together a DUR.md cross-fade). ── */
+   so it fades in; data-leaving fades it out (together a DUR.slow cross-fade). ── */
 .ng-scene {
   display: grid;
   gap: 16px;
-  animation: ng-fade var(--ng-fade, 0.3s) var(--ease-in-out) both;
-  transition: opacity var(--ng-fade, 0.3s) var(--ease-in-out);
+  animation: ng-fade var(--ng-fade, 0.3s) var(--ease-move) both;
+  transition: opacity var(--ng-fade, 0.3s) var(--ease-move);
 }
 .ng-scene[data-leaving] {
   opacity: 0;
@@ -128,7 +128,7 @@
   height: 3px;
   border-radius: 2px;
   background: var(--line-2);
-  transition: background var(--dur-sm) var(--ease-in-out);
+  transition: background var(--dur-base) var(--ease-move);
 }
 .ng-step-dots i[data-on] {
   background: var(--cyan);
@@ -139,7 +139,7 @@
   letter-spacing: -0.01em;
   line-height: 1.2;
   color: var(--text);
-  animation: ng-in var(--dur-sm) var(--ease-in-out) both;
+  animation: ng-in var(--dur-base) var(--ease-move) both;
 }
 .ng-step-text[data-kind="ok"] {
   color: var(--mint);

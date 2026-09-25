@@ -13,7 +13,7 @@
   --t: 13.5;
   --T: 15.5;
   --fin: 12.5;
-  --xf: 0.6; /* DUR.md: the cross-fade between two runs */
+  --xf: 0.56; /* DUR.slow: the cross-fade between two runs */
   position: relative;
   margin: 0;
   border-radius: 20px;
@@ -52,11 +52,11 @@
   opacity: min(clamp(0, (var(--t) - var(--a)) / 0.25, 1), clamp(0, (var(--b) - var(--t)) / 0.25, 1));
 }
 /* Everything that is not furniture fades out at the loop's end and back in at
-   its start: the cross-fade between two runs, DUR.md in all. */
+   its start: the cross-fade between two runs, DUR.slow in all. */
 .pl-fade {
   opacity: min(clamp(0, var(--t) / (var(--xf) / 2), 1), clamp(0, (var(--T) - var(--t)) / (var(--xf) / 2), 1));
 }
-/* EASE.inOut, cubic-bezier(0.65, 0, 0.35, 1), is easeInOutCubic: 4p³ up to
+/* EASE.move, cubic-bezier(0.65, 0, 0.35, 1), is easeInOutCubic: 4p³ up to
    the midpoint, 1 − 4(1 − p)³ after it. Both halves as one expression, from --p. */
 .pl-fly,
 .pl-travel {
@@ -106,7 +106,7 @@
   width: 14px;
   height: 14px;
   opacity: 0;
-  transition: opacity var(--dur-xs) var(--ease-out);
+  transition: opacity var(--dur-fast) var(--ease-enter);
   background:
     linear-gradient(var(--dim), var(--dim)) left / 4px 100% no-repeat,
     linear-gradient(var(--dim), var(--dim)) right / 4px 100% no-repeat;

@@ -4,6 +4,7 @@ import { useId } from "react";
 import { motion, useTransform, type MotionValue } from "motion/react";
 import { SceneFrame, useScene, type SceneStep } from "@/components/story/SceneFrame";
 import { StaticActors } from "@/components/story/StaticActors";
+import { ease } from "@/lib/motion";
 import { scatter, Stage, StageGhost, useStep } from "./stage";
 
 type Pt = [number, number];
@@ -36,11 +37,14 @@ type Layout = {
 };
 
 // Casper's query: three rings leave his head this far into step 2 (fractions of the step).
-const RING = { start: 0.05, gap: 0.07, dur: 0.38, count: 3 };
+const RING = { start: 0.04, gap: 0.06, dur: 0.34, count: 3 };
 // The rings only travel over the network: this wedge (degrees, y down) from Casper's head, feathered.
 const FAN: [number, number] = [-165, -55];
-// The passer-by crosses the network over this part of step 2.
-const SHADE: [number, number] = [0.6, 1];
+// The feather: the wedge is drawn this many times, each a little wider and faint, instead of a blur filter
+// (a filtered mask is re-rendered on every frame the rings move).
+const FEATHER_STEPS = 6;
+// The passer-by crosses the network over this part of step 2, once the two hems are joined.
+const SHADE: [number, number] = [0.72, 0.92];
 // A record shows only its seal while the passer-by's centre is within 1.5 sizes; the swap happens by 1.85.
 const SEAL_REACH: [number, number] = [1.5, 1.85];
 // The network's name is the same in every locale.
@@ -102,8 +106,8 @@ function Record({ p, n, i, L, shadeX, shadeOn }: { p: MotionValue<number>; n: nu
   const to: Pt = [L.picks[i].x, L.picks[i].y];
   const readable = i === L.read;
   // s1: the record leaves Boo's hand along its arc, one after the other.
-  const start = 0.05 + i * 0.15;
-  const t = useStep(p, 1, n, [start, start + 0.4], [0, 1]);
+  const start = 0.08 + i * 0.14;
+  const t = useStep(p, 1, n, [start, start + 0.34], [0, 1], ease.move);
   const x = useTransform(t, (v) => quad(L.hand, L.bends[i], to, smooth(v))[0]);
   const y = useTransform(t, (v) => quad(L.hand, L.bends[i], to, smooth(v))[1]);
   const appear = useStep(p, 1, n, [start - 0.02, start + 0.04], [0, 1]);
@@ -111,7 +115,7 @@ function Record({ p, n, i, L, shadeX, shadeOn }: { p: MotionValue<number>; n: nu
   const hit = ringHits(L, to);
   const open = useStep(p, 2, n, [hit - 0.01, hit + 0.01], [0, 1]);
   const check = useStep(p, 2, n, [hit + 0.01, hit + 0.03], [0, 1]);
-  const pop = useStep(p, 2, n, [hit - 0.01, hit + 0.03, hit + 0.1], [1, 1.2, 1]);
+  const pop = useStep(p, 2, n, [hit - 0.01, hit + 0.03, hit + 0.1], [1, 1.2, 1], ease.enter);
   // While the passer-by is near, the record shows only its seal: the check leaves first, then the grey lock
   // arrives (a sequence, never a blend). The record Casper is reading stays open.
   const grey = useTransform([shadeX, shadeOn], ([sx, on]) => {
@@ -124,8 +128,8 @@ function Record({ p, n, i, L, shadeX, shadeOn }: { p: MotionValue<number>; n: nu
   const checkOpacity = useTransform([check, grey], ([c, g]) => (c as number) * clamp01(1 - 2 * (g as number)));
   const cyanLock = useTransform(open, (o) => 1 - o);
   // s3: it ages out.
-  const expire = useStep(p, 3, n, [0.15, 0.9], [1, 0.35]);
-  const dash = useStep(p, 3, n, [0.15, 0.9], [0, 14]);
+  const expire = useStep(p, 3, n, [0.15, 0.7], [1, 0.35]);
+  const dash = useStep(p, 3, n, [0.15, 0.7], [0, 14]);
   const opacity = useTransform([appear, expire], ([a, e]) => (a as number) * (e as number));
   const dasharray = useTransform(dash, (d) => (d > 0 ? `4 ${d}` : "none"));
   const [w, h] = L.record;
@@ -151,7 +155,7 @@ function Record({ p, n, i, L, shadeX, shadeOn }: { p: MotionValue<number>; n: nu
 /** One of Casper's query rings: it grows from his head and thins out as it goes. */
 function Ring({ p, n, i, L }: { p: MotionValue<number>; n: number; i: number; L: Layout }) {
   const s = RING.start + i * RING.gap;
-  const r = useStep(p, 2, n, [s, s + RING.dur], [0, L.ring]);
+  const r = useStep(p, 2, n, [s, s + RING.dur], [0, L.ring], ease.exit);
   const opacity = useStep(p, 2, n, [s, s + 0.03, s + RING.dur], [0, 0.55, 0]);
   return <motion.circle cx={L.head[0]} cy={L.head[1]} fill="none" stroke="#4ade80" strokeWidth="1.5" style={{ r, opacity }} />;
 }
@@ -160,40 +164,40 @@ function Visual({ tags }: { tags: { sealed: string; ttl: string } }) {
   const { p, n, portrait, camera } = useScene();
   const id = useId().replace(/:/g, "");
   const L = layout(portrait);
-  // s0: the network lights up across the whole step, node by node; its name settles under it.
-  const light = useStep(p, 0, n, [0, 1], [0, 1]);
-  const captionIn = useStep(p, 0, n, [0.45, 0.75], [0, 1]);
-  const captionOut = useStep(p, 1, n, [0, 0.12], [1, 0]);
+  // s0: the network lights up node by node over the action; its name settles under it.
+  const light = useStep(p, 0, n, [0.04, 0.7], [0, 1]);
+  const captionIn = useStep(p, 0, n, [0.5, 0.7], [0, 1]);
+  const captionOut = useStep(p, 1, n, [0, 0.1], [1, 0]);
   const caption = useTransform([captionIn, captionOut], ([a, b]) => (a as number) * (b as number));
   // s2: the rest of the network steps back; Casper asks it (Ring); the nearest record's address comes to his hand;
   // then a ground line joins the two hems (complete by .8, so the reduced-motion still shows it whole).
   // A passer-by crosses the network meanwhile.
-  const dim = useStep(p, 2, n, [0, 0.25], [1, 0.45]);
+  // One after the other: the rings (.04 to .46), the address to his hand, the ground line, then the passer-by.
+  const dim = useStep(p, 2, n, [0, 0.2], [1, 0.45]);
   const near = L.picks[L.read];
-  const read = useStep(p, 2, n, [0.48, 0.66], [0, 1]);
-  const readFade = useStep(p, 3, n, [0, 0.3], [1, 0]);
+  const read = useStep(p, 2, n, [0.44, 0.56], [0, 1], ease.move);
+  const readFade = useStep(p, 3, n, [0, 0.2], [1, 0]);
   const readOpacity = useTransform([read, readFade], ([r, f]) => (r as number) * (f as number));
-  const meet = useStep(p, 2, n, [0.66, 0.8], [0, 1]);
-  const shadeOn = useStep(p, 2, n, [SHADE[0], SHADE[0] + 0.06, SHADE[1] - 0.06, SHADE[1]], [0, 1, 1, 0]);
-  const shadeX = useStep(p, 2, n, SHADE, [L.shade.from[0], L.shade.to[0]]);
+  const meet = useStep(p, 2, n, [0.56, 0.68], [0, 1], ease.move);
+  const shadeOn = useStep(p, 2, n, [SHADE[0], SHADE[0] + 0.04, SHADE[1] - 0.04, SHADE[1]], [0, 1, 1, 0]);
+  const shadeX = useStep(p, 2, n, SHADE, [L.shade.from[0], L.shade.to[0]], ease.move);
   const keyLight = useStep(p, 2, n, [0.1, 0.5], [0.06, 0.18]);
   // s3: the clock fills; records fade (inside Record).
-  const clockOn = useStep(p, 3, n, [0.02, 0.12], [0, 1]);
-  const clock = useStep(p, 3, n, [0.1, 0.9], [0, 1]);
+  const clockOn = useStep(p, 3, n, [0.04, 0.14], [0, 1]);
+  const clock = useStep(p, 3, n, [0.12, 0.7], [0, 1], ease.move);
   const [cx, cy, cr] = L.clock;
   // The rings' mask: the wedge over the network, feathered so their ends fade out instead of stopping.
   const fanR = L.ring + 120;
-  const feather = portrait ? 16 : 28;
+  const feather = portrait ? 8 : 12;
   const maskBox = { x: L.head[0] - fanR - 3 * feather, y: L.head[1] - fanR - 3 * feather, width: 2 * (fanR + 3 * feather), height: fanR + 6 * feather };
 
   return (
     <Stage portrait={portrait} camera={camera} light={{ color: "#22d3ee", opacity: keyLight }}>
       <defs>
-        <filter id={`dht-feather-${id}`} x="-15%" y="-15%" width="130%" height="130%">
-          <feGaussianBlur stdDeviation={feather} />
-        </filter>
         <mask id={`dht-fan-${id}`} maskUnits="userSpaceOnUse" {...maskBox}>
-          <path d={fanPath(L.head, fanR, FAN[0], FAN[1])} fill="#fff" filter={`url(#dht-feather-${id})`} />
+          {Array.from({ length: FEATHER_STEPS }, (_, i) => (
+            <path key={i} d={fanPath(L.head, fanR, FAN[0] - i * feather * 0.5, FAN[1] + i * feather * 0.5)} fill="#fff" fillOpacity={0.3} />
+          ))}
         </mask>
         <linearGradient id={`dht-meet-${id}`} x1={L.ground[0]} x2={L.ground[1]} y1="0" y2="0" gradientUnits="userSpaceOnUse">
           <stop offset="0" stopColor="#22d3ee" />
@@ -271,5 +275,5 @@ function Node({ node, r, picked, light, dim }: { node: Peer; r: number; picked: 
 }
 
 export function DhtScene({ eyebrow, label, steps, tags }: { eyebrow: string; label: string; steps: SceneStep[]; tags: { sealed: string; ttl: string } }) {
-  return <SceneFrame id="dht" chapter="dht" eyebrow={eyebrow} label={label} steps={steps} stills={[0.25, 0.42, 0.68, 0.9]} copyAt="bottom-right" length={76} visual={<Visual tags={tags} />} />;
+  return <SceneFrame id="dht" chapter="dht" eyebrow={eyebrow} label={label} steps={steps} stills={[0.22, 0.4, 0.66, 0.88]} copyAt="bottom-right" length={76} visual={<Visual tags={tags} />} />;
 }

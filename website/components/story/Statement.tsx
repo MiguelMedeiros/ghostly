@@ -3,13 +3,13 @@
 import { useEffect, useRef } from "react";
 import { animate as tween, motion, useInView, useMotionValue, useScroll, useTransform, type MotionValue } from "motion/react";
 import { useCalm } from "@/lib/useCalm";
-import { useScrub } from "@/lib/motion";
+import { ease, useScrub } from "@/lib/motion";
 import { useCards } from "@/components/home/stage";
 import "@/app/statement.css";
 
 /**
  * A second of silence between the acts: one sentence gets the whole screen.
- * Each word fades in, un-blurs and rises into place as the block scrolls up
+ * Each word fades in and rises into place as the block scrolls up
  * (p .15 to .5 of the section), the accent word landing last; the sentence then
  * holds and fades as it leaves. It repeats a verified line from the story,
  * so it is hidden from readers who already have the copy.
@@ -94,12 +94,12 @@ function schedule(words: { accent: boolean }[]): { start: number; end: number }[
 
 function Word({ p, start, end, accent, calm, children }: { p: MotionValue<number>; start: number; end: number; accent: boolean; calm: boolean; children: string }) {
   const k = useTransform(p, (v) => clamp01((v - start) / (end - start)));
+  // Opacity and a rise only: a blur filter on every word, every frame, is the one thing this page cannot afford.
   const opacity = useTransform(k, (t) => round(t));
-  const filter = useTransform(k, (t) => (t >= 1 ? "none" : `blur(${(8 * (1 - easeOut(t))).toFixed(2)}px)`));
-  const y = useTransform(k, (t) => `${(0.35 * (1 - easeOut(t))).toFixed(3)}em`);
+  const y = useTransform(k, (t) => `${(0.3 * (1 - ease.enter(t))).toFixed(3)}em`);
   return (
     <>
-      <motion.span className={accent ? "statement-word accent" : "statement-word"} style={calm ? undefined : { opacity, filter, y }}>
+      <motion.span className={accent ? "statement-word accent" : "statement-word"} style={calm ? undefined : { opacity, y }}>
         {children}
       </motion.span>{" "}
     </>
@@ -108,9 +108,6 @@ function Word({ p, start, end, accent, calm, children }: { p: MotionValue<number
 
 function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;
-}
-function easeOut(t: number): number {
-  return 1 - (1 - t) * (1 - t);
 }
 function round(v: number): number {
   return Math.round(v * 1000) / 1000;

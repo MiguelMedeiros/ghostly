@@ -9,43 +9,108 @@ import { useSpring, type MotionValue } from "motion/react";
  * The rules that go with them are in website/MOTION.md.
  */
 
-/** Cubic-bézier curves, as motion `ease` arrays. */
+/** Cubic-bézier curves, as motion `ease` arrays. Three curves, one job each. */
 export const EASE = {
-  /** Things arriving or settling: fast start, long soft landing. The site's default. */
-  out: [0.22, 1, 0.36, 1],
-  /** Things travelling from one place to another on their own (loops, demos). */
-  inOut: [0.65, 0, 0.35, 1],
-  /** Things leaving: a quiet start, gone quickly. */
-  in: [0.55, 0, 1, 0.45],
+  /** Arriving: fast start, long soft landing. Entrances, settles, hover in. */
+  enter: [0.22, 1, 0.36, 1],
+  /** Leaving: a quiet start, gone quickly. Exits, hover out. */
+  exit: [0.55, 0, 1, 0.45],
+  /** Travelling from A to B while on screen: a beat in a chapter, a loop, a demo. */
+  move: [0.65, 0, 0.35, 1],
 } as const satisfies Record<string, readonly [number, number, number, number]>;
 
 /** Durations in seconds. Nothing on the site animates for longer than `beat` unless it is scrubbed by scroll or loops. */
 export const DUR = {
-  /** Hover and press feedback. */
-  xs: 0.18,
-  /** Small UI changes: a chip, a caption swap. */
-  sm: 0.32,
-  /** A panel or a card entering. */
-  md: 0.6,
-  /** A large element or a whole scene fading in. */
-  lg: 0.9,
+  /** Hover, press, focus: feedback. 140 ms. */
+  fast: 0.14,
+  /** A small change: a chip, a caption swap, a card. 280 ms. */
+  base: 0.28,
+  /** A large element or a whole scene arriving. 560 ms. */
+  slow: 0.56,
   /** One story beat played in full (cards mode, loops). */
   beat: 1.8,
 } as const;
 
-/** Stagger between siblings entering in sequence (words, chips, rows). */
-export const STAGGER = 0.07;
+/** Stagger between siblings entering in sequence (words, chips, rows); after `STAGGER_MAX` siblings the rest arrive together. */
+export const STAGGER = 0.06;
+export const STAGGER_MAX = 6;
 
 /**
  * Springs. `scrub` smooths anything driven by scroll so a wheel tick or a
  * trackpad flick becomes a glide, without taking the scroll away from the
- * reader (no scroll-jacking); it settles in about 0.35 s. `actor` gives the
- * ghosts weight; `ui` is for small interface elements.
+ * reader (no scroll-jacking); it settles in about 0.35 s. `body` is the one
+ * spring for physical things (the ghosts, the pointer ghost): just under
+ * critical damping, so a stop carries a hint of follow-through. `ui` is for
+ * small interface elements.
  */
 export const SPRING = {
   scrub: { stiffness: 170, damping: 34, mass: 0.55, restDelta: 0.0005 },
-  actor: { stiffness: 120, damping: 26, mass: 0.8 },
+  body: { stiffness: 130, damping: 19, mass: 0.9 },
   ui: { stiffness: 380, damping: 32, mass: 0.6 },
+} as const;
+
+/**
+ * The hero's opening, in seconds from the first paint: the headline leads, the
+ * rest of the copy follows as one group, then Boo arrives from below, then his
+ * line is typed, then the cue to follow him nudges once. CSS mirrors the copy
+ * part in app/home.css (--hero-*).
+ */
+export const HERO = {
+  /** The headline starts rising. */
+  headline: 0.05,
+  /** The lead, buttons and micro line follow as a group. */
+  copy: 0.32,
+  /** Boo starts up from below his place. */
+  arriveAfter: 0.7,
+  /** How far below, in stage units. */
+  arriveFrom: 70,
+  /** His line starts typing, once the body spring has set him down. */
+  lineAfter: 1.7,
+  /** Per character. */
+  typeMs: 30,
+  /** The follow cue nudges once, after the line has been read. */
+  cueAfter: 3.6,
+} as const;
+
+/**
+ * A story beat inside a step of a chapter, as fractions of the step: the copy
+ * and the subject arrive (establish), the subject does its one thing (action),
+ * and nothing new moves after `settle`, so a reader who stops scrolling lands
+ * on a finished picture with time to read.
+ */
+export const BEAT = { establish: 0.15, settle: 0.7 } as const;
+
+/** A cubic-bézier as a function of progress, for `useTransform` ranges. */
+export function bezier([x1, y1, x2, y2]: readonly [number, number, number, number]): (t: number) => number {
+  const cx = 3 * x1;
+  const bx = 3 * (x2 - x1) - cx;
+  const ax = 1 - cx - bx;
+  const cy = 3 * y1;
+  const by = 3 * (y2 - y1) - cy;
+  const ay = 1 - cy - by;
+  const sampleX = (t: number) => ((ax * t + bx) * t + cx) * t;
+  const sampleY = (t: number) => ((ay * t + by) * t + cy) * t;
+  const slopeX = (t: number) => (3 * ax * t + 2 * bx) * t + cx;
+  return (x: number) => {
+    if (x <= 0) return 0;
+    if (x >= 1) return 1;
+    let t = x;
+    for (let i = 0; i < 8; i++) {
+      const dx = sampleX(t) - x;
+      if (Math.abs(dx) < 1e-5) break;
+      const d = slopeX(t);
+      if (Math.abs(d) < 1e-6) break;
+      t -= dx / d;
+    }
+    return sampleY(Math.max(0, Math.min(1, t)));
+  };
+}
+
+/** The three curves as functions (motion's `ease` option on a transform, or maths in a scene). */
+export const ease = {
+  enter: bezier(EASE.enter),
+  exit: bezier(EASE.exit),
+  move: bezier(EASE.move),
 } as const;
 
 /**
