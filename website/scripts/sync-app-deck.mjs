@@ -7,7 +7,7 @@
 // outside it would resolve `react` from the repository's node_modules, a second React.
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = resolve(root, "src/components");
@@ -37,27 +37,31 @@ function walk(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(resolve(dir, e.name)) : [resolve(dir, e.name)]));
 }
 
-const check = process.argv.includes("--check");
-const stale = [];
-for (const file of FILES) {
-  const target = resolve(destination, file);
-  const want = copyOf(file);
-  const have = existsSync(target) ? readFileSync(target, "utf8") : null;
-  if (have === want) continue;
-  if (check) stale.push(have === null ? `${file} (missing)` : file);
-  else {
-    mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, want);
+// Imported for FILES alone by scripts/ci-changes.mjs's test (which app files the site's CI job reads): run only
+// when invoked.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const check = process.argv.includes("--check");
+  const stale = [];
+  for (const file of FILES) {
+    const target = resolve(destination, file);
+    const want = copyOf(file);
+    const have = existsSync(target) ? readFileSync(target, "utf8") : null;
+    if (have === want) continue;
+    if (check) stale.push(have === null ? `${file} (missing)` : file);
+    else {
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, want);
+    }
   }
-}
-for (const extra of walk(destination).map((f) => relative(destination, f))) {
-  if (FILES.includes(extra)) continue;
-  if (check) stale.push(`${extra} (not the app's)`);
-  else rmSync(resolve(destination, extra));
-}
+  for (const extra of walk(destination).map((f) => relative(destination, f))) {
+    if (FILES.includes(extra)) continue;
+    if (check) stale.push(`${extra} (not the app's)`);
+    else rmSync(resolve(destination, extra));
+  }
 
-if (check && stale.length) {
-  console.error(`website/components/app is out of step with the app's deck:\n  ${stale.join("\n  ")}\nRun: cd website && npm run sync:app-deck`);
-  process.exit(1);
+  if (check && stale.length) {
+    console.error(`website/components/app is out of step with the app's deck:\n  ${stale.join("\n  ")}\nRun: cd website && npm run sync:app-deck`);
+    process.exit(1);
+  }
+  console.log(check ? `The app's deck: ${FILES.length} files match.` : `The app's deck: ${FILES.length} files copied.`);
 }
-console.log(check ? `The app's deck: ${FILES.length} files match.` : `The app's deck: ${FILES.length} files copied.`);

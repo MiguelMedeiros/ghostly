@@ -1,6 +1,6 @@
 # Testing map
 
-Every user-visible feature and every protocol capability of Ghostly is listed once in [`e2e/features.json`](../e2e/features.json), with a stable id, the WISP that describes it, the clients it exists in and the infrastructure it needs. Every test says which of those ids it covers. [`scripts/test-map.mjs`](../scripts/test-map.mjs) puts the two together: it runs no test, it reads the declarations, prints the matrix and fails when something is off. CI runs it on every pull request (Frontend job); it takes well under a second.
+Every user-visible feature and every protocol capability of Ghostly is listed once in [`e2e/features.json`](../e2e/features.json), with a stable id, the WISP that describes it, the clients it exists in and the infrastructure it needs. Every test says which of those ids it covers. [`scripts/test-map.mjs`](../scripts/test-map.mjs) puts the two together: it runs no test, it reads the declarations, prints the matrix and fails when something is off. CI runs it on every pull request (Frontend lint and types job); it takes well under a second.
 
 ```bash
 npm run test:map              # check, and print the summary

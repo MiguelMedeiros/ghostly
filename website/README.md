@@ -31,6 +31,7 @@ After `npm run build`, restart a running dev server: reader routes are static
 | `lib/wisp-editorial.ts` | Per-WISP benefit line, availability and optional video metadata. |
 | `lib/composition.ts` | Blocks and presets of the composition board. |
 | `content/videos/` | The video lesson template and an example script. |
+| `e2e/` | The browser checks (`npm run test:e2e` against a build). CI runs them in four shards of about equal time: `e2e/shard.mjs` splits the tests by `e2e/durations.json`. After adding a spec or making one slower, record the times again (the command is at the top of `shard.mjs`); a stale file only unbalances the shards, it never skips a test. |
 | `scripts/capture/` | The app screenshots (`public/screenshots/current/`): `npm run capture` re-shoots all of them from a fresh build of `dev`, with funded test wallets from the shared e2e environment; see its README. |
 
 ## The story spine
