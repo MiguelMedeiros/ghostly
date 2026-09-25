@@ -1,5 +1,6 @@
 import { SPARK_REGTEST, sparkCounterpart, type SparkCounterpart } from "../support/spark";
 import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
+import { composerRow } from "../support/composer";
 
 /**
  * Spark as its own way of paying: Spark to Spark, with Spark addresses and invoices, through the Breez SDK (the
@@ -13,7 +14,7 @@ const panel = (p: Peer) => p.page.getByTestId("spark-wallet");
 const balance = (p: Peer) => panel(p).getByTestId("spark-balance");
 const sats = async (p: Peer) => Number((await balance(p).innerText()).trim().match(/^[\d,]*/)![0].replace(/,/g, "") || NaN);
 const composer = async (p: Peer, amount: string) => {
-  await p.page.getByTestId("payment-button").click();
+  await (await composerRow(p.page, "payment-button")).click();
   await p.page.getByTestId("payment-card-spark").click();
   await p.page.getByTestId("payment-amount").fill(amount);
 };

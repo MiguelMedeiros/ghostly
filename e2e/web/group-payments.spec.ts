@@ -1,4 +1,5 @@
 import { expect, openProfilePage, openWallet, test, type Peer } from "../support/fixtures";
+import { composerRow } from "../support/composer";
 
 /**
  * Payments in a group (WISP 9xx § Payments), three browsers and a real Cashu mint (the test mint, or `E2E_MINT_URL`,
@@ -35,7 +36,7 @@ test.describe("group payments", { tag: "@network" }, () => {
 
   /** ⚡ in the group: whom, then the Cashu card, an amount, Request. */
   async function request(peer: Peer, whom: string | "group", amount: number, memo: string): Promise<void> {
-    await peer.page.getByTestId("payment-button").click();
+    await (await composerRow(peer.page, "payment-button")).click();
     if (whom === "group") await peer.page.getByTestId("group-pay-everyone").click();
     else await peer.page.getByTestId("group-pay-recipient").filter({ hasText: whom }).click();
     await peer.page.getByTestId("payment-card-cashu").click();

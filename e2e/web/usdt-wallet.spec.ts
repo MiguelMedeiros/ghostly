@@ -1,6 +1,7 @@
 import {Interface} from 'ethers';
 import {USDT_LOCAL} from '../support/usdt-local.mjs';
 import {chat,connect,expect,link,openChat,openWallet,test,useTestnet,type Peer} from '../support/fixtures';
+import { composerRow } from "../support/composer";
 
 test('WDK local token request, approval and confirmed receipt across two peers',{tag:['@gated','@feature:payments.usdt.send','@feature:payments.chat.review']},async({peer},testInfo)=>{
  test.skip(process.env.GHOSTLY_USDT_LOCAL!=='1','Requires e2e/infra (npm run e2e:infra:up) and GHOSTLY_USDT_LOCAL=1');
@@ -34,7 +35,7 @@ test('WDK local token request, approval and confirmed receipt across two peers',
  // Incoming tokens show up without touching anything.
  await expect(panel(alice).getByTestId('usdt-balance')).toHaveText('10 TEST-USDT',{timeout:30000});
  for(const p of [alice,bob])await openChat(p);
- await bob.page.getByTestId('payment-button').click();
+ await (await composerRow(bob.page, "payment-button")).click();
  await bob.page.getByTestId('payment-card-usdt').click();
  await bob.page.getByTestId('payment-amount').fill('1.25');
  await bob.page.getByTestId('payment-request').click();
@@ -56,7 +57,7 @@ test('WDK local token request, approval and confirmed receipt across two peers',
  // Send, with no request: Bob's app asks Alice's for an address, then the payment waits for his approval.
  await rpc('anvil_setBalance',[(await panel(bob).getByTestId('usdt-address').innerText()).trim(),'0xde0b6b3a7640000']);
  await openChat(bob);
- await bob.page.getByTestId('payment-button').click();
+ await (await composerRow(bob.page, "payment-button")).click();
  await bob.page.getByTestId('payment-card-usdt').click();
  await bob.page.getByTestId('payment-amount').fill('0.5');
  await bob.page.getByTestId('payment-send').click();

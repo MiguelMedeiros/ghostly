@@ -1,4 +1,5 @@
 import { connect, expect, link, test } from "../support/fixtures";
+import { composerRow } from "../support/composer";
 
 /**
  * Paying in a chat starts from the wallet's cards: a stack in the composer, where the card the pointer rests on
@@ -12,8 +13,8 @@ test("the chat's payment cards: flip through them, turn one over, and back to th
   const { page } = alice;
   const card = (id: string) => page.getByTestId(`payment-card-${id}`);
   const composer = page.getByTestId("payment-composer");
-  await expect(page.getByTestId("payment-button")).toBeEnabled({ timeout: 60_000 });
-  await page.getByTestId("payment-button").click();
+  await expect(await composerRow(page, "payment-button")).toBeEnabled({ timeout: 60_000 });
+  await (await composerRow(page, "payment-button")).click();
 
   // The cards first, as a choice of how to pay, the remembered one chosen and focused.
   const cards = composer.getByRole("radiogroup", { name: "Pay with" }).getByRole("radio");
@@ -76,7 +77,7 @@ test("the chat's payment cards: flip through them, turn one over, and back to th
   // The card turned over is the one the next payment starts on.
   await page.keyboard.press("Escape");
   await expect(composer).toHaveCount(0);
-  await page.getByTestId("payment-button").click();
+  await (await composerRow(page, "payment-button")).click();
   await expect(card("lightning")).toHaveAttribute("aria-checked", "true");
 });
 
@@ -85,10 +86,9 @@ test("on a phone the payment cards are a track, and a tap turns one over", { tag
   await link(alice, bob);
   await connect(alice, bob);
   const { page } = alice;
-  // On a phone the ⚡ is behind "More".
-  await page.getByTestId("composer-more").click();
-  await expect(page.getByTestId("payment-button")).toBeEnabled({ timeout: 60_000 });
-  await page.getByTestId("payment-button").click();
+  // On a phone the + menu is a sheet from the bottom.
+  await expect(await composerRow(page, "payment-button")).toBeEnabled({ timeout: 60_000 });
+  await (await composerRow(page, "payment-button")).click();
   const composer = page.getByTestId("payment-composer");
   await expect(composer.locator(".wallet-deck")).toHaveAttribute("data-mode", "track");
   await page.getByTestId("payment-deck-next").click();

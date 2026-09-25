@@ -341,5 +341,53 @@
       "expired": "Cette invitation a expiré.",
       "unknown": "Un problème est survenu pendant la connexion."
     }
+  },
+  "composer": {
+    "attach": "Joindre",
+    "payment": "Paiement",
+    "identity": "Identité",
+    "identityShared": "{{count}} partagée(s) dans cette discussion",
+    "document": "Document",
+    "media": "Photos et vidéos",
+    "camera": "Appareil photo",
+    "expressions": "Emoji et GIF",
+    "emoji": "Emoji",
+    "gif": "GIF",
+    "searchEmoji": "Rechercher un emoji",
+    "searchGifs": "Rechercher des GIF",
+    "noEmoji": "Aucun emoji trouvé",
+    "noGifs": "Aucun GIF trouvé",
+    "gifsUnavailable": "La recherche de GIF est indisponible. Réessayez.",
+    "gifSource": "GifCities · Internet Archive",
+    "skinTone": "Teint",
+    "searchResults": "Résultats de recherche",
+    "emojiCategories": "Catégories d'emoji",
+    "gifCategories": "Catégories de GIF",
+    "takePhoto": "Prendre une photo",
+    "retake": "Reprendre",
+    "sendPhoto": "Envoyer la photo",
+    "closeCamera": "Fermer l'appareil photo",
+    "cameraFailed": "Impossible de démarrer l'appareil photo.",
+    "category": {
+      "recent": "Récents",
+      "people": "Smileys et personnes",
+      "nature": "Animaux et nature",
+      "foods": "Nourriture et boissons",
+      "activity": "Activités",
+      "places": "Voyages et lieux",
+      "objects": "Objets",
+      "symbols": "Symboles",
+      "flags": "Drapeaux"
+    },
+    "gifCategory": {
+      "ghosts": "Fantômes",
+      "happy": "Joie",
+      "sad": "Tristesse",
+      "love": "Amour",
+      "yes": "Oui",
+      "party": "Fête",
+      "animals": "Animaux",
+      "retro": "Web rétro"
+    }
   }
 }

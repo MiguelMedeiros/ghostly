@@ -3,6 +3,7 @@ import { expect, test } from "../support/fixtures";
 import { choose } from "../support/select";
 import { addNostrIdentity, injectNostrSigner } from "../support/nostrSigner";
 import { pair } from "../support/paired";
+import { composerRow } from "../support/composer";
 
 /**
  * The pages beside the chat list (Wallet, Services, Settings, Profile, Identities) at every width they are shown at:
@@ -247,8 +248,9 @@ test("the chat's pickers stay inside the chat's column beside the widest list, t
   await page.mouse.up();
   const column = (await page.locator(".composer-safe").boundingBox())!;
   for (const [button, sheet] of [["payment-button", "payment-composer"], ["composer-identities-button", "composer-identities"]] as const) {
-    await expect(page.getByTestId(button)).toBeEnabled({ timeout: 60_000 });
-    await page.getByTestId(button).click();
+    const row = await composerRow(page, button);
+    await expect(row).toBeEnabled({ timeout: 60_000 });
+    await row.click();
     const box = (await page.getByTestId(sheet).boundingBox())!;
     expect(box.x, `${sheet} inside the chat's column`).toBeGreaterThanOrEqual(column.x - 1);
     expect(box.x + box.width, `${sheet} inside the chat's column`).toBeLessThanOrEqual(column.x + column.width + 1);

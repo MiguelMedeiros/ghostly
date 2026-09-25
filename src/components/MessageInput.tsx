@@ -1,12 +1,17 @@
 import { getSessionDraft, setSessionDraft } from "../lib/storage";
-import { useState, useRef, useEffect, useCallback, type ReactNode } from "react";
-import { EmojiPicker } from "./EmojiPicker";
-import { GifPicker } from "./GifPicker";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, type ReactNode } from "react";
 import { PaymentComposer } from "./PaymentComposer";
-import { ComposerIdentityButton, ComposerIdentityPicker } from "./identities/ComposerIdentities";
+import { ComposerIdentityPicker, useSharedIdentityCount } from "./identities/ComposerIdentities";
 import { VoiceRecorderButton } from "./voice/VoiceRecorderButton";
 import { canRecordVoice } from "../lib/voiceRecorder";
 import type { VoiceMeta } from "@ghostly/core";
+import { useI18n } from "../contexts/I18nContext";
+import { useIsMobile } from "../hooks/useIsMobile";
+import { ComposerMenu, type ComposerAction } from "./composer/ComposerMenu";
+import { ExpressionPanel } from "./composer/ExpressionPanel";
+import { CameraCapture, cameraByFileInput, useHasCamera } from "./composer/CameraCapture";
+import { CameraGlyph, DocumentGlyph, IdentityGlyph, MediaGlyph, PaymentGlyph, SmileIcon } from "./composer/icons";
+import "./composer/composer.css";
 
 interface MessageInputProps {
   draftId?: string;
@@ -36,15 +41,20 @@ interface MessageInputProps {
     /** Why paying is not possible now (a request still is): shown on the Pay side. */
     sendUnavailable?: string;
   };
-  /** A composer of its own for ⚡ instead of the chat's (a group chooses whom to pay first). */
+  /** A composer of its own for payments instead of the chat's (a group chooses whom to pay first). */
   paymentComposer?: (close: () => void) => ReactNode;
-  /** A paired chat: which of this profile's identities its contact sees, next to ⚡. */
+  /** A paired chat: which of this profile's identities its contact sees, from the + menu. */
   identities?: { peerKey: string; contact: string };
 }
 
 const DEFAULT_MAX = 500;
 const TOAST_DURATION = 5_000;
 
+/**
+ * The chat's composer, laid out as WhatsApp's: [+] [emoji/GIF] [message] in one rounded field, and the mic (send
+ * once there is text) beside it. The + opens what else can go into the chat (a payment, an identity, a document,
+ * photos, the camera); the smiley opens one panel with emoji and GIFs.
+ */
 export function MessageInput({
   draftId,
   onSend,
@@ -60,19 +70,28 @@ export function MessageInput({
   fileUnavailable,
   paymentsUnavailable,
 }: MessageInputProps) {
+  const { t } = useI18n();
+  const phone = useIsMobile();
   const [showPayment, setShowPayment] = useState(false);
   const [showIdentities, setShowIdentities] = useState(false);
-  const identitiesButtonRef = useRef<HTMLButtonElement>(null);
+  const [showMenu, setShowMenu] = useState(false);
+  const [showPanel, setShowPanel] = useState(false);
+  const [showCamera, setShowCamera] = useState(false);
+  const plusRef = useRef<HTMLButtonElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
+  const fieldRef = useRef<HTMLDivElement>(null);
+  const panelButtonRef = useRef<HTMLButtonElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mediaInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState(() => draftId ? getSessionDraft(draftId) : "");
-  const emojiButtonRef = useRef<HTMLButtonElement>(null);
-  const [showEmoji, setShowEmoji] = useState(false);
-  const [showMore, setShowMore] = useState(false);
-  const [showGif, setShowGif] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const caretRef = useRef<number | null>(null);
   const [canRecord] = useState(canRecordVoice);
+  const sharedIdentities = useSharedIdentityCount(identities?.peerKey);
+  const hasCamera = useHasCamera();
 
   useEffect(() => {
     textareaRef.current?.focus();
@@ -83,6 +102,12 @@ export function MessageInput({
     const input=textareaRef.current;
     if(input && text) { input.style.height="auto"; input.style.height=`${Math.min(input.scrollHeight,120)}px`; }
   }, [draftId,text]);
+
+  // An emoji goes in where the caret was; the caret stays after it.
+  useLayoutEffect(() => {
+    const input = textareaRef.current, at = caretRef.current;
+    if (input && at !== null) { caretRef.current = null; input.setSelectionRange(at, at); }
+  }, [text]);
 
   const showToast = useCallback((msg: string) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -133,51 +158,63 @@ export function MessageInput({
     }
   };
 
-  const handleEmojiSelect = useCallback(
-    (emoji: string) => {
-      const newText = text + emoji;
-      if (newText.length <= Math.max(maxLength, 16_384)) {
-        setText(newText);
-      }
-      textareaRef.current?.focus();
-    },
-    [text, maxLength],
-  );
+  const handleEmojiSelect = (emoji: string) => {
+    const input = textareaRef.current;
+    const start = input?.selectionStart ?? text.length, end = input?.selectionEnd ?? text.length;
+    const next = text.slice(0, start) + emoji + text.slice(end);
+    if (next.length > Math.max(maxLength, 16_384)) return;
+    caretRef.current = start + emoji.length;
+    setText(next);
+    // On a phone the keyboard would cover the panel: the field takes the focus only on a wide screen.
+    if (!phone) input?.focus({ preventScroll: true });
+  };
 
-  const handleGifSelect = useCallback(
-    async (url: string) => {
-      const err = await onSend(url);
-      if (err) {
-        showToast(err);
-      }
-      setShowGif(false);
-      textareaRef.current?.focus();
-    },
-    [onSend, showToast],
-  );
+  const handleGifSelect = async (url: string) => {
+    const err = await onSend(url);
+    if (err) showToast(err);
+    setShowPanel(false);
+    if (!phone) textareaRef.current?.focus();
+  };
 
+  /** Whatever the composer has open over it. */
   const closeAll = () => {
-    setShowEmoji(false);
-    setShowGif(false);
+    setShowMenu(false);
+    setShowPanel(false);
+    setShowPayment(false);
     setShowIdentities(false);
   };
 
-  const toggleEmoji = () => {
-    setShowGif(false);
-    setShowEmoji((v) => !v);
+  const sendFiles = async (files: FileList | null, input: HTMLInputElement) => {
+    const chosen = [...(files ?? [])];
+    input.value = "";
+    if (!onSendFile || disabled || fileUnavailable) return;
+    for (const file of chosen) {
+      const err = await onSendFile(file);
+      if (err) { showToast(err); return; }
+    }
   };
 
-  const toggleGif = () => {
-    setShowEmoji(false);
-    setShowGif((v) => !v);
-  };
+  const actions: ComposerAction[] = [];
+  if (payments || paymentComposer) actions.push({ id: "payment", label: t("composer.payment"), icon: <PaymentGlyph />, testId: "payment-button",
+    unavailable: paymentsUnavailable, onSelect: () => setShowPayment(true) });
+  if (identities) actions.push({ id: "identity", label: t("composer.identity"), icon: <IdentityGlyph />, testId: "composer-identities-button",
+    hint: sharedIdentities ? t("composer.identityShared", { count: String(sharedIdentities) }) : undefined, data: { "data-count": sharedIdentities },
+    onSelect: () => setShowIdentities(true) });
+  if (onSendFile) {
+    actions.push({ id: "document", label: t("composer.document"), icon: <DocumentGlyph />, testId: "composer-file", unavailable: fileUnavailable,
+      onSelect: () => fileInputRef.current?.click() });
+    actions.push({ id: "media", label: t("composer.media"), icon: <MediaGlyph />, testId: "composer-media", unavailable: fileUnavailable,
+      onSelect: () => mediaInputRef.current?.click() });
+    if (hasCamera) actions.push({ id: "camera", label: t("composer.camera"), icon: <CameraGlyph />, testId: "composer-camera", unavailable: fileUnavailable,
+      onSelect: () => cameraByFileInput() ? cameraInputRef.current?.click() : setShowCamera(true) });
+  }
 
   const bytes = maxBytes || softBytes ? new TextEncoder().encode(text.trim()).length : 0;
   const remaining = maxBytes ? maxBytes - bytes : maxLength - text.length;
   const overSoft = !!softBytes && bytes > softBytes;
 
   return (
-    <div className="bg-panel-header px-4 max-md:px-2 py-2.5 composer-safe shrink-0 relative">
+    <div ref={composerRef} data-composer className="@container/composer bg-panel-header px-3 max-md:px-2 py-2 composer-safe shrink-0 relative">
       {toast && (
         <div role="alert" className="absolute bottom-full left-4 right-4 mb-2 z-50 animate-fade-in">
           <div className="bg-[#3b2020] border border-danger/30 rounded-lg px-4 py-2.5 flex items-start gap-2 shadow-lg">
@@ -209,147 +246,52 @@ export function MessageInput({
           </div>
         </div>
       )}
-      <div className="flex items-end gap-2 relative">
-        {/* Left action buttons */}
-        <div className="flex items-center gap-0.5 max-md:gap-0 shrink-0 h-10 max-md:h-11">
-          {/* Phones keep the input wide: GIFs, sats and files wait behind a plus. */}
+      <div className="composer-row flex items-end gap-2 relative">
+        {/* One rounded field: the +, the emoji/GIF panel's smiley and the message. */}
+        <div ref={fieldRef} className="composer-field" data-disabled={disabled || undefined}>
+          <ComposerMenu actions={actions} open={showMenu} disabled={disabled} buttonRef={plusRef}
+            onOpenChange={(open) => { if (open) closeAll(); setShowMenu(open); }} />
           <button
-            onClick={() => setShowMore((v) => !v)}
-            disabled={disabled}
-            className={`md:hidden w-10 h-11 flex items-center justify-center rounded-full cursor-pointer border-none bg-transparent transition-transform disabled:opacity-30 ${
-              showMore ? "rotate-45 text-accent" : "text-text-secondary"
-            }`}
-            title="More"
-            data-testid="composer-more"
-          >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-          </button>
-          <button
-            ref={emojiButtonRef}
-            aria-expanded={showEmoji}
+            ref={panelButtonRef}
+            type="button"
+            data-testid="composer-expressions"
+            aria-expanded={showPanel}
             aria-haspopup="dialog"
-            onClick={toggleEmoji}
+            onClick={() => { const open = !showPanel; closeAll(); setShowPanel(open); }}
             disabled={disabled}
-            className={`w-9 h-9 max-md:w-10 max-md:h-11 flex items-center justify-center rounded-full transition-colors cursor-pointer border-none ${
-              showEmoji
-                ? "bg-accent/20 text-accent"
-                : "bg-transparent text-text-secondary hover:text-text-primary hover:bg-surface-hover"
-            } disabled:opacity-30 disabled:cursor-not-allowed`}
-            title="Emoji"
+            className={`composer-icon-button ${showPanel ? "composer-icon-button-on" : ""}`}
+            aria-label={t("composer.expressions")}
+            title={t("composer.expressions")}
           >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M8 14s1.5 2 4 2 4-2 4-2" />
-              <line x1="9" y1="9" x2="9.01" y2="9" strokeWidth="2.5" strokeLinecap="round" />
-              <line x1="15" y1="9" x2="15.01" y2="9" strokeWidth="2.5" strokeLinecap="round" />
-            </svg>
+            <SmileIcon size={24} />
           </button>
 
-          <div className={`composer-more ${showMore ? "composer-more-open" : ""}`} onClick={() => setShowMore(false)}>
-          <button
-            onClick={toggleGif}
-            disabled={disabled}
-            className={`w-9 h-9 max-md:w-10 max-md:h-11 flex items-center justify-center rounded-full transition-colors cursor-pointer border-none ${
-              showGif
-                ? "bg-accent/20 text-accent"
-                : "bg-transparent text-text-secondary hover:text-text-primary hover:bg-surface-hover"
-            } disabled:opacity-30 disabled:cursor-not-allowed`}
-            title="GIF"
-          >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <rect x="2" y="4" width="20" height="16" rx="3" />
-              <text x="12" y="15" textAnchor="middle" fill="currentColor" stroke="none" fontSize="8" fontWeight="bold" fontFamily="sans-serif">
-                GIF
-              </text>
-            </svg>
-          </button>
-
-          {(payments || paymentComposer) && (
-            <button
-              onClick={() => { setShowIdentities(false); setShowPayment((v) => !v); }}
-              disabled={disabled || !!paymentsUnavailable}
-              data-testid="payment-button"
-              className={`w-9 h-9 max-md:w-10 max-md:h-11 flex items-center justify-center rounded-full transition-colors cursor-pointer border-none ${
-                showPayment
-                  ? "bg-accent/20 text-accent"
-                  : "bg-transparent text-text-secondary hover:text-text-primary hover:bg-surface-hover"
-              } disabled:opacity-30 disabled:cursor-not-allowed`}
-              aria-label="Send or request sats"
-              title={paymentsUnavailable ?? "Send or request sats"}
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-              </svg>
-            </button>
-          )}
-
-          {identities && (
-            <ComposerIdentityButton peerKey={identities.peerKey} buttonRef={identitiesButtonRef} open={showIdentities}
-              onToggle={() => { setShowPayment(false); setShowIdentities((v) => !v); }} />
-          )}
-
-          {onSendFile && (
-            <>
-              <input
-                ref={fileInputRef}
-                type="file"
-                className="hidden"
-                data-testid="file-input"
-                disabled={disabled || !!fileUnavailable}
-                onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  e.target.value = "";
-                  if (!file || disabled || fileUnavailable) return;
-                  const err = await onSendFile(file);
-                  if (err) showToast(err);
-                }}
-              />
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={disabled || !!fileUnavailable}
-                className="w-9 h-9 max-md:w-10 max-md:h-11 flex items-center justify-center rounded-full transition-colors cursor-pointer border-none bg-transparent text-text-secondary hover:text-text-primary hover:bg-surface-hover disabled:opacity-30 disabled:cursor-not-allowed"
-                aria-label="Send a file"
-                title={fileUnavailable ?? "Send a file"}
+          <div className="flex-1 min-w-0 relative flex items-center self-stretch">
+            <textarea
+              ref={textareaRef}
+              value={text}
+              onChange={handleInput}
+              onKeyDown={handleKeyDown}
+              onFocus={() => { setShowMenu(false); setShowIdentities(false); if (phone) setShowPanel(false); }}
+              placeholder={disabled ? disabledPlaceholder : "Message…"}
+              disabled={disabled}
+              rows={1}
+              className="composer-textarea"
+            />
+            {softBytes && !maxBytes && bytes > softBytes - 60 && (
+              <span data-testid="dht-byte-count" title={overSoft ? `Over the ${softBytes} bytes the DHT carries: it is sent when you are live` : undefined}
+                className={`absolute right-2.5 bottom-1 text-[10px] ${overSoft ? "text-amber-500" : "text-text-muted"}`}>
+                {bytes} / {softBytes} B
+              </span>
+            )}
+            {!(softBytes && !maxBytes) && remaining < 100 && (
+              <span
+                className={`absolute right-2.5 bottom-1 text-[10px] ${remaining < 50 ? "text-danger" : "text-text-muted"}`}
               >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                </svg>
-              </button>
-            </>
-          )}
+                {remaining}{maxBytes ? " B" : ""}
+              </span>
+            )}
           </div>
-
-        </div>
-
-        {/* Text input */}
-        <div className="flex-1 relative flex items-center">
-          <textarea
-            ref={textareaRef}
-            value={text}
-            onChange={handleInput}
-            onKeyDown={handleKeyDown}
-            onFocus={closeAll}
-            placeholder={disabled ? disabledPlaceholder : "Message…"}
-            disabled={disabled}
-            rows={1}
-            className="w-full bg-input-bg border-none rounded-lg px-3 py-2 max-md:py-2.5 text-[15px] text-text-primary placeholder-text-muted resize-none focus:outline-none disabled:opacity-50 min-h-10 max-md:min-h-11 max-md:rounded-3xl"
-          />
-          {softBytes && !maxBytes && bytes > softBytes - 60 && (
-            <span data-testid="dht-byte-count" title={overSoft ? `Over the ${softBytes} bytes the DHT carries: it is sent when you are live` : undefined}
-              className={`absolute right-2.5 bottom-1.5 text-[10px] ${overSoft ? "text-amber-500" : "text-text-muted"}`}>
-              {bytes} / {softBytes} B
-            </span>
-          )}
-          {!(softBytes && !maxBytes) && remaining < 100 && (
-            <span
-              className={`absolute right-2.5 bottom-1.5 text-[10px] ${remaining < 50 ? "text-danger" : "text-text-muted"}`}
-            >
-              {remaining}{maxBytes ? " B" : ""}
-            </span>
-          )}
         </div>
 
         {/* Send button; the mic while there is nothing to send, as in WhatsApp */}
@@ -359,27 +301,20 @@ export function MessageInput({
             unavailable={fileUnavailable}
             disabled={disabled}
             onError={showToast}
-            onActiveChange={(active) => { if (active) { closeAll(); setShowMore(false); setShowPayment(false); } }}
+            onActiveChange={(active) => { if (active) closeAll(); }}
           />
         ) : <button
           aria-label="Send message"
           onClick={handleSubmit}
           disabled={disabled || !text.trim()}
-          className="w-10 h-10 max-md:w-11 max-md:h-11 flex items-center justify-center bg-accent rounded-full text-on-accent hover:bg-accent-hover transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shrink-0"
+          className="composer-send w-11 h-11 max-md:w-12 max-md:h-12 flex items-center justify-center bg-accent rounded-full text-on-accent hover:bg-accent-hover transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shrink-0"
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
             <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
           </svg>
         </button>}
 
-        {/* Pickers */}
-        {showEmoji && (
-            <EmojiPicker
-              anchorRef={emojiButtonRef}
-              onSelect={handleEmojiSelect}
-              onClose={() => { setShowEmoji(false); textareaRef.current?.focus(); }}
-            />
-        )}
+        {/* What the + opens */}
         {showPayment && paymentComposer && !paymentsUnavailable && !disabled && paymentComposer(() => setShowPayment(false))}
         {showPayment && !paymentComposer && payments && !paymentsUnavailable && !disabled && (
           <PaymentComposer
@@ -394,17 +329,39 @@ export function MessageInput({
         )}
 
         {showIdentities && identities && (
-          <ComposerIdentityPicker peerKey={identities.peerKey} contact={identities.contact} anchorRef={identitiesButtonRef}
+          <ComposerIdentityPicker peerKey={identities.peerKey} contact={identities.contact} anchorRef={plusRef}
             onClose={() => setShowIdentities(false)} />
         )}
-
-        {showGif && (
-          <GifPicker
-            onSelect={handleGifSelect}
-            onClose={() => setShowGif(false)}
-          />
-        )}
       </div>
+
+      {onSendFile && <>
+        <input ref={fileInputRef} type="file" className="hidden" data-testid="file-input" disabled={disabled || !!fileUnavailable}
+          onChange={(e) => void sendFiles(e.target.files, e.target)} />
+        <input ref={mediaInputRef} type="file" accept="image/*,video/*" multiple className="hidden" data-testid="media-input" disabled={disabled || !!fileUnavailable}
+          onChange={(e) => void sendFiles(e.target.files, e.target)} />
+        <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" data-testid="camera-input" disabled={disabled || !!fileUnavailable}
+          onChange={(e) => void sendFiles(e.target.files, e.target)} />
+      </>}
+
+      {showPanel && (
+        <ExpressionPanel
+          boundsRef={composerRef}
+          dismissRef={fieldRef}
+          onEmoji={handleEmojiSelect}
+          onGif={handleGifSelect}
+          onClose={() => {
+            setShowPanel(false);
+            const at = document.activeElement;
+            if (!phone && (!at || at === document.body || at.closest("[data-testid='expression-panel']"))) textareaRef.current?.focus();
+          }}
+        />
+      )}
+      {showCamera && onSendFile && (
+        <CameraCapture onClose={() => setShowCamera(false)} onSend={(file) => {
+          setShowCamera(false);
+          void onSendFile(file).then((err) => { if (err) showToast(err); });
+        }} />
+      )}
     </div>
   );
 }

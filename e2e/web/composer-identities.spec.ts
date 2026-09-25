@@ -2,11 +2,12 @@ import { expect, test, type Peer } from "../support/fixtures";
 import { injectNostrSigner } from "../support/nostrSigner";
 import { closeIdentities, openIdentities, theirFace, turnTheirs } from "../support/identities";
 import { pair } from "../support/paired";
+import { composerRow } from "../support/composer";
 
 const chatId = (peer: Peer) => peer.page.evaluate(() => location.hash);
 
 /**
- * The composer's identity button, beside ⚡: the profile's identities as ID cards, step for step as ⚡ pays. With none
+ * The composer's + → Identity, beside Payment: the profile's identities as ID cards, step for step as a payment is made. With none
  * yet, the blank card adds one there, without leaving the chat. "Use …" turns the chosen card over, as a payment card
  * turns; its back shares it and the contact sees it verified, the back says so and the card comes back with the seal.
  * Turned over again, Stop sharing, and the contact sees it is no longer shared.
@@ -18,9 +19,10 @@ test("an identity is added, shared and withdrawn from the chat's composer", { ta
   const withBob = await chatId(alice);
 
   // No identity yet: the deck is the blank card, which adds one here.
-  const button = alice.page.getByTestId("composer-identities-button");
-  await expect(button).toHaveAttribute("aria-label", "Share identities in this chat");
-  await button.click();
+  const plus = alice.page.getByTestId("composer-more");
+  const row = () => composerRow(alice.page, "composer-identities-button");
+  await expect(await row()).toHaveAttribute("data-count", "0");
+  await (await row()).click();
   const picker = alice.page.getByTestId("composer-identities");
   await expect(picker.getByRole("radio")).toHaveCount(1);
   await expect(picker.getByTestId("composer-identity-add")).toContainText("Add your first identity");
@@ -61,13 +63,19 @@ test("an identity is added, shared and withdrawn from the chat's composer", { ta
   await expect(picker).toHaveAttribute("data-side", "cards");
   await expect(nostr.getByTestId("id-card-shared")).toBeVisible();
   await expect(nostr).toBeFocused();
-  await expect(button.getByTestId("composer-identities-count")).toHaveText("1");
   await expect(bob.page.getByTestId("chat-identity-badges")).toBeVisible();
   await openIdentities(bob);
   await expect(theirFace(bob)).toHaveAttribute("data-status", "verified");
   await closeIdentities(bob);
 
-  // From the same picker, still open: turned over again, it is shared and verified; Stop sharing.
+  // The + menu's Identity row says one is shared here; it opens the picker again.
+  await alice.page.keyboard.press("Escape");
+  await expect(picker).toHaveCount(0);
+  await expect(await row()).toHaveAttribute("data-count", "1");
+  await expect(await row()).toContainText("1 shared in this chat");
+  await (await row()).click();
+
+  // Turned over again, it is shared and verified; Stop sharing.
   await expect(picker.getByTestId("composer-identity-hint")).toContainText(/ sees your Nostr npub1/);
   await use.click();
   await expect(status).toHaveText("Shared · verified by your contact");
@@ -76,7 +84,6 @@ test("an identity is added, shared and withdrawn from the chat's composer", { ta
   await share.click();
   await expect(picker).toHaveAttribute("data-side", "cards");
   await expect(nostr.getByTestId("id-card-shared")).toHaveCount(0);
-  await expect(button.getByTestId("composer-identities-count")).toHaveCount(0);
   await expect(bob.page.getByTestId("chat-identity-badges")).toHaveCount(0);
   await openIdentities(bob);
   await expect(theirFace(bob)).toHaveAttribute("data-status", "withdrawn");
@@ -84,25 +91,27 @@ test("an identity is added, shared and withdrawn from the chat's composer", { ta
   await expect(bobsCard.getByTestId("chat-identity-received-status")).toHaveText("No longer shared");
   await closeIdentities(bob);
 
-  // Escape closes it and gives the focus back to the button; opened again, the keys start on the chosen card.
+  // Escape closes it and gives the focus back to the +; opened again, the keys start on the chosen card.
   await alice.page.keyboard.press("Escape");
   await expect(picker).toHaveCount(0);
-  await expect(button).toBeFocused();
-  await button.click();
+  await expect(plus).toBeFocused();
+  await expect(await row()).toHaveAttribute("data-count", "0");
+  await (await row()).click();
   await expect(nostr).toBeFocused();
   await alice.page.keyboard.press("Escape");
   await expect(picker).toHaveCount(0);
 
-  // On a phone the button waits behind the plus with GIF, ⚡ and files; the input keeps its width.
+  // On a phone the + menu is a sheet from the bottom; the input keeps its width.
   await alice.page.setViewportSize({ width: 390, height: 844 });
-  await expect(button).toBeHidden();
-  await alice.page.getByTestId("composer-more").click();
-  await expect(button).toBeVisible();
   const input = await alice.page.getByPlaceholder("Message…").boundingBox();
   expect(input!.width).toBeGreaterThan(200);
-  const more = await alice.page.locator(".composer-more-open").boundingBox();
-  expect(more!.x + more!.width).toBeLessThanOrEqual(390);
-  await button.click();
+  await plus.click();
+  const menu = alice.page.getByTestId("composer-menu");
+  await expect(menu).toHaveAttribute("data-menu", "sheet");
+  const sheetMenu = await menu.boundingBox();
+  expect(sheetMenu!.x).toBeGreaterThanOrEqual(0);
+  expect(sheetMenu!.x + sheetMenu!.width).toBeLessThanOrEqual(390);
+  await menu.getByTestId("composer-identities-button").click();
   await expect(picker).toBeVisible();
   const sheet = await picker.boundingBox();
   expect(sheet!.x).toBeGreaterThanOrEqual(0);

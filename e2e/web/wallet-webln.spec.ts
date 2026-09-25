@@ -4,6 +4,7 @@ import { lndWebln } from "../../packages/browser/test/helpers/lndWebln";
 import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
 import { connectWebln, installWebln } from "../support/webln";
 import { choose, optionsOf } from "../support/select";
+import { composerRow } from "../support/composer";
 
 /**
  * Lightning through a browser wallet (WebLN, like Alby): the test puts `window.webln` in the page, backed
@@ -39,7 +40,7 @@ async function requestPaidInChat(alice: Peer, bob: Peer, sats: number, aliceSour
   await bob.page.getByTestId("chat-payments-open").click();
   await bob.page.getByTestId("chat-payments").getByTestId("chat-payments-cashu").click();
   await bob.page.getByTestId("chat-payments-save").click();
-  await bob.page.getByTestId("payment-button").click();
+  await (await composerRow(bob.page, "payment-button")).click();
   await bob.page.getByTestId("payment-card-lightning").click();
   await bob.page.getByTestId("payment-amount").fill(String(sats));
   await bob.page.getByTestId("payment-request").click();

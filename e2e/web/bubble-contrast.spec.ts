@@ -3,6 +3,7 @@ import type { Page } from "@playwright/test";
 import { strangerInvoice } from "../support/bolt11";
 import { chat, expect, openChat, openWallet, say, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
+import { composerRow } from "../support/composer";
 
 /**
  * Message bubbles take their colours from the theme: a sent and a received bubble in every colour theme, light
@@ -147,7 +148,7 @@ test("message bubbles follow the theme, and what is in them stays readable in ev
   if (localMint()) {
     for (const p of [alice, bob]) await testnetMint(p);
     for (const p of [alice, bob]) await openChat(p);
-    await bob.page.getByTestId("payment-button").click();
+    await (await composerRow(bob.page, "payment-button")).click();
     await bob.page.getByTestId("payment-card-cashu").click();
     await bob.page.getByTestId("payment-amount").fill("12");
     await bob.page.getByTestId("payment-composer").getByPlaceholder("What for? (optional)").fill("half the pizza");

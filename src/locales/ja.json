@@ -341,5 +341,53 @@
       "expired": "この招待は期限切れです。",
       "unknown": "接続中に問題が発生しました。"
     }
+  },
+  "composer": {
+    "attach": "添付",
+    "payment": "支払い",
+    "identity": "ID",
+    "identityShared": "このチャットで {{count}} 件共有中",
+    "document": "書類",
+    "media": "写真と動画",
+    "camera": "カメラ",
+    "expressions": "絵文字と GIF",
+    "emoji": "絵文字",
+    "gif": "GIF",
+    "searchEmoji": "絵文字を検索",
+    "searchGifs": "GIF を検索",
+    "noEmoji": "絵文字が見つかりません",
+    "noGifs": "GIF が見つかりません",
+    "gifsUnavailable": "GIF 検索を利用できません。もう一度お試しください。",
+    "gifSource": "GifCities · Internet Archive",
+    "skinTone": "肌の色",
+    "searchResults": "検索結果",
+    "emojiCategories": "絵文字のカテゴリ",
+    "gifCategories": "GIF のカテゴリ",
+    "takePhoto": "写真を撮る",
+    "retake": "撮り直す",
+    "sendPhoto": "写真を送信",
+    "closeCamera": "カメラを閉じる",
+    "cameraFailed": "カメラを起動できませんでした。",
+    "category": {
+      "recent": "最近使用",
+      "people": "スマイリーと人",
+      "nature": "動物と自然",
+      "foods": "食べ物と飲み物",
+      "activity": "アクティビティ",
+      "places": "旅行と場所",
+      "objects": "物",
+      "symbols": "記号",
+      "flags": "旗"
+    },
+    "gifCategory": {
+      "ghosts": "おばけ",
+      "happy": "うれしい",
+      "sad": "かなしい",
+      "love": "ラブ",
+      "yes": "はい",
+      "party": "パーティー",
+      "animals": "動物",
+      "retro": "レトロウェブ"
+    }
   }
 }

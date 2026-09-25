@@ -341,5 +341,53 @@
       "expired": "This invite has expired.",
       "unknown": "Something went wrong while connecting."
     }
+  },
+  "composer": {
+    "attach": "Attach",
+    "payment": "Payment",
+    "identity": "Identity",
+    "identityShared": "{{count}} shared in this chat",
+    "document": "Document",
+    "media": "Photos & videos",
+    "camera": "Camera",
+    "expressions": "Emoji and GIFs",
+    "emoji": "Emoji",
+    "gif": "GIF",
+    "searchEmoji": "Search emoji",
+    "searchGifs": "Search GIFs",
+    "noEmoji": "No emoji found",
+    "noGifs": "No GIFs found",
+    "gifsUnavailable": "GIF search is unavailable. Try again.",
+    "gifSource": "GifCities · Internet Archive",
+    "skinTone": "Skin tone",
+    "searchResults": "Search results",
+    "emojiCategories": "Emoji categories",
+    "gifCategories": "GIF categories",
+    "takePhoto": "Take photo",
+    "retake": "Retake",
+    "sendPhoto": "Send photo",
+    "closeCamera": "Close camera",
+    "cameraFailed": "The camera could not start.",
+    "category": {
+      "recent": "Recent",
+      "people": "Smileys & people",
+      "nature": "Animals & nature",
+      "foods": "Food & drink",
+      "activity": "Activities",
+      "places": "Travel & places",
+      "objects": "Objects",
+      "symbols": "Symbols",
+      "flags": "Flags"
+    },
+    "gifCategory": {
+      "ghosts": "Ghosts",
+      "happy": "Happy",
+      "sad": "Sad",
+      "love": "Love",
+      "yes": "Yes",
+      "party": "Party",
+      "animals": "Animals",
+      "retro": "Retro web"
+    }
   }
 }

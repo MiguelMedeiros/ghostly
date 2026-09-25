@@ -1,5 +1,6 @@
 import { chat, connect, expect, GIF, link, openProfilePage, say, test, type Peer } from "../support/fixtures";
 import { signS3 } from "../../packages/browser/src/backup/s3";
+import { composerRow } from "../support/composer";
 
 /**
  * Store-and-forward for an away contact (WISP 4xx, `hold/1`): what Alice sends while Bob's page is
@@ -80,7 +81,7 @@ test("text, a picture and a request held for an away contact arrive in order; a 
   await expect(held(alice, "held while you were out").getByText("Held · waiting for your contact")).toBeVisible({ timeout: 30_000 });
   await alice.page.getByTestId("file-input").setInputFiles({ name: "ghost.gif", mimeType: "image/gif", buffer: GIF });
   await expect(held(alice, "ghost.gif").getByText("Held · waiting for your contact")).toBeVisible({ timeout: 30_000 });
-  await alice.page.getByTestId("payment-button").click();
+  await (await composerRow(alice.page, "payment-button")).click();
   await alice.page.getByTestId("payment-card-cashu").click();
   await alice.page.getByTestId("payment-amount").fill("10");
   await alice.page.getByTestId("payment-request").click();

@@ -280,32 +280,39 @@ describe("ComposerIdentityPicker", () => {
   });
 });
 
-describe("MessageInput: the identity button", () => {
+describe("MessageInput: the + menu's Identity row", () => {
   const input = (identities?: { peerKey: string; contact: string }) => renderApp(<MessageInput onSend={async () => null} identities={identities} />);
+  const plus = () => screen.getByRole("button", { name: "Attach" });
 
-  it("is there only for a chat that can share identities", () => {
-    input();
+  it("is there only for a chat that can share identities", async () => {
+    const { user } = input();
+    // With nothing to attach (no files, wallet or identities), the + has no menu to open.
+    expect(plus()).toBeDisabled();
+    await user.click(plus());
     expect(screen.queryByTestId("composer-identities-button")).not.toBeInTheDocument();
   });
 
-  it("counts what is shared in this chat, and opens the picker with the focus in it", async () => {
+  it("says how many are shared in this chat, and opens the picker with the focus in it", async () => {
     const { user, engine } = input({ peerKey: "peer", contact: "Alice" });
     act(() => engine.update({ links: [paired({ identities: identitiesView({ shared: [sharedView({ id: "a" }), sharedView({ id: "b", status: "withdrawn" })] }) })], identityProofs: [proofView({ id: "a" }), proofView({ id: "b", subject: "example.net" })] }));
-    const button = screen.getByRole("button", { name: "Share identities in this chat, 1 shared" });
-    expect(within(button).getByTestId("composer-identities-count")).toHaveTextContent("1");
-    await user.click(button);
-    expect(button).toHaveAttribute("aria-expanded", "true");
+    await user.click(plus());
+    const row = screen.getByTestId("composer-identities-button");
+    expect(row).toHaveAttribute("data-count", "1");
+    expect(row).toHaveTextContent("Identity1 shared in this chat");
+    await user.click(row);
+    expect(screen.queryByTestId("composer-menu")).not.toBeInTheDocument();
     expect(screen.getByTestId("composer-identities")).toBeInTheDocument();
     expect(cards()[0]).toHaveFocus();
     await user.keyboard("{Escape}");
     expect(screen.queryByTestId("composer-identities")).not.toBeInTheDocument();
-    expect(button).toHaveFocus();
+    expect(plus()).toHaveFocus();
   });
 
-  it("has no count when nothing is shared", () => {
-    const { engine } = input({ peerKey: "peer", contact: "Alice" });
+  it("has no count when nothing is shared", async () => {
+    const { user, engine } = input({ peerKey: "peer", contact: "Alice" });
     act(() => engine.update({ links: [paired()], identityProofs: [proofView()] }));
-    expect(screen.getByRole("button", { name: "Share identities in this chat" })).toBeInTheDocument();
-    expect(screen.queryByTestId("composer-identities-count")).not.toBeInTheDocument();
+    await user.click(plus());
+    expect(screen.getByTestId("composer-identities-button")).toHaveAttribute("data-count", "0");
+    expect(screen.getByTestId("composer-identities-button")).toHaveTextContent(/^Identity$/);
   });
 });

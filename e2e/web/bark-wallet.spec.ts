@@ -1,4 +1,5 @@
 import { connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
+import { composerRow } from "../support/composer";
 
 /**
  * Bark (Second's Ark) beside Arkade. Mainnet has no Bark wallet yet; Testnet starts one on Second's public
@@ -42,7 +43,7 @@ test.describe("on Second's signet server", { tag: "@network" }, () => {
       await openChat(p);
     }
     const card = (p: Peer) => p.page.getByTestId("payment-card-bark");
-    await bob.page.getByTestId("payment-button").click();
+    await (await composerRow(bob.page, "payment-button")).click();
     await expect(card(bob)).toBeEnabled({ timeout: 60_000 });
     await bob.page.keyboard.press("Escape");
 
@@ -51,7 +52,7 @@ test.describe("on Second's signet server", { tag: "@network" }, () => {
     await alice.page.getByTestId("chat-payments-open").click();
     await alice.page.getByTestId("chat-payments").getByTestId("chat-payments-bark").click();
     await alice.page.getByTestId("chat-payments-save").click();
-    await bob.page.getByTestId("payment-button").click();
+    await (await composerRow(bob.page, "payment-button")).click();
     await expect(card(bob)).toBeDisabled({ timeout: 60_000 });
     await expect(card(bob)).toHaveAttribute("title", /does not accept Bark/);
     await expect(bob.page.getByTestId("payment-card-arkade"), "Arkade is its own way of paying, still allowed").toBeEnabled();

@@ -6,11 +6,10 @@ import { rmSync } from "node:fs";
 import { LocalRelay } from "../../../e2e/support/relay";
 import { CAST, chat, converse, go, newProfile, open, pair, person, shot, toBottom, type Peer } from "./helpers";
 import { fund, openWallet } from "./wallet";
+import { composerRow } from "../../../e2e/support/composer";
 
 const composerOpen = async (p: Peer) => {
-  const more = p.page.getByTestId("composer-more");
-  if (await more.isVisible()) await more.click();
-  await p.page.getByTestId("payment-button").click();
+  await (await composerRow(p.page, "payment-button")).click();
   await expect(p.page.getByTestId("payment-composer")).toBeVisible();
 };
 

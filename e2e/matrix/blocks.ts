@@ -223,7 +223,7 @@ export const delivery: Block = {
       const back = await away(b);
       await expect(a.page.getByTestId("contact-status")).toHaveAttribute("aria-label", "Away · messages are held", { timeout: 60_000 });
       await say(a, "held in my S3 for you");
-      await (await composerButton(a, (x) => x.page.getByTestId("file-input"))).setInputFiles({ name: "held.gif", mimeType: "image/gif", buffer: GIF });
+      await a.page.getByTestId("file-input").setInputFiles({ name: "held.gif", mimeType: "image/gif", buffer: GIF });
       await expect(chatPane(a).locator(".group").filter({ hasText: "held in my S3 for you" })).toContainText(/Held/, { timeout: 60_000 });
       await back();
       await sees(b, "held in my S3 for you");
@@ -292,7 +292,7 @@ export const files: Block = {
   id: "files",
   run: async ({ a, b }) => {
     const bytes = randomBytes(200 * 1024 + 13);
-    const input = await composerButton(a, (x) => x.page.getByTestId("file-input"));
+    const input = a.page.getByTestId("file-input");
     await input.setInputFiles({ name: "matrix.bin", mimeType: "application/octet-stream", buffer: bytes });
     const save = chatPane(b).getByTestId("file-bubble").filter({ hasText: "matrix.bin" }).last().getByTestId("file-save");
     await expect(save).toBeVisible({ timeout: 90_000 });
@@ -300,7 +300,7 @@ export const files: Block = {
     await save.click();
     const saved = await downloading;
     expect(createHash("sha256").update(readFileSync((await saved.path())!)).digest("hex")).toBe(createHash("sha256").update(bytes).digest("hex"));
-    await (await composerButton(b, (x) => x.page.getByTestId("file-input"))).setInputFiles({ name: "ghost.gif", mimeType: "image/gif", buffer: GIF });
+    await b.page.getByTestId("file-input").setInputFiles({ name: "ghost.gif", mimeType: "image/gif", buffer: GIF });
     await expect(chatPane(a).getByTestId("file-bubble").filter({ hasText: "ghost.gif" }).getByRole("img", { name: "ghost.gif" })).toBeVisible({ timeout: 90_000 });
   },
 };
@@ -592,7 +592,7 @@ async function mainnetUi({ a, b, combo }: World): Promise<void> {
     }
   }
   await openChat(a);
-  const button = await composerButton(a, (x) => x.page.getByTestId("payment-button"));
+  const button = await composerButton(a, "payment-button");
   await expect(button).toBeEnabled({ timeout: 60_000 });
   await button.click();
   await expect(a.page.getByTestId(`payment-card-${card}`)).toBeVisible();

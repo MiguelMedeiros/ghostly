@@ -178,6 +178,7 @@ try {
     await victim.page.bringToFront();
     await victim.page.getByTestId("datalink-state").filter({ hasText: "Peer to peer" }).waitFor({ timeout: 120_000 });
     const requestOnce = async () => {
+      await victim.page.getByTestId("composer-more").click();
       await victim.page.getByTestId("payment-button").click();
       await victim.page.getByTestId("payment-amount").fill("50");
       await victim.page.getByTestId("payment-request").click();

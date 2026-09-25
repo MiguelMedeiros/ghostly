@@ -341,5 +341,53 @@
       "expired": "انتهت صلاحية هذه الدعوة.",
       "unknown": "حدث خطأ أثناء الاتصال."
     }
+  },
+  "composer": {
+    "attach": "إرفاق",
+    "payment": "دفع",
+    "identity": "هوية",
+    "identityShared": "{{count}} مشتركة في هذه الدردشة",
+    "document": "مستند",
+    "media": "صور وفيديوهات",
+    "camera": "كاميرا",
+    "expressions": "إيموجي وصور GIF",
+    "emoji": "إيموجي",
+    "gif": "GIF",
+    "searchEmoji": "البحث عن إيموجي",
+    "searchGifs": "البحث عن صور GIF",
+    "noEmoji": "لم يُعثر على إيموجي",
+    "noGifs": "لم يُعثر على صور GIF",
+    "gifsUnavailable": "البحث عن صور GIF غير متاح. حاول مرة أخرى.",
+    "gifSource": "GifCities · Internet Archive",
+    "skinTone": "لون البشرة",
+    "searchResults": "نتائج البحث",
+    "emojiCategories": "فئات الإيموجي",
+    "gifCategories": "فئات GIF",
+    "takePhoto": "التقاط صورة",
+    "retake": "إعادة الالتقاط",
+    "sendPhoto": "إرسال الصورة",
+    "closeCamera": "إغلاق الكاميرا",
+    "cameraFailed": "تعذّر تشغيل الكاميرا.",
+    "category": {
+      "recent": "الأخيرة",
+      "people": "الوجوه والأشخاص",
+      "nature": "الحيوانات والطبيعة",
+      "foods": "الطعام والشراب",
+      "activity": "الأنشطة",
+      "places": "السفر والأماكن",
+      "objects": "الأشياء",
+      "symbols": "الرموز",
+      "flags": "الأعلام"
+    },
+    "gifCategory": {
+      "ghosts": "أشباح",
+      "happy": "سعيد",
+      "sad": "حزين",
+      "love": "حب",
+      "yes": "نعم",
+      "party": "حفلة",
+      "animals": "حيوانات",
+      "retro": "ويب قديم"
+    }
   }
 }

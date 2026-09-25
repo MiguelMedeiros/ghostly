@@ -3,6 +3,7 @@ import { Interface } from "ethers";
 import { USDT_LOCAL } from "../support/usdt-local.mjs";
 import { strangerInvoice } from "../support/bolt11";
 import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer, type PeerOptions } from "../support/fixtures";
+import { composerRow } from "../support/composer";
 
 /**
  * Every wallet provider receiving and sending, on test networks only (the Testnet mode):
@@ -23,7 +24,7 @@ async function twoInTestnet(peer: (name: string, options?: PeerOptions) => Promi
   return [alice, bob];
 }
 const composer = async (p: Peer, card: string, amount: string) => {
-  await p.page.getByTestId("payment-button").click();
+  await (await composerRow(p.page, "payment-button")).click();
   await p.page.getByTestId(`payment-card-${card}`).click();
   await p.page.getByTestId("payment-amount").fill(amount);
 };

@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { chat, connect, expect, link, openChat, openWallet, say, test, type Peer } from "../support/fixtures";
 import { mintEndpoint } from "../support/mint";
+import { composerRow } from "../support/composer";
 
 /**
  * Payments in a chat beyond the happy path: memos, a payment the contact refuses, ecash that was
@@ -43,7 +44,7 @@ const balanceOf = async (page: Page) =>
 
 /** Opens the composer, fills it and stops at the review. */
 async function prepareSend(p: Peer, sats: number, memo?: string) {
-  await p.page.getByTestId("payment-button").click();
+  await (await composerRow(p.page, "payment-button")).click();
   await p.page.getByTestId("payment-card-cashu").click();
   const composer = p.page.getByTestId("payment-composer");
   await p.page.getByTestId("payment-amount").fill(String(sats));
@@ -63,7 +64,7 @@ test("a request's memo shows on both sides, and test-mint payments say test sats
   for (const p of [alice, bob]) await openChat(p);
 
   // A request with a memo: both bubbles carry it, in test sats.
-  await bob.page.getByTestId("payment-button").click();
+  await (await composerRow(bob.page, "payment-button")).click();
   await bob.page.getByTestId("payment-card-cashu").click();
   await bob.page.getByTestId("payment-amount").fill("12");
   await bob.page.getByTestId("payment-composer").getByPlaceholder("What for? (optional)").fill("half the pizza");
