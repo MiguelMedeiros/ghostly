@@ -797,6 +797,7 @@ export class Communities {
         live.pendingEntries.delete(peer);
         live.knocksSeen.delete(peer);
         live.lingering.set(linkId, this.now() + ENTRY_LINGER_MS);
+        this.host.entryDone?.(linkId);
         live.admittedAt = this.now();
         // Its first hub is me (it knows): its edge at once, both sides looking fast, no lobby in between.
         if (live.hub && (live.members.has(peer) || live.members.size < COMMUNITY_TOPOLOGY.hubCapacity)) {

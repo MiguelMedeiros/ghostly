@@ -139,6 +139,8 @@ export class LinkSession {
   private lastRtcSignalIn: string | null = null;
 
   private running = false;
+  /** Stopped without a last packet (`stop(false)`): nothing more goes out. */
+  private silent = false;
   private polling = false;
   private publishing: Promise<void> | null = null;
   private publishAgain = false;
@@ -184,6 +186,7 @@ export class LinkSession {
   start(): void {
     if (this.running) return;
     this.running = true;
+    this.silent = false;
     this.events.onStatus?.("connecting");
     // Presence: a peer that advertises services says so as soon as it is up…
     if (this.getServices() !== undefined || this.myAck > 0) {
@@ -205,6 +208,7 @@ export class LinkSession {
   async stop(announce = true): Promise<void> {
     if (!this.running) return;
     this.running = false;
+    this.silent = !announce;
     if (this.pollTimer) clearTimeout(this.pollTimer);
     if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
     if (this.publishRetryTimer) clearTimeout(this.publishRetryTimer);
@@ -350,6 +354,7 @@ export class LinkSession {
 
   /** Coalesces publishes: at most one in flight and one queued behind it. */
   private publish(): Promise<void> {
+    if (this.silent) return Promise.resolve();
     if (this.publishing) {
       this.publishAgain = true;
       return this.publishing;

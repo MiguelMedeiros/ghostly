@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { BACKGROUND_REQUESTS_PER_MINUTE, REQUESTS_PER_MINUTE, RelayTransport, createIdentity, createRelayPayload } from "../src";
+import { describe, expect, it, vi } from "vitest";
+import { BACKGROUND_REQUESTS_PER_MINUTE, REQUESTS_PER_MINUTE, RelayTransport, WRITE_FIRST_MS, createIdentity, createRelayPayload } from "../src";
 // covers: core.relay-client
 
 describe("relay transport", () => {
@@ -98,6 +98,67 @@ describe("relay transport under pressure", () => {
     expect(requests).toBe(REQUESTS_PER_MINUTE);
     await relay.resolve(id.pubKeyZ32);
     expect(requests).toBe(REQUESTS_PER_MINUTE);
+  });
+
+  it("lets a link's refused write go before any read once the minute frees a request", async () => {
+    // A link polling fast for its peer while its offer waits for the budget: the offer is what the peer
+    // waits for, so the request the minute frees goes to it, not to one more poll (the e2e community
+    // join waited half a minute so: every freed request went to a poll, the offer out once polls slowed).
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const writes: number[] = [], reads: number[] = [];
+      const relay = new RelayTransport({ relays: ["https://a.test"], fetch: (async (_: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === "PUT") { writes.push(Date.now()); return new Response(null, { status: 204 }); }
+        reads.push(Date.now()); return new Response(createRelayPayload(id, [{ label: "_ts", value: "1" }], 3n) as BodyInit);
+      }) as typeof fetch });
+      const start = Date.now();
+      for (let i = 0; i < REQUESTS_PER_MINUTE; i++) { await relay.resolve(id.pubKeyZ32); vi.setSystemTime(Date.now() + 1_000); }
+      const offer = createIdentity();
+      await expect(relay.publish(offer, [{ label: "_ts", value: "1" }])).rejects.toThrow("budget");
+      // The link tries again every few seconds (`PUBLISH_RETRY_MS`), refused while the minute is full…
+      vi.setSystemTime(start + 57_000);
+      await expect(relay.publish(offer, [{ label: "_ts", value: "1" }])).rejects.toThrow("budget");
+      // …then the first request of the minute frees up: a poll comes first, and waits; the offer's retry goes.
+      vi.setSystemTime(start + 60_000);
+      expect((await relay.resolve(id.pubKeyZ32))?.timestampMicros).toBe(3n);
+      expect(reads).toHaveLength(REQUESTS_PER_MINUTE);
+      await relay.publish(offer, [{ label: "_ts", value: "2" }]);
+      expect(writes).toHaveLength(1);
+      // Out: polls take what frees up again.
+      vi.setSystemTime(start + 61_000);
+      await relay.resolve(id.pubKeyZ32);
+      expect(reads).toHaveLength(REQUESTS_PER_MINUTE + 1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("gives up the reads' wait for a write that never comes back", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      let reads = 0;
+      const relay = new RelayTransport({ relays: ["https://a.test"], fetch: (async (_: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === "PUT") return new Response(null, { status: 204 });
+        reads++; return new Response(createRelayPayload(id, [{ label: "_ts", value: "1" }], 3n) as BodyInit);
+      }) as typeof fetch });
+      const start = Date.now();
+      for (let i = 0; i < REQUESTS_PER_MINUTE; i++) await relay.resolve(id.pubKeyZ32);
+      await expect(relay.publish(createIdentity(), [{ label: "_ts", value: "1" }])).rejects.toThrow("budget");
+      // The link that wanted to write stopped: after a while, polls go on.
+      vi.setSystemTime(start + 60_000 + WRITE_FIRST_MS);
+      await relay.resolve(id.pubKeyZ32);
+      expect(reads).toBe(REQUESTS_PER_MINUTE + 1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("does not hold reads back for a background write the budget refused", async () => {
+    let reads = 0;
+    const relay = new RelayTransport({ relays: ["https://a.test"], fetch: (async (_: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PUT") return new Response(null, { status: 204 });
+      reads++; return new Response(createRelayPayload(id, [{ label: "_ts", value: "1" }], 3n) as BodyInit);
+    }) as typeof fetch });
+    for (let i = 0; i < BACKGROUND_REQUESTS_PER_MINUTE; i++) await relay.resolve(id.pubKeyZ32, { background: true });
+    await expect(relay.publish(createIdentity(), [{ label: "_ts", value: "1" }], { background: true })).rejects.toThrow("budget");
+    await relay.resolve(id.pubKeyZ32);
+    expect(reads).toBe(BACKGROUND_REQUESTS_PER_MINUTE + 1);
   });
 
   it("counts background requests on their own: a burst of signaling does not hold them back afterwards", async () => {

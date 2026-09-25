@@ -16,6 +16,9 @@ interface Edge {
   /** An edge opened expecting the other side at once; its presence published (the first thing a link does). */
   expected?: boolean;
   published?: boolean;
+  /** It saw the other side, and its offer or answer went out (a write the budget may hold back a while). */
+  sawPeer?: boolean;
+  signaled?: boolean;
 }
 
 /**
@@ -31,6 +34,8 @@ export interface NetworkModel {
   /** Pkarr requests per app and minute: a resolve costs 1, a publish 2 (it goes to both relays); background ones only up to `backgroundPerMinute`. */
   budgetPerMinute: number;
   backgroundPerMinute: number;
+  /** After a link's write the budget refused, reads (and background writes) wait this long, so the write goes first (`WRITE_FIRST_MS`). */
+  writeFirstMs: number;
   /** Polls each side needs, once both sides exist, before the link is up. */
   signalPolls: number;
   fastPollMs: number;
@@ -39,8 +44,8 @@ export interface NetworkModel {
   /** How long a side polls fast after `expectPeer`. */
   expectMs: number;
 }
-/** The web app on public relays: 30 requests a minute to each of two (20 for background ones), `RELAY_POLL_INTERVALS`, `EXPECT_PEER_MS`. */
-export const RELAY_NETWORK: NetworkModel = { budgetPerMinute: 60, backgroundPerMinute: 40, signalPolls: 2, fastPollMs: 2_000, backgroundPollMs: 30_000, connectedPollMs: 60_000, expectMs: 30_000 };
+/** The web app on public relays: 30 requests a minute to each of two (20 for background ones, a refused link write first), `RELAY_POLL_INTERVALS`, `EXPECT_PEER_MS`. */
+export const RELAY_NETWORK: NetworkModel = { budgetPerMinute: 60, backgroundPerMinute: 40, writeFirstMs: 5_000, signalPolls: 2, fastPollMs: 2_000, backgroundPollMs: 30_000, connectedPollMs: 60_000, expectMs: 30_000 };
 export interface Peer {
   name: string;
   groups: Groups;
@@ -55,6 +60,8 @@ export interface Peer {
   spent: number[];
   spentBackground: number[];
   refused: number;
+  /** When a link write of this app was last refused, while it waits for the budget. */
+  writeWaiting?: number;
 }
 
 function memoryStore(messages: StoredMessage[]): GroupStore {
@@ -84,11 +91,13 @@ export class CommunityWorld {
   constructor(private readonly timings: CommunityTimings = { ...COMMUNITY_TIMINGS, hubJitterMs: 0 }, readonly network: NetworkModel | null = null, private readonly random: () => number = Math.random) {}
 
   /** One Pkarr request of `cost`, if the app's budget allows it (always, without a `NetworkModel`). */
-  private spend(peer: Peer, cost: number, background = false): boolean {
+  private spend(peer: Peer, cost: number, background = false, write = false): boolean {
     if (!this.network) return true;
     peer.spent = peer.spent.filter(at => this.now - at < 60_000);
     peer.spentBackground = peer.spentBackground.filter(at => this.now - at < 60_000);
-    if (peer.spent.length + cost > this.network.budgetPerMinute || (background && peer.spentBackground.length + cost > this.network.backgroundPerMinute)) { peer.refused++; return false; }
+    const linkWrite = write && !background;
+    if ((!linkWrite && this.now - (peer.writeWaiting ?? -Infinity) < this.network.writeFirstMs) || peer.spent.length + cost > this.network.budgetPerMinute || (background && peer.spentBackground.length + cost > this.network.backgroundPerMinute)) { peer.refused++; if (linkWrite) peer.writeWaiting = this.now; return false; }
+    if (linkWrite) peer.writeWaiting = undefined;
     for (let i = 0; i < cost; i++) { peer.spent.push(this.now); if (background) peer.spentBackground.push(this.now); }
     return true;
   }
@@ -134,7 +143,7 @@ export class CommunityWorld {
       publish: async (identity, records, background) => {
         this.pkarrOps++;
         this.onPkarr?.(peer, "publish", identity.pubKeyZ32, !!background);
-        if (!this.spend(peer, 2, background)) throw new Error("Discovery request budget reached; retry shortly");
+        if (!this.spend(peer, 2, background, true)) throw new Error("Discovery request budget reached; retry shortly");
         if (peer.online) this.pkarr.set(identity.pubKeyZ32, structuredClone(records));
       },
       resolve: async (key, background) => {
@@ -199,18 +208,22 @@ export class CommunityWorld {
       if (!peer.online) continue;
       for (const edge of peer.links.values()) {
         // Its presence first (a publish, retried until the budget lets it through), then polls, found or not.
-        if (!edge.published) edge.published = this.spend(peer, 2);
+        if (!edge.published) edge.published = this.spend(peer, 2, false, true);
+        // Its offer or answer, once it saw the other side: retried on its own until the budget lets it through, as
+        // a `LinkSession` retries a publish, while the polls go on.
+        if (edge.sawPeer && !edge.signaled) edge.signaled = this.spend(peer, 2, false, true);
         const there = this.counterpart(edge);
-        if (edge.upAt !== undefined && !there) { edge.upAt = undefined; edge.polls = 0; }
+        if (edge.upAt !== undefined && !there) { edge.upAt = undefined; edge.polls = 0; edge.sawPeer = edge.signaled = false; }
         const every = edge.upAt !== undefined ? net.connectedPollMs : this.now < edge.fastUntil ? net.fastPollMs : net.backgroundPollMs;
         if (this.now - edge.lastPoll < every) continue;
         edge.lastPoll = this.now;
         if (!this.spend(peer, 1) || edge.upAt !== undefined) continue;
         const theirs = there && there.peer.online && this.sameSide(peer, there.peer) ? there.peer.links.get(there.linkId)! : undefined;
-        if (!theirs?.published) { edge.polls = 0; continue; }
+        if (!theirs?.published) { edge.polls = 0; edge.sawPeer = edge.signaled = false; continue; }
         if (edge.polls === 0 && this.now - theirs.openedAt < net.expectMs) edge.fastUntil = Math.max(edge.fastUntil, this.now + net.expectMs);
         // Seeing the other side is what dialing or answering it needs: a publish of the offer or answer.
-        if (edge.polls === 0 && !this.spend(peer, 2)) continue;
+        if (!edge.sawPeer) { edge.sawPeer = true; edge.signaled = this.spend(peer, 2, false, true); }
+        if (!edge.signaled) continue;
         edge.polls++;
       }
     }
