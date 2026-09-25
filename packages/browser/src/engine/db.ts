@@ -150,6 +150,30 @@ export const db = {
       tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("Receipt storage failed"));
     });
   },
+  /**
+   * Changes one message row in place, in one transaction: `change` sees the row as stored and gives the fields to
+   * set (`null`: leave it). A row that is not there is not made. Used for what the delivery states do not carry
+   * (the message's details record), on rows in any state.
+   */
+  async patchMessage(linkId: string, id: string, change: (message: StoredMessage) => Partial<StoredMessage> | null): Promise<StoredMessage | undefined> {
+    const tx = (await openDb()).transaction(STORES.messages, "readwrite");
+    const messages = tx.objectStore(STORES.messages);
+    const request = messages.get([linkId, id]);
+    let result: StoredMessage | undefined;
+    request.onsuccess = () => {
+      const message = request.result as StoredMessage | undefined;
+      if (!message) return;
+      const patch = change(message);
+      if (!patch) return;
+      result = { ...message, ...patch };
+      messages.put(result);
+    };
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("Message storage failed"));
+    });
+    return result;
+  },
   async deleteMessage(linkId: string, messageId: string): Promise<void> {
     await wrap((await store(STORES.messages, "readwrite")).delete([linkId, messageId]));
   },

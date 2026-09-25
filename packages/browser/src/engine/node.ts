@@ -34,6 +34,8 @@ import { fileMessageText, type PaymentRequest, type PaymentAsk, type Payment, ty
 import {
   DEFAULT_RELAYS,
   GhostLink,
+  utf8Encode,
+  type IncomingMessage,
   emptyLinkRecords,
   DHT_TEXT_BYTES, DHT_MESSAGE_TTL, type DeliveryMode,
   GhostlyHttpError,
@@ -88,7 +90,10 @@ import type {
   GroupEdgeView,
   FileTransferView,
   LinkView,
+  MessageDetails,
+  MessageDetailsView,
   MessageFile,
+  MessageSend,
   GroupView,
   Settings,
   SettingsPatch,
@@ -97,6 +102,7 @@ import type {
   StoredService,
   WalletView,
 } from "../shared/types";
+import { composeDetails, fileWire, pathSnapshot, withSend, type PathSnapshot } from "./messageDetails";
 import { db } from "./db";
 import { Groups } from "./groups";
 import { edgeView } from "./groupEdges";
@@ -300,6 +306,7 @@ export class GhostlyNode implements EngineImplementation {
     storeMessage: (message) => this.storeMessage(message),
     transfers: this.transfers,
     changed: (delayMs) => this.emitState(delayMs),
+    settled: (linkId, fileId, record) => void this.noteFileEnd(linkId, fileId, record.state === "done" ? undefined : record.error ?? record.state),
   });
   private stateTimer: ReturnType<typeof setTimeout> | null = null;
   private paymentTimer:ReturnType<typeof setTimeout>|null=null;
@@ -448,6 +455,7 @@ export class GhostlyNode implements EngineImplementation {
     },
     delivery: async (linkId, messageId, state, error) => {
       await db.updateDelivery(linkId, messageId, state, error);
+      await this.noteHold(linkId, messageId, state, error);
       const messages = await db.getMessages(linkId);
       const message = messages.find((m) => m.id === messageId);
       if (message?.file) this.transfers.set(message.file.id, state === "failed" ? { state: "failed", transferred: 0, size: message.file.size, error } : { state: "done", transferred: message.file.size, size: message.file.size });
@@ -463,8 +471,9 @@ export class GhostlyNode implements EngineImplementation {
       return { bytes: await readStored(stored, 0, storedSize(stored)), name: stored.metadata.name, size: stored.metadata.size, mime: stored.metadata.mime, voice: stored.metadata.voice };
     },
     paymentRequest: (paymentId): PaymentRequest | null => this.desk.requestFor(paymentId),
-    receiveText: (linkId, message) => this.storeMessage({ linkId, id: `peer_${message.id}`, text: message.text, sender: "peer", timestamp: message.timestamp, via: "hold" }),
-    receiveFile: async (linkId, wire, bytes, digest) => {
+    receiveText: (linkId, message, held) => this.storeMessage({ linkId, id: `peer_${message.id}`, text: message.text, sender: "peer", timestamp: message.timestamp, via: "hold",
+      details: { wire: { frame: "GHLD bundle", protocol: "hold/1", plaintextBytes: utf8Encode(message.text).length, ...(held && { wireBytes: held.bytes }) }, ...(held && { hold: held }) } }),
+    receiveFile: async (linkId, wire, bytes, digest, held) => {
       const live = this.links.get(linkId);
       if (!live) return "unknown chat";
       if (live.files.wireIds.has(wire.wireId)) return "duplicate file id";
@@ -477,7 +486,8 @@ export class GhostlyNode implements EngineImplementation {
       await fileStore.put({ id: file.id, linkId, blob: new Blob([bytes as BlobPart], { type: safeBlobType(file.mime) }), createdAt: Date.now(), direction: "in", wireId: wire.wireId, digest,
         metadata: { name: wire.name, size: wire.size, mime: wire.mime, timestamp: wire.timestamp, voice: wire.voice }, transfer: { state: "done", transferred: wire.size, size: wire.size } });
       this.transfers.set(file.id, { state: "done", transferred: wire.size, size: wire.size });
-      await this.storeMessage({ linkId, id: `peer_${wire.wireId}`, text: fileMessageText(file), sender: "peer", timestamp: wire.timestamp, via: "hold", file });
+      await this.storeMessage({ linkId, id: `peer_${wire.wireId}`, text: fileMessageText(file), sender: "peer", timestamp: wire.timestamp, via: "hold", file,
+        details: { wire: { frame: "GHLD bundle", protocol: "hold/1", plaintextBytes: wire.size, ...(held && { wireBytes: held.bytes }) }, ...(held && { hold: held }), completedAt: Date.now() } });
       return null;
     },
     receivePaymentRequest: (linkId, request) => this.desk.onPaymentRequest(linkId, request, true),
@@ -1080,7 +1090,9 @@ export class GhostlyNode implements EngineImplementation {
     if (!(live.link.isDataLinkOpen && trimmed.length <= LIMITS.maxChatMessageBytes / 4) && bytes > MAX_DHT_TEXT_BYTES)
       return { error: `Message too large for DHT (${bytes} bytes, max ${MAX_DHT_TEXT_BYTES}). Try a shorter message or share a link instead.`, refused: true };
     await this.storeMessage({ linkId, id: `me_${timestamp}`, text: trimmed, sender: "me", timestamp, via });
+    const at = Date.now(), snapshot = pathSnapshot(live, via);
     const error = await live.link.sendMessage(trimmed, timestamp);
+    await this.noteTextSend(linkId, { linkId, id: `me_${timestamp}`, text: trimmed, sender: "me", timestamp, via }, snapshot, at, error, live.link);
     if (!error) this.messageFeedback("sent", {linkId, id:`me_${timestamp}`, text:trimmed, sender:"me", timestamp, via});
     // The data link is reliable and ordered: sent means delivered.
     if (!live.stored.profile && !error && via === "datalink" && timestamp > live.peerAck) {
@@ -1179,6 +1191,7 @@ export class GhostlyNode implements EngineImplementation {
         read: () => db.getMessages(linkId),
         update: async (id, delivery, error, extra) => {
           await db.updateDelivery(linkId, id, delivery, error, extra);
+          if (delivery === "delivered") await this.noteDetails(linkId, id, details => ({ ...details, receiptAt: Date.now() }));
           const messages = await db.getMessages(linkId);
           if (delivery === "sent" || delivery === "delivered") {
             const message = messages.find(item => item.id === id);
@@ -1186,8 +1199,15 @@ export class GhostlyNode implements EngineImplementation {
           }
           this.events.onMessages(linkId, messages);
         },
-      }, message => this.links.get(linkId)?.link?.sendMessage(message.text, message.timestamp, message.wireId)
-        ?? Promise.resolve("You are offline. It is sent again once you are back."), message => message.via === "pkarr" ? DHT_MESSAGE_TTL : 20_000, message => {
+      }, async message => {
+        const live = this.links.get(linkId), link = live?.link;
+        if (!link) return "You are offline. It is sent again once you are back.";
+        // The path as it is when the message goes: the details keep it, whatever the session does after.
+        const at = Date.now(), snapshot = pathSnapshot(live, message.via);
+        const error = await link.sendMessage(message.text, message.timestamp, message.wireId);
+        await this.noteTextSend(linkId, message, snapshot, at, error, link);
+        return error;
+      }, message => message.via === "pkarr" ? DHT_MESSAGE_TTL : 20_000, message => {
         const pending = this.links.get(linkId)?.stored.dhtDeliveryState?.pending;
         return message.via === "pkarr" && pending && pending.message[0] === message.wireId ? pending.expires : undefined;
       }, { resender: {
@@ -1223,6 +1243,83 @@ export class GhostlyNode implements EngineImplementation {
    * its id, so the peer republishing it does not bring it back. Nothing goes
    * out on the wire — the peer keeps its own copy.
    */
+  /**
+   * One message's details view (WISP 400 § Message details): the row and its record, the chat's public keys and
+   * session, the file or payment it stands for. Nothing that opens the chat is in it.
+   */
+  async messageDetails({ linkId, messageId }: { linkId: string; messageId: string }): Promise<MessageDetailsView | null> {
+    if (typeof linkId !== "string" || typeof messageId !== "string") throw new Error("Chat not found");
+    const message = (await db.getMessages(linkId)).find(m => m.id === messageId);
+    if (!message) return null;
+    const live = this.links.get(linkId), stored = live?.stored;
+    const group = linkId.startsWith("group:") ? (await db.getGroups()).find(g => g.id === linkId.slice("group:".length)) : undefined;
+    const file = message.file ? await fileStore.get(message.file.id) : undefined;
+    const payment = message.paymentId ? this.desk.views()[message.paymentId] : undefined;
+    return composeDetails(message, {
+      link: live && stored && {
+        // A paired chat's sender key is its participation key; a compatibility chat's is its address on the DHT.
+        stored, myKey: stored.participationSeed ? identityFromSeedB64(stored.participationSeed).pubKeyZ32 : live.myPubKeyZ32,
+        verified: !!stored.pairedPeerKey && (stored.peerTrust ? stored.peerTrust.verifiedKey === stored.pairedPeerKey : true),
+        transportNow: live.link?.isDataLinkOpen ? live.pairing?.transport : undefined, relayedNow: !!live.link?.relayedPath, rttNowMs: live.link?.rttMs,
+      },
+      file, payment, group: group && { id: group.id, profile: group.community ? "community" : "mesh" },
+    });
+  }
+
+  /** Adds to a message's details record, whatever the row's delivery state. Nothing is pushed for it: the view asks. */
+  private noteDetails(linkId: string, id: string, change: (details: MessageDetails, message: StoredMessage) => MessageDetails): Promise<void> {
+    return db.patchMessage(linkId, id, message => ({ details: change(message.details ?? {}, message) })).then(() => {}, () => {});
+  }
+
+  /** One send of a text on its details: the path, the frame and its size, and the DHT envelope when that was the way. */
+  private noteTextSend(linkId: string, message: StoredMessage, snapshot: PathSnapshot, at: number, error: string | null, link: GhostLink): Promise<void> {
+    const plaintextBytes = utf8Encode(message.text).length;
+    const send: MessageSend = { at, ...snapshot, result: error ? "failed" : "sent", ...(error && { error }) };
+    const published = snapshot.path === "dht" ? link.dhtDelivery?.lastPublished : undefined;
+    const dht = published && published.id === message.wireId ? published : undefined;
+    const wire: MessageDetails["wire"] = snapshot.path === "dht" ? { frame: "_dm envelope", protocol: "dht-text/1", plaintextBytes, ...(dht && { wireBytes: dht.packetBytes }) }
+      : snapshot.path === "legacy-dht" ? { frame: "_msgs record", protocol: "legacy/1", plaintextBytes }
+      : snapshot.path === "legacy-datalink" ? { frame: "m", protocol: "legacy/1", plaintextBytes }
+      : { frame: "paired-message", protocol: "chat/1", plaintextBytes, wireBytes: utf8Encode(JSON.stringify({ t: "paired-message", id: message.wireId, ts: message.timestamp, m: message.text })).length };
+    return this.noteDetails(linkId, message.id, details => ({ ...withSend(details, send), ...(!error && { sentAt: at, wire }),
+      ...(dht && { dht: { seq: dht.seq, issued: dht.issued, expires: dht.expires, packetBytes: dht.packetBytes, nonce: dht.nonce, recordKey: dht.recordKey, records: dht.records } }) }));
+  }
+
+  /** A received text's frame, and the envelope it came in when the DHT floor carried it. */
+  private static receivedTextDetails(paired: boolean, message: IncomingMessage): MessageDetails {
+    const plaintextBytes = utf8Encode(message.text).length;
+    if (message.via === "pkarr") {
+      const p = message.packet, batch = message.batch;
+      if (paired) return { wire: { frame: "_dm envelope", protocol: "dht-text/1", plaintextBytes, ...(p && { wireBytes: p.packetBytes }) },
+        ...(p && { dht: { seq: p.seq, issued: p.issued, expires: p.expires, packetBytes: p.packetBytes, nonce: p.nonce, recordKey: p.recordKey, records: p.records } }) };
+      return { wire: { frame: "_msgs record", protocol: "legacy/1", plaintextBytes, ...(batch && { wireBytes: batch.encryptedPayloadLength }) },
+        ...(batch && { dht: { issued: batch.packetTimestamp, records: batch.rawRecordNames } }) };
+    }
+    if (!paired) return { wire: { frame: "m", protocol: "legacy/1", plaintextBytes } };
+    return { wire: { frame: "paired-message", protocol: "chat/1", plaintextBytes, wireBytes: utf8Encode(JSON.stringify({ t: "paired-message", id: message.id, ts: message.timestamp, m: message.text })).length } };
+  }
+
+  /** A held item's fate, on its message: stored for the contact (with the item's place in the mailbox), failed, or picked up. */
+  private noteHold(linkId: string, messageId: string, state: "sending" | "held" | "delivered" | "failed", error?: string): Promise<void> {
+    const now = Date.now(), entry = this.links.get(linkId)?.stored.hold?.outbox.find(e => e.messageId === messageId);
+    const facts = entry && { seq: entry.seq, bytes: entry.bytes, expires: entry.expires };
+    if (state === "held") return this.noteDetails(linkId, messageId, details => ({ ...withSend(details, { at: now, path: "hold", result: "sent" }), heldAt: now, sentAt: now,
+      wire: { ...details.wire, frame: "GHLD bundle", protocol: "hold/1", ...(facts?.bytes && { wireBytes: facts.bytes }) }, ...(facts && { hold: facts }) }));
+    if (state === "failed") return this.noteDetails(linkId, messageId, details => withSend(details, { at: now, path: "hold", result: "failed", ...(error && { error }) }));
+    if (state === "delivered") return this.noteDetails(linkId, messageId, details => ({ ...details, receiptAt: now }));
+    return Promise.resolve();
+  }
+
+  /** A file transfer ended: when, on the message that carries the file. */
+  private async noteFileEnd(linkId: string, fileId: string, error?: string): Promise<void> {
+    const message = (await db.getMessages(linkId)).find(m => m.file?.id === fileId);
+    if (!message) return;
+    const now = Date.now();
+    await this.noteDetails(linkId, message.id, details => error
+      ? (message.sender === "me" && details.sends?.length ? { ...details, sends: details.sends.map((s, i) => i === details.sends!.length - 1 ? { ...s, result: "failed", error } : s) } : details)
+      : { ...details, completedAt: now, ...(message.sender === "me" && { receiptAt: now }) });
+  }
+
   deleteMessage({ linkId, messageId }: { linkId: string; messageId: string }): void {
     const live = this.links.get(linkId);
     if (!live) return;
@@ -1314,7 +1411,9 @@ export class GhostlyNode implements EngineImplementation {
     if (!link) return fail("You are offline");
     this.transfers.set(file.id, { state: "transferring", transferred: 0, size: file.size });
     void (async () => {
-      if (await GhostlyNode.largeFilesAgreed(link)) {
+      const large = await GhostlyNode.largeFilesAgreed(link), at = Date.now();
+      await this.noteDetails(live.stored.id, `me_${timestamp}`, details => ({ ...withSend(details, { at, ...pathSnapshot(live, "datalink"), result: "sent" }), sentAt: at, wire: fileWire(large ? "files/3" : "files/2", file.size) }));
+      if (large) {
         await this.fileDesk.offer(live.stored.id, file, wireId, timestamp);
         return;
       }
@@ -1373,8 +1472,10 @@ export class GhostlyNode implements EngineImplementation {
         });
       } else {
         // The desk's replay has sent every pending request of this chat on the open session.
-        if (live.link.supportsPayments) await db.putMessage(sentNow(message));
-        else await db.updateDelivery(linkId, message.id, "failed", "Your contact's app cannot receive payment requests.");
+        if (live.link.supportsPayments) {
+          const at = Date.now();
+          await db.putMessage({ ...sentNow(message), details: { ...withSend(message.details, { at, ...pathSnapshot(live, "datalink"), result: "sent" }), sentAt: at } });
+        } else await db.updateDelivery(linkId, message.id, "failed", "Your contact's app cannot receive payment requests.");
       }
     }
     if (waiting.length) this.events.onMessages(linkId, await db.getMessages(linkId));
@@ -1409,6 +1510,7 @@ export class GhostlyNode implements EngineImplementation {
       timestamp: wire.timestamp,
       via: "datalink",
       file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(file.voice && { voice: file.voice }) },
+      details: { wire: fileWire("files/2", wire.size) },
     });
     void messageStored.catch(() => {});
     return {
@@ -1464,10 +1566,11 @@ export class GhostlyNode implements EngineImplementation {
     this.emitState(250);
   }
 
-  private fileSettled(fileId: string | undefined, error?: string): void {
+  private fileSettled(fileId: string | undefined, error?: string, linkId?: string): void {
     if (!fileId) return;
     const transfer = this.transfers.get(fileId);
     if (!transfer) return;
+    if (linkId) void this.noteFileEnd(linkId, fileId, error);
     this.transfers.set(fileId, error ? { ...transfer, state: "failed", error } : { ...transfer, state: "done", transferred: transfer.size });
     const state = this.transfers.get(fileId)!;
     void fileStore.updateTransfer(fileId, state).catch(() => {});
@@ -2396,6 +2499,7 @@ export class GhostlyNode implements EngineImplementation {
             timestamp: message.timestamp,
             via: message.via,
             nick: message.nick,
+            details: GhostlyNode.receivedTextDetails(!!stored.profile, message),
           });
         },
         onCallSignal: (signal) => this.events.onCallSignal(linkId, signal),
@@ -2414,11 +2518,11 @@ export class GhostlyNode implements EngineImplementation {
         onFileProgress: (id, transferred, direction) =>
           this.fileProgress(this.localFileId(linkId, id, direction), transferred),
         onFileComplete: (id, direction) =>
-          this.fileSettled(this.localFileId(linkId, id, direction, { failed: false })),
+          this.fileSettled(this.localFileId(linkId, id, direction, { failed: false }), undefined, linkId),
         onFilesFrame: (frame) => this.fileDesk.handle(linkId, frame),
         onFilesSession: (open) => this.fileDesk.session(linkId, open),
         onFileFailed: (id, reason, direction) =>
-          this.fileSettled(this.localFileId(linkId, id, direction, { failed: true }), reason),
+          this.fileSettled(this.localFileId(linkId, id, direction, { failed: true }), reason, linkId),
       },
     });
     const link = live.link;
@@ -2603,6 +2707,12 @@ export class GhostlyNode implements EngineImplementation {
     const live = this.links.get(message.linkId);
     // The peer republishes what it sent for a few minutes: what was deleted here stays deleted.
     if (live?.stored.deletedIds?.includes(message.id)) return;
+    // Its details begin here: the path a received message came over, or the one a payment goes over right now.
+    if (message.sender === "peer" && live && !message.details?.received) message = { ...message, details: { ...message.details, received: { at: Date.now(), ...pathSnapshot(live, message.via) } } };
+    else if (message.sender === "me" && message.paymentId && !message.delivery && live && !message.details?.sends) {
+      const at = Date.now();
+      message = { ...message, details: { ...withSend(message.details, { at, ...pathSnapshot(live, message.via), result: "sent" }), sentAt: at } };
+    }
     if (!(await db.addMessage(message))) return;
     if (message.sender === "peer") this.messageFeedback("message", message);
     if (live) live.lastMessageAt = Math.max(live.lastMessageAt, message.timestamp);

@@ -43,10 +43,13 @@ describe.each(LANGUAGES)("in %s", (language) => {
       { language },
     );
 
+    expect(screen.getByTestId("message-options")).toHaveAccessibleName(t(language, "chat.message.options"));
+    await user.click(screen.getByTestId("message-options"));
+    expect(screen.getByTestId("message-details")).toHaveTextContent(t(language, "chat.message.details"));
+    expect(screen.getByTestId("message-delete")).toHaveTextContent(t(language, "chat.deleteMessage"));
     await user.click(screen.getByTestId("message-delete"));
 
     const menu = screen.getByTestId("message-delete-menu");
-    expect(screen.getByTestId("message-delete")).toHaveAccessibleName(t(language, "chat.deleteMessage"));
     expect(menu).toHaveTextContent(t(language, "chat.deleteMessageHint"));
     expect(within(menu).getByRole("button", { name: t(language, "common.cancel") })).toBeInTheDocument();
     expect(screen.getByTestId("message-delete-confirm")).toHaveTextContent(t(language, "common.delete"));

@@ -55,6 +55,16 @@
     "yesterday": "昨天",
     "deleteMessage": "删除消息",
     "deleteMessageHint": "仅在此设备上删除，对方仍保留副本。",
+    "message": {
+      "details": "详情",
+      "detailsTitle": "消息详情",
+      "detailsClose": "关闭",
+      "copyJson": "全部复制为 JSON",
+      "copied": "已复制",
+      "keysHint": "此处绝不显示密钥。",
+      "options": "消息选项",
+      "copyHint": "点击复制"
+    },
     "options": "选项",
     "menu": {
       "pin": "置顶聊天",

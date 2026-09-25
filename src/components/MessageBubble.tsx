@@ -1,8 +1,10 @@
 import { useOutsideDismiss } from "../hooks/useDismiss";
 import { publicKeyLabel } from "../lib/publicKeyLabel";
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { FileBubble } from "./FileBubble";
+import { Menu, MenuItem } from "./Menu";
+import { MessageDetailsPanel } from "./MessageDetailsPanel";
 import { VoiceBubble } from "./voice/VoiceBubble";
 import { InvoiceBubble } from "./InvoiceBubble";
 import { findMoney } from "../lib/money";
@@ -19,6 +21,37 @@ interface MessageBubbleProps {
   peerNick?: string;
   /** Forgets this message on this device. Left out where a chat cannot be edited. */
   onDelete?: () => void;
+  /** The engine's link for the message's details; found from `peerPubKey` when left out (groups name theirs). */
+  linkId?: string;
+}
+
+/** How long a finger holds a message before its details open. */
+export const LONG_PRESS_MS = 500;
+
+/**
+ * A long press on a touch screen (or a pen): the details open, the way a double click opens them with a mouse. A
+ * finger that moves on, or a press on a control inside the message, is not one.
+ */
+function useLongPress(fire: () => void) {
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const start = useRef<{ x: number; y: number } | null>(null);
+  const fired = useRef(false);
+  const clear = () => { clearTimeout(timer.current); timer.current = undefined; start.current = null; };
+  useEffect(() => clear, []);
+  return {
+    onPointerDown: (e: ReactPointerEvent<HTMLElement>) => {
+      if (e.pointerType === "mouse" || e.button !== 0 || (e.target as HTMLElement).closest("button, a, input, audio, video")) return;
+      fired.current = false;
+      start.current = { x: e.clientX, y: e.clientY };
+      clearTimeout(timer.current);
+      timer.current = setTimeout(() => { timer.current = undefined; fired.current = true; fire(); }, LONG_PRESS_MS);
+    },
+    onPointerMove: (e: ReactPointerEvent<HTMLElement>) => { if (start.current && Math.hypot(e.clientX - start.current.x, e.clientY - start.current.y) > 10) clear(); },
+    onPointerUp: clear,
+    onPointerCancel: clear,
+    // The browser's own long-press menu would sit on top of the details.
+    onContextMenu: (e: React.MouseEvent) => { if (fired.current || start.current) e.preventDefault(); },
+  };
 }
 
 const IMAGE_URL_RE =
@@ -220,37 +253,47 @@ function formatDuration(ms: number): string {
 }
 
 /**
- * The one thing you can do to a message: forget it here. It is a local
- * deletion, so the menu says so before it happens — nothing is sent, and the
- * contact keeps their copy.
+ * What can be done to a message, behind its ⋮: its details, and forgetting it here. The deletion is local, so the
+ * menu says so before it happens: nothing is sent, and the contact keeps their copy.
  */
-function MessageActions({ onDelete, align }: { onDelete: () => void; align: "left" | "right" }) {
+function MessageMenu({ onDelete, onDetails, align }: { onDelete?: () => void; onDetails: () => void; align: "left" | "right" }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
+  const [confirm, setConfirm] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  useOutsideDismiss(ref, open, () => setOpen(false));
+  useOutsideDismiss(ref, confirm, () => setConfirm(false));
 
   return (
     <div ref={ref} className="relative self-center shrink-0">
       <button
         type="button"
-        data-testid="message-delete"
-        title={t("chat.deleteMessage")}
-        aria-label={t("chat.deleteMessage")}
+        data-testid="message-options"
+        title={t("chat.message.options")}
+        aria-label={t("chat.message.options")}
+        aria-haspopup="true"
+        aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         // Faint but always reachable by touch; on a pointer it waits for the message to be hovered.
-        className={`p-1 rounded-full transition-all cursor-pointer hover:text-danger md:group-hover:opacity-100 md:focus-visible:opacity-100 ${
-          open ? "text-danger opacity-100" : "text-text-muted max-md:opacity-40 md:opacity-0"
+        className={`p-1 rounded-full transition-all cursor-pointer hover:text-text-primary md:group-hover:opacity-100 md:focus-visible:opacity-100 ${
+          open || confirm ? "text-text-primary opacity-100" : "text-text-muted max-md:opacity-40 md:opacity-0"
         }`}
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M3 6h18" />
-          <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-          <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" />
         </svg>
       </button>
-      {open && (
+      <Menu open={open} onClose={() => setOpen(false)} anchorRef={ref} testId="message-menu" align={align === "left" ? "end" : "start"} prefer="up" focusFirst label={t("chat.message.options")}>
+        <MenuItem testId="message-details" onClick={() => { setOpen(false); onDetails(); }}
+          icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 16v-4M12 8h.01" /></svg>}>
+          {t("chat.message.details")}
+        </MenuItem>
+        {onDelete && <MenuItem testId="message-delete" danger onClick={() => { setOpen(false); setConfirm(true); }}
+          icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>}>
+          {t("chat.deleteMessage")}
+        </MenuItem>}
+      </Menu>
+      {confirm && onDelete && (
         <div
           data-testid="message-delete-menu"
           // No `translate` of its own: the fade-in animation sets `transform`.
@@ -262,7 +305,7 @@ function MessageActions({ onDelete, align }: { onDelete: () => void; align: "lef
           <div className="flex items-center justify-end gap-2">
             <button
               type="button"
-              onClick={() => setOpen(false)}
+              onClick={() => setConfirm(false)}
               className="px-2 py-0.5 rounded border border-border bg-surface-hover text-text-muted text-xs font-bold hover:text-text-secondary transition-colors cursor-pointer"
             >
               {t("common.cancel")}
@@ -271,7 +314,7 @@ function MessageActions({ onDelete, align }: { onDelete: () => void; align: "lef
               type="button"
               data-testid="message-delete-confirm"
               onClick={() => {
-                setOpen(false);
+                setConfirm(false);
                 onDelete();
               }}
               className="px-2 py-0.5 rounded border border-danger/30 bg-danger/20 text-danger text-xs font-bold hover:bg-danger/30 transition-colors cursor-pointer"
@@ -285,7 +328,7 @@ function MessageActions({ onDelete, align }: { onDelete: () => void; align: "lef
   );
 }
 
-export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick = "", onDelete }: MessageBubbleProps) {
+export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick = "", onDelete, linkId }: MessageBubbleProps) {
   // Only what arrives while you watch moves; history is just there.
   const [enter] = useState(() =>
     Date.now() - message.timestamp < 5000
@@ -295,7 +338,10 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
       : "",
   );
   const money = useMemo(() => (message.paymentId || message.file ? null : findMoney(message.text)), [message.paymentId, message.file, message.text]);
-  const [showTech, setShowTech] = useState(false);
+  const [details, setDetails] = useState(false);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const openDetails = () => setDetails(true);
+  const press = useLongPress(openDetails);
   const [imgError, setImgError] = useState(false);
   const [revealed, setRevealed] = useState(false);
   const isMe = message.sender === "me";
@@ -305,6 +351,16 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
     hour: "2-digit",
     minute: "2-digit",
   });
+  const contentType = imgError || message.file || message.paymentId ? "text" : detectContentType(message.text);
+  const detailsPanel = details && (
+    <MessageDetailsPanel message={message} linkId={linkId ?? (peerPubKey ? engine.linkByPeer(peerPubKey)?.id : undefined)}
+      picture={contentType === "image"} onClose={() => setDetails(false)} returnFocus={rowRef.current} />
+  );
+  const rowProps = {
+    ref: rowRef, onDoubleClick: openDetails, ...press, "data-details-open": details || undefined,
+    // The second click of a double click would select a word of the message under the details.
+    onMouseDown: (e: React.MouseEvent) => { if (e.detail > 1) e.preventDefault(); },
+  };
 
   if (isSystem && message.systemEvent?.type === "join") {
     const pubKeyShort = message.systemEvent.pubKey
@@ -312,8 +368,8 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
       : "";
     
     return (
-      <div className={`group flex items-center justify-center gap-1 mb-3.5 px-[63px] max-md:px-2.5 ${enter}`}>
-        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-blue-500/10 text-link">
+      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 px-[63px] max-md:px-2.5 ${enter}`}>
+        <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-blue-500/10 text-link ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}>
           <svg
             width="14"
             height="14"
@@ -334,7 +390,8 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
           </span>
           <span className="text-text-muted text-[10px]">{time}</span>
         </div>
-        {onDelete && <MessageActions onDelete={onDelete} align="right" />}
+        <MessageMenu onDelete={onDelete} onDetails={openDetails} align="right" />
+        {detailsPanel}
       </div>
     );
   }
@@ -344,13 +401,13 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
     const isMissed = type === "call_missed" || type === "call_rejected";
     
     return (
-      <div className={`group flex items-center justify-center gap-1 mb-3.5 px-[63px] max-md:px-2.5 ${enter}`}>
+      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 px-[63px] max-md:px-2.5 ${enter}`}>
         <div
           className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs ${
             isMissed
               ? "bg-danger/10 text-danger"
               : "bg-surface-alt/80 text-text-secondary"
-          }`}
+          } ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}
         >
           <CallEventIcon type={type} hasVideo={hasVideo} />
           <span>{message.text}</span>
@@ -359,12 +416,12 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
           )}
           <span className="text-text-muted text-[10px]">{time}</span>
         </div>
-        {onDelete && <MessageActions onDelete={onDelete} align="right" />}
+        <MessageMenu onDelete={onDelete} onDetails={openDetails} align="right" />
+        {detailsPanel}
       </div>
     );
   }
 
-  const contentType = imgError ? "text" : detectContentType(message.text);
   const bigEmoji = contentType === "text" && isOnlyEmojis(message.text);
 
   const timestampEl = (
@@ -378,12 +435,12 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
 
   return (
     <div
+      {...rowProps}
       data-message-row
       data-sender={isMe ? "me" : "peer"}
       className={`group flex items-start gap-1 ${isMe ? "justify-end" : "justify-start"} mb-3.5 px-[63px] max-md:px-2.5 ${enter}`}
-      onDoubleClick={() => message.meta && setShowTech((v) => !v)}
     >
-      {isMe && onDelete && <MessageActions onDelete={onDelete} align="left" />}
+      {isMe && <MessageMenu onDelete={onDelete} onDetails={openDetails} align="left" />}
       {/* Bubbles take the theme's colours; what is inside reads on either one (see e2e/web/bubble-contrast.spec.ts). */}
       <div
         data-message-bubble
@@ -399,7 +456,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
           isMe
             ? "bg-sent-bg text-text-primary"
             : "bg-received-bg text-text-primary"
-        }`}
+        } ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}
         style={{
           boxShadow: "0 1px 0.5px rgba(11,20,26,0.13)",
         }}
@@ -495,45 +552,9 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
             }}>Retry message</button>
           </>}
         </div>}
-
-        {showTech && message.meta && (
-          <div className="mt-[6px] pt-[6px] border-t border-text-primary/10 text-[9px] text-text-primary/65 space-y-[2px] animate-fade-in font-mono clear-both">
-            <div>
-              <span className="text-accent-hover">id:</span> {message.id}
-            </div>
-            <div>
-              <span className="text-accent-hover">ts:</span>{" "}
-              {message.timestamp}
-            </div>
-            <div>
-              <span className="text-accent-hover">dir:</span>{" "}
-              {isMe ? "outbound" : "inbound"}
-            </div>
-            <div>
-              <span className="text-accent-hover">ack:</span>{" "}
-              {isMe
-                ? isAcked
-                  ? `ACKed (${peerAck})`
-                  : `Pending`
-                : "N/A"}
-            </div>
-            <div>
-              <span className="text-accent-hover">dht:</span>{" "}
-              <span className="break-all">
-                {message.meta.dhtKey.slice(0, 20)}...
-              </span>
-            </div>
-            <div>
-              <span className="text-accent-hover">dns:</span>{" "}
-              {message.meta.dnsRecords.join(", ")}
-            </div>
-            <div>
-              <span className="text-accent-hover">enc:</span> NaCl secretbox
-            </div>
-          </div>
-        )}
       </div>
-      {!isMe && onDelete && <MessageActions onDelete={onDelete} align="right" />}
+      {!isMe && <MessageMenu onDelete={onDelete} onDetails={openDetails} align="right" />}
+      {detailsPanel}
     </div>
   );
 }

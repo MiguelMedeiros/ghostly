@@ -15,6 +15,7 @@ import { blobDigest, fileBytes, fileBytesOf } from "../shared/fileBytes";
 import { fileStore, type StoredFile } from "../shared/idb";
 import { FileAppender, readStored } from "../shared/storedFiles";
 import type { FileTransferView, MessageFile, StoredMessage } from "../shared/types";
+import { fileWire } from "./messageDetails";
 
 /** What the desk needs from the peer: the chat's link and bookkeeping, its messages, and the views. */
 export interface FileDeskDeps {
@@ -29,6 +30,8 @@ export interface FileDeskDeps {
   storeMessage(message: StoredMessage): Promise<void>;
   transfers: Map<string, FileTransferView>;
   changed(delayMs?: number): void;
+  /** A transfer ended, either way: its local file id and how (for the message's details). */
+  settled?(linkId: string, fileId: string, record: FileTransferRecord): void;
 }
 
 interface Chat {
@@ -242,7 +245,8 @@ export class FileDesk {
       chat.saving = chat.saving.then(async () => {
         await fileStore.put({ id, linkId, direction: "in", wireId: record.id, createdAt: Date.now(), bytes: (await fileBytes()).kind,
           metadata: { name: file.name, size: file.size, mime: file.mime, timestamp: file.timestamp, voice: file.voice }, wire3: record });
-        await this.deps.storeMessage({ linkId, id: `peer_${record.id}`, text: fileMessageText(message), sender: "peer", timestamp: file.timestamp, via: "datalink", file: message });
+        await this.deps.storeMessage({ linkId, id: `peer_${record.id}`, text: fileMessageText(message), sender: "peer", timestamp: file.timestamp, via: "datalink", file: message,
+          details: { wire: fileWire("files/3", file.size) } });
       }).catch(() => {});
     }
     this.show(linkId, chat, record, transferred);
@@ -273,7 +277,10 @@ export class FileDesk {
     } else this.speeds.delete(id);
     if (view.stage === "asking" && record.direction === "in") { view.room = this.deps.transfers.get(id)?.room; void this.room(id); }
     this.deps.transfers.set(id, view);
+    if (transferEnded(record) && !this.ended.has(id)) { this.ended.add(id); this.deps.settled?.(linkId, id, record); }
   }
+  /** Transfers already reported as ended, by local id. */
+  private readonly ended = new Set<string>();
 
   /** The free space an offer is decided against, shown with it. */
   private async room(id: string): Promise<void> {

@@ -56,6 +56,24 @@ export interface DhtDeliveryView {
   error?: string;
   pendingUntil?: number;
   maxTextBytes: number;
+  /** The envelope last published from here, for a text's details; absent until one carried a text. */
+  lastPublished?: DhtPacketFacts;
+}
+/**
+ * What can be said about one DHT envelope without opening it: which text it carried, its sequence and times, the
+ * signed packet's size, the sealed record's nonce (the first 24 bytes of the record, never a key) and the address
+ * it was published under. All of it travels in the clear on the DHT already.
+ */
+export interface DhtPacketFacts {
+  /** The text's stable id, when the envelope carried one. */
+  id?: string;
+  seq: number;
+  issued: number;
+  expires: number;
+  packetBytes: number;
+  nonce: string;
+  recordKey: string;
+  records: string[];
 }
 export const emptyDhtDeliveryState = (): DhtDeliveryState => ({ sequence: 0, peerSequence: 0 });
 
@@ -93,7 +111,7 @@ export class DhtDelivery {
     credentials: PairingCredentials; transport: PkarrTransport;
     save(state: DhtDeliveryState): Promise<void>;
     pin(key: string): Promise<void>;
-    message(message: { id: string; text: string; timestamp: number }): Promise<void>;
+    message(message: { id: string; text: string; timestamp: number }, packet: DhtPacketFacts): Promise<void>;
     receipt(id: string): Promise<void>;
     changed(view: DhtDeliveryView): void;
     /** This side's capability-record revision, told in every envelope (WISP 03). */
@@ -117,7 +135,14 @@ export class DhtDelivery {
   }
   get view(): DhtDeliveryView {
     return { mode: this.mode, peerMode: this.state.peerMode, authenticated: !!this.options.credentials.peerKey,
-      error: Object.values(this.errors).join(". ") || undefined, pendingUntil: this.state.pending?.expires, maxTextBytes: DHT_TEXT_BYTES };
+      error: Object.values(this.errors).join(". ") || undefined, pendingUntil: this.state.pending?.expires, maxTextBytes: DHT_TEXT_BYTES,
+      ...(this.lastPublished && { lastPublished: this.lastPublished }) };
+  }
+  private lastPublished?: DhtPacketFacts;
+  /** The sealed record's nonce is its first 24 bytes: 32 characters of base64. */
+  private static facts(body: Body, records: GhostRecord[], key: string): DhtPacketFacts {
+    return { ...(body[6] && { id: body[6][0] }), seq: body[1], issued: body[2], expires: body[3], packetBytes: measureRecords(key, records),
+      nonce: records[0].value.slice(0, 32), recordKey: key, records: records.map(r => r.label) };
   }
   get comparisonCode(): string | undefined {
     if (!this.options.credentials.peerKey) return undefined;
@@ -244,6 +269,7 @@ export class DhtDelivery {
       receipt: receipt ? { ...receipt, attempts: receipt.attempts + 1 } : this.state.receipt });
     this.lastPublish = now; this.controlDue = now + 4 * 60_000;
     traceLink(this.from, "dht-publish", { mode: this.mode, seq: body[1] });
+    if (pending) this.lastPublished = DhtDelivery.facts(body, records, this.identity.pubKeyZ32);
     await this.options.transport.publish(this.identity, records);
     delete this.errors.publish; this.changed();
   }
@@ -281,7 +307,7 @@ export class DhtDelivery {
     // is safe because the durable message table deduplicates the stable ID.
     let nextReceipt = this.state.receipt;
     if (message) {
-      await this.options.message({ id: message[0], timestamp: message[1], text: message[2] });
+      await this.options.message({ id: message[0], timestamp: message[1], text: message[2] }, DhtDelivery.facts(body, packet.records, packet.pubKeyZ32));
       if (nextReceipt?.id !== message[0]) nextReceipt = { id: message[0], expires, attempts: 0 };
     }
     const confirmed = receipt && this.state.pending?.message[0] === receipt ? receipt : this.state.confirmed;

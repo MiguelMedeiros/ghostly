@@ -160,13 +160,14 @@ describe("MessageBubble: text", () => {
     expect(screen.queryByText("~Bob")).not.toBeInTheDocument();
   });
 
-  it("shows the technical details on a double click, when there are any", async () => {
+  it("opens the message's details on a double click, and Escape closes them", async () => {
     const { user } = bubble({ text: "hi", sender: "me", meta: { dhtKey: "k".repeat(40), encryptedPayloadLength: 10, dnsRecords: ["a", "b"] } }, { peerAck: 1_800_000_000_000 });
     await user.dblClick(screen.getByText("hi"));
-    expect(screen.getByText(/ACKed \(1800000000000\)/)).toBeInTheDocument();
-    expect(screen.getByText("outbound")).toBeInTheDocument();
-    await user.dblClick(screen.getByText("hi"));
-    expect(screen.queryByText("outbound")).not.toBeInTheDocument();
+    const panel = await screen.findByTestId("message-details");
+    expect(within(panel).getByTestId("message-details-kind")).toHaveTextContent("Text");
+    expect(screen.getByTestId("message-details-keys-hint")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("message-details")).not.toBeInTheDocument();
   });
 });
 
@@ -199,8 +200,9 @@ describe("MessageBubble: system lines", () => {
     expect(screen.getByText("Missed call").parentElement).not.toHaveTextContent("(");
   });
 
-  it("lets a system line be deleted too", () => {
-    bubble({ sender: "system", text: "Call ended", callEvent: { type: "call_ended" } }, { onDelete: () => {} });
+  it("lets a system line be deleted too, from its menu", async () => {
+    const { user } = bubble({ sender: "system", text: "Call ended", callEvent: { type: "call_ended" } }, { onDelete: () => {} });
+    await user.click(screen.getByTestId("message-options"));
     expect(screen.getByRole("button", { name: "Delete message" })).toBeInTheDocument();
   });
 });
@@ -280,11 +282,13 @@ describe("MessageBubble: deleting", () => {
   it("deletes only after the menu says it is only here", async () => {
     const onDelete = vi.fn();
     const { user } = bubble({ text: "oops" }, { onDelete });
+    await user.click(screen.getByTestId("message-options"));
     await user.click(screen.getByRole("button", { name: "Delete message" }));
     expect(screen.getByTestId("message-delete-menu")).toHaveTextContent("Deleted only here. Your contact keeps their copy.");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByTestId("message-delete-menu")).not.toBeInTheDocument();
     expect(onDelete).not.toHaveBeenCalled();
+    await user.click(screen.getByTestId("message-options"));
     await user.click(screen.getByRole("button", { name: "Delete message" }));
     await user.click(screen.getByTestId("message-delete-confirm"));
     expect(onDelete).toHaveBeenCalledTimes(1);
@@ -294,6 +298,7 @@ describe("MessageBubble: deleting", () => {
   it("closes the menu on a click elsewhere", async () => {
     const onDelete = vi.fn();
     const { user } = renderApp(<><p>elsewhere</p><MessageBubble message={message({ sender: "me" })} onDelete={onDelete} /></>);
+    await user.click(screen.getByTestId("message-options"));
     await user.click(screen.getByRole("button", { name: "Delete message" }));
     await user.click(screen.getByText("elsewhere"));
     expect(screen.queryByTestId("message-delete-menu")).not.toBeInTheDocument();

@@ -1,4 +1,4 @@
-import { DhtDelivery, type DeliveryMode, type DhtDeliveryState, type DhtDeliveryView } from "./dhtDelivery";
+import { DhtDelivery, type DeliveryMode, type DhtDeliveryState, type DhtDeliveryView , type DhtPacketFacts } from "./dhtDelivery";
 import { PairedFiles } from "./pairedFiles";
 import { TransportSwitch, allowedTransports, type SwitchPlan } from "./transportSwitch";
 import { proofHash, type ProofAdapter, type ProofScope } from "./peerProofs";
@@ -92,6 +92,8 @@ export interface IncomingMessage {
   nick?: string;
   via: "pkarr" | "datalink";
   batch?: ResolvedLink;
+  /** A paired chat's text from the DHT floor: the envelope it came in (`DhtPacketFacts`). */
+  packet?: DhtPacketFacts;
 }
 
 export interface GhostLinkEvents {
@@ -328,7 +330,7 @@ export class GhostLink {
           if (!this.isDataLinkOpen && this.tracker?.progress.stage !== "on-dht") this.tracker?.onDht("waiting");
         }, DHT_PIN_GRACE_MS);
       },
-      message: async message => { await options.events?.onMessage?.({ ...message, via: "pkarr" }); },
+      message: async (message, packet) => { await options.events?.onMessage?.({ ...message, via: "pkarr", packet }); },
       receipt: async id => { await options.events?.onMessageReceipt?.(id); },
       changed: view => {
         options.events?.onDhtDelivery?.(view);

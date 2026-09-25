@@ -55,6 +55,16 @@
     "yesterday": "أمس",
     "deleteMessage": "حذف الرسالة",
     "deleteMessageHint": "يُحذف من هذا الجهاز فقط. تبقى النسخة لدى جهة اتصالك.",
+    "message": {
+      "details": "التفاصيل",
+      "detailsTitle": "تفاصيل الرسالة",
+      "detailsClose": "إغلاق",
+      "copyJson": "نسخ الكل بصيغة JSON",
+      "copied": "تم النسخ",
+      "keysHint": "لا تُعرض المفاتيح هنا أبدًا.",
+      "options": "خيارات الرسالة",
+      "copyHint": "انقر للنسخ"
+    },
     "options": "خيارات",
     "menu": {
       "pin": "تثبيت المحادثة",

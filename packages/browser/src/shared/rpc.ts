@@ -12,7 +12,7 @@ import type { SparkNetwork } from "@ghostly/core";
 import type { ProfileChoice } from '../profiles/public';
 import type { ProofChallenge, ProofEvidence, ProofAdapter } from "@ghostly/core";
 import type { LinkParams, PairedTransport, DeliveryMode } from "@ghostly/core";
-import type { CashuInspection, EngineState, MessageFile, SettingsPatch, StoredMessage } from "./types";
+import type { CashuInspection, EngineState, MessageDetailsView, MessageFile, SettingsPatch, StoredMessage } from "./types";
 import type { NostrDraft, NostrDraftRequest, NostrPublishResult } from "../nostr/types";
 
 /** UI → engine calls. The extension carries them over a runtime port, the web app calls the peer in the same page. */
@@ -117,6 +117,8 @@ export interface EngineApi {
   /** `refused`: the text was not kept (it cannot be sent this way); any other error leaves it to be sent later. */
   sendMessage(params: { linkId: string; text: string; timestamp?: number }): { error: string | null; refused?: boolean };
   retryMessage(params: { linkId: string; messageId: string }): void;
+  /** One message's details view (WISP 400 § Message details): how it travelled, as stored, plus what the engine knows around it now. */
+  messageDetails(params: { linkId: string; messageId: string }): MessageDetailsView | null;
   /** Forgets one message and the bytes of the file it carried. Nothing is sent: the peer keeps its copy. */
   deleteMessage(params: { linkId: string; messageId: string }): void;
   /** Link secrets, for a UI that keeps its own session list in the same profile. */

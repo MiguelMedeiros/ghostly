@@ -1,0 +1,9 @@
+/* A message's details (MessageDetailsPanel.tsx): a panel from the end edge on a wide screen, a sheet from the bottom
+   on a phone. Reduced motion makes both instant (index.css's global rule). */
+@keyframes message-details-in-end { from { transform: translateX(var(--details-from, 100%)); } to { transform: none; } }
+@keyframes message-details-in-up { from { transform: translateY(100%); } to { transform: none; } }
+.message-details-panel[data-side="end"] { animation: message-details-in-end 0.25s ease-out both; }
+[dir="rtl"] .message-details-panel[data-side="end"] { --details-from: -100%; }
+.message-details-panel[data-side="bottom"] { animation: message-details-in-up 0.25s ease-out both; }
+/* Values wrap anywhere: a hash or an id never widens the panel. */
+.message-details-value { overflow-wrap: anywhere; white-space: pre-wrap; }
