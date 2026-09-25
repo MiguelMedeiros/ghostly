@@ -348,7 +348,13 @@ export interface ServicesPlatform {
   /** Null when nothing is known about the transfer, e.g. after a restart. */
   retryFile?(fileId: string): Promise<void>;
   getTransfer(fileId: string): FileTransferState | null;
+  /** The file to show or save, backed by storage. Null when it is gone, or too large to hand out here (see `saveFile`). */
   getFile(fileId: string): Promise<Blob | null>;
+  /**
+   * Saves a copy through the system's save dialog, where the platform keeps files as real files (the desktop
+   * app): true when saved, false when the person cancelled, null where the platform has no such dialog.
+   */
+  saveFile?(fileId: string): Promise<boolean | null>;
   /** Forgets a message this device deleted: the peer's copy of it and the bytes of any file it carried. */
   deleteMessage(peerPubKeyZ32: string, messageId: string): Promise<void>;
   wallet: WalletPlatform;

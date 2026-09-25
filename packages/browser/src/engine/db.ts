@@ -1,5 +1,6 @@
 import { emptyIdentityLedger, emptyProofLedger, type IdentityLedger, type ProofLedger } from "@ghostly/core";
 import { STORES, fileStore, store, wrap, openDb } from "../shared/idb";
+import { removeFileBytes } from "../shared/fileBytes";
 import type { Settings, StoredGroup, StoredLink, StoredMessage, StoredService } from "../shared/types";
 
 /**
@@ -104,6 +105,8 @@ export const db = {
     const keys = await wrap(messages.index("byLink").getAllKeys(linkId));
     await Promise.all(keys.map((key) => wrap(messages.delete(key))));
     await fileStore.deleteForLink(linkId);
+    await removeFileBytes(`${linkId}-in-`);
+    await removeFileBytes(`${linkId}-out-`);
   },
 
   async getMessages(linkId: string): Promise<StoredMessage[]> {

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-file-bytes-remove-where"
+description = "Enables the file_bytes_remove_where command without any pre-configured scope."
+commands.allow = ["file_bytes_remove_where"]
+
+[[permission]]
+identifier = "deny-file-bytes-remove-where"
+description = "Denies the file_bytes_remove_where command without any pre-configured scope."
+commands.deny = ["file_bytes_remove_where"]

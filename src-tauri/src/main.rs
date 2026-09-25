@@ -5,6 +5,7 @@ mod clipboard;
 mod commands;
 mod crypto;
 mod diagnostics;
+mod file_store;
 mod hyperdht;
 mod lnd;
 mod local_fetch;
@@ -83,6 +84,17 @@ macro_rules! commands {
             oidc::oidc_loopback_start,
             oidc::oidc_loopback_wait,
             oidc::oidc_loopback_cancel,
+            file_store::file_bytes_append,
+            file_store::file_bytes_flush,
+            file_store::file_bytes_close,
+            file_store::file_bytes_size,
+            file_store::file_bytes_truncate,
+            file_store::file_bytes_read,
+            file_store::file_bytes_digest,
+            file_store::file_bytes_remove,
+            file_store::file_bytes_remove_where,
+            file_store::file_bytes_room,
+            file_store::file_bytes_save,
         ]
     };
 }
@@ -96,6 +108,7 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState { pkarr })
         .manage(ViewerState::default())
         .manage(paired_transport::TransportState::default())
@@ -107,6 +120,10 @@ fn main() {
             if let Ok(dir) = app.path().app_log_dir() {
                 diagnostics::init(&dir);
             }
+            // Files sent and received in chats, one folder per profile.
+            app.manage(file_store::FileStore::new(
+                app.path().app_data_dir()?.join("files"),
+            ));
             Ok(())
         })
         .register_asynchronous_uri_scheme_protocol(viewer::SCHEME, |ctx, request, responder| {
@@ -214,14 +231,15 @@ mod tests {
             "user": "", "password": "", "params": [], "macaroon": "00", "path": "/v1/x",
             "timeoutMs": 1, "peer": "p", "service": "s", "title": "t",
             "response": {"status": 200, "headers": [], "bodyB64": ""},
-            "port": 0, "expectedState": "x",
+            "port": 0, "expectedState": "x", "space": "x", "prefix": "", "size": 0,
+            "offset": 0, "length": 0, "name": "x",
         })
     }
 
     #[test]
     fn build_rs_capabilities_and_permission_files_name_the_same_commands() {
         let declared: BTreeSet<String> = declared().into_iter().collect();
-        assert_eq!(declared.len(), 38, "{declared:?}");
+        assert_eq!(declared.len(), 49, "{declared:?}");
         let granted: BTreeSet<String> = capability()["permissions"]
             .as_array()
             .unwrap()

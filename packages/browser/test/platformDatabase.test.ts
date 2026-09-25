@@ -1,4 +1,4 @@
-import { IDBFactory } from "fake-indexeddb";
+import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StoredLink, StoredMessage } from "../src/shared/types";
 // covers: storage.indexeddb, app.clear-data, profiles.create
@@ -14,6 +14,7 @@ let db: typeof import("../src/engine/db").db;
 
 beforeEach(async () => {
   vi.stubGlobal("indexedDB", new IDBFactory());
+  vi.stubGlobal("IDBKeyRange", IDBKeyRange);
   vi.resetModules();
   idb = await import("../src/shared/idb");
   ({ db } = await import("../src/engine/db"));
@@ -39,16 +40,16 @@ describe("opening the database", () => {
       old.createObjectStore("proofs", { keyPath: "secret" }).put({ secret: "s1", amount: 8 });
     });
     const opened = await idb.openDb();
-    expect(opened.version).toBe(7);
+    expect(opened.version).toBe(8);
     expect([...opened.objectStoreNames].sort()).toEqual(Object.values(idb.STORES).sort());
     expect((await db.getLinks()).map((l) => l.id)).toEqual(["kept"]);
     expect(await count(idb.STORES.proofs)).toBe(1);
   });
 
-  it("upgrades a v6 schema by adding only the groups store", async () => {
+  it("upgrades a v6 schema by adding only the stores it lacked (groups, file pieces)", async () => {
     await olderDatabase(6, (old) => {
       for (const name of Object.values(idb.STORES)) {
-        if (name === idb.STORES.groups) continue;
+        if (name === idb.STORES.groups || name === idb.STORES.fileChunks) continue;
         const keyPath = { messages: ["linkId", "id"], proofs: "secret", quotes: "quote", melts: "quote", paymentIntents: "review.id" }[name as string] ?? "id";
         const created = name === idb.STORES.settings ? old.createObjectStore(name) : old.createObjectStore(name, { keyPath });
         if (name === idb.STORES.messages || name === idb.STORES.files) created.createIndex("byLink", "linkId");
@@ -58,6 +59,7 @@ describe("opening the database", () => {
     expect([...opened.objectStoreNames].sort()).toEqual(Object.values(idb.STORES).sort());
     await db.putGroup({ id: "g" } as never);
     expect(await db.getGroups()).toEqual([{ id: "g" }]);
+    expect(opened.transaction(idb.STORES.fileChunks).objectStore(idb.STORES.fileChunks).keyPath).toEqual(["id", "index"]);
   });
 
   it("keeps each profile in a database of its own", async () => {

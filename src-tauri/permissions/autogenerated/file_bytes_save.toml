@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-file-bytes-save"
+description = "Enables the file_bytes_save command without any pre-configured scope."
+commands.allow = ["file_bytes_save"]
+
+[[permission]]
+identifier = "deny-file-bytes-save"
+description = "Denies the file_bytes_save command without any pre-configured scope."
+commands.deny = ["file_bytes_save"]

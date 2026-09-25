@@ -41,6 +41,17 @@ const COMMANDS: &[&str] = &[
     "oidc_loopback_start",
     "oidc_loopback_wait",
     "oidc_loopback_cancel",
+    "file_bytes_append",
+    "file_bytes_flush",
+    "file_bytes_close",
+    "file_bytes_size",
+    "file_bytes_truncate",
+    "file_bytes_read",
+    "file_bytes_digest",
+    "file_bytes_remove",
+    "file_bytes_remove_where",
+    "file_bytes_room",
+    "file_bytes_save",
 ];
 
 fn main() {

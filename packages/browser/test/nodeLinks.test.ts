@@ -4,6 +4,7 @@ import { LIMITS, createIdentity, type FileSink, type GhostLinkOptions } from "@g
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { STORES, fileStore, transact } from "../src/shared/idb";
+import { storedBlob } from "../src/shared/storedFiles";
 import type { StoredLink } from "../src/shared/types";
 // covers: core.peer-keys, chat.paired.send, chat.paired.receipts, chat.paired.nickname-sync, files.paired.send, files.size-limit, files.persistence, delivery.hold.text, delivery.hold.picture, groups.protocol.link-frames, chat.waiting, chat.caps-record
 
@@ -255,7 +256,10 @@ describe("files a contact sends", () => {
     expect(node.getState().transfers[file.id]).toMatchObject({ state: "done", transferred: 5 });
     const stored = await fileStore.get(file.id);
     expect(stored).toMatchObject({ direction: "in", wireId: wire, digest: "digest-1", metadata: { name: "a.txt", mime: "text/html" } });
-    expect(stored!.blob.type).not.toBe("text/html");
+    // Written to file storage as it came, never gathered whole: here IndexedDB pieces, the tests' storage.
+    expect(stored!.blob).toBeUndefined();
+    expect(stored!.bytes).toBe("idb");
+    expect(await (await storedBlob(stored!, "application/octet-stream"))!.text()).toBe("hello");
     // Asked whether it is already here: only an exact match of what was announced says yes.
     expect(await events.onFileStored({ id: wire, name: "a.txt", size: 5, mime: "text/html", timestamp: 7 })).toBe("digest-1");
     expect(await events.onFileStored({ id: wire, name: "b.txt", size: 5, mime: "text/html", timestamp: 7 })).toBeUndefined();

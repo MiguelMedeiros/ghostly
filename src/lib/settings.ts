@@ -1,4 +1,5 @@
 import { clearChatData } from "@ghostly/browser/shared/idb";
+import { removeFileBytes } from "@ghostly/browser/shared/fileBytes";
 import { LEGACY_JOIN_PREFIX, getStorageProfile, ownsKey } from "./storage";
 import { registryKey } from "./profiles";
 
@@ -144,6 +145,7 @@ export async function clearAllData(): Promise<void> {
   }
   keysToRemove.forEach((key) => localStorage.removeItem(key));
   await clearChatData();
+  await removeFileBytes().catch(() => {});
 }
 
 export const APP_WEBSITE = "https://github.com/MiguelMedeiros/ghostly";

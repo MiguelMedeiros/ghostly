@@ -79,6 +79,8 @@ import {
 } from "@ghostly/core";
 import type { AttentionEvent, EngineImplementation } from "../shared/rpc";
 import { fileStore, type StoredFile } from "../shared/idb";
+import { fileBytes } from "../shared/fileBytes";
+import { FileAppender, readStored, removeStored, storedSize, streamStored } from "../shared/storedFiles";
 import { DEFAULT_MINTS, TEST_MINT, isWorthlessMint, type WalletMode } from "../shared/mints";
 import type {
   EngineState,
@@ -167,7 +169,7 @@ function linkFilesFrom(linkId: string, files: StoredFile[], messages: StoredMess
   for (const file of files) {
     const legacy = !file.direction;
     result.wireIds.add(file.wireId ?? file.id.slice(linkId.length + 1));
-    if (file.direction === "in" || (legacy && fromPeer.has(file.id))) result.receivedBytes += file.blob.size;
+    if (file.direction === "in" || (legacy && fromPeer.has(file.id))) result.receivedBytes += storedSize(file);
   }
   return result;
 }
@@ -430,7 +432,8 @@ export class GhostlyNode implements EngineImplementation {
     file: async (fileId) => {
       const stored = await fileStore.get(fileId);
       if (!stored?.metadata) return null;
-      return { bytes: new Uint8Array(await stored.blob.arrayBuffer()), name: stored.metadata.name, size: stored.metadata.size, mime: stored.metadata.mime, voice: stored.metadata.voice };
+      // A held file is at most 8 MiB: whole in memory while it is sealed.
+      return { bytes: await readStored(stored, 0, storedSize(stored)), name: stored.metadata.name, size: stored.metadata.size, mime: stored.metadata.mime, voice: stored.metadata.voice };
     },
     paymentRequest: (paymentId): PaymentRequest | null => this.desk.requestFor(paymentId),
     receiveText: (linkId, message) => this.storeMessage({ linkId, id: `peer_${message.id}`, text: message.text, sender: "peer", timestamp: message.timestamp, via: "hold" }),
@@ -1204,9 +1207,9 @@ export class GhostlyNode implements EngineImplementation {
         const stored = await fileStore.get(message.file.id);
         // Only what the peer sent counts against the room it has here.
         if (stored && (stored.direction === "in" || (!stored.direction && message.sender === "peer"))) {
-          live.files.receivedBytes = Math.max(0, live.files.receivedBytes - stored.blob.size);
+          live.files.receivedBytes = Math.max(0, live.files.receivedBytes - storedSize(stored));
         }
-        await fileStore.delete(message.file.id);
+        await removeStored(message.file.id);
         this.transfers.delete(message.file.id);
       }
       await db.deleteMessage(linkId, messageId);
@@ -1274,17 +1277,8 @@ export class GhostlyNode implements EngineImplementation {
       const stored = await fileStore.get(file.id);
       if (!stored) return fail("The file is gone");
       await fileStore.updateTransfer(file.id, { state: "transferring", transferred: 0, size: file.size });
-      const blob = stored.blob;
-      const source = (async function* () {
-        const reader = blob.stream().getReader();
-        try {
-          for (;;) {
-            const { done, value } = await reader.read();
-            if (done) return;
-            yield value;
-          }
-        } finally { await reader.cancel(); reader.releaseLock(); }
-      })();
+      // Read a step at a time, wherever the bytes are: never the whole file at once.
+      const source = streamStored(stored);
       await link.sendFile(
         { id: wireId, name: file.name, size: file.size, mime: file.mime, timestamp, ...(file.voice && { voice: file.voice }) },
         source,
@@ -1334,8 +1328,11 @@ export class GhostlyNode implements EngineImplementation {
     files.wireIds.add(wire.id);
     files.receivedBytes += wire.size;
     files.incoming.set(wire.id, { localId: file.id, size: wire.size });
-    const chunks: Uint8Array[] = [];
     let cancelled = false;
+    // The bytes go to storage as they arrive, in order: never gathered whole in memory.
+    const appender = fileBytes().then((bytes) => new FileAppender(bytes, file.id));
+    let writing: Promise<void> = appender.then(() => {});
+    const discard = () => appender.then((a) => a.bytes.remove(file.id)).catch(() => {});
     this.transfers.set(file.id, { state: "transferring", transferred: 0, size: file.size });
     const messageStored = this.storeMessage({
       linkId,
@@ -1348,30 +1345,33 @@ export class GhostlyNode implements EngineImplementation {
     });
     void messageStored.catch(() => {});
     return {
-      write: (chunk) => void chunks.push(chunk),
+      write: (chunk) => (writing = writing.then(async () => { if (!cancelled) await (await appender).append(chunk); })),
       // The message keeps the announced type for display; the bytes are served as something inert.
       close: async (digest?: string) => {
         await messageStored;
+        await writing;
         if (cancelled) throw new Error("Transfer cancelled");
         const live = this.links.get(linkId);
         // Deleted while it was still arriving: the bytes have nowhere to land, and give their room back.
         if (live?.stored.deletedIds?.includes(`peer_${wire.timestamp}`)) {
+          await discard();
           throw new Error("The receiving message was deleted");
         }
+        const written = await appender;
+        await written.close();
         await fileStore.put({
           id: file.id,
           linkId,
-          blob: new Blob(chunks as BlobPart[], { type: safeBlobType(file.mime) }),
+          bytes: written.bytes.kind,
           createdAt: Date.now(),
           direction: "in",
           wireId: wire.id,
           digest,
           metadata: { name: wire.name, size: wire.size, mime: wire.mime, timestamp: wire.timestamp, voice: wire.voice },
         });
-        chunks.length = 0;
-        if (cancelled) { await fileStore.delete(file.id); throw new Error("Transfer cancelled"); }
+        if (cancelled) { await removeStored(file.id); throw new Error("Transfer cancelled"); }
       },
-      abort: () => { cancelled = true; chunks.length = 0; },
+      abort: () => { cancelled = true; void writing.then(discard, discard); },
     };
   }
 
