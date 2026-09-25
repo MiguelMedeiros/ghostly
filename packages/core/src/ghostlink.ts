@@ -281,6 +281,9 @@ export class GhostLink {
       changed: view => {
         options.events?.onDhtDelivery?.(view);
         this.streamBlockChanged();
+        // A contact who chose DHT only (a ghostly1 code carries no mode) paired through the mailbox: the first
+        // pairing is over, and the stream attempt it will never answer is not a failure.
+        if (this.dht?.peerMode === "dht" && options.pairing?.credentials.peerKey && this.tracker && !this.tracker.done) this.tracker.live();
         if (this.streamBlocked) {
           if (this.channel || this.dialing || this.dataLink.state !== "idle") this.disconnect();
           this.emitDeliveryState();

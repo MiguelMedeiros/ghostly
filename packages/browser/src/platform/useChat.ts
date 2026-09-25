@@ -8,7 +8,9 @@ import {
   loadSession,
   markJoinAnnounced,
   saveSession,
+  sessionLinkParams,
 } from "../../../../src/lib/storage";
+import type { LinkParams } from "@ghostly/core";
 import type { ChatMessage, ChatTechInfo, ConnectionStatus } from "../../../../src/lib/types";
 import { engine } from "./engine";
 import { notifySessionsChanged, startSessionSync } from "./sync";
@@ -44,6 +46,12 @@ export const useChat: typeof Desktop.useChat = (params) => {
   linkIdRef.current = linkId;
   const createdAtRef = useRef(Date.now());
 
+  /** The stored session's keys, participation keys included, else the ones this chat was opened with. */
+  const linkParams = useCallback((): LinkParams => {
+    const stored = sessionId ? loadSession(sessionId) : null;
+    return stored ? sessionLinkParams(stored) : { profile, deliveryMode, seedB64: seedB64!, peerPubKeyZ32: peerPubKey!, encKeyB64: encKeyB64! };
+  }, [sessionId, profile, deliveryMode, seedB64, peerPubKey, encKeyB64]);
+
   const reload = useCallback(() => {
     if (sessionId) setMessages([...(loadSession(sessionId)?.messages ?? [])]);
   }, [sessionId]);
@@ -72,8 +80,8 @@ export const useChat: typeof Desktop.useChat = (params) => {
     setIsBurned(false);
     setIncomingCallSignal(null);
     reload();
-    void engine.call("ensureLink", { profile, deliveryMode, seedB64, peerPubKeyZ32: peerPubKey, encKeyB64 }).catch(() => {});
-  }, [profile, deliveryMode, seedB64, peerPubKey, encKeyB64, sessionId, reload]);
+    void engine.call("ensureLink", linkParams()).catch(() => {});
+  }, [profile, deliveryMode, seedB64, peerPubKey, encKeyB64, sessionId, reload, linkParams]);
 
   useEffect(() => {
     window.addEventListener("session-updated", reload);
@@ -108,7 +116,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
       const id =
         linkIdRef.current ??
         (seedB64 && peerPubKey && encKeyB64
-          ? (await engine.call("ensureLink", { profile, deliveryMode, seedB64, peerPubKeyZ32: peerPubKey, encKeyB64 })).linkId
+          ? (await engine.call("ensureLink", linkParams())).linkId
           : undefined);
       if (!id) return "Ghostly is still starting. Try again in a moment.";
       const { error, refused } = await engine.call("sendMessage", {
@@ -124,7 +132,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
       }
       return error;
     },
-    [profile, deliveryMode, sessionId, seedB64, peerPubKey, encKeyB64],
+    [profile, sessionId, seedB64, peerPubKey, encKeyB64, linkParams],
   );
 
   // "👋 joined": the joiner announces itself once, the creator answers once.

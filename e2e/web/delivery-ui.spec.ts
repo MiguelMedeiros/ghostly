@@ -39,7 +39,7 @@ test("Join camera decodes real QR frames, stops tracks, and rejects invalid inpu
   await manualFallback(b.page);
   await b.page.getByPlaceholder("Paste invite…").fill("javascript:alert('no')");
   await b.page.getByRole("dialog").getByRole("button",{name: "Join chat", exact: true}).click();
-  await expect(b.page.getByRole("alert")).toContainText("Invalid invite");
+  await expect(b.page.getByRole("alert")).toContainText("This is not a Ghostly invite.");
   await b.page.getByRole("button", {name: "Scan QR"}).click();
   await expect(b.page.getByRole("dialog", {name:"Join a chat"})).toHaveCount(0);
   await expect.poll(() => countChats(b.page)).toBe(1);
@@ -126,19 +126,18 @@ test("mobile keeps its footer and compact header, with multiline text and QR ins
   await a.page.keyboard.press("Escape"); await expect(a.page.getByPlaceholder("Message…")).toHaveValue("Line one\nLine two");
 });
 
-test("new DHT invite QR preserves delivery mode from creation through Join", { tag: ["@feature:invite.dht", "@feature:invite.qr.image"] }, async ({peer})=>{
+// A ghostly1 code carries no delivery mode (WISP 801): the contact learns "DHT only" from the inviter's first envelopes.
+test("a Text only chat's QR brings its contact onto the DHT", { tag: ["@feature:invite.dht", "@feature:invite.qr.image"] }, async ({peer})=>{
   const a=await peer("dht-qr-owner"),b=await peer("dht-qr-reader");
   await a.page.getByTitle("New Chat").click();
   await a.page.getByRole("radio",{name:"Text only",exact:true}).click();
-  await expect.poll(() => copyInvite(a.page)).toMatch(/^pair2d\//);
+  await expect.poll(() => copyInvite(a.page)).toMatch(/^https:\/\/ghostly\.tools\/#ghostly1p/);
   await expect(a.page.getByTestId("connection-options")).toHaveAccessibleName(/DHT only/);
   const qr=await a.page.getByTestId("invite-qr").screenshot();
   await b.page.getByRole("button",{name: "Join chat", exact: true}).first().click();
   await b.page.getByLabel("Open image").setInputFiles({name:"dht-invite.png",mimeType:"image/png",buffer:qr});
-  await expect(b.page.getByTestId("connection-options")).toHaveAccessibleName(/DHT only/);
+  await expect(b.page.getByTestId("connection-options")).toHaveAccessibleName(/DHT/);
   await b.page.getByTestId("connection-options").click();
-  await expect(b.page.getByRole("switch",{name:"DHT-only delivery"})).toBeChecked();
-  await expect(b.page.getByRole("radio",{name:"WebRTC",exact:true})).toBeDisabled();
   await expect(b.page.getByTestId("dht-delivery-details")).toContainText("Published is not received");
   await b.page.keyboard.press("Escape");
 });
@@ -189,7 +188,7 @@ for (const unavailable of ["none", "read", "publish", "network", "publication-ne
         headers: {"access-control-allow-origin":"*", "retry-after":"1"}});
     });
     await page.getByRole("button", {name:"New chat", exact:true}).click();
-    await expect.poll(() => copyInvite(page)).toMatch(/^pair1\//);
+    await expect.poll(() => copyInvite(page)).toMatch(/^https:\/\/ghostly\.tools\/#ghostly1p/);
     const menu = page.getByTestId("connection-options");
     await expect.poll(() => reads).toBeGreaterThan(0);
     await expect(menu).toHaveAccessibleName(unavailable === "none" ? /No contact yet/ : unavailable === "publication-network" ? /Publication unavailable/ : /Discovery unavailable|Publication unavailable/);

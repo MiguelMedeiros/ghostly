@@ -1,11 +1,11 @@
 import { screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { createLink, encodeInviteCode } from "@ghostly/core";
+import { createChatInvite, createLink, encodeInviteCode } from "@ghostly/core";
 import { InviteCard } from "../../components/InviteCard";
 import { getInviteCode } from "../../lib/storage";
 import { renderApp } from "../render";
 
-// covers: chat.paired.pair
+// covers: chat.paired.pair, invite.code
 
 const { invite } = createLink();
 const live = encodeInviteCode({ ...invite, profile: "paired-chat/1" });
@@ -61,6 +61,16 @@ describe("InviteCard", () => {
     const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
     await user.click(screen.getByRole("button", { name: "Copy invite" }));
     expect(writeText).toHaveBeenCalledWith(text);
+  });
+
+  it("shares a ghostly1 invite as its link on ghostly.tools, shown and copied", async () => {
+    const { inviteCode } = createChatInvite();
+    const { user, onChange } = card({ code: inviteCode });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByTestId("invite-link")).toHaveTextContent(`ghostly.tools/#${inviteCode}`);
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+    await user.click(screen.getByRole("button", { name: "Copy invite" }));
+    expect(writeText).toHaveBeenCalledWith(`https://ghostly.tools/#${inviteCode}`);
   });
 
   it("cannot change delivery before the chat exists", () => {

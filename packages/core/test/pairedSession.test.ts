@@ -239,6 +239,20 @@ describe("paired chat admission and session binding", () => {
       await vi.waitFor(() => expect(p.a.state.status).toBe("ready"));
       expect(p.a.state.peerNeedsConfirmation).toBeFalsy();
     });
+    it("blocks a first answer from any key but the one the invite named", async () => {
+      // covers: invite.pin
+      const p = pair([{ seedB64: createIdentity().seedB64, expectedPeerKey: createIdentity().pubKeyZ32 },
+        { seedB64: createIdentity().seedB64 }], tofu, tofu);
+      await vi.waitFor(() => expect(p.a.state.status).toBe("error"));
+      expect(p.a.state.keyMismatch).toBe(true);
+      expect(p.pinned[0]).not.toHaveBeenCalled();
+      expect(p.ready[0]).not.toHaveBeenCalled();
+    });
+    it("pins the key the invite named when that key answers", async () => {
+      const inviter = createIdentity();
+      const p = pair([{ seedB64: createIdentity().seedB64, expectedPeerKey: inviter.pubKeyZ32 }, { seedB64: inviter.seedB64 }], tofu, tofu);
+      await vi.waitFor(() => expect(p.pinned[0]).toHaveBeenCalledWith(inviter.pubKeyZ32, true));
+    });
     it("still blocks a key that changed under a pinned contact", async () => {
       const p = pair([{ seedB64: createIdentity().seedB64, peerKey: createIdentity().pubKeyZ32 },
         { seedB64: createIdentity().seedB64 }], tofu, { ...tofu, filesSupport: true, paymentsSupport: true });

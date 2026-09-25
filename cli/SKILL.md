@@ -112,6 +112,8 @@ echo "Alert: Server down!" | ghostly-cli send --seed "$SEED" --peer "$PEER" --ke
 ghostly-cli invite parse "ghost://pk:abc123...#key..."
 ```
 
+The CLI is a compatibility client: it reads only `ghost://` invites. An app invite (`ghostly1...`, or `https://ghostly.tools/#ghostly1...`) is refused with a message saying to open it in the Ghostly app.
+
 ## Flags
 
 | Command | Flag | Description |

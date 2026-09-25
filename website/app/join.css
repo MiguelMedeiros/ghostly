@@ -1,0 +1,87 @@
+/* The join page: a visit to ghostly.tools/#ghostly1… (components/site/JoinLanding.tsx). */
+.join-dialog {
+  width: min(440px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  margin: auto;
+  padding: 32px 28px 24px;
+  color: var(--text);
+  text-align: center;
+  border-color: var(--line-2);
+  box-shadow: 0 40px 120px -30px rgba(34, 211, 238, 0.35);
+}
+.join-dialog::backdrop {
+  background: rgba(3, 7, 12, 0.72);
+  backdrop-filter: blur(6px);
+}
+.join-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  color: var(--dim);
+  cursor: pointer;
+}
+.join-close:hover,
+.join-close:focus-visible {
+  color: var(--text);
+  background: var(--surface-3);
+}
+.join-close svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+.join-ghost {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+.join-title {
+  font-size: clamp(24px, 5vw, 30px);
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+.join-lead {
+  margin-top: 10px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.join-actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 24px;
+}
+.join-actions .btn {
+  width: 100%;
+  white-space: normal;
+}
+.join-note {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--mint);
+}
+.join-code {
+  display: block;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--surface-3);
+  color: var(--text);
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 12px;
+  word-break: break-all;
+  user-select: all;
+}
+.join-private {
+  margin-top: 18px;
+  line-height: 1.5;
+}

@@ -14,7 +14,7 @@ async function watchStreams(peer: Peer) {
 async function createDht(peer:Peer) {
   await peer.page.getByTitle("New Chat").click();
   await peer.page.getByRole("radio",{name:"Text only",exact:true}).click();
-  await expect.poll(() => copyInvite(peer.page)).toMatch(/^pair2d\//);
+  await expect.poll(() => copyInvite(peer.page)).toMatch(/^https:\/\/ghostly\.tools\/#ghostly1p/);
   return copyInvite(peer.page);
 }
 async function join(peer:Peer,invite:string) {
@@ -45,8 +45,11 @@ test("DHT-only starts from an invite without streams, preserves drafts and recei
   await b.page.getByPlaceholder("Message…").fill("Reply over DHT");await b.page.getByRole("button",{name:"Send message",exact:true}).click();
   await expect(chat(a).getByText("Reply over DHT",{exact:true})).toBeVisible();await expect(received(b)).toHaveCount(1);
   await a.page.reload();await b.page.reload();
-  for(const p of [a,b]) {await expect(p.page.getByTestId("connection-options")).toHaveAccessibleName(/DHT only/);await expect(chat(p).getByText(text,{exact:true})).toHaveCount(1);await expect(chat(p).getByText("Reply over DHT",{exact:true})).toHaveCount(1);}
-  await noStreams([a,b]);
+  // The inviter chose DHT only; the contact, whose ghostly1 code carries no mode, stays on the DHT it learnt from the envelopes.
+  await expect(a.page.getByTestId("connection-options")).toHaveAccessibleName(/DHT only/);
+  await expect(b.page.getByTestId("connection-options")).toHaveAccessibleName(/DHT/);
+  for(const p of [a,b]) {await expect(chat(p).getByText(text,{exact:true})).toHaveCount(1);await expect(chat(p).getByText("Reply over DHT",{exact:true})).toHaveCount(1);}
+  await noStreams([a]);
   await expect(a.page.getByRole("button",{name:"Send a file",exact:true})).toBeDisabled();
 });
 
@@ -58,7 +61,7 @@ test("DHT published while contact is away survives sender restart and is receive
   await expect(received(a)).toHaveCount(0);await a.page.reload();
   await expect(chat(a).getByText("Waiting in the DHT mailbox",{exact:true})).toHaveCount(1);
   await b.page.goto(returnTo);await expect(chat(b).getByText("Waiting in the DHT mailbox",{exact:true})).toHaveCount(1);await expect(received(a)).toHaveCount(1);
-  await b.page.reload();await expect(chat(b).getByText("Waiting in the DHT mailbox",{exact:true})).toHaveCount(1);await noStreams([a,b]);
+  await b.page.reload();await expect(chat(b).getByText("Waiting in the DHT mailbox",{exact:true})).toHaveCount(1);await noStreams([a]);
 });
 
 test("DHT and live delivery share history; offline text fallback is independent of strict stream fallback",{ tag: ["@feature:chat.dht.fallback"] },async({peer})=>{

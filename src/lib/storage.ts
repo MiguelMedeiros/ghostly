@@ -1,4 +1,4 @@
-import { MAX_NICK_LENGTH, sanitizeDisplayText } from "@ghostly/core";
+import { MAX_NICK_LENGTH, sanitizeDisplayText, type LinkParams } from "@ghostly/core";
 import type { ChatMessage, ChatSession } from "./types";
 
 /**
@@ -390,6 +390,21 @@ export interface SessionKeys {
   seedB64: string;
   peerPubKeyB64: string;
   encKeyB64: string;
+  participationSeedB64?: string;
+  peerParticipationKeyB64?: string;
+}
+
+/** What the engine needs to run a stored session's link (`ensureLink`). */
+export function sessionLinkParams(session: ChatSession): LinkParams {
+  return {
+    profile: session.profile,
+    deliveryMode: session.deliveryMode,
+    seedB64: session.mySeedB64,
+    peerPubKeyZ32: session.peerPubKeyB64,
+    encKeyB64: session.encKeyB64,
+    ...(session.participationSeedB64 ? { participationSeedB64: session.participationSeedB64 } : {}),
+    ...(session.peerParticipationKeyB64 ? { peerParticipationKeyZ32: session.peerParticipationKeyB64 } : {}),
+  };
 }
 
 /**
@@ -411,6 +426,8 @@ export function ensureSession(
       mySeedB64: keys.seedB64,
       peerPubKeyB64: keys.peerPubKeyB64,
       encKeyB64: keys.encKeyB64,
+      ...(keys.participationSeedB64 ? { participationSeedB64: keys.participationSeedB64 } : {}),
+      ...(keys.peerParticipationKeyB64 ? { peerParticipationKeyB64: keys.peerParticipationKeyB64 } : {}),
       messages: [],
       createdAt: options.createdAt ?? Date.now(),
     });

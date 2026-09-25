@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { INVITER_DIAL_GRACE_MS, PAIRING_ATTEMPT_MS, PAIRING_RETRY_MS } from "../src/ghostlink";
 import { RELAY_POLL_INTERVALS } from "../src/link";
-import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, invitationWhere, open, run, untilLive, useFakeWorld, type NetworkModel } from "./support/pairingWorld";
+import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, invitation, invitationWhere, open, run, untilLive, useFakeWorld, type NetworkModel } from "./support/pairingWorld";
 
 // covers: chat.paired.pair-timing, chat.paired.progress, chat.paired.pair
 
@@ -120,5 +120,21 @@ describe("a first pairing, at web pace", () => {
     const joiner = open(made.joiner, pkarr, { pollIntervals: RELAY_POLL_INTERVALS });
     const took = await untilLive(inviter, joiner, 30_000);
     expect(took).toBeLessThanOrEqual(10_000);
+  }, 30_000);
+});
+
+describe("a contact who chose DHT only", () => {
+  // A ghostly1 code carries no delivery mode (WISP 801): the joiner learns it from the first envelope.
+  it("pairs the joiner through the mailbox: its first pairing ends live, not failed on the stream nobody answers", async () => {
+    const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
+    const made = invitation();
+    made.inviter.params = { ...made.inviter.params, deliveryMode: "dht" };
+    const inviter = open(made.inviter, pkarr, { dht: true });
+    const joiner = open(made.joiner, pkarr, { dht: true });
+    await run(2 * PAIRING_ATTEMPT_MS);
+    expect(joiner.pinned.length).toBeGreaterThan(0);
+    expect(joiner.link.pairingProgress?.stage).toBe("live");
+    expect(joiner.progress.map(p => p.stage)).not.toContain("failed");
+    expect(inviter.link.pairingProgress).toBeUndefined();
   }, 30_000);
 });

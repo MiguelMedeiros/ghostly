@@ -239,6 +239,24 @@ describe("DHT delivery: ordering and replay", () => {
     await again.stop();
   });
 
+  it("before the pin, takes only the key a ghostly1 invite named, and forgets an impostor's envelope", async () => {
+    // covers: invite.pin
+    const seedB64 = createIdentity().seedB64;
+    const named = setup({ bobCredentials: { seedB64, expectedPeerKey: createIdentity().pubKeyZ32 } }); await named.bob.start();
+    await named.put(named.invitePacket(named.body()));
+    expect(named.messages).toEqual([]);
+    expect(named.pins).toEqual([]);
+    // Another invite holder can write to this mailbox, so a refusal is not remembered: the chat stays usable.
+    expect(named.last().peerRejected).toBeFalsy();
+    expect(named.views.at(-1)?.error).toBeUndefined();
+    await named.bob.stop();
+    const h = setup(); h.credentials.expectedPeerKey = h.alice.pubKeyZ32; await h.bob.start();
+    await h.put(h.invitePacket(h.body()));
+    expect(h.messages.map(m => m.text)).toEqual(["hello"]);
+    expect(h.pins).toEqual([h.alice.pubKeyZ32]);
+    await h.bob.stop();
+  });
+
   it("fails closed and remembers it when a different participation key signs after pinning", async () => {
     const other = createIdentity().pubKeyZ32;
     const h = setup({ bobCredentials: { seedB64: createIdentity().seedB64, peerKey: other }, pollMs: 10_000 });

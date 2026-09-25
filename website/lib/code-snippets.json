@@ -1,7 +1,7 @@
 {
   "createLink": {
     "file": "packages/core/src/invite.ts",
-    "line": 38,
+    "line": 166,
     "code": "/** Creates both ends of a link: keep `mine`, hand `invite` to the peer. */\nexport function createLink(): { mine: LinkParams; invite: LinkParams } {\n  const a = createIdentity();\n  const b = createIdentity();\n  const encKeyB64 = toBase64Url(generateEncryptionKey());\n  return {\n    mine: { seedB64: a.seedB64, peerPubKeyZ32: b.pubKeyZ32, encKeyB64 },\n    invite: { seedB64: b.seedB64, peerPubKeyZ32: a.pubKeyZ32, encKeyB64 },\n  };\n}"
   },
   "rankTransports": {

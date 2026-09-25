@@ -80,7 +80,7 @@ async function pairOnce(run: number, peer: (name: string, options?: { realRelays
 
   await inviter.page.getByTitle("New Chat").click();
   const invite = await copyInvite(inviter.page);
-  expect(invite).toMatch(/^pair1\//);
+  expect(invite).toMatch(/^https:\/\/ghostly\.tools\/#ghostly1p/);
   // The invite was made a moment ago, as when someone copies it and sends it over (`E2E_PAIR_INVITE_AGE_MS`).
   await inviter.page.waitForTimeout(INVITE_AGE_MS);
   await joiner.page.getByRole("button", { name: "Join chat", exact: true }).first().click();

@@ -152,13 +152,15 @@ export interface Opened { link: GhostLink; progress: PairingProgress[]; pinned: 
 const opened: GhostLink[] = [];
 
 /** One side's link, as the engine opens it for a chat never paired (node.ts `startLink` + the joiner's `expectPeer`). */
-export function open(side: Side, pkarr: MemoryPkarr, options: { active?: boolean; pollIntervals?: PollIntervals } = {}): Opened {
+export function open(side: Side, pkarr: MemoryPkarr, options: { active?: boolean; pollIntervals?: PollIntervals; dht?: boolean } = {}): Opened {
   const progress: PairingProgress[] = [], pinned: string[] = [];
   const link = new GhostLink({
     params: side.params,
     pairing: { credentials: { seedB64: side.seedB64 }, pinPeer: async key => { pinned.push(key); }, trustOnFirstUse: true },
     pairingProgress: side.old ? undefined : { role: side.role, startedAt: side.createdAt },
     transport: pkarr.transport(),
+    // The DHT mailbox too (WISP 403), as the engine opens it for every paired chat.
+    ...(options.dht ? { dht: { save: async () => {}, pollMs: 1_000 } } : {}),
     pollIntervals: options.pollIntervals ?? DHT_POLL_INTERVALS,
     autoConnect: true,
     createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,

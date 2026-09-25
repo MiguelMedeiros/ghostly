@@ -19,7 +19,7 @@ import { ProfileSwitchSplash } from "./components/ProfileSwitchSplash";
 import { ensureSession, loadSession } from "./lib/storage";
 import { useI18n } from "./contexts/I18nContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { chatPath, parseChatRoute } from "./lib/url";
+import { INVITE_REFUSAL_MESSAGE, chatPath, inviteRouteCode, readInvite } from "./lib/url";
 import { groupPath } from "./lib/groups";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useAnchorHome, useAppNavigation } from "./hooks/useAppNavigation";
@@ -35,21 +35,21 @@ function ChatLinkIntake() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { t } = useI18n();
-  const [invalid, setInvalid] = useState(false);
+  const [invalid, setInvalid] = useState<(typeof INVITE_REFUSAL_MESSAGE)[keyof typeof INVITE_REFUSAL_MESSAGE] | "join.invalid" | null>(null);
 
   // An effect, not a layout effect: the router starts listening in its own layout effect, after this
   // one's, and would miss a navigation made before it (an invite link opened in a new tab).
   useEffect(() => {
-    const rest = pathname.match(/^\/chat\/(.+)$/)?.[1];
+    const rest = inviteRouteCode(pathname);
     if (!rest) return;
-    const keys = parseChatRoute(pathname);
+    const reading = readInvite(rest);
     let sessionId: string | null = null;
-    if (keys) {
-      try { sessionId = ensureSession(keys); } catch { sessionId = null; }
-    } else if (!rest.includes("/") && loadSession(decodeURIComponent(rest))) return; // an ordinary chat address
+    if (reading.ok) {
+      try { sessionId = ensureSession(reading.keys); } catch { sessionId = null; }
+    } else if (!rest.includes("/") && !/^ghostly1/i.test(rest) && loadSession(decodeURIComponent(rest))) return; // an ordinary chat address
     if (!sessionId) {
       // Whatever it was, it leaves the address bar and the history: it may hold a key.
-      setInvalid(true);
+      setInvalid(reading.ok ? "join.invalid" : INVITE_REFUSAL_MESSAGE[reading.reason]);
       navigate("/", { replace: true });
       return;
     }
@@ -59,14 +59,14 @@ function ChatLinkIntake() {
 
   useEffect(() => {
     if (!invalid) return;
-    const timer = setTimeout(() => setInvalid(false), 6000);
+    const timer = setTimeout(() => setInvalid(null), 6000);
     return () => clearTimeout(timer);
   }, [invalid]);
 
   return invalid ? (
-    <div role="alert" data-testid="invite-link-invalid" onClick={() => setInvalid(false)}
+    <div role="alert" data-testid="invite-link-invalid" onClick={() => setInvalid(null)}
       className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-danger shadow-xl cursor-pointer">
-      {t("join.invalid")}
+      {t(invalid)}
     </div>
   ) : null;
 }
@@ -114,7 +114,7 @@ function GroupLinkIntake() {
  * this device does not have. Everything else opened directly gets home put under it (`useAnchorHome`).
  */
 function isIntake(pathname: string): boolean {
-  if (pathname.startsWith("/join/")) return true;
+  if (pathname.startsWith("/join/") || /^\/?ghostly1/i.test(pathname)) return true;
   const rest = pathname.match(/^\/chat\/(.+)$/)?.[1];
   return !!rest && (rest.includes("/") || !loadSession(decodeURIComponent(rest)));
 }

@@ -94,6 +94,9 @@ it("keeps a spare invite warmed, hands it out, and makes the next one", async ()
     expect(publishes.filter(k => k === contact)).toHaveLength(1);
     const view = () => node.getState().links.find(l => l.id === linkId)!;
     await vi.waitFor(() => expect(view().pairingProgress).toMatchObject({ role: "inviter", stage: "waiting" }));
+    // A ghostly1 invite (WISP 801), and this side answers with the participation key the code names.
+    expect(taken.inviteCode).toMatch(/^ghostly1p/);
+    expect(view().participationKey).toBe(decodeInviteCode(taken.inviteCode)!.peerParticipationKeyZ32);
     // A second take is another pair, not the same keys again.
     expect(node.takeInvite().inviteCode).not.toBe(taken.inviteCode);
   } finally { vi.useRealTimers(); await node.shutdown(); vi.unstubAllGlobals(); }
