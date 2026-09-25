@@ -3,6 +3,7 @@ import { useBackdropDismiss, useDialogFocus } from "../hooks/useDismiss";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { Switch } from "./wallet/ui";
 import { useAppNavigation } from "../hooks/useAppNavigation";
+import { servicesUnavailable } from "../lib/servicesAvailability";
 
 const GLOBE = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>;
 
@@ -19,13 +20,16 @@ export function ChatServicesDialog({ peerPubKey, name, onClose }: { peerPubKey: 
   if (!platform) return null;
   const online = platform.isOnline();
   const mine = platform.features.shareLocalServices ? platform.getSharedServices() : [];
-  const theirs = (platform.getPeer(peerPubKey)?.services ?? []).filter((s) => s.type === "http");
+  const peer = platform.getPeer(peerPubKey);
+  const theirs = (peer?.services ?? []).filter((s) => s.type === "http");
+  const unavailable = servicesUnavailable(peer, name);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 animate-fade-in" {...backdrop}>
       <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="chat-services-title" data-testid="chat-services" className="focus:outline-none w-full max-w-md bg-panel-header border border-border rounded-2xl shadow-2xl p-5 space-y-4 max-h-[85dvh] overflow-y-auto">
         <div>
           <h2 id="chat-services-title" className="text-lg font-medium text-text-primary">Apps with {name}</h2>
           <p className="text-xs text-text-muted mt-1">Pick which of your apps {name} can open.</p>
+          {unavailable && <p data-testid="chat-services-unavailable" className="text-xs text-text-secondary mt-2">{unavailable}</p>}
         </div>
 
         <section className="space-y-2">

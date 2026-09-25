@@ -647,12 +647,19 @@ export interface LinkView {
    */
   pairingProgress?: PairingProgress;
   peerVerified?: boolean;
-  /** `methods`: ways of paying both sides allow in this chat right now. */
-  capabilities?: { files: boolean; payments: boolean; methods?: Record<PaymentMethodName, boolean> };
+  /**
+   * `methods`: ways of paying both sides allow in this chat right now. `calls` / `services`: both sides offer
+   * `calls/1` / `services/1` on the open session (paired chats only; they need a live connection).
+   */
+  capabilities?: { files: boolean; payments: boolean; methods?: Record<PaymentMethodName, boolean>; calls?: boolean; services?: boolean };
   /** Ways of paying this device allows in this chat. */
   paymentMethods?: Record<PaymentMethodName, boolean>;
   /** Both sides announced private groups on the open session: this contact can be invited. */
   groups?: boolean;
+  /** Paired chats: what each side offers after the handshake (`paired-capabilities`); `peer` is null until it says. */
+  sessionOffers?: { mine: string[]; peer: string[] | null };
+  /** Paired chats: why a call cannot be placed right now, or null when it can. */
+  callsUnavailable?: string | null;
   availableTransports?: PairedTransport[];
   deliveryMode?: DeliveryMode;
   dhtDelivery?: DhtDeliveryView;

@@ -26,6 +26,8 @@ export * from "./lnurl";
 export * from "./version";
 
 export * from "./pairedSession";
+export * from "./pairedCapabilities";
+export * from "./pairedCalls";
 
 export * from "./pairedTransports";
 
