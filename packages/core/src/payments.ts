@@ -30,6 +30,11 @@ export const ENDPOINT = {
    * bearer string only the federation that issued them redeems).
    */
   fedimint: "fedimint-ecash/1",
+  /**
+   * Spark, wallet to wallet. Payload in a request: a payment target whose address is a Spark invoice made for
+   * that request; in a payment: a receipt hint `{ id }` (the payer's transfer id).
+   */
+  spark: "btc-spark/1",
 } as const;
 
 export interface PaymentAmount {
@@ -57,7 +62,7 @@ export interface PaymentAsk {
   id: string;
   timestamp: number;
   amount: PaymentAmount;
-  method: "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint";
+  method: "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark";
   memo?: string;
 }
 

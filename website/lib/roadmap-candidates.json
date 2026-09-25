@@ -205,7 +205,7 @@
     "status": "Planned",
     "range": "2xx",
     "section": "Rails and wallet adapters",
-    "body": "**Provider / signer route**\n\nSpark wallet SDK or separately selected Breez SDK; operator/service dependencies\n\n**Runtime and platform route**\n\nUpstream TS/RN; Breez Rust bindings documented\n\n**Confirmed evidence, Ghostly status, restriction / next decision**\n\n**Candidate**: [SDK overview](https://docs.spark.money/wallets/overview). Pin network and trust/exit model; test transfer states, receive, exit, recovery and Lightning route. Token support does not establish a particular USDT issuer/asset or chain.",
+    "body": "**Provider / signer route**\n\nBreez SDK Spark (WebAssembly `@breeztech/breez-sdk-spark` 0.26.0, nodeless), the same SDK and seed as the Breez Lightning source; Spark's operators and Lightspark's SSP\n\n**Runtime and platform route**\n\nOne WebAssembly path for web, extension offscreen page and Desktop WebView\n\n**Confirmed evidence, Ghostly status, restriction / next decision**\n\n**In development**: its own method `spark` (announced in the session's payment list only), [Draft 2xx](2xx-spark.md). Spark to Spark with Spark addresses (static: the wallet's identity) and Spark invoices (per request: amount, expiry, id), no Lightning hop. Testnet on Breez and Lightspark's hosted regtest (no API key, proven); Mainnet behind a Breez API key, labelled real bitcoin. \"Use for Lightning too\" makes the same wallet the Breez source. Unilateral exit, Spark tokens and the faucet (reCAPTCHA) remain open.",
     "sourceAnchor": "rails-and-wallet-adapters"
   },
   {

@@ -1,6 +1,6 @@
 import {formatPaymentAmount} from '@ghostly/core';
 import type {WalletState} from '../lib/platform';
-export type WalletRail = 'cashu' | 'lightning' | 'arkade' | 'bark' | 'usdt' | 'bitcoin' | 'fedimint';
+export type WalletRail = 'cashu' | 'lightning' | 'arkade' | 'bark' | 'spark' | 'usdt' | 'bitcoin' | 'fedimint';
 /** The cards a chat can pay with: all of them. */
 export type ChatRail = WalletRail;
 export const CASHU_MINT_SOURCE = 'cashu-mint';
@@ -25,16 +25,18 @@ export function walletCards(state:WalletState,testMints:readonly string[],{badge
  const unit=(isTest:boolean)=>badged?pageUnit(state,isTest):isTest?'test sats':'sats';
  const test=testnet?0:state.mints.filter(m=>testMints.includes(m.url)).reduce((sum,m)=>sum+m.balance,0);
  const cashu=`${Math.max(0,state.balance-test).toLocaleString()} ${unit(testnet)}`;
- const ark=state.ark,bark=state.bark,usdt=state.usdt;
+ const ark=state.ark,bark=state.bark,spark=state.spark,usdt=state.usdt;
  // Ready means it can receive: an Ark wallet that has no address yet (its provider has not answered) is not.
  const arkReady=!!ark?.configured&&!ark.locked&&!!ark.address,usdtReady=!!usdt?.configured&&!usdt.locked;
  const arkTest=ark?.network&&ark.network!=='bitcoin',usdtTest=!!usdt?.chainId&&usdt.chainId!==1;
  const barkReady=!!bark?.configured&&!bark.locked&&!!bark.address,barkTest=bark?.network!=='bitcoin';
+ const sparkReady=!!spark?.configured&&!spark.locked&&!!spark.address,sparkTest=(spark?.network??(testnet?'regtest':'bitcoin'))!=='bitcoin';
  return [
   {id:'cashu',name:'Cashu',balance:cashu,detail:testnet?'Ecash · test mints':test?`+${test.toLocaleString()} test sats`:'Ecash · your mints',status:state.mints.length?'Ready':'Set up',ready:state.mints.length>0},
   lightningCard(state,cashu,unit(testnet)),
   {id:'arkade',name:'Ark',balance:arkReady?`${ark!.balance.toLocaleString()} ${unit(!!arkTest)}`:ark?.configured&&!ark.automatic?'Locked':'Connecting…',detail:`Arkade · ${arkTest?ark!.network:'Bitcoin'}`,status:arkReady?'Ready':'Experimental',ready:arkReady},
   {id:'bark',name:'Bark',balance:barkReady?`${bark!.balance.toLocaleString()} ${unit(barkTest)}`:bark?.unavailable?'Testnet only':'Connecting…',detail:`Second's Ark · ${bark?.network==='regtest'?'regtest':bark?.network==='bitcoin'?'Bitcoin':'signet'}`,status:barkReady?'Ready':bark?.unavailable?'Not on Mainnet yet':'Experimental',ready:barkReady},
+  {id:'spark',name:'Spark',balance:sparkReady?`${spark!.balance.toLocaleString()} ${unit(sparkTest)}`:spark?.needsKey?'Needs a key':'Connecting…',detail:`Spark · ${sparkTest?'regtest':'Bitcoin'}`,status:sparkReady?(sparkTest?'Ready':'Real bitcoin'):spark?.needsKey?'Set up':'Experimental',ready:sparkReady},
   bitcoinCard(state,unit(testnet)),
   fedimintCard(state,unit),
   {id:'usdt',name:'USDT',balance:usdtReady?`${formatPaymentAmount(usdt!.balance,usdt!.decimals)} ${usdtTest?'TEST-USDT':'USDT'}`:usdt?.configured&&!usdt.automatic?'Locked':'Connecting…',detail:usdt?.chainId===31337?'EVM local · test token':usdt?.chainId===11155111?'Sepolia · test token':'Ethereum · via WDK',status:usdtReady?'Ready':'Experimental',ready:usdtReady},

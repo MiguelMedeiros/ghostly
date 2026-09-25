@@ -18,7 +18,7 @@ const ME = "me".padEnd(52, "y"), ALICE = "alice".padEnd(52, "y"), BOB = "bob".pa
 const member = (patch: Partial<GroupMemberView>): GroupMemberView => ({ key: ME, role: "member", me: false, online: false, missing: 0, ...patch });
 const members = [member({ key: ME, me: true }), member({ key: ALICE, nick: "Alice", role: "admin" }), member({ key: BOB, nick: "Bob" }), member({ key: CAROL, nick: "Carol" })];
 const group = (patch: Partial<GroupView> = {}) => groupView({ profile: "community", status: "active", epoch: 1, myKey: ME, members, community: { hub: false, hubs: 2, connected: 1 }, ...patch });
-const none = { cashu: false, lightning: false, arkade: false, bark: false, bitcoin: false, usdt: false, fedimint: false };
+const none = { cashu: false, lightning: false, arkade: false, bark: false, spark: false, bitcoin: false, usdt: false, fedimint: false };
 /** What the engine lists once members said what they take: Carol takes nothing this device allows. */
 const edges = [
   linkView({ id: `cpay:group-1:${ALICE}`, peerPubKeyZ32: ALICE, capabilities: { files: false, payments: true, methods: { ...none, cashu: true, lightning: true } } }),

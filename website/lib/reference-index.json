@@ -339,6 +339,23 @@
     "notices": []
   },
   {
+    "file": "2xx-spark.md",
+    "sourcePath": "docs/wisps/2xx-spark.md",
+    "aliases": [],
+    "slug": "2xx-spark",
+    "title": "WISP 2xx — Spark payments",
+    "status": "Draft",
+    "updated": "2026-09-24",
+    "implementation": "Experimental browser adapter, Breez SDK Spark @breeztech/breez-sdk-spark 0.26.0 (WebAssembly, nodeless). Every Testnet profile opens a wallet on Breez and Lightspark's hosted regtest. Mainnet makes one only after the person enters a Breez API key.",
+    "documentKind": "Adapter",
+    "dependencies": [
+      "200-payments.md",
+      "203-lightning.md"
+    ],
+    "summary": "Spark is a Bitcoin layer 2. Its signing operators co-sign transfers of off-chain leaves: a transfer between two Spark wallets is instant, costs no on-chain fee, and needs no Lightning route. Before this draft Ghostly used Spark only through the Breez Lightning source (203, breez): it paid and received BOLT11 invoices from a Spark wallet. This adapter makes Spark a way of paying of its own, spark. Two contacts who bot",
+    "notices": []
+  },
+  {
     "file": "300-peer-proofs.md",
     "sourcePath": "docs/wisps/300-peer-proofs.md",
     "aliases": [

@@ -1,7 +1,7 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { decodeBolt11 } from "@ghostly/core";
 import type { Payment, PaymentType, PrepareSendPaymentResponse } from "@breeztech/breez-sdk-spark/web";
-import { loadBreezSdk, type BreezNetwork, type BreezSdkModule, type BreezWallet } from "./breezSdk";
+import { breezStorage, loadBreezSdk, openBreez, type BreezSdkModule, type BreezWallet } from "./breezSdk";
 import { isRecoveryPhrase, normalizePhrase } from "./recoveryPhrase";
 import type { InvoiceStatus, LightningInvoice, LightningPayResult, LightningPaymentRef, LightningPaymentStatus, LightningProvider, LightningProviderDescriptor } from "./lightning";
 import { isNothingSpentError, NothingSpentError, type ProviderNetwork, type ProviderPlatform } from "./types";
@@ -25,16 +25,12 @@ const QUOTE_MS = 60_000;
 const PAGE = 100, PAGES = 10;
 /** Without any record of a payment, it is called failed only this long after its invoice expired. */
 const LOST_AFTER_MS = 3600_000;
-const DISCONNECT_MS = 10_000;
 
 const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-const breezNetwork = (network: ProviderNetwork): BreezNetwork => (network === "bitcoin" ? "mainnet" : "regtest");
 const sats = (value: bigint | number) => { const n = Number(value); if (!Number.isSafeInteger(n) || n < 0) throw new Error("Breez returned an invalid amount"); return n; };
 const message = (error: unknown) => (error instanceof Error ? error.message : typeof error === "string" ? error : "Breez refused the payment");
 
-/** The wallet's own storage: one per network and seed, named without revealing anything about the seed. */
-export const breezStorage = (network: ProviderNetwork, mnemonic: string) =>
-  `ghostly-breez-${breezNetwork(network)}-${hex(sha256(new TextEncoder().encode(`ghostly-breez:${breezNetwork(network)}:${mnemonic}`))).slice(0, 16)}`;
+export { breezStorage };
 
 /**
  * The idempotency key of one attempt at paying one invoice: asking the SDK twice with it pays once.
@@ -59,9 +55,6 @@ function preimageOf(payment: Payment): string | undefined {
   return details?.type === "lightning" ? details.htlcDetails.preimage : details?.type === "spark" ? details.htlcDetails?.preimage : undefined;
 }
 
-/** One SDK instance per wallet storage: re-saving the same wallet must not run two over one database. */
-const open = new Map<string, { wallet: Promise<BreezWallet>; refs: number }>();
-
 /**
  * Lightning through the Breez SDK, nodeless: a self-custodial wallet on Spark whose seed Ghostly
  * generated (or the person restored) and keeps sealed. Invoices are received and paid through Breez's
@@ -79,27 +72,8 @@ export class BreezLightning implements LightningProvider {
   private constructor(private readonly wallet: BreezWallet, private readonly network: ProviderNetwork, private readonly release: () => Promise<void>) {}
 
   static async connect(params: { network: ProviderNetwork; mnemonic: string; apiKey?: string }, sdk: () => Promise<BreezSdkModule> = loadBreezSdk, storage = breezStorage): Promise<BreezLightning> {
-    const key = `${storage(params.network, params.mnemonic)}|${params.apiKey ? hex(sha256(new TextEncoder().encode(params.apiKey))).slice(0, 8) : ""}`;
-    let entry = open.get(key);
-    if (!entry) {
-      const wallet = sdk().then((module) => module.connect({ network: breezNetwork(params.network), mnemonic: params.mnemonic, apiKey: params.apiKey, storage: storage(params.network, params.mnemonic) }));
-      entry = { wallet, refs: 0 };
-      open.set(key, entry);
-      wallet.catch(() => { if (open.get(key) === entry) open.delete(key); });
-    }
-    entry.refs++;
-    const held = entry;
-    let wallet: BreezWallet;
-    try { wallet = await held.wallet; }
-    catch (error) { held.refs--; throw error; }
-    let released = false;
-    return new BreezLightning(wallet, params.network, async () => {
-      if (released) return;
-      released = true;
-      if (--held.refs > 0) return;
-      if (open.get(key) === held) open.delete(key);
-      await Promise.race([wallet.disconnect(), new Promise((resolve) => setTimeout(resolve, DISCONNECT_MS))]);
-    });
+    const { wallet, release } = await openBreez(params, sdk, storage);
+    return new BreezLightning(wallet, params.network, release);
   }
 
   async info() {

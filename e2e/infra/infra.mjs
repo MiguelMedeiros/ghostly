@@ -315,6 +315,8 @@ async function full(args) {
     // The Ark SDK opens server-sent events, which Node has behind a flag.
     const env = environment({
       GHOSTLY_BREEZ_TESTNET: process.env.GHOSTLY_BREEZ_TESTNET ?? (process.env.GHOSTLY_BREEZ_COUNTERPART ? "1" : "0"),
+      // Spark to Spark: the same hosted regtest, the same rule (GHOSTLY_SPARK_COUNTERPART, or the Breez one).
+      GHOSTLY_SPARK_REGTEST: process.env.GHOSTLY_SPARK_REGTEST ?? (process.env.GHOSTLY_SPARK_COUNTERPART || process.env.GHOSTLY_BREEZ_COUNTERPART ? "1" : "0"),
       NODE_OPTIONS: [process.env.NODE_OPTIONS, "--experimental-eventsource"].filter(Boolean).join(" "),
     });
     // One file at a time: bitcoind.regtest mines a hundred blocks at once, which runs out the clock of any HTLC

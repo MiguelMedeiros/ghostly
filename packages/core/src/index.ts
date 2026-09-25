@@ -40,6 +40,7 @@ export { DhtDelivery, DHT_TEXT_BYTES, DHT_MESSAGE_TTL, emptyDhtDeliveryState, ty
 export * from "./storeForward";
 export * from "./paymentIntent";
 export * from "./bitcoinAddress";
+export * from "./sparkAddress";
 
 export * from "./identityProofs";
 export * from "./bitcoinScript";

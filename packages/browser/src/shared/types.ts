@@ -4,6 +4,7 @@ import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
 import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
 import type { FedimintWalletView } from "../engine/paymentAdapters/fedimintWallet";
+import type { SparkWalletView } from "../engine/paymentAdapters/sparkWallet";
 import type { LightningView } from "../engine/paymentAdapters/providers/lightningService";
 import type { BitcoinView } from "../engine/paymentAdapters/providers/bitcoinService";
 import type { PaymentReview, PaymentTarget } from "@ghostly/core";
@@ -393,6 +394,8 @@ export interface WalletView {
   bark?: BarkWalletView;
   /** Federations joined with an invite code, and their ecash. */
   fedimint?: FedimintWalletView;
+  /** Spark, wallet to wallet (the Breez SDK's Spark wallet; it can also be the Breez Lightning source). */
+  spark?: SparkWalletView;
   usdt?: UsdtWalletView;
   /** The Lightning source of this mode (the Cashu mints by default) and its latest operations. */
   lightning?: LightningView;
@@ -435,7 +438,7 @@ export interface StoredMessage {
 }
 
 /** The ways of paying a group note can name. */
-export type GroupPayRail = "cashu" | "lightning" | "arkade" | "bark" | "bitcoin" | "usdt" | "fedimint";
+export type GroupPayRail = "cashu" | "lightning" | "arkade" | "bark" | "bitcoin" | "spark" | "usdt" | "fedimint";
 
 /**
  * A payment between two members as the whole group sees it (WISP 9xx § Payments): who pays whom, how much, over

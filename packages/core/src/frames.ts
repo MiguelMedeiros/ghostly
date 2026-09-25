@@ -141,7 +141,7 @@ export interface PayAskFrame {
   ts: number;
   v: string;
   u: string;
-  m: "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint";
+  m: "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark";
   memo?: string;
 }
 
@@ -306,7 +306,7 @@ export function decodeControl(text: string): ControlFrame | null {
     }
     case "pay-ask": {
       if (!isPayId(f.id) || typeof f.ts !== "number" || !isAmount(f.v) || !isUnit(f.u)) return null;
-      if (f.m !== "arkade" && f.m !== "usdt" && f.m !== "bark" && f.m !== "bitcoin" && f.m !== "fedimint") return null;
+      if (f.m !== "arkade" && f.m !== "usdt" && f.m !== "bark" && f.m !== "bitcoin" && f.m !== "fedimint" && f.m !== "spark") return null;
       return { t: "pay-ask", id: f.id, ts: f.ts, v: f.v, u: f.u, m: f.m, memo: typeof f.memo === "string" ? f.memo.slice(0, 140) : undefined };
     }
     case "pay-res":

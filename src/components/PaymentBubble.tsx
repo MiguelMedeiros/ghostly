@@ -78,7 +78,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
   // Fedimint: the network of the federation it names (ours, when we joined it; the mode otherwise).
   const fedimint = payment.federation ?? payment.federations?.[0];
   const federationNetwork = fedimint ? wallet.getState()?.fedimint?.federations.find((f) => f.id === fedimint)?.network : undefined;
-  const testSats = payment.target?.method === "arkade" || payment.target?.method === "bark" || payment.target?.method === "bitcoin" || payment.target?.method === "fedimint" ? payment.target.network !== "bitcoin"
+  const testSats = payment.target?.method === "arkade" || payment.target?.method === "bark" || payment.target?.method === "bitcoin" || payment.target?.method === "fedimint" || payment.target?.method === "spark" ? payment.target.network !== "bitcoin"
     : fedimint ? (federationNetwork ? federationNetwork !== "bitcoin" : wallet.getState()?.mode === "testnet")
     : payment.target?.method === "cashu" ? payment.target.network === "cashu-test"
     : !tokenPayment && (payment.mint ? isWorthlessMint(payment.mint) : payment.mints?.length ? payment.mints.every(isWorthlessMint)
@@ -89,6 +89,8 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
     try {
       if (payment.target?.method === "bitcoin") return { uri: paymentUri({ kind: "bitcoin", address: payment.target.address, amountSat: payment.amount, lightning: payment.invoice }), value: payment.target.address };
       if (payment.target?.method === "arkade" || payment.target?.method === "bark") return { uri: paymentUri({ kind: "ark", address: payment.target.address, amountSat: payment.amount }), value: payment.target.address };
+      // A Spark invoice has no URI scheme wallets agree on: the invoice itself is what another Spark wallet pastes.
+      if (payment.target?.method === "spark") return { uri: payment.target.address, value: payment.target.address };
       if ((!payment.target || payment.target.method === "fedimint") && payment.invoice) return { uri: paymentUri({ kind: "lightning", invoice: payment.invoice }), value: payment.invoice };
     } catch { /* not something another wallet can open */ }
     return null;
@@ -113,7 +115,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
         </span>
         {" "}<span className="text-xs ml-1 text-[hsla(0,0%,100%,0.7)]">{tokenPayment?payment.target?.asset:testSats?'test sats':'sats'}</span>
       </p>
-      {payment.target && <p className="text-xs text-text-muted">{payment.target.method==="usdt"?"USDT":payment.target.method==="arkade"?"Ark":payment.target.method==="bark"?"Bark":payment.target.method==="bitcoin"?"Bitcoin on-chain":payment.target.method==="fedimint"?"Fedimint":"Cashu"} · {payment.target.network}</p>}
+      {payment.target && <p className="text-xs text-text-muted">{payment.target.method==="usdt"?"USDT":payment.target.method==="arkade"?"Ark":payment.target.method==="bark"?"Bark":payment.target.method==="spark"?"Spark":payment.target.method==="bitcoin"?"Bitcoin on-chain":payment.target.method==="fedimint"?"Fedimint":"Cashu"} · {payment.target.network}</p>}
       {!payment.target && fedimint && <p className="text-xs text-text-muted" data-testid="payment-fedimint">Fedimint{isRequest && !outgoing && payment.state === "pending" ? " · you share no federation: Lightning" : ""}</p>}
       {review && <PaymentReview review={review} wallet={wallet} onClose={()=>setReview(null)}/>}
       {payment.memo && <p className="text-[13px] m-0 mt-0.5 wrap-break-word">{payment.memo}</p>}

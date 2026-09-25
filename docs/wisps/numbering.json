@@ -145,6 +145,15 @@
   },
   {
     "oldId": "—",
+    "id": "206",
+    "oldFile": "2xx-spark.md",
+    "file": "2xx-spark.md",
+    "kind": "Adapter",
+    "displayNumber": "2xx",
+    "numberAssignment": "unassigned"
+  },
+  {
+    "oldId": "—",
     "id": "207",
     "oldFile": "2xx-fedimint.md",
     "file": "2xx-fedimint.md",

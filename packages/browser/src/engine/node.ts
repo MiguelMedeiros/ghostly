@@ -7,6 +7,8 @@ import { FedimintWallet } from "./paymentAdapters/fedimintWallet";
 import { FedimintAdapter, type FedimintPrepared } from "./paymentAdapters/fedimint";
 import { loadFedimintSdk, type FedimintSdk } from "./paymentAdapters/fedimintSdk";
 import type { BarkPrepared } from "./paymentAdapters/bark";
+import { SparkWallet } from "./paymentAdapters/sparkWallet";
+import type { SparkPrepared } from "./paymentAdapters/spark";
 import { PaymentCoordinator } from "./paymentAdapters/coordinator";
 import { intentRepository } from "./paymentAdapters/persistence";
 import type { ArkPrepared } from "./paymentAdapters/arkade";
@@ -15,6 +17,7 @@ import type { CashuPrepared } from "./wallet";
 import { LightningService } from "./paymentAdapters/providers/lightningService";
 import { BitcoinService, type BitcoinPrepared } from "./paymentAdapters/providers/bitcoinService";
 import { CASHU_MINT_SOURCE } from "./paymentAdapters/providers/cashuMint";
+import { BREEZ_SOURCE } from "./paymentAdapters/providers/breez";
 import { defaultRegistry, type ProviderRegistry } from "./paymentAdapters/providers/registry";
 import { onAdaptersChanged } from "../plugins/registry";
 import type { ProviderHost, ProviderPlatform } from "./paymentAdapters/providers/types";
@@ -177,7 +180,7 @@ function newLiveLink(stored: StoredLink, lastMessageAt: number, files = emptyLin
 }
 
 /** What a host may replace. The defaults are what a browser can do on its own. */
-const PAYMENT_METHODS: PaymentMethodName[] = ["cashu", "lightning", "arkade", "usdt", "bark", "bitcoin", "fedimint"];
+const PAYMENT_METHODS: PaymentMethodName[] = ["cashu", "lightning", "arkade", "usdt", "bark", "bitcoin", "fedimint", "spark"];
 
 export interface NodeOptions {
   nativeTransports?: Partial<Record<NativeTransport, (seedB64: string) => Promise<NativeEndpoint>>>;
@@ -186,7 +189,7 @@ export interface NodeOptions {
   pollIntervals?: PollIntervals;
   /** How to reach a shared local web app. Default: `fetch`, which needs the app's or the browser's consent. */
   localFetch?: LocalFetch;
-  /** Create and connect the Ark, Bark and USDT wallets at start. Default: on; tests without a network turn it off. */
+  /** Create and connect the Ark, Bark, Spark and USDT wallets at start. Default: on; tests without a network turn it off. */
   automaticWallets?: boolean;
   /** Where this engine runs, for the wallet providers that only work on some platforms. Default: web. */
   platform?: ProviderPlatform;
@@ -252,6 +255,7 @@ export class GhostlyNode implements EngineImplementation {
     // An invoice of a chat request was paid into the federation: the request is paid.
     received: (paymentId) => void this.desk.onLightningPaid({ paymentId }),
   }, () => (this.options.fedimintSdk ?? loadFedimintSdk)());
+  private readonly sparkWallet = new SparkWallet(() => { void this.refreshWallet(); void this.desk.reconcileSparkReceipts().catch(()=>{}); });
   private readonly paymentCoordinator = new PaymentCoordinator(intentRepository, [{
     method:"usdt",
     prepare:(target,amount,feeCap)=>this.usdtWallet.require().prepare(target,amount,feeCap),
@@ -267,6 +271,11 @@ export class GhostlyNode implements EngineImplementation {
     prepare: (target, amount, feeCap) => this.barkWallet.require().prepare(target, amount, feeCap),
     execute: (review, prepared, persist) => this.barkWallet.require().execute(review, prepared as BarkPrepared, persist),
     reconcile: (review, prepared) => this.barkWallet.require().reconcile(review, prepared as BarkPrepared),
+  }, {
+    method: "spark",
+    prepare: (target, amount, feeCap) => this.sparkWallet.require().prepare(target, amount, feeCap),
+    execute: (review, prepared, persist) => this.sparkWallet.require().execute(review, prepared as SparkPrepared, persist),
+    reconcile: (review, prepared) => this.sparkWallet.require().reconcile(review, prepared as SparkPrepared),
   }, {
     method:"bitcoin",
     prepare:(target,amount,feeCap)=>this.bitcoin.adapter.prepare(target,amount,feeCap),
@@ -342,7 +351,16 @@ export class GhostlyNode implements EngineImplementation {
     pay: (quote, note, paymentId) => this.lightning.pay(quote.quote, { note, paymentId }),
     // "I paid": the source, the mints and the federations are asked now; the request is paid only once one of them saw it.
     check: async () => { await Promise.all([this.lightning.reconcile(), this.wallet.checkQuotes(), this.fedimintWallet.checkReceives()]); },
-  }, this.bitcoin, this.fedimintWallet);
+  }, this.bitcoin, this.fedimintWallet, {
+    ready: () => !!this.sparkWallet.adapter,
+    requestTarget: (amount, memo) => this.sparkWallet.target(amount, memo),
+    received: (target, amount, since, claimed) => {
+      const adapter = this.sparkWallet.adapter;
+      // A request made on the other mode's wallet is looked for there, once it is back.
+      return adapter && target.network === adapter.network ? adapter.received(target.address, amount, since, claimed) : Promise.resolve(undefined);
+    },
+    sync: async () => { await this.sparkWallet.adapter?.sync(); },
+  });
 
   /** Store-and-forward for away contacts (WISP 4xx): items sealed into this device's own storage, picked up from the contact's. */
   private holdStore: { key: string; store: HoldStore } | null = null;
@@ -572,7 +590,7 @@ export class GhostlyNode implements EngineImplementation {
     const history = view.history.filter((tx) => !tx.mint || isWorthlessMint(tx.mint) === (mode === "testnet"));
     let waitingTestSats = 0;
     if (mode === "mainnet") for (const mint of this.settings.mints.filter(isWorthlessMint)) waitingTestSats += await this.wallet.balanceAt(mint);
-    this.walletView = { ...view, mode, waitingTestSats, history, feesPaid: history.reduce((sum, tx) => sum + tx.fee, 0), ark: this.arkWallet.view, bark: this.barkWallet.view, fedimint: this.fedimintWallet.view, usdt: this.usdtWallet.view, lightning: this.lightning.view, bitcoin: this.bitcoin.view, intents: (await intentRepository.list()).map((saved) => saved.review) };
+    this.walletView = { ...view, mode, waitingTestSats, history, feesPaid: history.reduce((sum, tx) => sum + tx.fee, 0), ark: this.arkWallet.view, bark: this.barkWallet.view, fedimint: this.fedimintWallet.view, spark: this.sparkWallet.view, usdt: this.usdtWallet.view, lightning: this.lightning.view, bitcoin: this.bitcoin.view, intents: (await intentRepository.list()).map((saved) => saved.review) };
     for (const tx of this.walletView.history) {
       const fresh = !this.walletFeedbackIds.has(tx.id);
       this.walletFeedbackIds.add(tx.id);
@@ -588,7 +606,7 @@ export class GhostlyNode implements EngineImplementation {
     if(this.shuttingDown)return;
     try {
       for(const {review} of await intentRepository.list()){
-        if(!["submitted","unknown"].includes(review.state) || (review.method==="arkade" && !this.arkWallet.adapter) || (review.method==="bark" && !this.barkWallet.adapter) || (review.method==="usdt" && !this.usdtWallet.adapter) || (review.method==="bitcoin" && !this.bitcoin.sources.active) || (review.method==="fedimint" && !this.fedimintWallet.federation(review.provider)))continue;
+        if(!["submitted","unknown"].includes(review.state) || (review.method==="arkade" && !this.arkWallet.adapter) || (review.method==="bark" && !this.barkWallet.adapter) || (review.method==="spark" && !this.sparkWallet.adapter) || (review.method==="usdt" && !this.usdtWallet.adapter) || (review.method==="bitcoin" && !this.bitcoin.sources.active) || (review.method==="fedimint" && !this.fedimintWallet.federation(review.provider)))continue;
         await this.reconcilePayment({id:review.id}).catch(()=>{});
       }
     } finally {if(!this.shuttingDown)this.paymentTimer=setTimeout(()=>void this.pollPaymentStatus(),10000);}
@@ -608,10 +626,12 @@ export class GhostlyNode implements EngineImplementation {
     await this.arkWallet.start();
     await this.barkWallet.start();
     await this.fedimintWallet.start();
+    await this.sparkWallet.start();
     await this.usdtWallet.start();
     await this.arkWallet.setMode(this.settings.walletMode ?? "mainnet");
     await this.barkWallet.setMode(this.settings.walletMode ?? "mainnet");
     await this.fedimintWallet.setMode(this.settings.walletMode ?? "mainnet");
+    await this.sparkWallet.setMode(this.settings.walletMode ?? "mainnet");
     await this.usdtWallet.setMode(this.settings.walletMode ?? "mainnet");
     await this.lightning.start(this.settings.walletMode ?? "mainnet");
     await this.bitcoin.start(this.settings.walletMode ?? "mainnet");
@@ -650,6 +670,7 @@ export class GhostlyNode implements EngineImplementation {
     if (this.options.automaticWallets !== false) {
       void this.arkWallet.ensureReady();
       void this.barkWallet.ensureReady();
+      void this.sparkWallet.ensureReady();
       void this.usdtWallet.ensureReady();
     }
   }
@@ -665,6 +686,7 @@ export class GhostlyNode implements EngineImplementation {
     await this.arkWallet.stop();
     await this.barkWallet.stop();
     await this.fedimintWallet.stop();
+    await this.sparkWallet.stop();
     await this.usdtWallet.stop();
     await this.lightning.stop();
     await this.bitcoin.stop();
@@ -1344,9 +1366,9 @@ export class GhostlyNode implements EngineImplementation {
     await this.updateSettings({ settings: { walletMode: mode, mints } });
     // Queued behind whatever the wallets are doing (a new wallet on a slow network): the switch answers at
     // once, and each wallet follows in order, so switching back and forth ends on the last choice.
-    const followed = Promise.all([this.arkWallet.setMode(mode), this.barkWallet.setMode(mode), this.fedimintWallet.setMode(mode), this.usdtWallet.setMode(mode), this.lightning.setMode(mode), this.bitcoin.setMode(mode)]).then(() => this.refreshWallet());
+    const followed = Promise.all([this.arkWallet.setMode(mode), this.barkWallet.setMode(mode), this.fedimintWallet.setMode(mode), this.sparkWallet.setMode(mode), this.usdtWallet.setMode(mode), this.lightning.setMode(mode), this.bitcoin.setMode(mode)]).then(() => this.refreshWallet());
     void followed.then(() => { void this.fedimintWallet.ensureReady(); void this.lightning.ensureReady(); void this.bitcoin.ensureReady(); }, () => {});
-    if (this.options.automaticWallets !== false) void followed.then(() => { void this.arkWallet.ensureReady(); void this.barkWallet.ensureReady(); void this.usdtWallet.ensureReady(); }, () => {});
+    if (this.options.automaticWallets !== false) void followed.then(() => { void this.arkWallet.ensureReady(); void this.barkWallet.ensureReady(); void this.sparkWallet.ensureReady(); void this.usdtWallet.ensureReady(); }, () => {});
     // Names, fees and limits of this mode's mints (a mint just added has none yet).
     for (const mint of this.modeMints()) void this.wallet.checkMint(mint).then(() => this.refreshWallet(), () => {});
     await this.refreshWallet();
@@ -1450,6 +1472,21 @@ export class GhostlyNode implements EngineImplementation {
   fedimintRestoreBackup(params: { text: string; password: string }) { return this.fedimintWallet.restoreBackup(params.text, params.password); }
   fedimintRestorePhrase(params: { mnemonic: string; invites: string[] }) { return this.fedimintWallet.restorePhrase(params.mnemonic, params.invites); }
   barkBoard() { return this.barkWallet.board(); }
+  /** Testnet's Spark wallet is made by itself; this makes Mainnet's (with a Breez API key) or restores from a phrase. */
+  async sparkCreate(params: Parameters<EngineApi["sparkCreate"]>[0]) { await this.sparkWallet.create(params); }
+  async sparkBackup() { const { mnemonic, network } = await this.sparkWallet.backup(); return { mnemonic, network }; }
+  sparkExportBackup(params: { password: string }) { return this.sparkWallet.exportBackup(params.password); }
+  async sparkRestoreBackup(params: { text: string; password: string; apiKey?: string }) { await this.sparkWallet.restoreBackup(params.text, params.password, params.apiKey); await this.sparkWallet.ensureReady(); }
+  sparkRefresh() { return this.sparkWallet.refresh(); }
+  /**
+   * One seed for both: the Spark wallet of this mode becomes the Breez Lightning source too. The SDK is shared (same
+   * seed, same storage), so there is one wallet and one balance behind the Spark and Lightning cards.
+   */
+  async sparkUseForLightning() {
+    const { mnemonic, apiKey } = await this.sparkWallet.backup();
+    await this.lightning.sources.set(BREEZ_SOURCE, { mnemonic, ...(apiKey ? { apiKey } : {}) });
+    await this.refreshWallet();
+  }
   async preparePayment(params: Parameters<EngineApi["preparePayment"]>[0]) {
     if (params.linkId) {
       const link=this.paymentLink(params.linkId); if(!link)throw new Error("The peer is offline");
@@ -1462,6 +1499,7 @@ export class GhostlyNode implements EngineImplementation {
       if(params.target.method==="bark" && !link.supportsBarkPayments)throw new Error("This peer does not support Bark payments");
       if(params.target.method==="bitcoin" && !link.supportsBitcoinPayments)throw new Error("This peer does not take on-chain Bitcoin in this chat");
       if(params.target.method==="fedimint" && !link.supportsFedimintPayments)throw new Error("This peer does not take Fedimint in this chat");
+      if(params.target.method==="spark" && !link.supportsSparkPayments)throw new Error("This peer does not take Spark in this chat");
       const request=params.requestId ? this.desk.payment(params.requestId) : undefined;
       if(params.requestId){
         if(!request || request.linkId!==params.linkId || request.direction!=="in" || request.state!=="pending" || request.amount!==params.amount)throw new Error("Payment review does not match the authenticated request");
@@ -1484,6 +1522,7 @@ export class GhostlyNode implements EngineImplementation {
       if(intent.review.method==="bark" && !link.supportsBarkPayments)throw new Error("Reconnect a peer supporting Bark before approving");
       if(intent.review.method==="bitcoin" && !link.supportsBitcoinPayments)throw new Error("Reconnect a peer taking on-chain Bitcoin before approving");
       if(intent.review.method==="fedimint" && !link.supportsFedimintPayments)throw new Error("Reconnect a peer taking Fedimint before approving");
+      if(intent.review.method==="spark" && !link.supportsSparkPayments)throw new Error("Reconnect a peer taking Spark before approving");
       if(intent.review.method==="cashu" && !link.allowsPayment("cashu"))throw new Error("Cashu is off in this chat");
       await link.requirePaymentSupport();
       if (intent.review.requestId) {
@@ -1496,8 +1535,9 @@ export class GhostlyNode implements EngineImplementation {
     if(review.state==="settled")await this.desk.recordArk(review).catch(()=>{});
     await this.desk.recordBark(review).catch(()=>{});
     await this.desk.recordBitcoin(review).catch(()=>{});
+    await this.desk.recordSpark(review).catch(()=>{});
     await this.desk.recordUsdt(review).catch(()=>{});
-    await this.arkWallet.refresh();await this.barkWallet.refresh();await this.usdtWallet.refresh();return review;
+    await this.arkWallet.refresh();await this.barkWallet.refresh();await this.sparkWallet.refresh();await this.usdtWallet.refresh();return review;
   }
   async reconcilePayment(params: {id:string}) {
     const review=await this.paymentCoordinator.reconcile(params.id);
@@ -1505,8 +1545,9 @@ export class GhostlyNode implements EngineImplementation {
     if(review.state==="settled")await this.desk.recordArk(review).catch(()=>{});
     await this.desk.recordBark(review).catch(()=>{});
     await this.desk.recordBitcoin(review).catch(()=>{});
+    await this.desk.recordSpark(review).catch(()=>{});
     await this.desk.recordUsdt(review).catch(()=>{});
-    await this.arkWallet.refresh();await this.barkWallet.refresh();await this.usdtWallet.refresh();return review;
+    await this.arkWallet.refresh();await this.barkWallet.refresh();await this.sparkWallet.refresh();await this.usdtWallet.refresh();return review;
   }
   cancelPayment(params: {id:string}) { return this.paymentCoordinator.cancel(params.id); }
 
@@ -1517,7 +1558,7 @@ export class GhostlyNode implements EngineImplementation {
     return this.desk.send(params);
   }
 
-  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint"; rail?: "cashu" | "lightning" }) {
+  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark"; rail?: "cashu" | "lightning" }) {
     return this.desk.request({ linkId: params.linkId, amount: params.amount, memo: params.memo, timestamp: params.timestamp, method: params.method,
       ...(params.rail === "cashu" || params.rail === "lightning" ? { rail: params.rail } : {}) });
   }
@@ -1530,9 +1571,9 @@ export class GhostlyNode implements EngineImplementation {
     return this.desk.requestFromGroup(params);
   }
 
-  /** Paying on a card without a request (Ark, Bark, USDT, on-chain): the contact's app answers with one. */
-  askToPay(params: { linkId: string; amount: number; method: "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint"; memo?: string; timestamp: number }) {
-    if (params.method !== "arkade" && params.method !== "usdt" && params.method !== "bark" && params.method !== "bitcoin" && params.method !== "fedimint") throw new Error("Only Ark, Bark, USDT, on-chain Bitcoin and Fedimint are paid this way");
+  /** Paying on a card without a request (Ark, Bark, Spark, USDT, on-chain): the contact's app answers with one. */
+  askToPay(params: { linkId: string; amount: number; method: "arkade" | "usdt" | "bark" | "bitcoin" | "spark" | "fedimint"; memo?: string; timestamp: number }) {
+    if (params.method !== "arkade" && params.method !== "usdt" && params.method !== "bark" && params.method !== "bitcoin" && params.method !== "fedimint" && params.method !== "spark") throw new Error("Only Ark, Bark, Spark, USDT, on-chain Bitcoin and Fedimint are paid this way");
     return this.desk.ask(params);
   }
 
@@ -1761,7 +1802,7 @@ export class GhostlyNode implements EngineImplementation {
     live.pairing = { status: "connecting" };
     live.link = new GhostLink({
       // An edge carries payments with its member (WISP 9xx § Payments), as a chat does; an entry session does not.
-      paymentMethods: entry ? { cashu: false, lightning: false, arkade: false, usdt: false, bark: false, bitcoin: false, fedimint: false } : stored.paymentMethods,
+      paymentMethods: entry ? { cashu: false, lightning: false, arkade: false, usdt: false, bark: false, bitcoin: false, fedimint: false, spark: false } : stored.paymentMethods,
       arkPaymentsSupport: !entry,
       usdtPaymentsSupport: !entry,
       barkPaymentsSupport: !entry,

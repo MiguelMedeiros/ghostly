@@ -5,6 +5,7 @@ import { CashuWallet } from "../components/wallet/CashuWallet";
 import { ArkWalletPanel } from "../components/ArkWalletPanel";
 import { BarkWalletPanel } from "../components/BarkWalletPanel";
 import { FedimintWalletPanel } from "../components/FedimintWalletPanel";
+import { SparkWalletPanel } from "../components/SparkWalletPanel";
 import { UsdtWalletPanel } from "../components/UsdtWalletPanel";
 import { BitcoinWalletPanel } from "../components/BitcoinWalletPanel";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
@@ -14,7 +15,7 @@ import { Page } from "../components/layout";
 
 const RAIL_KEY = "ghostly-wallet-rail";
 const remembered = (): WalletRail => {
-  try { const saved = sessionStorage.getItem(RAIL_KEY); if (saved === "cashu" || saved === "lightning" || saved === "arkade" || saved === "bark" || saved === "usdt" || saved === "bitcoin" || saved === "fedimint") return saved; } catch { /* storage unavailable */ }
+  try { const saved = sessionStorage.getItem(RAIL_KEY); if (saved === "cashu" || saved === "lightning" || saved === "arkade" || saved === "bark" || saved === "spark" || saved === "usdt" || saved === "bitcoin" || saved === "fedimint") return saved; } catch { /* storage unavailable */ }
   return "cashu";
 };
 
@@ -56,6 +57,7 @@ export function Wallet() {
           {(panel === "cashu" || panel === "lightning") && <CashuWallet key={panel} wallet={wallet} state={state} rail={panel} onOpenCashu={() => select("cashu")} />}
           {panel === "arkade" && <ArkWalletPanel wallet={wallet} state={state} />}
           {panel === "bark" && <BarkWalletPanel wallet={wallet} state={state} />}
+          {panel === "spark" && <SparkWalletPanel wallet={wallet} state={state} />}
           {panel === "usdt" && <UsdtWalletPanel wallet={wallet} state={state} />}
           {panel === "bitcoin" && <BitcoinWalletPanel wallet={wallet} state={state} />}
           {panel === "fedimint" && <FedimintWalletPanel wallet={wallet} state={state} />}
