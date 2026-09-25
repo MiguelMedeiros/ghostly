@@ -7,7 +7,8 @@ import type { FedimintWalletView } from "../engine/paymentAdapters/fedimintWalle
 import type { SparkWalletView } from "../engine/paymentAdapters/sparkWallet";
 import type { LightningView } from "../engine/paymentAdapters/providers/lightningService";
 import type { BitcoinView } from "../engine/paymentAdapters/providers/bitcoinService";
-import type { PaymentReview, PaymentTarget } from "@ghostly/core";
+import type { PaymentReview, PaymentTarget, WalletNetwork } from "@ghostly/core";
+import type { ProviderDescriptorView } from "../engine/paymentAdapters/providers/types";
 import type { CapsState, DeliveryMode, DhtDeliveryState, DhtDeliveryView, HoldKind } from "@ghostly/core";
 import type { S3Config } from "../backup/s3";
 import type { TransportCause, TransportEntry, TransportEvent } from "../engine/transportLog";
@@ -344,6 +345,11 @@ export interface StoredPayment {
   /** Requests: how the payer can pay. */
   invoice?: string;
   mints?: string[];
+  /**
+   * Real money or test coins: only a wallet of this network pays a request, or made a payment. Absent on records
+   * from before wallets had their own network: its target, mints or invoice say (see `paymentNetwork`).
+   */
+  network?: WalletNetwork;
   /** Fedimint requests: the federations the payee takes ecash of (their ids). */
   federations?: string[];
   /** Fedimint payments: the federation of the notes, and the client operation that spent (or redeems) them. */
@@ -411,9 +417,77 @@ export interface WalletTx {
   note?: string;
 }
 
+/** The kinds of wallet a profile can have: each is one card of the deck, on one network. */
+export type WalletType = "cashu" | "lightning" | "arkade" | "bark" | "spark" | "bitcoin" | "fedimint" | "usdt";
+export const WALLET_TYPES: readonly WalletType[] = ["cashu", "lightning", "arkade", "bark", "spark", "bitcoin", "fedimint", "usdt"];
+
+/** One network's wallets, whole: what `WalletView` shows of the network in use, for either network. */
+export interface NetworkWalletsView {
+  ark?: ArkWalletView;
+  bark?: BarkWalletView;
+  fedimint?: FedimintWalletView;
+  spark?: SparkWalletView;
+  usdt?: UsdtWalletView;
+  lightning?: LightningView;
+  bitcoin?: BitcoinView;
+  /** This network's Cashu mints (test mints and mints on this machine are Testnet's). */
+  mints: MintView[];
+  balance: number;
+  /** This network's history, newest first. */
+  history: WalletTx[];
+  feesPaid: number;
+}
+
+/**
+ * A wallet the profile has: one type on one network, at most one of each. `id` is `<type>:<network>`. Its seed and
+ * secrets stay in the engine; `config` holds only what can be shown (a server, a source).
+ */
+export interface WalletInstanceView {
+  id: string;
+  type: WalletType;
+  network: WalletNetwork;
+  config: Record<string, string>;
+}
+
+/**
+ * What New can make: one type on one network. `available` false: `reason` says why (Mainnet not validated yet,
+ * one already there). `needs`: the one thing it asks for, when it cannot be made in one click.
+ */
+export interface WalletOffer {
+  type: WalletType;
+  network: WalletNetwork;
+  available: boolean;
+  reason?: string;
+  /** Already made: its card is in the deck. */
+  exists?: boolean;
+  needs?: "invite" | "provider";
+  /** Lightning and on-chain: the sources that can be picked on this network. */
+  providers?: ProviderDescriptorView[];
+}
+
+/** What New asks the engine to make (see `walletCreate`). */
+export interface WalletCreate {
+  type: WalletType;
+  network: WalletNetwork;
+  /** Lightning and on-chain: the source, and the values of its form (blank ones take the network's default). */
+  providerId?: string;
+  values?: Record<string, string>;
+  /** Fedimint: the federation's invite code. */
+  invite?: string;
+}
+
 export interface WalletView {
-  /** Which wallets are in use: real money, or test networks. Absent means mainnet. */
+  /**
+   * The network the legacy page shows (the old Mainnet/Testnet switch). Absent means mainnet. Every wallet keeps
+   * its own network whatever this says: `networks` has both.
+   */
   mode?: WalletMode;
+  /** Both networks' wallets, open side by side. */
+  networks?: Record<WalletNetwork, NetworkWalletsView>;
+  /** The wallets this profile has, in the deck's order. */
+  wallets?: WalletInstanceView[];
+  /** What New can make on each network. */
+  offers?: WalletOffer[];
   /** On Mainnet: test sats held at test mints (a contact may have sent some), shown once in Testnet. */
   waitingTestSats?: number;
   ark?: ArkWalletView;
@@ -813,7 +887,14 @@ export interface LinkView {
    * `methods`: ways of paying both sides allow in this chat right now. `calls` / `services`: both sides offer
    * `calls/1` / `services/1` on the open session (paired chats only; they need a live connection).
    */
-  capabilities?: { files: boolean; payments: boolean; methods?: Record<PaymentMethodName, boolean>; calls?: boolean; services?: boolean; largeFiles?: boolean };
+  capabilities?: {
+    files: boolean; payments: boolean; methods?: Record<PaymentMethodName, boolean>; calls?: boolean; services?: boolean; largeFiles?: boolean;
+    /**
+     * The networks the contact has a wallet on, per way of paying, as it said on the open session. Absent: it said
+     * none (an older app): any network may meet. A card is offered only where its network is in the list.
+     */
+    networks?: Partial<Record<PaymentMethodName, WalletNetwork[]>>;
+  };
   /** files/3 live in this chat: bytes the contact's device said it can still take for files, when it said. */
   peerFileRoom?: number | null;
   /** Ways of paying this device allows in this chat. */

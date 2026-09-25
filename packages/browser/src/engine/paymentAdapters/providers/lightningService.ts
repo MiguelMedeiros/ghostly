@@ -83,13 +83,13 @@ const LNURL_KEPT = 20;
 export const defaultFeeCap = (amount: number) => Math.max(10, Math.ceil(amount * 0.03));
 
 /**
- * Lightning for the whole engine: the Lightning card, the invoice a chat request carries and paying a
- * contact's invoice all come here, and go to the active source of the wallet mode in use.
+ * Lightning of one network: its Lightning card, the invoice a chat request on that network carries and paying a
+ * contact's invoice on it all come here, and go to this network's active source. The engine has one per network.
  */
 export class LightningService {
   readonly sources: ProviderSources<LightningProvider>;
   private readonly quotes = new Map<string, { providerId: string; provider: LightningProvider; invoice: string; amount: number; maxFee: number; paymentHash: string }>();
-  private mode: WalletMode = "mainnet";
+  private readonly mode: WalletMode;
   private timer?: ReturnType<typeof setTimeout>;
   private passes: Promise<void> = Promise.resolve();
   private stopped = false;
@@ -97,9 +97,10 @@ export class LightningService {
   /** Lightning addresses and LNURLs resolved, until an amount is chosen for them. */
   private readonly lnurls = new Map<string, { params: LnurlPayParams; at: number }>();
 
-  constructor(descriptors: () => readonly LightningProviderDescriptor[], host: () => Omit<ProviderHost, "mode" | "signal">, private readonly events: LightningEvents, defaultId?: string, private readonly options: { fetch?: typeof fetch } = {}) {
+  constructor(readonly network: WalletMode, descriptors: () => readonly LightningProviderDescriptor[], host: () => Omit<ProviderHost, "mode" | "signal">, private readonly events: LightningEvents, defaultId?: string, private readonly options: { fetch?: typeof fetch } = {}) {
+    this.mode = network;
     this.sources = new ProviderSources<LightningProvider>({
-      kind: "lightning", descriptors, host, defaultId,
+      kind: "lightning", network, descriptors, host, defaultId,
       changed: () => { this.schedule(0); events.changed(); },
       refuseReplacing: (providerId, mode) => this.refusal(providerId, mode),
       refresh: async (provider) => (provider.capabilities.balance ? { balance: (await provider.info()).balance } : {}),
@@ -110,8 +111,7 @@ export class LightningService {
     return { ...this.sources.view, capabilities: this.sources.active?.capabilities, recent: this.recent };
   }
 
-  async start(mode: WalletMode) { this.mode = mode; await this.sources.start(mode); await this.loadRecent(); }
-  async setMode(mode: WalletMode) { this.mode = mode; this.quotes.clear(); await this.sources.setMode(mode); await this.loadRecent(); this.events.changed(); }
+  async start() { await this.sources.start(); await this.loadRecent(); }
   ensureReady() { return this.sources.ensureReady(); }
   async stop() { this.stopped = true; clearTimeout(this.timer); await this.sources.stop(); }
   refreshOffered() { this.sources.refreshOffered(); }
@@ -290,9 +290,9 @@ export class LightningService {
     return open.length ? `A Lightning payment through this source has not ended yet (${open.length}). Wait for it before changing the source.` : undefined;
   }
 
-  /** In Mainnet, an invoice on a test chain is refused, and the reverse is harmless (test mints use lnbc). */
+  /** A Mainnet source refuses an invoice on a test chain; the reverse is harmless (test mints use lnbc). */
   private checkNetwork(network: string) {
-    if (this.mode === "mainnet" && network !== "bitcoin") throw new Error(`That invoice is for ${network}, a test network: switch the wallets to Testnet`);
+    if (this.mode === "mainnet" && network !== "bitcoin") throw new Error(`That invoice is for ${network}, a test network: pay it from a Testnet wallet`);
   }
 
   private async get(direction: LightningOp["direction"], hash: string) { return wrap<LightningOp | undefined>((await store(STORES.settings, "readonly")).get(opKey(direction, hash))); }

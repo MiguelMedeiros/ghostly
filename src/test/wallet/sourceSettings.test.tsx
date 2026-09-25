@@ -29,8 +29,8 @@ const recording = (id: string): ProviderDescriptor<Recorded> => ({
 async function setUp(ids: string[]) {
   created = [];
   // Desktop: Bitcoin Core only runs there.
-  sources = new ProviderSources<Recorded>({ kind: "onchain", descriptors: () => ids.map(recording), host: () => ({ platform: "desktop" }), changed: () => {} });
-  await sources.start("testnet");
+  sources = new ProviderSources<Recorded>({ kind: "onchain", network: "testnet", descriptors: () => ids.map(recording), host: () => ({ platform: "desktop" }), changed: () => {} });
+  await sources.start();
   return renderApp(<SourcePicker kind="onchain" view={sources.view} onSet={(id, values) => sources.set(id, values)} />);
 }
 

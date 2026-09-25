@@ -107,7 +107,7 @@ describe("paying a contact's request, never twice", () => {
     ]);
     await desk.start();
     await desk.payRequest({ linkId: "l", paymentId: "r1" });
-    expect(wallet.createToken).toHaveBeenCalledWith(100, [MINT], undefined, expect.any(Function));
+    expect(wallet.createToken).toHaveBeenCalledWith(100, [MINT], undefined, expect.any(Function), "mainnet");
   });
 
   it("goes to Lightning only when no ecash was made and the request has an invoice", async () => {

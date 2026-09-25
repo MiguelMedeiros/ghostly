@@ -22,22 +22,24 @@ Keep method support, settlement and user authorization separate. A payer chooses
 
 Bind requests and receipts to the authenticated payee context and request ID. Idempotent retries must not initiate a second payment. Distinguish pending, succeeded, failed and unknown outcomes. A peer's receipt is a statement, not independent settlement proof; verify through the payment adapter where available. Never silently switch methods after an ambiguous settlement.
 
-## Wallet modes: Mainnet and Testnet
+## Wallet networks: Mainnet and Testnet
 
-A client keeps real money and test coins apart with one switch for every wallet, stored with the profile's wallet settings:
+Real money and test coins never meet. Every wallet a client holds is on one of two networks, and a client may hold wallets of both at once, side by side:
 
 | | Mainnet | Testnet |
 |---|---|---|
-| Cashu and Lightning | The user's mints, excluding test ones | Test mints: the public test mint (added when switching) and mints on this machine (`localhost`, `127.0.0.1`, `[::1]`) |
+| Cashu and Lightning | The user's mints, excluding test ones | Test mints: the public test mint and mints on this machine (`localhost`, `127.0.0.1`, `[::1]`) |
 | Ark | Bitcoin | Mutinynet by default; Signet and a local regtest server may be chosen while the wallet is empty |
 | USDT | Ethereum, the canonical contract | Sepolia (Aave's test USDT) by default; a local chain may be chosen while the wallet is empty |
 | Lightning source | The Cashu mints unless another source is chosen | Its own choice, the Cashu (test) mints by default |
 | Bitcoin on-chain source | None until one is chosen | None until one is chosen |
 
-- Each mode keeps its own Ark and USDT wallets. Switching parks the current wallet (`arkWallet-mode-<mode>`, `usdtWallet-mode-<mode>` in the peer database) and opens the other mode's, creating its default wallet the first time. Nothing is replaced, retired or deleted by a switch; backups carry parked wallets like the active ones ([05](05-backups.md)).
-- Balances, history, invoices, requests and payment cards are those of the mode in use. Ecash from any known mint is still taken in; test sats received on Mainnet wait, and the wallet says how many, until Testnet is chosen.
+- A network's wallet of each kind is stored on its own (`arkWallet-mode-<network>`, `usdtWallet-mode-<network>`, … in the peer database). Clients from before wallets had their own network kept the wallet of the mode in use under a bare key (`arkWallet`); a client moves it to its network's key once, in one transaction, deleting and overwriting nothing ([05](05-backups.md)).
+- The chain of a payment target decides its network (Bitcoin and Ethereum are Mainnet; every other chain is Testnet), and so does a Cashu mint. A payment goes only through the wallet of its own network. A request or a payment of one network is refused by a wallet of the other, with nothing spent.
+- A `pay-req` carries `n`: `"mainnet"` or `"testnet"`, the network that pays it. A `pay-ask` carries the `n` the payer pays from, and the payee answers from its wallet of that network, or not at all. An older client sends no `n`: the request's endpoints tell (a test mint, a test chain; a bare invoice without mints is taken as Mainnet). Clients ignore an `n` that is neither value.
+- `paired-payments` may carry `n`: for each way of paying in `m`, the networks this side has a wallet on (`{"cashu":["testnet"],"arkade":["mainnet","testnet"]}`). A client offers a card only where its network is in the contact's list; a method missing from the map has none. No `n` at all (an older client) means any network may meet. A malformed map is ignored and the last good one kept; unknown methods are left out. It is sent again on the open session when a wallet is made.
 - Test sats never settle a request for real sats, and a request is never mixed: it names either only real mints or only test mints ([201](201-cashu.md)).
-- While Testnet is on, the client says so wherever it is (a badge by the app's name), and every amount reads as test sats, test coins or TEST-USDT.
+- The client shows each wallet's network with it, and every test amount reads as test sats, test coins or TEST-USDT.
 - A contact's mint is never added automatically unless it is on the fixed list of public test mints: in particular never a mint on this machine, which would let a contact make the app reach one of its local ports.
 
 ## On-chain Bitcoin (draft)

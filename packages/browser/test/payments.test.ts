@@ -178,7 +178,7 @@ describe("ways of paying chosen per chat", () => {
     wallet.payQuote.mockResolvedValue(true);
     await desk.payRequest({ linkId: "l1", paymentId: "r1" });
     expect(wallet.createToken).not.toHaveBeenCalled();
-    expect(wallet.quoteInvoice).toHaveBeenCalledWith("lnbc40");
+    expect(wallet.quoteInvoice).toHaveBeenCalledWith("lnbc40", "mainnet");
   });
   it("pays a Lightning payment reviewed as such over Lightning, never with ecash in its place, within its fee", async () => {
     const { desk, wallet, allowed, state } = await setup([incomingRequest]);
@@ -245,12 +245,13 @@ describe("test sats are never money", () => {
     expect(host.storeMessage.mock.calls.map((c) => (c[0] as { text: string }).text)).toContain("⚡ 1,000 test sats");
   });
 
-  it("a request made while trying things out on the test mint is paid in test sats", async () => {
+  it("a Testnet request names only the test mints, says Testnet, and is paid in test sats", async () => {
     const { desk: d, link, wallet } = desk([TEST, REAL]);
     await d.start();
-    const { paymentId } = await d.request({ linkId: "l1", amount: 10, timestamp: 2 });
+    const { paymentId } = await d.request({ linkId: "l1", amount: 10, timestamp: 2, network: "testnet" });
     expect(cashuMints(link)).toContain("testnut");
     expect(cashuMints(link)).not.toContain("minibits");
+    expect(link.sendPaymentRequest).toHaveBeenLastCalledWith(expect.objectContaining({ network: "testnet" }));
     wallet.nextAmount = 10;
     await d.onPayment("l1", { id: "p1", timestamp: 3, requestId: paymentId, amount: { value: "10", asset: "sat" }, endpoint: [ENDPOINT.cashu, "cashuBy"] });
     expect(rows<StoredPayment>("payments").find((p) => p.id === paymentId)?.state).toBe("settled");

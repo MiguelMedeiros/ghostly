@@ -55,14 +55,14 @@ describe("registerAdapters", () => {
   it("tells listeners, and the pickers recompute what is offered without reconnecting", async () => {
     const changed = vi.fn();
     const stop = onAdaptersChanged(changed);
-    const sources = new ProviderSources<FakeLightningProvider>({ kind: "lightning", descriptors: () => defaultRegistry().lightning, host: () => ({ platform: "web" }), changed: vi.fn() });
-    await sources.start("testnet");
+    const sources = new ProviderSources<FakeLightningProvider>({ kind: "lightning", network: "testnet", descriptors: () => defaultRegistry().lightning, host: () => ({ platform: "web" }), changed: vi.fn() });
+    await sources.start();
     const before = sources.view.offered.map((d) => d.id);
     expect(before).not.toContain("web-ln");
     registerAdapters(plugin("web", { lightning: [lightning("web-ln", { platforms: ["web"] }), lightning("desk-ln", { platforms: ["desktop"] }), lightning("main-ln", { networks: ["bitcoin"] })] }));
     expect(changed).toHaveBeenCalledTimes(1);
     sources.refreshOffered();
-    // Only what this platform and this mode can run: the platform and network rules are the same for plugins.
+    // Only what this platform and this network can run: the platform and network rules are the same for plugins.
     expect(sources.view.offered.map((d) => d.id)).toEqual([...before, "web-ln"]);
     expect(sources.view.status).toBe("none"); // nothing was connected, nothing is
     stop();

@@ -114,19 +114,24 @@ describe("checking a mint before it is added", () => {
 });
 
 describe("the balance and history shown", () => {
-  it("counts neither reserved proofs nor the other mode's mints, and shows the latest 100 records with every fee", async () => {
+  it("counts neither reserved proofs nor the other network's mints, and shows the latest 100 records with every fee", async () => {
     seed("proofs", [stored(64, "a"), stored(32, "held", MINT, true), stored(500, "test", TEST_MINT)]);
     seed("walletTx", Array.from({ length: 120 }, (_, i) => ({ id: `tx${i}`, timestamp: i, mint: MINT, kind: "ecash-in", amount: 1, fee: 1 })));
-    const { wallet } = setup([MINT], [MINT, TEST_MINT]);
+    const events = { onChange: vi.fn(), onTestMintNeeded: vi.fn(async (_mint: string) => {}), onQuotePaid: vi.fn(), onMeltResolved: vi.fn() };
+    // The engine's default network (none named) is Mainnet: the real mint; Testnet has the test mint.
+    const wallet = new CashuWallet((network) => (network === "testnet" ? [TEST_MINT] : [MINT]), events, () => [MINT, TEST_MINT]);
     const view = await wallet.view();
     expect(view.balance).toBe(64);
     expect(view.mints.map((m) => m.url)).toEqual([MINT]);
     expect(view.history).toHaveLength(100);
     expect(view.history[0].timestamp).toBe(119);
     expect(view.feesPaid).toBe(120);
-    // Kept, and counted where it belongs, but never spent from this mode.
+    // Kept, and counted in its own network's wallet, but never spent by a send of the other network.
+    expect(await wallet.view("testnet")).toMatchObject({ balance: 500, mints: [expect.objectContaining({ url: TEST_MINT })] });
     expect(await wallet.balanceAt(TEST_MINT)).toBe(500);
-    await expect(wallet.createToken(100, [TEST_MINT])).rejects.toThrow("You share no mint with this contact");
+    await expect(wallet.createToken(100)).rejects.toThrow("Not enough sats in your wallet");
+    await expect(wallet.createToken(100, undefined, undefined, undefined, "mainnet")).rejects.toThrow("Not enough sats in your wallet");
+    expect(mint.send).not.toHaveBeenCalled();
   });
 });
 

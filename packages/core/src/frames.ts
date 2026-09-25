@@ -132,6 +132,11 @@ export interface PayRequestFrame {
   e: WireEndpoint[];
   /** The `pay-ask` this answers, if any. */
   a?: string;
+  /**
+   * `mainnet` (real money) or `testnet` (test coins): what pays it. Absent from apps before wallets had their own
+   * network; the endpoints tell then (a test mint, a test chain).
+   */
+  n?: "mainnet" | "testnet";
 }
 
 /** A payer asking to pay: the payee answers with a `pay-req` whose `a` is this id. */
@@ -143,6 +148,8 @@ export interface PayAskFrame {
   u: string;
   m: "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark";
   memo?: string;
+  /** The network the payer will pay from: the payee answers from its wallet of that network. */
+  n?: "mainnet" | "testnet";
 }
 
 /** A payment that travels in band, such as an ecash token. */
@@ -299,7 +306,7 @@ export function decodeControl(text: string): ControlFrame | null {
       const memo = typeof f.memo === "string" ? f.memo.slice(0, 140) : undefined;
       if (f.t === "pay-req") {
         if (!Array.isArray(f.e) || f.e.length === 0 || f.e.length > 8 || !f.e.every(isEndpoint)) return null;
-        return { t: "pay-req", id: f.id, ts: f.ts, v: f.v, u: f.u, memo, e: f.e, a: isPayId(f.a) ? f.a : undefined };
+        return { t: "pay-req", id: f.id, ts: f.ts, v: f.v, u: f.u, memo, e: f.e, a: isPayId(f.a) ? f.a : undefined, n: f.n === "mainnet" || f.n === "testnet" ? f.n : undefined };
       }
       if (!isEndpoint(f.e) || (f.rid !== undefined && !isPayId(f.rid))) return null;
       return { t: "pay", id: f.id, ts: f.ts, rid: f.rid, v: f.v, u: f.u, memo, e: f.e };
@@ -307,7 +314,7 @@ export function decodeControl(text: string): ControlFrame | null {
     case "pay-ask": {
       if (!isPayId(f.id) || typeof f.ts !== "number" || !isAmount(f.v) || !isUnit(f.u)) return null;
       if (f.m !== "arkade" && f.m !== "usdt" && f.m !== "bark" && f.m !== "bitcoin" && f.m !== "fedimint" && f.m !== "spark") return null;
-      return { t: "pay-ask", id: f.id, ts: f.ts, v: f.v, u: f.u, m: f.m, memo: typeof f.memo === "string" ? f.memo.slice(0, 140) : undefined };
+      return { t: "pay-ask", id: f.id, ts: f.ts, v: f.v, u: f.u, m: f.m, memo: typeof f.memo === "string" ? f.memo.slice(0, 140) : undefined, n: f.n === "mainnet" || f.n === "testnet" ? f.n : undefined };
     }
     case "pay-res":
       if (!isPayId(f.id) || typeof f.ok !== "boolean") return null;

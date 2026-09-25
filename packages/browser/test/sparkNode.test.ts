@@ -13,18 +13,20 @@ let node: GhostlyNode | undefined;
 beforeEach(async () => { await transact([STORES.settings, STORES.intents], (s) => { s[STORES.settings].clear(); s[STORES.intents].clear(); }); });
 afterEach(async () => { await node?.shutdown(); node = undefined; vi.restoreAllMocks(); });
 
-it("'Use for Lightning too' makes the Spark wallet's own seed the Breez Lightning source: one wallet behind both cards", async () => {
+it("'Use for Lightning too' makes a network's Spark wallet's own seed that network's Breez Lightning source: one wallet behind both cards", async () => {
   const net = new FakeBreezNetwork();
   node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { automaticWallets: false, providers: {
     lightning: [cashuMint, breezDescriptor(async () => net.sdk)], onchain: [],
   } });
   vi.spyOn(node["wallet"], "view").mockImplementation(async () => ({ mints: [], balance: 0, history: [], feesPaid: 0 }));
   await node.start();
-  await node.walletSetMode({ mode: "testnet" });
   const mnemonic = generateMnemonic(wordlist);
-  const backup = vi.spyOn(node["sparkWallet"], "backup").mockResolvedValue({ mnemonic, network: "regtest" });
-  await node.sparkUseForLightning();
+  const backup = vi.spyOn(node["sparkWallets"].testnet, "backup").mockResolvedValue({ mnemonic, network: "regtest" });
+  const mainnetBackup = vi.spyOn(node["sparkWallets"].mainnet, "backup");
+  await node.sparkUseForLightning({ network: "testnet" });
   expect(backup).toHaveBeenCalledOnce();
-  await vi.waitFor(() => expect(node!.getState().wallet.lightning).toMatchObject({ providerId: "breez", status: "ready" }));
+  expect(mainnetBackup, "the Mainnet Spark wallet is not asked").not.toHaveBeenCalled();
+  await vi.waitFor(() => expect(node!.getState().wallet.networks?.testnet.lightning).toMatchObject({ providerId: "breez", status: "ready" }));
+  expect(node.getState().wallet.networks?.mainnet.lightning?.providerId, "the Mainnet Lightning source is untouched").not.toBe("breez");
   expect(net.connects.map((c) => c.storage), "the Spark wallet's storage: the same wallet").toEqual([breezStorage("regtest", mnemonic)]);
 });

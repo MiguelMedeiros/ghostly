@@ -35,7 +35,7 @@ describeLightningProvider("WebLN (injected fake wallet)", async () => {
 });
 
 describe("finding the browser wallet", () => {
-  it("is only offered in the web app, in both modes", () => {
+  it("is only offered in the web app, on both networks", () => {
     expect(LIGHTNING_PROVIDERS).toContain(webln);
     expect(offeredIn(webln, "web", "mainnet") && offeredIn(webln, "web", "testnet")).toBe(true);
     expect(offeredIn(webln, "extension", "testnet") || offeredIn(webln, "desktop", "mainnet")).toBe(false);
@@ -191,13 +191,13 @@ describe("the engine with a browser wallet as the Lightning source", () => {
     const events = { changed: vi.fn(), received: vi.fn(), resolved: vi.fn() } satisfies LightningEvents;
     const cashu = { view: async () => ({ balance: 0, mints: [], history: [], feesPaid: 0 }) } as unknown as CashuWallet;
     const descriptor = { ...webln, create: async (_: unknown, host: { mode: "mainnet" | "testnet"; signal: AbortSignal }) => WeblnLightning.connect(wallet, host.mode, host.signal) };
-    return { events, lightning: new LightningService(() => [cashuMint, descriptor], () => ({ platform: "web", cashu }), events, CASHU_MINT_SOURCE) };
+    return { events, lightning: new LightningService("testnet", () => [cashuMint, descriptor], () => ({ platform: "web", cashu }), events, CASHU_MINT_SOURCE) };
   }
 
   it("connects with nothing to store, and keeps its signal after replacing the mints", async () => {
     const { wallet, counterpart } = pair();
     const { lightning, events } = service(wallet);
-    await lightning.start("testnet");
+    await lightning.start();
     await lightning.sources.set("webln", {});
     expect(lightning.view).toMatchObject({ providerId: "webln", status: "ready", network: "regtest", alias: "Fake WebLN", secrets: [] });
     // Receive: the invoice is the wallet's, seen paid through `lookupInvoice`.
@@ -217,7 +217,7 @@ describe("the engine with a browser wallet as the Lightning source", () => {
   it("an unknown payment through a wallet that cannot look it up says so", async () => {
     const { wallet, counterpart } = pair({ send: "lost", methods: ["makeInvoice", "sendPayment", "getBalance"] });
     const { lightning } = service(wallet);
-    await lightning.start("testnet");
+    await lightning.start();
     await lightning.sources.set("webln", {});
     const quote = await lightning.quote((await (await enabled(counterpart)).makeInvoice({ amount: 5 })).paymentRequest);
     expect(await lightning.pay(quote.quote)).toBe(false);

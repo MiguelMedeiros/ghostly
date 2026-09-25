@@ -14,9 +14,9 @@ import { testInvoice } from "../../core/test/invoice";
 // covers: wallet.lightning.sources, wallet.onchain.sources, wallet.mode
 
 /**
- * The engine's Lightning service and the per-mode sources under it: what reaches a contact is the invoice
+ * The engine's Lightning service of one network and the sources under it: what reaches a contact is the invoice
  * asked for, a quote is paid only through the source that made it, every outcome is journaled and only
- * ever reconciled, and a source is connected only on a network of the wallet mode in use.
+ * ever reconciled, and a source is connected only on a chain of its own network.
  */
 
 const keys = async () => (await wrap((await store(STORES.settings, "readonly")).getAllKeys())).map(String).sort();
@@ -32,13 +32,13 @@ function service(provider: LightningProvider = new FakeLightningProvider({ settl
   const cashu = { view: async () => ({ balance: 7, mints: [], history: [], feesPaid: 0 }) } as unknown as CashuWallet;
   // Nothing secret to configure: no sealing (a 600k-round PBKDF2) on every set.
   const descriptor: LightningProviderDescriptor = { ...fakeLightning, fields: [], validate: undefined, create: async () => provider, ...extra };
-  const lightning = new LightningService(() => [cashuMint, descriptor], () => ({ platform: "web", cashu }), events, CASHU_MINT_SOURCE);
+  const lightning = new LightningService("testnet", () => [cashuMint, descriptor], () => ({ platform: "web", cashu }), events, CASHU_MINT_SOURCE);
   services.push(lightning);
   return { lightning, events, provider };
 }
 async function ready(provider?: LightningProvider, extra?: Partial<LightningProviderDescriptor>) {
   const setup = service(provider, extra);
-  await setup.lightning.start("testnet");
+  await setup.lightning.start();
   await setup.lightning.sources.set("fake-lightning", {});
   return setup;
 }
@@ -267,7 +267,7 @@ describe("reconciling what is open", () => {
   });
 });
 
-describe("the sources of each wallet mode", () => {
+describe("the sources of each network", () => {
   type Node = { info(): Promise<{ network: ProviderNetwork; alias?: string }>; close: Mock<() => Promise<void>>; balance?: number };
   const node = (network: ProviderNetwork, balance = 5): Node => ({ info: async () => ({ network, alias: "n" }), close: vi.fn(async () => {}), balance });
   const descriptor = (create: (secrets: Record<string, string>) => Promise<Node>, extra: Partial<ProviderDescriptor<Node>> = {}): ProviderDescriptor<Node> => ({
@@ -275,9 +275,9 @@ describe("the sources of each wallet mode", () => {
     fields: [{ name: "key", label: "Key", kind: "secret", optional: true }, { name: "speed", label: "Speed", kind: "select", optional: true, options: [{ value: "fast", label: "Fast" }] }],
     create: (settings) => create(settings.secrets), ...extra,
   });
-  function sources(list: ProviderDescriptor<Node>[], options: { defaultId?: string; refresh?: (n: Node) => Promise<{ balance?: number }>; kind?: "lightning" | "onchain" } = {}) {
+  function sources(list: ProviderDescriptor<Node>[], options: { defaultId?: string; refresh?: (n: Node) => Promise<{ balance?: number }>; kind?: "lightning" | "onchain"; network?: "mainnet" | "testnet" } = {}) {
     const changed = vi.fn();
-    const s = new ProviderSources<Node>({ kind: options.kind ?? "lightning", descriptors: () => list, host: () => ({ platform: "web" }), changed, defaultId: options.defaultId, refresh: options.refresh });
+    const s = new ProviderSources<Node>({ kind: options.kind ?? "lightning", network: options.network ?? "testnet", descriptors: () => list, host: () => ({ platform: "web" }), changed, defaultId: options.defaultId, refresh: options.refresh });
     return { s, changed };
   }
   const stops: ProviderSources<Node>[] = [];
@@ -286,23 +286,23 @@ describe("the sources of each wallet mode", () => {
   it("says plainly when there is no source to use", async () => {
     const lightning = sources([]).s, onchain = sources([], { kind: "onchain" }).s;
     stops.push(lightning, onchain);
-    await lightning.start("testnet"); await onchain.start("testnet");
+    await lightning.start(); await onchain.start();
     await expect(lightning.use()).rejects.toThrow("No Lightning source is set up");
     await expect(onchain.use()).rejects.toThrow("No Bitcoin source is set up");
   });
 
-  it("refuses a node on a network its provider does not support, or of the other mode", async () => {
+  it("refuses a node on a network its provider does not support, or on the other network", async () => {
     let network: ProviderNetwork = "signet";
     const { s } = sources([descriptor(async () => node(network))]);
-    stops.push(s);
-    await s.start("testnet");
+    const mainnet = sources([descriptor(async () => node(network))], { network: "mainnet" }).s;
+    stops.push(s, mainnet);
+    await s.start(); await mainnet.start();
     await expect(s.set("node", { key: "secret-key" })).rejects.toThrow("runs on signet, which Node does not support here");
     network = "bitcoin";
-    await expect(s.set("node", { key: "secret-key" })).rejects.toThrow("real money: switch the wallets to Mainnet");
-    await s.setMode("mainnet");
+    await expect(s.set("node", { key: "secret-key" })).rejects.toThrow("real money: set it up as a Mainnet wallet instead");
     network = "regtest";
-    await expect(s.set("node", { key: "secret-key" })).rejects.toThrow("a test network: switch the wallets to Testnet");
-    await expect(s.set("node", { key: "secret-key", speed: "warp" })).rejects.toThrow("Choose speed");
+    await expect(mainnet.set("node", { key: "secret-key" })).rejects.toThrow("a test network: set it up as a Testnet wallet instead");
+    await expect(mainnet.set("node", { key: "secret-key", speed: "warp" })).rejects.toThrow("Choose speed");
     expect(await keys()).toEqual([]);
   });
 
@@ -311,13 +311,13 @@ describe("the sources of each wallet mode", () => {
     const d = descriptor(async (secrets) => { if (fail) throw new Error(`refused key ${secrets.key}`); return node("regtest"); });
     const first = sources([d]).s;
     stops.push(first);
-    await first.start("testnet");
+    await first.start();
     fail = false;
     await first.set("node", { key: "hunter22" });
     fail = true;
     const { s, changed } = sources([d]);
     stops.push(s);
-    await s.start("testnet");
+    await s.start();
     await s.ensureReady();
     // One failure is not "unavailable": it is tried again by itself, and says why meanwhile.
     expect(s.view).toMatchObject({ status: "connecting", error: "Could not connect to Node: refused key •••", failures: 1 });
@@ -328,27 +328,45 @@ describe("the sources of each wallet mode", () => {
     expect(s.view.status).toBe("ready");
   }, 30_000); // Every attempt unseals the secret (a 600k-round PBKDF2).
 
-  it("a connection still waiting when the mode switches is dropped, and closed when it arrives", async () => {
+  it("a connection still waiting when the source stops is dropped, and closed when it arrives", async () => {
     let arrive!: (n: Node) => void;
     const late = node("regtest");
     const { s } = sources([descriptor(() => new Promise<Node>((resolve) => (arrive = resolve)))], { defaultId: "node" });
     stops.push(s);
-    await s.start("testnet");
+    await s.start();
     const connecting = s.ensureReady();
     await vi.waitFor(() => expect(arrive).toBeTypeOf("function"));
-    const switching = s.setMode("mainnet");
+    const stopping = s.stop();
+    await connecting; await stopping;
     arrive(late);
-    await connecting; await switching;
     await vi.waitFor(() => expect(late.close).toHaveBeenCalled());
     expect(s.active).toBeUndefined();
-    expect(s.view).toMatchObject({ mode: "mainnet" });
+    expect(s.view).toMatchObject({ mode: "testnet" });
+  });
+
+  it("each network has its own source: one still connecting never holds the other back", async () => {
+    let arrive!: (n: Node) => void;
+    const late = node("regtest");
+    const testnet = sources([descriptor(() => new Promise<Node>((resolve) => (arrive = resolve)))], { defaultId: "node" }).s;
+    const mainnet = sources([descriptor(async () => node("bitcoin"))], { defaultId: "node", network: "mainnet" }).s;
+    stops.push(testnet, mainnet);
+    await testnet.start(); await mainnet.start();
+    const connecting = testnet.ensureReady();
+    await vi.waitFor(() => expect(arrive).toBeTypeOf("function"));
+    await mainnet.ensureReady();
+    expect(mainnet.view).toMatchObject({ mode: "mainnet", status: "ready", network: "bitcoin" });
+    expect(testnet.active).toBeUndefined();
+    arrive(late);
+    await connecting;
+    expect(testnet.view).toMatchObject({ mode: "testnet", status: "ready", network: "regtest" });
+    expect(mainnet.view.status).toBe("ready");
   });
 
   it("choosing the default with nothing to configure stores nothing, and forgets what was stored", async () => {
     const plain = descriptor(async () => node("regtest"), { id: "plain", fields: [] });
     const { s } = sources([plain, descriptor(async () => node("regtest"))], { defaultId: "plain" });
     stops.push(s);
-    await s.start("testnet");
+    await s.start();
     await s.set("node", { speed: "fast" });
     expect(await keys()).toEqual(["lightningSource-testnet"]);
     await s.set("plain", {});
@@ -356,11 +374,10 @@ describe("the sources of each wallet mode", () => {
     expect(s.view).toMatchObject({ providerId: "plain", isDefault: true, status: "ready" });
   });
 
-  it("switching to the mode already in use changes nothing, and a new provider list reaches the picker", async () => {
+  it("starting changes nothing on its own, and a new provider list reaches the picker", async () => {
     const { s, changed } = sources([descriptor(async () => node("regtest"))]);
     stops.push(s);
-    await s.start("testnet");
-    await s.setMode("testnet");
+    await s.start();
     expect(changed).not.toHaveBeenCalled();
     s.refreshOffered();
     expect(changed).toHaveBeenCalledOnce();
@@ -373,7 +390,7 @@ describe("the sources of each wallet mode", () => {
     let next = a;
     const { s } = sources([descriptor(async () => next)], { refresh: (n) => refresh(n) });
     stops.push(s);
-    await s.start("testnet");
+    await s.start();
     await s.set("node", { key: "s3cr3t-key" });
     await vi.waitFor(() => expect(s.view.error).toBe("Could not read the balance: bad key •••"));
     let release!: () => void;
@@ -392,7 +409,7 @@ describe("the sources of each wallet mode", () => {
     let next = a, hold = false, fail!: (error: Error) => void;
     const { s } = sources([descriptor(async () => next)], { refresh: async (n) => { if (hold && n === a) await new Promise<void>((_, reject) => (fail = reject)); return { balance: n.balance }; } });
     stops.push(s);
-    await s.start("testnet");
+    await s.start();
     await s.set("node", {});
     hold = true;
     const stale = s.refresh();

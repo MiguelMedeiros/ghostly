@@ -36,7 +36,7 @@ export class FedimintLightning implements LightningProvider {
 
   async info() {
     const federation = this.wallet.federation(this.federationId);
-    if (!federation?.network) throw new SourceConfigError("You have not joined this federation in this wallet mode");
+    if (!federation?.network) throw new SourceConfigError("You have not joined this federation in the Fedimint wallet of this network");
     if (!federation.modules.includes("ln")) throw new SourceConfigError(`${federation.name ?? "This federation"} has no Lightning gateway module`);
     const balance = Math.floor(await this.client().balance() / 1000);
     return { network: federation.network, alias: federation.name ?? `Federation ${this.federationId.slice(0, 8)}`, balance };
@@ -114,7 +114,7 @@ export const fedimint: LightningProviderDescriptor = {
     const wallet = host.fedimint as FedimintWallet | undefined;
     if (!wallet) throw new SourceConfigError("This app has no Fedimint wallet");
     const id = config.federation.trim().toLowerCase();
-    if (!wallet.federation(id)) throw new SourceConfigError("You have not joined this federation in this wallet mode");
+    if (!wallet.federation(id)) throw new SourceConfigError("You have not joined this federation in the Fedimint wallet of this network");
     return new FedimintLightning(wallet, id);
   },
 };

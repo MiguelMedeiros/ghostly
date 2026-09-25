@@ -1,8 +1,9 @@
 import { generateMnemonic, validateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
-import { ETHEREUM_USDT, EVM_TEST_CHAINS, SEPOLIA_TEST_USDT } from '@ghostly/core';
+import { ETHEREUM_USDT, EVM_TEST_CHAINS, SEPOLIA_TEST_USDT, type WalletNetwork } from '@ghostly/core';
 import type { WalletMode } from '../../shared/mints';
-import { ModeChanged, ModeGate } from './modeGate';
+import { ModeChanged, ModeGate, WrongNetworkError, networkLabel } from './modeGate';
+import { walletKey } from './walletNetworks';
 import { STORES, store, transact, wrap } from '../../shared/idb';
 import { UsdtAdapter, type UsdtConfig } from './usdt';
 import { intentRepository, newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from './persistence';
@@ -16,15 +17,17 @@ export interface UsdtWalletView {
 export interface UsdtCreate {network:UsdtConfig['network'];provider:string;token:string;password?:string;mnemonic?:string}
 /** Every new profile starts with this wallet: an address to receive on, nothing to set up. */
 export const DEFAULT_USDT = {network:'ethereum',provider:'https://ethereum.publicnode.com',token:ETHEREUM_USDT} as const satisfies Omit<UsdtCreate,'password'|'mnemonic'>;
-/** The Testnet mode starts on Sepolia, with Aave's test USDT (anyone can mint it from their faucet). */
+/** A Testnet USDT wallet starts on Sepolia, with Aave's test USDT (anyone can mint it from their faucet). */
 export const TESTNET_USDT = {network:'sepolia',provider:'https://ethereum-sepolia-rpc.publicnode.com',token:SEPOLIA_TEST_USDT} as const satisfies Omit<UsdtCreate,'password'|'mnemonic'>;
 /** Ethereum carries real USDT; Sepolia and a local chain carry worthless test tokens. */
 export const usdtMode=(network:UsdtConfig['network']):WalletMode=>network==='ethereum'?'mainnet':'testnet';
 /** A wallet with a device key opens by itself; one sealed with a password (older profiles) waits for it. */
 interface SavedWallet {config:UsdtConfig;seed:EncryptedSeed;deviceKey?:string}
+/** The defaults a new wallet of this network is made with, in one click. */
+export const usdtDefaults=(network:WalletNetwork)=>network==='testnet'?TESTNET_USDT:DEFAULT_USDT;
+/** The USDT wallet of one network: Mainnet's and Testnet's are both open at once, each under its own key. */
 export class UsdtWallet {
-  /** Each mode keeps its own wallet: switching parks one and opens the other, nothing is replaced. */
-  private mode:WalletMode='mainnet';
+  private readonly key:string;
   private saved?:SavedWallet;
   private epoch = 0;
   private timer?:ReturnType<typeof setTimeout>;
@@ -35,35 +38,41 @@ export class UsdtWallet {
   private gate=new ModeGate();
   adapter?:UsdtAdapter;
   view:UsdtWalletView={configured:false,locked:true,balance:'0',gasBalance:'0'};
-  constructor(private changed:()=>void) {}
+  constructor(readonly network:WalletNetwork,private changed:()=>void) {this.key=walletKey('usdtWallet',network);}
   /** Creating, replacing and restoring never interleave: two of them could each think the profile is empty. */
   private serial<T>(run:()=>Promise<T>):Promise<T> {const next=this.queue.then(run,run);this.queue=next.catch(()=>{});return next;}
-  async start() {this.saved=await wrap<SavedWallet|undefined>((await store(STORES.settings,'readonly')).get('usdtWallet'));this.view={...this.view,configured:!!this.saved,automatic:!!this.saved?.deviceKey,...this.saved?.config,locked:true};}
-  /** Creates the default wallet on first run and opens one that needs no password. Retries while the RPC is unreachable. */
-  ensureReady():Promise<void> {
-    // One already under way may be for the mode before a switch: once it ends, look again (once).
-    if(this.readying)return this.readying.then(()=>this.needsReady()?this.startReady():undefined);
-    return this.startReady();
+  async start() {this.saved=await wrap<SavedWallet|undefined>((await store(STORES.settings,'readonly')).get(this.key));this.view={...this.view,configured:!!this.saved,automatic:!!this.saved?.deviceKey,...this.saved?.config,locked:true};}
+  /**
+   * Opens the wallet when it needs no password; `create`: makes the default one first when there is none. Retries
+   * while the RPC is unreachable.
+   */
+  ensureReady(create=false):Promise<void> {
+    if(this.readying)return this.readying.then(()=>this.needsReady(create)?this.startReady(create):undefined);
+    return this.startReady(create);
   }
-  private startReady():Promise<void> {return this.readying??=this.ready().finally(()=>{this.readying=undefined;});}
-  private needsReady() {return !this.stopped&&(!this.saved||(!!this.saved.deviceKey&&!this.adapter));}
-  private async ready() {
+  private startReady(create:boolean):Promise<void> {return this.readying??=this.ready(create).finally(()=>{this.readying=undefined;});}
+  private needsReady(create:boolean) {return !this.stopped&&(this.saved?!!this.saved.deviceKey&&!this.adapter:create);}
+  private async ready(create:boolean) {
     clearTimeout(this.retry);
     try {
-      if(!this.saved)await this.createDefault();
+      if(!this.saved){if(create)await this.createDefault();}
       else if(this.saved.deviceKey && !this.adapter)await this.serial(()=>this.stopped?Promise.resolve():this.unlock());
     } catch(error) {
-      // A switch ended the wait: `ensureReady` runs again for the new mode.
       if(this.stopped||error instanceof ModeChanged)return;
       this.view={...this.view,error:`Connecting to Ethereum… ${error instanceof Error?error.message:''}`.trim()};this.changed();
-      this.retry=setTimeout(()=>void this.ensureReady(),30000);
+      this.retry=setTimeout(()=>void this.ensureReady(create),30000);
     }
   }
-  /** The default wallet of the mode in use when this runs: a switch queued before it is already applied. */
-  private createDefault() {return this.serial(async()=>{if(!this.saved)await this.createNow({...(this.mode==='testnet'?TESTNET_USDT:DEFAULT_USDT)});});}
+  private createDefault() {return this.serial(async()=>{if(!this.saved)await this.createNow({...usdtDefaults(this.network)});});}
+  /** A wallet of this network on its default chain and RPC, made now: it answers first, or nothing is saved. */
+  createDefaultNow() {return this.serial(async()=>{if(this.saved)throw new Error(`There is already a ${networkLabel(this.network)} USDT wallet`);await this.createNow({...usdtDefaults(this.network)});});}
+  get configured() {return !!this.saved;}
+  /** A creation waiting on its RPC gives up now, saving nothing. */
+  cutShort() {this.gate.interrupt();}
+  resume() {this.gate.resume();}
   create(params:UsdtCreate) {return this.serial(()=>this.createNow(params));}
   private async createNow(params:UsdtCreate) {
-    if(usdtMode(params.network)!==this.mode)throw new Error(this.mode==='mainnet'?'Switch the wallets to Testnet to use a test network':'Switch the wallets to Mainnet to use Ethereum');
+    if(usdtMode(params.network)!==this.network)throw new WrongNetworkError(usdtMode(params.network),`${params.network==='ethereum'?'Ethereum':params.network} is a ${networkLabel(usdtMode(params.network))} network: this is the ${networkLabel(this.network)} USDT wallet`);
     const mnemonic=params.mnemonic?.trim() || generateMnemonic(wordlist);
     if(!validateMnemonic(mnemonic,wordlist))throw new Error('Invalid recovery phrase');
     const deviceKey=params.password?undefined:newDeviceKey();
@@ -88,32 +97,10 @@ export class UsdtWallet {
     if(epoch!==this.epoch){await adapter.dispose();return;}
     this.adapter=adapter;await this.refresh();
   }
-  /**
-   * Opens the wallet of this mode, parking the other one under `usdtWallet-mode-<mode>` (kept, never
-   * retired: it may hold money). A mode that has none gets its default wallet from `ensureReady`.
-   */
-  setMode(mode:WalletMode):Promise<void> {
-    this.gate.switching(mode);
-    return this.serial(async()=>{
-    this.mode=mode;this.gate.entered(mode);
-    const current=this.saved;
-    const parked=await wrap<SavedWallet|undefined>((await store(STORES.settings,'readonly')).get(`usdtWallet-mode-${mode}`));
-    if(current && usdtMode(current.config.network)===mode)return;
-    if(!current && !parked)return;
-    // The old wallet's closing waits for its queue, maybe on its RPC: it finishes on its own, the switch goes on.
-    clearTimeout(this.retry);void this.lock().catch(()=>{});
-    await transact([STORES.settings],s=>{
-      if(current)s[STORES.settings].put(current,`usdtWallet-mode-${usdtMode(current.config.network)}`);
-      if(parked){s[STORES.settings].put(parked,'usdtWallet');s[STORES.settings].delete(`usdtWallet-mode-${mode}`);}
-      else s[STORES.settings].delete('usdtWallet');
-    });
-    this.saved=parked;
-    this.view={configured:!!parked,locked:true,automatic:!!parked?.deviceKey,balance:'0',gasBalance:'0',...parked?.config};this.changed();
-  });}
   /** Shutting down: nothing reconnects afterwards. */
-  async stop() {this.stopped=true;await this.serial(()=>this.lock());}
+  async stop() {this.stopped=true;this.gate.close();await this.serial(()=>this.lock());}
   async lock() {++this.epoch;clearTimeout(this.timer);clearTimeout(this.retry);const adapter=this.adapter;this.adapter=undefined;this.view={...this.view,locked:true};this.changed();await adapter?.dispose();}
-  /** A mode switch ends it where it is: the wallet being left needs no balance, and the switch does not wait for its RPC. */
+  /** Stopping ends it where it is: a wallet shutting down needs no balance. */
   async refresh() {
     clearTimeout(this.timer);const adapter=this.adapter;if(!adapter)return;
     try {const address=await this.gate.within(adapter.address()),balances=await this.gate.within(adapter.balances());if(adapter!==this.adapter)return;this.view={configured:true,locked:false,automatic:!!this.saved?.deviceKey,...adapter.config,address,...balances};}
@@ -130,7 +117,7 @@ export class UsdtWallet {
     if(!this.saved)throw new Error('No USDT wallet to back up');
     if(password.length<12)throw new Error('Use at least 12 characters for the backup password');
     const mnemonic=await this.reveal(password);
-    const intents=(await intentRepository.list()).filter(i=>i.review.method==='usdt');
+    const intents=(await intentRepository.list()).filter(i=>this.ours(i));
     const plaintext=JSON.stringify({format:'ghostly-usdt',version:1,config:this.saved.config,mnemonic,intents});
     return JSON.stringify({format:'ghostly-usdt-encrypted',version:1,vault:await sealSeed(plaintext,password)});
   }
@@ -140,7 +127,7 @@ export class UsdtWallet {
     if(envelope.format!=='ghostly-usdt-encrypted'||envelope.version!==1)throw new Error('Unsupported USDT backup');
     const payload=JSON.parse(await unsealSeed(envelope.vault,password)) as {format:string;version:number;config:UsdtConfig;mnemonic:string;intents:SavedIntent[]};
     if(payload.format!=='ghostly-usdt'||payload.version!==1||!validateMnemonic(payload.mnemonic,wordlist)||!Array.isArray(payload.intents))throw new Error('Invalid USDT backup');
-    if(usdtMode(payload.config.network)!==this.mode)throw new Error(`This backup is a ${usdtMode(payload.config.network)==='mainnet'?'Mainnet':'Testnet'} wallet: switch the wallets to it first`);
+    if(usdtMode(payload.config.network)!==this.network)throw new WrongNetworkError(usdtMode(payload.config.network),`This backup is a ${networkLabel(usdtMode(payload.config.network))} USDT wallet`);
     const config=await UsdtAdapter.inspect(payload.config);
     if(config.codeHash!==payload.config.codeHash||config.decimals!==payload.config.decimals||payload.intents.some(i=>i.review.method!=='usdt'||i.review.chainId!==config.chainId||i.review.token?.toLowerCase()!==config.token.toLowerCase()))throw new Error('Backup token or network mismatch');
     const deviceKey=newDeviceKey();
@@ -155,15 +142,17 @@ export class UsdtWallet {
    */
   private async retirable(refusal:string):Promise<SavedWallet> {
     const saved=this.saved!;
-    if((await intentRepository.list()).some(i=>i.review.method==='usdt'))throw new Error(refusal);
+    if((await intentRepository.list()).some(i=>this.ours(i)))throw new Error(refusal);
     if(this.adapter){const {balance,gasBalance}=await this.gate.within(this.adapter.balances());if(BigInt(balance)>0n||BigInt(gasBalance)>0n)throw new Error(refusal);}
     await this.lock();
     return saved;
   }
+  /** A payment of this wallet's network (the other network's wallet has its own). */
+  private ours(intent:SavedIntent) {return intent.review.method==='usdt'&&usdtMode(intent.review.network as UsdtConfig['network'])===this.network;}
   private async save(saved:SavedWallet,retired?:SavedWallet,intents:SavedIntent[]=[]) {
     await transact([STORES.settings,STORES.intents],s=>{
       if(retired)s[STORES.settings].put(retired,`usdtWallet-retired-${Date.now()}`);
-      s[STORES.settings].put(saved,'usdtWallet');
+      s[STORES.settings].put(saved,this.key);
       for(const intent of intents)s[STORES.intents].add(intent);
     });
   }

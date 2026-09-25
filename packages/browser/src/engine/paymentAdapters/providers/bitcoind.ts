@@ -95,7 +95,7 @@ export class BitcoindOnchain implements OnchainProvider {
     const provider = new BitcoindOnchain(config, transport);
     signal?.addEventListener("abort", () => void provider.close(), { once: true });
     const { network } = await provider.info();
-    if (networkMode(network) !== mode) throw new Error(mode === "mainnet" ? `This node is on ${network}, not Bitcoin mainnet` : "This node is on Bitcoin mainnet: use it in the Mainnet mode");
+    if (networkMode(network) !== mode) throw new Error(mode === "mainnet" ? `This node is on ${network}, not Bitcoin mainnet` : "This node is on Bitcoin mainnet: set it up as a Mainnet wallet instead");
     const wallet = object(await provider.call("getwalletinfo"), "wallet information");
     if (wallet.private_keys_enabled === false) throw new Error("This wallet has no private keys: it cannot sign a payment");
     return provider;

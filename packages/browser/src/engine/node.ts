@@ -1,13 +1,13 @@
-import { UsdtWallet } from "./paymentAdapters/usdtWallet";
+import { UsdtWallet, usdtMode } from "./paymentAdapters/usdtWallet";
 import { iceServerProblem } from "../shared/ice";
 import type { UsdtPrepared } from "./paymentAdapters/usdt";
-import { ArkWallet } from "./paymentAdapters/arkWallet";
-import { BarkWallet } from "./paymentAdapters/barkWallet";
-import { FedimintWallet } from "./paymentAdapters/fedimintWallet";
+import { ArkWallet, arkMode } from "./paymentAdapters/arkWallet";
+import { BARK_MAINNET_UNAVAILABLE, BarkWallet, barkDefaults, barkMode } from "./paymentAdapters/barkWallet";
+import { FEDIMINT_MAINNET, FEDIMINT_MAINNET_UNAVAILABLE, FedimintWallet } from "./paymentAdapters/fedimintWallet";
 import { FedimintAdapter, type FedimintPrepared } from "./paymentAdapters/fedimint";
 import { loadFedimintSdk, type FedimintSdk } from "./paymentAdapters/fedimintSdk";
 import type { BarkPrepared } from "./paymentAdapters/bark";
-import { SparkWallet } from "./paymentAdapters/sparkWallet";
+import { SparkWallet, sparkMode, sparkNetworkFor } from "./paymentAdapters/sparkWallet";
 import type { SparkPrepared } from "./paymentAdapters/spark";
 import { PaymentCoordinator } from "./paymentAdapters/coordinator";
 import { intentRepository } from "./paymentAdapters/persistence";
@@ -31,6 +31,11 @@ import { normalizeNostrRelays } from '../nostr/relay';
 import type { NostrDraft, NostrDraftRequest, NostrPublishResult } from '../nostr/types';
 import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
+import { WALLET_NETWORKS, walletNetworkOf, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
+import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/modeGate";
+import { createTiming, SPARK_MAINNET_NOT_YET, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
+import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
+import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
 import { CapsExchange, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
 import { fileMessageText, type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
 import {
@@ -88,7 +93,7 @@ import { fileStore, type StoredFile } from "../shared/idb";
 import { fileBytes } from "../shared/fileBytes";
 import { FileAppender, readStored, removeStored, storedSize, streamStored } from "../shared/storedFiles";
 import { FileDesk } from "./fileDesk";
-import { DEFAULT_MINTS, TEST_MINT, isWorthlessMint, type WalletMode } from "../shared/mints";
+import { DEFAULT_MINTS, TEST_MINT, isWorthlessMint, mintNetwork, type WalletMode } from "../shared/mints";
 import type {
   EngineState,
   GroupEdgeView,
@@ -104,8 +109,15 @@ import type {
   StoredLink,
   StoredMessage,
   StoredService,
+  NetworkWalletsView,
+  WalletCreate,
+  WalletInstanceView,
+  WalletOffer,
+  WalletTx,
+  WalletType,
   WalletView,
 } from "../shared/types";
+import { WALLET_TYPES } from "../shared/types";
 import { composeDetails, fileWire, pathSnapshot, withSend, type PathSnapshot } from "./messageDetails";
 import { db } from "./db";
 import { Groups } from "./groups";
@@ -320,46 +332,59 @@ export class GhostlyNode implements EngineImplementation {
   private groupEntryTimer: ReturnType<typeof setInterval> | null = null;
   private walletView: WalletView = { mints: [], balance: 0, history: [], feesPaid: 0 };
 
-  private readonly usdtWallet = new UsdtWallet(() => { void this.refreshWallet(); void this.desk.reconcileUsdtReceipts().catch(()=>{}); });
-  private readonly arkWallet = new ArkWallet(() => { void this.refreshWallet(); void this.desk.reconcileArkReceipts().catch(()=>{}); });
-  private readonly barkWallet = new BarkWallet(() => { void this.refreshWallet(); void this.desk.reconcileBarkReceipts().catch(()=>{}); });
-  private readonly fedimintWallet: FedimintWallet = new FedimintWallet({
+  /**
+   * Every wallet twice, one per network (real money, test coins), both open at once. Nothing is parked: a payment
+   * goes through the wallet of its own network, and a wallet of one network never pays for the other.
+   */
+  private readonly usdtWallets = perNetwork((network) => new UsdtWallet(network, () => { void this.refreshWallet(); void this.desk.reconcileUsdtReceipts().catch(()=>{}); }));
+  private readonly arkWallets = perNetwork((network) => new ArkWallet(network, () => { void this.refreshWallet(); void this.desk.reconcileArkReceipts().catch(()=>{}); }));
+  private readonly barkWallets = perNetwork((network) => new BarkWallet(network, () => { void this.refreshWallet(); void this.desk.reconcileBarkReceipts().catch(()=>{}); }));
+  private readonly fedimintWallets = perNetwork((network) => new FedimintWallet(network, {
     changed: () => void this.refreshWallet(),
     // An invoice of a chat request was paid into the federation: the request is paid.
     received: (paymentId) => void this.desk.onLightningPaid({ paymentId }),
-  }, () => (this.options.fedimintSdk ?? loadFedimintSdk)());
-  private readonly sparkWallet = new SparkWallet(() => { void this.refreshWallet(); void this.desk.reconcileSparkReceipts().catch(()=>{}); });
+  }, () => (this.options.fedimintSdk ?? loadFedimintSdk)()));
+  private readonly sparkWallets = perNetwork((network) => new SparkWallet(network, () => { void this.refreshWallet(); void this.desk.reconcileSparkReceipts().catch(()=>{}); }));
+  /** The network the legacy wallet page shows (the old Mainnet/Testnet switch), and what a call naming none acts on. */
+  private get viewNetwork(): WalletNetwork { return this.settings.walletMode === "testnet" ? "testnet" : "mainnet"; }
+  private net(network?: WalletNetwork): WalletNetwork { return network === "mainnet" || network === "testnet" ? network : this.viewNetwork; }
+  /** The Fedimint wallet that joined this federation, whichever network it is on. */
+  private fedimintOf(federation: string | undefined): FedimintWallet | undefined { return federation ? WALLET_NETWORKS.map((n) => this.fedimintWallets[n]).find((w) => w.federation(federation)) : undefined; }
+  /**
+   * Every way of paying through the wallet of the payment's own network: the target's chain says which. A
+   * network with no wallet refuses, so a test wallet never settles a request for real money.
+   */
   private readonly paymentCoordinator = new PaymentCoordinator(intentRepository, [{
     method:"usdt",
-    prepare:(target,amount,feeCap)=>this.usdtWallet.require().prepare(target,amount,feeCap),
-    execute:(review,prepared,persist)=>this.usdtWallet.require().execute(review,prepared as UsdtPrepared,persist),
-    reconcile:(review,prepared)=>this.usdtWallet.require().reconcile(review,prepared as UsdtPrepared),
+    prepare:(target,amount,feeCap)=>this.onNetworkOf(this.usdtWallets,"USDT",target).require().prepare(target,amount,feeCap),
+    execute:(review,prepared,persist)=>this.onNetworkOf(this.usdtWallets,"USDT",review).require().execute(review,prepared as UsdtPrepared,persist),
+    reconcile:(review,prepared)=>this.onNetworkOf(this.usdtWallets,"USDT",review).require().reconcile(review,prepared as UsdtPrepared),
   }, {
     method: "arkade",
-    prepare: (target, amount, feeCap) => this.arkWallet.require().prepare(target, amount, feeCap),
-    execute: (review, prepared, persist) => this.arkWallet.require().execute(review, prepared as ArkPrepared, persist),
-    reconcile: (review, prepared,persist) => this.arkWallet.require().reconcile(review, prepared as ArkPrepared,persist),
+    prepare: (target, amount, feeCap) => this.onNetworkOf(this.arkWallets,"Ark",target).require().prepare(target, amount, feeCap),
+    execute: (review, prepared, persist) => this.onNetworkOf(this.arkWallets,"Ark",review).require().execute(review, prepared as ArkPrepared, persist),
+    reconcile: (review, prepared,persist) => this.onNetworkOf(this.arkWallets,"Ark",review).require().reconcile(review, prepared as ArkPrepared,persist),
   }, {
     method: "bark",
-    prepare: (target, amount, feeCap) => this.barkWallet.require().prepare(target, amount, feeCap),
-    execute: (review, prepared, persist) => this.barkWallet.require().execute(review, prepared as BarkPrepared, persist),
-    reconcile: (review, prepared) => this.barkWallet.require().reconcile(review, prepared as BarkPrepared),
+    prepare: (target, amount, feeCap) => this.onNetworkOf(this.barkWallets,"Bark",target).require().prepare(target, amount, feeCap),
+    execute: (review, prepared, persist) => this.onNetworkOf(this.barkWallets,"Bark",review).require().execute(review, prepared as BarkPrepared, persist),
+    reconcile: (review, prepared) => this.onNetworkOf(this.barkWallets,"Bark",review).require().reconcile(review, prepared as BarkPrepared),
   }, {
     method: "spark",
-    prepare: (target, amount, feeCap) => this.sparkWallet.require().prepare(target, amount, feeCap),
-    execute: (review, prepared, persist) => this.sparkWallet.require().execute(review, prepared as SparkPrepared, persist),
-    reconcile: (review, prepared) => this.sparkWallet.require().reconcile(review, prepared as SparkPrepared),
+    prepare: (target, amount, feeCap) => this.onNetworkOf(this.sparkWallets,"Spark",target).require().prepare(target, amount, feeCap),
+    execute: (review, prepared, persist) => this.onNetworkOf(this.sparkWallets,"Spark",review).require().execute(review, prepared as SparkPrepared, persist),
+    reconcile: (review, prepared) => this.onNetworkOf(this.sparkWallets,"Spark",review).require().reconcile(review, prepared as SparkPrepared),
   }, {
     method:"bitcoin",
-    prepare:(target,amount,feeCap)=>this.bitcoin.adapter.prepare(target,amount,feeCap),
-    execute:(review,prepared,persist)=>this.bitcoin.adapter.execute(review,prepared as BitcoinPrepared,persist),
-    reconcile:(review,prepared,persist)=>this.bitcoin.adapter.reconcile(review,prepared as BitcoinPrepared,persist),
-    release:(review,prepared)=>this.bitcoin.adapter.release!(review,prepared as BitcoinPrepared),
+    prepare:(target,amount,feeCap)=>this.bitcoins[walletNetworkOf(target.network)].adapter.prepare(target,amount,feeCap),
+    execute:(review,prepared,persist)=>this.bitcoins[walletNetworkOf(review.network)].adapter.execute(review,prepared as BitcoinPrepared,persist),
+    reconcile:(review,prepared,persist)=>this.bitcoins[walletNetworkOf(review.network)].adapter.reconcile(review,prepared as BitcoinPrepared,persist),
+    release:(review,prepared)=>this.bitcoins[walletNetworkOf(review.network)].adapter.release!(review,prepared as BitcoinPrepared),
   }, {
     method:"fedimint",
-    prepare:(target,amount,feeCap)=>new FedimintAdapter(this.fedimintWallet,this.desk.fedimintPublisher).prepare(target,amount,feeCap),
-    execute:(review,prepared,persist)=>new FedimintAdapter(this.fedimintWallet,this.desk.fedimintPublisher).execute(review,prepared as FedimintPrepared,persist),
-    reconcile:(review)=>new FedimintAdapter(this.fedimintWallet,this.desk.fedimintPublisher).reconcile(review),
+    prepare:(target,amount,feeCap)=>new FedimintAdapter(this.fedimintWallets[walletNetworkOf(target.network)],this.desk.fedimintPublisher).prepare(target,amount,feeCap),
+    execute:(review,prepared,persist)=>new FedimintAdapter(this.fedimintWallets[walletNetworkOf(review.network)],this.desk.fedimintPublisher).execute(review,prepared as FedimintPrepared,persist),
+    reconcile:(review)=>new FedimintAdapter(this.fedimintWallets[walletNetworkOf(review.network)],this.desk.fedimintPublisher).reconcile(review),
   }, {
     method:"cashu",
     prepare:(target,amount,feeCap)=>new CashuAdapter(this.wallet,(r,t)=>this.desk.recordCashu(r,t)).prepare(target,amount,feeCap),
@@ -369,16 +394,25 @@ export class GhostlyNode implements EngineImplementation {
     if (review.state === "settled") this.feedback("confirmed", review.id);
     void this.refreshWallet();
   });
-  /** The mints of the wallet mode in use, primary first; the others stay, for the other mode. */
-  private modeMints(): string[] {
-    const testnet = this.settings.walletMode === "testnet";
-    return this.settings.mints.filter((mint) => isWorthlessMint(mint) === testnet);
+  /**
+   * The wallet of a payment's network, or a refusal naming what is missing: "no Testnet Ark wallet". The chain of
+   * the target (or of the review, which is its target) decides; nothing else can.
+   */
+  private onNetworkOf<W>(wallets: PerNetwork<W>, rail: string, target: { network: string }): W {
+    const network = walletNetworkOf(target.network), wallet = wallets[network] as W & { configured?: boolean };
+    if (wallet.configured === false) throw new Error(`This is a ${networkLabel(network)} payment, and you have no ${networkLabel(network)} ${rail} wallet: create one in Wallet → New`);
+    return wallet;
   }
-  private readonly wallet = new CashuWallet(() => this.modeMints(), {
+  /** One network's Cashu mints, primary first (the network the legacy page shows when none is named). */
+  private networkMints(network?: WalletNetwork): string[] {
+    const wanted = this.net(network);
+    return this.settings.mints.filter((mint) => mintNetwork(mint) === wanted);
+  }
+  private readonly wallet = new CashuWallet((network) => this.networkMints(network), {
     onChange: () => void this.refreshWallet(),
     // The mints settle their own invoices and payments; the Lightning journal learns it from here.
-    onQuotePaid: (quote) => void this.lightning.reportInvoicePaid(quote.invoice, { paymentId: quote.paymentId, mint: quote.mint }),
-    onMeltResolved: (melt, paid) => void this.lightning.reportPaymentResolved(melt.request, paid, { paymentId: melt.paymentId, mint: melt.mint }),
+    onQuotePaid: (quote) => void this.lightnings[mintNetwork(quote.mint)].reportInvoicePaid(quote.invoice, { paymentId: quote.paymentId, mint: quote.mint }),
+    onMeltResolved: (melt, paid) => void this.lightnings[mintNetwork(melt.mint)].reportPaymentResolved(melt.request, paid, { paymentId: melt.paymentId, mint: melt.mint }),
     onTestMintNeeded: async (mint) => void (await this.walletAddMint({ url: mint })),
   }, () => this.settings.mints);
   private registry?: ProviderRegistry;
@@ -386,15 +420,15 @@ export class GhostlyNode implements EngineImplementation {
   /** A plugin registered or left after start: the pickers show the new list. */
   private stopWatchingAdapters?: () => void;
   /** Read when a source connects, once the constructor has run. */
-  private readonly providerHost = () => ({ platform: this.options.platform ?? "web" as const, cashu: this.wallet, fedimint: this.fedimintWallet, invoke: this.options.invoke });
-  /** Lightning through the active source of the mode: the Cashu mints unless the person chose another. */
-  private readonly lightning: LightningService = new LightningService(() => this.providers().lightning, this.providerHost, {
+  private readonly providerHost = (network: WalletNetwork) => ({ platform: this.options.platform ?? "web" as const, cashu: this.wallet, fedimint: this.fedimintWallets[network], invoke: this.options.invoke });
+  /** Lightning of each network, through its active source: the Cashu mints unless the person chose another. */
+  private readonly lightnings: PerNetwork<LightningService> = perNetwork((network) => new LightningService(network, () => this.providers().lightning, () => this.providerHost(network), {
     changed: () => void this.refreshWallet(),
     received: (op) => void this.desk.onLightningPaid(op),
     resolved: (op, paid) => void this.desk.onLightningResolved(op, paid),
-  }, CASHU_MINT_SOURCE);
-  /** On-chain Bitcoin through the active source of the mode: none until the person sets one up. */
-  private readonly bitcoin = new BitcoinService(() => this.providers().onchain, this.providerHost, () => { void this.refreshWallet(); void this.desk.reconcileBitcoinReceipts().catch(()=>{}); });
+  }, CASHU_MINT_SOURCE));
+  /** On-chain Bitcoin of each network, through its active source: none until the person sets one up. */
+  private readonly bitcoins: PerNetwork<BitcoinService> = perNetwork((network) => new BitcoinService(network, () => this.providers().onchain, () => this.providerHost(network), () => { void this.refreshWallet(); void this.desk.reconcileBitcoinReceipts().catch(()=>{}); }));
   private readonly desk: PaymentDesk = new PaymentDesk(this.wallet, {
     onReviewedPaymentResult:async(id)=>{await this.reconcilePayment({id});},
     onReviewedPaymentRefused:async(id,reason)=>{
@@ -424,22 +458,22 @@ export class GhostlyNode implements EngineImplementation {
       void this.groupPayments.sync().catch(() => {});
       this.emitState();
     },
-  }, this.arkWallet, this.usdtWallet, this.barkWallet, {
-    createInvoice: (amount, paymentId) => this.lightning.createInvoice(amount, { paymentId }),
-    quote: async (invoice) => { const quote = await this.lightning.quote(invoice); return { ...quote, mint: quote.source === CASHU_MINT_SOURCE ? quote.mint : undefined }; },
-    pay: (quote, note, paymentId) => this.lightning.pay(quote.quote, { note, paymentId }),
+    defaultNetwork: () => this.viewNetwork,
+  }, this.arkWallets, this.usdtWallets, this.barkWallets, perNetwork((network) => ({
+    createInvoice: (amount: number, paymentId: string) => this.lightnings[network].createInvoice(amount, { paymentId }),
+    quote: async (invoice: string) => { const quote = await this.lightnings[network].quote(invoice); return { ...quote, mint: quote.source === CASHU_MINT_SOURCE ? quote.mint : undefined }; },
+    pay: (quote: { quote: string }, note: string, paymentId: string) => this.lightnings[network].pay(quote.quote, { note, paymentId }),
     // "I paid": the source, the mints and the federations are asked now; the request is paid only once one of them saw it.
-    check: async () => { await Promise.all([this.lightning.reconcile(), this.wallet.checkQuotes(), this.fedimintWallet.checkReceives()]); },
-  }, this.bitcoin, this.fedimintWallet, {
-    ready: () => !!this.sparkWallet.adapter,
-    requestTarget: (amount, memo) => this.sparkWallet.target(amount, memo),
-    received: (target, amount, since, claimed) => {
-      const adapter = this.sparkWallet.adapter;
-      // A request made on the other mode's wallet is looked for there, once it is back.
+    check: async () => { await Promise.all([this.lightnings[network].reconcile(), this.wallet.checkQuotes(), this.fedimintWallets[network].checkReceives()]); },
+  })), this.bitcoins, this.fedimintWallets, perNetwork((network) => ({
+    ready: () => !!this.sparkWallets[network].adapter,
+    requestTarget: (amount: number, memo?: string) => this.sparkWallets[network].target(amount, memo),
+    received: (target: PaymentTarget, amount: number, since: number, claimed: ReadonlySet<string>) => {
+      const adapter = this.sparkWallets[network].adapter;
       return adapter && target.network === adapter.network ? adapter.received(target.address, amount, since, claimed) : Promise.resolve(undefined);
     },
-    sync: async () => { await this.sparkWallet.adapter?.sync(); },
-  });
+    sync: async () => { await this.sparkWallets[network].adapter?.sync(); },
+  })));
 
   /** Store-and-forward for away contacts (WISP 4xx): items sealed into this device's own storage, picked up from the contact's. */
   private holdStore: { key: string; store: HoldStore } | null = null;
@@ -682,13 +716,23 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   private async refreshWallet(): Promise<void> {
-    const mode = this.settings.walletMode ?? "mainnet", view = await this.wallet.view();
-    // The history of the mode in use: test ecash is not mixed into the story of real money, nor the reverse.
-    const history = view.history.filter((tx) => !tx.mint || isWorthlessMint(tx.mint) === (mode === "testnet"));
-    let waitingTestSats = 0;
-    if (mode === "mainnet") for (const mint of this.settings.mints.filter(isWorthlessMint)) waitingTestSats += await this.wallet.balanceAt(mint);
-    this.walletView = { ...view, mode, waitingTestSats, history, feesPaid: history.reduce((sum, tx) => sum + tx.fee, 0), ark: this.arkWallet.view, bark: this.barkWallet.view, fedimint: this.fedimintWallet.view, spark: this.sparkWallet.view, usdt: this.usdtWallet.view, lightning: this.lightning.view, bitcoin: this.bitcoin.view, intents: (await intentRepository.list()).map((saved) => saved.review) };
-    for (const tx of this.walletView.history) {
+    const mode = this.viewNetwork;
+    const networks = {} as Record<WalletNetwork, NetworkWalletsView>;
+    let everything: WalletTx[] = [];
+    for (const network of WALLET_NETWORKS) {
+      const view = await this.wallet.view(network);
+      everything = view.history;
+      // A network's own story: test ecash is not mixed into the story of real money, nor the reverse.
+      const history = view.history.filter((tx) => !tx.mint || mintNetwork(tx.mint) === network);
+      networks[network] = { mints: view.mints, balance: view.balance, history, feesPaid: history.reduce((sum, tx) => sum + tx.fee, 0),
+        ark: this.arkWallets[network].view, bark: this.barkWallets[network].view, fedimint: this.fedimintWallets[network].view, spark: this.sparkWallets[network].view,
+        usdt: this.usdtWallets[network].view, lightning: this.lightnings[network].view, bitcoin: this.bitcoins[network].view };
+    }
+    const shown = networks[mode];
+    const wallets = walletInstances(networks);
+    this.walletView = { ...shown, mode, waitingTestSats: mode === "mainnet" ? networks.testnet.balance : 0, networks, wallets, offers: this.walletOffers(networks, wallets), intents: (await intentRepository.list()).map((saved) => saved.review) };
+    this.announcePaymentNetworks(wallets);
+    for (const tx of everything) {
       const fresh = !this.walletFeedbackIds.has(tx.id);
       this.walletFeedbackIds.add(tx.id);
       if (this.walletFeedbackReady && fresh && tx.amount > 0 && tx.timestamp >= this.feedbackStartedAt) {
@@ -703,7 +747,9 @@ export class GhostlyNode implements EngineImplementation {
     if(this.shuttingDown)return;
     try {
       for(const {review} of await intentRepository.list()){
-        if(!["submitted","unknown"].includes(review.state) || (review.method==="arkade" && !this.arkWallet.adapter) || (review.method==="bark" && !this.barkWallet.adapter) || (review.method==="spark" && !this.sparkWallet.adapter) || (review.method==="usdt" && !this.usdtWallet.adapter) || (review.method==="bitcoin" && !this.bitcoin.sources.active) || (review.method==="fedimint" && !this.fedimintWallet.federation(review.provider)))continue;
+        // Each through its own network's wallet, once that one is open.
+        const network=walletNetworkOf(review.network);
+        if(!["submitted","unknown"].includes(review.state) || (review.method==="arkade" && !this.arkWallets[network].adapter) || (review.method==="bark" && !this.barkWallets[network].adapter) || (review.method==="spark" && !this.sparkWallets[network].adapter) || (review.method==="usdt" && !this.usdtWallets[network].adapter) || (review.method==="bitcoin" && !this.bitcoins[network].sources.active) || (review.method==="fedimint" && !this.fedimintWallets[network].federation(review.provider)))continue;
         await this.reconcilePayment({id:review.id}).catch(()=>{});
       }
     } finally {if(!this.shuttingDown)this.paymentTimer=setTimeout(()=>void this.pollPaymentStatus(),10000);}
@@ -724,22 +770,23 @@ export class GhostlyNode implements EngineImplementation {
     setOwnDidSource(() => this.did.id);
     this.did.start();
     await this.nostrSocial.load();
-    await this.arkWallet.start();
-    await this.barkWallet.start();
-    await this.fedimintWallet.start();
-    await this.sparkWallet.start();
-    await this.usdtWallet.start();
-    await this.arkWallet.setMode(this.settings.walletMode ?? "mainnet");
-    await this.barkWallet.setMode(this.settings.walletMode ?? "mainnet");
-    await this.fedimintWallet.setMode(this.settings.walletMode ?? "mainnet");
-    await this.sparkWallet.setMode(this.settings.walletMode ?? "mainnet");
-    await this.usdtWallet.setMode(this.settings.walletMode ?? "mainnet");
-    await this.lightning.start(this.settings.walletMode ?? "mainnet");
-    await this.bitcoin.start(this.settings.walletMode ?? "mainnet");
+    // Wallets stored the way they were before each had its own network take their network's key first. Nothing
+    // is deleted: see walletNetworks.ts. The report names keys only.
+    const migrated = await migrateWalletNetworks();
+    if (migrated.moved.length || migrated.unreadable.length) console.info("[wallet] wallets moved to their network's key:", migrated.moved.map((m) => m.key).join(", ") || "none", migrated.unreadable.length ? `; left as they were: ${migrated.unreadable.join(", ")}` : "");
+    for (const network of WALLET_NETWORKS) {
+      await this.arkWallets[network].start();
+      await this.barkWallets[network].start();
+      await this.fedimintWallets[network].start();
+      await this.sparkWallets[network].start();
+      await this.usdtWallets[network].start();
+      await this.lightnings[network].start();
+      await this.bitcoins[network].start();
+    }
     await this.desk.start();
     await this.refreshWallet();
     this.wallet.start();
-    this.stopWatchingAdapters ??= onAdaptersChanged(() => { if (!this.shuttingDown) { this.lightning.refreshOffered(); this.bitcoin.refreshOffered(); } });
+    this.stopWatchingAdapters ??= onAdaptersChanged(() => { if (!this.shuttingDown) for (const network of WALLET_NETWORKS) { this.lightnings[network].refreshOffered(); this.bitcoins[network].refreshOffered(); } });
 
     const history = new Map<string, StoredMessage[]>();
     for (const stored of await db.getLinks()) {
@@ -765,17 +812,26 @@ export class GhostlyNode implements EngineImplementation {
     if (this.settings.online) { this.hold.start(); this.startGroupEntries(); this.prepareSpare(); }
     void this.pollPaymentStatus().catch(()=>{});
     // Federations joined before: opened (and the notes a contact sent that an interruption left unredeemed, redeemed).
-    void this.fedimintWallet.ensureReady().then(() => this.desk.resumeFedimint());
-    // The Lightning and Bitcoin sources the person set up (the Cashu mints need no network to connect).
-    void this.lightning.recover().then(() => this.lightning.ensureReady());
-    void this.bitcoin.ensureReady();
-    // Every profile has its wallets ready to receive without any setup; they connect in the background.
-    if (this.options.automaticWallets !== false) {
-      void this.arkWallet.ensureReady();
-      void this.barkWallet.ensureReady();
-      void this.sparkWallet.ensureReady();
-      void this.usdtWallet.ensureReady();
+    void Promise.all(WALLET_NETWORKS.map((n) => this.fedimintWallets[n].ensureReady())).then(() => this.desk.resumeFedimint());
+    for (const network of WALLET_NETWORKS) {
+      // The Lightning and Bitcoin sources the person set up (the Cashu mints need no network to connect).
+      void this.lightnings[network].recover().then(() => this.lightnings[network].ensureReady());
+      void this.bitcoins[network].ensureReady();
+      this.openWallets(network);
     }
+  }
+
+  /**
+   * Opens the wallets of a network that exist. The legacy page's network also gets its default wallets made when it
+   * has none (what every profile had before wallets were made one at a time).
+   */
+  private openWallets(network: WalletNetwork) {
+    const create = this.options.automaticWallets !== false && network === this.viewNetwork;
+    if (!create && this.options.automaticWallets === false) return;
+    void this.arkWallets[network].ensureReady(create);
+    void this.barkWallets[network].ensureReady(create);
+    void this.sparkWallets[network].ensureReady(create);
+    void this.usdtWallets[network].ensureReady(create);
   }
 
   /** Tells every peer we are leaving. Best effort: the browser may already be closing. */
@@ -789,13 +845,15 @@ export class GhostlyNode implements EngineImplementation {
     this.identities.stop();
     this.did.stop();
     this.nostrSocial.stop();
-    await this.arkWallet.stop();
-    await this.barkWallet.stop();
-    await this.fedimintWallet.stop();
-    await this.sparkWallet.stop();
-    await this.usdtWallet.stop();
-    await this.lightning.stop();
-    await this.bitcoin.stop();
+    for (const network of WALLET_NETWORKS) {
+      await this.arkWallets[network].stop();
+      await this.barkWallets[network].stop();
+      await this.fedimintWallets[network].stop();
+      await this.sparkWallets[network].stop();
+      await this.usdtWallets[network].stop();
+      await this.lightnings[network].stop();
+      await this.bitcoins[network].stop();
+    }
     await this.nativeQueue;
     await this.hold.stop();
     await Promise.allSettled([...this.outboxes.values()].map(outbox => outbox.stop()));
@@ -1098,8 +1156,7 @@ export class GhostlyNode implements EngineImplementation {
     for (const live of this.links.values()) live.link?.wake();
     this.hold.wake();
     // A wallet source that could not be reached at start-up (no network yet, a server asleep) tries again.
-    this.lightning.sources.wake();
-    this.bitcoin.sources.wake();
+    for (const network of WALLET_NETWORKS) { this.lightnings[network].sources.wake(); this.bitcoins[network].sources.wake(); }
   }
 
   exportLinks() {
@@ -1804,22 +1861,123 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /**
-   * Every wallet switches together: Cashu shows the mints of the mode (Testnet brings the public test
-   * mint), Ark and USDT open this mode's wallet and park the other one. Nothing is replaced or lost.
+   * The legacy page's network (the old Mainnet/Testnet switch): which network's wallets it shows, and what a call
+   * naming no network acts on. Nothing is parked any more: every wallet stays open on its own network. The network
+   * chosen gets its default wallets when it has none, as the switch always did (Testnet brings the public test mint).
    */
   async walletSetMode({ mode }: { mode: WalletMode }): Promise<void> {
     if (mode !== "mainnet" && mode !== "testnet") throw new Error("Unknown wallet mode");
     const mints = mode === "testnet" && !this.settings.mints.some(isWorthlessMint) ? [...this.settings.mints, TEST_MINT] : this.settings.mints;
     await this.updateSettings({ settings: { walletMode: mode, mints } });
-    // Queued behind whatever the wallets are doing (a new wallet on a slow network): the switch answers at
-    // once, and each wallet follows in order, so switching back and forth ends on the last choice.
-    const followed = Promise.all([this.arkWallet.setMode(mode), this.barkWallet.setMode(mode), this.fedimintWallet.setMode(mode), this.sparkWallet.setMode(mode), this.usdtWallet.setMode(mode), this.lightning.setMode(mode), this.bitcoin.setMode(mode)]).then(() => this.refreshWallet());
-    void followed.then(() => { void this.fedimintWallet.ensureReady(); void this.lightning.ensureReady(); void this.bitcoin.ensureReady(); }, () => {});
-    if (this.options.automaticWallets !== false) void followed.then(() => { void this.arkWallet.ensureReady(); void this.barkWallet.ensureReady(); void this.sparkWallet.ensureReady(); void this.usdtWallet.ensureReady(); }, () => {});
-    // Names, fees and limits of this mode's mints (a mint just added has none yet).
-    for (const mint of this.modeMints()) void this.wallet.checkMint(mint).then(() => this.refreshWallet(), () => {});
+    this.openWallets(mode);
+    // Names, fees and limits of this network's mints (a mint just added has none yet).
+    for (const mint of this.networkMints(mode)) void this.wallet.checkMint(mint).then(() => this.refreshWallet(), () => {});
     await this.refreshWallet();
   }
+
+  /**
+   * New → a type → a network: the wallet is made in one click, with the known-good defaults of that network, and
+   * checked before its card appears: the server answers, the mint says who it is, the chain is the right one. On
+   * failure nothing is saved and the error says what to try again. Types that need one thing (a Fedimint invite,
+   * a Lightning or on-chain source's form) take it in `invite` or `providerId` + `values`.
+   */
+  async walletCreate(params: WalletCreate): Promise<WalletInstanceView> {
+    const { type, network } = params;
+    if (!WALLET_TYPES.includes(type)) throw new Error("Unknown kind of wallet");
+    if (network !== "mainnet" && network !== "testnet") throw new Error("Choose Mainnet or Testnet");
+    await this.refreshWallet();
+    const offer = this.walletView.offers?.find((o) => o.type === type && o.network === network);
+    if (offer && !offer.available) throw new Error(offer.reason ?? "This wallet cannot be made here");
+    if (offer?.exists && type !== "lightning" && type !== "fedimint") throw new Error(`You already have a ${networkLabel(network)} ${WALLET_NAMES[type]} wallet`);
+    const label = `${networkLabel(network)} ${WALLET_NAMES[type]}`;
+    try {
+      if (type === "cashu") await this.createCashu(network);
+      else if (type === "arkade") await this.creating(this.arkWallets[network], () => this.arkWallets[network].createDefaultNow());
+      else if (type === "usdt") await this.creating(this.usdtWallets[network], () => this.usdtWallets[network].createDefaultNow());
+      else if (type === "bark") await this.creating(this.barkWallets[network], () => this.barkWallets[network].createDefaultNow());
+      else if (type === "spark") {
+        if (network === "mainnet") throw new Error(SPARK_MAINNET_NOT_YET);
+        await this.creating(this.sparkWallets[network], () => this.sparkWallets[network].create({ network: sparkNetworkFor(network) }));
+      } else if (type === "fedimint") {
+        if (!params.invite?.trim()) throw new Error("Paste the federation's invite code (fed11…)");
+        await this.creating(this.fedimintWallets[network], () => this.fedimintWallets[network].join(params.invite!));
+        void this.lightnings[network].ensureReady();
+      } else {
+        const service = type === "lightning" ? this.lightnings[network] : this.bitcoins[network];
+        const providerId = params.providerId ?? "";
+        const descriptor = service.sources.view.offered.find((d) => d.id === providerId);
+        if (!descriptor) throw new Error(`Choose a ${type === "lightning" ? "Lightning" : "Bitcoin"} source that runs on ${networkLabel(network)}`);
+        // What the person left blank takes the network's default (a BDK wallet's chain), the rest as typed.
+        const values = { ...Object.fromEntries(descriptor.fields.flatMap((f) => f.defaults?.[network] ? [[f.name, f.defaults[network]!]] : [])), ...(params.values ?? {}) };
+        await this.creating(service.sources, () => service.sources.set(providerId, values));
+      }
+    } catch (error) {
+      await this.refreshWallet();
+      throw Object.assign(new Error(createFailure(label, error)), { cause: error });
+    }
+    await this.refreshWallet();
+    const made = this.walletView.wallets?.find((w) => w.type === type && w.network === network);
+    if (!made) throw new Error(`The ${label} wallet did not come up. Nothing was lost: try again.`);
+    return made;
+  }
+
+  /**
+   * A creation that waits on the network gets `createTiming.timeoutMs`; then its waits are cut short, and what it did
+   * decides (a wait cut short saves nothing). It is never raced: a wallet saved just in time is reported as made.
+   */
+  private async creating(wallet: { cutShort(): void; resume(): void }, work: () => Promise<unknown>): Promise<void> {
+    let late = false;
+    const timer = setTimeout(() => { late = true; wallet.cutShort(); }, createTiming.timeoutMs);
+    try { await work(); }
+    catch (error) { throw late && error instanceof ModeChanged ? new Error("It did not answer in time") : error; }
+    finally { clearTimeout(timer); wallet.resume(); }
+  }
+
+  /** Cashu of one network: its default mints, only those that answer. None answering is a failure, nothing added. */
+  private async createCashu(network: WalletNetwork) {
+    if (this.networkMints(network).length) throw new Error(`You already have a ${networkLabel(network)} Cashu wallet`);
+    const defaults = network === "testnet" ? [TEST_MINT] : DEFAULT_MINTS;
+    const answered: string[] = [];
+    let last: unknown;
+    for (const url of defaults) {
+      try { answered.push((await this.wallet.checkMint(url)).url); } catch (error) { last = error; }
+    }
+    if (!answered.length) throw last instanceof Error ? last : new Error("No mint answered");
+    // A mint of the other network stays where it is; these become this network's, the first one primary.
+    await this.updateSettings({ settings: { mints: [...this.settings.mints.filter((m) => !answered.includes(m)), ...answered], mintsInitialized: true } });
+  }
+
+  /** What New can make on each network, and what is already there. */
+  private walletOffers(networks: Record<WalletNetwork, NetworkWalletsView>, wallets: WalletInstanceView[]): WalletOffer[] {
+    const has = (type: WalletType, network: WalletNetwork) => wallets.some((w) => w.type === type && w.network === network);
+    const offers: WalletOffer[] = [];
+    for (const type of WALLET_TYPES) for (const network of WALLET_NETWORKS) {
+      const view = networks[network];
+      const base = { type, network, exists: has(type, network) };
+      if (type === "bark" && !barkDefaults(network)) offers.push({ ...base, available: false, reason: BARK_MAINNET_UNAVAILABLE });
+      else if (type === "spark" && network === "mainnet") offers.push({ ...base, available: false, reason: SPARK_MAINNET_NOT_YET });
+      else if (type === "fedimint") offers.push(network === "mainnet" && !FEDIMINT_MAINNET ? { ...base, available: false, reason: FEDIMINT_MAINNET_UNAVAILABLE } : { ...base, available: true, needs: "invite" });
+      else if (type === "lightning" || type === "bitcoin") {
+        // Lightning through the Cashu mints comes with a Cashu wallet: New offers the other sources.
+        const providers = (type === "lightning" ? view.lightning : view.bitcoin)?.offered.filter((d) => d.id !== CASHU_MINT_SOURCE) ?? [];
+        const custom = type === "lightning" ? !!view.lightning?.providerId && view.lightning.providerId !== CASHU_MINT_SOURCE : base.exists;
+        offers.push(providers.length ? { ...base, exists: custom, available: true, needs: "provider", providers } : { ...base, exists: custom, available: false, reason: `No ${type === "lightning" ? "Lightning source" : "on-chain wallet"} runs on ${networkLabel(network)} here yet` });
+      } else offers.push({ ...base, available: true });
+    }
+    return offers;
+  }
+
+  /** The networks of this profile's wallets, per way of paying: every chat tells its contact (paired-payments). */
+  private announcePaymentNetworks(wallets: WalletInstanceView[]) {
+    const networks = paymentNetworksOf(wallets);
+    const key = JSON.stringify(networks);
+    if (key === this.announcedNetworks) return;
+    this.announcedNetworks = key;
+    for (const live of this.links.values()) live.link?.setPaymentNetworks?.(networks);
+  }
+  private announcedNetworks = "";
+  /** What a new chat link starts announcing. */
+  private get paymentNetworks(): PaymentNetworks { return paymentNetworksOf(this.walletView.wallets ?? []); }
 
   async walletSetPrimaryMint({ url }: { url: string }): Promise<void> {
     if (!this.settings.mints.includes(url)) return;
@@ -1833,44 +1991,47 @@ export class GhostlyNode implements EngineImplementation {
     await this.refreshWallet();
   }
 
-  /** `via: "cashu"`: ecash straight from the mints (the Cashu card). Otherwise the active Lightning source. */
-  async walletReceiveLightning({ amount, via }: { amount: number; via?: "cashu" }) {
+  /** `via: "cashu"`: ecash straight from the network's mints (the Cashu card). Otherwise its active Lightning source. */
+  async walletReceiveLightning({ amount, via, network }: { amount: number; via?: "cashu"; network?: WalletNetwork }) {
+    const n = this.net(network);
     if (via === "cashu") {
-      const quote = await this.wallet.receiveLightning(amount);
+      const quote = await this.wallet.receiveLightning(amount, undefined, n);
       return { quote: quote.quote, invoice: quote.invoice, expiresAt: quote.expiresAt, source: CASHU_MINT_SOURCE };
     }
-    const created = await this.lightning.createInvoice(amount);
+    const created = await this.lightnings[n].createInvoice(amount);
     return { quote: created.paymentHash, invoice: created.invoice, expiresAt: created.expiresAt, paymentHash: created.paymentHash, source: created.source };
   }
 
-  walletQuoteInvoice({ invoice, via }: { invoice: string; via?: "cashu" }) {
-    return via === "cashu" ? this.wallet.quoteInvoice(invoice) : this.lightning.quote(invoice);
+  walletQuoteInvoice({ invoice, via, network }: { invoice: string; via?: "cashu"; network?: WalletNetwork }) {
+    const n = this.net(network);
+    return via === "cashu" ? this.wallet.quoteInvoice(invoice, n) : this.lightnings[n].quote(invoice);
   }
 
   async walletPayQuote({ quote, mint, note }: { quote: string; mint: string; note?: string }) {
-    // A quote of the Lightning source, or a melt quote the Cashu card asked the mints for.
-    return { paid: this.lightning.hasQuote(quote) ? await this.lightning.pay(quote, { note }) : await this.wallet.payQuote(quote, mint, note) };
+    // A quote of a network's Lightning source (it knows its own), or a melt quote the Cashu card asked the mints for.
+    const lightning = WALLET_NETWORKS.map((n) => this.lightnings[n]).find((l) => l.hasQuote(quote));
+    return { paid: lightning ? await lightning.pay(quote, { note }) : await this.wallet.payQuote(quote, mint, note) };
   }
 
   /** A Lightning address or LNURL (LUD-16, LUD-06): resolved here, in the engine, so every platform fetches the same way. */
-  lnurlResolve({ text }: { text: string }) { return this.lightning.resolveDestination(text); }
-  lnurlInvoice({ id, amount, comment }: { id: string; amount: number; comment?: string }) { return this.lightning.destinationInvoice(id, amount, comment); }
+  lnurlResolve({ text, network }: { text: string; network?: WalletNetwork }) { return this.lightnings[this.net(network)].resolveDestination(text); }
+  lnurlInvoice({ id, amount, comment, network }: { id: string; amount: number; comment?: string; network?: WalletNetwork }) { return this.lightnings[this.net(network)].destinationInvoice(id, amount, comment); }
 
   checkPayment(params: { linkId: string; paymentId: string }) { return this.desk.checkPayment(params); }
 
-  /** Makes a provider this mode's Lightning source, with the values of its form (secrets are sealed). */
-  async lightningSetSource({ providerId, values }: { providerId: string; values: Record<string, string> }) { await this.lightning.sources.set(providerId, values); await this.refreshWallet(); }
+  /** Makes a provider this network's Lightning source, with the values of its form (secrets are sealed). */
+  async lightningSetSource({ providerId, values, network }: { providerId: string; values: Record<string, string>; network?: WalletNetwork }) { await this.lightnings[this.net(network)].sources.set(providerId, values); await this.refreshWallet(); }
   /** Back to the default source, the Cashu mints. */
-  async lightningClearSource() { await this.lightning.sources.clear(); await this.refreshWallet(); }
-  async lightningRetrySource() { await this.lightning.sources.retryNow(); await this.refreshWallet(); }
-  async lightningReconfigureSource({ values }: { values: Record<string, string> }) { await this.lightning.sources.reconfigure(values); await this.refreshWallet(); }
-  async lightningRefresh() { await this.lightning.sources.refresh(); await this.lightning.reconcile(); }
-  async bitcoinSetSource({ providerId, values }: { providerId: string; values: Record<string, string> }) { await this.bitcoin.sources.set(providerId, values); await this.refreshWallet(); }
-  async bitcoinClearSource() { await this.bitcoin.sources.clear(); await this.refreshWallet(); }
-  async bitcoinRetrySource() { await this.bitcoin.sources.retryNow(); await this.refreshWallet(); }
-  async bitcoinReconfigureSource({ values }: { values: Record<string, string> }) { await this.bitcoin.sources.reconfigure(values); await this.refreshWallet(); }
-  async bitcoinReceiveAddress() { const address = await this.bitcoin.receiveAddress(); await this.refreshWallet(); return address; }
-  bitcoinRefresh() { return this.bitcoin.sources.refresh(); }
+  async lightningClearSource(params?: { network?: WalletNetwork }) { await this.lightnings[this.net(params?.network)].sources.clear(); await this.refreshWallet(); }
+  async lightningRetrySource(params?: { network?: WalletNetwork }) { await this.lightnings[this.net(params?.network)].sources.retryNow(); await this.refreshWallet(); }
+  async lightningReconfigureSource({ values, network }: { values: Record<string, string>; network?: WalletNetwork }) { await this.lightnings[this.net(network)].sources.reconfigure(values); await this.refreshWallet(); }
+  async lightningRefresh(params?: { network?: WalletNetwork }) { const lightning = this.lightnings[this.net(params?.network)]; await lightning.sources.refresh(); await lightning.reconcile(); }
+  async bitcoinSetSource({ providerId, values, network }: { providerId: string; values: Record<string, string>; network?: WalletNetwork }) { await this.bitcoins[this.net(network)].sources.set(providerId, values); await this.refreshWallet(); }
+  async bitcoinClearSource(params?: { network?: WalletNetwork }) { await this.bitcoins[this.net(params?.network)].sources.clear(); await this.refreshWallet(); }
+  async bitcoinRetrySource(params?: { network?: WalletNetwork }) { await this.bitcoins[this.net(params?.network)].sources.retryNow(); await this.refreshWallet(); }
+  async bitcoinReconfigureSource({ values, network }: { values: Record<string, string>; network?: WalletNetwork }) { await this.bitcoins[this.net(network)].sources.reconfigure(values); await this.refreshWallet(); }
+  async bitcoinReceiveAddress(params?: { network?: WalletNetwork }) { const address = await this.bitcoins[this.net(params?.network)].receiveAddress(); await this.refreshWallet(); return address; }
+  bitcoinRefresh(params?: { network?: WalletNetwork }) { return this.bitcoins[this.net(params?.network)].sources.refresh(); }
 
   walletInspectCashu({ text }: { text: string }) {
     return { inspection: this.wallet.inspect(text) };
@@ -1885,56 +2046,88 @@ export class GhostlyNode implements EngineImplementation {
     return this.wallet.exportTokens();
   }
 
-  usdtCreate(params:Parameters<EngineApi["usdtCreate"]>[0]) {return this.usdtWallet.create(params);}
-  usdtUnlock(params:{password:string}) {return this.usdtWallet.unlock(params.password);}
-  usdtReveal(params:{password?:string}) {return this.usdtWallet.reveal(params.password);}
-  usdtLock() {return this.usdtWallet.lock();}
-  usdtRefresh() {return this.usdtWallet.refresh();}
-  usdtGetTestTokens() {return this.usdtWallet.getTestTokens();}
-  usdtExportBackup(params:{password:string}) {return this.usdtWallet.exportBackup(params.password);}
-  async usdtRestoreBackup(params:{text:string;password:string}) {await this.usdtWallet.restoreBackup(params.text,params.password);await this.usdtWallet.ensureReady();}
-  arkCreate(params: Parameters<EngineApi["arkCreate"]>[0]) { return this.arkWallet.create(params); }
-  arkUnlock(params: { password: string }) { return this.arkWallet.unlock(params.password); }
-  arkLock() { return this.arkWallet.lock(); }
-  arkBackup(params: { password?: string }) { return this.arkWallet.backup(params.password); }
-  arkExportBackup(params:{password:string}) { return this.arkWallet.exportBackup(params.password); }
-  async arkRestoreBackup(params:{text:string;password:string}) { await this.arkWallet.restoreBackup(params.text,params.password); await this.arkWallet.ensureReady(); }
-  arkRefresh() { return this.arkWallet.refresh(); }
-  arkRecover() { return this.arkWallet.recover(); }
-  barkCreate(params: Parameters<EngineApi["barkCreate"]>[0]) { return this.barkWallet.create(params); }
-  barkBackup() { return this.barkWallet.backup(); }
-  barkExportBackup(params: { password: string }) { return this.barkWallet.exportBackup(params.password); }
-  async barkRestoreBackup(params: { text: string; password: string }) { await this.barkWallet.restoreBackup(params.text, params.password); await this.barkWallet.ensureReady(); }
-  barkRefresh() { return this.barkWallet.refresh(); }
-  fedimintPreview(params: { invite: string }) { return this.fedimintWallet.preview(params.invite); }
-  async fedimintJoin(params: { invite: string; recover?: boolean }) { const joined = await this.fedimintWallet.join(params.invite, { recover: !!params.recover }); void this.lightning.ensureReady(); return joined; }
-  fedimintLeave(params: { federation: string }) { return this.fedimintWallet.leave(params.federation); }
-  fedimintRefresh() { return this.fedimintWallet.refresh(); }
-  async fedimintSpendNotes(params: { federation: string; amount: number }) { const { notes, operationId } = await this.fedimintWallet.spendNotes(params.federation, params.amount); return { notes, operation: operationId }; }
-  fedimintReceiveNotes(params: { notes: string }) { return this.fedimintWallet.receiveNotes(params.notes); }
-  fedimintInvoice(params: { federation: string; amount: number; memo?: string }) { return this.fedimintWallet.createInvoice(params.federation, params.amount, params.memo ?? "").then(({ invoice }) => ({ invoice })); }
-  fedimintTakeBack(params: { federation: string; operation: string }) { return this.fedimintWallet.takeBack(params.federation, params.operation); }
-  fedimintBackup() { return this.fedimintWallet.backup(); }
-  fedimintExportBackup(params: { password: string }) { return this.fedimintWallet.exportBackup(params.password); }
-  fedimintRestoreBackup(params: { text: string; password: string }) { return this.fedimintWallet.restoreBackup(params.text, params.password); }
-  fedimintRestorePhrase(params: { mnemonic: string; invites: string[] }) { return this.fedimintWallet.restorePhrase(params.mnemonic, params.invites); }
-  barkBoard() { return this.barkWallet.board(); }
-  /** Testnet's Spark wallet is made by itself; this makes Mainnet's (with a Breez API key) or restores from a phrase. */
-  async sparkCreate(params: Parameters<EngineApi["sparkCreate"]>[0]) { await this.sparkWallet.create(params); }
-  async sparkBackup() { const { mnemonic, network } = await this.sparkWallet.backup(); return { mnemonic, network }; }
-  sparkExportBackup(params: { password: string }) { return this.sparkWallet.exportBackup(params.password); }
-  async sparkRestoreBackup(params: { text: string; password: string; apiKey?: string }) { await this.sparkWallet.restoreBackup(params.text, params.password, params.apiKey); await this.sparkWallet.ensureReady(); }
-  sparkRefresh() { return this.sparkWallet.refresh(); }
   /**
-   * One seed for both: the Spark wallet of this mode becomes the Breez Lightning source too. The SDK is shared (same
-   * seed, same storage), so there is one wallet and one balance behind the Spark and Lightning cards.
+   * A backup goes into the wallet of its own network, whichever was asked: the file says which, and a wallet of the
+   * other network refuses it untouched (WrongNetworkError) before this hands it on.
    */
-  async sparkUseForLightning() {
-    const { mnemonic, apiKey } = await this.sparkWallet.backup();
-    await this.lightning.sources.set(BREEZ_SOURCE, { mnemonic, ...(apiKey ? { apiKey } : {}) });
+  private async restoreInto<W, R>(wallets: PerNetwork<W>, network: WalletNetwork | undefined, restore: (wallet: W) => Promise<R>): Promise<{ wallet: W; result: R }> {
+    const first = wallets[this.net(network)];
+    try { return { wallet: first, result: await restore(first) }; }
+    catch (error) {
+      if (!(error instanceof WrongNetworkError)) throw error;
+      const wallet = wallets[error.network];
+      return { wallet, result: await restore(wallet) };
+    }
+  }
+
+  // Each wallet call acts on one network's wallet: the one named, else the legacy page's. A create names its chain,
+  // and so its network.
+  usdtCreate(params: Parameters<EngineApi["usdtCreate"]>[0]) { return this.usdtWallets[usdtMode(params.network)].create(params); }
+  usdtUnlock(params: { password: string; network?: WalletNetwork }) { return this.usdtWallets[this.net(params.network)].unlock(params.password); }
+  usdtReveal(params: { password?: string; network?: WalletNetwork }) { return this.usdtWallets[this.net(params?.network)].reveal(params?.password); }
+  usdtLock(params?: { network?: WalletNetwork }) { return this.usdtWallets[this.net(params?.network)].lock(); }
+  usdtRefresh(params?: { network?: WalletNetwork }) { return this.usdtWallets[this.net(params?.network)].refresh(); }
+  usdtGetTestTokens(params?: { network?: WalletNetwork }) { return this.usdtWallets[params?.network ?? "testnet"].getTestTokens(); }
+  usdtExportBackup(params: { password: string; network?: WalletNetwork }) { return this.usdtWallets[this.net(params.network)].exportBackup(params.password); }
+  async usdtRestoreBackup(params: { text: string; password: string; network?: WalletNetwork }) { const { wallet } = await this.restoreInto(this.usdtWallets, params.network, (w) => w.restoreBackup(params.text, params.password)); await wallet.ensureReady(); }
+  arkCreate(params: Parameters<EngineApi["arkCreate"]>[0]) { return this.arkWallets[arkMode(params.network)].create(params); }
+  arkUnlock(params: { password: string; network?: WalletNetwork }) { return this.arkWallets[this.net(params.network)].unlock(params.password); }
+  arkLock(params?: { network?: WalletNetwork }) { return this.arkWallets[this.net(params?.network)].lock(); }
+  arkBackup(params: { password?: string; network?: WalletNetwork }) { return this.arkWallets[this.net(params?.network)].backup(params?.password); }
+  arkExportBackup(params: { password: string; network?: WalletNetwork }) { return this.arkWallets[this.net(params.network)].exportBackup(params.password); }
+  async arkRestoreBackup(params: { text: string; password: string; network?: WalletNetwork }) { const { wallet } = await this.restoreInto(this.arkWallets, params.network, (w) => w.restoreBackup(params.text, params.password)); await wallet.ensureReady(); }
+  arkRefresh(params?: { network?: WalletNetwork }) { return this.arkWallets[this.net(params?.network)].refresh(); }
+  arkRecover(params?: { network?: WalletNetwork }) { return this.arkWallets[this.net(params?.network)].recover(); }
+  barkCreate(params: Parameters<EngineApi["barkCreate"]>[0]) { return this.barkWallets[barkMode(params.network)].create(params); }
+  barkBackup(params?: { network?: WalletNetwork }) { return this.barkWallets[this.net(params?.network)].backup(); }
+  barkExportBackup(params: { password: string; network?: WalletNetwork }) { return this.barkWallets[this.net(params.network)].exportBackup(params.password); }
+  async barkRestoreBackup(params: { text: string; password: string; network?: WalletNetwork }) { const { wallet } = await this.restoreInto(this.barkWallets, params.network, (w) => w.restoreBackup(params.text, params.password)); await wallet.ensureReady(); }
+  barkRefresh(params?: { network?: WalletNetwork }) { return this.barkWallets[this.net(params?.network)].refresh(); }
+  barkBoard(params?: { network?: WalletNetwork }) { return this.barkWallets[this.net(params?.network)].board(); }
+  /** An invite's federation is on one network: the wallet of that network previews and joins it. */
+  async fedimintPreview(params: { invite: string; network?: WalletNetwork }) { return (await this.restoreInto(this.fedimintWallets, params.network, (w) => w.preview(params.invite))).result; }
+  async fedimintJoin(params: { invite: string; recover?: boolean; network?: WalletNetwork }) {
+    const { wallet, result } = await this.restoreInto(this.fedimintWallets, params.network, (w) => w.join(params.invite, { recover: !!params.recover }));
+    void this.lightnings[wallet.network].ensureReady();
+    return result;
+  }
+  fedimintLeave(params: { federation: string }) { return (this.fedimintOf(params.federation) ?? this.fedimintWallets[this.viewNetwork]).leave(params.federation); }
+  async fedimintRefresh(params?: { network?: WalletNetwork }) { for (const network of params?.network ? [params.network] : WALLET_NETWORKS) await this.fedimintWallets[network].refresh(); }
+  async fedimintSpendNotes(params: { federation: string; amount: number }) { const { notes, operationId } = await (this.fedimintOf(params.federation) ?? this.fedimintWallets[this.viewNetwork]).spendNotes(params.federation, params.amount); return { notes, operation: operationId }; }
+  /** Pasted notes go to the wallet that joined their federation, whichever network it is on. */
+  async fedimintReceiveNotes(params: { notes: string; network?: WalletNetwork }) {
+    for (const network of WALLET_NETWORKS) {
+      const wallet = this.fedimintWallets[network];
+      if (await wallet.inspectNotes(params.notes).catch(() => null)) return wallet.receiveNotes(params.notes);
+    }
+    return this.fedimintWallets[this.net(params.network)].receiveNotes(params.notes);
+  }
+  fedimintInvoice(params: { federation: string; amount: number; memo?: string }) { return (this.fedimintOf(params.federation) ?? this.fedimintWallets[this.viewNetwork]).createInvoice(params.federation, params.amount, params.memo ?? "").then(({ invoice }) => ({ invoice })); }
+  fedimintTakeBack(params: { federation: string; operation: string }) { return (this.fedimintOf(params.federation) ?? this.fedimintWallets[this.viewNetwork]).takeBack(params.federation, params.operation); }
+  fedimintBackup(params?: { network?: WalletNetwork }) { return this.fedimintWallets[this.net(params?.network)].backup(); }
+  fedimintExportBackup(params: { password: string; network?: WalletNetwork }) { return this.fedimintWallets[this.net(params.network)].exportBackup(params.password); }
+  async fedimintRestoreBackup(params: { text: string; password: string; network?: WalletNetwork }) { return (await this.restoreInto(this.fedimintWallets, params.network, (w) => w.restoreBackup(params.text, params.password))).result; }
+  fedimintRestorePhrase(params: { mnemonic: string; invites: string[]; network?: WalletNetwork }) { return this.fedimintWallets[this.net(params.network)].restorePhrase(params.mnemonic, params.invites); }
+  /** A Spark wallet on the chain named (Mainnet with a Breez API key), or one restored from a phrase. */
+  async sparkCreate(params: Parameters<EngineApi["sparkCreate"]>[0]) { await this.sparkWallets[sparkMode(params.network)].create(params); }
+  async sparkBackup(params?: { network?: WalletNetwork }) { const { mnemonic, network } = await this.sparkWallets[this.net(params?.network)].backup(); return { mnemonic, network }; }
+  sparkExportBackup(params: { password: string; network?: WalletNetwork }) { return this.sparkWallets[this.net(params.network)].exportBackup(params.password); }
+  async sparkRestoreBackup(params: { text: string; password: string; apiKey?: string; network?: WalletNetwork }) { const { wallet } = await this.restoreInto(this.sparkWallets, params.network, (w) => w.restoreBackup(params.text, params.password, params.apiKey)); await wallet.ensureReady(); }
+  sparkRefresh(params?: { network?: WalletNetwork }) { return this.sparkWallets[this.net(params?.network)].refresh(); }
+  /**
+   * One seed for both: the Spark wallet of a network becomes that network's Breez Lightning source too. The SDK is
+   * shared (same seed, same storage), so there is one wallet and one balance behind the Spark and Lightning cards.
+   */
+  async sparkUseForLightning(params?: { network?: WalletNetwork }) {
+    const network = this.net(params?.network);
+    const { mnemonic, apiKey } = await this.sparkWallets[network].backup();
+    await this.lightnings[network].sources.set(BREEZ_SOURCE, { mnemonic, ...(apiKey ? { apiKey } : {}) });
     await this.refreshWallet();
   }
   async preparePayment(params: Parameters<EngineApi["preparePayment"]>[0]) {
+    // The card chosen and what it pays are on one network, or nothing is prepared: test coins never pay for real money.
+    const paying = params.target.method === "cashu" ? mintNetwork(params.target.provider) : walletNetworkOf(params.target.network);
+    if (params.network && params.network !== paying) throw new Error(crossNetwork(params.network, paying));
     if (params.linkId) {
       const link=this.paymentLink(params.linkId); if(!link)throw new Error("The peer is offline");
       // Whom the link pays: the chat's contact, or the community member it names.
@@ -1952,6 +2145,8 @@ export class GhostlyNode implements EngineImplementation {
         if(!request || request.linkId!==params.linkId || request.direction!=="in" || request.state!=="pending" || request.amount!==params.amount)throw new Error("Payment review does not match the authenticated request");
         if(params.target.method!=="cashu" ? JSON.stringify(request.target)!==JSON.stringify(params.target) : !!request.target || params.target.address!==request.id || !request.mints?.includes(params.target.provider))throw new Error("Selected method or mint does not match the authenticated request");
         if(request.lightningPending || Object.values(this.desk.views()).some(p=>p.kind==="payment" && p.requestId===request.id && p.linkId===params.linkId && !["failed","reclaimed"].includes(p.state)))throw new Error("This request already has a payment; reconcile it instead");
+        const asked=paymentNetwork(request);
+        if(asked!==paying)throw new Error(crossNetwork(paying, asked));
       } else if(params.target.method!=="cashu" || !payee || params.target.address!==payee)throw new Error("Destination does not match the authenticated peer");
       params={...params,payee};
     }
@@ -1959,6 +2154,11 @@ export class GhostlyNode implements EngineImplementation {
     if(params.target.method==="fedimint" && !params.requestId)throw new Error("Fedimint ecash is paid on a contact's request in a chat");
     const memo=typeof params.memo==="string" ? params.memo.trim().slice(0,140) || undefined : undefined;
     return this.paymentCoordinator.prepare(params.target,params.amount,params.feeCap,{payee:params.payee,linkId:params.linkId,requestId:params.requestId,memo});
+  }
+  /** The wallets of a review's network read again after it moved money. */
+  private async refreshNetwork(review: PaymentReview) {
+    const network = review.method === "cashu" ? mintNetwork(review.provider) : walletNetworkOf(review.network);
+    await this.arkWallets[network].refresh(); await this.barkWallets[network].refresh(); await this.sparkWallets[network].refresh(); await this.usdtWallets[network].refresh();
   }
   async approvePayment(params: {id:string}) {
     const intent=await intentRepository.get(params.id);
@@ -1984,7 +2184,7 @@ export class GhostlyNode implements EngineImplementation {
     await this.desk.recordBitcoin(review).catch(()=>{});
     await this.desk.recordSpark(review).catch(()=>{});
     await this.desk.recordUsdt(review).catch(()=>{});
-    await this.arkWallet.refresh();await this.barkWallet.refresh();await this.sparkWallet.refresh();await this.usdtWallet.refresh();return review;
+    await this.refreshNetwork(review);return review;
   }
   async reconcilePayment(params: {id:string}) {
     const review=await this.paymentCoordinator.reconcile(params.id);
@@ -1994,37 +2194,40 @@ export class GhostlyNode implements EngineImplementation {
     await this.desk.recordBitcoin(review).catch(()=>{});
     await this.desk.recordSpark(review).catch(()=>{});
     await this.desk.recordUsdt(review).catch(()=>{});
-    await this.arkWallet.refresh();await this.barkWallet.refresh();await this.sparkWallet.refresh();await this.usdtWallet.refresh();return review;
+    await this.refreshNetwork(review);return review;
   }
   cancelPayment(params: {id:string}) { return this.paymentCoordinator.cancel(params.id); }
 
-  sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number }) {
+  /** `network`: the Cashu card of that network sends (its mints). */
+  sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; network?: WalletNetwork }) {
     const live = this.links.get(params.linkId);
     // Ecash is a bearer token: it is never held for an away contact, only a request for it is.
     if (live && this.holdingFor(live)) throw new Error("Ecash is not held for an away contact. Send a request instead, or wait until they are back.");
-    return this.desk.send(params);
+    return this.desk.send({ ...params, network: this.net(params.network) });
   }
 
-  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark"; rail?: "cashu" | "lightning" }) {
-    return this.desk.request({ linkId: params.linkId, amount: params.amount, memo: params.memo, timestamp: params.timestamp, method: params.method,
+  /** `network`: the card's network; the request is paid only by a wallet of that network. */
+  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark"; rail?: "cashu" | "lightning"; network?: WalletNetwork }) {
+    return this.desk.request({ linkId: params.linkId, amount: params.amount, memo: params.memo, timestamp: params.timestamp, method: params.method, network: this.net(params.network),
       ...(params.rail === "cashu" || params.rail === "lightning" ? { rail: params.rail } : {}) });
   }
 
   /** A request any member of a group may pay, once (WISP 9xx § Payments). */
-  requestGroupPayment(params: { groupId: string; amount: number; memo?: string; timestamp: number; rail: "cashu" | "lightning" }) {
+  requestGroupPayment(params: { groupId: string; amount: number; memo?: string; timestamp: number; rail: "cashu" | "lightning"; network?: WalletNetwork }) {
     const group = this.groups.views().find(g => g.id === params.groupId);
     if (group?.status !== "active") throw new Error("You are not in this group");
     if (group.members.length < 2) throw new Error("Nobody else is in the group yet");
-    return this.desk.requestFromGroup(params);
+    return this.desk.requestFromGroup({ ...params, network: this.net(params.network) });
   }
 
-  /** Paying on a card without a request (Ark, Bark, Spark, USDT, on-chain): the contact's app answers with one. */
-  askToPay(params: { linkId: string; amount: number; method: "arkade" | "usdt" | "bark" | "bitcoin" | "spark" | "fedimint"; memo?: string; timestamp: number }) {
+  /** Paying on a card without a request (Ark, Bark, Spark, USDT, on-chain): the contact's app answers with one, on this card's network. */
+  askToPay(params: { linkId: string; amount: number; method: "arkade" | "usdt" | "bark" | "bitcoin" | "spark" | "fedimint"; memo?: string; timestamp: number; network?: WalletNetwork }) {
     if (params.method !== "arkade" && params.method !== "usdt" && params.method !== "bark" && params.method !== "bitcoin" && params.method !== "fedimint" && params.method !== "spark") throw new Error("Only Ark, Bark, Spark, USDT, on-chain Bitcoin and Fedimint are paid this way");
-    return this.desk.ask(params);
+    return this.desk.ask({ ...params, network: this.net(params.network) });
   }
 
-  payRequest(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number }) {
+  /** `network`: the card chosen to pay; a request of the other network is refused, nothing spent. */
+  payRequest(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number; network?: WalletNetwork }) {
     return this.desk.payRequest(params);
   }
 
@@ -2391,6 +2594,7 @@ export class GhostlyNode implements EngineImplementation {
       verifiedPeerKey: stored.peerTrust ? stored.peerTrust.verifiedKey : stored.pairedPeerKey, expectedPeerKey: stored.peerParticipationKeyZ32 } : undefined;
     live.link = new GhostLink({
       paymentMethods: stored.paymentMethods,
+      paymentNetworks: this.paymentNetworks,
       holdSupport: !!stored.hold?.enabled,
       arkPaymentsSupport: true,
       usdtPaymentsSupport: true,
@@ -2890,7 +3094,8 @@ export class GhostlyNode implements EngineImplementation {
     const link = live.link;
     if (!this.holdingFor(live)) return { files: !!link && GhostlyNode.takesFiles(link), payments: link?.supportsPayments ?? false,
       calls: link?.supportsCalls ?? false, services: link?.supportsServices ?? false, largeFiles: link?.supportsLargeFiles ?? false,
-      methods: Object.fromEntries(PAYMENT_METHODS.map(m => [m, link?.allowsPayment(m) ?? false])) as Record<PaymentMethodName, boolean> };
+      methods: Object.fromEntries(PAYMENT_METHODS.map(m => [m, link?.allowsPayment(m) ?? false])) as Record<PaymentMethodName, boolean>,
+      ...(link?.peerPaymentNetworks?.("cashu") !== undefined ? { networks: Object.fromEntries(PAYMENT_METHODS.map(m => [m, link!.peerPaymentNetworks(m) ?? []])) } : {}) };
     const held = this.hold.heldPaymentMethods(live.stored.id) ?? [];
     const methods = Object.fromEntries(PAYMENT_METHODS.map(m => [m, held.includes(m) && (link?.paymentEnabled(m) ?? false)])) as Record<PaymentMethodName, boolean>;
     return { files: true, payments: Object.values(methods).some(Boolean), methods, calls: false, services: false };

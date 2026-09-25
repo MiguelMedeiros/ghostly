@@ -224,8 +224,8 @@ describe("Breez as the engine's Lightning source", () => {
     const events = { changed: vi.fn(), received: vi.fn(), resolved: vi.fn() } satisfies LightningEvents;
     const cashu = { view: async () => ({ balance: 0, mints: [], history: [], feesPaid: 0 }) } as unknown as CashuWallet;
     const descriptor = breezDescriptor(async () => net.sdk);
-    const lightning = new LightningService(() => [cashuMint, descriptor], () => ({ platform: "extension", cashu }), events, CASHU_MINT_SOURCE);
-    await lightning.start("testnet");
+    const lightning = new LightningService("testnet", () => [cashuMint, descriptor], () => ({ platform: "extension", cashu }), events, CASHU_MINT_SOURCE);
+    await lightning.start();
     const mnemonic = TEST_PHRASE;
     await lightning.sources.set(BREEZ_SOURCE, { mnemonic, apiKey: "" });
     expect(lightning.view).toMatchObject({ providerId: BREEZ_SOURCE, status: "ready", network: "regtest", secrets: ["mnemonic", "apiKey"] });

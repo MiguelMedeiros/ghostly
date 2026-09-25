@@ -70,6 +70,8 @@ function member(world: CommunityWorld, name: string): Payer {
     groupLinks: g => [groupLinkId(g)],
     storeMessage: putMessage,
     onChange: () => { void late.notes.sync(); },
+    // The members pay each other on the public test mint: Testnet.
+    defaultNetwork: () => "testnet",
   }, undefined, undefined, undefined, lightning as unknown as DeskLightning);
   late.notes = new GroupPayments({
     payments: () => Object.values(desk.views()),

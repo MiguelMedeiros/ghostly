@@ -1,8 +1,19 @@
+import type { WalletNetwork } from "@ghostly/core";
 import type { WalletMode } from "../../shared/mints";
 
 /** A wallet of the mode being left stopped opening: the switch goes ahead without waiting for its network. */
 export class ModeChanged extends Error {
   constructor() { super("The wallets switched mode"); this.name = "ModeChanged"; }
+}
+
+export const networkLabel = (network: WalletNetwork) => network === "mainnet" ? "Mainnet" : "Testnet";
+
+/**
+ * What was asked of one network's wallet belongs to the other network's (a backup, a chain): nothing was changed.
+ * `network` is where it belongs, so the engine can hand it to that wallet instead.
+ */
+export class WrongNetworkError extends Error {
+  constructor(readonly network: WalletNetwork, message: string) { super(message); this.name = "WrongNetworkError"; }
 }
 
 /**
@@ -29,11 +40,23 @@ export class ModeGate {
   /** The owner's switch to `mode` is applied (its queue reached it): waits are for this mode again. */
   entered(mode: WalletMode) { this.current = mode; }
 
+  /**
+   * A creation took too long: the waits under way end now, and so does every wait that starts until `resume`
+   * (a creation still sealing its seed has not reached its server yet, and must not wait there either).
+   */
+  interrupt() { this.cut = true; this.controller.abort(); this.controller = new AbortController(); }
+  resume() { this.cut = false; }
+  private cut = false;
+
+  /** The wallet stopped: every wait ends now, and any later one at once. */
+  close() { this.closed = true; this.controller.abort(); }
+  private closed = false;
+
   within<T>(work: Promise<T>, dispose?: (value: T) => unknown): Promise<T> {
     const signal = this.controller.signal;
     return new Promise<T>((resolve, reject) => {
       const give = () => { reject(new ModeChanged()); void work.then((value) => dispose?.(value), () => {}); };
-      if (this.current && this.current !== this.target) return give();
+      if (this.closed || this.cut || (this.current && this.current !== this.target)) return give();
       signal.addEventListener("abort", give, { once: true });
       work.then(
         (value) => { signal.removeEventListener("abort", give); if (!signal.aborted) resolve(value); },

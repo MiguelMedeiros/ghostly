@@ -229,7 +229,7 @@ export class HoldEngine {
       } else {
         const request = this.host.paymentRequest(entry.ref!);
         if (!request) return fail("The payment request is gone");
-        body = utf8Encode(JSON.stringify({ id: request.id, ts: request.timestamp, v: request.amount.value, u: request.amount.asset, memo: request.memo, e: request.endpoints, a: request.ask }));
+        body = utf8Encode(JSON.stringify({ id: request.id, ts: request.timestamp, v: request.amount.value, u: request.amount.asset, memo: request.memo, e: request.endpoints, a: request.ask, n: request.network }));
       }
     } catch (error) { return fail(error instanceof Error ? error.message : String(error)); }
     let bytes: Uint8Array;
@@ -421,7 +421,7 @@ export class HoldEngine {
           try { parsed = JSON.parse(utf8Decode(body)); } catch { throw new HoldRefusedError("format", "Not a payment request"); }
           const frame = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? decodeControl(JSON.stringify({ ...(parsed as object), t: "pay-req" })) : null;
           if (frame?.t !== "pay-req") throw new HoldRefusedError("format", "Not a payment request");
-          await this.host.receivePaymentRequest(linkId, { id: frame.id, timestamp: frame.ts, amount: { value: frame.v, asset: frame.u }, memo: frame.memo, endpoints: frame.e, ask: frame.a });
+          await this.host.receivePaymentRequest(linkId, { id: frame.id, timestamp: frame.ts, amount: { value: frame.v, asset: frame.u }, memo: frame.memo, endpoints: frame.e, ask: frame.a, network: frame.n });
         }
         hold = await this.save(linkId, { ...this.state(linkId), inSeq: seq });
         changed = true;

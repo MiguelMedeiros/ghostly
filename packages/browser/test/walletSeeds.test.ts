@@ -3,12 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { generateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import type { PaymentReview } from "@ghostly/core";
-import { ArkWallet, DEFAULT_ARK } from "../src/engine/paymentAdapters/arkWallet";
+import { ArkWallet, DEFAULT_ARK, TESTNET_ARK } from "../src/engine/paymentAdapters/arkWallet";
 import { UsdtWallet, DEFAULT_USDT } from "../src/engine/paymentAdapters/usdtWallet";
 import { BarkWallet, TESTNET_BARK } from "../src/engine/paymentAdapters/barkWallet";
 import { ArkadeAdapter } from "../src/engine/paymentAdapters/arkade";
 import { UsdtAdapter } from "../src/engine/paymentAdapters/usdt";
 import { encodeBackup } from "../src/engine/paymentAdapters/backup";
+import { WrongNetworkError } from "../src/engine/paymentAdapters/modeGate";
 import { intentRepository, sealSeed } from "../src/engine/paymentAdapters/persistence";
 import type { SavedIntent } from "../src/engine/paymentAdapters/coordinator";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
@@ -86,12 +87,12 @@ describe("the USDT wallet's seed", () => {
   const intent = (over: Partial<PaymentReview> = {}): SavedIntent => ({ review: { id: crypto.randomUUID(), payee: "bob", method: "usdt", network: "ethereum", chainId: 1, token: DEFAULT_USDT.token.toLowerCase(), provider: DEFAULT_USDT.provider, asset: "USDT", unit: "token-base", address: "0xbob", expiresAt: 0, createdAt: 0, amount: 1, fee: 0, feeCap: 0, state: "settled", ...over } as PaymentReview, prepared: {} });
 
   it("a wallet sealed with a password waits for it, refuses a wrong one, and its phrase shows nowhere", async () => {
-    const wallet = new UsdtWallet(() => {}); await wallet.start();
+    const wallet = new UsdtWallet("mainnet", () => {}); await wallet.start();
     await wallet.create({ ...DEFAULT_USDT, password: PASSWORD });
     const mnemonic = connected(UsdtAdapter.connect);
     await wallet.stop();
 
-    const reopened = new UsdtWallet(() => {}); await reopened.start(); await reopened.ensureReady();
+    const reopened = new UsdtWallet("mainnet", () => {}); await reopened.start(); await reopened.ensureReady();
     expect(reopened.view).toMatchObject({ configured: true, locked: true, automatic: false });
     expect(() => reopened.require()).toThrow("Unlock your USDT wallet or wait for it to connect");
     await expect(reopened.unlock()).rejects.toThrow("Enter the USDT wallet password");
@@ -109,25 +110,27 @@ describe("the USDT wallet's seed", () => {
   });
 
   it("with no wallet there is nothing to open, reveal or back up", async () => {
-    const wallet = new UsdtWallet(() => {}); await wallet.start();
+    const wallet = new UsdtWallet("mainnet", () => {}); await wallet.start();
     await expect(wallet.unlock("whatever password")).rejects.toThrow("Create a USDT wallet first");
     await expect(wallet.reveal()).rejects.toThrow("No USDT wallet");
     await expect(wallet.exportBackup(CHOSEN)).rejects.toThrow("No USDT wallet to back up");
     expect(() => wallet.target()).toThrow("Unlock your USDT wallet");
   });
 
-  it("a phrase that is not BIP39, or a network of the other mode, makes no wallet", async () => {
-    const wallet = new UsdtWallet(() => {}); await wallet.start();
+  it("a phrase that is not BIP39, or a chain of the other network (WrongNetworkError), makes no wallet", async () => {
+    const wallet = new UsdtWallet("mainnet", () => {}); await wallet.start();
     await expect(wallet.create({ ...DEFAULT_USDT, mnemonic: "one two three" })).rejects.toThrow("Invalid recovery phrase");
-    await expect(wallet.create({ network: "sepolia", provider: "https://rpc.example", token: "0x" })).rejects.toThrow("Switch the wallets to Testnet to use a test network");
+    const wrong = await wallet.create({ network: "sepolia", provider: "https://rpc.example", token: "0x" }).catch((e: unknown) => e);
+    expect(wrong).toBeInstanceOf(WrongNetworkError);
+    expect(wrong).toMatchObject({ network: "testnet", message: "sepolia is a Testnet network: this is the Mainnet USDT wallet" });
     expect(await settingsKeys()).toEqual([]);
   });
 
   it("an unreachable RPC is said, and a balance that cannot be read is marked stale", async () => {
     vi.mocked(UsdtAdapter.connect).mockRejectedValueOnce(new Error("offline"));
-    const wallet = new UsdtWallet(() => {}); await wallet.start(); await wallet.ensureReady();
+    const wallet = new UsdtWallet("mainnet", () => {}); await wallet.start(); await wallet.ensureReady(true);
     expect(wallet.view).toMatchObject({ configured: false, error: "Connecting to Ethereum… offline" });
-    await wallet.ensureReady();
+    await wallet.ensureReady(true);
     expect(wallet.view.locked).toBe(false);
     fx.usdtBalancesFail = true;
     await wallet.refresh();
@@ -136,7 +139,7 @@ describe("the USDT wallet's seed", () => {
   });
 
   it("a lock while the wallet opens wins: what arrives late is closed, not used", async () => {
-    const wallet = new UsdtWallet(() => {}); await wallet.start(); await wallet.ensureReady();
+    const wallet = new UsdtWallet("mainnet", () => {}); await wallet.start(); await wallet.ensureReady(true);
     await wallet.lock();
     const gate = deferred();
     const connect = vi.mocked(UsdtAdapter.connect).getMockImplementation()!;
@@ -153,7 +156,7 @@ describe("the USDT wallet's seed", () => {
   });
 
   it("a lock while a wallet is being made keeps the new wallet, closed", async () => {
-    const wallet = new UsdtWallet(() => {}); await wallet.start();
+    const wallet = new UsdtWallet("mainnet", () => {}); await wallet.start();
     const gate = deferred();
     const connect = vi.mocked(UsdtAdapter.connect).getMockImplementation()!;
     vi.mocked(UsdtAdapter.connect).mockImplementationOnce(async (...args) => { await gate.wait; return connect(...args); });
@@ -162,32 +165,34 @@ describe("the USDT wallet's seed", () => {
     await wallet.lock();
     gate.release();
     await creating;
-    expect(await settingsKeys()).toEqual(["usdtWallet"]);
+    expect(await settingsKeys()).toEqual(["usdtWallet-mode-mainnet"]);
     expect(wallet.view).toMatchObject({ configured: true, locked: true, automatic: true });
     expect(fx.adapters.at(-1)!.dispose).toHaveBeenCalled();
   });
 
   it("a replacement that fails to connect leaves the old wallet in place, and it opens again", async () => {
-    const wallet = new UsdtWallet(() => {}); await wallet.start(); await wallet.ensureReady();
+    const wallet = new UsdtWallet("mainnet", () => {}); await wallet.start(); await wallet.ensureReady(true);
     const first = connected(UsdtAdapter.connect);
     vi.mocked(UsdtAdapter.connect).mockRejectedValueOnce(new Error("rpc refused"));
     await expect(wallet.create({ ...DEFAULT_USDT })).rejects.toThrow("rpc refused");
     await vi.waitFor(() => expect(wallet.view.locked).toBe(false));
     expect(connected(UsdtAdapter.connect)).toBe(first);
-    expect(await settingsKeys()).toEqual(["usdtWallet"]);
+    expect(await settingsKeys()).toEqual(["usdtWallet-mode-mainnet"]);
     await wallet.stop();
   });
 
-  it("a backup restores only a matching, valid wallet of this mode, and unfinished payments come back unknown", async () => {
+  it("a backup restores only a matching, valid wallet of this network, and unfinished payments come back unknown", async () => {
     const mnemonic = generateMnemonic(wordlist);
     const payload = (over: object = {}) => JSON.stringify({ format: "ghostly-usdt", version: 1, config: CONFIG, mnemonic, intents: [], ...over });
-    const wallet = new UsdtWallet(() => {}); await wallet.start();
+    const wallet = new UsdtWallet("mainnet", () => {}); await wallet.start();
     await expect(wallet.restoreBackup("x".repeat(16 * 1024 * 1024 + 1), CHOSEN)).rejects.toThrow("Backup is too large");
     await expect(wallet.restoreBackup(JSON.stringify({ format: "ghostly-ark-encrypted", version: 1 }), CHOSEN)).rejects.toThrow("Unsupported USDT backup");
     await expect(wallet.restoreBackup(await backupFile("ghostly-usdt-encrypted", payload()), "not the password")).rejects.toThrow("Could not unlock");
     await expect(wallet.restoreBackup(await backupFile("ghostly-usdt-encrypted", payload({ mnemonic: "one two three" })), CHOSEN)).rejects.toThrow("Invalid USDT backup");
     await expect(wallet.restoreBackup(await backupFile("ghostly-usdt-encrypted", payload({ intents: "none" })), CHOSEN)).rejects.toThrow("Invalid USDT backup");
-    await expect(wallet.restoreBackup(await backupFile("ghostly-usdt-encrypted", payload({ config: { ...CONFIG, network: "sepolia", chainId: 11155111 } })), CHOSEN)).rejects.toThrow("This backup is a Testnet wallet: switch the wallets to it first");
+    const wrong = await wallet.restoreBackup(await backupFile("ghostly-usdt-encrypted", payload({ config: { ...CONFIG, network: "sepolia", chainId: 11155111 } })), CHOSEN).catch((e: unknown) => e);
+    expect(wrong, "a Testnet backup belongs in the Testnet wallet").toBeInstanceOf(WrongNetworkError);
+    expect(wrong).toMatchObject({ network: "testnet", message: "This backup is a Testnet USDT wallet" });
     fx.codeHash = "0xother";
     await expect(wallet.restoreBackup(await backupFile("ghostly-usdt-encrypted", payload()), CHOSEN), "the token contract changed").rejects.toThrow("Backup token or network mismatch");
     fx.codeHash = "0xfixture";
@@ -209,21 +214,22 @@ describe("the USDT wallet's seed", () => {
   });
 
   it("two first starts at once make one wallet, not two", async () => {
-    const wallet = new UsdtWallet(() => {}); await wallet.start();
-    await Promise.all([wallet.ensureReady(), wallet.ensureReady(), wallet.ensureReady()]);
+    const wallet = new UsdtWallet("mainnet", () => {}); await wallet.start();
+    await Promise.all([wallet.ensureReady(true), wallet.ensureReady(true), wallet.ensureReady(true)]);
     expect(UsdtAdapter.connect).toHaveBeenCalledOnce();
-    expect(await settingsKeys()).toEqual(["usdtWallet"]);
+    expect(await settingsKeys()).toEqual(["usdtWallet-mode-mainnet"]);
     await wallet.stop();
   });
 
   it("its backup file is sealed with the chosen password, carries its payments, and restores the same phrase", async () => {
     vi.mocked(generateMnemonic).mockReturnValueOnce(TEST_PHRASE);
-    const wallet = new UsdtWallet(() => {}); await wallet.start(); await wallet.ensureReady();
+    const wallet = new UsdtWallet("mainnet", () => {}); await wallet.start(); await wallet.ensureReady(true);
     const mnemonic = connected(UsdtAdapter.connect);
     expect(mnemonic).toBe(TEST_PHRASE);
     const paid = intent();
     await intentRepository.put(paid);
     await intentRepository.put(intent({ method: "arkade", network: "bitcoin" }));
+    await intentRepository.put(intent({ network: "sepolia", chainId: 11155111 }));
     await expect(wallet.exportBackup("short")).rejects.toThrow("Use at least 12 characters for the backup password");
     const file = await wallet.exportBackup(CHOSEN);
     expect(phraseLeaks(file)).toEqual([]);
@@ -231,9 +237,9 @@ describe("the USDT wallet's seed", () => {
     await wallet.stop();
 
     await transact([STORES.settings, STORES.intents], (s) => { s[STORES.settings].clear(); s[STORES.intents].clear(); });
-    const restored = new UsdtWallet(() => {}); await restored.start();
+    const restored = new UsdtWallet("mainnet", () => {}); await restored.start();
     await restored.restoreBackup(file, CHOSEN);
-    expect((await intentRepository.list()).map((i) => i.review.id), "only its own payments").toEqual([paid.review.id]);
+    expect((await intentRepository.list()).map((i) => i.review.id), "only its own payments, of its own network").toEqual([paid.review.id]);
     await restored.ensureReady();
     expect(connected(UsdtAdapter.connect)).toBe(mnemonic);
     expect(leaks(mnemonic, restored.view)).toEqual([]);
@@ -241,11 +247,11 @@ describe("the USDT wallet's seed", () => {
   });
 
   it("a restore over an unused wallet archives it, and the archived seed is still there", async () => {
-    const wallet = new UsdtWallet(() => {}); await wallet.start(); await wallet.ensureReady();
+    const wallet = new UsdtWallet("mainnet", () => {}); await wallet.start(); await wallet.ensureReady(true);
     const file = await backupFile("ghostly-usdt-encrypted", JSON.stringify({ format: "ghostly-usdt", version: 1, config: CONFIG, mnemonic: generateMnemonic(wordlist), intents: [] }));
     await wallet.restoreBackup(file, CHOSEN);
     const keys = await settingsKeys();
-    expect(keys).toContain("usdtWallet");
+    expect(keys).toContain("usdtWallet-mode-mainnet");
     expect(keys.filter((k) => k.startsWith("usdtWallet-retired-"))).toHaveLength(1);
   });
 });
@@ -255,14 +261,14 @@ describe("the Ark wallet's seed", () => {
   const intent = (over: Partial<PaymentReview> = {}): SavedIntent => ({ review: { id: crypto.randomUUID(), payee: "bob", method: "arkade", network: "bitcoin", provider: DEFAULT_ARK.provider, asset: "BTC", unit: "sat", address: "ark1bob", expiresAt: 0, createdAt: 0, amount: 1, fee: 0, feeCap: 0, state: "settled", ...over } as PaymentReview, prepared: {} });
 
   it("a wallet sealed with a password waits for it and refuses a wrong one", async () => {
-    const wallet = new ArkWallet(() => {}); await wallet.start();
+    const wallet = new ArkWallet("mainnet", () => {}); await wallet.start();
     await expect(wallet.unlock()).rejects.toThrow("Create or restore an Ark wallet first");
     await expect(wallet.backup()).rejects.toThrow("No Ark wallet to back up");
     await wallet.create({ ...DEFAULT_ARK, password: PASSWORD });
     const mnemonic = connected(ArkadeAdapter.connect);
     await wallet.stop();
 
-    const reopened = new ArkWallet(() => {}); await reopened.start(); await reopened.ensureReady();
+    const reopened = new ArkWallet("mainnet", () => {}); await reopened.start(); await reopened.ensureReady();
     expect(reopened.view).toMatchObject({ locked: true, automatic: false });
     expect(() => reopened.require()).toThrow("Unlock your Ark wallet or wait for it to connect");
     await expect(reopened.unlock()).rejects.toThrow("Enter the Ark wallet password");
@@ -276,9 +282,12 @@ describe("the Ark wallet's seed", () => {
     await reopened.stop();
   });
 
-  it("refuses an unknown network, and a provider that runs on another one, without saving anything", async () => {
-    const wallet = new ArkWallet(() => {}); await wallet.start();
+  it("refuses an unknown network, one of the other network's wallet, and a provider that runs on another one, without saving anything", async () => {
+    const wallet = new ArkWallet("mainnet", () => {}); await wallet.start();
     await expect(wallet.create({ ...DEFAULT_ARK, network: "litecoin" as never })).rejects.toThrow("Unsupported Ark network");
+    const wrong = await wallet.create({ ...TESTNET_ARK }).catch((e: unknown) => e);
+    expect(wrong).toBeInstanceOf(WrongNetworkError);
+    expect(wrong).toMatchObject({ network: "testnet", message: "mutinynet is a Testnet network: this is the Mainnet Ark wallet" });
     fx.info = { ...fx.info, network: "mutinynet" };
     await expect(wallet.create({ ...DEFAULT_ARK })).rejects.toThrow("That Ark provider runs on mutinynet, not bitcoin");
     await expect(wallet.create({ ...DEFAULT_ARK, mnemonic: "one two three" })).rejects.toThrow("Invalid recovery phrase");
@@ -287,7 +296,7 @@ describe("the Ark wallet's seed", () => {
   });
 
   it("shows what it could read and says what it could not, logging no phrase", async () => {
-    const wallet = new ArkWallet(() => {}); await wallet.start(); await wallet.ensureReady();
+    const wallet = new ArkWallet("mainnet", () => {}); await wallet.start(); await wallet.ensureReady(true);
     const mnemonic = connected(ArkadeAdapter.connect);
     fx.arkFails.add("balance").add("incoming");
     await wallet.refresh();
@@ -300,7 +309,7 @@ describe("the Ark wallet's seed", () => {
   });
 
   it("a replacement that fails to connect leaves the old wallet in place, and it opens again", async () => {
-    const wallet = new ArkWallet(() => {}); await wallet.start(); await wallet.ensureReady();
+    const wallet = new ArkWallet("mainnet", () => {}); await wallet.start(); await wallet.ensureReady(true);
     const first = connected(ArkadeAdapter.connect);
     vi.mocked(ArkadeAdapter.connect).mockRejectedValueOnce(new Error("provider refused"));
     await expect(wallet.create({ ...DEFAULT_ARK })).rejects.toThrow("provider refused");
@@ -309,30 +318,35 @@ describe("the Ark wallet's seed", () => {
     await wallet.stop();
   });
 
-  it("a profile whose only wallet is parked for this mode takes it back", async () => {
+  it("a wallet an older app parked for Mainnet is the Mainnet wallet, left where it is, and the Testnet wallet does not see it", async () => {
     const parked = { config: CONFIG, seed: await sealSeed(generateMnemonic(wordlist), "device key 0123456789"), deviceKey: "device key 0123456789" };
     await transact([STORES.settings], (s) => s[STORES.settings].put(parked, "arkWallet-mode-mainnet"));
-    const wallet = new ArkWallet(() => {}); await wallet.start();
-    await wallet.setMode("mainnet");
-    expect(await settingsKeys()).toEqual(["arkWallet"]);
+    const wallet = new ArkWallet("mainnet", () => {}); await wallet.start();
+    expect(wallet.configured).toBe(true);
     expect(wallet.view).toMatchObject({ configured: true, locked: true, automatic: true, network: "bitcoin" });
+    const testnet = new ArkWallet("testnet", () => {}); await testnet.start();
+    expect(testnet.configured).toBe(false);
+    expect(testnet.view).toMatchObject({ configured: false });
+    expect(await settingsKeys()).toEqual(["arkWallet-mode-mainnet"]);
   });
 
-  it("a backup restores only a valid wallet of this mode whose payments match it", async () => {
+  it("a backup restores only a valid wallet of this network whose payments match it", async () => {
     const mnemonic = generateMnemonic(wordlist);
     const payload = (over: object = {}) => encodeBackup({ format: "ghostly-ark", version: 1, sdk: "0.4.74", createdAt: 0, mnemonic, config: CONFIG, database: { version: 3, stores: [] }, intents: [], ...over });
-    const wallet = new ArkWallet(() => {}); await wallet.start();
+    const wallet = new ArkWallet("mainnet", () => {}); await wallet.start();
     await expect(wallet.restoreBackup("x".repeat(16 * 1024 * 1024 + 1), CHOSEN)).rejects.toThrow("Ark backup is too large");
     await expect(wallet.restoreBackup(JSON.stringify({ format: "ghostly-ark-encrypted", version: 2 }), CHOSEN)).rejects.toThrow("Unsupported Ark backup");
     await expect(wallet.restoreBackup(await backupFile("ghostly-ark-encrypted", payload()), "not the password")).rejects.toThrow("Could not unlock");
     await expect(wallet.restoreBackup(await backupFile("ghostly-ark-encrypted", payload({ sdk: "0.5.0" })), CHOSEN), "another SDK's database").rejects.toThrow("Invalid Ark backup payload");
     await expect(wallet.restoreBackup(await backupFile("ghostly-ark-encrypted", payload({ mnemonic: "one two" })), CHOSEN)).rejects.toThrow("Invalid Ark backup payload");
     await expect(wallet.restoreBackup(await backupFile("ghostly-ark-encrypted", payload({ config: { ...CONFIG, network: "litecoin" } })), CHOSEN)).rejects.toThrow("Unsupported Ark network in backup");
-    await expect(wallet.restoreBackup(await backupFile("ghostly-ark-encrypted", payload({ config: { ...CONFIG, network: "mutinynet" } })), CHOSEN)).rejects.toThrow("This backup is a Testnet wallet: switch the wallets to it first");
+    const wrong = await wallet.restoreBackup(await backupFile("ghostly-ark-encrypted", payload({ config: { ...CONFIG, network: "mutinynet" } })), CHOSEN).catch((e: unknown) => e);
+    expect(wrong, "a Testnet backup belongs in the Testnet wallet").toBeInstanceOf(WrongNetworkError);
+    expect(wrong).toMatchObject({ network: "testnet", message: "This backup is a Testnet Ark wallet" });
     await expect(wallet.restoreBackup(await backupFile("ghostly-ark-encrypted", payload({ intents: [intent({ provider: "https://other.example" })] })), CHOSEN)).rejects.toThrow("Backup intents do not match its wallet");
     expect(await settingsKeys()).toEqual([]);
 
-    await wallet.ensureReady();
+    await wallet.ensureReady(true);
     const unfinished = intent({ state: "submitted" }), failed = intent({ state: "failed" });
     await wallet.restoreBackup(await backupFile("ghostly-ark-encrypted", payload({ intents: [unfinished, failed] })), CHOSEN);
     expect((await settingsKeys()).filter((k) => k.startsWith("arkWallet-retired-")), "the unused wallet is archived").toHaveLength(1);
@@ -346,11 +360,11 @@ describe("the Ark wallet's seed", () => {
 describe("the Bark wallet's seed", () => {
   let server: FakeBarkServer;
   beforeEach(() => { server = new FakeBarkServer(); });
-  const make = () => new BarkWallet(vi.fn(), async () => server.sdk());
+  const make = () => new BarkWallet("testnet", vi.fn(), async () => server.sdk());
   const CONFIG = { network: "signet", provider: TESTNET_BARK.provider, explorer: TESTNET_BARK.explorer, serverKey: `02${"ab".repeat(32)}`, walletId: "w-old" };
 
   it("boards on-chain coins and shows no phrase in its view or logs, even when a read fails", async () => {
-    const wallet = make(); await wallet.start(); await wallet.setMode("testnet"); await wallet.ensureReady();
+    const wallet = make(); await wallet.start(); await wallet.ensureReady(true);
     const { mnemonic, config } = await wallet.backup();
     const handle = server.wallets.get(`ghostly-bark-${config.walletId}`)!;
     handle.onchain = 5_000;
@@ -367,7 +381,7 @@ describe("the Bark wallet's seed", () => {
   it("a backup restores only a valid wallet whose payments match it, and archives the unused wallet it replaces", async () => {
     const mnemonic = generateMnemonic(wordlist);
     const payload = (over: object = {}) => JSON.stringify({ format: "ghostly-bark", version: 1, mnemonic, config: CONFIG, intents: [], ...over });
-    const wallet = make(); await wallet.start(); await wallet.setMode("testnet");
+    const wallet = make(); await wallet.start();
     await expect(wallet.restoreBackup("x".repeat(16 * 1024 * 1024 + 1), CHOSEN)).rejects.toThrow("Bark backup is too large");
     await expect(wallet.restoreBackup(JSON.stringify({ format: "ghostly-usdt-encrypted", version: 1 }), CHOSEN)).rejects.toThrow("Unsupported Bark backup");
     await expect(wallet.restoreBackup(await backupFile("ghostly-bark-encrypted", payload({ version: 2 })), CHOSEN)).rejects.toThrow("Invalid Bark backup");
@@ -376,7 +390,7 @@ describe("the Bark wallet's seed", () => {
     await expect(wallet.restoreBackup(await backupFile("ghostly-bark-encrypted", payload({ intents: [theirs] })), CHOSEN)).rejects.toThrow("Backup payments do not match its wallet");
     expect(await settingsKeys()).toEqual([]);
 
-    await wallet.ensureReady();
+    await wallet.ensureReady(true);
     await wallet.restoreBackup(await backupFile("ghostly-bark-encrypted", payload()), CHOSEN);
     expect((await settingsKeys()).filter((k) => k.startsWith("barkWallet-retired-"))).toHaveLength(1);
     expect(wallet.view).toMatchObject({ configured: true, locked: true, network: "signet" });
