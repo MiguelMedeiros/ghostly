@@ -36,9 +36,10 @@ export * from "./peerProofs";
 
 export * from './domainProofs';
 
-export * from './pubkyRing';
+export * from './pkdns';
+export * from './pubkyProofs';
 
-export * from './ringLink';
+export * from './pubkyRing';
 
 export * from "./capsRecord";
 export { DhtDelivery, DHT_TEXT_BYTES, DHT_MESSAGE_TTL, DHT_TEXT_REFUSED, LIVE_POLL_MS, ACTIVE_DHT_POLL_MS, emptyDhtDeliveryState, type DeliveryMode, type DhtDeliveryState, type DhtDeliveryView, type DhtPacketFacts } from "./dhtDelivery";

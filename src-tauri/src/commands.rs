@@ -272,6 +272,33 @@ fn launch(url: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Pubky Passport's authorize page, in the system browser: an identity proof's Pubky request, which Passport
+/// approves (WISP 302). Only `https://passport.pubky.app/authorize#d=<the request, URI-encoded>`: no query, no
+/// other page or host. The request is a short-lived secret: it is handed to the browser (as the system opener's
+/// argument, for the instant it runs) and never logged.
+#[tauri::command]
+pub fn open_pubky_passport(url: String) -> Result<(), String> {
+    if !is_pubky_passport_url(&url) {
+        return Err("Not a Pubky Passport request".into());
+    }
+    launch(&url)
+}
+
+fn is_pubky_passport_url(url: &str) -> bool {
+    const PREFIX: &str = "https://passport.pubky.app/authorize#d=";
+    let Some(request) = url.strip_prefix(PREFIX) else {
+        return false;
+    };
+    // encodeURIComponent's output only: letters, digits, -_.!~*'() and %XX escapes. Nothing a shell or the
+    // system's URL handler could read as a second argument, and no second fragment.
+    !request.is_empty()
+        && url.len() <= 8192
+        && request
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || b"-_.!~*'()%".contains(&c))
+        && request.to_ascii_lowercase().starts_with("pubkyauth%3a")
+}
+
 /// Open only Ghostly's repository/release pages, in the system browser.
 #[tauri::command]
 pub fn open_project_link(url: String) -> Result<(), String> {
@@ -329,7 +356,7 @@ mod project_link_tests {
 
 #[cfg(test)]
 mod tests {
-    // covers: desktop.crypto, desktop.payment-links, app.project-links, chat.dht.delivery
+    // covers: desktop.crypto, desktop.payment-links, app.project-links, chat.dht.delivery, proofs.pubky
     use super::*;
     use crate::test_support::{pkarr, pkarr_relay, Relay};
     use base64::engine::general_purpose::STANDARD;
@@ -367,6 +394,32 @@ mod tests {
             "lightning:lnbç",
         ] {
             assert!(!is_payment_link(url), "{url}");
+        }
+    }
+
+    #[test]
+    fn pubky_passport_opens_only_its_authorize_page_with_a_request() {
+        let request = "pubkyauth%3A%2F%2Fsignin%3Fcaps%3D%252Fpub%252Fghostly.app%252Fproofs%252Fab%252F%253Aw%26secret%3DAbC-_";
+        let ok = format!("https://passport.pubky.app/authorize#d={request}");
+        assert!(is_pubky_passport_url(&ok), "{ok}");
+        for url in [
+            "https://passport.pubky.app/authorize#d=".to_string(),
+            format!("https://passport.pubky.app/authorize?x=1#d={request}"),
+            format!("http://passport.pubky.app/authorize#d={request}"),
+            format!("https://passport.pubky.app.evil.example/authorize#d={request}"),
+            format!("https://passport.pubky.app/other#d={request}"),
+            format!("https://evil.example/#https://passport.pubky.app/authorize#d={request}"),
+            format!("https://passport.pubky.app/authorize#d={request}#x"),
+            format!("https://passport.pubky.app/authorize#d={request} --args"),
+            format!("https://passport.pubky.app/authorize#d={request}\n"),
+            "https://passport.pubky.app/authorize#d=https%3A%2F%2Fevil.example".to_string(),
+            format!(
+                "https://passport.pubky.app/authorize#d={}",
+                "a".repeat(9000)
+            ),
+        ] {
+            assert!(!is_pubky_passport_url(&url), "{url}");
+            assert!(super::open_pubky_passport(url).is_err());
         }
     }
 

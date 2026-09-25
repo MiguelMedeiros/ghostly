@@ -345,6 +345,12 @@
           "markdownDescription": "Enables the open_project_link command without any pre-configured scope."
         },
         {
+          "description": "Enables the open_pubky_passport command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-pubky-passport",
+          "markdownDescription": "Enables the open_pubky_passport command without any pre-configured scope."
+        },
+        {
           "description": "Enables the open_service_window command without any pre-configured scope.",
           "type": "string",
           "const": "allow-open-service-window",
@@ -637,6 +643,12 @@
           "type": "string",
           "const": "deny-open-project-link",
           "markdownDescription": "Denies the open_project_link command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_pubky_passport command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-pubky-passport",
+          "markdownDescription": "Denies the open_pubky_passport command without any pre-configured scope."
         },
         {
           "description": "Denies the open_service_window command without any pre-configured scope.",

@@ -498,16 +498,15 @@
     "sourceAnchor": "identity-and-social-candidate-matrix"
   },
   {
-    "id": "candidate-pubky-ring",
-    "title": "Pubky / Ring",
+    "id": "candidate-pubky-ring-passport",
+    "title": "Pubky / Ring / Passport",
     "family": "3",
     "kind": "Identity / account adapter",
-    "status": "In implementation",
-    "note": "#246",
-    "level": "planned",
+    "status": "Available",
+    "level": "available",
     "range": "3xx",
     "section": "Identity and social candidate matrix",
-    "body": "**Confirmed upstream primitive / source**\n\n[AuthToken protocol](https://github.com/pubky/pubky-homeserver/blob/main/docs/AUTH.md), [Ring routes](https://github.com/pubky/pubky-ring)\n\n**Signer, runtime and trust distinction**\n\nRing documents scoped homeserver authorization, not a general Ghostly arbitrary-message signing API\n\n**Ghostly status / next gate**\n\n**In implementation: #246**: [#246](https://github.com/MiguelMedeiros/ghostly/pull/246) makes Pubky an identity provider approved in Pubky Ring or Pubky Passport, a statement published in one granted folder and read by each contact. On `dev` the older import and Ring delegation code is off (`EXTERNAL_IDENTITIES_ENABLED = false`, `proofs.pubky`). Server trust, independent fetch, freshness and cleanup to validate. Do not modify Ring or expose auth tokens as peer proofs.",
+    "body": "**Confirmed upstream primitive / source**\n\n[Auth specification](https://github.com/pubky/pubky-homeserver/blob/main/docs/AUTH.md), [Ring](https://github.com/pubky/pubky-ring), [Passport integration](https://github.com/pubky/pubky-passport/blob/main/docs/integration.md)\n\n**Signer, runtime and trust distinction**\n\nRing and Passport approve standard scoped grants, not arbitrary Ghostly signing\n\n**Ghostly status / next gate**\n\n**Available** proof provider (2026-09-25, `proofs.pubky`, [302](302-pubky.md)): one grant for one proof folder, approved in Pubky Passport or Pubky Ring (the unmodified apps); the statement published there and read back by each contact through the key's own PKDNS; removal deletes it with a new approval. The pasted-secret import and the modified-Ring delegation are retired (old evidence still verifies). Homeserver operators could also write in the folder: stated in the provider's limits.",
     "sourceAnchor": "identity-and-social-candidate-matrix"
   },
   {

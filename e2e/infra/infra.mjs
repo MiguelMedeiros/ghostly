@@ -94,6 +94,8 @@ const PROBES = {
   "Iroh relay": () => http(endpoints.irohRelay),
   "HyperDHT relay": () => http(`${endpoints.hyperdhtRelay.replace(/^ws/, "http")}/healthz`),
   "AT Protocol PDS / PLC": async () => (await http(`${endpoints.atproto.pds}/xrpc/_health`)) && http(`${endpoints.atproto.plc}/_health`),
+  // Up once the homeserver's record reached the testnet's Pkarr relay (the testnet's fixed homeserver key).
+  "Pubky testnet": async () => (await http(`${endpoints.pubky.pkarrRelay}/8pinxxgqs41n4aididenw5apqp1urfmzdztr8jt4abrkdn435ewo`)) && tcp(endpoints.pubky.httpRelay) && tcp(endpoints.pubky.homeserver),
   // The environment's own mint, whatever E2E_MINT_URL points the suite at.
   "Cashu mint": () => http(`${read("E2E_MINT_URL")}/v1/info`),
 };

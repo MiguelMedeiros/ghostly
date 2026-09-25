@@ -84,6 +84,7 @@ macro_rules! commands {
             commands::updater_can_install,
             commands::open_project_link,
             commands::open_payment_link,
+            commands::open_pubky_passport,
             share::share_text,
             clipboard::read_clipboard_text,
             oidc::oidc_loopback_start,
@@ -260,7 +261,7 @@ mod tests {
     #[test]
     fn build_rs_capabilities_and_permission_files_name_the_same_commands() {
         let declared: BTreeSet<String> = declared().into_iter().collect();
-        assert_eq!(declared.len(), 49, "{declared:?}");
+        assert_eq!(declared.len(), 50, "{declared:?}");
         let granted: BTreeSet<String> = capability()["permissions"]
             .as_array()
             .unwrap()

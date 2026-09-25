@@ -740,6 +740,8 @@ export interface IdentityProofView {
   sharedWith: number;
   /** The identity as a URI the profile's public DID can list (`alsoKnownAs`); absent when it has none. */
   publicUri?: string;
+  /** What the provider checked (public: contacts receive it too). Removal uses it to take down a published proof. */
+  evidence?: unknown;
 }
 
 /** The profile's did:dht (WISP 3xx-did-dht): its own key, public to everyone, never tied to a chat. */

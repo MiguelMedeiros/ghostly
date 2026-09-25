@@ -462,13 +462,13 @@ export const editorial: Record<string, Entry> = {
   },
   "302-pubky": {
     benefit: {
-      en: "Explore a Pubky identity binding. Using Pkarr is not, by itself, a Pubky integration.",
-      "pt-br": "Explorar um vínculo com identidade Pubky. Usar Pkarr não é, por si só, uma integração Pubky.",
+      en: "Show a contact you hold a Pubky key: approve one request in Pubky Ring or Pubky Passport, and Ghostly writes a small proof file to your homeserver.",
+      "pt-br": "Mostrar a um contato que você tem uma chave Pubky: aprove um pedido no Pubky Ring ou no Pubky Passport, e o Ghostly grava um arquivo pequeno de prova no seu homeserver.",
     },
-    level: "research",
+    level: "available",
     note: {
-      en: "Deferred; number not yet assigned.",
-      "pt-br": "Adiado; número ainda não atribuído.",
+      en: "The proof is published, not signed: Ring and Passport approve Pubky auth requests only. Number not yet assigned.",
+      "pt-br": "A prova é publicada, não assinada: o Ring e o Passport só aprovam pedidos de autenticação Pubky. Número ainda não atribuído.",
     },
   },
   "303-keet": {

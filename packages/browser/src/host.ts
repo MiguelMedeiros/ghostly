@@ -68,6 +68,11 @@ export interface BrowserHost {
   oidc?: OidcHost;
   /** Signing in to the person's AT Protocol server (Bluesky or another PDS) for an identity proof. Left out where the platform cannot. */
   atproto?: AtprotoHost;
+  /**
+   * Opens Pubky Passport's authorize page (`https://passport.pubky.app/authorize#d=…`, the request in its fragment)
+   * outside the app. The desktop app hands it to the system browser; left out where the page opens a popup itself.
+   */
+  openPubkyPassport?(url: string): Promise<void>;
 }
 
 /** Where a share sheet points: the button that opened it, in CSS pixels from the page's top left. */

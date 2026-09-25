@@ -78,6 +78,11 @@ export const VARIABLES = {
   E2E_ATPROTO_PLC_URL: ["http://127.0.0.1:47087", "AT Protocol PLC directory (in memory, as https://plc.ghostly.test)"],
   GHOSTLY_HYPERDHT_RELAY_URL: ["ws://127.0.0.1:47097", "HyperDHT relay (dht-relay over WebSocket, native-transports/hyperdht-relay)"],
 
+  // Pubky (WISP 302): Pubky's testnet. The suites route Pubky's public relays and the homeserver's name here.
+  GHOSTLY_PUBKY_PKARR_RELAY_URL: ["http://127.0.0.1:47091", "Pubky testnet: its Pkarr relay (the homeserver's record, on the testnet's own DHT)"],
+  GHOSTLY_PUBKY_HTTP_RELAY_URL: ["http://127.0.0.1:47092", "Pubky testnet: its HTTP relay (auth requests and approvals), for httprelay.pubky.app"],
+  GHOSTLY_PUBKY_HOMESERVER_URL: ["http://127.0.0.1:47093", "Pubky testnet: the homeserver's ICANN HTTP, for https://pubky-homeserver.e2e.ghostly.tools"],
+
   // S3 (held messages, profile backups): RustFS with throwaway keys.
   GHOSTLY_S3_ENDPOINT: ["http://127.0.0.1:47080", "S3-compatible endpoint (RustFS)"],
   GHOSTLY_S3_KEY: ["ghostly-e2e", "S3 access key (local server)"],
@@ -130,6 +135,7 @@ export const endpoints = {
   hyperdhtRelay: read("GHOSTLY_HYPERDHT_RELAY_URL"),
   atproto: { pds: read("E2E_ATPROTO_PDS_URL"), plc: read("E2E_ATPROTO_PLC_URL") },
   s3: { endpoint: read("GHOSTLY_S3_ENDPOINT"), key: read("GHOSTLY_S3_KEY"), secret: read("GHOSTLY_S3_SECRET") },
+  pubky: { pkarrRelay: read("GHOSTLY_PUBKY_PKARR_RELAY_URL"), httpRelay: read("GHOSTLY_PUBKY_HTTP_RELAY_URL"), homeserver: read("GHOSTLY_PUBKY_HOMESERVER_URL") },
 };
 
 /** `host:port` of a URL, the way the app shows where a service is. */

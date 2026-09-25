@@ -400,18 +400,15 @@
       "11-pubky"
     ],
     "slug": "302-pubky",
-    "title": "WISP 3xx: Pubky",
+    "title": "WISP 3xx: Pubky identity (approved in Pubky Ring or Pubky Passport)",
     "status": "Draft",
-    "updated": "2026-09-20",
-    "implementation": "Experimental local import and modified-Ring adapter; see follow-up",
+    "updated": "2026-09-25",
+    "implementation": "Identity provider pubky: packages/browser/src/proofs/providers/pubky.ts, proofs/pubky.ts; core pubkyProofs.ts, pkdns.ts",
     "dependencies": [
       "300-peer-proofs.md"
     ],
-    "summary": "Optional Pubky identity proof bound to a participation. Existing Pkarr use and Paykit-inspired payment identifiers do not constitute Pubky identity integration. The browser documentation explicitly describes the current lack of Pubky Ring integration.",
-    "notices": [
-      "Release decision (2026-09-21): external identity proofs and external profile lookup are deferred. This release exposes only Ghostly participation identity. Nostr, Pubky, Keet, imports and Ring UI are disabled; previous experiments and stored data are preserved for future work. Descriptions below are historical/research, not available release features.",
-      "Planned integration. No current integration is enabled or promised. The historical document identifier 302 remains in the URL for link compatibility; it is not a committed WISP number."
-    ]
+    "summary": "A person shows a contact, optionally and per contact, that they hold a Pubky key: the key Pubky Ring (a phone) or Pubky Passport (a browser) keeps for them. It is a provider of the identity-proof contract (PROOFS.md), id pubky, category self-custodied: made once on the Identities page, then shared per contact through WISP 300's exchange like every other identity.",
+    "notices": []
   },
   {
     "file": "303-keet.md",

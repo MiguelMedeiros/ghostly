@@ -74,12 +74,28 @@ export interface SignerField {
   optional?: boolean;
 }
 
+/**
+ * A request waiting for the person's approval elsewhere, in one of two ways (Pubky: Passport in a browser window, or
+ * Ring by scanning a QR code). The UI shows both on one screen; whichever approves first wins. Its values are secrets
+ * (the QR carries a relay key): never logged, never stored.
+ */
+export interface ApprovalRequest {
+  /** The primary button. `run` is called synchronously from its click, so a popup it opens keeps the user activation. */
+  open?: { label: string; description?: string; run(): void };
+  /** A QR code for a phone app, with its caption. */
+  qr?: { value: string; label: string };
+  /** Short lines under the choices. */
+  notes?: readonly string[];
+}
+
 export interface SignerContext {
   values: Record<string, string>;
   signal: AbortSignal;
   /** The signer asks the person to approve on a page (NIP-46 auth_url): the UI shows it as a link, never opens it itself. */
   onAuthUrl(url: string): void;
   onProgress(message: string): void;
+  /** The signer waits for an approval elsewhere (`null`: it no longer does). The UI renders it; see `ApprovalRequest`. */
+  onApproval?(request: ApprovalRequest | null): void;
 }
 
 export interface SignerSession<E> {
@@ -209,13 +225,14 @@ export interface IdentityProofProvider<E = unknown> {
    */
   publicUri?(subject: string): string | undefined;
   /**
-   * Takes down what a signer published when the person removes the proof (an AT Protocol record). Runs in
+   * Takes down what a signer published when the person removes the proof (an AT Protocol record, a Pubky proof file). Runs in
    * the UI, called synchronously from the confirming click (it may open a window first). The shared Pkarr
    * revocation is published either way; if this fails, the person may remove the proof without it.
    */
   unpublish?: {
     /** What the removal adds, for the confirmation: "Also deletes the record on your server." */
     description: string;
-    run(proof: { id: string; subject: string; key: string }, ctx: SignerContext): Promise<void>;
+    /** `evidence` is what `parseEvidence` accepted when the proof was made (Pubky: the proof file's folder). */
+    run(proof: { id: string; subject: string; key: string; evidence: E }, ctx: SignerContext): Promise<void>;
   };
 }

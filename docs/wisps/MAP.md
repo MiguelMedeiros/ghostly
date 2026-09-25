@@ -6,7 +6,7 @@ This map is a design map, not a claim that every box exists or that every combin
 |---|---|---|---|---|---|---|
 | Ghost records / rendezvous (02) | None | WebRTC (101; existing baseline) | Admission / roles (800 and 900) | Bounded mesh (9xx group mesh; implemented, text only) | Cashu (201; app integration exists) | Chat (400) |
 | Peer Keys (03) | Nostr (301; experimental implementation) | Iroh (102; proposed) | Membership and epoch security (900; first profile implemented) | GossipSub (901; candidate) | Lightning (203; app integration exists) | Files (500) |
-| Capability / transport negotiation (03 and 100; proposed) | Pubky (302; local import experimental) | HyperDHT (103; proposed) | Removal / recovery / history policy (900) | Other adapters, including Pear components: investigate only | Ark integration planned (202); on-chain / Spark research | Voice / video (600) |
+| Capability / transport negotiation (03 and 100; proposed) | Pubky (302; approved in Ring or Passport) | HyperDHT (103; proposed) | Removal / recovery / history policy (900) | Other adapters, including Pear components: investigate only | Ark integration planned (202); on-chain / Spark research | Voice / video (600) |
 | Current record profile exists; modular agreement is new | Keet (303; compatible local import experimental) | Runtime availability differs | Does not select an overlay by itself | Keet distribution API not assumed | External component executes authorized payment | Local services (700) |
 
 ```mermaid
