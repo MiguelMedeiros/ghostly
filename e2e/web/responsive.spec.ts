@@ -69,6 +69,9 @@ async function layoutProblems(page: Page, root: string): Promise<string[]> {
  * of its box without an ellipsis, text outside the card, two lines of text on top of each other, or text under the
  * ID card's photo or seal. A card chooses what it shows by its own width, so this holds at every width.
  */
+/** A deck's switch has played out (the card's swing, its seal peeking in), so what is measured is the card at rest. */
+const deckSettled = (page: Page, deck: string) => page.locator(deck).first().evaluate(el => Promise.all(el.getAnimations({ subtree: true }).map(a => a.finished.catch(() => {}))));
+
 async function deckCardProblems(page: Page, root: string): Promise<string[]> {
   return page.evaluate((selector) => {
     const problems: string[] = [];
@@ -227,7 +230,10 @@ test("the page keeps a phone's width however wide the chat list is dragged", { t
   await expectTidy(page, "[data-testid=wallet]", "the wallet beside the widest list");
   await page.goto("/#/identities");
   await expect(page.locator(".id-deck")).toHaveAttribute("data-mode", "track");
+  // The page opens on the Ghostly card: the click brings the proof's card up, and its swing (the seal peeking in) must
+  // have played out before the card is measured.
   await page.getByTestId("identity-proof").click();
+  await deckSettled(page, ".id-deck");
   await expectTidy(page, "[data-testid=identities-page]", "an ID card beside the widest list");
   await page.goto("/#/settings");
   await expectTidy(page, "[data-testid=settings-page]", "Settings beside the widest list");

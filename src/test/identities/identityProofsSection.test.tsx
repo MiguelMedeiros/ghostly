@@ -1,4 +1,5 @@
 import { act, screen, within } from "@testing-library/react";
+import { useLocation } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { IdentityProofsSection } from "../../components/identities/IdentityProofsSection";
 import { date } from "../../lib/identities";
@@ -6,7 +7,7 @@ import { linkView } from "../fakeEngine";
 import { renderApp as render } from "../render";
 import { DAY, identitiesView, now, proofView, sharedView } from "./views";
 
-// covers: proofs.deck, proofs.revoke, proofs.expiry, proofs.withdraw
+// covers: proofs.deck, proofs.revoke, proofs.expiry, proofs.withdraw, proofs.ghostly-card
 
 /**
  * The swing a card makes as it comes up is skipped with reduced motion: only the choice is tested. Set after the
@@ -14,20 +15,24 @@ import { DAY, identitiesView, now, proofView, sharedView } from "./views";
  */
 const renderApp = (...args: Parameters<typeof render>) => { const shown = render(...args); document.documentElement.dataset.reduceMotion = "true"; return shown; };
 
+function Where() {
+  return <p data-testid="where">{useLocation().pathname}</p>;
+}
+
 const cards = () => screen.getAllByTestId("identity-proof");
+const ghostly = () => screen.getByTestId("identity-ghostly");
 const panel = () => screen.getByTestId("identity-panel");
 const chosen = () => screen.getAllByRole("tab").filter(t => t.getAttribute("aria-selected") === "true");
 
 /** Identities → Yours: the proofs this profile holds, as a deck of ID cards over the chosen one's panel. */
 describe("IdentityProofsSection", () => {
-  it("is a single card while there are none, which adds the first one", async () => {
+  it("is the Ghostly card and the blank one while there are no proofs, and the blank one adds the first", async () => {
     const { user } = renderApp(<IdentityProofsSection />);
     expect(screen.getByRole("tablist", { name: "Your identities" })).toBeInTheDocument();
-    expect(screen.getAllByRole("tab")).toHaveLength(1);
-    expect(screen.getByTestId("identity-add")).toHaveTextContent("Add your first identity");
-    // One card: no arrows to move along.
-    expect(screen.queryByTestId("identity-deck-next")).not.toBeInTheDocument();
-    expect(panel()).toHaveTextContent("Prove that you hold a Nostr key or another identity");
+    expect(screen.getAllByRole("tab").map(t => t.dataset.testid)).toEqual(["identity-ghostly", "identity-add"]);
+    expect(chosen()).toEqual([ghostly()]);
+    expect(screen.getByTestId("identity-add")).toHaveTextContent("Add an identity");
+    expect(panel()).toHaveTextContent("what contacts see unless you share another");
     expect(screen.queryByTestId("identity-proof")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("identity-add"));
     expect(screen.getByRole("dialog", { name: "Add an identity" })).toBeInTheDocument();
@@ -47,8 +52,8 @@ describe("IdentityProofsSection", () => {
         verified: { subject: "https://accounts.google.com#1234", source: "ID token signed by accounts.google.com", attester: "accounts.google.com" } }),
       proofView({ id: "c", provider: "ssh-github", subject: "octocat", expiresAt: gone, sharedWith: 3, verified: { subject: "octocat", source: "SSH signature" } }),
     ] }));
-    expect(screen.getAllByRole("tab").map(t => t.dataset.testid)).toEqual(["identity-proof", "identity-proof", "identity-proof", "identity-add"]);
-    expect(screen.getByTestId("identity-add")).toHaveTextContent("Add identity");
+    expect(screen.getAllByRole("tab").map(t => t.dataset.testid)).toEqual(["identity-ghostly", "identity-proof", "identity-proof", "identity-proof", "identity-add"]);
+    expect(screen.getByTestId("identity-add")).toHaveTextContent("Add another identity");
     const [domain, oidc, github] = cards();
     expect(domain).toHaveTextContent("Domain");
     expect(domain).toHaveTextContent("Your own key");
@@ -99,7 +104,7 @@ describe("IdentityProofsSection", () => {
     // Selecting the Add card by key does not open the dialog; Enter on it does.
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await user.keyboard("{Home}");
-    expect(chosen()).toEqual([cards()[0]]);
+    expect(chosen()).toEqual([ghostly()]);
     await user.click(screen.getByTestId("identity-deck-prev"));
     expect(chosen()).toEqual([screen.getByTestId("identity-add")]);
     screen.getByTestId("identity-add").focus();
@@ -159,8 +164,8 @@ describe("IdentityProofsSection", () => {
     act(() => engine.update({ identityProofs: [proofView({ id: "a" })] }));
     expect(cards()).toHaveLength(1);
     expect(screen.queryByTestId("identity-proof-remove-confirm")).not.toBeInTheDocument();
-    // The next card comes up in its place.
-    expect(chosen()).toEqual([cards()[0]]);
+    // The first card, the Ghostly one, comes up in its place.
+    expect(chosen()).toEqual([ghostly()]);
   });
 
   it("forgets a half-made removal when another card comes up", async () => {
@@ -192,5 +197,48 @@ describe("IdentityProofsSection", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("The revocation could not be published");
     expect(screen.getByTestId("identity-proof-remove-confirm")).toBeInTheDocument();
     expect(cards()[0]).toHaveTextContent("Verified");
+  });
+
+  describe("the Ghostly card", () => {
+    it("comes first with the profile's name and picture, Default, one key per chat and the chats, with and without proofs", () => {
+      const { engine } = renderApp(<IdentityProofsSection />);
+      act(() => engine.update({ settings: { nick: "Ghost", avatar: "data:image/jpeg;base64,AAAA" }, links: [linkView({ id: "l1", createdAt: Date.UTC(2026, 0, 2) }), linkView({ id: "l2", peerPubKeyZ32: "other", createdAt: Date.UTC(2026, 0, 5) })] }));
+      const card = ghostly();
+      expect(screen.getAllByRole("tab")[0]).toBe(card);
+      expect(chosen()).toEqual([card]);
+      expect(card).toHaveClass("id-card-ghostly");
+      expect(within(card).getByTestId("id-card-name")).toHaveTextContent("Ghost");
+      expect(card.querySelector(".id-card-photo img")).toHaveAttribute("src", "data:image/jpeg;base64,AAAA");
+      expect(card).toHaveTextContent("Default");
+      expect(within(card).getByTestId("identity-proof-subject")).toHaveTextContent("One key per chat");
+      expect(card).toHaveTextContent("Used in 2 chats");
+      // The first profile has no date of its own: since its first chat.
+      expect(card).toHaveTextContent(`Since ${date(Date.UTC(2026, 0, 2) / 1000)}`);
+      expect(card.querySelector("[data-deck=face]")).toHaveAttribute("data-status", "default");
+      // Its panel: what it is, and where the name and picture are edited.
+      const panelOf = screen.getByTestId("identity-ghostly-panel");
+      expect(within(panelOf).getByTestId("identity-ghostly-name")).toHaveTextContent("Ghost");
+      expect(within(panelOf).getByTestId("identity-panel-status")).toHaveTextContent("Default");
+      expect(panelOf).toHaveTextContent("a key pair made for each chat");
+      expect(screen.getByTestId("identity-ghostly-edit")).toHaveTextContent("Edit profile");
+      // Still first, and still there, once proofs come.
+      act(() => engine.update({ identityProofs: [proofView({ id: "a" })] }));
+      expect(screen.getAllByRole("tab").map(t => t.dataset.testid)).toEqual(["identity-ghostly", "identity-proof", "identity-add"]);
+    });
+
+    it("shows the name's initial without a picture, and that name and picture are hidden when not shared", () => {
+      const { engine } = renderApp(<IdentityProofsSection />);
+      act(() => engine.update({ settings: { nick: "Ghost", avatar: undefined } }));
+      expect(within(ghostly()).getByTestId("id-card-monogram")).toHaveTextContent("G");
+      act(() => engine.update({ settings: { nick: "Ghost", shareProfile: false } }));
+      expect(within(ghostly()).queryByTestId("id-card-monogram")).not.toBeInTheDocument();
+      expect(within(ghostly()).getByTestId("id-card-name")).toHaveTextContent("Name and picture hidden");
+    });
+
+    it("its Edit profile opens the Profile page", async () => {
+      const { user } = renderApp(<><IdentityProofsSection /><Where /></>);
+      await user.click(screen.getByTestId("identity-ghostly-edit"));
+      expect(screen.getByTestId("where")).toHaveTextContent("/profile");
+    });
   });
 });

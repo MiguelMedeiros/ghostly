@@ -17,6 +17,7 @@ const b64url = (b: Uint8Array) => Buffer.from(b).toString("base64url");
 const deck = (page: Page) => page.getByTestId("identities-mine").locator(".id-deck");
 const byName = (page: Page, name: string) => page.getByTestId("identity-proof").filter({ hasText: name });
 const addCard = (page: Page) => page.getByTestId("identity-add");
+const ghostlyCard = (page: Page) => page.getByTestId("identity-ghostly");
 const panel = (page: Page) => page.getByTestId("identity-panel");
 /** The card is the chosen one, the only one, and the panel below is its own. */
 async function chosen(page: Page, card: Locator) {
@@ -64,17 +65,19 @@ async function withTestIdentities(peer: Peer) {
   await injectNostrSigner(peer);
 }
 
-test("with a mouse the identities are a stack of ID cards: the pointer, a click, the keys and the arrows choose one, its panel follows, and the last card adds one", { tag: ["@feature:proofs.deck", "@feature:proofs.page"] }, async ({ peer }) => {
+test("with a mouse the identities are a stack of ID cards: the pointer, a click, the keys and the arrows choose one, its panel follows, and the last card adds one", { tag: ["@feature:proofs.deck", "@feature:proofs.page", "@feature:proofs.ghostly-card"] }, async ({ peer }) => {
   const alice = await peer("iddeck-alice", { viewport: { width: 1280, height: 900 } });
   await withTestIdentities(alice);
   const { page } = alice;
   await page.evaluate(() => { location.hash = "#/identities"; });
 
-  // None yet: the deck is a single blank card, which adds the first one.
+  // None yet: the deck is the profile's Ghostly card, chosen, then the blank card, which adds the first one.
   await expect(deck(page)).toHaveAttribute("data-mode", "stack");
-  await expect(page.getByRole("tablist", { name: "Your identities" }).getByRole("tab")).toHaveCount(1);
-  await expect(addCard(page)).toContainText("Add your first identity");
-  await expect(page.getByTestId("identity-deck-next")).toHaveCount(0);
+  await expect(page.getByRole("tablist", { name: "Your identities" }).getByRole("tab")).toHaveCount(2);
+  await chosen(page, ghostlyCard(page));
+  await expect(ghostlyCard(page)).toContainText("Default");
+  await expect(addCard(page)).toContainText("Add an identity");
+  await expect(page.getByTestId("identity-ghostly-panel")).toContainText("what contacts see unless you share another");
   await addNostrIdentity(alice);
   // The card just made comes up, with its details below.
   const nostr = byName(page, "Nostr");
@@ -83,14 +86,14 @@ test("with a mouse the identities are a stack of ID cards: the pointer, a click,
   await expect(nostr).toContainText("Verified");
   await expect(nostr.getByTestId("identity-proof-subject")).toContainText("npub1");
   await expect(panel(page).getByTestId("identity-panel-subject")).toHaveText(/^[0-9a-f]{64}$/);
-  await expect(addCard(page)).toContainText("Add identity");
+  await expect(addCard(page)).toContainText("Add another identity");
 
   await addTestKey(alice);
   const key = byName(page, "Test key");
   await chosen(page, key);
   await expect(panel(page)).toContainText("Test signature");
   const tabs = page.getByRole("tablist", { name: "Your identities" }).getByRole("tab");
-  await expect(tabs).toHaveCount(3);
+  await expect(tabs).toHaveCount(4);
   expect(tiled(await strips(page))).toBe(true);
 
   // The pointer rests on the Nostr card's strip: it comes up, and its panel follows.
@@ -117,15 +120,19 @@ test("with a mouse the identities are a stack of ID cards: the pointer, a click,
   // Coming up is not choosing: the dialog opens on Enter, not on the arrow.
   await expect(page.getByTestId("add-identity")).toHaveCount(0);
   await page.keyboard.press("ArrowRight");
+  await chosen(page, ghostlyCard(page));
+  await page.keyboard.press("ArrowRight");
   await chosen(page, nostr);
   await page.keyboard.press("End");
   await chosen(page, addCard(page));
   await page.keyboard.press("Home");
-  await chosen(page, nostr);
+  await chosen(page, ghostlyCard(page));
 
   // The arrows under the deck.
   await page.getByTestId("identity-deck-prev").click();
   await chosen(page, addCard(page));
+  await page.getByTestId("identity-deck-next").click();
+  await chosen(page, ghostlyCard(page));
   await page.getByTestId("identity-deck-next").click();
   await chosen(page, nostr);
 
@@ -140,8 +147,8 @@ test("with a mouse the identities are a stack of ID cards: the pointer, a click,
   await page.getByTestId("identity-proof-remove").click();
   await page.getByTestId("identity-proof-remove-confirm").click();
   await expect(page.getByTestId("identity-proof")).toHaveCount(1);
-  await expect(tabs).toHaveCount(2);
-  await chosen(page, nostr);
+  await expect(tabs).toHaveCount(3);
+  await chosen(page, ghostlyCard(page));
 });
 
 test("on a phone the ID cards are a snapping track: a swipe chooses the card at rest in the centre, and a tap on the last one adds an identity", { tag: ["@feature:proofs.deck", "@feature:app.mobile-layout"] }, async ({ peer }) => {

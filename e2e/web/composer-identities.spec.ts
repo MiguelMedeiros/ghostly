@@ -18,15 +18,19 @@ test("an identity is added, shared and withdrawn from the chat's composer", { ta
   await pair(alice, bob);
   const withBob = await chatId(alice);
 
-  // No identity yet: the deck is the blank card, which adds one here.
+  // No identity yet: the deck is the Ghostly card, chosen, then the blank card, which adds one here.
   const plus = alice.page.getByTestId("composer-more");
   const row = () => composerRow(alice.page, "composer-identities-button");
   await expect(await row()).toHaveAttribute("data-count", "0");
   await (await row()).click();
   const picker = alice.page.getByTestId("composer-identities");
-  await expect(picker.getByRole("radio")).toHaveCount(1);
-  await expect(picker.getByTestId("composer-identity-add")).toContainText("Add your first identity");
-  await expect(picker.getByTestId("composer-identities-empty")).toContainText("No identities yet");
+  await expect(picker.getByRole("radio")).toHaveCount(2);
+  await expect(picker.getByTestId("composer-identity-ghostly")).toHaveAttribute("aria-checked", "true");
+  await expect(picker.getByTestId("composer-identity-use")).toHaveText(/Use Ghostly/);
+  await expect(picker.getByTestId("composer-identity-add")).toContainText("Add an identity");
+  await picker.getByTestId("composer-identity-add").focus();
+  await alice.page.keyboard.press("End");
+  await expect(picker.getByTestId("composer-identities-empty")).toContainText("No other identities yet");
   await picker.getByTestId("composer-identities-add").click();
   const add = alice.page.getByTestId("add-identity");
   await add.getByTestId("add-identity-nostr").click();
@@ -75,9 +79,11 @@ test("an identity is added, shared and withdrawn from the chat's composer", { ta
   await expect(await row()).toContainText("1 shared in this chat");
   await (await row()).click();
 
-  // Turned over again, it is shared and verified; Stop sharing.
-  await expect(picker.getByTestId("composer-identity-hint")).toContainText(/ sees your Nostr npub1/);
-  await use.click();
+  // Opened again it starts on the Ghostly card; a click on the Nostr card, wearing the seal, turns it over: it is
+  // shared and verified; Stop sharing.
+  await expect(picker.getByTestId("composer-identity-ghostly")).toHaveAttribute("aria-checked", "true");
+  await expect(nostr.getByTestId("id-card-shared")).toBeVisible();
+  await nostr.click();
   await expect(status).toHaveText("Shared · verified by your contact");
   await expect(back).toContainText("a copy they kept stays");
   await expect(share).toHaveText("Stop sharing");
@@ -97,7 +103,7 @@ test("an identity is added, shared and withdrawn from the chat's composer", { ta
   await expect(plus).toBeFocused();
   await expect(await row()).toHaveAttribute("data-count", "0");
   await (await row()).click();
-  await expect(nostr).toBeFocused();
+  await expect(picker.getByTestId("composer-identity-ghostly")).toBeFocused();
   await alice.page.keyboard.press("Escape");
   await expect(picker).toHaveCount(0);
 
@@ -123,7 +129,8 @@ test("an identity is added, shared and withdrawn from the chat's composer", { ta
     expect(box!.x).toBeGreaterThanOrEqual(0);
     expect(box!.x + box!.width).toBeLessThanOrEqual(390);
   }
-  await use.click();
+  // The sheet opens on the Ghostly card; a tap on the Nostr card turns that one over.
+  await nostr.click();
   await expect(share).toBeFocused();
   for (const part of [back, share]) {
     const box = await part.boundingBox();

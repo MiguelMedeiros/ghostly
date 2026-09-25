@@ -42,9 +42,12 @@ describe("ContactIdentitiesPanel", () => {
   it("is titled for the contact, closes, and says when nothing is shared", async () => {
     const { user, onClose } = open({ links: [paired()] });
     expect(screen.getByRole("dialog", { name: "Identities with Alice" })).toBeInTheDocument();
-    expect(screen.getByTestId("chat-identities-none")).toHaveTextContent("Nothing shared by Alice yet.");
-    // Mine: the picker's blank card, to add the first one.
-    expect(within(screen.getByTestId("chat-identities-mine")).getByTestId("composer-identity-add")).toHaveTextContent("Add your first identity");
+    expect(screen.getByTestId("chat-identities-none")).toHaveTextContent("Nothing else shared by Alice yet.");
+    // Theirs: their Ghostly card alone. Mine: my Ghostly card, then the picker's blank card, to add the first one.
+    expect(screen.queryAllByTestId("chat-identity-received")).toHaveLength(0);
+    expect(within(screen.getByTestId("chat-identities-received")).getByTestId("chat-identity-ghostly")).toHaveAttribute("aria-checked", "true");
+    expect(within(screen.getByTestId("chat-identities-mine")).getByTestId("composer-identity-ghostly")).toHaveAttribute("aria-checked", "true");
+    expect(within(screen.getByTestId("chat-identities-mine")).getByTestId("composer-identity-add")).toHaveTextContent("Add an identity");
     await user.click(screen.getByTestId("chat-identities-close"));
     expect(onClose).toHaveBeenCalledOnce();
     await user.keyboard("{Escape}");
@@ -169,7 +172,8 @@ describe("ContactIdentitiesPanel", () => {
       const { user, engine } = open({ links: [paired()], identityProofs: [proofView({ id: "a" })] });
       engine.on("shareIdentityProof", () => undefined);
       const mine = within(screen.getByTestId("chat-identities-mine"));
-      await user.click(mine.getByTestId("composer-identity-use"));
+      // The Ghostly card is first; a click on the proof's card turns that one over.
+      await user.click(mine.getByTestId("composer-identity"));
       expect(mine.getByTestId("composer-identity-status")).toHaveTextContent("Not shared");
       await user.click(mine.getByTestId("composer-identity-share"));
       expect(engine.callsTo("shareIdentityProof")).toEqual([{ linkId: "link-1", id: "a" }]);
@@ -179,14 +183,17 @@ describe("ContactIdentitiesPanel", () => {
       const { user, engine } = open({ links: [paired({ identities: identitiesView({ shared: [sharedView({ id: "a", status: "accepted" })] }) })], identityProofs: [proofView({ id: "a" })] });
       engine.on("withdrawIdentityProof", () => undefined);
       const mine = within(screen.getByTestId("chat-identities-mine"));
-      await user.click(mine.getByTestId("composer-identity-use"));
+      await user.click(mine.getByTestId("composer-identity"));
       expect(mine.getByTestId("composer-identity-status")).toHaveTextContent("Shared · verified by your contact");
       await user.click(mine.getByRole("button", { name: "Stop sharing" }));
       expect(engine.callsTo("withdrawIdentityProof")).toEqual([{ linkId: "link-1", id: "a" }]);
     });
 
-    it("does not share what the contact's app cannot verify", () => {
-      open({ links: [paired({ identities: identitiesView({ contactProviders: ["nostr"] }) })], identityProofs: [proofView()] });
+    it("does not share what the contact's app cannot verify", async () => {
+      const { user } = open({ links: [paired({ identities: identitiesView({ contactProviders: ["nostr"] }) })], identityProofs: [proofView()] });
+      // From the Ghostly card, the keys bring the proof's card up.
+      act(() => screen.getByTestId("composer-identity-ghostly").focus());
+      await user.keyboard("{ArrowRight}");
       expect(screen.getByTestId("composer-identity-hint")).toHaveTextContent("Alice’s app cannot verify Domain yet");
       expect(screen.getByTestId("composer-identity-use")).toBeDisabled();
     });

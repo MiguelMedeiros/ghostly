@@ -80,6 +80,8 @@ test("a proof in its last days puts a dot on Identities, in the bar and in the p
   await page.getByTestId("mobile-tab-chats").click();
   await expect(page.getByTestId("mobile-tab-identities").getByTestId("identities-attention")).toBeVisible();
   await page.getByTestId("mobile-tab-identities").click();
+  // The page starts on the Ghostly card: the proof's card, once chosen, has Remove.
+  await page.getByTestId("identity-proof").click();
   await page.getByTestId("identity-proof-remove").click();
   await page.getByTestId("identity-proof-remove-confirm").click();
   await expect(page.getByTestId("identity-proof")).toHaveCount(0);
