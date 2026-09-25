@@ -110,9 +110,12 @@ describe("ContactIdentitiesPanel", () => {
       expect(oidc).toHaveTextContent("accounts.google.com says this account logged in: only as trustworthy as accounts.google.com.");
     });
 
-    it("shows a looked-up name on the card", () => {
-      open(withReceived([receivedView({ display: { name: "Alice Liddell", source: "keys.openpgp.org", fetchedAt: now() } })]));
+    it("shows a looked-up name on the card, and on its back where the name came from", async () => {
+      const { user } = open(withReceived([receivedView({ display: { name: "Alice Liddell", source: "keys.openpgp.org", fetchedAt: now() } })]));
       expect(theirs()[0]).toHaveTextContent("Alice Liddell");
+      const card = await turnOver(user, 0);
+      expect(card).toHaveTextContent("Domain · Alice Liddell");
+      expect(within(card).getByTestId("chat-identity-received-name-source")).toHaveTextContent("Name: keys.openpgp.org");
     });
 
     it("checks again on request, but not what was withdrawn or revoked", async () => {

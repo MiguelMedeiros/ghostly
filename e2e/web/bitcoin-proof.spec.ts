@@ -1,4 +1,5 @@
 import { expect, test, type Peer } from "../support/fixtures";
+import { closeIdentities, myStatus, openIdentities, shareIdentity, theirCards, theirFace, turnTheirs } from "../support/identities";
 import { pair } from "../support/paired";
 import { testBitcoinWallet } from "../../packages/browser/test/helpers/bitcoinSign";
 import { choose } from "../support/select";
@@ -12,12 +13,6 @@ import { choose } from "../support/select";
 
 const chatId = (peer: Peer) => peer.page.evaluate(() => location.hash);
 const go = (peer: Peer, hash: string) => peer.page.evaluate(h => { location.hash = h; }, hash);
-async function identities(peer: Peer) {
-  await peer.page.getByTitle("Options").click();
-  await peer.page.getByTestId("chat-identities-open").click();
-  return peer.page.getByTestId("chat-identities");
-}
-const close = (peer: Peer) => peer.page.getByTestId("chat-identities").getByRole("button", { name: "Close" }).click();
 
 test("a Bitcoin address proof: verified by the contact it is shared with, absent for another", { tag: ["@feature:proofs.bitcoin", "@feature:proofs.share"] }, async ({ peer }) => {
   const [alice, bob, carol] = await Promise.all([peer("btc-alice"), peer("btc-bob"), peer("btc-carol")]);
@@ -71,26 +66,23 @@ test("a Bitcoin address proof: verified by the contact it is shared with, absent
 
   // Shared with Bob, and only with Bob.
   await go(alice, withBob);
-  let dialog = await identities(alice);
-  await dialog.getByTestId("chat-identity-share").click();
-  await expect(dialog.getByTestId("chat-identity-mine-status")).toHaveText("Shared · verified by your contact");
-  await close(alice);
+  await shareIdentity(alice);
+  await closeIdentities(alice);
 
-  dialog = await identities(bob);
-  const received = dialog.getByTestId("chat-identity-received");
-  await expect(received).toHaveCount(1);
-  await expect(received).toHaveAttribute("data-provider", "bitcoin");
-  await expect(received).toHaveAttribute("data-status", "verified");
-  await received.getByText("Details").click();
-  await expect(received.getByTestId("chat-identity-received-subject")).toHaveText(wallet.address);
-  await expect(received).toContainText("BIP-322 simple signature, P2WPKH, test network");
-  await close(bob);
+  await openIdentities(bob);
+  await expect(theirCards(bob)).toHaveCount(1);
+  await expect(theirFace(bob)).toHaveAttribute("data-status", "verified");
+  const back = await turnTheirs(bob);
+  await expect(back).toHaveAttribute("data-provider", "bitcoin");
+  await expect(back.getByTestId("chat-identity-received-subject")).toHaveAttribute("title", wallet.address);
+  await expect(back).toContainText("BIP-322 simple signature, P2WPKH, test network");
+  await closeIdentities(bob);
 
-  dialog = await identities(carol);
-  await expect(dialog.getByTestId("chat-identities-none")).toBeVisible();
-  await expect(dialog.getByTestId("chat-identity-received")).toHaveCount(0);
-  await close(carol);
+  const none = await openIdentities(carol);
+  await expect(none.getByTestId("chat-identities-none")).toBeVisible();
+  await expect(theirCards(carol)).toHaveCount(0);
+  await closeIdentities(carol);
   await go(alice, withCarol);
-  dialog = await identities(alice);
-  await expect(dialog.getByTestId("chat-identity-mine-status")).toHaveText("Not shared");
+  await openIdentities(alice);
+  await expect(await myStatus(alice)).toHaveText("Not shared");
 });

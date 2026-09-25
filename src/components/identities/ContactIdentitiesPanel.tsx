@@ -128,6 +128,8 @@ function TheirCardBack({ entry, linkId, name, nostr, onCards }: { entry: Entry; 
             <span className="id-card-back-name">{card.label}{card.name ? ` · ${card.name}` : ""}</span>
             <span className="id-card-back-subject" title={card.subject} data-testid="chat-identity-received-subject">{card.short}</span>
             <span className="id-card-back-meta">{card.category}</span>
+            {/* A name the evidence or a lookup carried, and who wrote it: a holder's own words are not a proof. */}
+            {card.name && <span className="id-card-back-meta" data-testid="chat-identity-received-name-source">Name: {r.display?.source ?? r.verified.display?.source}</span>}
           </span>
         </div>
         <dl className="contact-card-facts">

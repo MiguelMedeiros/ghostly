@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { expect, test, type Peer } from "../support/fixtures";
+import { closeIdentities, openIdentities, shareIdentity, theirCards, theirFace } from "../support/identities";
 import { LocalOidcIssuer } from "../support/oidcIssuer";
 import { pair } from "../support/paired";
 import { choose } from "../support/select";
@@ -48,27 +49,20 @@ test("a provider-attested account is verified by the contact it is shared with, 
 
   // Shared with Bob only.
   await alice.page.evaluate((h) => { location.hash = h; }, bobChat);
-  await alice.page.getByTitle("Options").click();
-  await alice.page.getByTestId("chat-identities-open").click();
-  const dialog = alice.page.getByTestId("chat-identities");
-  await dialog.getByTestId("chat-identity-share").first().click();
-  await expect(dialog.getByTestId("chat-identity-mine-status").first()).toHaveText("Shared · verified by your contact");
-  await dialog.getByRole("button", { name: "Close" }).click();
+  await shareIdentity(alice);
+  await closeIdentities(alice);
 
-  await bob.page.getByTitle("Options").click();
-  await bob.page.getByTestId("chat-identities-open").click();
-  const received = bob.page.getByTestId("chat-identity-received");
+  await openIdentities(bob);
+  const received = theirCards(bob);
   await expect(received).toHaveCount(1);
-  await expect(received).toHaveAttribute("data-status", "verified");
+  await expect(theirFace(bob)).toHaveAttribute("data-status", "verified");
   await expect(received).toContainText("Attested by oidc.ghostly.test");
   await expect(received).toContainText("alice@example.test");
 
   // Carol is Alice's contact too, and receives nothing.
   await alice.page.evaluate((h) => { location.hash = h; }, carolChat);
-  await carol.page.getByTitle("Options").click();
-  await carol.page.getByTestId("chat-identities-open").click();
-  await expect(carol.page.getByTestId("chat-identities")).toBeVisible();
-  await expect(carol.page.getByTestId("chat-identity-received")).toHaveCount(0);
+  await openIdentities(carol);
+  await expect(theirCards(carol)).toHaveCount(0);
 });
 
 test("a token the provider signed for another nonce is refused and nothing is saved", { tag: ["@feature:proofs.oidc.nonce"] }, async ({ peer }) => {

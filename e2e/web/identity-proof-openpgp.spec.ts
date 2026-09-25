@@ -1,4 +1,5 @@
 import { expect, test, type Peer } from "../support/fixtures";
+import { closeIdentities, openIdentities, shareIdentity, theirCards, theirFace, turnTheirs } from "../support/identities";
 import { pair } from "../support/paired";
 import { fingerprints as fpr, TestGpg, vector } from "../../packages/browser/test/helpers/gpg";
 
@@ -13,12 +14,6 @@ test.afterAll(() => gpg?.close());
 
 const chatId = (peer: Peer) => peer.page.evaluate(() => location.hash);
 const go = (peer: Peer, hash: string) => peer.page.evaluate(h => { location.hash = h; }, hash);
-async function identities(peer: Peer) {
-  await peer.page.getByTitle("Options").click();
-  await peer.page.getByTestId("chat-identities-open").click();
-  return peer.page.getByTestId("chat-identities");
-}
-const close = (peer: Peer) => peer.page.getByTestId("chat-identities").getByRole("button", { name: "Close" }).click();
 
 /** Identities → OpenPGP with the plain gpg signer, up to the paste; returns the dialog and the statement. */
 async function startPgp(peer: Peer, fingerprint: string) {
@@ -70,32 +65,27 @@ test("an OpenPGP key signed with gpg: refused when it should be, then shared wit
 
   // Shared with Bob only.
   await go(alice, withBob);
-  const mine = await identities(alice);
-  await mine.getByTestId("chat-identity-share").click();
-  await expect(mine.getByTestId("chat-identity-mine-status")).toHaveText("Shared · verified by your contact");
-  await close(alice);
+  await shareIdentity(alice);
+  await closeIdentities(alice);
 
-  // Bob's app verified it on its own: fingerprint, how, and the user ID with its caveat.
+  // Bob's app verified it on its own: fingerprint, how, and the user ID on the card.
   await expect(bob.page.getByTestId("chat-identity-badges")).toBeVisible();
-  const dialog = await identities(bob);
-  const received = dialog.getByTestId("chat-identity-received");
-  await expect(received).toHaveCount(1);
-  await expect(received).toHaveAttribute("data-provider", "openpgp");
-  await expect(received).toHaveAttribute("data-status", "verified");
-  await expect(received).toContainText("Alice Test <alice@example.org>");
-  // Said plainly, next to the user ID, without opening anything.
-  await expect(received.getByTestId("chat-identity-received-name-source")).toBeVisible();
-  await expect(received.getByTestId("chat-identity-received-name-source")).toContainText("written by its holder: not proof that the name or email is theirs");
-  await received.getByText("Details").click();
-  await expect(received.getByTestId("chat-identity-received-subject")).toHaveText(fpr.alice);
-  await expect(received).toContainText("OpenPGP signature (Ed25519 signing subkey, v4 key)");
+  await openIdentities(bob);
+  await expect(theirCards(bob)).toHaveCount(1);
+  await expect(theirFace(bob)).toHaveAttribute("data-status", "verified");
+  await expect(theirCards(bob)).toContainText("Alice Test <alice@example.org>");
+  const back = await turnTheirs(bob);
+  await expect(back).toHaveAttribute("data-provider", "openpgp");
+  await expect(back).toContainText("Alice Test <alice@example.org>");
+  await expect(back.getByTestId("chat-identity-received-subject")).toHaveAttribute("title", fpr.alice);
+  await expect(back).toContainText("OpenPGP signature (Ed25519 signing subkey, v4 key)");
   // keys.openpgp.org is only ever asked from this button, which says so.
-  await expect(received.getByTestId("chat-identity-lookup")).toHaveText("Check emails with keys.openpgp.org");
-  await close(bob);
+  await expect(back.getByTestId("chat-identity-lookup")).toHaveText("Check emails with keys.openpgp.org");
+  await closeIdentities(bob);
 
   // Carol was never shown it.
-  const none = await identities(carol);
-  await expect(none.getByTestId("chat-identity-received")).toHaveCount(0);
-  await close(carol);
+  await openIdentities(carol);
+  await expect(theirCards(carol)).toHaveCount(0);
+  await closeIdentities(carol);
   await expect(carol.page.getByTestId("chat-identity-badges")).toHaveCount(0);
 });

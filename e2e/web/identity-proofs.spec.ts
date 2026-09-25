@@ -1,5 +1,6 @@
 import { finalizeEvent, generateSecretKey, getPublicKey } from "nostr-tools/pure";
 import { expect, test, type Peer } from "../support/fixtures";
+import { closeIdentities, myStatus, openIdentities, shareIdentity, stopSharing, theirCards, theirFace, turnTheirs } from "../support/identities";
 import { pair } from "../support/paired";
 
 /**
@@ -22,12 +23,6 @@ async function injectNostrSigner(peer: Peer): Promise<string> {
 
 const chatId = (peer: Peer) => peer.page.evaluate(() => location.hash);
 const go = (peer: Peer, hash: string) => peer.page.evaluate(h => { location.hash = h; }, hash);
-async function identities(peer: Peer) {
-  await peer.page.getByTitle("Options").click();
-  await peer.page.getByTestId("chat-identities-open").click();
-  return peer.page.getByTestId("chat-identities");
-}
-const close = (peer: Peer) => peer.page.getByTestId("chat-identities").getByRole("button", { name: "Close" }).click();
 
 test("a Nostr identity is proven once, shared with one contact only, withdrawn, and expires", { tag: ["@feature:proofs.nostr", "@feature:proofs.share", "@feature:proofs.withdraw", "@feature:proofs.expiry"] }, async ({ peer }) => {
   const [alice, bob, carol] = await Promise.all([peer("idp-alice"), peer("idp-bob"), peer("idp-carol")]);
@@ -53,58 +48,57 @@ test("a Nostr identity is proven once, shared with one contact only, withdrawn, 
 
   // Shared with Bob, and only with Bob.
   await go(alice, withBob);
-  let dialog = await identities(alice);
-  await dialog.getByTestId("chat-identity-share").click();
-  await expect(dialog.getByTestId("chat-identity-mine-status")).toHaveText("Shared · verified by your contact");
-  await close(alice);
+  await shareIdentity(alice);
+  await closeIdentities(alice);
 
   await expect(bob.page.getByTestId("chat-identity-badges")).toBeVisible();
-  dialog = await identities(bob);
-  const received = dialog.getByTestId("chat-identity-received");
-  await expect(received).toHaveCount(1);
-  await expect(received).toHaveAttribute("data-status", "verified");
-  await expect(received.getByTestId("chat-identity-received-status")).toHaveText("Verified");
-  await expect(received).toContainText("Their own key");
-  await received.getByText("Details").click();
-  await expect(received.getByTestId("chat-identity-received-subject")).toHaveText(pubkey);
-  await expect(received).toContainText("Nostr signature");
-  await close(bob);
+  await openIdentities(bob);
+  await expect(theirCards(bob)).toHaveCount(1);
+  await expect(theirFace(bob)).toHaveAttribute("data-status", "verified");
+  await expect(theirCards(bob)).toContainText("Their own key");
+  let back = await turnTheirs(bob);
+  await expect(back.getByTestId("chat-identity-received-status")).toHaveText("Verified");
+  await expect(back.getByTestId("chat-identity-received-subject")).toHaveAttribute("title", pubkey);
+  await expect(back).toContainText("Nostr signature");
+  await closeIdentities(bob);
 
-  dialog = await identities(carol);
-  await expect(dialog.getByTestId("chat-identities-none")).toBeVisible();
-  await expect(dialog.getByTestId("chat-identity-received")).toHaveCount(0);
-  await close(carol);
+  const none = await openIdentities(carol);
+  await expect(none.getByTestId("chat-identities-none")).toBeVisible();
+  await expect(theirCards(carol)).toHaveCount(0);
+  await closeIdentities(carol);
   await expect(carol.page.getByTestId("chat-identity-badges")).toHaveCount(0);
   // Alice's chat with Carol offers it, but has not shared it.
   await go(alice, withCarol);
-  dialog = await identities(alice);
-  await expect(dialog.getByTestId("chat-identity-mine-status")).toHaveText("Not shared");
-  await close(alice);
+  await openIdentities(alice);
+  await expect(await myStatus(alice)).toHaveText("Not shared");
+  await closeIdentities(alice);
 
   // Withdrawn: Bob's app says so, and the badge goes.
   await go(alice, withBob);
-  dialog = await identities(alice);
-  await dialog.getByTestId("chat-identity-withdraw").click();
-  await expect(dialog.getByTestId("chat-identity-mine-status")).toHaveText("Not shared");
-  await close(alice);
+  await stopSharing(alice);
+  await expect(await myStatus(alice)).toHaveText("Not shared");
+  await closeIdentities(alice);
   await expect(bob.page.getByTestId("chat-identity-badges")).toHaveCount(0);
-  dialog = await identities(bob);
-  await expect(dialog.getByTestId("chat-identity-received")).toHaveAttribute("data-status", "withdrawn");
-  await expect(dialog.getByTestId("chat-identity-received-status")).toHaveText("No longer shared");
-  await close(bob);
+  await openIdentities(bob);
+  await expect(theirFace(bob)).toHaveAttribute("data-status", "withdrawn");
+  back = await turnTheirs(bob);
+  await expect(back.getByTestId("chat-identity-received-status")).toHaveText("No longer shared");
+  await closeIdentities(bob);
 
   // Shared again, then Bob's clock passes its validity (90 days): expired, never shown as verified.
-  dialog = await identities(alice);
-  await dialog.getByTestId("chat-identity-share").click();
-  await expect(dialog.getByTestId("chat-identity-mine-status")).toHaveText("Shared · verified by your contact");
-  await close(alice);
-  await expect(bob.page.getByTestId("chat-identity-badges")).toBeVisible();
+  await shareIdentity(alice);
+  await closeIdentities(alice);
+  const badges = bob.page.getByTestId("chat-identity-badges");
+  await expect(badges.getByTestId("chat-identity-badge")).toHaveAttribute("data-state", "verified");
   await bob.page.clock.setFixedTime(Date.now() + 91 * 86_400_000);
-  dialog = await identities(bob);
-  await expect(dialog.getByTestId("chat-identity-received")).toHaveAttribute("data-status", "expired");
-  await expect(dialog.getByTestId("chat-identity-received-status")).toHaveText("Expired");
-  await close(bob);
-  await expect(bob.page.getByTestId("chat-identity-badges")).toHaveCount(0);
+  await openIdentities(bob);
+  await expect(theirFace(bob)).toHaveAttribute("data-status", "expired");
+  back = await turnTheirs(bob);
+  await expect(back.getByTestId("chat-identity-received-status")).toHaveText("Expired");
+  await closeIdentities(bob);
+  // The header keeps its mark, greyed as expired, without the check.
+  await expect(badges.getByTestId("chat-identity-badge")).toHaveAttribute("data-state", "expired");
+  await expect(badges.getByTestId("chat-identity-check-1")).toHaveCount(0);
 });
 
 test("removing a proof revokes it for a contact the person never reconnects to", { tag: ["@feature:proofs.nostr", "@feature:proofs.revoke", "@feature:proofs.page"] }, async ({ peer, relay }) => {
@@ -118,10 +112,8 @@ test("removing a proof revokes it for a contact the person never reconnects to",
   await alice.page.getByTestId("add-identity-start").click();
   await expect(alice.page.getByTestId("identity-proof")).toHaveCount(1);
   await go(alice, withCarol);
-  let dialog = await identities(alice);
-  await dialog.getByTestId("chat-identity-share").click();
-  await expect(dialog.getByTestId("chat-identity-mine-status")).toHaveText("Shared · verified by your contact");
-  await close(alice);
+  await shareIdentity(alice);
+  await closeIdentities(alice);
   await expect(carol.page.getByTestId("chat-identity-badges")).toBeVisible();
 
   // Carol's app is closed when Alice removes it: the withdrawal cannot reach her, the revocation goes to Pkarr.
@@ -137,16 +129,18 @@ test("removing a proof revokes it for a contact the person never reconnects to",
   // Alice never comes back. Carol opens Ghostly again and checks: revoked.
   await carol.page.goto(`/${carolChat}`);
   await expect(carol.page.getByPlaceholder("Message…")).toBeVisible();
-  dialog = await identities(carol);
-  const received = dialog.getByTestId("chat-identity-received");
-  await expect(received).toHaveAttribute("data-status", /verified|revoked/);
-  await received.getByText("Details").click();
+  await openIdentities(carol);
+  await expect(theirFace(carol)).toHaveAttribute("data-status", /verified|revoked/);
+  const back = await turnTheirs(carol);
   // The app also looks by itself a minute after starting; either way it ends revoked.
-  if (await received.getAttribute("data-status") === "verified") await received.getByTestId("chat-identity-recheck").click();
-  await expect(received).toHaveAttribute("data-status", "revoked");
-  await expect(received.getByTestId("chat-identity-received-status")).toHaveText("Revoked by its owner");
-  await close(carol);
-  await expect(carol.page.getByTestId("chat-identity-badges")).toHaveCount(0);
+  if (await back.getAttribute("data-status") === "verified") await back.getByTestId("chat-identity-recheck").click();
+  await expect(back).toHaveAttribute("data-status", "revoked");
+  await expect(back.getByTestId("chat-identity-received-status")).toHaveText("Revoked: its owner removed it and published a revocation");
+  await closeIdentities(carol);
+  // The header keeps its mark, struck through as revoked, without the check.
+  const badges = carol.page.getByTestId("chat-identity-badges");
+  await expect(badges.getByTestId("chat-identity-badge")).toHaveAttribute("data-state", "revoked");
+  await expect(badges.getByTestId("chat-identity-check-1")).toHaveCount(0);
 
   // The account bar's Identities carries a dot for it until Carol has seen it on the Identities page.
   await expect(carol.page.getByTestId("account-identities").getByTestId("identities-attention")).toBeVisible();

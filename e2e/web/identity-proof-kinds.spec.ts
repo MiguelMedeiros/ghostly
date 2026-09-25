@@ -1,5 +1,6 @@
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { expect, test, type Peer } from "../support/fixtures";
+import { closeIdentities, openIdentities, shareIdentity, theirCards, theirFace } from "../support/identities";
 import { pair } from "../support/paired";
 import { choose } from "../support/select";
 
@@ -51,26 +52,17 @@ test("every kind of signer: a pasted signature and a provider's attestation, bot
 
   // Bob's app has no fake providers: it says it cannot verify them, and nothing is sent.
   await alice.page.evaluate(h => { location.hash = h; }, chatHash);
-  await alice.page.getByTitle("Options").click();
-  await alice.page.getByTestId("chat-identities-open").click();
-  const dialog = alice.page.getByTestId("chat-identities");
-  await expect(dialog.getByTestId("chat-identity-mine").first()).toContainText("cannot verify");
-  await expect(dialog.getByTestId("chat-identity-share").first()).toBeDisabled();
-  await dialog.getByRole("button", { name: "Close" }).click();
+  const mine = (await openIdentities(alice)).getByTestId("chat-identities-mine");
+  await expect(mine.getByTestId("composer-identity-hint")).toContainText("cannot verify");
+  await expect(mine.getByTestId("composer-identity-use")).toBeDisabled();
+  await closeIdentities(alice);
 
   // With them, Bob verifies both, and says who vouches for the attested one.
   await useFakeIdentities(bob);
-  await alice.page.getByTitle("Options").click();
-  await alice.page.getByTestId("chat-identities-open").click();
-  for (const i of [0, 1]) {
-    await dialog.getByTestId("chat-identity-share").first().click();
-    await expect(dialog.getByTestId("chat-identity-mine-status").nth(i)).toHaveText("Shared · verified by your contact");
-  }
+  for (const which of ["Your own key", "Attested by issuer.ghostly.test"]) await shareIdentity(alice, which);
   await expect(bob.page.getByTestId("chat-identity-badges")).toBeVisible();
-  await bob.page.getByTitle("Options").click();
-  await bob.page.getByTestId("chat-identities-open").click();
-  const received = bob.page.getByTestId("chat-identity-received");
-  await expect(received).toHaveCount(2);
-  await expect(received.filter({ hasText: "Attested by issuer.ghostly.test" })).toHaveAttribute("data-status", "verified");
-  await expect(received.filter({ hasText: "Their own key" })).toHaveAttribute("data-status", "verified");
+  await openIdentities(bob);
+  await expect(theirCards(bob)).toHaveCount(2);
+  await expect(theirFace(bob, "Attested by issuer.ghostly.test")).toHaveAttribute("data-status", "verified");
+  await expect(theirFace(bob, "Their own key")).toHaveAttribute("data-status", "verified");
 });

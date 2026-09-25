@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { generateSecretKey, getPublicKey } from "nostr-tools/pure";
 import { expect, test, type Peer } from "../support/fixtures";
+import { closeIdentities, openIdentities, shareIdentity, turnTheirs } from "../support/identities";
 import { LocalNostrRelay, NOSTR_TEST_RELAY } from "../support/nostrRelay";
 import { addNostrIdentity, injectNostrSigner } from "../support/nostrSigner";
 import { pair } from "../support/paired";
@@ -14,12 +15,6 @@ import { pair } from "../support/paired";
 
 const chatId = (peer: Peer) => peer.page.evaluate(() => location.hash);
 const go = (peer: Peer, hash: string) => peer.page.evaluate(h => { location.hash = h; }, hash);
-async function identities(peer: Peer) {
-  await peer.page.getByTitle("Options").click();
-  await peer.page.getByTestId("chat-identities-open").click();
-  return peer.page.getByTestId("chat-identities");
-}
-const close = (peer: Peer) => peer.page.getByTestId("chat-identities").getByRole("button", { name: "Close" }).click();
 const now = () => Math.floor(Date.now() / 1000);
 
 /** Identities → Nostr: this app asks the test relay and nothing else. */
@@ -67,21 +62,20 @@ test("a contact's profile, follows and notes load only on request from the perso
 
   // Alice shares her Nostr identity with Bob only.
   await go(alice, withBob);
-  let dialog = await identities(alice);
-  await dialog.getByTestId("chat-identity-share").click();
-  await expect(dialog.getByTestId("chat-identity-mine-status")).toHaveText("Shared · verified by your contact");
-  await close(alice);
+  await shareIdentity(alice);
+  await closeIdentities(alice);
 
   // Carol got no proof: no Nostr card, and her app never asked any relay.
-  dialog = await identities(carol);
-  await expect(dialog.getByTestId("chat-identities-none")).toBeVisible();
-  await expect(dialog.getByTestId("nostr-contact")).toHaveCount(0);
-  await close(carol);
+  const none = await openIdentities(carol);
+  await expect(none.getByTestId("chat-identities-none")).toBeVisible();
+  await expect(none.getByTestId("nostr-contact")).toHaveCount(0);
+  await closeIdentities(carol);
 
-  // Bob sees the card, and nothing was fetched before he asks.
+  // Bob sees the card, turned over, and nothing was fetched before he asks.
   await expect(bob.page.getByTestId("chat-identity-badges")).toBeVisible();
-  dialog = await identities(bob);
-  const card = dialog.getByTestId("nostr-contact");
+  await openIdentities(bob);
+  const back = await turnTheirs(bob, "Nostr");
+  const card = back.getByTestId("nostr-contact");
   await expect(card).toHaveAttribute("data-subject", a.pubkey);
   await expect(card).toContainText("relay.ghostly.test");
   expect(relay.requests).toEqual([]);
@@ -96,8 +90,7 @@ test("a contact's profile, follows and notes load only on request from the perso
   await expect(card.getByTestId("nostr-profile-avatar")).toBeVisible();
   await expect(card.getByTestId("nostr-profile-source")).toContainText("from relay.ghostly.test");
   await expect(card.getByTestId("nostr-profile-source")).toContainText("Self-described");
-  const received = dialog.getByTestId("chat-identity-received");
-  await expect(received.getByTestId("chat-identity-received-name-source")).toHaveText("Nostr profile (kind 0, signed by this key, self-described)");
+  await expect(back).toContainText("Nostr · Alice in Chains");
   expect(pictureFetches).toBe(1);
   expect(relay.requests).toEqual([{ by: "bob", filter: { kinds: [0], authors: [a.pubkey], limit: 3 } }]);
 
@@ -124,7 +117,7 @@ test("a contact's profile, follows and notes load only on request from the perso
   // Publication is off: no follow button, no posting.
   await expect(card.getByTestId("nostr-follow")).toHaveCount(0);
   await expect(card.getByTestId("nostr-unfollow")).toHaveCount(0);
-  await close(bob);
+  await closeIdentities(bob);
   await go(bob, "#/identities");
   await expect(bob.page.getByTestId("nostr-post")).toHaveCount(0);
   await bob.page.getByTestId("nostr-publish").click();
@@ -162,7 +155,8 @@ test("a contact's profile, follows and notes load only on request from the perso
 
   // Unfollow, then follow again, from the contact's card: the rest of the list travels unchanged.
   await go(bob, bobsChat);
-  await identities(bob);
+  await openIdentities(bob);
+  await turnTheirs(bob, "Nostr");
   await card.getByTestId("nostr-unfollow").click();
   await expect(publish.getByTestId("nostr-publish-preview")).toContainText("1 account");
   await publish.getByTestId("nostr-publish-confirm").click();
@@ -180,5 +174,5 @@ test("a contact's profile, follows and notes load only on request from the perso
   expect([b.signed(1), b.signed(0), b.signed(3), b.signed(30078)]).toEqual([1, 1, 2, 1]);
   expect(a.signed(0) + a.signed(1) + a.signed(3)).toBe(0);
   expect(relay.published.every(p => p.by === "bob")).toBe(true);
-  await close(bob);
+  await closeIdentities(bob);
 });
