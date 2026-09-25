@@ -49,7 +49,7 @@ export function Menu({ open, onClose, anchorRef, testId, id, children }: {
   if (!open) return null;
 
   if (phone) return createPortal(<>
-    <div aria-hidden="true" className="fixed inset-0 z-50 bg-black/40 animate-fade-in" />
+    <div aria-hidden="true" data-testid="menu-backdrop" className="fixed inset-0 z-50 bg-black/40 animate-fade-in" />
     <div ref={ref} id={id} data-testid={testId} data-menu="sheet"
       className="menu-sheet fixed inset-x-0 bottom-0 z-50 max-h-[80vh] overflow-y-auto rounded-t-2xl border-t border-border bg-surface-alt px-1 pt-2 pb-safe shadow-2xl animate-fade-in">
       <div aria-hidden="true" className="mx-auto mb-2 h-1 w-9 rounded-full bg-border-bright" />

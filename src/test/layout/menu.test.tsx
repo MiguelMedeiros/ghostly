@@ -84,7 +84,7 @@ describe("Menu: one line per row", () => {
     expect(screen.queryByTestId("menu")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Options" }));
-    const backdrop = document.body.querySelector<HTMLElement>(".bg-black\\/40")!;
+    const backdrop = screen.getByTestId("menu-backdrop");
     act(() => { backdrop.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })); backdrop.dispatchEvent(new PointerEvent("pointerup", { bubbles: true })); });
     expect(screen.queryByTestId("menu")).not.toBeInTheDocument();
   });
