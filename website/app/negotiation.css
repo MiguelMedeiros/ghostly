@@ -484,8 +484,8 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--lvl-development);
-  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.15);
+  background: var(--lvl-available);
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.15);
 }
 
 @keyframes ng-in {

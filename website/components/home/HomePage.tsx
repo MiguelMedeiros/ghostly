@@ -23,7 +23,8 @@ import "@/app/home.css";
  * gets the whole screen. Then the product, your space, the architecture
  * opening under the ghosts, and the payoff.
  */
-export function HomePage({ locale }: { locale: Locale }) {
+/** `version`: the release the download panel offers (lib/latestRelease.ts). */
+export function HomePage({ locale, version }: { locale: Locale; version: string }) {
   const t = home[locale];
   return (
     <Shell locale={locale}>
@@ -68,8 +69,8 @@ export function HomePage({ locale }: { locale: Locale }) {
         <AgreeScene eyebrow={t.agree.eyebrow} label={t.agree.label} steps={t.agree.steps} labels={t.agree} />
         <AliveScene eyebrow={t.alive.eyebrow} label={t.alive.label} steps={t.alive.steps} labels={t.alive} />
       </Act>
-      <NextSection t={t.next} locale={locale} />
-      <SpaceSection t={t.space} w={t.wallets} locale={locale} shotLabel={t.next.fromDev} />
+      <NextSection t={t.next} />
+      <SpaceSection t={t.space} w={t.wallets} shotLabel={t.next.fromDev} />
       <OpenScene
         eyebrow={t.open.eyebrow}
         label={t.open.label}
@@ -91,7 +92,7 @@ export function HomePage({ locale }: { locale: Locale }) {
           </Link>
         </div>
       </div>
-      <Finale t={t.finale} />
+      <Finale t={t.finale} version={version} />
     </Shell>
   );
 }

@@ -269,14 +269,8 @@
   padding: 18px 16px 16px;
   border-bottom: 1px solid var(--line);
 }
-.tl-phase[data-level="released"] {
-  --l: var(--lvl-released);
-}
-.tl-phase[data-level="development"] {
-  --l: var(--lvl-development);
-}
-.tl-phase[data-level="building"] {
-  --l: var(--lvl-building);
+.tl-phase[data-level="available"] {
+  --l: var(--lvl-available);
 }
 .tl-phase[data-level="planned"] {
   --l: var(--lvl-planned);
@@ -322,7 +316,7 @@
   gap: 6px;
   font-size: 12px;
   font-weight: 700;
-  color: var(--lvl-released);
+  color: var(--lvl-available);
 }
 .tl-here svg {
   filter: none;
@@ -424,7 +418,7 @@
     top: 10px;
     bottom: 10px;
     width: 2px;
-    background: linear-gradient(var(--lvl-released), var(--lvl-development), var(--lvl-building), var(--lvl-planned), var(--line-2));
+    background: linear-gradient(var(--lvl-available), var(--lvl-planned), var(--line-2));
     opacity: 0.6;
   }
   .tl-stage {
@@ -433,14 +427,8 @@
     display: grid;
     gap: 6px;
   }
-  .tl-stage[data-level="released"] {
-    --l: var(--lvl-released);
-  }
-  .tl-stage[data-level="development"] {
-    --l: var(--lvl-development);
-  }
-  .tl-stage[data-level="building"] {
-    --l: var(--lvl-building);
+  .tl-stage[data-level="available"] {
+    --l: var(--lvl-available);
   }
   .tl-stage[data-level="planned"]:not([data-phase="later"]) {
     --l: var(--lvl-planned);

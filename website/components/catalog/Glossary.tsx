@@ -31,7 +31,7 @@ export function Glossary({ t }: { t: CatalogCopy["glossary"] }) {
               <span className="gl-term">
                 {w.term}
                 {w.status && (
-                  <span className="level level--sm" data-level="development">
+                  <span className="level level--sm" data-level="planned">
                     {w.status}
                   </span>
                 )}

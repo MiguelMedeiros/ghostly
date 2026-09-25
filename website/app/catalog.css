@@ -300,14 +300,8 @@
   color: var(--l);
   line-height: 1;
 }
-.wmap-stat[data-level="released"] {
-  --l: var(--lvl-released);
-}
-.wmap-stat[data-level="development"] {
-  --l: var(--lvl-development);
-}
-.wmap-stat[data-level="building"] {
-  --l: var(--lvl-building);
+.wmap-stat[data-level="available"] {
+  --l: var(--lvl-available);
 }
 .wmap-stat[data-level="planned"] {
   --l: var(--lvl-planned);
@@ -338,7 +332,7 @@
   width: 28px;
 }
 .wmap-demo--color {
-  background: linear-gradient(90deg, var(--lvl-released) 0 25%, var(--lvl-development) 25% 50%, var(--lvl-planned) 50% 75%, var(--lvl-research) 75%);
+  background: linear-gradient(90deg, var(--lvl-available) 0 34%, var(--lvl-planned) 34% 67%, var(--lvl-research) 67%);
   border: 0;
 }
 .wmap-grid {
@@ -399,14 +393,8 @@
   border-color: var(--l);
   background: color-mix(in srgb, var(--l) 26%, var(--surface));
 }
-.wmap-tile[data-level="released"] {
-  --l: var(--lvl-released);
-}
-.wmap-tile[data-level="development"] {
-  --l: var(--lvl-development);
-}
-.wmap-tile[data-level="building"] {
-  --l: var(--lvl-building);
+.wmap-tile[data-level="available"] {
+  --l: var(--lvl-available);
 }
 .wmap-tile[data-level="planned"] {
   --l: var(--lvl-planned);

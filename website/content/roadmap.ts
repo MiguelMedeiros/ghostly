@@ -2,9 +2,9 @@ import type { Localized } from "@/lib/i18n";
 import type { Level } from "@/lib/status";
 
 /**
- * The public roadmap: tracks in dependency order, never dates. "Now" lists
- * what already exists (released or merged), so finished work is not presented
- * as a future step.
+ * The public roadmap: tracks in dependency order, never dates. It starts after
+ * 0.5.0: "Now" is a short baseline of what the app already does, and "Next" is
+ * only work that is not built. Checked against the code on `dev`.
  */
 type Track = {
   id: string;
@@ -21,7 +21,7 @@ const en = {
   meta: {
     title: "Roadmap",
     description:
-      "Where Ghostly is going, in order and with dependencies: polish, more ways to pay, optional identities, groups, storage, SDKs and plugins, independent apps and a self-hosted runtime. No invented dates.",
+      "Where Ghostly goes after 0.5.0, in order and with dependencies: richer chats, more ways to pay, optional identities, groups, storage, SDKs and plugins, independent apps and a self-hosted runtime. No invented dates.",
   },
   eyebrow: "Public roadmap",
   title: "The ghost keeps learning.",
@@ -37,20 +37,20 @@ const en = {
   after: "Builds on",
   tracks: [
     {
-      id: "polish",
+      id: "talk",
       n: "01",
-      title: "Consolidate what exists",
-      why: "Paired chats, native transports and the new wallets are merged. They need to become a release people can rely on.",
+      title: "Talk in more ways",
+      why: "Paired chats are the default now. Next they get what the older WebRTC chats still do better, and voice messages.",
       now: [
-        { text: "Paired chats with pinned keys, negotiated files and payments", level: "development" },
-        { text: "Iroh and HyperDHT between desktop apps", level: "development" },
-        { text: "Calls, screen sharing and local app sharing in WebRTC chats", level: "released" },
+        { text: "Paired chats with pinned keys, files, payments and local apps", level: "available" },
+        { text: "Calls and screen sharing in WebRTC chats", level: "available" },
+        { text: "Pairing progress you can watch while two apps find each other", level: "available" },
       ],
       next: [
-        { text: "Calls and local services inside paired chats", level: "planned" },
-        { text: "Release 0.5.0 with the merged work", level: "development" },
+        { text: "Calls inside paired chats", level: "planned" },
+        { text: "Voice messages", level: "planned" },
       ],
-      gate: "Accurate client-by-client scope, reproducible tests, and a public release.",
+      gate: "Every client tested against every other one, on each transport it offers.",
       after: [],
     },
     {
@@ -59,20 +59,17 @@ const en = {
       title: "More ways to pay",
       why: "One payment agreement, many wallets. Each method keeps its own rules and its own risks.",
       now: [
-        { text: "Cashu, with Lightning through the mint", level: "released" },
-        { text: "Ark via Arkade and USDT via Tether WDK, experimental", level: "development" },
-        { text: "Your own Lightning source: NWC, LND, Core Lightning, a browser wallet (WebLN), Breez on a local regtest", level: "development" },
-        { text: "Ark via Bark, test networks only", level: "development" },
-        { text: "Spark to Spark, wallet to wallet: Breez's regtest in Testnet, Mainnet with a Breez API key", level: "development" },
-        { text: "On-chain bitcoin in a chat: a BDK wallet (test networks) or Bitcoin Core (desktop)", level: "development" },
-        { text: "Pay a request from any other wallet (QR code or link), and pay Lightning addresses and LNURLs", level: "development" },
+        { text: "Cashu and Lightning, through the mint or your own source (NWC, LND, Core Lightning, WebLN)", level: "available" },
+        { text: "Lightning addresses, and paying a request from any wallet", level: "available" },
+        { text: "Ark, Spark, Fedimint, USDT and on-chain bitcoin, experimental; several on test networks only", level: "available" },
       ],
       next: [
-        { text: "Mainnet for Bark, Breez and BDK once reviewed with real money in mind", level: "planned" },
-        { text: "Fedimint, Liquid and other rails", level: "planned" },
+        { text: "Mainnet for Bark, Breez, BDK and Fedimint, once reviewed with real money in mind", level: "planned" },
+        { text: "Unilateral exit for Ark", level: "planned" },
+        { text: "Liquid and other rails", level: "planned" },
       ],
       gate: "Disposable-network settlement, fee limits, unknown-result reconciliation, and recovery or exit tested before any mainnet claim.",
-      after: ["polish"],
+      after: ["talk"],
     },
     {
       id: "reach",
@@ -80,31 +77,29 @@ const en = {
       title: "Reach each other in more places",
       why: "New transports widen where two people can meet. Each one is an adapter both sides must support, never a silent bridge.",
       now: [
-        { text: "WebRTC everywhere; Iroh and HyperDHT on desktop", level: "development" },
+        { text: "WebRTC everywhere; Iroh and HyperDHT between desktop apps", level: "available" },
       ],
       next: [
         { text: "Local network discovery, generic QUIC and WebSocket relay profiles", level: "planned" },
         { text: "Tor, libp2p, Pear / Holepunch components", level: "research" },
       ],
       gate: "Each adapter tested on its own platforms, with its relays and privacy trade-offs stated.",
-      after: ["polish"],
+      after: ["talk"],
     },
     {
       id: "keep",
       n: "04",
       title: "Keep things, bring them back",
-      why: "Backups, storage and held messages already exist in the merged build; next is making recovery routine.",
+      why: "Profiles, backups and held messages exist. Next is making recovery routine.",
       now: [
-        { text: "Local profiles", level: "development" },
-        { text: "Sealed backups to a file or any S3-compatible bucket", level: "development" },
-        { text: "Messages held for an away contact in your own S3 bucket (store-and-forward, hold/1)", level: "development" },
+        { text: "Local profiles, sealed backups to a file or S3, messages held for an away contact", level: "available" },
       ],
       next: [
         { text: "Scheduled backups and retention", level: "planned" },
         { text: "More storage places (WebDAV, Blossom and others), for backups and held messages", level: "planned" },
       ],
       gate: "Restore drills across devices and versions, without overwriting anything.",
-      after: ["polish"],
+      after: ["talk"],
     },
     {
       id: "identity",
@@ -112,16 +107,16 @@ const en = {
       title: "Bring an identity, only if you want",
       why: "Nobody needs a public identity to talk. Proofs are optional, several can coexist, and you choose what each contact sees.",
       now: [
-        { text: "Proofs made once and shared per chat: Nostr, a domain, an OpenPGP or SSH key, a Bitcoin address", level: "development" },
-        { text: "Accounts at Google, Microsoft, Apple, GitLab or Twitch, attested by the provider (merged, not offered until clients are registered)", level: "development" },
-        { text: "Nostr social layer: a proven key's profile, follows and notes on request; posting through your own signer, off by default", level: "development" },
+        { text: "Proofs made once, shared per chat: Nostr, a domain, an OpenPGP or SSH key, a Bitcoin address", level: "available" },
+        { text: "Nostr social layer: profile, follows and notes; posting off by default", level: "available" },
       ],
       next: [
+        { text: "OpenID accounts (Google, Microsoft, Apple, GitLab, Twitch): built, offered once Ghostly's OAuth clients are registered", level: "planned" },
         { text: "Hardware signers and passkeys", level: "planned" },
         { text: "Pubky and Keet, and their profiles and content", level: "research" },
       ],
       gate: "Sessions without any proof still work. Proving a key never implies importing a graph or permission to publish.",
-      after: ["polish"],
+      after: ["talk"],
     },
     {
       id: "groups",
@@ -129,16 +124,16 @@ const en = {
       title: "From a conversation to a community",
       why: "Groups need membership, roles and distribution designed together, off the DHT.",
       now: [
-        { text: "Private groups of up to eight: text only, one admin, a fresh key whenever membership changes (group-mesh/1)", level: "development" },
+        { text: "Private groups of up to eight and communities of up to 256: text, a picture and payments between members", level: "available" },
       ],
       next: [
-        { text: "Files, calls and payments in groups, each a capability of its own", level: "planned" },
+        { text: "Files and calls in groups, each a capability of its own", level: "planned" },
         { text: "More than one admin, member key updates", level: "planned" },
-        { text: "Larger groups (GossipSub), channels, topics and gated access", level: "planned" },
+        { text: "Channels, topics and gated access", level: "planned" },
         { text: "Group encryption beyond the epoch-key scheme (MLS)", level: "research" },
       ],
       gate: "Membership authority, removal, partitions, abuse limits and recovery tested.",
-      after: ["polish", "identity"],
+      after: ["talk", "identity"],
     },
     {
       id: "sdk",
@@ -146,16 +141,15 @@ const en = {
       title: "SDKs, adapters and plugins",
       why: "Let others build pieces without forking the app. A plugin is packaging; the contract stays a WISP.",
       now: [
-        { text: "Contracts published as WISP drafts; a CLI for scripts and bots", level: "released" },
-        { text: "@ghostly/sdk: contracts, fakes and contract suites; an adapter registers as a plugin, without a registry line", level: "development" },
+        { text: "Contracts as WISP drafts, a CLI for scripts and bots, and @ghostly/sdk: an adapter registers as a plugin", level: "available" },
       ],
       next: [
         { text: "Adapter manifests, and the SDK published on npm", level: "planned" },
-        { text: "A permissioned plugin host", level: "research" },
         { text: "Package authenticity and updates", level: "planned" },
+        { text: "A permissioned plugin host", level: "research" },
       ],
       gate: "Malicious-plugin tests, provenance and an update policy.",
-      after: ["polish"],
+      after: ["talk"],
     },
     {
       id: "apps",
@@ -199,7 +193,7 @@ const ptBr: RoadmapCopy = {
   meta: {
     title: "Roadmap",
     description:
-      "Para onde o Ghostly vai, em ordem e com dependências: polimento, mais formas de pagar, identidades opcionais, grupos, armazenamento, SDKs e plugins, apps independentes e um runtime auto-hospedado. Sem datas inventadas.",
+      "Para onde o Ghostly vai depois da 0.5.0, em ordem e com dependências: chats mais ricos, mais formas de pagar, identidades opcionais, grupos, armazenamento, SDKs e plugins, apps independentes e um runtime auto-hospedado. Sem datas inventadas.",
   },
   eyebrow: "Roadmap público",
   title: "O fantasma continua aprendendo.",
@@ -215,20 +209,20 @@ const ptBr: RoadmapCopy = {
   after: "Depende de",
   tracks: [
     {
-      id: "polish",
+      id: "talk",
       n: "01",
-      title: "Consolidar o que existe",
-      why: "Chats pareados, transportes nativos e as novas carteiras estão integrados. Precisam virar uma versão em que as pessoas possam confiar.",
+      title: "Conversar de mais jeitos",
+      why: "Os chats pareados agora são o padrão. O próximo passo é dar a eles o que os chats WebRTC antigos ainda fazem melhor, e mensagens de voz.",
       now: [
-        { text: "Chats pareados com chaves fixadas, arquivos e pagamentos negociados", level: "development" },
-        { text: "Iroh e HyperDHT entre apps desktop", level: "development" },
-        { text: "Chamadas, compartilhamento de tela e de apps locais em chats WebRTC", level: "released" },
+        { text: "Chats pareados com chaves fixadas, arquivos, pagamentos e apps locais", level: "available" },
+        { text: "Chamadas e compartilhamento de tela em chats WebRTC", level: "available" },
+        { text: "Ver o progresso do pareamento enquanto os dois apps se encontram", level: "available" },
       ],
       next: [
-        { text: "Chamadas e serviços locais dentro dos chats pareados", level: "planned" },
-        { text: "Lançar a 0.5.0 com o trabalho integrado", level: "development" },
+        { text: "Chamadas dentro dos chats pareados", level: "planned" },
+        { text: "Mensagens de voz", level: "planned" },
       ],
-      gate: "Escopo exato por cliente, testes reproduzíveis e uma versão pública.",
+      gate: "Cada cliente testado contra cada outro, em cada transporte que oferece.",
       after: [],
     },
     {
@@ -237,20 +231,17 @@ const ptBr: RoadmapCopy = {
       title: "Mais formas de pagar",
       why: "Um acordo de pagamento, muitas carteiras. Cada método mantém as próprias regras e os próprios riscos.",
       now: [
-        { text: "Cashu, com Lightning pelo mint", level: "released" },
-        { text: "Ark via Arkade e USDT via Tether WDK, experimentais", level: "development" },
-        { text: "Sua própria fonte Lightning: NWC, LND, Core Lightning, uma carteira do navegador (WebLN), Breez num regtest local", level: "development" },
-        { text: "Ark via Bark, só em redes de teste", level: "development" },
-        { text: "Spark para Spark, de carteira para carteira: regtest da Breez na Testnet, Mainnet com uma chave de API da Breez", level: "development" },
-        { text: "Bitcoin on-chain no chat: uma carteira BDK (redes de teste) ou o Bitcoin Core (desktop)", level: "development" },
-        { text: "Pagar um pedido com qualquer outra carteira (QR code ou link), e pagar Lightning addresses e LNURLs", level: "development" },
+        { text: "Cashu e Lightning, pelo mint ou pela sua própria fonte (NWC, LND, Core Lightning, WebLN)", level: "available" },
+        { text: "Lightning addresses, e pagar um pedido com qualquer carteira", level: "available" },
+        { text: "Ark, Spark, Fedimint, USDT e bitcoin on-chain, experimentais; vários só em redes de teste", level: "available" },
       ],
       next: [
-        { text: "Mainnet para Bark, Breez e BDK depois de revisados pensando em dinheiro de verdade", level: "planned" },
-        { text: "Fedimint, Liquid e outros trilhos", level: "planned" },
+        { text: "Mainnet para Bark, Breez, BDK e Fedimint, depois de revisados pensando em dinheiro de verdade", level: "planned" },
+        { text: "Saída unilateral no Ark", level: "planned" },
+        { text: "Liquid e outros trilhos", level: "planned" },
       ],
       gate: "Liquidação em rede descartável, limites de taxa, reconciliação de resultado desconhecido e recuperação ou saída testadas antes de qualquer promessa em mainnet.",
-      after: ["polish"],
+      after: ["talk"],
     },
     {
       id: "reach",
@@ -258,31 +249,29 @@ const ptBr: RoadmapCopy = {
       title: "Encontrar-se em mais lugares",
       why: "Novos transportes ampliam onde duas pessoas podem se encontrar. Cada um é um adapter que os dois lados precisam suportar, nunca uma ponte silenciosa.",
       now: [
-        { text: "WebRTC em todo lugar; Iroh e HyperDHT no desktop", level: "development" },
+        { text: "WebRTC em todo lugar; Iroh e HyperDHT entre apps desktop", level: "available" },
       ],
       next: [
         { text: "Descoberta na rede local, perfis QUIC genérico e relay WebSocket", level: "planned" },
         { text: "Tor, libp2p, componentes Pear / Holepunch", level: "research" },
       ],
       gate: "Cada adapter testado nas próprias plataformas, com relays e trade-offs de privacidade declarados.",
-      after: ["polish"],
+      after: ["talk"],
     },
     {
       id: "keep",
       n: "04",
       title: "Guardar e trazer de volta",
-      why: "Backups, armazenamento e mensagens guardadas já existem na build integrada; o próximo passo é tornar a recuperação rotina.",
+      why: "Perfis, backups e mensagens guardadas já existem. O próximo passo é tornar a recuperação rotina.",
       now: [
-        { text: "Perfis locais", level: "development" },
-        { text: "Backups selados num arquivo ou em qualquer bucket compatível com S3", level: "development" },
-        { text: "Mensagens guardadas para um contato ausente no seu próprio bucket S3 (store-and-forward, hold/1)", level: "development" },
+        { text: "Perfis locais, backups selados num arquivo ou S3, mensagens guardadas para um contato ausente", level: "available" },
       ],
       next: [
         { text: "Backups agendados e retenção", level: "planned" },
         { text: "Mais lugares de armazenamento (WebDAV, Blossom e outros), para backups e mensagens guardadas", level: "planned" },
       ],
       gate: "Testes de restauração entre aparelhos e versões, sem sobrescrever nada.",
-      after: ["polish"],
+      after: ["talk"],
     },
     {
       id: "identity",
@@ -290,16 +279,16 @@ const ptBr: RoadmapCopy = {
       title: "Traga uma identidade, só se quiser",
       why: "Ninguém precisa de identidade pública para conversar. Provas são opcionais, várias podem coexistir e você escolhe o que cada contato vê.",
       now: [
-        { text: "Provas feitas uma vez e compartilhadas por chat: Nostr, um domínio, uma chave OpenPGP ou SSH, um endereço Bitcoin", level: "development" },
-        { text: "Contas no Google, Microsoft, Apple, GitLab ou Twitch, atestadas pelo provedor (integradas, mas só oferecidas quando os clientes forem registrados)", level: "development" },
-        { text: "Camada social do Nostr: perfil, quem segue e notas de uma chave provada, sob pedido; publicar pelo seu próprio signer, desligado por padrão", level: "development" },
+        { text: "Provas feitas uma vez, compartilhadas por chat: Nostr, um domínio, uma chave OpenPGP ou SSH, um endereço Bitcoin", level: "available" },
+        { text: "Camada social do Nostr: perfil, quem segue e notas; publicar desligado por padrão", level: "available" },
       ],
       next: [
+        { text: "Contas OpenID (Google, Microsoft, Apple, GitLab, Twitch): prontas, oferecidas quando os clientes OAuth do Ghostly forem registrados", level: "planned" },
         { text: "Signers de hardware e passkeys", level: "planned" },
         { text: "Pubky e Keet, com os perfis e conteúdos deles", level: "research" },
       ],
       gate: "Sessões sem nenhuma prova continuam funcionando. Provar uma chave nunca implica importar um grafo nem permissão para publicar.",
-      after: ["polish"],
+      after: ["talk"],
     },
     {
       id: "groups",
@@ -307,16 +296,16 @@ const ptBr: RoadmapCopy = {
       title: "De uma conversa a uma comunidade",
       why: "Grupos precisam de membros, papéis e distribuição desenhados juntos, fora da DHT.",
       now: [
-        { text: "Grupos privados de até oito pessoas: só texto, um admin, chave nova sempre que os membros mudam (group-mesh/1)", level: "development" },
+        { text: "Grupos privados de até oito e comunidades de até 256: texto, uma foto e pagamentos entre membros", level: "available" },
       ],
       next: [
-        { text: "Arquivos, chamadas e pagamentos em grupos, cada um uma capacidade própria", level: "planned" },
+        { text: "Arquivos e chamadas em grupos, cada um uma capacidade própria", level: "planned" },
         { text: "Mais de um admin, atualização de chaves dos membros", level: "planned" },
-        { text: "Grupos maiores (GossipSub), canais, tópicos e acesso restrito", level: "planned" },
+        { text: "Canais, tópicos e acesso restrito", level: "planned" },
         { text: "Criptografia de grupo além do esquema de chaves por época (MLS)", level: "research" },
       ],
       gate: "Autoridade sobre membros, remoção, partições, limites contra abuso e recuperação testados.",
-      after: ["polish", "identity"],
+      after: ["talk", "identity"],
     },
     {
       id: "sdk",
@@ -324,16 +313,15 @@ const ptBr: RoadmapCopy = {
       title: "SDKs, adapters e plugins",
       why: "Deixar outras pessoas construírem peças sem fazer fork do app. Plugin é embalagem; o contrato continua sendo um WISP.",
       now: [
-        { text: "Contratos publicados como rascunhos WISP; uma CLI para scripts e bots", level: "released" },
-        { text: "@ghostly/sdk: contratos, fakes e suítes de contrato; um adapter se registra como plugin, sem linha no registro", level: "development" },
+        { text: "Contratos como rascunhos WISP, uma CLI para scripts e bots, e o @ghostly/sdk: um adapter se registra como plugin", level: "available" },
       ],
       next: [
         { text: "Manifestos de adapters, e o SDK publicado no npm", level: "planned" },
-        { text: "Um host de plugins com permissões", level: "research" },
         { text: "Autenticidade de pacotes e atualizações", level: "planned" },
+        { text: "Um host de plugins com permissões", level: "research" },
       ],
       gate: "Testes com plugins maliciosos, procedência e uma política de atualização.",
-      after: ["polish"],
+      after: ["talk"],
     },
     {
       id: "apps",
@@ -375,15 +363,19 @@ export const roadmap: Localized<RoadmapCopy> = { en, "pt-br": ptBr };
 
 /**
  * Candidate status in the site's levels. The adapter roadmap's status column
- * lags the work merged on dev (wallet sources and identity proofs on
- * 2026-09-23; groups, the SDK, the Nostr social layer, paying from another
- * wallet and store-and-forward on 2026-09-24), so those candidates are pinned
- * to "development" here; nothing is being built outside dev at the time of
- * writing.
+ * lags the code on `dev`, so what the app already runs is pinned to
+ * "available" here, with the PR that shipped it.
  */
-const BUILDING = new Set<string>([]);
-const DEVELOPMENT = new Set([
-  // Wallet sources merged on dev (2026-09-23)
+const AVAILABLE = new Set([
+  // Before 0.5.0
+  "candidate-pkarr-mainline-dht",
+  "candidate-webrtc",
+  "candidate-cashu",
+  "candidate-lightning-bolt11",
+  "candidate-files-and-attachments",
+  "candidate-voice-video-screenshare",
+  "candidate-local-state",
+  // Wallet sources and rails (#77, #78, #79, #82, #86, #88, #90, #188, #192)
   "candidate-ark-via-bark",
   "candidate-bitcoin-on-chain",
   "candidate-lnd",
@@ -393,7 +385,9 @@ const DEVELOPMENT = new Set([
   "candidate-bitcoin-core-rpc",
   "candidate-bdk",
   "candidate-esplora",
-  // Identity proofs merged on dev (2026-09-23)
+  "candidate-spark",
+  "candidate-fedimint",
+  // Identity proofs (#80, #81, #85, #89, #91, #93)
   "candidate-proof",
   "candidate-nostr",
   "candidate-openpgp-pgp",
@@ -401,9 +395,7 @@ const DEVELOPMENT = new Set([
   "candidate-bitcoin-address-proof",
   "candidate-github",
   "candidate-domain",
-  // OpenID proofs are merged but not offered until the OAuth clients are registered
-  "candidate-openid-connect-providers-google-microsoft-entra-work-school-and-personal-apple-gitlab-com-twitch",
-  // Backups merged on dev (#72): sealed bundles to a file or an S3-compatible bucket
+  // Backups (#72): sealed bundles to a file or an S3-compatible bucket
   "candidate-backup-export-import-migration",
   "candidate-remote-encrypted-storage",
   // Paying from another wallet and Lightning addresses (#107, WISP 205)
@@ -414,8 +406,8 @@ const DEVELOPMENT = new Set([
   "candidate-social-graph",
   "candidate-content-read-search",
   "candidate-publication",
-  // Private groups (#102, #106): group-mesh/1, text only, up to eight members;
-  // its epoch-key scheme is the group crypto decided for this first profile
+  // Private groups and communities (#102, #106, #153); the epoch-key scheme is
+  // the group crypto decided for them
   "candidate-private-groups",
   "candidate-group-crypto",
   // Store-and-forward (#108): hold/1 in the sender's own S3 storage
@@ -424,17 +416,15 @@ const DEVELOPMENT = new Set([
   // publisher identity and permissions are not built yet
   "candidate-sdk-and-manifests",
 ]);
-const RELEASED = new Set([
-  "candidate-pkarr-mainline-dht",
-  "candidate-webrtc",
-  "candidate-cashu",
-  "candidate-lightning-bolt11",
-]);
+/**
+ * Built but not offered: OpenID proofs (#92) wait for Ghostly's OAuth clients
+ * to be registered, so for the people using the app they are still planned.
+ */
+const NOT_OFFERED = new Set(["candidate-openid-connect-providers-google-microsoft-entra-work-school-and-personal-apple-gitlab-com-twitch"]);
 export function candidateLevel(id: string, status: string): Level {
-  if (BUILDING.has(id)) return "building";
-  if (DEVELOPMENT.has(id)) return "development";
-  if (RELEASED.has(id)) return "released";
-  if (status.startsWith("Current") || status.startsWith("In development")) return "development";
+  if (NOT_OFFERED.has(id)) return "planned";
+  if (AVAILABLE.has(id)) return "available";
+  if (status.startsWith("Current") || status.startsWith("In development")) return "available";
   if (/research/i.test(status)) return "research";
   return "planned";
 }

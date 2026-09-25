@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { HomePage } from "@/components/home/HomePage";
 import { home } from "@/content/home";
 import { alternates } from "@/lib/i18n";
+import { latestRelease } from "@/lib/latestRelease";
 
 export const metadata: Metadata = {
   title: { absolute: home.en.meta.title },
@@ -9,6 +10,6 @@ export const metadata: Metadata = {
   alternates: alternates("/", "en"),
 };
 
-export default function Page() {
-  return <HomePage locale="en" />;
+export default async function Page() {
+  return <HomePage locale="en" version={await latestRelease()} />;
 }

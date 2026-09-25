@@ -3,10 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { CardDeck } from "@/components/app/WalletCardDeck";
 import { WALLET_RAILS, type WalletCard, type WalletRail } from "@/components/app/walletCardTypes";
-import { LevelBadge } from "@/components/site/Level";
-import type { Locale } from "@/lib/i18n";
 import { useCalm } from "@/lib/useCalm";
-import { shell } from "@/content/shell";
 import type { HomeCopy } from "@/content/home";
 
 /**
@@ -29,30 +26,27 @@ const noop = () => () => {};
 /** True once the page runs in the browser: the deck picks its stack or its track from the pointer, which the server cannot know. */
 const useMounted = () => useSyncExternalStore(noop, () => true, () => false);
 
-function Details({ card, locale, ...rest }: { card: Copy; locale: Locale } & React.HTMLAttributes<HTMLDivElement>) {
+function Details({ card, ...rest }: { card: Copy } & React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div className={`sp-desc wallet-card-${railOf(card)}`} {...rest}>
       <p className="body">{card.body}</p>
-      <p className="note">
-        {"more" in card && card.more && <LevelBadge level={card.more} locale={locale} small />} {card.limits}
-      </p>
+      <p className="note">{card.limits}</p>
     </div>
   );
 }
 
-export function WalletDeck({ t, locale }: { t: HomeCopy["wallets"]; locale: Locale }) {
-  const levels = shell[locale].levels;
+export function WalletDeck({ t }: { t: HomeCopy["wallets"] }) {
   // The app's order, whatever order the content lists them in.
   const copies = [...t.cards].sort((a, b) => WALLET_RAILS.indexOf(railOf(a)) - WALLET_RAILS.indexOf(railOf(b)));
   // A card's face, as the app's wallet page draws it: the name, what kind of payment it is where the app shows the
-  // balance, and how ready it is where the app shows its status.
+  // balance, and the network it runs on where the app shows its status.
   const cards: WalletCard[] = copies.map((c) => ({
     id: railOf(c),
     name: c.name,
     balance: c.kind,
     detail: "",
-    status: levels[c.level],
-    ready: c.level === "released",
+    status: c.network,
+    ready: c.net !== "test",
   }));
   const [selected, setSelected] = useState<WalletRail>(cards[0].id);
   const copy = copies[Math.max(0, cards.findIndex((c) => c.id === selected))];
@@ -130,12 +124,11 @@ export function WalletDeck({ t, locale }: { t: HomeCopy["wallets"]; locale: Loca
         {/* Every card's details, invisible, so the panel is as tall as the longest and nothing below jumps. */}
         <div className="sp-desc-sizer" aria-hidden="true">
           {copies.map((c) => (
-            <Details key={c.id} card={c} locale={locale} />
+            <Details key={c.id} card={c} />
           ))}
         </div>
         <Details
           card={copy}
-          locale={locale}
           id="wallet-panel"
           role="tabpanel"
           aria-labelledby={`wallet-tab-${selected}`}
@@ -148,7 +141,7 @@ export function WalletDeck({ t, locale }: { t: HomeCopy["wallets"]; locale: Loca
         <ul className="sp-noscript">
           {copies.map((c) => (
             <li key={c.id}>
-              <strong>{c.name}</strong> ({levels[c.level]}): {c.body} {c.limits}
+              <strong>{c.name}</strong> ({c.network}): {c.body} {c.limits}
             </li>
           ))}
         </ul>
