@@ -3,11 +3,14 @@ import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../contexts/I18nContext";
 
 interface QRCodeDisplayProps {
+  /** What Copy and Share hand over. */
   value: string;
+  /** What the QR encodes, when not `value`: segments, each in the mode that fits it (an invite link in capitals). */
+  qr?: string[];
   label?: string;
 }
 
-export function QRCodeDisplay({ value, label }: QRCodeDisplayProps) {
+export function QRCodeDisplay({ value, qr, label }: QRCodeDisplayProps) {
   const { t } = useI18n();
   const currentValue = useRef(value); currentValue.current = value;
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -51,7 +54,7 @@ export function QRCodeDisplay({ value, label }: QRCodeDisplayProps) {
       )}
       <div data-testid="invite-qr" className="bg-white p-4 rounded-xl max-w-full [&_svg]:max-w-full [&_svg]:h-auto">
         <QRCodeSVG
-          value={value}
+          value={qr ?? value}
           size={232}
           marginSize={2}
           title="Invite QR code"

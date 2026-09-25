@@ -208,6 +208,9 @@ export class DhtDelivery {
     try {
       if (!verify(fromBase64Url(signature), utf8Encode(JSON.stringify(["ghostly-dht-envelope", this.to, this.from, sender ? this.participation.pubKeyZ32 : "invite", body])), publicKeyFromZ32(author))) return;
     } catch { return; }
+    // Before the pin, the key the invite named: another invite holder's envelope is refused, and not remembered,
+    // since whoever holds a copy can write to this mailbox and the inviter's next envelope replaces it.
+    if (!this.options.credentials.peerKey && this.options.credentials.expectedPeerKey && this.options.credentials.expectedPeerKey !== author) return;
     if (this.options.credentials.peerKey && this.options.credentials.peerKey !== author) { await this.persist({ ...this.state, peerRejected: true }); this.errors.peer = "DHT participation key does not match the saved contact. No content or receipt was accepted."; this.changed(); return; }
     if (sequence <= this.state.peerSequence) return;
     if (message !== null && (!Array.isArray(message) || message.length !== 3 || typeof message[0] !== "string" || !ID.test(message[0]) || !Number.isSafeInteger(message[1]) || message[1] <= 0 || message[1] > issued + 30_000 ||

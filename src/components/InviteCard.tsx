@@ -1,12 +1,17 @@
 import { useEffect, useRef, useState } from "react";
-import { decodeInviteCode, encodeInviteCode } from "@ghostly/core";
+import { decodeInviteCode, encodeInviteCode, inviteQrSegments } from "@ghostly/core";
+import { inviteShareText } from "../lib/url";
 import { engine } from "@ghostly/browser/platform/engine";
 import { saveInviteCode } from "../lib/storage";
 import { useOutsideDismiss } from "../hooks/useDismiss";
 import { useI18n } from "../contexts/I18nContext";
 import { QRCodeDisplay } from "./QRCode";
 
-/** The QR and copied code are the same capability, including the initial delivery mode. */
+/**
+ * The QR and the copied link are the same capability. A `ghostly1` code is shared as its link
+ * (`https://ghostly.tools/#ghostly1…`) and its QR is that link in capitals; a code saved before
+ * this format stays as it was.
+ */
 export function InviteCard({ code, sessionId, linkId, mode, onChange }: { code: string; sessionId: string; linkId?: string; mode: "stream" | "dht"; onChange(code: string): void }) {
   const { t } = useI18n();
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -15,6 +20,7 @@ export function InviteCard({ code, sessionId, linkId, mode, onChange }: { code: 
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const parsed = decodeInviteCode(code);
   const effectiveCode = parsed?.profile ? encodeInviteCode({ ...parsed, deliveryMode: mode }) : code;
+  const shared = inviteShareText(effectiveCode);
   useEffect(() => {
     if (effectiveCode !== code) { saveInviteCode(sessionId, effectiveCode); onChange(effectiveCode); }
   }, [effectiveCode, code, sessionId, onChange]);
@@ -48,7 +54,10 @@ export function InviteCard({ code, sessionId, linkId, mode, onChange }: { code: 
       </button>
       {detailsOpen && <div id="invite-delivery-details" role="region" aria-label={t("invite.details")} className="absolute right-0 top-full z-20 mt-2 w-72 max-w-full rounded-lg border border-border bg-sidebar-bg p-3 text-left text-xs leading-relaxed text-text-secondary shadow-xl">{t("invite.textDetails")}</div>}
     </div>}
-    {busy ? <p className="py-20 text-xs text-text-muted" role="status">Updating invite…</p> : <QRCodeDisplay value={effectiveCode} />}
+    {busy ? <p className="py-20 text-xs text-text-muted" role="status">Updating invite…</p> : <>
+      <QRCodeDisplay value={shared} qr={inviteQrSegments(effectiveCode)} />
+      {shared !== effectiveCode && <p data-testid="invite-link" title={shared} dir="ltr" className="mt-2 truncate font-mono text-[11px] text-text-muted">{shared.replace(/^https:\/\//, "")}</p>}
+    </>}
     {error && <p role="alert" className="mt-2 text-xs text-danger">{error}</p>}
   </div>;
 }

@@ -2,7 +2,7 @@ import { useBackdropDismiss } from "../hooks/useDismiss";
 import { useEffect, useRef, useState } from "react";
 import jsQR from "jsqr";
 import { decodeCommunityLink, decodeGroupEntryLink } from "@ghostly/core";
-import { parseInvite } from "../lib/url";
+import { INVITE_REFUSAL_MESSAGE, readInvite } from "../lib/url";
 import { pasteShortcut, readClipboardText } from "../lib/clipboard";
 import { useI18n } from "../contexts/I18nContext";
 import type { SessionKeys } from "../lib/storage";
@@ -62,9 +62,10 @@ export function JoinDialog({ onJoin, onJoinGroup, onClose }: { onJoin(keys: Sess
       });
       return;
     }
-    const keys = parseInvite(value);
-    if (!keys) { setError(t("join.invalid")); setManual(true); return; }
-    joined.current = true; stop(); onJoin(keys);
+    const reading = readInvite(value);
+    // The reason, as WISP 801 words it: a typo, a newer version, not an invite at all, or a damaged one.
+    if (!reading.ok) { setError(t(INVITE_REFUSAL_MESSAGE[reading.reason])); setManual(true); return; }
+    joined.current = true; stop(); onJoin(reading.keys);
   };
   const paste = async () => {
     if (busyRef.current || joined.current || closed.current) return;

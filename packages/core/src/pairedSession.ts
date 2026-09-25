@@ -27,6 +27,11 @@ export interface PairingCredentials {
   peerKey?: string;
   requireSignedSignals?: boolean;
   verifiedPeerKey?: string;
+  /**
+   * The key the invite named (a `ghostly1` code carries the inviter's): before
+   * anything is pinned, an answer signed by any other key is a security rejection.
+   */
+  expectedPeerKey?: string;
 }
 interface Offer {
   t: "pair-offer";
@@ -204,7 +209,8 @@ export class PairedSession {
       }
       if (!peer.versions.includes(1) || !peer.transports.includes(this.transport) || !peer.capabilities.includes("chat/1"))
         return this.fail("No compatible paired chat profile");
-      if (this.options.credentials.peerKey && this.options.credentials.peerKey !== peer.key)
+      const pinned = this.options.credentials.peerKey ?? this.options.credentials.expectedPeerKey;
+      if (pinned && pinned !== peer.key)
         return this.fail("Saved contact key mismatch. This invite is already paired with another participation key. Check with your contact and use a new invitation if the change was intended.", true);
       const ranked = rankTransports(this.offer.transports, peer.transports);
       if (!ranked.length) return this.fail("No common available transport");

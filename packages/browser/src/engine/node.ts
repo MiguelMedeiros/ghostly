@@ -42,7 +42,7 @@ import {
   RELAY_POLL_INTERVALS,
   RTC_CONFIG,
   RelayTransport,
-  createLink,
+  createChatInvite,
   createIdentity,
   decodeInviteCode,
   encodeInviteCode,
@@ -788,8 +788,9 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   private makeSpare(): SpareInvite {
-    const { mine, invite } = createLink();
-    return { mine: { ...mine, profile: "paired-chat/1" }, inviteKey: identityFromSeedB64(invite.seedB64), inviteCode: encodeInviteCode({ ...invite, profile: "paired-chat/1" }), madeAt: Date.now() };
+    // A ghostly1 invite (WISP 801): `mine` keeps the participation seed whose public key the code carries.
+    const { mine, invite, inviteCode } = createChatInvite();
+    return { mine, inviteKey: identityFromSeedB64(invite.seedB64), inviteCode, madeAt: Date.now() };
   }
 
   /** One invite warmed and waiting, warmed again every so often while it waits (the relays forget). */
@@ -816,13 +817,17 @@ export class GhostlyNode implements EngineImplementation {
     return { linkId: await this.addLink(params) };
   }
 
-  async ensureLink({ inviteCode, ...params }: LinkParams & { inviteCode?: string }): Promise<{ linkId: string }> {
-    const existing = [...this.links.values()].find((l) => l.stored.seedB64 === params.seedB64);
+  async ensureLink({ inviteCode, participationSeedB64, ...params }: LinkParams & { inviteCode?: string }): Promise<{ linkId: string }> {
+    // The inviter's own participation seed never travels in a code: checked here, then carried past the round trip.
+    if (participationSeedB64 !== undefined && !/^[A-Za-z0-9_-]{43}$/.test(participationSeedB64)) throw new Error("Invalid participation seed");
+    const checked = decodeInviteCode(encodeInviteCode(params));
+    if (!checked) throw new Error("That does not look like a Ghostly invite");
+    const existing = [...this.links.values()].find((l) => l.stored.seedB64 === checked.seedB64);
     if (existing) {
-      if (existing.stored.profile !== params.profile) throw new Error("Invitation profile does not match the stored link");
+      if (existing.stored.profile !== checked.profile) throw new Error("Invitation profile does not match the stored link");
       return { linkId: existing.stored.id };
     }
-    return { linkId: await this.addLink(params, inviteCode) };
+    return { linkId: await this.addLink({ ...checked, ...(participationSeedB64 ? { participationSeedB64 } : {}) }, inviteCode) };
   }
 
   private profileRequests = new Map<string, Promise<void>>();
@@ -1824,11 +1829,12 @@ export class GhostlyNode implements EngineImplementation {
 
   // -- internals -----------------------------------------------------------
 
-  private async addLink(params: LinkParams, inviteCode?: string): Promise<string> {
+  private async addLink({ participationSeedB64, ...params }: LinkParams, inviteCode?: string): Promise<string> {
     const stored: StoredLink = {
       id: identityFromSeedB64(params.seedB64).pubKeyZ32.slice(0, 16),
       ...params,
-      ...(params.profile ? { participationSeed: createIdentity().seedB64 } : {}),
+      // The inviter's key is the one its ghostly1 code carries; the joiner's is fresh.
+      ...(params.profile ? { participationSeed: participationSeedB64 ?? createIdentity().seedB64 } : {}),
       createdAt: Date.now(),
       inviteCode,
     };
@@ -2036,7 +2042,7 @@ export class GhostlyNode implements EngineImplementation {
         peerFallback: stored.peerFallback, preferred: stored.preferredTransport, fallback: stored.transportFallback },
       pairing: stored.profile && stored.participationSeed ? {
         credentials: { seedB64: stored.participationSeed, peerKey: stored.pairedPeerKey, requireSignedSignals: stored.requireSignedSignals,
-          verifiedPeerKey: stored.peerTrust ? stored.peerTrust.verifiedKey : stored.pairedPeerKey },
+          verifiedPeerKey: stored.peerTrust ? stored.peerTrust.verifiedKey : stored.pairedPeerKey, expectedPeerKey: stored.peerParticipationKeyZ32 },
         verifyPeer: async key => {
           await db.verifyPeer(stored.id, key);
           live.stored = { ...live.stored, peerTrust: { version: 1, verifiedKey: key, verifiedAt: Date.now() } };
@@ -2044,6 +2050,8 @@ export class GhostlyNode implements EngineImplementation {
         },
         pinPeer: async (key, signedSignals) => {
           if (live.stored.pairedPeerKey && live.stored.pairedPeerKey !== key) throw new Error("Already paired");
+          // A ghostly1 invite named the inviter: anyone else holding a copy of it cannot answer as them.
+          if (live.stored.peerParticipationKeyZ32 && live.stored.peerParticipationKeyZ32 !== key) throw new Error("Not the key this invite named");
           const previous = live.stored;
           live.stored = { ...live.stored, peerTrust: live.stored.peerTrust ?? { version: 1, verifiedKey: live.stored.pairedPeerKey }, pairedPeerKey: key, requireSignedSignals: live.stored.requireSignedSignals || signedSignals, inviteCode: undefined };
           try { await db.pinPeer(stored.id, key, signedSignals); }

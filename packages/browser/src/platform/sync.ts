@@ -6,6 +6,7 @@ import {
   forgetInviteCode,
   getInviteCode,
   listSessions,
+  sessionLinkParams,
   setSessionPeerNick,
   updateSessionLabel,
 } from "../../../../src/lib/storage";
@@ -137,11 +138,7 @@ async function reconcile(): Promise<void> {
     ensuring.add(session.id);
     engine
       .call("ensureLink", {
-        profile: session.profile,
-        deliveryMode: session.deliveryMode,
-        seedB64: session.mySeedB64,
-        peerPubKeyZ32: session.peerPubKeyB64,
-        encKeyB64: session.encKeyB64,
+        ...sessionLinkParams(session),
         // The side that made the invite still holds it; the engine learns who invited whom from that.
         inviteCode: getInviteCode(session.id) ?? undefined,
       })

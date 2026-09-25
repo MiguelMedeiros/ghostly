@@ -54,6 +54,10 @@ export interface ChatSession {
   mySeedB64: string;
   peerPubKeyB64: string;
   encKeyB64: string;
+  /** The inviter's own participation seed, whose public key its `ghostly1` code carries. Never shared. */
+  participationSeedB64?: string;
+  /** The joiner's copy of that public key, from the code: the only key that may answer first. */
+  peerParticipationKeyB64?: string;
   messages: ChatMessage[];
   createdAt: number;
   lastSyncAt?: number;

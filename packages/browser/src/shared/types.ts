@@ -41,6 +41,8 @@ export interface StoredLink {
   /** The chat's connection story, newest last (see engine/transportLog.ts). Local only. */
   transportLog?: TransportEntry[];
   pairedPeerKey?: string;
+  /** The inviter's participation key, from a `ghostly1` code (the joiner's side): the only key that may be pinned. */
+  peerParticipationKeyZ32?: string;
   /** Absent only in old releases, where first pin required an explicit code comparison. */
   peerTrust?: { version: 1; verifiedKey?: string; verifiedAt?: number };
   requireSignedSignals?: boolean;
