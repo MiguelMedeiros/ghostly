@@ -33,6 +33,11 @@ export interface GroupsHost {
   openEntry(link: GroupEntryLink, role: "host" | "guest", mySeedB64: string, peer: string): Promise<string>;
   /** Entry sessions of this group that exist: peer key → link id. */
   entries(groupId: string): Map<string, string>;
+  /**
+   * The admission over this entry session is done (the welcome went): it closes as soon as its data
+   * link does (the joiner closes its side on the welcome), rather than dialing the joiner again.
+   */
+  entryDone?(linkId: string): void;
   /** The other end of this link is here (its packet is fresh), or a connection with it is under way. */
   linkSeen?(linkId: string): boolean;
   /**
@@ -538,6 +543,7 @@ export class Groups {
         if (entryPeer) traceJoin(g, "welcome.sent");
         if (entryPeer) {
           this.pendingEntries.get(g)?.delete(entryPeer);
+          this.host.entryDone?.(linkId);
           setTimeout(() => { if (this.host.entries(g).get(entryPeer) === linkId) void this.host.closeEdge(linkId); }, ENTRY_LINGER_MS);
         }
         this.host.emit();

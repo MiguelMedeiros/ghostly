@@ -22,6 +22,13 @@ export const REQUESTS_PER_MINUTE = 30;
  * signaling cannot wait, and a burst of signaling does not hold the background ones back afterwards.
  */
 export const BACKGROUND_REQUESTS_PER_MINUTE = 20;
+/**
+ * A link's write the budget refused (its presence, its offer, its answer) goes first when the minute
+ * frees a request: reads on that relay wait this long after the refusal. A link that polls fast for a
+ * peer while its offer waits would otherwise take every request the minute frees, and the offer (the
+ * only thing that peer is waiting for) would go out only once the polling slowed down, half a minute later.
+ */
+export const WRITE_FIRST_MS = 5_000;
 /** A relay that fails at the network level is left alone for this long. */
 const NETWORK_ERROR_COOLDOWN_MS = 20_000;
 
@@ -57,6 +64,8 @@ export class RelayTransport implements PkarrTransport {
   private cursor = 0;
   private readonly spent = new Map<string, number[]>();
   private readonly spentBackground = new Map<string, number[]>();
+  /** When a link's write was last refused on each relay, while it waits for the budget. */
+  private readonly writeWaiting = new Map<string, number>();
   /** Timestamp of the last packet sent to each relay, per key: the compare-and-swap value for the next one. */
   private readonly lastPut = new Map<string, bigint>();
   private readonly perMinute: number;
@@ -96,6 +105,7 @@ export class RelayTransport implements PkarrTransport {
     this.lastTimestamp.set(identity.pubKeyZ32, timestamp);
 
     const payload = createRelayPayload(identity, records, timestamp);
+    const waitingBefore = new Map(this.writeWaiting);
     const results = await Promise.allSettled(
       this.relays.map(async (relay) => {
         const slot = `${relay} ${identity.pubKeyZ32}`;
@@ -112,6 +122,10 @@ export class RelayTransport implements PkarrTransport {
       }),
     );
 
+    // Out on one relay: the link will not try again, so a relay that refused it has no write to wait for.
+    if (results.some((r) => r.status === "fulfilled")) {
+      for (const relay of this.relays) if (this.writeWaiting.get(relay) !== waitingBefore.get(relay)) this.writeWaiting.delete(relay);
+    }
     if (!results.some((r) => r.status === "fulfilled")) {
       const reasons = results.map((r) => (r.status === "rejected" ? String(r.reason) : "")).join("; ");
       throw new Error(`Publish failed on every relay: ${reasons}`);
@@ -132,7 +146,7 @@ export class RelayTransport implements PkarrTransport {
     let reachable = false;
     for (let i = 0; i < this.relays.length; i++) {
       const relay = this.relays[(start + i) % this.relays.length];
-      if (this.isCoolingDown(relay, "GET") || !this.take(relay, options.background)) continue;
+      if (this.isCoolingDown(relay, "GET") || !this.take(relay, options.background, false)) continue;
       try {
         const response = await this.request(`${relay}/${pubKeyZ32}`, { method: "GET" });
         if (response.status === 429) {
@@ -155,7 +169,7 @@ export class RelayTransport implements PkarrTransport {
       }
     }
     if (!reachable) {
-      const resting = this.relays.every((r) => this.isCoolingDown(r, "GET") || (this.spent.get(r)?.length ?? 0) >= this.perMinute
+      const resting = this.relays.every((r) => this.isCoolingDown(r, "GET") || (this.spent.get(r)?.length ?? 0) >= this.perMinute || this.writeFirst(r)
         || (!!options.background && (this.spentBackground.get(r)?.length ?? 0) >= this.backgroundPerMinute));
       // Holding back is not an outage: report what is already known.
       if (resting && this.newest.has(pubKeyZ32)) return this.newest.get(pubKeyZ32)!;
@@ -166,7 +180,7 @@ export class RelayTransport implements PkarrTransport {
 
   private async put(relay: string, pubKeyZ32: string, payload: Uint8Array, replaces?: bigint, background = false): Promise<Response> {
     if (this.isCoolingDown(relay, "PUT")) throw new Error("Discovery relay is cooling down; retry shortly");
-    if (!this.take(relay, background)) throw new Error("Discovery request budget reached; retry shortly");
+    if (!this.take(relay, background, true)) throw new Error("Discovery request budget reached; retry shortly");
     try { return await this.request(`${relay}/${pubKeyZ32}`, {
       method: "PUT",
       body: payload as BodyInit,
@@ -177,17 +191,30 @@ export class RelayTransport implements PkarrTransport {
     }
   }
 
-  /** Discovery reads and writes share a bounded per-relay request budget; background requests only part of it. */
-  private take(relay: string, background = false): boolean {
+  /**
+   * Discovery reads and writes share a bounded per-relay request budget; background requests only part
+   * of it. A link's write the budget refused goes before any read once a request is free again.
+   */
+  private take(relay: string, background: boolean | undefined, write: boolean): boolean {
     const now = Date.now();
     const recent = (this.spent.get(relay) ?? []).filter((at) => now - at < 60_000);
     const recentBackground = (this.spentBackground.get(relay) ?? []).filter((at) => now - at < 60_000);
     this.spent.set(relay, recent);
     this.spentBackground.set(relay, recentBackground);
-    if (recent.length >= this.perMinute || (background && recentBackground.length >= this.backgroundPerMinute)) return false;
+    const linkWrite = write && !background;
+    if (recent.length >= this.perMinute || (background && recentBackground.length >= this.backgroundPerMinute) || (!linkWrite && this.writeFirst(relay, now))) {
+      if (linkWrite) this.writeWaiting.set(relay, now);
+      return false;
+    }
+    if (linkWrite) this.writeWaiting.delete(relay);
     recent.push(now);
     if (background) recentBackground.push(now);
     return true;
+  }
+
+  /** A link's write is waiting for this relay's budget: reads (and background writes) let it go first. */
+  private writeFirst(relay: string, now = Date.now()): boolean {
+    return now - (this.writeWaiting.get(relay) ?? -Infinity) < WRITE_FIRST_MS;
   }
 
   private isCoolingDown(relay: string, method: "GET" | "PUT"): boolean {

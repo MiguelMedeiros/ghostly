@@ -213,6 +213,13 @@ export interface GhostLinkOptions {
    * only polled once a minute, which is what keeps relays happy.
    */
   autoConnect?: boolean;
+  /** When its first packet goes out (`LinkSessionOptions.firstPublish`): after its first look, the side that dials puts its offer in it. */
+  firstPublish?: "at-start" | "after-first-poll";
+  /**
+   * A link for one exchange, closed right after it (a group's entry session): once connected, it leaves
+   * its offer or answer in its packet rather than publishing again to clear it.
+   */
+  oneShot?: boolean;
   createPeerConnection: () => RTCPeerConnection;
   localFetch: LocalFetch;
   /** Everything this peer currently offers on this link. */
@@ -361,7 +368,7 @@ export class GhostLink {
       pollIntervals: options.pollIntervals,
       getServices: options.getServices,
       // A joiner dials the moment it sees the inviter: its offer goes in its first packet.
-      firstPublish: this.tracker && options.pairingProgress?.role === "joiner" ? "after-first-poll" : "at-start",
+      firstPublish: options.firstPublish ?? (this.tracker && options.pairingProgress?.role === "joiner" ? "after-first-poll" : "at-start"),
       events: {
         // The first look decided nothing to dial: say we are here now (a dial says it with its offer).
         onFirstPoll: () => { if (!this.dialing) this.session.ensureAdvertised(); },
@@ -397,6 +404,10 @@ export class GhostLink {
       peerPubKeyZ32: options.params.peerPubKeyZ32,
       createPeerConnection: options.createPeerConnection,
       publishSignal: signal => {
+        // Stopped: its data link closing clears a signal nobody will read.
+        if (this.stopped) return;
+        // A one-exchange link connected: it closes in a moment, and a packet clearing its offer would only spend the relays' budget.
+        if (!signal && options.oneShot && this.dataLink.state === "open") return;
         const report = (error: unknown) => {
           if (signal && options.params.profile) events.onPairingState?.({ status: "error",
             error: `Could not publish connection details: ${error instanceof Error ? error.message : "discovery unavailable"}. Reconnect to retry.` });
@@ -1080,7 +1091,8 @@ export class GhostLink {
    * the lower-key rule settles any collision, on both sides.
    */
   private maybeAutoConnect(presence: PeerPresence): void {
-    if (this.streamBlocked || this.keyStopped || !this.options.autoConnect || !presence.online || this.channel || this.dataLink.state !== "idle") return;
+    // Stopping (its loops end after an await): a poll finishing meanwhile must not dial again.
+    if (this.stopped || this.streamBlocked || this.keyStopped || !this.options.autoConnect || !presence.online || this.channel || this.dataLink.state !== "idle") return;
     // On the DHT the chat is usable: layer 1 is retried at the background pace (WISP 100), not the pairing's.
     // A pin over the DHT alone changes nothing here: the joiner still knocks and the inviter still answers.
     const pairing = !!this.tracker && !this.tracker.done && this.tracker.progress.stage !== "on-dht";

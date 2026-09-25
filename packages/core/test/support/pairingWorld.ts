@@ -1,5 +1,6 @@
 import { vi } from "vitest";
-import { GhostLink } from "../../src/ghostlink";
+import { GhostLink, type GhostLinkOptions } from "../../src/ghostlink";
+import type { DataLinkState } from "../../src/datalink";
 import { DHT_POLL_INTERVALS, type PollIntervals } from "../../src/link";
 import { createLink, type LinkParams } from "../../src/invite";
 import { createIdentity, type Identity } from "../../src/identity";
@@ -44,12 +45,15 @@ export class MemoryPkarr {
   readsBackground = 0;
   /** Reads per key: which records a budget goes on. */
   readsByKey = new Map<string, number>();
+  /** Publishes per key. */
+  publishesByKey = new Map<string, number>();
   constructor(private readonly model: NetworkModel) {}
 
   transport(): PkarrTransport {
     return {
       publish: async (identity: Identity, records: GhostRecord[]) => {
         const count = ++this.publishes;
+        this.publishesByKey.set(identity.pubKeyZ32, (this.publishesByKey.get(identity.pubKeyZ32) ?? 0) + 1);
         const at = Date.now();
         if (this.model.publishFails?.(count)) { await after(this.model.publishMs); throw new Error("Publish error: the network is away"); }
         this.packets.set(identity.pubKeyZ32, { packet: { pubKeyZ32: identity.pubKeyZ32, timestampMicros: BigInt(at) * 1000n, records }, visibleAt: at + this.model.visibleAfterMs });
@@ -165,7 +169,9 @@ export interface Opened {
 const opened: GhostLink[] = [];
 
 /** One side's link, as the engine opens it for a chat never paired (node.ts `startLink` + the joiner's `expectPeer`). */
-export function open(side: Side, pkarr: MemoryPkarr, options: { active?: boolean; pollIntervals?: PollIntervals; dht?: boolean; credentials?: PairingCredentials; dhtState?: DhtDeliveryState } = {}): Opened {
+export function open(side: Side, pkarr: MemoryPkarr, options: { active?: boolean; pollIntervals?: PollIntervals; dht?: boolean; credentials?: PairingCredentials; dhtState?: DhtDeliveryState;
+  /** A group's entry session opens its links so (node.ts `startEdge`). */
+  link?: Pick<GhostLinkOptions, "oneShot" | "firstPublish">; onDataLinkState?: (state: DataLinkState) => void } = {}): Opened {
   const progress: PairingProgress[] = [], pinned: string[] = [];
   const received: Opened["received"] = [], receipts: string[] = [], states: PairingState[] = [];
   const credentials: PairingCredentials = options.credentials ?? { seedB64: side.seedB64 };
@@ -182,6 +188,7 @@ export function open(side: Side, pkarr: MemoryPkarr, options: { active?: boolean
     transport: pkarr.transport(),
     pollIntervals: options.pollIntervals ?? DHT_POLL_INTERVALS,
     autoConnect: true,
+    ...options.link,
     createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
     localFetch: vi.fn(), getServices: () => [{ id: "chat", type: "chat" }], getHostedHttpService: () => undefined,
     events: {
@@ -189,6 +196,7 @@ export function open(side: Side, pkarr: MemoryPkarr, options: { active?: boolean
       onMessage: m => { received.push({ id: m.id, text: m.text, via: m.via }); },
       onMessageReceipt: id => { receipts.push(id); },
       onPairingState: state => { states.push(state); },
+      onDataLinkState: options.onDataLinkState,
     },
   });
   opened.push(link);

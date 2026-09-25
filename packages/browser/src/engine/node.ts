@@ -159,6 +159,8 @@ interface LiveLink {
   files: LinkFiles;
   /** The chat's connection story (paired chats), made from `stored.transportLog` on first use. */
   transportLog?: TransportLog;
+  /** A group's entry session whose admission is done: it closes once its data link does (`GroupsHost.entryDone`). */
+  entryDone?: boolean;
 }
 
 /** What one peer has sent us, so it can neither fill the disk nor reuse an id. */
@@ -573,14 +575,12 @@ export class GhostlyNode implements EngineImplementation {
     resolve: async (pubKeyZ32, background) => (await this.transport.resolve(pubKeyZ32, { background }))?.records ?? null,
     expectPeer: linkId => this.links.get(linkId)?.link?.expectPeer(),
     openEdge: (state, peer, expectPeer) => this.openEdge(state, peer, expectPeer),
-    closeEdge: async linkId => {
+    closeEdge: linkId => this.closeGroupLink(linkId),
+    entryDone: linkId => {
       const live = this.links.get(linkId);
-      if (!live?.stored.group) return;
-      this.links.delete(linkId);
-      // An entry session is over once the admission is (or was given up): nobody waits on it, so it goes
-      // without a last packet saying so, which would only spend two of the relays' requests at a busy moment.
-      await live.link?.stop(!live.stored.groupEntry); await live.caps?.stop();
-      await db.deleteLink(linkId);
+      if (!live?.stored.groupEntry) return;
+      if (live.dataLink === "open") live.entryDone = true;
+      else void this.closeGroupLink(linkId).catch(() => {});
     },
     edgeNick: linkId => this.links.get(linkId)?.presence.nick || undefined,
     storeMessage: message => this.storeMessage(message),
@@ -2214,6 +2214,16 @@ export class GhostlyNode implements EngineImplementation {
     }
   }
 
+  private async closeGroupLink(linkId: string): Promise<void> {
+    const live = this.links.get(linkId);
+    if (!live?.stored.group) return;
+    this.links.delete(linkId);
+    // An entry session is over once the admission is (or was given up): nobody waits on it, so it goes
+    // without a last packet saying so, which would only spend two of the relays' requests at a busy moment.
+    await live.link?.stop(!live.stored.groupEntry); await live.caps?.stop();
+    await db.deleteLink(linkId);
+  }
+
   /** The edge of a group toward one member: a paired link pinned to that member's key, carrying group frames and nothing else. */
   private async openEdge(state: { id: string; seedB64: string }, peer: string, expectPeer = false): Promise<string> {
     const me = identityFromSeedB64(state.seedB64);
@@ -2282,6 +2292,9 @@ export class GhostlyNode implements EngineImplementation {
       nick: this.sharedNick,
       pollIntervals: this.pollIntervals,
       autoConnect: true,
+      // An entry session carries one admission and closes. The member's side always dials (the joiner's key is
+      // drawn so), and the joiner's packet is already there: its offer goes in its first packet.
+      ...(entry ? { oneShot: true, firstPublish: stored.groupEntry === "host" ? "after-first-poll" as const : "at-start" as const } : {}),
       createPeerConnection: () =>
         new RTCPeerConnection({ iceServers: [...(RTC_CONFIG.iceServers ?? []), ...this.settings.iceServers.filter((server) => !iceServerProblem(server))] }),
       localFetch: this.localFetch,
@@ -2318,6 +2331,9 @@ export class GhostlyNode implements EngineImplementation {
           // Payments with this member that did not get through go again, never twice.
           if (state === "open" && !entry) void this.desk.replay(linkId).catch(() => {});
           live.dataLink = state;
+          // The joiner closed its side on the welcome: the session goes now. Left to itself, it would dial
+          // the joiner again (its packet still looks online), spending an offer and fast polls on nobody.
+          if (entry && state !== "open" && live.entryDone) void this.closeGroupLink(linkId).catch(() => {});
           if (state !== "open" && live.pairing?.status !== "error") live.pairing = { status: "connecting" };
           this.emitState();
         },
