@@ -18,7 +18,7 @@
 // instead of this one's (remote.mjs): `--host one` is the maintainer's test server. There, `up` joins a stack that
 // is already up rather than seeding it again under other checkouts' tests, `full` never takes it down, and
 // `down` / `reset` want --host on the command line itself.
-import { HOST, HOST_FLAG, SOCKET, disconnect, forward, remote } from "./remote.mjs";
+import { HOST, HOST_FLAG, LOCAL_DOCKER, SOCKET, disconnect, forward, remote } from "./remote.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
@@ -181,12 +181,22 @@ async function answering() {
 const FORWARDS = SERVICE_PORTS.map((port) => [localPort(port), port]);
 const LOCAL_PORTS = `127.0.0.1:${FORWARDS[0][0]}-${FORWARDS.at(-1)[0]}`;
 
+/** A ghostly-e2e stack on this machine's own Docker: the checkout that started it, or null. */
+function localStack() {
+  const found = spawnSync("docker", ["inspect", "-f", '{{index .Config.Labels "com.docker.compose.project.working_dir"}} since {{.State.StartedAt}}', `${PROJECT}-bitcoind`], { env: LOCAL_DOCKER, encoding: "utf8" });
+  return found.status === 0 ? found.stdout.trim().replace(/\/e2e\/infra since /, " since ").replace(/\.\d+Z$/, "Z") : null;
+}
+
 function forwardAll({ strict = true } = {}) {
   const held = forward(FORWARDS);
   if (!held.length) return true;
-  const message = `127.0.0.1:${held.join(",")} is held on this machine (a local ghostly-e2e?), so it cannot be forwarded to ${HOST}. `
-    + "Stop what holds it, or set E2E_INFRA_LOCAL_PORTS=<first free port> to use other ports here (the app's own Regtest "
-    + "options, Ark, Bark and the EVM chain, then do not reach the environment).";
+  const local = localStack();
+  const holder = local
+    ? `a local ${PROJECT} stack holds them (started from ${local}): whoever started it stops it there with npm run e2e:infra:down`
+    : "something on this machine holds them";
+  const message = `127.0.0.1:${held.join(",")} cannot be forwarded to ${HOST}: ${holder}. `
+    + "Or set E2E_INFRA_LOCAL_PORTS=<first free port> to use other ports here (the app's own Regtest options, Ark, "
+    + "Bark and the EVM chain, then do not reach the environment).";
   if (strict) throw new Error(message);
   console.log(`WARNING: ${message}`);
   return false;
