@@ -5,7 +5,7 @@ import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { setStorageProfile as setProfile } from "../../lib/storage";
 import { renderApp } from "../render";
 
-// covers: app.composer.attach, app.composer.expressions, app.emoji-picker, chat.paired.emoji, chat.paired.gifs
+// covers: app.composer.attach, app.composer.expressions, app.emoji-picker, chat.paired.emoji, chat.paired.gifs, chat.paired.gifs.categories
 
 const viewport = (width: number, height = 800) => (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height });
 
@@ -316,12 +316,96 @@ describe("the emoji/GIF panel", () => {
     expect(screen.getByTestId("expression-panel")).toHaveAttribute("data-tab", "gif");
   });
 
-  it("says when GIF search is down", async () => {
+  it("says when GIF search is down, and tries again on request", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("Unavailable", { status: 503 }));
     localStorage.setItem("ghostly_composer_panel_tab", "gif");
     const { user } = composer();
     await user.click(smiley());
-    expect(await screen.findByText("GIF search is unavailable. Try again.")).toBeInTheDocument();
+    expect(await screen.findByText("GIF search is unavailable.")).toBeInTheDocument();
+    expect(screen.queryByTestId("gif-loading")).not.toBeInTheDocument();
+    gifCities();
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findAllByTestId("gif-result")).toHaveLength(3);
+    expect(screen.queryByTestId("gif-trouble")).not.toBeInTheDocument();
+  });
+
+  /** GifCities that answers only when the test says so, per search. */
+  function slowGifCities() {
+    const answers = new Map<string, () => void>();
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation((input) => new Promise((resolve) => {
+      const q = new URL(String(input)).searchParams.get("q")!;
+      answers.set(q, () => resolve(new Response(JSON.stringify([{ gif: `http://geocities.com/${q.replace(/\s/g, "_")}.gif`, url_text: `${q} gif`, checksum: q }]))));
+    }));
+    const answer = (q: string) => act(() => { answers.get(q)!(); });
+    return { fetch, answer, asked: (q: string) => waitFor(() => expect(answers.has(q)).toBe(true)) };
+  }
+
+  it("each category is a search of its own: a spinner until its answer is in, never the last category's tiles", async () => {
+    const gifCities = slowGifCities();
+    localStorage.setItem("ghostly_composer_panel_tab", "gif");
+    const { user } = composer();
+    await user.click(smiley());
+    await gifCities.asked("ghost");
+    expect(screen.getByTestId("gif-loading")).toBeInTheDocument();
+    await gifCities.answer("ghost");
+    expect(await screen.findByTitle("ghost gif")).toBeInTheDocument();
+    const categories = [["retro", "computer"], ["happy", "happy"], ["sad", "sad"], ["love", "love"], ["yes", "thumbs up"], ["party", "party"], ["animals", "cat"]];
+    for (const [id, q] of categories) {
+      await user.click(screen.getByTestId(`gif-category-${id}`));
+      expect(screen.getByTestId(`gif-category-${id}`)).toHaveAttribute("aria-pressed", "true");
+      // GifCities takes seconds: meanwhile the grid is a spinner, not the tiles of the category before.
+      expect(screen.queryAllByTestId("gif-result")).toHaveLength(0);
+      expect(screen.getByTestId("gif-loading")).toBeInTheDocument();
+      await gifCities.asked(q);
+      expect(new URL(String(gifCities.fetch.mock.lastCall![0])).searchParams.get("q")).toBe(q);
+      await gifCities.answer(q);
+      expect(await screen.findByTitle(`${q} gif`)).toBeInTheDocument();
+      expect(screen.getByTestId("gif-grid")).toHaveAttribute("data-query", q);
+      expect(screen.getAllByTestId("gif-result")).toHaveLength(1);
+    }
+    // An answer seen once is back at once, with no second search.
+    const searches = gifCities.fetch.mock.calls.length;
+    await user.click(screen.getByTestId("gif-category-ghosts"));
+    expect(screen.getByTitle("ghost gif")).toBeInTheDocument();
+    expect(gifCities.fetch.mock.calls.length).toBe(searches);
+  });
+
+  it("shows the category chosen last, whichever answer comes first", async () => {
+    const gifCities = slowGifCities();
+    localStorage.setItem("ghostly_composer_panel_tab", "gif");
+    const { user } = composer();
+    await user.click(smiley());
+    await gifCities.asked("ghost");
+    await gifCities.answer("ghost");
+    await screen.findByTitle("ghost gif");
+    await user.click(screen.getByTestId("gif-category-happy"));
+    await gifCities.asked("happy");
+    await user.click(screen.getByTestId("gif-category-sad"));
+    await gifCities.asked("sad");
+    // The answer to the category left behind is not shown for the one chosen.
+    await gifCities.answer("happy");
+    expect(screen.getByTestId("gif-loading")).toBeInTheDocument();
+    expect(screen.queryByTitle("happy gif")).not.toBeInTheDocument();
+    await gifCities.answer("sad");
+    expect(await screen.findByTitle("sad gif")).toBeInTheDocument();
+    expect(screen.getByTestId("gif-grid")).toHaveAttribute("data-query", "sad");
+  });
+
+  it("says so when none of a search's previews load, and draws them again on request", async () => {
+    gifCities(2);
+    localStorage.setItem("ghostly_composer_panel_tab", "gif");
+    const { user } = composer();
+    await user.click(smiley());
+    const tiles = await screen.findAllByTestId("gif-result");
+    // The Wayback Machine lost the first: the tile goes, the rest stay.
+    fireEvent.error(within(tiles[0]).getByRole("img"));
+    expect(screen.getAllByTestId("gif-result")).toHaveLength(1);
+    // All lost: not a blank grid, but a word about it.
+    fireEvent.error(within(screen.getByTestId("gif-result")).getByRole("img"));
+    expect(screen.getByTestId("gif-trouble")).toHaveTextContent("The GIFs could not be loaded.");
+    expect(screen.queryByTestId("gif-grid")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findAllByTestId("gif-result")).toHaveLength(2);
   });
 
   it("closes on Escape, giving the focus back to the message", async () => {

@@ -17,9 +17,17 @@ interface PickerGif {
   url: string;
 }
 
+/** A search's answer, kept with the search it answers: the grid shows it only while that is still the search. */
+interface Results {
+  query: string;
+  gifs: PickerGif[];
+}
+
 const GIFCITIES_SEARCH_URL = "https://gifcities.archive.org/api/v1/gifsearch";
 const WAYBACK_URL = "https://web.archive.org/web/";
 const RESULTS_LIMIT = 20;
+/** GifCities answers in about 3 s; past this the panel says so rather than spin on. */
+const REQUEST_TIMEOUT_MS = 20_000;
 
 /** GifCities has no "trending": the icons over the grid are searches it answers well, ghosts first. */
 const GIF_CATEGORIES: { id: string; query: string }[] = [
@@ -51,16 +59,23 @@ async function searchGifCities(query: string, signal: AbortSignal): Promise<Pick
 /**
  * The panel's GIFs, from GifCities (the Internet Archive's GeoCities GIFs): category icons that are ready-made
  * searches, a search field, and the results in columns of their own heights. A GIF is sent as soon as it is chosen.
+ *
+ * The grid only ever shows the current search's answer. GifCities takes seconds, so while a category's answer is on
+ * its way the grid is a spinner, never the last category's tiles (which looked like the click did nothing). Answers
+ * are kept for the panel's life, so a category seen once is back at once.
  */
 export function GifTab({ onSelect, autoFocus }: { onSelect: (url: string) => void; autoFocus?: boolean }) {
   const { t } = useI18n();
   const [category, setCategory] = useState(GIF_CATEGORIES[0].id);
   const [query, setQuery] = useState("");
-  const [gifs, setGifs] = useState<PickerGif[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [results, setResults] = useState<Results | null>(null);
+  /** The search GifCities did not answer, if it is the current one. */
+  const [failed, setFailed] = useState<string | null>(null);
+  /** Bumped by "Try again": the search runs again, and the tiles are drawn anew. */
+  const [attempt, setAttempt] = useState(0);
   // The Wayback Machine lost some of these files; drop the tiles that do not load.
   const [broken, setBroken] = useState<Set<string>>(new Set());
+  const answers = useRef(new Map<string, PickerGif[]>());
   const inputRef = useRef<HTMLInputElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
 
@@ -69,23 +84,43 @@ export function GifTab({ onSelect, autoFocus }: { onSelect: (url: string) => voi
   const typed = query.trim();
   const search = typed || GIF_CATEGORIES.find((c) => c.id === category)!.query;
   useEffect(() => {
+    const show = (gifs: PickerGif[]) => {
+      setResults({ query: search, gifs });
+      setBroken(new Set());
+      setFailed(null);
+      if (scroller.current) scroller.current.scrollTop = 0;
+    };
+    const known = answers.current.get(search);
+    if (known) { show(known); return; }
     const controller = new AbortController();
+    let timedOut = false;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
     const timer = setTimeout(async () => {
-      setLoading(true);
-      setFailed(false);
+      deadline = setTimeout(() => { timedOut = true; controller.abort(); }, REQUEST_TIMEOUT_MS);
       try {
-        const results = await searchGifCities(search, controller.signal);
-        if (!controller.signal.aborted) { setGifs(results); setBroken(new Set()); if (scroller.current) scroller.current.scrollTop = 0; }
+        const gifs = await searchGifCities(search, controller.signal);
+        if (controller.signal.aborted) return;
+        answers.current.set(search, gifs);
+        show(gifs);
       } catch {
-        if (!controller.signal.aborted) { setGifs([]); setFailed(true); }
+        if (timedOut || !controller.signal.aborted) setFailed(search);
       } finally {
-        if (!controller.signal.aborted) setLoading(false);
+        clearTimeout(deadline);
       }
     }, typed ? 400 : 0);
-    return () => { clearTimeout(timer); controller.abort(); };
-  }, [search, typed]);
+    return () => { clearTimeout(timer); clearTimeout(deadline); controller.abort(); };
+  }, [search, typed, attempt]);
 
-  const shown = gifs.filter((gif) => !broken.has(gif.id));
+  const current = results?.query === search ? results : null;
+  const shown = current ? current.gifs.filter((gif) => !broken.has(gif.id)) : [];
+  const loading = !current && failed !== search;
+  const retry = () => { setFailed(null); setBroken(new Set()); setAttempt((n) => n + 1); };
+  const trouble = (message: string) => (
+    <div className="expression-trouble" data-testid="gif-trouble" role="status">
+      <p>{message}</p>
+      <button type="button" className="expression-retry" data-testid="gif-retry" onClick={retry}>{t("composer.retry")}</button>
+    </div>
+  );
   return (
     <div className="expression-tab" data-testid="gif-tab">
       <CategoryBar label={t("composer.gifCategories")} testIdPrefix="gif-category" active={typed ? null : category}
@@ -93,14 +128,18 @@ export function GifTab({ onSelect, autoFocus }: { onSelect: (url: string) => voi
         items={GIF_CATEGORIES.map((c) => ({ id: c.id, label: t(`composer.gifCategory.${c.id}` as Parameters<typeof t>[0]), icon: GIF_CATEGORY_ICONS[c.id] }))} />
       <PanelSearch value={query} onChange={setQuery} placeholder={t("composer.searchGifs")} inputRef={inputRef} />
       <div ref={scroller} className="expression-scroll" aria-busy={loading}>
-        {loading && !shown.length ? (
-          <div className="expression-empty"><div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" /></div>
+        {loading ? (
+          <div className="expression-empty" data-testid="gif-loading"><div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" /></div>
+        ) : !current ? (
+          trouble(t("composer.gifsUnavailable"))
+        ) : !current.gifs.length ? (
+          <p className="expression-empty" data-testid="gif-empty">{t("composer.noGifs")}</p>
         ) : !shown.length ? (
-          <p className="expression-empty" data-testid="gif-empty">{failed ? t("composer.gifsUnavailable") : t("composer.noGifs")}</p>
+          trouble(t("composer.gifsNotLoading"))
         ) : (
-          <div className="gif-masonry" data-testid="gif-grid">
+          <div className="gif-masonry" data-testid="gif-grid" data-query={search}>
             {shown.map((gif) => (
-              <button key={gif.id} type="button" data-testid="gif-result" onClick={() => onSelect(gif.url)} title={gif.title} className="gif-tile">
+              <button key={`${attempt}:${gif.id}`} type="button" data-testid="gif-result" onClick={() => onSelect(gif.url)} title={gif.title} className="gif-tile">
                 <img src={gif.previewUrl} alt={gif.title} loading="lazy" onError={() => setBroken((prev) => new Set(prev).add(gif.id))} />
               </button>
             ))}
