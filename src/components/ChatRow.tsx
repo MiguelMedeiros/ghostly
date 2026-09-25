@@ -5,6 +5,7 @@ import { PeerAvatar } from "./Avatar";
 import { GroupAvatar } from "./GroupAvatar";
 import { ContactMarks } from "./identities/ContactMarks";
 import { PinIcon } from "./PinIcon";
+import { useI18n } from "../contexts/I18nContext";
 import { formatListTime, previewText } from "../lib/chatList";
 import { groupReadAt } from "../lib/groups";
 import type { ChatListDensity } from "../lib/settings";
@@ -14,6 +15,7 @@ import type { ChatMessage } from "../lib/types";
  * The rows of the chat list, drawn the way messengers draw theirs: the name and the time on one line, the last
  * message (with its delivery mark) and the unread count on the next. `compact` (the default) keeps the contact's
  * key out of the row — it is in the row's tooltip and the chat's header; `comfortable` gives it its own line.
+ * What the chat is set to (pinned; muted next) is a quiet mark just before the time, in the time's own tone.
  */
 
 const AVATAR = { compact: 46, comfortable: 52 } as const;
@@ -56,12 +58,23 @@ function UnreadBadge({ count }: { count: number }) {
   );
 }
 
+/**
+ * A quiet mark for what the chat is set to, sized like the delivery ticks. Marks sit together in `status`, before
+ * the time: the per-chat mute bell goes first, then the pin.
+ */
+export function StatusMark({ label, testId, children }: { label: string; testId: string; children: ReactNode }) {
+  return <span role="img" aria-label={label} data-testid={testId} className="inline-flex h-3 w-3 items-center justify-center">{children}</span>;
+}
+
 /** The two (or, comfortable, three) lines beside the avatar, shared by chats and groups. */
-function RowText({ name, nameClass, marks, time, timeClass = "text-text-muted", sub, preview, trailing, timeCover }: {
+function RowText({ name, nameClass, marks, status, time, timeClass = "text-text-muted", sub, preview, trailing, timeCover }: {
   name: ReactNode; nameClass: string;
   /** After the name: the contact's verified identities (identities/ContactMarks.tsx), which give way before the time does. */
-  marks?: ReactNode; time?: string; timeClass?: string; sub?: ReactNode; preview: ReactNode; trailing?: ReactNode;
-  /** Laid over the time while the row is hovered: the row's actions, which so never move anything. */
+  marks?: ReactNode;
+  /** Before the time: what the chat is set to (StatusMark), muted, never at the time's expense. */
+  status?: ReactNode;
+  time?: string; timeClass?: string; sub?: ReactNode; preview: ReactNode; trailing?: ReactNode;
+  /** Laid over the marks and the time while the row is hovered: the row's actions, which so never move anything. */
   timeCover?: ReactNode;
 }) {
   return (
@@ -71,8 +84,11 @@ function RowText({ name, nameClass, marks, time, timeClass = "text-text-muted", 
           <span data-testid="chat-row-name" className={`min-w-0 truncate text-[15px] leading-5 ${nameClass}`}>{name}</span>
           {marks}
         </span>
-        {time && <span data-testid="chat-row-time" className={`shrink-0 text-xs leading-5 ${timeClass}`}>{time}</span>}
-        {timeCover}
+        {(status || time || timeCover) && <span className="relative flex shrink-0 items-baseline gap-1.5">
+          {status && <span data-testid="chat-row-status" className="flex h-5 items-center gap-1 self-center text-text-muted">{status}</span>}
+          {time && <span data-testid="chat-row-time" className={`text-xs leading-5 ${timeClass}`}>{time}</span>}
+          {timeCover}
+        </span>}
       </div>
       {sub}
       <div className="mt-0.5 flex items-center gap-2">
@@ -84,7 +100,7 @@ function RowText({ name, nameClass, marks, time, timeClass = "text-text-muted", 
 }
 
 const rowClass = (active: boolean, density: ChatListDensity) =>
-  `group relative flex items-center gap-3 ps-3 pe-3 cursor-pointer transition-colors ${ROW[density]} ${active ? "bg-surface-hover" : "hover:bg-surface-alt focus-within:bg-surface-alt"}`;
+  `group relative flex items-center gap-3 ps-3 pe-3 cursor-pointer transition-colors ${ROW[density]} ${active ? "bg-surface-hover" : "hover:bg-surface-alt has-[:focus-visible]:bg-surface-alt"}`;
 
 export interface ChatRowProps {
   density: ChatListDensity;
@@ -109,16 +125,9 @@ export interface ChatRowProps {
 
 /** A 1:1 chat in the list. */
 export function ChatRow(p: ChatRowProps) {
+  const { t } = useI18n();
   const size = AVATAR[p.density];
-  const pinLabel = p.pinned ? "Unpin chat" : "Pin chat";
-  // One pin button: beside the unread count while the chat is pinned (so a pinned chat says so), else among the actions.
-  const pin = (
-    <button type="button" title={pinLabel} aria-label={pinLabel} aria-pressed={p.pinned} data-testid="chat-row-pin"
-      onClick={e => { e.stopPropagation(); p.onTogglePin(); }}
-      className={`flex items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${p.pinned ? "h-5 w-5 text-accent hover:bg-accent/15 max-md:pointer-events-none" : "h-7 w-7 text-text-muted hover:text-accent"}`}>
-      <PinIcon active={p.pinned} />
-    </button>
-  );
+  const pinLabel = p.pinned ? t("chat.menu.unpin") : t("chat.menu.pin");
   return (
     <div data-testid="chat-row" onClick={p.onOpen} title={`${p.label} · ${p.keyLabel}`} className={rowClass(p.active, p.density)}>
       <div className={`relative shrink-0 rounded-full flex items-center justify-center ${p.active ? "bg-surface-alt" : "bg-surface-hover"}`} style={{ width: size, height: size }}>
@@ -163,14 +172,18 @@ export function ChatRow(p: ChatRowProps) {
               {previewText(p.lastMessage.text)}
             </span>
           : <span className="italic text-text-muted">No messages</span>}
-        trailing={(p.pinned || p.unread > 0) && <>
-          {p.pinned && pin}
-          {p.unread > 0 && <UnreadBadge count={p.unread} />}
-        </>}
+        status={p.pinned && <StatusMark label={t("sidebar.pinned")} testId="chat-row-pinned"><PinIcon active size={12} /></StatusMark>}
+        trailing={p.unread > 0 && <UnreadBadge count={p.unread} />}
         timeCover={
-          // Pointer devices only: a phone opens the chat on a tap and pins from the chat's Options.
-          <div data-testid="chat-row-actions" className={`max-md:hidden absolute -top-1 end-0 flex items-center gap-0.5 rounded-md ps-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 ${p.active ? "bg-surface-hover" : "bg-surface-alt"}`}>
-            {!p.pinned && pin}
+          // Pointer devices only: a phone opens the chat on a tap and pins from the chat's Options. The layer covers
+          // the marks too, so a pinned chat's mark turns into its Unpin button in place. Keyboard focus shows it, a
+          // click's leftover focus does not (else the layer would hide the new mark once the pointer leaves).
+          <div data-testid="chat-row-actions" className={`max-md:hidden absolute top-1/2 end-0 flex min-w-full -translate-y-1/2 items-center justify-end gap-0.5 rounded-md ps-1 opacity-0 transition-opacity group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 ${p.active ? "bg-surface-hover" : "bg-surface-alt"}`}>
+            <button type="button" title={pinLabel} aria-label={pinLabel} aria-pressed={p.pinned} data-testid="chat-row-pin"
+              onClick={e => { e.stopPropagation(); p.onTogglePin(); }}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-text-muted hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent cursor-pointer">
+              <PinIcon active={p.pinned} />
+            </button>
             <button type="button" onClick={p.onDelete} title={p.deleteLabel}
               className="flex h-7 w-7 items-center justify-center rounded-md text-text-muted hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent cursor-pointer">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
