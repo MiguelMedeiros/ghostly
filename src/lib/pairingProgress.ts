@@ -1,28 +1,12 @@
 import type { LinkView } from "@ghostly/browser/shared/types";
 
 /**
- * How far a paired chat's first connection got, as the engine reports it per chat (the contract shared with the
- * pairing-speed work). The inviter publishes the invite and waits for the knock; the joiner looks the invite up
- * and knocks; both then answer, connect and go live.
+ * How far a paired chat's first connection got, as the engine reports it per chat (`PairingProgress` in
+ * @ghostly/core). The inviter publishes the invite and waits; the joiner looks the invite up and knocks in its
+ * first packet; the inviter answers; both connect and go live.
  */
-export type PairingStage = "publishing" | "waiting" | "resolving" | "knocking" | "answering" | "connecting" | "live" | "failed";
-export type PairingRole = "inviter" | "joiner";
-
-export interface PairingProgress {
-  role: PairingRole;
-  stage: PairingStage;
-  /** When this stage began (ms since the epoch). */
-  since: number;
-  /** When this pairing began. */
-  startedAt: number;
-  /** 1 for the first try; a retry counts up. */
-  attempt: number;
-  /** A short technical note (an error message, a relay), shown under the plain words. */
-  detail?: string;
-  /** Only when `stage` is `failed`: a short code, and whether trying again can help. */
-  reason?: string;
-  retryable?: boolean;
-}
+export type { PairingProgress, PairingRole, PairingStage } from "@ghostly/core";
+import type { PairingProgress, PairingRole, PairingStage } from "@ghostly/core";
 
 /** The steps each side walks through, in order. `failed` can replace any of them. */
 export const PAIRING_STEPS: Record<PairingRole, PairingStage[]> = {
@@ -54,10 +38,9 @@ export function failureReason(code: string | undefined): FailureReason {
   return (FAILURE_REASONS as readonly string[]).includes(camel) ? camel as FailureReason : "unknown";
 }
 
-/** The engine's own report, when it gives one (the field lands with the pairing-speed work). */
+/** The engine's own report of a chat's first pairing (`LinkView.pairingProgress`), when it gives one. */
 export function reportedProgress(link: LinkView | undefined): PairingProgress | undefined {
-  const reported = (link as (LinkView & { pairingProgress?: PairingProgress }) | undefined)?.pairingProgress;
-  return reported && typeof reported.stage === "string" && typeof reported.role === "string" ? reported : undefined;
+  return link?.pairingProgress;
 }
 
 /**
