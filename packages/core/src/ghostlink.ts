@@ -75,6 +75,15 @@ export interface GhostLinkEvents {
   /** An `idp-*` identity-proof frame from the paired contact (only when both sides offer `identity-proof/1`). */
   onIdentityProof?(frame: Record<string, unknown>): Promise<void>;
   onTransportsChanged?(): void;
+  /**
+   * The contact chose a transport for this chat just now (its switch intent went up on the open session).
+   * Nothing new on the wire: read from the `paired-policy` it already sends.
+   */
+  onPeerTransportChoice?(transport: PairedTransport): void;
+  /** A live transport switch completed: the session now runs over `to`, and nothing reconnected. */
+  onTransportSwitched?(from: PairedTransport | undefined, to: PairedTransport): void;
+  /** Round trip of a liveness ping on the open session, in milliseconds. */
+  onRtt?(ms: number): void;
   onTransportDiscovery?(descriptors: TransportDescriptors, transports: PairedTransport[], fallback: boolean): Promise<void>;
   onPairingState?(state: PairingState): void;
   onMessage?(message: IncomingMessage): void | Promise<void>;
@@ -200,6 +209,11 @@ export class GhostLink {
   private peerGroupVersions: number[] | null = null;
   private livenessTimer: ReturnType<typeof setInterval> | null = null;
   private peerAnswersPings = false;
+  /** When the ping awaiting its pong went, and the round trip last measured on this session. */
+  private pingSentAt = 0;
+  private rtt?: number;
+  /** The contact's transport policy as last seen on this session, to tell its explicit choices apart. */
+  private peerPolicySeen: { intent: number } | null = null;
   private unansweredPings = 0;
   private openWaiters: { resolve: () => void; reject: (e: Error) => void }[] = [];
   private lastAutoConnectAt = 0;
@@ -316,6 +330,9 @@ export class GhostLink {
         catch { /* Channel closure is handled by its owner; retry uses a fresh session. */ }
       },
       peer: policy => {
+        const before = this.peerPolicySeen;
+        this.peerPolicySeen = { intent: policy.intent };
+        if (before && policy.intent > before.intent) options.events?.onPeerTransportChoice?.(policy.preferred);
         this.peerDescriptors = policy.descriptors;
         this.peerTransports = transportOrder(policy.available, policy.preferred, true);
         this.peerFallback = policy.fallback;
@@ -502,6 +519,13 @@ export class GhostLink {
     this.rejectWaiters(new GhostlyHttpError("unreachable", "Connection attempt cancelled"));
   }
 
+  /** What the contact's app can use on this link, as it last said (on the open session, or remembered). */
+  get peerAvailableTransports(): PairedTransport[] | undefined {
+    return this.switcher.peerPolicy?.available ?? this.peerTransports;
+  }
+  /** The round trip last measured on the open session; unknown until a ping was answered. */
+  get rttMs(): number | undefined { return this.isDataLinkOpen ? this.rtt : undefined; }
+
   get availableTransports(): PairedTransport[] {
     return [...(this.options.rtcAvailable !== false ? ["webrtc/1" as const] : []), ...this.endpoints.keys()];
   }
@@ -550,16 +574,24 @@ export class GhostLink {
     try { this.channel?.send(JSON.stringify({ t: "paired-adapters", descriptors })); } catch { /* Closing channel; exchange again on reconnect. */ }
   }
 
-  async setTransportPreference(preferred: PairedTransport, fallback: boolean): Promise<void> {
+  /**
+   * `automatic`: this side stops choosing. Its policy still says `preferred` (the app's default) for the order
+   * it dials in, but its switch intent drops to none, so the contact's explicit choice wins on the open session
+   * and, without one, the current transport is kept. Never adds an unavailable adapter either way.
+   */
+  async setTransportPreference(preferred: PairedTransport, fallback: boolean, automatic = false): Promise<void> {
     if (!this.options.params.profile || !this.availableTransports.includes(preferred)) throw new Error("Transport unavailable in this runtime");
     this.preferred = preferred; this.fallback = fallback;
     if (this.paired?.state.status === "ready") {
       if (!this.paired.peerTransportSwitchSupport) {
+        if (automatic) return;
         this.transitionError = "Your contact needs an updated app to negotiate a transport change.";
         this.emitPairingState(); return;
       }
-      this.switcher.changed(); this.emitPairingState(); return;
+      this.switcher.changed(automatic ? "automatic" : true); this.emitPairingState(); return;
     }
+    // A choice made while offline carries no intent into the next session; going automatic clears an older one.
+    if (automatic) this.switcher.changed("automatic");
     // A preference is local configuration, not an instruction to find a peer.
     // Discovery/incoming connections will use this offer when a contact arrives.
     // This also applies to a saved contact that is currently offline.
@@ -1005,27 +1037,35 @@ export class GhostLink {
           channel.close(); if (this.channel === channel) this.detach();
         },
         onReady: () => {
+          let carried: PairedFiles | null = null;
+          let switched: { from?: PairedTransport; to: PairedTransport } | null = null;
           if (migration) {
             if (this.candidate?.channel !== channel) { paired.stop(); channel.close(); return; }
             const oldChannel = this.channel, oldPaired = this.paired, oldBinding = this.activeBinding;
+            const from = oldPaired?.state.transport;
             this.candidate = null;
-            this.pairedFiles?.closeAll(); this.pairedFiles = null;
+            // Transfers in flight carry on over the new channel; they end only if it cannot take files.
+            const files = this.pairedFiles; this.pairedFiles = null;
+            if (files && paired.supports("files/2")) { files.rebind(channel); carried = files; } else files?.closeAll();
             this.pairedHttp?.close(); this.pairedHttp = null;
             this.channel = channel; this.paired = paired; this.activeBinding = binding;
             oldPaired?.stop(); oldChannel?.close();
             if (!oldBinding && binding) this.dataLink.close();
             this.session.setDataLinkOpen(true);
+            switched = { from, to: paired.state.transport! };
           }
           if (this.channel !== channel) return;
           this.securityRejected = false;
           const events = this.options.events ?? {};
-          if (paired.supports("files/2")) this.pairedFiles = new PairedFiles(channel, {
+          if (carried) this.pairedFiles = carried;
+          else if (paired.supports("files/2")) this.pairedFiles = new PairedFiles(channel, {
             onIncoming: file => events.onFileIncoming?.(file) ?? null,
             onStored: events.onFileStored,
             onProgress: events.onFileProgress,
             onComplete: events.onFileComplete,
             onFailed: events.onFileFailed,
           });
+          this.peerPolicySeen = null;
           if (paired.peerTransportSwitchSupport) this.switcher.begin(paired.proofSession, paired.state.transport!);
           else this.advertiseTransports();
           this.peerPaymentMethods = null;
@@ -1050,6 +1090,7 @@ export class GhostLink {
           this.startLiveness(channel, paired.peerAnswersPings);
           for (const waiter of this.openWaiters.splice(0)) waiter.resolve();
           this.options.events?.onPresence?.(this.presence);
+          if (switched) this.options.events?.onTransportSwitched?.(switched.from, switched.to);
         },
         onApplication: async data => {
           if (this.channel !== channel) return;
@@ -1059,7 +1100,11 @@ export class GhostLink {
           let frame: Record<string, unknown>;
           try { frame = JSON.parse(data); } catch { return; }
           if (frame?.t === "paired-ping") { try { channel.send(JSON.stringify({ t: "paired-pong" })); } catch { /* closing */ } return; }
-          if (frame?.t === "paired-pong") { this.peerAnswersPings = true; return; }
+          if (frame?.t === "paired-pong") {
+            this.peerAnswersPings = true;
+            if (this.pingSentAt) { this.rtt = Date.now() - this.pingSentAt; this.pingSentAt = 0; this.options.events?.onRtt?.(this.rtt); }
+            return;
+          }
           if (!frame || typeof frame !== "object") return;
           if (paired.peerTransportSwitchSupport && this.switcher.handle(frame)) return;
           if (frame.t === "paired-rtc") {
@@ -1217,11 +1262,14 @@ export class GhostLink {
   private startLiveness(channel: FrameChannel, peerAnswersPings = false): void {
     this.stopLiveness();
     this.peerAnswersPings = peerAnswersPings;
+    // One ping at the open, not counted as missed: the round trip is known at once, not 15 s later.
+    const ping = () => { this.pingSentAt = Date.now(); channel.send(JSON.stringify({ t: "paired-ping" })); };
+    if (peerAnswersPings) try { ping(); } catch { /* closing: the timer below finds out */ }
     this.livenessTimer = setInterval(() => {
       if (this.channel !== channel) { this.stopLiveness(); return; }
       if (this.peerAnswersPings && this.unansweredPings >= LIVENESS_MISSED_PINGS) { this.dropDeadSession(channel); return; }
       this.unansweredPings++;
-      try { channel.send(JSON.stringify({ t: "paired-ping" })); } catch { this.dropDeadSession(channel); }
+      try { ping(); } catch { this.dropDeadSession(channel); }
     }, LIVENESS_PING_MS);
   }
   private stopLiveness(): void {
@@ -1229,6 +1277,8 @@ export class GhostLink {
     this.livenessTimer = null;
     this.unansweredPings = 0;
     this.peerAnswersPings = false;
+    this.pingSentAt = 0;
+    this.rtt = undefined;
   }
   private dropDeadSession(channel: FrameChannel): void {
     this.stopLiveness();

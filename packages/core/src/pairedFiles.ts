@@ -14,15 +14,20 @@ interface Incoming {
   offset: number;
   timer?: ReturnType<typeof setTimeout>;
 }
-interface Pending { resolve(): void; reject(error: Error): void; }
+interface Pending { resolve(): void; reject(error: Error): void; frame: object; }
+/** Transfers finished lately, by id, with their final offset: a repeated end is acknowledged again. */
+const DONE_KEPT = 32;
 
 /** files/2: authenticated text frames work on RTC, Iroh and HyperDHT alike.
  * Stop-and-wait credits bound each sender to one 16 KiB chunk in flight.
- * Final receipt follows digest verification and durable sink.close, never merely send(). */
+ * Final receipt follows digest verification and durable sink.close, never merely send().
+ * A live transport switch moves transfers to the new channel (`rebind`): the one frame awaiting its
+ * acknowledgement goes again there, and a receiver acknowledges a frame it already applied again. */
 export class PairedFiles {
   private incoming = new Map<string, Incoming>();
   private outgoing = new Set<string>();
   private pending = new Map<string, Pending>();
+  private done = new Map<string, number>();
   private closed = false;
   constructor(private channel: FrameChannel, private events: FileTransferEvents & {
     onStored?(file: FileInfo): Promise<string | undefined>;
@@ -41,7 +46,7 @@ export class PairedFiles {
         clearTimeout(timer); this.pending.delete(key);
         if (error) reject(error); else resolve();
       };
-      this.pending.set(key, { resolve: () => finish(), reject: finish });
+      this.pending.set(key, { resolve: () => finish(), reject: finish, frame });
       try { this.sendFrame(frame); } catch (error) { finish(error instanceof Error ? error : new Error(String(error))); }
     });
   }
@@ -75,6 +80,15 @@ export class PairedFiles {
     } finally { this.outgoing.delete(file.id); }
   }
 
+  /** The session moved to another transport: transfers carry on over `channel`, where what awaits an acknowledgement goes again. */
+  rebind(channel: FrameChannel): void {
+    if (this.closed) return;
+    this.channel = channel;
+    for (const pending of this.pending.values()) {
+      try { this.sendFrame(pending.frame); } catch (error) { pending.reject(error instanceof Error ? error : new Error(String(error))); }
+    }
+  }
+
   async handle(frame: Record<string, unknown>): Promise<void> {
     if (this.closed || typeof frame.id !== "string" || !ID.test(frame.id)) return;
     const id = frame.id;
@@ -91,7 +105,12 @@ export class PairedFiles {
     }
     try {
       if (frame.t === "pf-start") {
-        if (this.incoming.has(id)) throw new Error("Duplicate active file");
+        const active = this.incoming.get(id);
+        // Sent again after a transport switch, before any chunk: the same announcement is acknowledged again.
+        if (active && active.offset === 0 && frame.size === active.file.size && frame.name === active.file.name) {
+          this.sendFrame({ t: "pf-ack", id, phase: "start", offset: 0 }); return;
+        }
+        if (active) throw new Error("Duplicate active file");
         if (typeof frame.name !== "string" || frame.name.length > 1000 || typeof frame.mime !== "string" || frame.mime.length > 130 ||
           typeof frame.size !== "number" || !Number.isSafeInteger(frame.size) || frame.size < 0 || frame.size > LIMITS.maxFileBytes ||
           typeof frame.timestamp !== "number" || !Number.isSafeInteger(frame.timestamp) || frame.timestamp <= 0 ||
@@ -110,7 +129,15 @@ export class PairedFiles {
         return;
       }
       const entry = this.incoming.get(id);
-      if (!entry) return;
+      if (!entry) {
+        if (frame.t === "pf-end" && this.done.get(id) === frame.offset) this.sendFrame({ t: "pf-ack", id, phase: "end", offset: frame.offset });
+        return;
+      }
+      // The last chunk again (its acknowledgement was lost in a transport switch): acknowledged again, applied once.
+      if (frame.t === "pf-chunk" && typeof frame.offset === "number" && typeof frame.data === "string" && frame.offset < entry.offset &&
+        frame.offset + fromBase64Url(frame.data).length === entry.offset) {
+        this.sendFrame({ t: "pf-ack", id, phase: "chunk", offset: entry.offset }); return;
+      }
       if (frame.offset !== entry.offset) throw new Error("Invalid file offset");
       if (frame.t === "pf-chunk") {
         if (typeof frame.data !== "string" || frame.data.length > Math.ceil(CHUNK * 4 / 3) || !/^[A-Za-z0-9_-]+$/.test(frame.data)) throw new Error("Invalid chunk");
@@ -129,6 +156,8 @@ export class PairedFiles {
         await entry.sink?.close(digest);
         if (this.incoming.get(id) !== entry) return;
         clearTimeout(entry.timer); this.incoming.delete(id);
+        this.done.set(id, entry.offset);
+        if (this.done.size > DONE_KEPT) this.done.delete(this.done.keys().next().value!);
         if (!entry.stored) this.events.onComplete?.(id, "in");
         this.sendFrame({ t: "pf-ack", id, phase: "end", offset: entry.offset });
       }

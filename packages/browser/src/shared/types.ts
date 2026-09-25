@@ -10,6 +10,7 @@ import type { BitcoinView } from "../engine/paymentAdapters/providers/bitcoinSer
 import type { PaymentReview, PaymentTarget } from "@ghostly/core";
 import type { DeliveryMode, DhtDeliveryState, DhtDeliveryView, HoldKind } from "@ghostly/core";
 import type { S3Config } from "../backup/s3";
+import type { TransportEntry } from "../engine/transportLog";
 import type { PublicProfile, ProfileChoice } from '../profiles/public';
 import type { NostrContactCache, NostrContactView, NostrSocialSettings, NostrSocialState } from "../nostr/types";
 import type { ProofLedger, ProofAdapter } from "@ghostly/core";
@@ -34,8 +35,11 @@ export interface StoredLink {
   peerDescriptors?: TransportDescriptors;
   peerTransports?: PairedTransport[];
   peerFallback?: boolean;
+  /** Absent: no choice for this chat, the app's rule applies ("Automatic"). */
   preferredTransport?: PairedTransport;
   transportFallback?: boolean;
+  /** The chat's connection story, newest last (see engine/transportLog.ts). Local only. */
+  transportLog?: TransportEntry[];
   pairedPeerKey?: string;
   /** Absent only in old releases, where first pin required an explicit code comparison. */
   peerTrust?: { version: 1; verifiedKey?: string; verifiedAt?: number };
@@ -652,6 +656,14 @@ export interface LinkView {
   transportErrors?: Partial<Record<PairedTransport, string>>;
   preferredTransport?: PairedTransport;
   transportFallback?: boolean;
+  /** No transport chosen for this chat: the app's rule applies. */
+  transportAutomatic?: boolean;
+  /** What the contact's app can use on this link, as it last said; unknown before a first session. */
+  peerTransports?: PairedTransport[];
+  /** Round trip on the live session, once measured. */
+  transportRttMs?: number;
+  /** The chat's connection story, newest last; only for the chat on screen (`setActiveLink`). */
+  transportLog?: TransportEntry[];
   id: string;
   myPubKeyZ32: string;
   peerPubKeyZ32: string;

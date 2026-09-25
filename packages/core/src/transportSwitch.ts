@@ -68,9 +68,12 @@ export class TransportSwitch {
     this.context = context; this.actual = actual;
     this.options.state(); this.announce();
   }
-  changed(userIntent = true): void {
+  /** `automatic`: no choice of this side's any more; the contact's explicit one wins, and without one the
+   * current transport is kept while it is allowed. */
+  changed(userIntent: boolean | "automatic" = true): void {
     this.revision++;
-    if (userIntent) this.intent = Math.max(this.intent, this.remote?.intent ?? 0) + 1;
+    if (userIntent === "automatic") this.intent = 0;
+    else if (userIntent) this.intent = Math.max(this.intent, this.remote?.intent ?? 0) + 1;
     this.failed = "";
     this.announce(); this.reconcile();
   }

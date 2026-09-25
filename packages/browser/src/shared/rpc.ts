@@ -119,6 +119,8 @@ export interface EngineApi {
   sendFile(params: { linkId: string; file: MessageFile; timestamp: number }): void;
   setDeliveryMode(params: { linkId: string; mode: DeliveryMode }): void;
   setTransportPreference(params: { linkId: string; preferred: PairedTransport; fallback: boolean }): void;
+  /** One chat's connection from its menu: a transport both sides can use, or `auto` for the app's rule. */
+  setChatTransport(params: { linkId: string; transport: PairedTransport | "auto" }): void;
   setChatPaymentMethods(params: { linkId: string; methods: Partial<Record<import("@ghostly/core").PaymentMethodName, boolean>> }): void;
   /** Store-and-forward in one chat (WISP 4xx): accept held items from this contact, and hold items for it while it is away. */
   setChatHold(params: { linkId: string; enabled: boolean }): void;
