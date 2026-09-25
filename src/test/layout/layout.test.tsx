@@ -1,7 +1,7 @@
 import { screen } from "@testing-library/react";
 import { Link, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
-import { Block, ButtonGroup, FieldGrid, InputGroup, LinkRow, Page, Row, Section, Truncate } from "../../components/layout";
+import { Block, ButtonGroup, FieldGrid, InputGroup, LinkRow, Page, PageAction, Row, Section, Truncate } from "../../components/layout";
 import { renderApp } from "../render";
 
 // covers: app.responsive
@@ -165,6 +165,19 @@ describe("Page", () => {
     const body = screen.getByTestId("page").querySelector("[data-page-body]")!;
     expect(body).toHaveClass("@container/page");
     expect(body).toContainElement(screen.getByText("Body"));
+  });
+
+  it("puts the page's primary action in the header: an accent button named by its label, with a plus", async () => {
+    const onClick = vi.fn();
+    const { user } = renderApp(<Page title="Identities" trailing={<PageAction label="New" title="Add an identity" testId="new" onClick={onClick} />}><p>Body</p></Page>);
+    const action = screen.getByTestId("new");
+    expect(screen.getByRole("banner")).toContainElement(action);
+    expect(action).toHaveAccessibleName("New");
+    expect(action).toHaveAttribute("type", "button");
+    expect(action).toHaveClass("bg-accent", "text-on-accent");
+    expect(action.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+    await user.click(action);
+    expect(onClick).toHaveBeenCalledOnce();
   });
 
   it("has no trailing slot without controls", () => {
