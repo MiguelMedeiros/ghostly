@@ -5,6 +5,7 @@ import { domain } from "./providers/domain";
 import { openpgp } from "./providers/openpgp";
 import { ssh, sshGithub, sshGitlab } from "./providers/ssh";
 import { oidc } from "./providers/oidc";
+import { did } from "./providers/did";
 import { FAKE_IDENTITY_PROVIDERS, testIdentitiesEnabled } from "./testing";
 import { registeredIdentityProviders, reserveAdapterIds } from "../plugins/registry";
 
@@ -20,6 +21,7 @@ export const IDENTITY_PROVIDERS: readonly IdentityProofProvider[] = [
   bitcoin,
   ssh, sshGithub, sshGitlab,
   oidc,
+  did,
 ];
 
 reserveAdapterIds("identity", IDENTITY_PROVIDERS.map((p) => p.id));

@@ -2,6 +2,7 @@ import { useEffect, useRef, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { identityProvider, identityProviders } from "@ghostly/browser/proofs/registry";
 import { availableSigners } from "@ghostly/browser/proofs/verify";
+import { setOwnDidSource } from "@ghostly/browser/proofs/providers/did";
 import type { IdentityPlatform, IdentityProofProvider } from "@ghostly/browser/proofs/contract";
 import type { IdentityStatus, SharedIdentity } from "@ghostly/core";
 import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
@@ -13,6 +14,9 @@ const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
 /** The engine's state, re-rendered on every change. */
 export const useEngineState = () => useSyncExternalStore(subscribe, snapshot);
+
+// The profile's own Ghostly did:dht is not an external identity: the DID provider refuses it by name.
+setOwnDidSource(() => (engine.state as { did?: { id?: string } } | undefined)?.did?.id);
 
 /**
  * Calls `onNew` with a proof that was not there on the last render: one just added comes up in a deck of ID cards, so

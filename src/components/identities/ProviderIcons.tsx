@@ -15,7 +15,7 @@ import { providerForIssuer } from "@ghostly/browser/proofs/oidc/providers";
  *  - Google "G" and the Microsoft four squares: drawn after the brands' sign-in
  *    guidelines (full colour on white), not recoloured. They stay their owners' trademarks.
  *  - Nostr: the community mark by bembureda (mbarulli/nostr-logo, CC0), as before.
- *  - Domain, OpenPGP, SSH and the neutral account mark: original line drawings.
+ *  - Domain, OpenPGP, SSH, DID (a key at the centre of a graph) and the neutral account mark: original line drawings.
  *
  * `ghostly` is not a proof provider: it is the mark of the profile's own Ghostly identity (its ID card, the
  * first of every deck), the ghost of src/assets/identities/ghostly.svg on its dark tile.
@@ -91,6 +91,10 @@ export const PROVIDER_ICONS: Record<string, ProviderIcon> = {
   "oidc:apple": { tile: `bg-black ${white}`, mark: simple(APPLE) },
   "oidc:gitlab": gitlab,
   "oidc:twitch": { tile: `bg-[#9146ff] ${white}`, fill: 0.55, mark: simple(TWITCH) },
+  did: {
+    tile: `bg-[#1f6fb2] ${white}`,
+    mark: size => svg(size, "0 0 24 24", <g {...stroke}><circle cx="12" cy="12.5" r="2.6" /><circle cx="12" cy="4" r="1.8" /><circle cx="4.8" cy="18" r="1.8" /><circle cx="19.2" cy="18" r="1.8" /><path d="M12 9.9V5.8M9.8 13.9l-3.5 2.9M14.2 13.9l3.5 2.9" /></g>),
+  },
   ghostly: { tile: "bg-[#0f172a] text-[#22d3ee]", fill: 0.72, mark: size => svg(size, "0 0 24 24", <><path fill="currentColor" d={GHOST} /><circle cx="9" cy="9" r="1.5" fill="#0f172a" /><circle cx="15" cy="9" r="1.5" fill="#0f172a" /></>) },
 };
 

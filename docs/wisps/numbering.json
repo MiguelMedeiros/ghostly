@@ -261,6 +261,15 @@
     "numberAssignment": "unassigned"
   },
   {
+    "oldId": "none",
+    "id": "311",
+    "oldFile": "3xx-did.md",
+    "file": "3xx-did.md",
+    "kind": "Adapter",
+    "displayNumber": "3xx",
+    "numberAssignment": "unassigned"
+  },
+  {
     "oldId": "13",
     "id": "400",
     "oldFile": "13-chat.md",
