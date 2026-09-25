@@ -146,7 +146,8 @@ function firstApproval(requests: readonly PendingRequest[], signal: AbortSignal,
       wakers.add(wake);
     });
 
-    // A poll can hold the relay's long poll open; the end does not wait for it (what lands later is signed out).
+    // The end does not wait for a poll in flight (one that got an approval is still redeeming it at the homeserver):
+    // its request is freed when it settles, and a session it brings is signed out.
     const poll = async (request: PendingRequest) => {
       try {
         while (!over) {
