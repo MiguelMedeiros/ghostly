@@ -76,7 +76,8 @@ export function MessageDetailsPanel({ message, linkId, picture, onClose, returnF
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-3">
+      {/* Technical words, in English and left to right whatever the app's language, as code is. */}
+      <div dir="ltr" className="flex-1 overflow-y-auto px-4 py-3 text-start">
         <p data-testid="message-details-summary" className="m-0 mb-3 text-[13px] leading-snug text-text-primary">{model.summary}</p>
         {model.sections.map(section => (
           <section key={section.id} data-testid="message-details-section" data-section={section.id} className="mb-3">

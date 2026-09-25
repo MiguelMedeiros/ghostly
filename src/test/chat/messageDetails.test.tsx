@@ -290,7 +290,7 @@ describe("the words", () => {
     [{ path: "iroh/1", relayed: true }, "Iroh through a relay"],
     [{ path: "dht" }, "DHT floor (Pkarr)"],
     [{ path: "legacy-datalink" }, "WebRTC (compatibility chat)"],
-  ] as const)("%j reads %s", (step, words) => expect(pathWords(step)).toBe(words));
+  ] as [Parameters<typeof pathWords>[0], string][])("%j reads %s", (step, words) => expect(pathWords(step)).toBe(words));
 
   it("sizes and durations read at a glance, with the exact figure", () => {
     expect(formatBytes(999)).toBe("999 bytes");

@@ -57,7 +57,7 @@ export function formatDuration(ms: number): string {
 /** Local time to the millisecond; the copy is the instant in ISO 8601. */
 export function formatTime(ms: number): string {
   const date = new Date(ms);
-  return `${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}.${String(ms % 1000).padStart(3, "0")}`;
+  return `${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })}.${String(ms % 1000).padStart(3, "0")}`;
 }
 const timeRow = (label: string, at: number): DetailRow => ({ label, value: formatTime(at), mono: true, copy: new Date(at).toISOString() });
 const keyRow = (label: string, key: string): DetailRow => ({ label, value: publicKeyLabel(key), mono: true, copy: key });
@@ -116,7 +116,7 @@ function voiceCodec(mime: string): string {
   const m = mime.toLowerCase();
   const codec = /opus/.test(m) ? "Opus" : /aac|mp4a/.test(m) ? "AAC" : /vorbis/.test(m) ? "Vorbis" : /wav|pcm/.test(m) ? "PCM" : "";
   const container = /webm/.test(m) ? "WebM" : /mp4|m4a/.test(m) ? "MP4" : /ogg/.test(m) ? "Ogg" : /wav/.test(m) ? "WAV" : mime;
-  return codec ? `${codec} in ${container}` : container;
+  return codec ? `${codec} in ${container}` : `${container}, codec not declared`;
 }
 
 const kindOf = (message: ChatMessage, picture: boolean): string =>

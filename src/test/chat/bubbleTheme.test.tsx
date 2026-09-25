@@ -51,7 +51,7 @@ describe("MessageBubble: theme colours", () => {
     await user.dblClick(container.querySelector("[data-message-bubble]")!);
     const panel = await screen.findByTestId("message-details");
     expect(within(panel).getByTestId("message-details-excerpt")).toHaveClass("bg-received-bg");
-    expect(container.querySelector("[data-message-bubble]")).toHaveClass("ring-accent");
+    expect(container.querySelector("[data-message-bubble]")).toHaveClass("outline-accent");
     expect(fixedColours(container)).toEqual([]);
     expect(fixedColours(panel)).toEqual([]);
   });

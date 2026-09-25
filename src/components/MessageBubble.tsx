@@ -356,7 +356,11 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
     <MessageDetailsPanel message={message} linkId={linkId ?? (peerPubKey ? engine.linkByPeer(peerPubKey)?.id : undefined)}
       picture={contentType === "image"} onClose={() => setDetails(false)} returnFocus={rowRef.current} />
   );
-  const rowProps = { ref: rowRef, onDoubleClick: openDetails, ...press, "data-details-open": details || undefined };
+  const rowProps = {
+    ref: rowRef, onDoubleClick: openDetails, ...press, "data-details-open": details || undefined,
+    // The second click of a double click would select a word of the message under the details.
+    onMouseDown: (e: React.MouseEvent) => { if (e.detail > 1) e.preventDefault(); },
+  };
 
   if (isSystem && message.systemEvent?.type === "join") {
     const pubKeyShort = message.systemEvent.pubKey
@@ -365,7 +369,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
     
     return (
       <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 px-[63px] max-md:px-2.5 ${enter}`}>
-        <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-blue-500/10 text-link ${details ? "ring-2 ring-accent" : ""}`}>
+        <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-blue-500/10 text-link ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}>
           <svg
             width="14"
             height="14"
@@ -403,7 +407,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
             isMissed
               ? "bg-danger/10 text-danger"
               : "bg-surface-alt/80 text-text-secondary"
-          } ${details ? "ring-2 ring-accent" : ""}`}
+          } ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}
         >
           <CallEventIcon type={type} hasVideo={hasVideo} />
           <span>{message.text}</span>
@@ -452,7 +456,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
           isMe
             ? "bg-sent-bg text-text-primary"
             : "bg-received-bg text-text-primary"
-        } ${details ? "ring-2 ring-accent" : ""}`}
+        } ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}
         style={{
           boxShadow: "0 1px 0.5px rgba(11,20,26,0.13)",
         }}

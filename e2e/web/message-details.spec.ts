@@ -109,14 +109,14 @@ test("message details: a text, a file and a voice message, on both sides", { tag
   await holdMic(alice.page, 1_500);
   const bobsVoice = chat(bob).getByTestId("voice-bubble").last();
   await expect(bobsVoice.getByTestId("voice-play")).toBeEnabled({ timeout: 30_000 });
-  await openFromMenu(bob, chat(bob).locator("[data-message-row]").filter({ has: bobsVoice }));
+  await openFromMenu(bob, chat(bob).locator("[data-message-row]").filter({ has: bob.page.getByTestId("voice-bubble") }).last());
   await expect(field(bob.page, "Kind")).toHaveText("Voice message");
-  await expect(field(bob.page, "Codec")).toHaveText(/Opus in WebM|Opus in Ogg/);
+  await expect(field(bob.page, "Codec")).toHaveText(/^Opus in WebM$|^WebM, codec not declared$/);
   await expect(field(bob.page, "Length")).toHaveText(/^\d+(\.\d+)? s$/);
   await expect(field(bob.page, "Waveform")).toHaveText("64 peaks");
   await expect(field(bob.page, "Received over")).toHaveText("WebRTC, direct");
   await close(bob.page);
-  await openFromMenu(alice, chat(alice).locator("[data-message-row]").filter({ has: chat(alice).getByTestId("voice-bubble").last() }));
+  await openFromMenu(alice, chat(alice).locator("[data-message-row]").filter({ has: alice.page.getByTestId("voice-bubble") }).last());
   await expect(field(alice.page, "Sent over")).toHaveText("WebRTC, direct");
   await expect(field(alice.page, "Waveform")).toHaveText("64 peaks");
   await expect(panel(alice.page).getByTestId("message-details-summary")).toContainText("Voice message sent live over WebRTC");
