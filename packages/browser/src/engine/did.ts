@@ -160,20 +160,19 @@ export class ProfileDid {
 
   private async publish(): Promise<void> {
     if (!this.stored || !this.host.online()) return;
-    const stored = this.stored;
-    const packet = encodeDidDhtPacket(this.document());
-    const previous = stored.published;
-    let payload: Uint8Array;
-    let seq: number;
-    if (previous && this.samePacket(previous.payload)) {
-      // Unchanged: the same signed packet again, which a DHT node or relay takes as a refresh, not an update.
-      payload = fromBase64Url(previous.payload);
-      seq = previous.seq;
-    } else {
-      seq = Math.max(Math.floor(Date.now() / 1000), (previous?.seq ?? 0) + 1);
-      payload = signDidDhtPacket(identityFromSeed(await this.unsealed()), packet, seq);
-    }
+    const previous = this.stored.published;
     try {
+      const packet = encodeDidDhtPacket(this.document());
+      let payload: Uint8Array;
+      let seq: number;
+      if (previous && this.samePacket(previous.payload)) {
+        // Unchanged: the same signed packet again, which a DHT node or relay takes as a refresh, not an update.
+        payload = fromBase64Url(previous.payload);
+        seq = previous.seq;
+      } else {
+        seq = Math.max(Math.floor(Date.now() / 1000), (previous?.seq ?? 0) + 1);
+        payload = signDidDhtPacket(identityFromSeed(await this.unsealed()), packet, seq);
+      }
       await this.host.publish(toZ32(this.publicKey()), payload);
       this.error = undefined;
       await this.save({ ...this.stored, published: { payload: toBase64Url(payload), seq, at: Date.now() } });
@@ -197,8 +196,13 @@ export class ProfileDid {
     return fromBase64Url(this.stored.publicKey);
   }
 
+  /** Whether `payload` carries the document as it is now. Never throws: the engine's state is built from it. */
   private samePacket(payload: string): boolean {
-    return bytesEqual(fromBase64Url(payload).subarray(HEADER), encodeDidDhtPacket(this.document()));
+    try {
+      return bytesEqual(fromBase64Url(payload).subarray(HEADER), encodeDidDhtPacket(this.document()));
+    } catch {
+      return false;
+    }
   }
 
   private async unsealed(): Promise<Uint8Array> {

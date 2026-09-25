@@ -121,6 +121,7 @@ A client MUST publish a profile's DID only under that profile's DID key, never u
 - A switch to not publish the DID at all.
 - Services (a Ghostly contact entry point, for example) stay out: one would give everyone a way to reach the profile.
 - Key rotation through `_prv`; type indexing and authoritative gateways are not used.
+- A backup restored as a new profile beside its original carries the same DID key: both profiles then publish under it, and the packet with the lower sequence number is refused by relays until one of them changes its document.
 
 ## References
 
