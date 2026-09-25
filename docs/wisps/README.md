@@ -67,7 +67,7 @@ The implementation column is independent of document status. Existing features c
 | [700](700-local-services.md) | Local Services | Draft | Existing HTTP proxy |
 | [701](701-http-services.md) | HTTP Local Service Profile | Draft | Legacy desktop/extension hosting; web viewer where supported; not paired hosted HTTP. |
 | [800](800-invite-join.md) | Invite and Join | Draft | Existing bearer invite; admission protocol proposed |
-| [801](801-invitation-profiles.md) | Implemented Invitation Profiles | Draft | Today pair1/pair2d plus v0.4 imports; one `pair3/` format proposed |
+| [801](801-invitation-profiles.md) | Implemented Invitation Profiles | Draft | Today pair1/pair2d plus v0.4 imports; one bech32m `ghostly1…` format proposed |
 | [900](900-group-sessions.md) | Group Session Negotiation | Draft | Contract of the first profile; implemented as `group-mesh/1`, text only |
 | [Group Mesh · 9xx planned](9xx-group-mesh.md) | Group Mesh Distribution Profile | Draft | `group-mesh/1` and its entry link `group-entry/1`: core, engine and UI; unit and four-browser e2e; web, extension and desktop |
 | [Group Community · 9xx planned](9xx-group-community.md) | Group Community Distribution Profile | Draft | `group-community/1`: a link anyone can open, admission by any member, elected hubs, up to 256 members; core, engine and UI; unit, six-browser e2e and a headless load test |

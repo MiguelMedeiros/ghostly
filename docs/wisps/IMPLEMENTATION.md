@@ -59,7 +59,7 @@ Inspection of `dev` at `802b48bc`. The chat family's revision 0.2 describes one 
 
 | Behaviour | Today | Revision 0.2 |
 |---|---|---|
-| Invite formats created | `pair1/` (streams first) or `pair2d/` (DHT only), chosen at creation ([invite.ts](../../packages/core/src/invite.ts)) | `pair3/` only, no choice; `pair1/`, `pair2d/` and prefix-less still read ([801](801-invitation-profiles.md)) |
+| Invite formats created | `pair1/` (streams first) or `pair2d/` (DHT only), chosen at creation ([invite.ts](../../packages/core/src/invite.ts)) | One bech32m `ghostly1…` string (or `https://ghostly.tools/#ghostly1…`), no choice; `pair1/`, `pair2d/` and prefix-less still read ([801](801-invitation-profiles.md)) |
 | First contact | `pair1/`: needs a stream (WebRTC in the product). `pair2d/`: DHT envelope with recipient `invite` ([dhtDelivery.ts](../../packages/core/src/dhtDelivery.ts)) | Both at once; pin on whichever verifies first; same key required on both |
 | First pairing without a stream | `pair1/` does not finish | Ends `on-dht` and chats |
 | Short-text fallback after a drop | Exists for paired chats once the contact announced DHT support (`GhostLink.textDelivery`, [ghostlink.ts](../../packages/core/src/ghostlink.ts)) | The rule for every chat; every contact announces it from the first contact |

@@ -45,7 +45,7 @@ The [proof increment](PROOF-INCREMENT.md) now includes explicit experimental loc
 | [500 Files](500-files.md) | [501 files/2](501-paired-files.md), [502 compatibility](502-legacy-files.md) | Layer 1 or a hold; never DHT records; no resume |
 | [600 Media](600-media.md) | [601 WebRTC media](601-webrtc-media.md) | Legacy 1:1 only; runtime capture limits |
 | [700 Local Services](700-local-services.md) | [701 HTTP](701-http-services.md) | Legacy hosting with selected contact access; not paired HTTP |
-| [800 Invite/Join](800-invite-join.md) | [801 implemented invitations](801-invitation-profiles.md) | Bearer bootstrap exists; one `pair3/` format and global consumable admission proposed |
+| [800 Invite/Join](800-invite-join.md) | [801 implemented invitations](801-invitation-profiles.md) | Bearer bootstrap exists; one bech32m `ghostly1…` invite and global consumable admission proposed |
 | [900 Groups](900-group-sessions.md) | [9xx Group Mesh](9xx-group-mesh.md), [9xx Group Community](9xx-group-community.md), [901 GossipSub](901-gossipsub.md) | Mesh profile (text, eight members) and community profile (a link, 256 members, hubs) implemented; GossipSub proposed |
 
 Transport100 already separates101/102/103. Payment200 separates201Cashu and203Lightning via Cashu; Ark202 remains implementation work until its substantive contract and evidence are ready. Identity300 separates301/302/303 external proof bindings, currently disabled. Document kinds describe responsibilities, not feature availability.

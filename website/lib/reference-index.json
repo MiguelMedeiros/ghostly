@@ -751,7 +751,7 @@
       "01-ghost-core.md",
       "02-peer-keys.md"
     ],
-    "summary": "Every new 1:1 chat starts from the same invite (801): pair3/ and three fields. The invite no longer chooses how the chat is carried; the handshake does, on the DHT and on a stream in parallel (400). Its version lives in the prefix, and the error rules go both ways: a current app refuses a newer version with \"update to join\" and never downgrades it; an older app refuses a pair3/ code as invalid. v0.4 codes (no prefix)",
+    "summary": "Every new 1:1 chat starts from the same invite (801): one bech32m string, ghostly1…, also shareable as https://ghostly.tools/#ghostly1…. The invite no longer chooses how the chat is carried; the handshake does, on the DHT and on a stream in parallel (400). Its format version is the first data symbol, and the error rules go both ways: a current app answers a newer version with \"Update to join\", a failed checksum with ",
     "notices": []
   },
   {
@@ -762,7 +762,7 @@
     "title": "WISP 801: Implemented Invitation Profiles",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "Today: pair1/ and pair2d/ creation plus v0.4 imports. Proposed: one format, pair3/, and the reading rules below",
+    "implementation": "Today: pair1/ and pair2d/ creation plus v0.4 imports. Proposed: one bech32m format, ghostly1…, and the reading rules below",
     "documentKind": "Profile",
     "dependencies": [
       "800-invite-join.md",

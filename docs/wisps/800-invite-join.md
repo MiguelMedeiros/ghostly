@@ -14,7 +14,7 @@
 
 ## One invite for the one chat (revision 0.2)
 
-Every new 1:1 chat starts from the same invite ([801](801-invitation-profiles.md#one-invite-format-revision-02)): `pair3/` and three fields. The invite no longer chooses how the chat is carried; the handshake does, on the DHT and on a stream in parallel ([400](400-chat.md#how-a-chat-starts-upgrades-falls-back-and-comes-back)). Its version lives in the prefix, and the error rules go both ways: a current app refuses a newer version with "update to join" and never downgrades it; an older app refuses a `pair3/` code as invalid. v0.4 codes (no prefix) still open a compatibility chat ([402](402-legacy-chat.md)). The admission requirements below are unchanged by this revision.
+Every new 1:1 chat starts from the same invite ([801](801-invitation-profiles.md#one-invite-format-revision-02)): one bech32m string, `ghostly1…`, also shareable as `https://ghostly.tools/#ghostly1…`. The invite no longer chooses how the chat is carried; the handshake does, on the DHT and on a stream in parallel ([400](400-chat.md#how-a-chat-starts-upgrades-falls-back-and-comes-back)). Its format version is the first data symbol, and the error rules go both ways: a current app answers a newer version with "Update to join", a failed checksum with "This code has a typo", and never reads one format as another; an older app refuses a `ghostly1…` code as invalid and creates nothing. v0.4 codes (no prefix) still open a compatibility chat ([402](402-legacy-chat.md)). The admission requirements below are unchanged by this revision.
 
 ## Contract and concrete profiles
 
@@ -68,5 +68,5 @@ Race two different joiners, replay consumed invites, duplicate the same join ret
 
 ## Revision log
 
-- 0.2 (2026-09-25): one invite for the one chat; version in the prefix; refusal rules both ways (details in 801).
+- 0.2 (2026-09-25): one invite for the one chat, a bech32m `ghostly1…` string with its version inside; refusal rules both ways (details in 801).
 - 0.1 (2026-09-20): initial review draft.

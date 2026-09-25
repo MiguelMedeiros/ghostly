@@ -27,7 +27,7 @@ The earlier split between a "legacy" chat and a "paired" chat, and between "Live
 
 | Before (dev, 2026-09-25) | After (this revision) |
 |---|---|
-| `pair1/` invite: live streams first; the first contact needs WebRTC to connect, or pairing does not finish | The one invite format ([801](801-invitation-profiles.md)); the first contact happens on the DHT and on a stream in parallel, and pairing finishes on whichever works |
+| `pair1/` invite: live streams first; the first contact needs WebRTC to connect, or pairing does not finish | The one invite, a `ghostly1…` string ([801](801-invitation-profiles.md)); the first contact happens on the DHT and on a stream in parallel, and pairing finishes on whichever works |
 | `pair2d/` invite ("Text only"): DHT only from the first start, never upgrades by itself | Same first contact; the chat then upgrades by itself. "DHT only" becomes a per-chat choice made at any time, not an invite type |
 | Paired chat whose stream drops: short text goes over the DHT, the stream is redialled | Unchanged in substance: this is now the rule for every chat |
 | Legacy chat (prefix-less v0.4 code): timestamp `_msgs` text on the link record, legacy WebRTC link with calls, files and hosted HTTP | A **compatibility chat** ([402](402-legacy-chat.md)): kept, readable and writable, so a contact still on 0.4 can go on talking; never created for a new chat |
@@ -68,7 +68,7 @@ sequenceDiagram
     participant D as DHT (Pkarr)
     participant B as Joiner
     A->>D: publish presence and capability record (invite-sealed)
-    A-->>B: invite code pair3/... (out of band)
+    A-->>B: invite code ghostly1... (out of band)
     B->>D: read A's presence and capability record
     par First contact on the DHT
         B->>D: first-contact envelope in B's mailbox, signed by B's participation key
