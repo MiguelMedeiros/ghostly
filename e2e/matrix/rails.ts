@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, type Locator } from "@playwright/test";
 import { Interface } from "ethers";
+import { choose } from "../support/select";
 import { chatOption, chatPane, either, openChat, paymentCard, wallet, type Actor } from "./actors";
 
 /**
@@ -149,7 +150,7 @@ interface LightningNode {
 async function chooseSource(actor: Actor, provider: string): Promise<Locator> {
   await wallet(actor, "lightning");
   const source = actor.page.getByTestId("lightning-source");
-  await source.getByTestId("lightning-source-select").selectOption(provider);
+  await choose(source.getByTestId("lightning-source-select"), provider);
   return source;
 }
 
@@ -407,10 +408,10 @@ async function bdk(a: Actor, b: Actor): Promise<void> {
   const address: Partial<Record<string, string>> = {};
   for (const p of [a, b]) {
     await wallet(p, "bitcoin");
-    await panel(p).getByTestId("onchain-source-select").selectOption("bdk");
+    await choose(panel(p).getByTestId("onchain-source-select"), "bdk");
     const form = panel(p).getByTestId("provider-form-bdk");
     await panel(p).getByTestId("bdk-written").check();
-    await form.getByLabel(either("Network")).selectOption("regtest");
+    await choose(form.getByLabel(either("Network")), "regtest");
     await form.getByLabel(either("Esplora server")).fill(BDK_REGTEST.esplora);
     await form.getByTestId("provider-save").click();
     await expect(panel(p).getByTestId("onchain-source-saved")).toBeVisible({ timeout: 60_000 });
