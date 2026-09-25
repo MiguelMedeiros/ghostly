@@ -24,6 +24,12 @@ const HANDSHAKE_MS = 20_000;
 const RELAY_OPEN_MS = 10_000;
 const LISTEN_MS = 20_000;
 const MAX_CHANNELS = 2;
+/**
+ * How the relay client is always made: never custodial. dht-relay's default is custodial, which sends every
+ * secret key to the relay so it can run the handshake and the stream itself. Nothing here takes this from
+ * settings or options; test/hyperdhtRelay.test.ts fails if a secret key ever reaches the relay's wire.
+ */
+const NON_CUSTODIAL = Object.freeze({ custodial: false as const });
 
 /**
  * The descriptor a browser's HyperDHT endpoint gives out: its key, that it is reached only through a relay, and
@@ -106,7 +112,7 @@ async function relayClient(url: string, createSocket: (url: string) => WebSocket
     });
     // Non-custodial: the relay is told public keys only, never a secret key (dht-relay's default sends them).
     // The node's own key is never used to listen or dial: a random one says nothing about this app.
-    const node = new RelayedDHT(new WebSocketStream(true, socket), { custodial: false, keyPair: hyperKeyPair(crypto.getRandomValues(new Uint8Array(32))) }) as RelayedNode;
+    const node = new RelayedDHT(new WebSocketStream(true, socket), { ...NON_CUSTODIAL, keyPair: hyperKeyPair(crypto.getRandomValues(new Uint8Array(32))) }) as RelayedNode;
     let closed!: () => void;
     const client: RelayClient = { node, endpoints: new Set(), gone: false, closed: new Promise(resolve => { closed = resolve; }) };
     socket.addEventListener("close", () => {
