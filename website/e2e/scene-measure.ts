@@ -106,7 +106,8 @@ export function measure(id: string): Shot {
 export function settleKey(id: string): string {
   const section = document.getElementById(id);
   if (!section) return "";
-  const parts: string[] = [];
+  // The page itself first: nothing has settled while it is still scrolling.
+  const parts: string[] = [String(Math.round(scrollY))];
   section.closest(".act")?.querySelectorAll<SVGGElement>(".act-backdrop .actor").forEach((a) => parts.push(a.style.transform, a.style.opacity));
   section.querySelectorAll(".scene-visual svg.stage :is(path, rect, circle, ellipse, line, text)").forEach((el) => {
     if (el.closest("svg.ghost, defs, mask")) return;

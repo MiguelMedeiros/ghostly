@@ -28,13 +28,18 @@ const GAP = 8;
 const overlap = (a: Rect, b: Rect, gap: number) => a.x < b.x + b.w + gap && a.x + a.w + gap > b.x && a.y < b.y + b.h + gap && a.y + a.h + gap > b.y;
 const fmt = (r: Rect) => `[${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.w)}×${Math.round(r.h)}]`;
 
-/** Scroll the pinned chapter to a point of its progress and wait for the picture to settle. */
+/**
+ * Scroll the pinned chapter to a point of its progress and wait for the picture to settle.
+ * The jump is instant: the site scrolls smoothly (html scroll-behavior), and a smooth
+ * scroll that has not started yet looks settled, so the next act was measured from the
+ * previous chapter, its backdrop screens below the window.
+ */
 async function scrollChapter(page: Page, id: string, p: number) {
   await page.evaluate(
     ([id, p]) => {
       const el = document.getElementById(id as string)!;
       const top = el.getBoundingClientRect().top + scrollY;
-      scrollTo(0, top + (el.offsetHeight - innerHeight) * (p as number));
+      scrollTo({ top: top + (el.offsetHeight - innerHeight) * (p as number), behavior: "instant" });
     },
     [id, p] as const,
   );
