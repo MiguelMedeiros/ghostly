@@ -4,42 +4,182 @@
 |---|---|
 | Candidate number | 400; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-20 |
+| Revision | 0.2 |
+| Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
-| Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md) |
-| Implementation | Existing 1:1 messages; stronger semantics proposed |
+| Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [03](03-capabilities.md), [100](100-transports.md), [800](800-invite-join.md) |
+| Implementation | Existing 1:1 messages over two separate profiles; the single layered chat of revision 0.2 is proposed |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 
+## One chat, two layers (revision 0.2)
+
+There is one kind of 1:1 chat and one invite format. Every chat has two layers:
+
+| Layer | What it is | What it is for | Always there? |
+|---|---|---|---|
+| **Layer 0, the DHT** | Signed, encrypted Pkarr records on the Mainline DHT, read through HTTP relays or natively ([01](01-ghost-core.md)) | The rendezvous: the invite, the first contact and handshake, capabilities and transport descriptors. The **floor**: short text ([403](403-dht-text.md)) and the pointer to held items ([4xx](4xx-store-and-forward.md)) when nothing better connects | Yes, for as long as both sides can reach the DHT |
+| **Layer 1, peer to peer** | An authenticated stream over WebRTC, Iroh or HyperDHT, chosen by the rank sum of [100](100-transports.md) | Everything: text up to 16 KiB, receipts, files, payments, names and pictures, and (once specified) calls | Only while one of those transports connects |
+
+The DHT is always the rendezvous. After the handshake the two apps upgrade to the best peer-to-peer transport they both support and talk there. If no transport connects, or the one in use drops, the chat keeps working over the DHT alone, and layer 1 is retried in the background until it comes back. A person can also choose to keep a chat on the DHT only.
+
+The earlier split between a "legacy" chat and a "paired" chat, and between "Live chat" and "Text only" at invite time, goes away. What those were becomes:
+
+| Before (dev, 2026-09-25) | After (this revision) |
+|---|---|
+| `pair1/` invite: live streams first; the first contact needs WebRTC to connect, or pairing does not finish | The one invite format ([801](801-invitation-profiles.md)); the first contact happens on the DHT and on a stream in parallel, and pairing finishes on whichever works |
+| `pair2d/` invite ("Text only"): DHT only from the first start, never upgrades by itself | Same first contact; the chat then upgrades by itself. "DHT only" becomes a per-chat choice made at any time, not an invite type |
+| Paired chat whose stream drops: short text goes over the DHT, the stream is redialled | Unchanged in substance: this is now the rule for every chat |
+| Legacy chat (prefix-less v0.4 code): timestamp `_msgs` text on the link record, legacy WebRTC link with calls, files and hosted HTTP | A **compatibility chat** ([402](402-legacy-chat.md)): kept, readable and writable, so a contact still on 0.4 can go on talking; never created for a new chat |
+
+## States of a chat
+
+A chat is always in exactly one of these states, on each side. The UI shows the state, not the layer names.
+
+| State | Meaning | Text | Shown as |
+|---|---|---|---|
+| `rendezvous` | The invite was made or used; the contact's participation key is not pinned yet | The joiner MAY send first-contact text on the DHT ([403](403-dht-text.md)); nothing else | The pairing progress ([#201 contract](#pairing-progress-and-transport-rows)) |
+| `live` | Pinned, and an authenticated layer-1 session is ready over transport *T* | Everything both apps negotiated ([401](401-paired-chat.md)) | "Live · Iroh" (the transport's name) |
+| `on-dht` | Pinned, no layer-1 session, and neither side chose DHT only; layer 1 is being retried | Short text and receipts; held items where both allow them | "On DHT · retrying live" |
+| `dht-chosen` | Pinned, and this side or the contact chose DHT only for this chat | As `on-dht`; layer 1 is not dialled | "DHT only · chosen by you" or "by <contact>" |
+
+Transitions:
+
+```mermaid
+stateDiagram-v2
+    [*] --> rendezvous: invite made or used
+    rendezvous --> live: stream handshake verified first
+    rendezvous --> on_dht: first-contact envelope verified first
+    on_dht --> live: layer 1 connects and authenticates
+    live --> on_dht: stream closes or 3 pings missed
+    on_dht --> dht_chosen: either side picks DHT only
+    live --> dht_chosen: either side picks DHT only
+    dht_chosen --> on_dht: both sides leave DHT only
+    rendezvous --> failed: security rejection or the DHT unreachable
+```
+
+`failed` is reserved for a security rejection (a participation key that does not match the pin, a forged or tampered record) or for not reaching the DHT at all (every relay and the native DHT refuse or time out). A first pairing whose streams do not connect is **not** a failure: it ends in `on-dht`.
+
+## How a chat starts, upgrades, falls back and comes back
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as Inviter
+    participant D as DHT (Pkarr)
+    participant B as Joiner
+    A->>D: publish presence and capability record (invite-sealed)
+    A-->>B: invite code pair3/... (out of band)
+    B->>D: read A's presence and capability record
+    par First contact on the DHT
+        B->>D: first-contact envelope in B's mailbox, signed by B's participation key
+        A->>D: read B's mailbox, verify, pin B, reply envelope
+        B->>D: read reply, verify, pin A
+    and First contact on a stream
+        B->>D: WebRTC offer (_rtc), signed
+        A->>D: WebRTC answer (_rtc)
+        A->>B: pair-offer, pair-proof, pair-ready (401)
+    end
+    Note over A,B: Pinned on whichever path verified first. Same keys on both paths, or a security rejection.
+    alt A stream connected
+        A->>B: chat over layer 1 (WebRTC, Iroh or HyperDHT by rank sum)
+    else No stream connected
+        A->>D: short text envelopes (403), 256 bytes each
+        D->>B: read on the poll
+        Note over A,B: on-dht: layer 1 retried in the background (100)
+    end
+    A->>B: layer 1 drops (close, or 3 missed pings)
+    A->>D: queued text falls back to the DHT under the same ids
+    B->>D: contact seen again, dialler redials
+    A->>B: layer 1 back, queued long text, files and requests flush in order
+```
+
+1. **Start.** The inviter publishes its presence and a capability record on the DHT ([03](03-capabilities.md)) and hands over the invite. The joiner starts two first contacts at once: a first-contact envelope in its DHT mailbox ([403](403-dht-text.md)) and a stream attempt through `_rtc` signaling ([101](101-webrtc.md)). Each side pins the other's participation key on the first path that verifies. Both paths carry the same key; a different key on the other path is a security rejection, never a fallback.
+2. **Upgrade.** Once pinned, and unless either side chose DHT only, the two apps run the transport negotiation of [100](100-transports.md): the intersection of both capability records, ranked by the rank sum. Native transports can be tried without a WebRTC session first, because their descriptors travel in the capability record (new). The first transport that authenticates wins; the chat moves to `live`.
+3. **Fall back.** When the layer-1 session closes, or three pings in a row go unanswered ([401](401-paired-chat.md#liveness-and-reconnection)), the chat moves to `on-dht` at once. Unconfirmed text is sent again over the DHT under the same message ids; what the DHT cannot carry waits in the outbox, or is held ([4xx](4xx-store-and-forward.md)) where both sides allow it.
+4. **Come back.** Layer 1 is retried in the background with the backoff of [100](100-transports.md#background-retry-and-upgrade). When it authenticates again, the chat moves back to `live`, everything waiting in the outbox goes in order, and the DHT stops carrying text for that chat.
+
+## Candidate requirements for the one chat
+
+1. A new chat MUST be created with the one invite format of [801](801-invitation-profiles.md). There is no delivery choice at invite time.
+2. Every chat MUST keep layer 0 working for as long as it exists: presence, the capability record and the DHT mailbox of [403](403-dht-text.md). Layer 1 is an upgrade, not a precondition.
+3. A first pairing MUST finish in `live` or in `on-dht` whenever the DHT is reachable and no security check failed. It MUST NOT report failure because a stream did not connect.
+4. A chat in `on-dht` MUST keep retrying layer 1 ([100](100-transports.md#background-retry-and-upgrade)) and MUST move to `live` without any action from the person when a transport authenticates.
+5. A chat in `live` MUST move to `on-dht` when layer 1 is lost, and MUST NOT lose, duplicate or reorder a message in the move: the stable message id and the outbox of [401](401-paired-chat.md) are shared by both layers, and the receiver deduplicates across them.
+6. Choosing DHT only is per chat and per side. Either side's choice keeps both off layer 1; leaving it takes both ([403](403-dht-text.md#choosing-dht-only)). The choice is announced in the next envelope at once.
+7. What a state cannot carry is said before it is attempted, not after a silent failure. The composer and the chat's actions show the reason ("Needs a live connection", "Up to 256 bytes on the DHT") next to the disabled action, and anything that can wait is queued rather than refused.
+8. A security rejection (key mismatch, a forged record, a proof bound to another channel) MUST stop the chat on both layers until the person acts. It MUST NOT trigger a fallback.
+9. The actual state and transport are reported separately from the person's preference.
+
+## What each state can carry
+
+| Ability | `live` | `on-dht` and `dht-chosen` | UI while on the DHT |
+|---|---|---|---|
+| Text up to 256 UTF-8 bytes | Yes | Yes ([403](403-dht-text.md)) | Sends; one text awaits a receipt at a time, the rest queue |
+| Text of 257 bytes to 16 KiB | Yes | Held ([4xx](4xx-store-and-forward.md)) if both allow; otherwise queued for layer 1 (new) | "Sends when live" on the bubble; the byte count turns amber past 256 |
+| Receipts ("Received by peer") | Yes | Yes, for DHT text and held items | Same states as live |
+| Name | Yes (`paired-nick`) | Yes, in the capability record (new, at most 64 bytes) | Unchanged |
+| Picture | Yes (`paired-avatar`) | No; waits for layer 1 | The last picture stays |
+| Files and voice messages | Yes (`files/2`, [501](501-paired-files.md)) | Held if both allow (8 MiB each); otherwise queued for layer 1 (new) | Attach stays enabled; the bubble says "Sends when live" or "Held for <contact>" |
+| Payment requests | Yes (`payments/1`) | Held if both allow (Cashu and Lightning requests); otherwise queued | As files |
+| Paying (ecash, Lightning, Ark, Spark, on-chain) | Yes, per [200](200-payments.md) | No. Bearer tokens never enter the DHT or a hold, and a payment is not queued | ⚡ disabled: "Payments need a live connection" |
+| Calls, voice and video | Not yet in this profile ([600](600-media.md); compatibility chats only) | No | Call buttons disabled: "Calls need a live connection" |
+| Hosted local services | Not yet in this profile ([700](700-local-services.md); compatibility chats only) | No | Hidden |
+| Identity proofs shared with the contact | Yes | No; they wait for layer 1 | Unchanged |
+
+A Lightning invoice pasted as text is text: it fits the DHT when short enough, and sending it starts no payment. Cashu tokens are refused as DHT text.
+
 ## Contract and concrete profiles
 
-This document defines common responsibilities and proposed extensions. Exact implemented encodings and runtime limits belong to [401 · Paired Chat](401-paired-chat.md), [402 · Legacy Timestamp Chat](402-legacy-chat.md), [403 · Bounded DHT Text](403-dht-text.md). Supporting a concrete profile does not establish full conformance to this Draft.
+This document defines the chat's common responsibilities. Exact encodings belong to:
 
-## Local experimental increment
+- [401 · Chat Session](401-paired-chat.md): the authenticated layer-1 session (`paired-chat/1`, `chat/1`), its receipts, liveness and outbox.
+- [403 · DHT Text](403-dht-text.md): the floor of every chat, and its first contact.
+- [4xx · Store-and-Forward](4xx-store-and-forward.md): held items for an away contact, on either layer.
+- [402 · Compatibility Chat](402-legacy-chat.md): the v0.4 timestamp profile, kept for existing chats and v0.4 codes only.
 
-The follow-up adds transcript-negotiated signed signaling, durable per-message delivery/retry state and observed extension interoperability; see the [implementation profile](PAIRED-CHAT-INCREMENT.md) for exact partial coverage and residual risks. This does not change Draft status.
+Supporting a concrete profile does not establish full conformance to this Draft.
 
-The opt-in [paired chat increment](PAIRED-CHAT-INCREMENT.md) now exercises a limited subset of this draft. It is not full conformance or a replacement for the broader candidate design below. Read its exact wire profile, local admission boundary and limitations separately from the legacy baseline.
+## Pairing progress and transport rows
 
-## Implemented scope
+Two surfaces show where a chat is. They are specified here so both apps say the same thing.
 
-See the concrete profiles above for current fields, limits, receipt semantics and runtime availability. Contract requirements below are separately reviewable; proposed extensions are not shipped merely because a profile exists.
+- **Pairing progress** (the `PairingProgress` contract of the pairing-latency work): its stages stay `publishing`, `waiting`, `resolving`, `knocking`, `answering`, `connecting`, `live`, `failed`, and gain a terminal stage **`on-dht`**: pinned over the DHT, layer 1 not connected (yet). `detail.reason` on `on-dht` is one of `no-common-transport`, `transport` (every attempt failed), `chosen` (either side chose DHT only) or `waiting` (still trying). `failed` keeps only `key-mismatch`, `security`, `publish` and `offline` (the DHT itself unreachable). A first pairing that ends in `on-dht` keeps its layer-1 attempts running; the scene gives way to the chat at `on-dht`, and the header indicator says "On DHT · retrying live".
+- **Transport rows and the per-chat switch** (the transport-switch work): **DHT** is one of the transports in the chat's Connection menu: Automatic · WebRTC · Iroh · HyperDHT · **DHT only**. Choosing it is the `dht-chosen` state; Automatic leaves it. Rows: "Live connection lost · texts go through the DHT", "Back live over <transport>", "You switched to DHT only", "<contact> switched to DHT only", "Left DHT only · connecting live". DHT only is always available; the others are offered only when both apps support them.
 
 ## Candidate semantics
 
 Future messages need a stable sender-scoped message ID, authenticated channel/participation context, sequence within a sender generation, content type and bounded body. Distinguish locally queued, sent, received, durably stored and read; only advertise receipts actually implemented. Retries reuse IDs. Deduplication retention must cover the declared retry window and survive restart where durable delivery is promised.
 
-Offer per-sender order with explicit gaps; do not promise total order across peers/groups. Bind generation/epoch changes so sequence resets cannot replay old messages. DHT-only must be an explicit small-message profile with visible size/retention limits; report failure or truncation policy before losing user content. No group fanout over `_msgs`.
+Offer per-sender order with explicit gaps; do not promise total order across peers/groups. Bind generation/epoch changes so sequence resets cannot replay old messages. DHT delivery has visible size/retention limits; report failure or truncation policy before losing user content. No group fanout over DHT mailboxes or `_msgs`; groups ([900](900-group-sessions.md)) have their own distribution and are outside this revision.
 
 ## Compatibility, security and open decisions
 
-Keep the legacy timestamp profile separate. Decide message ID encoding, durable outbox, receipt authentication, retry limits, retention and upgrade rules before Proposed. Offline group catch-up is negotiated peer storage in 900, not a Core promise. Receipts leak activity and should have declared policy.
+The compatibility profile ([402](402-legacy-chat.md)) stays separate: a compatibility chat is never silently converted, and a 0.5 app never creates one. Receipts leak activity and should have declared policy. Publishing every chat's text to the DHT when layer 1 is down exposes to relays what [403](403-dht-text.md) already exposes for DHT-only chats (sizes, timing, the mailbox addresses), now for every chat; the content stays sealed.
+
+Open decisions forced by this revision, each with the editors' recommendation:
+
+| # | Question | Recommendation |
+|---|---|---|
+| Q1 | May files and payment requests ride DHT text? | **No.** They ride layer 1, or a hold ([4xx](4xx-store-and-forward.md)) whose content lives in the sender's storage with only a pointer on the DHT. Splitting them across DHT records is what [01](01-ghost-core.md) forbids. |
+| Q2 | Fallback message size: keep 256 bytes, or raise it (the compatibility profile allows 500)? | **Keep 256** ([403](403-dht-text.md)). A post-pin envelope with a receipt already uses most of the 1,000-byte packet. Longer text is queued for layer 1 or held, never fragmented. |
+| Q3 | How long is layer 1 retried? | **Forever while the app runs and the chat is not `dht-chosen`**, paced as in [100](100-transports.md#background-retry-and-upgrade): at once when the contact is seen, then 20 s doubling to 3 min while it stays online, nothing while it is away. No give-up timer. |
+| Q4 | Queue texts beyond the one-outstanding DHT text in the outbox, or keep them in the composer as today? | **Queue** them, in order, as `queued`. The one-outstanding rule stays on the wire. |
+| Q5 | Queue files and payment requests while on the DHT with no hold, or disable attach? | **Queue** them locally, with a cancel, until layer 1 or a hold takes them. Payments themselves are never queued. |
+| Q6 | Should a person be able to forbid DHT text for a chat ("live only")? | **Not in 0.5's UI.** The wire keeps it expressible: a capability record without `dht-text/1` means "send me nothing on the DHT", and the other side then queues. |
+| Q7 | Poll pace of the DHT mailbox while `live` | **Slow it to every 5 minutes while live** (today 30 s), back to 4 s the moment layer 1 is lost. With every chat on the floor, the relays' per-IP budget (50 requests a minute on pkarr.pubky.org) is the limit. |
+
+Other open decisions stay as before: message ID encoding across profiles, receipt authentication on the DHT, retry limits and retention before Proposed. Offline group catch-up is negotiated peer storage in 900, not a Core promise.
 
 ## Conformance
 
-Exercise equal timestamps, out-of-order arrivals, duplicated messages across DHT/data link, disconnect after send but before storage, restart/retry and full budgets with signaling present. Verify no receipt means more than its declared stage.
+Exercise equal timestamps, out-of-order arrivals, duplicated messages across DHT and layer 1, disconnect after send but before storage, restart/retry and full budgets with signaling present. Verify no receipt means more than its declared stage. For revision 0.2 add: a first pairing with every stream blocked ends in `on-dht` and chats; the same pairing with streams unblocked later moves to `live` by itself; a layer-1 drop mid-conversation loses and duplicates nothing; a key mismatch on either path stops both; DHT only chosen on one side keeps both off layer 1.
 
 ## References
 
-[LinkSession](../../packages/core/src/link.ts), [GhostLink](../../packages/core/src/ghostlink.ts), [records](../../packages/core/src/records.ts), [local messages](../../packages/browser/src/engine/db.ts), [group sessions](900-group-sessions.md).
+[LinkSession](../../packages/core/src/link.ts), [GhostLink](../../packages/core/src/ghostlink.ts), [DHT delivery](../../packages/core/src/dhtDelivery.ts), [records](../../packages/core/src/records.ts), [outbox](../../packages/browser/src/engine/outbox.ts), [local messages](../../packages/browser/src/engine/db.ts), [group sessions](900-group-sessions.md).
+
+## Revision log
+
+- 0.2 (2026-09-25): one chat with a DHT layer and a peer-to-peer layer; chat states; what each state carries; the pairing-progress and transport-row wording; open decisions Q1 to Q7.
+- 0.1 (2026-09-20): initial review draft.
