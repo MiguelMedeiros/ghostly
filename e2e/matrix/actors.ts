@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { Locator } from "@playwright/test";
 import { expect, type Peer } from "../support/fixtures";
 import { choose } from "../support/select";
+import { composerRow } from "../support/composer";
 
 /**
  * A person in a scenario: a web or extension peer, with the language and the
@@ -80,13 +81,10 @@ export async function nickname(actor: Actor, name: string): Promise<void> {
 }
 
 /**
- * A composer button. On a phone the less used ones (file, GIF, ⚡) live behind "More",
- * which closes again after each use.
+ * A row of the composer's + menu (payment, identity, document, photos), on every screen size: the + opens it (a sheet on
+ * a phone). The file inputs themselves are always in the page; `setInputFiles` needs no menu.
  */
-export async function composerButton(actor: Actor, button: (a: Actor) => Locator): Promise<Locator> {
-  if (actor.phone && !(await button(actor).isVisible())) await actor.page.getByTestId("composer-more").click();
-  return button(actor);
-}
+export const composerButton = (actor: Actor, testId: string): Promise<Locator> => composerRow(actor.page, testId);
 
 export async function say(actor: Actor, text: string): Promise<void> {
   const box = actor.page.getByPlaceholder("Message…");
@@ -101,7 +99,7 @@ export const sees = (actor: Actor, text: string, timeout = 90_000) =>
 
 /** The payment composer on this person's chat, with the card of one rail turned over (a track on a phone). */
 export async function paymentCard(actor: Actor, card: string): Promise<void> {
-  const button = await composerButton(actor, (a) => a.page.getByTestId("payment-button"));
+  const button = await composerButton(actor, "payment-button");
   await expect(button).toBeEnabled({ timeout: 60_000 });
   await button.click();
   const composer = actor.page.getByTestId("payment-composer");

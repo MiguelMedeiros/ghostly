@@ -1,6 +1,7 @@
 import { chat, connect, expect, link, openChat, openWallet, say, test, type Peer } from "../support/fixtures";
 import { LocalLnurlServer } from "../support/lnurl";
 import { endpoints } from "../infra/env.mjs";
+import { composerRow } from "../support/composer";
 
 /**
  * Paying with a wallet that is not Ghostly, and paying a Lightning address. Sats move through the test
@@ -46,7 +47,7 @@ test.describe("another wallet", { tag: "@network" }, () => {
     await openChat(bob);
 
     // Bob asks for 10 sats. Alice never presses Pay: she pays the invoice from her own wallet page instead.
-    await bob.page.getByTestId("payment-button").click();
+    await (await composerRow(bob.page, "payment-button")).click();
     await bob.page.getByTestId("payment-card-cashu").click();
     await bob.page.getByTestId("payment-amount").fill("10");
     await bob.page.getByTestId("payment-request").click();

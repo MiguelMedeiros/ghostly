@@ -42,11 +42,17 @@ test("on a phone: a chat is a screen of its own", { tag: ["@feature:app.mobile-l
   await connect(alice, bob);
   await expect(alice.page.getByTestId("mobile-tabs")).toHaveCount(0);
 
-  // The composer keeps the less used buttons behind "More".
-  await expect(alice.page.getByTitle("Send a file")).toBeHidden();
+  // WhatsApp's composer: [+] [emoji/GIF] [message] [mic]; what the + holds opens as a sheet from the bottom.
+  await expect(alice.page.getByTestId("composer-expressions")).toBeVisible();
+  const input = (await alice.page.getByPlaceholder("Message…").boundingBox())!;
+  expect(input.width).toBeGreaterThan(200);
   await alice.page.getByTestId("composer-more").click();
-  await expect(alice.page.getByTitle("Send a file")).toBeVisible();
-  await expect(alice.page.getByTitle("GIF")).toBeVisible();
+  const menu = alice.page.getByTestId("composer-menu");
+  await expect(menu).toHaveAttribute("data-menu", "sheet");
+  await expect(menu.getByTestId("composer-file")).toBeVisible();
+  await expect(menu.getByTestId("composer-media")).toBeVisible();
+  await alice.page.getByTestId("menu-backdrop").click({ position: { x: 10, y: 10 } });
+  await expect(menu).toHaveCount(0);
 
   await say(bob, "boo on the small screen");
   await expect(chat(alice).getByText("boo on the small screen")).toBeVisible();

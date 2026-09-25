@@ -4,6 +4,7 @@ import { BDK_REGTEST } from "../support/bdk-regtest/regtest.mjs";
 import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
 import { choose } from "../support/select";
 import { FakeEsplora } from "../../packages/browser/test/helpers/fakeEsplora";
+import { composerRow } from "../support/composer";
 
 /**
  * The BDK wallet (bitcoindevkit in WebAssembly) as the on-chain Bitcoin source, Testnet only:
@@ -136,7 +137,7 @@ test("the chat offers on-chain Bitcoin, off until a source is set up", { tag: ["
   const [alice, bob] = await Promise.all([peer("bdk-chat-a"), peer("bdk-chat-b")]);
   await link(alice, bob);
   await connect(alice, bob);
-  await alice.page.getByTestId("payment-button").click({ timeout: 60_000 });
+  await (await composerRow(alice.page, "payment-button")).click({ timeout: 60_000 });
   await expect(alice.page.getByTestId("payment-card-bitcoin")).toBeDisabled();
   await expect(alice.page.getByTestId("payment-card-bitcoin")).toHaveAttribute("title", /Bitcoin is not set up yet/);
 });
@@ -198,7 +199,7 @@ test("BDK on regtest: funded, a Send from the wallet, a Send and a Request paid 
 
   // A Send in the chat: Bob's app asks Alice's for a fresh address, Bob approves.
   for (const p of [alice, bob]) await openChat(p);
-  await bob.page.getByTestId("payment-button").click();
+  await (await composerRow(bob.page, "payment-button")).click();
   await bob.page.getByTestId("payment-card-bitcoin").click();
   await bob.page.getByTestId("payment-amount").fill("5000");
   await bob.page.getByTestId("payment-send").click();
@@ -215,7 +216,7 @@ test("BDK on regtest: funded, a Send from the wallet, a Send and a Request paid 
   await expect.poll(async () => { regtest("mine", "1"); return alicesRequest.getByTestId("payment-state").innerText(); }, { timeout: 90_000, intervals: [3_000] }).toBe("Paid");
 
   // A Request paid in the chat: Bob asks, Alice pays from the bubble.
-  await bob.page.getByTestId("payment-button").click();
+  await (await composerRow(bob.page, "payment-button")).click();
   await bob.page.getByTestId("payment-card-bitcoin").click();
   await bob.page.getByTestId("payment-amount").fill("3000");
   await bob.page.getByTestId("payment-request").click();

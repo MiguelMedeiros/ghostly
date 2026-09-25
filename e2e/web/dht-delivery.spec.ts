@@ -2,6 +2,7 @@ import { copyInvite } from "../support/clipboard";
 import { pasteInvite } from "../support/clipboard";
 import { test, expect, chat, say, type Peer } from "../support/fixtures";
 import { LocalRelay } from "../support/relay";
+import { composerRow } from "../support/composer";
 
 async function watchStreams(peer: Peer) {
   // Before creating/joining; retained on reload. This observes real browser construction.
@@ -56,7 +57,7 @@ test("DHT-only starts from an invite without streams, preserves drafts and recei
   for(const p of [a,b]) {await expect(chat(p).getByText(text,{exact:true})).toHaveCount(1);await expect(chat(p).getByText("Reply over DHT",{exact:true})).toHaveCount(1);}
   await noStreams([a]);
   // A file waits for a live connection instead of being refused.
-  await expect(a.page.getByRole("button",{name:"Send a file",exact:true})).toBeEnabled();
+  await expect(await composerRow(a.page,"composer-file")).toBeEnabled();
 });
 
 test("DHT published while contact is away survives sender restart and is received once when contact returns",{ tag: ["@feature:chat.dht.offline"] },async({peer})=>{

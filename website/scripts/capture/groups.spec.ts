@@ -6,6 +6,7 @@ import { rmSync } from "node:fs";
 import { LocalRelay } from "../../../e2e/support/relay";
 import { CAST, chat, converse, home, newProfile, open, person, sceneImage, shot, toBottom, type Peer } from "./helpers";
 import { fund } from "./wallet";
+import { composerRow } from "../../../e2e/support/composer";
 
 const GROUP = "Lake house trip";
 const groupChat = (p: Peer) => p.page.getByTestId("group-chat");
@@ -55,7 +56,7 @@ test("a private group of four, desktop and phone", async ({ browser, baseURL }) 
   ], everyone);
 
   // Boo asks the group for the firewood; Wendy pays it, once, and everyone sees who did.
-  await boo.page.getByTestId("payment-button").click();
+  await (await composerRow(boo.page, "payment-button")).click();
   await boo.page.getByTestId("group-pay-everyone").click();
   await boo.page.getByTestId("payment-card-cashu").click();
   await boo.page.getByTestId("payment-amount").fill("2000");

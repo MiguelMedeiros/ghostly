@@ -1,6 +1,7 @@
 import { BREEZ_TESTNET, counterpart, type Counterpart } from "../support/breez";
 import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
 import { choose, optionsOf, close } from "../support/select";
+import { composerRow } from "../support/composer";
 
 /**
  * Breez (the nodeless Breez SDK, on Spark) as the Lightning source. Its wallet is Ghostly's to make: a
@@ -95,7 +96,7 @@ test.describe("on Breez's regtest", { tag: "@network" }, () => {
     // A Request in the chat: Bob's invoice comes from his Breez wallet. Alice pays it from her Lightning
     // card (the bubble's "Copy invoice"): her Breez wallet pays, Bob's sees it paid and settles the request.
     for (const p of [alice, bob]) await openChat(p);
-    await bob.page.getByTestId("payment-button").click();
+    await (await composerRow(bob.page, "payment-button")).click();
     await bob.page.getByTestId("payment-card-lightning").click();
     await bob.page.getByTestId("payment-amount").fill("150");
     await bob.page.getByTestId("payment-request").click();

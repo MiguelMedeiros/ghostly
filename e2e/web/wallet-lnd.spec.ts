@@ -2,6 +2,7 @@ import { decodeBolt11 } from "@ghostly/core";
 import { balance, credentials, invoice, lookupInvoice, settled } from "../support/lnd-regtest/regtest.mjs";
 import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
 import { choose } from "../support/select";
+import { composerRow } from "../support/composer";
 
 /**
  * The LND provider against real nodes: GHOSTLY_LND_REGTEST=1 with e2e/infra up (npm run e2e:infra:up) and this
@@ -91,7 +92,7 @@ test("LND: a node per person, invoices in and out through the card, a chat reque
   await bob.page.getByTestId("chat-payments-open").click();
   await bob.page.getByTestId("chat-payments").getByTestId("chat-payments-cashu").click();
   await bob.page.getByTestId("chat-payments-save").click();
-  await bob.page.getByTestId("payment-button").click();
+  await (await composerRow(bob.page, "payment-button")).click();
   await bob.page.getByTestId("payment-card-lightning").click();
   await bob.page.getByTestId("payment-amount").fill("2100");
   await bob.page.getByTestId("payment-request").click();

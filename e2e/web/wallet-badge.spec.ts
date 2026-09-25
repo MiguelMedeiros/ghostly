@@ -1,4 +1,5 @@
 import { chat, connect, expect, link, openChat, openWallet, test, type Peer } from "../support/fixtures";
+import { composerRow } from "../support/composer";
 
 // Sats that come in while the wallet is closed show as a count on the wallet icon, until it is opened.
 test.describe("wallet badge", { tag: "@network" }, () => {
@@ -26,7 +27,7 @@ test.describe("wallet badge", { tag: "@network" }, () => {
     await openChat(alice);
     await expect(alice.page.getByTestId("wallet-new")).toHaveCount(0);
 
-    await alice.page.getByTestId("payment-button").click();
+    await (await composerRow(alice.page, "payment-button")).click();
     await alice.page.getByTestId("payment-card-cashu").click();
     await alice.page.getByTestId("payment-amount").fill("21");
     await alice.page.getByTestId("payment-send").click();

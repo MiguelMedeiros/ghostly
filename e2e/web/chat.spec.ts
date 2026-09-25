@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { BIG, BIG_SHA256 } from "../../extension/test/atlas.mjs";
 import { chat, connect, expect, GIF, link, linkLegacy, say, test, type Peer } from "../support/fixtures";
+import { openExpressions } from "../support/composer";
 
 async function setNickname(peer: Peer, nick: string): Promise<void> {
   await peer.page.goto("/#/settings");
@@ -74,36 +75,42 @@ test("emoji and GIFs", { tag: ["@feature:chat.paired.emoji", "@feature:chat.pair
   await link(alice, bob);
   await connect(alice, bob);
 
-  await alice.page.getByTitle("Emoji").click();
-  await alice.page.locator("em-emoji-picker").getByRole("searchbox").fill("ghost");
-  await alice.page.locator("em-emoji-picker").getByRole("button", { name: "👻" }).first().click();
+  // One panel, emoji first: search, pick, and it goes into the message.
+  const panel = await openExpressions(alice.page, "emoji");
+  await panel.getByTestId("expression-search").fill("ghost");
+  await panel.getByTestId("emoji-section-search").getByRole("button", { name: "👻" }).first().click();
   await expect(alice.page.getByPlaceholder("Message…")).toHaveValue("👻");
   await alice.page.getByPlaceholder("Message…").press("Enter");
   await expect(chat(bob).getByText("👻", { exact: true })).toBeVisible();
 
-  await alice.page.getByTitle("GIF").click();
+  // The switch at the bottom: GIFs, ghosts first; one click sends it and closes the panel.
+  await openExpressions(alice.page, "gif");
   await expect(alice.page.getByRole("button", { name: "Giphy", exact: true })).toHaveCount(0);
+  await expect(alice.page.getByTestId("gif-category-ghosts")).toHaveAttribute("aria-pressed", "true");
   await alice.page.getByTitle("retro ghost").click();
+  await expect(alice.page.getByTestId("expression-panel")).toHaveCount(0);
   const gif = bob.page.locator('img[src*="ghost.gif"]');
   await expect(gif).toBeVisible();
   expect(await gif.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1);
+
+  // A phone: the same panel is a sheet, and it opens on GIFs, the segment used last.
   await alice.page.setViewportSize({width:390,height:844});
-  await alice.page.getByTestId("composer-more").click();
-  await alice.page.getByTitle("GIF").click();
-  await expect(alice.page.getByText("GIFCITIES · INTERNET ARCHIVE")).toBeVisible();
-  await alice.page.getByPlaceholder("Search GIFs...").fill("ghost");
+  await alice.page.getByTestId("composer-expressions").click();
+  const sheet = alice.page.getByTestId("expression-panel");
+  await expect(sheet).toHaveAttribute("data-tab", "gif");
+  await expect(sheet).toHaveClass(/\bsheet\b/);
+  await expect(alice.page.getByText("GifCities · Internet Archive")).toBeVisible();
+  await alice.page.getByPlaceholder("Search GIFs").fill("ghost");
   await expect(alice.page.getByTitle("retro ghost")).toBeVisible();
   await alice.page.keyboard.press("Escape");
-  await expect(alice.page.getByPlaceholder("Search GIFs...")).toHaveCount(0);
-  await alice.page.getByTestId("composer-more").click();
-  await alice.page.getByTitle("GIF").click();
+  await expect(sheet).toHaveCount(0);
+  await alice.page.getByTestId("composer-expressions").click();
   await alice.page.locator(".sheet-backdrop").click({position:{x:10,y:10}});
-  await expect(alice.page.getByPlaceholder("Search GIFs...")).toHaveCount(0);
+  await expect(sheet).toHaveCount(0);
   await alice.context.route("https://gifcities.archive.org/**",route=>route.fulfill({status:503,body:"Unavailable"}));
-  await alice.page.getByTestId("composer-more").click();
-  await alice.page.getByTitle("GIF").click();
+  await alice.page.getByTestId("composer-expressions").click();
   await expect(alice.page.getByText("GIF search is unavailable. Try again.")).toBeVisible();
-  await alice.page.getByRole("button",{name:"Close GIF picker"}).click();
+  await alice.page.keyboard.press("Escape");
 });
 
 test("files, peer to peer, arrive intact", { tag: ["@feature:files.paired.send", "@feature:files.paired.images"] }, async ({ peer }, testInfo) => {

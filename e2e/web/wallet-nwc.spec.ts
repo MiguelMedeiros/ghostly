@@ -1,6 +1,7 @@
 import { FakeNwcWallet, TestRelay } from "../../packages/browser/test/helpers/fakeNwc";
 import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
 import { choose } from "../support/select";
+import { composerRow } from "../support/composer";
 
 /**
  * Lightning through Nostr Wallet Connect: the person pastes a wallet's `nostr+walletconnect://` URI as the
@@ -115,7 +116,7 @@ test.describe("NWC on regtest Lightning", () => {
     await bob.page.getByTestId("chat-payments-open").click();
     await bob.page.getByTestId("chat-payments").getByTestId("chat-payments-cashu").click();
     await bob.page.getByTestId("chat-payments-save").click();
-    await bob.page.getByTestId("payment-button").click();
+    await (await composerRow(bob.page, "payment-button")).click();
     await bob.page.getByTestId("payment-card-lightning").click();
     await bob.page.getByTestId("payment-amount").fill("2100");
     await bob.page.getByTestId("payment-request").click();

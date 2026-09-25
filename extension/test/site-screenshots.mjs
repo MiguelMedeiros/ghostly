@@ -146,6 +146,7 @@ try {
   await boo.page.getByTestId("file-input").setInputFiles(photo);
   await casper.page.getByTestId("file-save").first().waitFor({ timeout: 120_000 });
   await say(casper, "love it. here, for the pizza 🍕");
+  await casper.page.getByTestId("composer-more").click();
   await casper.page.getByTestId("payment-button").click();
   await casper.page.getByTestId("payment-amount").fill("2100");
   await casper.page.getByPlaceholder("What for? (optional)").fill("pizza 🍕");

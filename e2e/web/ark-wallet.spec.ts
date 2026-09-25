@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
+import { composerRow } from "../support/composer";
 
 // Opt-in, local regtest only. Every profile and seed belongs to this test.
 test("Ark request, explicit approval and receipt in the chat", { tag: ["@feature:payments.arkade.request", "@feature:payments.arkade.send", "@feature:payments.chat.review", "@gated"] }, async ({ peer }, testInfo) => {
@@ -28,7 +29,7 @@ test("Ark request, explicit approval and receipt in the chat", { tag: ["@feature
   await expect(balance(bob)).toHaveText(/^0\s*sats/);
   // In the chat: pick the Ark card, type the amount, request.
   for (const p of [alice, bob]) await openChat(p);
-  await bob.page.getByTestId("payment-button").click();
+  await (await composerRow(bob.page, "payment-button")).click();
   await bob.page.getByTestId("payment-card-arkade").click();
   // The card turns over: its back is where the amount goes.
   await expect(bob.page.getByTestId("payment-back")).toContainText("Ark");
@@ -56,7 +57,7 @@ test("Ark request, explicit approval and receipt in the chat", { tag: ["@feature
 
   // Send, with no request: Bob's app asks Alice's for a fresh Ark address, then waits for his approval.
   for (const p of [alice, bob]) await openChat(p);
-  await bob.page.getByTestId("payment-button").click();
+  await (await composerRow(bob.page, "payment-button")).click();
   await bob.page.getByTestId("payment-card-arkade").click();
   await bob.page.getByTestId("payment-amount").fill("400");
   await bob.page.getByTestId("payment-send").click();

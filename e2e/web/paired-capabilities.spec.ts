@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { chat, expect, openChat, openWallet, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
+import { composerRow } from "../support/composer";
 
 test("paired chat: files, real WebRTC, local mint send/request and persistence", { tag: ["@feature:chat.paired.pair", "@feature:transport.webrtc", "@feature:files.paired.send", "@feature:files.persistence", "@feature:chat.paired.storage", "@feature:wallet.cashu.receive-lightning", "@feature:payments.chat.review", "@feature:payments.cashu.send", "@feature:payments.cashu.request", "@feature:wallet.history"] }, async ({ peer }) => {
   test.skip(!process.env.E2E_MINT_URL?.startsWith("http://127.0.0.1:"), "Requires an explicitly local fake mint");
@@ -23,7 +24,7 @@ test("paired chat: files, real WebRTC, local mint send/request and persistence",
   await alice.page.getByTestId("wallet-create-invoice").click();
   await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^100\s*sats/);
   for (const p of [alice, bob]) await openChat(p);
-  await alice.page.getByTestId("payment-button").click(); await alice.page.getByTestId("payment-card-cashu").click(); await alice.page.getByTestId("payment-amount").fill("21");
+  await (await composerRow(alice.page, "payment-button")).click(); await alice.page.getByTestId("payment-card-cashu").click(); await alice.page.getByTestId("payment-amount").fill("21");
   await alice.page.getByTestId("payment-send").click();
   // Every send is reviewed first: nothing leaves before the approval.
   await alice.page.getByTestId("payment-composer").getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
@@ -38,7 +39,7 @@ test("paired chat: files, real WebRTC, local mint send/request and persistence",
   await bob.page.getByTestId("chat-payments-open").click();
   await bob.page.getByTestId("chat-payments").getByTestId("chat-payments-lightning").click();
   await bob.page.getByTestId("chat-payments-save").click();
-  await bob.page.getByTestId("payment-button").click(); await bob.page.getByTestId("payment-card-cashu").click(); await bob.page.getByTestId("payment-amount").fill("10"); await bob.page.getByTestId("payment-request").click();
+  await (await composerRow(bob.page, "payment-button")).click(); await bob.page.getByTestId("payment-card-cashu").click(); await bob.page.getByTestId("payment-amount").fill("10"); await bob.page.getByTestId("payment-request").click();
   await alice.page.getByTestId("payment-pay").click();
   await chat(alice).getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
   for (const p of [alice, bob]) await expect(chat(p).getByTestId("payment-bubble").filter({ hasText: "equest" }).getByTestId("payment-state")).toHaveText(/Paid/);

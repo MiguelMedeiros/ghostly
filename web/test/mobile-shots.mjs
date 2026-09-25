@@ -94,7 +94,7 @@ try {
   await shot(phone, "chat");
   console.log("horizontal overflow in chat:", await overflow(phone));
 
-  await phone.getByTitle("Emoji").click();
+  await phone.getByTestId("composer-expressions").click();
   await phone.waitForTimeout(1200);
   await shot(phone, "sheet-emoji");
   await phone.mouse.click(180, 80);

@@ -1,5 +1,6 @@
 import { chat, connect, expect, link, openChat, openWallet, test, type Peer } from "../support/fixtures";
 import { TEST_MINT, mintEndpoint } from "../support/mint";
+import { composerRow } from "../support/composer";
 
 /**
  * Sats move through a real Cashu mint: the test mint, whose sats are worthless
@@ -47,7 +48,7 @@ test.describe("wallet", { tag: "@network" }, () => {
     await expect(alice.page.getByTestId("wallet-paid")).toBeVisible();
 
     await openChat(alice);
-    await alice.page.getByTestId("payment-button").click();
+    await (await composerRow(alice.page, "payment-button")).click();
     await alice.page.getByTestId("payment-card-cashu").click();
     await alice.page.getByTestId("payment-amount").fill("21");
     // The Cashu card turned over; the mint that holds the sats pays, so there is no mint to pick.
@@ -70,7 +71,7 @@ test.describe("wallet", { tag: "@network" }, () => {
     await bob.page.getByTestId("chat-payments-open").click();
     await bob.page.getByTestId("chat-payments").getByTestId("chat-payments-lightning").click();
     await bob.page.getByTestId("chat-payments-save").click();
-    await bob.page.getByTestId("payment-button").click();
+    await (await composerRow(bob.page, "payment-button")).click();
     await bob.page.getByTestId("payment-card-cashu").click();
     await bob.page.getByTestId("payment-amount").fill("10");
     await bob.page.getByTestId("payment-request").click();
@@ -104,7 +105,7 @@ test.describe("wallet", { tag: "@network" }, () => {
     await receive(alice, 50);
     await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^50\s*sats/);
     await openChat(alice);
-    await alice.page.getByTestId("payment-button").click();
+    await (await composerRow(alice.page, "payment-button")).click();
     await alice.page.getByTestId("payment-card-cashu").click();
     await alice.page.getByTestId("payment-amount").fill("10");
     await alice.page.getByTestId("payment-send").click();
