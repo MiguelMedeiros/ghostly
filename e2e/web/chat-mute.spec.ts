@@ -60,6 +60,10 @@ const heard = (peer: Peer, note: number) =>
   peer.page.evaluate((note) => (JSON.parse(localStorage.getItem("qa-notes") ?? "[]") as number[]).filter((hz) => hz === note).length, note);
 const notices = (peer: Peer) => peer.page.evaluate(() => (JSON.parse(localStorage.getItem("qa-notices") ?? "[]") as unknown[]).length);
 
+/** The chat's row in the list, and its bell among the row's actions (shown on hover). */
+const rowOf = (peer: Peer) => peer.page.getByTestId("sidebar").getByTestId("chat-row").first();
+const bellOf = (peer: Peer) => rowOf(peer).getByTestId("chat-row-mute");
+
 /** Mutes the open chat from its ⋮ menu. */
 async function mute(peer: Peer, choice: "15m" | "1h" | "1d" | "forever") {
   await peer.page.getByTestId("chat-options").click();
@@ -82,12 +86,14 @@ test("a chat muted for 15 minutes stays quiet but keeps counting, and is heard a
   await expect.poll(() => notices(guest)).toBe(shown + 1);
 
   await mute(guest, "15m");
-  await expect(guest.page.getByTestId("chat-muted")).toHaveAccessibleName(/^Notifications muted until \d{1,2}:\d{2}/);
-  await guest.page.screenshot({ path: testInfo.outputPath("muted-header.png") });
+  // Nothing by the name in the header: the one such button on the page is the list row's bell, which says until when.
+  await expect(guest.page.getByRole("button", { name: /^Notifications muted/ })).toHaveCount(1);
+  await expect(bellOf(guest)).toHaveAccessibleName(/^Notifications muted until \d{1,2}:\d{2}/);
+  await guest.page.screenshot({ path: testInfo.outputPath("muted-chat.png") });
 
   // Away from the chat, so its row counts what comes in.
   await guest.page.evaluate(() => { location.hash = "#/"; });
-  const row = guest.page.getByTestId("chat-row").first();
+  const row = rowOf(guest);
   await expect(row).toHaveAttribute("data-muted", "true");
   await expect(row.getByTestId("chat-row-muted")).toBeVisible();
   await say(host, "while muted");
@@ -117,7 +123,7 @@ test("Until I unmute: a call still rings, the mute outlasts a day, and it ends w
   await pair(alice, bob);
   const [sounds, shown] = [await heard(bob, NOTE.message), await notices(bob)];
   await mute(bob, "forever");
-  const bell = bob.page.getByTestId("chat-muted");
+  const bell = bellOf(bob);
   await expect(bell).toHaveAccessibleName("Notifications muted");
   await expect(bell).toHaveAttribute("data-muted", "forever");
 
@@ -140,12 +146,14 @@ test("Until I unmute: a call still rings, the mute outlasts a day, and it ends w
   expect(await notices(bob)).toBe(shown);
   await expect(bell).toHaveAttribute("data-muted", "forever");
 
-  // Turned off from the header's bell: heard again.
+  // Turned off from the list row's bell: heard again.
+  await rowOf(bob).hover();
   await bell.click();
   await expect(bob.page.getByTestId("mute-menu")).toBeVisible();
-  await bob.page.screenshot({ path: testInfo.outputPath("unmute-from-bell.png") });
+  await bob.page.screenshot({ path: testInfo.outputPath("unmute-from-row.png") });
   await bob.page.getByTestId("mute-off").click();
-  await expect(bell).toHaveCount(0);
+  await expect(bell).not.toHaveAttribute("data-muted");
+  await expect(rowOf(bob).getByTestId("chat-row-muted")).toHaveCount(0);
   await say(alice, "unmuted");
   await expect(chat(bob).getByText("unmuted")).toBeVisible({ timeout: 60_000 });
   await expect.poll(() => heard(bob, NOTE.message)).toBe(sounds + 1);

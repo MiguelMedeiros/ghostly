@@ -134,7 +134,7 @@ test("a chat muted before its contact joins goes live in silence; the contact, n
   await alice.page.getByTestId("chat-options").click();
   await alice.page.getByTestId("chat-mute-open").click();
   await alice.page.getByTestId("mute-forever").click();
-  await expect(alice.page.getByTestId("chat-muted")).toBeVisible();
+  await expect(alice.page.getByTestId("sidebar").getByTestId("chat-row-muted")).toBeVisible();
   const invite = await copyInvite(alice.page);
   await bob.page.getByRole("button", { name: "Join chat", exact: true }).first().click();
   await pasteInvite(bob.page, invite);
