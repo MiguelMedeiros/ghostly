@@ -57,6 +57,7 @@ The implementation column is independent of document status. Existing features c
 | [OpenPGP · 3xx planned](3xx-openpgp.md) | OpenPGP | Draft | Experimental provider `openpgp`; gpg-made vectors, contract suite and e2e |
 | [Bitcoin address · 3xx planned](3xx-bitcoin.md) | Bitcoin Address Proof | Draft | Experimental provider: BIP-322 2.0.0 and legacy P2PKH, verified locally |
 | [SSH · 3xx planned](3xx-ssh.md) | SSH keys | Draft | Experimental `ssh`, `ssh-github`, `ssh-gitlab` providers |
+| [DID · 3xx planned](3xx-did.md) | Decentralized identifiers (did:key, did:jwk, did:dht, did:web) | Draft | Experimental `did` provider |
 | [400](400-chat.md) | Chat Messaging | Draft | One chat on two layers: live link and DHT fallback today; DHT start and self-upgrade being implemented |
 | [401](401-paired-chat.md) | Chat Session (formerly Paired Chat) | Draft | Layer-1 session of every new chat: WebRTC, native Iroh/HyperDHT where supported; calls and shared apps (live); DHT first contact and automatic upgrade being implemented |
 | [402](402-legacy-chat.md) | Compatibility Chat (formerly Legacy Timestamp Chat) | Draft; retained for compatibility | v0.4 and CLI clients; existing chats and v0.4 codes only |

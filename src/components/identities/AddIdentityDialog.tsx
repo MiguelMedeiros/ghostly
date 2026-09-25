@@ -9,7 +9,8 @@ import { FieldGrid } from "../layout";
 import { Button, Notice, input } from "../wallet/ui";
 import { ProviderMark, StatusPill } from "./ProviderMark";
 import { Select } from "../ui/Select";
-import { applicableSigners, SubjectPreviewFacts, useSubjectPreview } from "./SubjectPreview";
+import { SubjectPreviewFacts } from "./SubjectPreview";
+import { applicableSigners, useSubjectPreview } from "./useSubjectPreview";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const VALIDITY = [7, 30, 90, 180, 365];
