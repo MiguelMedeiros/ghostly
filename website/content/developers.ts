@@ -10,7 +10,7 @@ const en = {
   hero: {
     eyebrow: "For developers",
     title: "Two peers. A DHT. A direct line.",
-    lead: "Each app publishes a small signed record to the Mainline DHT, finds the other's, keeps what both speak and opens a direct connection — every step an open contract, a WISP.",
+    lead: "Each app publishes a small signed record to the Mainline DHT, finds the other's, keeps what both speak and opens a direct connection. Every step is an open contract, a WISP.",
     ctaCore: "WISP 01 · Ghost Core",
     ctaCatalog: "Browse {n} WISPs",
     ctaCode: "GitHub",
@@ -37,7 +37,7 @@ const en = {
     },
   },
   compose: {
-    eyebrow: "01 — Composition",
+    eyebrow: "01 · Composition",
     title: "Pick the pieces. See what you get.",
     lead: "Each row is an area of the architecture, each block a piece with its own contract. Pick a composition: it lights the pieces it needs.",
     presets: "Compositions",
@@ -52,7 +52,7 @@ const en = {
     boardLabel: "Architecture board",
   },
   negotiate: {
-    eyebrow: "02 — Negotiation",
+    eyebrow: "02 · Negotiation",
     title: "Two peers. One honest answer.",
     lead: "Each side offers what it has, in its own order. What both have is ranked by both orders together. Nothing in common means no.",
     scenarios: "Scenario",
@@ -87,7 +87,7 @@ const en = {
     off: "Stays off",
     fail: "No connection",
     failBody: "Nothing in common. Nothing bridges WebRTC to Iroh; a bridge would be its own integration, with its own trust.",
-    first: "The very first pairing always runs over WebRTC — that is how the peers learn each other's native addresses. The ranking applies from the second session on.",
+    first: "The very first pairing always runs over WebRTC. That is how the peers learn each other's native addresses. The ranking applies from the second session on.",
     rule: "Same rule as rankTransports() in packages/core/src/pairedTransports.ts",
     simplified: "offers simplified",
     status: "Paired sessions: in development for 0.5.0",
@@ -95,7 +95,7 @@ const en = {
     casper: "Casper",
   },
   path: {
-    eyebrow: "03 — Your path",
+    eyebrow: "03 · Your path",
     title: "From reading to building.",
     steps: [
       {
@@ -129,12 +129,12 @@ const en = {
     ],
   },
   availability: {
-    eyebrow: "04 — Where it runs",
+    eyebrow: "04 · Where it runs",
     title: "Client by client.",
     lead: "The same feature can be available in one client and not another. This is the honest map.",
     feature: "Feature",
     clients: ["Web app", "Desktop", "Extension", "CLI"],
-    none: "—",
+    none: "No",
     rows: [
       { name: "Text chat", cells: ["released", "released", "released", "released"] },
       { name: "Paired chats, pinned keys", cells: ["development", "development", "development", null] },
@@ -162,7 +162,7 @@ const en = {
   },
   next: {
     catalog: { title: "The WISP catalog", body: "Every WISP, searchable, with its status and implementations.", cta: "Open the catalog" },
-    roadmap: { title: "The roadmap", body: "What comes next, in dependency order — no dates.", cta: "See the roadmap" },
+    roadmap: { title: "The roadmap", body: "What comes next, in dependency order. No dates.", cta: "See the roadmap" },
     docs: { title: "Protocol docs", body: "The long-form walkthrough of the protocol.", cta: "Read the docs" },
   },
 };
@@ -178,7 +178,7 @@ const ptBr: DevCopy = {
   hero: {
     eyebrow: "Para desenvolvedores",
     title: "Dois peers. Uma DHT. Uma linha direta.",
-    lead: "Cada app publica um pequeno registro assinado na DHT Mainline, acha o do outro, fica com o que os dois falam e abre uma conexão direta — cada passo um contrato aberto, um WISP.",
+    lead: "Cada app publica um pequeno registro assinado na DHT Mainline, acha o do outro, fica com o que os dois falam e abre uma conexão direta. Cada passo é um contrato aberto, um WISP.",
     ctaCore: "WISP 01 · Ghost Core",
     ctaCatalog: "Ver os {n} WISPs",
     ctaCode: "GitHub",
@@ -205,7 +205,7 @@ const ptBr: DevCopy = {
     },
   },
   compose: {
-    eyebrow: "01 — Composição",
+    eyebrow: "01 · Composição",
     title: "Escolha as peças. Veja o que sai.",
     lead: "Cada linha é uma área da arquitetura; cada bloco, uma peça com o próprio contrato. Escolha uma composição: ela acende as peças de que precisa.",
     presets: "Composições",
@@ -220,7 +220,7 @@ const ptBr: DevCopy = {
     boardLabel: "Tabuleiro da arquitetura",
   },
   negotiate: {
-    eyebrow: "02 — Negociação",
+    eyebrow: "02 · Negociação",
     title: "Dois peers. Uma resposta honesta.",
     lead: "Cada lado oferece o que tem, na própria ordem. O que os dois têm é ordenado pelas duas ordens juntas. Nada em comum quer dizer não.",
     scenarios: "Cenário",
@@ -255,7 +255,7 @@ const ptBr: DevCopy = {
     off: "Fica de fora",
     fail: "Sem conexão",
     failBody: "Nada em comum. Nada faz ponte entre WebRTC e Iroh; uma ponte seria uma integração própria, com a própria confiança.",
-    first: "O primeiro pareamento sempre roda por WebRTC — é assim que os peers aprendem os endereços nativos um do outro. A ordem vale a partir da segunda sessão.",
+    first: "O primeiro pareamento sempre roda por WebRTC: é assim que os peers aprendem os endereços nativos um do outro. A ordem vale a partir da segunda sessão.",
     rule: "A mesma regra de rankTransports() em packages/core/src/pairedTransports.ts",
     simplified: "ofertas simplificadas",
     status: "Sessões pareadas: em desenvolvimento para a 0.5.0",
@@ -263,7 +263,7 @@ const ptBr: DevCopy = {
     casper: "Casper",
   },
   path: {
-    eyebrow: "03 — Seu caminho",
+    eyebrow: "03 · Seu caminho",
     title: "Da leitura à construção.",
     steps: [
       {
@@ -297,12 +297,12 @@ const ptBr: DevCopy = {
     ],
   },
   availability: {
-    eyebrow: "04 — Onde roda",
+    eyebrow: "04 · Onde roda",
     title: "Cliente por cliente.",
     lead: "O mesmo recurso pode existir num cliente e não em outro. Este é o mapa honesto.",
     feature: "Recurso",
     clients: ["App web", "Desktop", "Extensão", "CLI"],
-    none: "—",
+    none: "Não",
     rows: [
       { name: "Chat de texto", cells: ["released", "released", "released", "released"] },
       { name: "Chats pareados, chaves fixadas", cells: ["development", "development", "development", null] },
@@ -330,7 +330,7 @@ const ptBr: DevCopy = {
   },
   next: {
     catalog: { title: "O catálogo de WISPs", body: "Todos os WISPs, com busca, status e implementações.", cta: "Abrir o catálogo" },
-    roadmap: { title: "O roadmap", body: "O que vem depois, na ordem das dependências — sem datas.", cta: "Ver o roadmap" },
+    roadmap: { title: "O roadmap", body: "O que vem depois, na ordem das dependências, sem datas.", cta: "Ver o roadmap" },
     docs: { title: "Docs do protocolo", body: "O passo a passo longo do protocolo (em inglês).", cta: "Ler os docs" },
   },
 };

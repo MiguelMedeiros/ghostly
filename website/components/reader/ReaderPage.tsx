@@ -55,8 +55,13 @@ export async function ReaderPage({ reference, requested, locale }: { reference: 
   const parent = w?.parent ? wisps.find((x) => x.id === w.parent) : undefined;
   const moved = requested !== reference.slug;
   const former = numbering.find((e) => e.file === reference.file && e.oldFile !== e.file);
-  // Old heading anchors (e.g. "#wisp-09--identity-proofs") keep working after renumbering.
-  const legacyHeading = former && w ? new GithubSlugger().slug(reference.title.replace(`WISP ${w.number}`, `WISP ${former.oldId}`)) : undefined;
+  // Old title anchors keep working: the number before renumbering, and the title
+  // before it lost its dash ("#wisp-09--identity-proofs", "#wisp-300--peer-proofs").
+  const name = reference.title.replace(/^WISP\s+[^\s:]+:\s+/, "");
+  const legacyHeadings =
+    w && name !== reference.title
+      ? [...new Set([w.number, ...(former ? [former.oldId] : [])].map((n) => new GithubSlugger().slug(`WISP ${n} \u2014 ${name}`)))]
+      : [];
   const sourceUrl = `${REPO_URL}/blob/dev/${reference.sourcePath}`;
 
   return (
@@ -230,7 +235,9 @@ export async function ReaderPage({ reference, requested, locale }: { reference: 
             )}
 
             <div className="reader-prose" lang="en">
-              {legacyHeading && <span id={legacyHeading} />}
+              {legacyHeadings.map((id) => (
+                <span key={id} id={id} />
+              ))}
               <ReferenceMarkdown body={body} sourcePath={reference.sourcePath} locale={locale} repoLabel={t.repo} />
             </div>
 

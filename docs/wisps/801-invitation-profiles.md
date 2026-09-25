@@ -1,4 +1,4 @@
-# WISP 801 — Implemented Invitation Profiles
+# WISP 801: Implemented Invitation Profiles
 
 | Field | Value |
 |---|---|

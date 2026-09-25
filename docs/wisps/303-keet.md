@@ -1,4 +1,4 @@
-# WISP 3xx — Keet
+# WISP 3xx: Keet
 
 | Field | Value |
 |---|---|
@@ -36,6 +36,6 @@ First gate: a documented API and reproducible proof/verification prototype. Only
 
 [Peer Proofs](300-peer-proofs.md), [HyperDHT transport](103-hyperdht.md), [catalogue](README.md).
 
-## Implementation follow-up — 2026-09-20
+## Implementation follow-up (2026-09-20)
 
 The [proof increment](PROOF-INCREMENT.md) now includes explicit experimental local imports for Pubky and Keet-compatible keys, alongside external-signer Nostr. Multiple proofs coexist per conversation. Ghostly participation remains the default. Pubky Ring and existing Keet account signer bridges remain unavailable; local key control is not evidence of those integrations. All WISPs remain Draft; earlier baseline inspections are historical.

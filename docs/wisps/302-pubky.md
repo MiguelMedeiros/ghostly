@@ -1,4 +1,4 @@
-# WISP 3xx — Pubky
+# WISP 3xx: Pubky
 
 > Release decision (2026-09-21): external identity proofs and external profile lookup are deferred. This release exposes only Ghostly participation identity. Nostr, Pubky, Keet, imports and Ring UI are disabled; previous experiments and stored data are preserved for future work. Descriptions below are historical/research, not available release features.
 
@@ -38,12 +38,12 @@ Two independent verifiers must reject signatures for the wrong participation/aud
 
 [Peer Proofs](300-peer-proofs.md), [implementation evidence](IMPLEMENTATION.md).
 
-## Implementation follow-up — 2026-09-20
+## Implementation follow-up (2026-09-20)
 
 The [proof increment](PROOF-INCREMENT.md) now includes explicit experimental local imports for Pubky and Keet-compatible keys, alongside external-signer Nostr. Multiple proofs coexist per conversation. Ghostly participation remains the default. Pubky Ring and existing Keet account signer bridges remain unavailable; local key control is not evidence of those integrations. All WISPs remain Draft; earlier baseline inspections are historical.
 
 
-## Modified Ring identity authorization — implementation candidate
+## Modified Ring identity authorization (implementation candidate)
 
 The new negotiated capability is `proof-pubky-ring/1`, separate from `proof-pubky-import/1`. This is an experimental extension to Ring revision `f142436883b4f41a599da37993a9635225f008fa`, **not compatible with the unchanged official Ring app**. Source overlay, reproducible patch and rationale are in [the Ring integration](../../integrations/pubky-ring/README.md). No Pubky SDK export of a session credential is used.
 

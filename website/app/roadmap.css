@@ -20,7 +20,7 @@
   font-size: 14.5px;
 }
 .rm-rules li::before {
-  content: "— ";
+  content: "· ";
   color: var(--cyan);
 }
 .rm-growth {

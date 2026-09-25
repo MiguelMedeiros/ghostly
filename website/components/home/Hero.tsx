@@ -12,7 +12,7 @@ import type { HomeCopy } from "@/content/home";
 
 /**
  * Act 0: one sentence in the dark and a small ghost asking into it. Boo is the
- * act's actor — the backdrop draws him at his hero pose and carries him into
+ * act's actor. The backdrop draws him at his hero pose and carries him into
  * the invitation when you scroll; the copy slides away as you leave. Without
  * scripts, or with reduced motion, a still Boo stands in for the actor.
  */

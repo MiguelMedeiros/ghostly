@@ -36,7 +36,7 @@ A copy of what a contact received is useless elsewhere: another contact's challe
 audience is wrong, and nobody else has the proof key. The external identity itself links every
 conversation it is shared in; that is what the person is choosing to reveal, and the UI says so.
 
-This is a delegation (see [WISP 300](../../../../docs/wisps/300-peer-proofs.md#implementation--2026-09-23-identity-proofs)): the external signer authorizes the proof
+This is a delegation (see [WISP 300](../../../../docs/wisps/300-peer-proofs.md#implementation-2026-09-23-identity-proofs)): the external signer authorizes the proof
 key once, instead of signing every contact's challenge. It is what makes publish-style (DNS) and
 paste-back (SSH, PGP, Bitcoin) proofs usable, and one OpenID login enough for every contact.
 

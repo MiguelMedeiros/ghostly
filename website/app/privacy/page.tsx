@@ -8,7 +8,7 @@ export const metadata: Metadata = {
   description:
     "Ghostly has no servers and no accounts, so there is no place for your data to be collected. What stays on your device, what travels the network, and who else can see it.",
   openGraph: {
-    title: "Privacy Policy — Ghostly",
+    title: "Privacy Policy | Ghostly",
     description:
       "Ghostly has no servers and no accounts. What stays on your device, what travels the network, and who else can see it.",
     type: "article",
@@ -24,7 +24,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Privacy Policy — Ghostly",
+    title: "Privacy Policy | Ghostly",
     description:
       "Ghostly has no servers and no accounts. What stays on your device, what travels the network, and who else can see it.",
     images: ["https://ghostly.tools/og-image.png"],
@@ -106,7 +106,7 @@ export default function PrivacyPage() {
                 </strong>{" "}
                 To be reachable, your client publishes a signed record to a
                 public distributed hash table, keyed by your public key. Anyone
-                who knows your public key can look it up — that is how contacts
+                who knows your public key can look it up. That is how contacts
                 reach you.
               </li>
               <li>
@@ -141,7 +141,7 @@ export default function PrivacyPage() {
               <li>
                 <strong className="text-gray-200">STUN servers.</strong> To
                 negotiate a direct connection through NAT, WebRTC contacts
-                public STUN servers — by default Google&apos;s
+                public STUN servers, by default Google&apos;s
                 (<code className="text-cyan-400 text-sm">
                   stun.l.google.com
                 </code>{" "}
@@ -197,10 +197,10 @@ export default function PrivacyPage() {
               serving a response body to a navigation request.
             </p>
             <p>
-              The attach is scoped to loopback origins —{" "}
-              <code className="text-cyan-400 text-sm">localhost</code>,{" "}
+              The attach is scoped to loopback origins
+              (<code className="text-cyan-400 text-sm">localhost</code>,{" "}
               <code className="text-cyan-400 text-sm">127.0.0.1</code> and{" "}
-              <code className="text-cyan-400 text-sm">::1</code> — and happens
+              <code className="text-cyan-400 text-sm">::1</code>) and happens
               only for a service you explicitly chose to open. The extension
               does not attach to arbitrary tabs, does not read the pages you
               browse, and requests no access to public websites. No page content

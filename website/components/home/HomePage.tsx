@@ -30,7 +30,7 @@ export function HomePage({ locale }: { locale: Locale }) {
       <StoryRail
         label={t.rail}
         marks={[
-          { id: "hero", label: `00 — ${t.hero.title1}` },
+          { id: "hero", label: `00 · ${t.hero.title1}` },
           { id: "invite", label: t.invite.eyebrow },
           { id: "dht", label: t.dht.eyebrow },
           { id: "agree", label: t.agree.eyebrow },

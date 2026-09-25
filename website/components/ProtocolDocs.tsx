@@ -125,7 +125,7 @@ const dnsRecords = [
   {
     name: "_ack",
     type: "TXT",
-    description: "Acknowledgment timestamp — confirms receipt of peer messages",
+    description: "Acknowledgment timestamp: confirms receipt of peer messages",
     encrypted: false,
     required: false,
     maxSize: "13-14 chars",
@@ -466,7 +466,7 @@ export function ProtocolDocs() {
               
               <p className="text-gray-400 leading-relaxed mb-8">
                 Ghostly uses <strong className="text-gray-200">Pkarr</strong> (Public Key Addressable Resource Records)
-                to publish encrypted messages to the <strong className="text-gray-200">Mainline DHT</strong> — the same
+                to publish encrypted messages to the <strong className="text-gray-200">Mainline DHT</strong>, the same
                 distributed hash table that powers BitTorrent with 10M+ nodes.
               </p>
 
@@ -910,7 +910,7 @@ Both:  encrypt/decrypt with shared encKey (256-bit)`}</code>
                 {[
                   {
                     q: "Why Mainline DHT instead of a custom P2P network?",
-                    a: "The Mainline DHT is the largest deployed DHT in the world with 10M+ active nodes. By leveraging existing infrastructure, we get instant global reach, battle-tested reliability, and no bootstrap problem. Users don't need to wait for network effects — the network already exists.",
+                    a: "The Mainline DHT is the largest deployed DHT in the world with 10M+ active nodes. By leveraging existing infrastructure, we get instant global reach, battle-tested reliability, and no bootstrap problem. Users don't need to wait for network effects: the network already exists.",
                     tags: ["Infrastructure", "Scale"],
                   },
                   {
@@ -935,7 +935,7 @@ Both:  encrypt/decrypt with shared encKey (256-bit)`}</code>
                   },
                   {
                     q: "Why two keypairs per chat instead of one shared keypair?",
-                    a: "Each party signing their own records prevents impersonation — you can only write to your own keypair. This creates two unidirectional channels that together form the bidirectional chat. It also allows for independent message timing and acknowledgments.",
+                    a: "Each party signing their own records prevents impersonation: you can only write to your own keypair. This creates two unidirectional channels that together form the bidirectional chat. It also allows for independent message timing and acknowledgments.",
                     tags: ["Security", "Non-repudiation"],
                   },
                   {
@@ -945,12 +945,12 @@ Both:  encrypt/decrypt with shared encKey (256-bit)`}</code>
                   },
                   {
                     q: "Why polling instead of push notifications?",
-                    a: "The DHT doesn't support subscriptions or push — it's a key-value store. Polling is the only option, but we optimize with adaptive intervals: 2s when active, 8s when idle, 1s during calls. This balances responsiveness with DHT load.",
+                    a: "The DHT doesn't support subscriptions or push. It's a key-value store. Polling is the only option, but we optimize with adaptive intervals: 2s when active, 8s when idle, 1s during calls. This balances responsiveness with DHT load.",
                     tags: ["DHT Constraints", "Optimization"],
                   },
                   {
                     q: "Why are messages ephemeral (no persistence)?",
-                    a: "DHT records expire naturally (~2 hours without republishing). This is a feature, not a bug — messages vanish when you stop the app. For users wanting persistence, messages are stored locally. The ephemeral nature provides plausible deniability.",
+                    a: "DHT records expire naturally (~2 hours without republishing). This is a feature, not a bug: messages vanish when you stop the app. For users wanting persistence, messages are stored locally. The ephemeral nature provides plausible deniability.",
                     tags: ["Privacy", "Ephemerality"],
                   },
                   {
@@ -960,7 +960,7 @@ Both:  encrypt/decrypt with shared encKey (256-bit)`}</code>
                   },
                   {
                     q: "Why WebRTC for calls instead of the DHT?",
-                    a: "Real-time audio/video requires low latency that the DHT can't provide. WebRTC gives us direct peer-to-peer media streams with SRTP encryption. The DHT is only used for signaling (exchanging SDP/ICE) — once connected, media flows directly between peers.",
+                    a: "Real-time audio/video requires low latency that the DHT can't provide. WebRTC gives us direct peer-to-peer media streams with SRTP encryption. The DHT is only used for signaling (exchanging SDP/ICE). Once connected, media flows directly between peers.",
                     tags: ["Real-time", "Performance"],
                   },
                   {
@@ -970,7 +970,7 @@ Both:  encrypt/decrypt with shared encKey (256-bit)`}</code>
                   },
                   {
                     q: "Why include timestamps in call signals?",
-                    a: "The timestamp (ts) field resolves 'glare' — when both parties call each other simultaneously. The lower timestamp wins and becomes the caller. This deterministic resolution prevents deadlocks without requiring coordination.",
+                    a: "The timestamp (ts) field resolves 'glare' (both parties calling each other simultaneously). The lower timestamp wins and becomes the caller. This deterministic resolution prevents deadlocks without requiring coordination.",
                     tags: ["Conflict Resolution", "Determinism"],
                   },
                   {

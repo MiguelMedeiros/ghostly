@@ -1,4 +1,4 @@
-# WISP 3xx — Provider-attested identity (OpenID Connect)
+# WISP 3xx: Provider-attested identity (OpenID Connect)
 
 | Field | Value |
 |---|---|
@@ -39,9 +39,9 @@ A token is accepted only when every check passes:
 5. `0 < exp − iat ≤ 24 h`, `iat ≤ now + 60 s`, and `iat` within the statement's sign-in window above. (Outside a proof, e.g. the prover's own check right after sign-in, the token must also be unexpired: `nbf ≤ now + 60 s ≤ exp + 120 s`.)
 6. `nonce` equals the statement id.
 7. `sub` present (≤ 255 characters).
-8. Signature valid under the key with the header's `kid` from the provider's **pinned** JWKS URL (not discovered at verification time). RSA keys 2048–8192 bits; P-256 for ES256; a key's `use`/`alg`/`key_ops`, when present, must allow this use.
+8. Signature valid under the key with the header's `kid` from the provider's **pinned** JWKS URL (not discovered at verification time). RSA keys 2048 to 8192 bits; P-256 for ES256; a key's `use`/`alg`/`key_ops`, when present, must allow this use.
 
-JWKS fetching goes through the contract's `ctx.fetch` (HTTPS GET only, no redirects, no credentials, 10 s time-out, refused offline), 64 KiB and 32 keys at most, cached for an hour (the response's `max-age`, bounded to 5 min–24 h, where the fetcher reports it). An unknown `kid` refetches once, at most once a minute per URL (key rotation without becoming a request amplifier).
+JWKS fetching goes through the contract's `ctx.fetch` (HTTPS GET only, no redirects, no credentials, 10 s time-out, refused offline), 64 KiB and 32 keys at most, cached for an hour (the response's `max-age`, bounded to between 5 min and 24 h, where the fetcher reports it). An unknown `kid` refetches once, at most once a minute per URL (key rotation without becoming a request amplifier).
 
 The result names the account as `<issuer>#<sub>` (Microsoft: the issuer with the account's tenant), `attester` = the issuer host, and, when the person chose to share them, their name or username and email as `display`, with whether the provider says it verified the email. It is shown as attested by that provider, never as a key the person holds, and never as current once the proof expires or is withdrawn.
 

@@ -1,4 +1,4 @@
-# WISP 502 — Legacy File Frames
+# WISP 502: Legacy File Frames
 
 | Field | Value |
 |---|---|

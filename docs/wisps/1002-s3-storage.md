@@ -1,4 +1,4 @@
-# WISP 1002 — S3-Compatible Storage
+# WISP 1002: S3-Compatible Storage
 
 | Field | Value |
 |---|---|

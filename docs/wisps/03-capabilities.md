@@ -1,4 +1,4 @@
-# WISP 03 — Capability Negotiation
+# WISP 03: Capability Negotiation
 
 | Field | Value |
 |---|---|

@@ -1,4 +1,4 @@
-# WISP 2xx — Spark payments
+# WISP 2xx: Spark payments
 
 | Field | Value |
 |---|---|

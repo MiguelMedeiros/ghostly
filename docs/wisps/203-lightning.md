@@ -1,4 +1,4 @@
-# WISP 203 — Lightning
+# WISP 203: Lightning
 
 | Field | Value |
 |---|---|

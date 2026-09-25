@@ -1,4 +1,4 @@
-# WISP 400 — Chat Messaging
+# WISP 400: Chat Messaging
 
 | Field | Value |
 |---|---|

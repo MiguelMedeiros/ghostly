@@ -1,4 +1,4 @@
-# WISP 201 — Cashu
+# WISP 201: Cashu
 
 | Field | Value |
 |---|---|

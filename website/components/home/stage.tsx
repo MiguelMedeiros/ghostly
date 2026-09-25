@@ -22,7 +22,7 @@ export function stepOf(p: number, n: number): number {
   return Math.min(n - 1, Math.max(0, Math.floor(((p - ENTER) / (EXIT - ENTER)) * n)));
 }
 
-/** The scene progress at fraction f of step i — the inverse of stepOf. */
+/** The scene progress at fraction f of step i (the inverse of stepOf). */
 export function stepAt(i: number, f: number, n: number): number {
   return ENTER + ((i + f) / n) * (EXIT - ENTER);
 }
@@ -49,7 +49,7 @@ export const TOUCH_QUERY = "(pointer: coarse)";
 
 /**
  * Phones, and any touch-first device, do not get the pinned, scroll-scrubbed
- * film: momentum scrolling fights it. They get cards — the same scenes, each
+ * film: momentum scrolling fights it. They get cards: the same scenes, each
  * step playing its beat once as its figure comes into view.
  */
 export function useCards(): boolean {

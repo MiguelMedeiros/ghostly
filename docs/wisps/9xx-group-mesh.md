@@ -1,4 +1,4 @@
-# WISP 9xx — Group Mesh Distribution Profile
+# WISP 9xx: Group Mesh Distribution Profile
 
 | Field | Value |
 |---|---|

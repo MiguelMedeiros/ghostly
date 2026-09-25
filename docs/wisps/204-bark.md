@@ -1,4 +1,4 @@
-# WISP 204 — Ark payments via Bark
+# WISP 204: Ark payments via Bark
 
 | Field | Value |
 |---|---|

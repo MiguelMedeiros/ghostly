@@ -2,7 +2,7 @@
 
 > Release decision (2026-09-21): external identity proofs and external profile lookup were deferred; Pubky, Keet, local imports and Ring UI remain disabled, their experiments and stored data preserved.
 >
-> Update (2026-09-23): **identity proofs are back, rebuilt** ([WISP 300 implementation](300-peer-proofs.md#implementation--2026-09-23-identity-proofs)): made once per profile, shared per contact only by choice, with a provider contract ([PROOFS.md](../../packages/browser/src/proofs/PROOFS.md)). Nostr (NIP-07, NIP-46) is the first provider; domain, Bitcoin, SSH, PGP and OpenID Connect providers plug into the same contract. A public profile is looked up only on the person's request.
+> Update (2026-09-23): **identity proofs are back, rebuilt** ([WISP 300 implementation](300-peer-proofs.md#implementation-2026-09-23-identity-proofs)): made once per profile, shared per contact only by choice, with a provider contract ([PROOFS.md](../../packages/browser/src/proofs/PROOFS.md)). Nostr (NIP-07, NIP-46) is the first provider; domain, Bitcoin, SSH, PGP and OpenID Connect providers plug into the same contract. A public profile is looked up only on the person's request.
 
 **All 31 entries remain Drafts.** The maintainer approved family-based numbering on 2026-09-22. This editorial migration does not assign new wire identifiers or claim new implementation support. See [numbering and compatibility](NUMBERING.md) for the old-to-new map and independent families. Future adapters need substantive contracts, not empty numbered placeholders.
 
@@ -10,7 +10,7 @@ Ghost is the minimal Pkarr/DHT rendezvous and small-record primitive. Ghostly is
 
 ## Read first
 
-- [Adapter and ecosystem roadmap](ADAPTER-ROADMAP.md) — broad candidate inventory, official sources, dependencies and release gates; candidate inventory, not implementation claims.
+- [Adapter and ecosystem roadmap](ADAPTER-ROADMAP.md): broad candidate inventory, official sources, dependencies and release gates; candidate inventory, not implementation claims.
 - [Implemented experimental paired-chat increment](PAIRED-CHAT-INCREMENT.md)
 - [Native Iroh/HyperDHT transport increment](TRANSPORT-INCREMENT.md)
 - [Process and required format](00-process.md)
@@ -78,9 +78,9 @@ Dependencies in headers describe the candidate modular design. Conditional depen
 
 ## Proposed milestones and exit evidence
 
-1. **00–03, 100–101:** review process/Core/key lifecycle, then capability/transport agreement and the WebRTC binding. Exit: exact profiles and two independent implementations with downgrade, invite and reconnect tests.
-2. **102–103:** demonstrate interchangeable data adapters using the same application capability. Exit: measured supported platforms, endpoint authentication and policy-respecting failure/fallback; not just sockets connecting.
-3. **300–302:** demonstrate optional external proofs and no-proof sessions. Exit: independent verification, replay/rotation tests and explicit correlation tradeoffs. Keet remains gated by API feasibility in 303.
+1. **00-03, 100-101:** review process/Core/key lifecycle, then capability/transport agreement and the WebRTC binding. Exit: exact profiles and two independent implementations with downgrade, invite and reconnect tests.
+2. **102-103:** demonstrate interchangeable data adapters using the same application capability. Exit: measured supported platforms, endpoint authentication and policy-respecting failure/fallback; not just sockets connecting.
+3. **300-302:** demonstrate optional external proofs and no-proof sessions. Exit: independent verification, replay/rotation tests and explicit correlation tradeoffs. Keet remains gated by API feasibility in 303.
 4. **Groups:** 800 and 901 remain review drafts; 900 has its first profile, the [group mesh](9xx-group-mesh.md), implemented for text between up to eight members. The authorized implementation sequence was the paired-chat base, then Iroh, then HyperDHT/Holepunch. The subsequently authorized proof sequence is Nostr, then Pubky, then Keet in 1:1 sessions. Nostr and explicit Pubky/Keet-compatible local imports are implemented experimentally; external Pubky/Keet signer bridges remain blocked. Group implementation still needs its own scope decision.
 
 400, 500, 600, 700 and 200/201/203 document existing application capabilities and their modular evolution. These milestones do not promise implementation dates or claim that all adapters exist. Group security, topology and abuse limits must be validated before release claims.

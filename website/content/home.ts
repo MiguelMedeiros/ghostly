@@ -7,7 +7,7 @@ import type { Level } from "@/lib/status";
  */
 const en = {
   meta: {
-    title: "Ghostly — Find each other. Talk peer to peer.",
+    title: "Ghostly: Find each other. Talk peer to peer.",
     description:
       "Meet the people you choose through a private invitation, then chat, send files and sats, peer to peer. No account to create. Free and open source.",
   },
@@ -16,7 +16,7 @@ const en = {
     badge: "Peer to peer · No account to create",
     title1: "Find your people.",
     title2: "Talk peer to peer.",
-    lead: "Ghostly connects you straight to the people you invite — to chat one to one or as a group, send files and sats, call, and share what runs on your computer.",
+    lead: "Ghostly connects you straight to the people you invite. Chat one to one or as a group, send files and sats, call, and share what runs on your computer.",
     open: "Open in your browser",
     download: "Download the app",
     micro: "Nothing to install · Free and open source",
@@ -31,16 +31,16 @@ const en = {
     after: " Ghostly server in the middle.",
   },
   invite: {
-    eyebrow: "01 — The invitation",
+    eyebrow: "01 · The invitation",
     label: "How an invitation works",
     steps: [
       {
         title: "Create an invitation.",
-        body: "Boo makes an invitation for one person. It holds the keys for this connection — nothing about a public account, because there isn't one.",
+        body: "Boo makes an invitation for one person. It holds the keys for this connection and nothing about a public account, because there isn't one.",
       },
       {
         title: "Share it your way.",
-        body: "As a link, a QR code or a text code — in person, by message, however you like. Only share it with the person you want to meet.",
+        body: "As a link, a QR code or a text code. In person, by message, however you like. Only share it with the person you want to meet.",
         note: "Scanning the QR code with a camera is new in 0.5.0.",
       },
       {
@@ -51,12 +51,12 @@ const en = {
     card: { title: "Invitation", link: "Link", qr: "QR", code: "Code", forOne: "for one person" },
   },
   dht: {
-    eyebrow: "02 — The meeting place",
+    eyebrow: "02 · The meeting place",
     label: "How the two apps find each other on the DHT",
     steps: [
       {
         title: "A public network with no owner.",
-        body: "To find each other, both apps use the Mainline DHT — millions of computers that already help BitTorrent users meet — through Pkarr. There is no Ghostly server in the middle.",
+        body: "To find each other, both apps use the Mainline DHT (millions of computers that already help BitTorrent users meet) through Pkarr. There is no Ghostly server in the middle.",
         note: "Browsers reach the DHT through public Pkarr relays; the desktop app and CLI can also reach it directly.",
       },
       {
@@ -75,7 +75,7 @@ const en = {
     tags: { sealed: "sealed", ttl: "expires" },
   },
   agree: {
-    eyebrow: "03 — The agreement",
+    eyebrow: "03 · The agreement",
     label: "How both sides agree on what to use",
     steps: [
       {
@@ -88,7 +88,7 @@ const en = {
       },
       {
         title: "A plan both agreed to.",
-        body: "Chat, files and Cashu, over WebRTC — because that's what these two have in common. Change the apps, and the plan changes with them.",
+        body: "Chat, files and Cashu, over WebRTC, because that's what these two have in common. Change the apps, and the plan changes with them.",
         note: "Negotiated abilities come with paired chats, new in 0.5.0. Chats started with an older version keep a fixed set.",
       },
     ],
@@ -97,7 +97,7 @@ const en = {
     plan: "The plan",
   },
   alive: {
-    eyebrow: "04 — The connection comes alive",
+    eyebrow: "04 · The connection comes alive",
     label: "How the conversation leaves the DHT for a direct connection",
     steps: [
       {
@@ -110,15 +110,15 @@ const en = {
       },
       {
         title: "Honest about the route.",
-        body: "Public STUN servers help the two devices find a route through home routers. If a direct path isn't possible, the connection can fail — you can add your own TURN relay in settings.",
-        note: "Very short texts can still travel as DHT records when no live link is up — up to 500 bytes today, 256 bytes in paired chats.",
+        body: "Public STUN servers help the two devices find a route through home routers. If a direct path isn't possible, the connection can fail. You can add your own TURN relay in settings.",
+        note: "Very short texts can still travel as DHT records when no live link is up: up to 500 bytes today, 256 bytes in paired chats.",
       },
     ],
     pipe: "live connection",
     thread: "rendezvous",
   },
   next: {
-    eyebrow: "05 — What happens next",
+    eyebrow: "05 · What happens next",
     title: "Now that you're connected.",
     lead: "Available in the app today, unless the badge says it arrives in 0.5.0.",
     shot: "Screenshot of the Ghostly app",
@@ -147,7 +147,7 @@ const en = {
         id: "calls",
         icon: "video",
         title: "Be a little closer.",
-        body: "Voice, video and screen sharing, one to one — turn the camera on or share your screen without calling again.",
+        body: "Voice, video and screen sharing, one to one. Turn the camera on or share your screen without calling again.",
         level: "released" as Level,
         extra: "Screen sharing needs a computer. Calls ring in chats over WebRTC; paired chats and groups don't ring yet.",
       },
@@ -155,9 +155,9 @@ const en = {
         id: "sats",
         icon: "bolt",
         title: "A little thank-you.",
-        body: "Send or request sats right in the conversation — ecash, a Lightning invoice, or from the wallet you already use.",
+        body: "Send or request sats right in the conversation: ecash, a Lightning invoice, or from the wallet you already use.",
         level: "released" as Level,
-        extra: "New in 0.5.0: your own Lightning node or wallet (NWC, LND, Core Lightning, WebLN, Breez), Lightning addresses, paying from any wallet, Ark, USDT and on-chain bitcoin — several on test networks first.",
+        extra: "New in 0.5.0: your own Lightning node or wallet (NWC, LND, Core Lightning, WebLN, Breez), Lightning addresses, paying from any wallet, Ark, USDT and on-chain bitcoin (several on test networks first).",
         extraLevel: "development" as Level,
       },
       {
@@ -172,7 +172,7 @@ const en = {
         id: "identities",
         icon: "badge",
         title: "Prove who you are. Only to whom you choose.",
-        body: "Attach an outside identity to your profile once — a Nostr key, a domain, an OpenPGP or SSH key, a Bitcoin address — and share it with one contact at a time. Their app verifies it on the device.",
+        body: "Attach an outside identity to your profile once (a Nostr key, a domain, an OpenPGP or SSH key, a Bitcoin address) and share it with one contact at a time. Their app verifies it on the device.",
         level: "development" as Level,
         extra: "Never required to talk. Withdraw it from one chat, or revoke it everywhere.",
       },
@@ -180,7 +180,7 @@ const en = {
         id: "services",
         icon: "window",
         title: "Made here. Open there.",
-        body: "Let a contact open a web app running on your computer — a photo gallery, a dashboard, a prototype — while you're online.",
+        body: "While you're online, let a contact open a web app running on your computer: a photo gallery, a dashboard, a prototype.",
         level: "released" as Level,
         extra: "Desktop app or browser extension at both ends; plain HTTP, no WebSockets. Choosing which contacts see each app arrives in 0.5.0.",
       },
@@ -196,7 +196,7 @@ const en = {
     ],
   },
   space: {
-    eyebrow: "06 — Your space",
+    eyebrow: "06 · Your space",
     title: "Everything stays yours, on your device.",
     lead: "Chats, keys, wallets and services live in the app. No server of ours.",
     profiles: {
@@ -224,7 +224,7 @@ const en = {
     title: "One wallet, many ways to pay.",
     lead: "Each payment method is its own card, with its own rules. Pick one to see what it does and how ready it is.",
     hint: "Choose a card",
-    testnet: "A Testnet switch moves every wallet to test networks at once — in development.",
+    testnet: "A Testnet switch moves every wallet to test networks at once (in development).",
     cards: [
       {
         id: "cashu",
@@ -240,7 +240,7 @@ const en = {
         kind: "invoices",
         level: "released" as Level,
         body: "Pay and receive Lightning invoices from the chat.",
-        limits: "Through your Cashu mint today. From 0.5.0 your own node or wallet can be the source — NWC, LND, Core Lightning, a browser wallet (WebLN, web app only) or Breez on a test network — it pays Lightning addresses, and any other wallet can pay your invoice from its QR code.",
+        limits: "Through your Cashu mint today. From 0.5.0 your own node or wallet can be the source: NWC, LND, Core Lightning, a browser wallet (WebLN, web app only) or Breez on a test network. It pays Lightning addresses, and any other wallet can pay your invoice from its QR code.",
         more: "development" as Level,
       },
       {
@@ -278,7 +278,7 @@ const en = {
     ],
   },
   open: {
-    eyebrow: "07 — Under the ghosts",
+    eyebrow: "07 · Under the ghosts",
     label: "The pieces that make Ghostly",
     steps: [
       {
@@ -295,7 +295,7 @@ const en = {
     catalog: "Browse the WISPs",
   },
   finale: {
-    eyebrow: "08 — Your turn",
+    eyebrow: "08 · Your turn",
     title1: "One little step.",
     title2: "You're a ghost.",
     lead: "Open Ghostly in your browser and invite someone you know. Or take it with you on your desktop.",
@@ -306,7 +306,7 @@ const en = {
     },
     desktop: {
       title: "For your computer",
-      body: "The desktop app for macOS, Windows and Linux — the same Ghostly, installed.",
+      body: "The desktop app for macOS, Windows and Linux. The same Ghostly, installed.",
       platforms: {
         mac: { name: "macOS", chip: "For this Mac" },
         windows: { name: "Windows", chip: "For this PC" },
@@ -346,7 +346,7 @@ export type HomeCopy = typeof en;
 
 const ptBr: HomeCopy = {
   meta: {
-    title: "Ghostly — Encontre quem você quer. Converse direto, peer to peer.",
+    title: "Ghostly: encontre quem você quer. Converse direto, peer to peer.",
     description:
       "Encontre as pessoas que você escolher por um convite privado e converse, envie arquivos e sats, peer to peer. Sem criar conta. Gratuito e de código aberto.",
   },
@@ -355,7 +355,7 @@ const ptBr: HomeCopy = {
     badge: "Peer to peer · Sem criar conta",
     title1: "Encontre sua gente.",
     title2: "Converse direto.",
-    lead: "O Ghostly liga você diretamente às pessoas que você convida — para conversar a dois ou em grupo, mandar arquivos e sats, fazer chamadas e compartilhar o que roda no seu computador.",
+    lead: "O Ghostly liga você diretamente às pessoas que você convida, para conversar a dois ou em grupo, mandar arquivos e sats, fazer chamadas e compartilhar o que roda no seu computador.",
     open: "Abrir no navegador",
     download: "Baixar o app",
     micro: "Nada para instalar · Gratuito e de código aberto",
@@ -369,16 +369,16 @@ const ptBr: HomeCopy = {
     after: " um servidor do Ghostly no meio.",
   },
   invite: {
-    eyebrow: "01 — O convite",
+    eyebrow: "01 · O convite",
     label: "Como funciona um convite",
     steps: [
       {
         title: "Crie um convite.",
-        body: "O Boo cria um convite para uma pessoa. Ele guarda as chaves desta conexão — nada de conta pública, porque não existe uma.",
+        body: "O Boo cria um convite para uma pessoa. Ele guarda as chaves desta conexão. Nada de conta pública, porque não existe uma.",
       },
       {
         title: "Compartilhe do seu jeito.",
-        body: "Como link, QR code ou código de texto — pessoalmente, por mensagem, como preferir. Compartilhe só com quem você quer encontrar.",
+        body: "Como link, QR code ou código de texto, pessoalmente ou por mensagem, como preferir. Compartilhe só com quem você quer encontrar.",
         note: "Escanear o QR code com a câmera é novidade da 0.5.0.",
       },
       {
@@ -389,12 +389,12 @@ const ptBr: HomeCopy = {
     card: { title: "Convite", link: "Link", qr: "QR", code: "Código", forOne: "para uma pessoa" },
   },
   dht: {
-    eyebrow: "02 — O ponto de encontro",
+    eyebrow: "02 · O ponto de encontro",
     label: "Como os dois apps se encontram na DHT",
     steps: [
       {
         title: "Uma rede pública, sem dono.",
-        body: "Para se acharem, os dois apps usam a DHT Mainline — milhões de computadores que já ajudam usuários de BitTorrent a se encontrar — por meio do Pkarr. Não há um servidor do Ghostly no meio.",
+        body: "Para se acharem, os dois apps usam a DHT Mainline, por meio do Pkarr. São milhões de computadores que já ajudam usuários de BitTorrent a se encontrar. Não há um servidor do Ghostly no meio.",
         note: "Navegadores chegam à DHT por relays públicos do Pkarr; o app desktop e a CLI também falam com ela diretamente.",
       },
       {
@@ -413,7 +413,7 @@ const ptBr: HomeCopy = {
     tags: { sealed: "selado", ttl: "expira" },
   },
   agree: {
-    eyebrow: "03 — O acordo",
+    eyebrow: "03 · O acordo",
     label: "Como os dois lados combinam o que usar",
     steps: [
       {
@@ -426,7 +426,7 @@ const ptBr: HomeCopy = {
       },
       {
         title: "Um plano que os dois aceitaram.",
-        body: "Chat, arquivos e Cashu, por WebRTC — porque é isso que esses dois têm em comum. Troque os apps, e o plano muda junto.",
+        body: "Chat, arquivos e Cashu, por WebRTC, porque é isso que esses dois têm em comum. Troque os apps, e o plano muda junto.",
         note: "Capacidades negociadas chegam com os chats pareados, novidade da 0.5.0. Chats iniciados numa versão anterior mantêm um conjunto fixo.",
       },
     ],
@@ -435,7 +435,7 @@ const ptBr: HomeCopy = {
     plan: "O plano",
   },
   alive: {
-    eyebrow: "04 — A conexão ganha vida",
+    eyebrow: "04 · A conexão ganha vida",
     label: "Como a conversa sai da DHT para uma conexão direta",
     steps: [
       {
@@ -448,15 +448,15 @@ const ptBr: HomeCopy = {
       },
       {
         title: "Sincero sobre o caminho.",
-        body: "Servidores STUN públicos ajudam os aparelhos a achar uma rota através dos roteadores de casa. Se não houver caminho direto, a conexão pode falhar — dá para adicionar seu próprio relay TURN nos ajustes.",
-        note: "Textos bem curtos ainda podem viajar como registros na DHT quando não há link ao vivo — até 500 bytes hoje, 256 bytes nos chats pareados.",
+        body: "Servidores STUN públicos ajudam os aparelhos a achar uma rota através dos roteadores de casa. Se não houver caminho direto, a conexão pode falhar. Dá para adicionar seu próprio relay TURN nos ajustes.",
+        note: "Textos bem curtos ainda podem viajar como registros na DHT quando não há link ao vivo: até 500 bytes hoje, 256 bytes nos chats pareados.",
       },
     ],
     pipe: "conexão ao vivo",
     thread: "encontro",
   },
   next: {
-    eyebrow: "05 — E depois",
+    eyebrow: "05 · E depois",
     title: "Agora que vocês estão conectados.",
     lead: "Disponível no app hoje, a menos que o selo diga que chega na 0.5.0.",
     shot: "Captura de tela do app Ghostly",
@@ -485,7 +485,7 @@ const ptBr: HomeCopy = {
         id: "calls",
         icon: "video",
         title: "Fique mais perto.",
-        body: "Voz, vídeo e compartilhamento de tela, um a um — ligue a câmera ou mostre a tela sem ligar de novo.",
+        body: "Voz, vídeo e compartilhamento de tela, um a um. Ligue a câmera ou mostre a tela sem ligar de novo.",
         level: "released",
         extra: "Compartilhar a tela exige um computador. Chamadas tocam nos chats por WebRTC; chats pareados e grupos ainda não tocam.",
       },
@@ -493,9 +493,9 @@ const ptBr: HomeCopy = {
         id: "sats",
         icon: "bolt",
         title: "Um agradinho.",
-        body: "Envie ou peça sats na própria conversa — ecash, uma fatura Lightning, ou da carteira que você já usa.",
+        body: "Envie ou peça sats na própria conversa: ecash, uma fatura Lightning, ou da carteira que você já usa.",
         level: "released",
-        extra: "Novidade da 0.5.0: seu próprio nó ou carteira Lightning (NWC, LND, Core Lightning, WebLN, Breez), Lightning addresses, pagar de qualquer carteira, Ark, USDT e bitcoin on-chain — vários primeiro em redes de teste.",
+        extra: "Novidade da 0.5.0: seu próprio nó ou carteira Lightning (NWC, LND, Core Lightning, WebLN, Breez), Lightning addresses, pagar de qualquer carteira, Ark, USDT e bitcoin on-chain (vários primeiro em redes de teste).",
         extraLevel: "development",
       },
       {
@@ -510,7 +510,7 @@ const ptBr: HomeCopy = {
         id: "identities",
         icon: "badge",
         title: "Prove quem você é. Só para quem você escolher.",
-        body: "Vincule uma identidade externa ao seu perfil uma vez — uma chave Nostr, um domínio, uma chave OpenPGP ou SSH, um endereço Bitcoin — e compartilhe com um contato por vez. O app dele verifica no aparelho.",
+        body: "Vincule uma identidade externa ao seu perfil uma vez (uma chave Nostr, um domínio, uma chave OpenPGP ou SSH, um endereço Bitcoin) e compartilhe com um contato por vez. O app dele verifica no aparelho.",
         level: "development",
         extra: "Nunca é exigido para conversar. Retire de um chat, ou revogue em todo lugar.",
       },
@@ -518,7 +518,7 @@ const ptBr: HomeCopy = {
         id: "services",
         icon: "window",
         title: "Feito aqui. Aberto lá.",
-        body: "Deixe um contato abrir um app web que roda no seu computador — uma galeria de fotos, um painel, um protótipo — enquanto você está online.",
+        body: "Enquanto você está online, deixe um contato abrir um app web que roda no seu computador, como uma galeria de fotos, um painel ou um protótipo.",
         level: "released",
         extra: "App desktop ou extensão nas duas pontas; HTTP simples, sem WebSockets. Escolher quais contatos veem cada app chega na 0.5.0.",
       },
@@ -534,7 +534,7 @@ const ptBr: HomeCopy = {
     ],
   },
   space: {
-    eyebrow: "06 — Seu espaço",
+    eyebrow: "06 · Seu espaço",
     title: "Tudo continua seu, no seu aparelho.",
     lead: "Chats, chaves, carteiras e serviços ficam no app. Nenhum servidor nosso.",
     profiles: {
@@ -562,7 +562,7 @@ const ptBr: HomeCopy = {
     title: "Uma carteira, muitas formas de pagar.",
     lead: "Cada método de pagamento é um cartão, com as próprias regras. Escolha um para ver o que ele faz e o quanto está pronto.",
     hint: "Escolha um cartão",
-    testnet: "Uma chave de Testnet leva todas as carteiras para redes de teste de uma vez — em desenvolvimento.",
+    testnet: "Uma chave de Testnet leva todas as carteiras para redes de teste de uma vez (em desenvolvimento).",
     cards: [
       {
         id: "cashu",
@@ -578,7 +578,7 @@ const ptBr: HomeCopy = {
         kind: "faturas",
         level: "released",
         body: "Pague e receba faturas Lightning pelo chat.",
-        limits: "Pelo seu mint Cashu hoje. A partir da 0.5.0, seu próprio nó ou carteira pode ser a fonte — NWC, LND, Core Lightning, uma carteira do navegador (WebLN, só no app web) ou Breez numa rede de teste —, ela paga Lightning addresses e qualquer outra carteira paga a sua fatura pelo QR code.",
+        limits: "Pelo seu mint Cashu hoje. A partir da 0.5.0, seu próprio nó ou carteira pode ser a fonte: NWC, LND, Core Lightning, uma carteira do navegador (WebLN, só no app web) ou Breez numa rede de teste. Ela paga Lightning addresses, e qualquer outra carteira paga a sua fatura pelo QR code.",
         more: "development",
       },
       {
@@ -616,7 +616,7 @@ const ptBr: HomeCopy = {
     ],
   },
   open: {
-    eyebrow: "07 — Por baixo dos fantasmas",
+    eyebrow: "07 · Por baixo dos fantasmas",
     label: "As peças que formam o Ghostly",
     steps: [
       {
@@ -633,7 +633,7 @@ const ptBr: HomeCopy = {
     catalog: "Ver os WISPs",
   },
   finale: {
-    eyebrow: "08 — Sua vez",
+    eyebrow: "08 · Sua vez",
     title1: "Um passinho.",
     title2: "Você já é um fantasma.",
     lead: "Abra o Ghostly no navegador e convide alguém que você conhece. Ou leve com você no desktop.",
@@ -644,7 +644,7 @@ const ptBr: HomeCopy = {
     },
     desktop: {
       title: "Para o seu computador",
-      body: "O app de desktop para macOS, Windows e Linux — o mesmo Ghostly, instalado.",
+      body: "O app de desktop para macOS, Windows e Linux. O mesmo Ghostly, instalado.",
       platforms: {
         mac: { name: "macOS", chip: "Para este Mac" },
         windows: { name: "Windows", chip: "Para este PC" },

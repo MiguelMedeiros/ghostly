@@ -191,8 +191,8 @@ export const editorial: Record<string, Entry> = {
   },
   "04-profiles": {
     benefit: {
-      en: "Keep separate lives on one device — chats, wallets, services and settings — never announced to contacts.",
-      "pt-br": "Manter vidas separadas num aparelho — chats, carteiras, serviços e ajustes — sem anunciar isso aos contatos.",
+      en: "Keep separate lives on one device (chats, wallets, services and settings), never announced to contacts.",
+      "pt-br": "Manter vidas separadas num aparelho (chats, carteiras, serviços e ajustes), sem anunciar isso aos contatos.",
     },
     level: "development",
     note: {
@@ -223,8 +223,8 @@ export const editorial: Record<string, Entry> = {
   },
   "101-webrtc": {
     benefit: {
-      en: "Carry a session over a WebRTC data channel — the path every Ghostly app has today.",
-      "pt-br": "Levar a sessão por um canal de dados WebRTC — o caminho que todo app Ghostly tem hoje.",
+      en: "Carry a session over a WebRTC data channel, the path every Ghostly app has today.",
+      "pt-br": "Levar a sessão por um canal de dados WebRTC, o caminho que todo app Ghostly tem hoje.",
     },
     level: "released",
     note: {
@@ -261,8 +261,8 @@ export const editorial: Record<string, Entry> = {
     },
     level: "released",
     note: {
-      en: "Payment requests exist in the release. In development: negotiated methods in paired chats, and any wallet paying a request from its QR code or link — settled only when the payee's own wallet sees the money.",
-      "pt-br": "Pedidos de pagamento existem na versão pública. Em desenvolvimento: métodos negociados em chats pareados, e qualquer carteira pagando um pedido pelo QR code ou link — liquidado só quando a carteira de quem recebe vê o dinheiro.",
+      en: "Payment requests exist in the release. In development: negotiated methods in paired chats, and any wallet paying a request from its QR code or link. It settles only when the payee's own wallet sees the money.",
+      "pt-br": "Pedidos de pagamento existem na versão pública. Em desenvolvimento: métodos negociados em chats pareados, e qualquer carteira pagando um pedido pelo QR code ou link. O pagamento só conta como liquidado quando a carteira de quem recebe vê o dinheiro.",
     },
     feature: inApp("next", "Send sats", "Enviar sats"),
   },
@@ -300,8 +300,8 @@ export const editorial: Record<string, Entry> = {
   },
   "204-bark": {
     benefit: {
-      en: "A second Ark provider — Second's Bark — beside Arkade, so Ark isn't tied to one implementation.",
-      "pt-br": "Um segundo provedor de Ark — o Bark, da Second — ao lado do Arkade, para o Ark não depender de uma implementação.",
+      en: "A second Ark provider (Second's Bark) beside Arkade, so Ark isn't tied to one implementation.",
+      "pt-br": "Um segundo provedor de Ark (o Bark, da Second) ao lado do Arkade, para o Ark não depender de uma implementação.",
     },
     level: "development",
     note: {
@@ -336,8 +336,8 @@ export const editorial: Record<string, Entry> = {
   },
   "300-peer-proofs": {
     benefit: {
-      en: "Optionally prove to one contact that you control an outside identity — never required.",
-      "pt-br": "Provar, se quiser, a um contato que você controla uma identidade externa — nunca obrigatório.",
+      en: "Optionally prove to one contact that you control an outside identity. Never required.",
+      "pt-br": "Provar, se quiser, a um contato que você controla uma identidade externa. Nunca é obrigatório.",
     },
     level: "development",
     note: {
@@ -359,8 +359,8 @@ export const editorial: Record<string, Entry> = {
   "3xx-nostr-social": {
     group: "identity",
     benefit: {
-      en: "What a proven Nostr key lets a contact see — profile, follows, notes — and, if you turn it on, posting through your own signer.",
-      "pt-br": "O que uma chave Nostr provada deixa um contato ver — perfil, quem segue, notas — e, se você ligar, publicar pelo seu próprio signer.",
+      en: "What a proven Nostr key lets a contact see (profile, follows, notes) and, if you turn it on, posting through your own signer.",
+      "pt-br": "O que uma chave Nostr provada deixa um contato ver (perfil, quem segue, notas) e, se você ligar, publicar pelo seu próprio signer.",
     },
     level: "development",
     note: {
@@ -383,8 +383,8 @@ export const editorial: Record<string, Entry> = {
   "3xx-openpgp": {
     group: "identity",
     benefit: {
-      en: "Sign the statement once with your own gpg — a YubiKey works unchanged — and the contact verifies it locally.",
-      "pt-br": "Assinar a declaração uma vez com o seu próprio gpg — uma YubiKey funciona igual — e o contato verifica localmente.",
+      en: "Sign the statement once with your own gpg (a YubiKey works unchanged), and the contact verifies it locally.",
+      "pt-br": "Assinar a declaração uma vez com o seu próprio gpg (uma YubiKey funciona igual), e o contato verifica localmente.",
     },
     level: "development",
     note: {
@@ -479,8 +479,8 @@ export const editorial: Record<string, Entry> = {
   },
   "403-dht-text": {
     benefit: {
-      en: "Very short text through DHT records when no live link is up — bounded, not a mailbox.",
-      "pt-br": "Textos bem curtos por registros na DHT quando não há link ao vivo — limitado, não é caixa postal.",
+      en: "Very short text through DHT records when no live link is up. Bounded, not a mailbox.",
+      "pt-br": "Textos bem curtos por registros na DHT quando não há link ao vivo. É limitado, não é caixa postal.",
     },
     level: "released",
     note: {
@@ -491,8 +491,8 @@ export const editorial: Record<string, Entry> = {
   "4xx-store-and-forward": {
     group: "talk",
     benefit: {
-      en: "Text, a picture or a payment request sent while a contact is away waits, sealed, in your own S3 bucket — and reaches them when they are back.",
-      "pt-br": "Texto, uma imagem ou um pedido de pagamento enviados com o contato ausente esperam, selados, no seu próprio bucket S3 — e chegam quando ele volta.",
+      en: "Text, a picture or a payment request sent while a contact is away waits, sealed, in your own S3 bucket and reaches them when they are back.",
+      "pt-br": "Texto, uma imagem ou um pedido de pagamento enviados com o contato ausente esperam, selados, no seu próprio bucket S3 e chegam quando ele volta.",
     },
     level: "development",
     note: {
@@ -594,8 +594,8 @@ export const editorial: Record<string, Entry> = {
   },
   "900-group-sessions": {
     benefit: {
-      en: "How a group agrees on who is in it, locks out whoever left, and moves messages between members — never through the DHT.",
-      "pt-br": "Como um grupo combina quem faz parte dele, tranca para fora quem saiu e leva as mensagens entre os membros — nunca pela DHT.",
+      en: "How a group agrees on who is in it, locks out whoever left, and moves messages between members, never through the DHT.",
+      "pt-br": "Como um grupo combina quem faz parte dele, tranca para fora quem saiu e leva as mensagens entre os membros, nunca pela DHT.",
     },
     level: "development",
     note: {
@@ -640,8 +640,8 @@ export const editorial: Record<string, Entry> = {
   },
   "1000-storage": {
     benefit: {
-      en: "Where sealed bundles are kept — separate from what goes into a backup.",
-      "pt-br": "Onde os pacotes selados ficam guardados — separado do que entra num backup.",
+      en: "Where sealed bundles are kept, separate from what goes into a backup.",
+      "pt-br": "Onde os pacotes selados ficam guardados, separados do que entra num backup.",
     },
     level: "development",
     note: {
@@ -663,8 +663,8 @@ export const editorial: Record<string, Entry> = {
   },
   "1002-s3-storage": {
     benefit: {
-      en: "Any S3-compatible bucket — AWS, R2, B2, MinIO, Garage — holding only encrypted bundles.",
-      "pt-br": "Qualquer bucket compatível com S3 — AWS, R2, B2, MinIO, Garage — guardando só pacotes criptografados.",
+      en: "Any S3-compatible bucket (AWS, R2, B2, MinIO, Garage) holding only encrypted bundles.",
+      "pt-br": "Qualquer bucket compatível com S3 (AWS, R2, B2, MinIO, Garage) guardando só pacotes criptografados.",
     },
     level: "development",
     note: {

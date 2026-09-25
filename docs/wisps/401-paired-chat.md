@@ -1,4 +1,4 @@
-# WISP 401 — Paired Chat
+# WISP 401: Paired Chat
 
 | Field | Value |
 |---|---|

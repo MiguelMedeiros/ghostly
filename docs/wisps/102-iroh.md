@@ -1,4 +1,4 @@
-# WISP 102 — Iroh
+# WISP 102: Iroh
 
 | Field | Value |
 |---|---|

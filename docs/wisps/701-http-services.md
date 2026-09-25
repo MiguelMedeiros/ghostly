@@ -1,4 +1,4 @@
-# WISP 701 — HTTP Local Service Profile
+# WISP 701: HTTP Local Service Profile
 
 | Field | Value |
 |---|---|

@@ -10,7 +10,7 @@ export const metadata: Metadata = {
   description:
     "Legacy record-format guide for Ghostly. DNS TXT records, encryption schemes, message formats, and call signaling over the Mainline DHT.",
   openGraph: {
-    title: "Protocol Documentation — Ghostly",
+    title: "Protocol Documentation | Ghostly",
     description:
       "Legacy record-format guide for Ghostly. DNS TXT records, encryption, and message formats.",
     type: "article",
@@ -26,7 +26,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Protocol Documentation — Ghostly",
+    title: "Protocol Documentation | Ghostly",
     description:
       "Legacy record-format guide for Ghostly. DNS TXT records, encryption, and message formats.",
     images: ["https://ghostly.tools/og-image.png"],

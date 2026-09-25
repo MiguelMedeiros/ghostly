@@ -52,7 +52,7 @@ function Visual({ layers }: { layers: string[] }) {
   const ride = useStep(p, 0, n, [0.1, 0.95], [closedTop, openTop]);
   const g = C.ghost;
   const booY = useTransform(ride, (v) => v - g * 1.25 + 8);
-  // Another app — a dashed outline, not a character — comes to stand on your app.
+  // Another app (a dashed outline, not a character) comes to stand on your app.
   const other = useStep(p, 1, n, [0.3, 0.6], [0, 1]);
   const otherX = useStep(p, 1, n, [0.3, 0.6], [C.cx + C.W + 60, C.cx + g * 0.25]);
   const light = useStep(p, 0, n, [0.2, 0.9], [0.04, 0.12]);

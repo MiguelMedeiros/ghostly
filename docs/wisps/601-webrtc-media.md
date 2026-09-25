@@ -1,4 +1,4 @@
-# WISP 601 — WebRTC Media
+# WISP 601: WebRTC Media
 
 | Field | Value |
 |---|---|

@@ -1,4 +1,4 @@
-# WISP 100 — Transport Negotiation
+# WISP 100: Transport Negotiation
 
 | Field | Value |
 |---|---|

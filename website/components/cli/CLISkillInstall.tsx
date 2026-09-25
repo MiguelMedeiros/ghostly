@@ -105,17 +105,17 @@ const features = [
   {
     icon: <GhostIcon />,
     title: "Ephemeral",
-    description: "Messages vanish from the DHT — no permanent traces",
+    description: "Messages vanish from the DHT. No permanent traces",
   },
   {
     icon: <GlobeIcon />,
     title: "No Servers",
-    description: "Direct P2P via 10M+ DHT nodes — no middleman",
+    description: "Direct P2P via 10M+ DHT nodes, no middleman",
   },
   {
     icon: <BracesIcon />,
     title: "JSON Output",
-    description: "Perfect for AI agents — structured JSON responses",
+    description: "Perfect for AI agents: structured JSON responses",
   },
 ];
 

@@ -1,4 +1,4 @@
-# WISP 402 — Legacy Timestamp Chat
+# WISP 402: Legacy Timestamp Chat
 
 | Field | Value |
 |---|---|

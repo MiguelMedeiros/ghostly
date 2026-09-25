@@ -1,10 +1,10 @@
-# Optional peer proofs — implementation increment
+# Optional peer proofs: implementation increment
 
 > Release decision (2026-09-21): external identity proofs and external profile lookup are deferred. This release exposes only Ghostly participation identity. Nostr, Pubky, Keet, imports and Ring UI are disabled; previous experiments and stored data are preserved for future work. Descriptions below are historical/research, not available release features.
 >
-> 2026-09-23: new Nostr proofs use the rebuilt [identity proofs](300-peer-proofs.md#implementation--2026-09-23-identity-proofs) instead; this `proof-*` protocol stays disabled.
+> 2026-09-23: new Nostr proofs use the rebuilt [identity proofs](300-peer-proofs.md#implementation-2026-09-23-identity-proofs) instead; this `proof-*` protocol stays disabled.
 
-2026-09-20. Experimental implementation of Nostr and authorized local-import profiles for WISP 300–303; all WISPs remain Draft. This is not an independent interoperability certification or a security audit.
+2026-09-20. Experimental implementation of Nostr and authorized local-import profiles for WISP 300-303; all WISPs remain Draft. This is not an independent interoperability certification or a security audit.
 
 ## Identity and consent
 
@@ -55,7 +55,7 @@ Proof failures do not replace pins, clear history, weaken transport policy, or d
 | Keet-compatible local import | Experimental | SDK derivation/attestData/verify and browser/native compatibility regression | Not evidence of an existing Keet app account |
 | Multiple proofs | One record per adapter/direction | Coexistence and independent withdrawal tests | Same Ghostly implementation; no independent-client certification |
 
-Nostr signer requests time out after two minutes; peer challenge requests after 15 seconds. Cancellation ignores late signer results. The app never auto-opens signer auth URLs and only displays validated HTTPS approval links. Bunker input accepts 1–3 secure WebSocket relays; insecure WebSocket is limited to loopback for isolated development tests. It does not resolve NIP-05 or silently switch relays. Signer permission is restricted to `sign_event:30078`. Accounts already configured at a signer remain entirely external.
+Nostr signer requests time out after two minutes; peer challenge requests after 15 seconds. Cancellation ignores late signer results. The app never auto-opens signer auth URLs and only displays validated HTTPS approval links. Bunker input accepts 1 to 3 secure WebSocket relays; insecure WebSocket is limited to loopback for isolated development tests. It does not resolve NIP-05 or silently switch relays. Signer permission is restricted to `sign_event:30078`. Accounts already configured at a signer remain entirely external.
 
 ## External Pubky signer feasibility (historical no-import scope)
 

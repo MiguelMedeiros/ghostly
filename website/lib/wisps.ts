@@ -20,7 +20,7 @@ export type Wisp = {
   file: string;
   slug: string;
   aliases: string[];
-  /** Title without the "WISP nn —" prefix. */
+  /** Title without the "WISP nn:" prefix. */
   name: string;
   fullTitle: string;
   group: GroupId;
@@ -59,7 +59,7 @@ const all: Wisp[] = numbering.map((entry) => {
   const ref = refs.find((r) => r.file === entry.file);
   const slug = entry.file.replace(/\.md$/, "").toLowerCase();
   const fullTitle = ref?.title ?? entry.file;
-  const name = fullTitle.replace(/^WISP\s+\S+\s+[—-]\s+/, "");
+  const name = fullTitle.replace(/^WISP\s+[^\s:]+(?::|\s+[\u2014-])\s+/, "");
   const extra = editorial[slug];
   return {
     id: entry.id,

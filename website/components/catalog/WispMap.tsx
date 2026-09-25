@@ -73,7 +73,7 @@ export function WispMap({ t, locale }: { t: CatalogCopy; locale: Locale }) {
                       className="wmap-tile"
                       data-level={w.level ?? "none"}
                       data-kind={w.kind}
-                      title={`${w.number} · ${w.name}${w.level ? ` — ${levels[w.level]}` : ""}`}
+                      title={`${w.number} · ${w.name}${w.level ? ` · ${levels[w.level]}` : ""}`}
                     >
                       <span className="wmap-num mono">{w.number}</span>
                       <span className="wmap-name">{short(w.name)}</span>

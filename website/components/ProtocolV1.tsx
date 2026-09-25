@@ -199,7 +199,7 @@ flags  bit 0 = END`}</Pre>
             ["Desktop", "Mainline DHT directly (Rust), plus relays", "Yes, through Rust, with cookies", "A window per service on its own origin"],
             ["Extension", "HTTP relays", "Yes, with Chrome's host permission", "A tab on a virtual origin"],
             ["Web", "HTTP relays", "No: a page may not reach your machine", "Not yet"],
-            ["CLI", "Mainline DHT directly", "—", "—"],
+            ["CLI", "Mainline DHT directly", "No", "No"],
           ]}
         />
         <List

@@ -182,16 +182,16 @@ function Chip({ x, y, color, pop, portrait }: { x: number; y: number; color: str
 }
 
 // Where things are, per orientation. The actors' poses live in poses.ts:
-// landscape Boo's body is x 664–856, y 494–715 (eyes at y ≈ 578); Casper's x 1084–1276 (eyes ≈ 568, mouth to ≈ 640,
-// hem bottom 705). Landscape safe area is y 150–750 (2:1 viewports crop 90 units top and bottom).
-// portrait Boo's body is x 35–155, y 275–413 (eyes ≈ 327); Casper's x 235–355 (mouth ≈ 357, skirt 342–382).
+// landscape Boo's body is x 664-856, y 494-715 (eyes at y ≈ 578); Casper's x 1084-1276 (eyes ≈ 568, mouth to ≈ 640,
+// hem bottom 705). Landscape safe area is y 150-750 (2:1 viewports crop 90 units top and bottom).
+// portrait Boo's body is x 35-155, y 275-413 (eyes ≈ 327); Casper's x 235-355 (mouth ≈ 357, skirt 342-382).
 type Layout = {
   /** Where the card first appears (at Boo's side) and where he holds it out. */
   born: Pt;
   rest: Pt;
   /** The card as a token, once it is on its way. */
   token: number;
-  /** The private channel: a cubic from where the card rests — two controls and Casper's chest. */
+  /** The private channel: a cubic from where the card rests, through two controls, to Casper's chest. */
   flight: [Pt, Pt, Pt];
   chips: [Pt, Pt];
   link: [number, number, number];
@@ -231,11 +231,11 @@ function Visual({ card }: { card: Card }) {
   const id = useId().replace(/:/g, "");
   const stage = portrait ? { w: 390, h: 844 } : { w: 1440, h: 900 };
 
-  // Step 0 — Boo makes the card: it grows at his side and settles where he holds it out.
+  // Step 0: Boo makes the card: it grows at his side and settles where he holds it out.
   const grow = useStep(p, 0, n, [0.1, 0.3, 0.5, 0.7], [0.2, 0.72, 0.93, 1]);
   const settle = useStep(p, 0, n, [0.1, 0.3, 0.5, 0.7], [0, 0.62, 0.9, 1]);
   const appear = useStep(p, 0, n, [0.1, 0.3], [0, 1]);
-  // Step 1 — the three ways light up in turn; the card becomes a token, travels the channel and folds into Casper.
+  // Step 1: the three ways light up in turn; the card becomes a token, travels the channel and folds into Casper.
   const glowLink = useStep(p, 1, n, [0.02, 0.08, 0.15], [0, 1, 0]);
   const glowQr = useStep(p, 1, n, [0.13, 0.19, 0.26], [0, 1, 0]);
   const glowCode = useStep(p, 1, n, [0.24, 0.3, 0.37], [0, 1, 0]);
@@ -247,7 +247,7 @@ function Visual({ card }: { card: Card }) {
   const arcDraw = useStep(p, 1, n, [0.5, 0.76], [0, 1]);
   const arcFade = useStep(p, 1, n, [0.82, 0.94], [0.5, 0]);
   const ring = useStep(p, 1, n, [0.86, 1], [0, 1]);
-  // Step 2 — both confirm, then the connection.
+  // Step 2: both confirm, then the connection.
   const popBoo = useStep(p, 2, n, [0.08, 0.15, 0.22], [0, 1.15, 1]);
   const popCasper = useStep(p, 2, n, [0.22, 0.29, 0.36], [0, 1.15, 1]);
   const link = useStep(p, 2, n, [0.4, 0.6], [0, 1]);

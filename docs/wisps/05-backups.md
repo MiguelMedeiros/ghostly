@@ -1,4 +1,4 @@
-# WISP 05 — Profile Backups
+# WISP 05: Profile Backups
 
 | Field | Value |
 |---|---|
@@ -14,7 +14,7 @@
 
 ## Scope
 
-A **profile backup** captures one local profile ([04](04-profiles.md)) completely, so it can be brought back on this or another device: chats and their keys, messages and files, wallets and their payment journal, shared services and grants, per-chat payment choices and settings. It is one opaque, encrypted **bundle**. Where a bundle is kept — a file, an S3 bucket — is the concern of storage adapters ([1000](1000-storage.md)); this document defines what a bundle is.
+A **profile backup** captures one local profile ([04](04-profiles.md)) completely, so it can be brought back on this or another device: chats and their keys, messages and files, wallets and their payment journal, shared services and grants, per-chat payment choices and settings. It is one opaque, encrypted **bundle**. Where a bundle is kept (a file, an S3 bucket) is the concern of storage adapters ([1000](1000-storage.md)); this document defines what a bundle is.
 
 Per-wallet backups defined by [202](202-arkade.md) and the USDT scope remain valid for moving a single wallet. A profile backup contains them.
 

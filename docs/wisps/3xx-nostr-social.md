@@ -1,4 +1,4 @@
-# WISP 3xx — Nostr social layer
+# WISP 3xx: Nostr social layer
 
 | Field | Value |
 |---|---|
@@ -8,7 +8,7 @@
 | Updated | 2026-09-23 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [300](300-peer-proofs.md), [301](301-nostr.md) |
-| Implementation | Experimental: `packages/browser/src/nostr/`, `packages/browser/src/engine/nostrSocial.ts`; see [below](#implementation--2026-09-23) |
+| Implementation | Experimental: `packages/browser/src/nostr/`, `packages/browser/src/engine/nostrSocial.ts`; see [below](#implementation-2026-09-23) |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 
@@ -54,13 +54,13 @@ Deletion requests (NIP-09), reactions, replies and mentions, DMs, relay lists (N
 
 ## Conformance
 
-A contact without the shared proof loads nothing and sees no Nostr card, and no relay sees a request from them. With it, profile, follows and notes load only on the person's action, from the configured relays, each shown with source and time; a note matching the person's mute list is hidden and counted; hints are computed only once the person's own list is loaded. Publication is refused while the capability is off; a draft signed by another key, or altered by the signer, is refused before anything is sent; a follow/unfollow keeps every other entry of the list; a profile update keeps unknown fields. See the [implementation](#implementation--2026-09-23) for the tests that establish this.
+A contact without the shared proof loads nothing and sees no Nostr card, and no relay sees a request from them. With it, profile, follows and notes load only on the person's action, from the configured relays, each shown with source and time; a note matching the person's mute list is hidden and counted; hints are computed only once the person's own list is loaded. Publication is refused while the capability is off; a draft signed by another key, or altered by the signer, is refused before anything is sent; a follow/unfollow keeps every other entry of the list; a profile update keeps unknown fields. See the [implementation](#implementation-2026-09-23) for the tests that establish this.
 
 ## References
 
 [Peer Proofs](300-peer-proofs.md), [Nostr](301-nostr.md), [Local public profiles](PUBLIC-PROFILES.md), [roadmap: identity, profiles and social data](ADAPTER-ROADMAP.md#identity-profiles-and-social-data).
 
-## Implementation — 2026-09-23
+## Implementation (2026-09-23)
 
 Experimental, web, extension and desktop. Code: `packages/browser/src/nostr/relay.ts` (bounded NIP-01 client: read one filter from the person's relays, send one signed event), `nostr/social.ts` (parsing of kinds 0, 3, 1 and 10000, mute rules, follow hints, the three unsigned templates), `nostr/types.ts` (settings, caches, views), `engine/nostrSocial.ts` (permissions, caches, drafts), engine RPC `nostrLoadContact`, `nostrForgetContact`, `nostrLoadOwn`, `nostrDraft`, `nostrPublish`; UI `src/components/nostr/` (the contact card inside the chat's Identities, the Identities → Nostr section, the publish dialog), signing in `src/lib/nostr.ts`.
 

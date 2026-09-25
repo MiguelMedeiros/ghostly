@@ -1,4 +1,4 @@
-/* /developers — the paired-session negotiation loop (components/dev/Negotiation.tsx).
+/* /developers: the paired-session negotiation loop (components/dev/Negotiation.tsx).
    Every rule here is prefixed ng-. The older .nego-* / .peer-* rules in developers.css
    belonged to the interactive form this loop replaced and are no longer used. */
 

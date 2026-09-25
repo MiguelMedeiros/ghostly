@@ -1,4 +1,4 @@
-# WISP 202 — Ark payments via Arkade
+# WISP 202: Ark payments via Arkade
 
 | Field | Value |
 |---|---|

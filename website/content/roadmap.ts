@@ -25,7 +25,7 @@ const en = {
   },
   eyebrow: "Public roadmap",
   title: "The ghost keeps learning.",
-  lead: "It started small, learned to find someone, then new ways to talk and to trade value. What comes next is ordered by what it depends on — not by dates we'd have to invent.",
+  lead: "It started small, learned to find someone, then new ways to talk and to trade value. What comes next is ordered by what it depends on, not by dates we'd have to invent.",
   rules: [
     "No dates. Order and dependencies only.",
     "What already exists is marked as such, not listed as future work.",
@@ -78,7 +78,7 @@ const en = {
       id: "reach",
       n: "03",
       title: "Reach each other in more places",
-      why: "New transports widen where two people can meet — each one an adapter both sides must support, never a silent bridge.",
+      why: "New transports widen where two people can meet. Each one is an adapter both sides must support, never a silent bridge.",
       now: [
         { text: "WebRTC everywhere; Iroh and HyperDHT on desktop", level: "development" },
       ],
@@ -109,11 +109,11 @@ const en = {
     {
       id: "identity",
       n: "05",
-      title: "Bring an identity — only if you want",
+      title: "Bring an identity, only if you want",
       why: "Nobody needs a public identity to talk. Proofs are optional, several can coexist, and you choose what each contact sees.",
       now: [
         { text: "Proofs made once and shared per chat: Nostr, a domain, an OpenPGP or SSH key, a Bitcoin address", level: "development" },
-        { text: "Accounts at Google, Microsoft, Apple, GitLab or Twitch, attested by the provider — merged, not offered until clients are registered", level: "development" },
+        { text: "Accounts at Google, Microsoft, Apple, GitLab or Twitch, attested by the provider (merged, not offered until clients are registered)", level: "development" },
         { text: "Nostr social layer: a proven key's profile, follows and notes on request; posting through your own signer, off by default", level: "development" },
       ],
       next: [
@@ -161,7 +161,7 @@ const en = {
       id: "apps",
       n: "08",
       title: "Apps and catalogs",
-      why: "Mini-apps, peer-to-peer games, commerce, interfaces for specific contracts — found through independent catalogs.",
+      why: "Mini-apps, peer-to-peer games, commerce, interfaces for specific contracts, all found through independent catalogs.",
       now: [{ text: "Nothing yet", level: "planned" }],
       next: [
         { text: "Mini-apps and games", level: "planned" },
@@ -175,7 +175,7 @@ const en = {
       id: "os",
       n: "09",
       title: "A Ghostly you can host",
-      why: "An always-on runtime — even a Raspberry Pi at home — so services and presence don't depend on an open tab.",
+      why: "An always-on runtime (even a Raspberry Pi at home) so services and presence don't depend on an open tab.",
       now: [{ text: "Vision only", level: "planned" }],
       next: [
         { text: "Self-hosted 24h runtime", level: "planned" },
@@ -203,7 +203,7 @@ const ptBr: RoadmapCopy = {
   },
   eyebrow: "Roadmap público",
   title: "O fantasma continua aprendendo.",
-  lead: "Ele começou pequeno, aprendeu a encontrar alguém, depois ganhou novas formas de conversar e de trocar valor. O que vem a seguir está ordenado pelo que depende de quê — não por datas que teríamos de inventar.",
+  lead: "Ele começou pequeno, aprendeu a encontrar alguém, depois ganhou novas formas de conversar e de trocar valor. O que vem a seguir está ordenado pelo que depende de quê, não por datas que teríamos de inventar.",
   rules: [
     "Sem datas. Só ordem e dependências.",
     "O que já existe aparece como existente, não como trabalho futuro.",
@@ -256,7 +256,7 @@ const ptBr: RoadmapCopy = {
       id: "reach",
       n: "03",
       title: "Encontrar-se em mais lugares",
-      why: "Novos transportes ampliam onde duas pessoas podem se encontrar — cada um é um adapter que os dois lados precisam suportar, nunca uma ponte silenciosa.",
+      why: "Novos transportes ampliam onde duas pessoas podem se encontrar. Cada um é um adapter que os dois lados precisam suportar, nunca uma ponte silenciosa.",
       now: [
         { text: "WebRTC em todo lugar; Iroh e HyperDHT no desktop", level: "development" },
       ],
@@ -287,11 +287,11 @@ const ptBr: RoadmapCopy = {
     {
       id: "identity",
       n: "05",
-      title: "Traga uma identidade — só se quiser",
+      title: "Traga uma identidade, só se quiser",
       why: "Ninguém precisa de identidade pública para conversar. Provas são opcionais, várias podem coexistir e você escolhe o que cada contato vê.",
       now: [
         { text: "Provas feitas uma vez e compartilhadas por chat: Nostr, um domínio, uma chave OpenPGP ou SSH, um endereço Bitcoin", level: "development" },
-        { text: "Contas no Google, Microsoft, Apple, GitLab ou Twitch, atestadas pelo provedor — integradas, mas só oferecidas quando os clientes forem registrados", level: "development" },
+        { text: "Contas no Google, Microsoft, Apple, GitLab ou Twitch, atestadas pelo provedor (integradas, mas só oferecidas quando os clientes forem registrados)", level: "development" },
         { text: "Camada social do Nostr: perfil, quem segue e notas de uma chave provada, sob pedido; publicar pelo seu próprio signer, desligado por padrão", level: "development" },
       ],
       next: [
@@ -339,7 +339,7 @@ const ptBr: RoadmapCopy = {
       id: "apps",
       n: "08",
       title: "Apps e catálogos",
-      why: "Miniapps, jogos P2P, comércio, interfaces para contratos específicos — encontrados por catálogos independentes.",
+      why: "Miniapps, jogos P2P, comércio, interfaces para contratos específicos, todos encontrados por catálogos independentes.",
       now: [{ text: "Nada ainda", level: "planned" }],
       next: [
         { text: "Miniapps e jogos", level: "planned" },
@@ -353,7 +353,7 @@ const ptBr: RoadmapCopy = {
       id: "os",
       n: "09",
       title: "Um Ghostly que você hospeda",
-      why: "Um runtime sempre ligado — até um Raspberry Pi em casa — para serviços e presença não dependerem de uma aba aberta.",
+      why: "Um runtime sempre ligado (até um Raspberry Pi em casa) para serviços e presença não dependerem de uma aba aberta.",
       now: [{ text: "Só visão", level: "planned" }],
       next: [
         { text: "Runtime auto-hospedado 24h", level: "planned" },
