@@ -20,15 +20,19 @@ A person shows a contact, optionally and per contact, that they hold a Pubky key
 
 Neither Ring nor Passport signs arbitrary text. They approve standard Pubky SDK auth requests, which grant an app access to paths of the key's homeserver. So the external identity vouches for the statement by **publishing** it, the way a domain proof publishes a DNS record:
 
-1. Ghostly picks a fresh folder, 32 random bytes as hex, and starts ONE grant auth flow (`GrantAuthFlow.start`, client id `ghostly.tools`, `x-source` Ghostly) for exactly one capability: `/pub/ghostly.app/proofs/<folder>/:w`. The flow's proof-of-possession key stays in that flow's memory (not the SDK's delegated IndexedDB key).
-2. The same request is offered two ways, on one screen, and whichever approves it first wins:
-   - **Pubky Passport**: a button opens `https://passport.pubky.app/authorize#d=<encodeURIComponent(authorization URL)>` in a popup, from the click itself (a popup opened after an `await` is blocked). The desktop app hands that page to the system browser instead. Ghostly passes no callbacks, so it acts on no message from Passport: a Passport outcome is never a credential. Someone with no Passport identity can make one there with "Continue with Google"; such an identity is recovered with Google plus Passport together (neither alone can), and the approval screen says so.
-   - **Pubky Ring**: a QR code of the same authorization URL.
-3. The SDK receives the approval through Pubky's HTTP relay and returns a session. Ghostly refuses a session whose capabilities are not exactly the one asked for (signs it out, writes nothing).
+1. Ghostly picks a fresh folder, 32 random bytes as hex, and asks for exactly one capability: `/pub/ghostly.app/proofs/<folder>/:w`. It starts two auth flows for it, same capability and relay, each with its own relay secret, because the two signers read different forms of the request:
+   - a grant flow (`GrantAuthFlow.start`, client id `ghostly.tools`, `x-source` Ghostly), whose link is `pubkyauth://signin_grant?…`. The flow's proof-of-possession key stays in that flow's memory (not the SDK's delegated IndexedDB key).
+   - a cookie flow (`AuthFlow.start`, `AuthFlowKind.signin()`, `x-source` Ghostly), whose link is `pubkyauth://signin?…`. The SDK deprecates it, but the Pubky Ring in the app stores (1.19) predates pubky/pubky-ring#360 and answers "Unrecognized format" to a `signin_grant` link. Once Ring's store build parses `signin_grant`, the QR code moves to the grant link and this flow goes.
+2. Both are offered on one screen, and whichever is approved first wins:
+   - **Pubky Passport**: a button opens `https://passport.pubky.app/authorize#d=<encodeURIComponent(grant authorization URL)>` in a popup, from the click itself (a popup opened after an `await` is blocked). The desktop app hands that page to the system browser instead. Ghostly passes no callbacks, so it acts on no message from Passport: a Passport outcome is never a credential. Someone with no Passport identity can make one there with "Continue with Google"; such an identity is recovered with Google plus Passport together (neither alone can), and the approval screen says so.
+   - **Pubky Ring**: a QR code of the cookie flow's authorization URL.
+3. The SDK receives the approval through Pubky's HTTP relay and returns a session; Ghostly then stops waiting for the other flow and frees both (a flow is freed only once no poll of it is in flight). Ghostly refuses a session whose capabilities are not exactly the one asked for (signs it out, writes nothing).
 4. Ghostly builds the WISP 300 statement for the session's key (`pubky:<z32 key>` authorizes a fresh per-proof Ed25519 key for the validity chosen, 90 days by default, at most 365), and writes its exact bytes, one line with no newline, to `/pub/ghostly.app/proofs/<folder>/<statement id>.txt`, where the statement id is SHA-256 of the statement, lowercase hex. The evidence is `{ "folder": "<64 hex>" }` and nothing else.
-5. Ghostly verifies it the way a contact will (below) before saving, then signs the session out and forgets it. An approval that lands after a cancel or a time-out (5 minutes, the relay's lifetime) is signed out at once. If the proof is not saved, the file just written is deleted.
+5. Ghostly verifies it the way a contact will (below) before saving, then signs the session out and forgets it. An approval that lands after a cancel, a time-out (5 minutes, the relay's lifetime) or the other flow's approval is signed out at once. If the proof is not saved, the file just written is deleted.
 
-The authorization URL carries the relay channel's secret. It goes in Passport's fragment (never sent to a server), encoded exactly once, is drawn as a QR code but never written into the page as text, and is never logged; errors from the SDK are redacted before they are shown.
+A grant session carries its own credential. A cookie session is the homeserver's HTTP-only cookie in the browser, a third-party cookie from Ghostly's page: Chromium keeps it, but WebKit drops it (Safari, and the WKWebView of the macOS desktop app), so there the homeserver refuses the Ring session's write. Ghostly then says the browser blocked the cookie and points to Passport, rather than showing a bare 401.
+
+Each authorization URL carries its relay channel's secret. The grant one goes in Passport's fragment (never sent to a server), encoded exactly once; the cookie one is drawn as a QR code but never written into the page as text; neither is logged, and errors from the SDK are redacted before they are shown.
 
 ## Verification (contact side)
 
@@ -43,7 +47,7 @@ The outcome says how it was checked: "File on the homeserver <host>, found throu
 
 ## Removal
 
-Ghostly keeps no access after adding a proof, so taking the file down needs one more approval, and the removal says so. **Remove and stop sharing** asks, on the same approval screen (Passport button, Ring QR code), for the same folder's capability; the session must be the same key; the file is deleted; then the proof is removed. If that approval is declined, cancelled or fails, nothing is removed yet, and **Remove without it** removes the proof and leaves the file on the homeserver (the same flow as an AT Protocol record).
+Ghostly keeps no access after adding a proof, so taking the file down needs one more approval, and the removal says so. **Remove and stop sharing** asks, on the same approval screen (Passport button, Ring QR code, the same two flows), for the same folder's capability; the session must be the same key; the file is deleted; then the proof is removed. If that approval is declined, cancelled or fails, nothing is removed yet, and **Remove without it** removes the proof and leaves the file on the homeserver (the same flow as an AT Protocol record).
 
 Either way, WISP 300's revocation applies: every contact it was shared with is told it is withdrawn, and the proof key publishes a `_ghostly-revoked` record on Pkarr (republished until the proof would have expired), which contacts find even if the person never reconnects. A contact's re-check finds the revocation first ("Revoked by its owner"); a deleted file alone reads "Could not be confirmed".
 
@@ -60,9 +64,9 @@ Web (`connect-src 'self' https: wss:`) and desktop (`connect-src … https: wss:
 
 ## Conformance
 
-- Unit: path and capability building, the exact file bytes, key normalization, PKDNS decoding (a real homeserver packet as the vector), bounded reads, newest-record selection, private-host refusal, a session with any other capability refused and signed out, cancellation, the Passport popup opened synchronously in the click, the request never logged; the WISP 300 contract suite.
+- Unit: path and capability building, the exact file bytes, key normalization, PKDNS decoding (a real homeserver packet as the vector), bounded reads, newest-record selection, private-host refusal, a session with any other capability refused and signed out, the first approval of either flow winning and both flows freed with no poll left after an approval, a cancel, a time-out or a failure, the Passport popup opened synchronously in the click, the requests never logged; the links the real SDK makes (a `signin?` QR code without `cid` or `cpk`, a `signin_grant?` Passport request, different secrets) and a port of the store Ring's link routing (pubky-ring c6e73d0) that must read the QR code as an auth request; the WISP 300 contract suite.
 - End to end, against Pubky's testnet in the e2e infra (homeserver, Pkarr relay, HTTP relay) with a test approver holding a throwaway key in place of Ring and Passport: adding a Pubky identity through a Passport stand-in and by scanning the QR code, a contact verifying it, removal deleting the file and the contact seeing it revoked (`e2e/web/pubky-identity.spec.ts`).
-- Pending: approval by the real Pubky Ring and the real passport.pubky.app, checked by hand.
+- Pending: approval by the real Pubky Ring and the real passport.pubky.app, checked by hand. A Ring approval completes only where the browser keeps the homeserver's cookie (Chromium: Chrome, Edge, the extension, the Windows desktop app).
 
 ## Retired experiments (history)
 

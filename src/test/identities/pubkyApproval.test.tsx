@@ -10,33 +10,41 @@ import { proofView } from "./views";
 
 /**
  * Adding and removing a Pubky identity in the UI, with the Pubky SDK replaced: the approval screen shows Passport's
- * button and Ring's QR code of ONE request; the button opens Passport straight from the click (a popup opened after an
- * await is blocked); the request, which carries a relay secret, is never logged or written into the page as text.
+ * button (a grant request) and Ring's QR code (a cookie request for the same folder), and either approval completes
+ * it; the button opens Passport straight from the click (a popup opened after an await is blocked); the requests,
+ * which carry relay secrets, are never logged or written into the page as text.
  */
 
-/** Looks like a real one: the relay secret is in it. */
-const AUTH_URL = "pubkyauth://signin?caps=%2Fpub%2Fghostly.app%2Fproofs%2Fx%2F%3Aw&relay=https%3A%2F%2Fhttprelay.pubky.app%2Finbox&secret=c2VjcmV0LXJlbGF5LWtleQ";
-const PASSPORT = `https://passport.pubky.app/authorize#d=${encodeURIComponent(AUTH_URL)}`;
+/** Look like real ones: the relay secrets are in them. */
+const GRANT_URL = "pubkyauth://signin_grant?caps=%2Fpub%2Fghostly.app%2Fproofs%2Fx%2F%3Aw&relay=https%3A%2F%2Fhttprelay.pubky.app%2Finbox&secret=c2VjcmV0LXJlbGF5LWtleQ&cid=ghostly.tools&cpk=a2V5";
+const COOKIE_URL = "pubkyauth://signin?caps=%2Fpub%2Fghostly.app%2Fproofs%2Fx%2F%3Aw&relay=https%3A%2F%2Fhttprelay.pubky.app%2Finbox&secret=Y29va2llLXNlY3JldA";
+const SECRETS = ["c2VjcmV0LXJlbGF5LWtleQ", "Y29va2llLXNlY3JldA"];
+const PASSPORT = `https://passport.pubky.app/authorize#d=${encodeURIComponent(GRANT_URL)}`;
 const key = createIdentity().pubKeyZ32;
 
 const sdk = vi.hoisted(() => ({
+  /** Each request asked for, grant then cookie. */
   capabilities: [] as string[],
-  approve: undefined as undefined | ((session: unknown) => void),
+  /** Approves the request of one form (Passport's grant or Ring's cookie request). */
+  approve: undefined as undefined | ((session: unknown, form: "grant" | "cookie") => void),
   written: [] as [string, string][],
   deleted: [] as string[],
 }));
 
-vi.mock("@synonymdev/pubky", () => ({
-  AuthFlowKind: { signin: () => "signin" },
-  GrantAuthFlow: {
-    start(capabilities: string) {
-      sdk.capabilities.push(capabilities);
-      let arrived: unknown;
-      sdk.approve = session => { arrived = session; };
-      return { authorizationUrl: AUTH_URL, tryPollOnce: async () => arrived, free: () => {} };
-    },
-  },
-}));
+vi.mock("@synonymdev/pubky", () => {
+  const arrived: { grant?: unknown; cookie?: unknown } = {};
+  sdk.approve = (session, form) => { arrived[form] = session; };
+  const start = (form: "grant" | "cookie") => (capabilities: string) => {
+    sdk.capabilities.push(capabilities);
+    delete arrived[form];
+    return { authorizationUrl: form === "grant" ? GRANT_URL : COOKIE_URL, tryPollOnce: async () => { const session = arrived[form]; delete arrived[form]; return session; }, free: () => {} };
+  };
+  return {
+    AuthFlowKind: { signin: () => "signin" },
+    GrantAuthFlow: { start: start("grant") },
+    AuthFlow: { start: start("cookie") },
+  };
+});
 
 /** What Ring or Passport hands back: a session for this key, granted exactly what was asked. */
 function session() {
@@ -58,7 +66,7 @@ describe("Pubky approval in the UI", () => {
   let popup: { closed: boolean; close: ReturnType<typeof vi.fn> };
   let open: ReturnType<typeof vi.fn>;
   beforeEach(() => {
-    Object.assign(sdk, { capabilities: [], approve: undefined, written: [], deleted: [] });
+    Object.assign(sdk, { capabilities: [], written: [], deleted: [] });
     logged.length = 0;
     for (const level of ["log", "info", "warn", "error", "debug"] as const) vi.spyOn(console, level).mockImplementation((...args) => { logged.push(args); });
     popup = { closed: false, close: vi.fn(() => { popup.closed = true; }) };
@@ -68,10 +76,10 @@ describe("Pubky approval in the UI", () => {
   afterEach(() => {
     const text = JSON.stringify(logged.map(args => (args as unknown[]).map(String)));
     expect(text).not.toContain("pubkyauth");
-    expect(text).not.toContain("c2VjcmV0");
+    for (const secret of SECRETS) expect(text).not.toContain(secret);
   });
 
-  it("adds one: Passport's button opens the popup synchronously in the click, Ring's QR code is the same request", async () => {
+  it("adds one: Passport's button opens the popup synchronously in the click, Ring's QR code asks for the same folder", async () => {
     const onClose = vi.fn();
     const { user, engine } = renderApp(<AddIdentityDialog onClose={onClose} />);
     engine.on("beginIdentityProof", ({ provider, subject, validityDays = 90 }) =>
@@ -82,8 +90,8 @@ describe("Pubky approval in the UI", () => {
     expect(screen.getByTestId("add-identity-start")).toHaveTextContent("Continue");
     await user.click(screen.getByTestId("add-identity-start"));
     const approval = await screen.findByTestId("approval");
-    // One request, for one proof folder.
-    expect(sdk.capabilities).toEqual([expect.stringMatching(/^\/pub\/ghostly\.app\/proofs\/[a-f0-9]{64}\/:w$/)]);
+    // One proof folder, asked for in two forms (Passport's and Ring's).
+    expect(sdk.capabilities).toEqual([expect.stringMatching(/^\/pub\/ghostly\.app\/proofs\/[a-f0-9]{64}\/:w$/), sdk.capabilities[0]]);
     const button = within(approval).getByTestId("approval-open");
     expect(button).toHaveTextContent("Approve in your browser (Pubky Passport)");
     expect(within(approval).getByRole("img", { name: "Or scan with Pubky Ring" })).toBeInTheDocument();
@@ -91,7 +99,7 @@ describe("Pubky approval in the UI", () => {
     expect(approval).toHaveTextContent("recovered with Google plus Passport");
     // The request is drawn in the QR code, never written in the page.
     expect(document.body.innerHTML).not.toContain("pubkyauth");
-    expect(document.body.innerHTML).not.toContain("c2VjcmV0");
+    for (const secret of SECRETS) expect(document.body.innerHTML).not.toContain(secret);
 
     // A synchronous dispatch: if anything were awaited before window.open, it would not have been called yet.
     fireEvent.click(button);
@@ -100,8 +108,9 @@ describe("Pubky approval in the UI", () => {
     expect(open.mock.calls[0][2]).toMatch(/popup/);
     expect(open.mock.calls[0][2]).not.toMatch(/noopener|noreferrer/);
 
-    // Approved (in Passport or Ring alike): the screen goes, the popup is closed, the proof is written and checked.
-    await act(async () => { sdk.approve!(session()); });
+    // Approved, here in Ring although Passport was opened: the screen goes, the popup is closed, the proof is written
+    // and checked.
+    await act(async () => { sdk.approve!(session(), "cookie"); });
     // The request is polled every second.
     await vi.waitFor(() => expect(onClose).toHaveBeenCalledOnce(), { timeout: 5_000 });
     expect(screen.queryByTestId("approval")).not.toBeInTheDocument();
@@ -138,7 +147,7 @@ describe("Pubky approval in the UI", () => {
 
     await user.click(screen.getByTestId("identity-proof-remove-confirm"));
     const approval = await within(notes).findByTestId("approval");
-    expect(sdk.capabilities).toEqual([`/pub/ghostly.app/proofs/${folder}/:w`]);
+    expect(sdk.capabilities).toEqual([`/pub/ghostly.app/proofs/${folder}/:w`, `/pub/ghostly.app/proofs/${folder}/:w`]);
     // Nothing removed until it is approved, and the card does not say it is revoking while it waits.
     expect(engine.callsTo("removeIdentityProof")).toEqual([]);
     expect(screen.getByTestId("identity-proof")).not.toHaveTextContent("Revoking");
@@ -146,7 +155,7 @@ describe("Pubky approval in the UI", () => {
     fireEvent.click(within(approval).getByTestId("approval-open"));
     expect(open).toHaveBeenCalledWith(PASSPORT, "pubky-passport", expect.stringMatching(/popup/));
 
-    await act(async () => { sdk.approve!(session()); });
+    await act(async () => { sdk.approve!(session(), "grant"); });
     await vi.waitFor(() => expect(engine.callsTo("removeIdentityProof")).toEqual([{ id }]), { timeout: 5_000 });
     expect(sdk.deleted).toEqual([pubkyProofPath(folder, id)]);
     expect(sdk.written).toEqual([]);
@@ -167,7 +176,7 @@ describe("Pubky approval in the UI", () => {
     expect(engine.callsTo("removeIdentityProof")).toEqual([]);
     await user.click(screen.getByTestId("identity-proof-remove-anyway"));
     expect(engine.callsTo("removeIdentityProof")).toEqual([{ id }]);
-    expect(sdk.capabilities).toHaveLength(1);
+    expect(sdk.capabilities).toHaveLength(2);
     expect(sdk.deleted).toEqual([]);
   });
 });

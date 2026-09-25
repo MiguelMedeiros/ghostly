@@ -2,13 +2,13 @@ import {
   DEFAULT_RELAYS, homeserverWebEndpoint, openRelayPayload, pubkyHomeserverOf, PUBKY_PROOF_MAX_BYTES,
   type HomeserverEndpoint,
 } from "@ghostly/core";
-import type { GrantAuthFlow, Session } from "@synonymdev/pubky";
+import type { AuthFlow, GrantAuthFlow, Session } from "@synonymdev/pubky";
 import type { ApprovalRequest, IdentityFetch } from "./contract";
 import { getBrowserHost } from "../host";
 
 /**
  * Pubky, browser side: reading a key's records and files the way a contact's app does (through the proof
- * contract's bounded `ctx.fetch` only), and asking the person to approve ONE Pubky auth request in Pubky Ring or
+ * contract's bounded `ctx.fetch` only), and asking the person to approve one Pubky auth request in Pubky Ring or
  * Pubky Passport (https://github.com/pubky/pubky-passport/blob/main/docs/integration.md). See WISP 302.
  */
 
@@ -111,69 +111,110 @@ export function openPassportWindow(url: string): Window | null | void {
   return window.open(url, "pubky-passport", "popup,width=520,height=760");
 }
 
+/** What a request of either kind offers while it waits: one poll at a time, freed once no poll is in flight. */
+interface PendingRequest { tryPollOnce(): Promise<Session | undefined>; free(): void }
+
+/** A 401 or 403 from the homeserver: the session it was given is not one it accepts. */
+const refused = (e: unknown) => {
+  const status = (e as { data?: { statusCode?: unknown } } | null)?.data?.statusCode;
+  return status === 401 || status === 403;
+};
+
 /**
- * Starts ONE grant auth flow for `capability`, shows it both ways (a Passport button, a QR code for Ring: the same
- * request), and waits for whichever approves it first, then runs `work` with the session. The session lives only
- * in this renderer's memory while `work` runs, and is signed out afterwards; nothing about it is stored. An
- * approval that arrives after a cancel is signed out at once.
+ * Polls every request until one of them is approved and resolves with that session and its request; a cancel, the
+ * deadline or a failed poll ends the wait for all of them. Each request is freed once its last poll has settled
+ * (never while one is in flight), and a session that lands after the end is signed out at once.
+ */
+function firstApproval(requests: readonly PendingRequest[], signal: AbortSignal, timeoutMs: number): Promise<{ session: Session; request: PendingRequest }> {
+  return new Promise((resolve, reject) => {
+    let over = false;
+    const wakers = new Set<() => void>();
+    const end = (settle: () => void) => {
+      if (over) return;
+      over = true;
+      clearTimeout(timer);
+      signal.removeEventListener("abort", cancel);
+      for (const wake of wakers) wake();
+      settle();
+    };
+    const cancel = () => end(() => reject(signal.reason));
+    const timer = setTimeout(() => end(() => reject(new Error("Nobody approved the request in time. Start again for a new one."))), timeoutMs);
+    if (signal.aborted) cancel(); else signal.addEventListener("abort", cancel, { once: true });
+    const pause = () => new Promise<void>(done => {
+      const wake = () => { clearTimeout(t); wakers.delete(wake); done(); };
+      const t = setTimeout(wake, POLL_EVERY);
+      wakers.add(wake);
+    });
+
+    // A poll can hold the relay's long poll open; the end does not wait for it (what lands later is signed out).
+    const poll = async (request: PendingRequest) => {
+      try {
+        while (!over) {
+          let session: Session | undefined;
+          try { session = await request.tryPollOnce(); }
+          catch (e) { end(() => reject(failure("The Pubky request failed", e))); return; }
+          if (session && over) { try { await session.signout(); } catch { /* best effort */ } finally { session.free(); } return; }
+          if (session) { const approved = session; end(() => resolve({ session: approved, request })); return; }
+          if (!over) await pause();
+        }
+      } finally { request.free(); }
+    };
+    for (const request of requests) void poll(request);
+  });
+}
+
+/**
+ * Starts one request for `capability` in each of the two forms Pubky signers read (a grant request for Passport, a
+ * cookie request for Ring's QR code: see below), shows both on one screen, and waits for whichever is approved
+ * first, then runs `work` with that session. The session lives only in this renderer's memory while `work` runs,
+ * and is signed out afterwards; nothing about it is stored. An approval that arrives after the end is signed out.
  */
 export async function withPubkyApproval<T>(options: PubkyApprovalOptions, work: (session: PubkyApprovedSession) => Promise<T>): Promise<T> {
   const { signal } = options;
   signal.throwIfAborted();
-  const { GrantAuthFlow, AuthFlowKind } = await import("@synonymdev/pubky");
+  const { AuthFlow, GrantAuthFlow, AuthFlowKind } = await import("@synonymdev/pubky");
   signal.throwIfAborted();
-  let flow: GrantAuthFlow;
+  const relay = options.relay ?? null;
+  let grant: GrantAuthFlow, cookie: AuthFlow;
   try {
     // The flow's proof-of-possession key stays in this flow's memory (not the SDK's delegated IndexedDB key).
-    flow = GrantAuthFlow.start(options.capability, AuthFlowKind.signin(), { clientId: PUBKY_CLIENT_ID, relay: options.relay ?? null, xCallback: { xSource: "Ghostly" } });
+    grant = GrantAuthFlow.start(options.capability, AuthFlowKind.signin(), { clientId: PUBKY_CLIENT_ID, relay, xCallback: { xSource: "Ghostly" } });
   } catch (e) { throw failure("Could not start a Pubky request", e); }
+  try {
+    // Same capability and relay, its own secret. The SDK deprecates this flow, but it is the one Ring's store build reads.
+    cookie = AuthFlow.start(options.capability, AuthFlowKind.signin(), relay, { xSource: "Ghostly" });
+  } catch (e) { grant.free(); throw failure("Could not start a Pubky request", e); }
 
   const opened: { window?: Window | null } = {};
-  let inFlight: Promise<Session | undefined> | undefined;
-  const url = flow.authorizationUrl;
   options.onApproval({
     open: {
       label: "Approve in your browser (Pubky Passport)",
       description: "Opens Pubky Passport. No Passport identity yet? It offers “Continue with Google” and makes one.",
       run: () => {
-        const window = (options.openPassport ?? openPassportWindow)(passportUrl(url));
+        const window = (options.openPassport ?? openPassportWindow)(passportUrl(grant.authorizationUrl));
         opened.window = window ?? null;
         // null: the browser refused the popup (undefined: it opened elsewhere, the system browser).
         if (window === null) options.onProgress("Your browser blocked the Passport window: allow pop-ups for Ghostly and press the button again, or scan the code with Pubky Ring.");
       },
     },
-    qr: { value: url, label: "Or scan with Pubky Ring" },
+    // Ring gets the cookie request (`pubkyauth://signin?…`), not the grant one: the Ring in the app stores (1.19)
+    // predates pubky/pubky-ring#360 and answers "Unrecognized format" to a `signin_grant` link. Move this to
+    // grant.authorizationUrl, and drop the cookie flow, once Ring's store build parses `signin_grant`.
+    qr: { value: cookie.authorizationUrl, label: "Or scan with Pubky Ring" },
     notes: [
       "An identity Passport makes with Google is recovered with Google plus Passport: both are needed, neither alone can.",
       "The code is your request: scan it yourself, and do not share it.",
     ],
   });
 
-  // A poll can hold the relay's long poll open; a cancel does not wait for it (what lands later is signed out).
-  const cancelled = new Promise<never>((_, reject) => {
-    const stop = () => reject(signal.reason);
-    if (signal.aborted) stop(); else signal.addEventListener("abort", stop, { once: true });
-  });
-  cancelled.catch(() => {});
-  let session: Session | undefined;
+  let session: Session, viaCookie: boolean;
   try {
-    const deadline = Date.now() + (options.timeoutMs ?? APPROVAL_TIMEOUT);
-    while (!session) {
-      signal.throwIfAborted();
-      if (Date.now() >= deadline) throw new Error("Nobody approved the request in time. Start again for a new one.");
-      inFlight = flow.tryPollOnce();
-      session = await Promise.race([inFlight, cancelled]).catch(e => { if (signal.aborted) throw signal.reason; throw failure("The Pubky request failed", e); });
-      inFlight = undefined;
-      if (!session) await Promise.race([new Promise(resolve => setTimeout(resolve, POLL_EVERY)), cancelled]);
-    }
+    const first = await firstApproval([grant, cookie], signal, options.timeoutMs ?? APPROVAL_TIMEOUT);
+    session = first.session;
+    viaCookie = first.request === cookie;
   } finally {
     options.onApproval(null);
     try { if (opened.window && !opened.window.closed) opened.window.close(); } catch { /* another origin's window: best effort */ }
-    const pending = inFlight;
-    // A flow is freed only when no call of it is in flight; a session that lands after the end is signed out.
-    void (pending ?? Promise.resolve(undefined)).then(async late => {
-      if (late && late !== session) { try { await late.signout(); } catch { /* best effort */ } finally { late.free(); } }
-    }, () => {}).finally(() => flow.free());
   }
 
   options.onProgress("Approved. Checking what Pubky granted…");
@@ -193,12 +234,19 @@ export async function withPubkyApproval<T>(options: PubkyApprovalOptions, work: 
     throw e;
   }
 
+  // A cookie session lives in the homeserver's cookie, a third-party cookie here. WebKit drops it (Safari, and the
+  // WKWebView of Ghostly's macOS app), so the homeserver then refuses the session's writes: say that, not "401".
+  const fail = (what: string) => (e: unknown) => {
+    if (viaCookie && refused(e))
+      throw new Error("Pubky Ring approved, but this browser blocked the sign-in cookie of your homeserver, so nothing was changed. Approve with Pubky Passport instead, or use Ghostly in Chrome.");
+    throw failure(what, e);
+  };
   const approved = session;
   try {
     return await work({
       key,
-      put: (path, text) => approved.storage.putText(path, text).catch(e => { throw failure("Could not write to your homeserver", e); }),
-      delete: path => approved.storage.delete(path).catch(e => { throw failure("Could not delete from your homeserver", e); }),
+      put: (path, text) => approved.storage.putText(path, text).catch(fail("Could not write to your homeserver")),
+      delete: path => approved.storage.delete(path).catch(fail("Could not delete from your homeserver")),
     });
   } finally {
     // The grant is only needed for this: end it, and forget the session.
