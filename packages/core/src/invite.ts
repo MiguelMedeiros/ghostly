@@ -1,6 +1,6 @@
 import { bech32, bech32m } from "@scure/base";
 import { generateEncryptionKey } from "./crypto";
-import { createIdentity } from "./identity";
+import { createIdentity, identityFromSeedB64 } from "./identity";
 import { fromBase64Url, fromZ32, toBase64Url, toZ32 } from "./bytes";
 
 /**
@@ -185,4 +185,51 @@ export function createChatInvite(): { mine: LinkParams; invite: LinkParams; invi
   const pairedMine: LinkParams = { ...mine, profile: "paired-chat/1", participationSeedB64: participation.seedB64 };
   const pairedInvite: LinkParams = { ...invite, profile: "paired-chat/1", peerParticipationKeyZ32: participation.pubKeyZ32 };
   return { mine: pairedMine, invite: pairedInvite, inviteCode: encodeGhostlyInvite(pairedInvite) };
+}
+
+/** A chat this side already has, as `inviteOwnership` reads it: its own seed and the contact's link key. */
+export interface KnownLink {
+  seedB64: string;
+  peerPubKeyZ32: string;
+}
+
+/**
+ * Whose invite a code is, among the chats a profile already has: `own` when this profile made it (the
+ * invite's seed derives the contact key one of its chats waits for, which holds for every format, since
+ * an inviter keeps the contact's public key), `joined` when this profile already joined by it (the
+ * invite's seed is a chat's own), `new` otherwise. Another profile's chats are never passed, so its
+ * invites read as new: two profiles on one app may chat with each other.
+ */
+export type InviteOwnership<T extends KnownLink> = { kind: "own" | "joined"; link: T } | { kind: "new" };
+
+export function inviteOwnership<T extends KnownLink>(invite: Pick<LinkParams, "seedB64">, links: Iterable<T>): InviteOwnership<T> {
+  const known = [...links];
+  const joined = known.find((link) => link.seedB64 === invite.seedB64);
+  if (joined) return { kind: "joined", link: joined };
+  const inviteKey = identityFromSeedB64(invite.seedB64).pubKeyZ32;
+  const own = known.find((link) => link.peerPubKeyZ32 === inviteKey);
+  return own ? { kind: "own", link: own } : { kind: "new" };
+}
+
+const OWN_INVITE_PREFIX = "own-invite";
+
+/**
+ * A join refused because the invite is this profile's own (WISP 801 Q9). The message carries the reason
+ * and the chat that owns the invite, so a client on the other side of an RPC (which gets the message and
+ * nothing else) reads them back with `ownInviteRefusal`.
+ */
+export class OwnInviteError extends Error {
+  readonly reason = OWN_INVITE_PREFIX;
+  constructor(readonly linkId: string | null) {
+    super(`${OWN_INVITE_PREFIX}${linkId ? ` ${linkId}` : ""}: This is your own invite. Share it with a contact; they join with it.`);
+    this.name = "OwnInviteError";
+  }
+}
+
+/** The refusal an error (or an error's message, as an RPC hands it over) carries, or null when it is another error. */
+export function ownInviteRefusal(error: unknown): { linkId: string | null } | null {
+  if (error instanceof OwnInviteError) return { linkId: error.linkId };
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const match = message.match(/^own-invite(?: (\S+))?: /);
+  return match ? { linkId: match[1] ?? null } : null;
 }

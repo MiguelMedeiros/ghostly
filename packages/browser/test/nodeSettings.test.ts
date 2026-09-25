@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GhostlyHttpError, createIdentity } from "@ghostly/core";
+import { GhostlyHttpError, createIdentity, createChatInvite } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { STORES, transact } from "../src/shared/idb";
@@ -270,10 +270,13 @@ describe("links", () => {
     expect(JSON.stringify(exported)).not.toContain(chat.participationSeed);
   });
 
-  it("an invite is joined once; a different profile under the same seed is refused, and garbage is not an invite", async () => {
+  it("an invite is joined once, never one's own; a different profile under the same seed is refused, and garbage is not an invite", async () => {
     const { node } = engine({ transport: fixture });
     node["settings"] = { ...node["settings"], online: false };
-    const { inviteCode } = await node.createLink();
+    const own = await node.createLink();
+    // This profile's own invite makes no second chat (WISP 801 Q9); a contact's is joined once.
+    await expect(node.joinLink({ inviteCode: own.inviteCode })).rejects.toThrow("This is your own invite");
+    const { inviteCode } = createChatInvite();
     const { linkId } = await node.joinLink({ inviteCode });
     expect(await node.joinLink({ inviteCode })).toEqual({ linkId });
     expect(node.getState().links).toHaveLength(2);

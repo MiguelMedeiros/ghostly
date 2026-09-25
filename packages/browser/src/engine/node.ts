@@ -48,6 +48,8 @@ import {
   createChatInvite,
   createIdentity,
   decodeInviteCode,
+  inviteOwnership,
+  OwnInviteError,
   encodeInviteCode,
   edgeParams,
   formatLocalTarget,
@@ -880,7 +882,19 @@ export class GhostlyNode implements EngineImplementation {
       if (existing.stored.profile !== params.profile) throw new Error("Invitation profile does not match the stored link");
       return { linkId: existing.stored.id };
     }
+    this.refuseOwnInvite(params);
     return { linkId: await this.addLink(params) };
+  }
+
+  /**
+   * A profile never joins its own invite (WISP 801 Q9): the join would make a second chat, the joiner's
+   * side of a link this profile already waits on. The inviter's own side arrives with its code or its
+   * participation seed and is never a join. The spare invite counts too, though its code is not out yet.
+   */
+  private refuseOwnInvite(params: LinkParams): void {
+    const own = inviteOwnership(params, [...this.links.values()].map((l) => l.stored));
+    if (own.kind === "own") throw new OwnInviteError(own.link.id);
+    if (this.spare && identityFromSeedB64(params.seedB64).pubKeyZ32 === this.spare.inviteKey.pubKeyZ32) throw new OwnInviteError(null);
   }
 
   async ensureLink({ inviteCode, participationSeedB64, ...params }: LinkParams & { inviteCode?: string }): Promise<{ linkId: string }> {
@@ -893,6 +907,7 @@ export class GhostlyNode implements EngineImplementation {
       if (existing.stored.profile !== checked.profile) throw new Error("Invitation profile does not match the stored link");
       return { linkId: existing.stored.id };
     }
+    if (!inviteCode && !participationSeedB64) this.refuseOwnInvite(checked);
     return { linkId: await this.addLink({ ...checked, ...(participationSeedB64 ? { participationSeedB64 } : {}) }, inviteCode) };
   }
 

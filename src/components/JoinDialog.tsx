@@ -2,7 +2,8 @@ import { useBackdropDismiss } from "../hooks/useDismiss";
 import { useEffect, useRef, useState } from "react";
 import jsQR from "jsqr";
 import { decodeCommunityLink, decodeGroupEntryLink } from "@ghostly/core";
-import { INVITE_REFUSAL_MESSAGE, readInvite } from "../lib/url";
+import { INVITE_REFUSAL_MESSAGE, classifyInvite, readInvite } from "../lib/url";
+import { showJoinNotice } from "../lib/joinNotice";
 import { pasteShortcut, readClipboardText } from "../lib/clipboard";
 import { useI18n } from "../contexts/I18nContext";
 import type { SessionKeys } from "../lib/storage";
@@ -10,8 +11,11 @@ import type { SessionKeys } from "../lib/storage";
 /**
  * Scanned data is only parsed as an invite; never opened as a URL or executed. A group's link
  * (`group1/…`) goes to `onJoinGroup`, which the dialog waits for, so a refusal is shown here.
+ *
+ * An invite this profile already has a chat for makes no second chat (WISP 801 Q9): one it made itself
+ * is refused here, with the way to that chat (`onOpenChat`); one it already joined by opens that chat.
  */
-export function JoinDialog({ onJoin, onJoinGroup, onClose }: { onJoin(keys: SessionKeys): void; onJoinGroup?(link: string): Promise<void>; onClose(): void }) {
+export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onClose }: { onJoin(keys: SessionKeys): void; onOpenChat?(sessionId: string): void; onJoinGroup?(link: string): Promise<void>; onClose(): void }) {
   const { t } = useI18n();
   const closed = useRef(false);
   const busyRef = useRef(false);
@@ -25,6 +29,7 @@ export function JoinDialog({ onJoin, onJoinGroup, onClose }: { onJoin(keys: Sess
   const generation = useRef(0), joined = useRef(false);
   const [input, setInput] = useState("");
   const [error, setError] = useState("");
+  const [own, setOwn] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [starting, setStarting] = useState(false);
   const stop = () => {
@@ -65,11 +70,15 @@ export function JoinDialog({ onJoin, onJoinGroup, onClose }: { onJoin(keys: Sess
     const reading = readInvite(value);
     // The reason, as WISP 801 words it: a typo, a newer version, not an invite at all, or a damaged one.
     if (!reading.ok) { setError(t(INVITE_REFUSAL_MESSAGE[reading.reason])); setManual(true); return; }
-    joined.current = true; stop(); onJoin(reading.keys);
+    const outcome = classifyInvite(reading.keys);
+    if (outcome.kind === "own") { setError(""); setManual(false); setOwn(outcome.sessionId); return; }
+    joined.current = true; stop();
+    if (outcome.kind === "joined") { showJoinNotice("join.alreadyIn"); (onOpenChat ?? (() => onJoin(reading.keys)))(outcome.sessionId); return; }
+    onJoin(reading.keys);
   };
   const paste = async () => {
     if (busyRef.current || joined.current || closed.current) return;
-    stop(); busyRef.current = true; setBusy(true); setError("");
+    stop(); busyRef.current = true; setBusy(true); setError(""); setOwn(null);
     const current = generation.current;
     try {
       // One click: the desktop app reads natively (no WebKit "Paste" callout); a refusal leaves the field and the shortcut.
@@ -84,7 +93,7 @@ export function JoinDialog({ onJoin, onJoinGroup, onClose }: { onJoin(keys: Sess
   };
   const scan = async () => {
     if (busyRef.current || joined.current || closed.current) return;
-    stop(); busyRef.current = true; setError(""); setStarting(true);
+    stop(); busyRef.current = true; setError(""); setOwn(null); setStarting(true);
     const current = generation.current;
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error("unsupported");
@@ -167,6 +176,10 @@ export function JoinDialog({ onJoin, onJoinGroup, onClose }: { onJoin(keys: Sess
       </div>
     </>}
     {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
+    {own && <div data-testid="join-own-invite" className="mt-3 rounded-lg border border-border bg-input-bg p-3">
+      <p role="alert" className="text-sm text-text-primary">{t("join.own")}</p>
+      <button type="button" data-testid="join-open-chat" onClick={() => { joined.current = true; stop(); (onOpenChat ?? onClose)(own); }} className={`${button} mt-3 w-full bg-accent text-panel-header`}>{t("join.openChat")}</button>
+    </div>}
     {manual && <form className="mt-3" onSubmit={event => { event.preventDefault(); if (!busyRef.current) accept(input.trim()); }}>
       <textarea ref={manualInput} aria-label={t("join.invite")} autoCapitalize="none" autoCorrect="off" spellCheck={false} value={input} onChange={event => { setInput(event.target.value); setError(""); }} placeholder="Paste invite…" rows={3} className="w-full resize-none rounded-lg bg-input-bg p-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-accent" />
       <div className="mt-3 grid grid-cols-2 gap-3"><button type="button" onClick={close} className={`${button} border border-border`}>{t("common.cancel")}</button><button disabled={!input.trim() || busy || starting || scanning} className={`${button} bg-accent text-panel-header`}>{t("join.submit")}</button></div>
