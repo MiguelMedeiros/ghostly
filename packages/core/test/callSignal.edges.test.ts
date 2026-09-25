@@ -46,10 +46,29 @@ describe("call signal candidates: refusals", () => {
     expect(withCandidate(`${HOST} raddr 0.0.0.0 rport x`)).toBeNull();
   });
 
+  it("accepts an IPv6 related address: WebKit's IPv6 srflx says `raddr ::`, and one refused candidate drops the whole call", () => {
+    const srflx = "354790382 1 udp 1677732095 2001:db8:8785:c1e7:f5d3:2b6d:efb7:c24c 55917 typ srflx";
+    expect(withCandidate(`${srflx} raddr :: rport 0 generation 0 network-cost 999`)?.c).toEqual([`${srflx} raddr :: rport 0`]);
+    expect(withCandidate(`${srflx} raddr fe80::1 rport 9`)?.c).toEqual([`${srflx} raddr fe80::1 rport 9`]);
+    // Still an address and nothing more.
+    expect(withCandidate(`${srflx} raddr ::/0 rport 0`)).toBeNull();
+    expect(withCandidate(`${srflx} generation :: raddr :: rport 0`)).toBeNull();
+  });
+
   it("keeps raddr/rport only as a pair and drops every other extension", () => {
     expect(withCandidate(`${HOST} raddr 0.0.0.0`)?.c).toEqual([HOST]);
     expect(withCandidate(`${HOST} rport 9`)?.c).toEqual([HOST]);
     expect(withCandidate(`${HOST} network-id 1 ufrag abcd raddr 0.0.0.0 rport 9`)?.c).toEqual([`${HOST} raddr 0.0.0.0 rport 9`]);
+  });
+
+  it("accepts only dynamic payload types for Opus and VP8, and never the same one for both", () => {
+    for (const pt of [35, 63, 96, 106, 127]) expect(parseCallSignal(JSON.stringify({ ...base, vp: pt }), NOW)?.vp).toBe(pt);
+    for (const bad of [0, 34, 64, 95, 128, -1, 106.5, "106", null]) {
+      expect(parseCallSignal(JSON.stringify({ ...base, vp: bad }), NOW), `vp ${bad}`).toBeNull();
+      expect(parseCallSignal(JSON.stringify({ ...base, ap: bad }), NOW), `ap ${bad}`).toBeNull();
+    }
+    expect(parseCallSignal(JSON.stringify({ ...base, ap: 109, vp: 109 }), NOW)).toBeNull();
+    expect(parseCallSignal(JSON.stringify({ ...base, ap: 109, vp: 106 }), NOW)).toMatchObject({ ap: 109, vp: 106 });
   });
 
   it("refuses an SSRC list that is not a short list", () => {

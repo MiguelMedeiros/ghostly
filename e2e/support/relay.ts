@@ -33,8 +33,8 @@ export class LocalRelay {
     await context.route(LocalRelay.pattern, (route) => this.fulfill(route));
   }
 
-  /** The relay on a real port, for peers whose requests cannot be intercepted. Resolves to its URL. */
-  async listen(): Promise<string> {
+  /** The relay on a real port (`port`, or any free one), for peers whose requests cannot be intercepted. Resolves to its URL. */
+  async listen(port = 0): Promise<string> {
     if (!this.server) {
       this.server = createServer((request, response) => {
         const chunks: Buffer[] = [];
@@ -45,7 +45,7 @@ export class LocalRelay {
           response.end(answer.body);
         });
       });
-      await new Promise<void>((resolve) => this.server!.listen(0, "127.0.0.1", resolve));
+      await new Promise<void>((resolve) => this.server!.listen(port, "127.0.0.1", resolve));
     }
     return `http://127.0.0.1:${(this.server.address() as AddressInfo).port}`;
   }

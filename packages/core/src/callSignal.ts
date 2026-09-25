@@ -18,7 +18,20 @@ export interface CallSignal {
   v?: number;
   /** What the picture is: the camera or a screen. Only meaningful with `v: 1`. */
   k?: "c" | "s";
+  /**
+   * The payload types the sender's SDP gives Opus and VP8, when not 111 and 96 (the rebuilt SDP's own, and
+   * Chromium's). WebKit offers H264 as 96 and VP8 as 106: rebuilt as `96 VP8`, the offerer read the answerer's
+   * VP8 as H264 and never showed its picture.
+   */
+  ap?: number;
+  vp?: number;
 }
+
+/** What the rebuilt SDP gives Opus and VP8 unless the signal says otherwise. */
+const DEFAULT_OPUS_PT = 111;
+const DEFAULT_VP8_PT = 96;
+/** Dynamic RTP payload types: 96-127 (RFC 3551), and 35-63, which WebRTC engines use too. */
+const dynamicPayloadType = (n: unknown): n is number => Number.isInteger(n) && (((n as number) >= 96 && (n as number) <= 127) || ((n as number) >= 35 && (n as number) <= 63));
 
 export type CallState = "idle" | "offering" | "incoming" | "answering" | "connecting" | "connected" | "ended";
 
@@ -60,6 +73,8 @@ export function extractParamsFromSdp(sdp: string): Partial<CallSignal> {
   const candidates: string[] = [];
   let audioSsrc: number | null = null;
   let videoSsrc: number | null = null;
+  let opus: number | null = null;
+  let vp8: number | null = null;
   let currentMedia = "";
 
   for (const line of lines) {
@@ -85,6 +100,12 @@ export function extractParamsFromSdp(sdp: string): Partial<CallSignal> {
       media.push("v");
       currentMedia = "v";
     }
+    const rtpmap = line.match(/^a=rtpmap:(\d+) (opus\/48000|VP8\/90000)/i);
+    if (rtpmap) {
+      const pt = Number(rtpmap[1]);
+      if (currentMedia === "a" && opus === null && /^opus/i.test(rtpmap[2])) opus = pt;
+      if (currentMedia === "v" && vp8 === null && /^VP8/i.test(rtpmap[2])) vp8 = pt;
+    }
     if (line.startsWith("a=candidate:")) {
       candidates.push(line.substring("a=candidate:".length));
     }
@@ -105,10 +126,12 @@ export function extractParamsFromSdp(sdp: string): Partial<CallSignal> {
   const hostCandidates = candidates.filter(c => c.includes(" host ") && c.includes(" udp "));
   // Include 1 host candidate (for local connections) and 1 srflx (for remote)
   // Keep packet size under 1000 bytes DHT limit
+  // An IPv6 related address (`raddr ::`, WebKit's IPv6 srflx) made apps before 0.5 refuse the whole signal:
+  // the related address is informational, so it is left out.
   const selectedCandidates = [
     ...hostCandidates.slice(0, 1),
     ...srflxCandidates.slice(0, 1),
-  ];
+  ].map(c => c.replace(/ raddr \S*:\S* rport \d+/, ""));
   
   const ssrcs: number[] = [];
   if (audioSsrc !== null) ssrcs.push(audioSsrc);
@@ -122,6 +145,9 @@ export function extractParamsFromSdp(sdp: string): Partial<CallSignal> {
     m: media,
     c: selectedCandidates,
     ss: ssrcs,
+    // Only when they differ from what every rebuilt SDP assumes: signals between Chromium apps stay as they were.
+    ...(opus !== null && opus !== DEFAULT_OPUS_PT && dynamicPayloadType(opus) ? { ap: opus } : {}),
+    ...(vp8 !== null && vp8 !== DEFAULT_VP8_PT && dynamicPayloadType(vp8) ? { vp: vp8 } : {}),
   };
 }
 
@@ -168,14 +194,15 @@ function normalizeCandidate(candidate: unknown): string | null | undefined {
   if (rest.length % 2 !== 0) return null;
   for (let i = 0; i < rest.length; i += 2) {
     const [name, value] = [rest[i], rest[i + 1]];
-    if (!EXTENSION_TOKEN.test(name) || !EXTENSION_TOKEN.test(value)) return null;
+    if (!EXTENSION_TOKEN.test(name)) return null;
+    // raddr is an address, IPv6 too (`raddr ::`, as WebKit gives an IPv6 srflx): the address pattern, not the token one.
     if (name === "raddr") {
       if (!CANDIDATE_ADDRESS.test(value)) return null;
       raddr = value;
     } else if (name === "rport") {
       rport = uint(value, 65535);
       if (rport === null) return null;
-    }
+    } else if (!EXTENSION_TOKEN.test(value)) return null;
     // Other extension attributes (generation, network-id, ufrag...) are dropped.
   }
 
@@ -239,7 +266,16 @@ export function parseCallSignal(json: string, now = Date.now()): CallSignal | nu
     }
   }
 
-  return { t: raw.t, ts: raw.ts, u: raw.u, p: raw.p, f: raw.f, s: raw.s, m: media, c: candidates, ss: ssrcs, ...picture };
+  const payloadTypes: Pick<CallSignal, "ap" | "vp"> = {};
+  for (const key of ["ap", "vp"] as const) {
+    const value = raw[key];
+    if (value === undefined) continue;
+    if (!dynamicPayloadType(value)) return null;
+    payloadTypes[key] = value;
+  }
+  if (payloadTypes.ap !== undefined && payloadTypes.ap === payloadTypes.vp) return null;
+
+  return { t: raw.t, ts: raw.ts, u: raw.u, p: raw.p, f: raw.f, s: raw.s, m: media, c: candidates, ss: ssrcs, ...picture, ...payloadTypes };
 }
 
 /** The `v`/`k` pair of any signal. Returns null for a malformed one, `{}` when it says nothing. */
@@ -284,6 +320,8 @@ export function buildSdpFromSignal(signal: CallSignal): string {
   const sessionId = Math.floor(Math.random() * 1e15);
   const audioSsrc = signal.ss?.[0] ?? Math.floor(Math.random() * 0xFFFFFFFF);
   const videoSsrc = signal.ss?.[1] ?? Math.floor(Math.random() * 0xFFFFFFFF);
+  const opus = signal.ap ?? DEFAULT_OPUS_PT;
+  const vp8 = signal.vp ?? DEFAULT_VP8_PT;
 
   const lines: string[] = [
     "v=0",
@@ -301,7 +339,7 @@ export function buildSdpFromSignal(signal: CallSignal): string {
     
     if (mediaType === "a") {
       lines.push(
-        "m=audio 9 UDP/TLS/RTP/SAVPF 111",
+        `m=audio 9 UDP/TLS/RTP/SAVPF ${opus}`,
         "c=IN IP4 0.0.0.0",
         "a=rtcp:9 IN IP4 0.0.0.0",
       );
@@ -319,14 +357,14 @@ export function buildSdpFromSignal(signal: CallSignal): string {
         "a=sendrecv",
         "a=msid:stream audio0",
         "a=rtcp-mux",
-        "a=rtpmap:111 opus/48000/2",
-        "a=fmtp:111 minptime=10;useinbandfec=1",
+        `a=rtpmap:${opus} opus/48000/2`,
+        `a=fmtp:${opus} minptime=10;useinbandfec=1`,
         `a=ssrc:${audioSsrc} cname:pkarr`,
         `a=ssrc:${audioSsrc} msid:stream audio0`,
       );
     } else if (mediaType === "v") {
       lines.push(
-        "m=video 9 UDP/TLS/RTP/SAVPF 96",
+        `m=video 9 UDP/TLS/RTP/SAVPF ${vp8}`,
         "c=IN IP4 0.0.0.0",
         "a=rtcp:9 IN IP4 0.0.0.0",
       );
@@ -347,11 +385,11 @@ export function buildSdpFromSignal(signal: CallSignal): string {
         `a=msid:stream video0`,
         "a=rtcp-mux",
         "a=rtcp-rsize",
-        "a=rtpmap:96 VP8/90000",
-        "a=rtcp-fb:96 ccm fir",
-        "a=rtcp-fb:96 nack",
-        "a=rtcp-fb:96 nack pli",
-        "a=rtcp-fb:96 goog-remb",
+        `a=rtpmap:${vp8} VP8/90000`,
+        `a=rtcp-fb:${vp8} ccm fir`,
+        `a=rtcp-fb:${vp8} nack`,
+        `a=rtcp-fb:${vp8} nack pli`,
+        `a=rtcp-fb:${vp8} goog-remb`,
         `a=ssrc:${videoSsrc} cname:pkarr`,
         `a=ssrc:${videoSsrc} msid:stream video0`,
       );
