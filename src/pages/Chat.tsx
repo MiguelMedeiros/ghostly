@@ -14,6 +14,9 @@ import { Menu, MenuItem, MenuSeparator } from "../components/Menu";
 import { useI18n } from "../contexts/I18nContext";
 import { InviteCard } from "../components/InviteCard";
 import { PairingBanner } from "../components/PairingBanner";
+import { PairingScene } from "../components/pairing/PairingScene";
+import { PairingIndicator } from "../components/pairing/PairingIndicator";
+import { usePairingProgress } from "../hooks/usePairingProgress";
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Navigate } from "react-router-dom";
 import { useChat } from "../hooks/useChat";
@@ -165,6 +168,18 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const dhtOnly = deliveryPeer?.deliveryMode === "dht" || deliveryPeer?.textDelivery === "dht";
   const pairedReady = deliveryPeer?.pairing?.status === "ready";
   const textReady = deliveryPeer?.canSendText ?? pairedReady;
+  // A chat made here (it has an invite to give) is the inviter's side of the pairing; read once, before the
+  // invite code is forgotten when the contact shows up.
+  const createdHere = useMemo(() => !!getInviteCode(sessionId), [sessionId]);
+  const pairing = usePairingProgress(paired ? session?.peerPubKeyB64 : undefined, {
+    inviter: createdHere,
+    // Text only has no live link to wait for: its messages go over the DHT from the start.
+    enabled: paired && (deliveryPeer?.deliveryMode ?? session?.deliveryMode) !== "dht",
+    createdAt: session?.createdAt,
+  });
+  const pairingSceneId = `pairing-${sessionId}`;
+  // Once the contact knocked, the invite has done its job.
+  const invitePast = pairing.show && ["answering", "connecting", "live"].includes(pairing.progress?.stage ?? "");
   const peerKey = params?.peerPubKeyB64;
   const sendFile = useCallback(
     async (source: File): Promise<string | null> => {
@@ -321,6 +336,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // A chat still pairing opens on its scene, not on the bottom of an empty history.
+  const sceneOn = pairing.show;
+  useEffect(() => {
+    if (sceneOn && messages.length === 0) document.getElementById(pairingSceneId)?.scrollIntoView({ block: "nearest" });
+  }, [sceneOn, messages.length, pairingSceneId]);
+
   // Only what is on screen has been read; a chat kept alive by a call has not.
   useEffect(() => {
     if (visible) markSessionAsRead(sessionId);
@@ -426,6 +447,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               {paired && <IdentityStack peerKey={params.peerPubKeyB64} open={showIdentities} onOpen={() => setShowIdentities(open => !open)} />}
               </div>
             )}
+            <div className="flex min-w-0 items-center gap-2">
             <div ref={connectionRef} className="relative">
               <button
                 ref={connectionButtonRef}
@@ -439,7 +461,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 <span role="img" aria-label={statusLabel} data-testid="contact-status"
                   className={`h-2 w-2 shrink-0 rounded-full ${statusLabel === "Connected" ? `bg-green-500 ${pollCountdown.isPolling ? "contact-fetch-pulse" : ""}` : /issue|unavailable|mismatch/.test(statusLabel) ? "bg-danger" : "bg-text-muted"}`} />
                 {showKeySubtitle && (
-                  <span className="text-text-muted/60 text-xs max-md:text-[10px] font-mono whitespace-nowrap">
+                  <span className={`text-text-muted/60 text-xs max-md:text-[10px] font-mono whitespace-nowrap ${pairing.show ? "max-md:hidden" : ""}`}>
                     {truncatedPeerKey}
                   </span>
                 )}
@@ -451,6 +473,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                   {techInfo?.myPubKey && <TechInfoRow label="You" value={techInfo.myPubKey} mono copyable />}
                   <TechInfoRow label="Peer" value={params.peerPubKeyB64} mono copyable />
                 </div>
+              )}
+            </div>
+              {/* Until live: the "connected" moment belongs to the scene, and the header goes back to how it was. */}
+              {pairing.show && pairing.progress && pairing.progress.stage !== "live" && (
+                <PairingIndicator progress={pairing.progress}
+                  onOpen={() => document.getElementById(pairingSceneId)?.scrollIntoView({ block: "center", behavior: "smooth" })} />
               )}
             </div>
           </div>
@@ -604,10 +632,17 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               </time>
             </p>
           )}
-          {inviteCode && !pairedReady && messages.length === 0 && (
+          {/* The scene and the invite it waits on: side by side where the column has room for both. */}
+          <div className="pairing-invite"><div className="pairing-invite-row">
+          {pairing.show && pairing.progress && (
+            <PairingScene id={pairingSceneId} progress={pairing.progress} contact={shownName}
+              retry={() => void pairing.retry()} retrying={pairing.retrying} retryError={pairing.retryError} />
+          )}
+          {inviteCode && !pairedReady && !invitePast && messages.length === 0 && (
             <InviteCard code={inviteCode} sessionId={sessionId} linkId={deliveryPeer?.id} mode={deliveryPeer?.deliveryMode ?? session?.deliveryMode ?? "stream"} onChange={setInviteCode} />
           )}
-          {!inviteCode && messages.length === 0 && (
+          </div></div>
+          {!inviteCode && !pairing.show && messages.length === 0 && (
             <div className="flex items-center justify-center min-h-[200px]">
               <div className="bg-surface-alt/90 rounded-lg px-4 py-2 text-center">
                 <p className="text-text-muted text-xs">

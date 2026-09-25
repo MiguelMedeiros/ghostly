@@ -276,5 +276,58 @@
     "othersUnread": "messaggi non letti in un altro profilo",
     "switching": "Apertura di {{name}}…",
     "holdHint": "Oppure tieni premuto Impostazioni nella barra delle schede"
+  },
+  "pairing": {
+    "you": "Tu",
+    "contact": "Il tuo contatto",
+    "steps": "Passaggi dell’abbinamento",
+    "done": "fatto",
+    "elapsed": "{{time}} in questo passaggio",
+    "attempt": "tentativo {{n}}",
+    "indicator": "Abbinamento: {{stage}}",
+    "retry": "Riprova",
+    "retrying": "Nuovo tentativo…",
+    "newInvite": "Chiedi al tuo contatto un nuovo invito.",
+    "sayHello": "Ora potete chattare. Saluta!",
+    "stage": {
+      "publishing": "Pubblicazione del tuo invito sulla rete…",
+      "waiting": "In attesa che il tuo contatto apra l’invito",
+      "resolving": "Ricerca dell’invito sulla rete…",
+      "knocking": "Bussando alla porta del tuo contatto…",
+      "answeringInviter": "Il tuo contatto ha bussato. Rispondo…",
+      "answeringJoiner": "Il tuo contatto sta rispondendo…",
+      "connecting": "Apertura di un collegamento diretto e cifrato…",
+      "live": "Connesso",
+      "failed": "Impossibile connettersi"
+    },
+    "step": {
+      "publishing": "Pubblica",
+      "waiting": "Attendi",
+      "resolving": "Cerca",
+      "knocking": "Bussa",
+      "answering": "Rispondi",
+      "connecting": "Connetti",
+      "live": "Attivo",
+      "failed": "Fallito"
+    },
+    "slow": {
+      "publishing": "Pubblicazione ancora in corso. La rete è lenta a rispondere.",
+      "waiting": "Il tuo contatto non ha ancora aperto l’invito. Resta valido, quindi puoi condividerlo di nuovo.",
+      "resolving": "Ancora alla ricerca del tuo contatto sulla rete…",
+      "knocking": "L’app del tuo contatto non ha ancora risposto. Potrebbe essere chiusa o offline.",
+      "answering": "Scambio delle chiavi con il tuo contatto ancora in corso…",
+      "connecting": "Apertura del collegamento diretto ancora in corso. Le reti restrittive possono richiedere più tempo."
+    },
+    "reason": {
+      "publish": "Impossibile pubblicare il tuo invito sulla rete. Controlla la connessione.",
+      "resolve": "Invito non trovato sulla rete. Potrebbe essere vecchio o copiato male.",
+      "timeout": "L’app del tuo contatto non ha risposto in tempo.",
+      "offline": "Sei offline. L’abbinamento riprende quando torni online.",
+      "transport": "Non è stato possibile aprire un collegamento diretto tra i tuoi dispositivi.",
+      "rejected": "L’app del tuo contatto ha rifiutato la connessione.",
+      "keyMismatch": "La chiave di questo contatto non corrisponde a quella salvata. Non è stato accettato nulla.",
+      "expired": "Questo invito è scaduto.",
+      "unknown": "Qualcosa è andato storto durante la connessione."
+    }
   }
 }

@@ -276,5 +276,58 @@
     "othersUnread": "其他资料中有未读消息",
     "switching": "正在打开 {{name}}…",
     "holdHint": "也可以在标签栏长按“设置”"
+  },
+  "pairing": {
+    "you": "你",
+    "contact": "你的联系人",
+    "steps": "配对步骤",
+    "done": "已完成",
+    "elapsed": "此步骤已用 {{time}}",
+    "attempt": "第 {{n}} 次尝试",
+    "indicator": "配对：{{stage}}",
+    "retry": "重试",
+    "retrying": "正在重试…",
+    "newInvite": "请联系人给你一个新的邀请。",
+    "sayHello": "现在可以聊天了。打个招呼吧！",
+    "stage": {
+      "publishing": "正在把你的邀请发布到网络…",
+      "waiting": "正在等待联系人打开邀请",
+      "resolving": "正在网络上查找邀请…",
+      "knocking": "正在敲联系人的门…",
+      "answeringInviter": "联系人敲门了。正在回应…",
+      "answeringJoiner": "联系人正在回应…",
+      "connecting": "正在建立直接的加密连接…",
+      "live": "已连接",
+      "failed": "无法连接"
+    },
+    "step": {
+      "publishing": "发布",
+      "waiting": "等待",
+      "resolving": "查找",
+      "knocking": "敲门",
+      "answering": "回应",
+      "connecting": "连接",
+      "live": "在线",
+      "failed": "失败"
+    },
+    "slow": {
+      "publishing": "仍在发布你的邀请，网络响应较慢。",
+      "waiting": "联系人还没有打开邀请。邀请仍然有效，你可以再次分享。",
+      "resolving": "仍在网络上寻找你的联系人…",
+      "knocking": "联系人的应用还没有回应，可能已关闭或离线。",
+      "answering": "仍在与联系人交换密钥…",
+      "connecting": "仍在建立直接连接。受限网络可能需要更长时间。"
+    },
+    "reason": {
+      "publish": "无法把邀请发布到网络。请检查你的网络连接。",
+      "resolve": "在网络上找不到该邀请。它可能已过时或复制有误。",
+      "timeout": "联系人的应用没有及时回应。",
+      "offline": "你处于离线状态。恢复在线后配对会继续。",
+      "transport": "无法在你们的设备之间建立直接连接。",
+      "rejected": "联系人的应用拒绝了连接。",
+      "keyMismatch": "该联系人的密钥与已保存的不一致。没有接受任何数据。",
+      "expired": "此邀请已过期。",
+      "unknown": "连接时出现问题。"
+    }
   }
 }

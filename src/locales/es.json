@@ -276,5 +276,58 @@
     "othersUnread": "mensajes sin leer en otro perfil",
     "switching": "Abriendo {{name}}…",
     "holdHint": "O mantén pulsado Ajustes en la barra de pestañas"
+  },
+  "pairing": {
+    "you": "Tú",
+    "contact": "Tu contacto",
+    "steps": "Pasos del emparejamiento",
+    "done": "hecho",
+    "elapsed": "{{time}} en este paso",
+    "attempt": "intento {{n}}",
+    "indicator": "Emparejamiento: {{stage}}",
+    "retry": "Reintentar",
+    "retrying": "Reintentando…",
+    "newInvite": "Pide a tu contacto una invitación nueva.",
+    "sayHello": "Ya podéis chatear. ¡Saluda!",
+    "stage": {
+      "publishing": "Publicando tu invitación en la red…",
+      "waiting": "Esperando a que tu contacto abra la invitación",
+      "resolving": "Buscando la invitación en la red…",
+      "knocking": "Llamando a la puerta de tu contacto…",
+      "answeringInviter": "Tu contacto llamó. Respondiendo…",
+      "answeringJoiner": "Tu contacto está respondiendo…",
+      "connecting": "Abriendo un enlace directo y cifrado…",
+      "live": "Conectado",
+      "failed": "No se pudo conectar"
+    },
+    "step": {
+      "publishing": "Publicar",
+      "waiting": "Esperar",
+      "resolving": "Buscar",
+      "knocking": "Llamar",
+      "answering": "Responder",
+      "connecting": "Conectar",
+      "live": "En vivo",
+      "failed": "Falló"
+    },
+    "slow": {
+      "publishing": "Todavía publicando tu invitación. La red tarda en responder.",
+      "waiting": "Tu contacto aún no ha abierto la invitación. Sigue siendo válida, así que puedes compartirla otra vez.",
+      "resolving": "Todavía buscando a tu contacto en la red…",
+      "knocking": "La app de tu contacto aún no responde. Puede estar cerrada o sin conexión.",
+      "answering": "Todavía intercambiando claves con tu contacto…",
+      "connecting": "Todavía abriendo un enlace directo. Las redes restrictivas pueden tardar más."
+    },
+    "reason": {
+      "publish": "No se pudo publicar tu invitación en la red. Revisa tu conexión.",
+      "resolve": "No se encontró la invitación en la red. Puede ser antigua o estar mal copiada.",
+      "timeout": "La app de tu contacto no respondió a tiempo.",
+      "offline": "No tienes conexión. El emparejamiento sigue cuando vuelvas a estar en línea.",
+      "transport": "No se pudo abrir un enlace directo entre tus dispositivos.",
+      "rejected": "La app de tu contacto rechazó la conexión.",
+      "keyMismatch": "La clave de este contacto no coincide con la guardada. No se aceptó nada.",
+      "expired": "Esta invitación ha caducado.",
+      "unknown": "Algo salió mal al conectar."
+    }
   }
 }

@@ -276,5 +276,58 @@
     "othersUnread": "mensagens não lidas em outro perfil",
     "switching": "Abrindo {{name}}…",
     "holdHint": "Ou segure Configurações na barra de abas"
+  },
+  "pairing": {
+    "you": "Você",
+    "contact": "Seu contato",
+    "steps": "Etapas do pareamento",
+    "done": "concluída",
+    "elapsed": "{{time}} nesta etapa",
+    "attempt": "tentativa {{n}}",
+    "indicator": "Pareamento: {{stage}}",
+    "retry": "Tentar de novo",
+    "retrying": "Tentando de novo…",
+    "newInvite": "Peça um novo convite ao seu contato.",
+    "sayHello": "Já dá para conversar. Diga oi!",
+    "stage": {
+      "publishing": "Colocando seu convite na rede…",
+      "waiting": "Esperando seu contato abrir o convite",
+      "resolving": "Procurando o convite na rede…",
+      "knocking": "Batendo na porta do seu contato…",
+      "answeringInviter": "Seu contato bateu. Respondendo…",
+      "answeringJoiner": "Seu contato está respondendo…",
+      "connecting": "Abrindo uma conexão direta e criptografada…",
+      "live": "Conectado",
+      "failed": "Não foi possível conectar"
+    },
+    "step": {
+      "publishing": "Publicar",
+      "waiting": "Esperar",
+      "resolving": "Procurar",
+      "knocking": "Bater",
+      "answering": "Responder",
+      "connecting": "Conectar",
+      "live": "Ao vivo",
+      "failed": "Falhou"
+    },
+    "slow": {
+      "publishing": "Ainda publicando seu convite. A rede está demorando para responder.",
+      "waiting": "Seu contato ainda não abriu o convite. Ele continua válido, então você pode compartilhá-lo de novo.",
+      "resolving": "Ainda procurando seu contato na rede…",
+      "knocking": "O app do seu contato ainda não respondeu. Pode estar fechado ou offline.",
+      "answering": "Ainda trocando chaves com seu contato…",
+      "connecting": "Ainda abrindo uma conexão direta. Redes restritas podem demorar mais."
+    },
+    "reason": {
+      "publish": "Não foi possível colocar seu convite na rede. Verifique sua conexão.",
+      "resolve": "Não foi possível encontrar o convite na rede. Ele pode ser antigo ou estar incorreto.",
+      "timeout": "O app do seu contato não respondeu a tempo.",
+      "offline": "Você está offline. O pareamento continua quando você voltar a ficar online.",
+      "transport": "Não foi possível abrir uma conexão direta entre os seus aparelhos.",
+      "rejected": "O app do seu contato recusou a conexão.",
+      "keyMismatch": "A chave deste contato não bate com a salva. Nada foi aceito.",
+      "expired": "Este convite expirou.",
+      "unknown": "Algo deu errado ao conectar."
+    }
   }
 }
