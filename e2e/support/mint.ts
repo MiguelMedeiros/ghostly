@@ -40,7 +40,10 @@ export async function attachMint(context: BrowserContext): Promise<void> {
   if (endpoint === TEST_MINT) return;
   await context.route(requests, async (route) => {
     const { pathname, search } = new URL(route.request().url());
-    const response = await route.fetch({ url: `${endpoint}${pathname}${search}` });
-    await route.fulfill({ response });
+    // A mint slow to answer (mintd under load takes seconds for /v1/info now and then) is a slow mint to the
+    // app, which retries: not an error of the test that happened to be running while the app polled it.
+    const response = await route.fetch({ url: `${endpoint}${pathname}${search}`, timeout: 60_000 }).catch(() => null);
+    if (response) await route.fulfill({ response }).catch(() => {});
+    else await route.abort("timedout").catch(() => {});
   });
 }

@@ -189,10 +189,20 @@ npm run e2e:matrix -- --shard 1/4 --docs          # a shard; --docs writes the t
 | `matrix/requirements.ts` | what a block needs from outside (a mint, S3, a regtest stack, `gpg`…) and how to tell it is up |
 | `matrix/reporter.ts` | the matrix as a table: `test-results/matrix-summary/summary.md` and `results.json`, the job summary in CI |
 
+| `matrix/rails.ts` | the Testnet payment blocks of the rails that need `e2e/infra` (LND, Core Lightning, NWC, Breez, Arkade, Bark, BDK, USDT): the source set up through its form or its wallet, funded from the environment, then a request and a direct Send each way in the chat, with the bubbles and both balances checked |
+
 A (the host) is always a laptop in English; B (who joins) carries the scenario's language, screen and restored profile,
 so every scenario is also a mixed pair. A block whose infrastructure is not up is skipped with the reason and the
 scenario goes on; the report lists what was skipped. In the HTML report (`playwright-report-matrix/`) every scenario
 is tagged `@<dimension>:<value>` (`@clients:web-extension` for the pair): filter by one to see every scenario with it.
+
+In Testnet, A is the one the environment funds and B gets its money from A in the chat before paying anything back.
+Lightning in a chat only pays requests, so its direct payment goes card to card (an invoice of B's card paid from
+A's), and the chat's Send is checked to be refused. The Lightning suites have one pair of nodes each, so a scenario
+holds its rail's nodes while it pays (a lock directory per rail in the system's temp directory): two workers never
+see each other's payments in the balances. Breez's regtest is hosted by Breez and Lightspark and cannot run
+offline; its block runs only with a funded counterpart wallet (`GHOSTLY_BREEZ_COUNTERPART`), and is skipped with
+that reason otherwise.
 
 The matrix runs every night with the ephemeral environment (`e2e-full.yml`: four shards, then one report with the
 matrix in the run's summary), not on pull requests. It serves its own

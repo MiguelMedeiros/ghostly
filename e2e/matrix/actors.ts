@@ -42,7 +42,8 @@ export const chatPane = (actor: Peer) => actor.page.locator(".chat-wallpaper");
 
 /** Hash navigation works the same in the web app and in the extension's app page. */
 export async function go(actor: Actor, hash: string): Promise<void> {
-  await actor.page.evaluate((h) => { location.hash = h; }, hash);
+  // A page that is reloading (a profile switched after a restore) has no context to run in for a moment.
+  await expect(() => actor.page.evaluate((h) => { location.hash = h; }, hash)).toPass({ timeout: 30_000 });
 }
 
 export async function home(actor: Actor): Promise<void> {

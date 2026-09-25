@@ -37,7 +37,12 @@ export const REQUIREMENTS: Record<string, { met: () => boolean; missing: string 
   lnd: { met: () => env("GHOSTLY_LND_REGTEST") === "1", missing: "the LND regtest stack (GHOSTLY_LND_REGTEST=1)" },
   cln: { met: () => env("GHOSTLY_CLN_REGTEST") === "1", missing: "the Core Lightning regtest stack (GHOSTLY_CLN_REGTEST=1)" },
   nwc: { met: () => env("GHOSTLY_NWC_REGTEST") === "1", missing: "the NWC regtest stack (GHOSTLY_NWC_REGTEST=1)" },
-  breez: { met: () => env("GHOSTLY_BREEZ_TESTNET") === "1", missing: "Breez's hosted regtest (GHOSTLY_BREEZ_TESTNET=1)" },
+  // Breez's regtest is hosted by Breez and Lightspark, not by e2e/infra, and its faucet asks for a reCAPTCHA:
+  // the block needs a funded counterpart wallet of one's own (as `npm run e2e:full` does).
+  breez: {
+    met: () => env("GHOSTLY_BREEZ_TESTNET") === "1" || env("GHOSTLY_BREEZ_COUNTERPART") !== "",
+    missing: "Breez's hosted regtest, which e2e/infra cannot run offline, with a funded counterpart wallet (GHOSTLY_BREEZ_COUNTERPART; its faucet needs a reCAPTCHA)",
+  },
   ark: { met: () => env("GHOSTLY_ARK_REGTEST") === "1", missing: "the Arkade regtest stack (GHOSTLY_ARK_REGTEST=1)" },
   bark: { met: () => env("GHOSTLY_BARK_REGTEST") === "1", missing: "the Bark regtest stack (GHOSTLY_BARK_REGTEST=1)" },
   bdk: { met: () => env("GHOSTLY_BDK_REGTEST") === "1", missing: "the BDK regtest stack (GHOSTLY_BDK_REGTEST=1)" },
