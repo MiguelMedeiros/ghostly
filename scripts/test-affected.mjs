@@ -299,7 +299,11 @@ async function joinStack() {
   console.log(`\n▶ e2e: join the shared stack on ${SHARED.name}\n  $ ${COMMANDS.use}`);
   const start = Date.now();
   const joined = spawnSync("npm", ["run", "e2e:infra:use", "--", "--host", SHARED.name], { cwd: ROOT, stdio: "inherit" }).status === 0 && envNow() === SHARED.host;
-  if (joined) { results.push({ label: `e2e: joined the shared stack on ${SHARED.name}`, ok: true, seconds: (Date.now() - start) / 1000 }); return; }
+  if (joined) {
+    results.push({ label: `e2e: joined the shared stack on ${SHARED.name}`, ok: true, seconds: (Date.now() - start) / 1000 });
+    stack = stackDecision({ tests: gated.stackTests, env: envNow(), check: "answers" });
+    return;
+  }
   stack = stackDecision({ tests: gated.stackTests, env: envNow(), check: "unjoined", why: `${COMMANDS.use} failed, see above` });
   for (const line of stack.lines) console.log(`  ${line}`);
   skipped.push(`gated: ${stack.lines[0]}`);

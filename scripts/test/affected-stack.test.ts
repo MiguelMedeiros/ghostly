@@ -116,7 +116,8 @@ describe("stackDecision", () => {
 
 describe("statusWhy", () => {
   it("an SSH failure", () => {
-    expect(statusWhy("file:///x/remote.mjs:60\nError: Could not connect to miguel@one: ssh: connect to host one port 22: Operation timed out\n    at connect")).toBe("Could not connect to miguel@one: ssh: connect to host one port 22: Operation timed out");
+    // Uncaught at import: node prints the source line (which says "Could not connect" too) before the error.
+    expect(statusWhy("file:///x/remote.mjs:67\n  if (started.status !== 0) throw new Error(`Could not connect to ${HOST}: …`);\n                ^\n\nError: Could not connect to miguel@one: ssh: connect to host one port 22: Operation timed out\n    at connect")).toBe("Could not connect to miguel@one: ssh: connect to host one port 22: Operation timed out");
   });
 
   it("stopped containers and silent endpoints", () => {

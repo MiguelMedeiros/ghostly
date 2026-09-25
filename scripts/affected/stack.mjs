@@ -95,7 +95,7 @@ export function stackDecision({ tests, env, check, why, list = false }) {
 export function statusWhy(output) {
   const lines = output.split("\n").map((l) => l.trim()).filter(Boolean);
   const reasons = [];
-  const failed = lines.find((l) => /Could not (?:connect|read)/.test(l));
+  const failed = lines.find((l) => /^(?:Error:\s*)?Could not (?:connect|read)/.test(l));
   if (failed) return failed.replace(/^(?:Error:\s*)+/, "");
   for (const l of lines) {
     const forward = /cannot be forwarded to \S+: (.*?)(?:: whoever|\. Or set|$)/.exec(l);
