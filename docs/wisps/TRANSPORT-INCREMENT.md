@@ -44,7 +44,7 @@ A switch on an open session (`transport-switch/1`) moves the conversation withou
 Each side derives the chat's transport lines from its own engine events (`packages/browser/src/engine/transportLog.ts`):
 
 - the first connection;
-- a switch and why: you, the contact, the old transport dropped, or the apps on their own;
+- a switch and why: you, the contact, the old transport dropped, or the apps on their own. Only a live session moving without a drop is credited to someone's choice. Coming back after a drop is the app reconnecting ("Back live over Iroh", "Switched to Iroh: WebRTC dropped"), even when it lands on a transport someone chose. Choosing the transport already in use is not remembered as a reason;
 - a failed switch, and the transport it stayed on;
 - a lost live link and what carries text meanwhile (DHT or held items);
 - DHT only chosen, by you or the contact ("You switched to DHT only", "Ana switched to DHT only"), in place of the drop it caused; and the way out ("Left DHT only · connecting live"), worded as WISP 400 § Pairing progress and transport rows;

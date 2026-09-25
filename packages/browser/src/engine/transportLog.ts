@@ -81,8 +81,12 @@ export class TransportLog {
     this.entries = entries.slice(-TRANSPORT_LOG_MAX).map(e => ({ ...e }));
   }
 
-  /** Someone chose a transport for this chat just now: a switch to it soon after is theirs. */
+  /**
+   * Someone chose a transport for this chat just now: a live switch to it soon after is theirs. Choosing the one
+   * already carrying the chat moves nothing, so there is nothing for it to explain later.
+   */
   chose(by: "you" | "contact", transport: PairedTransport, now: number): void {
+    if (this.snapshot?.live && this.snapshot.transport === transport) { this.choice = null; return; }
     this.choice = { by, transport, at: now };
   }
 
@@ -122,7 +126,10 @@ export class TransportLog {
       const wasLost = !!last && !liveLine(last);
       const before = this.lastTransport();
       if (!last || !wasLost) return this.add({ kind: "connected", at: now, transport: next.transport });
-      if (before && before !== next.transport) return this.add({ kind: "switched", at: now, from: before, transport: next.transport, cause: this.cause(next.transport, now) ?? "dropped" });
+      // Back after a drop is the app reconnecting, never someone's switch (WISP 400: "Back live over X", or
+      // "Switched to X: Y dropped"), even when it lands where someone chose: that choice is spent.
+      if (this.choice?.transport === next.transport) this.choice = null;
+      if (before && before !== next.transport) return this.add({ kind: "switched", at: now, from: before, transport: next.transport, cause: "dropped" });
       return this.add({ kind: "back", at: now, transport: next.transport });
     }
     const fallback = next.text === "dht" ? "dht" as const : next.text === "hold" ? "hold" as const : undefined;

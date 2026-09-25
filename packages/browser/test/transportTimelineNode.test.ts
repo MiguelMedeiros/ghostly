@@ -160,7 +160,8 @@ describe.each([
     expect([view().pairing?.transport, view().pairing?.transitionTarget, contactState().transport, contactState().transitionTarget])
       .toEqual(["hyperdht/1", undefined, "hyperdht/1", undefined]);
     const after = view().transportLog!.slice(view().transportLog!.findIndex(e => e.kind === "lost") + 1);
-    expect(after.map(e => [e.kind, e.from, e.transport])).toEqual([["switched", "iroh/1", "hyperdht/1"]]);
+    // The app reconnecting, not the contact switching, though it lands on the contact's choice.
+    expect(after.map(e => [e.kind, e.cause, e.from, e.transport])).toEqual([["switched", "dropped", "iroh/1", "hyperdht/1"]]);
     expect(contactGot).toEqual(["in flight at the drop"]);
   }, 20_000);
 });
