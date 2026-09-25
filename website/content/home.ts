@@ -257,8 +257,8 @@ const en = {
         kind: "wallet to wallet",
         net: "key" as Net,
         network: "Mainnet with your own key",
-        body: "Send to a Spark address, wallet to wallet. The same seed is your Breez Lightning source.",
-        limits: "Experimental. Testnet opens a regtest wallet by itself; Mainnet needs your own Breez API key and is labelled real money.",
+        body: "Bitcoin on Spark, from one Spark wallet to another in a chat. Each request carries a Spark invoice made for it.",
+        limits: "Experimental. Testnet opens a regtest wallet by itself; Mainnet needs your own Breez API key and is labelled real money. The same wallet can be your Lightning source too.",
       },
       {
         id: "fedimint",
@@ -604,8 +604,8 @@ const ptBr: HomeCopy = {
         kind: "de carteira para carteira",
         net: "key",
         network: "Mainnet com sua própria chave",
-        body: "Envie para um endereço Spark, de carteira para carteira. A mesma seed é a sua fonte Lightning Breez.",
-        limits: "Experimental. A Testnet abre sozinha uma carteira regtest; a Mainnet exige a sua própria chave de API da Breez e aparece marcada como dinheiro de verdade.",
+        body: "Bitcoin no Spark, de uma carteira Spark para outra numa conversa. Cada pedido leva uma fatura Spark feita para ele.",
+        limits: "Experimental. A Testnet abre sozinha uma carteira regtest; a Mainnet exige a sua própria chave de API da Breez e aparece marcada como dinheiro de verdade. A mesma carteira também pode ser a sua fonte Lightning.",
       },
       {
         id: "fedimint",
