@@ -70,10 +70,8 @@
     "menu": {
       "pin": "Pin chat",
       "unpin": "Unpin chat",
-      "payments": "Payments…",
       "hold": "Hold messages…",
       "identities": "Identities…",
-      "connection": "Connection…",
       "services": "Services…",
       "refresh": "Refresh",
       "techInfo": "Tech Info",

@@ -50,7 +50,7 @@ describe("every locale has the same keys as English", () => {
 /** Sources read as text: which keys they ask for is all that matters here. */
 const allSources = appSources();
 const componentSources = Object.fromEntries(Object.entries(allSources).filter(([path]) => [
-  /^\.\.\/\.\.\/components\/(PaymentComposer|PaymentBubble|WalletDeck|GroupMembersDialog|GroupLinkPanel|NewGroupDialog|InviteCard|PairingBanner|MessageBubble)\.tsx$/,
+  /^\.\.\/\.\.\/components\/(PaymentComposer|PaymentBubble|WalletDeck|GroupMembersDialog|GroupLinkPanel|NewGroupDialog|InviteCard|ChatConnection|MessageBubble)\.tsx$/,
   /^\.\.\/\.\.\/components\/(wallet\/providers|identities|layout)\/[^/]+\.tsx?$/,
   /^\.\.\/\.\.\/pages\/GroupChat\.tsx$/,
 ].some((pattern) => pattern.test(path))));

@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { chooseDhtOnly, expect, test, type Peer } from "../support/fixtures";
+import { chooseDhtOnly, expect, setDhtOnly, test, type Peer } from "../support/fixtures";
 
 /**
  * A measurement, not a check: how long a paired chat takes to go live again after both sides leave
@@ -33,14 +33,7 @@ const say = async (peer: Peer, text: string) => {
 const connected = (peer: Peer, timeout: number) =>
   expect(peer.page.getByTestId("connection-options")).toHaveAttribute("aria-label", /Connected · WebRTC/, { timeout });
 
-async function dhtOnly(peer: Peer, on: boolean): Promise<void> {
-  const menu = peer.page.getByTestId("connection-menu");
-  if ((await menu.getAttribute("open")) === null) await peer.page.getByTestId("connection-options").click();
-  const choice = peer.page.getByRole("switch", { name: "DHT-only delivery" });
-  if ((await choice.isChecked()) !== on) await choice.click();
-  await expect.poll(() => choice.isChecked()).toBe(on);
-  await peer.page.keyboard.press("Escape");
-}
+const dhtOnly = (peer: Peer, on: boolean): Promise<void> => setDhtOnly(peer.page, on);
 
 const percentile = (values: number[], p: number) => values.length ? values[Math.min(values.length - 1, Math.floor(p * values.length))] : NaN;
 

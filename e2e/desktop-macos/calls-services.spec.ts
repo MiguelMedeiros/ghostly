@@ -330,10 +330,12 @@ test("two Desktop apps on a Mac pair, call with media both ways, share a screen,
       const dhtOnly = async (p: DesktopPerson, on: boolean) => {
         await p.go(p.chatHash!);
         if ((await p.app.attribute('[data-testid="connection-menu"]', "open")) === null) await p.app.click('[data-testid="connection-options"]');
-        const toggle = 'input[role="switch"][aria-label="DHT-only delivery"]';
-        await expect.poll(() => p.app.attribute(toggle, "aria-checked"), { message: `${p.name}'s DHT-only switch` }).not.toBeNull();
-        if ((await p.app.attribute(toggle, "aria-checked")) !== String(on)) await p.app.click(toggle);
-        await expect.poll(() => p.app.attribute(toggle, "aria-checked")).toBe(String(on));
+        // DHT only is one of the connection choices; off goes back to Automatic, or to WebRTC in an app that runs
+        // only that (no Automatic row there). The first match in the page is Automatic when there is one.
+        const choice = '[data-testid="connection-option-dht"]', back = '[data-testid="connection-option-auto"], [data-testid="connection-option-webrtc"]';
+        await expect.poll(() => p.app.attribute(choice, "aria-checked"), { message: `${p.name}'s DHT only choice` }).not.toBeNull();
+        if ((await p.app.attribute(choice, "aria-checked")) !== String(on)) await p.app.click(on ? choice : back);
+        await expect.poll(() => p.app.attribute(choice, "aria-checked")).toBe(String(on));
         await p.app.execute(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));`);
       };
       for (const p of [alice, bob]) await dhtOnly(p, true);

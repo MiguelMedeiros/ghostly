@@ -53,11 +53,11 @@ test("with WebRTC gone, two browsers keep chatting over HyperDHT through a relay
   for (const p of [alice, bob]) await setRelay(p, relay);
   // Both apps now run HyperDHT too, through the relay: offered, marked relayed, and WebRTC stays in use (direct first).
   for (const p of [alice, bob]) {
-    await p.page.getByTestId("transport-chip").click();
-    const option = p.page.getByTestId("transport-option-hyperdht");
+    await p.page.getByTestId("connection-options").click();
+    const option = p.page.getByTestId("connection-option-hyperdht");
     await expect(option).toBeEnabled({ timeout: 60_000 });
-    await expect(option).toContainText("Through a relay · used when nothing direct connects");
-    await expect(p.page.getByTestId("transport-option-webrtc")).toContainText("In use");
+    await expect(option).toHaveAttribute("title", "HyperDHT: Through a relay · used when nothing direct connects");
+    await expect(p.page.getByTestId("connection-option-webrtc")).toContainText("In use");
     await p.page.keyboard.press("Escape");
   }
   // The setting is kept across a reload.
@@ -78,6 +78,7 @@ test("with WebRTC gone, two browsers keep chatting over HyperDHT through a relay
 
   // Every place that describes the connection says it goes through a relay.
   await alice.page.getByTestId("connection-options").click();
+  await alice.page.getByTestId("connection-details-summary").click();
   await expect(alice.page.getByTestId("connection-relayed")).toHaveText(`Relayed via ${new URL(relay).host}`);
   await expect(alice.page.getByTestId("connection-summary")).toContainText("never what they say");
   await alice.page.keyboard.press("Escape");

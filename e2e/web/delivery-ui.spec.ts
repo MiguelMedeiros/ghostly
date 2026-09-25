@@ -81,6 +81,9 @@ test("header connection popover, five desktop destinations and resizing preserve
   await expect(a.page.getByRole("dialog",{name:"Connection options"})).toBeVisible();
   await expect(a.page.getByRole("radio",{name:"WebRTC",exact:true})).toBeChecked();
   await expect(a.page.getByRole("switch",{name:"Fallback",exact:true})).toBeVisible();
+  // Verification is under Details, closed until asked for.
+  await expect(a.page.getByTestId("pair-verify")).toBeHidden();
+  await a.page.getByTestId("connection-details-summary").click();
   await expect(a.page.getByTestId("pair-verify")).toBeVisible();
   await a.page.keyboard.press("Escape"); await expect(trigger).toBeFocused();
   await expect(a.page.getByRole("dialog",{name:"Connection options"})).toBeHidden();
@@ -171,7 +174,7 @@ test("home actions have equal sizes and enabled controls signal clicks", { tag: 
     await create.click();
     const menu = p.page.getByTestId("connection-options");
     await expect(menu).toHaveCSS("cursor", "pointer"); await menu.click();
-    await expect(p.page.getByRole("switch", {name:"DHT-only delivery"})).toHaveCSS("cursor", "pointer");
+    await expect(p.page.getByRole("radio", {name:"DHT only", exact:true})).toHaveCSS("cursor", "pointer");
     await expect(p.page.getByRole("radio", {name:"WebRTC", exact:true})).toHaveCSS("cursor", "pointer");
     await expect(p.page.getByRole("radio", {name:"Iroh", exact:true})).toHaveCSS("cursor", "not-allowed");
     // Before the contact arrives, what is written waits for it (WISP 400): the composer is open.
@@ -197,6 +200,8 @@ for (const unavailable of ["none", "read", "publish", "network", "publication-ne
     await expect.poll(() => reads).toBeGreaterThan(0);
     await expect(menu).toHaveAccessibleName(unavailable === "none" ? /No contact yet/ : unavailable === "publication-network" ? /Publication unavailable/ : /Discovery unavailable|Publication unavailable/);
     await menu.click();
+    // The failure is on the panel's first lines; the help, under Details.
+    await page.getByTestId("connection-details-summary").click();
     const alert = page.getByTestId("connection-menu").getByRole("alert");
     // The inviter only needs its own invite published: a failed read leaves the pairing scene waiting, a failed
     // publish is the scene's failure too, with its own retry.
@@ -216,7 +221,7 @@ for (const unavailable of ["none", "read", "publish", "network", "publication-ne
       }
       await expect(page.getByRole("link", {name:"review relay settings"})).toHaveAttribute("href", "#/settings");
     }
-    await expect(page.getByRole("switch", {name:"DHT-only delivery"})).toBeEnabled();
+    await expect(page.getByRole("radio", {name:"DHT only", exact:true})).toBeEnabled();
     await expect(page.getByRole("radio", {name:"WebRTC", exact:true})).toBeEnabled();
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("invite-card").getByRole("button",{name:/Copy invite|Copied!/})).toBeVisible();

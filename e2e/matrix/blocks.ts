@@ -91,10 +91,7 @@ export const pair: Block = {
     await a.page.getByTitle(either("New Chat")).click();
     if (combo.delivery === "dht") {
       // DHT only is chosen in the chat's Connection menu (WISP 400), not in its invite.
-      await a.page.getByTestId("connection-options").click();
-      await a.page.getByRole("switch", { name: "DHT-only delivery" }).click();
-      await expect(a.page.getByRole("switch", { name: "DHT-only delivery" })).toBeChecked();
-      await a.page.keyboard.press("Escape");
+      await dhtOnly(a, true);
       await expect.poll(() => copyInvite(a)).toMatch(/^https:\/\/ghostly\.tools\/#ghostly1p/);
     }
     const invite = await copyInvite(a);
@@ -156,11 +153,14 @@ async function setOnline(actor: Actor, online: boolean): Promise<void> {
   await expect(toggle).toHaveText(want);
 }
 
+/** DHT only is one of the connection choices; off leaves it for Automatic (a browser's one transport). */
 async function dhtOnly(actor: Actor, on: boolean): Promise<void> {
   const menu = actor.page.getByTestId("connection-menu");
   if ((await menu.getAttribute("open")) === null) await actor.page.getByTestId("connection-options").click();
-  const choice = actor.page.getByRole("switch", { name: "DHT-only delivery" });
-  if ((await choice.isChecked()) !== on) await choice.click();
+  const panel = actor.page.getByRole("dialog", { name: "Connection options" });
+  const choice = panel.getByRole("radio", { name: "DHT only", exact: true });
+  const back = panel.getByRole("radio", { name: "Automatic", exact: true }).or(panel.getByRole("radio", { name: "WebRTC", exact: true })).first();
+  if ((await choice.isChecked()) !== on) await (on ? choice : back).click();
   await expect.poll(() => choice.isChecked()).toBe(on);
   await actor.page.keyboard.press("Escape");
 }

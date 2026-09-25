@@ -1,10 +1,9 @@
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import { usePeerNick, useShareProfile } from "../hooks/useAvatars";
 import { PeerAvatar } from "../components/Avatar";
-import { useOutsideDismiss, useBackdropDismiss } from "../hooks/useDismiss";
+import { useBackdropDismiss } from "../hooks/useDismiss";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { createPortal } from "react-dom";
-import { ChatPaymentsDialog } from "../components/ChatPaymentsDialog";
 import { ChatHoldDialog } from "../components/ChatHoldDialog";
 import { ContactIdentitiesPanel } from "../components/identities/ContactIdentitiesPanel";
 import { IdentityStack } from "../components/identities/ContactMarks";
@@ -13,7 +12,7 @@ import { PinIcon } from "../components/PinIcon";
 import { Menu, MenuItem, MenuSeparator } from "../components/Menu";
 import { useI18n } from "../contexts/I18nContext";
 import { InviteCard } from "../components/InviteCard";
-import { PairingBanner } from "../components/PairingBanner";
+import { ChatConnection } from "../components/ChatConnection";
 import { PairingScene } from "../components/pairing/PairingScene";
 import { PairingIndicator } from "../components/pairing/PairingIndicator";
 import { usePairingProgress } from "../hooks/usePairingProgress";
@@ -48,13 +47,11 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { fileMessageText, parseCallSignal, signalHasVideo, type VoiceMeta } from "@ghostly/core";
 import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
 import { useAppNavigation } from "../hooks/useAppNavigation";
-import { TransportChip, TransportMenu } from "../components/TransportMenu";
 import { MuteMenu, MuteMenuItem } from "../components/ChatMute";
 import { MUTE_SILENCES, callRings, useChatMute } from "../lib/chatMute";
-import { TransportIcon } from "../components/TransportIcon";
 import { useChatLink } from "../hooks/useChatLink";
 import { TransportLine } from "../components/TransportTimeline";
-import { connectionSummary, mergeTimeline } from "../lib/transportEvents";
+import { mergeTimeline } from "../lib/transportEvents";
 
 interface ChatProps {
   /** The stored session this chat is. `App` reads it off the address. */
@@ -261,20 +258,15 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const [labelDraft, setLabelDraft] = useState("");
   /** Ways of paying are chosen per chat; the ⚡ works while this device allows at least one. */
   const chatPeer = platform?.getPeer(params?.peerPubKeyB64 ?? "");
-  // The chat's link as the engine shows it: its transport lines and what its Connection menu offers.
+  // The chat's link as the engine shows it: its transport lines in the timeline.
   const chatLink = useChatLink(params?.peerPubKeyB64 ?? "");
   const timeline = useMemo(() => mergeTimeline(messages, paired ? chatLink?.transportLog ?? [] : []), [messages, paired, chatLink?.transportLog]);
   const paymentsOn = !chatPeer?.paymentMethods || Object.values(chatPeer.paymentMethods).some(Boolean);
-  const [showPayments, setShowPayments] = useState(false);
   const [showHold, setShowHold] = useState(false);
   const [showIdentities, setShowIdentities] = useState(false);
   const [showServices, setShowServices] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [showTransport, setShowTransport] = useState(false);
   const [showMute, setShowMute] = useState(false);
-  const [connectionOpen, setConnectionOpen] = useState(false);
-  const connectionRef = useRef<HTMLDivElement>(null);
-  const connectionButtonRef = useRef<HTMLButtonElement>(null);
   const [showTechInfo, setShowTechInfo] = useState(false);
   const labelInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -347,14 +339,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     setConfirmDelete(false);
     setCodeCopied(false);
     setMenuOpen(false);
-    setConnectionOpen(false);
   }, [sessionId]);
 
   const closeMenu = () => setMenuOpen(false);
-  useOutsideDismiss(connectionRef, connectionOpen, () => {
-    if (connectionRef.current?.contains(document.activeElement)) connectionButtonRef.current?.focus();
-    setConnectionOpen(false);
-  });
   const techBackdrop = useBackdropDismiss(() => setShowTechInfo(false));
 
   useEffect(() => {
@@ -396,7 +383,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const displayName = chatLabel || contactNick;
   const isAnonymous = !displayName;
   const shownName = displayName || t("common.unnamedContact", { key: contactTag(params.peerPubKeyB64) });
-  const showKeySubtitle = true;
+  // Until live: the "connected" moment belongs to the scene, and the header goes back to how it was.
+  const pairingShown = pairing.show && !!pairing.progress && pairing.progress.stage !== "live";
 
   return (
     // The chat's column, and beside it (over it when narrow) the contact's identities: the page is their container.
@@ -475,43 +463,24 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               </div>
             )}
             <div className="flex min-w-0 items-center gap-2">
-            <div ref={connectionRef} className="relative">
-              <button
-                ref={connectionButtonRef}
-                type="button"
-                aria-label="Connection details"
-                aria-expanded={connectionOpen}
-                aria-controls={`connection-details-${sessionId}`}
-                onClick={() => setConnectionOpen(open => !open)}
-                className="flex items-center gap-1.5 rounded cursor-pointer hover:text-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-              >
+              {/* The contact's status and key. The connection is the icon beside the calls; both keys are in its panel. */}
+              <span className="flex min-w-0 items-center gap-1.5" data-testid="chat-subtitle">
                 <span role="img" aria-label={statusLabel} data-testid="contact-status"
                   className={`h-2 w-2 shrink-0 rounded-full ${statusLabel === "Connected" ? `bg-green-500 ${pollCountdown.isPolling ? "contact-fetch-pulse" : ""}` : /issue|unavailable|mismatch/.test(statusLabel) ? "bg-danger" : "bg-text-muted"}`} />
-                {showKeySubtitle && (
-                  <span className={`text-text-muted/60 text-xs max-md:text-[10px] font-mono whitespace-nowrap ${pairing.show ? "max-md:hidden" : ""}`}>
-                    {truncatedPeerKey}
-                  </span>
-                )}
-              </button>
-              {connectionOpen && (
-                <div id={`connection-details-${sessionId}`} role="region" aria-label="Connection details"
-                  className="absolute start-0 top-full z-50 mt-2 w-80 max-w-[75vw] rounded-lg border border-border bg-surface-alt p-4 shadow-xl space-y-3">
-                  <TechInfoRow label="Connection" value={statusLabel} />
-                  {techInfo?.myPubKey && <TechInfoRow label="You" value={techInfo.myPubKey} mono copyable />}
-                  <TechInfoRow label="Peer" value={params.peerPubKeyB64} mono copyable />
-                </div>
-              )}
-            </div>
-              {/* Until live: the "connected" moment belongs to the scene, and the header goes back to how it was. */}
-              {pairing.show && pairing.progress && pairing.progress.stage !== "live" ? (
+                <span className={`text-text-muted/60 text-xs max-md:text-[10px] font-mono whitespace-nowrap ${pairing.show ? "max-md:hidden" : ""}`}>
+                  {truncatedPeerKey}
+                </span>
+              </span>
+              {pairingShown && pairing.progress && (
                 <PairingIndicator progress={pairing.progress}
                   onOpen={() => document.getElementById(pairingSceneId)?.scrollIntoView({ block: "center", behavior: "smooth" })} />
-              ) : paired && <TransportChip peerKey={params.peerPubKeyB64} />}
+              )}
             </div>
           </div>
         </div>
         <div className="flex items-center gap-1">
-          {paired && <PairingBanner peerKey={params.peerPubKeyB64} />}
+          {/* The chat's one connection control: its icon, and one panel with the choice and the rest under Details. */}
+          <ChatConnection key={sessionId} peerKey={params.peerPubKeyB64} paired={paired} myKey={techInfo?.myPubKey} status={statusLabel} />
           <CallButtons blocked={callsBlocked} busy={webrtc.callState !== "idle"} onCall={(withVideo) => webrtc.startCall(withVideo)} />
           {/* Options dropdown */}
           <div className="relative" ref={menuRef}>
@@ -551,12 +520,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                   {codeCopied ? t("common.copied") : t("sidebar.copyInvite")}
                 </MenuItem>
               )}
-              {platform?.wallet && platform.getPeer(params.peerPubKeyB64) && (
-                <MenuItem testId="chat-payments-open" onClick={() => { setShowPayments(true); closeMenu(); }}
-                  icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>}>
-                  {t("chat.menu.payments")}
-                </MenuItem>
-              )}
               {paired && platform?.getPeer(params.peerPubKeyB64) && (
                 <MenuItem testId="chat-hold-open" onClick={() => { setShowHold(true); closeMenu(); }}
                   icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 8v13H3V8" /><path d="M1 3h22v5H1z" /><path d="M10 12h4" /></svg>}>
@@ -567,13 +530,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 <MenuItem testId="chat-identities-open" onClick={() => { setShowIdentities(true); closeMenu(); }}
                   icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" /><path d="m9 12 2 2 4-4" /></svg>}>
                   {t("chat.menu.identities")}
-                </MenuItem>
-              )}
-              {paired && chatLink && (
-                <MenuItem testId="chat-connection-open" onClick={() => { closeMenu(); setShowTransport(true); }}
-                  icon={<TransportIcon transport={chatLink.pairing?.transport} size={16} />}
-                  hint={connectionSummary(chatLink, Date.now(), shownName)?.short ?? (chatLink.deliveryMode === "dht" ? "DHT only · no live connection" : "Not live")}>
-                  {t("chat.menu.connection")}
                 </MenuItem>
               )}
               {platform && platform.getPeer(params.peerPubKeyB64) && (
@@ -607,7 +563,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 {t("sidebar.deleteChat")}
               </MenuItem>
             </Menu>
-            {paired && chatLink && <TransportMenu link={chatLink} open={showTransport} onClose={() => setShowTransport(false)} anchorRef={menuRef} />}
             <MuteMenu chat={sessionId} open={showMute} onClose={() => setShowMute(false)} anchorRef={menuRef} />
           </div>
         </div>
@@ -750,10 +705,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
       {showHold && chatPeer && params && platform && (
         <ChatHoldDialog peer={chatPeer} name={shownName} onClose={() => setShowHold(false)}
           onSave={(enabled) => platform.setChatHold(params.peerPubKeyB64, enabled)} />
-      )}
-      {showPayments && chatPeer && params && platform && (
-        <ChatPaymentsDialog peer={chatPeer} name={shownName} onClose={() => setShowPayments(false)}
-          onSave={(methods) => platform.setChatPaymentMethods(params.peerPubKeyB64, methods)} />
       )}
       {confirmDelete && <DeleteChatDialog name={`${shownName} · ${truncatedPeerKey}`} onClose={()=>setConfirmDelete(false)} onConfirm={handleDelete} />}
       {/* Tech Info Modal */}

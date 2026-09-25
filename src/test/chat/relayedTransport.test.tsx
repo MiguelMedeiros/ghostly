@@ -1,8 +1,7 @@
 import { act, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { LinkView } from "@ghostly/browser/shared/types";
-import { PairingBanner } from "../../components/PairingBanner";
-import { TransportChip } from "../../components/TransportMenu";
+import { ChatConnection } from "../../components/ChatConnection";
 import { connectionSummary, transportLineDetails, transportLineText, transportOptions, type TransportEntry } from "../../lib/transportEvents";
 import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -44,23 +43,22 @@ describe("a relayed transport", () => {
     expect(transportLineText({ ...entry, relayed: undefined }, "Ana")).toBe("Moved to HyperDHT, a direct path was found");
   });
 
-  it("shows in the header's Connection menu and in the connection popover", async () => {
-    const view = renderApp(<><TransportChip peerKey="peer" /><PairingBanner peerKey="peer" /></>);
+  it("shows in the header's connection control and in its panel", async () => {
+    const view = renderApp(<ChatConnection peerKey="peer" />);
     act(() => view.engine.update({ links: [linkView({ ...web, pairing: onHyperdht, dataLink: "open", transportRttMs: 180, transportRelayed: { relays: ["relay.example"] } })] }));
-    await view.user.click(screen.getByTestId("transport-chip"));
-    const menu = screen.getByTestId("transport-menu");
-    expect(within(menu).getByTestId("transport-menu-now")).toHaveTextContent("Connection · on HyperDHT, relayed, 180 ms");
-    expect(within(menu).getByTestId("transport-option-hyperdht")).toHaveTextContent("In use · relayed · 180 ms");
-    await view.user.keyboard("{Escape}");
+    expect(screen.getByTestId("connection-options")).toHaveAttribute("data-relayed", "");
+    expect(screen.getByTestId("connection-options")).toHaveAccessibleName("Connection options: Connected · HyperDHT (relayed)");
     await view.user.click(screen.getByTestId("connection-options"));
-    expect(screen.getByTestId("connection-relayed")).toHaveTextContent("Relayed via relay.example");
-    expect(screen.getByTestId("connection-summary")).toHaveTextContent("never what they say");
+    const panel = screen.getByRole("dialog", { name: "Connection options" });
+    expect(within(panel).getByTestId("connection-option-hyperdht")).toHaveTextContent("In use · relayed · 180 ms");
+    expect(within(panel).getByTestId("connection-relayed")).toHaveTextContent("Relayed via relay.example");
+    expect(within(panel).getByTestId("connection-summary")).toHaveTextContent("never what they say");
   });
 
   it("when not in use, says it goes through a relay", async () => {
-    const view = renderApp(<TransportChip peerKey="peer" />);
+    const view = renderApp(<ChatConnection peerKey="peer" />);
     act(() => view.engine.update({ links: [linkView({ ...web, pairing: { status: "ready", transport: "webrtc/1" } as Pairing, dataLink: "open" })] }));
-    await view.user.click(screen.getByTestId("transport-chip"));
-    expect(screen.getByTestId("transport-option-hyperdht")).toHaveTextContent("Through a relay · used when nothing direct connects");
+    await view.user.click(screen.getByTestId("connection-options"));
+    expect(screen.getByTestId("connection-option-hyperdht")).toHaveAttribute("title", "HyperDHT: Through a relay · used when nothing direct connects");
   });
 });

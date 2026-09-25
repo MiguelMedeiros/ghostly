@@ -9,6 +9,11 @@ import { pair } from "../support/paired";
 
 const trigger = (p: Peer) => p.page.getByTestId("connection-options");
 const popover = (p: Peer) => p.page.getByRole("dialog", { name: "Connection options" });
+/** The panel's secondary part: verification, keys, history. Closed until asked for. */
+async function details(p: Peer): Promise<void> {
+  const more = p.page.getByTestId("connection-details");
+  if ((await more.getAttribute("open")) === null) await p.page.getByTestId("connection-details-summary").click();
+}
 
 /** Ghostly's own Offline switch, on the Services page: the chat has to go somewhere it can be seen. */
 async function setOnline(p: Peer, online: boolean): Promise<void> {
@@ -65,9 +70,13 @@ test("the connection popover opens and closes by click, Escape and a click outsi
   await expect(alice.page.getByPlaceholder("Message…")).toBeEnabled();
 });
 
-test("the header shows only an icon, as big as the call buttons; a tooltip names the state", { tag: ["@feature:chat.paired.status"] }, async ({ peer }) => {
+test("the header shows only an icon, as big as the call buttons; a tooltip names the state", { tag: ["@feature:chat.paired.status", "@feature:transport.indicator"] }, async ({ peer }) => {
   const [alice] = await linked(peer, ["icon-alice", "icon-bob"]);
   const tip = alice.page.getByRole("tooltip");
+  // One connection control: no chip, no second button, no ⋮ Connection.
+  await expect(alice.page.getByTestId("connection-options")).toHaveCount(1);
+  await expect(alice.page.getByTestId("transport-chip")).toHaveCount(0);
+  await expect(alice.page.getByRole("button", { name: "Connection details", exact: true })).toHaveCount(0);
   await expect(trigger(alice)).toHaveText("");
   await expect(trigger(alice)).toHaveAttribute("data-state", "connected");
   await expect(trigger(alice).getByTestId("connection-dot")).toBeVisible();
@@ -87,16 +96,17 @@ test("the header shows only an icon, as big as the call buttons; a tooltip names
   await trigger(alice).click();
   await expect(popover(alice)).toBeVisible();
   await expect(tip).toBeHidden();
-  await expect(popover(alice).getByTestId("connection-state")).toHaveText("Connected · WebRTC");
+  // Its first line is the state and the round trip.
+  await expect(popover(alice).getByTestId("connection-state")).toHaveText(/^Connected · WebRTC( · \d+ ms)?$/);
 
   // Reached from the keyboard, the tooltip shows; Escape dismisses it and keeps focus.
   await alice.page.keyboard.press("Escape");
   await expect(popover(alice)).toBeHidden();
   await alice.page.mouse.move(0, 0);
   await expect(tip).toBeHidden();
-  // Between them, the live transport's chip in the subtitle (#204).
-  await alice.page.getByTestId("transport-chip").focus();
-  await alice.page.keyboard.press("Tab");
+  // The call buttons come right after it.
+  await alice.page.getByTestId("call-audio").focus();
+  await alice.page.keyboard.press("Shift+Tab");
   await expect(trigger(alice)).toBeFocused();
   await expect(tip).toBeVisible();
   await alice.page.keyboard.press("Escape");
@@ -108,6 +118,7 @@ test("verifying shows one code on both sides, and each side confirms for itself"
   const [alice, bob] = await linked(peer, ["code-alice", "code-bob"]);
   for (const p of [alice, bob]) {
     await trigger(p).click();
+    await details(p);
     await expect(p.page.getByTestId("pair-trust")).toContainText("Key saved · not verified");
     // No code until someone asks to compare.
     await expect(p.page.getByTestId("pair-code")).toHaveCount(0);
@@ -131,6 +142,7 @@ test("verifying shows one code on both sides, and each side confirms for itself"
   // Closed and opened again, it stays verified.
   await bob.page.keyboard.press("Escape");
   await trigger(bob).click();
+  await details(bob);
   await expect(bob.page.getByTestId("pair-verified")).toBeVisible();
   await expect(bob.page.getByTestId("pair-verify")).toHaveCount(0);
   await say(bob, "verified and still talking");
@@ -149,8 +161,8 @@ test("offline, the popover says so; the contact is offered Reconnect, and the ch
   await trigger(alice).click();
   await expect(popover(alice)).toContainText("Offline");
   // Nothing to choose or retry while offline.
-  await expect(alice.page.getByRole("switch", { name: "DHT-only delivery" })).toBeDisabled();
-  await expect(alice.page.getByRole("radio", { name: "WebRTC", exact: true })).toBeDisabled();
+  await expect(popover(alice).getByRole("radio", { name: "DHT only", exact: true })).toBeDisabled();
+  await expect(popover(alice).getByRole("radio", { name: "WebRTC", exact: true })).toBeDisabled();
   await expect(popover(alice).getByRole("button", { name: "Reconnect" })).toHaveCount(0);
   await expect(alice.page.getByPlaceholder("Message…")).toBeDisabled();
   await alice.page.keyboard.press("Escape");

@@ -14,10 +14,17 @@ export async function pair(host: Peer, guest: Peer) {
   for (const peer of [host, guest]) await expect(peer.page.getByTestId("pair-verified")).toHaveCount(0);
 }
 
-/** The optional comparison, from the connection panel. Both sides see one code. */
+/** The connection panel's Details, where verification, keys and history are: opened, with the panel. */
+export async function connectionDetails(peer: Peer): Promise<void> {
+  if ((await peer.page.getByTestId("connection-menu").getAttribute("open")) === null) await peer.page.getByTestId("connection-options").click();
+  const more = peer.page.getByTestId("connection-details");
+  if ((await more.getAttribute("open")) === null) await peer.page.getByTestId("connection-details-summary").click();
+}
+
+/** The optional comparison, from the connection panel's Details. Both sides see one code. */
 export async function verifyContact(host: Peer, guest: Peer) {
   for (const peer of [host, guest]) {
-    await peer.page.getByTestId("connection-options").click();
+    await connectionDetails(peer);
     await peer.page.getByTestId("pair-verify").click();
   }
   const codes = await Promise.all([host, guest].map(peer => peer.page.getByTestId("pair-code").textContent()));

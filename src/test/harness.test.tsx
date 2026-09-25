@@ -2,7 +2,7 @@ import { screen } from "@testing-library/react";
 import { useEffect, useState } from "react";
 import { describe, expect, it } from "vitest";
 import { engine } from "@ghostly/browser/platform/engine";
-import { PairingBanner } from "../components/PairingBanner";
+import { ChatConnection } from "../components/ChatConnection";
 import { useI18n } from "../contexts/I18nContext";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { linkView } from "./fakeEngine";
@@ -41,7 +41,7 @@ describe("component test harness", () => {
 
 // The example in src/test/README.md, kept working.
 it("reconnects from the connection menu (README example)", async () => {
-  const { user, engine } = renderApp(<PairingBanner peerKey="peer" />);
+  const { user, engine } = renderApp(<ChatConnection peerKey="peer" />);
   engine.on("connect", () => undefined).update({ links: [linkView({ pairing: { status: "error", error: "Relay refused" } })] });
   await user.click(screen.getByTestId("connection-options"));
   await user.click(screen.getByRole("button", { name: "Reconnect" }));

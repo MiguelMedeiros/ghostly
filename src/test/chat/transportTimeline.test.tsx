@@ -2,7 +2,7 @@ import { act, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { TransportLine } from "../../components/TransportTimeline";
-import { TransportChip, TransportMenu } from "../../components/TransportMenu";
+import { ChatConnection } from "../../components/ChatConnection";
 import { mergeTimeline, shortReason, transportEventText, transportLineText, transportOptions, transportWaitText, type TransportEntry } from "../../lib/transportEvents";
 import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -116,14 +116,15 @@ describe("transport lines in the timeline", () => {
   });
 });
 
-describe("the chat's Connection menu", () => {
+describe("the chat's connection control and its panel", () => {
   const all = ["webrtc/1", "iroh/1", "hyperdht/1"] as LinkView["availableTransports"];
 
-  function chip(link: Partial<LinkView>) {
-    const view = renderApp(<TransportChip peerKey="peer" />);
+  function control(link: Partial<LinkView>) {
+    const view = renderApp(<ChatConnection peerKey="peer" />);
     act(() => view.engine.update({ links: [linkView({ pairing: ready(), dataLink: "open", ...link })] }));
     return view;
   }
+  const panel = () => screen.getByRole("dialog", { name: "Connection options" });
 
   it("offers only what both apps support, and says why the rest is off", () => {
     expect(transportOptions({ availableTransports: all, peerTransports: ["webrtc/1", "iroh/1"] })).toEqual([
@@ -138,50 +139,53 @@ describe("the chat's Connection menu", () => {
       .toEqual(["This app has no WebRTC", "All eight native connection slots are in use.", undefined]);
   });
 
-  it("shows the live transport and its round trip in the header, and nothing until live", () => {
-    const view = chip({ pairing: ready({ transport: "iroh/1" }), transportRttMs: 38 });
-    const button = screen.getByTestId("transport-chip");
-    expect(button).toHaveTextContent("Iroh· 38 ms");
-    expect(button).toHaveAccessibleName("Connection: Iroh, round trip 38 ms. Change");
+  it("shows the live transport by its mark in the header, and its round trip on the panel's first line", () => {
+    const view = control({ pairing: ready({ transport: "iroh/1" }), transportRttMs: 38 });
+    const icon = () => screen.getByTestId("connection-options");
+    expect(icon().querySelector("[data-transport-icon]")).toHaveAttribute("data-transport-icon", "iroh/1");
+    expect(icon()).toHaveAccessibleName("Connection options: Connected · Iroh");
+    expect(screen.getByTestId("connection-state")).toHaveTextContent("Connected · Iroh · 38 ms");
     act(() => view.engine.update({ links: [linkView({ pairing: ready({ transport: "iroh/1", transitionTarget: "hyperdht/1" }), dataLink: "open" })] }));
-    expect(screen.getByTestId("transport-chip")).toHaveTextContent("Switching to HyperDHT");
-    act(() => view.engine.update({ links: [linkView({ pairing: { status: "connecting" } as Pairing, dataLink: "idle" })] }));
-    expect(screen.queryByTestId("transport-chip")).toBeNull();
+    expect(screen.getByTestId("connection-state")).toHaveTextContent(/^Switching · HyperDHT$/);
+    act(() => view.engine.update({ links: [linkView({ pairing: { status: "connecting", peerKey: "peer" } as Pairing, dataLink: "connecting" })] }));
+    expect(icon()).toHaveAccessibleName("Connection options: Connecting…");
+    expect(icon().querySelector("[data-transport-icon]")).toBeNull();
   });
 
   it("switches this chat on Desktop, back to Automatic too, and keeps what the contact cannot use off", async () => {
-    const { user, engine } = chip({ availableTransports: all, peerTransports: ["webrtc/1", "iroh/1"], transportAutomatic: true, transportRttMs: 12 });
+    const { user, engine } = control({ availableTransports: all, peerTransports: ["webrtc/1", "iroh/1"], transportAutomatic: true, transportRttMs: 12 });
     engine.on("setChatTransport", () => undefined);
-    await user.click(screen.getByTestId("transport-chip"));
-    const menu = screen.getByTestId("transport-menu");
-    expect(within(menu).getByTestId("transport-menu-now")).toHaveTextContent("Connection · on WebRTC, 12 ms");
-    const radios = within(menu).getAllByRole("radio");
+    await user.click(screen.getByTestId("connection-options"));
+    const radios = within(panel()).getAllByRole("radio");
     expect(radios.map(r => [r.textContent, r.getAttribute("aria-checked"), (r as HTMLButtonElement).disabled])).toEqual([
-      ["AutomaticThe apps choose, WebRTC first", "true", false],
+      ["Automatic", "true", false],
       ["WebRTCIn use · 12 ms", "false", false],
       ["Iroh", "false", false],
-      ["HyperDHTYour contact's app doesn't support HyperDHT", "false", true],
-      ["DHT onlyShort texts over the DHT, even offline", "false", false],
+      ["HyperDHT", "false", true],
+      ["DHT only", "false", false],
     ]);
-    await user.click(within(menu).getByTestId("transport-option-iroh"));
+    // The longer word is the row's tooltip.
+    expect(within(panel()).getByTestId("connection-option-hyperdht")).toHaveAttribute("title", "HyperDHT: Your contact's app doesn't support HyperDHT");
+    await user.click(within(panel()).getByTestId("connection-option-iroh"));
     expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "iroh/1" }]);
-    expect(screen.queryByTestId("transport-menu")).toBeNull();
+    // The panel stays open: the choice moves at once, and what is in use follows when the switch lands.
+    expect((screen.getByTestId("connection-menu") as HTMLDetailsElement).open).toBe(true);
 
     act(() => engine.update({ links: [linkView({ pairing: ready({ transport: "iroh/1" }), dataLink: "open", availableTransports: all, peerTransports: ["webrtc/1", "iroh/1"], preferredTransport: "iroh/1", transportAutomatic: false })] }));
-    await user.click(screen.getByTestId("transport-chip"));
-    expect(screen.getByTestId("transport-option-iroh")).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByTestId("transport-option-auto")).toHaveAttribute("aria-checked", "false");
-    await user.click(screen.getByTestId("transport-option-auto"));
+    expect(screen.getByTestId("connection-option-iroh")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("connection-option-iroh")).toHaveAttribute("data-in-use", "");
+    expect(screen.getByTestId("connection-option-auto")).toHaveAttribute("aria-checked", "false");
+    await user.click(screen.getByTestId("connection-option-auto"));
     expect(engine.callsTo("setChatTransport").slice(-1)[0]).toEqual({ linkId: "link-1", transport: "auto" });
   });
 
-  it("says what the chat waits for, in the menu's note and on the chosen option (WISP 100)", async () => {
-    const { user } = chip({ availableTransports: all, peerNick: "Bea", pairing: ready({ transport: "iroh/1" }), preferredTransport: "hyperdht/1", transportAutomatic: false,
+  it("says what the chat waits for, in its own block and on the chosen option (WISP 100)", async () => {
+    const { user } = control({ availableTransports: all, peerNick: "Bea", pairing: ready({ transport: "iroh/1" }), preferredTransport: "hyperdht/1", transportAutomatic: false,
       transportWait: { transport: "hyperdht/1", by: "you", reason: "contact-lacks", live: "iroh/1", failures: 0 } });
-    await user.click(screen.getByTestId("transport-chip"));
-    const menu = screen.getByTestId("transport-menu");
-    expect(within(menu).getByTestId("transport-option-hyperdht")).toHaveAttribute("title", "HyperDHT: Chosen · waiting for it");
-    expect(within(menu).getByTestId("transport-menu-note")).toHaveTextContent("You chose HyperDHT. Bea's app doesn't have HyperDHT. Automatic connects over what both apps have.");
+    await user.click(screen.getByTestId("connection-options"));
+    expect(within(panel()).getByTestId("connection-option-hyperdht")).toHaveAttribute("title", "HyperDHT: Chosen · waiting for it");
+    expect(within(panel()).getByTestId("connection-waiting-why")).toHaveTextContent("You chose HyperDHT. Bea's app doesn't have HyperDHT.");
+    expect(within(panel()).getByTestId("connection-waiting-automatic")).toBeInTheDocument();
   });
 
   it("words each reason a chat waits, where it is meanwhile, and when Automatic is the way out", () => {
@@ -203,56 +207,54 @@ describe("the chat's Connection menu", () => {
   });
 
   it("says why a change could not be made, and stays open", async () => {
-    const { user, engine } = chip({ availableTransports: all, transportAutomatic: true });
+    const { user, engine } = control({ availableTransports: all, transportAutomatic: true });
     engine.on("setChatTransport", () => { throw new Error("Transport unavailable"); });
-    await user.click(screen.getByTestId("transport-chip"));
-    await user.click(screen.getByTestId("transport-option-hyperdht"));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Transport unavailable");
-    expect(screen.getByTestId("transport-menu")).toBeInTheDocument();
+    await user.click(screen.getByTestId("connection-options"));
+    await user.click(screen.getByTestId("connection-option-hyperdht"));
+    expect(await within(panel()).findByRole("alert")).toHaveTextContent("Transport unavailable");
+    expect((screen.getByTestId("connection-menu") as HTMLDetailsElement).open).toBe(true);
   });
 
-  it("on the web shows WebRTC and DHT only, with a note: WebRTC is in use and nothing else is asked", async () => {
-    const { user, engine } = chip({ availableTransports: ["webrtc/1"], transportAutomatic: true });
+  it("on the web lists every transport, WebRTC in use and the natives off with the reason, and DHT only", async () => {
+    const { user, engine } = control({ availableTransports: ["webrtc/1"], transportAutomatic: true });
     engine.on("setChatTransport", () => undefined);
-    await user.click(screen.getByTestId("transport-chip"));
-    const menu = screen.getByTestId("transport-menu");
-    const radios = within(menu).getAllByRole("radio");
-    expect(radios.map(r => r.getAttribute("aria-label"))).toEqual(["WebRTC", "DHT only"]);
-    expect(radios[0]).toHaveAttribute("aria-checked", "true");
-    expect(radios[0]).toBeDisabled();
-    expect(within(menu).getByTestId("transport-menu-note")).toHaveTextContent("This app connects over WebRTC only. Iroh needs Ghostly Desktop; HyperDHT needs Ghostly Desktop or a HyperDHT relay (Settings, Network).");
-    // DHT only is always there, on every app.
-    await user.click(within(menu).getByTestId("transport-option-dht"));
+    await user.click(screen.getByTestId("connection-options"));
+    const radios = within(panel()).getAllByRole("radio");
+    expect(radios.map(r => [r.getAttribute("aria-label"), r.getAttribute("aria-checked"), (r as HTMLButtonElement).disabled])).toEqual([
+      ["WebRTC", "true", false], ["Iroh", "false", true], ["HyperDHT", "false", true], ["DHT only", "false", false],
+    ]);
+    // WebRTC is what it is on: nothing to ask. DHT only is there on every app.
+    await user.click(within(panel()).getByTestId("connection-option-webrtc"));
+    expect(engine.callsTo("setChatTransport")).toEqual([]);
+    await user.click(within(panel()).getByTestId("connection-option-dht"));
     expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "dht" }]);
   });
 
   it("on DHT only in a web app, WebRTC leaves it for the app's rule", async () => {
-    const anchor = { current: document.body };
-    const { user, engine } = renderApp(<TransportMenu link={linkView({ availableTransports: ["webrtc/1"], deliveryMode: "dht", dataLink: "idle", transportAutomatic: true })} open onClose={() => {}} anchorRef={anchor} />);
+    const { user, engine } = control({ availableTransports: ["webrtc/1"], deliveryMode: "dht", dataLink: "idle", pairing: undefined, transportAutomatic: true });
     engine.on("setChatTransport", () => undefined);
-    expect(screen.getByTestId("transport-option-dht")).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByTestId("transport-option-webrtc")).toHaveAttribute("aria-checked", "false");
-    await user.click(screen.getByTestId("transport-option-webrtc"));
+    await user.click(screen.getByTestId("connection-options"));
+    expect(screen.getByTestId("connection-option-dht")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("connection-option-webrtc")).toHaveAttribute("aria-checked", "false");
+    await user.click(screen.getByTestId("connection-option-webrtc"));
     expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "auto" }]);
   });
 
-  it("with DHT only on (reached from ⋮, no chip then), offers every way back to a live connection", async () => {
-    const anchor = { current: document.body };
-    const { user, engine } = renderApp(<TransportMenu link={linkView({ availableTransports: all, deliveryMode: "dht", dataLink: "idle", transportAutomatic: true })} open onClose={() => {}} anchorRef={anchor} />);
+  it("with DHT only on, offers every way back to a live connection", async () => {
+    const { user, engine } = control({ availableTransports: all, deliveryMode: "dht", dataLink: "idle", pairing: undefined, transportAutomatic: true });
     engine.on("setChatTransport", () => undefined);
-    const menu = screen.getByTestId("transport-menu");
-    expect(within(menu).getByTestId("transport-menu-now")).toHaveTextContent("Connection · DHT only");
-    expect(within(menu).getAllByRole("radio").filter(r => r.getAttribute("aria-checked") === "true").map(r => r.getAttribute("aria-label"))).toEqual(["DHT only"]);
-    expect(within(menu).getAllByRole("radio").every(r => !(r as HTMLButtonElement).disabled)).toBe(true);
-    await user.click(within(menu).getByTestId("transport-option-iroh"));
+    await user.click(screen.getByTestId("connection-options"));
+    expect(within(panel()).getByTestId("connection-state")).toHaveTextContent("DHT only · chosen by you");
+    expect(within(panel()).getAllByRole("radio").filter(r => r.getAttribute("aria-checked") === "true").map(r => r.getAttribute("aria-label"))).toEqual(["DHT only"]);
+    expect(within(panel()).getAllByRole("radio").every(r => !(r as HTMLButtonElement).disabled)).toBe(true);
+    await user.click(within(panel()).getByTestId("connection-option-iroh"));
     expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "iroh/1" }]);
   });
 
   it("says when the contact chose DHT only", () => {
-    const anchor = { current: document.body };
-    renderApp(<TransportMenu link={linkView({ availableTransports: all, dataLink: "idle", transportAutomatic: true, dhtDelivery: { mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 } })} open onClose={() => {}} anchorRef={anchor} />);
-    expect(screen.getByTestId("transport-option-dht")).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByTestId("transport-option-dht")).toHaveAttribute("title", "DHT only: Your contact chose it · no live link until you both leave it");
-    expect(screen.getByTestId("transport-menu-note")).toHaveTextContent("Your contact chose DHT only: no live connection until you both leave it.");
+    control({ availableTransports: all, dataLink: "idle", pairing: undefined, textDelivery: "dht", transportAutomatic: true, dhtDelivery: { mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 } });
+    expect(screen.getByTestId("connection-option-dht")).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByTestId("connection-option-dht")).toHaveAttribute("title", "DHT only: Your contact chose it · no live link until you both leave it");
+    expect(screen.getByTestId("connection-options")).toHaveAccessibleName("Connection options: DHT only · chosen by your contact");
   });
 });

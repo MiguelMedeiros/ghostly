@@ -1,4 +1,4 @@
-import { chat, expect, test, type Peer } from "../support/fixtures";
+import { chat, expect, setDhtOnly, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 
 /**
@@ -17,13 +17,7 @@ const remoteSize = (peer: Peer) =>
   });
 
 /** Turns the chat's DHT-only delivery on or off from the connection panel. */
-async function dhtOnly(peer: Peer, on: boolean) {
-  if (await peer.page.getByTestId("connection-menu").getAttribute("open") === null) await peer.page.getByTestId("connection-options").click();
-  const choice = peer.page.getByRole("switch", { name: "DHT-only delivery" });
-  if (await choice.isChecked() !== on) await choice.click();
-  await expect.poll(() => choice.isChecked()).toBe(on);
-  await peer.page.keyboard.press("Escape");
-}
+const dhtOnly = (peer: Peer, on: boolean) => setDhtOnly(peer.page, on);
 
 test("a new chat calls over its live session: video, answer, hang up", { tag: ["@feature:calls.paired", "@feature:calls.paired.negotiate", "@feature:calls.signal", "@feature:calls.video"] }, async ({ peer }, testInfo) => {
   const [alice, bob] = await Promise.all([peer("paired-call-alice"), peer("paired-call-bob")]);
