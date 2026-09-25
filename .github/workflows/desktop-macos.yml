@@ -83,7 +83,7 @@ jobs:
 
       - name: Two Desktop apps pair, call and share an app
         env:
-          REPEAT: ${{ inputs.repeat || '10' }}
+          REPEAT: ${{ inputs.repeat || '20' }}
         run: npx playwright test -c e2e/playwright.desktop-macos.config.ts --repeat-each "$REPEAT"
 
       - name: Say what failed

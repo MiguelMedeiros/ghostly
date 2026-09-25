@@ -152,8 +152,21 @@ export class MacDriver implements DesktopApp {
     return this.execute(`return document.title;`);
   }
 
+  /**
+   * Waits for a match, as a Playwright click does: the page draws what an action asks for a moment after it
+   * (a hash change, a dialog), and a click or keys sent before would be lost. Throws after `timeout`.
+   */
+  private async present(selector: string, timeout = 10_000): Promise<void> {
+    const deadline = Date.now() + timeout;
+    while (!(await this.execute<boolean>(`return !!document.querySelector(arguments[0]);`, selector))) {
+      if (Date.now() > deadline) return;
+      await new Promise((done) => setTimeout(done, 100));
+    }
+  }
+
   /** The pointer's events on the element, then its click: what a press sends, where it lands. */
   async click(selector: string): Promise<void> {
+    await this.present(selector);
     await this.execute(
       `const e = document.querySelector(arguments[0]);
        if (!e) throw new Error("Nothing to click at " + arguments[0]);
@@ -172,6 +185,7 @@ export class MacDriver implements DesktopApp {
    * native one and announced with an `input` event. `` (WebDriver's Enter) is a key press.
    */
   async type(selector: string, text: string): Promise<void> {
+    await this.present(selector);
     await this.execute(
       `const [selector, text] = arguments;
        const e = document.querySelector(selector);
