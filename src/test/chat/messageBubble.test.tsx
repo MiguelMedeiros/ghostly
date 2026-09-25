@@ -305,6 +305,15 @@ describe("MessageBubble: deleting", () => {
     expect(onDelete).not.toHaveBeenCalled();
   });
 
+  it("draws the menu and the confirmation over the page, not inside the scrolling list", async () => {
+    const { user, container } = renderApp(<div data-message-list><MessageBubble message={message({ sender: "me" })} onDelete={() => {}} /></div>);
+    await user.click(screen.getByTestId("message-options"));
+    expect(screen.getByTestId("message-menu").parentElement).toBe(document.body);
+    await user.click(screen.getByRole("button", { name: "Delete message" }));
+    expect(screen.getByTestId("message-delete-menu").parentElement).toBe(document.body);
+    expect(container).not.toContainElement(screen.getByTestId("message-delete-menu"));
+  });
+
   it("offers no delete where the chat cannot be edited", () => {
     bubble({ text: "kept" });
     expect(screen.queryByRole("button", { name: "Delete message" })).not.toBeInTheDocument();

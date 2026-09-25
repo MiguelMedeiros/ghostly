@@ -53,6 +53,8 @@ describe.each(LANGUAGES)("in %s", (language) => {
     expect(menu).toHaveTextContent(t(language, "chat.deleteMessageHint"));
     expect(within(menu).getByRole("button", { name: t(language, "common.cancel") })).toBeInTheDocument();
     expect(screen.getByTestId("message-delete-confirm")).toHaveTextContent(t(language, "common.delete"));
+    // Drawn over the page, outside the bubble.
+    expect(rawKeys(menu)).toEqual([]);
     expect(rawKeys(container)).toEqual([]);
   });
 

@@ -15,7 +15,7 @@ const GAP = 4;
  * sheet from the bottom with full-width rows. Outside clicks and Escape close it; the arrow keys, Home and End
  * move between the rows that can be used.
  */
-export function Menu({ open, onClose, anchorRef, testId, id, align = "end", prefer = "down", focusFirst, label, portal, className = "", children }: {
+export function Menu({ open, onClose, anchorRef, testId, id, align = "end", prefer = "down", focusFirst, label, portal, within, className = "", children }: {
   open: boolean;
   onClose: () => void;
   /** The opener and its positioned wrapper: the menu drops from its end edge, and clicks on it are not "outside". */
@@ -36,6 +36,11 @@ export function Menu({ open, onClose, anchorRef, testId, id, align = "end", pref
    * draw over it.
    */
   portal?: boolean;
+  /**
+   * A selector for an ancestor of the opener (a chat's message list) that the popover stays inside as well as the
+   * window: it moves over, and flips, within the part of the window that ancestor covers.
+   */
+  within?: string;
   className?: string;
   children: ReactNode;
 }) {
@@ -50,14 +55,14 @@ export function Menu({ open, onClose, anchorRef, testId, id, align = "end", pref
     const fit = () => {
       const menu = ref.current, anchor = anchorRef.current;
       if (!menu || !anchor) return;
+      const box = bounds(anchor, within);
       if (portal) {
         const rect = menu.getBoundingClientRect(), opener = anchor.getBoundingClientRect();
-        const width = document.documentElement.clientWidth || window.innerWidth, height = window.innerHeight;
-        const below = opener.bottom + rect.height + MARGIN <= height, above = opener.top - rect.height - MARGIN >= 0;
+        const below = opener.bottom + rect.height + MARGIN <= box.bottom, above = opener.top - rect.height - MARGIN >= box.top;
         const up = prefer === "up" ? above || !below : !below && above;
-        // Lined up with the opener's start or end edge (the end is the left one in a right-to-left page), kept in the window.
+        // Lined up with the opener's start or end edge (the end is the left one in a right-to-left page), kept in the bounds.
         const left = (align === "start") === (getComputedStyle(anchor).direction !== "rtl") ? opener.left : opener.right - rect.width;
-        const next = { left: Math.max(MARGIN, Math.min(left, width - MARGIN - rect.width)), top: up ? opener.top - GAP - rect.height : opener.bottom + GAP };
+        const next = { left: Math.max(box.left + MARGIN, Math.min(left, box.right - MARGIN - rect.width)), top: up ? opener.top - GAP - rect.height : opener.bottom + GAP };
         setFixed(was => was?.left === next.left && was.top === next.top ? was : next);
         return;
       }
@@ -65,9 +70,9 @@ export function Menu({ open, onClose, anchorRef, testId, id, align = "end", pref
       const before = menu.style.translate;
       menu.style.translate = "0";
       const rect = menu.getBoundingClientRect(), opener = anchor.getBoundingClientRect();
-      const width = document.documentElement.clientWidth || window.innerWidth, height = window.innerHeight;
-      const shift = rect.left < MARGIN ? MARGIN - rect.left : rect.right > width - MARGIN ? Math.max(MARGIN - rect.left, width - MARGIN - rect.right) : 0;
-      const below = opener.bottom + rect.height + MARGIN <= height, above = opener.top - rect.height - MARGIN >= 0;
+      const left = box.left + MARGIN, right = box.right - MARGIN;
+      const shift = rect.left < left ? left - rect.left : rect.right > right ? Math.max(left - rect.left, right - rect.right) : 0;
+      const below = opener.bottom + rect.height + MARGIN <= box.bottom, above = opener.top - rect.height - MARGIN >= box.top;
       const up = prefer === "up" ? above || !below : !below && above;
       menu.style.translate = before;
       setPlace(was => was.shift === shift && was.up === up ? was : { shift, up });
@@ -79,7 +84,7 @@ export function Menu({ open, onClose, anchorRef, testId, id, align = "end", pref
       window.removeEventListener("resize", fit);
       window.removeEventListener("scroll", fit, true);
     };
-  }, [open, phone, anchorRef, prefer, portal, align]);
+  }, [open, phone, anchorRef, prefer, portal, align, within]);
 
   useEffect(() => {
     if (open && focusFirst) usable(ref.current)[0]?.focus({ preventScroll: true });
@@ -120,6 +125,16 @@ export function Menu({ open, onClose, anchorRef, testId, id, align = "end", pref
       {children}
     </div>
   );
+}
+
+/** The window, or the part of it the opener's `within` ancestor covers. */
+function bounds(anchor: HTMLElement, within?: string) {
+  const width = document.documentElement.clientWidth || window.innerWidth, height = window.innerHeight;
+  const box = { left: 0, top: 0, right: width, bottom: height };
+  const area = within ? anchor.closest(within)?.getBoundingClientRect() : undefined;
+  // An ancestor with no size (not laid out) bounds nothing.
+  if (!area?.width || !area.height) return box;
+  return { left: Math.max(box.left, area.left), top: Math.max(box.top, area.top), right: Math.min(box.right, area.right), bottom: Math.min(box.bottom, area.bottom) };
 }
 
 /** The rows the keys move between: those that can be used now. */
