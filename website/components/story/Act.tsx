@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { motion, useInView, useMotionValueEvent, useScroll, useSpring, useTransform, type MotionValue } from "motion/react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { motion, useInView, useMotionValue, useMotionValueEvent, useScroll, useSpring, useTransform, type MotionValue } from "motion/react";
 import { Ghost, type GhostMood } from "@/components/ghost/Ghost";
 import { orientationOf, scatter, stepOf, useCards, usePortrait, VIEW_BOX_ORIGIN } from "@/components/home/stage";
 import { useCalm } from "@/lib/useCalm";
 import { SPRING, useScrub } from "@/lib/motion";
-import { BLOCKING, poseAt, ROOMS, STAGE, valueAt, type Chapter } from "./poses";
+import { BLOCKING, blockingFor, poseAt, ROOMS, STAGE, valueAt, type Chapter, type Frame } from "./poses";
 
 /**
  * One continuous take. The act pins a full-bleed backdrop behind its chapters
@@ -59,6 +59,7 @@ export function Act({
 
 function LiveAct({ id, chapters, field, bubble, bubbleAvoid, children }: { id: string; chapters: ActChapter[]; field: boolean; bubble?: string; bubbleAvoid?: string; children: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
   const portrait = usePortrait();
   const orient = orientationOf(portrait);
   const inView = useInView(ref, { margin: "10% 0px 10% 0px" });
@@ -121,10 +122,18 @@ function LiveAct({ id, chapters, field, bubble, bubbleAvoid, children }: { id: s
     return { chapter: last.chapter, t: 1, steps: last.steps };
   };
 
+  // What the window shows of the stage, and where the copy ends: the hero pose is fitted to it (poses.ts fitHero).
+  // Read through a ref (the transformers below keep their first closure); `framed` re-runs them when it changes.
+  const frameRef = useRef<Frame | null>(null);
+  const framed = useMotionValue<number>(0);
+  const [frame, setFrame] = useState<Frame | null>(null);
+  const table = (chapter: Chapter) => blockingFor(orient, chapter, frameRef.current);
   const pose = (who: "boo" | "casper", v: number) => {
     const at = locate(v);
-    if (!at) return poseAt(BLOCKING[orient][chapters[0].chapter][who], 0);
-    return poseAt(BLOCKING[orient][at.chapter][who], at.t);
+    // Until the window is measured the fitted pose is unknown: Boo waits unseen instead of standing somewhere he may be cut.
+    if (!frameRef.current && orient === "landscape" && chapters[0].chapter === "hero") return { ...poseAt(table(chapters[0].chapter)[who], 0), a: 0 };
+    if (!at) return poseAt(table(chapters[0].chapter)[who], 0);
+    return poseAt(table(at.chapter)[who], at.t);
   };
   const focus = (v: number): [number, number] => {
     const at = locate(v);
@@ -134,14 +143,51 @@ function LiveAct({ id, chapters, field, bubble, bubbleAvoid, children }: { id: s
 
   // Every actor channel, opacity included, goes through the same spring: no hard cuts inside an act.
   const spring = SPRING.actor;
-  const bx = useSpring(useTransform(actP, (v) => pose("boo", v).x), spring);
-  const by = useSpring(useTransform(actP, (v) => pose("boo", v).y), spring);
-  const bs = useSpring(useTransform(actP, (v) => pose("boo", v).s / 100), spring);
-  const ba = useSpring(useTransform(actP, (v) => pose("boo", v).a), spring);
-  const cx = useSpring(useTransform(actP, (v) => pose("casper", v).x), spring);
-  const cy = useSpring(useTransform(actP, (v) => pose("casper", v).y), spring);
-  const cs = useSpring(useTransform(actP, (v) => pose("casper", v).s / 100), spring);
-  const ca = useSpring(useTransform(actP, (v) => pose("casper", v).a), spring);
+  const bx = useSpring(useTransform([actP, framed], ([v]) => pose("boo", v as number).x), spring);
+  const by = useSpring(useTransform([actP, framed], ([v]) => pose("boo", v as number).y), spring);
+  const bs = useSpring(useTransform([actP, framed], ([v]) => pose("boo", v as number).s / 100), spring);
+  const ba = useSpring(useTransform([actP, framed], ([v]) => pose("boo", v as number).a), spring);
+  const cx = useSpring(useTransform([actP, framed], ([v]) => pose("casper", v as number).x), spring);
+  const cy = useSpring(useTransform([actP, framed], ([v]) => pose("casper", v as number).y), spring);
+  const cs = useSpring(useTransform([actP, framed], ([v]) => pose("casper", v as number).s / 100), spring);
+  const ca = useSpring(useTransform([actP, framed], ([v]) => pose("casper", v as number).a), spring);
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      const svg = svgRef.current;
+      const act = ref.current;
+      if (!svg || !act || orient !== "landscape") return;
+      const box = svg.getBoundingClientRect();
+      if (!box.width || !box.height) return;
+      const { w: sw, h: sh } = STAGE.landscape;
+      const k = Math.max(box.width / sw, box.height / sh);
+      const l = (sw - box.width / k) / 2;
+      const t = (sh - box.height / k) / 2;
+      const navH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--nav-h")) || 64;
+      const copy = bubbleAvoid ? [...act.querySelectorAll(bubbleAvoid)].map((el) => el.getBoundingClientRect()).filter((r) => r.width > 2 && r.height > 2) : [];
+      const copyRight = copy.length ? l + (Math.max(...copy.map((r) => r.right)) - box.left) / k : l;
+      const next: Frame = { l, t: t + navH / k, r: l + box.width / k, b: t + box.height / k, k, copyRight };
+      const prev = frameRef.current;
+      if (prev && (Object.keys(next) as (keyof Frame)[]).every((key) => Math.abs(prev[key] - next[key]) < 0.5)) return;
+      frameRef.current = next;
+      setFrame(next);
+      framed.set(framed.get() + 1);
+      // The first fit is where he stands, not somewhere he glides to; he fades in there.
+      if (!prev) {
+        const at = pose("boo", actP.get());
+        bx.jump(at.x);
+        by.jump(at.y);
+        bs.jump(at.s / 100);
+      }
+    };
+    measure();
+    // Again once the webfont is in (the copy's width changes with it).
+    void document.fonts?.ready.then(measure);
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+    // pose() only reads refs and the orientation, which is a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orient, bubbleAvoid, framed, bx, by, bs]);
   const fx = useTransform(actP, (v) => focus(v)[0]);
   const fy = useTransform(actP, (v) => focus(v)[1]);
   const scale = useTransform(actP, (v) => {
@@ -195,7 +241,7 @@ function LiveAct({ id, chapters, field, bubble, bubbleAvoid, children }: { id: s
   return (
     <div id={id} ref={ref} className="act" data-chapter={scene.chapter} data-inview={inView} style={{ ["--chapter-bg" as string]: room }}>
       <div className="act-backdrop" aria-hidden="true">
-        <svg className="stage" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="xMidYMid slice">
+        <svg ref={svgRef} className="stage" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="xMidYMid slice">
           <rect className="act-room" width={w} height={h} />
           {field && (
             <motion.g className="act-field" style={{ y: fieldY }}>
@@ -222,7 +268,7 @@ function LiveAct({ id, chapters, field, bubble, bubbleAvoid, children }: { id: s
                 <Ghost who="boo" size={100} mood={booMood} look={booLook} float={false} halo />
               </g>
             </motion.g>
-            {bubble && <Bubble text={bubble} x={bx} y={by} s={bs} fade={bubbleFade} orient={orient} rest={poseAt(BLOCKING[orient][chapters[0].chapter].boo, 0)} avoid={bubbleAvoid} />}
+            {bubble && <Bubble text={bubble} x={bx} y={by} s={bs} fade={bubbleFade} orient={orient} rest={poseAt(blockingFor(orient, chapters[0].chapter, frame).boo, 0)} avoid={bubbleAvoid} />}
           </motion.g>
         </svg>
       </div>
