@@ -95,6 +95,7 @@ server on the tailnet. Without `--host` nothing changes: local mode is the defau
 
 ```bash
 npm run e2e:infra:status -- --host one   # is the shared stack up? (exit 0 when every service answers)
+node e2e/infra/infra.mjs check --host one  # the same answer, read-only: opens no connection, forwards nothing (3: not checked)
 npm run e2e:infra:use -- --host one      # join it as it is: forwards its ports here, writes this checkout's .env.e2e
 npm run e2e:infra:up -- --host one       # bring it up if it is not (joins it, without seeding, if it is)
 npx playwright test -c e2e/playwright.config.ts --project=web --workers=2 e2e/web/wallet-lnd.spec.ts
@@ -107,7 +108,8 @@ npm run e2e:infra:down -- --host one     # remove it for everyone; likewise
 Many checkouts share one stack. A session checks `status` first and runs `use` when it answers, `up` only when
 it does not; `up` of a stack that already answers is `use`, so a race between two sessions is harmless. Neither
 re-seeds: seeding mines blocks, and 100 blocks under an HTLC in flight close a Core Lightning channel in someone
-else's test. `e2e:full -- --host one` joins (or brings up) the shared stack and never takes it down. `down` and
+else's test. `npm run test:affected` does the `status` and `use` part by itself when it picks `@gated` tests
+(docs/TESTING.md). `e2e:full -- --host one` joins (or brings up) the shared stack and never takes it down. `down` and
 `reset` of a remote stack refuse unless `--host` is on the command line itself, so an `E2E_INFRA_HOST` left in a
 shell cannot remove it under the others.
 

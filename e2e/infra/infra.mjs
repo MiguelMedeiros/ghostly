@@ -6,6 +6,8 @@
 //   node e2e/infra/infra.mjs down     stop and remove everything, volumes included, and .env.e2e (npm run e2e:infra:down)
 //   node e2e/infra/infra.mjs reset    down, then up: a fresh chain                      (npm run e2e:infra:reset)
 //   node e2e/infra/infra.mjs status   the containers and whether each endpoint answers
+//   node e2e/infra/infra.mjs check    whether it answers, read-only: exit 0 yes, 1 no, 3 not checked (another host
+//                                     with no connection from here: check opens none and forwards nothing)
 //   node e2e/infra/infra.mjs use      an environment that is already up, as it is: check it answers, write .env.e2e
 //                                     (npm run e2e:infra:use; with --host, how another checkout joins the shared one)
 //   node e2e/infra/infra.mjs full [--keep] [--no-vitest] [-- <playwright args>]         (npm run e2e:full)
@@ -18,7 +20,7 @@
 // instead of this one's (remote.mjs): `--host one` is the maintainer's test server. There, `up` joins a stack that
 // is already up rather than seeding it again under other checkouts' tests, `full` never takes it down, and
 // `down` / `reset` want --host on the command line itself.
-import { HOST, HOST_FLAG, LOCAL_DOCKER, SOCKET, disconnect, forward, remote } from "./remote.mjs";
+import { HOST, HOST_FLAG, LOCAL_DOCKER, SOCKET, connected, disconnect, forward, remote } from "./remote.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
@@ -35,7 +37,7 @@ const ENV_FILE = join(ROOT, ".env.e2e");
 const started = Date.now();
 const elapsed = (since = started) => `${Math.round((Date.now() - since) / 1000)}s`;
 const log = (message) => console.log(`[e2e-infra ${elapsed()}] ${message}`);
-const where = remote ? `${PROJECT} on ${HOST} (${process.env.E2E_INFRA_ADDRESS})` : PROJECT;
+const where = remote ? `${PROJECT} on ${HOST}${process.env.E2E_INFRA_ADDRESS ? ` (${process.env.E2E_INFRA_ADDRESS})` : ""}` : PROJECT;
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** The environment's own variables (defaults, or what the shell set), for compose and every child. */
@@ -256,6 +258,27 @@ async function status() {
   if (!every) process.exitCode = 1;
 }
 
+/**
+ * `status`'s verdict without its side effects (npm run test:affected -- --list): through the connection and forwards
+ * that already run, never a new one. A local stack holding the ports would answer for the remote one: that is a no.
+ */
+async function check() {
+  if (remote && !connected()) {
+    console.log(`not checked: no connection to ${HOST} from this machine (npm run e2e:infra:status -- --host ${HOST} opens it)`);
+    process.exitCode = 3;
+    return;
+  }
+  const local = remote ? localStack() : null;
+  if (local) {
+    console.log(`${where}: NOT READY here: a local ${PROJECT} stack holds its ports (started from ${local})`);
+    process.exitCode = 1;
+    return;
+  }
+  const ok = await answering();
+  console.log(`${where}: ${ok ? "answers" : "NOT READY"}`);
+  if (!ok) process.exitCode = 1;
+}
+
 function run(command, args, env) {
   return new Promise((resolve) => {
     const child = spawn(command, args, { cwd: ROOT, env, stdio: "inherit" });
@@ -322,9 +345,10 @@ try {
   else if (command === "down") { down(); if (remote) disconnect(); }
   else if (command === "reset") { down(); await up(); }
   else if (command === "status") await status();
+  else if (command === "check") await check();
   else if (command === "use") await use();
   else if (command === "full") await full(rest);
-  else { console.error("usage: infra.mjs [--host <ssh target>] up | seed | down | reset | status | use | full [--keep] [--no-vitest] [-- <playwright args>]"); process.exit(2); }
+  else { console.error("usage: infra.mjs [--host <ssh target>] up | seed | down | reset | status | check | use | full [--keep] [--no-vitest] [-- <playwright args>]"); process.exit(2); }
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);
   process.exit(1);
