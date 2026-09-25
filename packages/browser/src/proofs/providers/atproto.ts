@@ -105,6 +105,8 @@ export function createAtprotoIdentityProvider(options: AtprotoIdentityOptions = 
       },
       short: shortAtprotoDid,
     },
+    // The account's AT URI, for a public DID document's alsoKnownAs (#247), when the person lists it there.
+    publicUri: did => `at://${did}`,
     validity: { defaultDays: 90, maxDays: 365 },
     // The record can be deleted any time: contacts look again after an hour.
     recheck: { afterSeconds: 3600 },

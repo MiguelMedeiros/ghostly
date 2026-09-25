@@ -40,6 +40,7 @@ describe("the AT Protocol provider", () => {
     expect(p.signers.map(s => s.kind)).toEqual(["in-app", "in-app"]);
     expect(p.signers[0].action).toBe("Continue on your server");
     expect(p.unpublish?.description).toMatch(/deletes the record/);
+    expect(p.publicUri?.("did:plc:z72i7hdynmk6r22z27h6tvur")).toBe("at://did:plc:z72i7hdynmk6r22z27h6tvur");
   });
 
   it("verifies, shows the handle checked both ways, and links the profile", async () => {
