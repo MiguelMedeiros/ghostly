@@ -15,7 +15,7 @@ import type { PublicProfile, ProfileChoice } from '../profiles/public';
 import type { NostrContactCache, NostrContactView, NostrSocialSettings, NostrSocialState } from "../nostr/types";
 import type { ProofLedger, ProofAdapter } from "@ghostly/core";
 import type { IdentityDisplay, IdentityLedger, IdentityStatus, SharedIdentity, VerifiedIdentity } from "@ghostly/core";
-import type { DataLinkState, LinkStatus, ServiceAd, PairingState, NativeTransport, PairedTransport, TransportDescriptors } from "@ghostly/core";
+import type { DataLinkState, LinkStatus, ServiceAd, PairingState, NativeTransport, PairedTransport, TransportDescriptors, TransportWait } from "@ghostly/core";
 import type { CommunityState, GroupCommit, GroupRole, GroupState, GroupStatus } from "@ghostly/core";
 
 /** A link as stored in IndexedDB. Same fields Desktop keeps in its ChatSession. */
@@ -838,8 +838,13 @@ export interface LinkView {
   transportFallback?: boolean;
   /** No transport chosen for this chat: the app's rule applies. */
   transportAutomatic?: boolean;
-  /** What the contact's app can use on this link, as it last said; unknown before a first session. */
+  /** What the contact's app can use on this link, as it last said (a session, or its capability record); unknown before either. */
   peerTransports?: PairedTransport[];
+  /**
+   * The transport this chat is set to reach and is not on yet, and why (WISP 100, "A chosen transport not reached
+   * yet"): waited for, never a failure. Absent when the chat is on it, or nothing limits where it goes.
+   */
+  transportWait?: TransportWait;
   /** Round trip on the live session, once measured. */
   transportRttMs?: number;
   /**

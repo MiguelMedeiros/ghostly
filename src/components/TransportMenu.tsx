@@ -6,7 +6,7 @@ import { useChatLink } from "../hooks/useChatLink";
 import { Menu } from "./Menu";
 import { TransportIcon } from "./TransportIcon";
 import { focus, transportName } from "../lib/connection";
-import { connectionSummary, liveTransport, transportOptions } from "../lib/transportEvents";
+import { connectionSummary, liveTransport, transportOptions, transportWaitText } from "../lib/transportEvents";
 
 /**
  * The chat's live transport in its header, once live (the pairing indicator has the place until then). It opens
@@ -48,7 +48,7 @@ export function TransportMenu({ link, open, onClose, anchorRef }: {
     <Menu testId="transport-menu" open={open} onClose={onClose} anchorRef={anchorRef}>
       <div className="px-3 pb-1 pt-1.5 text-xs text-text-muted" data-testid="transport-menu-now">
         <span className="font-medium text-text-primary">Connection</span>
-        {" · "}{summary ? `on ${summary.name}${summary.relays ? ", relayed" : ""}${summary.rttMs !== undefined ? `, ${summary.rttMs} ms` : ""}` : link.deliveryMode === "dht" ? "DHT only" : "not live"}
+        {" · "}{summary ? `on ${summary.name}${summary.relays ? ", relayed" : ""}${summary.rttMs !== undefined ? `, ${summary.rttMs} ms` : ""}` : link.deliveryMode === "dht" ? "DHT only" : link.transportWait ? `waiting for ${transportName(link.transportWait.transport)}` : "not live"}
       </div>
       <TransportOptions link={link} onChosen={onClose} menu />
     </Menu>
@@ -72,6 +72,8 @@ export function TransportOptions({ link, disabled = false, onChosen, menu = fals
   // In the menu, DHT only is one of the choices: picking another leaves it. The popover has its own switch for it.
   const off = busy || disabled || (dht && !menu);
   const peerDht = link.dhtDelivery?.peerMode === "dht";
+  // A chosen transport not reached yet (WISP 100): the menu says why; the popover has its own block for it.
+  const wait = !dht && menu ? link.transportWait : undefined, waitText = wait && transportWaitText(wait, link.peerNick || "Your contact");
   // One set of ids per place: the popover's and the menu's options can both be in the page.
   const ids = menu ? "transport-option" : "connection-option";
   async function choose(transport: PairedTransport | "auto" | "dht") {
@@ -94,7 +96,7 @@ export function TransportOptions({ link, disabled = false, onChosen, menu = fals
       {(single && menu ? local : options).map(o => (
         <Option menu={menu} key={o.transport} testId={`${ids}-${o.transport.replace("/1", "")}`} icon={<TransportIcon transport={o.transport} />}
           checked={!dht && (single ? o.available : !automatic && link.preferredTransport === o.transport)} disabled={off || (single && menu && !dht) || !o.available}
-          hint={!o.available ? o.reason : current === o.transport ? `In use${o.relayed ? " · relayed" : ""}${link.transportRttMs !== undefined ? ` · ${link.transportRttMs} ms` : ""}` : !automatic && link.preferredTransport === o.transport ? "Chosen · not in use" : o.relayed ? "Through a relay · used when nothing direct connects" : undefined}
+          hint={!o.available ? o.reason : current === o.transport ? `In use${o.relayed ? " · relayed" : ""}${link.transportRttMs !== undefined ? ` · ${link.transportRttMs} ms` : ""}` : link.transportWait?.transport === o.transport && !dht ? "Chosen · waiting for it" : !automatic && link.preferredTransport === o.transport ? "Chosen · not in use" : o.relayed ? "Through a relay · used when nothing direct connects" : undefined}
           onClick={() => void choose(o.transport)} label={transportName(o.transport)} />
       ))}
       {/* Always there (WISP 400): it travels as the DHT envelope's mode, so every app can choose it. */}
@@ -102,9 +104,10 @@ export function TransportOptions({ link, disabled = false, onChosen, menu = fals
         icon={<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="m3 7 9-4 9 4-9 4Z" /><path d="m3 12 9 4 9-4M3 17l9 4 9-4" /></svg>}
         hint={peerDht && !dht ? "Your contact chose it · no live link until you both leave it" : dht ? "Short texts over the DHT, no live link" : "Short texts over the DHT, even offline"} />}
     </div>
-    {((single && menu) || (peerDht && menu) || error) && <p className={`${menu ? "max-w-72 px-3 pb-1.5 pt-1" : "mt-1"} whitespace-normal text-[11px] leading-4 text-text-muted`} data-testid="transport-menu-note">
+    {((single && menu) || (peerDht && menu) || waitText || error) && <p className={`${menu ? "max-w-72 px-3 pb-1.5 pt-1" : "mt-1"} whitespace-normal text-[11px] leading-4 text-text-muted`} data-testid="transport-menu-note">
       {error ? <span role="alert" className="text-danger">{error}</span>
         : peerDht ? "Your contact chose DHT only: no live connection until you both leave it."
+        : waitText ? `${waitText.why}${waitText.automatic ? " Automatic connects over what both apps have." : ""}`
         : link.transportErrors?.["iroh/1"] ? `This app connects over WebRTC only right now: Iroh could not start (${link.transportErrors["iroh/1"].replace(/\.$/, "")}). HyperDHT needs Ghostly Desktop or a HyperDHT relay (Settings, Network).`
         : "This app connects over WebRTC only. Iroh needs Ghostly Desktop; HyperDHT needs Ghostly Desktop or a HyperDHT relay (Settings, Network)."}
     </p>}

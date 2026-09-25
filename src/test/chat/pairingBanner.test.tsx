@@ -48,6 +48,16 @@ describe("PairingBanner: what the header says", () => {
     ["on the DHT while live is retried", { textDelivery: "dht", pairing: ready() }, {}, { label: "On DHT · retrying live", kind: "dht", dot: null, pulse: false }],
     ["DHT only, chosen by the contact", { textDelivery: "dht", pairing: ready(), dhtDelivery: { mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 } }, {}, { label: "DHT only · chosen by your contact", kind: "dht", dot: null, pulse: false }],
     ["a switch to HyperDHT", { pairing: ready({ transitionTarget: "hyperdht/1" }) }, {}, { label: "Switching · HyperDHT", kind: "waiting", dot: "bg-text-muted", pulse: true }],
+    // A chosen transport not reached yet (WISP 100): waited for, never a connection issue.
+    ["waiting on the DHT for a HyperDHT chosen with Fallback off", { textDelivery: "dht", dataLink: "idle", pairing: { status: "negotiating", transport: "iroh/1" } as Pairing,
+      transportWait: { transport: "hyperdht/1", by: "you", reason: "unreachable", failures: 1, error: "Transport change failed: hyperdht/1 unreachable." } }, {},
+      { label: "On DHT · waiting for HyperDHT", kind: "dht", dot: null, pulse: false }],
+    ["waiting for a chosen HyperDHT before text can take the DHT", { textDelivery: "unavailable", dataLink: "idle", pairing: { status: "negotiating", transport: "iroh/1" } as Pairing,
+      transportWait: { transport: "hyperdht/1", by: "you", reason: "unknown", failures: 0 } }, {}, { label: "Waiting for HyperDHT", kind: "waiting", dot: "bg-text-muted", pulse: false }],
+    ["the first attempt for a transport chosen with Fallback off", { textDelivery: "dht", dataLink: "idle", pairing: { status: "negotiating", transport: "iroh/1", transitionTarget: "hyperdht/1" } as Pairing,
+      transportWait: { transport: "hyperdht/1", by: "you", reason: "connecting", failures: 0 } }, {}, { label: "Switching · HyperDHT", kind: "waiting", dot: "bg-text-muted", pulse: true }],
+    ["live on a fallback while a chosen transport waits", { pairing: ready({ transport: "iroh/1" }),
+      transportWait: { transport: "hyperdht/1", by: "you", reason: "unreachable", live: "iroh/1", failures: 2 } }, {}, { label: "Connected · Iroh", kind: "connected", dot: "bg-accent", pulse: false }],
     ["connected over WebRTC", { pairing: ready() }, {}, { label: "Connected · WebRTC", kind: "connected", dot: "bg-accent", pulse: false }],
     ["connected over Iroh", { pairing: ready({ transport: "iroh/1" }) }, {}, { label: "Connected · Iroh", kind: "connected", dot: "bg-accent", pulse: false }],
     ["connected over HyperDHT", { pairing: ready({ transport: "hyperdht/1" }) }, {}, { label: "Connected · HyperDHT", kind: "connected", dot: "bg-accent", pulse: false }],
@@ -244,6 +254,33 @@ describe("PairingBanner: what the popover does", () => {
     await user.click(screen.getByRole("switch", { name: "DHT-only delivery" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("The contact's app cannot do DHT-only");
     expect(header()).toMatchObject({ kind: "failure", name: "Connection issue" });
+  });
+
+  it("says why the chat waits for its chosen transport, and when it tries again, with no connection issue", () => {
+    const retryAt = new Date(2026, 8, 25, 13, 5).getTime();
+    banner({ textDelivery: "dht", dataLink: "idle", peerNick: "Bea", pairing: { status: "negotiating", transport: "iroh/1" } as Pairing, preferredTransport: "hyperdht/1", transportAutomatic: false,
+      transportWait: { transport: "hyperdht/1", by: "you", reason: "unreachable", failures: 1, error: "Transport change failed: hyperdht/1 unreachable. Retry or choose another transport.", retryAt } });
+    const block = screen.getByTestId("connection-waiting");
+    expect(block).toHaveAttribute("data-reason", "unreachable");
+    expect(within(block).getByTestId("connection-waiting-why")).toHaveTextContent(`You chose HyperDHT. HyperDHT didn't connect: HyperDHT unreachable. Trying again at ${new Date(retryAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`);
+    expect(block).toHaveTextContent("Short texts go through the DHT meanwhile; the rest waits.");
+    expect(within(block).queryByRole("button", { name: "Use Automatic" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "HyperDHT" })).toHaveAttribute("title", "HyperDHT: Chosen · waiting for it");
+  });
+
+  it("says plainly when the contact's app lacks the chosen transport, and offers Automatic", async () => {
+    const { user, engine } = banner({ pairing: ready({ transport: "iroh/1" }), peerNick: "Bea", preferredTransport: "hyperdht/1", transportAutomatic: false,
+      transportWait: { transport: "hyperdht/1", by: "you", reason: "contact-lacks", live: "iroh/1", failures: 0 } });
+    engine.on("setChatTransport", () => undefined);
+    const block = screen.getByTestId("connection-waiting");
+    expect(within(block).getByTestId("connection-waiting-why")).toHaveTextContent("You chose HyperDHT. Bea's app doesn't have HyperDHT.");
+    expect(block).toHaveTextContent("The chat stays on Iroh meanwhile.");
+    // Live on Iroh: the header says so, and "Preferred" is not said twice.
+    expect(header()).toMatchObject({ kind: "connected", name: "Connected · Iroh" });
+    expect(screen.queryByText(/^Preferred:/)).not.toBeInTheDocument();
+    await user.click(within(block).getByRole("button", { name: "Use Automatic" }));
+    expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "auto" }]);
   });
 
   it("reconnects a chat that is not connected", async () => {

@@ -1,4 +1,4 @@
-import { TRANSPORTS, type PairedTransport } from "@ghostly/core";
+import { TRANSPORTS, type PairedTransport, type TransportWait } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import type { TransportEntry, TransportEvent } from "@ghostly/browser/engine/transportLog";
 import { transportName } from "./connection";
@@ -188,8 +188,12 @@ export function transportEventText(event: TransportEvent, contact: string): stri
       const how = event.started ? " · this app started" : event.downMs !== undefined ? ` · after ${duration(event.downMs)} down` : "";
       return `Live over ${t}${event.from ? ` (was ${name(event.from)})` : ""}${how}${rtt}`;
     }
-    case "down":
-      return `Live connection lost${event.from ? ` (${name(event.from)})` : ""}${event.text === "dht" ? " · texts go through the DHT" : event.text === "hold" ? ` · messages wait for ${contact}` : ""}${event.reason ? ` · ${event.reason}` : ""}`;
+    case "down": {
+      const meanwhile = event.text === "dht" ? " · texts go through the DHT" : event.text === "hold" ? ` · messages wait for ${contact}` : "";
+      // Off live to wait for a chosen transport (Fallback off), not a drop.
+      if (event.target) return `Waiting for ${name(event.target)}${event.from ? ` · off ${name(event.from)}` : ""}${meanwhile}`;
+      return `Live connection lost${event.from ? ` (${name(event.from)})` : ""}${meanwhile}${event.reason ? ` · ${event.reason}` : ""}`;
+    }
     case "switched": {
       const why = event.cause === "you" ? "your choice" : event.cause === "contact" ? `${contact}'s choice` : event.cause === "dropped" ? "after a drop" : "automatic";
       return `Moved from ${name(event.from)} to ${t} · ${why}${rtt}`;
@@ -202,10 +206,39 @@ export function transportEventText(event: TransportEvent, contact: string): stri
       const reason = event.reason ? shortReason(event.reason) : "";
       return `Couldn't switch${event.target ? ` to ${name(event.target)}` : " transport"}${reason ? `: ${reason}` : ""}`;
     }
-    case "attempt": return `Connection attempt failed${event.reason ? `: ${shortReason(event.reason)}` : ""}`;
+    case "attempt":
+      if (event.target) return `${name(event.target)} didn't connect yet${event.reason ? `: ${shortReason(event.reason)}` : ""} · tried again by itself`;
+      return `Connection attempt failed${event.reason ? `: ${shortReason(event.reason)}` : ""}`;
     case "dht-only": return event.cause === "contact" ? `${contact} switched to DHT only` : "You switched to DHT only";
     case "dht-left": return `Left DHT only${event.transport ? ` · set to ${t}` : " · automatic"}`;
   }
+}
+
+/**
+ * What a chat waits for, said for people (WISP 100, "A chosen transport not reached yet"): the header's label when
+ * nothing else carries the chat, why in a sentence, where the chat is meanwhile, and whether Automatic is the way out
+ * (the contact's app lacks it). `contact`: the name the chat shows for the other side.
+ */
+export function transportWaitText(wait: TransportWait, contact: string, format: (at: number) => string = at => new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })):
+  { label: string; why: string; meanwhile: string; automatic: boolean } {
+  const t = name(wait.transport), their = `${contact}'s`;
+  const who = wait.by === "you" ? `You chose ${t}` : wait.by === "contact" ? `${contact} chose ${t}` : `Fallback is off, so only ${t} may carry this chat`;
+  const next = wait.retryAt ? ` Trying again at ${format(wait.retryAt)}.` : " It is tried again by itself.";
+  const reason = {
+    "unknown": `${their} app hasn't said yet whether it has ${t}.`,
+    "starting": `${their} ${t} is starting.`,
+    "connecting": `Connecting over ${t}…`,
+    "unreachable": `${t} didn't connect${wait.error ? `: ${shortReason(wait.error)}` : ""}.${next}`,
+    "waiting": `It connects when ${contact} is reachable over it.`,
+    "contact-lacks": `${their} app doesn't have ${t}.`,
+    "app-lacks": `This app isn't running ${t}${wait.by === "contact" ? "" : " right now"}.`,
+  }[wait.reason];
+  return {
+    label: `Waiting for ${t}`,
+    why: `${who}. ${reason}`,
+    meanwhile: wait.live ? `The chat stays on ${name(wait.live)} meanwhile.` : "Short texts go through the DHT meanwhile; the rest waits.",
+    automatic: wait.reason === "contact-lacks" || (wait.reason === "app-lacks" && wait.by !== "contact"),
+  };
 }
 
 /** The live transport of a chat: on it, and nothing moving. */

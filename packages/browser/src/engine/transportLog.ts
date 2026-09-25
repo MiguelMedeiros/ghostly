@@ -1,4 +1,4 @@
-import type { PairedTransport } from "@ghostly/core";
+import type { PairedTransport, TransportWait } from "@ghostly/core";
 
 /**
  * A chat's connection story, in two places (WISP 400 § "Pairing progress and transport rows").
@@ -57,6 +57,7 @@ export interface TransportEvent {
   kind: TransportEventKind;
   transport?: PairedTransport;
   from?: PairedTransport;
+  /** `chose`, `failed`: the transport chosen or tried. `down`, `attempt`: the one the chat waits for (WISP 100). */
   target?: PairedTransport;
   cause?: TransportCause;
   /** `failed`, `attempt`: why. */
@@ -89,6 +90,8 @@ export interface TransportSnapshot {
   transitionTarget?: PairedTransport;
   /** Why the last attempt to connect failed, while not live. */
   error?: string;
+  /** A transport the chat is set to reach and is not on yet (WISP 100): who chose it, attempts that failed, why. */
+  waiting?: Pick<TransportWait, "transport" | "by" | "failures" | "error">;
 }
 
 /** A drop the chat comes back from this soon, on the same transport, is not a row. */
@@ -172,12 +175,16 @@ export class TransportLog {
   private snapshot: TransportSnapshot | null = null;
   private choice: { by: "you" | "contact"; transport: PairedTransport; at: number } | null = null;
   /** Since when the chat has no live connection (a drop seen by this app, not a restart of it). */
-  private down: { at: number; from?: PairedTransport; text?: "dht" | "hold" } | null = null;
+  private down: { at: number; from?: PairedTransport; text?: "dht" | "hold";
+    /** Off live to wait for a chosen transport (Fallback off), not a drop: reaching it is that choice landing. */
+    waiting?: { transport: PairedTransport; by?: "you" | "contact" } } | null = null;
   /** A fresh "back to automatic" row: the automatic move it causes is told on that row. */
   private autoRow: { id: string; at: number } | null = null;
   /** Since when the current transport carries the chat, in this run of the app. */
   private liveSince?: number;
   private seenLive = false;
+  /** The transport the chat last waited for, and whose choice it was: reaching it is that choice landing. */
+  private waited: { transport: PairedTransport; by?: "you" | "contact" } | null = null;
 
   constructor(entries: readonly TransportEntry[] = [], history?: readonly TransportEvent[]) {
     const compact = compactTransportRows(entries);
@@ -197,6 +204,8 @@ export class TransportLog {
     const target = transport === "automatic" ? undefined : transport;
     this.event({ at: now, kind: "chose", cause: by, ...(target ? { target } : {}), ...(on ? { transport: on } : {}) });
     this.choice = !target || target === on ? null : { by, transport: target, at: now };
+    // A wait given up for another choice (Automatic included): reaching the old one later is not this choice landing.
+    if (this.down?.waiting && this.down.waiting.transport !== target) delete this.down.waiting;
     // Leaving DHT only for this choice: the row that says so already names it.
     const last = this.entries[this.entries.length - 1] as TransportEntry | undefined;
     if (last?.kind === "dht-left" && last.transport === target && now - last.at <= CHOICE_TTL_MS) return true;
@@ -233,24 +242,35 @@ export class TransportLog {
       if (next.live && next.transport) this.cameBack(next.transport, now);
       return true;
     }
+    const waited = this.waited, waitedOff = !prev?.live ? this.down?.waiting : undefined;
+    const waiting = next.waiting ? { transport: next.waiting.transport, ...(next.waiting.by ? { by: next.waiting.by } : {}) } : null;
+    if (waiting) this.waited = waiting; else if (next.live) this.waited = null;
     if (next.live && next.transport) {
+      // Off live to wait for it (Fallback off), and now on it: the choice landed, however long it took (WISP 100).
+      // After a drop it is the app reconnecting instead, even onto someone's choice.
+      if (waitedOff?.transport === next.transport) return this.landed(next.transport, waitedOff.by, now);
       if (prev?.live && prev.transport === next.transport) {
         // Still on the same one: a switch that did not happen is the only news.
         if (next.transitionError && next.transitionError !== prev.transitionError)
           return this.failed(prev.transitionTarget ?? this.choice?.transport, next.transitionError, next.transport, now);
-        return false;
+        return this.waitAttempt(prev.waiting, next.waiting, now);
       }
-      if (prev?.live && prev.transport) return this.switched(prev.transport, next.transport, now);
+      if (prev?.live && prev.transport) return this.switched(prev.transport, next.transport, now, waited?.transport === next.transport ? waited.by : undefined);
       return this.cameBack(next.transport, now);
     }
     let changed = false;
     if (prev?.live) {
-      // Not a row: the header says the chat is off live; a row comes only if the outage lasts (`cameBack`).
+      // Not a row: the header says the chat is off live; a row comes only if the outage lasts (`cameBack`). Off live to
+      // wait for a chosen transport (Fallback off), the history says so.
       const text = next.text === "dht" ? "dht" as const : next.text === "hold" ? "hold" as const : undefined;
-      this.down = { at: now, from: prev.transport, ...(text ? { text } : {}) };
+      this.down = { at: now, from: prev.transport, ...(text ? { text } : {}), ...(waiting ? { waiting } : {}) };
       this.liveSince = undefined;
-      this.event({ at: now, kind: "down", ...(prev.transport ? { from: prev.transport } : {}), ...(text ? { text } : {}) });
+      this.event({ at: now, kind: "down", ...(prev.transport ? { from: prev.transport } : {}), ...(text ? { text } : {}), ...(next.waiting ? { target: next.waiting.transport } : {}) });
       changed = true;
+    } else if (this.down && waiting) {
+      // Still off live, and waiting for a chosen transport now (one chosen while off live). Only a choice ends the wait
+      // here (`chose`): a snapshot in between, while the session moves onto it, says nothing about it.
+      this.down.waiting = waiting;
     } else if (this.down && prev) {
       // What carries text meanwhile may have become known since the link dropped.
       const text = next.text === "dht" ? "dht" as const : next.text === "hold" ? "hold" as const : undefined;
@@ -262,6 +282,7 @@ export class TransportLog {
       }
     }
     if (next.error && next.error !== prev?.error) { this.event({ at: now, kind: "attempt", reason: next.error }); changed = true; }
+    if (this.waitAttempt(prev?.waiting, next.waiting, now)) changed = true;
     if (next.transitionError && next.transitionError !== prev?.transitionError)
       return this.failed(prev?.transitionTarget ?? this.choice?.transport, next.transitionError, undefined, now) || changed;
     return changed;
@@ -326,13 +347,49 @@ export class TransportLog {
     return true;
   }
 
-  /** A live session moved from one transport to another without dropping. */
-  private switched(from: PairedTransport, transport: PairedTransport, now: number): boolean {
+  /**
+   * Another attempt for the transport waited for did not connect (WISP 100): the history has it, once per reason in a
+   * row (it is retried until it does, for as long as it takes), and the timeline never does.
+   */
+  private waitAttempt(prev: TransportSnapshot["waiting"], next: TransportSnapshot["waiting"], now: number): boolean {
+    if (!next || next.failures <= (prev?.transport === next.transport ? prev.failures : 0)) return false;
+    const reason = next.error ?? "It did not connect", last = this.history[this.history.length - 1] as TransportEvent | undefined;
+    if (last?.kind === "attempt" && last.target === next.transport && last.reason === reason) { last.at = now; return true; }
+    this.event({ at: now, kind: "attempt", target: next.transport, reason });
+    return true;
+  }
+
+  /**
+   * The chat is live on the transport it waited for, off live meanwhile (Fallback off): someone's choice landed. The
+   * choice's row becomes the switch, as a live switch's does, however long the wait was; nothing reads as a drop.
+   */
+  private landed(transport: PairedTransport, by: "you" | "contact" | undefined, now: number): boolean {
+    const from = this.down?.from ?? this.lastTransport();
+    this.down = null; this.liveSince = now; this.seenLive = true;
+    if (this.choice?.transport === transport) this.choice = null;
+    const cause: TransportCause = by ?? "automatic";
+    this.event({ at: now, kind: "switched", transport, cause, ...(from ? { from } : {}) });
+    const last = this.entries[this.entries.length - 1] as TransportEntry | undefined;
+    if (by && last?.kind === "chose" && last.target === transport) {
+      Object.assign(last, { kind: "switched", transport, at: now, ...(from ? { from } : {}) });
+      delete last.target;
+      return true;
+    }
+    if (!from) { this.add({ kind: "connected", at: now, transport }); return true; }
+    if (from === transport) return true;
+    this.add({ kind: "switched", at: now, from, transport, cause });
+    return true;
+  }
+
+  /** A live session moved from one transport to another without dropping. `waited`: whose choice it waited for, if it did. */
+  private switched(from: PairedTransport, transport: PairedTransport, now: number, waited?: "you" | "contact"): boolean {
     this.liveSince = now;
-    const cause = this.cause(transport, now) ?? "automatic";
+    const last = this.entries[this.entries.length - 1] as TransportEntry | undefined;
+    // Back to automatic just now: the move it lets happen (the contact's standing choice) is told on its row.
+    const auto = !!last && this.autoRow?.id === last.id && now - this.autoRow.at <= CHOICE_TTL_MS;
+    const cause = this.cause(transport, now) ?? (auto ? undefined : waited) ?? "automatic";
     this.event({ at: now, kind: "switched", from, transport, cause });
     // The row of the choice becomes the switch it caused, or the automatic row says where it landed.
-    const last = this.entries[this.entries.length - 1] as TransportEntry | undefined;
     if (last && (cause === "you" || cause === "contact") && last.kind === "chose" && last.target === transport) {
       Object.assign(last, { kind: "switched", from, transport, at: now });
       delete last.target;

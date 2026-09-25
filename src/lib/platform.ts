@@ -11,7 +11,7 @@ import type { SparkCreate, SparkWalletView } from "@ghostly/browser/engine/payme
 import type { SparkNetwork } from "@ghostly/core";
 import type { LightningView } from "@ghostly/browser/engine/paymentAdapters/providers/lightningService";
 import type { BitcoinView } from "@ghostly/browser/engine/paymentAdapters/providers/bitcoinService";
-import type { DataLinkState, ServiceAd, PairingState } from "@ghostly/core";
+import type { DataLinkState, ServiceAd, PairingState, TransportWait } from "@ghostly/core";
 import type { ChatFile } from "./types";
 
 /**
@@ -40,6 +40,8 @@ export interface PeerLinkState {
   hold?: PeerHoldState;
   dhtDelivery?: { mode: "stream" | "dht"; peerMode?: "stream" | "dht"; authenticated: boolean; error?: string; pendingUntil?: number; maxTextBytes: number };
   pairing?: PairingState;
+  /** The transport the chat waits for, and why (WISP 100): the chat's status says so rather than a connection issue. */
+  transportWait?: TransportWait;
   /**
    * `methods`: ways of paying both sides allow in this chat right now. `calls` / `services`: both sides offer
    * `calls/1` / `services/1` on the open session (paired chats; they need a live connection).
