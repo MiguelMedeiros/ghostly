@@ -137,3 +137,43 @@ export function measureFraming(section: HTMLElement | null, chapter: Chapter): F
 export const lerpFraming = (a: Framing, b: Framing, t: number): Framing => ({ k: a.k + (b.k - a.k) * t, x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
 
 export const sameFraming = (a: Framing, b: Framing) => a.k === b.k && a.x === b.x && a.y === b.y;
+
+/** A still's camera: a push-in about a focal point, in landscape stage units. */
+export type StillCamera = { scale: number; fx: number; fy: number };
+
+/** The push a landscape still gets where its chapter's picture allows it: it lifts the labels. */
+const STILL_PUSH = 1.25;
+/** Where the push is centred when nothing needs moving, and where a still's key light sits. */
+export const STILL_LIGHT: [number, number] = [720, 470];
+/** Clear space kept between a chapter's picture and the still's edge, in stage units. */
+const STILL_MARGIN = 24;
+
+/**
+ * The camera for a chapter's landscape stills (the cards layout and reduced
+ * motion), where the whole 1.6 stage sits in a 1.6 figure. It pushes in as far
+ * as STILL_PUSH while the chapter's ART, with a margin, still fits the figure,
+ * and moves the window off the centre only as far as the art needs, never past
+ * the stage's edges. The focal point is the one point the push leaves still.
+ */
+export function stillCamera(chapter: Chapter): StillCamera {
+  const [fx0, fy0] = STILL_LIGHT;
+  const boxes = ART[chapter];
+  if (!boxes?.length) return { scale: STILL_PUSH, fx: fx0, fy: fy0 };
+  const { w, h } = STAGE.landscape;
+  const m = STILL_MARGIN;
+  const x0 = Math.min(...boxes.map((b) => b[0])) - m;
+  const y0 = Math.min(...boxes.map((b) => b[1])) - m;
+  const x1 = Math.max(...boxes.map((b) => b[2])) + m;
+  const y1 = Math.max(...boxes.map((b) => b[3])) + m;
+  // Rounded down, so the art still fits.
+  const scale = Math.max(1, Math.floor(Math.min(STILL_PUSH, w / (x1 - x0), h / (y1 - y0)) * 100) / 100);
+  if (scale === 1) return { scale, fx: fx0, fy: fy0 };
+  // At scale s about f the figure shows the stage from f·(1 − 1/s), w/s wide (h/s high).
+  const t = 1 - 1 / scale;
+  const place = (f: number, lo: number, hi: number, size: number, stage: number) => {
+    const from = Math.min(Math.max(f * t, hi - size), lo);
+    return Math.min(Math.max(from, 0), stage - size) / t;
+  };
+  const round = (v: number) => Math.round(v * 100) / 100;
+  return { scale, fx: round(place(fx0, x0, x1, w / scale, w)), fy: round(place(fy0, y0, y1, h / scale, h)) };
+}
