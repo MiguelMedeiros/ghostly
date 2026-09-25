@@ -385,6 +385,25 @@ body {
   height: 17px;
 }
 
+/* Who is sharing a screen, and why a share failed: above the controls, where the small window has room. */
+.call-mini .call-share-notice {
+  top: auto;
+  bottom: 54px;
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.call-mini .call-share-notice svg {
+  width: 12px;
+  height: 12px;
+}
+
+.call-mini .call-share-error {
+  bottom: 78px;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
 .call-mini .call-preview {
   top: 8px;
   right: 8px;

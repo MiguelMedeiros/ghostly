@@ -8,9 +8,9 @@ import { LocalRelay } from "../support/relay";
 
 /**
  * Two Ghostly Desktop apps on one Mac, in the system WKWebView, pair and use a chat's live session for what
- * only a live session carries (#207): a video call with media both ways (`calls/1`), and a local web app one
- * of them shares, opened by the other in a window of its own (`services/1`). On the DHT the call buttons are
- * off and say why.
+ * only a live session carries (#207): a video call with media both ways (`calls/1`), a screen shared from inside
+ * a video call and from inside a voice call, and a local web app one of them shares, opened by the other in a
+ * window of its own (`services/1`). On the DHT the call buttons are off and say why.
  *
  * The Linux Desktop harness (e2e/desktop/) cannot show the calls: WebKitGTK has no WebRTC for their media (a Linux
  * pair goes live on Iroh or HyperDHT, e2e/desktop/native-upgrade.spec.ts, but cannot call). macOS has no WebDriver for WKWebView, so the apps are driven through the test driver built
@@ -23,7 +23,9 @@ import { LocalRelay } from "../support/relay";
  * `navigator.mediaDevices` instance, the answering app sometimes still reached WebKit's own, which with no
  * camera fails with "OverconstrainedError: Invalid constraint". Everything after it — the peer connection, the
  * codecs, the <video> — is the app's own, and the stats of each side's connection show the other side's media
- * arriving and being decoded.
+ * arriving and being decoded. The screen is a canvas too, of another size than the camera, so the other side
+ * tells which picture it gets by its size: WebKit's own `getDisplayMedia` would ask the person at the Mac, and
+ * record their screen. Whether this WKWebView has one of its own is noted in the report.
  *
  * What it found on its first runs, both fixed in packages/core/src/callSignal.ts: an IPv6 srflx candidate
  * (`raddr ::`) made the receiver drop the whole offer (no ring), and the SDP rebuilt from the compact signal
@@ -65,20 +67,22 @@ const FAKE_MEDIA = `
       });
     };
   }
-  const camera = () => {
-    const canvas = Object.assign(document.createElement("canvas"), { width: 320, height: 240 });
+  // A picture that changes every frame: the camera at 320x240, the screen at 640x360.
+  const picture = (width, height) => {
+    const canvas = Object.assign(document.createElement("canvas"), { width, height });
     canvas.style.cssText = "position:fixed;left:0;top:0;width:2px;height:2px;opacity:0.01;pointer-events:none";
     document.body.append(canvas);
     const g = canvas.getContext("2d");
     let n = 0;
     setInterval(() => {
       g.fillStyle = "hsl(" + ((n++ * 9) % 360) + " 80% 50%)";
-      g.fillRect(0, 0, 320, 240);
+      g.fillRect(0, 0, width, height);
       g.fillStyle = "#fff";
       g.fillText(String(n), 12, 24);
     }, 66);
     return canvas.captureStream(15).getVideoTracks();
   };
+  const camera = () => picture(320, 240);
   const microphone = () => {
     const context = new AudioContext();
     const tone = context.createOscillator();
@@ -99,6 +103,12 @@ const FAKE_MEDIA = `
       window.__e2eLog.push("getUserMedia " + JSON.stringify(constraints) + " failed: " + error.name + ": " + error.message);
       throw error;
     }
+  };
+  // Whether this WKWebView can capture a screen at all, before the stand-in takes its place.
+  window.__e2eNativeDisplayMedia = typeof MediaDevices.prototype.getDisplayMedia;
+  MediaDevices.prototype.getDisplayMedia = async (constraints = {}) => {
+    window.__e2eLog.push("getDisplayMedia " + JSON.stringify(constraints));
+    return new MediaStream(picture(640, 360));
   };
 `;
 
@@ -125,6 +135,26 @@ const REMOTE_PICTURE = `
   const video = [...document.querySelectorAll("video")].find((v) => !v.muted);
   return video ? video.videoWidth + "x" + video.videoHeight : "none";`;
 
+/** Whether the call shows the other side's picture at all (a voice call hides the element). */
+const REMOTE_SHOWN = `
+  const video = document.querySelector('[data-testid="remote-video"]');
+  return !!video && !video.classList.contains("hidden");`;
+
+/** The share button's state, or null when it is not there. */
+const SHARE_BUTTON = `
+  const b = document.querySelector('[data-testid="share-screen"]');
+  return b && { disabled: b.disabled, title: b.title };`;
+
+/** The stand-in screen's size; the camera's is 320x240, or less when WebRTC scales it down. */
+const SCREEN = "640x360";
+const picture = /^[1-9]\d*x[1-9]\d*$/;
+
+/** The call's sharing notice, if it shows one. WebKit ends a flex box's innerText with a newline: trimmed. */
+const sharingNotice = async (p: DesktopPerson) => (await p.app.text('[data-testid="call-sharing"]'))?.trim() ?? null;
+
+/** How many "… call ended" lines the page shows. */
+const endedLines = async (p: DesktopPerson) => (await p.snapshot()).split("call ended").length - 1;
+
 const pageText = (p: DesktopPerson) => p.snapshot();
 
 /** Polls `read` until `done` holds; a timeout says what was last read. */
@@ -138,8 +168,8 @@ async function until<T>(read: () => Promise<T>, done: (value: T) => boolean, tim
   }
 }
 
-test("two Desktop apps on a Mac pair, call with media both ways, share an app, and say why not on the DHT", {
-  tag: ["@client:desktop", "@feature:calls.paired", "@feature:calls.video", "@feature:calls.paired.negotiate", "@feature:calls.paired.live-only",
+test("two Desktop apps on a Mac pair, call with media both ways, share a screen, share an app, and say why not on the DHT", {
+  tag: ["@client:desktop", "@feature:calls.paired", "@feature:calls.video", "@feature:calls.audio", "@feature:calls.screen-share", "@feature:calls.upgrade", "@feature:calls.paired.negotiate", "@feature:calls.paired.live-only",
     "@feature:services.add", "@feature:services.share", "@feature:services.open", "@feature:services.paired.negotiate", "@feature:services.desktop-viewer"],
 }, async ({}, testInfo) => {
   test.skip(process.platform !== "darwin", "macOS only: the system WKWebView");
@@ -203,6 +233,20 @@ test("two Desktop apps on a Mac pair, call with media both ways, share an app, a
         testInfo.annotations.push({ type: `${p.name} received`, description: JSON.stringify(await received()) });
       }
       expect(await pageText(alice)).toMatch(clock);
+      testInfo.annotations.push({ type: "WKWebView getDisplayMedia", description: String(await alice.app.execute(`return window.__e2eNativeDisplayMedia;`)) });
+
+      // The screen takes the camera's place, and stopping turns the camera back on.
+      const camera = await bob.app.execute<string>(REMOTE_PICTURE);
+      expect(camera).not.toBe(SCREEN);
+      await expect.poll(() => alice.app.execute(SHARE_BUTTON), { timeout: 30_000 }).toEqual({ disabled: false, title: "Share screen" });
+      await alice.app.click('[data-testid="share-screen"]');
+      await expect.poll(() => sharingNotice(alice), { timeout: 30_000 }).toBe("You're sharing your screen");
+      await expect.poll(() => bob.app.execute<string>(REMOTE_PICTURE), { timeout: 60_000, message: "B shows A's screen" }).toBe(SCREEN);
+      await expect.poll(() => sharingNotice(bob), { timeout: 30_000 }).toMatch(/is sharing their screen$/);
+      await alice.app.click('[data-testid="share-screen"]');
+      await expect.poll(() => bob.app.execute<string>(REMOTE_PICTURE), { timeout: 60_000, message: "B shows A's camera again" }).not.toBe(SCREEN);
+      expect(await bob.app.execute<string>(REMOTE_PICTURE)).toMatch(picture);
+      for (const p of [alice, bob]) await expect.poll(() => sharingNotice(p), { timeout: 30_000 }).toBeNull();
 
       await alice.press("End call");
       for (const p of [alice, bob]) {
@@ -210,6 +254,36 @@ test("two Desktop apps on a Mac pair, call with media both ways, share an app, a
         await expect.poll(() => pageText(p), { timeout: 30_000, message: `${p.name}'s chat says the call ended` }).toContain("Video call ended");
       }
       // Once over, another call could start from either side.
+      await expect.poll(() => bob.callButton(), { timeout: 30_000 }).toMatchObject({ disabled: false });
+    });
+
+    await test.step("screen in a voice call: A shares, B sees it appear and is told, A stops and it goes away", async () => {
+      const ended = await Promise.all([alice, bob].map(endedLines));
+      await alice.app.click('[data-testid="call-audio"]');
+      await expect.poll(() => pageText(bob), { timeout: 60_000 }).toContain("Incoming audio call");
+      await bob.app.click('[title="Accept audio call"]');
+      // Connected, over the video section a voice call negotiates empty: the button is on.
+      await expect.poll(() => alice.app.execute(SHARE_BUTTON), { timeout: 60_000, message: "A can share in a voice call" }).toEqual({ disabled: false, title: "Share screen" });
+      expect(await bob.app.execute<boolean>(REMOTE_SHOWN), "a voice call shows no picture").toBe(false);
+
+      await alice.app.click('[data-testid="share-screen"]');
+      await expect.poll(() => alice.app.execute(SHARE_BUTTON), { timeout: 30_000 }).toEqual({ disabled: false, title: "Stop sharing" });
+      await expect.poll(() => bob.app.execute<boolean>(REMOTE_SHOWN), { timeout: 60_000, message: "B's call shows a picture" }).toBe(true);
+      await expect.poll(() => bob.app.execute<string>(REMOTE_PICTURE), { timeout: 60_000, message: "B shows A's screen" }).toBe(SCREEN);
+      await expect.poll(() => sharingNotice(bob), { timeout: 30_000 }).toMatch(/is sharing their screen$/);
+      const received = () => bob.app.executeAsync<Received>(RECEIVED);
+      const before = await received();
+      await until(received, (r) => r.frames > before.frames, 30_000, "B keeps decoding A's screen");
+
+      await alice.app.click('[data-testid="share-screen"]');
+      await expect.poll(() => bob.app.execute<boolean>(REMOTE_SHOWN), { timeout: 60_000, message: "B's picture goes away" }).toBe(false);
+      for (const p of [alice, bob]) await expect.poll(() => sharingNotice(p), { timeout: 30_000 }).toBeNull();
+
+      await alice.press("End call");
+      for (const [i, p] of [alice, bob].entries()) {
+        await expect.poll(() => p.app.text('[title="End call"]'), { timeout: 30_000 }).toBeNull();
+        await expect.poll(() => endedLines(p), { timeout: 30_000, message: `${p.name}'s chat says this call ended too` }).toBeGreaterThan(ended[i]);
+      }
       await expect.poll(() => bob.callButton(), { timeout: 30_000 }).toMatchObject({ disabled: false });
     });
 

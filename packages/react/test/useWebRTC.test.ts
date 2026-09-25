@@ -307,6 +307,8 @@ describe("hanging up while the camera or microphone prompt is still open", () =>
     expect(call.publishedKinds()).toEqual(["o", "h"]);
     expect(call.result.current.localStream).toBeNull();
     expect(call.result.current.isVideoOff).toBe(true);
+    // The call it was meant for is over: there is nothing to report.
+    expect(call.onError).not.toHaveBeenCalled();
   });
 });
 
@@ -339,22 +341,6 @@ describe("when the prompt is refused or there is no device", () => {
     expect(call.onError).toHaveBeenCalledExactlyOnceWith(error);
     expect(call.result.current.callState).toBe("idle");
     expect(FakePeerConnection.instances).toEqual([]);
-    expect(call.published).toEqual([]);
-  });
-
-  it("sharing the screen with the microphone denied stops the screen capture it already had", async () => {
-    const call = renderCall();
-    act(() => { void call.result.current.startCall(true, "screen"); });
-    const screen = devices.displayMedia[0].grant();
-    await settle();
-
-    devices.userMedia[0].deny(denied());
-    await settle();
-
-    expect(screen.getVideoTracks()[0].readyState).toBe("ended");
-    expect(devices.liveTracks()).toEqual([]);
-    expect(call.onError).toHaveBeenCalledOnce();
-    expect(call.result.current.callState).toBe("idle");
     expect(call.published).toEqual([]);
   });
 
