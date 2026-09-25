@@ -1,4 +1,5 @@
 import { BIG_SHA256, startAtlas } from "../../extension/test/atlas.mjs";
+import { composerRow } from "../support/composer";
 import { expect, test } from "../support/extension";
 import { pair } from "../support/paired";
 
@@ -21,15 +22,22 @@ test("a local web app shared in a paired chat, from the chat itself", { tag: ["@
     await expect(a.page.getByTestId("service-item")).toContainText("Not shared with anyone yet");
     await a.page.goBack();
 
-    // Granted per chat, from the chat's own menu.
-    await a.page.getByTestId("chat-options").click();
-    await a.page.getByTestId("chat-services-open").click();
+    // Nothing shared either way yet: no apps strip in the chat, so its Manage button is not there to reach.
+    await expect(a.page.getByTestId("peer-services")).toHaveCount(0);
+    // A first share, granted per chat from the composer's + → Shared apps.
+    const row = await composerRow(a.page, "composer-services");
+    await expect(row).toBeEnabled();
+    await expect(row).not.toHaveAttribute("title");
+    await row.click();
     const toggle = a.page.getByTestId("chat-services").getByTestId("chat-service-toggle");
     await expect(toggle).toHaveAttribute("aria-checked", "false");
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-checked", "true");
     await a.page.getByRole("button", { name: "Done" }).click();
     await expect(a.page.getByTestId("grant-services")).toContainText("You share 1 app");
+    // The + row counts it too.
+    await expect(await composerRow(a.page, "composer-services")).toHaveAttribute("title", "1 shared in this chat");
+    await a.page.keyboard.press("Escape");
 
     // The contact sees it in the chat and opens it over the paired session.
     const open = b.page.getByTestId("open-service").filter({ hasText: "Atlas" });

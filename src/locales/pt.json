@@ -71,7 +71,6 @@
       "pin": "Fixar conversa",
       "unpin": "Desafixar conversa",
       "hold": "Reter mensagens…",
-      "services": "Serviços…",
       "refresh": "Atualizar",
       "techInfo": "Informações técnicas",
       "continueNew": "Continuar numa nova conversa"
@@ -442,6 +441,9 @@
     "payment": "Pagamento",
     "identity": "Identidade",
     "identityShared": "{{count}} compartilhada(s) nesta conversa",
+    "services": "Apps compartilhados",
+    "servicesShared": "{{count}} compartilhado(s) nesta conversa",
+    "servicesNeedApp": "Precisa da extensão ou do app desktop do Ghostly",
     "document": "Documento",
     "media": "Fotos e vídeos",
     "camera": "Câmera",

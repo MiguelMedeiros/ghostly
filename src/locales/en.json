@@ -71,7 +71,6 @@
       "pin": "Pin chat",
       "unpin": "Unpin chat",
       "hold": "Hold messages…",
-      "services": "Services…",
       "refresh": "Refresh",
       "techInfo": "Tech Info",
       "continueNew": "Continue in a new chat"
@@ -442,6 +441,9 @@
     "payment": "Payment",
     "identity": "Identity",
     "identityShared": "{{count}} shared in this chat",
+    "services": "Shared apps",
+    "servicesShared": "{{count}} shared in this chat",
+    "servicesNeedApp": "Needs the Ghostly extension or desktop app",
     "document": "Document",
     "media": "Photos & videos",
     "camera": "Camera",

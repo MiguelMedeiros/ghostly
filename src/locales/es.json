@@ -71,7 +71,6 @@
       "pin": "Fijar chat",
       "unpin": "Dejar de fijar",
       "hold": "Retener mensajes…",
-      "services": "Servicios…",
       "refresh": "Actualizar",
       "techInfo": "Información técnica",
       "continueNew": "Continuar en un chat nuevo"
@@ -442,6 +441,9 @@
     "payment": "Pago",
     "identity": "Identidad",
     "identityShared": "{{count}} compartida(s) en este chat",
+    "services": "Apps compartidas",
+    "servicesShared": "{{count}} compartida(s) en este chat",
+    "servicesNeedApp": "Necesita la extensión o la app de escritorio de Ghostly",
     "document": "Documento",
     "media": "Fotos y vídeos",
     "camera": "Cámara",

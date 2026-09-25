@@ -297,12 +297,14 @@ test("two Desktop apps on a Mac pair, call with media both ways, share a screen,
       await expect.poll(() => alice.app.text('[data-testid="your-apps"]')).toContain("Atlas");
 
       await alice.go(alice.chatHash!);
-      // Just after the chat opens it may draw its header again, and a click on the old one is lost: again until the menu is up.
+      // Just after the chat opens it may draw its composer again, and a click on the old + is lost: again until the menu is up.
       await expect(async () => {
-        if ((await alice.app.attribute('[data-testid="chat-options"]', "aria-expanded")) !== "true") await alice.app.click('[data-testid="chat-options"]');
-        expect(await alice.app.text('[data-testid="chat-services-open"]'), "the chat's menu").not.toBeNull();
+        if ((await alice.app.attribute('[data-testid="composer-more"]', "aria-expanded")) !== "true") await alice.app.click('[data-testid="composer-more"]');
+        expect(await alice.app.text('[data-testid="composer-services"]'), "the composer's + menu").not.toBeNull();
       }).toPass({ timeout: 30_000 });
-      await alice.app.click('[data-testid="chat-services-open"]');
+      // A first share, from + → Shared apps: both apps offer services/1, so the row opens.
+      expect(await alice.app.attribute('[data-testid="composer-services"]', "disabled")).toBeNull();
+      await alice.app.click('[data-testid="composer-services"]');
       await expect.poll(() => alice.app.text('[data-testid="chat-service-toggle"]')).not.toBeNull();
       // Both apps offer services/1 and the chat is live: nothing to explain.
       expect(await alice.app.text('[data-testid="chat-services-unavailable"]')).toBeNull();

@@ -28,7 +28,7 @@ describe("shared apps in a paired chat: why they cannot travel", () => {
     expect(servicesUnavailable(peer(patch), "Ana")).toBe(want);
   });
 
-  it("the chat's Services… dialog shows it under the title, and nothing once apps can travel", () => {
+  it("the chat's Services dialog shows it under the title, and nothing once apps can travel", () => {
     const view = renderApp(<ChatServicesDialog peerPubKey="peer" name="Ana" onClose={() => {}} />);
     act(() => view.engine.update({ links: [linkView({ profile: "paired-chat/1", dataLink: "idle", pairing: { status: "connecting" } as Pairing,
       sessionOffers: { mine: both.mine, peer: null }, capabilities: { files: false, payments: false, services: false } })] }));

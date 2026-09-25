@@ -23,6 +23,7 @@ import { useWebRTC } from "../hooks/useWebRTC";
 import { useSettings } from "../contexts/SettingsContext";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
+import { composerServices } from "../components/composer/servicesRow";
 import { CallButtons } from "../components/CallButtons";
 import { CallOverlay } from "../components/CallOverlay";
 import { IncomingCallNotification } from "../components/IncomingCallNotification";
@@ -526,12 +527,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                   {t("chat.menu.hold")}
                 </MenuItem>
               )}
-              {platform && platform.getPeer(params.peerPubKeyB64) && (
-                <MenuItem testId="chat-services-open" onClick={() => { setShowServices(true); closeMenu(); }}
-                  icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>}>
-                  {t("chat.menu.services")}
-                </MenuItem>
-              )}
               {compat && (
                 <MenuItem testId="chat-continue-new" onClick={() => {
                   closeMenu();
@@ -648,6 +643,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
             : undefined
         }
         identities={paired ? { peerKey: params.peerPubKeyB64, contact: shownName } : undefined}
+        // The apps this contact and you share, chosen per chat: always reachable here, even before anything is shared.
+        services={composerServices(t, platform, params.peerPubKeyB64, shownName, () => setShowServices(true))}
       />
 
       {/* Incoming call notification */}

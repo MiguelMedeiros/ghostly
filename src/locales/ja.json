@@ -71,7 +71,6 @@
       "pin": "チャットをピン留め",
       "unpin": "ピン留めを解除",
       "hold": "メッセージを保留…",
-      "services": "サービス…",
       "refresh": "更新",
       "techInfo": "技術情報",
       "continueNew": "新しいチャットで続ける"
@@ -442,6 +441,9 @@
     "payment": "支払い",
     "identity": "ID",
     "identityShared": "このチャットで {{count}} 件共有中",
+    "services": "共有アプリ",
+    "servicesShared": "このチャットで {{count}} 件共有中",
+    "servicesNeedApp": "Ghostly の拡張機能またはデスクトップアプリが必要です",
     "document": "書類",
     "media": "写真と動画",
     "camera": "カメラ",
