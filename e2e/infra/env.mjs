@@ -72,6 +72,10 @@ export const VARIABLES = {
   // Iroh (WISP 102): the relay the browsers' Iroh goes through, and the native test peer homes on.
   GHOSTLY_IROH_RELAY_URL: ["http://127.0.0.1:47085", "Iroh relay (iroh-relay 1.2 --dev, plain HTTP): browser Iroh suites"],
   // HyperDHT for browsers (WISP 103): the relay browsers reach HyperDHT through, on its own HyperDHT network.
+  // AT Protocol: a PLC directory and a reference PDS (e2e/infra/atproto). The app is never told: support/atproto.ts routes
+  // https://pds.ghostly.test and https://plc.ghostly.test here, as the PDS believes it is the first.
+  E2E_ATPROTO_PDS_URL: ["http://127.0.0.1:47086", "AT Protocol PDS (@atproto/pds, as https://pds.ghostly.test): Bluesky identity suites"],
+  E2E_ATPROTO_PLC_URL: ["http://127.0.0.1:47087", "AT Protocol PLC directory (in memory, as https://plc.ghostly.test)"],
   GHOSTLY_HYPERDHT_RELAY_URL: ["ws://127.0.0.1:47097", "HyperDHT relay (dht-relay over WebSocket, native-transports/hyperdht-relay)"],
 
   // S3 (held messages, profile backups): RustFS with throwaway keys.
@@ -124,6 +128,7 @@ export const endpoints = {
   usdt: { rpc: read("GHOSTLY_USDT_RPC_URL"), token: read("GHOSTLY_USDT_TOKEN") },
   irohRelay: read("GHOSTLY_IROH_RELAY_URL"),
   hyperdhtRelay: read("GHOSTLY_HYPERDHT_RELAY_URL"),
+  atproto: { pds: read("E2E_ATPROTO_PDS_URL"), plc: read("E2E_ATPROTO_PLC_URL") },
   s3: { endpoint: read("GHOSTLY_S3_ENDPOINT"), key: read("GHOSTLY_S3_KEY"), secret: read("GHOSTLY_S3_SECRET") },
 };
 

@@ -1,5 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 import { OIDC_TEST_ISSUER } from "./support/oidcIssuer";
+import { ATPROTO_TEST_PLC } from "./support/atproto";
 
 /**
  * The combination matrix (e2e/matrix/): generated scenarios, each one a pair of
@@ -56,6 +57,6 @@ export default defineConfig({
         reuseExistingServer: !process.env.CI,
         timeout: 5 * 60_000,
         // The same build the suite tests: the local OIDC issuer and the SDK example's adapters.
-        env: { VITE_OIDC_TEST_ISSUER: OIDC_TEST_ISSUER, GHOSTLY_PLUGINS: "examples/sdk-adapter/src/index.ts" },
+        env: { VITE_OIDC_TEST_ISSUER: OIDC_TEST_ISSUER, VITE_ATPROTO_TEST_PLC: ATPROTO_TEST_PLC, GHOSTLY_PLUGINS: "examples/sdk-adapter/src/index.ts" },
       },
 });

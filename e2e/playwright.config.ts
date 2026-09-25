@@ -8,6 +8,7 @@ const infraEnv = join(import.meta.dirname, "..", ".env.e2e");
 if (existsSync(infraEnv)) process.loadEnvFile(infraEnv);
 
 const { OIDC_TEST_ISSUER } = await import("./support/oidcIssuer");
+const { ATPROTO_TEST_PLC } = await import("./support/atproto");
 
 /**
  * End-to-end tests for Ghostly: real browsers, the shipped build, no servers.
@@ -78,6 +79,6 @@ export default defineConfig({
         timeout: 5 * 60_000,
         // The suite's build knows the local OIDC issuer (support/oidcIssuer.ts) and carries the SDK example's
         // adapters (web/sdk-plugin.spec.ts); a release build does neither.
-        env: { VITE_OIDC_TEST_ISSUER: OIDC_TEST_ISSUER, GHOSTLY_PLUGINS: "examples/sdk-adapter/src/index.ts" },
+        env: { VITE_OIDC_TEST_ISSUER: OIDC_TEST_ISSUER, VITE_ATPROTO_TEST_PLC: ATPROTO_TEST_PLC, GHOSTLY_PLUGINS: "examples/sdk-adapter/src/index.ts" },
       },
 });
