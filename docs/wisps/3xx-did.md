@@ -29,6 +29,8 @@ The subject is the DID itself, in canonical form, at most 512 printable ASCII ch
 
 A DID URL (with a `#fragment`, `?query` or `/path`) is not a DID and is refused.
 
+The provider id is `did`, so the statement reads `I control did:did:web:example.com …`: the provider, a colon, then the DID. Verifiers never parse the text; they rebuild it from the binding.
+
 ## Resolution
 
 | Method | Document | What the network learns |

@@ -10,12 +10,17 @@ import { renderApp } from "../render";
 import { proofView } from "./views";
 import { choose, optionsOf } from "../select";
 
-// covers: proofs.picker, proofs.domain.dns, proofs.ssh, proofs.oidc
+// covers: proofs.picker, proofs.domain.dns, proofs.ssh, proofs.oidc, proofs.did
 
 
 const provider = (id: string) => IDENTITY_PROVIDERS.find((p) => p.id === id)!;
 /** What a web page can add with no OpenID Connect client IDs in the build (they await registration). */
 const WITHOUT_OIDC = IDENTITY_PROVIDERS.filter((p) => p.id !== "oidc");
+/** The picker shows these at once; the `advanced` ones (DIDs) wait under "Advanced". */
+const BASIC = WITHOUT_OIDC.filter((p) => !p.advanced);
+const ADVANCED = IDENTITY_PROVIDERS.filter((p) => p.advanced);
+/** An Ed25519 did:key (the all-zero seed's, from the did:key spec's test vectors): resolved on the device. */
+const DID_KEY = "did:key:z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp";
 
 function dialog() {
   const onClose = vi.fn();
@@ -49,18 +54,34 @@ describe("AddIdentityDialog", () => {
     it("shows one card per provider that can be added here, in registry order", () => {
       dialog();
       const cards = within(screen.getByRole("list", { name: "Kinds of identity" })).getAllByRole("listitem");
-      expect(cards.map((c) => c.dataset.testid)).toEqual(WITHOUT_OIDC.map((p) => `add-identity-card-${p.id}`));
+      expect(cards.map((c) => c.dataset.testid)).toEqual(BASIC.map((p) => `add-identity-card-${p.id}`));
     });
 
-    it("has a card for every registered provider once each can be added", () => {
+    it("folds the advanced kinds under Advanced, closed at first, named on the toggle", async () => {
+      const { user } = dialog();
+      const toggle = screen.getByTestId("add-identity-advanced");
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(toggle).toHaveTextContent(`Advanced· ${ADVANCED.map((p) => p.label).join(", ")}`);
+      for (const p of ADVANCED) expect(screen.queryByTestId(`add-identity-card-${p.id}`)).not.toBeInTheDocument();
+      await user.click(toggle);
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      const cards = within(screen.getByRole("list", { name: "Advanced kinds of identity" })).getAllByRole("listitem");
+      expect(cards.map((c) => c.dataset.testid)).toEqual(ADVANCED.map((p) => `add-identity-card-${p.id}`));
+      await user.click(toggle);
+      expect(screen.queryByRole("list", { name: "Advanced kinds of identity" })).not.toBeInTheDocument();
+    });
+
+    it("has a card for every registered provider once each can be added", async () => {
       restore = configureOidc();
-      dialog();
+      const { user } = dialog();
+      await user.click(screen.getByTestId("add-identity-advanced"));
       for (const p of IDENTITY_PROVIDERS) expect(screen.getByTestId(`add-identity-card-${p.id}`)).toBeInTheDocument();
       expect(screen.getAllByRole("listitem")).toHaveLength(IDENTITY_PROVIDERS.length);
     });
 
-    it.each(WITHOUT_OIDC.map((p) => [p.id, p] as const))("%s: the card shows its name, category and one line, not the long description", (id, p) => {
-      dialog();
+    it.each(WITHOUT_OIDC.map((p) => [p.id, p] as const))("%s: the card shows its name, category and one line, not the long description", async (id, p) => {
+      const { user } = dialog();
+      if (p.advanced) await user.click(screen.getByTestId("add-identity-advanced"));
       const card = screen.getByTestId(`add-identity-card-${id}`);
       expect(within(card).getByTestId("add-identity-summary")).toHaveTextContent(p.summary);
       expect(card).toHaveTextContent(p.label);
@@ -72,6 +93,7 @@ describe("AddIdentityDialog", () => {
 
     it.each(WITHOUT_OIDC.map((p) => [p.id, p] as const))("%s: About opens the details in place, with the caveats it declares", async (id, p) => {
       const { user } = dialog();
+      if (p.advanced) await user.click(screen.getByTestId("add-identity-advanced"));
       const about = screen.getByRole("button", { name: `About ${p.label}` });
       await user.click(about);
       expect(about).toHaveAttribute("aria-expanded", "true");
@@ -177,6 +199,51 @@ describe("AddIdentityDialog", () => {
       expect(screen.getByTestId("add-identity-field-domain")).toHaveAttribute("type", "text");
       expect(screen.getByTestId("add-identity-field-bunker")).toHaveAttribute("type", "password");
       expect(screen.getByTestId("add-identity-start")).toHaveTextContent("Sign with NIP-05 with a remote signer");
+    });
+  });
+
+  describe("a DID", () => {
+    const openDid = async (user: ReturnType<typeof dialog>["user"]) => {
+      await user.click(screen.getByTestId("add-identity-advanced"));
+      await user.click(screen.getByTestId("add-identity-did"));
+    };
+
+    it("is looked up before anything is signed: the subject first, then what it is, then the signers that apply", async () => {
+      const { user } = dialog();
+      await openDid(user);
+      const start = screen.getByTestId("add-identity-start");
+      expect(start).toBeDisabled();
+      // Nothing to choose until the DID is known: a did:web can publish, a did:key only sign.
+      expect(screen.queryByTestId("add-identity-signer")).not.toBeInTheDocument();
+      await user.type(screen.getByTestId("add-identity-subject"), DID_KEY);
+      // "Looking it up…" first, then the facts (another element).
+      await vi.waitFor(() => expect(screen.getByTestId("add-identity-preview")).toHaveAttribute("data-status", "ok"), { timeout: 3000 });
+      expect(screen.getByTestId("add-identity-preview-method")).toHaveTextContent("did:key, the key is the identifier");
+      expect(screen.getByTestId("add-identity-preview-key")).toHaveTextContent("#z6MkiTBz1y…ooWp (Ed25519)");
+      expect(screen.queryByTestId("add-identity-signer")).not.toBeInTheDocument();
+      expect(screen.getByText(/paste a JWS or the raw signature/)).toBeInTheDocument();
+      expect(start).toBeEnabled();
+    });
+
+    it("names a method it does not check, and cannot start", async () => {
+      const { user } = dialog();
+      await openDid(user);
+      await user.type(screen.getByTestId("add-identity-subject"), "did:plc:ewvi7nxzyoun6zhxrhs64oiz");
+      expect(await screen.findByTestId("add-identity-preview-error", {}, { timeout: 3000 })).toHaveTextContent("did:plc is not supported yet. Ghostly checks did:key, did:jwk, did:dht and did:web.");
+      expect(screen.getByTestId("add-identity-start")).toBeDisabled();
+    });
+
+    it("begins with the DID and shows the statement to sign, with snippets for its key", async () => {
+      const { user, engine } = dialog();
+      answerBegin();
+      await openDid(user);
+      await user.type(screen.getByTestId("add-identity-subject"), DID_KEY);
+      await vi.waitFor(() => expect(screen.getByTestId("add-identity-start")).toBeEnabled(), { timeout: 3000 });
+      await user.click(screen.getByTestId("add-identity-start"));
+      expect(engine.callsTo("beginIdentityProof")).toEqual([{ provider: "did", subject: DID_KEY, validityDays: 90 }]);
+      expect(await screen.findByTestId("add-identity-copy-0")).toHaveTextContent(`I control did:${DID_KEY} and authorize the Ghostly key`);
+      expect(screen.getByTestId("add-identity-copy-1")).toHaveTextContent(`kid: "${DID_KEY}#${DID_KEY.slice(8)}"`);
+      expect(screen.getByTestId("add-identity-finish")).toBeDisabled();
     });
   });
 
