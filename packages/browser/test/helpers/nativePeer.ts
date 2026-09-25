@@ -2,7 +2,8 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { BoundChannel, FrameChannel, NativeBinding, NativeEndpoint } from "@ghostly/core";
 
-export async function nativePeer(binary: string, seed: number): Promise<NativeEndpoint & { dropReceipts: boolean }> {
+/** `relays` homes the peer on those Iroh relays (so a browser peer can reach it); without it, loopback only. */
+export async function nativePeer(binary: string, seed: number, options: { relays?: string[] } = {}): Promise<NativeEndpoint & { dropReceipts: boolean }> {
   const process = spawn(binary, [], { stdio: ["pipe", "pipe", "pipe"] });
   const channels = new Map<number, BoundChannel>();
   const send = (value: object) => process.stdin.write(JSON.stringify(value) + "\n");
@@ -37,9 +38,9 @@ export async function nativePeer(binary: string, seed: number): Promise<NativeEn
     } else if (event.type === "closed") { channels.get(event.id)?.channel.onClose?.(); channels.delete(event.id); }
   });
   const receivers = new WeakMap<FrameChannel, (text: string) => void>();
-  send({ seed: Array(32).fill(seed) });
+  send({ seed: Array(32).fill(seed), ...(options.relays ? { relays: options.relays } : {}) });
   const descriptor = await Promise.race([address, new Promise<never>((_, reject) => {
-    const timer = setTimeout(() => { process.kill(); reject(new Error(`Native peer startup timeout: ${failure}`)); }, 5000);
+    const timer = setTimeout(() => { process.kill(); reject(new Error(`Native peer startup timeout: ${failure}`)); }, options.relays ? 15000 : 5000);
     timer.unref(); address.finally(() => clearTimeout(timer));
   })]);
   const endpoint: NativeEndpoint & { dropReceipts: boolean } = {
