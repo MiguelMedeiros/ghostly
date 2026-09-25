@@ -225,26 +225,29 @@ test("a picture address over plain http is not fetched", { tag: ["@feature:chat.
   expect(fetched).toEqual([]);
 });
 
-test("double-clicking a received message shows how it came, again hides it", { tag: ["@feature:chat.paired.message-details"] }, async ({ peer }) => {
+test("double-clicking a received message in a compatibility chat shows how it came, Escape hides it", { tag: ["@feature:chat.paired.message-details"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await linkLegacy(alice, bob);
   await connect(alice, bob);
   await say(bob, "inspect me");
   const received = bubble(alice, "inspect me");
   await expect(received).toBeVisible();
-  await expect(received).not.toContainText("inbound");
 
+  // The message's details (message-details.spec.ts has the paired chat's): the compatibility chat's own wire.
   await received.getByText("inspect me").dblclick();
-  for (const field of ["id:", "ts:", "dir:", "ack:", "dht:", "dns:", "enc:"]) await expect(received.getByText(field, { exact: true })).toBeVisible();
-  await expect(received).toContainText("inbound");
-  await expect(received).toContainText("N/A");
-  await expect(received).toContainText("NaCl secretbox");
+  const details = alice.page.getByTestId("message-details");
+  const field = (label: string) => details.locator(`[data-testid="message-details-row"][data-label="${label}"]`);
+  await expect(details).toHaveAttribute("data-loaded", "yes");
+  await expect(field("Direction")).toHaveText("Received");
+  await expect(field("Chat profile")).toHaveText("compatibility chat (Ghostly 0.4)");
+  await expect(field("Protocol")).toHaveText("legacy/1");
+  await expect(field("Received over")).toContainText("(compatibility chat)");
   // Other messages keep theirs to themselves.
-  await expect(chat(alice).getByText("dir:", { exact: true })).toHaveCount(1);
+  await expect(chat(alice).locator("[data-message-row][data-details-open]")).toHaveCount(1);
 
-  await received.getByText("inspect me").dblclick();
-  await expect(received).not.toContainText("inbound");
-  await expect(chat(alice).getByText("dir:", { exact: true })).toHaveCount(0);
+  await alice.page.keyboard.press("Escape");
+  await expect(details).toHaveCount(0);
+  await expect(chat(alice).locator("[data-message-row][data-details-open]")).toHaveCount(0);
 });
 
 test("a legacy chat before its data link: an overlong text is refused and the draft is kept", { tag: ["@feature:chat.legacy.limits"] }, async ({ peer }) => {
