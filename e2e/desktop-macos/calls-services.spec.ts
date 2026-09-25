@@ -149,6 +149,9 @@ const SHARE_BUTTON = `
 const SCREEN = "640x360";
 const picture = /^[1-9]\d*x[1-9]\d*$/;
 
+/** The call's sharing notice, if it shows one. WebKit ends a flex box's innerText with a newline: trimmed. */
+const sharingNotice = async (p: DesktopPerson) => (await p.app.text('[data-testid="call-sharing"]'))?.trim() ?? null;
+
 /** How many "… call ended" lines the page shows. */
 const endedLines = async (p: DesktopPerson) => (await p.snapshot()).split("call ended").length - 1;
 
@@ -237,13 +240,13 @@ test("two Desktop apps on a Mac pair, call with media both ways, share a screen,
       expect(camera).not.toBe(SCREEN);
       await expect.poll(() => alice.app.execute(SHARE_BUTTON), { timeout: 30_000 }).toEqual({ disabled: false, title: "Share screen" });
       await alice.app.click('[data-testid="share-screen"]');
-      await expect.poll(() => alice.app.text('[data-testid="call-sharing"]'), { timeout: 30_000 }).toBe("You're sharing your screen");
+      await expect.poll(() => sharingNotice(alice), { timeout: 30_000 }).toBe("You're sharing your screen");
       await expect.poll(() => bob.app.execute<string>(REMOTE_PICTURE), { timeout: 60_000, message: "B shows A's screen" }).toBe(SCREEN);
-      await expect.poll(() => bob.app.text('[data-testid="call-sharing"]'), { timeout: 30_000 }).toMatch(/is sharing their screen$/);
+      await expect.poll(() => sharingNotice(bob), { timeout: 30_000 }).toMatch(/is sharing their screen$/);
       await alice.app.click('[data-testid="share-screen"]');
       await expect.poll(() => bob.app.execute<string>(REMOTE_PICTURE), { timeout: 60_000, message: "B shows A's camera again" }).not.toBe(SCREEN);
       expect(await bob.app.execute<string>(REMOTE_PICTURE)).toMatch(picture);
-      for (const p of [alice, bob]) await expect.poll(() => p.app.text('[data-testid="call-sharing"]'), { timeout: 30_000 }).toBeNull();
+      for (const p of [alice, bob]) await expect.poll(() => sharingNotice(p), { timeout: 30_000 }).toBeNull();
 
       await alice.press("End call");
       for (const p of [alice, bob]) {
@@ -267,14 +270,14 @@ test("two Desktop apps on a Mac pair, call with media both ways, share a screen,
       await expect.poll(() => alice.app.execute(SHARE_BUTTON), { timeout: 30_000 }).toEqual({ disabled: false, title: "Stop sharing" });
       await expect.poll(() => bob.app.execute<boolean>(REMOTE_SHOWN), { timeout: 60_000, message: "B's call shows a picture" }).toBe(true);
       await expect.poll(() => bob.app.execute<string>(REMOTE_PICTURE), { timeout: 60_000, message: "B shows A's screen" }).toBe(SCREEN);
-      await expect.poll(() => bob.app.text('[data-testid="call-sharing"]'), { timeout: 30_000 }).toMatch(/is sharing their screen$/);
+      await expect.poll(() => sharingNotice(bob), { timeout: 30_000 }).toMatch(/is sharing their screen$/);
       const received = () => bob.app.executeAsync<Received>(RECEIVED);
       const before = await received();
       await until(received, (r) => r.frames > before.frames, 30_000, "B keeps decoding A's screen");
 
       await alice.app.click('[data-testid="share-screen"]');
       await expect.poll(() => bob.app.execute<boolean>(REMOTE_SHOWN), { timeout: 60_000, message: "B's picture goes away" }).toBe(false);
-      for (const p of [alice, bob]) await expect.poll(() => p.app.text('[data-testid="call-sharing"]'), { timeout: 30_000 }).toBeNull();
+      for (const p of [alice, bob]) await expect.poll(() => sharingNotice(p), { timeout: 30_000 }).toBeNull();
 
       await alice.press("End call");
       for (const [i, p] of [alice, bob].entries()) {
