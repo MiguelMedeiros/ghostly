@@ -193,16 +193,23 @@ export async function desktopPerson(name: string, options: {
     connection: async () => (await app().attribute('[data-testid="connection-options"]', "aria-label")) ?? "",
     preferTransport: async (preferred, fallback) => {
       await app().click('[data-testid="connection-options"]');
-      // The radios are transparent inputs over their labels: clicked from the page, as a person's tap lands.
-      return run<string[]>(`
-        const [preferred, fallback] = arguments;
-        const menu = document.querySelector('[data-testid="connection-menu"]') ?? document;
-        const offered = ["WebRTC", "Iroh", "HyperDHT"].filter((name) => !menu.querySelector('input[type=radio][aria-label="' + name + '"]')?.disabled);
-        if (preferred) menu.querySelector('input[type=radio][aria-label="' + preferred + '"]').click();
-        const toggle = menu.querySelector('input[role=switch][aria-label="Fallback"]');
-        if (toggle.checked !== fallback) toggle.click();
-        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-        return offered;`, preferred ?? null, fallback);
+      // The radios and the switch are transparent inputs over their labels: clicked from the page, as a person's
+      // tap lands. `checked` is the engine's state, drawn back.
+      const input = (selector: string) => `(document.querySelector('[data-testid="connection-menu"]') ?? document).querySelector(${JSON.stringify(selector)})`;
+      const radio = (name: string) => input(`input[type=radio][aria-label="${name}"]`);
+      const toggle = input('input[role=switch][aria-label="Fallback"]');
+      const offered: string[] = [];
+      for (const name of ["WebRTC", "Iroh", "HyperDHT"]) if (await run<boolean>(`return !${radio(name)}?.disabled;`)) offered.push(name);
+      // One this app lacks (WebRTC on Linux) cannot be chosen: its option is off, and says why.
+      if (preferred && offered.includes(preferred)) {
+        await run(`${radio(preferred)}.click();`);
+        // The Fallback switch sends the preference the page shows: only once the choice is drawn, or it sends the old one.
+        await expect.poll(() => run<boolean>(`return ${radio(preferred)}.checked;`), { message: `${name} chose ${preferred}` }).toBe(true);
+      }
+      if (await run<boolean>(`return ${toggle}.checked;`) !== fallback) await run(`${toggle}.click();`);
+      await expect.poll(() => run<boolean>(`return ${toggle}.checked;`), { message: `${name}'s Fallback is ${fallback ? "on" : "off"}` }).toBe(fallback);
+      await run(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));`);
+      return offered;
     },
     away: async () => {
       const hash = person.chatHash;

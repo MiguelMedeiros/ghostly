@@ -142,6 +142,16 @@ it("DHT only from the chat's menu: a row for the choice, one for leaving it, the
  * side plans the switch) and whichever side redials, both end on the transport the agreement names, once, and stay
  * there; nothing sent meanwhile is lost (WISP 100: a live chat changes transport when it drops or someone switches).
  */
+it("Automatic in an app with no WebRTC prefers its first native transport, so the Fallback switch can be turned off", async () => {
+  const { node, id, view } = await setup();
+  await node.setChatTransport({ linkId: id, transport: "auto" });
+  expect(view().transportAutomatic).toBe(true);
+  // Not WebRTC, which this app lacks: the popover's Fallback switch sends this preference back.
+  expect(view().preferredTransport).toBe("iroh/1");
+  await node.setTransportPreference({ linkId: id, preferred: view().preferredTransport!, fallback: false });
+  expect(view().transportFallback).toBe(false);
+}, 20_000);
+
 describe.each([
   { appCoordinates: true, dialer: "app", who: "the app redials" },
   { appCoordinates: true, dialer: "contact", who: "the contact redials" },

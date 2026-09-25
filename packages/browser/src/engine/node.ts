@@ -31,7 +31,7 @@ import { normalizeNostrRelays } from '../nostr/relay';
 import type { NostrDraft, NostrDraftRequest, NostrPublishResult } from '../nostr/types';
 import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
-import { CapsExchange, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, TRANSPORTS, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
+import { CapsExchange, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
 import { fileMessageText, type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
 import {
   DEFAULT_RELAYS,
@@ -1676,8 +1676,7 @@ export class GhostlyNode implements EngineImplementation {
     const log = this.transportLogOf(live);
     if (log?.chose("you", "automatic", Date.now())) this.saveTransportLog(live, log);
     // The app's rule: WebRTC first where there is one (Linux WebKitGTK has none), fallback on.
-    const available = live.link.availableTransports;
-    await live.link.setTransportPreference(available.includes("webrtc/1") ? "webrtc/1" : available[0], true, true);
+    await live.link.setTransportPreference(automaticTransport(live.link.availableTransports), true, true);
   }
 
   /** The chat's connection story, for paired chats (not group edges). */
@@ -2816,7 +2815,8 @@ export class GhostlyNode implements EngineImplementation {
       canSendText: (live.link?.canSendText ?? false) || this.holdingFor(live),
       textDelivery: this.holdingFor(live) ? "hold" : live.link?.textDelivery ?? "unavailable",
       transportErrors: live.transportErrors,
-      preferredTransport: live.stored.preferredTransport ?? "webrtc/1",
+      // Automatic: what the app's rule prefers here, so the Fallback switch sends a transport this app has.
+      preferredTransport: live.stored.preferredTransport ?? automaticTransport(live.link?.availableTransports ?? []),
       transportFallback: live.stored.transportFallback ?? true,
       transportAutomatic: live.stored.preferredTransport === undefined,
       peerTransports: live.link?.peerAvailableTransports,

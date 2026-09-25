@@ -99,7 +99,7 @@ export const PLAN: readonly Step[] = [
   {
     id: "calls",
     title: "a call in the chat: A rings, B answers, A hangs up; where a side cannot call, its button says why",
-    // Before the transport step, which a Linux Desktop pair cannot pass (no WebRTC to pair live with).
+    // Before the transport step, whose preferences would decide whether the pair is live when it rings.
     applies: always,
     // A Linux Desktop (WebKitGTK) has no WebRTC, so no call media: its buttons say so, and so do its contact's.
     features: (c) => (withDesktop(c) ? ["calls.paired.live-only"] : ["calls.paired", "calls.paired.negotiate", "calls.audio"]),
@@ -109,8 +109,11 @@ export const PLAN: readonly Step[] = [
     id: "transport",
     title: "the transport the pair asked for, and what the clients offer",
     applies: always,
-    features: (c) => withDesktop(c)
-      ? ["transport.preference", ...({ webrtc: ["transport.webrtc"], "webrtc-strict": ["transport.webrtc"], "native-fallback": c.client === "desktop-desktop" ? ["transport.iroh"] : ["transport.webrtc", "transport.switch"], "iroh-only": ["transport.iroh"], "hyperdht-only": ["transport.hyperdht"] })[c.transport]]
+    // The Desktop is Linux (no WebRTC): two of them go live natively from the DHT, on Iroh unless HyperDHT alone is
+    // asked for (the default settles on either); with the web they have no live transport in common and stay on the DHT.
+    features: (c) => c.client === "desktop-desktop"
+      ? ["transport.preference", "chat.native-upgrade", ...({ webrtc: [], "webrtc-strict": ["transport.iroh"], "native-fallback": ["transport.iroh"], "iroh-only": ["transport.iroh"], "hyperdht-only": ["transport.hyperdht"] })[c.transport]]
+      : withDesktop(c) ? ["transport.preference", "chat.one-chat"]
       : ["transport.webrtc", ...(c.transport === "webrtc-strict" ? ["transport.switch"] : [])],
     requires: none,
   },
