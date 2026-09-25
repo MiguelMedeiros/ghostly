@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, test } from "../support/fixtures";
+import { expect, openProfilePage, test } from "../support/fixtures";
 import { attachMint } from "../support/mint";
 
 /**
@@ -49,13 +49,19 @@ for (const mobile of [false, true]) {
     await expect(page.getByTestId("sidebar-new-menu")).toHaveCount(0);
 
     // Every page the sidebar leads to renders: the account bar on a wide screen, the tab bar on a phone.
-    const places = mobile
-      ? ["Wallets", "Identities", "Services", "Settings"].map((name) => page.getByTestId("mobile-tabs").getByRole("button", { name }))
-      : ["account-profile", "account-identities", "account-services", "account-settings", "wallet-chip"].map((id) => page.getByTestId(id));
-    for (const place of places) {
+    // Profile is reached through the account switcher (the web can hold several profiles), as a person does.
+    const tab = (name: string) => () => page.getByTestId("mobile-tabs").getByRole("button", { name }).click();
+    const bar = (id: string) => () => page.getByTestId(id).click();
+    const places: [string, () => Promise<void>][] = mobile
+      ? [["wallet", tab("Wallets")], ["identities", tab("Identities")], ["services", tab("Services")], ["settings", tab("Settings")]]
+      : [
+          ["profile", () => openProfilePage(page)],
+          ["identities", bar("account-identities")], ["services", bar("account-services")], ["settings", bar("account-settings")], ["wallet", bar("wallet-chip")],
+        ];
+    for (const [path, open] of places) {
       await page.goto("/");
-      await place.click();
-      await expect(page).not.toHaveURL(/#\/?$/);
+      await open();
+      await expect(page).toHaveURL(new RegExp(`#/${path}$`));
       await noErrorScreen();
     }
 
