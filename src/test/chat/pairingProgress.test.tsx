@@ -241,7 +241,7 @@ describe("the engine's own report (the pairing-progress contract)", () => {
 
   it("a failure retrying cannot fix: no Retry, ask for a new invite", () => {
     const { engine } = renderApp(<Pairing inviter />);
-    show(report({ stage: "failed", reason: "expired", retryable: false }), engine);
+    show(report({ stage: "failed", reason: "expired" as PairingProgress["reason"], retryable: false }), engine);
     expect(screen.getByRole("alert")).toHaveTextContent("This invite has expired.");
     expect(screen.getByRole("alert")).toHaveTextContent("Ask your contact for a new invite.");
     expect(screen.queryByTestId("pairing-retry")).toBeNull();
@@ -258,7 +258,7 @@ describe("the engine's own report (the pairing-progress contract)", () => {
 
   it("an unknown reason reads as something went wrong, with the engine's detail", () => {
     const { engine } = renderApp(<Pairing inviter />);
-    show(report({ stage: "failed", reason: "gremlins", retryable: true, detail: "E_GREMLIN" }), engine);
+    show(report({ stage: "failed", reason: "gremlins" as PairingProgress["reason"], retryable: true, detail: "E_GREMLIN" }), engine);
     expect(screen.getByRole("alert")).toHaveTextContent("Something went wrong while connecting.");
     expect(screen.getByRole("alert")).toHaveTextContent("E_GREMLIN");
   });
