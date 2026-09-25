@@ -90,12 +90,13 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   const pick = (id: ChatRail) => { picked.current = true; setRail(id); };
   const railShown = payCards.some((c) => c.id === rail);
   const railBlocked = !!payCards.find((c) => c.id === rail && unavailable(c));
+  const usable = firstUsable();
   useEffect(() => {
     if (railShown && (picked.current || !railBlocked)) return;
-    const next = firstUsable() ?? (railShown ? undefined : payCards[0]?.id);
+    const next = usable ?? (railShown ? undefined : payCards[0]?.id);
     if (next && next !== rail) setRail(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [railShown, railBlocked, payCards.length]);
+  }, [railShown, railBlocked, usable, payCards.length]);
   // Pay, or Accept: which ways this chat takes. A chat that has every way off opens on Accept, to turn one on.
   const [mode, setMode] = useState<Mode>(() => onSaveMethods && cards.length && !payCards.length ? "accept" : "pay");
   // The cards, then the chosen one turned over (deck/Flip.tsx). Without a wallet to show, only the back.

@@ -4,6 +4,7 @@ import { choose } from "../support/select";
 import { addNostrIdentity, injectNostrSigner } from "../support/nostrSigner";
 import { pair } from "../support/paired";
 import { composerRow } from "../support/composer";
+import { closePayments, openPayments } from "../support/payments";
 
 /**
  * The pages beside the chat list (Wallet, Services, Settings, Profile, Identities) at every width they are shown at:
@@ -263,5 +264,39 @@ test("the chat's pickers stay inside the chat's column beside the widest list, t
     await page.waitForTimeout(250);
     expect(await deckCardProblems(page, `[data-testid=${sheet}]`), `${sheet}'s cards`).toEqual([]);
     await page.keyboard.press("Escape");
+  }
+});
+
+/** Whether a control can be used where it is, without scrolling: in the window, and what a click there lands on. */
+const reachable = (page: Page, testId: string) => page.getByTestId(testId).evaluate((el) => {
+  const r = el.getBoundingClientRect(), hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+  return r.top >= 0 && r.bottom <= innerHeight && !!hit && (hit === el || el.contains(hit));
+});
+
+test("the payment sheet fits a short window: its head in view, Use and Save in reach, the rest scrolls", { tag: ["@feature:app.responsive", "@feature:payments.chat.cards", "@feature:payments.chat.methods"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("alice", { viewport: { width: 1100, height: 900 } }), peer("bob")]);
+  await pair(alice, bob);
+  const { page } = alice;
+  // A laptop split in two, then a narrow side panel the height of the extension's.
+  for (const viewport of [{ width: 1100, height: 420 }, { width: 380, height: 560 }]) {
+    await page.setViewportSize(viewport);
+    const sheet = await openPayments(page);
+    const where = `${viewport.width}x${viewport.height}`;
+    expect((await sheet.boundingBox())!.y, `the sheet's top in the window at ${where}`).toBeGreaterThanOrEqual(0);
+    await expect.poll(() => reachable(page, "payment-mode-accept"), `Accept at ${where}`).toBe(true);
+    await expect.poll(() => reachable(page, "payment-use"), `Use at ${where}`).toBe(true);
+    await openPayments(page, "accept");
+    await expect.poll(() => reachable(page, "payment-accept-save"), `Save at ${where}`).toBe(true);
+    // Save works where it is: a way turned off, saved, and on again.
+    for (const on of ["false", "true"]) {
+      await page.getByTestId("payment-accept-deck-next").click();
+      const current = sheet.locator("[role=checkbox][data-active=true]");
+      await current.press("Space");
+      await expect(current).toHaveAttribute("aria-checked", on);
+      await page.getByTestId("payment-accept-save").click();
+      await expect(page.getByTestId("payment-accept-status")).toHaveAttribute("data-state", "saved");
+      await page.getByTestId("payment-accept-deck-prev").click();
+    }
+    await closePayments(page);
   }
 });

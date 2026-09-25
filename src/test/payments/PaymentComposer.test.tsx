@@ -2,13 +2,13 @@ import { act, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LinkView, WalletView } from "@ghostly/browser/shared/types";
 import { PaymentComposer } from "../../components/PaymentComposer";
+import { rememberRail, rememberedRail } from "../../lib/chatPayments";
 import { fakeEngine, linkView, paymentView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { arkReady, bitcoinSource, everyWallet, mint, REAL_MINT, reviewContext, reviewOf, target, TEST_MINT, usdtReady } from "./fixtures";
 
 // covers: payments.chat.cards, payments.chat.methods, payments.amounts, payments.cashu.send, payments.arkade.send, payments.bark.send, payments.bitcoin.send, payments.usdt.send
 
-const RAIL_KEY = "ghostly-payment-rail";
 const OTHER_MINT = "https://mint2.example.com";
 const ALL_ON = { cashu: true, lightning: true, arkade: true, bark: true, spark: true, bitcoin: true, usdt: true, fedimint: true };
 
@@ -52,7 +52,7 @@ describe("the amount", () => {
   });
 
   it("takes decimals for USDT and requests in the token's smallest units", async () => {
-    localStorage.setItem(RAIL_KEY, "usdt");
+    rememberRail("peer", "usdt");
     const { user, onRequest } = open();
     await user.click(screen.getByTestId("payment-use"));
     await user.type(amount(), "1.5x");
@@ -63,7 +63,7 @@ describe("the amount", () => {
   });
 
   it("refuses more USDT decimals than the token has, without asking for anything", async () => {
-    localStorage.setItem(RAIL_KEY, "usdt");
+    rememberRail("peer", "usdt");
     const { user, onRequest } = open();
     await user.click(screen.getByTestId("payment-use"));
     await user.type(amount(), "1.1234567");
@@ -84,7 +84,7 @@ describe("the amount", () => {
     ["USDT on Sepolia", "usdt", { usdt: usdtReady({ chainId: 11155111 }) }, "TEST-USDT"],
     ["USDT on Ethereum", "usdt", { usdt: usdtReady({ chainId: 1 }) }, "USDT"],
   ])("counts %s in the right unit", async (_, rail, wallet, unit) => {
-    localStorage.setItem(RAIL_KEY, rail);
+    rememberRail("peer", rail);
     const { user } = open({ wallet: everyWallet(wallet) });
     await user.click(screen.getByTestId("payment-use"));
     expect(amount()).toHaveAccessibleName(`Amount in ${unit}`);
@@ -100,20 +100,47 @@ describe("the cards", () => {
   });
 
   it("starts on the card used last time", () => {
-    localStorage.setItem(RAIL_KEY, "arkade");
+    rememberRail("peer", "arkade");
     open();
     expect(card("arkade")).toHaveAttribute("aria-checked", "true");
     expect(card("cashu")).toHaveAttribute("aria-checked", "false");
   });
 
   it("skips a remembered card that is off in this chat, for the first one that is on", () => {
-    localStorage.setItem(RAIL_KEY, "arkade");
+    rememberRail("peer", "arkade");
     open({ link: { paymentMethods: { ...ALL_ON, cashu: false, arkade: false } } });
     expect(card("lightning")).toHaveAttribute("aria-checked", "true");
   });
 
+  it("starts on the first card that can be used, in the deck's order, not on one that is not set up", () => {
+    // No mint: Cashu and Lightning (through the mints) cannot be used; Ark is next.
+    open({ wallet: everyWallet({ mints: [], balance: 0 }) });
+    expect(card("arkade")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("payment-use")).toBeEnabled();
+  });
+
+  it("passes over a remembered card that cannot be used now", () => {
+    rememberRail("peer", "usdt");
+    open({ wallet: everyWallet({ usdt: { configured: true, locked: true, chainId: 1, decimals: 6, balance: "0", gasBalance: "0" } }) });
+    expect(card("cashu")).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("starts past a card the contact does not accept", () => {
+    open({ link: { dataLink: "open", capabilities: { files: true, payments: true, methods: { ...ALL_ON, cashu: false } } } });
+    expect(card("lightning")).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("moves to the first card that can be used as the wallet comes up, until one is picked", async () => {
+    open({ wallet: everyWallet({ mints: [], balance: 0, ark: { configured: false, locked: true, balance: 0 }, bark: undefined, spark: undefined, usdt: undefined, bitcoin: undefined }) });
+    expect(card("cashu")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("payment-use")).toBeDisabled();
+    act(() => fakeEngine.update({ wallet: { ...fakeEngine.state.wallet, ark: arkReady() } }));
+    expect(await screen.findByText("Use Ark")).toBeInTheDocument();
+    expect(card("arkade")).toHaveAttribute("aria-checked", "true");
+  });
+
   it("ignores a remembered value that is not a card", () => {
-    localStorage.setItem(RAIL_KEY, "paypal");
+    rememberRail("peer", "paypal");
     open();
     expect(card("cashu")).toHaveAttribute("aria-checked", "true");
   });
@@ -121,7 +148,7 @@ describe("the cards", () => {
   it("turns over the card clicked and remembers it for next time", async () => {
     const { user } = open();
     await user.click(card("arkade"));
-    expect(localStorage.getItem(RAIL_KEY)).toBe("arkade");
+    expect(rememberedRail("peer")).toBe("arkade");
     const back = screen.getByTestId("payment-back");
     expect(within(back).getByText("Ark")).toBeInTheDocument();
     expect(within(back).getByText("5,000 test sats · with Alice")).toBeInTheDocument();
@@ -136,10 +163,10 @@ describe("the cards", () => {
     expect(card("lightning")).toHaveAttribute("aria-checked", "true");
     expect(card("lightning")).toHaveFocus();
     // Moving only selects: nothing is remembered until a card is turned over.
-    expect(localStorage.getItem(RAIL_KEY)).toBeNull();
+    expect(rememberedRail("peer")).toBeNull();
     await user.keyboard("{Enter}");
     expect(within(screen.getByTestId("payment-back")).getByText("Lightning")).toBeInTheDocument();
-    expect(localStorage.getItem(RAIL_KEY)).toBe("lightning");
+    expect(rememberedRail("peer")).toBe("lightning");
   });
 
   it("goes back from the amount to the cards", async () => {
@@ -169,7 +196,7 @@ describe("a card that cannot be used here", () => {
     expect(card("arkade")).toHaveAttribute("aria-checked", "true");
     expect(screen.getByText("Ark is connecting…", { selector: "p" })).toBeInTheDocument();
     expect(screen.getByTestId("payment-use")).toBeDisabled();
-    expect(localStorage.getItem(RAIL_KEY)).toBeNull();
+    expect(rememberedRail("peer")).toBeNull();
   });
 
   it("says a way of paying is off in this chat", () => {
@@ -192,7 +219,7 @@ describe("a card that cannot be used here", () => {
 
 describe("request and send", () => {
   it("requests with a Lightning invoice but sends nothing on Lightning", async () => {
-    localStorage.setItem(RAIL_KEY, "lightning");
+    rememberRail("peer", "lightning");
     const { user, onRequest, onClose } = open();
     await user.click(screen.getByTestId("payment-use"));
     await user.type(amount(), "50");
@@ -220,7 +247,7 @@ describe("request and send", () => {
   });
 
   it("measures an Ark amount against the Ark balance", async () => {
-    localStorage.setItem(RAIL_KEY, "arkade");
+    rememberRail("peer", "arkade");
     const { user } = open({ balance: 1_000_000 });
     await user.click(screen.getByTestId("payment-use"));
     await user.type(amount(), "6000");
@@ -313,7 +340,7 @@ describe("sending on Ark, Bark, on-chain and USDT", () => {
   const tick = (ms: number) => act(() => { vi.advanceTimersByTime(ms); });
 
   async function ask(rail: string, typed: string) {
-    localStorage.setItem(RAIL_KEY, rail);
+    rememberRail("peer", rail);
     const view = open();
     view.engine.on("askToPay", () => ({ askId: "ask-1" })).on("preparePayment", reviewOf);
     await view.user.click(screen.getByTestId("payment-use"));
@@ -366,7 +393,7 @@ describe("sending on Ark, Bark, on-chain and USDT", () => {
   });
 
   it("shows why the contact could not be asked", async () => {
-    localStorage.setItem(RAIL_KEY, "bark");
+    rememberRail("peer", "bark");
     const { user, engine } = open();
     engine.on("askToPay", () => { throw new Error("Your contact is offline"); });
     await user.click(screen.getByTestId("payment-use"));

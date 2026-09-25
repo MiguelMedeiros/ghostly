@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { chat, expect, openChat, openWallet, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 import { composerRow } from "../support/composer";
+import { chatPayments } from "../support/payments";
 
 test("paired chat: files, real WebRTC, local mint send/request and persistence", { tag: ["@feature:chat.paired.pair", "@feature:transport.webrtc", "@feature:files.paired.send", "@feature:files.persistence", "@feature:chat.paired.storage", "@feature:wallet.cashu.receive-lightning", "@feature:payments.chat.review", "@feature:payments.cashu.send", "@feature:payments.cashu.request", "@feature:wallet.history"] }, async ({ peer }) => {
   test.skip(!process.env.E2E_MINT_URL?.startsWith("http://127.0.0.1:"), "Requires an explicitly local fake mint");
@@ -35,10 +36,7 @@ test("paired chat: files, real WebRTC, local mint send/request and persistence",
   await alice.page.getByTestId("payment-composer").getByRole("button", { name: "Close", exact: true }).click();
   await openChat(bob);
   // Ecash only: the fake mint pays a request's own Lightning invoice by itself and would race Alice.
-  await bob.page.getByTestId("chat-options").click();
-  await bob.page.getByTestId("chat-payments-open").click();
-  await bob.page.getByTestId("chat-payments").getByTestId("chat-payments-lightning").click();
-  await bob.page.getByTestId("chat-payments-save").click();
+  await chatPayments(bob.page, { lightning: false });
   await (await composerRow(bob.page, "payment-button")).click(); await bob.page.getByTestId("payment-card-cashu").click(); await bob.page.getByTestId("payment-amount").fill("10"); await bob.page.getByTestId("payment-request").click();
   await alice.page.getByTestId("payment-pay").click();
   await chat(alice).getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();

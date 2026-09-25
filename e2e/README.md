@@ -184,7 +184,7 @@ npm run e2e:infra:up && npm run test:e2e      # .env.e2e sets E2E_MINT_URL
 | `web/services-web.spec.ts` | a web page says sharing needs the extension or desktop, in the Services page and in a chat's Services… dialog |
 | `web/profiles.spec.ts` · `profile-lock.spec.ts` | profiles keep chats and settings apart, switching, deleting; the lock screen (change, remove, at startup) goes with new profiles and guards deleting a locked one |
 | `web/profile-backup-file.spec.ts` · `profile-backup.spec.ts` | a whole profile backed up to a file (and to S3 with `GHOSTLY_S3_*`), restored as a new profile; passphrase rules |
-| `web/chat-payments.spec.ts` | each chat allows its own ways of paying, both sides' choices shown |
+| `web/chat-payments.spec.ts` | each chat accepts its own ways of paying, chosen on the composer's cards (+ → Payment → Accept); both sides' choices shown; one chat's choice and starting card are its own |
 | `web/sdk-plugin.spec.ts` | adapters built outside the app against `@ghostly/sdk` (`examples/sdk-adapter`), compiled into this build with `GHOSTLY_PLUGINS`: the plugin's Lightning source in the picker (Testnet only), connected, an invoice seen paid; its identity proof added from a pasted signature |
 | `web/store-forward.spec.ts` | held messages (WISP 4xx): with `GHOSTLY_S3_*`, text, a picture and a request held in Alice's S3 while Bob's page is closed, picked up in order when he is back, a changed object refused, an expired one dropped; a contact without the switch is unaffected (no S3 needed) |
 | `web/wallet-cashu.spec.ts` · `wallets-ready.spec.ts` · `wallet-backups.spec.ts` | wallets ready with no setup, Cashu send/mint errors, the Lightning card, test sats; Ark and USDT recovery phrase and encrypted backup files (`@network`) |

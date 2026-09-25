@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { ALL_METHODS_ON, type ChatPaymentMethods } from "../lib/chatPayments";
 import type { PeerLinkState } from "../lib/platform";
@@ -49,10 +49,12 @@ export function ChatPaymentAccept({ peer, contact, cards, onSave }: {
     const said = theirs(id);
     return t(said === "on" ? "payments.accept.hint.both" : said === "off" ? "payments.accept.hint.theyOff" : "payments.accept.hint.unknown", params);
   };
-  const status = error ? undefined
-    : changed ? t("payments.accept.status.changed", { name: contact })
-    : done ? t(connected ? "payments.accept.status.savedLive" : "payments.accept.status.savedLater", { name: contact })
+  const state = error ? "error" : busy ? "saving" : changed ? "changed" : done ? "saved" : "idle";
+  const status = state === "error" ? undefined
+    : state === "changed" || state === "saving" ? t("payments.accept.status.changed", { name: contact })
+    : state === "saved" ? t(connected ? "payments.accept.status.savedLive" : "payments.accept.status.savedLater", { name: contact })
     : t("payments.accept.status.idle");
+  const saveRef = useRef<HTMLButtonElement>(null);
 
   const toggle = (id: WalletRail) => {
     if (busy) return;
@@ -61,16 +63,21 @@ export function ChatPaymentAccept({ peer, contact, cards, onSave }: {
   };
   const save = () => {
     setBusy(true); setError("");
-    void onSave(draft).then(() => { setDone(true); setBusy(false); }, (e: unknown) => { setError(e instanceof Error ? e.message : String(e)); setBusy(false); });
+    void onSave(draft).then(() => {
+      setDone(true); setBusy(false);
+      // Save goes grey once saved: the keyboard goes back to the cards rather than out of the sheet.
+      const at = document.activeElement;
+      if (!at || at === document.body || at === saveRef.current) saveRef.current?.closest(".composer-sheet")?.querySelector<HTMLElement>('[role=checkbox][tabindex="0"]')?.focus({ preventScroll: true });
+    }, (e: unknown) => { setError(e instanceof Error ? e.message : String(e)); setBusy(false); });
   };
 
   return <>
     <CardDeck compact kind="checks" label={t("payments.accept.deck", { name: contact })} name="payment-accept-deck" cards={shown} selected={active}
       onSelect={setActive} onChoose={toggle} checked={(c) => draft[c.id]} testId={(id) => `payment-accept-${id}`} size={{ max: 250, share: .62 }} />
     <p className="composer-sheet-hint" data-testid="payment-accept-hint">{card && hint(card.id, card.name)}</p>
-    <p className="payment-accept-status" data-testid="payment-accept-status" role="status">{status}</p>
+    <p className="payment-accept-status" data-testid="payment-accept-status" data-state={state} role="status">{status}</p>
     {error && <p role="alert" className="text-danger text-xs m-0">{error}</p>}
-    <button type="button" data-testid="payment-accept-save" className="composer-sheet-action" disabled={!changed || busy} onClick={save}>
+    <button ref={saveRef} type="button" data-testid="payment-accept-save" className="composer-sheet-action" disabled={!changed || busy} onClick={save}>
       {t(busy ? "payments.accept.saving" : "payments.accept.save")}
     </button>
   </>;

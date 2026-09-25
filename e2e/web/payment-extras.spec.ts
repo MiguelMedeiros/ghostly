@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import { chat, connect, expect, link, openChat, openWallet, say, test, type Peer } from "../support/fixtures";
 import { mintEndpoint } from "../support/mint";
 import { composerRow } from "../support/composer";
+import { chatPayments } from "../support/payments";
 
 /**
  * Payments in a chat beyond the happy path: memos, a payment the contact refuses, ecash that was
@@ -166,11 +167,7 @@ test("a contact who turns Cashu off stops a reviewed payment before anything is 
   const review = await prepareSend(alice, 21);
 
   // Bob turns Cashu off for this chat while Alice looks at the review.
-  await bob.page.getByTestId("chat-options").click();
-  await bob.page.getByTestId("chat-payments-open").click();
-  await bob.page.getByTestId("chat-payments").getByTestId("chat-payments-cashu").click();
-  await bob.page.getByTestId("chat-payments-save").click();
-  await expect(bob.page.getByTestId("chat-payments")).toHaveCount(0);
+  await chatPayments(bob.page, { cashu: false });
 
   // Alice's app learns it on the open session; approving is refused and nothing leaves.
   await expect(async () => {

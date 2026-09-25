@@ -2,6 +2,7 @@ import { FakeNwcWallet, TestRelay } from "../../packages/browser/test/helpers/fa
 import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
 import { choose } from "../support/select";
 import { composerRow } from "../support/composer";
+import { chatPayments } from "../support/payments";
 
 /**
  * Lightning through Nostr Wallet Connect: the person pastes a wallet's `nostr+walletconnect://` URI as the
@@ -112,10 +113,7 @@ test.describe("NWC on regtest Lightning", () => {
 
     // Bob asks over Lightning only (Cashu off in this chat): the invoice in the request is his own wallet's.
     await openChat(bob);
-    await bob.page.getByTestId("chat-options").click();
-    await bob.page.getByTestId("chat-payments-open").click();
-    await bob.page.getByTestId("chat-payments").getByTestId("chat-payments-cashu").click();
-    await bob.page.getByTestId("chat-payments-save").click();
+    await chatPayments(bob.page, { cashu: false });
     await (await composerRow(bob.page, "payment-button")).click();
     await bob.page.getByTestId("payment-card-lightning").click();
     await bob.page.getByTestId("payment-amount").fill("2100");

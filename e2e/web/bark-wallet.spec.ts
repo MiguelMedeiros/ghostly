@@ -1,5 +1,6 @@
 import { connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
 import { composerRow } from "../support/composer";
+import { chatPayments, closePayments, openPayments } from "../support/payments";
 
 /**
  * Bark (Second's Ark) beside Arkade. Mainnet has no Bark wallet yet; Testnet starts one on Second's public
@@ -48,17 +49,14 @@ test.describe("on Second's signet server", { tag: "@network" }, () => {
     await bob.page.keyboard.press("Escape");
 
     // Alice turns Bark off in this chat: Bob's app can no longer pick it, and says why.
-    await alice.page.getByTestId("chat-options").click();
-    await alice.page.getByTestId("chat-payments-open").click();
-    await alice.page.getByTestId("chat-payments").getByTestId("chat-payments-bark").click();
-    await alice.page.getByTestId("chat-payments-save").click();
+    await chatPayments(alice.page, { bark: false });
     await (await composerRow(bob.page, "payment-button")).click();
     await expect(card(bob)).toBeDisabled({ timeout: 60_000 });
     await expect(card(bob)).toHaveAttribute("title", /does not accept Bark/);
     await expect(bob.page.getByTestId("payment-card-arkade"), "Arkade is its own way of paying, still allowed").toBeEnabled();
-    await bob.page.keyboard.press("Escape");
-    await bob.page.getByTestId("chat-options").click();
-    await bob.page.getByTestId("chat-payments-open").click();
-    await expect(bob.page.getByTestId("chat-payments-bark-contact")).toContainText("has it off");
+    // Bob's Accept side says what Alice has off.
+    await openPayments(bob.page, "accept");
+    await expect(bob.page.getByTestId("payment-accept-bark")).toContainText("Contact: has it off");
+    await closePayments(bob.page);
   });
 });
