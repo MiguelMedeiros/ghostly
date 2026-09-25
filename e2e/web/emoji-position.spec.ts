@@ -37,8 +37,8 @@ test("the emoji/GIF panel follows the composer across sidebar and viewport chang
  await page.getByPlaceholder("Message…").click();await expect(panel).toBeVisible();
  await page.keyboard.press("Escape");await expect(panel).toHaveCount(0);
  await trigger.click();await trigger.click();await expect(panel).toHaveCount(0);
- // A click elsewhere in the chat closes it.
- await trigger.click();await page.locator(".chat-wallpaper").click({position:{x:20,y:20}});await expect(panel).toHaveCount(0);
+ // A click anywhere else (here the chat list's empty space) closes it.
+ await trigger.click();await expect(panel).toBeVisible();await page.mouse.click(240,300);await expect(panel).toHaveCount(0);
  // Recent emoji come first next time.
  await trigger.click();await expect(panel.getByTestId("emoji-section-recent").getByRole("button",{name:"👻",exact:true})).toBeVisible();
 });

@@ -1,5 +1,17 @@
 /* The chat's composer (MessageInput.tsx), laid out as WhatsApp's: one rounded field holding the +, the smiley and
    the message, and the mic (or send) beside it. Theme tokens only, so both schemes and every colour theme follow. */
+
+/* The wells text is typed into. Light themes paint the input colour the same as the bar around it, so there the
+   wells are the surface (white) with a hairline, as WhatsApp's white field on its grey bar. */
+:root {
+  --composer-well: var(--color-input-bg);
+  --composer-well-edge: transparent;
+}
+:root[data-theme="light"] {
+  --composer-well: var(--color-surface);
+  --composer-well-edge: var(--color-border);
+}
+
 .composer-field {
   flex: 1;
   min-width: 0;
@@ -9,7 +21,8 @@
   min-height: 44px;
   padding: 2px 4px;
   border-radius: 22px;
-  background: var(--color-input-bg);
+  background: var(--composer-well);
+  box-shadow: inset 0 0 0 1px var(--composer-well-edge);
 }
 .composer-icon-button {
   flex: none;
@@ -53,7 +66,7 @@
 .composer-textarea:disabled { opacity: 0.5; }
 
 /* Recording takes the field's place, in the field's shape. */
-.composer-row > .voice-bar { border-radius: 22px; background: var(--color-input-bg); }
+.composer-row > .voice-bar { border-radius: 22px; background: var(--composer-well); box-shadow: inset 0 0 0 1px var(--composer-well-edge); }
 
 @media (max-width: 767px) {
   .composer-field { min-height: 48px; border-radius: 24px; }
@@ -159,7 +172,8 @@
   height: 36px;
   padding: 0 14px;
   border-radius: 9999px;
-  background: var(--color-input-bg);
+  background: var(--composer-well);
+  box-shadow: inset 0 0 0 1px var(--composer-well-edge);
   color: var(--color-text-muted);
 }
 .expression-search:focus-within { box-shadow: inset 0 0 0 2px var(--color-accent); }
@@ -285,7 +299,8 @@
   margin: 8px auto;
   padding: 3px;
   border-radius: 9999px;
-  background: var(--color-input-bg);
+  background: var(--composer-well);
+  box-shadow: inset 0 0 0 1px var(--composer-well-edge);
 }
 .expression-switch button {
   width: 56px;

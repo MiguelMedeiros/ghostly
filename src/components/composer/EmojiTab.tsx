@@ -7,6 +7,12 @@ import { CategoryBar, PanelSearch } from "./PanelParts";
 interface Cell { native: string; name: string }
 interface Section { id: string; title: string; cells: Cell[] }
 
+/** The grid scrolled so a category's heading is at its top. */
+function scrollToSection(box: HTMLElement | null, id: string) {
+  const section = box?.querySelector<HTMLElement>(`[data-section="${id}"]`);
+  if (box && section) box.scrollTop = section.offsetTop;
+}
+
 const TONES = ["✋", "✋🏻", "✋🏼", "✋🏽", "✋🏾", "✋🏿"];
 
 /**
@@ -37,20 +43,15 @@ export function EmojiTab({ onPick, autoFocus }: { onPick: (emoji: string) => voi
 
   // A category chosen while searching is scrolled to once the search is gone and the grid is back.
   useEffect(() => {
-    const id = jumpTo.current;
-    if (!id || results) return;
+    if (!jumpTo.current || results) return;
+    scrollToSection(scroller.current, jumpTo.current);
     jumpTo.current = null;
-    const el = scroller.current?.querySelector<HTMLElement>(`[data-section="${id}"]`);
-    if (el && scroller.current) scroller.current.scrollTop = el.offsetTop;
   }, [results]);
 
   const choose = (id: string) => {
     setActive(id);
-    jumpTo.current = id;
-    if (query) { setQuery(""); return; }
-    const el = scroller.current?.querySelector<HTMLElement>(`[data-section="${id}"]`);
-    jumpTo.current = null;
-    if (el && scroller.current) scroller.current.scrollTop = el.offsetTop;
+    if (query) { jumpTo.current = id; setQuery(""); }
+    else scrollToSection(scroller.current, id);
   };
 
   const followScroll = () => {
