@@ -45,7 +45,7 @@ test("a plugin's Lightning source and identity proof show in the pickers and wor
   // The identity proof: signed outside Ghostly with a BIP-340 key held by this test, pasted back.
   const secret = schnorr.utils.randomSecretKey();
   await page.evaluate(() => { location.hash = "#/identities"; });
-  await page.getByTestId("identity-add").click();
+  await page.getByTestId("identities-new").click();
   const add = page.getByTestId("add-identity");
   await add.getByTestId("add-identity-example-schnorr").click();
   await choose(add.getByTestId("add-identity-signer"), "paste");

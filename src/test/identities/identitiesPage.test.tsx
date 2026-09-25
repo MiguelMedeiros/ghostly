@@ -81,7 +81,7 @@ describe("what needs attention about identities", () => {
 });
 
 describe("the Identities page", () => {
-  it("holds this profile's proofs with their status, and the way to add one", async () => {
+  it("holds this profile's proofs with their status, and New in its header adds one", async () => {
     const t = now();
     const { user } = renderApp(<Identities />, { route: "/identities" });
     act(() => fakeEngine.update({ identityProofs: [proofView({ id: "a" }), proofView({ id: "b", subject: "example.net", issuedAt: t - 28 * DAY, expiresAt: t + 2 * DAY })] }));
@@ -91,8 +91,26 @@ describe("the Identities page", () => {
     expect(within(soon).getByTestId("identity-proof-expiring")).toHaveTextContent("Expires in 2 days");
     await user.click(soon);
     expect(screen.getByTestId("identity-panel")).toHaveTextContent("Add it again to renew it");
-    await user.click(screen.getByTestId("identity-add"));
+    // Renewing opens the same add flow as New.
+    await user.click(screen.getByTestId("identity-renew"));
     expect(screen.getByRole("dialog", { name: "Add an identity" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    // New is the page's own action, in its header, not a card in the deck.
+    const add = within(screen.getByRole("banner")).getByTestId("identities-new");
+    expect(add).toHaveAccessibleName("New");
+    expect(add).toHaveAttribute("title", "Add an identity");
+    expect(screen.queryByTestId("identity-add")).not.toBeInTheDocument();
+    await user.click(add);
+    expect(screen.getByRole("dialog", { name: "Add an identity" })).toBeInTheDocument();
+    expect(screen.getByTestId("add-identity-nostr")).toBeInTheDocument();
+  });
+
+  it("with no proofs yet shows the Ghostly card alone and points at New", () => {
+    renderApp(<Identities />, { language: "pt" });
+    expect(screen.getAllByRole("tab").map(t => t.dataset.testid)).toEqual(["identity-ghostly"]);
+    expect(screen.getByTestId("identities-new")).toHaveTextContent("Nova");
+    expect(screen.getByTestId("identity-empty")).toHaveTextContent("Escolha Nova");
   });
 
   it("names the contact who could not verify one of yours", () => {

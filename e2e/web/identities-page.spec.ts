@@ -20,7 +20,7 @@ test("the account bar opens Identities, where a proof is added and listed; Profi
   await expect(item).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("heading", { name: "Identities" })).toBeVisible();
 
-  await page.getByTestId("identity-add").click();
+  await page.getByTestId("identities-new").click();
   const add = page.getByTestId("add-identity");
   await add.getByTestId("add-identity-nostr").click();
   await expect(add.getByTestId("add-identity-signer")).toHaveAttribute("data-value", "nip07");
@@ -59,7 +59,7 @@ test("a proof in its last days puts a dot on Identities, in the bar and in the p
   }
   await page.getByTestId("mobile-tab-identities").click();
   await expect(page.getByRole("heading", { name: "Identities" })).toBeVisible();
-  await page.getByTestId("identity-add").click();
+  await page.getByTestId("identities-new").click();
   const add = page.getByTestId("add-identity");
   await add.getByTestId("add-identity-nostr").click();
   await choose(add.getByTestId("add-identity-validity"), "7");

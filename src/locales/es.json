@@ -333,6 +333,7 @@
       "addOne": "Añadir una identidad",
       "addAnother": "Añadir otra identidad",
       "addHint": "Demuestra que tienes una clave Nostr, un dominio o una cuenta, y muéstralo a los contactos que elijas, un chat a la vez.",
+      "emptyHint": "Aún no hay otras identidades. Elige Nuevo para demostrar que tienes una clave Nostr, un dominio o una cuenta, y luego muéstrala a los contactos que elijas, un chat cada vez.",
       "chosenChats": "Se muestra solo en los chats que elijas",
       "noOthers": "Aún no hay otras identidades.",
       "nothingElse": "{{name}} aún no ha compartido nada más.",

@@ -32,7 +32,7 @@ function didKey() {
 /** Identities → Add → Advanced → DID, with the DID typed in; returns the dialog once its preview is shown. */
 async function startDidProof(peer: Peer, did: string) {
   await go(peer, "#/identities");
-  await peer.page.getByTestId("identity-add").click();
+  await peer.page.getByTestId("identities-new").click();
   const add = peer.page.getByTestId("add-identity");
   // DIDs wait under Advanced, so the picker stays simple for newcomers.
   await expect(add.getByTestId("add-identity-did")).toHaveCount(0);

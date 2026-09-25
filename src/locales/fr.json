@@ -333,6 +333,7 @@
       "addOne": "Ajouter une identité",
       "addAnother": "Ajouter une autre identité",
       "addHint": "Prouvez que vous détenez une clé Nostr, un domaine ou un compte, puis montrez-le aux contacts de votre choix, une discussion à la fois.",
+      "emptyHint": "Aucune autre identité pour l'instant. Choisissez Nouveau pour prouver que vous détenez une clé Nostr, un domaine ou un compte, puis montrez-la aux contacts de votre choix, une discussion à la fois.",
       "chosenChats": "Montrée seulement dans les discussions de votre choix",
       "noOthers": "Pas encore d'autre identité.",
       "nothingElse": "{{name}} n'a encore rien partagé d'autre.",

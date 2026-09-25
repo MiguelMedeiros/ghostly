@@ -17,7 +17,7 @@ const go = (peer: Peer, hash: string) => peer.page.evaluate(h => { location.hash
 
 /** Identities → OpenPGP with the plain gpg signer, up to the paste; returns the dialog and the statement. */
 async function startPgp(peer: Peer, fingerprint: string) {
-  await peer.page.getByTestId("identity-add").click();
+  await peer.page.getByTestId("identities-new").click();
   const add = peer.page.getByTestId("add-identity");
   await add.getByTestId("add-identity-openpgp").click();
   await expect(add.getByTestId("add-identity-signer")).toHaveAttribute("data-value", "gpg");

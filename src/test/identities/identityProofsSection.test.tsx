@@ -27,24 +27,23 @@ const chosen = () => screen.getAllByRole("tab").filter(t => t.getAttribute("aria
 
 /** Identities → Yours: the proofs this profile holds, as a deck of ID cards over the chosen one's panel. */
 describe("IdentityProofsSection", () => {
-  it("is the Ghostly card and the blank one while there are no proofs, and the blank one adds the first", async () => {
-    const { user } = renderApp(<IdentityProofsSection />);
+  it("is only the Ghostly card while there are no proofs, and its panel points at New", async () => {
+    const { user, engine } = renderApp(<IdentityProofsSection />);
     expect(screen.getByRole("tablist", { name: "Your identities" })).toBeInTheDocument();
-    expect(screen.getAllByRole("tab").map(t => t.dataset.testid)).toEqual(["identity-ghostly", "identity-add"]);
+    // Adding is the page's New, not a card in the deck.
+    expect(screen.getAllByRole("tab").map(t => t.dataset.testid)).toEqual(["identity-ghostly"]);
+    expect(screen.queryByTestId("identity-add")).not.toBeInTheDocument();
     expect(chosen()).toEqual([ghostly()]);
-    expect(screen.getByTestId("identity-add")).toHaveTextContent("Add an identity");
     expect(panel()).toHaveTextContent("what contacts see unless you share another");
+    expect(screen.getByTestId("identity-empty")).toHaveTextContent("No other identities yet. Choose New to prove");
     expect(screen.queryByTestId("identity-proof")).not.toBeInTheDocument();
-    await user.click(screen.getByTestId("identity-add"));
-    expect(screen.getByRole("dialog", { name: "Add an identity" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Close" }));
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    // The panel's button opens it too.
-    await user.click(screen.getByTestId("identity-add-open"));
-    expect(screen.getByRole("dialog", { name: "Add an identity" })).toBeInTheDocument();
+    // Once there is one, the hint goes.
+    act(() => engine.update({ identityProofs: [proofView({ id: "a" })] }));
+    await user.click(ghostly());
+    expect(screen.queryByTestId("identity-empty")).not.toBeInTheDocument();
   });
 
-  it("makes an ID card of each proof, with its provider, subject, category, validity and sharing, and ends with Add identity", () => {
+  it("makes an ID card of each proof, with its provider, subject, category, validity and sharing", () => {
     const valid = now() + 30 * DAY, gone = now() - 2 * DAY;
     const { engine } = renderApp(<IdentityProofsSection />);
     act(() => engine.update({ identityProofs: [
@@ -53,8 +52,7 @@ describe("IdentityProofsSection", () => {
         verified: { subject: "https://accounts.google.com#1234", source: "ID token signed by accounts.google.com", attester: "accounts.google.com" } }),
       proofView({ id: "c", provider: "ssh-github", subject: "octocat", expiresAt: gone, sharedWith: 3, verified: { subject: "octocat", source: "SSH signature" } }),
     ] }));
-    expect(screen.getAllByRole("tab").map(t => t.dataset.testid)).toEqual(["identity-ghostly", "identity-proof", "identity-proof", "identity-proof", "identity-add"]);
-    expect(screen.getByTestId("identity-add")).toHaveTextContent("Add another identity");
+    expect(screen.getAllByRole("tab").map(t => t.dataset.testid)).toEqual(["identity-ghostly", "identity-proof", "identity-proof", "identity-proof"]);
     const [domain, oidc, github] = cards();
     expect(domain).toHaveTextContent("Domain");
     expect(domain).toHaveTextContent("Your own key");
@@ -98,19 +96,20 @@ describe("IdentityProofsSection", () => {
     expect(panel()).toHaveAttribute("aria-labelledby", "identity-tab-b");
     expect(within(panel()).getByTestId("identity-panel-subject")).toHaveTextContent("example.net");
 
+    // The last card goes round to the first; the arrows under the deck go round too.
     await user.keyboard("{ArrowRight}");
-    expect(chosen()).toEqual([screen.getByTestId("identity-add")]);
-    expect(screen.getByTestId("identity-add")).toHaveFocus();
-    expect(screen.getByTestId("identity-add-open")).toBeInTheDocument();
-    // Selecting the Add card by key does not open the dialog; Enter on it does.
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(chosen()).toEqual([ghostly()]);
+    expect(ghostly()).toHaveFocus();
+    await user.keyboard("{End}");
+    expect(chosen()).toEqual([cards()[1]]);
     await user.keyboard("{Home}");
     expect(chosen()).toEqual([ghostly()]);
     await user.click(screen.getByTestId("identity-deck-prev"));
-    expect(chosen()).toEqual([screen.getByTestId("identity-add")]);
-    screen.getByTestId("identity-add").focus();
+    expect(chosen()).toEqual([cards()[1]]);
+    // No card opens a dialog.
+    cards()[1].focus();
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("dialog", { name: "Add an identity" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("brings up a proof as soon as it is added", () => {
@@ -123,13 +122,15 @@ describe("IdentityProofsSection", () => {
 
   it("says in its panel how to renew a proof in its last days", async () => {
     const t = now();
-    const { user, engine } = renderApp(<IdentityProofsSection />);
+    const onAdd = vi.fn();
+    const { user, engine } = renderApp(<IdentityProofsSection onAdd={onAdd} />);
     act(() => engine.update({ identityProofs: [proofView({ id: "soon", issuedAt: t - 28 * DAY, expiresAt: t + 2 * DAY })] }));
     expect(within(cards()[0]).getByTestId("identity-proof-expiring")).toHaveTextContent("Expires in 2 days");
     expect(within(panel()).getByTestId("identity-panel-status")).toHaveTextContent("Expires in 2 days");
     expect(panel()).toHaveTextContent("Add it again to renew it; then remove this one.");
+    // Renewing is adding it again: the page's add flow.
     await user.click(screen.getByTestId("identity-renew"));
-    expect(screen.getByRole("dialog", { name: "Add an identity" })).toBeInTheDocument();
+    expect(onAdd).toHaveBeenCalledOnce();
   });
 
   it("lists the chats it is shared in, and stops sharing it in one", async () => {
@@ -266,7 +267,7 @@ describe("IdentityProofsSection", () => {
       expect(screen.getByTestId("identity-ghostly-edit")).toHaveTextContent("Edit profile");
       // Still first, and still there, once proofs come.
       act(() => engine.update({ identityProofs: [proofView({ id: "a" })] }));
-      expect(screen.getAllByRole("tab").map(t => t.dataset.testid)).toEqual(["identity-ghostly", "identity-proof", "identity-add"]);
+      expect(screen.getAllByRole("tab").map(t => t.dataset.testid)).toEqual(["identity-ghostly", "identity-proof"]);
     });
 
     it("shows the name's initial without a picture, and that name and picture are hidden when not shared", () => {

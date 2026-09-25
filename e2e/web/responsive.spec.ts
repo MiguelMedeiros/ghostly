@@ -147,7 +147,7 @@ for (const width of WIDTHS) {
     await expect(page.getByTestId("identities-page")).toBeVisible();
     await expectTidy(page, "[data-testid=identities-page]", "Identities");
     // Adding an identity: the dialog holds together too (Nostr, remote signer: no extension in this page).
-    await page.getByTestId("identity-add").click();
+    await page.getByTestId("identities-new").click();
     await expectTidy(page, "[data-testid=add-identity]", "Identities, choosing an identity");
     await page.getByTestId("add-identity-nostr").click();
     await expect(page.getByTestId("add-identity-field-bunker")).toBeVisible();

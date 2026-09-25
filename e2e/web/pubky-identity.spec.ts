@@ -20,7 +20,7 @@ const PROOF_FOLDER = /^\/pub\/ghostly\.app\/proofs\/([a-f0-9]{64})\/:w$/;
 /** Identities → Add → Pubky → Continue: the approval screen, both ways. */
 async function startPubky(peer: Peer) {
   await go(peer, "#/identities");
-  await peer.page.getByTestId("identity-add").click();
+  await peer.page.getByTestId("identities-new").click();
   const add = peer.page.getByTestId("add-identity");
   await add.getByTestId("add-identity-pubky").click();
   await add.getByTestId("add-identity-start").click();

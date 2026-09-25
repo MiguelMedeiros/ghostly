@@ -325,7 +325,7 @@ function identityKit(w: World): IdentityKit | undefined {
   const { a, b } = w;
   const start = async (tile: string) => {
     await go(a, "#/identities");
-    await a.page.getByTestId("identity-add").click();
+    await a.page.getByTestId("identities-new").click();
     const add = a.page.getByTestId("add-identity");
     await add.getByTestId(tile).click();
     return add;

@@ -15,7 +15,7 @@ import { choose } from "../support/select";
 
 async function addAccountProof(page: Page, issuer: LocalOidcIssuer, signer = "oidc-email") {
   await page.evaluate(() => { location.hash = "#/identities"; });
-  await page.getByTestId("identity-add").click();
+  await page.getByTestId("identities-new").click();
   const add = page.getByTestId("add-identity");
   await add.getByTestId("add-identity-oidc").click();
   await choose(add.getByTestId("add-identity-signer"), signer);
