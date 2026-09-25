@@ -9,16 +9,19 @@
   user-select: none;
   -webkit-user-select: none;
 }
+/* Bars share the width: 64 fit down to 160px (a phone's bubble), never spilling over the buttons beside them. */
 .voice-wave-bars {
   position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
-  gap: 2px;
+  justify-content: space-between;
+  gap: 1.5px;
+  overflow: hidden;
 }
 .voice-wave-bar {
   flex: 1 1 0;
-  min-width: 1.5px;
+  min-width: 1px;
   max-width: 3px;
   border-radius: 2px;
   background: currentColor;
@@ -74,6 +77,8 @@
   animation: fade-in 120ms ease-out;
 }
 @media (max-width: 767px) { .voice-bar { inset-inline-end: 52px; } }
+/* A phone held in one hand: the timer and "slide to cancel" are all that fit, as in WhatsApp. */
+@media (max-width: 479px) { .voice-hold-live { display: none; } }
 .voice-bar-dot {
   width: 10px;
   height: 10px;

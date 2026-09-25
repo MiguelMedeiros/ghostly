@@ -13,6 +13,7 @@ const TAP_MS = 300;
 const CANCEL_PX = 110;
 const LOCK_PX = 80;
 const HINT_MS = 2500;
+const PREVIEW_BARS = 40;
 
 interface Props {
   onSend(file: File, voice: VoiceMeta): Promise<string | null>;
@@ -226,7 +227,8 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
       recorder.pause();
       setPhase("paused");
       setElapsed(recorder.elapsed());
-      setPreview({ peaks: recorder.peaks(), playing: false });
+      // Fewer bars than a message: the bar beside it has buttons on both sides.
+      setPreview({ peaks: recorder.peaks(PREVIEW_BARS), playing: false });
     }
   };
 
@@ -273,7 +275,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
           <span className="text-[15px] tabular-nums text-text-primary min-w-[40px]" data-testid="voice-timer" aria-label={`Recorded ${time}`}>{time}</span>
           {mode === "hold" ? (
             <>
-              <LiveWaveform levels={levels} bars={24} />
+              <LiveWaveform levels={levels} bars={24} className="voice-hold-live" />
               <span className="voice-slide" style={{ opacity: slideFade, transform: `translateX(${drag.x * direction() * 0.6}px)` }} data-testid="voice-slide">
                 <svg className="voice-slide-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
                 Slide to cancel
