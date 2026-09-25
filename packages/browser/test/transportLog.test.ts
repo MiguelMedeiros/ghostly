@@ -159,3 +159,18 @@ describe("transport log: flapping", () => {
     expect(new TransportLog([...log.entries, ...log.entries]).entries).toHaveLength(TRANSPORT_LOG_MAX);
   });
 });
+
+describe("transport log: the live transport now", () => {
+  it("says since when and why, past a failed switch, and nothing while not live", () => {
+    const log = new TransportLog();
+    expect(log.liveNow()).toBeUndefined();
+    log.observe(live("webrtc/1"), 10);
+    expect(log.liveNow()).toEqual({ since: 10, cause: undefined });
+    log.chose("contact", "iroh/1", 15);
+    log.observe(live("iroh/1"), 20);
+    log.switchFailed("hyperdht/1", "unreachable", 30);
+    expect(log.liveNow()).toEqual({ since: 20, cause: "contact" });
+    log.observe(down(), 40);
+    expect(log.liveNow()).toBeUndefined();
+  });
+});

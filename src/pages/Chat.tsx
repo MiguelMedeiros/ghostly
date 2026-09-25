@@ -45,10 +45,11 @@ import { chatPath } from "../lib/url";
 import { fileMessageText, parseCallSignal, signalHasVideo, type VoiceMeta } from "@ghostly/core";
 import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
 import { useAppNavigation } from "../hooks/useAppNavigation";
-import { TransportChip, TransportIcon, TransportMenu } from "../components/TransportMenu";
+import { TransportChip, TransportMenu } from "../components/TransportMenu";
+import { TransportIcon } from "../components/TransportIcon";
 import { useChatLink } from "../hooks/useChatLink";
 import { TransportLine } from "../components/TransportTimeline";
-import { mergeTimeline } from "../lib/transportEvents";
+import { connectionSummary, mergeTimeline } from "../lib/transportEvents";
 
 interface ChatProps {
   /** The stored session this chat is. `App` reads it off the address. */
@@ -606,7 +607,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               )}
               {paired && chatLink && (
                 <MenuItem testId="chat-connection-open" onClick={() => { closeMenu(); setShowTransport(true); }}
-                  icon={<TransportIcon transport={chatLink.pairing?.transport} size={16} />}>
+                  icon={<TransportIcon transport={chatLink.pairing?.transport} size={16} />}
+                  hint={connectionSummary(chatLink, Date.now(), shownName)?.short ?? (chatLink.deliveryMode === "dht" ? "DHT only · no live connection" : "Not live")}>
                   {t("chat.menu.connection")}
                 </MenuItem>
               )}

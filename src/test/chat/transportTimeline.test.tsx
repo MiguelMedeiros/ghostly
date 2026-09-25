@@ -165,6 +165,6 @@ describe("the chat's Connection menu", () => {
     const menu = screen.getByTestId("transport-menu");
     expect(within(menu).getByTestId("transport-menu-now")).toHaveTextContent("Connection · DHT only");
     expect(within(menu).getAllByRole("radio").every(r => (r as HTMLButtonElement).disabled)).toBe(true);
-    expect(within(menu).getByTestId("transport-menu-note")).toHaveTextContent("DHT only is on. Turn it off from the connection icon to choose a live connection.");
+    expect(within(menu).getByTestId("transport-menu-note")).toHaveTextContent("DHT only is on. Turn it off to choose a live connection.");
   });
 });

@@ -10,7 +10,7 @@ const lines = (peer: Peer) => chat(peer).getByTestId("transport-line");
 const lineText = (peer: Peer, text: string | RegExp) => lines(peer).getByTestId("transport-line-text").filter({ hasText: text });
 
 test("each timeline says when the chat went live, dropped and came back, and the menu offers what a browser can", {
-  tag: ["@feature:transport.timeline", "@feature:transport.chat-switch", "@feature:chat.paired.reconnect"],
+  tag: ["@feature:transport.timeline", "@feature:transport.chat-switch", "@feature:transport.indicator", "@feature:chat.paired.reconnect"],
 }, async ({ peer }) => {
   test.setTimeout(4 * 60_000);
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
@@ -27,9 +27,23 @@ test("each timeline says when the chat went live, dropped and came back, and the
   await expect(details).toContainText("WebRTC");
   await expect(details).toContainText("A first pairing always uses WebRTC.");
 
+  // The connection icon shows the transport by its own mark; hovering it says what it is, clicking it says why.
+  const icon = alice.page.getByTestId("connection-options");
+  await expect(icon).toHaveAttribute("data-transport", "webrtc/1");
+  await expect(icon.locator("[data-transport-icon]")).toHaveAttribute("data-transport-icon", "webrtc/1");
+  await icon.hover();
+  await expect(alice.page.getByTestId("connection-tooltip-detail")).toHaveText(/^(\d+ ms · )?live for .+ · the only one here$/);
+  await icon.click();
+  const summary = alice.page.getByTestId("connection-summary");
+  await expect(summary).toContainText("Transport");
+  await expect(summary).toContainText("WebRTC is the only transport this app runs.");
+  await expect(alice.page.getByTestId("connection-menu").getByRole("radio", { name: "WebRTC" })).toHaveAttribute("aria-checked", "true");
+  await alice.page.keyboard.press("Escape");
+
   // The header names the live transport, and the chat's Connection menu (chip or ⋮) offers WebRTC alone here.
   await expect(alice.page.getByTestId("transport-chip")).toHaveAttribute("data-transport", "webrtc/1");
   await alice.page.getByTitle("Options").click();
+  await expect(alice.page.getByTestId("chat-connection-open")).toContainText(/Connection…WebRTC · (\d+ ms · )?the only one here/);
   await alice.page.getByTestId("chat-connection-open").click();
   const menu = alice.page.getByTestId("transport-menu");
   await expect(menu.getByRole("radio")).toHaveCount(1);

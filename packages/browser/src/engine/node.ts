@@ -2203,6 +2203,7 @@ export class GhostlyNode implements EngineImplementation {
       transportAutomatic: live.stored.preferredTransport === undefined,
       peerTransports: live.link?.peerAvailableTransports,
       transportRttMs: live.link?.rttMs,
+      transportLive: live.transportLog?.liveNow(),
       // The whole story only for the chat on screen: every state push carries every link.
       transportLog: stored.id === this.activeLinkId && stored.profile && !stored.group ? stored.transportLog ?? [] : undefined,
       myPubKeyZ32: live.myPubKeyZ32,

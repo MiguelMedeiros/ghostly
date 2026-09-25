@@ -10,7 +10,7 @@ import type { BitcoinView } from "../engine/paymentAdapters/providers/bitcoinSer
 import type { PaymentReview, PaymentTarget } from "@ghostly/core";
 import type { DeliveryMode, DhtDeliveryState, DhtDeliveryView, HoldKind } from "@ghostly/core";
 import type { S3Config } from "../backup/s3";
-import type { TransportEntry } from "../engine/transportLog";
+import type { TransportCause, TransportEntry } from "../engine/transportLog";
 import type { PublicProfile, ProfileChoice } from '../profiles/public';
 import type { NostrContactCache, NostrContactView, NostrSocialSettings, NostrSocialState } from "../nostr/types";
 import type { ProofLedger, ProofAdapter } from "@ghostly/core";
@@ -662,6 +662,8 @@ export interface LinkView {
   peerTransports?: PairedTransport[];
   /** Round trip on the live session, once measured. */
   transportRttMs?: number;
+  /** While live: since when the current transport carries the chat, and why it was chosen (see engine/transportLog.ts). */
+  transportLive?: { since: number; cause?: TransportCause };
   /** The chat's connection story, newest last; only for the chat on screen (`setActiveLink`). */
   transportLog?: TransportEntry[];
   id: string;

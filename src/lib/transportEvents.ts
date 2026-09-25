@@ -123,3 +123,54 @@ export function mergeTimeline<M extends { timestamp: number }>(messages: readonl
   while (i < sorted.length) out.push({ kind: "transport", entry: sorted[i++] });
   return out;
 }
+
+/** The live transport of a chat: on it, and nothing moving. */
+export function liveTransport(link?: Pick<LinkView, "dataLink" | "pairing" | "deliveryMode">): PairedTransport | undefined {
+  const pair = link?.pairing;
+  return link?.dataLink === "open" && pair?.status === "ready" && link.deliveryMode !== "dht" ? pair.transport : undefined;
+}
+
+/** How long something has lasted, as a person says it: "less than a minute", "12 min", "3 h", "2 days". */
+export function lasting(ms: number): string {
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 1) return "less than a minute";
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours} h`;
+  return `${Math.floor(hours / 24)} days`;
+}
+
+/** What a chat's live connection is, at a glance: the tooltip, the ⋮ row and the popover all read from this. */
+export interface ConnectionSummary {
+  transport: PairedTransport;
+  name: string;
+  rttMs?: number;
+  since?: number;
+  /** Why this transport, in a few words ("your choice") and in a sentence. */
+  whyShort: string;
+  why: string;
+  /** "Iroh · 42 ms · live for 12 min · your choice" */
+  line: string;
+  /** Short enough for a menu row's second line: "Iroh · 42 ms · your choice". */
+  short: string;
+  /** The same without the transport's name, under a label that already says it: "42 ms · live for 12 min · your choice". */
+  detail: string;
+}
+
+export function connectionSummary(link: LinkView | undefined, now: number, contact = "Your contact"): ConnectionSummary | undefined {
+  const transport = liveTransport(link);
+  if (!link || !transport) return undefined;
+  const t = name(transport), chosen = link.transportAutomatic === false || (link.transportAutomatic === undefined && link.preferredTransport !== undefined);
+  const cause = link.transportLive?.cause, only = (link.availableTransports ?? []).length === 1;
+  const [whyShort, why] = only ? ["the only one here", `${t} is the only transport this app runs.`]
+    : cause === "contact" ? [`${contact === "Your contact" ? "your contact's" : `${contact}'s`} choice`, `${contact} chose ${t} for this chat.`]
+    : chosen && link.preferredTransport === transport ? ["your choice", `You chose ${t} for this chat.`]
+    : chosen ? ["fallback", `You chose ${name(link.preferredTransport)} for this chat; it is not available now, so the chat uses ${t}.`]
+    : cause === "dropped" ? ["automatic, after a drop", `Automatic: the chat came back over ${t} after the previous transport dropped.`]
+    : ["automatic", `Automatic: both apps rank ${t} first${transport === "webrtc/1" ? ", and a first pairing always uses WebRTC" : ""}.`];
+  const since = link.transportLive?.since;
+  const parts = [...(link.transportRttMs !== undefined ? [`${link.transportRttMs} ms`] : []), ...(since !== undefined ? [`live for ${lasting(now - since)}`] : []), whyShort];
+  return { transport, name: t, rttMs: link.transportRttMs, since, whyShort, why, line: [t, ...parts].join(" · "), detail: parts.join(" · "),
+    short: [t, ...(link.transportRttMs !== undefined ? [`${link.transportRttMs} ms`] : []), whyShort].join(" · ") };
+}
+

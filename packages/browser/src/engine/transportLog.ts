@@ -108,6 +108,17 @@ export class TransportLog {
     return false;
   }
 
+  /** The live transport now: since when it carries the chat and why it was chosen (the line that started it). */
+  liveNow(): { since: number; cause?: TransportCause } | undefined {
+    if (!this.snapshot?.live) return undefined;
+    for (let i = this.entries.length - 1; i >= 0; i--) {
+      const e = this.entries[i];
+      if (e.kind === "failed") continue;
+      return liveLine(e) ? { since: e.at, cause: e.cause } : undefined;
+    }
+    return undefined;
+  }
+
   /** A switch to `target` could not connect, and the chat stayed on the transport it was on. */
   switchFailed(target: PairedTransport, reason: string, now: number): boolean {
     return this.failed(target, reason, this.snapshot?.live ? this.snapshot.transport : undefined, now);

@@ -7,7 +7,7 @@ import { GroupMembersDialog } from "../../components/GroupMembersDialog";
 import { groupView, type StatePatch } from "../fakeEngine";
 import { renderApp } from "../render";
 
-// covers: groups.connection
+// covers: groups.connection, transport.indicator
 
 const ME = "me".padEnd(52, "y"), ALICE = "alice".padEnd(52, "y"), BOB = "bob".padEnd(52, "y"), CAROL = "carol".padEnd(52, "y");
 const NOW = Date.now();
@@ -37,13 +37,34 @@ function header() {
     kind: trigger.dataset.state,
     name: trigger.getAttribute("aria-label")!.replace("Group connection: ", ""),
     popover: screen.getByTestId("group-connection-state").textContent,
-    tooltip: screen.getByTestId("group-connection-tooltip").textContent,
+    // The label, without the line on what carries the group.
+    tooltip: screen.getByTestId("group-connection-tooltip").textContent!.replace(screen.queryByTestId("group-connection-tooltip-detail")?.textContent ?? "", ""),
     dot: [...(within(trigger).queryByTestId("group-connection-dot")?.classList ?? [])].find(c => c.startsWith("bg-")) ?? null,
   };
 }
 const rows = () => screen.getAllByTestId("group-connection-member").map(row => ({
   key: row.dataset.key, state: row.dataset.state, status: within(row).getByTestId("group-connection-member-status").textContent,
 }));
+
+describe("GroupConnection: over what the group is live", () => {
+  it.each<[string, GroupMemberView[], string | undefined, string | undefined]>([
+    ["everyone over WebRTC", [me, alice(), bob()], "2 of 2 live over WebRTC", "webrtc/1"],
+    ["some over WebRTC", [me, alice(), bob({ state: "waiting", transport: undefined })], "1 of 2 live over WebRTC", "webrtc/1"],
+    ["edges over different transports", [me, alice(), bob({ transport: "iroh/1" }), member({ key: CAROL, edge: edge({ linkId: "edge-c", transport: "iroh/1" }) })], "3 of 3 live · 2 Iroh, 1 WebRTC", undefined],
+    ["nobody live", [me, alice({ state: "waiting" }), bob({ state: "waiting" })], undefined, undefined],
+  ])("%s", async (_, members, line, transport) => {
+    await open(active(members));
+    const trigger = screen.getByTestId("group-connection-options");
+    if (line) {
+      expect(screen.getByTestId("group-connection-tooltip-detail")).toHaveTextContent(line);
+      expect(screen.getByTestId("group-connection-transports")).toHaveTextContent(line);
+    } else expect(screen.queryByTestId("group-connection-transports")).not.toBeInTheDocument();
+    if (transport) {
+      expect(trigger).toHaveAttribute("data-transport", transport);
+      expect(trigger.querySelector("[data-transport-icon]")).toHaveAttribute("data-transport-icon", transport);
+    } else expect(trigger).not.toHaveAttribute("data-transport");
+  });
+});
 
 describe("GroupConnection: the header sums up the mesh", () => {
   it.each<[string, GroupMemberView[], StatePatch, { kind: string; label: string; dot: string | null }]>([
