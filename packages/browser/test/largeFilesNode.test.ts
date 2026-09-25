@@ -51,9 +51,9 @@ async function setup() {
   const records = new Map<string, FileTransferRecord>();
   const sources = new Map<string, { size: number; digest?: string }>();
   let decide: (size: number) => OfferDecision = () => "accept";
-  let contact: GhostLink;
+  const peer: { link?: GhostLink } = {};
   const files = new ChatFiles({
-    send: (frame) => contact.sendFilesFrame(frame),
+    send: (frame) => peer.link?.sendFilesFrame(frame) ?? false,
     decide: async (file) => decide(file.size),
     openTarget: async (record): Promise<IncomingTarget> => {
       const disk = received.get(record.id) ?? { hash: createHash("sha256"), length: 0 };
@@ -68,7 +68,7 @@ async function setup() {
     changed: (record) => { records.set(`${record.direction}:${record.id}`, record); },
     room: async () => 50 * 1024 ** 3,
   });
-  contact = new GhostLink({
+  const contact = new GhostLink({
     params: { ...invitation.invite, profile: "paired-chat/1" }, rtcAvailable: false, largeFilesSupport: true,
     pairing: { credentials: { seedB64: theirs, peerKey: identityFromSeedB64(mine).pubKeyZ32 }, pinPeer: async () => {} },
     native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1", "hyperdht/1"], peerFallback: true,
@@ -76,6 +76,7 @@ async function setup() {
     transport, createPeerConnection: () => { throw new Error("No WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
     events: { onFilesFrame: (frame) => files.handle(frame), onFilesSession: (open) => { if (open) files.attach(); else files.detach(); } },
   });
+  peer.link = contact;
   contact.registerEndpoint(net.endpoint("iroh/1", "contact"));
   contact.registerEndpoint(net.endpoint("hyperdht/1", "contact"));
   let node = makeNode();

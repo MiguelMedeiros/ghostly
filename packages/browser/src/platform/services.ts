@@ -119,7 +119,8 @@ export const servicesPlatform: ServicesPlatform | null = {
   async sendFile(peerPubKeyZ32, source, options) {
     const link = engine.linkByPeer(peerPubKeyZ32);
     if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
-    if (link.profile && !link.capabilities?.files) throw new Error("Connect to an updated peer to send files");
+    // Refused only by a live contact that takes no files: while not live, the peer keeps it and sends it when live.
+    if (link.profile && !link.capabilities?.files && link.dataLink === "open") throw new Error("Connect to an updated peer to send files");
     const tooLarge = servicesPlatform!.fileTooLarge!(peerPubKeyZ32, source.size);
     if (tooLarge) throw new Error(tooLarge);
 

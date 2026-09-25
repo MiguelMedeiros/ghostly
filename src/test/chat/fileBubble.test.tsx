@@ -10,6 +10,8 @@ import { renderApp } from "../render";
 // covers: files.large.offer, files.large.resume, files.size-label
 
 const GB = 1024 ** 3;
+// The root tsconfig has no Array.at.
+const last = <T,>(list: T[]): T | undefined => list[list.length - 1];
 const file = (patch: Partial<ChatFile> = {}): ChatFile => ({ id: "chat1-in-abc", name: "movie.mkv", size: 4.2 * GB, mime: "video/x-matroska", ...patch });
 const show = (transfer: FileTransferState | null, patch: Partial<ChatFile> = {}) => {
   fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: transfer ? { [file(patch).id]: transfer } : {} });
@@ -56,7 +58,7 @@ describe("FileBubble: files/3", () => {
     fireEvent.click(screen.getByTestId("file-accept"));
     await waitFor(() => expect(fakeEngine.callsTo("fileAction")).toEqual([{ linkId: "chat1", fileId: "chat1-in-abc", action: "accept" }]));
     fireEvent.click(screen.getByTestId("file-decline"));
-    await waitFor(() => expect(fakeEngine.callsTo("fileAction").at(-1)?.action).toBe("decline"));
+    await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("decline"));
   });
 
   it("an offer larger than the room here cannot be accepted", () => {
@@ -68,15 +70,15 @@ describe("FileBubble: files/3", () => {
   it("a moving transfer pauses and cancels; paused here it resumes; paused by the contact it does not", async () => {
     const view = show({ state: "transferring", direction: "out", transferred: GB, size: 4.2 * GB, rate: 1024 ** 2 }, { id: "chat1-out-xyz" });
     fireEvent.click(screen.getByTestId("file-pause"));
-    await waitFor(() => expect(fakeEngine.callsTo("fileAction").at(-1)).toEqual({ linkId: "chat1", fileId: "chat1-out-xyz", action: "pause" }));
+    await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))).toEqual({ linkId: "chat1", fileId: "chat1-out-xyz", action: "pause" }));
     act(() => fakeEngine.update({ transfers: { "chat1-out-xyz": { state: "transferring", stage: "paused", pausedBy: "me", direction: "out", transferred: GB, size: 4.2 * GB } } }));
     expect(screen.queryByTestId("file-pause")).toBeNull();
     fireEvent.click(screen.getByTestId("file-resume"));
-    await waitFor(() => expect(fakeEngine.callsTo("fileAction").at(-1)?.action).toBe("resume"));
+    await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("resume"));
     act(() => fakeEngine.update({ transfers: { "chat1-out-xyz": { state: "transferring", stage: "paused", pausedBy: "peer", direction: "out", transferred: GB, size: 4.2 * GB } } }));
     expect(screen.queryByTestId("file-resume")).toBeNull();
     fireEvent.click(screen.getByTestId("file-cancel"));
-    await waitFor(() => expect(fakeEngine.callsTo("fileAction").at(-1)?.action).toBe("cancel"));
+    await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("cancel"));
     view.unmount();
   });
 
