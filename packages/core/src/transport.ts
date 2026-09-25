@@ -11,7 +11,12 @@ import type { GhostRecord, SignedPacket } from "./pkarr";
  * signaling). A transport with a request budget spends only part of it on these, so they never
  * starve the links; one without ignores it.
  */
-export interface PkarrRequestOptions { background?: boolean }
+/**
+ * `urgent`: a signal is due any moment (a link polling fast). A transport with more than one relay may
+ * ask a second one when the first had nothing new: relays behind one name do not all serve a fresh
+ * packet at the same moment.
+ */
+export interface PkarrRequestOptions { background?: boolean; urgent?: boolean }
 
 export interface PkarrTransport {
   publish(identity: Identity, records: GhostRecord[], options?: PkarrRequestOptions): Promise<void>;

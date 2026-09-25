@@ -1,5 +1,5 @@
 import type { WalletMode } from "./mints";
-import type { PaymentMethodName, VoiceMeta } from "@ghostly/core";
+import type { PairingProgress, PaymentMethodName, VoiceMeta } from "@ghostly/core";
 import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
 import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
@@ -639,6 +639,11 @@ export interface LinkView {
   proofError?: string;
   profile?: "paired-chat/1";
   pairing?: PairingState;
+  /**
+   * How far this chat's first pairing got (`@ghostly/core` `PairingProgress`): from the invite being
+   * published to `live`. Absent for chats paired before this app start, DHT-only invites and legacy chats.
+   */
+  pairingProgress?: PairingProgress;
   peerVerified?: boolean;
   /** `methods`: ways of paying both sides allow in this chat right now. */
   capabilities?: { files: boolean; payments: boolean; methods?: Record<PaymentMethodName, boolean> };

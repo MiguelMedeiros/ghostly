@@ -195,6 +195,12 @@
           "markdownDescription": "Enables the decrypt_text command without any pre-configured scope."
         },
         {
+          "description": "Enables the diagnostic_log command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-diagnostic-log",
+          "markdownDescription": "Enables the diagnostic_log command without any pre-configured scope."
+        },
+        {
           "description": "Enables the encrypt_text command without any pre-configured scope.",
           "type": "string",
           "const": "allow-encrypt-text",
@@ -415,6 +421,12 @@
           "type": "string",
           "const": "deny-decrypt-text",
           "markdownDescription": "Denies the decrypt_text command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the diagnostic_log command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-diagnostic-log",
+          "markdownDescription": "Denies the diagnostic_log command without any pre-configured scope."
         },
         {
           "description": "Denies the encrypt_text command without any pre-configured scope.",

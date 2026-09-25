@@ -58,15 +58,18 @@ pub async fn publish(
     pkarr.publish(&signed_packet).await
 }
 
+/// `background`: a look that can wait; `urgent`: a signal is due (see `Pkarr::resolve_with`).
 pub async fn resolve(
     pkarr: &Pkarr,
     public_key_z32: &str,
+    background: bool,
+    urgent: bool,
 ) -> Result<Option<ResolvedPacket>, String> {
     let public_key: PublicKey = public_key_z32
         .try_into()
         .map_err(|e| format!("Invalid public key: {}", e))?;
 
-    let Some(signed_packet) = pkarr.resolve(&public_key).await else {
+    let Some(signed_packet) = pkarr.resolve_with(&public_key, background, urgent).await else {
         return Ok(None);
     };
 

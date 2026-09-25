@@ -100,9 +100,15 @@ export interface EngineApi {
   /** Publication, step 2: the draft, signed by the person's own signer, sent to their relays. */
   nostrPublish(params: { draftId: string; event: unknown }): NostrPublishResult;
   createLink(): { linkId: string; inviteCode: string };
+  /**
+   * The keys for a new chat, warmed on the network ahead of time when the engine could (see `GhostlyNode.
+   * takeInvite`): the UI keeps `mine` as its side and hands `inviteCode` over, then `ensureLink`s it.
+   */
+  takeInvite(): { mine: LinkParams; inviteCode: string };
   joinLink(params: { inviteCode: string }): { linkId: string };
   /** Makes sure a link with these parameters runs; used by UIs that keep their own session list. */
-  ensureLink(params: LinkParams): { linkId: string };
+  /** `inviteCode`: the invite this side made and holds (the inviter); absent on the side that joined. */
+  ensureLink(params: LinkParams & { inviteCode?: string }): { linkId: string };
   confirmPair(params: { linkId: string; code: string }): void;
   pollNow(params: { linkId: string }): void;
   removeLink(params: { linkId: string }): void;

@@ -28,6 +28,7 @@
     "allow-resolve-messages",
     "allow-publish-records",
     "allow-resolve-records",
+    "allow-diagnostic-log",
     "allow-local-fetch",
     "allow-bitcoind-rpc",
     "allow-lnd-request",

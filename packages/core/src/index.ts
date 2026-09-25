@@ -55,3 +55,5 @@ export * from "./groupEntry";
 export * from "./groupCommunity";
 export * from "./communityRendezvous";
 export * from "./groupMeta";
+export * from "./pairingProgress";
+export { setLinkTraceSink } from "./linkTrace";

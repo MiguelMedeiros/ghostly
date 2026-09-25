@@ -8,15 +8,25 @@
 //! newest (signatures verified by pkarr, the newest timestamp wins), and a read
 //! returns the newest seen: one that a peer put only on the DHT is at most one
 //! poll late.
+//!
+//! Publishing is timed the same way. A relay keeps a packet the moment the PUT
+//! arrives and serves it from then on, but answers only after its own DHT put,
+//! seconds later, and the DHT put from here takes 2 to 6 s. A link publishes
+//! several times while pairing (its presence, its offer, its answer), one after
+//! the other, so waiting for those answers put seconds between each step. Now a
+//! publish returns as soon as the packet can be read back from a relay, or a
+//! write succeeded, whichever is first; the writes run on in the background and
+//! say in the log how they ended.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use pkarr::relay_client::{RelayClient, RelayError};
 use pkarr::{Client, PublicKey, ResolvePolicy, SignedPacket};
 use tokio::sync::watch;
 use url::Url;
+
+use crate::diagnostics;
 
 /// Reads this client allows itself per relay and minute; past it, a read
 /// returns the newest seen and leaves the relays to the DHT lookup. Relays
@@ -29,6 +39,41 @@ const READS_PER_MINUTE: usize = 40;
 const REST: Duration = Duration::from_secs(15);
 /// Keys whose newest packet is remembered; the least recently read go first.
 const REMEMBERED_KEYS: usize = 1024;
+/// A relay that has the packet answers in 0.3 s (0.9 s while a PUT for the key
+/// is landing); one that has not asks its DHT first and takes longer than a
+/// poll should. A read waits this long for a relay, and no longer.
+const READ_TIMEOUT: Duration = Duration::from_millis(1_500);
+/// A relay answers a PUT after its own DHT put: this long is given to hear how it went.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+/// After a relay answered empty-handed, how much longer a read waits for the DHT lookup before
+/// returning nothing; the lookup runs on, and the next poll has what it found.
+const LOOKUP_GRACE: Duration = Duration::from_millis(300);
+/// A background read (nobody waiting on it) spends no relay budget and waits for the lookup this long.
+const BACKGROUND_LOOKUP_WAIT: Duration = Duration::from_secs(4);
+/// A publish reads its packet back from a relay this soon after the PUTs left, then every so often…
+const READ_BACK_AFTER: Duration = Duration::from_millis(200);
+const READ_BACK_EVERY: Duration = Duration::from_millis(300);
+/// …this many times at most; after that it waits for the writes themselves.
+const READ_BACKS: usize = 4;
+/// A relay that says (`x-ratelimit-remaining`) it has fewer requests left than this for us is left
+/// to the others; pkarr.pubky.org allows 50 a minute per address, pkarr.pubky.app 1000.
+const RESERVE: i64 = 4;
+/// A second opinion on an urgent read is asked of a relay only while it has this many left.
+const SECOND_OPINION_RESERVE: i64 = 12;
+/// Once a relay said its limit (`x-ratelimit-limit`, a minute's worth per address), this client
+/// allows itself half of it, within these bounds: two apps on one machine share the address.
+const READS_PER_MINUTE_LEAST: usize = 10;
+const READS_PER_MINUTE_MOST: usize = 90;
+/// A read-back after a publish waits this long for the relay: one that has the packet answers in
+/// 0.3 s; one that has not is still asking its DHT, and the next read-back will do.
+const READ_BACK_TIMEOUT: Duration = Duration::from_millis(700);
+/// A relay's body, at most: a packet is 1104 bytes, with room for the odd header the relay adds.
+const MAX_BODY: usize = 4096;
+/// A first PUT of ours to a relay that answers 409 (it is still putting the packet this key was warmed
+/// with, which takes it 3-5 s) is tried again this often, this many times: the packet lands the moment
+/// the relay is done, and is served from then on.
+const FIRST_PUT_RETRIES: usize = 7;
+const FIRST_PUT_RETRY_AFTER: Duration = Duration::from_millis(700);
 
 pub struct Pkarr {
     inner: Arc<Inner>,
@@ -37,7 +82,10 @@ pub struct Pkarr {
 struct Inner {
     /// Publishes, and looks keys up in the background. The DHT in the app.
     lookup: Option<Client>,
-    relays: Vec<RelayClient>,
+    /// The relays, read and written with plain HTTP (`READ_TIMEOUT` / `WRITE_TIMEOUT`, `If-Match` on
+    /// writes, the relay's rate-limit headers read on every answer).
+    relays: Vec<Url>,
+    http: reqwest::Client,
     /// READS_PER_MINUTE for the public relays; none for relays of one's own.
     reads_per_minute: usize,
     state: Mutex<State>,
@@ -61,6 +109,35 @@ struct Seen {
 struct RelayBudget {
     spent: VecDeque<Instant>,
     resting_until: Option<Instant>,
+    /// What the relay last said it has left for this address (`x-ratelimit-remaining`), if it says.
+    remaining: Option<i64>,
+    /// The relay's own limit per minute (`x-ratelimit-limit`), if it says: this client's cap follows it.
+    limit: Option<usize>,
+    /// The timestamp of the last packet this client PUT there, per key: what the next PUT replaces.
+    last_put: HashMap<PublicKey, pkarr::Timestamp>,
+}
+
+/// What a relay answered a GET with.
+enum RelayAnswer {
+    Packet(SignedPacket),
+    Missing,
+    RateLimited,
+    Timeout,
+    Unreachable(String),
+    Other(String),
+}
+
+/// One write of a packet, to a relay or the DHT, and how it went.
+type Write = std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send>>;
+
+fn short(key: &PublicKey) -> String {
+    key.to_z32().chars().take(6).collect()
+}
+
+/// An error, in a few words, for a log line.
+fn brief(error: &str) -> String {
+    let first = error.split(':').next().unwrap_or(error).trim();
+    first.chars().take(40).collect()
 }
 
 impl Pkarr {
@@ -96,15 +173,10 @@ impl Pkarr {
         relays: &[Url],
         reads_per_minute: usize,
     ) -> Result<Self, String> {
-        // The default reqwest client, as pkarr builds its own relay clients.
+        // One HTTP client for every relay: connections are kept and reused.
         let http = reqwest::Client::builder()
             .build()
             .map_err(|e| format!("HTTP client: {e}"))?;
-        let relays = relays
-            .iter()
-            .map(|url| RelayClient::new(url.clone(), http.clone(), pkarr::DEFAULT_REQUEST_TIMEOUT))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| format!("Relay: {e}"))?;
         let state = State {
             relays: relays.iter().map(|_| RelayBudget::default()).collect(),
             ..State::default()
@@ -112,43 +184,182 @@ impl Pkarr {
         Ok(Self {
             inner: Arc::new(Inner {
                 lookup,
-                relays,
+                relays: relays.to_vec(),
+                http,
                 reads_per_minute,
                 state: Mutex::new(state),
             }),
         })
     }
 
-    /// Publishes to the DHT and every relay; one of them taking it is enough.
+    /// Publishes to the DHT and every relay. Returns once the packet is out there to be read: a relay
+    /// serves it back, or a write succeeded. The writes run on and log how they ended; an error means
+    /// every one of them failed.
     pub async fn publish(&self, packet: &SignedPacket) -> Result<(), String> {
-        let inner = &self.inner;
-        let relays =
-            futures_util::future::join_all(inner.relays.iter().map(|relay| async move {
-                relay.publish(packet).await.map_err(|e| e.to_string())
-            }));
-        let lookup = async {
-            match &inner.lookup {
-                Some(client) => Some(client.publish(packet).await.map_err(|e| e.to_string())),
-                None => None,
-            }
-        };
-        let (relays, lookup) = tokio::join!(relays, lookup);
-
-        let results: Vec<_> = relays.into_iter().chain(lookup).collect();
-        if results.iter().any(Result::is_ok) {
-            return Ok(());
+        let started = Instant::now();
+        let key = packet.public_key();
+        let inner = self.inner.clone();
+        // `outcome`: `None` while writes run, then whether any succeeded; `first_ok`: the first success.
+        let (outcome_tx, mut outcome) = watch::channel::<Option<Result<(), String>>>(None);
+        let (first_ok_tx, mut first_ok) = watch::channel(false);
+        let writes: Vec<(String, Write)> = (0..inner.relays.len())
+            .map(|index| {
+                let (this, packet) = (
+                    Self {
+                        inner: inner.clone(),
+                    },
+                    packet.clone(),
+                );
+                (
+                    inner.relays[index]
+                        .host_str()
+                        .unwrap_or("relay")
+                        .to_string(),
+                    Box::pin(async move { this.relay_put(index, &packet).await }) as _,
+                )
+            })
+            .chain(inner.lookup.clone().map(|client| {
+                let packet = packet.clone();
+                (
+                    "dht".to_string(),
+                    Box::pin(async move {
+                        client
+                            .publish(&packet)
+                            .await
+                            .map(|_| ())
+                            .map_err(|e| e.to_string())
+                    }) as _,
+                )
+            }))
+            .collect();
+        {
+            let (key, first_ok_tx) = (key.clone(), first_ok_tx.clone());
+            tokio::spawn(async move {
+                let mut errors = Vec::new();
+                let mut ok = false;
+                let mut report = Vec::new();
+                let mut pending = writes
+                    .into_iter()
+                    .map(|(name, write)| async move { (name, write.await) })
+                    .collect::<futures_util::stream::FuturesUnordered<_>>();
+                use futures_util::StreamExt;
+                while let Some((name, result)) = pending.next().await {
+                    let at = started.elapsed().as_millis();
+                    match result {
+                        Ok(()) => {
+                            ok = true;
+                            let _ = first_ok_tx.send(true);
+                            report.push(format!("{name}=ok@{at}ms"));
+                        }
+                        Err(e) => {
+                            report.push(format!("{name}=err@{at}ms({})", brief(&e)));
+                            errors.push(format!("{name}: {e}"));
+                        }
+                    }
+                }
+                diagnostics::log(&format!(
+                    "pkarr publish {} done {}",
+                    short(&key),
+                    report.join(" ")
+                ));
+                let _ = outcome_tx.send(Some(if ok {
+                    Ok(())
+                } else {
+                    Err(format!("Publish error: {}", errors.join("; ")))
+                }));
+            });
         }
-        let reasons: Vec<_> = results.into_iter().filter_map(Result::err).collect();
-        Err(format!("Publish error: {}", reasons.join("; ")))
+        // Our own newest: a read of this key from here (a read-back) compares against it.
+        let wanted = packet.timestamp();
+        let settled = async {
+            // An error here means the write task is gone, which counts as settled.
+            let _ = outcome.wait_for(|o| o.is_some()).await;
+            outcome
+                .borrow()
+                .clone()
+                .unwrap_or_else(|| Err("Publish error: writes vanished".into()))
+        };
+        tokio::pin!(settled);
+        let mut wait = READ_BACK_AFTER;
+        for _ in 0..READ_BACKS {
+            tokio::select! {
+                result = &mut settled => return self.published(&key, started, "settled", result),
+                _ = async { let _ = first_ok.wait_for(|ok| *ok).await; } => return self.published(&key, started, "written", Ok(())),
+                _ = tokio::time::sleep(wait) => {}
+            }
+            wait = READ_BACK_EVERY;
+            // A read-back is not a poll: it spends none of the read budget (the relay counts it all the same).
+            let Some(index) = self.pick_relay(false) else {
+                continue;
+            };
+            let read = self.relay_get_within(index, &key, READ_BACK_TIMEOUT);
+            tokio::pin!(read);
+            tokio::select! {
+                result = &mut settled => return self.published(&key, started, "settled", result),
+                _ = async { let _ = first_ok.wait_for(|ok| *ok).await; } => return self.published(&key, started, "written", Ok(())),
+                answer = &mut read => {
+                    let visible = matches!(&answer, RelayAnswer::Packet(seen) if seen.timestamp() >= wanted);
+                    self.relay_answered(index, answer);
+                    if visible { return self.published(&key, started, "visible", Ok(())); }
+                }
+            }
+        }
+        let result = settled.await;
+        self.published(&key, started, "settled late", result)
+    }
+
+    fn published(
+        &self,
+        key: &PublicKey,
+        started: Instant,
+        how: &str,
+        result: Result<(), String>,
+    ) -> Result<(), String> {
+        diagnostics::log(&format!(
+            "pkarr publish {} {how} after {}ms{}",
+            short(key),
+            started.elapsed().as_millis(),
+            result
+                .as_ref()
+                .err()
+                .map(|e| format!(" {e}"))
+                .unwrap_or_default()
+        ));
+        result
     }
 
     /// The newest packet seen under `key`, having asked the network: `None`
     /// when nobody has published one anyone could find.
     pub async fn resolve(&self, key: &PublicKey) -> Option<SignedPacket> {
-        let lookup = self.look_up(key);
+        self.resolve_with(key, false, false).await
+    }
 
-        if let Some(index) = self.take_relay() {
-            let read = self.inner.relays[index].resolve(key, ResolvePolicy::CacheFirst, None);
+    /// `background`: a look that can wait (a link nobody is watching, nothing expected). It asks no
+    /// relay, keeping their budget for links that are signaling, and waits for the DHT lookup instead.
+    /// A foreground read asks one relay and returns what is known the moment the relay answered (or
+    /// `READ_TIMEOUT` passed): a key nobody has yet costs one read, not the DHT lookup's seconds too.
+    /// `urgent`: a signal is due any moment; when the relay asked had nothing newer, a second relay
+    /// with plenty of requests left is asked too (relays do not all serve a fresh packet at once).
+    pub async fn resolve_with(
+        &self,
+        key: &PublicKey,
+        background: bool,
+        urgent: bool,
+    ) -> Option<SignedPacket> {
+        let started = Instant::now();
+        let before = self.newest(key).map(|p| p.timestamp());
+        let lookup = self.look_up(key);
+        let source;
+
+        if background {
+            if self.newest(key).is_none() {
+                if let Some(done) = lookup {
+                    let _ = tokio::time::timeout(BACKGROUND_LOOKUP_WAIT, finished(done)).await;
+                }
+            }
+            source = "dht";
+        } else if let Some(index) = self.pick_relay(true) {
+            let read = self.relay_get(index, key);
             tokio::pin!(read);
             let answer = match lookup.clone() {
                 Some(done) => tokio::select! {
@@ -157,20 +368,81 @@ impl Pkarr {
                 },
                 None => Some(read.as_mut().await),
             };
-            match answer {
-                Some(answer) => self.relay_answered(index, answer),
+            source = match answer {
+                Some(answer) => {
+                    let source = match &answer {
+                        RelayAnswer::Packet(_) => "relay",
+                        RelayAnswer::Missing => "relay-miss",
+                        RelayAnswer::Timeout => "relay-timeout",
+                        RelayAnswer::RateLimited => "relay-429",
+                        RelayAnswer::Unreachable(_) => "relay-down",
+                        RelayAnswer::Other(_) => "relay-error",
+                    };
+                    self.relay_answered(index, answer);
+                    source
+                }
                 // The lookup was quicker. Only an empty handed one waits for the relay.
-                None if self.newest(key).is_none() => self.relay_answered(index, read.await),
-                None => {}
+                None if self.newest(key).is_none() => {
+                    self.relay_answered(index, read.await);
+                    "relay-late"
+                }
+                None => "dht",
+            };
+            // Nothing newer from that relay, and a signal is due: another relay may have it already.
+            if urgent && self.newest(key).map(|p| p.timestamp()) == before {
+                if let Some(other) = self.pick_relay_other_than(index) {
+                    let answer = self.relay_get(other, key).await;
+                    self.relay_answered(other, answer);
+                }
             }
+            if self.newest(key).is_none() {
+                if let Some(done) = lookup {
+                    let _ = tokio::time::timeout(LOOKUP_GRACE, finished(done)).await;
+                }
+            }
+        } else if self.newest(key).is_none() {
+            // No relay budget left: the lookup is all there is.
+            if let Some(done) = lookup {
+                let _ = tokio::time::timeout(BACKGROUND_LOOKUP_WAIT, finished(done)).await;
+            }
+            source = "dht";
+        } else {
+            source = "budget";
         }
 
-        if self.newest(key).is_none() {
-            if let Some(done) = lookup {
-                finished(done).await;
-            }
+        let found = self.newest(key);
+        let ms = started.elapsed().as_millis();
+        let newer = found.as_ref().map(|p| p.timestamp()) != before;
+        // Quiet in the steady state: a line when something changed, took long, or is missing.
+        if newer || ms > 700 || found.is_none() {
+            let age = found
+                .as_ref()
+                .map(|p| {
+                    format!(
+                        " age={}ms",
+                        (pkarr::Timestamp::now()
+                            .as_u64()
+                            .saturating_sub(p.timestamp().as_u64()))
+                            / 1000
+                    )
+                })
+                .unwrap_or_default();
+            diagnostics::log(&format!(
+                "pkarr read {} {ms}ms {source}{} -> {}{age}",
+                short(key),
+                if background { " background" } else { "" },
+                if found.is_some() {
+                    if newer {
+                        "newer"
+                    } else {
+                        "same"
+                    }
+                } else {
+                    "none"
+                }
+            ));
         }
-        self.newest(key)
+        found
     }
 
     /// The lookup running for `key`, started if none is.
@@ -195,31 +467,217 @@ impl Pkarr {
         Some(rx)
     }
 
-    /// The next relay, in turn, that is not resting and has budget left.
-    fn take_relay(&self) -> Option<usize> {
+    /// The relay to ask now: not resting, within this client's budget (spent when `budgeted`), and of
+    /// those the one that says it has the most requests left for this address; in turn when none says.
+    fn pick_relay(&self, budgeted: bool) -> Option<usize> {
         let mut state = self.inner.state.lock().unwrap();
         let now = Instant::now();
         let count = state.relays.len();
-        for _ in 0..count {
-            let index = state.turn % count;
-            state.turn = state.turn.wrapping_add(1);
-            if state.relays[index].take(now, self.inner.reads_per_minute) {
-                return Some(index);
+        let turn = state.turn;
+        state.turn = state.turn.wrapping_add(1);
+        let mut best: Option<(usize, i64, usize)> = None;
+        for offset in 0..count {
+            let index = (turn + offset) % count;
+            if !state.relays[index].available(now, self.inner.reads_per_minute) {
+                continue;
+            }
+            // Unknown counts as plenty: a relay that never said is one to ask.
+            let remaining = state.relays[index].remaining.unwrap_or(i64::MAX);
+            if remaining < RESERVE {
+                continue;
+            }
+            if best.is_none_or(|(_, most, _)| remaining > most) {
+                best = Some((index, remaining, offset));
             }
         }
-        None
+        let (index, _, _) = best?;
+        if budgeted {
+            state.relays[index].spend(now);
+        }
+        Some(index)
     }
 
-    fn relay_answered(&self, index: usize, answer: Result<SignedPacket, RelayError>) {
+    /// Another relay for a second opinion: available, and with `SECOND_OPINION_RESERVE` requests left there.
+    fn pick_relay_other_than(&self, index: usize) -> Option<usize> {
+        let mut state = self.inner.state.lock().unwrap();
+        let now = Instant::now();
+        let count = state.relays.len();
+        let other = (0..count).filter(|&i| i != index).find(|&i| {
+            state.relays[i].available(now, self.inner.reads_per_minute)
+                && state.relays[i].remaining.unwrap_or(i64::MAX) >= SECOND_OPINION_RESERVE
+        })?;
+        state.relays[other].spend(now);
+        Some(other)
+    }
+
+    /// One GET at a relay, as a poll makes it: `READ_TIMEOUT` at most, the relay's rate-limit headers noted.
+    async fn relay_get(&self, index: usize, key: &PublicKey) -> RelayAnswer {
+        self.relay_get_within(index, key, READ_TIMEOUT).await
+    }
+
+    async fn relay_get_within(
+        &self,
+        index: usize,
+        key: &PublicKey,
+        timeout: Duration,
+    ) -> RelayAnswer {
+        let response = match self
+            .inner
+            .http
+            .get(self.key_url(index, key))
+            .timeout(timeout)
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(e) if e.is_timeout() => return RelayAnswer::Timeout,
+            Err(e) if e.is_connect() => return RelayAnswer::Unreachable(e.to_string()),
+            Err(e) => return RelayAnswer::Other(e.to_string()),
+        };
+        self.note_rate_limit(index, &response);
+        match response.status().as_u16() {
+            200 => {
+                if response
+                    .content_length()
+                    .is_some_and(|len| len > MAX_BODY as u64)
+                {
+                    return RelayAnswer::Other("body too large".into());
+                }
+                match response.bytes().await {
+                    Ok(bytes) if bytes.len() <= MAX_BODY => {
+                        match SignedPacket::from_relay_payload(key, &bytes) {
+                            Ok(packet) => RelayAnswer::Packet(packet),
+                            Err(e) => RelayAnswer::Other(format!("invalid packet: {e}")),
+                        }
+                    }
+                    Ok(_) => RelayAnswer::Other("body too large".into()),
+                    Err(e) if e.is_timeout() => RelayAnswer::Timeout,
+                    Err(e) => RelayAnswer::Other(e.to_string()),
+                }
+            }
+            404 => RelayAnswer::Missing,
+            429 => RelayAnswer::RateLimited,
+            status => RelayAnswer::Other(format!("status {status}")),
+        }
+    }
+
+    fn key_url(&self, index: usize, key: &PublicKey) -> Url {
+        let mut url = self.inner.relays[index].clone();
+        if let Ok(mut segments) = url.path_segments_mut() {
+            segments.push(&key.to_z32());
+        }
+        url
+    }
+
+    /// What the relay says about its limit for this address, on every answer.
+    fn note_rate_limit(&self, index: usize, response: &reqwest::Response) {
+        let header = |name: &str| {
+            response
+                .headers()
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.trim().parse::<i64>().ok())
+        };
+        let (remaining, limit) = (header("x-ratelimit-remaining"), header("x-ratelimit-limit"));
+        if remaining.is_none() && limit.is_none() {
+            return;
+        }
+        let mut state = self.inner.state.lock().unwrap();
+        let budget = &mut state.relays[index];
+        if remaining.is_some() {
+            budget.remaining = remaining;
+        }
+        if let Some(limit) = limit {
+            budget.limit = Some(limit.max(0) as usize);
+        }
+    }
+
+    /// One PUT at a relay, telling it which packet of ours it replaces (`If-Match`): a relay refuses
+    /// (428) to replace a packet whose DHT put is still in flight unless told, and a link publishes in
+    /// bursts (its presence, then its offer). 412 means it never got the one named: insist without.
+    async fn relay_put(&self, index: usize, packet: &SignedPacket) -> Result<(), String> {
+        let key = packet.public_key();
+        let previous = {
+            let mut state = self.inner.state.lock().unwrap();
+            state.relays[index]
+                .last_put
+                .insert(key.clone(), packet.timestamp())
+        };
+        let url = self.key_url(index, &key);
+        let body = packet.to_relay_payload();
+        let send = |replaces: Option<pkarr::Timestamp>| {
+            let mut request = self
+                .inner
+                .http
+                .put(url.clone())
+                .timeout(WRITE_TIMEOUT)
+                .body(body.clone());
+            if let Some(replaces) = replaces {
+                request = request.header("if-match", replaces.as_u64().to_string());
+            }
+            request.send()
+        };
+        let mut response = send(previous).await.map_err(|e| brief(&e.to_string()))?;
+        self.note_rate_limit(index, &response);
+        if response.status().as_u16() == 412 && previous.is_some() {
+            response = send(None).await.map_err(|e| brief(&e.to_string()))?;
+            self.note_rate_limit(index, &response);
+        }
+        // 428: the relay holds a packet someone else put there moments ago (the inviter warming this
+        // key) and its DHT put is still in flight. Learn which, and name it.
+        if response.status().as_u16() == 428 && previous.is_none() {
+            if let RelayAnswer::Packet(current) = self.relay_get(index, &key).await {
+                if current.timestamp() < packet.timestamp() {
+                    response = send(Some(current.timestamp()))
+                        .await
+                        .map_err(|e| brief(&e.to_string()))?;
+                    self.note_rate_limit(index, &response);
+                }
+            }
+        }
+        // 409 with nothing of ours there before: the relay is still putting the packet the inviter warmed
+        // this key with, and says so this way. It takes it a few seconds; try again, twice.
+        let mut retries = 0;
+        while response.status().as_u16() == 409 && previous.is_none() && retries < FIRST_PUT_RETRIES
+        {
+            retries += 1;
+            tokio::time::sleep(FIRST_PUT_RETRY_AFTER).await;
+            response = send(None).await.map_err(|e| brief(&e.to_string()))?;
+            self.note_rate_limit(index, &response);
+        }
+        match response.status().as_u16() {
+            200..=299 => Ok(()),
+            429 => {
+                self.inner.state.lock().unwrap().relays[index].rest();
+                Err("rate limited".into())
+            }
+            409 => Err("relay has a more recent packet".into()),
+            428 => Err("relay is still putting another packet".into()),
+            status => Err(format!("status {status}")),
+        }
+    }
+
+    fn relay_answered(&self, index: usize, answer: RelayAnswer) {
         let mut state = self.inner.state.lock().unwrap();
         match answer {
-            Ok(packet) => state.keep(packet),
-            // A missing key times out: the relay is asking the DHT. Not a reason to rest.
-            Err(RelayError::Request(_)) => state.relays[index].rest(),
-            Err(RelayError::UnexpectedStatus(status)) if status.as_u16() == 429 => {
-                state.relays[index].rest()
+            RelayAnswer::Packet(packet) => {
+                state.keep(packet);
             }
-            Err(_) => {}
+            // A missing key times out (the relay is asking its DHT); that is not a reason to rest.
+            RelayAnswer::Missing | RelayAnswer::Timeout => {}
+            RelayAnswer::RateLimited => state.relays[index].rest(),
+            RelayAnswer::Unreachable(reason) => {
+                state.relays[index].rest();
+                diagnostics::log(&format!(
+                    "pkarr relay {} unreachable: {}",
+                    self.inner.relays[index].host_str().unwrap_or("?"),
+                    brief(&reason)
+                ));
+            }
+            RelayAnswer::Other(reason) => diagnostics::log(&format!(
+                "pkarr relay {} answered oddly: {reason}",
+                self.inner.relays[index].host_str().unwrap_or("?")
+            )),
         }
     }
 
@@ -232,13 +690,15 @@ impl Pkarr {
 }
 
 impl State {
-    fn keep(&mut self, packet: SignedPacket) {
+    /// Remembers `packet` if it is the newest seen under its key; says whether it was.
+    fn keep(&mut self, packet: SignedPacket) -> bool {
         let key = packet.public_key();
         if let Some(seen) = self.newest.get_mut(&key) {
             if packet.more_recent_than(&seen.packet) {
                 seen.packet = packet;
+                return true;
             }
-            return;
+            return false;
         }
         if self.newest.len() >= REMEMBERED_KEYS {
             let stalest = self
@@ -252,11 +712,14 @@ impl State {
         }
         let read_at = Instant::now();
         self.newest.insert(key, Seen { packet, read_at });
+        true
     }
 }
 
 impl RelayBudget {
-    fn take(&mut self, now: Instant, reads_per_minute: usize) -> bool {
+    /// Not resting, and this client has reads left for it this minute: `reads_per_minute` until the
+    /// relay said its own limit, half of that (within bounds) from then on. No cap stays no cap.
+    fn available(&mut self, now: Instant, reads_per_minute: usize) -> bool {
         if self.resting_until.is_some_and(|until| until > now) {
             return false;
         }
@@ -267,11 +730,17 @@ impl RelayBudget {
         {
             self.spent.pop_front();
         }
-        if self.spent.len() >= reads_per_minute {
-            return false;
-        }
+        let cap = match self.limit {
+            Some(limit) if reads_per_minute != usize::MAX => {
+                (limit / 2).clamp(READS_PER_MINUTE_LEAST, READS_PER_MINUTE_MOST)
+            }
+            _ => reads_per_minute,
+        };
+        self.spent.len() < cap
+    }
+
+    fn spend(&mut self, now: Instant) {
         self.spent.push_back(now);
-        true
     }
 
     fn rest(&mut self) {
@@ -395,12 +864,57 @@ mod tests {
         slow(&dht, 300);
 
         let pkarr = desktop(&fast, &dht);
-        let got = pkarr.resolve(&keypair.public_key()).await.unwrap();
-        assert_eq!(value(&got), "dht");
+        // A read returns once the relay answered empty-handed and a moment passed; the lookup runs on,
+        // and the next poll has what it found.
+        let key = keypair.public_key();
+        let mut got = pkarr.resolve(&key).await;
+        for _ in 0..10 {
+            if got.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            got = pkarr.resolve(&key).await;
+        }
+        assert_eq!(value(&got.unwrap()), "dht");
         assert!(pkarr
             .resolve(&Keypair::random().public_key())
             .await
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn a_read_of_a_key_nobody_has_does_not_wait_for_the_dht_lookup() {
+        let (fast, dht) = (pkarr_relay().await, pkarr_relay().await);
+        slow(&dht, 2_000);
+        let pkarr = desktop(&fast, &dht);
+        let started = Instant::now();
+        assert!(pkarr
+            .resolve(&Keypair::random().public_key())
+            .await
+            .is_none());
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_background_read_asks_no_relay() {
+        let (fast, dht) = (pkarr_relay().await, pkarr_relay().await);
+        let keypair = Keypair::random();
+        put(&dht, &packet(&keypair, "1"));
+        let pkarr = desktop(&fast, &dht);
+        assert_eq!(
+            value(
+                &pkarr
+                    .resolve_with(&keypair.public_key(), true, false)
+                    .await
+                    .unwrap()
+            ),
+            "1"
+        );
+        assert_eq!((gets(&fast), gets(&dht)), (0, 1));
     }
 
     #[tokio::test]
@@ -510,6 +1024,91 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_relay_still_putting_another_packet_is_told_which_one_this_replaces() {
+        // The inviter warmed this key a moment ago; the relay is still putting that packet on the DHT.
+        let relay = pkarr_relay().await;
+        let keypair = Keypair::random();
+        let warm = packet(&keypair, "warm");
+        put(&relay, &warm);
+        *relay.putting.lock().unwrap() = true;
+        let pkarr = Pkarr::private(&[relay.url.parse().unwrap()]).unwrap();
+        tokio::time::sleep(Duration::from_millis(1_100)).await;
+        let mine = packet(&keypair, "mine");
+        pkarr.publish(&mine).await.unwrap();
+        assert_eq!(
+            value(&pkarr.resolve(&keypair.public_key()).await.unwrap()),
+            "mine"
+        );
+        let requests = relay.requests.lock().unwrap().clone();
+        let key = keypair.public_key().to_z32();
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|r| r.starts_with("PUT"))
+                .collect::<Vec<_>>(),
+            [
+                &format!("PUT /{key}"),
+                &format!("PUT /{key} if-match={}", warm.timestamp().as_u64())
+            ],
+            "refused once, then named the packet it replaces: {requests:?}"
+        );
+        // An older packet is not forced through: the relay holds a more recent one, and that is that.
+        assert!(pkarr.publish(&warm).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn reads_go_to_the_relay_with_the_most_requests_left_for_this_address() {
+        let (scarce, plenty) = (pkarr_relay().await, pkarr_relay().await);
+        scarce.headers.lock().unwrap().extend([
+            ("x-ratelimit-limit".into(), "50".into()),
+            ("x-ratelimit-remaining".into(), "3".into()),
+        ]);
+        plenty.headers.lock().unwrap().extend([
+            ("x-ratelimit-limit".into(), "1000".into()),
+            ("x-ratelimit-remaining".into(), "900".into()),
+        ]);
+        let keypair = Keypair::random();
+        let first = packet(&keypair, "1");
+        put(&scarce, &first);
+        put(&plenty, &first);
+        let pkarr = Pkarr::new(
+            None,
+            &[scarce.url.parse().unwrap(), plenty.url.parse().unwrap()],
+        )
+        .unwrap();
+        for _ in 0..12 {
+            pkarr.resolve(&keypair.public_key()).await.unwrap();
+        }
+        // Until they said, each was asked in turn; once the scarce one said it has 3 left, every read
+        // went to the other.
+        assert!(gets(&scarce) <= 2, "{}", gets(&scarce));
+        assert_eq!(gets(&scarce) + gets(&plenty), 12);
+    }
+
+    #[tokio::test]
+    async fn a_relays_own_limit_caps_this_clients_reads_at_half_of_it() {
+        let relay = pkarr_relay().await;
+        relay.headers.lock().unwrap().extend([
+            ("x-ratelimit-limit".into(), "50".into()),
+            ("x-ratelimit-remaining".into(), "45".into()),
+        ]);
+        let keypair = Keypair::random();
+        put(&relay, &packet(&keypair, "1"));
+        let pkarr = Pkarr::new(None, &[relay.url.parse().unwrap()]).unwrap();
+        for _ in 0..40 {
+            assert_eq!(
+                value(&pkarr.resolve(&keypair.public_key()).await.unwrap()),
+                "1"
+            );
+        }
+        assert_eq!(
+            gets(&relay),
+            25,
+            "half of 50, the rest answered from the newest seen"
+        );
+    }
+
+    #[tokio::test]
     async fn a_packet_is_published_to_the_relays_and_the_dht_and_one_is_enough() {
         let (fast, dht) = (pkarr_relay().await, pkarr_relay().await);
         let keypair = Keypair::random();
@@ -518,6 +1117,13 @@ mod tests {
             .publish(&packet(&keypair, "1"))
             .await
             .unwrap();
+        // A publish returns on the first taker; the other writes finish on their own.
+        for _ in 0..20 {
+            if dht.packets.lock().unwrap().contains_key(&key) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
         assert!(fast.packets.lock().unwrap().contains_key(&key));
         assert!(dht.packets.lock().unwrap().contains_key(&key));
 
