@@ -26,7 +26,7 @@ test("a Bitcoin address proof: verified by the contact it is shared with, absent
 
   // Identities → Bitcoin address, signed in "Sparrow".
   await go(alice, "#/identities");
-  await alice.page.getByTestId("identity-add").click();
+  await alice.page.getByTestId("identities-new").click();
   const add = alice.page.getByTestId("add-identity");
   await add.getByTestId("add-identity-bitcoin").click();
   // What it does not prove is said before anything is signed.

@@ -8,7 +8,7 @@ import { expect, test } from "../support/fixtures";
 test("a kind of identity is recognized at a glance, and its caveats are one click away", { tag: ["@feature:proofs.picker"] }, async ({ peer }) => {
   const alice = await peer("idpk-alice");
   await alice.page.evaluate(() => { location.hash = "#/identities"; });
-  await alice.page.getByTestId("identity-add").click();
+  await alice.page.getByTestId("identities-new").click();
   const add = alice.page.getByTestId("add-identity");
 
   // Every built-in card has its own mark, not one shared glyph. The SDK example's identity, compiled into
@@ -55,7 +55,7 @@ test("a kind of identity is recognized at a glance, and its caveats are one clic
 test("the picker holds together on a phone: the category goes under the name, the targets stay big", { tag: ["@feature:proofs.picker"] }, async ({ peer }) => {
   const alice = await peer("idpk-phone", { mobile: true });
   await alice.page.evaluate(() => { location.hash = "#/identities"; });
-  await alice.page.getByTestId("identity-add").click();
+  await alice.page.getByTestId("identities-new").click();
   const add = alice.page.getByTestId("add-identity");
   const card = add.getByTestId("add-identity-card-ssh-gitlab");
   await expect(card).toBeVisible();

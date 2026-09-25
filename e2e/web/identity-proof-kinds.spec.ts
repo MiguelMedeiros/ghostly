@@ -23,7 +23,7 @@ test("every kind of signer: a pasted signature and a provider's attestation, bot
 
   // external-tool: the statement is shown to copy, signed outside Ghostly, pasted back.
   const seed = ed25519.utils.randomSecretKey();
-  await alice.page.getByTestId("identity-add").click();
+  await alice.page.getByTestId("identities-new").click();
   const add = alice.page.getByTestId("add-identity");
   await add.getByTestId("add-identity-fake-key").click();
   await choose(add.getByTestId("add-identity-signer"), "fake-tool");
@@ -40,7 +40,7 @@ test("every kind of signer: a pasted signature and a provider's attestation, bot
   await expect(add).toHaveCount(0);
 
   // redirect: a login provider vouches for an account.
-  await alice.page.getByTestId("identity-add").click();
+  await alice.page.getByTestId("identities-new").click();
   await add.getByTestId("add-identity-fake-account").click();
   await add.getByTestId("add-identity-start").click();
   // The login opens from its own click (a popup needs the click's user activation).

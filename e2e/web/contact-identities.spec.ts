@@ -39,7 +39,7 @@ async function stubGitHub(peer: Peer, published: Map<string, string[]>) {
 
 async function addGitHub(peer: Peer, key: TestSshKey, login: string) {
   await go(peer, "#/identities");
-  await peer.page.getByTestId("identity-add").click();
+  await peer.page.getByTestId("identities-new").click();
   const add = peer.page.getByTestId("add-identity");
   await add.getByTestId("add-identity-ssh-github").click();
   await add.getByTestId("add-identity-subject").fill(login);
@@ -53,7 +53,7 @@ async function addGitHub(peer: Peer, key: TestSshKey, login: string) {
 async function addBitcoin(peer: Peer) {
   const wallet = testBitcoinWallet("p2wpkh");
   await go(peer, "#/identities");
-  await peer.page.getByTestId("identity-add").click();
+  await peer.page.getByTestId("identities-new").click();
   const add = peer.page.getByTestId("add-identity");
   await add.getByTestId("add-identity-bitcoin").click();
   await add.getByTestId("add-identity-subject").fill(wallet.address);

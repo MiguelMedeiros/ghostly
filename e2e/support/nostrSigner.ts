@@ -23,7 +23,7 @@ export async function injectNostrSigner(peer: Peer, secret = generateSecretKey()
 /** Identities → Nostr, signed by the injected NIP-07 signer. Leaves the page on Identities. */
 export async function addNostrIdentity(peer: Peer): Promise<void> {
   await peer.page.evaluate(() => { location.hash = "#/identities"; });
-  await peer.page.getByTestId("identity-add").click();
+  await peer.page.getByTestId("identities-new").click();
   const add = peer.page.getByTestId("add-identity");
   await add.getByTestId("add-identity-nostr").click();
   await expect(add.getByTestId("add-identity-signer")).toHaveAttribute("data-value", "nip07");

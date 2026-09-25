@@ -30,7 +30,7 @@ async function approveOnServer(popup: Page, account: AtprotoAccount) {
 
 async function addBluesky(page: Page, account: AtprotoAccount) {
   await page.evaluate(() => { location.hash = "#/identities"; });
-  await page.getByTestId("identity-add").click();
+  await page.getByTestId("identities-new").click();
   const add = page.getByTestId("add-identity");
   await add.getByTestId("add-identity-atproto").click();
   await add.getByTestId("add-identity-field-handle").fill(account.handle);

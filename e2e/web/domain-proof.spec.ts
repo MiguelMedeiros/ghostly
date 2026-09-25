@@ -16,7 +16,7 @@ const go = (peer: Peer, hash: string) => peer.page.evaluate(h => { location.hash
 /** Identities → Domain, with one of its publish signers, up to the instructions. */
 async function startDomainProof(peer: Peer, domain: string, signer: "dns" | "https") {
   await go(peer, "#/identities");
-  await peer.page.getByTestId("identity-add").click();
+  await peer.page.getByTestId("identities-new").click();
   const add = peer.page.getByTestId("add-identity");
   await add.getByTestId("add-identity-domain").click();
   await choose(add.getByTestId("add-identity-signer"), signer);

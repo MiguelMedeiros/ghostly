@@ -35,7 +35,7 @@ test("a Nostr identity is proven once, shared with one contact only, withdrawn, 
 
   // Identities: signed once by the NIP-07 signer, checked before it is saved.
   await go(alice, "#/identities");
-  await alice.page.getByTestId("identity-add").click();
+  await alice.page.getByTestId("identities-new").click();
   const add = alice.page.getByTestId("add-identity");
   await add.getByTestId("add-identity-nostr").click();
   await expect(add.getByTestId("add-identity-signer")).toHaveAttribute("data-value", "nip07");
@@ -107,7 +107,7 @@ test("removing a proof revokes it for a contact the person never reconnects to",
   await pair(alice, carol);
   const withCarol = await chatId(alice);
   await go(alice, "#/identities");
-  await alice.page.getByTestId("identity-add").click();
+  await alice.page.getByTestId("identities-new").click();
   await alice.page.getByTestId("add-identity-nostr").click();
   await alice.page.getByTestId("add-identity-start").click();
   await expect(alice.page.getByTestId("identity-proof")).toHaveCount(1);

@@ -40,7 +40,7 @@ test("an SSH key proves a GitHub account, shared with one contact only, and a re
 
   // Identities → GitHub (SSH key): the app says whom it asks, and shows what to run.
   await go(alice, "#/identities");
-  await alice.page.getByTestId("identity-add").click();
+  await alice.page.getByTestId("identities-new").click();
   const add = alice.page.getByTestId("add-identity");
   await add.getByTestId("add-identity-ssh-github").click();
   await expect(add).toContainText("asks api.github.com for this account's public SSH keys");
@@ -104,7 +104,7 @@ test("a bare SSH key is proven on the device, and another key's signature is ref
   const chat = await chatId(alice);
 
   await go(alice, "#/identities");
-  await alice.page.getByTestId("identity-add").click();
+  await alice.page.getByTestId("identities-new").click();
   const add = alice.page.getByTestId("add-identity");
   await add.getByTestId("add-identity-ssh").click();
   await add.getByTestId("add-identity-subject").fill(`${mine.publicKey} me@laptop`);
