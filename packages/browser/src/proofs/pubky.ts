@@ -24,13 +24,16 @@ const RELAY_PAYLOAD_MAX = 1072;
  * that is down, answers garbage or holds an older packet does not count. Throws when none has a valid one.
  */
 export async function pubkyRecords(key: string, fetch: IdentityFetch, signal?: AbortSignal, relays: readonly string[] = PUBKY_RELAYS): Promise<Uint8Array> {
+  const failed: unknown[] = [];
   const answers = await Promise.all(relays.map(async relay => {
-    try {
-      const r = await fetch(`${relay.replace(/\/+$/, "")}/${key}`, { maxBytes: RELAY_PAYLOAD_MAX, signal });
-      return r.status === 200 ? openRelayPayload(key, r.bytes) : undefined;
-    } catch { return undefined; }
+    let r;
+    try { r = await fetch(`${relay.replace(/\/+$/, "")}/${key}`, { maxBytes: RELAY_PAYLOAD_MAX, signal }); }
+    catch (e) { failed.push(e); return undefined; }
+    try { return r.status === 200 ? openRelayPayload(key, r.bytes) : undefined; } catch { return undefined; }
   }));
   const newest = answers.filter(a => !!a).sort((a, b) => (b.timestampMicros > a.timestampMicros ? 1 : b.timestampMicros < a.timestampMicros ? -1 : 0))[0];
+  // No relay answered at all (offline, a time-out): say that, not that the key has no records.
+  if (!newest && failed.length === relays.length && failed[0] instanceof Error) throw failed[0];
   if (!newest) throw new Error("This Pubky key has no records on the Pkarr relays");
   return newest.dnsPacket;
 }
@@ -132,7 +135,12 @@ export async function withPubkyApproval<T>(options: PubkyApprovalOptions, work: 
     open: {
       label: "Approve in your browser (Pubky Passport)",
       description: "Opens Pubky Passport. No Passport identity yet? It offers “Continue with Google” and makes one.",
-      run: () => { opened.window = (options.openPassport ?? openPassportWindow)(passportUrl(url)) ?? null; },
+      run: () => {
+        const window = (options.openPassport ?? openPassportWindow)(passportUrl(url));
+        opened.window = window ?? null;
+        // null: the browser refused the popup (undefined: it opened elsewhere, the system browser).
+        if (window === null) options.onProgress("Your browser blocked the Passport window: allow pop-ups for Ghostly and press the button again, or scan the code with Pubky Ring.");
+      },
     },
     qr: { value: url, label: "Or scan with Pubky Ring" },
     notes: [

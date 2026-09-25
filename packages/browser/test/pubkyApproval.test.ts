@@ -254,3 +254,18 @@ describe("Pubky removal", () => {
     expect(approved.storage.delete).not.toHaveBeenCalled();
   });
 });
+
+describe("Pubky approval: a blocked popup", () => {
+  beforeEach(() => { Object.assign(sdk, { started: [], polls: [], next: undefined, freed: 0, pending: 0 }); });
+
+  it("says the browser blocked Passport and points to the QR code, and keeps waiting", async () => {
+    const poll = deferred<unknown>();
+    sdk.next = () => poll.promise;
+    const onProgress = vi.fn();
+    const run = withPubkyApproval({ capability: `/pub/ghostly.app/proofs/${"f".repeat(64)}/:w`, signal: new AbortController().signal,
+      onApproval: r => r?.open?.run(), onProgress, openPassport: () => null }, async () => "done");
+    await vi.waitFor(() => expect(onProgress).toHaveBeenCalledWith(expect.stringMatching(/blocked the Passport window.*Pubky Ring/)));
+    poll.resolve(session());
+    await expect(run).resolves.toBe("done");
+  });
+});

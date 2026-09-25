@@ -171,6 +171,17 @@ describe("Pubky proofs: verify", () => {
     const net = new PubkyNet();
     const me = createIdentity();
     for (const relay of net.relays.values()) relay.set(me.pubKeyZ32, new Uint8Array(4096));
-    await expect(pubkyRecords(me.pubKeyZ32, net.fetch)).rejects.toThrow(/no records/);
+    await expect(pubkyRecords(me.pubKeyZ32, net.fetch)).rejects.toThrow(/too large/);
+    // One relay's oversized answer is ignored when another has a valid packet.
+    const hs = net.homeserver();
+    net.moveTo(me, hs, { relays: ["https://pkarr.pubky.app"] });
+    await expect(pubkyRecords(me.pubKeyZ32, net.fetch)).resolves.toBeInstanceOf(Uint8Array);
+  });
+});
+
+describe("Pubky proofs: offline", () => {
+  it("says it is offline rather than that the key has no records", async () => {
+    const offline = boundedIdentityFetch({ online: () => false });
+    await expect(pubkyRecords(createIdentity().pubKeyZ32, offline)).rejects.toThrow(/Offline/);
   });
 });

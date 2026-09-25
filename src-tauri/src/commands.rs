@@ -274,7 +274,8 @@ fn launch(url: &str) -> Result<(), String> {
 
 /// Pubky Passport's authorize page, in the system browser: an identity proof's Pubky request, which Passport
 /// approves (WISP 302). Only `https://passport.pubky.app/authorize#d=<the request, URI-encoded>`: no query, no
-/// other page or host. The request is a short-lived secret; it is handed to the browser and never logged.
+/// other page or host. The request is a short-lived secret: it is handed to the browser (as the system opener's
+/// argument, for the instant it runs) and never logged.
 #[tauri::command]
 pub fn open_pubky_passport(url: String) -> Result<(), String> {
     if !is_pubky_passport_url(&url) {
