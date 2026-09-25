@@ -54,6 +54,9 @@ export const BROWSER_ARGS = [
   // The calls ring with Chromium's fake camera and microphone, no prompt.
   "--use-fake-device-for-media-stream",
   "--use-fake-ui-for-media-stream",
+  // The fake microphone plays the e2e suite's voice-like sample, so a voice message has a waveform.
+  `--use-file-for-fake-audio-capture=${fileURLToPath(new URL("../../../e2e/support/voice-sample.wav", import.meta.url))}`,
+  "--autoplay-policy=no-user-gesture-required",
 ];
 
 /** A browser profile on disk: a person whose storage outlives one browser, reopened later on a phone with `open(..., { profile })`. */
@@ -199,6 +202,18 @@ export async function pair(host: Peer, guest: Peer, beforeJoin?: () => Promise<v
   await expect(host.page.getByTitle("Click to set a name")).toHaveText(guest.name, { timeout: 30_000 }).catch(() => console.log(`  [${host.name}] still no name for ${guest.name}`));
   await expect(guest.page.getByTitle("Click to set a name")).toHaveText(host.name, { timeout: 30_000 }).catch(() => console.log(`  [${guest.name}] still no name for ${host.name}`));
   return host.page.evaluate(() => location.hash);
+}
+
+/** A voice message: the mic held for `ms` (the composer must be empty), then let go. */
+export async function voice(p: Peer, ms = 4200) {
+  const mic = p.page.getByTestId("voice-record");
+  const box = (await mic.boundingBox())!;
+  await p.page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await p.page.mouse.down();
+  await expect(p.page.getByTestId("voice-bar")).toHaveAttribute("data-phase", "recording");
+  await p.page.waitForTimeout(ms);
+  await p.page.mouse.up();
+  await expect(p.page.getByTestId("voice-bar")).toHaveCount(0);
 }
 
 /** One line of a conversation: who types it, and what. */

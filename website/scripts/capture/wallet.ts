@@ -33,7 +33,7 @@ export async function openWallet(p: Peer, card?: Rail | "lightning") {
 }
 
 /** Every wallet on test networks: the app says so on every card and in the wallet's notice. */
-export async function useTestnet(p: Peer) {
+export async function testnetMode(p: Peer) {
   await openWallet(p);
   await p.page.getByTestId("wallet-mode").getByRole("radio", { name: "Testnet" }).click();
   await expect(p.page.getByTestId("testnet-notice")).toBeVisible();
@@ -158,7 +158,7 @@ export type Funding = Partial<Record<Rail, number>>;
 
 /** Testnet mode, then each rail funded in turn. Returns the rails that could not be funded. */
 export async function fund(p: Peer, funding: Funding): Promise<Rail[]> {
-  await useTestnet(p);
+  await testnetMode(p);
   const steps: Record<Rail, (n: number) => Promise<void>> = {
     cashu: (n) => cashu(p, n), arkade: () => arkade(p), bark: (n) => bark(p, n), spark: (n) => spark(p, n),
     usdt: (n) => usdt(p, n), bitcoin: (n) => bitcoin(p, n), fedimint: (n) => fedimint(p, n),

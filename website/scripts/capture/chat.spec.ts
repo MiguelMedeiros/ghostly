@@ -1,9 +1,9 @@
 // "Say it your way" and "Send the actual thing": Boo's chats with four friends, the one with Casper
-// open, then the photo Casper sends. Desktop from Boo's side; the phone test is the same story on
+// open (text and a voice message), then the photo Casper sends. Desktop from Boo's side; the phone test is the same story on
 // Boo's phone.
 import { test, expect, type Browser } from "@playwright/test";
 import { LocalRelay } from "../../../e2e/support/relay";
-import { CAST, chat, converse, pair, person, sceneImage, shot, toBottom, type Peer } from "./helpers";
+import { CAST, chat, converse, pair, person, sceneImage, shot, toBottom, voice, type Peer } from "./helpers";
 
 /** The friends Boo talked to earlier today, oldest first: they fill the chat list under Casper. */
 const EARLIER = [
@@ -33,8 +33,11 @@ async function story(browser: Browser, baseURL: string, mobile: boolean) {
     [casper, "straight to you. nothing in between"],
     [boo, "perfect. and friday?"],
     [casper, "8pm at the old gate. bring the good flashlight 🔦"],
-    [boo, "deal. I'll bring snacks too 🍪"],
   ], [boo, casper]);
+  // Casper says the rest out loud.
+  await voice(casper);
+  await expect(chat(boo).getByTestId("voice-bubble").last().getByTestId("voice-play")).toBeEnabled({ timeout: 60_000 });
+  await converse([[boo, "deal. I'll bring snacks too 🍪"]], [boo, casper]);
   // Casper has read everything: Boo's last bubbles carry the receipt.
   await boo.page.waitForTimeout(2500);
   await toBottom(boo);

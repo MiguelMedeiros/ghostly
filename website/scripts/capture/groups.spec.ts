@@ -1,10 +1,11 @@
 // "Bring the whole group": a private group (group-mesh/1) with a picture, made by Boo and joined by
-// three friends through its link, everyone talking. Desktop from Boo's side, then Boo's own profile
+// three friends through its link, everyone talking, and a request to the group paid by one member. Desktop from Boo's side, then Boo's own profile
 // reopened on a phone.
 import { test, expect } from "@playwright/test";
 import { rmSync } from "node:fs";
 import { LocalRelay } from "../../../e2e/support/relay";
 import { CAST, chat, converse, home, newProfile, open, person, sceneImage, shot, toBottom, type Peer } from "./helpers";
+import { fund } from "./wallet";
 
 const GROUP = "Lake house trip";
 const groupChat = (p: Peer) => p.page.getByTestId("group-chat");
@@ -22,6 +23,9 @@ test("a private group of four, desktop and phone", async ({ browser, baseURL }) 
   const boo = await person(browser, relay, baseURL!, CAST.boo, { profile });
   const friends = await Promise.all([CAST.casper, CAST.wendy, CAST.spooky].map((who) => person(browser, relay, baseURL!, who)));
   const [casper, wendy, spooky] = friends;
+  // Payments between members run on the test mint here: everyone in Testnet, Wendy with test sats.
+  await Promise.all([fund(boo, {}), fund(casper, {}), fund(spooky, {}), fund(wendy, { cashu: 10_000 })]);
+  for (const p of [boo, ...friends]) await home(p);
 
   // Boo makes the group, gives it a picture, and hands out its link.
   await home(boo);
@@ -48,7 +52,23 @@ test("a private group of four, desktop and phone", async ({ browser, baseURL }) 
     [spooky, "and I bring the ghost stories 👻"],
     [casper, "car leaves at 6. who's riding with me?"],
     [wendy, "me! saving you the front seat, Boo"],
-    [boo, "see you all friday 🌙"],
+  ], everyone);
+
+  // Boo asks the group for the firewood; Wendy pays it, once, and everyone sees who did.
+  await boo.page.getByTestId("payment-button").click();
+  await boo.page.getByTestId("group-pay-everyone").click();
+  await boo.page.getByTestId("payment-card-cashu").click();
+  await boo.page.getByTestId("payment-amount").fill("2000");
+  await boo.page.getByPlaceholder("What for? (optional)").fill("firewood 🔥");
+  await boo.page.getByTestId("payment-request").click();
+  await expect(boo.page.getByTestId("payment-composer")).toHaveCount(0);
+  const ask = chat(wendy).getByTestId("payment-bubble").filter({ hasText: "firewood" });
+  await ask.getByTestId("payment-pay").click({ timeout: 90_000 });
+  await chat(wendy).getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
+  await expect(chat(boo).getByTestId("group-pay-caption").filter({ hasText: "asked the group" })).toContainText("Paid by Wendy", { timeout: 90_000 });
+  await converse([
+    [boo, "thanks Wendy! 🔥"],
+    [spooky, "see you all friday 🌙"],
   ], everyone);
   await boo.page.waitForTimeout(2000);
   await toBottom(boo);
