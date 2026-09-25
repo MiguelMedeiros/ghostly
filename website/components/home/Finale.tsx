@@ -6,7 +6,7 @@ import { useCalm } from "@/lib/useCalm";
 import { Ghost, GhostMark, type GhostMood } from "@/components/ghost/Ghost";
 import { Icon } from "@/components/site/icons";
 import { Particles } from "@/components/site/Particles";
-import { DOWNLOADS, PLATFORMS, RELEASE_URL, VERSION, defaultInstaller, platformOf, type InstallerKey } from "@/lib/release";
+import { PLATFORMS, defaultInstaller, downloads, platformOf, releaseUrl, type InstallerKey } from "@/lib/release";
 import { APP_URL } from "@/content/shell";
 import type { HomeCopy } from "@/content/home";
 import "@/app/finale.css";
@@ -47,7 +47,8 @@ function Words({ text, className = "", from = 0 }: { text: string; className?: s
  * platform (the reader's machine first), the extension and the CLI. Without
  * scripts, or with reduced motion, the final frame is simply there.
  */
-export function Finale({ t }: { t: HomeCopy["finale"] }) {
+export function Finale({ t, version }: { t: HomeCopy["finale"]; version: string }) {
+  const links = downloads(version);
   const reduce = useCalm();
   const sectionRef = useRef<HTMLElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -247,20 +248,21 @@ export function Finale({ t }: { t: HomeCopy["finale"] }) {
         <div className="fin-panel">
           <div className="fin-panel-head">
             <h3 className="fin-panel-title">
-              <Icon name="desktop" /> {t.desktop.title} <span className="chip">v{VERSION}</span>
+              <Icon name="desktop" /> {t.desktop.title} <span className="chip">v{version}</span>
             </h3>
-            <p className="fin-panel-body">{t.desktop.body}</p>
+            <a className="caption fin-all" href={releaseUrl(version)}>
+              {t.all} <span aria-hidden="true">↗</span>
+            </a>
           </div>
           <div className="fin-cards">
             {platforms.map((p) => (
               <div key={p.id} className="card fin-card" data-hot={p.id === hot || undefined}>
                 <div className="fin-card-head">
-                  <h4 className="fin-card-title">{t.desktop.platforms[p.id].name}</h4>
-                  {p.id === hot && <span className="chip fin-chip--hot">{t.desktop.platforms[p.id].chip}</span>}
+                  <h4 className="fin-card-title">{t.desktop.platforms[p.id]}</h4>
                 </div>
                 <div className="fin-dls">
                   {p.installers.map((d) => (
-                    <a key={d.key} className="btn fin-dl" href={DOWNLOADS[d.key]} aria-current={d.key === installer ? "true" : undefined}>
+                    <a key={d.key} className="btn fin-dl" href={links[d.key]} aria-current={d.key === installer ? "true" : undefined}>
                       <Icon name="download" /> {t.desktop.installers[d.key]} <span className="fin-dl-ext">{d.ext}</span>
                     </a>
                   ))}
@@ -274,7 +276,7 @@ export function Finale({ t }: { t: HomeCopy["finale"] }) {
                 </h4>
                 <p className="fin-card-body">{t.extension.body}</p>
               </div>
-              <a className="btn fin-dl" href={DOWNLOADS.chromeStore}>
+              <a className="btn fin-dl" href={links.chromeStore}>
                 <Icon name="globe" /> {t.extension.cta} <span className="fin-dl-ext">Web Store</span>
               </a>
             </div>
@@ -291,12 +293,6 @@ export function Finale({ t }: { t: HomeCopy["finale"] }) {
             </div>
           </div>
         </div>
-        <p className="caption fin-note">
-          {t.note.replace("{v}", VERSION)}{" "}
-          <a href={RELEASE_URL}>
-            {t.all} <span aria-hidden="true">↗</span>
-          </a>
-        </p>
       </div>
     </section>
   );

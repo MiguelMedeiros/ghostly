@@ -239,12 +239,6 @@ html.js .fin[data-state="done"][data-poof="true"] .fin-actor--boo {
   color: var(--cyan);
   flex: none;
 }
-.fin-panel-body {
-  color: var(--muted);
-  font-size: var(--t-note);
-  line-height: 1.5;
-  text-wrap: pretty;
-}
 .fin-cards {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -307,11 +301,6 @@ html.js .fin[data-state="done"][data-poof="true"] .fin-actor--boo {
   line-height: 1.5;
   text-wrap: pretty;
 }
-.fin-chip--hot {
-  color: var(--cyan);
-  border-color: rgba(34, 211, 238, 0.4);
-  background: rgba(34, 211, 238, 0.08);
-}
 .fin-dls {
   display: grid;
   gap: 8px;
@@ -347,19 +336,15 @@ html.js .fin[data-state="done"][data-poof="true"] .fin-actor--boo {
 .fin-dl[aria-current="true"] .fin-dl-ext {
   color: var(--cyan);
 }
-.fin-note {
-  margin-top: 22px;
+/* Every file of the release, small, at the end of the panel's head. */
+.fin-all {
   text-transform: none;
   letter-spacing: 0.02em;
-  line-height: 1.7;
-  max-width: 56em;
-}
-.fin-note a {
   color: var(--muted);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-.fin-note a:hover {
+.fin-all:hover {
   color: var(--cyan);
 }
 
@@ -441,9 +426,6 @@ html.js .fin[data-state="done"][data-poof="true"] .fin-actor--boo {
   .fin-panel {
     order: 6;
     margin-top: 48px;
-  }
-  .fin-note {
-    order: 7;
   }
   .fin-actors {
     min-height: calc(var(--fin-ghost) * 1.25 + 50px);

@@ -1,5 +1,6 @@
 import { Ghost } from "@/components/ghost/Ghost";
 import { Icon } from "@/components/site/icons";
+import { NEXT_VERSION } from "@/lib/status";
 import type { HomeCopy } from "@/content/home";
 import { Reveal } from "./Reveal";
 import { WalletDeck } from "./WalletDeck";
@@ -43,7 +44,7 @@ export function SpaceSection({ t, w, shotLabel }: { t: HomeCopy["space"]; w: Hom
                   <img src="/screenshots/current/profiles.webp" alt="The Profile page listing two profiles, Boo and Haunted House, with backups above" loading="lazy" width={1280} height={820} />
                 </div>
               </div>
-              <figcaption className="caption">{shotLabel}</figcaption>
+              <figcaption className="caption">{shotLabel.replace("{n}", NEXT_VERSION)}</figcaption>
             </figure>
 
             <div className="sp-rail">

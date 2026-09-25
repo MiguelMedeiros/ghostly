@@ -23,7 +23,8 @@ import "@/app/home.css";
  * gets the whole screen. Then the product, your space, the architecture
  * opening under the ghosts, and the payoff.
  */
-export function HomePage({ locale }: { locale: Locale }) {
+/** `version`: the release the download panel offers (lib/latestRelease.ts). */
+export function HomePage({ locale, version }: { locale: Locale; version: string }) {
   const t = home[locale];
   return (
     <Shell locale={locale}>
@@ -91,7 +92,7 @@ export function HomePage({ locale }: { locale: Locale }) {
           </Link>
         </div>
       </div>
-      <Finale t={t.finale} />
+      <Finale t={t.finale} version={version} />
     </Shell>
   );
 }

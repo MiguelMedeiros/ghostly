@@ -6,3 +6,6 @@
  */
 export const LEVELS = ["available", "planned", "research"] as const;
 export type Level = (typeof LEVELS)[number];
+
+/** Only the app screenshots' caption uses it ("{n}" in home.next.fromDev); the screenshots' own card owns that caption. */
+export const NEXT_VERSION = "0.5.0";

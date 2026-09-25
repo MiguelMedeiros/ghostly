@@ -126,7 +126,7 @@ const en = {
     lead: "Here is what the app does.",
     shot: "Screenshot of the Ghostly app",
     illustration: "Illustration",
-    fromDev: "In the app",
+    fromDev: "Development build, {n}",
     fromOld: "An earlier build",
     items: [
       {
@@ -318,11 +318,10 @@ const en = {
     },
     desktop: {
       title: "For your computer",
-      body: "The desktop app for macOS, Windows and Linux. The same Ghostly, installed.",
       platforms: {
-        mac: { name: "macOS", chip: "For this Mac" },
-        windows: { name: "Windows", chip: "For this PC" },
-        linux: { name: "Linux", chip: "For this machine" },
+        mac: "macOS",
+        windows: "Windows",
+        linux: "Linux",
       },
       installers: {
         macArm: "Apple silicon",
@@ -335,11 +334,10 @@ const en = {
     },
     extension: {
       title: "Browser extension",
-      body: "From the Chrome Web Store, for Chrome, Brave, Edge and other Chromium browsers.",
+      body: "Chrome, Brave, Edge",
       cta: "Add to Chrome",
     },
     cli: { title: "Command line", body: "For scripts, bots and agents.", cta: "CLI guide" },
-    note: "Every download is version {v}.",
     all: "All release files",
     conversation: [
       { side: "boo", text: "Boo! 👻" },
@@ -473,7 +471,7 @@ const ptBr: HomeCopy = {
     lead: "Veja o que o app faz.",
     shot: "Captura de tela do app Ghostly",
     illustration: "Ilustração",
-    fromDev: "No app",
+    fromDev: "Build de desenvolvimento, {n}",
     fromOld: "Um build anterior",
     items: [
       {
@@ -665,11 +663,10 @@ const ptBr: HomeCopy = {
     },
     desktop: {
       title: "Para o seu computador",
-      body: "O app de desktop para macOS, Windows e Linux. O mesmo Ghostly, instalado.",
       platforms: {
-        mac: { name: "macOS", chip: "Para este Mac" },
-        windows: { name: "Windows", chip: "Para este PC" },
-        linux: { name: "Linux", chip: "Para esta máquina" },
+        mac: "macOS",
+        windows: "Windows",
+        linux: "Linux",
       },
       installers: {
         macArm: "Apple silicon",
@@ -682,11 +679,10 @@ const ptBr: HomeCopy = {
     },
     extension: {
       title: "Extensão do navegador",
-      body: "Pela Chrome Web Store, para Chrome, Brave, Edge e outros navegadores Chromium.",
+      body: "Chrome, Brave, Edge",
       cta: "Adicionar ao Chrome",
     },
     cli: { title: "Linha de comando", body: "Para scripts, bots e agentes.", cta: "Guia da CLI (em inglês)" },
-    note: "Todos os downloads são a versão {v}.",
     all: "Todos os arquivos da versão",
     conversation: [
       { side: "boo", text: "Buu! 👻" },
