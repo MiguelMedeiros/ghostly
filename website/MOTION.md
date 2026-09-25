@@ -118,7 +118,31 @@ network field behind the act drifts 12 px over 28 s and parallaxes with the
 scroll on its own composited layer; the grid holds still. Leaving: the copy
 fades and lifts 48 px over p 0.2 to 0.7 of the hero.
 
-### Loops and demos (developer page, wallet deck)
+### Step-through explainers (developer page)
+
+The developer page opens with the protocol in eight steps
+(`components/dev/ProtocolSteps.tsx`), which the reader drives rather than
+watches:
+
+- Next, Previous, the step dots, ← → (and Home, End). Arriving at a step plays
+  its beat once (establish, action, then a finished frame); going back plays
+  the step being left in reverse, 1.6× faster; a jump of more than one step
+  fades the picture out (`fast`, `exit`), starts the target at its first frame
+  and fades in (`base`, `enter`); Replay rewinds the step at 3× and plays it.
+- Nothing advances by itself. Play all goes step by step with a 2.8 s hold on
+  each finished frame and stops at the last one.
+- The picture follows one number, `--t` (seconds along all the steps, in
+  `protocolTimeline.ts`); every shape reads it through the `sx-` rules in
+  `app/dev-steps.css`, and moves on `move` (packets travel a route at an even
+  speed, and a route draws behind its packet). Two labels that share a place
+  swap: the next arrives after the last has started to leave, never on top.
+- The copy card changes first (out `fast`, in `base` after it), then the
+  picture answers. All cards share one grid cell, so the panel never changes
+  height and nothing below it moves.
+- Reduced motion and no JavaScript: each step is its finished frame, changes
+  are instant, no idle loop runs.
+
+### Loops and demos (wallet deck)
 
 - A loop runs 10 to 16 s, split into named phases of 2 to 4 s each; each phase
   has a caption of 2 to 4 words that changes with it.
