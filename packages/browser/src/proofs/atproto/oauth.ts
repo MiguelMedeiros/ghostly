@@ -185,8 +185,9 @@ async function withSession<T>(options: AtprotoFlowOptions, work: (session: { did
   } catch (e) {
     const text = String((e as { error?: string })?.error ?? (e as Error)?.message ?? e);
     if (/invalid_scope/i.test(text) || /scope/i.test(String((e as { errorDescription?: string })?.errorDescription ?? ""))) throw new AtprotoScopeError(
-      "Your server does not offer a permission limited to Ghostly's records: it only offers full access to your account. Choose \"Your server, full access\" to continue anyway; Ghostly still only writes this one record.", { cause: e });
-    throw new Error(`Your server (${pdsHost(account.pds)}) refused to start the sign-in.`, { cause: e });
+      "Your server does not offer a permission limited to Ghostly's records: it only offers full access to your account. Choose \"Your server, full access\" to continue anyway; Ghostly still only writes this one record.");
+    // eslint-disable-next-line preserve-caught-error -- A message people can act on; the library's error stays out of the UI (ES2020 has no Error.cause).
+    throw new Error(`Your server (${pdsHost(account.pds)}) refused to start the sign-in.`);
   }
   if (!state) throw new Error("The sign-in could not start.");
   options.onProgress(`Approve on ${pdsHost(account.pds)} in the window that opened…`);

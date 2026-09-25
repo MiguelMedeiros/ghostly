@@ -52,7 +52,8 @@ export async function resolveAtprotoDid(did: string, options: AtprotoResolveOpti
   try {
     response = await options.fetch(url, { headers: { accept: "application/did+ld+json, application/json" }, maxBytes: DID_DOCUMENT_MAX_BYTES, signal: options.signal, redirect: "error" });
   } catch (e) {
-    throw new Error(/too large/i.test(String(e)) ? "The account's DID document is too large" : "The account's DID could not be resolved", { cause: e });
+    // eslint-disable-next-line preserve-caught-error -- A message people can act on; the library's error stays out of the UI (ES2020 has no Error.cause).
+    throw new Error(/too large/i.test(String(e)) ? "The account's DID document is too large" : "The account's DID could not be resolved");
   }
   if (response.status === 404 || response.status === 410) throw new Error("The account's DID is not registered, or was deactivated");
   if (response.status !== 200) throw new Error("The account's DID could not be resolved");

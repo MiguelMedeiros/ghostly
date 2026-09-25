@@ -129,7 +129,8 @@ export function createAtprotoIdentityProvider(options: AtprotoIdentityOptions = 
       const url = `${doc.pds}/xrpc/com.atproto.sync.getRecord?${new URLSearchParams({ did, collection: ATPROTO_PROOF_COLLECTION, rkey })}`;
       let response: Awaited<ReturnType<IdentityFetch>>;
       try { response = await ctx.fetch(url, { headers: { accept: "application/vnd.ipld.car" }, maxBytes: RECORD_PROOF_MAX_BYTES, signal: ctx.signal, redirect: "error" }); }
-      catch (e) { throw new Error(/too large/i.test(String(e)) ? "The account's server sent a proof that is too large" : `The account's server (${hostOf(doc.pds)}) could not be reached`, { cause: e }); }
+      // eslint-disable-next-line preserve-caught-error -- A message people can act on; the library's error stays out of the UI (ES2020 has no Error.cause).
+      catch (e) { throw new Error(/too large/i.test(String(e)) ? "The account's server sent a proof that is too large" : `The account's server (${hostOf(doc.pds)}) could not be reached`); }
       if (response.status !== 200) {
         let code = "";
         try { code = String((JSON.parse(response.text) as { error?: unknown }).error ?? ""); } catch { /* not JSON */ }
@@ -139,7 +140,8 @@ export function createAtprotoIdentityProvider(options: AtprotoIdentityOptions = 
       }
       let proof: ReturnType<typeof verifyAtprotoRecordProof>;
       try { proof = verifyAtprotoRecordProof(response.bytes, { did, key: doc.key, collection: ATPROTO_PROOF_COLLECTION, rkey }); }
-      catch (e) { throw new Error(e instanceof AtprotoProofError ? `The account's repository does not prove the record: ${e.message}` : "The account's repository could not be read", { cause: e }); }
+      // eslint-disable-next-line preserve-caught-error -- A message people can act on; the library's error stays out of the UI (ES2020 has no Error.cause).
+      catch (e) { throw new Error(e instanceof AtprotoProofError ? `The account's repository does not prove the record: ${e.message}` : "The account's repository could not be read"); }
       if (!proof.record) throw new Error("The record is no longer in the account's repository");
       checkAtprotoProofRecord(proof.record.value, statement);
       const handle = await verifiedAtprotoHandle(doc, resolve);
@@ -163,7 +165,8 @@ export function createAtprotoIdentityProvider(options: AtprotoIdentityOptions = 
           catch (e) {
             if (e instanceof AtprotoScopeError && access !== "full") {
               fullAccessServers.add(flow.account.pds);
-              throw new Error("Your server only offers full access to your account. Try again to approve that; Ghostly only deletes this one record.", { cause: e });
+              // eslint-disable-next-line preserve-caught-error -- A message people can act on; the library's error stays out of the UI (ES2020 has no Error.cause).
+              throw new Error("Your server only offers full access to your account. Try again to approve that; Ghostly only deletes this one record.");
             }
             throw e;
           }
