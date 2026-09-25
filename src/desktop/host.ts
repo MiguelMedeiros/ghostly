@@ -114,6 +114,8 @@ export function createDesktopHost(version: string) {
     openPaymentLink: (uri) => invoke("open_payment_link", { url: uri }),
     // WKWebView has no Web Share API; the system's share sheet is shown by Rust (macOS; elsewhere false: the page copies).
     shareText: (text, anchor) => invoke<boolean>("share_text", { text, anchor }),
+    // WKWebView's readText() shows a "Paste" callout that needs a second click; Rust reads the text (main window only, bounded).
+    readClipboardText: () => invoke<string>("read_clipboard_text"),
     // There is nothing to ask: the user typed the address, and Rust only ever reaches loopback.
     requestLocalAccess: async () => true,
     async openService(peerPubKeyZ32, serviceId) {

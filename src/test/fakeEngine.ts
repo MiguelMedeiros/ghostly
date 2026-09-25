@@ -87,6 +87,8 @@ export class FakeEngine implements BrowserHost {
   /** Every request, in order. */
   readonly calls: { method: EngineMethod; params: unknown }[] = [];
   openPaymentLink?: BrowserHost["openPaymentLink"];
+  /** The desktop host's native clipboard read, when a test gives one; left out, the page's Clipboard API is used. */
+  readClipboardText?: BrowserHost["readClipboardText"];
 
   private handlers = new Map<EngineMethod, (params: never) => unknown>();
   private send: ((message: EngineEvent | RpcResponse) => void) | null = null;
@@ -134,6 +136,7 @@ export class FakeEngine implements BrowserHost {
     this.calls.length = 0;
     this.handlers.clear();
     this.openPaymentLink = undefined;
+    this.readClipboardText = undefined;
     this.setState({});
   }
 

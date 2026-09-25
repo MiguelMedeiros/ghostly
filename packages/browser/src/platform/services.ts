@@ -63,6 +63,10 @@ export const servicesPlatform: ServicesPlatform | null = {
     const share = getBrowserHost().shareText;
     return share ? share(text, anchor) : null;
   },
+  readClipboardText() {
+    const read = getBrowserHost().readClipboardText;
+    return read ? read() : null;
+  },
   get features() {
     return getBrowserHost().features;
   },
