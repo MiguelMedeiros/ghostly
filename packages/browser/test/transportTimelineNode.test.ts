@@ -1,5 +1,5 @@
 import "fake-indexeddb/auto";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { GhostLink, createIdentity, createLink, identityFromSeedB64, type PairingState } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
@@ -16,9 +16,11 @@ import { FakeNativeNet } from "./helpers/fakeNative";
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const step of cleanup.splice(0).reverse()) await step(); });
 
-async function setup() {
+/** `appCoordinates`: the app holds the lower rendezvous key, so it plans the switches (random when left out). */
+async function setup({ appCoordinates }: { appCoordinates?: boolean } = {}) {
   const net = new FakeNativeNet();
-  const invitation = createLink();
+  let invitation = createLink();
+  while (appCoordinates !== undefined && (invitation.invite.peerPubKeyZ32 < invitation.mine.peerPubKeyZ32) !== appCoordinates) invitation = createLink();
   const [mine, theirs] = [createIdentity().seedB64, createIdentity().seedB64];
   const id = `timeline-${crypto.randomUUID()}`;
   await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
@@ -30,13 +32,14 @@ async function setup() {
   const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false,
     nativeTransports: { "iroh/1": async () => net.endpoint("iroh/1", "app"), "hyperdht/1": async () => net.endpoint("hyperdht/1", "app") } });
   let contactState: PairingState = { status: "connecting" };
+  const contactGot: string[] = [];
   const contact = new GhostLink({
     params: { ...invitation.invite, profile: "paired-chat/1" }, rtcAvailable: false,
     pairing: { credentials: { seedB64: theirs, peerKey: identityFromSeedB64(mine).pubKeyZ32 }, pinPeer: async () => {} },
     native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1", "hyperdht/1"], peerFallback: true,
       peerDescriptors: { "iroh/1": { id: "app:iroh/1" }, "hyperdht/1": { id: "app:hyperdht/1" } } },
     transport, createPeerConnection: () => { throw new Error("No WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
-    events: { onPairingState: state => { contactState = state; } },
+    events: { onPairingState: state => { contactState = state; }, onMessage: message => { contactGot.push(message.text); } },
   });
   contact.registerEndpoint(net.endpoint("iroh/1", "contact"));
   contact.registerEndpoint(net.endpoint("hyperdht/1", "contact"));
@@ -47,7 +50,7 @@ async function setup() {
   await vi.waitFor(() => expect(view().availableTransports).toHaveLength(2));
   void contact.connect(5_000).catch(() => {});
   await vi.waitFor(() => expect([view().pairing?.status, view().pairing?.transport, contactState.transport]).toEqual(["ready", "iroh/1", "iroh/1"]));
-  return { net, node, contact, id, view, contactState: () => contactState };
+  return { net, node, contact, id, view, contactState: () => contactState, contactGot };
 }
 
 const lines = (view: LinkView) => (view.transportLog ?? []).map(e => [e.kind, e.cause ?? null, e.transport ?? null]);
@@ -75,26 +78,24 @@ it("tells the chat's connection story: first connection, the contact's switch, y
   expect(view().pairing?.transport).toBe("iroh/1");
   net.unreachable.delete("hyperdht/1");
 
-  // Automatic: nothing moves by itself, and the chat's choice is forgotten.
+  // Automatic: this side stops choosing, so the contact's standing choice (HyperDHT) wins, and the chat's own is forgotten.
   await node.setChatTransport({ linkId: id, transport: "auto" });
   expect(view().transportAutomatic).toBe(true);
   expect((await db.getLinks()).find(l => l.id === id)?.preferredTransport).toBeUndefined();
+  await vi.waitFor(() => expect(lines(view()).at(-1)).toEqual(["switched", "automatic", "hyperdht/1"]));
 
   contact.disconnect();
   await vi.waitFor(() => expect(lines(view()).at(-1)).toEqual(["lost", null, null]));
-  // The contact still prefers HyperDHT, so the chat ends up there again. Whoever dials first decides the story:
-  // the contact straight over HyperDHT ("Switched to HyperDHT: Iroh dropped"), or this side over Iroh, then the
-  // session moves on ("Back live over Iroh", "Moved to HyperDHT"). Both are true; flapping is covered in transportLog.test.ts.
+  // It comes back where the agreement put it, in one line: the redial starts on the contact's choice.
   void contact.connect(5_000).catch(() => {});
-  await vi.waitFor(() => expect([view().pairing?.transport, view().transportLog!.at(-1)!.transport]).toEqual(["hyperdht/1", "hyperdht/1"]));
+  await vi.waitFor(() => expect([view().pairing?.transport, contactState().transport]).toEqual(["hyperdht/1", "hyperdht/1"]));
   const after = view().transportLog!.slice(view().transportLog!.findIndex(e => e.kind === "lost") + 1);
-  expect(after.map(e => [e.kind, e.cause ?? null])).toSatisfy((got: unknown[]) =>
-    JSON.stringify(got) === JSON.stringify([["switched", "dropped"]]) || JSON.stringify(got) === JSON.stringify([["back", null], ["switched", "automatic"]]));
+  expect(after.map(e => [e.kind, e.transport])).toEqual([["back", "hyperdht/1"]]);
   expect(contactState().status).toBe("ready");
 
   // Kept with the chat, and never a message: nothing to count as unread, nothing to preview.
   expect((await db.getLinks()).find(l => l.id === id)?.transportLog?.map(e => e.kind).slice(0, 5))
-    .toEqual(["connected", "switched", "switched", "failed", "lost"]);
+    .toEqual(["connected", "switched", "switched", "failed", "switched"]);
   expect(await db.getMessages(id)).toEqual([]);
   // Only the chat on screen carries it in the state.
   node.setActiveLink({ linkId: null });
@@ -119,3 +120,47 @@ it("DHT only from the chat's menu: a line for the choice, one for leaving it, th
   await vi.waitFor(() => expect(lines(view()).at(-1)).toEqual(["back", null, "iroh/1"]));
   expect(await db.getMessages(id)).toEqual([]);
 }, 40_000);
+
+/**
+ * A drop in automatic mode while a move to the contact's choice is still in flight. However the keys fall (which
+ * side plans the switch) and whichever side redials, both end on the transport the agreement names, once, and stay
+ * there; nothing sent meanwhile is lost (WISP 100: a live chat changes transport when it drops or someone switches).
+ */
+describe.each([
+  { appCoordinates: true, dialer: "app", who: "the app redials" },
+  { appCoordinates: true, dialer: "contact", who: "the contact redials" },
+  { appCoordinates: false, dialer: "app", who: "the app redials" },
+  { appCoordinates: false, dialer: "contact", who: "the contact redials" },
+  { appCoordinates: true, dialer: "both", who: "both redial at once" },
+  { appCoordinates: false, dialer: "both", who: "both redial at once" },
+] as const)("a drop mid-switch (the app plans switches: $appCoordinates), $who", ({ appCoordinates, dialer }) => {
+  it("ends on the contact's choice on both sides, with one line for coming back", async () => {
+    const { net, node, contact, id, view, contactState, contactGot } = await setup({ appCoordinates });
+    await vi.waitFor(() => expect(lines(view())).toEqual([["connected", null, "iroh/1"]]));
+    await node.setChatTransport({ linkId: id, transport: "auto" });
+
+    // The contact chooses HyperDHT; the switch is agreed, and its dial is still on its way when the link drops.
+    const release = net.hold("hyperdht/1");
+    await contact.setTransportPreference("hyperdht/1", true);
+    await vi.waitFor(() => expect([view().pairing?.transitionTarget, contactState().transitionTarget]).toEqual(["hyperdht/1", "hyperdht/1"]));
+    // A message still on the wire when the link drops is lost with it, and must go again once the chat is back.
+    expect((await node.sendMessage({ linkId: id, text: "in flight at the drop" })).error).toBeNull();
+    contact.disconnect();
+    await vi.waitFor(() => expect(lines(view()).at(-1)).toEqual(["lost", null, null]));
+    release();
+    expect(contactGot).toEqual([]);
+
+    if (dialer !== "contact") void node.connect({ linkId: id }).catch(() => {});
+    if (dialer !== "app") void contact.connect(5_000).catch(() => {});
+    await vi.waitFor(() => expect([view().pairing?.status, view().pairing?.transport, contactState().status, contactState().transport])
+      .toEqual(["ready", "hyperdht/1", "ready", "hyperdht/1"]));
+    await vi.waitFor(() => expect(contactGot).toEqual(["in flight at the drop"]));
+    // Settled, not flapping: no switch pending on either side, and no more lines a while later.
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect([view().pairing?.transport, view().pairing?.transitionTarget, contactState().transport, contactState().transitionTarget])
+      .toEqual(["hyperdht/1", undefined, "hyperdht/1", undefined]);
+    const after = view().transportLog!.slice(view().transportLog!.findIndex(e => e.kind === "lost") + 1);
+    expect(after.map(e => [e.kind, e.from, e.transport])).toEqual([["switched", "iroh/1", "hyperdht/1"]]);
+    expect(contactGot).toEqual(["in flight at the drop"]);
+  }, 20_000);
+});

@@ -36,6 +36,8 @@ export class TransportSwitch {
   private revision = 0;
   private intent = 0;
   private remote: TransportPolicy | null = null;
+  /** The contact's policy as it last said it, kept across sessions: where the next reconnect dials first. */
+  private lastRemote: TransportPolicy | null = null;
   private actual?: PairedTransport;
   private plan: SwitchPlan | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -56,6 +58,21 @@ export class TransportSwitch {
   }) {}
 
   get peerPolicy(): TransportPolicy | null { return this.remote; }
+  /**
+   * The transport a standing explicit choice names (the higher intent; the lower key on a tie), from this side's
+   * policy and the contact's last one, when both can use it. None when neither side chose: the rank sum decides.
+   * Both sides get the same answer, so whichever redials after a drop lands where the agreement would move it.
+   */
+  get chosenTarget(): PairedTransport | undefined {
+    const local = this.local(), remote = this.lastRemote;
+    if (!remote) return undefined;
+    const winner = this.winner(local, remote);
+    if (winner.intent === 0) return undefined;
+    return rankTransports(allowedTransports(local), allowedTransports(remote)).includes(winner.preferred) ? winner.preferred : undefined;
+  }
+  private winner(local: TransportPolicy, remote: TransportPolicy): TransportPolicy {
+    return local.intent > remote.intent || (local.intent === remote.intent && this.options.key < this.options.peerKey) ? local : remote;
+  }
   get pending(): SwitchPlan | null { return this.plan; }
   private local(): TransportPolicy { return { ...this.options.policy(), revision: this.revision, intent: this.intent }; }
   private signature(local: TransportPolicy, remote: TransportPolicy): string {
@@ -64,8 +81,15 @@ export class TransportSwitch {
   private send(frame: object): void { if (this.context) this.options.send({ ...frame, context: this.context }); }
   private announce(): void { this.send({ t: "paired-policy", policy: this.local() }); }
 
-  begin(context: string, actual: PairedTransport): void {
-    if (this.plan) this.settled = this.signature(this.plan.local, this.plan.remote);
+  /**
+   * A session is ready. `migrated`: it is the one a plan dialled, so that plan is done, even on a fallback choice.
+   * Otherwise it is a fresh session (a reconnect after a drop): a plan still pending from the old one did not happen,
+   * and what the old one kept or gave up on does not bind this one. Both sides agree again from their policies, so
+   * the chat ends on the same transport whichever side dialled.
+   */
+  begin(context: string, actual: PairedTransport, migrated = false): void {
+    this.settled = migrated && this.plan ? this.signature(this.plan.local, this.plan.remote) : "";
+    if (!migrated) this.failed = "";
     this.clearPlan();
     this.context = context; this.actual = actual;
     this.options.state(); this.announce();
@@ -100,7 +124,7 @@ export class TransportSwitch {
   private choices(local: TransportPolicy, remote: TransportPolicy): PairedTransport[] {
     const ranked = rankTransports(allowedTransports(local), allowedTransports(remote));
     if (!ranked.length) return [];
-    const winner = local.intent > remote.intent || (local.intent === remote.intent && this.options.key < this.options.peerKey) ? local : remote;
+    const winner = this.winner(local, remote);
     const target = winner.intent === 0 && this.actual && ranked.includes(this.actual) ? this.actual
       : ranked.includes(winner.preferred) ? winner.preferred : ranked[0];
     return [target, ...(local.fallback && remote.fallback ? ranked.filter(t => t !== target) : [])];
@@ -144,7 +168,7 @@ export class TransportSwitch {
       if (!policy || (this.remote && (policy.revision < this.remote.revision ||
         (policy.revision === this.remote.revision && JSON.stringify(policy) !== JSON.stringify(this.remote))))) return true;
       const changed = !this.remote || policy.revision !== this.remote.revision;
-      this.remote = policy; this.options.peer(policy);
+      this.remote = this.lastRemote = policy; this.options.peer(policy);
       if (changed && this.plan && !this.preparing) this.clearPlan();
       this.reconcile(); return true;
     }

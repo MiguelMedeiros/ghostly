@@ -15,6 +15,17 @@ export class FakeNativeNet {
   /** Every channel opened, newest last. */
   readonly channels: FrameChannel[] = [];
   private endpoints = new Map<string, { endpoint: NativeEndpoint; identity: string; closed: boolean }>();
+  private held = new Map<NativeTransport, (() => void)[]>();
+
+  /**
+   * Dials over `transport` wait from now on, as a handshake that takes long would, so a test can act while one is
+   * in flight. The returned release fails the waiting dials and lets later ones through.
+   */
+  hold(transport: NativeTransport): () => void {
+    const waiting: (() => void)[] = [];
+    this.held.set(transport, waiting);
+    return () => { if (this.held.get(transport) === waiting) this.held.delete(transport); for (const fail of waiting.splice(0)) fail(); };
+  }
 
   endpoint(transport: NativeTransport, name: string): NativeEndpoint {
     const id = `${name}:${transport}`, identity = hex(32);
@@ -22,6 +33,8 @@ export class FakeNativeNet {
     entry.endpoint = {
       transport, descriptor: { id }, onConnection: null, onDescriptor: null,
       connect: async descriptor => {
+        const waiting = this.held.get(transport);
+        if (waiting) await new Promise<void>((_, reject) => waiting.push(() => reject(new Error(`${transport} dial abandoned`))));
         const remote = this.endpoints.get((descriptor as { id?: string })?.id ?? "");
         if (this.unreachable.has(transport)) throw new Error(`${transport} unreachable`);
         if (!remote || remote.closed || entry.closed) throw new Error("Peer native address unavailable");
