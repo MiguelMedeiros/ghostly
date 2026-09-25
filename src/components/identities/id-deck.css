@@ -82,17 +82,18 @@
 /* The card chooses what it shows by its own width (a container query on the face), wherever it is: a page's stack, a
    narrow column's track, a chat's picker, a flipped card's front. Large (250px and up): everything. Medium: the band,
    the photo, the identity and one status line (its validity); no machine line. Small (under 190px): the provider's
-   mark and name and the status seal alone. Text a size leaves out stays in the card's accessible name (hidden to the
+   mark and name and the status seal alone. (A container query reads the face's content box: the card's width less its
+   padding, --pad on each side, and border: 250px of card is about 223px inside, 190px about 168px.) Text a size leaves out stays in the card's accessible name (hidden to the
    eye only); what is decoration goes. Every line is one line, cut with an ellipsis, never mid-word or under the seal. */
 .id-card-face{container:id-card/inline-size}
 .id-card-issuer-kind,.id-card-status-text{white-space:nowrap}
-@container id-card (width < 250px){
+@container id-card (width < 223px){
  .id-card-mrz{display:none}
  .id-card-face{grid-template-rows:auto minmax(0,1fr)}
  .id-card-issuer-kind,.id-card-field-category,.id-card-field-shared{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
  .id-card-fields{align-content:center}
 }
-@container id-card (width < 190px){
+@container id-card (width < 168px){
  .id-card-face{grid-template-columns:minmax(0,1fr);grid-template-areas:"band" "fields";column-gap:0}
  .id-card-photo,.id-card-seal{display:none}
  .id-card-issuer{flex:1;min-width:0}

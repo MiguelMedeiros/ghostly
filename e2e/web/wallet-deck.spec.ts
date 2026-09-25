@@ -146,6 +146,8 @@ test("a desktop column squeezed by the chat list keeps the stack, and every card
   await page.mouse.up();
   await expect(deck(page)).toHaveAttribute("data-mode", "stack");
   const column = (await page.getByTestId("wallet").boundingBox())!;
+  // Still a stack of readable cards (deck/Deck.tsx STACK_MIN_CARD); narrower, it is a track (responsive.spec.ts).
+  expect((await card(page, "cashu").locator(".wallet-deck-face").boundingBox())!.width).toBeGreaterThanOrEqual(210);
   const narrow = await strips(page);
   expect(tiled(narrow)).toBe(true);
   // The whole stack is inside the column.

@@ -32,12 +32,13 @@
 
 /* The card chooses what it shows by its own width (a container query on the face), wherever it is. Large (230px and
    up): everything. Medium: no detail line. Small (under 180px): the mark, the name and the status; no balance, chip or
-   ghost. Text a size leaves out stays in the card's accessible name; every line is one line, cut with an ellipsis. */
+   ghost. (A container query reads the face's content box, the card's width less its padding: 230px of card is
+   about 202px inside, 180px about 154px.) Text a size leaves out stays in the card's accessible name; every line is one line, cut with an ellipsis. */
 .wallet-deck-face{container:wallet-card/inline-size}
-@container wallet-card (width < 230px){
+@container wallet-card (width < 202px){
  .wallet-deck-card-detail{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
 }
-@container wallet-card (width < 180px){
+@container wallet-card (width < 154px){
  .wallet-deck-card-balance{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
  .wallet-deck-card-chip,.wallet-deck-card-ghost{display:none}
  .wallet-deck-card-text{grid-column:1/-1}

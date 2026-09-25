@@ -1,6 +1,8 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "../support/fixtures";
 import { choose } from "../support/select";
+import { addNostrIdentity, injectNostrSigner } from "../support/nostrSigner";
+import { pair } from "../support/paired";
 
 /**
  * The pages beside the chat list (Wallet, Services, Settings, Profile, Identities) at every width they are shown at:
@@ -61,9 +63,40 @@ async function layoutProblems(page: Page, root: string): Promise<string[]> {
   }, root);
 }
 
+/**
+ * What is wrong with the chosen card of every deck under `root` (wallet cards, ID cards): a line of text that runs out
+ * of its box without an ellipsis, text outside the card, two lines of text on top of each other, or text under the
+ * ID card's photo or seal. A card chooses what it shows by its own width, so this holds at every width.
+ */
+async function deckCardProblems(page: Page, root: string): Promise<string[]> {
+  return page.evaluate((selector) => {
+    const problems: string[] = [];
+    const shown = (el: Element) => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 2 && r.height > 2 && s.display !== "none" && s.visibility !== "hidden" && Number(s.opacity) > 0; };
+    const overlap = (a: DOMRect, b: DOMRect) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 2 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 2;
+    for (const face of document.querySelectorAll(`${selector} .deck-card[data-active=true] [data-deck=face]`)) {
+      const card = face.getBoundingClientRect(), name = (face.closest("[data-testid]")?.getAttribute("data-testid") ?? "card") + ` ${Math.round(card.width)}px`;
+      // The elements that hold a line of text themselves, as shown.
+      const lines = [...face.querySelectorAll<HTMLElement>("*")].filter(el => shown(el) && [...el.childNodes].some(n => n.nodeType === Node.TEXT_NODE && n.textContent!.trim()) && !el.closest("[aria-hidden=true]"));
+      // Where the text itself is drawn (its box may be padded clear of the seal).
+      const ink = (el: Element) => { const range = document.createRange(); range.selectNodeContents(el); const r = range.getBoundingClientRect(); const right = el.getBoundingClientRect().right - parseFloat(getComputedStyle(el).paddingRight); return new DOMRect(r.left, r.top, Math.min(r.right, right) - r.left, r.height); };
+      for (const el of lines) {
+        const r = ink(el), s = getComputedStyle(el), text = `"${el.textContent!.trim().slice(0, 30)}"`;
+        if (el.scrollWidth > el.clientWidth + 1 && s.textOverflow !== "ellipsis") problems.push(`${name}: ${text} runs out of its box without an ellipsis`);
+        if (r.left < card.left - 1 || r.right > card.right + 1 || r.top < card.top - 1 || r.bottom > card.bottom + 1) problems.push(`${name}: ${text} is outside the card`);
+        for (const decor of face.querySelectorAll(".id-card-photo, .id-card-seal")) if (shown(decor) && overlap(r, decor.getBoundingClientRect())) problems.push(`${name}: ${text} runs under ${decor.className}`);
+      }
+      lines.forEach((a, i) => lines.slice(i + 1).forEach(b => {
+        if (!a.contains(b) && !b.contains(a) && overlap(ink(a), ink(b))) problems.push(`${name}: "${a.textContent!.trim().slice(0, 20)}" and "${b.textContent!.trim().slice(0, 20)}" overlap`);
+      }));
+    }
+    return problems;
+  }, root);
+}
+
 async function expectTidy(page: Page, root: string, what: string): Promise<void> {
   await page.waitForTimeout(250); // Let a panel's fade-in and a late balance settle.
   expect(await layoutProblems(page, root), `${what} at ${page.viewportSize()?.width}px`).toEqual([]);
+  expect(await deckCardProblems(page, root), `${what}'s cards at ${page.viewportSize()?.width}px`).toEqual([]);
 }
 
 for (const width of WIDTHS) {
@@ -173,8 +206,11 @@ test("the account bar keeps its five places at the list's narrowest", { tag: ["@
   await expect(page.getByRole("navigation", { name: "Account" })).toHaveAttribute("data-compact", "true");
 });
 
-test("the page keeps a phone's width however wide the chat list is dragged", { tag: ["@feature:app.sidebar-resize", "@feature:app.responsive"] }, async ({ peer }) => {
-  const { page } = await peer("alice", { viewport: { width: 900, height: 900 } });
+test("the page keeps a phone's width however wide the chat list is dragged", { tag: ["@feature:app.sidebar-resize", "@feature:app.responsive", "@feature:wallet.deck", "@feature:proofs.deck"] }, async ({ peer }) => {
+  const alice = await peer("alice", { viewport: { width: 900, height: 900 } });
+  const { page } = alice;
+  await injectNostrSigner(alice);
+  await addNostrIdentity(alice);
   await page.goto("/#/wallet");
   const handle = (await page.getByTestId("sidebar-resize").boundingBox())!;
   await page.mouse.move(handle.x + 1, handle.y + 100);
@@ -183,9 +219,41 @@ test("the page keeps a phone's width however wide the chat list is dragged", { t
   await page.mouse.up();
   const column = (await page.getByTestId("wallet").boundingBox())!;
   expect(column.width).toBeGreaterThanOrEqual(319);
+  // Too narrow for a stack of readable cards, even with a mouse: the snapping track, one card whole in the centre.
+  await expect(page.getByTestId("wallet").locator(".wallet-deck")).toHaveAttribute("data-mode", "track");
   await page.getByTestId("wallet-card-cashu").click();
   await expect(page.getByTestId("mint-row").first()).toBeVisible();
   await expectTidy(page, "[data-testid=wallet]", "the wallet beside the widest list");
+  await page.goto("/#/identities");
+  await expect(page.locator(".id-deck")).toHaveAttribute("data-mode", "track");
+  await page.getByTestId("identity-proof").click();
+  await expectTidy(page, "[data-testid=identities-page]", "an ID card beside the widest list");
   await page.goto("/#/settings");
   await expectTidy(page, "[data-testid=settings-page]", "Settings beside the widest list");
+});
+
+test("the chat's pickers stay inside the chat's column beside the widest list, their cards readable", { tag: ["@feature:app.sidebar-resize", "@feature:app.responsive", "@feature:payments.chat.cards", "@feature:proofs.composer"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("alice", { viewport: { width: 900, height: 900 } }), peer("bob")]);
+  await injectNostrSigner(alice);
+  await pair(alice, bob);
+  const { page } = alice;
+  const chat = page.url();
+  await addNostrIdentity(alice);
+  await page.goto(chat);
+  const handle = (await page.getByTestId("sidebar-resize").boundingBox())!;
+  await page.mouse.move(handle.x + 1, handle.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(890, handle.y + 100, { steps: 5 });
+  await page.mouse.up();
+  const column = (await page.locator(".composer-safe").boundingBox())!;
+  for (const [button, sheet] of [["payment-button", "payment-composer"], ["composer-identities-button", "composer-identities"]] as const) {
+    await expect(page.getByTestId(button)).toBeEnabled({ timeout: 60_000 });
+    await page.getByTestId(button).click();
+    const box = (await page.getByTestId(sheet).boundingBox())!;
+    expect(box.x, `${sheet} inside the chat's column`).toBeGreaterThanOrEqual(column.x - 1);
+    expect(box.x + box.width, `${sheet} inside the chat's column`).toBeLessThanOrEqual(column.x + column.width + 1);
+    await page.waitForTimeout(250);
+    expect(await deckCardProblems(page, `[data-testid=${sheet}]`), `${sheet}'s cards`).toEqual([]);
+    await page.keyboard.press("Escape");
+  }
 });

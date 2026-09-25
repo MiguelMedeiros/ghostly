@@ -4,14 +4,15 @@ import "./composer-sheet.css";
 /**
  * The box a chat's composer opens over the message input to choose among cards: the payment picker
  * (PaymentComposer.tsx: the wallet's cards) and the identity picker (identities/ComposerIdentities.tsx: ID cards).
- * On a phone it is a bottom sheet over a backdrop, the screen's whole width (index.css's `.sheet`). Both pickers
+ * On a phone it is a bottom sheet over a backdrop, the screen's whole width (index.css's `.sheet`); on a desktop it
+ * never runs past the chat's column, however narrow the chat list leaves it. Both pickers
  * share this shell, its head, the hint under the deck and the primary action, so they look and fit alike.
  */
 export function ComposerSheet({ ref, className = "", children, ...props }: HTMLAttributes<HTMLDivElement> & { ref?: Ref<HTMLDivElement> }) {
   return (<>
     <div className="sheet-backdrop" />
     <div ref={ref} {...props}
-      className={`composer-sheet sheet sheet-padded absolute bottom-full left-0 mb-2 z-50 animate-fade-in w-[400px] max-w-[calc(100vw-1.5rem)] max-md:max-w-none bg-panel-header border border-border rounded-2xl shadow-2xl p-3 ${className}`}>
+      className={`composer-sheet sheet sheet-padded absolute bottom-full left-0 mb-2 z-50 animate-fade-in w-[400px] max-w-[min(100%,calc(100vw-1.5rem))] max-md:max-w-none bg-panel-header border border-border rounded-2xl shadow-2xl p-3 ${className}`}>
       {children}
     </div>
   </>);
