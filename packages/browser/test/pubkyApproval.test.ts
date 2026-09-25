@@ -239,7 +239,7 @@ describe("Pubky removal", () => {
     const folder = "9".repeat(64);
     const approved = session();
     sdk.next = async () => approved;
-    await provider.unpublish!.run({ id: statement.id, subject: me, evidence: { folder } }, context().ctx);
+    await provider.unpublish!.run({ id: statement.id, subject: me, key: statement.binding.key, evidence: { folder } }, context().ctx);
     expect(sdk.started[0].capabilities).toBe(`/pub/ghostly.app/proofs/${folder}/:w`);
     expect(approved.storage.delete).toHaveBeenCalledWith(pubkyProofPath(folder, statement.id));
     expect(approved.storage.putText).not.toHaveBeenCalled();
@@ -250,8 +250,15 @@ describe("Pubky removal", () => {
     const provider = createPubkyIdentityProvider();
     const approved = session(createIdentity().pubKeyZ32);
     sdk.next = async () => approved;
-    await expect(provider.unpublish!.run({ id: statementFor(me).id, subject: me, evidence: { folder: "9".repeat(64) } }, context().ctx)).rejects.toThrow(/another Pubky identity/);
+    await expect(provider.unpublish!.run({ id: statementFor(me).id, subject: me, key: "k".repeat(52), evidence: { folder: "9".repeat(64) } }, context().ctx)).rejects.toThrow(/another Pubky identity/);
     expect(approved.storage.delete).not.toHaveBeenCalled();
+  });
+
+  it("refuses stored evidence that is not exactly a folder, before asking anything", async () => {
+    const provider = createPubkyIdentityProvider();
+    for (const evidence of [undefined, {}, { folder: "../../x" }, { folder: "9".repeat(64), host: "evil.example.com" }])
+      await expect(provider.unpublish!.run({ id: statementFor(me).id, subject: me, key: "k".repeat(52), evidence }, context().ctx), JSON.stringify(evidence)).rejects.toThrow(/not Pubky proof evidence/);
+    expect(sdk.started).toEqual([]);
   });
 });
 

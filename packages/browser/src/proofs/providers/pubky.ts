@@ -15,6 +15,14 @@ export interface PubkyEvidence { folder: string }
 
 const short = (key: string) => `pubky${key.slice(0, 4)}…${key.slice(-4)}`;
 
+/** Strict: exactly `{ folder }`, 64 hex characters. Nothing else, so no evidence can name a host or another path. */
+function parseEvidence(raw: unknown): PubkyEvidence {
+  const e = raw as PubkyEvidence;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw) || Object.keys(raw).join(",") !== "folder" || !isPubkyProofFolder(e.folder))
+    throw new Error("That is not Pubky proof evidence");
+  return { folder: e.folder };
+}
+
 export interface PubkyIdentityOptions {
   /** Pkarr relays the verifier reads (tests). */
   relays?: readonly string[];
@@ -80,12 +88,7 @@ export function createPubkyIdentityProvider(options: PubkyIdentityOptions = {}):
     signers: [signer],
     // Pubky's own URI form for a key, as its SDK writes resources (`pubky://<key>/…`).
     publicUri: key => `pubky://${key}`,
-    parseEvidence(raw) {
-      const e = raw as PubkyEvidence;
-      if (!raw || typeof raw !== "object" || Array.isArray(raw) || Object.keys(raw).join(",") !== "folder" || !isPubkyProofFolder(e.folder))
-        throw new Error("That is not Pubky proof evidence");
-      return { folder: e.folder };
-    },
+    parseEvidence,
     async verify(statement, { folder }, ctx) {
       const key = statement.binding.subject;
       if (!isPubkyKey(key)) throw new Error("That is not a Pubky key");
@@ -95,12 +98,12 @@ export function createPubkyIdentityProvider(options: PubkyIdentityOptions = {}):
       return { subject: key, source: `File on the homeserver ${host}, found through the key’s own Pkarr records` };
     },
     unpublish: {
-      label: "Approve and remove",
-      skipLabel: "Remove, keep the file",
-      description: "The proof file stays on your homeserver until it is deleted, and deleting it takes one more approval in Pubky Ring or Passport: Ghostly kept no access to it. Either way, a revocation is published for your contacts’ apps to find.",
-      run({ id, subject, evidence }, ctx) {
-        const path = pubkyProofPath(evidence.folder, id);
-        return approve(pubkyProofCapability(evidence.folder), ctx, async session => {
+      description: "Also deletes the proof file on your homeserver: that takes one more approval in Pubky Ring or Passport, since Ghostly kept no access to it.",
+      async run({ id, subject, evidence }, ctx) {
+        // Stored when the proof was made: parsed like any evidence, so a bad record never names another path.
+        const { folder } = parseEvidence(evidence);
+        const path = pubkyProofPath(folder, id);
+        return approve(pubkyProofCapability(folder), ctx, async session => {
           if (session.key !== subject) throw new Error("That is another Pubky identity: approve with the one this proof is for");
           ctx.onProgress("Deleting the proof file from your homeserver…");
           await session.delete(path);

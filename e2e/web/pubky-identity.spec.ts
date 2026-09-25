@@ -99,7 +99,7 @@ test("a Pubky identity approved in Passport is verified by a contact; removing i
     await alice.page.getByTestId("identity-proof-remove").click();
     const notes = alice.page.getByTestId("identity-proof-remove-notes");
     await expect(notes).toContainText("one more approval in Pubky Ring or Passport");
-    await alice.page.getByTestId("identity-proof-remove-unpublish").click();
+    await alice.page.getByTestId("identity-proof-remove-confirm").click();
     await expect(notes.getByTestId("approval")).toBeVisible();
     const [again] = await Promise.all([alice.context.waitForEvent("page"), notes.getByTestId("approval-open").click()]);
     await again.getByRole("button", { name: "Approve" }).click();

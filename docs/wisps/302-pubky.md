@@ -43,10 +43,7 @@ The outcome says how it was checked: "File on the homeserver <host>, found throu
 
 ## Removal
 
-Ghostly keeps no access after adding a proof, so taking the file down needs one more approval. Removing a Pubky identity offers both:
-
-- **Approve and remove**: a new request for the same folder's capability (Ring or Passport, the same screen), the session must be the same key, the file is deleted, then the proof is removed.
-- **Remove, keep the file**: the proof is removed without touching the homeserver.
+Ghostly keeps no access after adding a proof, so taking the file down needs one more approval, and the removal says so. **Remove and stop sharing** asks, on the same approval screen (Passport button, Ring QR code), for the same folder's capability; the session must be the same key; the file is deleted; then the proof is removed. If that approval is declined, cancelled or fails, nothing is removed yet, and **Remove without it** removes the proof and leaves the file on the homeserver (the same flow as an AT Protocol record).
 
 Either way, WISP 300's revocation applies: every contact it was shared with is told it is withdrawn, and the proof key publishes a `_ghostly-revoked` record on Pkarr (republished until the proof would have expired), which contacts find even if the person never reconnects. A contact's re-check finds the revocation first ("Revoked by its owner"); a deleted file alone reads "Could not be confirmed".
 

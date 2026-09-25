@@ -125,7 +125,7 @@ describe("Pubky approval in the UI", () => {
     expect(open).not.toHaveBeenCalled();
   });
 
-  it("removes one: says what removal needs, asks again for the same folder and deletes the file, then revokes", async () => {
+  it("removes one: says what removal needs, asks again for the same folder, deletes the file, then revokes", async () => {
     const folder = "a".repeat(64);
     const id = "b".repeat(64);
     const { user, engine } = renderApp(<IdentityProofsSection />);
@@ -134,15 +134,15 @@ describe("Pubky approval in the UI", () => {
     await user.click(screen.getByTestId("identity-proof"));
     await user.click(screen.getByTestId("identity-proof-remove"));
     const notes = screen.getByTestId("identity-proof-remove-notes");
-    expect(notes).toHaveTextContent("deleting it takes one more approval in Pubky Ring or Passport: Ghostly kept no access to it");
-    expect(screen.getByTestId("identity-proof-remove-confirm")).toHaveTextContent("Remove, keep the file");
+    expect(notes).toHaveTextContent("Also deletes the proof file on your homeserver: that takes one more approval in Pubky Ring or Passport, since Ghostly kept no access to it.");
 
-    await user.click(screen.getByTestId("identity-proof-remove-unpublish"));
+    await user.click(screen.getByTestId("identity-proof-remove-confirm"));
     const approval = await within(notes).findByTestId("approval");
     expect(sdk.capabilities).toEqual([`/pub/ghostly.app/proofs/${folder}/:w`]);
     // Nothing removed until it is approved, and the card does not say it is revoking while it waits.
     expect(engine.callsTo("removeIdentityProof")).toEqual([]);
     expect(screen.getByTestId("identity-proof")).not.toHaveTextContent("Revoking");
+    expect(screen.getByTestId("identity-proof-remove-confirm")).toHaveTextContent("Waiting…");
     fireEvent.click(within(approval).getByTestId("approval-open"));
     expect(open).toHaveBeenCalledWith(PASSPORT, "pubky-passport", expect.stringMatching(/popup/));
 
@@ -152,14 +152,22 @@ describe("Pubky approval in the UI", () => {
     expect(sdk.written).toEqual([]);
   });
 
-  it("removes one without the file when asked: no approval, the revocation only", async () => {
+  it("cancelling the approval removes nothing, and then the proof can be removed without its file", async () => {
+    const id = "c".repeat(64);
     const { user, engine } = renderApp(<IdentityProofsSection />);
     engine.on("removeIdentityProof", () => undefined);
-    act(() => engine.update({ identityProofs: [proofView({ id: "c".repeat(64), provider: "pubky", subject: key, verified: { subject: key, source: "File" }, evidence: { folder: "d".repeat(64) } })] }));
+    act(() => engine.update({ identityProofs: [proofView({ id, provider: "pubky", subject: key, verified: { subject: key, source: "File" }, evidence: { folder: "d".repeat(64) } })] }));
     await user.click(screen.getByTestId("identity-proof"));
     await user.click(screen.getByTestId("identity-proof-remove"));
     await user.click(screen.getByTestId("identity-proof-remove-confirm"));
-    expect(engine.callsTo("removeIdentityProof")).toEqual([{ id: "c".repeat(64) }]);
-    expect(sdk.capabilities).toEqual([]);
+    await user.click(await screen.findByTestId("approval-cancel"));
+    expect(await screen.findByTestId("identity-proof-remove-anyway")).toBeInTheDocument();
+    expect(screen.getByTestId("identity-proof-remove-notes")).toHaveTextContent("contacts still see it revoked");
+    expect(screen.queryByTestId("approval")).not.toBeInTheDocument();
+    expect(engine.callsTo("removeIdentityProof")).toEqual([]);
+    await user.click(screen.getByTestId("identity-proof-remove-anyway"));
+    expect(engine.callsTo("removeIdentityProof")).toEqual([{ id }]);
+    expect(sdk.capabilities).toHaveLength(1);
+    expect(sdk.deleted).toEqual([]);
   });
 });

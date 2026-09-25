@@ -132,14 +132,7 @@ A provider has one or more signers; the UI shows the ones whose `platforms` incl
 primary button (`open.label`, `open.run()`), a QR code (`qr.value`, `qr.label`) and short `notes`. The UI shows them on
 one screen in place of the form; whichever approves first wins, and the signer calls `onApproval(null)` when it no longer
 waits. `open.run()` is called **synchronously from the button's click**, so a popup it opens keeps the user activation.
-The values are secrets (a relay key): drawn, never logged, stored or written into the page as text. A signer's
-`action` names the button that starts it ("Continue" for Pubky; default "Sign with <label>").
-
-**Taking a published proof down (`unpublish`).** A provider whose proof lives somewhere the person published it,
-and that Ghostly can remove for them (Pubky's file), declares `unpublish: { description, label, skipLabel, run }`.
-Removing such a proof says `description` and offers `label` (runs `run({ id, subject, evidence }, ctx)` in the
-renderer, with the same `ApprovalRequest` UI, then removes the proof) or `skipLabel` (removes it without). The
-revocation record is published either way.
+The values are secrets (a relay key): drawn, never logged, stored or written into the page as text.
 
 For `in-app`, the subject comes from the signer (`session.subject()`); for the others the person types or
 picks it in the subject field. A signer's `action` names the button that starts it ("Continue on your server");
@@ -148,10 +141,13 @@ by default "Sign with <label>" for `in-app`, "Continue" otherwise.
 ### Taking down what was published (`unpublish`)
 
 A provider whose signer published something the verifier fetches, and that the person can delete again (the AT
-Protocol record), declares `unpublish: { description, run(proof, ctx) }`. Removing the proof on the Identities page
-then calls `run` synchronously from the confirming click (it may open a window), and removes the proof only once
-it resolved; `description` is added to the confirmation. If it fails or is declined, the person may remove the
-proof without it ("Remove without it"): the shared Pkarr revocation still tells contacts. Test ids:
+Protocol record, the Pubky proof file), declares `unpublish: { description, run(proof, ctx) }`; `proof` is
+`{ id, subject, key, evidence }`, the evidence as stored (parse it with the provider's own `parseEvidence`). Removing
+the proof on the Identities page then calls `run` synchronously from the confirming click (it may open a window;
+`ctx.onApproval` shows an `ApprovalRequest` in the removal notes, as Pubky's second approval does), and removes the
+proof only once it resolved; `description` is added to the confirmation. If it fails, is declined or cancelled, the
+person may remove the proof without it ("Remove without it"): the shared Pkarr revocation still tells contacts. The
+card says "Revoking…" only once the removal itself starts. Test ids: `identity-proof-remove-notes`,
 `identity-proof-remove-progress`, `identity-proof-remove-anyway`. For `redirect`, the subject in the statement is the issuer, and the account
 comes out of `verify`.
 
@@ -246,7 +242,7 @@ storing the outcome are one transaction.
   `add-identity-subject`, `add-identity-validity`, `add-identity-field-<name>`, `add-identity-start`, then
   `add-identity-copy-<step>`, `add-identity-paste`, `add-identity-finish`, `add-identity-error`; `add-identity-advanced` unfolds the providers marked `advanced`, and a provider with `subject.preview` shows `add-identity-preview` (`data-status`, one `add-identity-preview-<fact>` per fact) or `add-identity-preview-error` before its signers; an approval elsewhere
   `approval` with `approval-open`, `approval-qr`, `approval-cancel`; saved rows `identity-proof`, removal
-  `identity-proof-remove`, `identity-proof-remove-confirm`, `identity-proof-remove-unpublish`, `identity-proof-remove-notes`. Chat: Options → `chat-identities-open` → `chat-identities` with `chat-identity-share`,
+  `identity-proof-remove`, `identity-proof-remove-confirm`, `identity-proof-remove-anyway`, `identity-proof-remove-notes`. Chat: Options → `chat-identities-open` → `chat-identities` with `chat-identity-share`,
   `chat-identity-withdraw`, `chat-identity-mine-status`, `chat-identity-received` (`data-status`),
   `chat-identity-recheck`, `chat-identity-lookup`; header `chat-identity-badges`.
 - `e2e/web/atproto-proofs.spec.ts` goes through the real OAuth pages of a local PDS and PLC directory
