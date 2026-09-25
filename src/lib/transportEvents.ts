@@ -45,8 +45,9 @@ export function transportLineText(entry: TransportEntry, contact: string): strin
       if (entry.fallback === "dht") return "Live connection lost · texts go through the DHT";
       if (entry.fallback === "hold") return `Live connection lost · messages wait for ${contact}`;
       return "Live connection lost";
-    case "dht-only": return entry.cause === "contact" ? `${contact} chose DHT only` : "You chose DHT only";
-    case "dht-left": return entry.transport ? `Left DHT only · ${t} chosen` : "Back to automatic";
+    // Worded as WISP 400 § "Pairing progress and transport rows" has them.
+    case "dht-only": return entry.cause === "contact" ? `${contact} switched to DHT only` : "You switched to DHT only";
+    case "dht-left": return "Left DHT only · connecting live";
     case "flapping": {
       const count = entry.count ?? 0;
       const times = `Reconnected ${count} ${count === 1 ? "time" : "times"} in ${span(entry.at - (entry.since ?? entry.at))}`;
