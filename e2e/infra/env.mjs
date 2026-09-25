@@ -72,14 +72,18 @@ export const VARIABLES = {
 /** The suite's own ports: `npm run e2e:full` passes them to its children, `.env.e2e` leaves them out. */
 export const HARNESS_PORTS = ["E2E_WEB_PORT", "E2E_LNURL_PORT", "E2E_DOMAIN_PORT"];
 
-/** Every port the environment publishes for an endpoint above, in order. */
+/**
+ * Every port the environment publishes for an endpoint above, in order, and arkd's admin API: the port after its
+ * public one (support/ark-regtest), which stays the next one here too.
+ */
 export const SERVICE_PORTS = [...new Set(Object.entries(VARIABLES).filter(([name]) => !HARNESS_PORTS.includes(name))
-  .flatMap(([, [value]]) => { const match = /^\w+:\/\/127\.0\.0\.1:(\d+)/.exec(value); return match ? [Number(match[1])] : []; }))].sort((a, b) => a - b);
+  .flatMap(([, [value]]) => { const match = /^\w+:\/\/127\.0\.0\.1:(\d+)/.exec(value); return match ? [Number(match[1])] : []; }))]
+  .concat(Number(new URL(VARIABLES.GHOSTLY_ARK_SERVER_URL[0]).port) + 1).sort((a, b) => a - b);
 
 /**
  * The port of this machine a published port is reached on. The same one, even with the environment on another host
  * (remote.mjs forwards it here: the app takes plain HTTP and WS from loopback only); or, with
- * E2E_INFRA_LOCAL_PORTS=<base>, base, base+1, … in SERVICE_PORTS order, to stay clear of ports held here.
+ * E2E_INFRA_LOCAL_PORTS=<base>, base, base+1, … (19 ports) in SERVICE_PORTS order, to stay clear of ports held here.
  */
 export const localPort = (port) => (process.env.E2E_INFRA_LOCAL_PORTS ? Number(process.env.E2E_INFRA_LOCAL_PORTS) + SERVICE_PORTS.indexOf(port) : port);
 const here = (value) => value.replace(/127\.0\.0\.1:(\d+)/, (_, port) => `127.0.0.1:${localPort(Number(port))}`);

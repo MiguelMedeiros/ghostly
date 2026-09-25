@@ -226,7 +226,6 @@ function down() {
   if (remote && !HOST_FLAG) throw new Error(`${where} is shared: name it on the command line to take it down (--host ${HOST})`);
   log(`removing ${where} (containers, volumes, network)`);
   compose(["down", "-v", "--remove-orphans", "--timeout", "5"]);
-  if (remote) disconnect();
   rmSync(ENV_FILE, { force: true });
 }
 
@@ -308,8 +307,9 @@ async function full(args) {
 const [command, ...rest] = process.argv.slice(2);
 try {
   if (command === "up") await up();
-  else if (command === "seed") await seed();
-  else if (command === "down") down();
+  else if (command === "seed") { if (remote) forwardAll(); await seed(); }
+  // The background connection goes too (forwards, Docker socket); `reset` still needs it for its `up`.
+  else if (command === "down") { down(); if (remote) disconnect(); }
   else if (command === "reset") { down(); await up(); }
   else if (command === "status") await status();
   else if (command === "use") await use();

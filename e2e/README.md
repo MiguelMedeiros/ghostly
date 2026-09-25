@@ -126,9 +126,16 @@ How it works (`e2e/infra/remote.mjs`):
   so the three files of `config/` travel as Compose configs. The project name and the containers are the same
   (`ghostly-e2e`, `ghostly-e2e-*`).
 - A stack here and a stack elsewhere cannot both have 47001-47090 on this Mac: `use`/`up` refuse while a local one
-  holds them. `E2E_INFRA_LOCAL_PORTS=<first free port>` forwards to that port and the next 17 instead (written to
+  holds them. `E2E_INFRA_LOCAL_PORTS=<first free port>` forwards to that port and the next 18 instead (written to
   `.env.e2e`), at the cost of the app's own Regtest options: the Ark, Bark and USDT specs then miss the stack.
 - To run the gated vitest contracts by hand: `set -a; . ./.env.e2e; set +a` first.
+
+Measured on 2026-09-24 ("one": 4 cores, 30 GB, shared with other projects). The stack idles at 0.2-0.6 of a core
+and ~0.8-1 GB there; under the LND, S3 and matrix specs at two workers it averaged 0.4 of a core, peaked at ~1, and
+stayed under 0.8 GB, with the host's load at most 2. That is what the limits leave room for. On the Mac, the SSH
+connection used 0.4 s of CPU over those runs. A local stack in use costs the Mac 0.5-2.9 cores plus ~1.2 GB in the
+Docker VM. From a clean project with the images pulled, `up` takes ~65 s, seeding included. A `docker exec` from
+the seeds takes ~0.15 s over SSH, and 3-4 s locally with the Mac at load 60.
 - Every service has a lower CPU weight than the host's other containers and a ceiling of its own
   (`docker-compose.remote.yml`), so the stack never starves the rest of that machine.
 
