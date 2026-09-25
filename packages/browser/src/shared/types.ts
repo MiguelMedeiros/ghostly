@@ -563,6 +563,7 @@ export interface Settings {
    * packet goes through one. Absent or empty means the defaults (n0's public relays, as the desktop app's).
    */
   irohRelays?: string[];
+  /**
    * The HyperDHT relay (wss://) this browser reaches the HyperDHT through, so paired chats can use HyperDHT
    * (WISP 103) beside WebRTC. Empty: none. Absent means the default (shared/hyperdhtRelay.ts). The Desktop
    * runs HyperDHT itself and ignores it.

@@ -256,7 +256,6 @@ export function connectionSummary(link: LinkView | undefined, now: number, conta
     : cause === "dropped" ? ["automatic, after a drop", `Automatic: the chat came back over ${t} after the previous transport dropped.`]
     : relayed ? ["no direct path", `Automatic: a direct connection could not be made, so the chat goes through ${t}'s relay.`]
     : ["automatic", `Automatic: both apps rank ${t} first${transport === "webrtc/1" ? ", and a first pairing always uses WebRTC" : ""}.`];
-  const why = relayed ? `${reason} The relay forwards encrypted bytes: it sees when you talk, never what you say.` : reason;
   const since = link.transportLive?.since;
   const rtt = link.transportRttMs !== undefined ? [`${link.transportRttMs} ms`] : [];
   const path = relayed ? ["relayed"] : [];

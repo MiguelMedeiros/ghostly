@@ -78,8 +78,8 @@ test("with WebRTC gone, two browsers keep chatting over HyperDHT through a relay
 
   // Every place that describes the connection says it goes through a relay.
   await alice.page.getByTestId("connection-options").click();
-  await expect(alice.page.getByTestId("connection-relayed")).toBeVisible();
-  await expect(alice.page.getByTestId("connection-summary")).toContainText("never what you say");
+  await expect(alice.page.getByTestId("connection-relayed")).toHaveText(`Relayed via ${new URL(relay).host}`);
+  await expect(alice.page.getByTestId("connection-summary")).toContainText("never what they say");
   await alice.page.keyboard.press("Escape");
   await expect(chat(bob).getByTestId("transport-line-text").filter({ hasText: /over HyperDHT|to HyperDHT/ }).first()).toBeVisible();
 });

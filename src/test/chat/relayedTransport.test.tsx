@@ -25,16 +25,15 @@ describe("a relayed transport", () => {
     ]);
   });
 
-  it("says relayed wherever the live connection is described, and what the relay sees", () => {
-    const link = linkView({ ...web, pairing: onHyperdht, dataLink: "open", transportRttMs: 180 });
+  it("says relayed wherever the live connection is described, which relay, and what it sees", () => {
+    const link = linkView({ ...web, pairing: onHyperdht, dataLink: "open", transportRttMs: 180, transportRelayed: { relays: ["relay.example"] } });
     const summary = connectionSummary(link, Date.now())!;
-    expect(summary.relayed).toBe(true);
-    expect(summary.line).toBe("HyperDHT · relayed · 180 ms · automatic, no direct path");
-    expect(summary.short).toBe("HyperDHT · relayed · 180 ms · automatic, no direct path");
-    expect(summary.why).toBe("Automatic: no direct connection worked, so the chat goes over HyperDHT through a relay. The relay forwards encrypted bytes: it sees when you talk, never what you say.");
+    expect(summary.relays).toEqual(["relay.example"]);
+    expect(summary.line).toBe("HyperDHT · relayed · 180 ms · no direct path");
+    expect(summary.why).toContain("Relayed: relay.example sees which devices talk and when, never what they say.");
     // The same transport between two Desktops is direct, and says nothing of a relay.
     const direct = connectionSummary(linkView({ ...web, relayedTransports: [], pairing: onHyperdht, dataLink: "open" }), Date.now())!;
-    expect(direct.relayed).toBe(false);
+    expect(direct.relays).toBeUndefined();
     expect(direct.line).not.toContain("relay");
   });
 
@@ -47,15 +46,15 @@ describe("a relayed transport", () => {
 
   it("shows in the header's Connection menu and in the connection popover", async () => {
     const view = renderApp(<><TransportChip peerKey="peer" /><PairingBanner peerKey="peer" /></>);
-    act(() => view.engine.update({ links: [linkView({ ...web, pairing: onHyperdht, dataLink: "open", transportRttMs: 180 })] }));
+    act(() => view.engine.update({ links: [linkView({ ...web, pairing: onHyperdht, dataLink: "open", transportRttMs: 180, transportRelayed: { relays: ["relay.example"] } })] }));
     await view.user.click(screen.getByTestId("transport-chip"));
     const menu = screen.getByTestId("transport-menu");
     expect(within(menu).getByTestId("transport-menu-now")).toHaveTextContent("Connection · on HyperDHT, relayed, 180 ms");
     expect(within(menu).getByTestId("transport-option-hyperdht")).toHaveTextContent("In use · relayed · 180 ms");
     await view.user.keyboard("{Escape}");
     await view.user.click(screen.getByTestId("connection-options"));
-    expect(screen.getByTestId("connection-relayed")).toHaveTextContent("relayed");
-    expect(screen.getByTestId("connection-summary")).toHaveTextContent("never what you say");
+    expect(screen.getByTestId("connection-relayed")).toHaveTextContent("Relayed via relay.example");
+    expect(screen.getByTestId("connection-summary")).toHaveTextContent("never what they say");
   });
 
   it("when not in use, says it goes through a relay", async () => {
