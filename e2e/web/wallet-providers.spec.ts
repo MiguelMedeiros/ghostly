@@ -95,9 +95,12 @@ test.describe("Cashu and Lightning", { tag: "@network" }, () => {
     await alice.page.getByRole("button", { name: "Pay", exact: true }).click();
     await expect(alice.page.getByTestId("wallet-notice")).toHaveText("Paid.", { timeout: 60_000 });
     await openWallet(alice, "cashu");
-    const left = Number((await testSats(alice).innerText()).match(/^(\d+)/)![1]);
-    expect(left, "100 in, 25 out and at most the fee reserve").toBeLessThanOrEqual(75);
-    expect(left).toBeGreaterThanOrEqual(70);
+    // The balance counts down to its new value (useCountUp, 0.7 s): read once, it can be anywhere on the way.
+    await expect(async () => {
+      const left = Number((await testSats(alice).innerText()).match(/^(\d+)/)![1]);
+      expect(left, "100 in, 25 out and at most the fee reserve").toBeLessThanOrEqual(75);
+      expect(left).toBeGreaterThanOrEqual(70);
+    }).toPass({ timeout: 15_000 });
   });
 });
 
