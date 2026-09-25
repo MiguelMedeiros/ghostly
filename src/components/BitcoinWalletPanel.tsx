@@ -5,6 +5,7 @@ import { PaymentReview } from "./PaymentReview";
 import { Actions, Address, Amount, Button, Notice, Row, Section, input, type Action } from "./wallet/ui";
 import { useRun } from "./wallet/run";
 import { SourcePicker } from "./wallet/providers/SourcePicker";
+import { changeableFields } from "./wallet/providers/sourceStatus";
 
 /** The most the person accepts to pay in fees unless they change it; the review shows the real fee. */
 const DEFAULT_FEE_CAP = 2_000;
@@ -19,6 +20,7 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
   const [action, setAction] = useState<Action>("receive");
   const [address, setAddress] = useState(""), [amount, setAmount] = useState(""), [feeCap, setFeeCap] = useState(String(DEFAULT_FEE_CAP));
   const [review, setReview] = useState<Review | null>(null);
+  const [changing, setChanging] = useState(false);
   const ready = bt?.status === "ready";
   // On-chain Bitcoin goes through the mode's source: in Testnet, under the page's badge, plain sats.
   const unit = "sats";
@@ -32,9 +34,23 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
           <Notice>On-chain Bitcoin goes through a wallet or node you choose below. Nothing is set up by default.</Notice>
         </div>
       ) : !ready ? (
-        <div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="bitcoin-connecting">
+        // Not connected: "Connecting…" while it is tried again by itself (with the last balance it read), not
+        // connected once that has failed for a while; either way, Retry now or move to another server.
+        <div className="bg-surface rounded-xl p-6 text-center space-y-3" data-testid="bitcoin-connecting" data-status={bt.status}>
           <p className="text-text-primary">{bt.status === "error" ? `${bt.label ?? "The Bitcoin source"} is not connected` : `Connecting to ${bt.label ?? "the Bitcoin source"}…`}</p>
-          {bt.error && <Notice tone="error">{bt.error}</Notice>}
+          {bt.balance !== undefined && (
+            <p className="text-text-secondary text-sm" data-testid="bitcoin-last-balance">
+              Last known balance: <span className="tabular-nums">{bt.balance.toLocaleString()}</span> {unit}{bt.balanceAt ? ` · ${new Date(bt.balanceAt).toLocaleString()}` : ""}
+            </p>
+          )}
+          {bt.error && <Notice tone={bt.status === "error" ? "error" : "warning"} testId="bitcoin-connect-error">{bt.error}{bt.status === "connecting" ? " · trying again by itself" : ""}</Notice>}
+          {(bt.status === "error" || !!bt.failures) && (
+            <div className="flex flex-wrap justify-center gap-2">
+              <Button disabled={busy} data-testid="bitcoin-retry" onClick={() => void run(() => wallet.bitcoinRetrySource())}>Retry</Button>
+              {changeableFields(bt).length > 0 && <Button disabled={busy} data-testid="bitcoin-change-server" onClick={() => setChanging(true)}>Change server</Button>}
+            </div>
+          )}
+          {error && <Notice tone="error" testId="bitcoin-error">{error}</Notice>}
         </div>
       ) : (
         <div className="space-y-4">
@@ -80,7 +96,8 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
           {error && <Notice tone="error" testId="bitcoin-error">{error}</Notice>}
         </div>
       )}
-      {bt && <SourcePicker kind="onchain" view={bt} onSet={(id, values) => wallet.bitcoinSetSource(id, values)} onClear={() => wallet.bitcoinClearSource()} />}
+      {bt && <SourcePicker kind="onchain" view={bt} onSet={(id, values) => wallet.bitcoinSetSource(id, values)} onClear={() => wallet.bitcoinClearSource()}
+        onRetry={() => wallet.bitcoinRetrySource()} onReconfigure={(values) => wallet.bitcoinReconfigureSource(values)} changing={changing} onChanging={setChanging} />}
       {bt?.status === "ready" && (
         <Section title="Settings"><Row label="Refresh" hint="Balance and history are read from the source every few seconds."><Button disabled={busy} onClick={() => void run(() => wallet.bitcoinRefresh())}>Refresh now</Button></Row></Section>
       )}

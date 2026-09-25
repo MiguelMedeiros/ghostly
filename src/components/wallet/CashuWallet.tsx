@@ -191,7 +191,8 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: Wall
               ))}
             </Section>
           )}
-          {ln && <SourcePicker kind="lightning" view={ln} onSet={(id, values) => wallet.lightningSetSource(id, values)} onClear={() => wallet.lightningClearSource()} />}
+          {ln && <SourcePicker kind="lightning" view={ln} onSet={(id, values) => wallet.lightningSetSource(id, values)} onClear={() => wallet.lightningClearSource()}
+            onRetry={() => wallet.lightningRetrySource()} onReconfigure={(values) => wallet.lightningReconfigureSource(values)} />}
           {viaMint && (
             <Section title="Settings">
               <Row label="Balance" hint="Lightning uses your Cashu balance: invoices are paid into, and paid from, your Cashu mints."><Button onClick={onOpenCashu}>Cashu settings</Button></Row>

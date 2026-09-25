@@ -55,6 +55,10 @@ describe("Lightning", () => {
   ] as const)("while its node is %s, says %s", (state, balance, status) => {
     expect(cardOf("lightning", { lightning: lightningSource({ status: state }) })).toMatchObject({ balance, status, ready: false });
   });
+
+  it("while its node reconnects, shows the last balance it read", () => {
+    expect(cardOf("lightning", { lightning: lightningSource({ status: "connecting", balance: 21, balanceAt: 1 }) })).toMatchObject({ balance: "21 sats", status: "Connecting…", ready: false });
+  });
 });
 
 describe("Ark", () => {
@@ -102,7 +106,13 @@ describe("Bitcoin on-chain", () => {
     ["error", "Unavailable", "Check settings"],
     ["connecting", "Connecting…", "Connecting…"],
   ] as const)("while its source is %s, says %s", (state, balance, status) => {
-    expect(cardOf("bitcoin", { bitcoin: bitcoinSource({ status: state }) })).toMatchObject({ balance, status, ready: false });
+    expect(cardOf("bitcoin", { bitcoin: bitcoinSource({ status: state, balance: undefined }) })).toMatchObject({ balance, status, ready: false });
+  });
+
+  it("while it reconnects, shows the last balance it read; once unavailable, says so", () => {
+    expect(cardOf("bitcoin", { mode: "testnet", bitcoin: bitcoinSource({ status: "connecting", balance: 1_234, balanceAt: 1, failures: 2 }) }))
+      .toMatchObject({ balance: "1,234 test sats", status: "Connecting…", ready: false });
+    expect(cardOf("bitcoin", { bitcoin: bitcoinSource({ status: "error", balance: 1_234, balanceAt: 1 }) })).toMatchObject({ balance: "Unavailable", status: "Check settings" });
   });
 });
 

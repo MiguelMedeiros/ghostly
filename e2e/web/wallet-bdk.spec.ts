@@ -1,12 +1,17 @@
 import { execFileSync } from "node:child_process";
+import type { BrowserContext, Route } from "@playwright/test";
 import { BDK_REGTEST } from "../support/bdk-regtest/regtest.mjs";
 import { chat, connect, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
 import { choose } from "../support/select";
+import { FakeEsplora } from "../../packages/browser/test/helpers/fakeEsplora";
 
 /**
  * The BDK wallet (bitcoindevkit in WebAssembly) as the on-chain Bitcoin source, Testnet only:
  *  - offline: the picker offers it in Testnet only, a new wallet shows its 12 words once, a bad phrase or an
  *    unreachable Esplora server is refused before anything is saved, and the chat shows the Bitcoin card;
+ *  - offline, against an in-memory Esplora the test switches on and off: a saved wallet whose server is down
+ *    when the app starts shows Connecting… with its last balance and connects by itself once the server is
+ *    back; Change server moves it to another server, the same wallet;
  *  - GHOSTLY_BDK_REGTEST=1: two wallets on e2e/infra's regtest chain (e2e/support/bdk-regtest) — funded, a Send
  *    from the wallet page, a Send and a Request paid in the chat, balances and txids checked on both sides.
  */
@@ -37,10 +42,10 @@ test("the BDK wallet is offered in Testnet only, shows a new wallet's words once
   // Regtest has no public server.
   await form.getByTestId("provider-save").click();
   await expect(panel(alice).getByTestId("onchain-source-error")).toContainText("Regtest needs the address of your own Esplora server");
-  // A server that does not answer (nothing listens on port 1): nothing is saved.
+  // A server that does not answer (nothing listens on port 1): nothing is saved, and it says why.
   await form.getByLabel("Esplora server").fill("http://127.0.0.1:1");
   await form.getByTestId("provider-save").click();
-  await expect(panel(alice).getByTestId("onchain-source-error")).toContainText("the Esplora server did not answer", { timeout: 30_000 });
+  await expect(panel(alice).getByTestId("onchain-source-error")).toContainText("nothing answers at 127.0.0.1:1: the local Esplora server is not running", { timeout: 30_000 });
   await expect(panel(alice).getByTestId("onchain-source-current")).toContainText("No source");
 
   // Restoring: a phrase that is not BIP39 is refused.
@@ -51,6 +56,80 @@ test("the BDK wallet is offered in Testnet only, shows a new wallet's words once
   await expect(panel(alice).getByTestId("onchain-source-error")).toContainText("not valid");
   // The phrase is not echoed back in the error.
   await expect(panel(alice).getByTestId("onchain-source-error")).not.toContainText("twelve valid");
+});
+
+/**
+ * Esplora servers answered from `esplora` (one regtest chain) under made-up hosts, each of which the test can
+ * take down: a refused connection, as when the server is not running.
+ */
+async function serveEsplora(context: BrowserContext, esplora: FakeEsplora, hosts: string[]) {
+  const up = new Map(hosts.map((host) => [host, true]));
+  const cors = { "access-control-allow-origin": "*", "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-allow-headers": "*" };
+  for (const host of hosts) {
+    await context.route(`https://${host}/**`, async (route: Route) => {
+      if (!up.get(host)) return route.abort("connectionrefused");
+      const request = route.request();
+      if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers: cors });
+      const response = await esplora.fetch(request.url(), { method: request.method(), body: request.postData() ?? undefined });
+      await route.fulfill({ status: response.status, headers: { ...cors, "content-type": response.headers.get("content-type") ?? "text/plain" }, body: await response.text() });
+    });
+  }
+  return { set: (host: string, answering: boolean) => up.set(host, answering) };
+}
+
+test("a BDK wallet whose Esplora is down at start-up shows Connecting…, connects by itself when it is back, and Change server keeps the wallet", { tag: ["@feature:wallet.onchain.sources", "@feature:wallet.onchain.bdk.create"] }, async ({ peer }) => {
+  test.setTimeout(3 * 60_000);
+  const esplora = new FakeEsplora();
+  const alice = await peer("bdk-reconnect");
+  const servers = await serveEsplora(alice.context, esplora, ["esplora-a.ghostly.test", "esplora-b.ghostly.test"]);
+  const status = panel(alice).getByTestId("onchain-source-status");
+  await useTestnet(alice);
+  const form = await chooseBdk(alice);
+  await panel(alice).getByTestId("bdk-written").check();
+  await choose(form.getByLabel("Network"), "regtest");
+  await form.getByLabel("Esplora server").fill("https://esplora-a.ghostly.test/api");
+  await form.getByTestId("provider-save").click();
+  await expect(status).toContainText(/Connected · BDK BIP84 · [0-9a-f]{8} · regtest/, { timeout: 60_000 });
+  const wallet = (await status.innerText()).match(/BDK BIP84 · [0-9a-f]{8}/)![0];
+  await panel(alice).getByTestId("bitcoin-new-address").click();
+  esplora.fund((await panel(alice).getByTestId("bitcoin-address").innerText()).trim(), 50_000);
+  await expect.poll(async () => { await panel(alice).getByRole("button", { name: "Refresh now" }).click(); return panel(alice).getByTestId("bitcoin-balance").innerText(); }, { timeout: 30_000 }).toContain("50,000");
+
+  // Quit and reopen while the server is down: not "Unavailable", but Connecting… with the last balance read.
+  servers.set("esplora-a.ghostly.test", false);
+  await alice.page.reload();
+  await openWallet(alice, "bitcoin");
+  const connecting = panel(alice).getByTestId("bitcoin-connecting");
+  await expect(connecting).toHaveAttribute("data-status", "connecting");
+  await expect(connecting).toContainText("Connecting to BDK wallet…");
+  await expect(panel(alice).getByTestId("bitcoin-last-balance")).toContainText("Last known balance: 50,000 sats");
+  await expect(panel(alice).getByTestId("bitcoin-connect-error")).toContainText("the Esplora server at esplora-a.ghostly.test did not answer", { timeout: 30_000 });
+  await expect(status).toContainText("trying again by itself");
+  await expect(panel(alice).getByTestId("bitcoin-retry")).toBeVisible();
+  await expect(connecting).toHaveAttribute("data-status", "connecting");
+  // The wallet card says so too: the last balance, Connecting…
+  await expect(alice.page.getByTestId("wallet-card-bitcoin")).toContainText("50,000");
+
+  // The server comes back: connected by itself, nothing pressed.
+  servers.set("esplora-a.ghostly.test", true);
+  await expect(status).toContainText(`Connected · ${wallet} · regtest`, { timeout: 60_000 });
+  await expect(panel(alice).getByTestId("bitcoin-balance")).toContainText("50,000");
+
+  // Change server: server A goes away for good, B serves the same chain. Same wallet, same coins.
+  servers.set("esplora-a.ghostly.test", false);
+  await panel(alice).getByTestId("onchain-source-change-server").click();
+  const change = panel(alice).getByTestId("onchain-source-server-form");
+  await expect(change.getByLabel("Esplora server")).toHaveValue("https://esplora-a.ghostly.test/api");
+  await change.getByLabel("Esplora server").fill("https://esplora-b.ghostly.test/api");
+  await change.getByTestId("onchain-source-server-save").click();
+  await expect(panel(alice).getByTestId("onchain-source-saved")).toContainText("BDK wallet now uses that server.", { timeout: 60_000 });
+  await expect(status).toContainText(`Connected · ${wallet} · regtest`);
+  await expect.poll(async () => { await panel(alice).getByRole("button", { name: "Refresh now" }).click(); return panel(alice).getByTestId("bitcoin-balance").innerText(); }, { timeout: 30_000 }).toContain("50,000");
+
+  // And it is what the next start uses.
+  await alice.page.reload();
+  await openWallet(alice, "bitcoin");
+  await expect(status).toContainText(`Connected · ${wallet} · regtest`, { timeout: 60_000 });
 });
 
 test("the chat offers on-chain Bitcoin, off until a source is set up", { tag: ["@feature:payments.bitcoin.offer"] }, async ({ peer }) => {

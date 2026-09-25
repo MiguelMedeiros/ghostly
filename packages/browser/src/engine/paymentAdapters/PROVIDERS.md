@@ -65,6 +65,33 @@ values into `config` (shown back) and `secrets` (sealed), calls `create`, asks `
 network of the other mode** before saving anything, and closes it on a mode switch, a replacement or
 shutdown (`close()`, and `host.signal` aborts).
 
+## Connecting, and when it cannot
+
+A saved source is connected in the background when the app starts, and **kept trying** while it cannot be
+reached: every failed attempt waits longer before the next (2 s, doubling up to 5 minutes, ±20 %), and an
+attempt starts at once on **Retry** or when the app wakes (back online, back in front: the engine's `wake`).
+Meanwhile the card says "Connecting…" with the last balance the source read (`<kind>SourceSeen-<mode>`),
+and it becomes "Unavailable" only once the failure is sustained (3 attempts over at least 30 s), or at once
+for a wrong setting. It connects by itself as soon as the server answers again.
+
+So `create` (and `info`) should say **why** they fail:
+
+- `SourceUnreachableError`: no answer (a time-out, a refused connection, no network, a 5xx). Tried again.
+- `SourceConfigError`: a setting is wrong (a server on another network, not the API expected, a phrase
+  that makes no wallet). Shown as unavailable at once; waiting does not fix it.
+- Anything else is taken as no answer. Both are recognised by `name`, so a plugin's own copies work.
+
+Say which server and what it did, precisely: "nothing answers at 127.0.0.1:44201: the local Esplora server is
+not running", "the Esplora server at blockstream.info did not answer in 20 s", "wrong network: the Esplora
+server at … is on testnet4, not signet". Listen to `host.signal`: a change of settings interrupts an attempt
+under way (the engine also gives up on one that ignores it, and closes what arrives later).
+
+A field marked `changeable` (a server address that does not change whose money it is, like a BDK wallet's
+Esplora) can be edited on a saved source with **Change server** (`ProviderSources.reconfigure`): the secrets
+stay sealed and are not typed again, and the new server is connected and checked before it is saved. Never
+mark a field that picks another account (a node's URL: another node is other money). `suggestions` offer
+values under a field, filtered by the other fields (`when`): public servers per network, for instance.
+
 ## Money safety
 
 - **Nothing spent vs unknown.** Throw `NothingSpentError` only when it is certain nothing left the wallet
