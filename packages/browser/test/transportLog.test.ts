@@ -43,6 +43,33 @@ describe("transport log: what a change reads as", () => {
     expect(log.entries.slice(1).map(e => e.cause)).toEqual(["automatic", "automatic"]);
   });
 
+  it("never credits a reconnect after a drop to someone's choice", () => {
+    // Drops a flapping window apart, so none of them folds into a flapping line; choices land well within their TTL.
+    const log = new TransportLog(), W = FLAP_WINDOW_MS;
+    log.observe(live("webrtc/1"), 0);
+    // A choice of the transport already in use moves nothing, and is not held against a later change back to it.
+    log.chose("you", "webrtc/1", 1);
+    log.observe(live("iroh/1"), 2);
+    log.observe(live("webrtc/1"), 3);
+    // A choice still on its way when the link drops: coming back on it is the app reconnecting.
+    log.chose("contact", "hyperdht/1", W);
+    log.observe(live("webrtc/1", { transitionTarget: "hyperdht/1" }), W + 1);
+    log.observe(down(), W + 2);
+    log.observe(live("hyperdht/1"), W + 3);
+    log.chose("you", "iroh/1", 3 * W);
+    log.observe(down(), 3 * W + 1);
+    log.observe(live("iroh/1"), 3 * W + 2);
+    // That choice was spent on the reconnect: a later live move to it is the app's.
+    log.observe(live("webrtc/1"), 3 * W + 3);
+    log.observe(live("iroh/1"), 3 * W + 4);
+    expect(log.entries.slice(1).map(e => [e.kind, e.cause ?? null, e.transport ?? null])).toEqual([
+      ["switched", "automatic", "iroh/1"], ["switched", "automatic", "webrtc/1"],
+      ["lost", null, null], ["switched", "dropped", "hyperdht/1"],
+      ["lost", null, null], ["switched", "dropped", "iroh/1"],
+      ["switched", "automatic", "webrtc/1"], ["switched", "automatic", "iroh/1"],
+    ]);
+  });
+
   it("says a lost link, what carries text meanwhile, and coming back", () => {
     const log = new TransportLog();
     log.observe(live("webrtc/1"), 0);

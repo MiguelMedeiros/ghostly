@@ -704,7 +704,10 @@ export class GhostLink {
       // Cached availability is a routing hint, not permission: the fresh signed
       // PairedSession offer enforces the peer's current (possibly offline-edited) policy.
       const remembered = this.peerTransports && rankTransports(local, this.peerFallback ? this.peerTransports : this.peerTransports.slice(0, 1));
-      const choices = remembered?.length ? remembered : this.peerTransports ? rankTransports(local, this.peerTransports) : local.filter(t => t === "webrtc/1");
+      const ranked = remembered?.length ? remembered : this.peerTransports ? rankTransports(local, this.peerTransports) : local.filter(t => t === "webrtc/1");
+      // A standing explicit choice goes first: the session starts where the agreement would move it anyway.
+      const chosen = this.switcher.chosenTarget;
+      const choices = chosen && ranked.includes(chosen) ? [chosen, ...ranked.filter(t => t !== chosen)] : ranked;
       if (!choices.length) throw new Error("No common available transport. Initial pairing requires WebRTC on both peers.");
       let lastError: unknown;
       for (const [index, transport] of choices.entries()) {
@@ -1173,7 +1176,7 @@ export class GhostLink {
             onFailed: events.onFileFailed,
           });
           this.peerPolicySeen = null;
-          if (paired.peerTransportSwitchSupport) this.switcher.begin(paired.proofSession, paired.state.transport!);
+          if (paired.peerTransportSwitchSupport) this.switcher.begin(paired.proofSession, paired.state.transport!, !!migration);
           else this.advertiseTransports();
           this.peerPaymentMethods = null;
           this.peerHoldOverride = null;
@@ -1423,7 +1426,9 @@ export class GhostLink {
     this.stopLiveness();
     const wasNative = !!this.activeBinding;
     this.applicationOpen = false;
-    if (!this.candidate && !this.switcher.pending) this.switcher.stop();
+    // A replacement still authenticating may yet carry the chat. Without one, the session a plan meant to move is
+    // gone, and so is the plan: its dial must not go on and open a session of its own, or settle the next one.
+    if (!this.candidate) { this.cancelCandidate(); this.switcher.stop(); }
     this.activeBinding = undefined;
     this.paired?.stop();
     this.paired = null;

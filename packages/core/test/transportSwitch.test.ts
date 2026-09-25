@@ -66,3 +66,42 @@ it("settles mutual fallback without a repeating switch loop", () => {
   h.switches.forEach(s => s.retry()); h.flush();
   expect(h.prepare[0]).toHaveBeenCalledTimes(1); h.switches.forEach(s => s.stop());
 });
+it("agrees again on a fresh session: a plan cut short by a drop does not settle the reconnect", () => {
+  const h = peers(); h.policies[1].preferred = "hyperdht/1"; h.switches[1].changed(); h.flush();
+  expect(h.switches.every(s => s.pending?.choices[0] === "hyperdht/1")).toBe(true);
+  // The link drops before the move; the redial lands on WebRTC, a transport the old plan would also have allowed.
+  h.switches.forEach(s => s.stop());
+  h.switches.forEach(s => s.begin("session-2", "webrtc/1")); h.flush();
+  expect(h.switches.every(s => s.pending?.choices[0] === "hyperdht/1")).toBe(true);
+  expect(h.prepare[0]).toHaveBeenCalledTimes(2);
+  // The move lands: that session is the plan's, so it is settled and nothing moves again.
+  h.switches.forEach(s => s.begin("session-3", "hyperdht/1", true)); h.flush();
+  expect(h.switches.every(s => !s.pending)).toBe(true);
+  expect(h.prepare[0]).toHaveBeenCalledTimes(2);
+  h.switches.forEach(s => s.stop());
+});
+it("does not keep a fallback settled on an older session", () => {
+  const h = peers(); h.policies[1].preferred = "iroh/1"; h.switches[1].changed(); h.flush();
+  h.switches[0].keep(); h.flush();
+  expect(h.switches.every(s => !s.pending)).toBe(true);
+  // Reconnected on the same transport: Iroh is still the contact's choice, so this session tries it once more.
+  h.switches.forEach(s => s.stop());
+  h.switches.forEach(s => s.begin("session-2", "webrtc/1")); h.flush();
+  expect(h.switches.every(s => s.pending?.choices[0] === "iroh/1")).toBe(true);
+  h.switches.forEach(s => s.stop());
+});
+it("names the same redial target on both sides: the explicit choice, or none", () => {
+  const h = peers();
+  expect(h.switches.map(s => s.chosenTarget)).toEqual([undefined, undefined]);
+  h.policies[1].preferred = "hyperdht/1"; h.switches[1].changed(); h.flush();
+  h.switches.forEach(s => s.stop());
+  // Kept across the drop, for the next dial, on either side.
+  expect(h.switches.map(s => s.chosenTarget)).toEqual(["hyperdht/1", "hyperdht/1"]);
+  h.switches.forEach(s => s.begin("session-2", "hyperdht/1")); h.flush();
+  h.policies[0].preferred = "iroh/1"; h.switches[0].changed(); h.flush();
+  expect(h.switches.map(s => s.chosenTarget)).toEqual(["iroh/1", "iroh/1"]);
+  // Back to automatic on side 0: side 1's standing choice names the target again.
+  h.policies[0].preferred = "webrtc/1"; h.switches[0].changed("automatic"); h.flush();
+  expect(h.switches.map(s => s.chosenTarget)).toEqual(["hyperdht/1", "hyperdht/1"]);
+  h.switches.forEach(s => s.stop());
+});
