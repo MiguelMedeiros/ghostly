@@ -145,6 +145,12 @@ export default function RootLayout({
         <Script id="js-flag" strategy="beforeInteractive">
           {"var d=document.documentElement;d.classList.add('js');try{var q=function(m,f){var l=matchMedia(m);f(l.matches);l.addEventListener('change',function(e){f(e.matches)})};q('(prefers-reduced-motion: reduce)',function(v){d.classList.toggle('calm',v)});q('(max-width: 860px)',function(v){if(v)d.dataset.orient='portrait';else delete d.dataset.orient});q('(pointer: coarse)',function(v){if(v)d.dataset.touch='';else delete d.dataset.touch})}catch(e){}"}
         </Script>
+        {/* An invite link (ghostly.tools/#ghostly1…, WISP 801): its code leaves the address before analytics
+            load (and, pasted later, before their history listeners run), so it is never in a page view, a
+            referrer or the history. components/site/JoinLanding.tsx reads it. */}
+        <Script id="invite-intake" strategy="beforeInteractive">
+          {"try{var t=function(){var h=location.hash;if(!/^#ghostly1/i.test(h))return;var v=h.slice(1);try{v=decodeURIComponent(v)}catch(e){}window.__ghostlyInvite=v;history.replaceState(history.state,'',location.pathname+location.search);dispatchEvent(new Event('ghostly-invite'))};t();addEventListener('popstate',t);addEventListener('hashchange',t)}catch(e){}"}
+        </Script>
         <Script
           src="https://www.googletagmanager.com/gtag/js?id=G-KXK4ESQ5DZ"
           strategy="afterInteractive"

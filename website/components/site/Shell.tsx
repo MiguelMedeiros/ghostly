@@ -6,6 +6,7 @@ import { SiteFooter } from "./Footer";
 import { GhostPet } from "./GhostPet";
 import { GhostSwarm } from "./GhostSwarm";
 import { HtmlLang } from "./HtmlLang";
+import { JoinLanding } from "./JoinLanding";
 
 export function Shell({ locale = "en", children }: { locale?: Locale; children: React.ReactNode }) {
   const t = shell[locale];
@@ -20,6 +21,7 @@ export function Shell({ locale = "en", children }: { locale?: Locale; children: 
       <SiteFooter locale={locale} />
       <GhostPet label={t.pet} />
       <GhostSwarm />
+      <JoinLanding locale={locale} />
     </div>
   );
 }
