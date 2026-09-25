@@ -48,6 +48,8 @@ for(const mobile of [false,true]) test(`popup outside gestures close safely (mob
 test("the connection panel opens by keyboard, has both keys, and dismisses without changing the chat", { tag: ["@feature:chat.paired.status", "@feature:app.popovers"] }, async ({peer}) => {
   const {page} = await peer("connection-details");
   await page.getByRole("button", {name:"New chat", exact:true}).click();
+  // The new chat's address, once the app has gone there.
+  await expect(page).toHaveURL(/#\/chat\//);
   const route = page.url();
   const trigger = page.getByTestId("connection-options");
   await expect(trigger).not.toHaveAttribute("title");

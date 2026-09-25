@@ -116,7 +116,8 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, polling 
           {rtt !== undefined && <span className="shrink-0 whitespace-nowrap text-text-muted">· {rtt} ms</span>}
         </span>
       </>}
-      <svg aria-hidden="true" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-text-muted"><path d="m6 9 6 6 6-6" /></svg>
+      {/* On a phone beside the pairing indicator, the dot alone: the indicator's tooltip needs the width. */}
+      <svg aria-hidden="true" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 text-text-muted ${compact ? "max-md:hidden" : ""}`}><path d="m6 9 6 6 6-6" /></svg>
     </summary>
     <div role="dialog" aria-label="Connection options" className="absolute start-0 top-full max-md:fixed max-md:inset-x-2 max-md:top-[calc(3.5rem_+_env(safe-area-inset-top))] max-md:w-auto z-40 mt-2 w-[min(22rem,calc(100vw-1rem))] max-h-[70dvh] overflow-y-auto rounded-xl border border-border bg-panel-header p-4 text-xs leading-5 text-text-muted shadow-xl">
       <div className="flex items-center gap-2 font-medium text-text-primary" data-testid="connection-state">
