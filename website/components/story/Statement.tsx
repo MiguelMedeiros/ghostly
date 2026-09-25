@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { animate as tween, motion, useInView, useMotionValue, useScroll, useTransform, type MotionValue } from "motion/react";
+import { animate as tween, motion, useInView, useMotionValue, useTransform, type MotionValue } from "motion/react";
 import { useCalm } from "@/lib/useCalm";
-import { ease, useScrub } from "@/lib/motion";
+import { ease } from "@/lib/motion";
+import { useBeats, usePlayheadProgress } from "@/lib/playhead";
 import { useCards } from "@/components/home/stage";
 import "@/app/statement.css";
 
@@ -19,8 +20,21 @@ export function Statement({ before, accent, after }: { before: string; accent: s
   const calm = useCalm();
   const cards = useCards();
   const still = calm || cards;
-  const { scrollYProgress: rawProgress } = useScroll({ target: ref, offset: ["start end", "end start"] });
-  const scrollYProgress = useScrub(rawProgress);
+  const scrollYProgress = usePlayheadProgress(ref, "crossing");
+  // The reveal is a beat: a flick still shows the words arrive, a stop never leaves the sentence half-written.
+  useBeats(
+    "statement",
+    () => {
+      const el = ref.current;
+      if (still || !el) return null;
+      const top = el.getBoundingClientRect().top + window.scrollY;
+      const vh = window.innerHeight;
+      const from = top - vh;
+      const span = el.offsetHeight + vh;
+      return [{ from: from + REVEAL[0] * span, to: from + REVEAL[1] * span, seen: [from, from + span] }];
+    },
+    [still],
+  );
   // Touch devices: no pin; the sentence reveals once when it is on screen.
   const local = useMotionValue<number>(REVEAL[0]);
   const inView = useInView(ref, { amount: 0.5, once: true });

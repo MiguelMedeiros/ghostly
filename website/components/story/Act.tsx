@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { animate as tween, motion, useInView, useMotionValue, useMotionValueEvent, useScroll, useSpring, useTransform, type MotionValue } from "motion/react";
+import { animate as tween, motion, useInView, useMotionValue, useMotionValueEvent, useSpring, useTransform, type MotionValue } from "motion/react";
 import { Ghost, type GhostMood } from "@/components/ghost/Ghost";
 import { EXIT, orientationOf, scatter, stepOf, useCards, usePortrait, VIEW_BOX_ORIGIN } from "@/components/home/stage";
 import { useCalm } from "@/lib/useCalm";
-import { DUR, EASE, HERO, SPRING, useScrub } from "@/lib/motion";
+import { DUR, EASE, HERO, PAIR, SPRING } from "@/lib/motion";
+import { useBeats, usePlayheadProgress } from "@/lib/playhead";
 import { BLOCKING, blockingFor, poseAt, ROOMS, STAGE, valueAt, type Chapter, type Frame } from "./poses";
 import { IDENTITY, lerpFraming, measureFraming, sameFraming, type Framing } from "./framing";
 
@@ -24,6 +25,8 @@ type Range = { chapter: Chapter; start: number; end: number; steps: number; fram
 type Located = { chapter: Chapter; t: number; steps: number; i: number };
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+/** Where the hero's Boo walks from his opening place into the story (poses.ts L.hero). */
+const HERO_WALK = [0.2, 0.8] as const;
 
 export function Act({
   id,
@@ -65,9 +68,8 @@ function LiveAct({ id, chapters, field, bubble, bubbleAvoid, children }: { id: s
   const portrait = usePortrait();
   const orient = orientationOf(portrait);
   const inView = useInView(ref, { margin: "10% 0px 10% 0px" });
-  const { scrollYProgress: rawActP } = useScroll({ target: ref, offset: ["start start", "end end"] });
-  // The camera, the focal point and the field follow the smoothed progress; the actors add their own weight on top.
-  const actP = useScrub(rawActP);
+  // The camera, the focal point and the field follow the story's playhead (lib/playhead.ts); the actors add their own weight on top.
+  const actP = usePlayheadProgress(ref, "pinned");
   const [ranges, setRanges] = useState<Range[]>([]);
   const rangesRef = useRef<Range[]>([]);
 
@@ -104,6 +106,29 @@ function LiveAct({ id, chapters, field, bubble, bubbleAvoid, children }: { id: s
       window.removeEventListener("resize", measure);
     };
   }, [chapters]);
+
+  // The actors' own beats: the hero's walk into the story and every glide from one chapter's pose to the next (an
+  // act's pair arriving as it pins is its first scene's fade-in beat). A flick still shows them; a stop never leaves
+  // the pair halfway between two chapters. The hero is not pinned (its copy scrolls away by itself), so a stop there
+  // stays where it is.
+  useBeats(
+    `act:${id}`,
+    () => {
+      const act = ref.current;
+      const rs = rangesRef.current;
+      if (!act || !rs.length) return null;
+      const top = act.getBoundingClientRect().top + window.scrollY;
+      const travel = Math.max(1, act.offsetHeight - window.innerHeight);
+      const seen: [number, number] = [top, top + travel];
+      const at = (r: Range, t: number) => top + (r.start + t * (r.end - r.start)) * travel;
+      return rs.map((r) => {
+        const hero = r.chapter === "hero";
+        const [a, b] = hero ? HERO_WALK : [EXIT, 1];
+        return { from: at(r, a), to: at(r, b), seen, stop: !hero };
+      });
+    },
+    [ranges],
+  );
 
   // Which chapter and sub-progress a global act progress is in. A pinned chapter
   // ends one viewport before the next one starts; in that hand-off the actors
@@ -272,11 +297,12 @@ function LiveAct({ id, chapters, field, bubble, bubbleAvoid, children }: { id: s
           <motion.div className="act-field" style={{ y: fieldY }}>
             <div className="act-field-drift">
               <svg className="stage" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="xMidYMid slice">
+                {/* The app's network look (pairing-scene.css): a dotted mesh in the mesh tone, loose dots on it. */}
                 {edges.map(([a, b]) => (
-                  <line key={`${a}-${b}`} x1={nodes[a].x} y1={nodes[a].y} x2={nodes[b].x} y2={nodes[b].y} stroke="#22d3ee" strokeOpacity="0.08" />
+                  <line key={`${a}-${b}`} x1={nodes[a].x} y1={nodes[a].y} x2={nodes[b].x} y2={nodes[b].y} stroke={PAIR.mesh} strokeOpacity="0.7" strokeWidth={PAIR.stroke.mesh} strokeDasharray={PAIR.meshDash} strokeLinecap="round" />
                 ))}
                 {nodes.map((n, i) => (
-                  <circle key={i} cx={n.x} cy={n.y} r={1.6 + n.t * 2} fill="#4c5f7a" opacity={0.55 + n.t * 0.45} />
+                  <circle key={i} cx={n.x} cy={n.y} r={1.6 + n.t * 2} fill={PAIR.dot} opacity={0.55 + n.t * 0.45} />
                 ))}
               </svg>
             </div>

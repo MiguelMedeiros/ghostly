@@ -66,6 +66,7 @@ export function framingFor({ chapter, side, copy, vw, vh, nav }: { chapter: Chap
   const ox = (vw - w * s0) / 2;
   const oy = (vh - h * s0) / 2;
   const bounds = { left: EDGE, top: nav + EDGE, right: vw - EDGE, bottom: vh - RAIL };
+  if (side === "band") return banded(boxes, { ...bounds, bottom: Math.min(bounds.bottom, copy.top - GAP) }, s0, ox, oy);
   const cornered = side.startsWith("bottom");
   const ax = cornered ? bounds.left : bounds.right;
   const ay = cornered ? bounds.top : (bounds.top + bounds.bottom) / 2;
@@ -116,6 +117,25 @@ export function framingFor({ chapter, side, copy, vw, vh, nav }: { chapter: Chap
   return { k, x: round(((1 - k) * (ax - ox) + at.dx) / s0), y: round(((1 - k) * (ay - oy) + at.dy) / s0) };
 }
 
+/**
+ * An upright window's film puts the copy in a band across the bottom (site.css), so the picture goes above it:
+ * as large as fits the space between the nav and the band (never larger than drawn), centred in it.
+ */
+function banded(boxes: Box[], space: Rect, s0: number, ox: number, oy: number): Framing {
+  // The art as drawn, in CSS px.
+  const left = s0 * Math.min(...boxes.map((b) => b[0])) + ox;
+  const top = s0 * Math.min(...boxes.map((b) => b[1])) + oy;
+  const right = s0 * Math.max(...boxes.map((b) => b[2])) + ox;
+  const bottom = s0 * Math.max(...boxes.map((b) => b[3])) + oy;
+  const k = Math.max(MIN_K, Math.min(1, (space.right - space.left) / (right - left), (space.bottom - space.top) / (bottom - top)));
+  // Scaled by k about its own top-left, then moved so its centre is the space's centre.
+  const dx = (space.left + space.right) / 2 - (left + (k * (right - left)) / 2);
+  const dy = (space.top + space.bottom) / 2 - (top + (k * (bottom - top)) / 2);
+  // p' = k·p + (x, y) in stage units, from s0·p' + o = left + dx + k(s0·p + o − left).
+  const round = (v: number) => Math.round(v * 100) / 100;
+  return { k: round(k), x: round(((1 - k) * (left - ox) + dx) / s0), y: round(((1 - k) * (top - oy) + dy) / s0) };
+}
+
 /** A chapter's framing on the current window, read from its section (the copy panel is measured where it is pinned). */
 export function measureFraming(section: HTMLElement | null, chapter: Chapter): Framing {
   const panel = section?.querySelector<HTMLElement>(".scene-copy");
@@ -124,9 +144,11 @@ export function measureFraming(section: HTMLElement | null, chapter: Chapter): F
   const s = sticky.getBoundingClientRect();
   const c = panel.getBoundingClientRect();
   const nav = document.querySelector("header")?.getBoundingClientRect().height ?? 0;
+  // The copy's place comes from the layout: site.css sets --copy-at: band where an upright window has it across the bottom.
+  const band = getComputedStyle(panel).getPropertyValue("--copy-at").trim() === "band";
   return framingFor({
     chapter,
-    side: section.dataset.copy ?? "left",
+    side: band ? "band" : (section.dataset.copy ?? "left"),
     copy: { left: c.left - s.left, top: c.top - s.top, right: c.right - s.left, bottom: c.bottom - s.top },
     vw: s.width,
     vh: s.height,

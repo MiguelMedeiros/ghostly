@@ -1,9 +1,10 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { animate as tween, motion, motionValue, useInView, useMotionValue, useMotionValueEvent, useScroll, useTransform, type MotionValue } from "motion/react";
+import { animate as tween, motion, motionValue, useInView, useMotionValue, useMotionValueEvent, useTransform, type MotionValue } from "motion/react";
 import { useCalm } from "@/lib/useCalm";
-import { DUR, EASE, useScrub } from "@/lib/motion";
+import { BEAT, DUR, EASE } from "@/lib/motion";
+import { useBeats, usePlayheadProgress } from "@/lib/playhead";
 import { EXIT, orientationOf, StageFramingContext, stepAt, stepOf, useCards, usePortrait, type Camera } from "@/components/home/stage";
 import { IDENTITY, measureFraming, sameFraming, STILL_LIGHT, stillCamera, type Framing } from "./framing";
 import { BLOCKING, ROOMS, valueAt, type Chapter } from "./poses";
@@ -34,6 +35,9 @@ export function useScene(): SceneState {
   if (!ctx) throw new Error("useScene outside a SceneFrame");
   return ctx;
 }
+
+/** How long a chapter's picture and copy take to fade in after it pins, and out before the hand-off (fractions of the chapter). */
+const FADE = 0.04;
 
 function hexToRgb(hex: string) {
   const n = parseInt(hex.slice(1), 16);
@@ -85,8 +89,24 @@ export function SceneFrame({
   const portrait = usePortrait();
   const n = steps.length;
   const inView = useInView(ref, { margin: "20% 0px 20% 0px" });
-  const { scrollYProgress: rawProgress } = useScroll({ target: ref, offset: ["start start", "end end"] });
-  const scrollYProgress = useScrub(rawProgress);
+  // The story's playhead, not the raw scroll: every scene, the actors and the copy read the same one (lib/playhead.ts).
+  const scrollYProgress = usePlayheadProgress(ref, "pinned");
+  // The beats a flick must still show and a stop must finish: the picture fading in, each step's action, the
+  // picture fading out. In page pixels, while the chapter holds the screen.
+  useBeats(
+    `scene:${id}`,
+    () => {
+      const el = ref.current;
+      if (article || !el) return null;
+      const top = el.getBoundingClientRect().top + window.scrollY;
+      const travel = Math.max(1, el.offsetHeight - window.innerHeight);
+      const at = (f: number) => top + f * travel;
+      const seen: [number, number] = [top, top + travel];
+      const beats = steps.map((_, i) => ({ from: at(stepAt(i, BEAT.establish, n)), to: at(stepAt(i, BEAT.settle, n)), seen }));
+      return seams ? [{ from: at(0), to: at(FADE), seen }, ...beats, { from: at(EXIT - FADE), to: at(EXIT), seen }] : beats;
+    },
+    [article, n, seams],
+  );
 
   // Server HTML and the first paint carry the story pose, not the scroll-0 pose.
   const [p] = useState(() => motionValue(stills[Math.min(1, n - 1)]));
@@ -130,8 +150,8 @@ export function SceneFrame({
   // pins and is gone before the actors start their glide at EXIT, so a hand-off
   // shows only the backdrop and the two ghosts. While it is invisible it takes
   // no clicks.
-  const enter = useTransform(p, [0, 0.04], [0, 1]);
-  const leave = useTransform(p, [EXIT - 0.04, EXIT], [1, 0]);
+  const enter = useTransform(p, [0, FADE], [0, 1]);
+  const leave = useTransform(p, [EXIT - FADE, EXIT], [1, 0]);
   const furniture = useTransform([enter, leave], ([a, b]) => (seams ? Math.min(a as number, b as number) : 1));
   // The copy rises the last few pixels into place as it fades in, and slips up a little as it leaves.
   const copyY = useTransform([enter, leave], ([a, b]) => (seams ? 12 * (1 - (a as number)) - 8 * (1 - (b as number)) : 0));

@@ -22,7 +22,9 @@ is checked (see the end).
    the pointer ghost) get the one `body` spring on top, so they anticipate and
    follow through instead of sliding.
 5. **Scroll belongs to the reader.** We never take the scroll over, snap it or
-   slow it down. We smooth what the scroll drives, not the scroll itself.
+   slow it down. We smooth what the scroll drives, not the scroll itself: the
+   story's pictures follow one playhead that keeps every beat readable at any
+   scroll speed (below).
 6. **Every frame is a frame.** Any paused point of a scene must read as a
    picture: nothing half-clipped, no text mid-fade across other text, nothing
    under the nav, and no beat still in motion after its settle point.
@@ -36,15 +38,18 @@ is checked (see the end).
 | `EASE.enter` | `0.22, 1, 0.36, 1` | Arriving, popping, settling, hover in. The default (`--ease`). |
 | `EASE.exit` | `0.55, 0, 1, 0.45` | Leaving, hover out. |
 | `EASE.move` | `0.65, 0, 0.35, 1` | A trip from A to B while on screen: a beat, a loop, a camera move. |
+| `EASE.burst` | `0.2, 0.8, 0.3, 1` | A ring bursting out once (the app's pairing "connected" rings). |
+| `EASE.hop` | `0.3, 1.6, 0.5, 1` | A hop or pop that overshoots and lands (the app's ghosts connecting; chips, checks). |
+| `PAIR` | see `lib/motion.ts` | The app's pairing look: eye ink, mesh and node tones, stroke widths. |
 | `DUR.fast` | 0.14 s | Hover, press, focus; a step's copy leaving. |
 | `DUR.base` | 0.28 s | A chip, a caption swap, a cross-fade, a step's copy arriving. |
 | `DUR.slow` | 0.56 s | A card, a panel, a large element or a scene arriving; the swarm in and out. |
 | `DUR.beat` | 1.8 s | One story beat played in full (cards mode, loops). |
 | `STAGGER` | 0.06 s | Between siblings entering in sequence; after `STAGGER_MAX` (6) the rest arrive together. |
-| `SPRING.scrub` | 170 / 34 / 0.55 | Anything driven by scroll (settles in about 0.35 s). |
 | `SPRING.body` | 130 / 19 / 0.9 | Physical things: the ghosts, the pointer ghost. Just under critical damping. |
 | `SPRING.ui` | 380 / 32 / 0.6 | Small interface elements. |
-| `BEAT` | establish 0.15, settle 0.7 | The shape of a step (below). |
+| `BEAT` | establish 0.04, settle 0.86 | The shape of a step (below): where its picture moves. |
+| `SCRUB` | follow 0.12 s, pace 0.72 vh/s, catch-up 1.2 s, decel 30 vh/s², rest 140 ms, jump 1.5 vh, seen 0.4 vh | The story's playhead (below). |
 | `HERO` | see `lib/motion.ts` | The opening's timeline (below). |
 
 `ease.enter`, `ease.exit` and `ease.move` are the same curves as functions,
@@ -65,13 +70,14 @@ other. The picture's first beat starts at `BEAT.establish` of the step.
 
 Every step of a chapter has the same shape, in fractions of the step:
 
-- **establish** (0 to 0.15): the copy is in; the subject of the step arrives or
-  is singled out (the rest dims).
-- **action** (0.15 to 0.7): the subject does its one thing. If the step has
-  two or three things (a card growing, then a link lighting), they run one
-  after the other inside this window, never at once.
-- **settle** (0.7 to 1): nothing new moves. A reader who stops scrolling here
-  sees the finished picture and has time to read.
+- **copy** (at 0): the step's copy changes at the step's edge.
+- **beat** (0.04 to 0.86): the subject arrives or is singled out, then does its
+  one thing. If the step has two or three things (a card growing, then a link
+  lighting), they run one after the other inside this window, never at once.
+  This window is what the playhead calls the step's beat.
+- **settle** (0.86 to 1): nothing new moves. A reader who stops scrolling here
+  sees the finished picture and has time to read. (Only the focal point, which
+  the key light and the gazes follow, may still drift toward the next step.)
 
 Stills for the cards layout are taken inside the settle. In cards mode the
 whole beat plays once, in `DUR.beat` on `move`, then holds.
@@ -97,6 +103,12 @@ whole beat plays once, in `DUR.beat` on `move`, then holds.
   table, never a separate animation.
 - A chapter's picture never sits on its copy (`components/story/framing.ts`);
   `e2e/scene-overlap.spec.ts` fails on any shape touching the copy.
+- Upright windows (taller than wide, wider than 860 px, with a pointer) run
+  the film too: the copy goes into a band across the bottom (`--copy-at: band`
+  in `app/site.css`) and each chapter's picture is framed whole above it, as
+  large as fits and never larger than drawn (`banded` in `framing.ts`). Before
+  #202 they cropped the landscape stage (ghosts cut, pictures on the copy);
+  #202 then sent them to cards, which read as "the animations are gone".
 
 ### The hero
 
@@ -155,6 +167,38 @@ watches:
   never edited here); it keeps the app's springs. The site only deals its
   cards every 3.8 s while nobody is pointing at it.
 
+### The ghosts and the brand: the app's pairing look
+
+The site's pictures share one visual language with the app's pairing scene
+(`src/components/pairing/PairingScene.tsx` and `pairing-scene.css`, read,
+never changed from here). Each page tells its own story; what they share is
+the look:
+
+- **The ghost.** Every character ghost on the site is the app's `GHOST_PATH`
+  (exported from `components/ghost/Ghost.tsx`): a round head and a hem cut
+  into points like the arcade ghosts' feet, five points and four notches. The
+  story's ghosts, the swarm (`GhostSprite`), the footer's `GhostPet` and the
+  404 draw it. Rounded, cloth-like folds are gone. The hem stirs, it does not
+  ripple: over 3.2 s the notches move sideways and the points up or down by
+  about a unit (the corners and sides stay put), the loop rests off screen
+  (`IdleLoops`), and reduced motion shows `GHOST_PATH` itself. The eyes take
+  the app's ink (`PAIR.eye`) and its blink: every 5 s, shut at 97%.
+- **Colour and line.** `PAIR` in `lib/motion.ts` (`--pair-*` in site.css)
+  holds the app's eye ink, mesh and node tones and stroke widths. A network
+  is a dotted mesh (`2 4`) in the mesh tone with ringed nodes, lit in the
+  accent where something is held; routes and links are solid.
+- **Easing.** `EASE.burst` is the app's "connected" ring, `EASE.hop` its
+  ghosts' hop; chips and checks pop on `hop`, rings go out on `burst`.
+- **The connected moment.** When the invitation connects, a ring bursts once
+  from each ghost and then from the middle of the link, as in the app,
+  inside the step's beat and inside the chapter's picture (never across the
+  copy).
+- The brand lockup in the nav and the footer is the app's
+  (`components/site/Brand.tsx`, from `src/components/AppBrand.tsx`): the app's
+  ghost icon and GHOSTLY in the app's system font stack, 700, tracking-tight,
+  both in the accent (cyan, about 11:1 on the page), the text 17/36 of the
+  icon. It does not move: the app's opening motion stays the app's.
+
 ### The swarm (page changes and long jumps)
 
 `components/site/GhostSwarm.tsx`: a flock of 30 small ghosts rises over the
@@ -207,8 +251,8 @@ download cards and their buttons, the rail's marks.
 
 | Mode | Who | What moves |
 |---|---|---|
-| Film | Desktop with a fine pointer | Pinned acts, scroll-scrubbed through `useScrub`. |
-| Cards | Touch devices, viewports ≤ 860 px and upright windows | Each step is a card; its scene plays its beat once (`DUR.beat`, `move`) when it scrolls into view. |
+| Film | Every window wider than 860 px with a fine pointer, upright ones included | Pinned acts, driven by the story's playhead. Upright windows put the copy in a band across the bottom. |
+| Cards | Touch devices and viewports ≤ 860 px | Each step is a card; its scene plays its beat once (`DUR.beat`, `move`) when it scrolls into view. No scroll-scrubbing on phones and tablets. |
 | Stills | `prefers-reduced-motion` and no JavaScript | One finished frame per step; loops show their final frame; changes cross-fade. |
 
 The layout script in `app/layout.tsx` sets `html.calm`, `html[data-orient]` and
@@ -222,16 +266,61 @@ renders every still with its ghosts and that nothing keeps running.
 
 ## Scroll-driven scenes
 
-- Read progress through `useScrub(scrollYProgress)`, never the raw value. A
-  wheel tick then becomes a glide, and a large jump (an anchor link, a reload
-  mid-page) is taken at once instead of swept through.
-- Place beats with `useStep(p, step, n, [from, to], out, curve)`
-  (`components/home/stage.tsx`), inside the step's action window.
+The story reads one playhead (`lib/playhead.ts`), never the raw scroll: every
+chapter's picture, the act's actors and camera, the hero's copy and the
+statement take their progress from it with `usePlayheadProgress(ref, offset)`,
+so they stay in step with each other. The scroll itself stays the reader's;
+the playhead only decides how the pictures catch up with it.
+
+- **Follow.** It follows the scroll with a critically damped glide
+  (`SCRUB.follow`): a wheel tick is a glide, not a step.
+- **Beats keep their pace.** Scenes register their beats with `useBeats` (a
+  chapter: its fade in, each step's beat window, its fade out; an act: the
+  hero's walk and every glide from one chapter's pose to the next; the
+  statement: its reveal). Inside a beat the playhead moves at most
+  `SCRUB.pace` viewport heights a second, and it eases into a beat
+  (`SCRUB.decel`) instead of braking in it. A flick through three steps still
+  plays each one, in order.
+- **Catch-up is capped.** However many beats a flick crossed, the playhead
+  catches up in `SCRUB.catchUp`; past it every beat plays faster. Beats only
+  count while their scene is on screen (the scroll within `SCRUB.seen` of its
+  pinned range): a chapter that has scrolled away is not replayed.
+- **A stop is a frame.** When the scroll stops inside a beat (`scrollend`, or
+  `SCRUB.rest` without a scroll event), the beat finishes if the reader was
+  scrolling down and goes back to its start if scrolling up. Carrying on the
+  same way, the picture holds until the scroll passes it; turning back
+  reverses it at once.
+- **Jumps are taken at once.** A scroll that moves more than `SCRUB.jump`
+  viewports in one go (a link, the rail, the swarm, a reload mid-page) moves
+  the playhead there in one frame: nothing rewinds or replays.
+- Place a scene's beats with `useStep(p, step, n, [from, to], out, curve)`
+  (`components/home/stage.tsx`), inside the step's beat window
+  (`BEAT.establish` to `BEAT.settle`).
 - Actors live in the act backdrop and move only between poses in
-  `components/story/poses.ts`.
+  `components/story/poses.ts`; on top of the playhead they carry the `body`
+  spring.
 - For any range that depends on state (orientation, locale), use the function
   form of `useTransform`: motion turns array ranges on scroll values into a
   native scroll animation fixed at mount.
+
+Lessons from recording the story at slow, flick and reverse speeds
+(`npm run motion:speeds`, #258):
+
+- A spring on scroll progress (the old `useScrub`) keeps up with any scroll,
+  so a flick swept three beats past in a third of a second: nothing could be
+  followed. Limiting the speed inside beats, not everywhere, keeps slow
+  reading direct and fast scrolling legible.
+- A pace per beat (each beat in N seconds) made a 4% fade take as long as a
+  whole action; the pace is in viewport heights a second instead.
+- A soft brake at a beat's edge loses against the follow spring (it keeps
+  pulling toward the scroll); the limit has to be a speed profile along the
+  way: the beat's pace inside it, plus what braking allows over the distance
+  before it.
+- Each scene smoothing its own progress let the chapter's picture and the
+  actors drift apart during a fast scroll; one playhead keeps them together.
+- A trackpad fling of two viewports crosses a whole chapter. Replaying beats
+  of a chapter that has physically scrolled away shows nothing but a delay,
+  so only beats on screen hold the playhead.
 
 ## Performance
 
@@ -271,5 +360,9 @@ renders every still with its ghosts and that nothing keeps running.
   (`scripts/motion/gif.sh` makes GIFs for a PR): every chapter, the hero, the
   swarm, the deck, the finale, the footer ghost, in film and in cards, and
   the reduced-motion pass.
+- `npm run motion:speeds http://localhost:PORT out/` records the first act at
+  six window sizes (landscape, upright, phone) and three scroll speeds (slow,
+  a fast flick, reverse); `scripts/motion/stack.sh` lays two builds' clips
+  side by side, lined up on the first scroll.
 - Scroll the page with a trackpad and with a mouse wheel: nothing should step,
   stall or snap; stop anywhere and the picture is finished.

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { GhostMark } from "@/components/ghost/Ghost";
+import { Brand } from "./Brand";
 import { href, isTranslated, LOCALE_META, LOCALES, splitLocale, type Locale } from "@/lib/i18n";
 import { shell, APP_URL } from "@/content/shell";
 
@@ -69,8 +69,7 @@ export function Nav({ locale }: { locale: Locale }) {
     <header className="nav" data-scrolled={scrolled}>
       <div className="wrap nav-inner">
         <Link href={href(locale, "/")} className="brand" aria-label="Ghostly home">
-          <GhostMark />
-          Ghostly
+          <Brand />
         </Link>
         <nav className="nav-links" aria-label="Main">
           {links.map((l) => (

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { GHOST_PATH } from "@/components/ghost/Ghost";
 
 type Mood = "sleeping" | "bored" | "happy" | "tired";
 
@@ -157,7 +158,7 @@ export function GhostPet({ label = "Hide the ghost" }: { label?: string }) {
     >
       <svg width="36" height="45" viewBox="0 0 80 100" aria-hidden="true" className="pet-body">
         <path
-          d="M40 8 C18 8 8 22 8 40 L8 72 L16 64 L24 72 L32 64 L40 72 L48 64 L56 72 L64 64 L72 72 L72 40 C72 22 62 8 40 8Z"
+          d={GHOST_PATH}
           fill="#22d3ee"
           style={{ filter: "drop-shadow(0 0 3px #22d3ee)" }}
         />

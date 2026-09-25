@@ -7,13 +7,14 @@ import { expect, test } from "@playwright/test";
  * Boo with his line, the statement its whole sentence, the finale its finished
  * frame, and nothing on the page may keep moving: no SMIL in the DOM, no
  * animation or transition running longer than a frame once the page has
- * settled. Checked on a desktop window and on a phone.
+ * settled. Checked on a desktop window, an upright one and a phone.
  */
 
 const CHAPTERS = ["invite", "dht", "agree", "alive", "open"] as const;
 
 const VIEWPORTS: { name: string; use: Parameters<typeof test.use>[0] }[] = [
   { name: "desktop 1440x900", use: { viewport: { width: 1440, height: 900 } } },
+  { name: "upright desktop 1009x1239", use: { viewport: { width: 1009, height: 1239 } } },
   { name: "phone 390x844", use: { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true } },
 ];
 

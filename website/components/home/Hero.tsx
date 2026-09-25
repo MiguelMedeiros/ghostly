@@ -1,11 +1,12 @@
 "use client";
 
 import { useRef } from "react";
-import { motion, useScroll, useTransform } from "motion/react";
+import { motion, useTransform } from "motion/react";
 import { GhostMark, Ghost } from "@/components/ghost/Ghost";
 import { Particles } from "@/components/site/Particles";
 import { useCalm } from "@/lib/useCalm";
-import { HERO, useScrub } from "@/lib/motion";
+import { HERO } from "@/lib/motion";
+import { usePlayheadProgress } from "@/lib/playhead";
 import { usePortrait } from "./stage";
 import { APP_URL } from "@/content/shell";
 import type { HomeCopy } from "@/content/home";
@@ -20,8 +21,7 @@ export function Hero({ t }: { t: HomeCopy["hero"] }) {
   const ref = useRef<HTMLElement>(null);
   const calm = useCalm();
   const portrait = usePortrait();
-  const { scrollYProgress: rawProgress } = useScroll({ target: ref, offset: ["start start", "end start"] });
-  const scrollYProgress = useScrub(rawProgress);
+  const scrollYProgress = usePlayheadProgress(ref, "leaving");
   // On phones the copy scrolls up under Boo, so it leaves early (poses.ts P.hero holds him until 0.5).
   // Function form on purpose: motion turns array ranges into native scroll animations fixed at mount.
   const fade = (v: number) => {

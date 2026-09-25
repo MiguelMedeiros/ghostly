@@ -57,22 +57,16 @@ export const orientationOf = (portrait: boolean): Orientation => (portrait ? "po
 export const TOUCH_QUERY = "(pointer: coarse)";
 
 /**
- * A window taller than it is wide cannot hold the film's landscape stage beside
- * its copy panel. `app/layout.tsx` marks it `data-orient="portrait"` too.
- */
-export const UPRIGHT_QUERY = "(max-aspect-ratio: 1/1)";
-
-/**
  * Phones, and any touch-first device, do not get the pinned, scroll-scrubbed
- * film: momentum scrolling fights it. Neither do upright windows. They get
- * cards: the same scenes, each step playing its beat once as its figure comes
- * into view.
+ * film: momentum scrolling fights it. They get cards: the same scenes, each
+ * step playing its beat once as its figure comes into view. Every other
+ * window, upright ones included, gets the film (upright windows put the copy
+ * in a band across the bottom, see site.css and story/framing.ts).
  */
 export function useCards(): boolean {
   const portrait = useMediaQuery(PORTRAIT_QUERY);
   const touch = useMediaQuery(TOUCH_QUERY);
-  const upright = useMediaQuery(UPRIGHT_QUERY);
-  return portrait || touch || upright;
+  return portrait || touch;
 }
 
 /** A ghost placed in stage units; `who` colours it, `s` is its width. */

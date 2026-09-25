@@ -4,7 +4,8 @@ import { useId } from "react";
 import { motion, useTransform, type MotionValue } from "motion/react";
 import { SceneFrame, useScene, type SceneStep } from "@/components/story/SceneFrame";
 import { StaticActors } from "@/components/story/StaticActors";
-import { ease } from "@/lib/motion";
+import { ease, PAIR } from "@/lib/motion";
+import { BLOCKING, poseAt } from "@/components/story/poses";
 import { Stage, useStep } from "./stage";
 
 type Card = { title: string; link: string; qr: string; code: string; forOne: string };
@@ -183,9 +184,9 @@ function Chip({ x, y, color, pop, portrait }: { x: number; y: number; color: str
 }
 
 // Where things are, per orientation. The actors' poses live in poses.ts:
-// landscape Boo's body is x 664-856, y 494-715 (eyes at y ≈ 578); Casper's x 1084-1276 (eyes ≈ 568, mouth to ≈ 640,
-// hem bottom 705). Landscape safe area is y 150-750 (2:1 viewports crop 90 units top and bottom).
-// portrait Boo's body is x 35-155, y 275-413 (eyes ≈ 327); Casper's x 235-355 (mouth ≈ 357, skirt 342-382).
+// landscape Boo's body is x 664-856, y 494-686 (eyes at y ≈ 578); Casper's x 1084-1276 (eyes ≈ 568, mouth to ≈ 640,
+// hem bottom 676). Landscape safe area is y 150-750 (2:1 viewports crop 90 units top and bottom).
+// portrait Boo's body is x 35-155, y 275-395 (eyes ≈ 327); Casper's x 235-355 (mouth ≈ 357, hem 380-395).
 type Layout = {
   /** Where the card first appears (at Boo's side) and where he holds it out. */
   born: Pt;
@@ -249,11 +250,15 @@ function Visual({ card }: { card: Card }) {
   const arcDraw = useStep(p, 1, n, [0.46, 0.64], [0, 1], ease.move);
   const arcFade = useStep(p, 1, n, [0.7, 0.78], [0.5, 0]);
   const ring = useStep(p, 1, n, [0.72, 0.84], [0, 1], ease.enter);
-  // Step 2: Boo confirms, Casper confirms, then the connection, then the check.
-  const popBoo = useStep(p, 2, n, [0.1, 0.16, 0.24], [0, 1.12, 1], ease.enter);
-  const popCasper = useStep(p, 2, n, [0.26, 0.32, 0.4], [0, 1.12, 1], ease.enter);
+  // Step 2: Boo confirms, Casper confirms, then the connection, then the check; each pops in on the app's hop.
+  const popBoo = useStep(p, 2, n, [0.1, 0.24], [0, 1], ease.hop);
+  const popCasper = useStep(p, 2, n, [0.26, 0.4], [0, 1], ease.hop);
   const link = useStep(p, 2, n, [0.44, 0.58], [0, 1], ease.move);
-  const check = useStep(p, 2, n, [0.58, 0.64, 0.7], [0, 1.2, 1], ease.enter);
+  const check = useStep(p, 2, n, [0.58, 0.7], [0, 1], ease.hop);
+  // Then the connected moment, as the app's pairing scene has it: a ring bursts once from each ghost and, a moment
+  // later, from the middle of the link.
+  const burst = useStep(p, 2, n, [0.62, 0.84], [0, 1], ease.burst);
+  const burstMid = useStep(p, 2, n, [0.66, 0.86], [0, 1], ease.burst);
   const light = useStep(p, 2, n, [0.44, 0.6], [0.08, 0.2]);
 
   const f0 = C.rest;
@@ -270,6 +275,10 @@ function Visual({ card }: { card: Card }) {
   const ringR = useTransform(ring, (t) => (portrait ? 4 + t * 36 : 6 + t * 54));
   const ringOpacity = useTransform(ring, (t) => (t <= 0 ? 0 : (1 - t) * 0.7));
   const glow: [MV, MV, MV] = [glowLink, glowQr, glowCode];
+  // Where the two stand once connected (the act draws them from the same table).
+  const cast = BLOCKING[portrait ? "portrait" : "landscape"].invite;
+  const boo = poseAt(cast.boo, 0.9);
+  const casper = poseAt(cast.casper, 0.9);
 
   return (
     <Stage portrait={portrait} camera={camera} light={{ color: CYAN, opacity: light }}>
@@ -296,6 +305,10 @@ function Visual({ card }: { card: Card }) {
 
       {/* The connection, once both confirmed it. */}
       <motion.path d={`M${C.link[0]} ${C.link[2]} L${C.link[1]} ${C.link[2]}`} fill="none" stroke={`url(#${id}-link)`} strokeWidth={portrait ? 4 : 6} strokeLinecap="round" style={{ pathLength: link, opacity: link }} />
+      {/* From the body's edge outward, inside the chapter's picture (framing.ts ART), so no ring crosses the copy. */}
+      <Burst x={boo.x + boo.s / 2} y={boo.y + boo.s / 2} from={boo.s * 0.42} to={boo.s * 0.58} color={CYAN} t={burst} />
+      <Burst x={casper.x + casper.s / 2} y={casper.y + casper.s / 2} from={casper.s * 0.42} to={casper.s * 0.54} color={GREEN} t={burst} />
+      <Burst x={C.check[0]} y={C.check[1]} from={portrait ? 14 : 20} to={portrait ? 34 : 48} color={GREEN} t={burstMid} />
       <motion.g style={{ x: C.check[0], y: C.check[1], scale: check }}>
         <circle r={portrait ? 14 : 20} fill={INK} stroke={GREEN} strokeWidth="2.5" />
         <path d={portrait ? "M-6 0 l4 4 l8 -8" : "M-9 0 l6 6 l12 -12"} stroke={GREEN} strokeWidth="3.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
@@ -307,6 +320,13 @@ function Visual({ card }: { card: Card }) {
       </motion.g>
     </Stage>
   );
+}
+
+/** One ring bursting out of (x, y) once, as the app's "connected" rings do: it grows from \`from\` to \`to\`, fading as it goes. */
+function Burst({ x, y, from, to, color, t }: { x: number; y: number; from: number; to: number; color: string; t: MV }) {
+  const radius = useTransform(t, (v) => from + (to - from) * v);
+  const opacity = useTransform(t, (v) => (v <= 0 || v >= 1 ? 0 : 0.9 * (1 - v)));
+  return <motion.circle cx={x} cy={y} fill="none" stroke={color} strokeWidth={PAIR.stroke.ring * 1.25} style={{ r: radius, opacity }} />;
 }
 
 export function InviteScene({ eyebrow, label, steps, card }: { eyebrow: string; label: string; steps: SceneStep[]; card: Card }) {
