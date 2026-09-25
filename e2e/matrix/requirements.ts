@@ -25,8 +25,7 @@ export const REQUIREMENTS: Record<string, { met: () => boolean; missing: string 
     missing: "a Cashu test mint: E2E_MINT_URL (npm run e2e:infra:up), or MATRIX_NETWORK=1 for the public testnut",
   },
   s3: {
-    // Disposable: on this machine, or e2e/infra's own on another host (E2E_INFRA_ADDRESS).
-    met: () => ["127.0.0.1", env("E2E_INFRA_ADDRESS")].some((host) => host !== "" && env("GHOSTLY_S3_ENDPOINT").startsWith(`http://${host}:`)) && env("GHOSTLY_S3_KEY") !== "" && env("GHOSTLY_S3_SECRET") !== "",
+    met: () => env("GHOSTLY_S3_ENDPOINT").startsWith("http://127.0.0.1:") && env("GHOSTLY_S3_KEY") !== "" && env("GHOSTLY_S3_SECRET") !== "",
     missing: "a local S3 server: GHOSTLY_S3_ENDPOINT/KEY/SECRET (npm run e2e:infra:up)",
   },
   desktop: {

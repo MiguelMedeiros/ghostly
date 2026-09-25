@@ -19,9 +19,7 @@ x-lnd: &lnd
     "--bitcoind.rpchost=bitcoind:18443", "--bitcoind.rpcuser=ghostly", "--bitcoind.rpcpass=regtest",
     "--bitcoind.zmqpubrawblock=tcp://bitcoind:28332", "--bitcoind.zmqpubrawtx=tcp://bitcoind:28333",
     "--listen=0.0.0.0:9735", "--rpclisten=0.0.0.0:10009", "--restlisten=0.0.0.0:8080",
-    "--bitcoin.defaultchanconfs=1", "--trickledelay=500",
-    # Its certificate also names the address its REST port is published on (tests pin it and check the name).
-    "--tlsextraip=${E2E_INFRA_ADDRESS:-127.0.0.1}"]
+    "--bitcoin.defaultchanconfs=1", "--trickledelay=500"]
   depends_on: { bitcoind: { condition: service_healthy } }
   healthcheck:
     test: ["CMD-SHELL", "lncli --network=regtest getinfo >/dev/null 2>&1 || exit 1"]

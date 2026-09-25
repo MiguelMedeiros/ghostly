@@ -83,6 +83,55 @@ Nightly on `dev`, and by hand, the `E2E (full)` workflow (`.github/workflows/e2e
 on a GitHub runner and keeps the Playwright report. It needs no secrets. See [When they run](#when-they-run) for
 how long it takes.
 
+### On another host (the shared stack on "one")
+
+Every `e2e:infra` command takes `--host <ssh target>` (or `E2E_INFRA_HOST=<ssh target>` in the environment) and
+then runs the same Compose project on that machine's Docker instead of this one's. Browsers, the app build and
+Playwright stay here; only the containers move. `--host one` is short for `miguel@one`, the maintainer's test
+server on the tailnet. Without `--host` nothing changes: local mode is the default.
+
+```bash
+npm run e2e:infra:status -- --host one   # is the shared stack up? (exit 0 when every service answers)
+npm run e2e:infra:use -- --host one      # join it as it is: forwards its ports here, writes this checkout's .env.e2e
+npm run e2e:infra:up -- --host one       # bring it up if it is not (joins it, without seeding, if it is)
+npx playwright test -c e2e/playwright.config.ts --project=web --workers=2 e2e/web/wallet-lnd.spec.ts
+npm run e2e:matrix -- --workers=2 --only <id>
+npm run e2e:infra:seed -- --host one     # top up funds and channels again (mines: not while others run tests)
+npm run e2e:infra:reset -- --host one    # a fresh chain for everyone; --host must be on the command line
+npm run e2e:infra:down -- --host one     # remove it for everyone; likewise
+```
+
+Many checkouts share one stack. A session checks `status` first and runs `use` when it answers, `up` only when
+it does not; `up` of a stack that already answers is `use`, so a race between two sessions is harmless. Neither
+re-seeds: seeding mines blocks, and 100 blocks under an HTLC in flight close a Core Lightning channel in someone
+else's test. `e2e:full -- --host one` joins (or brings up) the shared stack and never takes it down. `down` and
+`reset` of a remote stack refuse unless `--host` is on the command line itself, so an `E2E_INFRA_HOST` left in a
+shell cannot remove it under the others.
+
+How it works (`e2e/infra/remote.mjs`):
+
+- Ports are published on the host's **Tailscale address only** (`tailscale ip -4` over SSH, or `E2E_INFRA_ADDRESS`),
+  never `0.0.0.0`: test services with worthless keys, but not for the LAN or the internet.
+- One SSH connection in the background (`/tmp/ghostly-e2e-ssh-<host>`, one per Mac, shared by every checkout;
+  `use`/`up`/`status` start it) forwards **every published port to the same port of `127.0.0.1` here**. The app
+  takes plain HTTP and WS from loopback only (S3, Esplora, the NWC relay, the EVM RPC: "Use an HTTPS endpoint"), and
+  its own Regtest options (Ark, Bark, the EVM chain) name `127.0.0.1` in the build. So `.env.e2e` reads exactly as
+  in local mode, plus `E2E_INFRA_HOST`, `E2E_INFRA_ADDRESS` and `DOCKER_HOST`.
+- The same connection forwards the host's Docker socket to `/tmp/ghostly-e2e-docker-<host>.sock`, and
+  `DOCKER_HOST=unix://…` points Compose and the tests that run `docker` themselves (the provider contracts,
+  `lndProvider`, the Rust LND test) at it. `DOCKER_HOST=ssh://` would open a connection per call, and Compose opens
+  dozens at once: sshd's `MaxStartups` resets them. The support scripts' `docker exec` (`chain.mjs`) runs on the
+  host's own docker CLI over that connection: ~0.15 s a call, where the Mac's CLI took 1–4 s with the Mac busy.
+- `docker-compose.remote.yml` goes on top of `docker-compose.yml`. A remote daemon cannot bind-mount this checkout,
+  so the three files of `config/` travel as Compose configs. The project name and the containers are the same
+  (`ghostly-e2e`, `ghostly-e2e-*`).
+- A stack here and a stack elsewhere cannot both have 47001-47090 on this Mac: `use`/`up` refuse while a local one
+  holds them. `E2E_INFRA_LOCAL_PORTS=<first free port>` forwards to that port and the next 17 instead (written to
+  `.env.e2e`), at the cost of the app's own Regtest options: the Ark, Bark and USDT specs then miss the stack.
+- To run the gated vitest contracts by hand: `set -a; . ./.env.e2e; set +a` first.
+- Every service has a lower CPU weight than the host's other containers and a ceiling of its own
+  (`docker-compose.remote.yml`), so the stack never starves the rest of that machine.
+
 ## No servers
 
 Peers find each other through Pkarr relays. Here the relay is `support/relay.ts`, inside the test process: requests to the public relays are answered from memory, and the extension, whose peer runs where requests cannot be intercepted, is pointed at its local address in Settings → Network. So tests do not wait on the public relays, are never rate limited, and never see each other's packets. WebRTC connects the browsers directly on this machine. GIFCities is stubbed the same way.

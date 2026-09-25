@@ -4,16 +4,45 @@
 # projects, so every service gets a lower CPU weight and a ceiling of its own.
 name: ghostly-e2e
 
+# Limits (measured on "one", 4 cores / 30 GB, in e2e/README.md): the whole stack idles at ~0.3-0.6 of a core and
+# ~1 GB. cpu_shares 256 is a quarter of Docker's default weight — when the host is busy, the other projects' containers
+# win the CPU — and each service has a ceiling well above its peak, so no single one can take the host.
+x-small: &small { cpu_shares: 256, cpus: 0.5, mem_limit: 256m }
+x-node: &node { cpu_shares: 256, cpus: 1, mem_limit: 768m }
+x-big: &big { cpu_shares: 256, cpus: 1.5, mem_limit: 1536m }
+
 services:
+  bitcoind: *big
+  esplora: *big
+  ark-postgres: *node
+  ark-nbxplorer: *node
+  ark-wallet: *small
+  arkd: *node
   bark-captaind:
+    <<: *big
     volumes: !override ["bark-captaind:/data/captaind", "bark-postgres:/var/lib/postgresql/data"]
     configs:
       - { source: captaind-toml, target: /config/captaind.toml }
       - { source: captaind-start, target: /config/start.sh }
+  bark-funder: *node
+  lnd-alice: *node
+  lnd-bob: *node
+  webln-alice: *node
+  webln-bob: *node
+  cln-alice: *node
+  cln-bob: *node
   nwc-relay:
+    <<: *small
     volumes: !override ["nwc-relay:/app/strfry-db"]
     configs:
       - { source: strfry-conf, target: /etc/strfry.conf }
+  nwc-lnd-alice: *node
+  nwc-lnd-bob: *node
+  nwc-hub-alice: *small
+  nwc-hub-bob: *small
+  anvil: *node
+  s3: *node
+  mint: *small
 
 configs:
   captaind-toml: { environment: E2E_INFRA_CAPTAIND_TOML }

@@ -18,14 +18,14 @@
 // instead of this one's (remote.mjs): `--host one` is the maintainer's test server. There, `up` joins a stack that
 // is already up rather than seeding it again under other checkouts' tests, `full` never takes it down, and
 // `down` / `reset` want --host on the command line itself.
-import { HOST, HOST_FLAG, closeTunnel, remote, tunnel, tunnelUp } from "./remote.mjs";
+import { HOST, HOST_FLAG, SOCKET, disconnect, forward, remote } from "./remote.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureMiner } from "./chain.mjs";
-import { PROJECT, VARIABLES, dotenv, endpoints, published, read } from "./env.mjs";
+import { PROJECT, SERVICE_PORTS, VARIABLES, dotenv, endpoints, localPort, read } from "./env.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const COMPOSE = join(ROOT, "e2e", "infra", "docker-compose.yml");
@@ -87,7 +87,7 @@ const PROBES = {
   Anvil: () => rpc(endpoints.usdt.rpc, "eth_chainId"),
   S3: () => http(`${endpoints.s3.endpoint}/health`),
   // The environment's own mint, whatever E2E_MINT_URL points the suite at.
-  "Cashu mint": () => http(`${published(VARIABLES.E2E_MINT_URL[0])}/v1/info`),
+  "Cashu mint": () => http(`${read("E2E_MINT_URL")}/v1/info`),
 };
 
 async function probe() {
@@ -177,24 +177,39 @@ async function answering() {
   return Object.values(await probe()).every(Boolean);
 }
 
-/** The app's Regtest options (Ark, Bark, their Esplora, the EVM chain) name 127.0.0.1: forward those ports there. */
-const APP_PORTS = ["GHOSTLY_ESPLORA_URL", "GHOSTLY_ARK_SERVER_URL", "GHOSTLY_BARK_SERVER_URL", "GHOSTLY_USDT_RPC_URL"].map((name) => new URL(VARIABLES[name][0]).port);
+/** Remote: every published port, forwarded to this machine's port for it (env.mjs `localPort`). */
+const FORWARDS = SERVICE_PORTS.map((port) => [localPort(port), port]);
+const LOCAL_PORTS = `127.0.0.1:${FORWARDS[0][0]}-${FORWARDS.at(-1)[0]}`;
+
+function forwardAll({ strict = true } = {}) {
+  const held = forward(FORWARDS);
+  if (!held.length) return true;
+  const message = `127.0.0.1:${held.join(",")} is held on this machine (a local ghostly-e2e?), so it cannot be forwarded to ${HOST}. `
+    + "Stop what holds it, or set E2E_INFRA_LOCAL_PORTS=<first free port> to use other ports here (the app's own Regtest "
+    + "options, Ark, Bark and the EVM chain, then do not reach the environment).";
+  if (strict) throw new Error(message);
+  console.log(`WARNING: ${message}`);
+  return false;
+}
 
 function writeEnv() {
   writeFileSync(ENV_FILE, dotenv(Object.fromEntries(Object.keys(VARIABLES).map((name) => [name, process.env[name]]).filter(([, v]) => v))));
-  if (remote) log(`127.0.0.1:${APP_PORTS.join(",")} → ${HOST}: ${tunnel(APP_PORTS)} (the app's Regtest options)`);
   log(`up: variables in ${ENV_FILE}`);
 }
 
 async function use() {
+  if (remote) forwardAll();
   if (!(await answering())) throw new Error(`${where} is not up (or not every service answers): npm run e2e:infra:status${remote ? ` -- --host ${HOST}` : ""}`);
-  log(`joining ${where}, as it is`);
+  log(`joining ${where}, as it is${remote ? `; its ports forwarded to ${LOCAL_PORTS}` : ""}`);
   writeEnv();
 }
 
 async function up() {
-  // Shared by every checkout that points at it: seeding again would mine blocks under their running tests.
-  if (remote && (await answering())) { await use(); return; }
+  if (remote) {
+    forwardAll();
+    // Shared by every checkout that points at it: seeding again would mine blocks under their running tests.
+    if (await answering()) { await use(); return; }
+  }
   log(`starting ${where} (docker compose up)`);
   // bitcoind and its miner wallet first: NBXplorer warms the chain up through the node's loaded wallet.
   if (compose(["up", "-d", "--wait", "--remove-orphans", "bitcoind"]) === null) throw new Error("docker compose up bitcoind failed");
@@ -211,21 +226,23 @@ function down() {
   if (remote && !HOST_FLAG) throw new Error(`${where} is shared: name it on the command line to take it down (--host ${HOST})`);
   log(`removing ${where} (containers, volumes, network)`);
   compose(["down", "-v", "--remove-orphans", "--timeout", "5"]);
-  if (remote) closeTunnel();
+  if (remote) disconnect();
   rmSync(ENV_FILE, { force: true });
 }
 
 async function status() {
+  // The endpoints below are probed through the forwards: ports held here would answer for something else.
+  const forwarded = !remote || forwardAll({ strict: false });
   const list = containers();
   if (!list.length) { console.log(`${where} is not running.`); process.exitCode = 1; return; }
   for (const c of list) console.log(`${c.Name.padEnd(32)} ${c.State}${c.Health ? ` (${c.Health})` : ""}  ${c.RunningFor ?? ""}`);
   const answers = await probe();
   for (const [name, ok] of Object.entries(answers)) console.log(`${ok ? "answers " : "SILENT  "} ${name}`);
-  if (remote) console.log(`127.0.0.1:${APP_PORTS.join(",")} → ${HOST}: ${tunnelUp() ? "forwarded" : "not forwarded (e2e:infra:use starts it)"}`);
+  if (remote) console.log(`connection to ${HOST}: up (Docker at ${SOCKET}, ports at ${LOCAL_PORTS})`);
   const file = existsSync(ENV_FILE) ? readFileSync(ENV_FILE, "utf8") : "";
   const joined = file && (remote ? file.includes(`E2E_INFRA_HOST=${HOST}\n`) : !file.includes("E2E_INFRA_HOST="));
   console.log(joined ? `variables: ${ENV_FILE}` : `this checkout's .env.e2e does not point here (npm run e2e:infra:use${remote ? ` -- --host ${HOST}` : ""})`);
-  const every = list.every((c) => c.State === "running" && (!c.Health || c.Health === "healthy")) && Object.values(answers).every(Boolean);
+  const every = forwarded && list.every((c) => c.State === "running" && (!c.Health || c.Health === "healthy")) && Object.values(answers).every(Boolean);
   console.log(every ? `${where}: up` : `${where}: NOT READY`);
   if (!every) process.exitCode = 1;
 }
