@@ -1,34 +1,39 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
-import type { ReceivedIdentityView } from "@ghostly/browser/shared/types";
+import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
 import type { NostrContactView } from "@ghostly/browser/nostr/types";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
 import { useDialogFocus } from "../../hooks/useDismiss";
 import { dateTime, providerOf, useEngineState } from "../../lib/identities";
+import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { Deck } from "../deck/Deck";
 import { CardFlip, FlipTurnButton } from "../deck/Flip";
 import { useCardFlip } from "../deck/useCardFlip";
 import { NostrContactCard } from "../nostr/NostrContactCard";
+import { useCopyKey } from "../../hooks/useCopyKey";
 import { IdentityPicker } from "./ComposerIdentities";
 import { contactBadges } from "./contactBadges";
 import { IdCardFace, IdCardMark } from "./IdCardFace";
-import { idCardTone, machineLine, receivedIdCard, type IdCardContent } from "./idCard";
+import { contactGhostlyCard, GHOSTLY, idCardTone, machineLine, receivedIdCard, type IdCardContent } from "./idCard";
 import { ProviderMark } from "./ProviderMark";
 import "./contact-panel.css";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
-type Entry = { id: string; r: ReceivedIdentityView; card: IdCardContent };
+type Entry = { id: typeof GHOSTLY; ghostly: true; card: IdCardContent } | { id: string; ghostly?: false; r: ReceivedIdentityView; card: IdCardContent };
+type Received = Extract<Entry, { r: ReceivedIdentityView }>;
 
 /**
  * A chat's identities, beside the chat (the chat's column is `chat-pane`, contact-panel.css): a side panel in a wide
- * column, over the chat in a narrow one, a sheet from the bottom on a phone. What the contact shared is a deck of
- * their ID cards (the Identities page's cards, on the same deck); a click turns a card over to how it was proven,
+ * column, over the chat in a narrow one, a sheet from the bottom on a phone. The contact's identities are a deck of
+ * their ID cards (the Identities page's cards, on the same deck): first their Ghostly identity, the name and picture
+ * they sent and their key in this chat, then what they shared; a click turns a card over to how it was proven,
  * when this app checked it, until when it holds, and Check again. A Nostr card's back also loads the key's profile,
  * follows and notes, which asks relays. Below, which of this profile's identities the contact sees: the chat's
  * identity picker, in the panel.
  */
 export function ContactIdentitiesPanel({ peerKey, name, onClose }: { peerKey: string; name: string; onClose: () => void }) {
   const state = useEngineState();
+  const { t } = useI18n();
   const nav = useAppNavigation();
   const link = state?.links.find(l => l.peerPubKeyZ32 === peerKey);
   const ref = useRef<HTMLElement>(null);
@@ -39,7 +44,10 @@ export function ContactIdentitiesPanel({ peerKey, name, onClose }: { peerKey: st
   const received = link?.identities?.received ?? [];
   const order = contactBadges(received, { now }).map(b => b.id);
   const rank = (r: ReceivedIdentityView) => { const i = order.indexOf(r.id); return i < 0 ? order.length : i; };
-  const entries: Entry[] = [...received].sort((a, b) => rank(a) - rank(b)).map(r => ({ id: r.id, r, card: receivedIdCard(r, now) }));
+  const entries: Entry[] = [
+    ...(link ? [{ id: GHOSTLY, ghostly: true, card: contactGhostlyCard(t, link, name) } as const] : []),
+    ...[...received].sort((a, b) => rank(a) - rank(b)).map((r): Entry => ({ id: r.id, r, card: receivedIdCard(r, now) })),
+  ];
 
   return (<>
     <div className="contact-panel-backdrop" aria-hidden="true" onClick={onClose} />
@@ -56,9 +64,9 @@ export function ContactIdentitiesPanel({ peerKey, name, onClose }: { peerKey: st
       <div className="contact-panel-body">
         <section className="contact-panel-section" data-testid="chat-identities-received" aria-label={`Shared by ${name}`}>
           <h3 className="contact-panel-heading">Shared by {name}</h3>
-          {entries.length === 0
-            ? <p className="contact-panel-note" data-testid="chat-identities-none">Nothing shared by {name} yet.</p>
-            : link && <TheirCards entries={entries} linkId={link.id} name={name} nostr={link.nostr ?? []} />}
+          {link
+            ? <TheirCards t={t} entries={entries} link={link} name={name} nostr={link.nostr ?? []} />
+            : <p className="contact-panel-note" data-testid="chat-identities-none">{t("identities.ghostly.nothingElse", { name })}</p>}
         </section>
         <section className="contact-panel-section" data-testid="chat-identities-mine" aria-label="Yours, for this contact">
           <h3 className="contact-panel-heading">Yours, for this contact</h3>
@@ -73,7 +81,7 @@ export function ContactIdentitiesPanel({ peerKey, name, onClose }: { peerKey: st
 }
 
 /** The contact's ID cards: a deck, then the chosen card turned over. */
-function TheirCards({ entries, linkId, name, nostr }: { entries: Entry[]; linkId: string; name: string; nostr: NostrContactView[] }) {
+function TheirCards({ t, entries, link, name, nostr }: { t: Translate; entries: Entry[]; link: LinkView; name: string; nostr: NostrContactView[] }) {
   const [chosen, setChosen] = useState<string>();
   const { side, flipped, turn, turnBack } = useCardFlip();
   const root = useRef<HTMLDivElement>(null);
@@ -89,16 +97,58 @@ function TheirCards({ entries, linkId, name, nostr }: { entries: Entry[]; linkId
     <div ref={root} className={`contact-cards ${tone(entry)}`} data-side={showing ? "back" : "cards"}>
       {showing ? <CardFlip className="contact-identity" flipped={flipped} tone={tone(showing)}
         front={<IdCardFace card={showing.card} />}
-        back={<TheirCardBack entry={showing} linkId={linkId} name={name} nostr={nostr.find(v => v.subject === showing.r.subject)} onCards={cards} />} />
+        back={showing.ghostly
+          ? <TheirGhostlyBack t={t} card={showing.card} link={link} name={name} onCards={cards} />
+          : <TheirCardBack entry={showing} linkId={link.id} name={name} nostr={nostr.find(v => v.subject === showing.r.subject)} onCards={cards} />} />
       : <>
         <Deck<Entry> compact cards={entries} selected={entry.id} onSelect={setChosen} onChoose={id => { setChosen(id); turn(); }}
           kind="radios" label={`Identities shared by ${name}`} name="contact-identity-deck" className="id-deck" size={{ max: 300, share: .78 }}
-          testId={() => "chat-identity-received"}
+          testId={e => (e.ghostly ? "chat-identity-ghostly" : "chat-identity-received")}
           face={(e, { after }) => <IdCardFace card={e.card} after={after} />}
           mark={e => <IdCardMark provider={e.card.provider} subject={e.card.bound} />}
           tone={tone} />
-        <p className="contact-panel-hint">Choose a card to see how it was checked.</p>
+        {entries.length === 1
+          ? <p className="contact-panel-note" data-testid="chat-identities-none">{t("identities.ghostly.nothingElse", { name })}</p>
+          : <p className="contact-panel-hint">Choose a card to see how it was checked.</p>}
       </>}
+    </div>
+  );
+}
+
+/**
+ * The contact's Ghostly card turned over: the name and picture as they sent them (not a proof), their key in this
+ * chat in full, to copy, whether it is pinned, and since when the chat exists.
+ */
+function TheirGhostlyBack({ t, card, link, name, onCards }: { t: Translate; card: IdCardContent; link: LinkView; name: string; onCards: () => void }) {
+  const { copied, copy } = useCopyKey(card.subject);
+  return (
+    <div className="id-card-back contact-card-back" data-testid="chat-identity-back" data-provider={GHOSTLY} data-status={card.status}>
+      <div className="id-card-back-band">
+        <span className="id-card-back-title">{t("identities.ghostly.theirs")}</span>
+        <FlipTurnButton testId="chat-identity-cards" label={`Back to ${name}’s cards`} onClick={onCards} />
+      </div>
+      <div className="id-card-back-body">
+        <div className="id-card-back-sees">
+          {card.photo ? <img src={card.photo} alt="" className="h-10 w-10 shrink-0 rounded-xl object-cover" /> : <ProviderMark provider={GHOSTLY} />}
+          <span className="id-card-back-who">
+            <span className="id-card-back-name">{card.label}{card.name ? ` · ${card.name}` : ""}</span>
+            <span className="id-card-back-subject" title={card.subject} data-testid="chat-identity-received-subject">{card.short}</span>
+            <span className="id-card-back-meta">{card.category}</span>
+          </span>
+        </div>
+        <code className="block break-all select-all rounded-lg bg-black/30 p-2 text-[11px] leading-4 text-white/85" data-testid="chat-identity-key">{card.subject}</code>
+        <dl className="contact-card-facts">
+          <dt>Name</dt>
+          <dd>{t("identities.ghostly.nameAsSaid")}</dd>
+          <dt>Key</dt>
+          <dd data-testid="chat-identity-received-status" data-status={link.peerVerified ? "pinned" : "unpinned"}>{card.statusLabel}. {link.peerVerified ? t("identities.ghostly.pinnedExplain") : t("identities.ghostly.notPinnedExplain")}</dd>
+          {card.issued && <><dt>Since</dt><dd>{card.validity}</dd></>}
+        </dl>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="contact-card-action" data-testid="chat-identity-copy-key" onClick={copy}>{copied ? t("identities.ghostly.copied") : t("identities.ghostly.copyKey")}</button>
+        </div>
+      </div>
+      <span className="id-card-mrz id-card-back-mrz" aria-hidden="true">{card.mrz ?? machineLine(card.label, card.subject)}</span>
     </div>
   );
 }
@@ -108,7 +158,7 @@ function TheirCards({ entries, linkId, name, nostr }: { entries: Entry[]; linkId
  * checked it and until when it holds, Check again, and a public profile when the provider has one. A Nostr card's
  * back holds what the key published, loaded on request.
  */
-function TheirCardBack({ entry, linkId, name, nostr, onCards }: { entry: Entry; linkId: string; name: string; nostr?: NostrContactView; onCards: () => void }) {
+function TheirCardBack({ entry, linkId, name, nostr, onCards }: { entry: Received; linkId: string; name: string; nostr?: NostrContactView; onCards: () => void }) {
   const { r, card } = entry;
   const provider = providerOf(r.provider);
   const [busy, setBusy] = useState(""), [error, setError] = useState("");

@@ -42,8 +42,11 @@ type NestedKeyOf<T, K extends string = ""> = T extends object
 
 type TranslationKey = NestedKeyOf<TranslationDict>;
 
+/** `t()` as a value: for content worked out outside a component (identities/idCard.ts). */
+export type Translate = (key: TranslationKey, params?: Record<string, string | number>) => string;
+
 interface I18nContextValue {
-  t: (key: TranslationKey, params?: Record<string, string | number>) => string;
+  t: Translate;
   language: Language;
   dir: "ltr" | "rtl";
 }

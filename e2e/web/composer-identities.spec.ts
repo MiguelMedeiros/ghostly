@@ -18,15 +18,19 @@ test("an identity is added, shared and withdrawn from the chat's composer", { ta
   await pair(alice, bob);
   const withBob = await chatId(alice);
 
-  // No identity yet: the deck is the blank card, which adds one here.
+  // No identity yet: the deck is the Ghostly card, chosen, then the blank card, which adds one here.
   const plus = alice.page.getByTestId("composer-more");
   const row = () => composerRow(alice.page, "composer-identities-button");
   await expect(await row()).toHaveAttribute("data-count", "0");
   await (await row()).click();
   const picker = alice.page.getByTestId("composer-identities");
-  await expect(picker.getByRole("radio")).toHaveCount(1);
-  await expect(picker.getByTestId("composer-identity-add")).toContainText("Add your first identity");
-  await expect(picker.getByTestId("composer-identities-empty")).toContainText("No identities yet");
+  await expect(picker.getByRole("radio")).toHaveCount(2);
+  await expect(picker.getByTestId("composer-identity-ghostly")).toHaveAttribute("aria-checked", "true");
+  await expect(picker.getByTestId("composer-identity-use")).toHaveText(/Use Ghostly/);
+  await expect(picker.getByTestId("composer-identity-add")).toContainText("Add an identity");
+  await picker.getByTestId("composer-identity-add").focus();
+  await alice.page.keyboard.press("End");
+  await expect(picker.getByTestId("composer-identities-empty")).toContainText("No other identities yet");
   await picker.getByTestId("composer-identities-add").click();
   const add = alice.page.getByTestId("add-identity");
   await add.getByTestId("add-identity-nostr").click();

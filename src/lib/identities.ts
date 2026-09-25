@@ -4,7 +4,8 @@ import { identityProvider, identityProviders } from "@ghostly/browser/proofs/reg
 import { availableSigners } from "@ghostly/browser/proofs/verify";
 import type { IdentityPlatform, IdentityProofProvider } from "@ghostly/browser/proofs/contract";
 import type { IdentityStatus, SharedIdentity } from "@ghostly/core";
-import type { ReceivedIdentityView } from "@ghostly/browser/shared/types";
+import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
+import { currentProfile } from "./profiles";
 import { getPrefix, listSessions } from "./storage";
 import type { ChatSession } from "./types";
 
@@ -146,3 +147,10 @@ export function useIdentityAttention(): boolean {
 export const chatsByPeer = (): Map<string, ChatSession> => new Map(listSessions().map(s => [s.peerPubKeyB64, s]));
 /** A contact's name as the chat list shows it; undefined when they have none. */
 export const contactName = (chat: ChatSession | undefined): string | undefined => chat?.label || chat?.nick || undefined;
+
+/** When this profile began (milliseconds): the registry's date, or the first chat's when the registry has none (the first profile). */
+export function profileSince(links: Pick<LinkView, "createdAt">[]): number {
+  const made = currentProfile().createdAt;
+  if (made) return made;
+  return links.reduce((first, l) => (l.createdAt > 0 && (first === 0 || l.createdAt < first) ? l.createdAt : first), 0);
+}

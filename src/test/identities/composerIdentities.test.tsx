@@ -9,7 +9,7 @@ import { renderApp } from "../render";
 import { date } from "../../lib/identities";
 import { DAY, identitiesView, now, proofView, sharedView } from "./views";
 
-// covers: proofs.composer, proofs.share, proofs.withdraw
+// covers: proofs.composer, proofs.share, proofs.withdraw, proofs.ghostly-card
 
 function Where() {
   return <p data-testid="where">{useLocation().pathname}</p>;
@@ -32,6 +32,7 @@ function open(state: Parameters<ReturnType<typeof renderApp>["engine"]["update"]
 }
 
 const cards = () => screen.getAllByTestId("composer-identity");
+const ghostly = () => screen.getByTestId("composer-identity-ghostly");
 const chosen = () => screen.getAllByRole("radio").find(t => t.getAttribute("aria-checked") === "true");
 const hint = () => screen.getByTestId("composer-identity-hint").textContent;
 const use = () => screen.getByTestId("composer-identity-use");
@@ -53,15 +54,18 @@ const deckAgain = () => screen.findByRole("radiogroup", { name: "Your identities
  * line on what the chosen one shows the contact, "Use …", and the card turns over to share it or stop, here only.
  */
 describe("ComposerIdentityPicker", () => {
-  it("is the blank card alone when the profile has none, which adds the first one without leaving the chat", async () => {
+  it("is the Ghostly card and the blank one when the profile has no proofs, and the blank one adds the first without leaving the chat", async () => {
     const { user } = open({ links: [paired()], identityProofs: [] });
     expect(screen.getByRole("dialog", { name: "Your identities" })).toBeInTheDocument();
     expect(screen.getByRole("radiogroup", { name: "Your identities" })).toBeInTheDocument();
-    expect(screen.getAllByRole("radio")).toHaveLength(1);
-    expect(screen.getByTestId("composer-identity-add")).toHaveTextContent("Add your first identity");
+    expect(screen.getAllByRole("radio").map(t => t.dataset.testid)).toEqual(["composer-identity-ghostly", "composer-identity-add"]);
+    expect(chosen()).toBe(ghostly());
+    expect(screen.getByTestId("composer-identity-add")).toHaveTextContent("Add an identity");
     expect(screen.queryByTestId("composer-identity")).not.toBeInTheDocument();
-    expect(screen.getByTestId("composer-identities-empty")).toHaveTextContent("No identities yet");
     expect(screen.queryByTestId("composer-identities-manage")).not.toBeInTheDocument();
+    await user.keyboard("{End}");
+    expect(chosen()).toBe(screen.getByTestId("composer-identity-add"));
+    expect(screen.getByTestId("composer-identities-empty")).toHaveTextContent("No other identities yet.");
     await user.click(screen.getByTestId("composer-identities-add"));
     // The dialog takes the sheet's place while it is open, and the sheet comes back with the focus on its card.
     expect(screen.getByRole("dialog", { name: "Add an identity" })).toBeInTheDocument();
@@ -83,7 +87,7 @@ describe("ComposerIdentityPicker", () => {
       ] }) })],
       identityProofs: [proofView({ id: "a" }), proofView({ id: "b", subject: "example.net" }), proofView({ id: "c", subject: "example.org" }), proofView({ id: "d", subject: "example.info" })],
     });
-    expect(screen.getAllByRole("radio").map(t => t.dataset.testid)).toEqual(["composer-identity", "composer-identity", "composer-identity", "composer-identity", "composer-identity-add"]);
+    expect(screen.getAllByRole("radio").map(t => t.dataset.testid)).toEqual(["composer-identity-ghostly", "composer-identity", "composer-identity", "composer-identity", "composer-identity", "composer-identity-add"]);
     expect(cards().map(c => [within(c).getByTestId("identity-proof-subject").textContent, !!within(c).queryByTestId("id-card-shared")])).toEqual([
       ["example.com", true], ["example.net", false], ["example.org", true], ["example.info", false],
     ]);
@@ -92,7 +96,7 @@ describe("ComposerIdentityPicker", () => {
     expect(cards()[0]).toHaveTextContent("Domain");
     expect(cards()[0]).toHaveTextContent("Your own key");
     expect(cards()[0]).toHaveTextContent("Verified");
-    // The first card is the chosen one; no panel under the deck, one line and one action, as the payment picker.
+    // The proof just made is the chosen one; no panel under the deck, one line and one action, as the payment picker.
     expect(chosen()).toBe(cards()[0]);
     expect(screen.queryByRole("tabpanel")).not.toBeInTheDocument();
     expect(screen.queryByText(/What Alice sees/)).not.toBeInTheDocument();
@@ -200,9 +204,11 @@ describe("ComposerIdentityPicker", () => {
     expect(hint()).toContain("example.net");
     await user.keyboard("{End}");
     expect(chosen()).toBe(screen.getByTestId("composer-identity-add"));
-    expect(screen.getByTestId("composer-identities-add")).toHaveTextContent("Add identity");
+    expect(screen.getByTestId("composer-identities-add")).toHaveTextContent("Add another identity");
     await user.keyboard("{Home}");
-    expect(chosen()).toBe(cards()[0]);
+    expect(chosen()).toBe(ghostly());
+    expect(hint()).toBe("Alice sees your Ghostly identity, Ghost, and this chat's key me.");
+    expect(use()).toHaveTextContent("Use Ghostly");
   });
 
   it("does not turn an expired identity over but leads to Manage, and warns on the back about one expiring soon", async () => {
@@ -273,7 +279,7 @@ describe("ComposerIdentityPicker", () => {
     expect(first.onClose).toHaveBeenCalled();
     first.unmount();
     const second = open({ links: [paired()], identityProofs: [proofView()] });
-    await second.user.click(use());
+    await second.user.click(cards()[0]);
     await turned();
     await second.user.keyboard("{Escape}");
     expect(second.onClose).toHaveBeenCalled();
@@ -302,7 +308,8 @@ describe("MessageInput: the + menu's Identity row", () => {
     await user.click(row);
     expect(screen.queryByTestId("composer-menu")).not.toBeInTheDocument();
     expect(screen.getByTestId("composer-identities")).toBeInTheDocument();
-    expect(cards()[0]).toHaveFocus();
+    // The Ghostly card, first and chosen, has the keys.
+    expect(ghostly()).toHaveFocus();
     await user.keyboard("{Escape}");
     expect(screen.queryByTestId("composer-identities")).not.toBeInTheDocument();
     expect(plus()).toHaveFocus();
@@ -314,5 +321,83 @@ describe("MessageInput: the + menu's Identity row", () => {
     await user.click(plus());
     expect(screen.getByTestId("composer-identities-button")).toHaveAttribute("data-count", "0");
     expect(screen.getByTestId("composer-identities-button")).toHaveTextContent(/^Identity$/);
+  });
+
+  describe("the Ghostly card", () => {
+    const KEY = "yzk3gq8qpjb1g4mzr3ff3kr1j4c1b7dxy8dd3mkwqc9k7p3e1mio";
+    const withKey = (patch: Partial<LinkView> = {}) => paired({ myPubKeyZ32: KEY, ...patch });
+
+    it("comes first, wearing the seal: the profile's name and picture, this chat's key, and what Alice sees", () => {
+      open({ settings: { nick: "Ghost", avatar: "data:image/jpeg;base64,AAAA" }, links: [withKey()], identityProofs: [] });
+      const card = ghostly();
+      expect(screen.getAllByRole("radio")[0]).toBe(card);
+      expect(card).toHaveClass("id-card-ghostly");
+      expect(card).toHaveTextContent("Ghostly");
+      expect(within(card).getByTestId("id-card-name")).toHaveTextContent("Ghost");
+      expect(card.querySelector(".id-card-photo img")).toHaveAttribute("src", "data:image/jpeg;base64,AAAA");
+      expect(within(card).getByTestId("identity-proof-subject")).toHaveTextContent("yzk3gq8q…1mio");
+      expect(within(card).getByTestId("identity-proof-subject")).toHaveAttribute("title", KEY);
+      expect(card).toHaveTextContent("Default");
+      expect(card).toHaveTextContent("Your key in this chat");
+      expect(card).toHaveTextContent("Shared with Alice");
+      expect(within(card).getByTestId("id-card-shared")).toBeInTheDocument();
+      expect(card).not.toHaveAttribute("aria-disabled");
+      expect(hint()).toBe("Alice sees your Ghostly identity, Ghost, and this chat's key yzk3gq8q…1mio.");
+      expect(use()).toHaveTextContent("Use Ghostly");
+      expect(use()).toBeEnabled();
+    });
+
+    it("is never blocked, even before the contact's app is known", () => {
+      open({ links: [linkView({ myPubKeyZ32: KEY })], identityProofs: [] });
+      expect(ghostly()).not.toHaveAttribute("aria-disabled");
+      expect(hint()).toMatch(/^Alice sees your Ghostly identity/);
+    });
+
+    it("turns over to the key in full, to copy, and says Alice sees only this when nothing else is shared", async () => {
+      const { user } = open({ settings: { nick: "Ghost" }, links: [withKey()], identityProofs: [proofView({ id: "a" })] });
+      await user.click(ghostly());
+      await waitFor(() => expect(screen.getByTestId("composer-identity-copy-key")).toHaveFocus());
+      expect(sheet()).toHaveAttribute("data-side", "back");
+      expect(back()).toHaveAttribute("data-ghostly", "true");
+      expect(back()).toHaveTextContent("What Alice sees");
+      expect(within(back()).getByTestId("composer-identity-sees")).toHaveTextContent("Ghostly · Ghost");
+      expect(within(back()).getByTestId("composer-identity-key")).toHaveTextContent(KEY);
+      expect(status()).toBe("Alice sees only this identity");
+      // Nothing to take back: no Share only this.
+      expect(screen.queryByTestId("composer-identity-share")).not.toBeInTheDocument();
+      await user.click(screen.getByTestId("composer-identity-copy-key"));
+      expect(await navigator.clipboard.readText()).toBe(KEY);
+      expect(screen.getByTestId("composer-identity-copy-key")).toHaveTextContent("Copied");
+      // Back to the cards, the Ghostly card chosen.
+      await user.click(screen.getByRole("button", { name: "Choose another identity" }));
+      await deckAgain();
+      expect(chosen()).toBe(ghostly());
+    });
+
+    it("Share only this takes every other shared identity back from Alice, then says so", async () => {
+      const { user, engine } = open({
+        links: [withKey({ identities: identitiesView({ shared: [sharedView({ id: "a", status: "accepted" }), sharedView({ id: "b", status: "pending" }), sharedView({ id: "c", status: "withdrawn" })] }) })],
+        identityProofs: [proofView({ id: "a" }), proofView({ id: "b", subject: "example.net" }), proofView({ id: "c", subject: "example.org" })],
+      });
+      engine.on("withdrawIdentityProof", () => undefined);
+      await user.click(ghostly());
+      await turned();
+      expect(status()).toBe("Alice also sees 2 other identities");
+      expect(action()).toHaveTextContent("Share only this");
+      await user.click(action());
+      expect(engine.callsTo("withdrawIdentityProof")).toEqual([{ linkId: "link-1", id: "a" }, { linkId: "link-1", id: "b" }]);
+      expect(await within(back()).findByTestId("composer-identity-done")).toHaveTextContent("Only your Ghostly identity is shared");
+      act(() => engine.update({ links: [withKey({ identities: identitiesView({ shared: [sharedView({ id: "a", status: "withdrawn" }), sharedView({ id: "b", status: "withdrawn" }), sharedView({ id: "c", status: "withdrawn" })] }) })] }));
+      await deckAgain();
+      expect(chosen()).toBe(ghostly());
+      expect(cards().every(c => !within(c).queryByTestId("id-card-shared"))).toBe(true);
+    });
+
+    it("says one other identity in the singular", async () => {
+      const { user } = open({ links: [withKey({ identities: identitiesView({ shared: [sharedView({ id: "a", status: "accepted" })] }) })], identityProofs: [proofView({ id: "a" })] });
+      await user.click(ghostly());
+      await turned();
+      expect(status()).toBe("Alice also sees 1 other identity");
+    });
   });
 });

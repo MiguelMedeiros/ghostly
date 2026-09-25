@@ -16,6 +16,9 @@ import { providerForIssuer } from "@ghostly/browser/proofs/oidc/providers";
  *    guidelines (full colour on white), not recoloured. They stay their owners' trademarks.
  *  - Nostr: the community mark by bembureda (mbarulli/nostr-logo, CC0), as before.
  *  - Domain, OpenPGP, SSH and the neutral account mark: original line drawings.
+ *
+ * `ghostly` is not a proof provider: it is the mark of the profile's own Ghostly identity (its ID card, the
+ * first of every deck), the ghost of src/assets/identities/ghostly.svg on its dark tile.
  */
 
 export interface ProviderIcon {
@@ -41,6 +44,9 @@ const TWITCH = "M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.
 /** The ₿ of simple-icons' Bitcoin mark alone (its circle is the tile), so the letter sits at 6.1–17.5 × 2.6–17.8. */
 const BITCOIN_B = "M17.288 10.291c.24-1.59-.974-2.45-2.64-3.03l.54-2.153-1.315-.33-.525 2.107c-.345-.087-.705-.167-1.064-.25l.526-2.127-1.32-.33-.54 2.165c-.285-.067-.565-.132-.84-.2l-1.815-.45-.35 1.407s.975.225.955.236c.535.136.63.486.615.766l-1.477 5.92c-.075.166-.24.406-.614.314.015.02-.96-.24-.96-.24l-.66 1.51 1.71.426.93.242-.54 2.19 1.32.327.54-2.17c.36.1.705.19 1.05.273l-.51 2.154 1.32.33.545-2.19c2.24.427 3.93.257 4.64-1.774.57-1.637-.03-2.58-1.217-3.196.854-.193 1.5-.76 1.68-1.93h.01zm-3.01 4.22c-.404 1.64-3.157.75-4.05.53l.72-2.9c.896.23 3.757.67 3.33 2.37zm.41-4.24c-.37 1.49-2.662.735-3.405.55l.654-2.64c.744.18 3.137.524 2.75 2.084v.006z";
 const NOSTR = "M210.8 199.4c0 3.1-2.5 5.7-5.7 5.7h-68c-3.1 0-5.7-2.5-5.7-5.7v-15.5c.3-19 2.3-37.2 6.5-45.5 2.5-5 6.7-7.7 11.5-9.1 9.1-2.7 24.9-.9 31.7-1.2 0 0 20.4.8 20.4-10.7s-9.1-8.6-9.1-8.6c-10 .3-17.7-.4-22.6-2.4-8.3-3.3-8.6-9.2-8.6-11.2-.4-23.1-34.5-25.9-64.5-20.1-32.8 6.2.4 53.3.4 116.1v8.4c0 3.1-2.6 5.6-5.7 5.6H57.7c-3.1 0-5.7-2.5-5.7-5.7v-144c0-3.1 2.5-5.7 5.7-5.7h31.7c3.1 0 5.7 2.5 5.7 5.7 0 4.7 5.2 7.2 9 4.5 11.4-8.2 26-12.5 42.4-12.5 36.6 0 64.4 21.4 64.4 68.7v83.2ZM150 99.3c0-6.7-5.4-12.1-12.1-12.1s-12.1 5.4-12.1 12.1 5.4 12.1 12.1 12.1S150 106 150 99.3Z";
+
+/** The Ghostly ghost (src/assets/identities/ghostly.svg, drawn in a 24-unit box), eyes cut out of its tile. */
+const GHOST = "M12 2C7.582 2 4 5.582 4 10v8c0 .75.6 1 1 .6l2-1.6 2 1.6c.4.3.8.3 1.2 0L12 17l1.8 1.6c.4.3.8.3 1.2 0l2-1.6 2 1.6c.4.4 1 .15 1-.6v-8c0-4.418-3.582-8-8-8z";
 
 const white = "text-white";
 /** A white tile for the full-colour marks: a hairline keeps it from glowing on a dark theme. */
@@ -85,6 +91,7 @@ export const PROVIDER_ICONS: Record<string, ProviderIcon> = {
   "oidc:apple": { tile: `bg-black ${white}`, mark: simple(APPLE) },
   "oidc:gitlab": gitlab,
   "oidc:twitch": { tile: `bg-[#9146ff] ${white}`, fill: 0.55, mark: simple(TWITCH) },
+  ghostly: { tile: "bg-[#0f172a] text-[#22d3ee]", fill: 0.72, mark: size => svg(size, "0 0 24 24", <><path fill="currentColor" d={GHOST} /><circle cx="9" cy="9" r="1.5" fill="#0f172a" /><circle cx="15" cy="9" r="1.5" fill="#0f172a" /></>) },
 };
 
 /** The provider's icon; for an OpenID Connect proof whose subject names a known provider, that provider's. */
