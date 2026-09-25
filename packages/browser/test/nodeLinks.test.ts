@@ -202,22 +202,24 @@ describe("files a contact sends", () => {
 
   it("keeps the bytes under a local id of its own, served as something inert, and shows the transfer done", async () => {
     const { node, chat, events, announce } = await incoming();
-    const sink = announce("w1") as FileSink;
+    // The "." is outside the base64url alphabet of a local id, so no random id can contain this one by chance.
+    const wire = "w.1";
+    const sink = announce(wire) as FileSink;
     sink.write(bytes("hello"));
-    events.onFileProgress("w1", 3, "in");
+    events.onFileProgress(wire, 3, "in");
     const [file] = await vi.waitFor(async () => { const m = await db.getMessages(chat.id); expect(m).toHaveLength(1); return m.map((x) => x.file!); });
-    expect(file.id.startsWith(`${chat.id}-in-`)).toBe(true);
-    expect(file.id).not.toContain("w1");
+    expect(file.id).toMatch(new RegExp(`^${chat.id}-in-[A-Za-z0-9_-]{16}$`));
+    expect(file.id).not.toContain(wire);
     expect(node.getState().transfers[file.id]).toMatchObject({ state: "transferring", transferred: 3 });
     await sink.close("digest-1");
-    events.onFileComplete("w1", "in");
+    events.onFileComplete(wire, "in");
     expect(node.getState().transfers[file.id]).toMatchObject({ state: "done", transferred: 5 });
     const stored = await fileStore.get(file.id);
-    expect(stored).toMatchObject({ direction: "in", wireId: "w1", digest: "digest-1", metadata: { name: "a.txt", mime: "text/html" } });
+    expect(stored).toMatchObject({ direction: "in", wireId: wire, digest: "digest-1", metadata: { name: "a.txt", mime: "text/html" } });
     expect(stored!.blob.type).not.toBe("text/html");
     // Asked whether it is already here: only an exact match of what was announced says yes.
-    expect(await events.onFileStored({ id: "w1", name: "a.txt", size: 5, mime: "text/html", timestamp: 7 })).toBe("digest-1");
-    expect(await events.onFileStored({ id: "w1", name: "b.txt", size: 5, mime: "text/html", timestamp: 7 })).toBeUndefined();
+    expect(await events.onFileStored({ id: wire, name: "a.txt", size: 5, mime: "text/html", timestamp: 7 })).toBe("digest-1");
+    expect(await events.onFileStored({ id: wire, name: "b.txt", size: 5, mime: "text/html", timestamp: 7 })).toBeUndefined();
   });
 
   it("a wire id is used once, and a contact cannot announce more than the room it has here", async () => {
