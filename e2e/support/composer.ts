@@ -2,9 +2,9 @@ import { expect, type Locator, type Page } from "@playwright/test";
 
 /**
  * One row of the composer's + menu (WhatsApp's layout): `payment-button`, `composer-identities-button`,
- * `composer-file`, `composer-media` or `composer-camera`. Opens the menu when it is not open (the + waits while the
- * composer is disabled), so a spec can wait on the row (`toBeEnabled`, a title) or click it. Choosing a row closes the
- * menu; on a phone it is a sheet over a backdrop.
+ * `composer-services`, `composer-file`, `composer-media` or `composer-camera`. Opens the menu when it is not open (the
+ * + waits while the composer is disabled), so a spec can wait on the row (`toBeEnabled`, a title) or click it. Choosing
+ * a row closes the menu; on a phone it is a sheet over a backdrop.
  */
 export async function composerRow(page: Page, testId: string): Promise<Locator> {
   const menu = page.getByTestId("composer-menu");

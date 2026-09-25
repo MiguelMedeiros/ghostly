@@ -1,4 +1,5 @@
 import { chat, connect, expect, linkLegacy, say, test, type Peer } from "../support/fixtures";
+import { composerRow } from "../support/composer";
 import { pair } from "../support/paired";
 
 /**
@@ -35,7 +36,7 @@ test("the Services page on the web explains sharing needs the extension, and off
   expect(thrown).toEqual([]);
 });
 
-test("a paired chat's Services… dialog on the web explains the same, and closes", { tag: ["@feature:services.web-unavailable", "@feature:app.web-limits", "@feature:app.popovers"] }, async ({ peer }) => {
+test("a paired chat on the web: + → Shared apps is greyed and says sharing needs the extension or desktop app", { tag: ["@feature:services.web-unavailable", "@feature:app.web-limits", "@feature:app.composer.attach"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("svc-dialog-alice"), peer("svc-dialog-bob")]);
   const thrown = [...[alice, bob].map(errors)];
   await pair(alice, bob);
@@ -46,29 +47,16 @@ test("a paired chat's Services… dialog on the web explains the same, and close
   for (const p of [alice, bob]) await expect(p.page.getByTestId("peer-services")).toHaveCount(0);
 
   for (const p of [alice, bob]) {
-    await p.page.getByTestId("chat-options").click();
-    await p.page.getByTestId("chat-services-open").click();
-    const dialog = p.page.getByTestId("chat-services");
-    await expect(dialog).toBeVisible();
-    await expect(dialog.getByRole("heading", { name: /^Apps with / })).toBeVisible();
-    await expect(dialog).toContainText("Needs the extension or desktop app.");
-    // Nothing on the web to add, nor to grant.
-    await expect(dialog.getByText("+ Add an app")).toHaveCount(0);
-    await expect(dialog.getByTestId("chat-service-toggle")).toHaveCount(0);
-    await expect(dialog).toContainText("Nothing shared with you.");
-    await expect(dialog.getByTestId("chat-service-open")).toHaveCount(0);
-
-    await dialog.getByRole("button", { name: "Done" }).click();
-    await expect(dialog).toHaveCount(0);
+    // The web can neither share a local app nor open one: the row stays, greyed, saying so.
+    const row = await composerRow(p.page, "composer-services");
+    await expect(row).toBeDisabled();
+    await expect(row).toHaveAttribute("title", "Needs the Ghostly extension or desktop app");
+    await expect(row).toContainText("Shared apps");
+    await p.page.keyboard.press("Escape");
+    await expect(p.page.getByTestId("composer-menu")).toHaveCount(0);
+    await expect(p.page.getByTestId("chat-services")).toHaveCount(0);
     await expect(p.page.getByPlaceholder("Message…")).toBeEnabled();
   }
-
-  // A click beside it closes it as well.
-  await alice.page.getByTestId("chat-options").click();
-  await alice.page.getByTestId("chat-services-open").click();
-  await expect(alice.page.getByTestId("chat-services")).toBeVisible();
-  await alice.page.mouse.click(5, 5);
-  await expect(alice.page.getByTestId("chat-services")).toHaveCount(0);
 
   // The chat carries on as before.
   await say(bob, "still talking");
@@ -90,10 +78,25 @@ test("an older chat's apps strip on the web: Manage opens the same explanation",
 
   await strip.getByTestId("grant-services").click();
   const dialog = alice.page.getByTestId("chat-services");
+  await expect(dialog.getByRole("heading", { name: /^Apps with / })).toBeVisible();
   await expect(dialog).toContainText("Needs the extension or desktop app.");
+  // Nothing on the web to add, nor to grant.
+  await expect(dialog.getByText("+ Add an app")).toHaveCount(0);
+  await expect(dialog.getByTestId("chat-service-toggle")).toHaveCount(0);
   await expect(dialog).toContainText("Nothing shared with you.");
+  await expect(dialog.getByTestId("chat-service-open")).toHaveCount(0);
   await dialog.getByRole("button", { name: "Done" }).click();
   await expect(dialog).toHaveCount(0);
+
+  // A click beside it closes it as well.
+  await strip.getByTestId("grant-services").click();
+  await expect(dialog).toBeVisible();
+  await alice.page.mouse.click(5, 5);
+  await expect(dialog).toHaveCount(0);
+
+  // The composer's + says the same as the strip's dialog: this is the web.
+  await expect(await composerRow(alice.page, "composer-services")).toHaveAttribute("title", "Needs the Ghostly extension or desktop app");
+  await alice.page.keyboard.press("Escape");
 
   // And the Services page knows of no apps from this contact.
   await alice.page.getByTestId("account-services").click();
@@ -101,13 +104,15 @@ test("an older chat's apps strip on the web: Manage opens the same explanation",
   expect(thrown.flat()).toEqual([]);
 });
 
-/** The menu item that opened the dialog is gone once it opens: focus moves into the dialog, so Escape works. */
-test("Escape closes a chat's Services… dialog", { tag: ["@feature:app.popovers"] }, async ({ peer }) => {
+/** The Manage button that opened the dialog stays under it: focus moves into the dialog, so Escape works, and comes back. */
+test("Escape closes a chat's Services dialog", { tag: ["@feature:app.popovers"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("svc-escape-alice"), peer("svc-escape-bob")]);
-  await pair(alice, bob);
-  await alice.page.getByTestId("chat-options").click();
-  await alice.page.getByTestId("chat-services-open").click();
+  await linkLegacy(alice, bob);
+  await connect(alice, bob);
+  const manage = alice.page.getByTestId("peer-services").getByTestId("grant-services");
+  await manage.click();
   await expect(alice.page.getByTestId("chat-services")).toBeVisible();
   await alice.page.keyboard.press("Escape");
   await expect(alice.page.getByTestId("chat-services")).toHaveCount(0);
+  await expect(manage).toBeFocused();
 });

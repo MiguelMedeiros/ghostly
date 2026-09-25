@@ -1,4 +1,5 @@
 import { startAtlas } from "../../extension/test/atlas.mjs";
+import { composerRow } from "../support/composer";
 import { expect, test } from "../support/extension";
 import { chat } from "../support/fixtures";
 import { pair } from "../support/paired";
@@ -23,9 +24,12 @@ test("a new chat shares an app and calls, both over its live session", { tag: ["
     await a.page.getByTestId("service-target").fill(`localhost:${atlas.port}`);
     await a.page.getByTestId("service-save").click();
     await a.page.goBack();
-    await a.page.getByTestId("chat-options").click();
-    await a.page.getByTestId("chat-services-open").click();
     // Both apps offer services/1 and the chat is live: nothing to explain.
+    const row = await composerRow(a.page, "composer-services");
+    await expect(row).toBeEnabled();
+    await expect(row).not.toHaveAttribute("title");
+    await row.click();
+    await expect(a.page.getByTestId("chat-services")).toBeVisible();
     await expect(a.page.getByTestId("chat-services-unavailable")).toHaveCount(0);
     await a.page.getByTestId("chat-services").getByTestId("chat-service-toggle").click();
     await a.page.getByRole("button", { name: "Done" }).click();
@@ -58,14 +62,16 @@ test("with a web contact the chat calls, and says why apps cannot travel", { tag
   const [ext, web] = await Promise.all([extensionPeer("pcs-ext"), webPeer("pcs-web")]);
   await pair(ext, web);
   await expect(ext.page.getByTestId("call-video")).toBeEnabled();
-  await ext.page.getByTestId("chat-options").click();
-  await ext.page.getByTestId("chat-services-open").click();
-  // The web app can neither serve nor open local apps, so it does not offer services/1.
-  await expect(ext.page.getByTestId("chat-services-unavailable")).toContainText("cannot open or share apps");
-  // After the dialog's fade-in, so the picture shows it and not half of it.
+  // The web app can neither serve nor open local apps, so it does not offer services/1: nothing to choose in the
+  // chat's apps, and the + row says why.
+  const row = await composerRow(ext.page, "composer-services");
+  await expect(row).toBeDisabled();
+  await expect(row).toHaveAttribute("title", /cannot open or share apps/);
+  // After the menu's fade-in, so the picture shows it and not half of it.
   await ext.page.waitForTimeout(700);
   await ext.page.screenshot({ path: testInfo.outputPath("services-web-contact.png") });
-  await ext.page.getByRole("button", { name: "Done" }).click();
+  await ext.page.keyboard.press("Escape");
+  await expect(ext.page.getByTestId("composer-menu")).toHaveCount(0);
 
   await web.page.getByTestId("call-video").click();
   await expect(ext.page.getByText("Incoming video call...")).toBeVisible();
