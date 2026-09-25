@@ -494,5 +494,38 @@
       "animals": "Animais",
       "retro": "Web retrô"
     }
+  },
+  "payments": {
+    "mode": {
+      "label": "Pagamentos com {{name}}",
+      "pay": "Pagar ou pedir",
+      "accept": "Aceitar"
+    },
+    "accept": {
+      "deck": "Formas de pagamento que esta conversa aceita de {{name}}",
+      "on": "Ativo aqui",
+      "off": "Desligado aqui",
+      "contactOn": "Contato: aceita",
+      "contactOff": "Contato: desligou",
+      "hint": {
+        "both": "{{card}} está ativo para vocês dois: qualquer um pode pagar o outro com ele aqui.",
+        "theyOff": "{{card}} está ativo aqui, mas {{name}} desligou: funciona quando os dois ativarem.",
+        "unknown": "{{card}} está ativo aqui. Funciona quando {{name}} também ativar.",
+        "onceSaved": "{{card}} fica ativo quando você salvar. Funciona quando {{name}} também ativar.",
+        "off": "{{card}} está desligado aqui: nenhum de vocês pode pagar o outro com ele nesta conversa."
+      },
+      "status": {
+        "idle": "Uma forma só funciona quando os dois a ativam.",
+        "changed": "Ainda não salvo: {{name}} fica sabendo quando você salvar.",
+        "savedLive": "Salvo: {{name}} já sabe.",
+        "savedLater": "Salvo: {{name}} fica sabendo na próxima conexão."
+      },
+      "save": "Salvar",
+      "saving": "Salvando…"
+    },
+    "none": {
+      "text": "Nenhuma forma de pagamento está ativa nesta conversa.",
+      "action": "Escolher o que esta conversa aceita"
+    }
   }
 }

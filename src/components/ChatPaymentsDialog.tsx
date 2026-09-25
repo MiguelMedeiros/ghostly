@@ -18,7 +18,9 @@ const METHODS: { id: PaymentMethodName; name: string; what: string }[] = [
 ];
 
 /**
- * Which ways of paying one contact may use, chosen per chat. A way works only when both sides allow
+ * Which ways of paying one contact may use, chosen per chat. The composer's + → Payment → Accept chooses the same
+ * list on the cards (ChatPaymentAccept.tsx); this dialog, from the chat's ⋮, goes once that is the only way in.
+ * It scrolls in a short window (the extension's side panel), so Save stays in reach. A way works only when both sides allow
  * it; a connected contact is told at once, and later sessions offer it in the handshake.
  */
 export function ChatPaymentsDialog({ peer, name, onSave, onClose }: { peer: PeerLinkState; name: string; onSave: (methods: Record<PaymentMethodName, boolean>) => Promise<void>; onClose: () => void }) {
@@ -37,7 +39,7 @@ export function ChatPaymentsDialog({ peer, name, onSave, onClose }: { peer: Peer
   };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 animate-fade-in" {...backdrop}>
-      <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="chat-payments-title" data-testid="chat-payments" className="focus:outline-none w-full max-w-md bg-panel-header border border-border rounded-2xl shadow-2xl p-5 space-y-4">
+      <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="chat-payments-title" data-testid="chat-payments" className="focus:outline-none w-full max-w-md max-h-full overflow-y-auto bg-panel-header border border-border rounded-2xl shadow-2xl p-5 space-y-4">
         <div>
           <h2 id="chat-payments-title" className="text-lg font-medium text-text-primary">Payments with {name}</h2>
           <p className="text-xs text-text-muted mt-1">A way works only when both of you allow it.</p>

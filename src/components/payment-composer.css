@@ -1,6 +1,22 @@
 /* The chat's payment composer (PaymentComposer.tsx): the wallet's cards as a stack, then the chosen card turned over.
    Its back is a card's back: the magnetic stripe, the amount written on it, and what it is for on the signature strip. */
 
+/* A chat's composer has two sides, chosen in its head: Pay (the cards to pay or request with) and Accept (the ways
+   this chat takes, ChatPaymentAccept.tsx). */
+.payment-modes{display:inline-flex;align-self:center;flex:none;gap:2px;padding:2px;border-radius:999px;background:var(--theme-surface-alt,rgba(255,255,255,.06));box-shadow:inset 0 0 0 1px var(--theme-border)}
+.payment-modes button{padding:4px 10px;border:0;border-radius:999px;background:transparent;color:var(--theme-text-muted);font:inherit;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;transition:color .2s,background-color .2s}
+.payment-modes button:hover{color:var(--theme-text-primary)}
+.payment-modes button[aria-selected=true]{background:var(--theme-surface-hover,rgba(255,255,255,.12));color:var(--theme-text-primary)}
+.payment-modes button:focus-visible{outline:2px solid var(--theme-accent);outline-offset:1px}
+.payment-accept-status{margin:-4px 0 0;font-size:11px;line-height:1.3;color:var(--theme-text-secondary)}
+.payment-none{display:grid;gap:10px;padding:8px 0}
+
+/* On a desktop the sheet takes the room over the composer (--sheet-room, PaymentComposer.tsx) and scrolls past it, its
+   action kept in view at the bottom: a short window still reaches Use and Save. A phone's sheet (index.css .sheet) has
+   its own height and scrolls the same way. */
+@media (min-width:768px){.payment-composer{max-height:var(--sheet-room,calc(100dvh - 9rem));overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain}}
+.payment-composer>.composer-sheet-action{position:sticky;bottom:0;z-index:2;box-shadow:0 0 0 8px var(--theme-panel-header)}
+
 /* The turn itself is the deck's (deck/Flip.tsx, flip.css). */
 .payment-back{position:relative;overflow:hidden;border-radius:16px;color:#fff;border:1px solid rgba(var(--card-rgb,36,211,194),.4);
  background:radial-gradient(circle at 12% 110%,rgba(var(--card-rgb,36,211,194),.18),transparent 55%),linear-gradient(160deg,var(--to,#0b1f2a),#0a0e12);box-shadow:0 24px 50px -28px rgba(0,0,0,.9)}

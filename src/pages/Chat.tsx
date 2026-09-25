@@ -687,12 +687,15 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         maxLength={paired ? 16_384 : platform?.getPeer(params.peerPubKeyB64)?.dataLink === "open" ? 4000 : undefined}
         onSendFile={platform ? sendFile : undefined}
         fileUnavailable={paired ? chatStop ?? (chatLive && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.files ? "Update both peers to send files" : undefined) : undefined}
-        paymentsUnavailable={!paymentsOn ? "Payments are off in this chat. Choose them under ⋮ → Payments." : chatStop ? chatStop : paired && chatLive && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.payments ? "Your contact has payments off in this chat, or needs an updated Ghostly" : undefined}
+        // The + → Payment row still opens on these: its Accept side is where this chat's ways of paying are chosen.
+        paymentsUnavailable={!paymentsOn ? "Payments are off in this chat. Turn a way on under + → Payment → Accept." : chatStop ? chatStop : paired && chatLive && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.payments ? "Your contact has payments off in this chat, or needs an updated Ghostly" : undefined}
         payments={
           walletState && wallet && peerKey
             ? { balance: walletState.balance, contact: displayName || undefined, onSend: paySend, onRequest: payRequest,
               // Paying needs live: a bearer token never waits in a queue or a hold. A request can wait.
-              sendUnavailable: paired && !chatLive ? "Payments need a live connection" : undefined, reviewContext:platform?.getPeer(peerKey)?.id ? {wallet,peer:peerKey,linkId:platform.getPeer(peerKey)!.id!}:undefined }
+              sendUnavailable: paired && !chatLive ? "Payments need a live connection" : undefined, reviewContext:platform?.getPeer(peerKey)?.id ? {wallet,peer:peerKey,linkId:platform.getPeer(peerKey)!.id!}:undefined,
+              // Which ways this chat accepts: chosen on the composer's Accept side, for this chat only.
+              onSaveMethods: chatPeer && platform ? (methods) => platform.setChatPaymentMethods(peerKey, methods) : undefined }
             : undefined
         }
         identities={paired ? { peerKey: params.peerPubKeyB64, contact: shownName } : undefined}

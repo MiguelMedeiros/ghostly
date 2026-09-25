@@ -49,6 +49,8 @@
 .deck[data-mode=track] .deck-card{flex:0 0 var(--card-w);aspect-ratio:1.586;scroll-snap-align:center;scale:.94;transition:scale .4s var(--deck-ease)}
 .deck[data-mode=track] .deck-card:not([data-active=true]) [data-deck=face]::after{opacity:.15}
 .deck[data-mode=track] .deck-card[data-active=true]{scale:1;transition-duration:.55s;transition-timing-function:var(--deck-spring)}
+/* A deck of checks: a card that is on sits a little raised (in the stack, by its --y). */
+.deck[data-mode=track] .deck-card[data-checked=true] [data-deck=face]{translate:0 -5px;transition:translate .4s var(--deck-ease)}
 
 /* Under the deck: the arrows, and a mark per card with the chosen one lit. */
 .deck-nav{display:flex;align-items:center;justify-content:center;gap:10px}
