@@ -77,7 +77,7 @@ pub struct HyperState {
     /// Node and the script, when a test brings its own.
     program: Option<(PathBuf, PathBuf)>,
 }
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct Started {
     id: u64,
     descriptor: Value,
@@ -664,5 +664,251 @@ mod tests {
                 .unwrap_err(),
             closed
         );
+    }
+}
+
+/// The real sidecar.mjs, run by Node, over endpoints held in memory
+/// (`native-transports/hyperdht/test/fake-endpoint.mjs`): how many processes
+/// there are, and when they go.
+#[cfg(all(test, unix))]
+mod runtime_tests {
+    // covers: transport.native-pool
+    use super::*;
+    use tauri::ipc::InvokeResponseBody;
+    use tauri::test::{mock_builder, MockRuntime};
+
+    /// A folder holding the sidecar with the fake endpoint in place of the real
+    /// one, made once per test run.
+    fn program() -> (PathBuf, PathBuf) {
+        static PROGRAM: std::sync::OnceLock<(PathBuf, PathBuf)> = std::sync::OnceLock::new();
+        PROGRAM
+            .get_or_init(|| {
+                let source =
+                    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../native-transports/hyperdht");
+                let folder =
+                    std::env::temp_dir().join(format!("ghostly-hyperdht-{}", std::process::id()));
+                std::fs::create_dir_all(&folder).unwrap();
+                std::fs::copy(source.join("sidecar.mjs"), folder.join("sidecar.mjs")).unwrap();
+                std::fs::copy(
+                    source.join("test/fake-endpoint.mjs"),
+                    folder.join("endpoint.mjs"),
+                )
+                .unwrap();
+                let node = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                    .map(|dir| dir.join("node"))
+                    .find(|path| path.is_file())
+                    .expect("node on PATH");
+                (node, folder.join("sidecar.mjs"))
+            })
+            .clone()
+    }
+
+    fn app() -> tauri::App<MockRuntime> {
+        mock_builder()
+            .manage(HyperState {
+                program: Some(program()),
+                ..HyperState::default()
+            })
+            .build(tauri::generate_context!(test = true))
+            .expect("app")
+    }
+
+    fn seed(byte: u8) -> String {
+        use base64::Engine;
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode([byte; 32])
+    }
+
+    /// A page's channel, and what reaches it.
+    fn page() -> (Channel<Value>, mpsc::UnboundedReceiver<Value>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let channel = Channel::new(move |body| {
+            if let InvokeResponseBody::Json(json) = body {
+                let _ = tx.send(serde_json::from_str(&json).unwrap());
+            }
+            Ok(())
+        });
+        (channel, rx)
+    }
+
+    async fn start(app: &tauri::App<MockRuntime>, byte: u8) -> Result<Started, String> {
+        paired_hyperdht_start(app.handle().clone(), app.state(), seed(byte), page().0).await
+    }
+
+    async fn pid(app: &tauri::App<MockRuntime>) -> Option<u32> {
+        app.state::<HyperState>()
+            .runtime
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|r| r.pid)
+    }
+
+    fn spawned(app: &tauri::App<MockRuntime>) -> u64 {
+        app.state::<HyperState>().spawned.load(Ordering::Relaxed)
+    }
+
+    fn alive(pid: u32) -> bool {
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap()
+            .success()
+    }
+
+    async fn until(what: &str, mut done: impl FnMut() -> bool) {
+        for _ in 0..200 {
+            if done() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("{what} did not happen in 10 s");
+    }
+
+    async fn next(events: &mut mpsc::UnboundedReceiver<Value>) -> Value {
+        tokio::time::timeout(Duration::from_secs(10), events.recv())
+            .await
+            .expect("an event in 10 s")
+            .expect("the page's channel open")
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn every_endpoint_lives_in_one_runtime_that_leaves_with_the_last() {
+        let app = app();
+        let (events_a, mut page_a) = page();
+        let (events_b, mut page_b) = page();
+        let a = paired_hyperdht_start(app.handle().clone(), app.state(), seed(1), events_a)
+            .await
+            .unwrap();
+        let b = paired_hyperdht_start(app.handle().clone(), app.state(), seed(2), events_b)
+            .await
+            .unwrap();
+        let c = start(&app, 3).await.unwrap();
+        assert_eq!(spawned(&app), 1, "three endpoints, one process");
+        let runtime = pid(&app).await.unwrap();
+        assert_eq!(a.descriptor, json!({"publicKey": "01".repeat(32)}));
+
+        // Each endpoint hears only about its own connections.
+        let connection = paired_hyperdht_connect(app.state(), a.id, b.descriptor.clone())
+            .await
+            .unwrap();
+        let opened = next(&mut page_a).await;
+        assert_eq!(
+            (&opened["type"], &opened["id"], &opened["incoming"]),
+            (&json!("open"), &json!(connection), &json!(false))
+        );
+        let incoming = next(&mut page_b).await;
+        assert_eq!(incoming["incoming"], true);
+        paired_hyperdht_send(app.state(), a.id, connection, "hello".into()).unwrap();
+        let frame = next(&mut page_b).await;
+        assert_eq!(
+            (&frame["type"], &frame["text"]),
+            (&json!("frame"), &json!("hello"))
+        );
+        assert_eq!(frame["id"], incoming["id"]);
+        assert!(page_a.try_recv().is_err());
+
+        // Stopping one closes its connection on both ends, and keeps the runtime.
+        paired_hyperdht_stop(app.state(), a.id);
+        assert_eq!(
+            next(&mut page_a).await,
+            json!({"type":"closed", "id":connection})
+        );
+        let closed = next(&mut page_b).await;
+        assert_eq!(
+            (&closed["type"], &closed["id"]),
+            (&json!("closed"), &incoming["id"])
+        );
+        paired_hyperdht_stop(app.state(), c.id);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(pid(&app).await, Some(runtime));
+        assert!(alive(runtime));
+
+        // The last one out lets it go.
+        paired_hyperdht_stop(app.state(), b.id);
+        until("the runtime leaving", || !alive(runtime)).await;
+        assert_eq!(pid(&app).await, None);
+
+        // The next endpoint starts it again.
+        start(&app, 4).await.unwrap();
+        assert_eq!(spawned(&app), 2);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn endpoints_starting_at_once_start_one_runtime() {
+        let app = app();
+        let started = futures_util::future::join_all((1..=8).map(|byte| start(&app, byte))).await;
+        assert!(
+            started.iter().all(Result::is_ok),
+            "{:?}",
+            started.iter().find(|r| r.is_err())
+        );
+        assert_eq!(spawned(&app), 1);
+        assert_eq!(
+            start(&app, 9).await.err().unwrap(),
+            "Native endpoint limit reached"
+        );
+        assert_eq!(spawned(&app), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_runtime_that_died_takes_its_endpoints_and_is_started_again_once() {
+        let app = app();
+        let (events, mut page) = page();
+        let a = paired_hyperdht_start(app.handle().clone(), app.state(), seed(1), events)
+            .await
+            .unwrap();
+        let b = start(&app, 2).await.unwrap();
+        let connection = paired_hyperdht_connect(app.state(), a.id, b.descriptor.clone())
+            .await
+            .unwrap();
+        assert_eq!(next(&mut page).await["type"], "open");
+        let first = pid(&app).await.unwrap();
+
+        std::process::Command::new("kill")
+            .args(["-9", &first.to_string()])
+            .status()
+            .unwrap();
+        // Its page learns the connection is gone, and the endpoints are closed.
+        assert_eq!(
+            next(&mut page).await,
+            json!({"type":"closed", "id":connection})
+        );
+        until("both endpoints closing", || {
+            [a.id, b.id]
+                .iter()
+                .all(|id| paired_hyperdht_address(app.state(), *id).is_err())
+        })
+        .await;
+        assert_eq!(pid(&app).await, None);
+
+        // The chats reopening start one runtime between them.
+        let again = futures_util::future::join_all((1..=3).map(|byte| start(&app, byte))).await;
+        assert!(
+            again.iter().all(Result::is_ok),
+            "{again:?}",
+            again = again.iter().map(|r| r.as_ref().err()).collect::<Vec<_>>()
+        );
+        assert_eq!(spawned(&app), 2);
+        let second = pid(&app).await.unwrap();
+        assert_ne!(first, second);
+        assert!(alive(second));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_endpoint_the_runtime_refuses_leaves_nothing_behind() {
+        let app = app();
+        start(&app, 1).await.unwrap();
+        // The fake, like the DHT, will not listen twice on one key.
+        assert_eq!(
+            start(&app, 1).await.err().unwrap(),
+            "Endpoint already listening"
+        );
+        until("the refused endpoint being forgotten", || {
+            app.state::<HyperState>().peers.lock().unwrap().len() == 1
+        })
+        .await;
+        assert_eq!(spawned(&app), 1);
     }
 }
