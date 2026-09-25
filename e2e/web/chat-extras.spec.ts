@@ -1,6 +1,6 @@
 import { closeSync, openSync, ftruncateSync } from "node:fs";
 import type { Page } from "@playwright/test";
-import { createLink, encodeInviteCode } from "@ghostly/core";
+import { createLink, decodeInviteCode, encodeInviteCode } from "@ghostly/core";
 import { copyInvite } from "../support/clipboard";
 import { chat, connect, expect, GIF, link, linkLegacy, say, test, type Peer } from "../support/fixtures";
 
@@ -310,7 +310,9 @@ test("Tech Info copies the keys it shows, and shows only a preview of the encryp
   const alice = await peer("alice");
   await alice.page.getByTitle("New Chat").click();
   const invite = await copyInvite(alice.page);
-  const encKey = invite.split("/")[3];
+  // The invite is a ghostly1 link (WISP 801): its payload carries the chat's encryption key.
+  const encKey = decodeInviteCode(invite)!.encKeyB64;
+  expect(encKey).toHaveLength(43);
   const sessionId = decodeURIComponent(alice.page.url().split("#/chat/")[1]);
 
   await alice.page.getByTitle("Options").click();
