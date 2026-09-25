@@ -65,7 +65,14 @@
       "connection": "Conexión…",
       "services": "Servicios…",
       "refresh": "Actualizar",
-      "techInfo": "Información técnica"
+      "techInfo": "Información técnica",
+      "continueNew": "Continuar en un chat nuevo"
+    },
+    "compat": {
+      "label": "Chat de compatibilidad · Ghostly antiguo",
+      "hint": "Este chat se creó con un código de Ghostly 0.4. El texto y las llamadas siguen funcionando en ambos sentidos; un chat nuevo añade archivos, pagos y mensajes retenidos.",
+      "continued": "Invitaste a tu contacto a un chat nuevo.",
+      "open": "Abrir el chat nuevo"
     }
   },
   "group": {

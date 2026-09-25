@@ -9,7 +9,7 @@ import type { UsdtWallet } from "../src/engine/paymentAdapters/usdtWallet";
 import { fakeAddress } from "../src/engine/paymentAdapters/providers/testing";
 import type { StoredMessage, StoredPayment } from "../src/shared/types";
 import { resetDb, rows, seed } from "./fakes";
-// covers: payments.cashu.send, payments.cashu.request, payments.cashu.reclaim, payments.cashu.test-sats, payments.lightning.request, payments.chat.methods, payments.chat.refused, payments.external, payments.arkade.request, payments.bark.send, payments.bitcoin.send, payments.usdt.send, delivery.hold.request
+// covers: payments.cashu.send, payments.cashu.request, payments.cashu.reclaim, payments.cashu.test-sats, payments.lightning.request, payments.chat.methods, payments.chat.refused, payments.external, payments.arkade.request, payments.bark.send, payments.bitcoin.send, payments.usdt.send, delivery.hold.request, chat.waiting
 
 vi.mock("../src/shared/idb", async () => (await import("./fakes")).idbModule);
 beforeEach(() => resetDb());
@@ -57,6 +57,7 @@ function setup(stored: StoredPayment[] = []) {
     storeMessage: vi.fn(async (_message: StoredMessage) => {}),
     onChange: vi.fn(),
     heldPaymentMethods: vi.fn((): ("cashu" | "lightning")[] | null => null),
+    waitingPaymentMethods: vi.fn((): ("cashu" | "lightning")[] | null => null),
     holdRequest: vi.fn(async (_linkId: string, _request: PaymentRequest, _messageId: string) => {}),
     onReviewedPaymentResult: vi.fn(async () => {}),
     onReviewedPaymentRefused: vi.fn(async () => {}),
@@ -174,6 +175,35 @@ describe("requests we send", () => {
     enabled.lightning = false; // Allowed by the contact, but no longer on this device.
     await expect(desk.request({ linkId: "l", amount: 50, timestamp: 6 })).rejects.toThrow("Your contact allowed neither");
     await expect(desk.request({ linkId: "l", amount: 50, timestamp: 7, method: "arkade" }), "Ark needs the contact there").rejects.toThrow("You are offline");
+  });
+
+  it("a request while the chat is not live and nothing holds it waits here, goes with the replay when live, and a cancel withdraws it", async () => {
+    const { desk, link, host, sent, state } = setup();
+    link.isDataLinkOpen = false;
+    link.requirePaymentSupport.mockRejectedValue(new Error("dialled for 90 s"));
+    host.waitingPaymentMethods.mockReturnValue(["cashu", "lightning"]);
+    const { paymentId } = await desk.request({ linkId: "l", amount: 21, timestamp: 5 });
+    expect(link.requirePaymentSupport, "a waiting request dials nobody").not.toHaveBeenCalled();
+    expect(sent).toEqual([]);
+    expect(host.holdRequest).not.toHaveBeenCalled();
+    expect(host.storeMessage).toHaveBeenCalledWith(expect.objectContaining({ via: "datalink", delivery: "waiting", paymentId }));
+    expect(state(paymentId)).toMatchObject({ state: "pending", invoice: INVOICE, mints: [MINT] });
+    link.isDataLinkOpen = true;
+    await desk.replay("l");
+    expect(sent.map(s => s.frame.id)).toEqual([paymentId]);
+
+    // Cancelled before the chat was live: withdrawn, so no later session sends it.
+    link.isDataLinkOpen = false;
+    const second = (await desk.request({ linkId: "l", amount: 7, timestamp: 6 })).paymentId;
+    await desk.withdraw(second);
+    expect(state(second)?.state).toBe("failed");
+    link.isDataLinkOpen = true;
+    sent.length = 0;
+    await desk.replay("l");
+    expect(sent.map(s => s.frame.id)).not.toContain(second);
+    // Ark and the others need the contact there: they never wait.
+    link.isDataLinkOpen = false;
+    await expect(desk.request({ linkId: "l", amount: 5, timestamp: 8, method: "arkade" })).rejects.toThrow("dialled");
   });
 
   it("rebuilds only our own Cashu or Lightning requests", async () => {

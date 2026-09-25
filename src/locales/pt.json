@@ -65,7 +65,14 @@
       "connection": "Conexão…",
       "services": "Serviços…",
       "refresh": "Atualizar",
-      "techInfo": "Informações técnicas"
+      "techInfo": "Informações técnicas",
+      "continueNew": "Continuar numa nova conversa"
+    },
+    "compat": {
+      "label": "Conversa de compatibilidade · Ghostly antigo",
+      "hint": "Esta conversa foi criada com um código do Ghostly 0.4. Texto e chamadas continuam a funcionar nos dois sentidos; uma nova conversa acrescenta ficheiros, pagamentos e mensagens guardadas.",
+      "continued": "Convidou o seu contacto para uma nova conversa.",
+      "open": "Abrir a nova conversa"
     }
   },
   "group": {

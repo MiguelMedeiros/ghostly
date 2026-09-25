@@ -174,9 +174,8 @@ test("home actions have equal sizes and enabled controls signal clicks", { tag: 
     await expect(p.page.getByRole("switch", {name:"DHT-only delivery"})).toHaveCSS("cursor", "pointer");
     await expect(p.page.getByRole("radio", {name:"WebRTC", exact:true})).toHaveCSS("cursor", "pointer");
     await expect(p.page.getByRole("radio", {name:"Iroh", exact:true})).toHaveCSS("cursor", "not-allowed");
-    // Nobody has joined yet, so the composer is off: its empty state shows the mic, disabled and saying so.
-    const mic = p.page.getByRole("button", {name:"Record a voice message", exact:true});
-    await expect(mic).toBeDisabled(); await expect(mic).toHaveCSS("cursor", "not-allowed");
+    // Before the contact arrives, what is written waits for it (WISP 400): the composer is open.
+    await expect(p.page.getByPlaceholder("Message…")).toBeEnabled();
   }
 });
 

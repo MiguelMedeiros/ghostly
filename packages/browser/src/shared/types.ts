@@ -8,7 +8,7 @@ import type { SparkWalletView } from "../engine/paymentAdapters/sparkWallet";
 import type { LightningView } from "../engine/paymentAdapters/providers/lightningService";
 import type { BitcoinView } from "../engine/paymentAdapters/providers/bitcoinService";
 import type { PaymentReview, PaymentTarget } from "@ghostly/core";
-import type { DeliveryMode, DhtDeliveryState, DhtDeliveryView, HoldKind } from "@ghostly/core";
+import type { CapsState, DeliveryMode, DhtDeliveryState, DhtDeliveryView, HoldKind } from "@ghostly/core";
 import type { S3Config } from "../backup/s3";
 import type { TransportCause, TransportEntry } from "../engine/transportLog";
 import type { PublicProfile, ProfileChoice } from '../profiles/public';
@@ -22,6 +22,8 @@ import type { CommunityState, GroupCommit, GroupRole, GroupState, GroupStatus } 
 export interface StoredLink {
   deliveryMode?: DeliveryMode;
   dhtDeliveryState?: DhtDeliveryState;
+  /** This side's layer-0 capability record and the contact's last good one (WISP 03). */
+  capsState?: CapsState;
   publicProfiles?: PublicProfile[];
   profileChoice?: ProfileChoice;
   peerProofs?: ProofLedger;
@@ -422,8 +424,10 @@ export interface StoredMessage {
   /**
    * `held`: in this device's storage, waiting for the contact to come back (WISP 4xx).
    * `queued`: unconfirmed, and sent again by itself under the same id once the chat can carry it.
+   * `waiting`: not sent yet; it goes by itself when the chat can carry it (live, or the DHT text before it
+   * confirmed), and can be cancelled meanwhile ("Sends when live", WISP 400).
    */
-  delivery?: "sending" | "sent" | "queued" | "held" | "delivered" | "failed";
+  delivery?: "sending" | "sent" | "queued" | "waiting" | "held" | "delivered" | "failed";
   deliveryError?: string;
   /** Until when a `queued` message is sent again by itself; after that it waits for Retry. */
   resendUntil?: number;

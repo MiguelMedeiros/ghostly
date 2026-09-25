@@ -30,7 +30,7 @@ export function DeliveryMark({ delivery }: { delivery?: ChatMessage["delivery"] 
       </svg>
     );
   }
-  if (delivery === "sending" || delivery === "queued") {
+  if (delivery === "sending" || delivery === "queued" || delivery === "waiting") {
     return (
       <svg {...common} viewBox="0 0 11 11" width={11} aria-label="Sending" data-delivery="sending" className="inline shrink-0 me-1 -mt-0.5 text-text-muted">
         <circle cx="5.5" cy="5.5" r="4.6" stroke="currentColor" strokeWidth="1.2" />

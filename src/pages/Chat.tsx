@@ -42,6 +42,8 @@ import {
   updateSessionLabel,
 } from "../lib/storage";
 import { chatPath, inviteShareText } from "../lib/url";
+import { continueInNewChat } from "../lib/continueChat";
+import { engine } from "@ghostly/browser/platform/engine";
 import { fileMessageText, parseCallSignal, signalHasVideo, type VoiceMeta } from "@ghostly/core";
 import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
 import { useAppNavigation } from "../hooks/useAppNavigation";
@@ -169,12 +171,17 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
 
   const platform = useServicesPlatform();
   const paired = session?.profile === "paired-chat/1";
+  // A chat made with a v0.4 code (WISP 402): kept working both ways, never created by this app.
+  const compat = !!session && !paired;
   const deliveryPeer = platform?.getPeer(session?.peerPubKeyB64 ?? "");
-  const dhtOnly = deliveryPeer?.deliveryMode === "dht" || deliveryPeer?.textDelivery === "dht";
   const pairedReady = deliveryPeer?.pairing?.status === "ready";
-  const textReady = deliveryPeer?.canSendText ?? pairedReady;
   // A paired chat calls over its live session (`calls/1`); why it cannot right now, if it cannot.
   const callsBlocked = paired ? (deliveryPeer?.callsUnavailable === undefined ? "Calls need a live connection" : deliveryPeer.callsUnavailable) : null;
+  // The one chat (WISP 400): live over layer 1, or not; what cannot go now waits ("Sends when live") or is held.
+  const chatLive = pairedReady && deliveryPeer?.dataLink === "open";
+  // A security rejection stops the chat on both layers until the person acts.
+  const chatStop = paired && (deliveryPeer?.pairing?.keyMismatch || deliveryPeer?.dhtDelivery?.error?.includes("does not match"))
+    ? deliveryPeer?.pairing?.error ?? deliveryPeer?.dhtDelivery?.error ?? "This chat stopped: your contact's key changed." : undefined;
   // A chat made here (it has an invite to give) is the inviter's side of the pairing; read once, before the
   // invite code is forgotten when the contact shows up.
   const createdHere = useMemo(() => !!getInviteCode(sessionId), [sessionId]);
@@ -456,6 +463,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 )}
               </p>
               {paired && <IdentityStack peerKey={params.peerPubKeyB64} open={showIdentities} onOpen={() => setShowIdentities(open => !open)} />}
+              {compat && <span data-testid="compat-chat" title={t("chat.compat.hint")}
+                className="shrink-0 rounded bg-surface-hover px-1.5 py-0.5 text-[10px] leading-none text-text-muted whitespace-nowrap max-md:hidden">{t("chat.compat.label")}</span>}
               </div>
             )}
             <div className="flex min-w-0 items-center gap-2">
@@ -625,6 +634,17 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                   {t("chat.menu.services")}
                 </MenuItem>
               )}
+              {compat && (
+                <MenuItem testId="chat-continue-new" onClick={() => {
+                  closeMenu();
+                  void continueInNewChat(sessionId).then(next => {
+                    if (next) void sendMessage(next.message).finally(() => nav.conversation(chatPath(next.sessionId)));
+                  });
+                }}
+                  icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5" /><path d="M16 19h6m-3-3 3 3-3 3" /></svg>}>
+                  {t("chat.menu.continueNew")}
+                </MenuItem>
+              )}
               <MenuItem onClick={() => { forceRefresh(); closeMenu(); }}
                 icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" /><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" /></svg>}>
                 {t("chat.menu.refresh")}
@@ -645,6 +665,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
       </div>
 
       <PeerServices peerPubKey={params.peerPubKeyB64} showLink={!paired} onManage={() => setShowServices(true)} />
+
+      {compat && session?.continuedIn && (
+        <div data-testid="compat-continued" className="flex items-center justify-center gap-2 bg-panel-header/60 px-4 py-1.5 text-xs text-text-secondary">
+          <span>{t("chat.compat.continued")}</span>
+          <button type="button" className="underline text-accent cursor-pointer" onClick={() => nav.conversation(chatPath(session.continuedIn!))}>{t("chat.compat.open")}</button>
+        </div>
+      )}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto chat-wallpaper">
@@ -703,17 +730,20 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
       <MessageInput draftId={sessionId}
         key={sessionId}
         onSend={sendMessage}
-        disabled={isSending || (paired && !textReady)}
+        // Ghostly offline, or a security stop: nothing can go. Otherwise what cannot go now waits.
+        disabled={isSending || (paired && (!!chatStop || engine.state?.settings.online === false))}
         disabledPlaceholder="Message…"
         // The DHT carries a few hundred characters; the direct link has room for long invoices and ecash tokens.
-        maxBytes={dhtOnly ? deliveryPeer?.dhtDelivery?.maxTextBytes ?? 256 : undefined}
+        softBytes={paired && !chatLive ? deliveryPeer?.dhtDelivery?.maxTextBytes ?? 256 : undefined}
         maxLength={paired ? 16_384 : platform?.getPeer(params.peerPubKeyB64)?.dataLink === "open" ? 4000 : undefined}
         onSendFile={platform ? sendFile : undefined}
-        fileUnavailable={dhtOnly ? "DHT carries text only. Choose a live connection for files." : paired && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.files ? (pairedReady ? "Update both peers to send files" : "Connect and confirm your peer to send files, or hold messages for them under ⋮ → Hold messages") : undefined}
-        paymentsUnavailable={!paymentsOn ? "Payments are off in this chat. Choose them under ⋮ → Payments." : dhtOnly ? "DHT carries text only. Choose a live connection for sats." : paired && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.payments ? (pairedReady ? "Your contact has payments off in this chat, or needs an updated Ghostly" : deliveryPeer?.textDelivery === "hold" ? "Your contact allowed neither Cashu nor Lightning at your last session; a request cannot be held" : "Connect and confirm your peer to send sats") : undefined}
+        fileUnavailable={paired ? chatStop ?? (chatLive && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.files ? "Update both peers to send files" : undefined) : undefined}
+        paymentsUnavailable={!paymentsOn ? "Payments are off in this chat. Choose them under ⋮ → Payments." : chatStop ? chatStop : paired && chatLive && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.payments ? "Your contact has payments off in this chat, or needs an updated Ghostly" : undefined}
         payments={
           walletState && wallet && peerKey
-            ? { balance: walletState.balance, contact: displayName || undefined, onSend: paySend, onRequest: payRequest,reviewContext:platform?.getPeer(peerKey)?.id ? {wallet,peer:peerKey,linkId:platform.getPeer(peerKey)!.id!}:undefined }
+            ? { balance: walletState.balance, contact: displayName || undefined, onSend: paySend, onRequest: payRequest,
+              // Paying needs live: a bearer token never waits in a queue or a hold. A request can wait.
+              sendUnavailable: paired && !chatLive ? "Payments need a live connection" : undefined, reviewContext:platform?.getPeer(peerKey)?.id ? {wallet,peer:peerKey,linkId:platform.getPeer(peerKey)!.id!}:undefined }
             : undefined
         }
         identities={paired ? { peerKey: params.peerPubKeyB64, contact: shownName } : undefined}

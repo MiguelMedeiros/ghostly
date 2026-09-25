@@ -6,7 +6,7 @@ import type { ChatMessage } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
-// covers: chat.paired.links, chat.paired.image-links, chat.paired.receipts, chat.paired.delete-message, chat.paired.message-details, chat.paired.join-notice, payments.lightning.invoice-card, payments.cashu.token-card
+// covers: chat.paired.links, chat.paired.image-links, chat.paired.receipts, chat.paired.delete-message, chat.paired.message-details, chat.paired.join-notice, payments.lightning.invoice-card, payments.cashu.token-card, chat.waiting
 
 // A real bolt11 for 21u (2,100 sat), from packages/browser/test/uiHelpers.test.ts.
 const INVOICE = "lnbc21u1p42mkf2dqqpp56q3d9mfahf0974jqwy0yyfrg7zxksgxk7ufcc084yydhfx43daqqsp59g4z52329g4z52329g4z52329g4z52329g4z52329g4z52329g4q9qrsgqcqzyskhkhqar4dqgqfmarvdttr8x2nrp4txtamfupfftrnn4hmrp7s8ayen7hp2ye58jq8zu65rch9eplpxkhf3pf2nvuynhqxvkw5f7a2vgq486x8x";
@@ -212,6 +212,7 @@ describe("MessageBubble: delivery", () => {
     ["held", "Held · waiting for your contact"],
     ["delivered", "Received by peer"],
     ["queued", "Not confirmed yet · sends again by itself"],
+    ["waiting", "Sends when live"],
     ["failed", "Delivery unconfirmed"],
   ] as const)("says a %s message is %s", (delivery, text) => {
     bubble({ sender: "me", delivery });
@@ -238,6 +239,16 @@ describe("MessageBubble: delivery", () => {
     bubble({ sender: "me", delivery: "queued", deliveryError: "Connection closed before receipt." });
     expect(screen.getByRole("status")).not.toHaveTextContent("Delivery unconfirmed");
     expect(screen.queryByRole("button", { name: "Retry message" })).not.toBeInTheDocument();
+  });
+
+  it("offers a cancel for what waits for a live connection, with why it waits", async () => {
+    const { user, engine } = bubble({ sender: "me", delivery: "waiting", deliveryError: "Longer than the 256 bytes the DHT carries: it is sent when you are live." });
+    act(() => engine.update({ links: [linkView()] }));
+    engine.on("deleteMessage", () => undefined);
+    expect(screen.getByTestId("waiting-reason")).toHaveTextContent("256 bytes");
+    expect(screen.queryByRole("button", { name: "Retry message" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(engine.callsTo("deleteMessage")).toEqual([{ linkId: "link-1", messageId: "m1" }]);
   });
 
   it("does not retry into a chat that is not there", async () => {

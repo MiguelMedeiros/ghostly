@@ -32,7 +32,7 @@ async function mode(peer:Peer,dht:boolean) {
 async function noStreams(peers:Peer[]) { for(const p of peers) expect(await p.page.evaluate(()=>Number(localStorage.getItem("qa-stream-dials")??0))).toBe(0); }
 const received=(p:Peer)=>chat(p).getByText("Received by peer",{exact:true});
 
-test("DHT-only starts from an invite without streams, preserves drafts and receipts across reload",{ tag: ["@feature:chat.dht.send", "@feature:invite.dht"] },async({peer,relay})=>{
+test("DHT-only starts from an invite without streams, preserves drafts and receipts across reload",{ tag: ["@feature:chat.dht.send", "@feature:invite.dht", "@feature:chat.waiting"] },async({peer,relay})=>{
   const a=await peer("dht-first"),b=await peer("dht-second");
   await watchStreams(a);await watchStreams(b);
   await join(b,await createDht(a));
@@ -40,8 +40,13 @@ test("DHT-only starts from an invite without streams, preserves drafts and recei
   const text="DHT íntegro 👻";
   await say(a,text);await expect(chat(b).getByText(text,{exact:true})).toBeVisible();await expect(received(a)).toHaveCount(1);
   expect([...relay.packets.values()].every(packet=>!packet.includes(Buffer.from(text)))).toBe(true);
-  const large="👻".repeat(65); await b.page.getByPlaceholder("Message…").fill(large);await b.page.getByRole("button",{name:"Send message",exact:true}).click();
-  await expect(b.page.getByRole("alert")).toContainText("260 UTF-8 bytes");await expect(b.page.getByPlaceholder("Message…")).toHaveValue(large);
+  // Past the 256 bytes the DHT carries the counter turns amber, and the text waits for a live connection with a cancel (WISP 400).
+  const large="👻".repeat(65); await b.page.getByPlaceholder("Message…").fill(large);
+  await expect(b.page.getByTestId("dht-byte-count")).toHaveText("260 / 256 B");
+  await b.page.getByRole("button",{name:"Send message",exact:true}).click();
+  const waiting=chat(b).locator(".group").filter({hasText:large});
+  await expect(waiting.getByText("Sends when live",{exact:true})).toBeVisible();await expect(b.page.getByPlaceholder("Message…")).toHaveValue("");
+  await waiting.getByTestId("cancel-waiting").click();await expect(waiting).toHaveCount(0);
   await b.page.getByPlaceholder("Message…").fill("Reply over DHT");await b.page.getByRole("button",{name:"Send message",exact:true}).click();
   await expect(chat(a).getByText("Reply over DHT",{exact:true})).toBeVisible();await expect(received(b)).toHaveCount(1);
   await a.page.reload();await b.page.reload();
@@ -50,7 +55,8 @@ test("DHT-only starts from an invite without streams, preserves drafts and recei
   await expect(b.page.getByTestId("connection-options")).toHaveAccessibleName(/DHT/);
   for(const p of [a,b]) {await expect(chat(p).getByText(text,{exact:true})).toHaveCount(1);await expect(chat(p).getByText("Reply over DHT",{exact:true})).toHaveCount(1);}
   await noStreams([a]);
-  await expect(a.page.getByRole("button",{name:"Send a file",exact:true})).toBeDisabled();
+  // A file waits for a live connection instead of being refused.
+  await expect(a.page.getByRole("button",{name:"Send a file",exact:true})).toBeEnabled();
 });
 
 test("DHT published while contact is away survives sender restart and is received once when contact returns",{ tag: ["@feature:chat.dht.offline"] },async({peer})=>{

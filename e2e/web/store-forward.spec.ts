@@ -17,6 +17,8 @@ async function holdOn(p: Peer) {
   await dialog.getByTestId("chat-hold-save").click();
   await expect(dialog).toHaveCount(0);
 }
+/** Past the 256 bytes the DHT carries: short text to an away contact takes the DHT floor (WISP 403); longer text is held. */
+const LONG = " " + "and a few more words, to go past what the DHT carries. ".repeat(6);
 const held = (p: Peer, text: string) => chat(p).locator(".group").filter({ hasText: text });
 /** Bob's page is closed and Alice's side has noticed: what she sends now is held. */
 async function away(alice: Peer, bob: Peer): Promise<string> {
@@ -74,7 +76,7 @@ test("text, a picture and a request held for an away contact arrive in order; a 
 
   // Bob leaves. Alice sends text, a picture and a request: each is held, and the chat says how much waits.
   const url = await away(alice, bob);
-  await say(alice, "held while you were out");
+  await say(alice, `held while you were out${LONG}`);
   await expect(held(alice, "held while you were out").getByText("Held · waiting for your contact")).toBeVisible({ timeout: 30_000 });
   await alice.page.getByTestId("file-input").setInputFiles({ name: "ghost.gif", mimeType: "image/gif", buffer: GIF });
   await expect(held(alice, "ghost.gif").getByText("Held · waiting for your contact")).toBeVisible({ timeout: 30_000 });
@@ -115,7 +117,7 @@ test("text, a picture and a request held for an away contact arrive in order; a 
 
   // A held object changed in storage is refused by Bob, told to Alice as such, and never shown.
   const again = await away(alice, bob);
-  await say(alice, "this one gets tampered");
+  await say(alice, `this one gets tampered${LONG}`);
   await expect(held(alice, "this one gets tampered").getByText("Held · waiting for your contact")).toBeVisible({ timeout: 30_000 });
   const keys = [...(await (await s3("GET", "?list-type=2")).text()).matchAll(/<Key>([^<]+)<\/Key>/g)].map((m) => m[1]).filter((k) => !k.endsWith("manifest.ghostly-held"));
   expect(keys).toHaveLength(1);
@@ -135,7 +137,7 @@ test("text, a picture and a request held for an away contact arrive in order; a 
   await alice.page.reload();
   await expect(alice.page.getByTestId("contact-status")).toHaveAttribute("aria-label", "Connected", { timeout: 60_000 });
   const once = await away(alice, bob);
-  await say(alice, "nobody will read this in time");
+  await say(alice, `nobody will read this in time${LONG}`);
   await expect(held(alice, "nobody will read this in time").getByText("Held · waiting for your contact")).toBeVisible({ timeout: 30_000 });
   await expect(held(alice, "nobody will read this in time")).toContainText("whole lifetime", { timeout: 90_000 });
   await back(bob, once);
@@ -143,7 +145,7 @@ test("text, a picture and a request held for an away contact arrive in order; a 
   await expect(chat(bob).getByText("nobody will read this in time")).toHaveCount(0);
 });
 
-test("a contact whose app does not hold is unaffected: nothing is held, offline text still goes the old way", { tag: ["@feature:delivery.hold.legacy-peer", "@feature:delivery.hold.enable", "@feature:chat.paired.offline-send"] }, async ({ peer }) => {
+test("a contact whose app does not hold is unaffected: nothing is held, offline text still goes the old way", { tag: ["@feature:delivery.hold.legacy-peer", "@feature:delivery.hold.enable", "@feature:chat.paired.offline-send", "@feature:chat.waiting"] }, async ({ peer }) => {
   const [carol, dave] = await Promise.all([peer("carol"), peer("dave")]);
   await link(carol, dave);
   await connect(carol, dave);
@@ -159,8 +161,14 @@ test("a contact whose app does not hold is unaffected: nothing is held, offline 
   await expect(carol.page.getByTestId("contact-status")).not.toHaveAttribute("aria-label", "Connected", { timeout: 60_000 });
   await say(carol, "old way while away");
   await expect(held(carol, "old way while away").getByText("Sent · waiting for receipt")).toBeVisible({ timeout: 30_000 });
+  // Longer than the DHT carries, and nothing holds it: it waits, with a cancel, and goes when the chat is live.
+  await say(carol, `long while away${LONG}`);
+  await expect(held(carol, "long while away").getByText("Sends when live")).toBeVisible({ timeout: 30_000 });
+  await expect(held(carol, "long while away").getByTestId("cancel-waiting")).toBeVisible();
   await expect(carol.page.getByTestId("hold-indicator")).toHaveCount(0);
   await back(dave, url);
   await expect(chat(dave).getByText("old way while away")).toBeVisible({ timeout: 60_000 });
   await expect(held(carol, "old way while away").getByText("Received by peer")).toBeVisible({ timeout: 60_000 });
+  await expect(chat(dave).getByText("long while away")).toBeVisible({ timeout: 90_000 });
+  await expect(held(carol, "long while away").getByText("Received by peer")).toBeVisible({ timeout: 60_000 });
 });

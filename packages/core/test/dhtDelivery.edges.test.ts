@@ -3,10 +3,10 @@ import { ed25519, x25519 } from "@noble/curves/ed25519.js";
 import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { fromBase64Url, randomBytes, toBase64Url, utf8Encode } from "../src/bytes";
-import { encrypt } from "../src/crypto";
+import { decrypt, encrypt } from "../src/crypto";
 import { createIdentity, identityFromSeed, identityFromSeedB64, publicKeyFromZ32, sign } from "../src/identity";
 import { createLink } from "../src/invite";
-import { DhtDelivery, DHT_MESSAGE_TTL, LEAVING_DHT_FAST_MS, emptyDhtDeliveryState, type DhtDeliveryState, type DhtDeliveryView } from "../src/dhtDelivery";
+import { DhtDelivery, DHT_MESSAGE_TTL, DHT_TEXT_REFUSED, DROP_FAST_MS, LEAVING_DHT_FAST_MS, LIVE_POLL_MS, RENDEZVOUS_FAST_MS, emptyDhtDeliveryState, type DhtDeliveryState, type DhtDeliveryView } from "../src/dhtDelivery";
 import type { PairingCredentials } from "../src/pairedSession";
 import type { GhostRecord, SignedPacket } from "../src/pkarr";
 
@@ -19,7 +19,11 @@ const ID = "abcdefghijklmnopqrstuv", ID2 = "bcdefghijklmnopqrstuvw";
  * forged by hand from the link secret and her participation seed, exactly what a peer holding them
  * can do, so every refusal branch of the receiver can be reached with otherwise valid cryptography.
  */
-function setup(options: { mode?: "stream" | "dht"; pollMs?: number | null; state?: DhtDeliveryState; bobCredentials?: PairingCredentials } = {}) {
+/** Credentials of a Bob that pinned some contact already: no first contact under way. */
+const pinned = (): PairingCredentials => ({ seedB64: createIdentity().seedB64, peerKey: createIdentity().pubKeyZ32 });
+
+function setup(options: { mode?: "stream" | "dht"; pollMs?: number | null; state?: DhtDeliveryState; bobCredentials?: PairingCredentials;
+  capsRev?: number; peerCapsRev?: (rev: number) => void; peerAcceptsText?: () => boolean } = {}) {
   const link = createLink();
   const alice = identityFromSeedB64(createIdentity().seedB64), bobSeed = createIdentity().seedB64;
   const bobParticipation = identityFromSeedB64(bobSeed);
@@ -45,6 +49,7 @@ function setup(options: { mode?: "stream" | "dht"; pollMs?: number | null; state
   const bob = new DhtDelivery({ params: link.invite, mode: options.mode ?? "dht", state: options.state, credentials, transport,
     save: async state => { if (failSave) throw new Error("disk full"); saved.push(structuredClone(state)); }, pin: async key => { pins.push(key); },
     message: async m => { messages.push(m); }, receipt: async id => { receipts.push(id); }, changed: view => { views.push(view); },
+    capsRev: () => options.capsRev, peerCapsRev: options.peerCapsRev, peerAcceptsText: options.peerAcceptsText,
     ...(options.pollMs === null ? {} : { pollMs: options.pollMs ?? 100 }) });
 
   type Body = unknown[];
@@ -66,7 +71,9 @@ function setup(options: { mode?: "stream" | "dht"; pollMs?: number | null; state
   const put = async (p: SignedPacket | null) => { packet = p; await vi.advanceTimersByTimeAsync(options.pollMs ?? 100); };
   const last = () => saved.at(-1) ?? options.state ?? emptyDhtDeliveryState();
   const setFailSave = (on: boolean) => { failSave = on; };
-  return { setFailSave, link, alice, bob, credentials, mailbox, envelopeKey, transport, saved, messages, receipts, views, pins, body, signature,
+  /** The body of the last first-contact envelope Bob published. */
+  const openPublished = (): unknown[] => JSON.parse(decrypt(transport.publish.mock.lastCall![1][0].value, envelopeKey))[0];
+  return { setFailSave, openPublished, link, alice, bob, credentials, mailbox, envelopeKey, transport, saved, messages, receipts, views, pins, body, signature,
     invitePacket, pinnedPacket, put, last, bobParticipation };
 }
 
@@ -394,7 +401,7 @@ describe("DHT delivery: sending and lifecycle", () => {
     await vi.advanceTimersByTimeAsync(4_000 * 3 + 10);
     expect(dht.transport.resolve).toHaveBeenCalledTimes(4);
     await dht.bob.stop();
-    const stream = setup({ pollMs: null, mode: "stream" }); await stream.bob.start();
+    const stream = setup({ pollMs: null, mode: "stream", bobCredentials: pinned() }); await stream.bob.start();
     await vi.advanceTimersByTimeAsync(29_000);
     expect(stream.transport.resolve).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1_010);
@@ -412,7 +419,7 @@ describe("DHT delivery: sending and lifecycle", () => {
   });
 
   it("after leaving DHT-only, reads a contact still there at the DHT pace for two minutes, then at 30 s", async () => {
-    const h = setup({ pollMs: null, state: { ...emptyDhtDeliveryState(), peerMode: "dht" } }); await h.bob.start();
+    const h = setup({ pollMs: null, state: { ...emptyDhtDeliveryState(), peerMode: "dht" }, bobCredentials: pinned() }); await h.bob.start();
     await vi.advanceTimersByTimeAsync(0);
     await h.bob.setMode("stream"); await vi.advanceTimersByTimeAsync(0);
     const reads = h.transport.resolve.mock.calls.length;
@@ -423,6 +430,65 @@ describe("DHT delivery: sending and lifecycle", () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(h.transport.resolve.mock.calls.length - later, "two reads a minute, not fifteen").toBe(2);
     await h.bob.stop();
+  });
+
+  it("reads a first contact at the signaling pace for ten minutes, then at 30 s", async () => {
+    const h = setup({ pollMs: null, mode: "stream" }); await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
+    const first = h.transport.resolve.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(h.transport.resolve.mock.calls.length - first, "an inviter waiting for its contact reads every 4 s").toBe(15);
+    await vi.advanceTimersByTimeAsync(RENDEZVOUS_FAST_MS);
+    const later = h.transport.resolve.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(h.transport.resolve.mock.calls.length - later, "an invite nobody used does not spend the relays' budget").toBe(2);
+    h.bob.expect(); await vi.advanceTimersByTimeAsync(0);
+    const expected = h.transport.resolve.mock.calls.length;
+    expect(expected - later, "a fresh packet of the contact is looked at once").toBe(3);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(h.transport.resolve.mock.calls.length - expected).toBe(5);
+    await h.bob.stop();
+  });
+
+  it("reads every 5 minutes while live, at once when layer 1 is lost, then every 4 s for two minutes", async () => {
+    const h = setup({ pollMs: null, mode: "stream", bobCredentials: pinned() }); await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
+    h.bob.setLive(true);
+    const live = h.transport.resolve.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(LIVE_POLL_MS - 1_000);
+    expect(h.transport.resolve.mock.calls.length - live, "no read while live").toBe(0);
+    await vi.advanceTimersByTimeAsync(1_010);
+    expect(h.transport.resolve.mock.calls.length - live).toBe(1);
+    h.bob.setLive(false); await vi.advanceTimersByTimeAsync(0);
+    const dropped = h.transport.resolve.mock.calls.length;
+    expect(dropped - live, "read at once on the drop").toBe(2);
+    await vi.advanceTimersByTimeAsync(DROP_FAST_MS);
+    expect(h.transport.resolve.mock.calls.length - dropped).toBe(30);
+    const after = h.transport.resolve.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(h.transport.resolve.mock.calls.length - after, "back to 30 s in the background").toBe(2);
+    h.bob.setActive(true); await vi.advanceTimersByTimeAsync(0);
+    const active = h.transport.resolve.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(20_010);
+    expect(h.transport.resolve.mock.calls.length - active, "4 s while the chat is open on the DHT").toBe(5);
+    await h.bob.stop();
+  });
+
+  it("tells its capability-record revision in the envelope and reports the contact's", async () => {
+    const revs: number[] = [];
+    const h = setup({ mode: "dht", capsRev: 7, peerCapsRev: rev => revs.push(rev) }); await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
+    const body = h.openPublished();
+    expect(body.length).toBe(9);
+    expect(body[8]).toBe(7);
+    await h.put(h.invitePacket(h.body({ 8: 3 })));
+    expect(revs).toEqual([3]);
+    await h.put(h.invitePacket(h.body({ 8: "x", 9: ["later"] }, 2)));
+    expect(revs, "a malformed or unknown trailing element is ignored, the envelope still read").toEqual([3]);
+    expect(h.last().peerSequence, "the envelope with an unknown element was still read").toBe(2);
+    await h.bob.stop();
+  });
+
+  it("refuses text for a contact whose capability record lacks dht-text/1", async () => {
+    const h = setup({ mode: "stream", bobCredentials: pinned(), peerAcceptsText: () => false });
+    expect(h.bob.validate("hello", Date.now(), ID)).toBe(DHT_TEXT_REFUSED);
   });
 
   it("reads now when asked, and once more right after a read that was already in flight", async () => {

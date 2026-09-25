@@ -69,7 +69,8 @@ it("fails closed on a replacement participation key and exposes real publication
 
 it("accepts offline text for stream-preferring authenticated peers and preserves pending intent across mode changes", async () => {
   vi.useFakeTimers(); const h = setup(), a = h.make(0, "stream"), b = h.make(1, "stream");
-  expect(a.validate("first", Date.now(), "abcdefghijklmnopqrstuv")).toContain("authenticated");
+  // Every chat's first contact may carry text (WISP 403): no refusal before the pin any more.
+  expect(a.validate("first", Date.now(), "abcdefghijklmnopqrstuv")).toBeNull();
   await a.start(); await b.start(); await vi.advanceTimersByTimeAsync(4500);
   expect(await a.send("offline text", Date.now(), "abcdefghijklmnopqrstuv")).toBeNull();
   const deadline = h.saved[0].pending!.expires;

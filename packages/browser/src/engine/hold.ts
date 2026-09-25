@@ -144,6 +144,8 @@ export class HoldEngine {
     this.host.changed();
     if (this.expecting.has(linkId)) this.wake(linkId);
   }
+  /** Ways of paying the contact allowed at the last session, whatever the hold settings; undefined before any. */
+  lastPeerMethods(linkId: string): PaymentMethodName[] | undefined { return this.state(linkId).peerPaymentMethods; }
   async rememberPeerMethods(linkId: string, methods: PaymentMethodName[]): Promise<void> {
     await this.serialize(linkId, async () => {
       const hold = this.state(linkId);

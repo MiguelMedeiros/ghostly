@@ -18,6 +18,12 @@ const MAX_ATTEMPTS = 8;
 /** The contact's mailbox is read this often while either side is DHT-only, and otherwise… */
 const DHT_POLL_MS = 4_000;
 const STREAM_POLL_MS = 30_000;
+/** …only this often while layer 1 carries the chat (WISP 403, Q7): the relays' per-IP budget is shared by every chat. */
+export const LIVE_POLL_MS = 5 * 60_000;
+/** A new chat reads the contact's mailbox at the signaling pace this long after it starts, until it pins a contact. */
+export const RENDEZVOUS_FAST_MS = 10 * 60_000;
+/** After layer 1 is lost, the mailbox is read at once and then at the signaling pace this long. */
+export const DROP_FAST_MS = 2 * 60_000;
 /**
  * …except for this long after this side leaves DHT-only while the contact is still there: its own
  * switch then shows in seconds, not at the next 30 s read (both sides are blocked from a live link until
@@ -26,7 +32,11 @@ const STREAM_POLL_MS = 30_000;
 export const LEAVING_DHT_FAST_MS = 2 * 60_000;
 const ID = /^[A-Za-z0-9_-]{22}$/;
 type Message = [id: string, timestamp: number, text: string];
-type Body = [version: 1, sequence: number, issued: number, expires: number, author: string, mode: DeliveryMode, message: Message | null, receipt: string | null];
+/**
+ * The ninth element, the author's capability-record revision (WISP 03), is optional; readers ignore
+ * trailing elements they do not know. The signature covers all of them.
+ */
+type Body = [version: 1, sequence: number, issued: number, expires: number, author: string, mode: DeliveryMode, message: Message | null, receipt: string | null, capsRev?: number];
 export interface DhtDeliveryState {
   sequence: number;
   peerSequence: number;
@@ -56,7 +66,14 @@ export class DhtDelivery {
   private running = false;
   private ticking = false;
   private tickAgain = false;
+  /** Until when this side, having left DHT-only, reads a contact still there at the fast pace. */
+  private leavingUntil = 0;
+  /** Until when the mailbox is read at the fast pace for any other reason (a drop, a first contact). */
   private fastUntil = 0;
+  /** Until when a chat with no pinned contact reads at the fast pace. */
+  private rendezvousUntil = 0;
+  private live = false;
+  private active = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private chain = Promise.resolve();
   private lastPublish = 0;
@@ -76,6 +93,12 @@ export class DhtDelivery {
     message(message: { id: string; text: string; timestamp: number }): Promise<void>;
     receipt(id: string): Promise<void>;
     changed(view: DhtDeliveryView): void;
+    /** This side's capability-record revision, told in every envelope (WISP 03). */
+    capsRev?(): number | undefined;
+    /** An envelope from the contact named this revision of its capability record. */
+    peerCapsRev?(rev: number): void;
+    /** Whether the contact's capability record accepts DHT text (`dht-text/1`); absent or unknown: it does. */
+    peerAcceptsText?(): boolean;
     pollMs?: number;
   }) {
     this.state = structuredClone(options.state ?? emptyDhtDeliveryState()); this.mode = options.mode;
@@ -120,6 +143,8 @@ export class DhtDelivery {
   async start(): Promise<void> {
     if (this.running) return; this.running = true;
     if (this.state.confirmed) await this.options.receipt(this.state.confirmed);
+    // A chat with no pinned contact yet is a first contact: its mailbox is read at the signaling pace for a while.
+    if (!this.options.credentials.peerKey) this.rendezvousUntil = Date.now() + RENDEZVOUS_FAST_MS;
     this.changed(); void this.tick();
   }
   async stop(): Promise<void> { this.running = false; if (this.timer) clearTimeout(this.timer); this.timer = null; await this.chain; }
@@ -129,16 +154,40 @@ export class DhtDelivery {
       await this.persist({ ...this.state });
       // The contact learns the new method from the next envelope: it goes out now, not after the publish spacing.
       this.mode = mode; this.controlDue = 0; this.lastPublish = 0;
-      this.fastUntil = mode === "stream" ? Date.now() + LEAVING_DHT_FAST_MS : 0;
+      this.leavingUntil = mode === "stream" ? Date.now() + LEAVING_DHT_FAST_MS : 0;
       this.changed();
     });
     void this.tick();
   }
   /** Reads the contact's mailbox now: something says it may have changed its delivery method. */
   refresh(): void { void this.tick(); }
+  /** Reads the contact's mailbox at the signaling pace for a while (a fresh packet of a contact not pinned yet). */
+  expect(ms = DROP_FAST_MS): void {
+    const until = Date.now() + ms;
+    if (until <= this.fastUntil) return;
+    this.fastUntil = until; void this.tick();
+  }
+  /**
+   * Layer 1 carries the chat, or no longer does. While it does, the mailbox is read every 5 minutes; the
+   * moment it is lost, at once and then every 4 s for two minutes (WISP 403, poll pace).
+   */
+  setLive(live: boolean): void {
+    if (live === this.live) return;
+    this.live = live;
+    if (live) { this.fastUntil = 0; this.schedule(); return; }
+    this.expect(DROP_FAST_MS);
+  }
+  get isLive(): boolean { return this.live; }
+  /** The chat is open with the app in front: on the DHT, its mailbox is read at the signaling pace. */
+  setActive(active: boolean): void {
+    if (active === this.active) return;
+    this.active = active;
+    if (active && !this.live) void this.tick(); else this.schedule();
+  }
   validate(text: string, timestamp: number, id: string): string | null {
-    if (this.mode === "stream" && (!this.options.credentials.peerKey || !this.state.peerMode)) return "Offline DHT delivery needs an authenticated contact advertising DHT support. Use a DHT-only invitation for first contact.";
+    // Every chat's first contact runs here too (WISP 403): before the pin the text is sealed with the invite key.
     if (this.errors.peer) return this.errors.peer;
+    if (this.options.peerAcceptsText?.() === false) return DHT_TEXT_REFUSED;
     if (!ID.test(id) || !Number.isSafeInteger(timestamp) || timestamp <= 0) return "Invalid message.";
     if (utf8Encode(text).length > DHT_TEXT_BYTES) return `DHT text is limited to ${DHT_TEXT_BYTES} UTF-8 bytes. Shorten it or choose a live connection.`;
     if (/cashu[AB][A-Za-z0-9_-]+/i.test(text)) return "Payment tokens cannot be sent through DHT delivery.";
@@ -147,7 +196,7 @@ export class DhtDelivery {
     if (pending?.message[0] === id && pending.expires > now && pending.attempts >= MAX_ATTEMPTS) return "DHT retry budget exhausted. Wait for expiry before retrying this message.";
     const next = pending?.message[0] === id && pending.expires > now ? pending : { message: [id, timestamp, text] as Message, expires: now + DHT_MESSAGE_TTL, attempts: 0, next: now };
     // Validate the complete encrypted DNS packet before accepting local intent.
-    try { this.records([1, this.state.sequence + 1, now, next.expires, this.participation.pubKeyZ32, this.mode, next.message, this.state.receipt?.id ?? "abcdefghijklmnopqrstuv"], this.options.credentials.peerKey ?? this.participation.pubKeyZ32); }
+    try { this.records(this.body(this.state.sequence + 1, now, next.expires, next.message, this.state.receipt?.id ?? "abcdefghijklmnopqrstuv"), this.options.credentials.peerKey ?? this.participation.pubKeyZ32); }
     catch (error) { return error instanceof Error ? error.message : String(error); }
     return null;
   }
@@ -169,6 +218,12 @@ export class DhtDelivery {
       this.changed();
     });
   }
+  private body(sequence: number, issued: number, expires: number, message: Message | null, receipt: string | null): Body {
+    const rev = this.options.capsRev?.();
+    const body: Body = [1, sequence, issued, expires, this.participation.pubKeyZ32, this.mode, message, receipt];
+    if (rev !== undefined && Number.isSafeInteger(rev) && rev >= 0) body.push(rev);
+    return body;
+  }
   private async publish(force = false): Promise<void> {
     const now = Date.now();
     if (!this.running || this.errors.peer || (!force && now - this.lastPublish < 4_000)) return;
@@ -176,7 +231,7 @@ export class DhtDelivery {
     const receipt = this.state.receipt && this.state.receipt.expires > now && this.state.receipt.attempts < MAX_ATTEMPTS ? this.state.receipt : undefined;
     if (!force && (!pending || pending.next > now) && !receipt && this.controlDue > now) return;
     const expires = pending?.expires ?? now + CONTROL_TTL;
-    const body: Body = [1, this.state.sequence + 1, now, expires, this.participation.pubKeyZ32, this.mode, pending?.message ?? null, receipt?.id ?? null];
+    const body = this.body(this.state.sequence + 1, now, expires, pending?.message ?? null, receipt?.id ?? null);
     const records = this.records(body);
     // Persist sequence and attempt count first. A crash cannot reuse them or
     // reset the retransmission budget/absolute message deadline.
@@ -199,9 +254,9 @@ export class DhtDelivery {
     let envelope: unknown; try { envelope = JSON.parse(plaintext); } catch { return; }
     if (!Array.isArray(envelope) || envelope.length !== 2 || !Array.isArray(envelope[0])) return;
     const [body, signature] = envelope as [Body, string];
-    const [version, sequence, issued, expires, author, mode, message, receipt] = body;
+    const [version, sequence, issued, expires, author, mode, message, receipt, capsRev] = body;
     const now = Date.now();
-    if (body.length !== 8 || version !== 1 || !Number.isSafeInteger(sequence) || sequence < 1 || !Number.isSafeInteger(issued) ||
+    if (body.length < 8 || body.length > 16 || version !== 1 || !Number.isSafeInteger(sequence) || sequence < 1 || !Number.isSafeInteger(issued) ||
       !Number.isSafeInteger(expires) || issued > now + 30_000 || expires <= now || expires - issued > CONTROL_TTL || issued >= expires ||
       (mode !== "stream" && mode !== "dht") || typeof author !== "string" || typeof signature !== "string" || !/^[A-Za-z0-9_-]{86}$/.test(signature)) return;
     if (sender && sender !== author) return;
@@ -230,6 +285,7 @@ export class DhtDelivery {
       pending: confirmed && this.state.pending?.message[0] === confirmed ? undefined : this.state.pending });
     if (confirmed) await this.options.receipt(confirmed);
     delete this.errors.peer;
+    if (Number.isSafeInteger(capsRev) && (capsRev as number) >= 0) this.options.peerCapsRev?.(capsRev as number);
     this.changed();
   }
   private async tick(): Promise<void> {
@@ -249,7 +305,21 @@ export class DhtDelivery {
     } finally { this.ticking = false; }
     if (!this.running) return;
     if (this.tickAgain) { void this.tick(); return; }
-    const waiting = this.mode === "dht" || (this.state.peerMode === "dht" && Date.now() < this.fastUntil);
-    this.timer = setTimeout(() => void this.tick(), this.options.pollMs ?? (waiting ? DHT_POLL_MS : STREAM_POLL_MS));
+    this.schedule();
+  }
+  /** How long until the next read of the contact's mailbox (WISP 403, poll pace). */
+  get pollMs(): number {
+    if (this.options.pollMs) return this.options.pollMs;
+    const now = Date.now();
+    if (this.mode === "dht" || (this.state.peerMode === "dht" && now < this.leavingUntil) || now < this.fastUntil) return DHT_POLL_MS;
+    if (!this.options.credentials.peerKey && now < this.rendezvousUntil) return DHT_POLL_MS;
+    if (this.live) return LIVE_POLL_MS;
+    return this.active ? DHT_POLL_MS : STREAM_POLL_MS;
+  }
+  private schedule(): void {
+    if (!this.running || this.ticking) return;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = setTimeout(() => void this.tick(), this.pollMs);
   }
 }
+export const DHT_TEXT_REFUSED = "Your contact's app does not accept text over the DHT. It is sent when you are live.";
