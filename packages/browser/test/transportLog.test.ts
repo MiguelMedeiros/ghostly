@@ -69,11 +69,43 @@ describe("transport log: what a change reads as", () => {
     ]);
   });
 
-  it("says who turned on DHT-only", () => {
+  it("says who chose DHT only, and when the chat leaves it and is live again", () => {
     const log = new TransportLog();
     log.observe(live("webrtc/1"), 0);
     log.observe(down({ dhtOnly: true, text: "dht" }), 10);
-    expect(log.entries[1]).toMatchObject({ kind: "lost", fallback: "dht-only", cause: "you" });
+    expect(log.entries[1]).toMatchObject({ kind: "dht-only", cause: "you", from: "webrtc/1" });
+    // The contact chooses it too: its own line. Nothing more while both stay.
+    log.observe(down({ dhtOnly: true, peerDhtOnly: true, text: "dht" }), 20);
+    expect(log.observe(down({ dhtOnly: true, peerDhtOnly: true, text: "dht" }), 25)).toBe(false);
+    expect(log.entries[2]).toMatchObject({ kind: "dht-only", cause: "contact" });
+    // I leave it: still DHT only, because of the contact. The contact leaves: back to automatic, then live.
+    expect(log.observe(down({ dhtOnly: false, peerDhtOnly: true, text: "dht" }), 30)).toBe(false);
+    log.observe(down({ text: "unavailable" }), 40);
+    expect(log.entries[3]).toMatchObject({ kind: "dht-left", transport: undefined });
+    log.observe(live("iroh/1"), 50);
+    expect(kinds(log)).toEqual(["connected", "dht-only", "dht-only", "dht-left", "back"]);
+    expect(log.entries[4]).toMatchObject({ transport: "iroh/1" });
+  });
+
+  it("puts the contact's DHT-only choice in place of the drop it caused, and names a chosen transport on the way out", () => {
+    const log = new TransportLog();
+    log.observe(live("webrtc/1"), 0);
+    // The link drops a moment before the contact's envelope says why.
+    log.observe(down(), 1_000);
+    log.observe(down({ peerDhtOnly: true, text: "dht" }), 2_000);
+    expect(kinds(log)).toEqual(["connected", "dht-only"]);
+    expect(log.entries[1]).toMatchObject({ cause: "contact", at: 2_000 });
+    log.observe(live("webrtc/1", { preferred: "webrtc/1" }), 3_000);
+    expect(log.entries.slice(2)).toEqual([expect.objectContaining({ kind: "dht-left", transport: "webrtc/1" }), expect.objectContaining({ kind: "back", transport: "webrtc/1" })]);
+  });
+
+  it("does not repeat a DHT-only line after a restart", () => {
+    const first = new TransportLog();
+    first.observe(live("webrtc/1"), 0);
+    first.observe(down({ dhtOnly: true, text: "dht" }), 10);
+    const reopened = new TransportLog(first.entries);
+    expect(reopened.observe(down({ dhtOnly: true, text: "dht" }), 100)).toBe(false);
+    expect(reopened.liveNow()).toBeUndefined();
   });
 
   it("says a switch that failed, once, and keeps the transport it stayed on", () => {

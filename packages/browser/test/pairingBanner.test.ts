@@ -45,21 +45,22 @@ const header = (html: string) => {
 };
 
 it.each([
-  ["connected", { status: "ready", transport: "iroh/1" }, { dataLink: "open" }, "Connected · Iroh", false],
+  // Live, the tooltip adds what the connection is (#204): here only why, since nothing was measured.
+  ["connected", { status: "ready", transport: "iroh/1" }, { dataLink: "open" }, "Connected · Iroh", false, " automatic"],
   ["waiting", { status: "connecting", peerKey: "peer" }, { dataLink: "connecting", peerOnline: true }, "Connecting…", true],
-  ["waiting", { status: "ready", transport: "webrtc/1", transitionTarget: "iroh/1" }, { dataLink: "open" }, "Switching · Iroh", true],
+  ["waiting", { status: "ready", transport: "webrtc/1", transitionTarget: "iroh/1" }, { dataLink: "open" }, "Switching · Iroh", true, " automatic"],
   ["waiting", { status: "waiting", peerKey: "peer" }, { dataLink: "idle", peerParticipationKey: "saved" }, "Waiting for contact", false],
   ["dht", { status: "ready", transport: "webrtc/1" }, { dataLink: "open", textDelivery: "dht" }, "DHT · offline text", false],
   ["dht", { status: "connecting" }, { dataLink: "idle", deliveryMode: "dht" }, "DHT only", false],
   ["failure", { status: "error", peerKey: "peer", error: "Relay refused" }, { dataLink: "idle" }, "Connection issue Relay refused", false],
-] as const)("the header shows the %s icon and no text (%#)", (state, pairing, extra, tooltip, pulse) => {
+] as const)("the header shows the %s icon and no text (%#)", (state, pairing, extra, tooltip, pulse, detail = "") => {
   client.state.settings.online = true;
   client.state.links = [{ id: "chat", peerPubKeyZ32: "peer", availableTransports: ["webrtc/1", "iroh/1"], pairing, ...extra }];
   const view = header(renderToStaticMarkup(createElement(MemoryRouter, {}, createElement(PairingBanner, { peerKey: "peer" }))));
   expect(view.text).toBe("");
   expect(view.state).toBe(state);
   expect(view.pulse).toBe(pulse);
-  expect(view.tooltip).toBe(tooltip);
+  expect(view.tooltip).toBe(tooltip + detail);
   expect(view.attributes).toContain(`aria-label="Connection options: ${tooltip.replace(" Relay refused", "")}"`);
   expect(view.attributes).toMatch(/aria-describedby="[^"]+-tip"/);
 });

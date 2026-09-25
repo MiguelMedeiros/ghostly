@@ -46,8 +46,10 @@ test("each timeline says when the chat went live, dropped and came back, and the
   await expect(alice.page.getByTestId("chat-connection-open")).toContainText(/Connection…WebRTC · (\d+ ms · )?the only one here/);
   await alice.page.getByTestId("chat-connection-open").click();
   const menu = alice.page.getByTestId("transport-menu");
-  await expect(menu.getByRole("radio")).toHaveCount(1);
-  await expect(menu.getByRole("radio", { name: /WebRTC/ })).toHaveAttribute("aria-checked", "true");
+  // WebRTC alone, and DHT only, which every app can choose.
+  await expect(menu.getByRole("radio")).toHaveCount(2);
+  await expect(menu.getByRole("radio", { name: "WebRTC" })).toHaveAttribute("aria-checked", "true");
+  await expect(menu.getByRole("radio", { name: "DHT only" })).toHaveAttribute("aria-checked", "false");
   await expect(menu.getByTestId("transport-menu-note")).toHaveText("This app connects over WebRTC only. Iroh and HyperDHT need Ghostly Desktop on both sides.");
   await alice.page.keyboard.press("Escape");
   await expect(menu).toBeHidden();
@@ -65,4 +67,35 @@ test("each timeline says when the chat went live, dropped and came back, and the
   await say(alice, "welcome back");
   await expect(chat(bob).getByText("welcome back")).toBeVisible({ timeout: 60_000 });
   await expect(lines(alice).filter({ hasText: "welcome back" })).toHaveCount(0);
+});
+
+test("DHT only from the Connection menu: both timelines say who chose it, texts still go, and both come back live", {
+  tag: ["@feature:transport.timeline", "@feature:transport.chat-switch", "@feature:invite.delivery-mode"],
+}, async ({ peer }) => {
+  test.setTimeout(5 * 60_000);
+  const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
+  await link(alice, bob);
+  await connect(alice, bob);
+  for (const p of [alice, bob]) await expect(lineText(p, "Connected over WebRTC")).toHaveCount(1, { timeout: 60_000 });
+
+  // Alice chooses DHT only; it travels in her DHT envelope, and Bob's app keeps off the live link too.
+  await alice.page.getByTitle("Options").click();
+  await alice.page.getByTestId("chat-connection-open").click();
+  await alice.page.getByTestId("transport-menu").getByTestId("transport-option-dht").click();
+  await expect(lineText(alice, "You chose DHT only")).toHaveCount(1, { timeout: 60_000 });
+  await expect(lineText(bob, /^(?!You ).+ chose DHT only$/)).toHaveCount(1, { timeout: 120_000 });
+  await expect(alice.page.getByTestId("connection-options")).toHaveAttribute("aria-label", "Connection options: DHT only");
+  await say(bob, "over the DHT");
+  await expect(chat(alice).getByText("over the DHT")).toBeVisible({ timeout: 120_000 });
+
+  // Back to Automatic: both timelines say DHT only is over, then that the chat is live again.
+  await alice.page.getByTitle("Options").click();
+  await alice.page.getByTestId("chat-connection-open").click();
+  const menu = alice.page.getByTestId("transport-menu");
+  await expect(menu.getByTestId("transport-option-dht")).toHaveAttribute("aria-checked", "true");
+  await menu.getByTestId("transport-option-webrtc").click();
+  for (const p of [alice, bob]) await expect(lineText(p, "Back to automatic")).toHaveCount(1, { timeout: 120_000 });
+  for (const p of [alice, bob]) await expect(lineText(p, "Back live over WebRTC")).toHaveCount(1, { timeout: 120_000 });
+  await say(alice, "live again");
+  await expect(chat(bob).getByText("live again")).toBeVisible({ timeout: 60_000 });
 });

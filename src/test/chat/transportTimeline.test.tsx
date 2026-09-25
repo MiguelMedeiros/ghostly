@@ -28,7 +28,10 @@ describe("transport lines: what each change reads as", () => {
     ["a lost link", { kind: "lost", transport: undefined, from: "webrtc/1" }, "Live connection lost"],
     ["a lost link, texts over the DHT", { kind: "lost", transport: undefined, from: "webrtc/1", fallback: "dht" }, "Live connection lost · texts go through the DHT"],
     ["a lost link, messages held", { kind: "lost", transport: undefined, from: "webrtc/1", fallback: "hold" }, "Live connection lost · messages wait for Ana"],
-    ["DHT only, your choice", { kind: "lost", transport: undefined, fallback: "dht-only", cause: "you" }, "You turned on DHT only · no live connection"],
+    ["DHT only, your choice", { kind: "dht-only", transport: undefined, cause: "you" }, "You chose DHT only"],
+    ["DHT only, the contact's choice", { kind: "dht-only", transport: undefined, cause: "contact" }, "Ana chose DHT only"],
+    ["out of DHT only", { kind: "dht-left", transport: undefined }, "Back to automatic"],
+    ["out of DHT only, a transport chosen", { kind: "dht-left", transport: "iroh/1" }, "Left DHT only · Iroh chosen"],
     ["flapping, live", { kind: "flapping", count: 3, live: true, since: 0, at: 55_000 }, "Reconnected 3 times in 1 min · on WebRTC"],
     ["flapping, down", { kind: "flapping", count: 1, live: false, transport: undefined, since: 0, at: 5 * 60_000 }, "Reconnected 1 time in 5 min · not live now"],
   ])("%s", (_, patch, text) => {
@@ -124,6 +127,7 @@ describe("the chat's Connection menu", () => {
       ["WebRTCIn use · 12 ms", "false", false],
       ["Iroh", "false", false],
       ["HyperDHTYour contact's app doesn't support HyperDHT", "false", true],
+      ["DHT onlyShort texts over the DHT, even offline", "false", false],
     ]);
     await user.click(within(menu).getByTestId("transport-option-iroh"));
     expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "iroh/1" }]);
@@ -146,25 +150,48 @@ describe("the chat's Connection menu", () => {
     expect(screen.getByTestId("transport-menu")).toBeInTheDocument();
   });
 
-  it("on the web shows WebRTC alone, with a note, and nothing to choose", async () => {
+  it("on the web shows WebRTC and DHT only, with a note: WebRTC is in use and nothing else is asked", async () => {
     const { user, engine } = chip({ availableTransports: ["webrtc/1"], transportAutomatic: true });
+    engine.on("setChatTransport", () => undefined);
     await user.click(screen.getByTestId("transport-chip"));
     const menu = screen.getByTestId("transport-menu");
     const radios = within(menu).getAllByRole("radio");
-    expect(radios).toHaveLength(1);
-    expect(radios[0]).toHaveTextContent("WebRTC");
+    expect(radios.map(r => r.getAttribute("aria-label"))).toEqual(["WebRTC", "DHT only"]);
     expect(radios[0]).toHaveAttribute("aria-checked", "true");
     expect(radios[0]).toBeDisabled();
     expect(within(menu).getByTestId("transport-menu-note")).toHaveTextContent("This app connects over WebRTC only. Iroh and HyperDHT need Ghostly Desktop on both sides.");
-    expect(engine.callsTo("setChatTransport")).toEqual([]);
+    // DHT only is always there, on every app.
+    await user.click(within(menu).getByTestId("transport-option-dht"));
+    expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "dht" }]);
   });
 
-  it("with DHT only on (reached from ⋮, no chip then), says how to choose a live connection", () => {
+  it("on DHT only in a web app, WebRTC leaves it for the app's rule", async () => {
     const anchor = { current: document.body };
-    renderApp(<TransportMenu link={linkView({ availableTransports: all, deliveryMode: "dht", dataLink: "idle", transportAutomatic: true })} open onClose={() => {}} anchorRef={anchor} />);
+    const { user, engine } = renderApp(<TransportMenu link={linkView({ availableTransports: ["webrtc/1"], deliveryMode: "dht", dataLink: "idle", transportAutomatic: true })} open onClose={() => {}} anchorRef={anchor} />);
+    engine.on("setChatTransport", () => undefined);
+    expect(screen.getByTestId("transport-option-dht")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("transport-option-webrtc")).toHaveAttribute("aria-checked", "false");
+    await user.click(screen.getByTestId("transport-option-webrtc"));
+    expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "auto" }]);
+  });
+
+  it("with DHT only on (reached from ⋮, no chip then), offers every way back to a live connection", async () => {
+    const anchor = { current: document.body };
+    const { user, engine } = renderApp(<TransportMenu link={linkView({ availableTransports: all, deliveryMode: "dht", dataLink: "idle", transportAutomatic: true })} open onClose={() => {}} anchorRef={anchor} />);
+    engine.on("setChatTransport", () => undefined);
     const menu = screen.getByTestId("transport-menu");
     expect(within(menu).getByTestId("transport-menu-now")).toHaveTextContent("Connection · DHT only");
-    expect(within(menu).getAllByRole("radio").every(r => (r as HTMLButtonElement).disabled)).toBe(true);
-    expect(within(menu).getByTestId("transport-menu-note")).toHaveTextContent("DHT only is on. Turn it off to choose a live connection.");
+    expect(within(menu).getAllByRole("radio").filter(r => r.getAttribute("aria-checked") === "true").map(r => r.getAttribute("aria-label"))).toEqual(["DHT only"]);
+    expect(within(menu).getAllByRole("radio").every(r => !(r as HTMLButtonElement).disabled)).toBe(true);
+    await user.click(within(menu).getByTestId("transport-option-iroh"));
+    expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "iroh/1" }]);
+  });
+
+  it("says when the contact chose DHT only", () => {
+    const anchor = { current: document.body };
+    renderApp(<TransportMenu link={linkView({ availableTransports: all, dataLink: "idle", transportAutomatic: true, dhtDelivery: { mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 } })} open onClose={() => {}} anchorRef={anchor} />);
+    expect(screen.getByTestId("transport-option-dht")).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByTestId("transport-option-dht")).toHaveAttribute("title", "DHT only: Your contact chose it · no live link until you both leave it");
+    expect(screen.getByTestId("transport-menu-note")).toHaveTextContent("Your contact chose DHT only: no live connection until you both leave it.");
   });
 });

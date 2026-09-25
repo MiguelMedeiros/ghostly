@@ -69,10 +69,17 @@ export function TransportOptions({ link, disabled = false, onChosen, menu = fals
   const single = local.length <= 1;
   const dht = link.deliveryMode === "dht";
   const current = liveTransport(link), automatic = link.transportAutomatic ?? link.preferredTransport === undefined;
-  const off = busy || disabled || dht;
-  async function choose(transport: PairedTransport | "auto") {
-    // Already so (or nothing else to choose): nothing to ask the engine.
-    if (single || (transport === "auto" ? automatic : !automatic && link.preferredTransport === transport && current === transport)) { onChosen?.(); return; }
+  // In the menu, DHT only is one of the choices: picking another leaves it. The popover has its own switch for it.
+  const off = busy || disabled || (dht && !menu);
+  const peerDht = link.dhtDelivery?.peerMode === "dht";
+  // One set of ids per place: the popover's and the menu's options can both be in the page.
+  const ids = menu ? "transport-option" : "connection-option";
+  async function choose(transport: PairedTransport | "auto" | "dht") {
+    // A single transport here: choosing it means leaving DHT only, back to the app's rule.
+    if (single && transport !== "dht") transport = "auto";
+    // Already so: nothing to ask the engine.
+    const already = transport === "dht" ? dht : !dht && (transport === "auto" ? automatic : !automatic && link.preferredTransport === transport && current === transport);
+    if (already) { onChosen?.(); return; }
     setBusy(true); setError("");
     try { await engine.call("setChatTransport", { linkId: link.id, transport }); onChosen?.(); }
     catch (e) { setError(e instanceof Error ? e.message : "Could not change the connection."); }
@@ -80,20 +87,24 @@ export function TransportOptions({ link, disabled = false, onChosen, menu = fals
   }
   return <>
     <div role="radiogroup" aria-label="Connection for this chat" data-testid="transport-options">
-      {!single && <Option menu={menu} testId="transport-option-auto" checked={automatic} disabled={off} onClick={() => void choose("auto")}
+      {!single && <Option menu={menu} testId={`${ids}-auto`} checked={automatic && !dht} disabled={off} onClick={() => void choose("auto")}
         icon={<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3" /><path d="M18 3v4h-4M6 21v-4h4" /></svg>}
         hint="The apps choose, WebRTC first" label="Automatic" />}
       {/* The menu offers what can be chosen; the popover also lists what this app lacks, and why. */}
       {(single && menu ? local : options).map(o => (
-        <Option menu={menu} key={o.transport} testId={`transport-option-${o.transport.replace("/1", "")}`} icon={<TransportIcon transport={o.transport} />}
-          checked={single ? o.available : !automatic && link.preferredTransport === o.transport} disabled={off || (single && menu) || !o.available}
+        <Option menu={menu} key={o.transport} testId={`${ids}-${o.transport.replace("/1", "")}`} icon={<TransportIcon transport={o.transport} />}
+          checked={!dht && (single ? o.available : !automatic && link.preferredTransport === o.transport)} disabled={off || (single && menu && !dht) || !o.available}
           hint={!o.available ? o.reason : current === o.transport ? `In use${link.transportRttMs !== undefined ? ` · ${link.transportRttMs} ms` : ""}` : !automatic && link.preferredTransport === o.transport ? "Chosen · not in use" : undefined}
           onClick={() => void choose(o.transport)} label={transportName(o.transport)} />
       ))}
+      {/* Always there (WISP 400): it travels as the DHT envelope's mode, so every app can choose it. */}
+      {menu && <Option menu testId="transport-option-dht" checked={dht} disabled={busy || disabled} onClick={() => void choose("dht")} label="DHT only"
+        icon={<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="m3 7 9-4 9 4-9 4Z" /><path d="m3 12 9 4 9-4M3 17l9 4 9-4" /></svg>}
+        hint={peerDht && !dht ? "Your contact chose it · no live link until you both leave it" : dht ? "Short texts over the DHT, no live link" : "Short texts over the DHT, even offline"} />}
     </div>
-    {((single && menu) || (dht && menu) || error) && <p className={`${menu ? "max-w-72 px-3 pb-1.5 pt-1" : "mt-1"} whitespace-normal text-[11px] leading-4 text-text-muted`} data-testid="transport-menu-note">
+    {((single && menu) || (peerDht && menu) || error) && <p className={`${menu ? "max-w-72 px-3 pb-1.5 pt-1" : "mt-1"} whitespace-normal text-[11px] leading-4 text-text-muted`} data-testid="transport-menu-note">
       {error ? <span role="alert" className="text-danger">{error}</span>
-        : dht ? "DHT only is on. Turn it off to choose a live connection."
+        : peerDht ? "Your contact chose DHT only: no live connection until you both leave it."
         : "This app connects over WebRTC only. Iroh and HyperDHT need Ghostly Desktop on both sides."}
     </p>}
   </>;

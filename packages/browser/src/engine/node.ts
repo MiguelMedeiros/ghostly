@@ -1283,11 +1283,22 @@ export class GhostlyNode implements EngineImplementation {
 
   /**
    * One chat's connection, chosen from its menu: a transport both sides can use (it overrides the app's rule for
-   * this chat, and is remembered for the next reconnect), or `auto` to go back to the app's rule. Fallback stays as
-   * it was. The live session moves over without reconnecting; if the new transport fails, it stays where it was.
+   * this chat, and is remembered for the next reconnect), `auto` to go back to the app's rule, or `dht` for DHT only
+   * (WISP 400: it travels as the DHT envelope's mode; either side choosing it keeps both off the live link). Choosing
+   * anything else while on DHT only leaves it first. Fallback stays as it was. A live session moves over without
+   * reconnecting; if the new transport fails, it stays where it was.
    */
-  async setChatTransport({ linkId, transport }: { linkId: string; transport: PairedTransport | "auto" }): Promise<void> {
+  async setChatTransport({ linkId, transport }: { linkId: string; transport: PairedTransport | "auto" | "dht" }): Promise<void> {
     const live = this.links.get(linkId);
+    if (transport === "dht") { await this.setDeliveryMode({ linkId, mode: "dht" }); return; }
+    if (live?.stored.deliveryMode === "dht") {
+      // The choice is recorded first, so the line that says the chat left DHT only names it. The native adapters
+      // were released with DHT only: the preference reaches the link once they are back.
+      const preferredTransport = transport === "auto" ? undefined : transport;
+      live.stored = { ...live.stored, preferredTransport };
+      await db.patchLink(linkId, { preferredTransport });
+      await this.setDeliveryMode({ linkId, mode: "stream" });
+    }
     if (transport !== "auto") {
       await this.setTransportPreference({ linkId, preferred: transport, fallback: live?.stored.transportFallback ?? true });
       return;
@@ -1317,6 +1328,8 @@ export class GhostlyNode implements EngineImplementation {
       transport: pairing?.transport,
       text: this.holdingFor(live) ? "hold" : live.link.textDelivery,
       dhtOnly: live.stored.deliveryMode === "dht",
+      peerDhtOnly: live.link.dhtDelivery?.peerMode === "dht",
+      preferred: live.stored.preferredTransport,
       transitionError: pairing?.transitionError,
       transitionTarget: pairing?.transitionTarget,
     }, Date.now());

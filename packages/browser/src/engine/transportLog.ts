@@ -9,7 +9,7 @@ import type { PairedTransport } from "@ghostly/core";
  * never count as unread, never become the chat's preview, are never sent, and go when the chat goes. The app has
  * no disappearing-message timer; if it gets one, these lines follow it like any other row.
  */
-export type TransportEntryKind = "connected" | "switched" | "failed" | "lost" | "back" | "flapping";
+export type TransportEntryKind = "connected" | "switched" | "failed" | "lost" | "back" | "flapping" | "dht-only" | "dht-left";
 /** Why a switch happened: someone chose it, the link it replaced dropped, or the app moved on its own. */
 export type TransportCause = "you" | "contact" | "dropped" | "automatic";
 
@@ -17,7 +17,10 @@ export interface TransportEntry {
   id: string;
   at: number;
   kind: TransportEntryKind;
-  /** The transport carrying the chat after this line; absent while it is not live. */
+  /**
+   * The transport carrying the chat after this line; absent while it is not live. `dht-left`: the transport the
+   * chat is set to from now on, absent when back to automatic.
+   */
   transport?: PairedTransport;
   /** `switched`: the one before. `lost`: the one that dropped. */
   from?: PairedTransport;
@@ -44,6 +47,10 @@ export interface TransportSnapshot {
   text: "stream" | "dht" | "hold" | "unavailable";
   /** This side chose DHT-only delivery. */
   dhtOnly: boolean;
+  /** The contact chose DHT-only delivery (its DHT envelope's `mode`): no live link either way until both leave it. */
+  peerDhtOnly?: boolean;
+  /** The transport this chat is set to; absent: automatic. */
+  preferred?: PairedTransport;
   transitionError?: string;
   transitionTarget?: PairedTransport;
 }
@@ -54,11 +61,13 @@ export const FLAP_WINDOW_MS = 60_000;
 export const FLAP_MIN_LINES = 4;
 /** A choice explains a switch that lands this soon after it. */
 export const CHOICE_TTL_MS = 2 * 60_000;
+/** A "lost" line this recent is replaced by the DHT-only choice that explains it. */
+export const DHT_REASON_MS = 30_000;
 /** Lines kept per chat. */
 export const TRANSPORT_LOG_MAX = 50;
 
 const churn = (e: TransportEntry) => e.kind === "lost" || e.kind === "back" || e.kind === "flapping" || (e.kind === "switched" && e.cause === "dropped");
-const liveLine = (e: TransportEntry) => e.kind === "flapping" ? !!e.live : e.kind !== "lost" && !!e.transport;
+const liveLine = (e: TransportEntry) => e.kind === "flapping" ? !!e.live : e.kind !== "lost" && e.kind !== "dht-only" && e.kind !== "dht-left" && !!e.transport;
 
 let sequence = 0;
 const lineId = (at: number) => `${at.toString(36)}-${(++sequence).toString(36)}`;
@@ -82,6 +91,24 @@ export class TransportLog {
     const prev = this.snapshot;
     this.snapshot = { ...next };
     const last = this.entries[this.entries.length - 1] as TransportEntry | undefined;
+    // DHT only (WISP 400): either side choosing it keeps both off the live link; each choice, and the way out, is a line.
+    const dhtBefore = prev ? prev.dhtOnly || !!prev.peerDhtOnly : last?.kind === "dht-only";
+    const dhtNow = next.dhtOnly || !!next.peerDhtOnly;
+    if (dhtNow) {
+      const you = next.dhtOnly && !(prev ? prev.dhtOnly : dhtBefore);
+      const contact = !!next.peerDhtOnly && !(prev ? prev.peerDhtOnly : dhtBefore);
+      if (!you && !contact) return false;
+      // The link dropped a moment before the reason was known: the choice replaces the "lost" line.
+      if (last?.kind === "lost" && now - last.at <= DHT_REASON_MS) this.entries.pop();
+      if (you) this.add({ kind: "dht-only", at: now, cause: "you", from: prev?.live ? prev.transport : undefined });
+      if (contact) this.add({ kind: "dht-only", at: now, cause: "contact", from: prev?.live ? prev.transport : undefined });
+      return true;
+    }
+    if (dhtBefore) {
+      this.add({ kind: "dht-left", at: now, transport: next.preferred });
+      if (next.live && next.transport) this.add({ kind: "back", at: now, transport: next.transport });
+      return true;
+    }
     if (next.live && next.transport) {
       if (prev?.live && prev.transport === next.transport) {
         // Still on the same one: a switch that did not happen is the only news.
@@ -90,14 +117,16 @@ export class TransportLog {
         return false;
       }
       if (prev?.live && prev.transport) return this.add({ kind: "switched", at: now, from: prev.transport, transport: next.transport, cause: this.cause(next.transport, now) ?? "automatic" });
+      // Out of DHT only, the live link is back, over whatever the apps agree on now.
+      if (last?.kind === "dht-left") return this.add({ kind: "back", at: now, transport: next.transport });
       const wasLost = !!last && !liveLine(last);
       const before = this.lastTransport();
       if (!last || !wasLost) return this.add({ kind: "connected", at: now, transport: next.transport });
       if (before && before !== next.transport) return this.add({ kind: "switched", at: now, from: before, transport: next.transport, cause: this.cause(next.transport, now) ?? "dropped" });
       return this.add({ kind: "back", at: now, transport: next.transport });
     }
-    const fallback = next.dhtOnly ? "dht-only" as const : next.text === "dht" ? "dht" as const : next.text === "hold" ? "hold" as const : undefined;
-    if (prev?.live) return this.add({ kind: "lost", at: now, from: prev.transport, fallback, ...(next.dhtOnly && !prev.dhtOnly ? { cause: "you" as const } : {}) });
+    const fallback = next.text === "dht" ? "dht" as const : next.text === "hold" ? "hold" as const : undefined;
+    if (prev?.live) return this.add({ kind: "lost", at: now, from: prev.transport, fallback });
     // Not live before either: what carries text meanwhile may have become known since the link dropped.
     if (last && !liveLine(last) && (last.kind === "lost" || last.kind === "flapping") && last.fallback !== fallback) {
       last.fallback = fallback;
@@ -135,6 +164,7 @@ export class TransportLog {
   private lastTransport(): PairedTransport | undefined {
     for (let i = this.entries.length - 1; i >= 0; i--) {
       const e = this.entries[i];
+      if (e.kind === "dht-left") continue;
       if (e.transport) return e.transport;
       if (e.from) return e.from;
     }

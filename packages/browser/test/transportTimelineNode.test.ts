@@ -101,3 +101,22 @@ it("tells the chat's connection story: first connection, the contact's switch, y
   node.setActiveLink({ linkId: null });
   expect(view().transportLog).toBeUndefined();
 }, 40_000);
+
+it("DHT only from the chat's menu: a line for the choice, one for leaving it, then live again", async () => {
+  const { node, contact, id, view } = await setup();
+  await vi.waitFor(() => expect(lines(view())).toEqual([["connected", null, "iroh/1"]]));
+  await node.setChatTransport({ linkId: id, transport: "dht" });
+  expect(view().deliveryMode).toBe("dht");
+  await vi.waitFor(() => expect(lines(view()).at(-1)).toEqual(["dht-only", "you", null]));
+  // No "lost" line beside it: the choice is the reason.
+  expect(view().transportLog!.map(e => e.kind)).toEqual(["connected", "dht-only"]);
+  expect(view().transportLive).toBeUndefined();
+
+  await node.setChatTransport({ linkId: id, transport: "auto" });
+  expect(view().deliveryMode).toBe("stream");
+  expect(view().transportAutomatic).toBe(true);
+  await vi.waitFor(() => expect(lines(view()).at(-1)).toEqual(["dht-left", null, null]));
+  void contact.connect(5_000).catch(() => {});
+  await vi.waitFor(() => expect(lines(view()).at(-1)).toEqual(["back", null, "iroh/1"]));
+  expect(await db.getMessages(id)).toEqual([]);
+}, 40_000);

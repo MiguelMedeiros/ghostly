@@ -45,6 +45,8 @@ export function transportLineText(entry: TransportEntry, contact: string): strin
       if (entry.fallback === "dht") return "Live connection lost · texts go through the DHT";
       if (entry.fallback === "hold") return `Live connection lost · messages wait for ${contact}`;
       return "Live connection lost";
+    case "dht-only": return entry.cause === "contact" ? `${contact} chose DHT only` : "You chose DHT only";
+    case "dht-left": return entry.transport ? `Left DHT only · ${t} chosen` : "Back to automatic";
     case "flapping": {
       const count = entry.count ?? 0;
       const times = `Reconnected ${count} ${count === 1 ? "time" : "times"} in ${span(entry.at - (entry.since ?? entry.at))}`;
@@ -56,8 +58,8 @@ export function transportLineText(entry: TransportEntry, contact: string): strin
 /** What tapping a line shows: the transport, since when, why, and the round trip if known. */
 export function transportLineDetails(entry: TransportEntry, contact: string, format: (at: number) => string): { label: string; value: string }[] {
   const rows: { label: string; value: string }[] = [];
-  const live = entry.kind === "flapping" ? entry.live : entry.kind !== "lost" && !!entry.transport;
-  rows.push({ label: "Transport", value: live ? name(entry.transport) : "None live" });
+  const live = entry.kind === "flapping" ? entry.live : entry.kind !== "lost" && entry.kind !== "dht-only" && entry.kind !== "dht-left" && !!entry.transport;
+  rows.push({ label: "Transport", value: live ? name(entry.transport) : entry.kind === "dht-only" ? "DHT only" : "None live" });
   rows.push({ label: "Since", value: format(entry.at) });
   rows.push({ label: "Why", value: transportLineWhy(entry, contact, format) });
   if (entry.rttMs !== undefined && live) rows.push({ label: "Round trip", value: `${entry.rttMs} ms` });
@@ -81,6 +83,10 @@ function transportLineWhy(entry: TransportEntry, contact: string, format: (at: n
       if (entry.fallback === "dht") return `The live connection over ${name(entry.from)} ended. Short texts go through the DHT until it is back.`;
       if (entry.fallback === "hold") return `The live connection over ${name(entry.from)} ended. What you send waits in your storage for ${contact}.`;
       return `The live connection over ${name(entry.from)} ended. Ghostly reconnects when ${contact} is reachable.`;
+    case "dht-only": return `${entry.cause === "contact" ? `${contact} chose` : "You chose"} DHT only: short texts go through the DHT, with no live connection, until you both leave it.`;
+    case "dht-left": return entry.transport
+      ? `DHT only ended for both of you. You chose ${name(entry.transport)} for this chat; the live connection comes back when both apps can reach each other.`
+      : "DHT only ended for both of you. The apps choose the transport again; the live connection comes back when both apps can reach each other.";
     case "flapping": return `The live connection dropped and came back ${entry.count ?? 0} times between ${format(entry.since ?? entry.at)} and ${format(entry.at)}.`;
   }
 }

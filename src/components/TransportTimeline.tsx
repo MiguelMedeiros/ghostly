@@ -37,9 +37,10 @@ export function TransportLine({ entry, contact }: { entry: TransportEntry; conta
 }
 
 function TransportLineIcon({ entry }: { entry: TransportEntry }) {
-  const path = entry.kind === "failed" ? <><circle cx="12" cy="12" r="9" /><path d="M12 8v5m0 3h.01" /></>
+  const path = entry.kind === "dht-only" ? <><path d="m3 7 9-4 9 4-9 4Z" /><path d="m3 12 9 4 9-4M3 17l9 4 9-4" /></>
+    : entry.kind === "failed" ? <><circle cx="12" cy="12" r="9" /><path d="M12 8v5m0 3h.01" /></>
     : entry.kind === "lost" || (entry.kind === "flapping" && !entry.live) ? <><path d="m18.8 12.3 1.7-1.8a5 5 0 0 0-7-7l-1.7 1.7" /><path d="m5.2 11.7-1.7 1.8a5 5 0 0 0 7 7l1.7-1.7" /><path d="M8 2v3M2 8h3m11 11v3m3-6h3" /></>
-    : entry.kind === "switched" || entry.kind === "flapping" ? <><path d="M4 8h13l-3-3M20 16H7l3 3" /></>
+    : entry.kind === "switched" || entry.kind === "flapping" || entry.kind === "dht-left" ? <><path d="M4 8h13l-3-3M20 16H7l3 3" /></>
     : <><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7" /><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" /></>;
   return <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">{path}</svg>;
 }
