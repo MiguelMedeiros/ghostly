@@ -69,7 +69,14 @@ export const VARIABLES = {
   GHOSTLY_S3_SECRET: ["ghostly-e2e-worthless", "S3 secret key (local server)"],
 };
 
-const read = (name) => process.env[name] || VARIABLES[name][0];
+/**
+ * Where the environment publishes its ports: 127.0.0.1, or the Tailscale address of the host it runs on
+ * (E2E_INFRA_ADDRESS, set by remote.mjs for `--host`). The defaults above follow it; harness ports stay local.
+ */
+export const published = (value) => (process.env.E2E_INFRA_ADDRESS ? value.replace("127.0.0.1", process.env.E2E_INFRA_ADDRESS) : value);
+
+/** A variable's value: the shell's if set, the environment's default (at its published address) otherwise. */
+export const read = (name) => process.env[name] || published(VARIABLES[name][0]);
 
 /** Where each service is, as the host reaches it: the variable if set, the environment's default otherwise. */
 export const endpoints = {
@@ -95,6 +102,13 @@ export const endpoints = {
 /** `host:port` of a URL, the way the app shows where a service is. */
 export const hostOf = (url) => new URL(url).host;
 
+/** Written to `.env.e2e` only when the environment runs on another host (`--host`, remote.mjs). */
+export const REMOTE = {
+  E2E_INFRA_HOST: "SSH target the environment runs on (its Docker); unset: this machine",
+  E2E_INFRA_ADDRESS: "Its Tailscale address, where every port above is published",
+  DOCKER_HOST: "Docker of that host, for the scripts and tests that `docker exec` into the environment",
+};
+
 /** The suite's own ports: `npm run e2e:full` passes them to its children, `.env.e2e` leaves them out. */
 export const HARNESS_PORTS = ["E2E_WEB_PORT", "E2E_LNURL_PORT", "E2E_DOMAIN_PORT"];
 
@@ -103,7 +117,11 @@ export function dotenv(values = {}) {
   const lines = ["# Written by `npm run e2e:infra:up` (e2e/infra/infra.mjs); removed by `npm run e2e:infra:down`.",
     "# Worthless regtest coins, test tokens and throwaway keys only. Names are listed in e2e/infra/env.mjs."];
   for (const [name, [value, about]] of Object.entries(VARIABLES)) {
-    if (!HARNESS_PORTS.includes(name)) lines.push(`# ${about}`, `${name}=${values[name] ?? value}`);
+    if (!HARNESS_PORTS.includes(name)) lines.push(`# ${about}`, `${name}=${values[name] ?? published(value)}`);
+  }
+  // On another host (remote.mjs): where it is, and Docker pointed there for the scripts and tests that `docker exec`.
+  for (const [name, about] of Object.entries(REMOTE)) {
+    if (process.env[name]) lines.push(`# ${about}`, `${name}=${process.env[name]}`);
   }
   return `${lines.join("\n")}\n`;
 }

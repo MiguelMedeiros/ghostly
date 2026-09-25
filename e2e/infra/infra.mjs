@@ -6,35 +6,54 @@
 //   node e2e/infra/infra.mjs down     stop and remove everything, volumes included, and .env.e2e (npm run e2e:infra:down)
 //   node e2e/infra/infra.mjs reset    down, then up: a fresh chain                      (npm run e2e:infra:reset)
 //   node e2e/infra/infra.mjs status   the containers and whether each endpoint answers
+//   node e2e/infra/infra.mjs use      an environment that is already up, as it is: check it answers, write .env.e2e
+//                                     (npm run e2e:infra:use; with --host, how another checkout joins the shared one)
 //   node e2e/infra/infra.mjs full [--keep] [--no-vitest] [-- <playwright args>]         (npm run e2e:full)
 //                                     down, up, the gated provider contracts (vitest), the web and extension
 //                                     end-to-end suites with every gated suite on, then down — even on failure
 //                                     or Ctrl-C, unless --keep.
 // Only this project's containers (ghostly-e2e-*) are ever started, stopped or removed.
+//
+// Every command takes --host <ssh target> (or E2E_INFRA_HOST) to run the environment on another machine's Docker
+// instead of this one's (remote.mjs): `--host one` is the maintainer's test server. There, `up` joins a stack that
+// is already up rather than seeding it again under other checkouts' tests, `full` never takes it down, and
+// `down` / `reset` want --host on the command line itself.
+import { HOST, HOST_FLAG, closeTunnel, remote, tunnel, tunnelUp } from "./remote.mjs";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureMiner } from "./chain.mjs";
-import { PROJECT, VARIABLES, dotenv, endpoints } from "./env.mjs";
+import { PROJECT, VARIABLES, dotenv, endpoints, published, read } from "./env.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const COMPOSE = join(ROOT, "e2e", "infra", "docker-compose.yml");
+const COMPOSE_REMOTE = join(ROOT, "e2e", "infra", "docker-compose.remote.yml");
+const CONFIG = join(ROOT, "e2e", "infra", "config");
 const ENV_FILE = join(ROOT, ".env.e2e");
 const started = Date.now();
 const elapsed = (since = started) => `${Math.round((Date.now() - since) / 1000)}s`;
 const log = (message) => console.log(`[e2e-infra ${elapsed()}] ${message}`);
+const where = remote ? `${PROJECT} on ${HOST} (${process.env.E2E_INFRA_ADDRESS})` : PROJECT;
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** The environment's own variables (defaults, or what the shell set), for compose and every child. */
 function environment(extra = {}) {
-  const values = Object.fromEntries(Object.entries(VARIABLES).map(([name, [value]]) => [name, process.env[name] || value]));
+  const values = Object.fromEntries(Object.keys(VARIABLES).map((name) => [name, read(name)]));
   return { ...process.env, ...values, ...extra };
 }
 
+/** The config files, as docker-compose.remote.yml takes them: another host's Docker cannot mount this checkout. */
+const configs = () => ({
+  E2E_INFRA_CAPTAIND_TOML: readFileSync(join(CONFIG, "captaind.toml"), "utf8"),
+  E2E_INFRA_CAPTAIND_START: readFileSync(join(CONFIG, "captaind-start.sh"), "utf8"),
+  E2E_INFRA_STRFRY_CONF: readFileSync(join(CONFIG, "strfry.conf"), "utf8"),
+});
+
 function compose(args, { quiet = false } = {}) {
-  const result = spawnSync("docker", ["compose", "-p", PROJECT, "-f", COMPOSE, ...args], { cwd: ROOT, env: environment(), stdio: quiet ? "pipe" : "inherit", encoding: "utf8", maxBuffer: 1 << 28 });
+  const files = remote ? ["-f", COMPOSE, "-f", COMPOSE_REMOTE] : ["-f", COMPOSE];
+  const result = spawnSync("docker", ["compose", "-p", PROJECT, ...files, ...args], { cwd: ROOT, env: environment(remote ? configs() : {}), stdio: quiet ? "pipe" : "inherit", encoding: "utf8", maxBuffer: 1 << 28 });
   return result.status === 0 ? (result.stdout ?? "") : null;
 }
 
@@ -68,7 +87,7 @@ const PROBES = {
   Anvil: () => rpc(endpoints.usdt.rpc, "eth_chainId"),
   S3: () => http(`${endpoints.s3.endpoint}/health`),
   // The environment's own mint, whatever E2E_MINT_URL points the suite at.
-  "Cashu mint": () => http(`${VARIABLES.E2E_MINT_URL[0]}/v1/info`),
+  "Cashu mint": () => http(`${published(VARIABLES.E2E_MINT_URL[0])}/v1/info`),
 };
 
 async function probe() {
@@ -151,8 +170,32 @@ async function seed() {
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────────────────────────────────────
+/** Whether every container runs (healthy where it says) and every endpoint answers: an environment to join. */
+async function answering() {
+  const list = containers();
+  if (!list.length || list.some((c) => c.State !== "running" || (c.Health && c.Health !== "healthy"))) return false;
+  return Object.values(await probe()).every(Boolean);
+}
+
+/** The app's Regtest options (Ark, Bark, their Esplora, the EVM chain) name 127.0.0.1: forward those ports there. */
+const APP_PORTS = ["GHOSTLY_ESPLORA_URL", "GHOSTLY_ARK_SERVER_URL", "GHOSTLY_BARK_SERVER_URL", "GHOSTLY_USDT_RPC_URL"].map((name) => new URL(VARIABLES[name][0]).port);
+
+function writeEnv() {
+  writeFileSync(ENV_FILE, dotenv(Object.fromEntries(Object.keys(VARIABLES).map((name) => [name, process.env[name]]).filter(([, v]) => v))));
+  if (remote) log(`127.0.0.1:${APP_PORTS.join(",")} → ${HOST}: ${tunnel(APP_PORTS)} (the app's Regtest options)`);
+  log(`up: variables in ${ENV_FILE}`);
+}
+
+async function use() {
+  if (!(await answering())) throw new Error(`${where} is not up (or not every service answers): npm run e2e:infra:status${remote ? ` -- --host ${HOST}` : ""}`);
+  log(`joining ${where}, as it is`);
+  writeEnv();
+}
+
 async function up() {
-  log("starting ghostly-e2e (docker compose up)");
+  // Shared by every checkout that points at it: seeding again would mine blocks under their running tests.
+  if (remote && (await answering())) { await use(); return; }
+  log(`starting ${where} (docker compose up)`);
   // bitcoind and its miner wallet first: NBXplorer warms the chain up through the node's loaded wallet.
   if (compose(["up", "-d", "--wait", "--remove-orphans", "bitcoind"]) === null) throw new Error("docker compose up bitcoind failed");
   ensureMiner();
@@ -160,22 +203,31 @@ async function up() {
   await waitHealthy();
   log("every service answers; funding");
   await seed();
-  writeFileSync(ENV_FILE, dotenv(Object.fromEntries(Object.keys(VARIABLES).map((name) => [name, process.env[name]]).filter(([, v]) => v))));
-  log(`up: variables in ${ENV_FILE}`);
+  writeEnv();
 }
 
 function down() {
-  log("removing ghostly-e2e (containers, volumes, network)");
+  // Other checkouts' tests run on a shared environment: a variable left in a shell must not take it down.
+  if (remote && !HOST_FLAG) throw new Error(`${where} is shared: name it on the command line to take it down (--host ${HOST})`);
+  log(`removing ${where} (containers, volumes, network)`);
   compose(["down", "-v", "--remove-orphans", "--timeout", "5"]);
+  if (remote) closeTunnel();
   rmSync(ENV_FILE, { force: true });
 }
 
 async function status() {
   const list = containers();
-  if (!list.length) { console.log("ghostly-e2e is not running."); return; }
-  for (const c of list) console.log(`${c.Name.padEnd(32)} ${c.State}${c.Health ? ` (${c.Health})` : ""}`);
-  for (const [name, ok] of Object.entries(await probe())) console.log(`${ok ? "answers " : "SILENT  "} ${name}`);
-  console.log(existsSync(ENV_FILE) ? `variables: ${ENV_FILE}` : "no .env.e2e (run e2e:infra:up)");
+  if (!list.length) { console.log(`${where} is not running.`); process.exitCode = 1; return; }
+  for (const c of list) console.log(`${c.Name.padEnd(32)} ${c.State}${c.Health ? ` (${c.Health})` : ""}  ${c.RunningFor ?? ""}`);
+  const answers = await probe();
+  for (const [name, ok] of Object.entries(answers)) console.log(`${ok ? "answers " : "SILENT  "} ${name}`);
+  if (remote) console.log(`127.0.0.1:${APP_PORTS.join(",")} → ${HOST}: ${tunnelUp() ? "forwarded" : "not forwarded (e2e:infra:use starts it)"}`);
+  const file = existsSync(ENV_FILE) ? readFileSync(ENV_FILE, "utf8") : "";
+  const joined = file && (remote ? file.includes(`E2E_INFRA_HOST=${HOST}\n`) : !file.includes("E2E_INFRA_HOST="));
+  console.log(joined ? `variables: ${ENV_FILE}` : `this checkout's .env.e2e does not point here (npm run e2e:infra:use${remote ? ` -- --host ${HOST}` : ""})`);
+  const every = list.every((c) => c.State === "running" && (!c.Health || c.Health === "healthy")) && Object.values(answers).every(Boolean);
+  console.log(every ? `${where}: up` : `${where}: NOT READY`);
+  if (!every) process.exitCode = 1;
 }
 
 function run(command, args, env) {
@@ -195,7 +247,8 @@ async function full(args) {
   const separator = args.indexOf("--");
   const playwrightArgs = separator >= 0 ? args.slice(separator + 1) : [];
   let cleaned = false;
-  const cleanup = () => { if (!cleaned && !keep) { cleaned = true; down(); } };
+  // A shared environment elsewhere stays: `full` joins it (or brings it up) and leaves it for the others.
+  const cleanup = () => { if (!cleaned && !keep && !remote) { cleaned = true; down(); } };
   process.on("SIGINT", () => { cleanup(); process.exit(130); });
   process.on("SIGTERM", () => { cleanup(); process.exit(143); });
   process.on("SIGHUP", () => { cleanup(); process.exit(129); });
@@ -204,7 +257,7 @@ async function full(args) {
   const phase = async (name, work) => { const since = Date.now(); const result = await work(); phases.push(`${name} ${elapsed(since)}`); return result; };
   let code = 1;
   try {
-    await phase("down", async () => down());
+    if (!remote) await phase("down", async () => down());
     await phase("up", up);
     // Breez's regtest is hosted by Breez and Lightspark, and its faucet now wants a reCAPTCHA: on only with a funded
     // counterpart wallet of one's own (GHOSTLY_BREEZ_COUNTERPART), or when the shell turned it on.
@@ -242,8 +295,9 @@ try {
   else if (command === "down") down();
   else if (command === "reset") { down(); await up(); }
   else if (command === "status") await status();
+  else if (command === "use") await use();
   else if (command === "full") await full(rest);
-  else { console.error("usage: infra.mjs up | seed | down | reset | status | full [--keep] [--no-vitest] [-- <playwright args>]"); process.exit(2); }
+  else { console.error("usage: infra.mjs [--host <ssh target>] up | seed | down | reset | status | use | full [--keep] [--no-vitest] [-- <playwright args>]"); process.exit(2); }
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);
   process.exit(1);

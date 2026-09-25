@@ -37,7 +37,9 @@ const s3 = async (method: string, path: string, body?: Buffer) => {
 };
 
 test("text, a picture and a request held for an away contact arrive in order; a changed item is refused; an expired one is dropped", { tag: ["@feature:delivery.hold.storage", "@gated", "@feature:delivery.hold.enable", "@feature:delivery.hold.text", "@feature:delivery.hold.picture", "@feature:delivery.hold.request", "@feature:delivery.hold.tamper", "@feature:delivery.hold.expiry"] }, async ({ peer }) => {
-  test.skip(!endpoint.startsWith("http://127.0.0.1:"), "Requires a disposable local S3 server");
+  // Disposable: on this machine, or e2e/infra's own on another host (E2E_INFRA_ADDRESS).
+  const disposable = ["127.0.0.1", process.env.E2E_INFRA_ADDRESS].some((host) => host && endpoint.startsWith(`http://${host}:`));
+  test.skip(!disposable, "Requires a disposable S3 server (e2e/infra)");
   test.setTimeout(6 * 60_000);
   expect((await s3("PUT", "")).ok, "test bucket").toBe(true);
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);

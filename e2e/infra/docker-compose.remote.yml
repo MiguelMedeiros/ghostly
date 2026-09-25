@@ -1,0 +1,21 @@
+# On top of docker-compose.yml when the environment runs on another host (node e2e/infra/infra.mjs --host …,
+# see remote.mjs). Docker there cannot bind-mount this checkout's files, so the three config files travel as
+# Compose configs (their text in environment variables infra.mjs sets); and the host is shared with other
+# projects, so every service gets a lower CPU weight and a ceiling of its own.
+name: ghostly-e2e
+
+services:
+  bark-captaind:
+    volumes: !override ["bark-captaind:/data/captaind", "bark-postgres:/var/lib/postgresql/data"]
+    configs:
+      - { source: captaind-toml, target: /config/captaind.toml }
+      - { source: captaind-start, target: /config/start.sh }
+  nwc-relay:
+    volumes: !override ["nwc-relay:/app/strfry-db"]
+    configs:
+      - { source: strfry-conf, target: /etc/strfry.conf }
+
+configs:
+  captaind-toml: { environment: E2E_INFRA_CAPTAIND_TOML }
+  captaind-start: { environment: E2E_INFRA_CAPTAIND_START }
+  strfry-conf: { environment: E2E_INFRA_STRFRY_CONF }
