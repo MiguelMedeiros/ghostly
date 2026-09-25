@@ -2,7 +2,8 @@ name: Desktop on macOS
 
 # Two Ghostly Desktop apps on one Mac, in the system WKWebView: they pair, place a video call with media both
 # ways, open a local app one of them shares, and show why calls are off on the DHT (e2e/desktop-macos/).
-# The Linux Desktop job cannot: WebKitGTK has no WebRTC, so a Linux pair never goes live. macOS has no
+# The Linux Desktop job cannot: WebKitGTK has no WebRTC, which a call's media needs (a Linux pair goes live on
+# Iroh or HyperDHT, e2e/desktop/native-upgrade.spec.ts, but cannot call). macOS has no
 # WebDriver for WKWebView, so the app is built with the test driver (`npm run desktop:macos:build`, a debug
 # build with --features e2e-driver) and driven through it. See e2e/README.md → "Desktop on macOS".
 #

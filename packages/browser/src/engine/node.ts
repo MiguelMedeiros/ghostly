@@ -2533,6 +2533,7 @@ export class GhostlyNode implements EngineImplementation {
         local: () => this.capsContent(linkId),
         save: async state => { await db.patchLink(linkId, { capsState: state }); live.stored = { ...live.stored, capsState: state }; },
         changed: record => this.peerCapsChanged(linkId, record),
+        published: () => live.link?.announceCapsRevision(),
       });
       live.caps.start();
     }

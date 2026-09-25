@@ -106,6 +106,8 @@ export class DhtDelivery {
   private readonly from: string;
   private readonly to: string;
   private readonly participation;
+  /** The capability-record revision the last envelope published here named. */
+  private namedRev?: number;
   constructor(private readonly options: {
     params: LinkParams; mode: DeliveryMode; state?: DhtDeliveryState;
     credentials: PairingCredentials; transport: PkarrTransport;
@@ -241,6 +243,19 @@ export class DhtDelivery {
       catch (error) { this.errors.publish = `DHT publication failed: ${String(error instanceof Error ? error.message : error)}. Bounded retry continues until expiry.`; this.changed(); return this.errors.publish; }
     });
   }
+  /**
+   * This side's capability record has a new revision (WISP 03): an envelope names it now. Otherwise the contact
+   * learns of it with the next envelope that goes out anyway, a control one minutes away when nothing is sent,
+   * and dials no native transport the record newly offers until then.
+   */
+  async announce(): Promise<void> {
+    await this.serialize(async () => {
+      // Every publication spends a relay request: none when the last envelope named this revision already.
+      const rev = this.options.capsRev?.();
+      if (rev === undefined || rev === this.namedRev) return;
+      try { await this.publish(true); } catch { /* The next envelope names it. */ }
+    });
+  }
   /** A stream receipt for the same stable ID also cancels DHT retransmission. */
   async acknowledge(id: string): Promise<void> {
     await this.serialize(async () => {
@@ -271,6 +286,7 @@ export class DhtDelivery {
     traceLink(this.from, "dht-publish", { mode: this.mode, seq: body[1] });
     if (pending) this.lastPublished = DhtDelivery.facts(body, records, this.identity.pubKeyZ32);
     await this.options.transport.publish(this.identity, records);
+    this.namedRev = body[8];
     delete this.errors.publish; this.changed();
   }
   private async receive(packet: SignedPacket): Promise<void> {

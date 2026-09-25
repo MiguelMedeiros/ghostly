@@ -16,6 +16,7 @@ test-results
 playwright-report
 playwright-report-desktop
 playwright-report-desktop-macos
+playwright-report-compat
 dist-e2e
 
 # Generated native HyperDHT runtime

@@ -748,7 +748,24 @@ export class GhostLink {
     let changed = false;
     for (const t of ["iroh/1", "hyperdht/1"] as const) if (descriptors[t] && !this.peerDescriptors[t]) { this.peerDescriptors = { ...this.peerDescriptors, [t]: descriptors[t] }; changed = true; }
     if (!this.peerTransports && transports.length) { this.peerTransports = transports; this.peerFallback = true; changed = true; }
-    if (changed) traceLink(this.myPubKeyZ32, "record-transports", { transports });
+    if (!changed) return;
+    traceLink(this.myPubKeyZ32, "record-transports", { transports });
+    // Something new to dial: the next attempt is now, not after the wait that attempts with nothing to try built up.
+    if (this.channel || this.dialing) return;
+    this.autoConnectFailures = 0;
+    this.lastAutoConnectAt = 0;
+    this.maybeAutoConnect(this.presence);
+  }
+
+  /**
+   * This side's capability record has a new revision: a DHT envelope names it now, so the contact reads it (WISP 03).
+   * Only on the DHT with the contact pinned. A live session carries the same news itself, and before the pin the
+   * contact reads the record when it pins; either way an envelope would only spend a relay request, the budget the
+   * chat's signalling and held items need.
+   */
+  announceCapsRevision(): void {
+    if (this.isDataLinkOpen || !this.options.pairing?.credentials.peerKey) return;
+    void this.dht?.announce().catch(() => {});
   }
 
   get availableTransports(): PairedTransport[] {

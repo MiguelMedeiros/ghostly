@@ -269,6 +269,8 @@ export class CapsExchange {
     save(state: CapsState): Promise<void>;
     /** The contact's record changed (a newer revision was read). */
     changed?(record: CapsRecord): void;
+    /** A new revision of this side's record went out: the contact learns of it from an envelope that names it. */
+    published?(rev: number): void;
     /** A record was refused; `author` is a security signal (another key signed under this chat's address). */
     refused?(error: CapsRefusedError): void;
   }) {
@@ -325,6 +327,7 @@ export class CapsExchange {
         await this.persist({ ...this.state, rev, digest, sealedFor: peerKey });
         await this.options.transport.publish(this.keys.identity, records, changed ? undefined : { background: true });
         await this.persist({ ...this.state, publishedAt: now });
+        if (changed) this.options.published?.(rev);
       }
       this.schedule();
     });

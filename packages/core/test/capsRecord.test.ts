@@ -183,6 +183,24 @@ describe("capability record: publishing and reading", () => {
     await again.stop();
   });
 
+  it("says when a new revision went out (an envelope names it), not when the same content is sealed again", async () => {
+    vi.useFakeTimers();
+    const { link } = pair(), { transport } = exchange();
+    let name = "Ada";
+    const credentials: PairingCredentials = { seedB64: createIdentity().seedB64 };
+    const published: number[] = [];
+    const caps = new CapsExchange({ params: link.mine, credentials, transport, local: () => content({ name }), save: async () => {}, published: rev => published.push(rev) });
+    caps.start(); await vi.advanceTimersByTimeAsync(0);
+    expect(published).toEqual([1]);
+    name = "Ada L."; await caps.update(); await vi.advanceTimersByTimeAsync(CAPS_PUBLISH_SPACING_MS);
+    expect(published).toEqual([1, 2]);
+    credentials.peerKey = createIdentity().pubKeyZ32; await caps.update();
+    await vi.advanceTimersByTimeAsync(CAPS_REFRESH_MS + 1_000);
+    expect(transport.publish, "sealed for the pin, then hourly").toHaveBeenCalledTimes(4);
+    expect(published, "the same revision: nothing new to announce").toEqual([1, 2]);
+    await caps.stop();
+  });
+
   it("reads the contact's record at pairing and on a newer revision, keeps the last good one, reports a forged one", async () => {
     vi.useFakeTimers();
     const { link, a, b } = pair(), { transport } = exchange();

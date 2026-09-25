@@ -492,6 +492,23 @@ describe("DHT delivery: sending and lifecycle", () => {
     await h.bob.stop();
   });
 
+  it("names a new capability-record revision in an envelope at once, and only once", async () => {
+    const options = { mode: "dht" as const, capsRev: 7 };
+    const h = setup(options); await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
+    const published = h.transport.publish.mock.calls.length;
+    await h.bob.announce();
+    expect(h.transport.publish, "the last envelope named this revision already").toHaveBeenCalledTimes(published);
+    // A native transport started: the record's revision 8 says how to dial it, and the contact must hear of it now,
+    // not with a control envelope four minutes later.
+    options.capsRev = 8;
+    await h.bob.announce();
+    expect(h.transport.publish).toHaveBeenCalledTimes(published + 1);
+    expect(h.openPublished()[8]).toBe(8);
+    await h.bob.announce();
+    expect(h.transport.publish, "said once").toHaveBeenCalledTimes(published + 1);
+    await h.bob.stop();
+  });
+
   it("refuses text for a contact whose capability record lacks dht-text/1", async () => {
     const h = setup({ mode: "stream", bobCredentials: pinned(), peerAcceptsText: () => false });
     expect(h.bob.validate("hello", Date.now(), ID)).toBe(DHT_TEXT_REFUSED);
