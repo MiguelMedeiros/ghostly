@@ -8,7 +8,7 @@ import type { LinkParams } from "./invite";
 import type { PairingCredentials } from "./pairedSession";
 import type { TransportDescriptors } from "./pairedTransports";
 import { measureRecords, MAX_DNS_PACKET_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
-import type { PkarrTransport } from "./transport";
+import { budgetRetryMs, isDiscoveryBudgetError, type PkarrTransport } from "./transport";
 
 /**
  * The layer-0 capability record of a chat (WISP 03, revision 0.2): what each side accepts on the DHT
@@ -245,7 +245,11 @@ export class CapsKeys {
 export interface CapsState {
   /** My record's revision: increases with every change of its content. */
   rev: number;
-  /** A digest of the content last published, and when, and whether sealed for the pinned contact. */
+  /**
+   * A digest of the content of revision `rev`, and when it was last published, and whether sealed for the pinned
+   * contact. No `publishedAt`: that revision is not known to be out (a publication failed, or was cut short), and goes
+   * out at the next look.
+   */
   digest?: string;
   publishedAt?: number;
   sealedFor?: string;
@@ -326,6 +330,8 @@ export class CapsExchange {
       const content = this.options.local(), digest = digestOf(content), now = Date.now();
       const peerKey = this.options.credentials.peerKey;
       const changed = digest !== this.state.digest;
+      // A revision saved but not known to be out (its publication failed): it goes now, as it is.
+      const unpublished = this.state.digest !== undefined && !this.state.publishedAt;
       const due = changed || peerKey !== this.state.sealedFor || !this.state.publishedAt || now - this.state.publishedAt >= CAPS_REFRESH_MS;
       // A change right after a publication waits for the spacing; a new pin does not (the contact reads it next).
       const soon = changed && peerKey === this.state.sealedFor && !!this.state.publishedAt && now - this.state.publishedAt < CAPS_PUBLISH_SPACING_MS;
@@ -334,11 +340,17 @@ export class CapsExchange {
         const rev = changed ? this.state.rev + 1 : this.state.rev;
         const { records, dropped } = this.keys.seal(content, rev, peerKey, now);
         this.dropped = dropped;
-        // The revision is saved before it is published, so a crash never reuses it for other content.
-        await this.persist({ ...this.state, rev, digest, sealedFor: peerKey });
-        await this.options.transport.publish(this.keys.identity, records, changed ? undefined : { background: true });
+        // The revision is saved before it is published, so a crash never reuses it for other content; until it is
+        // out, it has no `publishedAt`, so a publication that fails (or a crash) does not lose it until the hourly one.
+        await this.persist({ ...this.state, rev, digest, sealedFor: peerKey, publishedAt: undefined });
+        try { await this.options.transport.publish(this.keys.identity, records, changed || unpublished ? undefined : { background: true }); }
+        catch (error) {
+          // Held back by the relays' request budget: again when the budget frees a request; any other failure, in a minute.
+          this.schedule(isDiscoveryBudgetError(error) ? budgetRetryMs(error, 1_000, 60_000) : 60_000);
+          throw error;
+        }
         await this.persist({ ...this.state, publishedAt: now });
-        if (changed) this.options.published?.(rev);
+        if (changed || unpublished) this.options.published?.(rev);
       }
       this.schedule();
     });
@@ -347,7 +359,8 @@ export class CapsExchange {
     if (this.timer) clearTimeout(this.timer);
     if (!this.running) return;
     const age = Date.now() - (this.state.publishedAt ?? 0);
-    this.timer = setTimeout(() => void this.update().catch(() => this.schedule()), inMs ?? Math.max(60_000, CAPS_REFRESH_MS - age));
+    // A failed publication already scheduled its retry.
+    this.timer = setTimeout(() => void this.update().catch(() => {}), inMs ?? Math.max(60_000, CAPS_REFRESH_MS - age));
   }
 
   /** An envelope named this revision of the contact's record: read it when it is newer than the one known. */

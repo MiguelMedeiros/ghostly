@@ -3,6 +3,7 @@ import { createIdentity } from "../src/identity";
 import { createRelayPayload } from "../src/pkarr";
 import { didDhtDocument, encodeDidDhtPacket, signDidDhtPacket } from "../src/didDht";
 import { DEFAULT_RELAYS, RelayTransport, normalizeRelayUrl } from "../src/relay";
+import { DiscoveryBudgetError } from "../src/transport";
 
 // covers: core.relay-client
 
@@ -137,7 +138,8 @@ describe("resolving", () => {
     expect((await relay.resolve(id.pubKeyZ32))?.timestampMicros).toBe(8n);
     limited = true;
     expect((await relay.resolve(id.pubKeyZ32))?.timestampMicros).toBe(8n);
-    await expect(relay.resolve(createIdentity().pubKeyZ32)).rejects.toThrow("No Pkarr relay reachable");
+    // Knowing nothing, it says the read waits for the relay's Retry-After: a wait, not an outage.
+    await expect(relay.resolve(createIdentity().pubKeyZ32)).rejects.toBeInstanceOf(DiscoveryBudgetError);
   });
 
   it("recovers a relay once its budget window has passed", async () => {

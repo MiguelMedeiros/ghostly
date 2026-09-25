@@ -7,7 +7,7 @@ import { identityFromSeed, identityFromSeedB64, publicKeyFromZ32, sign, verify }
 import type { LinkParams } from "./invite";
 import type { PairingCredentials } from "./pairedSession";
 import { measureRecords, MAX_DNS_PACKET_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
-import type { PkarrTransport } from "./transport";
+import { budgetRetryMs, isDiscoveryBudgetError, type PkarrTransport } from "./transport";
 import { traceLink } from "./linkTrace";
 
 export type DeliveryMode = "stream" | "dht";
@@ -15,6 +15,8 @@ export const DHT_TEXT_BYTES = 256;
 export const DHT_MESSAGE_TTL = 5 * 60_000;
 const CONTROL_TTL = 10 * 60_000;
 const MAX_ATTEMPTS = 8;
+/** The wait before publication attempt `attempts + 1` of a text, or of a receipt the contact still asks for. */
+const backoff = (attempts: number) => Math.min(60_000, 4_000 * 2 ** attempts);
 /** The contact's mailbox is read this often while either side is DHT-only, and otherwise… */
 const DHT_POLL_MS = 4_000;
 const STREAM_POLL_MS = 30_000;
@@ -46,7 +48,12 @@ export interface DhtDeliveryState {
   peerMode?: DeliveryMode;
   peerRejected?: boolean;
   pending?: { message: Message; expires: number; attempts: number; next: number };
-  receipt?: { id: string; expires: number; attempts: number };
+  /**
+   * The receipt this side owes for the contact's last text. `next`: when it forces a publication again (absent: at
+   * once). `settled`: the contact's newer envelope no longer carries that text (it has a receipt, on either path, or
+   * gave up on it), so the receipt only rides along on envelopes that go out anyway.
+   */
+  receipt?: { id: string; expires: number; attempts: number; next?: number; settled?: boolean };
   confirmed?: string;
 }
 export interface DhtDeliveryView {
@@ -99,6 +106,8 @@ export class DhtDelivery {
   private chain = Promise.resolve();
   private lastPublish = 0;
   private controlDue = 0;
+  /** Until when the relays' request budget holds publications back: what is due then goes at once. */
+  private budgetUntil = 0;
   private errors: Partial<Record<"publish" | "read" | "peer", string>> = {};
   private readonly identity;
   private readonly peerAddress: string;
@@ -240,7 +249,11 @@ export class DhtDelivery {
       await this.persist({ ...this.state, pending: next }); this.changed();
       // The next read comes at the pace for a text awaiting its receipt.
       try { await this.publish(true); this.schedule(); return null; }
-      catch (error) { this.errors.publish = `DHT publication failed: ${String(error instanceof Error ? error.message : error)}. Bounded retry continues until expiry.`; this.changed(); return this.errors.publish; }
+      catch (error) {
+        // Held back by the relays' request budget: the text is queued and goes as soon as the budget frees a request.
+        if (isDiscoveryBudgetError(error)) { this.schedule(); return null; }
+        this.errors.publish = `DHT publication failed: ${String(error instanceof Error ? error.message : error)}. Bounded retry continues until expiry.`; this.changed(); return this.errors.publish;
+      }
     });
   }
   /**
@@ -271,23 +284,44 @@ export class DhtDelivery {
   }
   private async publish(force = false): Promise<void> {
     const now = Date.now();
-    if (!this.running || this.errors.peer || (!force && now - this.lastPublish < 4_000)) return;
+    if (!this.running || this.errors.peer || (!force && (now - this.lastPublish < 4_000 || now < this.budgetUntil))) return;
     const pending = this.state.pending && this.state.pending.expires > now && this.state.pending.attempts < MAX_ATTEMPTS ? this.state.pending : undefined;
     const receipt = this.state.receipt && this.state.receipt.expires > now && this.state.receipt.attempts < MAX_ATTEMPTS ? this.state.receipt : undefined;
-    if (!force && (!pending || pending.next > now) && !receipt && this.controlDue > now) return;
+    // A receipt forces an envelope of its own only while the contact still asks for it, and with a text's backoff: the
+    // envelope stays in the mailbox until the next one, and every publication spends a request on each relay.
+    const receiptDue = !!receipt && !receipt.settled && (receipt.next ?? 0) <= now;
+    if (!force && (!pending || pending.next > now) && !receiptDue && this.controlDue > now) return;
     const expires = pending?.expires ?? now + CONTROL_TTL;
     const body = this.body(this.state.sequence + 1, now, expires, pending?.message ?? null, receipt?.id ?? null);
     const records = this.records(body);
     // Persist sequence and attempt count first. A crash cannot reuse them or
     // reset the retransmission budget/absolute message deadline.
-    await this.persist({ ...this.state, sequence: body[1], pending: pending ? { ...pending, attempts: pending.attempts + 1, next: now + Math.min(60_000, 4_000 * 2 ** pending.attempts) } : this.state.pending,
-      receipt: receipt ? { ...receipt, attempts: receipt.attempts + 1 } : this.state.receipt });
+    await this.persist({ ...this.state, sequence: body[1], pending: pending ? { ...pending, attempts: pending.attempts + 1, next: now + backoff(pending.attempts) } : this.state.pending,
+      receipt: receipt ? { ...receipt, attempts: receipt.attempts + 1, next: now + backoff(receipt.attempts) } : this.state.receipt });
+    const before = { lastPublish: this.lastPublish, controlDue: this.controlDue };
     this.lastPublish = now; this.controlDue = now + 4 * 60_000;
     traceLink(this.from, "dht-publish", { mode: this.mode, seq: body[1] });
     if (pending) this.lastPublished = DhtDelivery.facts(body, records, this.identity.pubKeyZ32);
-    await this.options.transport.publish(this.identity, records);
+    try { await this.options.transport.publish(this.identity, records); }
+    catch (error) {
+      if (isDiscoveryBudgetError(error)) await this.heldBack(error, now, before, pending, receipt);
+      throw error;
+    }
     this.namedRev = body[8];
     delete this.errors.publish; this.changed();
+  }
+  /**
+   * The relays' request budget held the envelope back: nothing went out, so it was no attempt (a text keeps its eight),
+   * and what it carried (a text, a receipt, a new mode) goes the moment the budget frees a request: the text and the
+   * receipt as they were before, and no publication before then (`budgetUntil`) but a forced one.
+   */
+  private async heldBack(error: Parameters<typeof budgetRetryMs>[0], now: number, before: { lastPublish: number; controlDue: number },
+    pending: DhtDeliveryState["pending"], receipt: DhtDeliveryState["receipt"]): Promise<void> {
+    const at = now + budgetRetryMs(error, 1_000, 60_000);
+    this.budgetUntil = at;
+    this.lastPublish = before.lastPublish; this.controlDue = Math.min(before.controlDue, at);
+    traceLink(this.from, "dht-publish-waits", { retryInMs: at - now });
+    await this.persist({ ...this.state, pending: pending ?? this.state.pending, receipt: receipt ?? this.state.receipt });
   }
   private async receive(packet: SignedPacket): Promise<void> {
     if (packet.pubKeyZ32 !== this.peerAddress || measureRecords(packet.pubKeyZ32, packet.records) > MAX_DNS_PACKET_BYTES) return;
@@ -325,7 +359,9 @@ export class DhtDelivery {
     if (message) {
       await this.options.message({ id: message[0], timestamp: message[1], text: message[2] }, DhtDelivery.facts(body, packet.records, packet.pubKeyZ32));
       if (nextReceipt?.id !== message[0]) nextReceipt = { id: message[0], expires, attempts: 0 };
-    }
+      // Asked for again (the text sent anew after a lost session): its receipt goes at once again.
+      else if (nextReceipt.settled) { const { settled: _settled, next: _next, ...asked } = nextReceipt; nextReceipt = asked; }
+    } else if (nextReceipt && !nextReceipt.settled) nextReceipt = { ...nextReceipt, settled: true };
     const confirmed = receipt && this.state.pending?.message[0] === receipt ? receipt : this.state.confirmed;
     if (mode !== this.state.peerMode) traceLink(this.from, "dht-peer-mode", { peerMode: mode });
     await this.persist({ ...this.state, peerSequence: sequence, peerMode: mode, peerRejected: undefined, receipt: nextReceipt, confirmed,
@@ -349,10 +385,11 @@ export class DhtDelivery {
       // pointers, which a busy mailbox must not starve.
       const background = !this.urgent && this.pollMs >= STREAM_POLL_MS;
       this.urgent = false;
+      // A read or a publication the relays' request budget held back is a wait, not an error: it goes when the budget frees.
       try { const packet = await this.options.transport.resolve(this.peerAddress, background ? { background } : undefined); if (!this.running) return; if (packet) await this.receive(packet); delete this.errors.read; }
-      catch (error) { this.errors.read = `Could not read DHT delivery: ${error instanceof Error ? error.message : String(error)}`; }
+      catch (error) { if (!isDiscoveryBudgetError(error)) this.errors.read = `Could not read DHT delivery: ${error instanceof Error ? error.message : String(error)}`; }
       try { await this.publish(); }
-      catch (error) { this.errors.publish = `Could not publish DHT delivery: ${error instanceof Error ? error.message : String(error)}`; }
+      catch (error) { if (!isDiscoveryBudgetError(error)) this.errors.publish = `Could not publish DHT delivery: ${error instanceof Error ? error.message : String(error)}`; }
       this.changed();
     });
     } finally { this.ticking = false; }
@@ -373,7 +410,9 @@ export class DhtDelivery {
   private schedule(): void {
     if (!this.running || this.ticking) return;
     if (this.timer) clearTimeout(this.timer);
-    this.timer = setTimeout(() => void this.tick(), this.pollMs);
+    // A publication the budget held back goes when the budget frees a request, if that comes before the next read.
+    const held = this.budgetUntil - Date.now();
+    this.timer = setTimeout(() => void this.tick(), held > 0 ? Math.min(this.pollMs, held) : this.pollMs);
   }
 }
 export const DHT_TEXT_REFUSED = "Your contact's app does not accept text over the DHT. It is sent when you are live.";

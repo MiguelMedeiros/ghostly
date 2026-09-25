@@ -12,6 +12,7 @@ import {
 } from "../src/capsRecord";
 import type { PairingCredentials } from "../src/pairedSession";
 import { relayedTransports } from "../src/pairedTransports";
+import { DiscoveryBudgetError } from "../src/transport";
 
 // covers: chat.caps-record
 
@@ -216,6 +217,41 @@ describe("capability record: publishing and reading", () => {
     await vi.advanceTimersByTimeAsync(CAPS_REFRESH_MS + 1_000);
     expect(transport.publish, "sealed for the pin, then hourly").toHaveBeenCalledTimes(4);
     expect(published, "the same revision: nothing new to announce").toEqual([1, 2]);
+    await caps.stop();
+  });
+
+  it("a change the relays' budget held back is not lost: it goes when the budget frees, under the same revision, and is announced then", async () => {
+    vi.useFakeTimers();
+    const { link } = pair(), { transport } = exchange();
+    let name = "Ada", saved: CapsState = emptyCapsState();
+    const published: number[] = [];
+    const caps = new CapsExchange({ params: link.mine, credentials: { seedB64: createIdentity().seedB64 }, transport, local: () => content({ name }),
+      save: async s => { saved = s; }, published: rev => published.push(rev) });
+    caps.start(); await vi.advanceTimersByTimeAsync(CAPS_PUBLISH_SPACING_MS);
+    expect(published).toEqual([1]);
+    transport.publish.mockRejectedValueOnce(new DiscoveryBudgetError(15_000));
+    name = "Ada L."; await caps.update().catch(() => {});
+    expect(transport.publish).toHaveBeenCalledTimes(2);
+    expect(saved, "saved before it went out, and not out").toMatchObject({ rev: 2, publishedAt: undefined });
+    expect(published).toEqual([1]);
+    // Not an hour later (the digest was saved before the publication): when the budget frees a request.
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(transport.publish).toHaveBeenCalledTimes(3);
+    expect(saved.rev, "the revision it was saved under").toBe(2);
+    expect(saved.publishedAt).toBeDefined();
+    expect(published).toEqual([1, 2]);
+    await caps.stop();
+  });
+
+  it("a first publication that fails at start is tried again a minute later", async () => {
+    vi.useFakeTimers();
+    const { link } = pair(), { transport } = exchange();
+    transport.publish.mockRejectedValueOnce(new Error("Publish failed on every relay"));
+    const caps = new CapsExchange({ params: link.mine, credentials: { seedB64: createIdentity().seedB64 }, transport, local: () => content(), save: async () => {} });
+    caps.start(); await vi.advanceTimersByTimeAsync(0);
+    expect(transport.publish).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(transport.publish).toHaveBeenCalledTimes(2);
     await caps.stop();
   });
 

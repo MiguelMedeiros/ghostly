@@ -1,4 +1,4 @@
-import { decodeControl, fromBase64Url, parseVoiceMeta, HOLD_LIMITS, HoldKeys, HoldRefusedError, newHoldMailbox, readManifest, utf8Decode, utf8Encode, type HoldPointer, type PaymentMethodName, type PaymentRequest, type PkarrTransport, type VoiceMeta } from "@ghostly/core";
+import { budgetRetryMs, decodeControl, fromBase64Url, isDiscoveryBudgetError, parseVoiceMeta, HOLD_LIMITS, HoldKeys, HoldRefusedError, newHoldMailbox, readManifest, utf8Decode, utf8Encode, type HoldPointer, type PaymentMethodName, type PaymentRequest, type PkarrTransport, type VoiceMeta } from "@ghostly/core";
 import { heldName, manifestName, type HoldStore } from "../backup/storage";
 import type { HeldEntry, HoldState, LinkHoldView, StoredLink } from "../shared/types";
 
@@ -59,6 +59,9 @@ export class HoldEngine {
   private readonly lastPublish = new Map<string, number>();
   private readonly expecting = new Map<string, number>();
   private readonly errors = new Map<string, string>();
+  /** Chats whose pointer the relays' request budget held back: it goes out as soon as the budget frees a request. */
+  private readonly pointerDue = new Set<string>();
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly host: HoldHost) {}
 
@@ -73,7 +76,8 @@ export class HoldEngine {
   async stop(): Promise<void> {
     this.running = false;
     if (this.timer) clearTimeout(this.timer);
-    this.timer = null;
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.timer = this.retryTimer = null;
     await Promise.allSettled([...this.chains.values()]);
   }
 
@@ -235,7 +239,7 @@ export class HoldEngine {
     try { await storage.store.put(entry.name, bytes); }
     catch (error) { return fail(`Could not store the item: ${error instanceof Error ? error.message : String(error)}`); }
     await update({ state: "held", error: undefined, bytes: bytes.length });
-    try { await this.publish(linkId, true); }
+    try { await this.publishPointer(linkId, true); }
     catch (error) { return fail(`Stored, but could not tell the contact where: ${error instanceof Error ? error.message : String(error)}`); }
     this.errors.delete(linkId);
     await this.host.delivery(linkId, entry.messageId, "held");
@@ -250,11 +254,34 @@ export class HoldEngine {
       if (!entry) return;
       await this.save(linkId, { ...hold, outbox: hold.outbox.filter((e) => e !== entry) });
       await this.host.storage()?.store.remove(entry.name).catch(() => {});
-      if (entry.state === "held") await this.publish(linkId, true).catch(() => {});
+      if (entry.state === "held") await this.publishPointer(linkId, true).catch(() => {});
     });
   }
   forgetLink(linkId: string): void {
     this.keyCache.delete(linkId); this.lastPoll.delete(linkId); this.lastPublish.delete(linkId); this.expecting.delete(linkId); this.errors.delete(linkId); this.chains.delete(linkId);
+    this.pointerDue.delete(linkId);
+  }
+
+  /**
+   * Publishes my pointer. One the relays' request budget held back is no failure: the item is stored, the pointer is
+   * due and goes out the moment the budget frees a request (the chat's signaling shares that budget, and spends it
+   * fast right when the contact comes back). A pointer already due goes out with any other publication.
+   */
+  private async publishPointer(linkId: string, rewriteManifest: boolean): Promise<void> {
+    try { await this.publish(linkId, rewriteManifest); }
+    catch (error) {
+      if (!isDiscoveryBudgetError(error)) throw error;
+      this.pointerDue.add(linkId);
+      this.retrySoon(budgetRetryMs(error, 1_000, TICK_MS));
+      return;
+    }
+    this.pointerDue.delete(linkId);
+  }
+
+  /** Looks at the chats again in `ms` (a pointer or a read the budget held back), unless a look is already that close. */
+  private retrySoon(ms: number): void {
+    if (!this.running || this.retryTimer) return;
+    this.retryTimer = setTimeout(() => { this.retryTimer = null; void this.tick(); }, ms);
   }
 
   /**
@@ -321,8 +348,8 @@ export class HoldEngine {
     for (const entry of hold.outbox.filter((e) => e.state === "queued")) await this.upload(linkId, entry).catch(() => {});
     hold = this.state(linkId);
     const held = hold.outbox.some((e) => e.state === "held");
-    if (this.host.storage() && (expired.length || (held && (hold.manifestSignedAt ?? 0) + RENEW_AFTER_MS <= now))) await this.publish(linkId, true).catch((error) => this.errors.set(linkId, String(error instanceof Error ? error.message : error)));
-    else if (held && (this.lastPublish.get(linkId) ?? 0) + REPUBLISH_MS <= now) await this.publish(linkId, false).catch(() => {});
+    if (this.host.storage() && (expired.length || (held && (hold.manifestSignedAt ?? 0) + RENEW_AFTER_MS <= now))) await this.publishPointer(linkId, true).catch((error) => this.errors.set(linkId, String(error instanceof Error ? error.message : error)));
+    else if (this.pointerDue.has(linkId) || (held && (this.lastPublish.get(linkId) ?? 0) + REPUBLISH_MS <= now)) await this.publishPointer(linkId, false).catch(() => {});
   }
 
   /**
@@ -337,7 +364,11 @@ export class HoldEngine {
     this.lastPoll.set(linkId, now);
     let packet;
     try { packet = await this.host.transport.resolve(keys.peerAddress); }
-    catch (error) { this.errors.set(linkId, `Could not read the contact's pointer: ${error instanceof Error ? error.message : String(error)}`); this.host.changed(); return; }
+    catch (error) {
+      // Held back by the relays' request budget: read again once it frees a request, and nothing is wrong meanwhile.
+      if (isDiscoveryBudgetError(error)) { this.lastPoll.delete(linkId); this.retrySoon(budgetRetryMs(error, 1_000, TICK_MS)); return; }
+      this.errors.set(linkId, `Could not read the contact's pointer: ${error instanceof Error ? error.message : String(error)}`); this.host.changed(); return;
+    }
     const pointer = packet ? keys.readPointer(packet, now) : null;
     if (!pointer) return;
     let hold = this.state(linkId);
@@ -352,7 +383,7 @@ export class HoldEngine {
         else await this.host.delivery(linkId, entry.messageId, "delivered");
         await this.host.storage()?.store.remove(entry.name).catch(() => {});
       }
-      await this.publish(linkId, true).catch(() => {});
+      await this.publishPointer(linkId, true).catch(() => {});
       this.host.changed();
     } else if (pointer.ack !== hold.peerAck) hold = await this.save(linkId, { ...hold, peerAck: pointer.ack });
     if (pointer.top <= hold.inSeq) { this.expecting.delete(linkId); return; }
@@ -408,7 +439,7 @@ export class HoldEngine {
     }
     if (!stop) this.expecting.delete(linkId);
     if (changed) {
-      await this.publish(linkId, false).catch((error) => this.errors.set(linkId, `Picked up, but could not acknowledge: ${error instanceof Error ? error.message : String(error)}`));
+      await this.publishPointer(linkId, false).catch((error) => this.errors.set(linkId, `Picked up, but could not acknowledge: ${error instanceof Error ? error.message : String(error)}`));
       if (!stop && !this.errors.get(linkId)?.startsWith("Refused")) this.errors.delete(linkId);
     }
     this.host.changed();

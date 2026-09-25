@@ -9,6 +9,7 @@ import { createLink } from "../src/invite";
 import { DhtDelivery, DHT_MESSAGE_TTL, DHT_TEXT_REFUSED, LEAVING_DHT_FAST_MS, LIVE_POLL_MS, emptyDhtDeliveryState, type DhtDeliveryState, type DhtDeliveryView } from "../src/dhtDelivery";
 import type { PairingCredentials } from "../src/pairedSession";
 import type { GhostRecord, SignedPacket } from "../src/pkarr";
+import { DiscoveryBudgetError } from "../src/transport";
 
 // covers: chat.dht.delivery, chat.dht.send, chat.dht.errors
 
@@ -524,6 +525,79 @@ describe("DHT delivery: sending and lifecycle", () => {
     expect(h.transport.resolve, "the asked-for read, not the one 30 s later").toHaveBeenCalledTimes(2);
     h.bob.refresh(); await vi.advanceTimersByTimeAsync(0);
     expect(h.transport.resolve).toHaveBeenCalledTimes(3);
+    await h.bob.stop();
+  });
+});
+
+describe("DHT delivery: the relays' request budget", () => {
+  const held = (ms: number) => new DiscoveryBudgetError(ms);
+
+  it("keeps an envelope the budget held back due, says no error, and sends it when the budget frees a request", async () => {
+    const h = setup({ pollMs: null, mode: "dht", bobCredentials: pinned() }); await h.bob.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.transport.publish).toHaveBeenCalledTimes(1);
+    // Leaving DHT only while the minute is spent: the envelope that says so waits 20 s for the budget…
+    h.transport.publish.mockRejectedValueOnce(held(20_000));
+    await h.bob.setMode("stream"); await vi.advanceTimersByTimeAsync(0);
+    expect(h.transport.publish).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(19_000);
+    expect(h.transport.publish, "no attempt while the budget is known to be spent").toHaveBeenCalledTimes(2);
+    // …and goes the moment it frees, not with the next control envelope four minutes later.
+    await vi.advanceTimersByTimeAsync(1_100);
+    expect(h.transport.publish).toHaveBeenCalledTimes(3);
+    expect(h.views.every(v => !v.error), "a wait for the budget is no error").toBe(true);
+    await h.bob.stop();
+  });
+
+  it("a text the budget held back is queued, not failed, and keeps all eight attempts", async () => {
+    const h = setup({ bobCredentials: pinned() }); await h.bob.start();
+    await vi.advanceTimersByTimeAsync(0);
+    h.transport.publish.mockRejectedValueOnce(held(10_000));
+    expect(await h.bob.send("hi", Date.now(), ID)).toBeNull();
+    expect(h.last().pending).toMatchObject({ attempts: 0 });
+    const calls = h.transport.publish.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(9_000);
+    expect(h.transport.publish.mock.calls.length).toBe(calls);
+    await vi.advanceTimersByTimeAsync(1_100);
+    expect(h.transport.publish.mock.calls.length).toBe(calls + 1);
+    expect(h.last().pending).toMatchObject({ attempts: 1 });
+    expect(h.views.every(v => !v.error)).toBe(true);
+    await h.bob.stop();
+  });
+
+  it("a read the budget held back is no error either", async () => {
+    const h = setup({ bobCredentials: pinned() });
+    h.transport.resolve.mockRejectedValue(held(5_000));
+    await h.bob.start(); await vi.advanceTimersByTimeAsync(1_000);
+    expect(h.views.length).toBeGreaterThan(0);
+    expect(h.views.every(v => !v.error)).toBe(true);
+    await h.bob.stop();
+  });
+
+  it("a receipt forces envelopes with a text's backoff, and none once the contact's newer envelope no longer carries the text", async () => {
+    const h = setup(); await h.bob.start();
+    // A text with its whole lifetime ahead: a sender that sends it anew keeps this deadline.
+    const text = h.body({ 3: Date.now() + DHT_MESSAGE_TTL });
+    await h.put(h.invitePacket(text));
+    expect(h.messages.map(m => m.text)).toEqual(["hello"]);
+    const start = Date.now(), first = h.transport.publish.mock.calls.length;
+    // Every tick (100 ms here) used to publish the receipt again, 4 s apart, until eight: now 4, 8, 16 s apart.
+    await vi.advanceTimersByTimeAsync(29_000);
+    expect(Date.now() - start).toBeGreaterThanOrEqual(29_000);
+    expect(h.transport.publish.mock.calls.length - first).toBeLessThanOrEqual(3);
+    expect(h.last().receipt).toMatchObject({ id: ID });
+    // Alice's next envelope has no text: she has her receipt (on either path), so it forces nothing more…
+    await h.put(h.pinnedPacket(h.body({ 6: null }, 2)));
+    expect(h.last().receipt).toMatchObject({ id: ID, settled: true });
+    const settled = h.transport.publish.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(h.transport.publish.mock.calls.length).toBe(settled);
+    // …until she asks for it again (the text sent anew after a lost session): then it goes at once.
+    await h.put(h.pinnedPacket(h.body({ 3: text[3] }, 3)));
+    expect(h.last().receipt).toMatchObject({ id: ID });
+    expect(h.last().receipt?.settled).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(h.transport.publish.mock.calls.length).toBe(settled + 1);
     await h.bob.stop();
   });
 });

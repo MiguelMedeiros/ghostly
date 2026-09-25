@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BACKGROUND_REQUESTS_PER_MINUTE, REQUESTS_PER_MINUTE, RelayTransport, WRITE_FIRST_MS, createIdentity, createRelayPayload } from "../src";
+import { BACKGROUND_REQUESTS_PER_MINUTE, DiscoveryBudgetError, REQUESTS_PER_MINUTE, RelayTransport, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError } from "../src";
 // covers: core.relay-client
 
 describe("relay transport", () => {
@@ -90,8 +90,8 @@ describe("relay transport under pressure", () => {
     // A hub's periodic looks run out at the background share, reads and writes alike…
     for (let i = 0; i < BACKGROUND_REQUESTS_PER_MINUTE; i++) await relay.resolve(id.pubKeyZ32, { background: true });
     await expect(relay.publish(id, [{ label: "_ts", value: "2" }], { background: true })).rejects.toThrow("budget");
-    // …and a background read with nothing known yet says so, rather than answering from nothing.
-    await expect(relay.resolve(createIdentity().pubKeyZ32, { background: true })).rejects.toThrow("No Pkarr relay reachable");
+    // …and a background read with nothing known yet says it waits for the budget, rather than answering from nothing.
+    await expect(relay.resolve(createIdentity().pubKeyZ32, { background: true })).rejects.toBeInstanceOf(DiscoveryBudgetError);
     expect(requests).toBe(BACKGROUND_REQUESTS_PER_MINUTE);
     // …while a link's signaling still has the rest.
     for (let i = BACKGROUND_REQUESTS_PER_MINUTE; i < REQUESTS_PER_MINUTE; i++) await relay.resolve(id.pubKeyZ32);
@@ -277,5 +277,60 @@ describe("relay operation backoff", () => {
     await expect(relay.publish(id, [])).rejects.toThrow();
     await expect(relay.resolve(id.pubKeyZ32)).rejects.toThrow();
     expect(requests).toBe(1);
+  });
+});
+
+describe("relay transport: the budget holds requests back as a wait", () => {
+  const id = createIdentity();
+  const ok = (async (_: RequestInfo | URL, init?: RequestInit) =>
+    init?.method === "PUT" ? new Response(null, { status: 204 }) : new Response(createRelayPayload(id, [{ label: "_ts", value: "1" }], 3n) as BodyInit)) as typeof fetch;
+
+  it("says a publish waits, and for how long: until the oldest request of the minute ages out on the relay that frees first", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const relay = new RelayTransport({ relays: ["https://a.test", "https://b.test"], fetch: ok });
+      const start = Date.now();
+      // 30 reads a second apart, alternating: each relay's minute is full, a.test's oldest request the older one.
+      for (let i = 0; i < 2 * REQUESTS_PER_MINUTE; i++) { await relay.resolve(id.pubKeyZ32); vi.setSystemTime(Date.now() + 500); }
+      const refused = await relay.publish(createIdentity(), [{ label: "_ts", value: "1" }]).then(() => null, (error: unknown) => error);
+      expect(isDiscoveryBudgetError(refused)).toBe(true);
+      // a.test's first read was at `start`: it frees at start + 60 s.
+      expect((refused as DiscoveryBudgetError).retryInMs).toBe(start + 60_000 - Date.now());
+      expect((refused as Error).message).toContain("Publish held back on every relay");
+      // Nothing went out, and the refusal cost nothing: at the time it named, the publish goes.
+      vi.setSystemTime(start + 60_000);
+      await relay.publish(createIdentity(), [{ label: "_ts", value: "1" }]);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("types a relay's own 429 as a wait for its Retry-After", async () => {
+    const relay = new RelayTransport({ relays: ["https://a.test"], fetch: (async () => new Response(null, { status: 429, headers: { "retry-after": "20" } })) as typeof fetch });
+    const first = await relay.publish(id, []).then(() => null, (error: unknown) => error);
+    expect(isDiscoveryBudgetError(first) && first.retryInMs).toBe(20_000);
+    const again = await relay.resolve(createIdentity().pubKeyZ32).then(() => null, (error: unknown) => error);
+    expect(isDiscoveryBudgetError(again) && again.retryInMs).toBeGreaterThan(19_000);
+  });
+
+  it("is a failure, not a wait, when a relay failed at the network level", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      let spent = 0;
+      const relay = new RelayTransport({ relays: ["https://a.test", "https://b.test"], fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes("b.test")) throw new TypeError("Failed to fetch");
+        spent++;
+        return ok(input, init);
+      }) as typeof fetch });
+      while (spent < REQUESTS_PER_MINUTE) await relay.resolve(id.pubKeyZ32).catch(() => {});
+      const refused = await relay.publish(createIdentity(), []).then(() => null, (error: unknown) => error);
+      expect(refused).toBeInstanceOf(Error);
+      expect(isDiscoveryBudgetError(refused)).toBe(false);
+      expect((refused as Error).message).toContain("Publish failed on every relay");
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("recognises a budget error from another copy of the module by its code", () => {
+    const foreign = Object.assign(new Error("Discovery request budget reached; retry shortly"), { code: "discovery-budget", retryInMs: 1_000 });
+    expect(isDiscoveryBudgetError(foreign)).toBe(true);
+    expect(isDiscoveryBudgetError(new Error("Discovery request budget reached; retry shortly"))).toBe(false);
   });
 });

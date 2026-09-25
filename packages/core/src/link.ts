@@ -10,7 +10,7 @@ import {
   type ResolvedMessage,
 } from "./records";
 import type { ServiceAd } from "./services";
-import type { PkarrTransport } from "./transport";
+import { budgetRetryMs, isDiscoveryBudgetError, type PkarrTransport } from "./transport";
 import { traceLink } from "./linkTrace";
 
 /**
@@ -61,6 +61,11 @@ export const EXPECT_PEER_MS = 30_000;
 /** A chat whose contact was never seen (an invite just sent) keeps looking at the active pace this long. */
 export const AWAITING_PEER_MS = 10 * 60_000;
 const PUBLISH_RETRY_MS = 4_000;
+/**
+ * A packet the relays' request budget held back goes again when the budget frees a request, and at least this often
+ * meanwhile: each refusal keeps it first in line for that request (`WRITE_FIRST_MS`), and costs no request itself.
+ */
+const BUDGET_RETRY_MIN_MS = 250;
 /** Two reads are never closer than this, however long the last one took. */
 const MIN_POLL_GAP_MS = 250;
 export const IDLE_THRESHOLD = 60_000;
@@ -92,8 +97,11 @@ export interface LinkSessionEvents {
   onStatus?(status: LinkStatus): void;
   /** A poll started, or finished with the next one due in `nextInMs`. */
   onPoll?(poll: { polling: boolean; nextInMs: number }): void;
-  /** A publish finished: how long it took, and whether it carried an `_rtc` signal. `error` when it failed. */
-  onPublish?(result: { ms: number; rtc: boolean; error?: string }): void;
+  /**
+   * A publish finished: how long it took, and whether it carried an `_rtc` signal. `error` when it failed; `waiting`
+   * when the relays' request budget held it back (nothing went out, and it goes again once the budget frees a request).
+   */
+  onPublish?(result: { ms: number; rtc: boolean; error?: string; waiting?: boolean }): void;
   /** The first read of the peer's key is done (with `firstPublish: "after-first-poll"`, what to publish is decided now). */
   onFirstPoll?(): void;
 }
@@ -309,12 +317,13 @@ export class LinkSession {
     try {
       const kept = await this.publishOnce(true);
       if (kept === 0) return "Message could not be published — DHT payload limit exceeded.";
-    } catch {
+    } catch (error) {
       // The message stays in the buffer; keep trying instead of losing it.
       if (this.publishRetryTimer) clearTimeout(this.publishRetryTimer);
-      this.publishRetryTimer = setTimeout(() => void this.publish().catch(() => {}), PUBLISH_RETRY_MS);
-      // Not an error for the sender: it is queued, and the connection status shows the trouble.
-      this.events.onStatus?.("error");
+      this.publishRetryTimer = setTimeout(() => void this.publish().catch(() => {}), this.retryDelay(error));
+      // Not an error for the sender: it is queued, and the connection status shows the trouble (a wait for the
+      // relays' budget is none).
+      if (!isDiscoveryBudgetError(error)) this.events.onStatus?.("error");
       return null;
     }
     this.pollNow();
@@ -368,10 +377,11 @@ export class LinkSession {
           await this.publishOnce(this.running);
         } while (this.publishAgain && this.running);
       } catch (error) {
-        // A signal that is not published is a call that never rings: try again.
+        // A signal that is not published is a call that never rings: try again. Held back by the relays' request
+        // budget, it goes as soon as the budget frees a request, and nothing is wrong meanwhile.
         if (this.running) {
-          this.discoveryResult("publish", error);
-          this.publishRetryTimer = setTimeout(() => void this.publish().catch(() => {}), PUBLISH_RETRY_MS);
+          if (!isDiscoveryBudgetError(error)) this.discoveryResult("publish", error);
+          this.publishRetryTimer = setTimeout(() => void this.publish().catch(() => {}), this.retryDelay(error));
         }
         throw error;
       } finally {
@@ -399,9 +409,9 @@ export class LinkSession {
     try {
       await this.transport.publish(this.identity, built.records);
     } catch (error) {
-      const ms = Date.now() - started;
-      traceLink(this.identity.pubKeyZ32, "publish", { ms, rtc: !!rtcSignal, error: String(error) });
-      this.events.onPublish?.({ ms, rtc: !!rtcSignal, error: error instanceof Error ? error.message : String(error) });
+      const ms = Date.now() - started, waiting = isDiscoveryBudgetError(error);
+      traceLink(this.identity.pubKeyZ32, "publish", { ms, rtc: !!rtcSignal, error: String(error), ...(waiting && { waiting, retryInMs: error.retryInMs }) });
+      this.events.onPublish?.({ ms, rtc: !!rtcSignal, error: error instanceof Error ? error.message : String(error), ...(waiting && { waiting }) });
       throw error;
     }
     const ms = Date.now() - started;
@@ -410,6 +420,11 @@ export class LinkSession {
     this.events.onPublish?.({ ms, rtc: !!rtcSignal });
     this.discoveryResult("publish");
     return built.keptMessages;
+  }
+
+  /** When a publish that failed goes again: when the relays' budget frees a request, if that held it back. */
+  private retryDelay(error: unknown): number {
+    return isDiscoveryBudgetError(error) ? budgetRetryMs(error, BUDGET_RETRY_MIN_MS, PUBLISH_RETRY_MS) : PUBLISH_RETRY_MS;
   }
 
   private discoveryResult(operation: "publish" | "read", error?: unknown): void {
@@ -484,8 +499,11 @@ export class LinkSession {
     } catch (error) {
       if (this.running) {
         traceLink(this.identity.pubKeyZ32, "poll", { ms: Date.now() - started, error: String(error) });
-        this.discoveryResult("read", error);
-        this.events.onStatus?.("error");
+        // A read the relays' request budget held back (nothing known yet to answer from) is a wait: the next poll reads.
+        if (!isDiscoveryBudgetError(error)) {
+          this.discoveryResult("read", error);
+          this.events.onStatus?.("error");
+        }
         if (!this.firstPollDone) { this.firstPollDone = true; this.events.onFirstPoll?.(); }
       }
     } finally {
