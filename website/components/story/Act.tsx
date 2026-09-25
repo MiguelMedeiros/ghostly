@@ -28,6 +28,7 @@ export function Act({
   chapters,
   field = false,
   bubble,
+  bubbleAvoid,
   children,
 }: {
   id: string;
@@ -36,6 +37,8 @@ export function Act({
   field?: boolean;
   /** A line Boo says in the first chapter. */
   bubble?: string;
+  /** Copy the line must stay clear of (a selector inside the act), e.g. the hero's headline and buttons. */
+  bubbleAvoid?: string;
   children: React.ReactNode;
 }) {
   const calm = useCalm();
@@ -48,13 +51,13 @@ export function Act({
     );
   }
   return (
-    <LiveAct id={id} chapters={chapters} field={field} bubble={bubble}>
+    <LiveAct id={id} chapters={chapters} field={field} bubble={bubble} bubbleAvoid={bubbleAvoid}>
       {children}
     </LiveAct>
   );
 }
 
-function LiveAct({ id, chapters, field, bubble, children }: { id: string; chapters: ActChapter[]; field: boolean; bubble?: string; children: React.ReactNode }) {
+function LiveAct({ id, chapters, field, bubble, bubbleAvoid, children }: { id: string; chapters: ActChapter[]; field: boolean; bubble?: string; bubbleAvoid?: string; children: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const portrait = usePortrait();
   const orient = orientationOf(portrait);
@@ -219,7 +222,7 @@ function LiveAct({ id, chapters, field, bubble, children }: { id: string; chapte
                 <Ghost who="boo" size={100} mood={booMood} look={booLook} float={false} halo />
               </g>
             </motion.g>
-            {bubble && <Bubble text={bubble} x={bx} y={by} s={bs} fade={bubbleFade} portrait={portrait} />}
+            {bubble && <Bubble text={bubble} x={bx} y={by} s={bs} fade={bubbleFade} orient={orient} rest={poseAt(BLOCKING[orient][chapters[0].chapter].boo, 0)} avoid={bubbleAvoid} />}
           </motion.g>
         </svg>
       </div>
@@ -235,9 +238,129 @@ function useGaze(x: MotionValue<number>, y: MotionValue<number>, s: MotionValue<
   return { x: lx, y: ly };
 }
 
-/** Boo's line, typed out once per page load, anchored above his head; it fades as the story moves on. */
-function Bubble({ text, x, y, s, fade, portrait }: { text: string; x: MotionValue<number>; y: MotionValue<number>; s: MotionValue<number>; fade: MotionValue<number>; portrait: boolean }) {
+
+/** Where Boo's line sits relative to his rest pose, worked out from the part of the stage the screen shows. */
+type BubbleLayout = {
+  lines: string[];
+  fs: number;
+  w: number;
+  h: number;
+  /** The bubble's left edge is at head x + ax · width − align · w + shift, its top at head y + ay · width − h. */
+  ax: number;
+  align: number;
+  shift: number;
+  ay: number;
+  /** Tail: where its base sits along the bottom edge, and which way its tip leans (−1 left, 0 down, 1 right). */
+  tail: number;
+  lean: -1 | 0 | 1;
+  side: "right" | "above" | "left";
+};
+
+const BUBBLE_MIN_PX = 13;
+const BUBBLE_MARGIN_PX = 12;
+
+/** Two lines, broken at the space nearest the middle. */
+function halves(text: string): string[] {
+  const mid = text.length / 2;
+  let best = -1;
+  for (let i = 0; i < text.length; i++) if (text[i] === " " && (best < 0 || Math.abs(i - mid) < Math.abs(best - mid))) best = i;
+  return best < 0 ? [text] : [text.slice(0, best), text.slice(best + 1)];
+}
+
+/**
+ * The stage is drawn with `slice`, so a narrow or tall window crops its sides.
+ * Try the line right of Boo's head, then above it, then left of it, first on
+ * one line and then on two; the first that stays on screen, clear of the nav
+ * and of the copy (`avoid`), wins. If none does, it goes above his head, slid
+ * sideways into view with the tail still under his head.
+ */
+function layoutBubble(text: string, g: SVGGElement, orient: "landscape" | "portrait", rest: { x: number; y: number; s: number }, avoid?: string): BubbleLayout {
+  const svg = g.ownerSVGElement!;
+  const box = svg.getBoundingClientRect();
+  const { w: sw, h: sh } = STAGE[orient];
+  const k = Math.max(box.width / sw, box.height / sh) || 1;
+  const x0 = (sw - box.width / k) / 2;
+  const y0 = (sh - box.height / k) / 2;
+  const cs = getComputedStyle(svg);
+  const navH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--nav-h")) || 64;
+  const ctx = document.createElement("canvas").getContext("2d");
+  if (ctx) ctx.font = `${cs.fontWeight} 100px ${cs.fontFamily}`;
+  const measure = (s: string) => (ctx ? ctx.measureText(s).width / 100 : s.length * 0.55);
+  // The copy, in screen pixels as it stands when the act is at its start (the backdrop is pinned to the act's top).
+  const actTop = svg.closest(".act")?.getBoundingClientRect().top ?? box.top;
+  const blocks = avoid
+    ? [...svg.closest(".act")!.querySelectorAll(avoid)]
+        .map((el) => el.getBoundingClientRect())
+        .filter((r) => r.width > 2 && r.height > 2)
+        .map((r) => ({ l: r.left - box.left, t: r.top - actTop, r: r.right - box.left, b: r.bottom - actTop }))
+    : [];
+
+  const fs = Math.max(18, BUBBLE_MIN_PX / k);
+  const gw = rest.s;
+  const headX = rest.x + gw / 2;
+  const ay = -8 / gw + 0.04;
+  const tailH = fs * 0.66;
+  const fits = (l: number, t: number, w: number, h: number) => {
+    const px = { l: (l - x0) * k, t: (t - y0) * k, r: (l + w - x0) * k, b: (t + h + tailH - y0) * k };
+    if (px.l < BUBBLE_MARGIN_PX || px.r > box.width - BUBBLE_MARGIN_PX) return false;
+    if (px.t < navH + 8 || px.b > box.height - BUBBLE_MARGIN_PX) return false;
+    const m = BUBBLE_MARGIN_PX;
+    return blocks.every((b) => px.r + m <= b.l || px.l - m >= b.r || px.b + m <= b.t || px.t - m >= b.b);
+  };
+
+  const options = [[text], halves(text)].filter((ls, i) => i === 0 || ls.length > 1);
+  for (const lines of options) {
+    const w = Math.max(...lines.map(measure)) * fs + fs * 2.8;
+    const h = fs * (2.9 + 1.3 * (lines.length - 1));
+    const top = rest.y + ay * gw - h;
+    const sides = [
+      { side: "right", ax: 0.62, align: 0, tail: h * 0.46, lean: -1 },
+      { side: "above", ax: 0.5, align: 0.5, tail: w / 2, lean: 0 },
+      { side: "left", ax: 0.38, align: 1, tail: w - h * 0.46, lean: 1 },
+    ] as const;
+    for (const o of sides) {
+      const left = rest.x + o.ax * gw - o.align * w;
+      if (fits(left, top, w, h)) return { lines, fs, w, h, ax: o.ax, align: o.align, shift: 0, ay, tail: Math.min(o.tail, w - h / 2), lean: o.lean, side: o.side };
+    }
+  }
+  const lines = options[options.length - 1];
+  const w = Math.max(...lines.map(measure)) * fs + fs * 2.8;
+  const h = fs * (2.9 + 1.3 * (lines.length - 1));
+  const m = BUBBLE_MARGIN_PX / k;
+  const want = headX - w / 2;
+  const left = Math.max(x0 + m, Math.min(x0 + box.width / k - m - w, want));
+  const r = Math.min(h / 2, fs * 1.45);
+  return { lines, fs, w, h, ax: 0.5, align: 0.5, shift: left - want, ay, tail: Math.max(r, Math.min(w - r, headX - left)), lean: 0, side: "above" };
+}
+
+/** Boo's line, typed out once per page load, beside or above his head and kept on screen; it fades as the story moves on. */
+function Bubble({
+  text,
+  x,
+  y,
+  s,
+  fade,
+  orient,
+  rest,
+  avoid,
+}: {
+  text: string;
+  x: MotionValue<number>;
+  y: MotionValue<number>;
+  s: MotionValue<number>;
+  fade: MotionValue<number>;
+  orient: "landscape" | "portrait";
+  rest: { x: number; y: number; s: number };
+  avoid?: string;
+}) {
+  const ref = useRef<SVGGElement>(null);
   const [shown, setShown] = useState(0);
+  const [lay, setLay] = useState<BubbleLayout>(() => {
+    const fs = 18;
+    const w = text.length * fs * 0.55 + fs * 2.8;
+    const h = fs * 2.9;
+    return { lines: [text], fs, w, h, ax: 0.62, align: 0, shift: 0, ay: -8 / rest.s + 0.04, tail: h * 0.46, lean: -1, side: "right" };
+  });
   useEffect(() => {
     let i = 0;
     let tick: number | undefined;
@@ -253,17 +376,58 @@ function Bubble({ text, x, y, s, fade, portrait }: { text: string; x: MotionValu
       if (tick !== undefined) window.clearInterval(tick);
     };
   }, [text]);
-  const bw = portrait ? 200 : 260;
-  const bh = portrait ? 44 : 52;
-  const ox = useTransform([x, s], ([gx, gs]) => (gx as number) + (gs as number) * (portrait ? 30 : 70));
-  const oy = useTransform([y, s], ([gy, gs]) => (gy as number) - bh - 8 + (portrait ? 0 : (gs as number) * 4));
+  const { x: rx, y: ry, s: rs } = rest;
+  useEffect(() => {
+    const place = () => {
+      if (ref.current) setLay(layoutBubble(text, ref.current, orient, { x: rx, y: ry, s: rs }, avoid));
+    };
+    place();
+    // Again once the webfont is in and the copy has finished rising in (before the typing starts).
+    void document.fonts?.ready.then(place);
+    const settle = window.setTimeout(place, 1000);
+    window.addEventListener("resize", place);
+    return () => {
+      window.clearTimeout(settle);
+      window.removeEventListener("resize", place);
+    };
+  }, [text, orient, rx, ry, rs, avoid]);
+
+  const layRef = useRef(lay);
+  layRef.current = lay;
+  const { lines, fs, w: bw, h: bh } = lay;
+  // Offsets scale with Boo (s is his width / 100) so the line stays on his head while he moves.
+  // Read through the ref: a subscribed transformer keeps the closure of its first render.
+  const ox = useTransform([x, s], ([gx, gs]) => {
+    const l = layRef.current;
+    return (gx as number) + l.ax * (gs as number) * 100 - l.align * l.w + l.shift;
+  });
+  const oy = useTransform([y, s], ([gy, gs]) => {
+    const l = layRef.current;
+    return (gy as number) + l.ay * (gs as number) * 100 - l.h;
+  });
+  const tailH = fs * 0.66;
+  const base = fs * 0.45;
+  const tip = lay.tail + lay.lean * fs * 0.8;
+  // The typed prefix, split over the lines.
+  let left = shown;
+  const typed = lines.map((l, i) => {
+    const n = Math.max(0, Math.min(l.length, left));
+    left -= l.length + (i < lines.length - 1 ? 1 : 0);
+    return l.slice(0, n);
+  });
+  const caretLine = Math.max(0, typed.findIndex((t, i) => t.length < lines[i].length));
+  const first = bh / 2 - ((lines.length - 1) * 1.3 * fs) / 2 + fs * 0.33;
   return (
-    <motion.g style={{ x: ox, y: oy, opacity: fade }} className="act-bubble" data-on={shown > 0}>
-      <rect width={bw} height={bh} rx={bh / 2} fill="rgba(34,211,238,0.14)" />
-      <path d={`M18 ${bh} l-8 12 l20 -12 z`} fill="rgba(34,211,238,0.14)" />
-      <text x={bw / 2} y={bh / 2 + 6} textAnchor="middle" fontSize={portrait ? 15 : 18} fill="#22d3ee">
-        {text.slice(0, shown)}
-        {shown < text.length && <tspan className="act-caret">|</tspan>}
+    <motion.g ref={ref} style={{ x: ox, y: oy, opacity: fade }} className="act-bubble" data-on={shown > 0} data-side={lay.side}>
+      <rect width={bw} height={bh} rx={Math.min(bh / 2, fs * 1.45)} fill="rgba(34,211,238,0.14)" />
+      <path d={`M${lay.tail - base} ${bh} L${tip} ${bh + tailH} L${lay.tail + base} ${bh} z`} fill="rgba(34,211,238,0.14)" />
+      <text textAnchor="middle" fontSize={fs} fill="#22d3ee">
+        {lines.map((_, i) => (
+          <tspan key={i} x={bw / 2} y={first + i * 1.3 * fs}>
+            {typed[i]}
+            {shown < text.length && i === caretLine && <tspan className="act-caret">|</tspan>}
+          </tspan>
+        ))}
       </text>
     </motion.g>
   );

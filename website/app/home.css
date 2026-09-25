@@ -105,7 +105,16 @@ html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act
 .bubble--boo {
   background: rgba(34, 211, 238, 0.14);
   color: var(--cyan);
-  border-bottom-left-radius: 5px;
+}
+/* The still bubble is centred over Boo, so its tail points straight down at his head. */
+.bubble--boo::after {
+  content: "";
+  position: absolute;
+  left: calc(50% - 7px);
+  top: 100%;
+  border: 7px solid transparent;
+  border-top: 8px solid rgba(34, 211, 238, 0.14);
+  border-bottom: 0;
 }
 @media (max-width: 860px) {
   .hero {
@@ -138,6 +147,31 @@ html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act
     left: 50%;
     top: calc(var(--nav-h) + 24px);
     transform: translateX(-50%);
+  }
+}
+/* Phones on their side: no room above the copy, so Boo stands beside it on the right. */
+@media (max-width: 860px) and (orientation: landscape) {
+  .hero {
+    align-items: center;
+    padding-top: calc(var(--nav-h) + 24px);
+  }
+  .hero-inner {
+    margin-inline: 16px 216px;
+  }
+  .hero-still {
+    left: auto;
+    right: 16px;
+    top: calc(var(--nav-h) + 24px);
+    transform: none;
+  }
+  .hero-still .ghost {
+    width: 120px;
+    height: auto;
+  }
+  .hero-still .bubble {
+    white-space: normal;
+    max-width: 184px;
+    text-align: center;
   }
 }
 

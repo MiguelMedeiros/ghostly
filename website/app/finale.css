@@ -66,18 +66,21 @@
   width: var(--fin-ghost);
   height: auto;
 }
+/* Each line starts over its speaker's head and grows toward the middle, over
+   the gap between the two (the squared corner is the tail), so neither runs off
+   the side of a phone; a line longer than the pair's footprint wraps. */
 .fin-bubble {
   position: absolute;
-  left: 50%;
   bottom: calc(100% + 8px);
+  width: max-content;
+  max-width: calc(var(--fin-ghost) * 2 + var(--fin-gap));
   padding: 9px 16px;
   border-radius: 18px;
   font-size: 15px;
   font-weight: 500;
   line-height: 1.3;
-  white-space: nowrap;
   opacity: 0;
-  transform: translate(-50%, 8px) scale(0.92);
+  transform: translateY(8px) scale(0.92);
   transition:
     opacity 0.3s var(--ease),
     transform 0.3s var(--ease);
@@ -87,14 +90,18 @@
 }
 .fin-bubble[data-on="true"] {
   opacity: 1;
-  transform: translate(-50%, 0);
+  transform: none;
 }
 .fin-bubble--boo {
+  left: 30%;
+  transform-origin: 0 100%;
   background: rgba(34, 211, 238, 0.14);
   color: var(--cyan);
   border-bottom-left-radius: 5px;
 }
 .fin-bubble--casper {
+  right: 30%;
+  transform-origin: 100% 100%;
   background: rgba(74, 222, 128, 0.14);
   color: var(--mint);
   border-bottom-right-radius: 5px;
@@ -127,7 +134,7 @@
 }
 .fin[data-poof="true"] .fin-actor--casper .fin-bubble {
   opacity: 0;
-  transform: translate(-50%, -6px) scale(0.9);
+  transform: translateY(-6px) scale(0.9);
 }
 @keyframes fin-poof {
   0% {
