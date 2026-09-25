@@ -187,7 +187,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const createdHere = useMemo(() => !!getInviteCode(sessionId), [sessionId]);
   const pairing = usePairingProgress(paired ? session?.peerPubKeyB64 : undefined, {
     inviter: createdHere,
-    // Text only has no live link to wait for: its messages go over the DHT from the start.
+    // A DHT-only chat has no live link to wait for: its messages go over the DHT from the start.
     enabled: paired && (deliveryPeer?.deliveryMode ?? session?.deliveryMode) !== "dht",
     createdAt: session?.createdAt,
   });
