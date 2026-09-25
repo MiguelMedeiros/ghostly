@@ -312,7 +312,8 @@ export class DhtDelivery {
   }
   /**
    * The relays' request budget held the envelope back: nothing went out, so it was no attempt (a text keeps its eight),
-   * and what it carried (a text, a receipt, a new mode) is due again the moment the budget frees a request.
+   * and what it carried (a text, a receipt, a new mode) goes the moment the budget frees a request: the text and the
+   * receipt as they were before, and no publication before then (`budgetUntil`) but a forced one.
    */
   private async heldBack(error: Parameters<typeof budgetRetryMs>[0], now: number, before: { lastPublish: number; controlDue: number },
     pending: DhtDeliveryState["pending"], receipt: DhtDeliveryState["receipt"]): Promise<void> {
@@ -320,9 +321,7 @@ export class DhtDelivery {
     this.budgetUntil = at;
     this.lastPublish = before.lastPublish; this.controlDue = Math.min(before.controlDue, at);
     traceLink(this.from, "dht-publish-waits", { retryInMs: at - now });
-    await this.persist({ ...this.state,
-      pending: pending && this.state.pending ? { ...this.state.pending, attempts: pending.attempts, next: at } : this.state.pending,
-      receipt: receipt && this.state.receipt ? { ...this.state.receipt, attempts: receipt.attempts, next: at } : this.state.receipt });
+    await this.persist({ ...this.state, pending: pending ?? this.state.pending, receipt: receipt ?? this.state.receipt });
   }
   private async receive(packet: SignedPacket): Promise<void> {
     if (packet.pubKeyZ32 !== this.peerAddress || measureRecords(packet.pubKeyZ32, packet.records) > MAX_DNS_PACKET_BYTES) return;
