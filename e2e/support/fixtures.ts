@@ -182,10 +182,20 @@ export async function linkLegacy(host: Peer, guest: Peer): Promise<void> {
  * choice is made in a chat, at any time, never in its invite.
  */
 export async function chooseDhtOnly(page: Page): Promise<void> {
-  await page.getByTestId("connection-options").click();
-  const choice = page.getByRole("switch", { name: "DHT-only delivery" });
-  if (!await choice.isChecked()) await choice.click();
-  await expect(choice).toBeChecked();
+  await setDhtOnly(page, true);
+}
+
+/**
+ * DHT only on or off, in the panel of the chat header's connection control: it is one of the connection choices.
+ * Off leaves it for Automatic, or for the one transport a browser runs (which is Automatic there too).
+ */
+export async function setDhtOnly(page: Page, on: boolean): Promise<void> {
+  if ((await page.getByTestId("connection-menu").getAttribute("open")) === null) await page.getByTestId("connection-options").click();
+  const panel = page.getByRole("dialog", { name: "Connection options" });
+  const choice = panel.getByRole("radio", { name: "DHT only", exact: true });
+  const back = panel.getByRole("radio", { name: "Automatic", exact: true }).or(panel.getByRole("radio", { name: "WebRTC", exact: true })).first();
+  if ((await choice.isChecked()) !== on) await (on ? choice : back).click();
+  await expect.poll(() => choice.isChecked()).toBe(on);
   await page.keyboard.press("Escape");
 }
 

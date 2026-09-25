@@ -156,7 +156,7 @@ describe("the chat's connection control and its panel", () => {
     const { user, engine } = control({ availableTransports: all, peerTransports: ["webrtc/1", "iroh/1"], transportAutomatic: true, transportRttMs: 12 });
     engine.on("setChatTransport", () => undefined);
     await user.click(screen.getByTestId("connection-options"));
-    expect(within(panel()).getByTestId("connection-in-use")).toHaveTextContent("WebRTC · 12 ms");
+    expect(within(panel()).getByTestId("connection-in-use")).toHaveTextContent("WebRTC");
     expect(within(panel()).getByTestId("connection-chosen")).toHaveTextContent("Automatic");
     const radios = within(panel()).getAllByRole("radio");
     expect(radios.map(r => [r.textContent, r.getAttribute("aria-checked"), (r as HTMLButtonElement).disabled])).toEqual([

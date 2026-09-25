@@ -1,4 +1,4 @@
-import { chat, chooseDhtOnly, expect, link, say, test, type Peer } from "../support/fixtures";
+import { chat, chooseDhtOnly, expect, link, say, setDhtOnly, test, type Peer } from "../support/fixtures";
 
 /**
  * The one chat of WISP 400 in the real app: first contact runs on the DHT and on a stream at once. With
@@ -66,9 +66,7 @@ test("DHT only on one side keeps both on the DHT; leaving it goes live",
     await say(alice, "short, over the DHT");
     await expect(chat(bob).getByText("short, over the DHT")).toBeVisible({ timeout: 60_000 });
     // Bob leaves DHT only: nothing blocks the live link any more.
-    await bob.page.getByTestId("connection-options").click();
-    await bob.page.getByRole("switch", { name: "DHT-only delivery" }).click();
-    await bob.page.keyboard.press("Escape");
+    await setDhtOnly(bob.page, false);
     for (const p of [alice, bob]) await expect(chip(p)).toHaveAccessibleName(/Connected · WebRTC/, { timeout: 90_000 });
     await expect(chat(bob).getByText("short, over the DHT")).toHaveCount(1);
   });

@@ -45,22 +45,29 @@ for(const mobile of [false,true]) test(`popup outside gestures close safely (mob
   }
 });
 
-test("connection details open by keyboard and dismiss without changing the chat", { tag: ["@feature:chat.paired.status", "@feature:app.popovers"] }, async ({peer}) => {
+test("the connection panel opens by keyboard, has both keys, and dismisses without changing the chat", { tag: ["@feature:chat.paired.status", "@feature:app.popovers"] }, async ({peer}) => {
   const {page} = await peer("connection-details");
   await page.getByRole("button", {name:"New chat", exact:true}).click();
   const route = page.url();
-  const trigger = page.getByRole("button", {name:"Connection details", exact:true});
+  const trigger = page.getByTestId("connection-options");
   await expect(trigger).not.toHaveAttribute("title");
   await trigger.focus();
   await page.keyboard.press("Enter");
-  const panel = page.getByRole("region", {name:"Connection details"});
+  const panel = page.getByRole("dialog", {name:"Connection options"});
   await expect(panel).toBeVisible();
-  await expect(panel.getByText("Peer", {exact:true})).toBeVisible();
+  // Both keys, whole and copyable: this side's and the contact's, whose short form is in the header.
+  await expect(panel.getByText("You", {exact:true})).toBeVisible();
+  await expect(panel.getByText("Contact", {exact:true})).toBeVisible();
+  const key = (await panel.getByTestId("connection-key-contact").textContent())!;
+  expect(key.length).toBeGreaterThan(40);
+  await expect(trigger.getByTestId("connection-key")).toHaveText(`${key.slice(0, 6)}...${key.slice(-6)}`);
+  await expect(panel.getByTestId("connection-key-you")).not.toHaveText(key);
   await page.keyboard.press("Escape");
-  await expect(panel).toHaveCount(0);
+  await expect(panel).toBeHidden();
   await expect(trigger).toBeFocused();
   await trigger.click();
+  await expect(panel).toBeVisible();
   await page.mouse.click(2,2);
-  await expect(panel).toHaveCount(0);
+  await expect(panel).toBeHidden();
   await expect(page).toHaveURL(route);
 });

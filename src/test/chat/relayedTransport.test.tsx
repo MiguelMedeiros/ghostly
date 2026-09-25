@@ -50,7 +50,7 @@ describe("a relayed transport", () => {
     expect(screen.getByTestId("connection-options")).toHaveAttribute("data-relayed", "");
     await view.user.click(screen.getByTestId("connection-options"));
     const panel = screen.getByRole("dialog", { name: "Connection options" });
-    expect(within(panel).getByTestId("connection-in-use")).toHaveTextContent("HyperDHT · relayed · 180 ms");
+    expect(within(panel).getByTestId("connection-in-use")).toHaveTextContent("HyperDHT · relayed");
     expect(within(panel).getByTestId("connection-option-hyperdht")).toHaveTextContent("In use · relayed · 180 ms");
     expect(within(panel).getByTestId("connection-relayed")).toHaveTextContent("Relayed via relay.example");
     expect(within(panel).getByTestId("connection-summary")).toHaveTextContent("never what they say");

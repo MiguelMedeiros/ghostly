@@ -2,9 +2,9 @@ import { chat, expect, say, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 
 /**
- * The connection popover in a paired chat's header: how it opens and closes,
- * the optional code comparison, and what it says and offers when one side
- * goes away and comes back.
+ * The connection control in a paired chat's header and its panel: how it opens
+ * and closes, the optional code comparison, and what it says and offers when
+ * one side goes away and comes back.
  */
 
 const trigger = (p: Peer) => p.page.getByTestId("connection-options");
@@ -65,15 +65,21 @@ test("the connection popover opens and closes by click, Escape and a click outsi
   await expect(alice.page.getByPlaceholder("Message…")).toBeEnabled();
 });
 
-test("the header shows only an icon, as big as the call buttons; a tooltip names the state", { tag: ["@feature:chat.paired.status"] }, async ({ peer }) => {
+test("the header has one connection control: the dot, the key, the transport in use and its round trip; a tooltip names the state", { tag: ["@feature:chat.paired.status", "@feature:transport.indicator"] }, async ({ peer }) => {
   const [alice] = await linked(peer, ["icon-alice", "icon-bob"]);
   const tip = alice.page.getByRole("tooltip");
-  await expect(trigger(alice)).toHaveText("");
+  // One control: nothing else in the header speaks of the connection.
+  await expect(alice.page.getByTestId("connection-options")).toHaveCount(1);
+  await expect(alice.page.getByTestId("transport-chip")).toHaveCount(0);
+  await expect(alice.page.getByRole("button", { name: "Connection details", exact: true })).toHaveCount(0);
   await expect(trigger(alice)).toHaveAttribute("data-state", "connected");
-  await expect(trigger(alice).getByTestId("connection-dot")).toBeVisible();
-  const icon = (await trigger(alice).boundingBox())!, call = (await alice.page.getByTestId("call-video").boundingBox())!;
-  expect(Math.abs(icon.width - call.width)).toBeLessThanOrEqual(1);
-  expect(Math.abs(icon.height - call.height)).toBeLessThanOrEqual(1);
+  await expect(trigger(alice).getByTestId("contact-status")).toHaveAttribute("aria-label", "Connected");
+  await expect(trigger(alice).getByTestId("contact-status")).toBeVisible();
+  await expect(trigger(alice).getByTestId("connection-key")).toHaveText(/^\S{6}\.\.\.\S{6}$/);
+  await expect(trigger(alice).getByTestId("connection-now")).toHaveText(/^WebRTC(· \d+ ms)?$/);
+  // Under the name, left of the calls: the right side has the call buttons and ⋮ only.
+  const control = (await trigger(alice).boundingBox())!, call = (await alice.page.getByTestId("call-audio").boundingBox())!;
+  expect(control.x + control.width).toBeLessThan(call.x);
 
   // Hover names the state; nothing is said until then.
   await expect(tip).toBeHidden();
@@ -94,9 +100,9 @@ test("the header shows only an icon, as big as the call buttons; a tooltip names
   await expect(popover(alice)).toBeHidden();
   await alice.page.mouse.move(0, 0);
   await expect(tip).toBeHidden();
-  // Between them, the live transport's chip in the subtitle (#204).
-  await alice.page.getByTestId("transport-chip").focus();
-  await alice.page.keyboard.press("Tab");
+  // The call buttons come right after it.
+  await alice.page.getByTestId("call-audio").focus();
+  await alice.page.keyboard.press("Shift+Tab");
   await expect(trigger(alice)).toBeFocused();
   await expect(tip).toBeVisible();
   await alice.page.keyboard.press("Escape");
@@ -143,14 +149,14 @@ test("offline, the popover says so; the contact is offered Reconnect, and the ch
   await setOnline(alice, false);
   await expect(trigger(alice)).toHaveAccessibleName("Connection options: Offline");
   await expect(trigger(alice)).toHaveAttribute("data-state", "offline");
-  await expect(trigger(alice)).toHaveText("");
+  await expect(trigger(alice).getByTestId("connection-now")).toHaveText("Offline");
   await trigger(alice).hover();
   await expect(alice.page.getByRole("tooltip")).toHaveText("Offline");
   await trigger(alice).click();
   await expect(popover(alice)).toContainText("Offline");
   // Nothing to choose or retry while offline.
-  await expect(alice.page.getByRole("switch", { name: "DHT-only delivery" })).toBeDisabled();
-  await expect(alice.page.getByRole("radio", { name: "WebRTC", exact: true })).toBeDisabled();
+  await expect(popover(alice).getByRole("radio", { name: "DHT only", exact: true })).toBeDisabled();
+  await expect(popover(alice).getByRole("radio", { name: "WebRTC", exact: true })).toBeDisabled();
   await expect(popover(alice).getByRole("button", { name: "Reconnect" })).toHaveCount(0);
   await expect(alice.page.getByPlaceholder("Message…")).toBeDisabled();
   await alice.page.keyboard.press("Escape");

@@ -98,8 +98,9 @@ describe("ChatConnection: what the header says", () => {
     expect(screen.getByTestId("connection-now")).toHaveTextContent("Iroh· 333 ms");
     expect(screen.getByTestId("connection-key")).toHaveTextContent("peer");
     // The panel: in use and chosen, one line each.
-    expect(screen.getByTestId("connection-in-use")).toHaveTextContent("Iroh · 333 ms");
+    expect(screen.getByTestId("connection-in-use")).toHaveTextContent(/^Iroh$/);
     expect(screen.getByTestId("connection-chosen")).toHaveTextContent("WebRTC · not in use");
+    expect(within(screen.getByTestId("connection-summary")).getByText("Round trip").nextSibling).toHaveTextContent("333 ms");
     expect(within(screen.getByTestId("connection-summary")).getByText("Why").nextSibling).toHaveTextContent("You chose WebRTC for this chat; it is not available now, so the chat uses Iroh.");
     // The choice is the checked one; the one in use is marked on its own row.
     const webrtc = screen.getByRole("radio", { name: "WebRTC" }), iroh = screen.getByRole("radio", { name: "Iroh" });
@@ -112,7 +113,8 @@ describe("ChatConnection: what the header says", () => {
   });
 
   it.each<[string, Partial<LinkView>, string, string]>([
-    ["automatic, live", { pairing: ready({ transport: "iroh/1" }), transportAutomatic: true, transportRttMs: 20 }, "Iroh · 20 ms", "Automatic"],
+    ["automatic, live", { pairing: ready({ transport: "iroh/1" }), transportAutomatic: true, transportRttMs: 20 }, "Iroh", "Automatic"],
+    ["moving to another", { pairing: ready({ transport: "iroh/1", transitionTarget: "hyperdht/1" }), transportAutomatic: true }, "Iroh · moving to HyperDHT", "Automatic"],
     ["a transport chosen and in use", { pairing: ready({ transport: "iroh/1" }), preferredTransport: "iroh/1", transportAutomatic: false }, "Iroh", "Iroh · in use"],
     ["a transport chosen and waited for", { pairing: ready(), preferredTransport: "hyperdht/1", transportAutomatic: false,
       transportWait: { transport: "hyperdht/1", by: "you", reason: "unreachable", live: "webrtc/1", failures: 1 } }, "WebRTC", "HyperDHT · waiting for it"],
@@ -210,7 +212,7 @@ describe("ChatConnection: what the header says", () => {
     const since = Date.now() - 12 * 60_000 - 5_000;
     banner({ pairing: ready({ transport: "iroh/1" }), preferredTransport: "iroh/1", transportAutomatic: false, transportRttMs: 42, transportLive: { since, cause: "you" } });
     expect(screen.getByTestId("connection-tooltip-detail")).toHaveTextContent("42 ms · live for 12 min · your choice");
-    expect(screen.getByTestId("connection-in-use")).toHaveTextContent("Iroh · 42 ms");
+    expect(screen.getByTestId("connection-in-use")).toHaveTextContent("Iroh");
     const summary = screen.getByTestId("connection-summary");
     expect(within(summary).getByText("Round trip").nextSibling).toHaveTextContent("42 ms");
     expect(within(summary).getByText("Live since").nextSibling).toHaveTextContent("(12 min)");

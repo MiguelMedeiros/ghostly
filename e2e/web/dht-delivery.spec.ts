@@ -1,6 +1,6 @@
 import { copyInvite } from "../support/clipboard";
 import { pasteInvite } from "../support/clipboard";
-import { test, expect, chat, chooseDhtOnly, say, type Peer } from "../support/fixtures";
+import { test, expect, chat, chooseDhtOnly, say, setDhtOnly, type Peer } from "../support/fixtures";
 import { LocalRelay } from "../support/relay";
 import { composerRow } from "../support/composer";
 
@@ -22,14 +22,7 @@ async function join(peer:Peer,invite:string) {
   await peer.page.getByRole("button",{name: "Join chat", exact: true}).first().click();
   await pasteInvite(peer.page, invite);
 }
-async function mode(peer:Peer,dht:boolean) {
-  const menu=peer.page.getByTestId("connection-menu");
-  if(await menu.getAttribute("open") === null) await peer.page.getByTestId("connection-options").click();
-  const choice=peer.page.getByRole("switch",{name:"DHT-only delivery"});
-  if(await choice.isChecked()!==dht) await choice.click();
-  await expect.poll(()=>choice.isChecked()).toBe(dht);
-  await peer.page.keyboard.press("Escape");
-}
+const mode = (peer:Peer,dht:boolean) => setDhtOnly(peer.page, dht);
 async function noStreams(peers:Peer[]) { for(const p of peers) expect(await p.page.evaluate(()=>Number(localStorage.getItem("qa-stream-dials")??0))).toBe(0); }
 const received=(p:Peer)=>chat(p).getByText("Received by peer",{exact:true});
 

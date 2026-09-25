@@ -76,9 +76,10 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, polling 
   const now = liveOn && !failure && !moving ? `${name(liveOn)}${link?.transportRelayed ? " · relayed" : ""}` : label;
   const rtt = liveOn && !failure && !moving ? link?.transportRttMs : undefined;
   const dot = status ?? label;
-  // What is in use and what is chosen, said apart: a chat set to WebRTC may be live over Iroh (Fallback on).
+  // What is in use and what is chosen, said apart: a chat set to WebRTC may be live over Iroh (Fallback on). The round
+  // trip has its own line below.
   const inUse = !online ? "Nothing · this device is offline"
-    : liveOn ? `${name(liveOn)}${link?.transportRelayed ? " · relayed" : ""}${link?.transportRttMs !== undefined ? ` · ${link.transportRttMs} ms` : ""}${moving ? ` · moving to ${name(moving)}` : ""}`
+    : liveOn ? `${name(liveOn)}${link?.transportRelayed ? " · relayed" : ""}${moving ? ` · moving to ${name(moving)}` : ""}`
     : dht || textDht ? "The DHT, for short texts · nothing live"
     : holding ? `Nothing live · messages wait for ${contact}` : "Nothing live";
   const chosen = dht ? "DHT only"
@@ -94,7 +95,8 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, polling 
     finally { setBusy(false); }
   }
   // `toggle` is queued, and React can take a while to handle it: the click and Escape act at once instead.
-  return <div className="relative min-w-0">
+  // The negative margin lines the dot up with the name above; on the summary, it would cut its own text by as much.
+  return <div className="relative -ms-1 min-w-0">
   <details ref={root} onToggle={e => setMenuOpen(e.currentTarget.open)} onKeyDown={e => {
     if (e.key !== "Escape") return;
     if (root.current?.open) { e.stopPropagation(); close(); } else if (tip) { e.stopPropagation(); setTip(false); }
@@ -102,7 +104,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, polling 
     <summary ref={trigger} onClick={() => { setTip(false); setMenuOpen(!root.current?.open); }} data-testid="connection-options" data-state={kind} data-transport={liveOn ?? (holding ? "hold" : undefined)} data-relayed={liveOn && link?.transportRelayed ? "" : undefined} aria-label={`Connection options: ${label}`} aria-describedby={`${id}-tip`}
       onPointerEnter={e => { if (e.pointerType !== "touch") setTip(true); }} onPointerLeave={() => setTip(false)}
       onFocus={e => { if (e.currentTarget.matches(":focus-visible")) setTip(true); }} onBlur={() => setTip(false)}
-      className={`-ms-1 flex min-h-7 min-w-0 max-w-full cursor-pointer list-none items-center gap-1.5 rounded-md px-1 text-xs leading-none transition-colors hover:bg-surface-hover max-md:min-h-8 [&::-webkit-details-marker]:hidden ${focus}`}>
+      className={`flex min-h-7 min-w-0 max-w-full cursor-pointer list-none items-center gap-1.5 rounded-md px-1 text-xs leading-none transition-colors hover:bg-surface-hover max-md:min-h-8 [&::-webkit-details-marker]:hidden ${focus}`}>
       <span role="img" aria-label={dot} data-testid="contact-status"
         className={`h-2 w-2 shrink-0 rounded-full ${dotTone(dot, polling)} ${connecting && !/^Connected/.test(dot) ? "motion-safe:animate-pulse" : ""}`} />
       <span data-testid="connection-key" className={`whitespace-nowrap font-mono text-text-muted/60 max-md:text-[10px] ${shown || compact ? "max-md:hidden" : ""}`}>{publicKeyLabel(peerKey)}</span>

@@ -119,10 +119,10 @@ test("mobile keeps its footer and compact header, with multiline text and QR ins
   await expect(a.page.getByPlaceholder("Message…")).toBeEnabled();
   await expect(a.page.getByTestId("account-bar")).toHaveCount(0);
   await a.page.getByPlaceholder("Message…").fill("Line one\nLine two");
-  // Only the icon in the header, with the call buttons, and nothing past the edge.
-  const icon=a.page.getByTestId("connection-options"); await expect(icon).toHaveText("");
-  const iconBox=(await icon.boundingBox())!, call=(await a.page.getByTestId("call-video").boundingBox())!;
-  expect(Math.abs(iconBox.width-call.width)).toBeLessThanOrEqual(1); expect(iconBox.x+iconBox.width).toBeLessThanOrEqual(390);
+  // One connection control under the name, a tap target of its own, left of the calls, and nothing past the edge.
+  const icon=a.page.getByTestId("connection-options"); await expect(icon).toBeVisible();
+  const iconBox=(await icon.boundingBox())!, call=(await a.page.getByTestId("call-audio").boundingBox())!;
+  expect(iconBox.height).toBeGreaterThanOrEqual(32); expect(iconBox.x+iconBox.width).toBeLessThanOrEqual(call.x);
   expect(await icon.evaluate(el=>{const h=el.closest(".header-safe")!;return h.scrollWidth<=h.clientWidth;})).toBe(true);
   await a.page.getByTestId("connection-options").click();await expect(a.page.getByRole("dialog",{name:"Connection options"})).toBeVisible();
   const menu=await a.page.getByRole("dialog",{name:"Connection options"}).boundingBox(); expect(menu!.x).toBeGreaterThanOrEqual(0); expect(menu!.x+menu!.width).toBeLessThanOrEqual(390);
@@ -171,7 +171,7 @@ test("home actions have equal sizes and enabled controls signal clicks", { tag: 
     await create.click();
     const menu = p.page.getByTestId("connection-options");
     await expect(menu).toHaveCSS("cursor", "pointer"); await menu.click();
-    await expect(p.page.getByRole("switch", {name:"DHT-only delivery"})).toHaveCSS("cursor", "pointer");
+    await expect(p.page.getByRole("radio", {name:"DHT only", exact:true})).toHaveCSS("cursor", "pointer");
     await expect(p.page.getByRole("radio", {name:"WebRTC", exact:true})).toHaveCSS("cursor", "pointer");
     await expect(p.page.getByRole("radio", {name:"Iroh", exact:true})).toHaveCSS("cursor", "not-allowed");
     // Before the contact arrives, what is written waits for it (WISP 400): the composer is open.
@@ -216,7 +216,7 @@ for (const unavailable of ["none", "read", "publish", "network", "publication-ne
       }
       await expect(page.getByRole("link", {name:"review relay settings"})).toHaveAttribute("href", "#/settings");
     }
-    await expect(page.getByRole("switch", {name:"DHT-only delivery"})).toBeEnabled();
+    await expect(page.getByRole("radio", {name:"DHT only", exact:true})).toBeEnabled();
     await expect(page.getByRole("radio", {name:"WebRTC", exact:true})).toBeEnabled();
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("invite-card").getByRole("button",{name:/Copy invite|Copied!/})).toBeVisible();

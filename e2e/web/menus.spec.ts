@@ -73,13 +73,15 @@ test("every row of the chat, group and New menus is one line and whole, in every
       const at = `${language} at ${viewport.width}px`;
       const sheet = viewport === PHONE ? "sheet" : "popover";
 
-      // The chat's ⋮: Pin, Mute notifications, Payments, Hold messages, Identities, Connection, Services, Refresh, Tech Info, Delete.
+      // The chat's ⋮: Pin, Mute notifications, Payments, Hold messages, Identities, Services, Refresh, Tech Info, Delete.
+      // The connection is not in it: the header's connection control has it.
       await go(chatHash);
       await page.getByTestId("chat-options").click();
       const chatMenu = page.getByTestId("chat-options-menu");
       await expect(chatMenu).toHaveAttribute("data-menu", sheet);
       await expect(chatMenu.getByTestId("chat-hold-open")).toBeVisible();
-      await oneLineEach(chatMenu, 10, `chat menu, ${at}`);
+      await expect(chatMenu.getByTestId("chat-connection-open")).toHaveCount(0);
+      await oneLineEach(chatMenu, 9, `chat menu, ${at}`);
       if (language !== "ar") await page.screenshot({ path: testInfo.outputPath(`chat-menu-${language}-${viewport.width}.png`) });
       await close(page, chatMenu);
 
