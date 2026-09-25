@@ -437,6 +437,7 @@
     "src/pages/Settings.tsx": ["settings.*","app.i18n","app.theme","app.reduce-motion","app.attention.*","app.version","app.updates.*","app.responsive","app.mobile-layout","chats.list.delete-all","proofs.domain.*","profiles.switcher","profiles.lock"],
     "src/pages/Wallet.tsx": ["wallet.*","payments.*","groups.payments.*","groups.community.payments.*"],
     "src/components/Sidebar.tsx": ["*"],
+    "src/components/Menu.tsx": ["*"],
     "src/components/AccountBar.tsx": ["*"],
     "src/components/ErrorBoundary.tsx": ["*"],
     "src/components/Avatar.tsx": ["*"],
