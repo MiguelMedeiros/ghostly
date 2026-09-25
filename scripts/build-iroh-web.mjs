@@ -1,25 +1,28 @@
 // Builds Iroh for browsers (native-transports/iroh-web) into packages/iroh-web/pkg.
 // The output is committed, so the web app, the extension and their Docker/CI
-// builds need no Rust. Run it after changing the crate or bumping iroh.
+// builds need no Rust. Run it after changing the crate or bumping iroh:
 //
-//   node scripts/build-iroh-web.mjs           rebuild pkg/
-//   node scripts/build-iroh-web.mjs --check   rebuild elsewhere, fail if pkg/ differs
+//   node scripts/build-iroh-web.mjs
+//
+// wasm-bindgen's output is not byte-for-byte reproducible (the order of its
+// exports varies between runs), so CI cannot rebuild and compare. Instead
+// pkg/BUILD.json records a hash of the crate's sources and of the wasm, and
+// scripts/test/irohWebBuild.test.ts fails when either no longer matches: a
+// crate changed without a rebuild, or a pkg file edited by hand.
 //
 // Needs: the wasm32-unknown-unknown target, a clang that targets wasm32 (ring's
 // C code; Apple's clang does not, Homebrew's llvm does: set CC_wasm32_unknown_unknown
 // or have /opt/homebrew/opt/llvm), and wasm-bindgen-cli at the crate's pinned version.
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { gzipSync } from 'node:zlib'
+import { irohWebSourceHash } from './iroh-web-source.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const crate = join(root, 'native-transports/iroh-web')
 const pkg = join(root, 'packages/iroh-web/pkg')
-const check = process.argv.includes('--check')
-const FILES = ['ghostly_iroh_web.js', 'ghostly_iroh_web.d.ts', 'ghostly_iroh_web_bg.wasm', 'ghostly_iroh_web_bg.wasm.d.ts']
 
 const manifest = readFileSync(join(crate, 'Cargo.toml'), 'utf8')
 const bindgen = /wasm-bindgen = "=([\d.]+)"/.exec(manifest)?.[1]
@@ -46,29 +49,18 @@ run('cargo', ['build', '--quiet', '--release', '--locked', '--target', 'wasm32-u
   RUSTFLAGS: ['--cfg getrandom_backend="wasm_js"', ...remap].join(' '),
 })
 
-const out = check ? mkdtempSync(join(tmpdir(), 'iroh-web-')) : pkg
-mkdirSync(out, { recursive: true })
-run('wasm-bindgen', ['--target', 'web', '--out-dir', out, join(target, 'wasm32-unknown-unknown/release/ghostly_iroh_web.wasm')])
+mkdirSync(pkg, { recursive: true })
+run('wasm-bindgen', ['--target', 'web', '--out-dir', pkg, join(target, 'wasm32-unknown-unknown/release/ghostly_iroh_web.wasm')])
 
-const wasm = readFileSync(join(out, 'ghostly_iroh_web_bg.wasm'))
+const wasm = readFileSync(join(pkg, 'ghostly_iroh_web_bg.wasm'))
 const build = {
   iroh,
   wasmBindgen: bindgen,
   rustc: run('rustc', ['--version']),
+  source: irohWebSourceHash(root),
   sha256: createHash('sha256').update(wasm).digest('hex'),
   bytes: wasm.length,
   gzipBytes: gzipSync(wasm, { level: 9 }).length,
 }
-writeFileSync(join(out, 'BUILD.json'), JSON.stringify(build, null, 2) + '\n')
-
-if (check) {
-  const differs = FILES.filter(name => !readFileSync(join(out, name)).equals(readFileSync(join(pkg, name))))
-  rmSync(out, { recursive: true, force: true })
-  if (differs.length) {
-    console.error(`packages/iroh-web/pkg is stale (${differs.join(', ')}): run node scripts/build-iroh-web.mjs and commit it`)
-    process.exit(1)
-  }
-  console.log('packages/iroh-web/pkg matches its source')
-} else {
-  console.log(`Built Iroh ${iroh} for browsers: ${(build.bytes / 1e6).toFixed(2)} MB wasm, ${(build.gzipBytes / 1e6).toFixed(2)} MB gzip`)
-}
+writeFileSync(join(pkg, 'BUILD.json'), JSON.stringify(build, null, 2) + '\n')
+console.log(`Built Iroh ${iroh} for browsers: ${(build.bytes / 1e6).toFixed(2)} MB wasm, ${(build.gzipBytes / 1e6).toFixed(2)} MB gzip`)

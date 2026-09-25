@@ -89,6 +89,7 @@ const PROBES = {
   Anvil: () => rpc(endpoints.usdt.rpc, "eth_chainId"),
   "Fedimint guardian / gateway": async () => (await tcp(endpoints.fedimint.api.replace(/^ws/, "http"))) && tcp(endpoints.fedimint.gateway),
   S3: () => http(`${endpoints.s3.endpoint}/health`),
+  "Iroh relay": () => http(endpoints.irohRelay),
   // The environment's own mint, whatever E2E_MINT_URL points the suite at.
   "Cashu mint": () => http(`${read("E2E_MINT_URL")}/v1/info`),
 };
@@ -223,6 +224,14 @@ async function up() {
     forwardAll();
     // Shared by every checkout that points at it: seeding again would mine blocks under their running tests.
     if (await answering()) { await use(); return; }
+    // Up from a checkout that knew fewer services (a service added since): start only what is missing, touch
+    // nothing that runs, and seed nothing.
+    if ((await PROBES["bitcoind RPC"]()) && (await PROBES.Esplora())) {
+      log(`adding the services ${where} lacks (docker compose up --no-recreate)`);
+      if (compose(["up", "-d", "--no-recreate"]) === null) throw new Error("docker compose up failed");
+      await waitHealthy();
+      await use(); return;
+    }
   }
   log(`starting ${where} (docker compose up)`);
   // bitcoind and its miner wallet first: NBXplorer warms the chain up through the node's loaded wallet.

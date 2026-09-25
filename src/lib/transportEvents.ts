@@ -220,6 +220,8 @@ export interface ConnectionSummary {
   name: string;
   rttMs?: number;
   since?: number;
+  /** Relayed (WISP 100): the relays' hosts. Absent on a direct path. */
+  relays?: string[];
   /** Why this transport, in a few words ("your choice") and in a sentence. */
   whyShort: string;
   why: string;
@@ -236,15 +238,20 @@ export function connectionSummary(link: LinkView | undefined, now: number, conta
   if (!link || !transport) return undefined;
   const t = name(transport), chosen = link.transportAutomatic === false || (link.transportAutomatic === undefined && link.preferredTransport !== undefined);
   const cause = link.transportLive?.cause, only = (link.availableTransports ?? []).length === 1;
+  const relayed = link.transportRelayed;
   const [whyShort, why] = only ? ["the only one here", `${t} is the only transport this app runs.`]
     : cause === "contact" ? [`${contact === "Your contact" ? "your contact's" : `${contact}'s`} choice`, `${contact} chose ${t} for this chat.`]
     : chosen && link.preferredTransport === transport ? ["your choice", `You chose ${t} for this chat.`]
     : chosen ? ["fallback", `You chose ${name(link.preferredTransport)} for this chat; it is not available now, so the chat uses ${t}.`]
     : cause === "dropped" ? ["automatic, after a drop", `Automatic: the chat came back over ${t} after the previous transport dropped.`]
+    : relayed ? ["no direct path", `Automatic: a direct connection could not be made, so the chat goes through ${t}'s relay.`]
     : ["automatic", `Automatic: both apps rank ${t} first${transport === "webrtc/1" ? ", and a first pairing always uses WebRTC" : ""}.`];
   const since = link.transportLive?.since;
-  const parts = [...(link.transportRttMs !== undefined ? [`${link.transportRttMs} ms`] : []), ...(since !== undefined ? [`live for ${lasting(now - since)}`] : []), whyShort];
-  return { transport, name: t, rttMs: link.transportRttMs, since, whyShort, why, line: [t, ...parts].join(" · "), detail: parts.join(" · "),
-    short: [t, ...(link.transportRttMs !== undefined ? [`${link.transportRttMs} ms`] : []), whyShort].join(" · ") };
+  const rtt = link.transportRttMs !== undefined ? [`${link.transportRttMs} ms`] : [];
+  const path = relayed ? ["relayed"] : [];
+  const parts = [...path, ...rtt, ...(since !== undefined ? [`live for ${lasting(now - since)}`] : []), whyShort];
+  return { transport, name: t, rttMs: link.transportRttMs, since, relays: relayed?.relays, whyShort,
+    why: relayed ? `${why} Relayed: ${relayed.relays.join(" and ") || "a relay"} sees which devices talk and when, never what they say.` : why,
+    line: [t, ...parts].join(" · "), detail: parts.join(" · "), short: [t, ...path, ...rtt, whyShort].join(" · ") };
 }
 

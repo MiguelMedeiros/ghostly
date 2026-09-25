@@ -332,6 +332,15 @@ services:
     environment: { RUSTFS_ACCESS_KEY: ghostly-e2e, RUSTFS_SECRET_KEY: ghostly-e2e-worthless, RUSTFS_CORS_ALLOWED_ORIGINS: "*" }
     ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47080:9000"]
 
+  # ── Iroh relay (WISP 102): a browser's Iroh reaches its contacts only through one ───────────────────────
+  # The same version as the app's iroh, in dev mode: plain HTTP (the app takes it from loopback only), no QUIC
+  # address discovery. The browsers and the native test peer home on it instead of n0's public relays.
+  iroh-relay:
+    image: n0computer/iroh-relay:v1.2.0
+    container_name: ghostly-e2e-iroh-relay
+    command: ["--dev"]
+    ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47085:3340"]
+
   # ── Cashu: the test mint (fake Lightning backend: its invoices pay themselves), as CI runs it ────────────
   mint:
     image: cashubtc/mintd:0.17.7

@@ -105,6 +105,7 @@ export function TransportOptions({ link, disabled = false, onChosen, menu = fals
     {((single && menu) || (peerDht && menu) || error) && <p className={`${menu ? "max-w-72 px-3 pb-1.5 pt-1" : "mt-1"} whitespace-normal text-[11px] leading-4 text-text-muted`} data-testid="transport-menu-note">
       {error ? <span role="alert" className="text-danger">{error}</span>
         : peerDht ? "Your contact chose DHT only: no live connection until you both leave it."
+        : link.transportErrors?.["iroh/1"] ? `This app connects over WebRTC only right now: Iroh could not start (${link.transportErrors["iroh/1"].replace(/\.$/, "")}). HyperDHT needs Ghostly Desktop on both sides.`
         : "This app connects over WebRTC only. Iroh and HyperDHT need Ghostly Desktop on both sides."}
     </p>}
   </>;

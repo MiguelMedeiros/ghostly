@@ -56,9 +56,16 @@ fn binding(endpoint: &Endpoint, connection: &Connection) -> Result<Binding, Stri
     connection
         .export_keying_material(&mut context, EXPORTER_LABEL, ALPN)
         .map_err(|_| "TLS exporter unavailable".to_string())?;
-    let mut identities = [endpoint.id().to_string(), connection.remote_id().to_string()];
+    let mut identities = [
+        endpoint.id().to_string(),
+        connection.remote_id().to_string(),
+    ];
     identities.sort();
-    Ok(Binding { transport: "iroh/1", context: hex(&context), identities })
+    Ok(Binding {
+        transport: "iroh/1",
+        context: hex(&context),
+        identities,
+    })
 }
 
 fn address(endpoint: &Endpoint) -> Address {
@@ -76,19 +83,25 @@ async fn write_frame(send: &mut SendStream, frame: &[u8]) -> Result<(), String> 
     if frame.is_empty() || frame.len() > MAX_FRAME {
         return Err("Frame exceeds transport budget".into());
     }
-    send.write_all(&(frame.len() as u32).to_be_bytes()).await.map_err(|e| e.to_string())?;
+    send.write_all(&(frame.len() as u32).to_be_bytes())
+        .await
+        .map_err(|e| e.to_string())?;
     send.write_all(frame).await.map_err(|e| e.to_string())
 }
 
 async fn read_frame(recv: &mut RecvStream) -> Result<Vec<u8>, String> {
     let mut header = [0u8; 4];
-    recv.read_exact(&mut header).await.map_err(|e| e.to_string())?;
+    recv.read_exact(&mut header)
+        .await
+        .map_err(|e| e.to_string())?;
     let length = u32::from_be_bytes(header) as usize;
     if length == 0 || length > MAX_FRAME {
         return Err("Frame exceeds transport budget".into());
     }
     let mut frame = vec![0; length];
-    recv.read_exact(&mut frame).await.map_err(|e| e.to_string())?;
+    recv.read_exact(&mut frame)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(frame)
 }
 
@@ -121,7 +134,10 @@ impl IrohNode {
                 .bind()
                 .await
                 .map_err(err)?;
-            if timeout(Duration::from_millis(online_ms.into()), endpoint.online()).await.is_err() {
+            if timeout(Duration::from_millis(online_ms.into()), endpoint.online())
+                .await
+                .is_err()
+            {
                 endpoint.close().await;
                 return Err(err("Iroh relay unreachable"));
             }
@@ -137,26 +153,36 @@ impl IrohNode {
     pub fn connect(&self, descriptor: JsValue, timeout_ms: u32) -> js_sys::Promise {
         let endpoint = self.endpoint.clone();
         future_to_promise(async move {
-            let json = js_sys::JSON::stringify(&descriptor).map_err(|_| err("Invalid descriptor"))?;
-            let address: Address = serde_json::from_str(&String::from(json))
-                .map_err(|_| err("Invalid descriptor"))?;
+            let json =
+                js_sys::JSON::stringify(&descriptor).map_err(|_| err("Invalid descriptor"))?;
+            let address: Address =
+                serde_json::from_str(&String::from(json)).map_err(|_| err("Invalid descriptor"))?;
             if address.addresses.len() > 8 {
                 return Err(err("Too many endpoint addresses"));
             }
-            let id = address.id.parse().map_err(|_| err("Invalid Iroh endpoint ID"))?;
+            let id = address
+                .id
+                .parse()
+                .map_err(|_| err("Invalid Iroh endpoint ID"))?;
             let mut addr = EndpointAddr::new(id);
             if let Some(relay) = &address.relay {
-                addr = addr.with_relay_url(relay.parse().map_err(|_| err("Invalid Iroh relay URL"))?);
+                addr =
+                    addr.with_relay_url(relay.parse().map_err(|_| err("Invalid Iroh relay URL"))?);
             } else {
                 // Direct addresses are useless to a browser; without a relay
                 // there is no way to reach this endpoint.
                 return Err(err("The contact has no Iroh relay"));
             }
-            let connection = timeout(Duration::from_millis(timeout_ms.into()), endpoint.connect(addr, ALPN))
+            let connection = timeout(
+                Duration::from_millis(timeout_ms.into()),
+                endpoint.connect(addr, ALPN),
+            )
+            .await
+            .map_err(|_| err("Iroh connection timed out"))?
+            .map_err(err)?;
+            IrohConn::attach(&endpoint, connection, false)
                 .await
-                .map_err(|_| err("Iroh connection timed out"))?
-                .map_err(err)?;
-            IrohConn::attach(&endpoint, connection, false).await.map(Into::into)
+                .map(Into::into)
         })
     }
 
@@ -165,9 +191,13 @@ impl IrohNode {
         let endpoint = self.endpoint.clone();
         future_to_promise(async move {
             loop {
-                let Some(incoming) = endpoint.accept().await else { return Ok(JsValue::UNDEFINED) };
+                let Some(incoming) = endpoint.accept().await else {
+                    return Ok(JsValue::UNDEFINED);
+                };
                 // A failed or slow handshake is dropped; the next one is awaited.
-                let Ok(Ok(connection)) = timeout(Duration::from_secs(10), incoming).await else { continue };
+                let Ok(Ok(connection)) = timeout(Duration::from_secs(10), incoming).await else {
+                    continue;
+                };
                 if let Ok(conn) = IrohConn::attach(&endpoint, connection, true).await {
                     return Ok(conn.into());
                 }
@@ -194,7 +224,11 @@ pub struct IrohConn {
 }
 
 impl IrohConn {
-    async fn attach(endpoint: &Endpoint, connection: Connection, incoming: bool) -> Result<IrohConn, JsValue> {
+    async fn attach(
+        endpoint: &Endpoint,
+        connection: Connection,
+        incoming: bool,
+    ) -> Result<IrohConn, JsValue> {
         let binding = binding(endpoint, &connection).map_err(err)?;
         let streams = timeout(Duration::from_secs(10), async {
             if incoming {
@@ -244,14 +278,20 @@ impl IrohConn {
 
     /// Round-trip time in milliseconds, as QUIC measures it.
     pub fn rtt(&self) -> f64 {
-        self.connection.rtt(iroh::endpoint::PathId::ZERO).map(|d| d.as_secs_f64() * 1000.0).unwrap_or(-1.0)
+        self.connection
+            .rtt(iroh::endpoint::PathId::ZERO)
+            .map(|d| d.as_secs_f64() * 1000.0)
+            .unwrap_or(-1.0)
     }
 
     /// Sends one text frame. Callers serialise sends; a concurrent call fails.
     pub fn send(&self, text: String) -> js_sys::Promise {
         let slot = self.send.clone();
         future_to_promise(async move {
-            let mut stream = slot.borrow_mut().take().ok_or_else(|| err("Channel busy or closed"))?;
+            let mut stream = slot
+                .borrow_mut()
+                .take()
+                .ok_or_else(|| err("Channel busy or closed"))?;
             let result = write_frame(&mut stream, text.as_bytes()).await;
             if result.is_ok() {
                 *slot.borrow_mut() = Some(stream);
@@ -264,11 +304,15 @@ impl IrohConn {
     pub fn recv(&self) -> js_sys::Promise {
         let slot = self.recv.clone();
         future_to_promise(async move {
-            let Some(mut stream) = slot.borrow_mut().take() else { return Ok(JsValue::UNDEFINED) };
+            let Some(mut stream) = slot.borrow_mut().take() else {
+                return Ok(JsValue::UNDEFINED);
+            };
             match read_frame(&mut stream).await {
                 Ok(frame) => {
                     *slot.borrow_mut() = Some(stream);
-                    String::from_utf8(frame).map(Into::into).map_err(|_| err("Non-text paired frame"))
+                    String::from_utf8(frame)
+                        .map(Into::into)
+                        .map_err(|_| err("Non-text paired frame"))
                 }
                 Err(_) => Ok(JsValue::UNDEFINED),
             }

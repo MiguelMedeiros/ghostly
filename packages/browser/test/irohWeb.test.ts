@@ -13,9 +13,9 @@ import { nativePeer } from "./helpers/nativePeer";
  * Iroh in the browser build (wasm, relay only) against itself and against the
  * Desktop's native Iroh, through a real `iroh-relay`. Paired sessions run the
  * whole core handshake: the pin and the binding check see the TLS exporter the
- * wasm computed. Set IROH_RELAY_URL (e.g. `npm run e2e:infra:use` writes it) to run.
+ * wasm computed. Runs when GHOSTLY_IROH_RELAY_URL is set (the e2e infra's relay: `npm run e2e:infra:use` writes it to .env.e2e).
  */
-const RELAY = process.env.IROH_RELAY_URL;
+const RELAY = process.env.GHOSTLY_IROH_RELAY_URL;
 const NATIVE = resolve("../../target/debug/examples/iroh-peer");
 
 const loadNode = async (): Promise<IrohWasm> => {

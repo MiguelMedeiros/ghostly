@@ -79,6 +79,8 @@ export interface NetworkSettings {
   defaultRelays: string[];
   /** Optional TURN server, used only when no direct path exists. */
   turn: { urls: string; username?: string; credential?: string } | null;
+  /** Where Iroh runs in the page (web app, extension): its relays (empty: the defaults) and the defaults. */
+  iroh?: { relays: string[]; defaultRelays: string[] };
 }
 
 export interface FileTransferState {
@@ -359,7 +361,7 @@ export interface ServicesPlatform {
   deleteMessage(peerPubKeyZ32: string, messageId: string): Promise<void>;
   wallet: WalletPlatform;
   getNetwork(): NetworkSettings | null;
-  setNetwork(settings: Pick<NetworkSettings, "relays" | "turn">): Promise<void>;
+  setNetwork(settings: Pick<NetworkSettings, "relays" | "turn"> & { irohRelays?: string[] }): Promise<void>;
 }
 
 export const servicesPlatform: ServicesPlatform | null = null;

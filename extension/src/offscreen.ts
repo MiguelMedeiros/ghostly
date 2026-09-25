@@ -28,7 +28,8 @@ setDatabaseName(databaseFor(profile));
 let running: EngineServer | null = null;
 const server = new Promise<EngineServer>((resolve) => {
   void navigator.locks.request(peerLockFor(profile), () => {
-    running = new EngineServer({ platform: "extension" });
+    // Iroh through a relay (WISP 102), over WebSockets from this document; the wasm loads on first use.
+    running = new EngineServer({ platform: "extension", irohWeb: true });
     // Only in `vite build --mode e2e` (test/attacks.mjs plays a malicious peer through it); gone from real builds.
     if (import.meta.env.MODE === "e2e") Object.assign(globalThis, { __ghostly: running });
     resolve(running);

@@ -9,6 +9,7 @@ export function NetworkSettings() {
   const network = platform?.getNetwork() ?? null;
   const [relays, setRelays] = useState("");
   const [turn, setTurn] = useState({ urls: "", username: "", credential: "" });
+  const [iroh, setIroh] = useState("");
   // What was last saved: "Saved" stays up while the form still shows it, instead of flashing past while
   // the engine is busy (a save can take seconds while the wallets start).
   const [savedAs, setSavedAs] = useState<string | null>(null);
@@ -19,12 +20,13 @@ export function NetworkSettings() {
     if (!network) return;
     setRelays(network.relays.join("\n"));
     setTurn({ urls: network.turn?.urls ?? "", username: network.turn?.username ?? "", credential: network.turn?.credential ?? "" });
+    setIroh((network.iroh?.relays.length ? network.iroh.relays : network.iroh?.defaultRelays ?? []).join("\n"));
     // Load once; afterwards the fields belong to the user until they save.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded]);
 
   if (!platform || !network) return null;
-  const current = JSON.stringify({ relays, turn });
+  const current = JSON.stringify({ relays, turn, iroh });
   const saved = savedAs === current;
 
   const save = async () => {
@@ -35,7 +37,10 @@ export function NetworkSettings() {
     const problem = server ? iceServerProblem(server) : null;
     if (problem) { setError(problem); return; }
     try {
-      await platform.setNetwork({ relays: relays.split(/\s+/).filter(Boolean), turn: server });
+      const irohRelays = iroh.split(/\s+/).filter(Boolean);
+      // The defaults are stored as "none chosen", so a later change of the defaults reaches this profile.
+      const defaults = network.iroh && JSON.stringify(irohRelays) === JSON.stringify(network.iroh.defaultRelays);
+      await platform.setNetwork({ relays: relays.split(/\s+/).filter(Boolean), turn: server, ...(network.iroh ? { irohRelays: defaults ? [] : irohRelays } : {}) });
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); return; }
     setSavedAs(current);
   };
@@ -104,6 +109,33 @@ export function NetworkSettings() {
           />
         </FieldGrid>
       </Block>
+
+      {network.iroh && <Block>
+        <div>
+          <label htmlFor="network-iroh-relays" className="text-text-primary text-sm block">Iroh relays</label>
+          <p className="text-text-muted text-xs mt-0.5">
+            A browser cannot send the UDP packets Iroh uses, so Iroh chats here always go through a relay: used
+            only when WebRTC cannot connect. The relay sees which devices talk and when, never what they say
+            (the connection is encrypted end to end). One per line, at most four.
+          </p>
+        </div>
+        <textarea
+          id="network-iroh-relays"
+          value={iroh}
+          onChange={(e) => setIroh(e.target.value)}
+          rows={2}
+          spellCheck={false}
+          data-testid="network-iroh-relays"
+          className={`${field} font-mono text-sm resize-y`}
+        />
+        <button
+          onClick={() => setIroh(network.iroh!.defaultRelays.join("\n"))}
+          aria-label="Reset Iroh relays to defaults"
+          className="min-h-8 text-xs text-text-muted hover:text-accent transition-colors cursor-pointer"
+        >
+          Reset to defaults
+        </button>
+      </Block>}
 
       <Block>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">

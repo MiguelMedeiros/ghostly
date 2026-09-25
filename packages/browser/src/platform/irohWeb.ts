@@ -18,6 +18,19 @@ export const DEFAULT_IROH_RELAYS = [
   "https://usw1-1.relay.n0.iroh.link/",
 ] as const;
 
+/**
+ * Why a relay URL cannot be used, or null. TLS, except on this machine (a local `iroh-relay --dev`): a page
+ * may not open plain WebSockets elsewhere, and the relay's operator would see traffic metadata in the clear.
+ */
+export function irohRelayProblem(value: string): string | null {
+  let url: URL;
+  try { url = new URL(value); } catch { return `Not a relay address: ${value}`; }
+  const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && local)) return `Use an https:// relay address: ${value}`;
+  if (url.username || url.password || url.search || url.hash || value.length > 256) return `Not a relay address: ${value}`;
+  return null;
+}
+
 /** A browser endpoint's descriptor: no direct addresses, only its relay. */
 export interface IrohWebDescriptor { id: string; relay: string | null; addresses: string[] }
 
@@ -124,7 +137,8 @@ export async function createIrohWebEndpoint(seedB64: string, options: IrohWebOpt
   };
   const endpoint: NativeEndpoint = {
     transport: "iroh/1",
-    descriptor: node.address(),
+    // Relay only: the rank puts it after every direct path (WISP 100, "Relayed").
+    descriptor: { ...node.address(), relayed: true },
     onDescriptor: null,
     get onConnection() { return handler; },
     set onConnection(value) { handler = value; if (value) for (const bound of early.splice(0)) value(bound); },

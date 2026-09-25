@@ -1,4 +1,4 @@
-import { rankTransports, transportOrder, TRANSPORTS, type PairedTransport, type TransportDescriptors } from "./pairedTransports";
+import { rankTransports, relayedTransports, transportOrder, TRANSPORTS, type PairedTransport, type TransportDescriptors } from "./pairedTransports";
 
 export interface TransportPolicy {
   revision: number;
@@ -122,9 +122,12 @@ export class TransportSwitch {
     this.clearPlan(); this.options.cancel(); this.options.state(error);
   }
   private choices(local: TransportPolicy, remote: TransportPolicy): PairedTransport[] {
-    const ranked = rankTransports(allowedTransports(local), allowedTransports(remote));
+    const relayed = relayedTransports(local.descriptors, remote.descriptors);
+    const ranked = rankTransports(allowedTransports(local), allowedTransports(remote), relayed);
     if (!ranked.length) return [];
     const winner = this.winner(local, remote);
+    // Nobody chose: the current transport stays, a relayed one too (no probing while live, WISP 100); the next
+    // dial ranks direct paths first again.
     const target = winner.intent === 0 && this.actual && ranked.includes(this.actual) ? this.actual
       : ranked.includes(winner.preferred) ? winner.preferred : ranked[0];
     return [target, ...(local.fallback && remote.fallback ? ranked.filter(t => t !== target) : [])];

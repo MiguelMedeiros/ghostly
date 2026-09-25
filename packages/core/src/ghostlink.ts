@@ -5,7 +5,7 @@ import { proofHash, type ProofAdapter, type ProofScope } from "./peerProofs";
 import { IDENTITY_MAX_FRAME, type IdentityScope } from "./identityProofs";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { identityFromSeedB64 } from "./identity";
-import { rankTransports, transportOrder, type NativeEndpoint, type NativeBinding, type PairedTransport, type TransportDescriptors } from "./pairedTransports";
+import { rankTransports, relayedTransports, transportOrder, type NativeEndpoint, type NativeBinding, type PairedTransport, type TransportDescriptors } from "./pairedTransports";
 import { sanitizeNick } from "./text";
 import { sanitizeAvatar } from "./avatar";
 import { randomBytes, toBase64Url, utf8Encode } from "./bytes";
@@ -257,6 +257,8 @@ export class GhostLink {
   private peerPolicySeen: { intent: number } | null = null;
   private unansweredPings = 0;
   private openWaiters: { resolve: () => void; reject: (e: Error) => void }[] = [];
+  /** Set while a WebRTC attempt this side dialled is pending: the ranked transports to try if it fails. */
+  private afterRtc?: { epoch: number; rest: PairedTransport[] };
   private lastAutoConnectAt = 0;
   private autoConnectFailures = 0;
   /** The peer's packet I last looked fast for its offer after (its timestamp): once per packet. */
@@ -384,7 +386,17 @@ export class GhostLink {
         this.trackDataLink(state);
         if (this.activeBinding) return;
         events.onDataLinkState?.(state);
-        if (state === "idle") this.rejectWaiters(new GhostlyHttpError("unreachable", "Could not connect to the peer"));
+        if (state === "open") this.afterRtc = undefined;
+        if (state !== "idle") return;
+        const next = this.afterRtc;
+        if (next && next.epoch === this.connectionEpoch && !this.stopped && !this.channel && !this.streamBlocked) {
+          // Still inside dial() (WebRTC failed while starting): the dial loop goes on by itself.
+          if (this.dialing) return;
+          this.afterRtc = undefined;
+          void this.dialAfterRtc(next); return;
+        }
+        this.afterRtc = undefined;
+        this.rejectWaiters(new GhostlyHttpError("unreachable", "Could not connect to the peer"));
       },
       attemptTimeoutMs: this.tracker ? PAIRING_ATTEMPT_MS : undefined,
     });
@@ -624,6 +636,20 @@ export class GhostLink {
   get peerAvailableTransports(): PairedTransport[] | undefined {
     return this.switcher.peerPolicy?.available ?? this.peerTransports;
   }
+  /** The open session goes through relays (WISP 100, "Relayed"): their hosts, this side's first. */
+  get relayedPath(): { relays: string[] } | undefined {
+    const transport = this.activeBinding?.transport;
+    if (!transport || !this.isDataLinkOpen) return undefined;
+    const local = this.localDescriptors(), remote = this.switcher.peerPolicy?.descriptors ?? this.peerDescriptors;
+    if (!relayedTransports(local, remote).includes(transport)) return undefined;
+    const relays: string[] = [];
+    for (const descriptor of [local[transport], remote[transport]]) {
+      const relay = (descriptor as { relay?: unknown } | undefined)?.relay;
+      if (typeof relay !== "string") continue;
+      try { const host = new URL(relay).host.replace(/\.$/, ""); if (!relays.includes(host)) relays.push(host); } catch { /* Not a URL: not shown. */ }
+    }
+    return { relays };
+  }
   /** The round trip last measured on the open session; unknown until a ping was answered. */
   get rttMs(): number | undefined { return this.isDataLinkOpen ? this.rtt : undefined; }
 
@@ -712,29 +738,67 @@ export class GhostLink {
     this.options.events?.onPairingState?.({ status: "connecting" });
     try {
       const local = this.transportOffer();
+      const relayed = relayedTransports(this.localDescriptors(), this.peerDescriptors);
       // Cached availability is a routing hint, not permission: the fresh signed
       // PairedSession offer enforces the peer's current (possibly offline-edited) policy.
-      const remembered = this.peerTransports && rankTransports(local, this.peerFallback ? this.peerTransports : this.peerTransports.slice(0, 1));
-      const ranked = remembered?.length ? remembered : this.peerTransports ? rankTransports(local, this.peerTransports) : local.filter(t => t === "webrtc/1");
+      const remembered = this.peerTransports && rankTransports(local, this.peerFallback ? this.peerTransports : this.peerTransports.slice(0, 1), relayed);
+      const ranked = remembered?.length ? remembered : this.peerTransports ? rankTransports(local, this.peerTransports, relayed) : local.filter(t => t === "webrtc/1");
       // A standing explicit choice goes first: the session starts where the agreement would move it anyway.
       const chosen = this.switcher.chosenTarget;
       const choices = chosen && ranked.includes(chosen) ? [chosen, ...ranked.filter(t => t !== chosen)] : ranked;
       if (!choices.length) throw new Error("No common available transport. Initial pairing requires WebRTC on both peers.");
+      const fallback = this.fallback && this.peerFallback;
       let lastError: unknown;
       for (const [index, transport] of choices.entries()) {
-        if (index > 0 && !(this.fallback && this.peerFallback)) break;
-        if (transport === "webrtc/1") { await this.dataLink.connect(); return; }
-        const endpoint = this.endpoints.get(transport);
-        const descriptor = this.peerDescriptors[transport];
-        if (!endpoint || !descriptor) { lastError = new Error("Peer native address unavailable; reconnect WebRTC once to exchange endpoints"); continue; }
-        try {
-          const { channel, binding } = await endpoint.connect(descriptor);
-          if (this.stopped || epoch !== this.connectionEpoch || this.channel) { channel.close(); return; }
-          this.attach(channel, binding); return;
-        } catch (error) { if (epoch !== this.connectionEpoch) return; lastError = error; }
+        if (index > 0 && !fallback) break;
+        if (transport === "webrtc/1") {
+          // WebRTC settles later (ICE can fail minutes from now): what ranks after it is where a failed attempt
+          // goes, typically a relayed Iroh behind a symmetric NAT (WISP 100, "Relayed"), before the DHT floor.
+          this.afterRtc = fallback && index + 1 < choices.length ? { epoch, rest: choices.slice(index + 1) } : undefined;
+          await this.dataLink.connect();
+          if (!this.afterRtc || this.dataLink.state !== "idle" || epoch !== this.connectionEpoch) return;
+          this.afterRtc = undefined; continue;
+        }
+        const result = await this.dialNative(transport, epoch);
+        if (result === true) return;
+        lastError = result;
       }
       throw lastError ?? new Error("No permitted transport could connect");
     } finally { if (epoch === this.connectionEpoch) this.dialing = false; }
+  }
+
+  private localDescriptors(): TransportDescriptors {
+    return Object.fromEntries([...this.endpoints].map(([transport, endpoint]) => [transport, endpoint.descriptor]));
+  }
+
+  /** True once attached (or when a newer attempt took over); the error otherwise. */
+  private async dialNative(transport: PairedTransport, epoch: number): Promise<true | Error> {
+    const endpoint = this.endpoints.get(transport as NativeEndpoint["transport"]);
+    const descriptor = this.peerDescriptors[transport as NativeEndpoint["transport"]];
+    if (!endpoint || !descriptor) return new Error("Peer native address unavailable; reconnect WebRTC once to exchange endpoints");
+    try {
+      const { channel, binding } = await endpoint.connect(descriptor);
+      if (this.stopped || epoch !== this.connectionEpoch || this.channel) { channel.close(); return true; }
+      this.attach(channel, binding); return true;
+    } catch (error) {
+      return epoch !== this.connectionEpoch ? true : error instanceof Error ? error : new Error(String(error));
+    }
+  }
+
+  /** A WebRTC attempt this side dialled ended without opening: the next ranked transports, in order. */
+  private async dialAfterRtc(next: { epoch: number; rest: PairedTransport[] }): Promise<void> {
+    this.dialing = true;
+    try {
+      let lastError: Error | undefined;
+      for (const transport of next.rest) {
+        if (transport === "webrtc/1") continue;
+        const result = await this.dialNative(transport, next.epoch);
+        if (result === true) return;
+        lastError = result;
+      }
+      if (next.epoch === this.connectionEpoch)
+        this.rejectWaiters(new GhostlyHttpError("unreachable", lastError ? `Could not connect to the peer: ${lastError.message}` : "Could not connect to the peer"));
+    } finally { if (next.epoch === this.connectionEpoch) this.dialing = false; }
   }
 
   /** Chat goes over the data link when it is up, through Pkarr otherwise. */

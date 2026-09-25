@@ -29,7 +29,8 @@ describe("the service worker keeps one peer", () => {
     expect(world.callsTo("offscreen.createDocument")).toEqual([
       [{ url: "offscreen.html", reasons: ["WEB_RTC"], justification: expect.stringContaining("WebRTC") }],
     ]);
-    expect(engine().options).toEqual({ platform: "extension" });
+    // Iroh runs in the page here too (WISP 102, relay only), loaded on first use.
+    expect(engine().options).toEqual({ platform: "extension", irohWeb: true });
 
     // Later asks find the document and only check that the peer answers.
     expect(await send({ target: "background", type: "ensure-engine" })).toEqual({ ok: true });

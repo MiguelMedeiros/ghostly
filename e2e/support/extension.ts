@@ -2,7 +2,7 @@ import { chromium } from "@playwright/test";
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, openPeer, type Peer } from "./fixtures";
+import { expect, openPeer, type Peer, type PeerOptions } from "./fixtures";
 import { test as base } from "./fixtures";
 
 const dist = join(import.meta.dirname, "..", "..", "extension", "dist");
@@ -28,9 +28,9 @@ function prepareExtension(work: string): string {
 
 type Fixtures = {
   /** Ghostly Browser in a Chromium profile of its own; `ignoreHTTPSErrors` reaches its offscreen engine too. */
-  extensionPeer: (name: string, options?: { ignoreHTTPSErrors?: boolean }) => Promise<Peer>;
+  extensionPeer: (name: string, options?: { ignoreHTTPSErrors?: boolean; irohRelay?: string }) => Promise<Peer>;
   /** Ghostly on the web, for talking to the extension across hosts. */
-  webPeer: (name: string) => Promise<Peer>;
+  webPeer: (name: string, options?: PeerOptions) => Promise<Peer>;
 };
 
 export const test = base.extend<Fixtures>({
@@ -75,6 +75,9 @@ export const test = base.extend<Fixtures>({
       await page.goto(`chrome-extension://${extensionId}/app.html#/settings`);
       // The peer lives in an offscreen document, out of reach of request interception: point it at the relay instead.
       await page.getByTestId("network-relays").fill(await relay.listen());
+      // Iroh would reach n0's public relays: a closed port on this machine keeps the suite offline (Iroh then
+      // fails to start, and the extension is WebRTC only, as its specs expect).
+      await page.getByTestId("network-iroh-relays").fill(options.irohRelay ?? "http://127.0.0.1:9/");
       await page.getByTestId("network-save").click();
       await expect(page.getByText("Saved", { exact: true })).toBeVisible();
       await page.goto(`chrome-extension://${extensionId}/app.html#/`);
@@ -92,7 +95,7 @@ export const test = base.extend<Fixtures>({
       headless: !process.env.HEADED,
       args: ["--disable-features=WebRtcHideLocalIpsWithMdns", "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"],
     });
-    await use((name) => openPeer(browser, relay, baseURL!, name));
+    await use((name, options) => openPeer(browser, relay, baseURL!, name, options));
     await browser.close();
   },
 });
