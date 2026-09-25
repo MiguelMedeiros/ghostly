@@ -146,10 +146,18 @@ describe("call signals", () => {
     expect(signal).toMatchObject({ vp: 106 });
     expect(signal.ap).toBeUndefined();
     const rebuilt = buildSdpFromSignal(signal);
-    expect(rebuilt).toContain("\r\nm=video 9 UDP/TLS/RTP/SAVPF 106\r\n");
-    expect(rebuilt).toContain("\r\na=rtpmap:106 VP8/90000\r\n");
-    expect(rebuilt).toContain("\r\na=rtcp-fb:106 nack pli\r\n");
-    expect(rebuilt).not.toContain(" 96");
+    const lines = rebuilt.split("\r\n");
+    // Only the lines that name a payload type are read: the session id and the
+    // SSRCs are random, and one of them starting with 96 is not a payload type.
+    const videoMedia = lines.filter((line) => line.startsWith("m=video "));
+    expect(videoMedia).toEqual(["m=video 9 UDP/TLS/RTP/SAVPF 106"]);
+    const rtpmaps = lines.filter((line) => line.startsWith("a=rtpmap:"));
+    expect(rtpmaps).toContain("a=rtpmap:106 VP8/90000");
+    expect(rtpmaps.filter((line) => /VP8/i.test(line))).toEqual(["a=rtpmap:106 VP8/90000"]);
+    expect(rtpmaps.some((line) => line.startsWith("a=rtpmap:96 "))).toBe(false);
+    const feedback = lines.filter((line) => line.startsWith("a=rtcp-fb:"));
+    expect(feedback).toContain("a=rtcp-fb:106 nack pli");
+    expect(feedback.every((line) => line.startsWith("a=rtcp-fb:106 "))).toBe(true);
     // The answer made from it keeps 106, and says so.
     expect(extractParamsFromSdp(rebuilt).vp).toBe(106);
   });
