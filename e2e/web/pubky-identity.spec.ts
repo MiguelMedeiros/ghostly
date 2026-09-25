@@ -135,7 +135,10 @@ test("a Pubky identity approved by scanning the QR code, as Pubky Ring does", { 
     const alice = await peer("pubky-ring");
     await attachPubky(alice.context, relay);
     const add = await startPubky(alice);
-    await approver.approve(await scanApprovalQr(alice.page));
+    // Ring's QR code is the cookie request (`signin?`), the form the Ring in the app stores reads.
+    const scanned = await scanApprovalQr(alice.page);
+    expect(scanned.startsWith("pubkyauth://signin?")).toBe(true);
+    await approver.approve(scanned);
     await expect(add).toHaveCount(0, { timeout: 90_000 });
     await expect(alice.page.getByTestId("identity-proof")).toHaveCount(1);
     await expect(alice.page.getByTestId("identity-panel-subject")).toContainText(approver.key);
