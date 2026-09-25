@@ -1,5 +1,7 @@
 # Experimental paired chat increment
 
+> **Revision 0.2 of the chat family (2026-09-25).** This increment is now the layer-1 session of the one chat ([401](401-paired-chat.md)); "paired chat" is no longer a kind of chat the person picks. The DHT is the rendezvous and floor of every chat ([400](400-chat.md), [403](403-dht-text.md)). The transcript constant `"no-dht-payload"` below stays byte for byte: it says the *session* carries no DHT payload, not that the chat has no DHT fallback. Statements below that pairing needs WebRTC describe today's code; revision 0.2 proposes a first contact on the DHT in parallel.
+
 **Subsequent implementation:** the [native transport increment](TRANSPORT-INCREMENT.md) extends this base to Iroh and HyperDHT on desktop. WebRTC-only statements below describe the initial base; initial product pairing still requires WebRTC.
 
 Status: local experimental implementation, not a Final WISP or security audit. This additive profile exercises parts of candidates 02-03, 100-101, 400 and 800. It does not implement their entire proposed lifecycle or a general multi-adapter framework. Existing chats keep the legacy profile unchanged.

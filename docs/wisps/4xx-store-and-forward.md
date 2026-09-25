@@ -4,11 +4,11 @@
 |---|---|
 | Number assignment | 4xx; planned, number to be defined |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-24 |
+| Revision | 0.2 |
+| Updated | 2026-09-25 |
 | Document kind | Profile |
 | Editors | Ghostly contributors; maintainer review pending |
-| Dependencies | [400](400-chat.md), [401](401-paired-chat.md), [403](403-dht-text.md), [1000](1000-storage.md), [1002](1002-s3-storage.md), [200](200-payments.md) |
+| Dependencies | [400](400-chat.md), [401](401-paired-chat.md), [403](403-dht-text.md), [03](03-capabilities.md), [1000](1000-storage.md), [1002](1002-s3-storage.md), [200](200-payments.md) |
 | Implementation | Experimental: `hold/1` in web, extension and desktop clients; exercised against a local S3-compatible server |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md).
@@ -16,6 +16,10 @@
 ## Purpose
 
 Today a message for a contact who is away reaches them only as short text through bounded DHT records ([403](403-dht-text.md)); a picture or a payment request waits until both are online ([401](401-paired-chat.md)). This profile lets what is sent meanwhile be **held** (text, a small file, a payment request) and delivered when the contact is back, with bounds that are stated rather than implied. Nothing here replaces the paired session or the DHT text path; a chat that does not turn it on behaves exactly as before.
+
+## Place in the one chat (revision 0.2)
+
+In the one chat of [400](400-chat.md), holding is what lets a chat that is not `live` carry more than 256 bytes of text: long text, files and voice messages, and payment requests. Its content never enters the DHT; only the pointer does, so it stays within what [01](01-ghost-core.md) allows on layer 0. It applies in `on-dht` and, new in this revision, in `dht-chosen` too: holding dials nobody, so choosing DHT only is no reason to stop it. With no hold on either side, the same items wait in the outbox for layer 1 ([400](400-chat.md#what-each-state-can-carry)).
 
 ## Options weighed
 
@@ -29,9 +33,9 @@ Today a message for a contact who is away reaches them only as short text throug
 
 ## Consent: `hold/1`
 
-A device offers `hold/1` in its paired offer ([401](401-paired-chat.md)) when the person turned **Hold messages** on for that chat. The same switch means both things: this device picks up what the contact held for it, and holds items for the contact when it can. Once the session is ready, each side also says `{"t":"paired-hold","on":<bool>,"top":<n>}` on the authenticated session (`top`: the highest sequence it has held for the other side), so a change takes effect without a new handshake; an older app drops the frame (it carries no id) and keeps the handshake offer. A device holds for a contact only when the contact's latest word allows it; a legacy peer never says so, so nothing is held for it and nothing is fetched from it. Consent is per chat and per direction of speech, never global.
+A device offers `hold/1` in its paired offer ([401](401-paired-chat.md)), and in its layer-0 capability record ([03](03-capabilities.md#layer-0-capability-record); new, so a chat that never went live can hold too), when the person turned **Hold messages** on for that chat. The same switch means both things: this device picks up what the contact held for it, and holds items for the contact when it can. Once the session is ready, each side also says `{"t":"paired-hold","on":<bool>,"top":<n>}` on the authenticated session (`top`: the highest sequence it has held for the other side), so a change takes effect without a new handshake; an older app drops the frame (it carries no id) and keeps the handshake offer. A device holds for a contact only when the contact's latest word allows it (the newer of its `paired-hold` frame and its capability record); a compatibility chat ([402](402-legacy-chat.md)) never says so, so nothing is held for it and nothing is fetched from it. Consent is per chat and per direction of speech, never global.
 
-A device holds items only while the paired session is closed and the chat is not in DHT-only mode; on an open session everything travels as in [401](401-paired-chat.md). Ecash (a bearer token) is never held: a payment *request* is. Ark, Bark, USDT and on-chain requests need live targets and are not held either.
+A device holds items only while the chat has no layer-1 session (`on-dht` or `dht-chosen`); on an open session everything travels as in [401](401-paired-chat.md). Revision 0.1 also stopped holding in DHT-only mode; that exclusion is dropped. Ecash (a bearer token) is never held: a payment *request* is. Ark, Bark, USDT and on-chain requests need live targets and are not held either.
 
 ## Keys
 
@@ -98,3 +102,8 @@ Unit: bundle sealing/opening with every refusal (`packages/core/test/storeForwar
 ## Open decisions
 
 A WebDAV or Blossom adapter with the same `presign` contract; whether a reader should be able to require hold from a contact by policy; showing the reader's storage cost before accepting a large picture; the number.
+
+## Revision log
+
+- 0.2 (2026-09-25): place in the one chat; consent also in the layer-0 capability record; holding continues while DHT only is chosen.
+- 0.1 (2026-09-24): `hold/1` profile.

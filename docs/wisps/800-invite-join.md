@@ -4,13 +4,17 @@
 |---|---|
 | Candidate number | 800; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.1 |
-| Updated | 2026-09-20 |
+| Revision | 0.2 |
+| Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md) |
 | Implementation | Existing bearer invite; admission protocol proposed |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
+
+## One invite for the one chat (revision 0.2)
+
+Every new 1:1 chat starts from the same invite ([801](801-invitation-profiles.md#one-invite-format-revision-02)): `pair3/` and three fields. The invite no longer chooses how the chat is carried; the handshake does, on the DHT and on a stream in parallel ([400](400-chat.md#how-a-chat-starts-upgrades-falls-back-and-comes-back)). Its version lives in the prefix, and the error rules go both ways: a current app refuses a newer version with "update to join" and never downgrades it; an older app refuses a `pair3/` code as invalid. v0.4 codes (no prefix) still open a compatibility chat ([402](402-legacy-chat.md)). The admission requirements below are unchanged by this revision.
 
 ## Contract and concrete profiles
 
@@ -52,7 +56,7 @@ Private admission can contact an online inviter through the invite bootstrap. Pu
 
 ## Compatibility, security and open decisions
 
-New format/version must be visibly distinct. Legacy imports keep their documented copied-secret risk; silently labeling them consumed is forbidden. Resolve the reviewed bootstrap/key-agreement profile, confirmation UX, durable commit protocol, limits/timeouts, acknowledgement recovery and public ingress before Proposed. Group authority loss/transfer follows 900. No proof of intended human identity comes merely from a successful handshake.
+New format/version must be visibly distinct, and an app that does not know a version must say so rather than read it as another ([801](801-invitation-profiles.md#reading-an-invite)). Legacy imports keep their documented copied-secret risk; silently labeling them consumed is forbidden. Resolve the reviewed bootstrap/key-agreement profile, confirmation UX, durable commit protocol, limits/timeouts, acknowledgement recovery and public ingress before Proposed. Group authority loss/transfer follows 900. No proof of intended human identity comes merely from a successful handshake.
 
 ## Conformance
 
@@ -61,3 +65,8 @@ Race two different joiners, replay consumed invites, duplicate the same join ret
 ## References
 
 [Legacy invite](../../packages/core/src/invite.ts), [browser join and invite display lifecycle](../../packages/browser/src/engine/node.ts), [peer keys](02-peer-keys.md), [group sessions](900-group-sessions.md).
+
+## Revision log
+
+- 0.2 (2026-09-25): one invite for the one chat; version in the prefix; refusal rules both ways (details in 801).
+- 0.1 (2026-09-20): initial review draft.

@@ -13,11 +13,11 @@ A positive case exchanges data in both directions. A negative case records the e
 | Scope | Positive case | Required failure/recovery cases |
 |---|---|---|
 | 02 Core | Rust/TypeScript record exchange | Wrong key/signature, bad secretbox, stale/replayed packet, full budget, relay failures |
-| 03 Keys / 20 Invite | Pair, confirm intended peer, restart and reconnect with stored participation | Two-joiner race; consumed invite reuse; crash at each commit boundary; expired/revoked invite; lost final confirmation; key loss and rotation |
+| 03 Keys / 20 Invite | Pair, confirm intended peer, restart and reconnect with stored participation; read `pair3/`, `pair1/`, `pair2d/` and v0.4 codes as 801 says | Two-joiner race; consumed invite reuse; a newer version (`pair4/`) refused with nothing stored; crash at each commit boundary; expired/revoked invite; lost final confirmation; key loss and rotation |
 | 04 Capabilities | Same exact selected versions and limits | No common required version; unknown optional/required extension; conflicting revisions; unavailable runtime permission |
-| 100-103 Transports | Same payload semantics on two adapters | Offer races, endpoint substitution, timeouts, bounded retries, policy-prohibited fallback; no common adapter |
+| 100-103 Transports | Same payload semantics on two adapters | Offer races, endpoint substitution, timeouts, bounded retries, policy-prohibited fallback; no common adapter (the chat stays on the DHT and chats); every transport blocked then one unblocked (upgrade without action); native upgrade from layer-0 descriptors with WebRTC blocked |
 | 300-303 Proofs | None/one/multiple valid optional proofs | Wrong channel/key/audience, replay, expiry, rotation/revocation, unsupported signer; Keet feasibility first |
-| 400 Chat | Bounded bidirectional delivery | Same timestamp, duplicates across paths, out-of-order/gaps, disconnect/restart, no false durable/read receipt, DHT size pressure |
+| 400 Chat | Bounded bidirectional delivery; first pairing with every stream blocked ends on the DHT; live, DHT, live with nothing lost | Same timestamp, duplicates across paths, out-of-order/gaps, disconnect/restart, no false durable/read receipt, DHT size pressure; different keys on the DHT and stream paths (rejected on both); DHT only on one side; recipient without `dht-text/1` |
 | 500 Files | Accepted size and exact bytes | Malicious name, excess/truncated body, duplicate IDs, timeout, cancel, quota and partial cleanup |
 | 600 Media | Voice/video and permitted screen modes | Permission denial, stale call, crossed offers, hangup cleanup, unavailable API |
 | 700 Local services | Approved target request/response | Path/header/redirect escape, disabled service, inherited credential isolation, body/quota/timeouts |

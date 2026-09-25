@@ -11,7 +11,7 @@ This map is a design map, not a claim that every box exists or that every combin
 
 ```mermaid
 flowchart TB
-    Base["Ghost base: records, rendezvous, Peer Keys"]
+    Base["Ghost base: records, rendezvous, Peer Keys; the floor of every chat (DHT text)"]
     Agree["Capabilities, versions and policy agreement"]
     Base --> Agree
     Agree --> Proof["Identity: Ghostly participation; optional external peer proofs / Nostr / Pubky local / Keet-compatible local"]
@@ -19,12 +19,14 @@ flowchart TB
     Agree --> Rules["Group admission, permissions and epoch security"]
     Rules --> Overlay["Common distribution profile: mesh prototype / GossipSub / future adapters"]
     Edge --> Path["Compatible authenticated data path"]
+    Edge -.->|none connects or it drops| Base
     Overlay --> Path
     Path --> Apps["Selected application formats: chat / files / media / local services"]
     Apps --> Pay["Optional payment operation: compatible Cashu / Lightning component"]
 ```
 
 - Proofs are zero, one or multiple independently verified bindings; they do not choose transport or authorize money movement.
+- Every 1:1 chat has the DHT underneath (layer 0: rendezvous and floor) and at most one peer-to-peer transport on top (layer 1). The DHT is never selected; it is what remains when no transport connects ([400](400-chat.md), [100](100-transports.md)).
 - Transport is selected per connection, subject to the chosen capability/distribution requirements. A browser extension does not automatically provide native UDP or every adapter.
 - A group initially requires a common distribution version, application format and security/admission profile. Pairwise connectivity is insufficient. Bridges are future explicitly validated integrations, never an implicit fallback.
 - Distribution routes protected envelopes; it does not own admission or invent cryptography. GossipSub is one candidate. No new custom gossip algorithm is proposed by this map.
@@ -39,11 +41,11 @@ The [proof increment](PROOF-INCREMENT.md) now includes explicit experimental loc
 
 | Contract | Concrete profiles | Current scope |
 |---|---|---|
-| [400 Chat](400-chat.md) | [401 paired](401-paired-chat.md), [402 legacy](402-legacy-chat.md), [403 bounded DHT text](403-dht-text.md) | Distinct existing paths; receipts and limits differ |
-| [500 Files](500-files.md) | [501 files/2](501-paired-files.md), [502 legacy](502-legacy-files.md) | Live 1:1; no DHT files or resume |
+| [400 Chat](400-chat.md) | [401 chat session](401-paired-chat.md) (layer 1), [403 DHT text](403-dht-text.md) (layer 0, the floor), [4xx store-and-forward](4xx-store-and-forward.md); [402 compatibility](402-legacy-chat.md) for v0.4 | Revision 0.2: one chat on two layers; today still two invite modes and a separate legacy profile |
+| [500 Files](500-files.md) | [501 files/2](501-paired-files.md), [502 compatibility](502-legacy-files.md) | Layer 1 or a hold; never DHT records; no resume |
 | [600 Media](600-media.md) | [601 WebRTC media](601-webrtc-media.md) | Legacy 1:1 only; runtime capture limits |
 | [700 Local Services](700-local-services.md) | [701 HTTP](701-http-services.md) | Legacy hosting with selected contact access; not paired HTTP |
-| [800 Invite/Join](800-invite-join.md) | [801 implemented invitations](801-invitation-profiles.md) | Bearer bootstrap exists; global consumable admission proposed |
+| [800 Invite/Join](800-invite-join.md) | [801 implemented invitations](801-invitation-profiles.md) | Bearer bootstrap exists; one `pair3/` format and global consumable admission proposed |
 | [900 Groups](900-group-sessions.md) | [9xx Group Mesh](9xx-group-mesh.md), [9xx Group Community](9xx-group-community.md), [901 GossipSub](901-gossipsub.md) | Mesh profile (text, eight members) and community profile (a link, 256 members, hubs) implemented; GossipSub proposed |
 
 Transport100 already separates101/102/103. Payment200 separates201Cashu and203Lightning via Cashu; Ark202 remains implementation work until its substantive contract and evidence are ready. Identity300 separates301/302/303 external proof bindings, currently disabled. Document kinds describe responsibilities, not feature availability.
