@@ -110,7 +110,7 @@
     "muted": "Coupées",
     "bell": "Notifications coupées",
     "bellUntil": "Notifications coupées jusqu'à {{time}}",
-    "stillArrive": "Les messages arrivent toujours. Les appels sonnent toujours."
+    "stillArrive": "Les messages arrivent. Les appels sonnent."
   },
   "invite": {
     "copy": "Copier l’invitation",

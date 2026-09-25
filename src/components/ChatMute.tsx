@@ -63,9 +63,10 @@ export function MuteMenu({ chat, open, onClose, anchorRef, align }: {
   };
   return (
     <Menu testId="mute-menu" open={open} onClose={onClose} anchorRef={anchorRef} align={align} focusFirst label={until === undefined ? t("mute.title") : mutedText(until)}>
-      <div className="whitespace-nowrap px-3 pb-1 pt-1.5 text-xs text-text-muted" data-testid="mute-menu-head">
-        <span className="block truncate font-medium text-text-primary">{until === undefined ? t("mute.title") : mutedText(until)}</span>
-        <span className="block truncate">{t("mute.stillArrive")}</span>
+      {/* Not a row: the note may wrap on a narrow sheet rather than be cut. */}
+      <div className="px-3 pb-1 pt-1.5 text-xs text-text-muted" data-testid="mute-menu-head">
+        <span className="block truncate whitespace-nowrap font-medium text-text-primary">{until === undefined ? t("mute.title") : mutedText(until)}</span>
+        <span className="block">{t("mute.stillArrive")}</span>
       </div>
       {until === undefined
         ? MUTE_CHOICES.map(choice => (

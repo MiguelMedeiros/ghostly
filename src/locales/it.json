@@ -110,7 +110,7 @@
     "muted": "Silenziata",
     "bell": "Notifiche silenziate",
     "bellUntil": "Notifiche silenziate fino alle {{time}}",
-    "stillArrive": "I messaggi arrivano comunque. Le chiamate squillano comunque."
+    "stillArrive": "I messaggi arrivano. Le chiamate squillano."
   },
   "invite": {
     "copy": "Copia invito",
