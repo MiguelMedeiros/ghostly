@@ -49,14 +49,26 @@ describe("PairingTracker", () => {
   it("pinned over the DHT, the pairing ends on-dht: attempts go on underneath, and live takes over (WISP 400)", () => {
     const { t, stages, reported } = tracker("joiner");
     t.published(); t.offerSent(); t.onDht("waiting");
-    expect(reported.at(-1)).toMatchObject({ stage: "on-dht", reason: "waiting", retryable: true });
+    expect(t.progress.stage, "the stream attempt under way goes on: a pin a moment before it opens is no stage").toBe("knocking");
     t.failed("timeout", true);
     expect(reported.at(-1)).toMatchObject({ stage: "on-dht", reason: "transport", retryable: true });
     t.offerSent(); t.answerReceived(); t.reset();
     expect(t.progress.stage, "background attempts do not take it back to its steps").toBe("on-dht");
     t.offerSent(); t.live("iroh/1");
-    expect(stages()).toEqual(["knocking", "on-dht", "on-dht", "live"]);
+    expect(stages()).toEqual(["knocking", "on-dht", "live"]);
     expect(reported.at(-1)).toMatchObject({ stage: "live", transport: "iroh/1", attempt: 3 });
+  });
+
+  it("pinned over the DHT with no stream attempt under way: on the DHT at once", () => {
+    const { t, reported } = tracker("inviter");
+    t.published(); t.sawPeer(); t.onDht("waiting");
+    expect(reported.at(-1)).toMatchObject({ stage: "on-dht", reason: "waiting", retryable: true });
+  });
+
+  it("a pin over the DHT while the stream connects ends live, through its steps", () => {
+    const { t, stages } = tracker("joiner");
+    t.published(); t.offerSent(); t.onDht("waiting"); t.answerReceived(); t.live("webrtc/1");
+    expect(stages()).toEqual(["knocking", "connecting", "live"]);
   });
 
   it("only a key mismatch, a forged signal, a failed publish or being offline is failed", () => {

@@ -93,8 +93,6 @@ export class PairingTracker {
   offerSent(): void { this.attempt("knocking"); }
   offerReceived(): void { this.attempt("answering"); }
   answerSent(): void { if (this.progress.stage === "answering") this.set("connecting"); }
-  /** Pinned over either path: whatever stream attempts fail from now on, the pairing ends `on-dht`. */
-  get pinnedOnDht(): boolean { return this.dhtPinned; }
   answerReceived(): void { if (this.progress.stage === "knocking") this.set("connecting"); }
 
   live(transport?: PairedTransport): void {
@@ -116,12 +114,21 @@ export class PairingTracker {
   }
 
   /**
+   * The contact was pinned over the DHT: nothing to show yet (a stream attempt is usually a moment away or under
+   * way), but from now on a stream that fails ends the pairing `on-dht`, not back between attempts.
+   */
+  pinnedOverDht(): void { if (!this.done) this.dhtPinned = true; }
+
+  /**
    * The contact is pinned over the DHT (its first-contact envelope verified first), or the chat is kept there:
    * the pairing ends `on-dht`, and later attempts only count until one goes `live`.
    */
   onDht(reason: PairingOnDhtReason): void {
     if (this.done) return;
     this.dhtPinned = true;
+    // A stream attempt under way goes on to its end (live, or on-dht if it fails): a pin over the DHT a moment
+    // before the stream opens is not a stage of its own. DHT only chosen ends the attempts.
+    if (this.attemptOpen && reason !== "chosen") return;
     this.attemptOpen = false;
     this.set("on-dht", { reason, retryable: reason !== "chosen" });
   }

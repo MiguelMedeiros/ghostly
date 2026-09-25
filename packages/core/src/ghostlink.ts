@@ -54,6 +54,8 @@ import { PairingTracker, type PairingProgress, type PairingRole } from "./pairin
 /** After a failed attempt: 20 s, then doubling up to 3 min. Someone opening the chat starts it over. */
 const AUTO_CONNECT_RETRY_MS = 20_000;
 /** A native transport that fails this many attempts in a row is skipped for `DEMOTE_MS`, while another remains (WISP 100). */
+/** Pinned over the DHT with no stream up this long after, a first pairing shows as on the DHT (WISP 400). */
+export const DHT_PIN_GRACE_MS = 10_000;
 export const DEMOTE_AFTER_FAILURES = 3;
 export const DEMOTE_MS = 60 * 60_000;
 const AUTO_CONNECT_MAX_RETRY_MS = 3 * 60_000;
@@ -231,6 +233,7 @@ export class GhostLink {
   private endpoints = new Map<PairedTransport, NativeEndpoint>();
   private activeBinding?: NativeBinding;
   private dialing = false;
+  private dhtPinGrace: ReturnType<typeof setTimeout> | null = null;
   /** Native attempts that failed in a row, and transports demoted until when (WISP 100, demotion). */
   private nativeFailures = new Map<PairedTransport, number>();
   private demotedUntil = new Map<PairedTransport, number>();
@@ -315,7 +318,15 @@ export class GhostLink {
       // A first contact verified on the DHT pins the contact: the pairing is on the DHT until a stream is up.
       pin: async key => {
         await options.pairing!.pinPeer(key, true);
-        if (!this.isDataLinkOpen) this.tracker?.onDht(this.deliveryMode === "dht" ? "chosen" : "waiting");
+        if (this.isDataLinkOpen || !this.tracker || this.tracker.done) return;
+        if (this.deliveryMode === "dht") { this.tracker.onDht("chosen"); return; }
+        // A stream is usually a moment away: the pairing shows its steps, and ends on the DHT only if no stream
+        // makes it (an attempt fails), or none is under way a little later.
+        this.tracker.pinnedOverDht();
+        if (!this.dhtPinGrace) this.dhtPinGrace = setTimeout(() => {
+          this.dhtPinGrace = null;
+          if (!this.isDataLinkOpen && this.tracker?.progress.stage !== "on-dht") this.tracker?.onDht("waiting");
+        }, DHT_PIN_GRACE_MS);
       },
       message: async message => { await options.events?.onMessage?.({ ...message, via: "pkarr" }); },
       receipt: async id => { await options.events?.onMessageReceipt?.(id); },
@@ -632,6 +643,7 @@ export class GhostLink {
 
   async stop(announce = true): Promise<void> {
     this.stopped = true;
+    if (this.dhtPinGrace) clearTimeout(this.dhtPinGrace);
     await this.dht?.stop();
     this.disconnect();
     await Promise.allSettled([...this.endpoints.values()].map(endpoint => endpoint.close()));
@@ -1048,7 +1060,8 @@ export class GhostLink {
   private maybeAutoConnect(presence: PeerPresence): void {
     if (this.streamBlocked || this.keyStopped || !this.options.autoConnect || !presence.online || this.channel || this.dataLink.state !== "idle") return;
     // On the DHT the chat is usable: layer 1 is retried at the background pace (WISP 100), not the pairing's.
-    const pairing = !!this.tracker && !this.tracker.done && !this.tracker.pinnedOnDht;
+    // A pin over the DHT alone changes nothing here: the joiner still knocks and the inviter still answers.
+    const pairing = !!this.tracker && !this.tracker.done && this.tracker.progress.stage !== "on-dht";
     const role = pairing ? this.options.pairingProgress?.role : undefined;
     if (role === "inviter") {
       this.peerSeenAt ||= Date.now();
