@@ -71,7 +71,11 @@ test("header connection popover, five desktop destinations and resizing preserve
   const a=await peer("layout-owner"), b=await peer("layout-guest");
   await pair(a,b);
   const box=a.page.getByPlaceholder("Message…");
+  // An empty composer offers the mic; once there is text, Send. Either one, enabled, signals a click.
+  const mic=a.page.getByRole("button",{name:"Record a voice message",exact:true}), send=a.page.getByRole("button",{name:"Send message",exact:true});
+  await expect(mic).toBeEnabled(); await expect(mic).toHaveCSS("cursor","pointer"); await expect(send).toHaveCount(0);
   await box.fill("First line\nSecond line");
+  await expect(send).toBeEnabled(); await expect(send).toHaveCSS("cursor","pointer"); await expect(mic).toHaveCount(0);
   const trigger=a.page.getByTestId("connection-options");
   await trigger.click();
   await expect(a.page.getByRole("dialog",{name:"Connection options"})).toBeVisible();
@@ -170,8 +174,9 @@ test("home actions have equal sizes and enabled controls signal clicks", { tag: 
     await expect(p.page.getByRole("switch", {name:"DHT-only delivery"})).toHaveCSS("cursor", "pointer");
     await expect(p.page.getByRole("radio", {name:"WebRTC", exact:true})).toHaveCSS("cursor", "pointer");
     await expect(p.page.getByRole("radio", {name:"Iroh", exact:true})).toHaveCSS("cursor", "not-allowed");
-    await expect(p.page.getByRole("button", {name:"Send message", exact:true})).toBeDisabled();
-    await expect(p.page.getByRole("button", {name:"Send message", exact:true})).toHaveCSS("cursor", "not-allowed");
+    // Nobody has joined yet, so the composer is off: its empty state shows the mic, disabled and saying so.
+    const mic = p.page.getByRole("button", {name:"Record a voice message", exact:true});
+    await expect(mic).toBeDisabled(); await expect(mic).toHaveCSS("cursor", "not-allowed");
   }
 });
 
@@ -193,12 +198,21 @@ for (const unavailable of ["none", "read", "publish", "network", "publication-ne
     await expect.poll(() => reads).toBeGreaterThan(0);
     await expect(menu).toHaveAccessibleName(unavailable === "none" ? /No contact yet/ : unavailable === "publication-network" ? /Publication unavailable/ : /Discovery unavailable|Publication unavailable/);
     await menu.click();
+    const alert = page.getByTestId("connection-menu").getByRole("alert");
+    // The inviter only needs its own invite published: a failed read leaves the pairing scene waiting, a failed
+    // publish is the scene's failure too, with its own retry.
+    const failure = page.getByTestId("pairing-failure");
+    if (unavailable === "none" || unavailable === "read") await expect(failure).toHaveCount(0);
+    else {
+      await expect(failure).toContainText("Could not put your invite on the network");
+      await expect(failure.getByRole("button", {name:"Try again", exact:true})).toBeEnabled();
+    }
     if (unavailable === "none") await expect(page.getByRole("alert")).toHaveCount(0);
     else {
-      await expect(page.getByRole("alert")).toContainText(unavailable === "network" ? /Could not (read|publish) discovery/ : `Could not ${unavailable === "publication-network" ? "publish" : unavailable} discovery`);
+      await expect(alert).toContainText(unavailable === "network" ? /Could not (read|publish) discovery/ : `Could not ${unavailable === "publication-network" ? "publish" : unavailable} discovery`);
       await expect(page.getByTestId("discovery-help")).toContainText("retry automatically");
       if (unavailable === "publication-network") {
-        await expect(page.getByRole("alert")).not.toContainText("Could not read discovery");
+        await expect(alert).not.toContainText("Could not read discovery");
         await expect(page.getByTestId("discovery-help")).toContainText("No contact yet");
       }
       await expect(page.getByRole("link", {name:"review relay settings"})).toHaveAttribute("href", "#/settings");
