@@ -93,7 +93,9 @@ function Option({ children, hint, icon, checked, disabled, onClick, testId }: {
   children: ReactNode; hint?: ReactNode; icon: ReactNode; checked: boolean; disabled: boolean; onClick(): void; testId: string;
 }) {
   return (
+    // A row is one line (as every menu's is); a reason cut at the menu's width is whole in the tooltip.
     <button type="button" role="radio" aria-checked={checked} disabled={disabled} data-testid={testId} data-menu-item onClick={onClick}
+      title={typeof hint === "string" ? `${children}: ${hint}` : undefined}
       className={`flex w-full min-w-0 items-center gap-3 whitespace-nowrap px-3 py-2 text-start text-sm transition-colors enabled:hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:outline-none disabled:cursor-default max-md:min-h-12 max-md:rounded-lg ${checked ? "text-text-primary" : "text-text-secondary"} ${disabled && !checked ? "opacity-60" : ""}`}>
       <span aria-hidden="true" className={`flex shrink-0 ${checked ? "text-accent" : ""}`}>{icon}</span>
       <span className="min-w-0 flex-1">
