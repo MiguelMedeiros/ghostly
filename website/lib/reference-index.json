@@ -476,7 +476,8 @@
     "updated": "2026-09-25",
     "implementation": "Experimental provider did; see below",
     "dependencies": [
-      "300-peer-proofs.md"
+      "300-peer-proofs.md",
+      "3xx-did-dht.md"
     ],
     "summary": "An optional identity proof, under 300, that a person controls a W3C decentralized identifier. The DID vouches, once, for the WISP 300 binding statement, which authorizes the profile's own proof key for a validity period; each chat the proof is shared with then gets a presentation signed by that proof key (shared WISP 300 machinery, no DID involved). A contact's app resolves the DID itself and checks the evidence agai",
     "notices": []

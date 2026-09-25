@@ -183,8 +183,17 @@
 .rm-section summary:hover .rm-cand-title {
   color: var(--cyan);
 }
+.rm-cand-head {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
 .rm-cand-title {
   font-weight: 600;
+}
+.rm-cand-note {
+  font-size: 12.5px;
+  color: var(--muted);
 }
 .rm-cand-kind {
   font-size: 11.5px;

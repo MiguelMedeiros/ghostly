@@ -76,8 +76,8 @@ const en: Timeline = {
       color: "#22d3ee",
       title: "Chat & connection",
       items: {
-        now: ["Chats: files, payments, local apps", "Short texts over the DHT when the live link drops", "Calls in every chat, while live", "Iroh and HyperDHT on desktop", "QR invitations", "Pairing progress you can watch", "Voice messages"],
-        planned: ["DHT start and self-upgrade in every chat", "ghostly1 invite codes", "Local network discovery, QUIC and WebSocket relay profiles"],
+        now: ["One ghostly1 invite: code, QR, link", "DHT start and self-upgrade in every chat", "Chats: files of any size, payments, local apps", "Calls in every chat, while live", "Iroh and HyperDHT on desktop; Iroh in browsers through relays", "Pairing progress you can watch", "Voice messages"],
+        planned: ["Typing and presence", "Local network discovery, QUIC and WebSocket relay profiles"],
         later: [{ text: "Tor, libp2p, Pear components", level: "research" }],
       },
     },
@@ -104,9 +104,9 @@ const en: Timeline = {
       color: "#f472b6",
       title: "Identity (optional)",
       items: {
-        now: ["Proofs: Nostr · domain · OpenPGP · SSH · Bitcoin address", "Nostr social layer"],
-        planned: ["OpenID accounts, once Ghostly's clients are registered", "Hardware signers, passkeys"],
-        later: [{ text: "Pubky and Keet, and their profiles and content", level: "research" }],
+        now: ["Proofs: Nostr · domain · OpenPGP · SSH · Bitcoin address · DID", "Nostr social layer", "A did:dht per profile"],
+        planned: ["Pubky and Bluesky identities (in implementation)", "OpenID accounts, once Ghostly's clients are registered", "Hardware wallets as signers, passkeys"],
+        later: ["Keet, once it has a supported signing API", { text: "Pubky profiles and content", level: "research" }],
       },
     },
     {
@@ -175,8 +175,8 @@ const ptBr: Timeline = {
       color: "#22d3ee",
       title: "Conversa e conexão",
       items: {
-        now: ["Chats: arquivos, pagamentos, apps locais", "Textos curtos pela DHT quando o link direto cai", "Chamadas em todo chat, ao vivo", "Iroh e HyperDHT no desktop", "Convites por QR", "Progresso do pareamento à vista", "Mensagens de voz"],
-        planned: ["Início na DHT e upgrade sozinho em todo chat", "Códigos de convite ghostly1", "Descoberta na rede local, perfis QUIC e relay WebSocket"],
+        now: ["Um único convite ghostly1: código, QR, link", "Início na DHT e upgrade sozinho em todo chat", "Chats: arquivos de qualquer tamanho, pagamentos, apps locais", "Chamadas em todo chat, ao vivo", "Iroh e HyperDHT no desktop; Iroh nos navegadores por relays", "Progresso do pareamento à vista", "Mensagens de voz"],
+        planned: ["Digitando e presença", "Descoberta na rede local, perfis QUIC e relay WebSocket"],
         later: [{ text: "Tor, libp2p, componentes Pear", level: "research" }],
       },
     },
@@ -203,9 +203,9 @@ const ptBr: Timeline = {
       color: "#f472b6",
       title: "Identidade (opcional)",
       items: {
-        now: ["Provas: Nostr · domínio · OpenPGP · SSH · endereço Bitcoin", "Camada social do Nostr"],
-        planned: ["Contas OpenID, quando os clientes do Ghostly forem registrados", "Signers de hardware, passkeys"],
-        later: [{ text: "Pubky e Keet, com os perfis e conteúdos deles", level: "research" }],
+        now: ["Provas: Nostr · domínio · OpenPGP · SSH · endereço Bitcoin · DID", "Camada social do Nostr", "Um did:dht por perfil"],
+        planned: ["Identidades Pubky e Bluesky (em implementação)", "Contas OpenID, quando os clientes do Ghostly forem registrados", "Carteiras de hardware como signers, passkeys"],
+        later: ["Keet, quando tiver uma API de assinatura suportada", { text: "Perfis e conteúdos do Pubky", level: "research" }],
       },
     },
     {

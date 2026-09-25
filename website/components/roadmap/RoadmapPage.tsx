@@ -4,8 +4,9 @@ import { LevelBadge } from "@/components/site/Level";
 import { Ghost } from "@/components/ghost/Ghost";
 import { Reveal } from "@/components/home/Reveal";
 import { ReferenceMarkdown } from "@/components/reader/Markdown";
-import { candidateLevel, roadmap } from "@/content/roadmap";
+import { roadmap } from "@/content/roadmap";
 import { href, type Locale } from "@/lib/i18n";
+import type { Level } from "@/lib/status";
 import candidates from "@/lib/roadmap-candidates.json";
 import { timeline } from "@/content/roadmap-timeline";
 import { wisps } from "@/lib/wisps";
@@ -132,13 +133,21 @@ export function RoadmapPage({ locale }: { locale: Locale }) {
                   <li key={c.id} id={c.id}>
                     <details>
                       <summary>
-                        <span className="rm-cand-title">{c.title}</span>
+                        <span className="rm-cand-head">
+                          <span className="rm-cand-title">{c.title}</span>
+                          {c.note && (
+                            <span className="rm-cand-note">
+                              {c.status in t.inventory.states && `${t.inventory.states[c.status as keyof typeof t.inventory.states]}: `}
+                              <span lang="en">{c.note}</span>
+                            </span>
+                          )}
+                        </span>
                         <span className="dim mono rm-cand-kind">{c.kind}</span>
-                        <LevelBadge level={candidateLevel(c.id, c.status)} locale={locale} small />
+                        <LevelBadge level={c.level as Level} locale={locale} small />
                       </summary>
                       <div className="rm-cand-body" lang="en">
                         <p className="dim mono">
-                          {c.status} · {t.inventory.sourceStatus}
+                          {c.note ? `${c.status}: ${c.note}` : c.status} · {t.inventory.sourceStatus}
                         </p>
                         <ReferenceMarkdown body={c.body} sourcePath="docs/wisps/ADAPTER-ROADMAP.md" locale={locale} idPrefix={`${c.id}-`} />
                       </div>
