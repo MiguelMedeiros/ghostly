@@ -550,7 +550,9 @@ export class GhostLink {
         if (!this.dialing) this.attemptEnded();
         this.rejectWaiters(new GhostlyHttpError("unreachable", "Could not connect to the peer"));
       },
-      attemptTimeoutMs: this.tracker ? PAIRING_ATTEMPT_MS : undefined,
+      // Asked as each attempt starts: once the first pairing is over, the contact reads at its chat's pace (30 s in the
+      // background), and a short offer would be withdrawn before it looked.
+      attemptTimeoutMs: () => this.tracker && !this.tracker.done ? PAIRING_ATTEMPT_MS : undefined,
     });
     this.switcher = new TransportSwitch({
       key: this.myPubKeyZ32, peerKey: options.params.peerPubKeyZ32,
