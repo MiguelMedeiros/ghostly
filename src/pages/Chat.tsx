@@ -703,7 +703,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
             </div>
           )}
           {timeline.map((row) => row.kind === "transport"
-            ? <TransportLine key={`transport:${row.entry.id}`} entry={row.entry} contact={shownName} />
+            ? <TransportLine key={`transport:${row.entry.id}`} entry={row.entry} earlier={row.earlier} contact={shownName} />
             : (
             <MessageBubble
               key={row.message.id}

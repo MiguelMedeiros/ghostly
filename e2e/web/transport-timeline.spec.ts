@@ -1,15 +1,16 @@
 import { chat, connect, expect, link, say, test, type Peer } from "../support/fixtures";
 
-// The chat's connection story, as two people chatting in browsers see it: a line in each timeline for the first
-// live connection, one when the link drops and one when it comes back, with the details a tap away, while messages
-// keep flowing. A browser speaks WebRTC only, so its Connection menu offers that alone and says why. A switch
-// between transports mid-chat (Desktop's Iroh and HyperDHT) is proven in-process in
-// packages/browser/test/transportSwitchLive.test.ts and transportTimelineNode.test.ts: Linux WebKitGTK, the only
+// The chat's connection story, as two people chatting in browsers see it: a row in each timeline for the first
+// live connection, with the details a tap away, and nothing for a contact's app that goes away and comes back at
+// once (that is in the connection panel's history), while messages keep flowing. A browser speaks WebRTC only, so
+// its Connection menu offers that alone and says why. A switch between transports mid-chat (Desktop's Iroh and
+// HyperDHT) is proven in-process in packages/browser/test/transportSwitchLive.test.ts and
+// transportTimelineNode.test.ts: Linux WebKitGTK, the only
 // Desktop the e2e harness drives, cannot go live (no RTCPeerConnection for the first pairing).
 const lines = (peer: Peer) => chat(peer).getByTestId("transport-line");
 const lineText = (peer: Peer, text: string | RegExp) => lines(peer).getByTestId("transport-line-text").filter({ hasText: text });
 
-test("each timeline says when the chat went live, dropped and came back, and the menu offers what a browser can", {
+test("each timeline says when the chat went live, a quick reconnect stays in the history, and the menu offers what a browser can", {
   tag: ["@feature:transport.timeline", "@feature:transport.chat-switch", "@feature:transport.indicator", "@feature:chat.paired.reconnect"],
 }, async ({ peer }) => {
   test.setTimeout(4 * 60_000);
@@ -54,12 +55,20 @@ test("each timeline says when the chat went live, dropped and came back, and the
   await alice.page.keyboard.press("Escape");
   await expect(menu).toBeHidden();
 
-  // Bob's app goes away and comes back (a reload): Alice's timeline says the link was lost and came back.
+  // Bob's app goes away and comes back at once (a reload): no row in either timeline. Alice's connection panel
+  // has the drop and the reconnect in its history.
   await bob.page.reload();
-  await expect(lineText(alice, "Live connection lost")).toHaveCount(1, { timeout: 90_000 });
-  await expect(lineText(alice, /Back live over WebRTC|Reconnected \d+ times? in/)).toHaveCount(1, { timeout: 120_000 });
-  // Bob's app started again: its own line says it connected, after the one from before.
-  await expect(lineText(bob, "Connected over WebRTC")).toHaveCount(2, { timeout: 120_000 });
+  await icon.click();
+  const history = alice.page.getByTestId("connection-history");
+  await history.getByText(/^Connection history/).click();
+  await expect(history.locator('[data-kind="down"]').first()).toBeVisible({ timeout: 90_000 });
+  const latest = history.getByTestId("connection-history-event").first();
+  await expect(latest).toHaveAttribute("data-kind", "live", { timeout: 120_000 });
+  await expect(latest).toContainText(/Live over WebRTC · after \d+ (s|min) down/);
+  await alice.page.keyboard.press("Escape");
+  for (const p of [alice, bob]) await expect(lineText(p, "Connected over WebRTC")).toHaveCount(1);
+  await expect(lines(alice)).toHaveCount(1);
+  await expect(lines(bob)).toHaveCount(1);
 
   // Messages keep flowing, and the lines stay out of the way of the conversation.
   await say(bob, "still here after the reload");
@@ -88,14 +97,18 @@ test("DHT only from the Connection menu: both timelines say who chose it, texts 
   await say(bob, "over the DHT");
   await expect(chat(alice).getByText("over the DHT")).toBeVisible({ timeout: 120_000 });
 
-  // Back to Automatic: both timelines say DHT only is over, then that the chat is live again.
+  // Back to Automatic: both timelines say the chat is live again, in one row that also stands for leaving DHT only.
   await alice.page.getByTitle("Options").click();
   await alice.page.getByTestId("chat-connection-open").click();
   const menu = alice.page.getByTestId("transport-menu");
   await expect(menu.getByTestId("transport-option-dht")).toHaveAttribute("aria-checked", "true");
   await menu.getByTestId("transport-option-webrtc").click();
-  for (const p of [alice, bob]) await expect(lineText(p, "Left DHT only · connecting live")).toHaveCount(1, { timeout: 120_000 });
-  for (const p of [alice, bob]) await expect(lineText(p, "Back live over WebRTC")).toHaveCount(1, { timeout: 120_000 });
+  for (const p of [alice, bob]) {
+    await expect(lineText(p, "Back live over WebRTC")).toHaveCount(1, { timeout: 120_000 });
+    const back = lines(p).filter({ hasText: "Back live over WebRTC" });
+    await back.getByRole("button").click();
+    await expect(back.getByTestId("transport-line-earlier")).toContainText("Left DHT only · connecting live");
+  }
   await say(alice, "live again");
   await expect(chat(bob).getByText("live again")).toBeVisible({ timeout: 60_000 });
 });

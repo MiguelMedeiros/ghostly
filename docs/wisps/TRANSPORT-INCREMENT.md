@@ -41,16 +41,14 @@ A switch on an open session (`transport-switch/1`) moves the conversation withou
 - **After a drop.** A plan cut short by a drop ends with the session it meant to move; its dial does not go on. The redial tries first the transport a standing explicit choice names (`TransportSwitch.chosenTarget`), and the new session agrees again from scratch (`begin(context, actual, migrated)`: only a session a plan dialled settles that plan). Both sides end on the same transport whoever dials ([WISP 100](100-transports.md#background-retry-and-upgrade)).
 - **Who chose.** A contact's explicit choice is read from a rise in the switch intent of the `paired-policy` frame it already sends. Nothing new goes on the wire.
 
-Each side derives the chat's transport lines from its own engine events (`packages/browser/src/engine/transportLog.ts`):
+Each side derives the chat's transport rows from its own engine events (`packages/browser/src/engine/transportLog.ts`), by the rules of WISP 400 § Transport rows:
 
-- the first connection;
-- a switch and why: you, the contact, the old transport dropped, or the apps on their own. Only a live session moving without a drop is credited to someone's choice. Coming back after a drop is the app reconnecting ("Back live over Iroh", "Switched to Iroh: WebRTC dropped"), even when it lands on a transport someone chose. Choosing the transport already in use is not remembered as a reason;
-- a failed switch, and the transport it stayed on;
-- a lost live link and what carries text meanwhile (DHT or held items);
-- DHT only chosen, by you or the contact ("You switched to DHT only", "Ana switched to DHT only"), in place of the drop it caused; and the way out ("Left DHT only · connecting live"), worded as WISP 400 § Pairing progress and transport rows;
-- coming back.
+- the first connection, and afterwards only a change of transport (an app restart or a drop under 5 minutes on the same transport adds nothing);
+- a switch and why: you, the contact, the old transport dropped, or the apps on their own. Only a live session moving without a drop is credited to someone's choice. Coming back after a drop is the app reconnecting ("Switched to Iroh: WebRTC dropped", or "Reconnected over Iroh after 6 min" after a long outage), even when it lands on a transport someone chose;
+- every choice: a transport ("You chose Iroh", which becomes "You switched to Iroh" when the session moves), back to automatic, DHT only by you or the contact, and the way out ("Left DHT only · connecting live");
+- a failed switch, and the transport it stayed on.
 
-Four or more drop/return lines within a minute collapse into one "Reconnected n times" line that keeps counting. The round trip comes from the existing liveness ping, with one extra ping at the open, not counted as missed. The lines live on the link (`StoredLink.transportLog`, the last 50), not among the messages. So they are never sent, never counted as unread and never the chat's preview, and they go when the chat goes. The app has no disappearing-message timer; if one comes, the lines follow it.
+The UI shows rows with no message between them as one row, the latest, listing the others in its details. Every event, drops, app starts, failed attempts and the round trip included, goes to the connection history (`StoredLink.transportHistory`, the last 200), shown in the connection panel. The round trip comes from the existing liveness ping, with one extra ping at the open, not counted as missed. The rows live on the link (`StoredLink.transportLog`, the last 50), not among the messages. So they are never sent, never counted as unread and never the chat's preview, and they go when the chat goes. Rows stored by older rules are compacted on load. The app has no disappearing-message timer; if one comes, the rows follow it.
 
 ## Native packaging and lifecycle
 

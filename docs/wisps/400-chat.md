@@ -4,7 +4,7 @@
 |---|---|
 | Candidate number | 400; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
-| Revision | 0.2 |
+| Revision | 0.2.3 |
 | Updated | 2026-09-25 |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [03](03-capabilities.md), [100](100-transports.md), [800](800-invite-join.md) |
@@ -144,7 +144,20 @@ Supporting a concrete profile does not establish full conformance to this Draft.
 Two surfaces show where a chat is. They are specified here so both apps say the same thing.
 
 - **Pairing progress** (the `PairingProgress` contract of the pairing-latency work): its stages stay `publishing`, `waiting`, `resolving`, `knocking`, `answering`, `connecting`, `live`, `failed`, and gain a terminal stage **`on-dht`**: pinned over the DHT, layer 1 not connected (yet). `detail.reason` on `on-dht` is one of `no-common-transport`, `transport` (every attempt failed), `chosen` (either side chose DHT only) or `waiting` (still trying). `failed` keeps only `key-mismatch`, `security`, `publish` and `offline` (the DHT itself unreachable). A first pairing that ends in `on-dht` keeps its layer-1 attempts running; the scene gives way to the chat at `on-dht`, and the header indicator says "On DHT · retrying live".
-- **Transport rows and the per-chat switch** (the transport-switch work): **DHT** is one of the transports in the chat's Connection menu: Automatic · WebRTC · Iroh · HyperDHT · **DHT only**. Choosing it is the `dht-chosen` state; Automatic leaves it. Rows: "Live connection lost · texts go through the DHT", "Back live over <transport>", "You switched to DHT only", "<contact> switched to DHT only", "Left DHT only · connecting live". DHT only is always available; the others are offered only when both apps support them.
+- **Transport rows and the per-chat switch** (the transport-switch work): **DHT** is one of the transports in the chat's Connection menu: Automatic · WebRTC · Iroh · HyperDHT · **DHT only**. Choosing it is the `dht-chosen` state; Automatic leaves it. DHT only is always available; the others are offered only when both apps support them.
+
+### Transport rows
+
+The timeline records what matters to the people in the chat, not every reconnect. Each app derives its rows from its own engine events; nothing about them goes on the wire, and they are never messages (never sent, never unread, never the chat's preview).
+
+1. **First connection.** "Connected over <transport>" appears once, for the chat's first live connection. After that, a live connection is a row only when its transport differs from the last one the chat's rows name. An app restart, on either side, that comes back on the same transport adds nothing.
+2. **Short drops are silent.** Live coming back within 5 minutes on the same transport adds nothing. On another transport it is one row: "Switched to <transport>: <old> dropped". The 5 minutes cover an app restart and its reconnect, which took up to about 2 minutes in practice.
+3. **A long outage is one row, when it ends:** "Reconnected over <transport> after 6 min", with "· <old> dropped" when it came back on another. There is never a "lost" row followed by a "back" row. While the chat is off live, including `on-dht`, the header indicator says so and the timeline adds nothing. Texts that went through the DHT meanwhile are messages in the timeline already, and the return row's details say so ("Texts went through the DHT meanwhile"); there is no separate DHT row.
+4. **Choices are always rows:** "You chose <transport>", "<contact> chose <transport>", "Back to automatic", "<contact> went back to automatic", "You switched to DHT only", "<contact> switched to DHT only". When the choice moves the live session, its row becomes the switch ("You switched to Iroh", "Back to automatic · now on WebRTC"). Leaving DHT only is "Left DHT only · connecting live", then "Back live over <transport>".
+5. **A switch that failed** is a row: "Couldn't switch to <transport>: <reason>. Still on <transport>".
+6. **Coalescing.** Rows with no message between them show as one row, the latest, with the earlier ones listed in its details ("…and 4 more changes"). The timeline never shows a column of them.
+7. **Connection history.** Every event, including what the timeline leaves out (drops it came back from, app starts, failed attempts, the round trip on each stretch), goes to the chat's connection history, shown in its connection panel, newest first.
+8. **Stored rows** written under older rules are compacted by these on load: restart and short-drop rows go, a "lost" and "back" pair becomes one outage row, and the old rows seed the connection history. Messages are untouched.
 
 ## Candidate semantics
 
@@ -180,6 +193,7 @@ Exercise equal timestamps, out-of-order arrivals, duplicated messages across DHT
 
 ## Revision log
 
+- 0.2.3 (2026-09-25): transport rows record what matters (first connection, a change of transport, choices, a failed switch, an outage when it ends), not every reconnect or restart; everything else goes to the connection history.
 - 0.2.2 (2026-09-25): calls (`calls/1`) and hosted services (`services/1`) on layer 1, both live only.
 - 0.2.1 (2026-09-25): hosted local services run in the chat session today; only calls are the gap. Implementation status updated.
 - 0.2 (2026-09-25): one chat with a DHT layer and a peer-to-peer layer; chat states; what each state carries; the pairing-progress and transport-row wording; decisions Q1 to Q7 (decided 2026-09-25).

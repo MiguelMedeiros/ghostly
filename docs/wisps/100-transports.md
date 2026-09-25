@@ -34,7 +34,7 @@ Once the contact is pinned, and unless either side is `dht-chosen`:
 
 Layer 1 is lost when its channel closes, when its runtime goes away (the native bridge exits, the browser suspends the page), or when liveness gives up (three pings in a row unanswered, [401](401-paired-chat.md#liveness-and-reconnection)). The chat then:
 
-1. moves to `on-dht` at once and says so ("Live connection lost · texts go through the DHT");
+1. moves to `on-dht` at once, which the header indicator shows; the timeline gets a row only if the outage outlasts a short drop ([400](400-chat.md#transport-rows));
 2. marks every unconfirmed layer-1 text `queued`, and sends the ones that fit over the DHT under the same ids ([403](403-dht-text.md#when-text-goes-over-the-dht));
 3. keeps files, payment requests and long texts waiting, or holds them ([4xx](4xx-store-and-forward.md)) where both sides allow it;
 4. speeds its DHT mailbox reads back up ([403](403-dht-text.md#poll-pace)) and starts the background retry below.

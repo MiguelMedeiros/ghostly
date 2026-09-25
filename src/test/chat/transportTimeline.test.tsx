@@ -16,7 +16,14 @@ const ready = (patch: Partial<Pairing> = {}): Pairing => ({ status: "ready", tra
 describe("transport lines: what each change reads as", () => {
   it.each<[string, Partial<TransportEntry>, string]>([
     ["the first connection", {}, "Connected over WebRTC"],
-    ["coming back", { kind: "back", transport: "iroh/1" }, "Back live over Iroh"],
+    ["live again after DHT only", { kind: "back", transport: "iroh/1" }, "Back live over Iroh"],
+    ["back after an outage", { kind: "back", transport: "hyperdht/1", downMs: 6 * 60_000 }, "Reconnected over HyperDHT after 6 min"],
+    ["back after an outage, on another transport", { kind: "back", transport: "iroh/1", from: "webrtc/1", downMs: 3 * 60 * 60_000 }, "Reconnected over Iroh after 3 h · WebRTC dropped"],
+    ["your choice", { kind: "chose", cause: "you", target: "iroh/1", transport: "webrtc/1" }, "You chose Iroh"],
+    ["the contact's choice", { kind: "chose", cause: "contact", target: "hyperdht/1", transport: undefined }, "Ana chose HyperDHT"],
+    ["back to automatic", { kind: "chose", cause: "you", transport: "webrtc/1" }, "Back to automatic"],
+    ["back to automatic, and the apps moved", { kind: "chose", cause: "you", from: "iroh/1", transport: "webrtc/1" }, "Back to automatic · now on WebRTC"],
+    ["the contact back to automatic", { kind: "chose", cause: "contact", transport: "webrtc/1" }, "Ana went back to automatic"],
     ["your switch", { kind: "switched", cause: "you", from: "webrtc/1", transport: "hyperdht/1" }, "You switched to HyperDHT"],
     ["the contact's switch", { kind: "switched", cause: "contact", from: "webrtc/1", transport: "iroh/1" }, "Ana switched to Iroh"],
     ["a fallback after a drop", { kind: "switched", cause: "dropped", from: "webrtc/1", transport: "iroh/1" }, "Switched to Iroh: WebRTC dropped"],
@@ -62,6 +69,24 @@ describe("transport lines: what each change reads as", () => {
     expect(screen.queryByTestId("transport-line-details")).toBeNull();
   });
 
+  it("says how long an outage lasted and what carried text meanwhile", async () => {
+    const { user } = renderApp(<TransportLine entry={line({ kind: "back", transport: "iroh/1", from: "webrtc/1", downMs: 6 * 60_000, fallback: "dht" })} contact="Ana" />);
+    await user.click(screen.getByRole("button"));
+    const details = screen.getByTestId("transport-line-details");
+    expect(within(details).getByText("Not live for").nextSibling).toHaveTextContent("6 min");
+    expect(within(details).getByText("Why").nextSibling).toHaveTextContent(/^The live connection over WebRTC ended at .+ and was down for 6 min\. Texts went through the DHT meanwhile\. It came back over Iroh\.$/);
+  });
+
+  it("stands for the rows before it, and lists them in its details", async () => {
+    const earlier = [line({ id: "e1", at: Date.UTC(2026, 8, 25, 14, 0) }), line({ id: "e2", kind: "dht-only", cause: "you", transport: undefined })];
+    const { user } = renderApp(<TransportLine entry={line({ id: "l3", kind: "back", transport: "webrtc/1" })} earlier={earlier} contact="Ana" />);
+    expect(screen.getByTestId("transport-line-earlier-count")).toHaveTextContent("+2");
+    await user.click(screen.getByRole("button", { name: /Back live over WebRTC and 2 earlier changes/ }));
+    expect(within(screen.getByTestId("transport-line-details")).getByText("Before this").nextSibling).toHaveTextContent("…and 2 more changes");
+    expect(within(screen.getByTestId("transport-line-earlier")).getAllByRole("listitem").map(li => li.querySelector("span")!.textContent))
+      .toEqual(["You switched to DHT only", "Connected over WebRTC"]);
+  });
+
   it("gives no round trip for a link that is not live", async () => {
     const { user } = renderApp(<TransportLine entry={line({ kind: "lost", transport: undefined, from: "iroh/1", rttMs: 40 })} contact="Ana" />);
     await user.click(screen.getByRole("button"));
@@ -79,6 +104,15 @@ describe("transport lines in the timeline", () => {
     ]);
     expect(rows.map(r => r.kind === "message" ? r.message.id : r.entry.id)).toEqual(["a", "m1", "b", "m2", "m3", "c"]);
     expect(mergeTimeline(messages, []).map(r => r.kind)).toEqual(["message", "message", "message"]);
+  });
+
+  it("merge rows with no message between them into the latest, never a column of them", () => {
+    const messages = [{ id: "m1", timestamp: 10 }, { id: "m2", timestamp: 50 }];
+    const rows = mergeTimeline(messages, [
+      line({ id: "a", at: 5 }), line({ id: "b", at: 20 }), line({ id: "c", at: 30 }), line({ id: "d", at: 40 }), line({ id: "e", at: 60 }),
+    ]);
+    expect(rows.map(r => r.kind === "message" ? r.message.id : `${r.entry.id}+${r.earlier.map(e => e.id).join("")}`))
+      .toEqual(["a+", "m1", "d+bc", "m2", "e+"]);
   });
 });
 

@@ -1,9 +1,9 @@
 import { TRANSPORTS, type PairedTransport } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
-import type { TransportEntry } from "@ghostly/browser/engine/transportLog";
+import type { TransportEntry, TransportEvent } from "@ghostly/browser/engine/transportLog";
 import { transportName } from "./connection";
 
-export type { TransportEntry };
+export type { TransportEntry, TransportEvent };
 
 const name = transportName;
 const native = (t?: PairedTransport) => t === "iroh/1" || t === "hyperdht/1";
@@ -30,7 +30,15 @@ export function transportLineText(entry: TransportEntry, contact: string): strin
   const t = name(entry.transport);
   switch (entry.kind) {
     case "connected": return `Connected over ${t}`;
-    case "back": return `Back live over ${t}`;
+    case "back":
+      if (entry.downMs === undefined) return `Back live over ${t}`;
+      return `Reconnected over ${t} after ${lasting(entry.downMs)}${entry.from ? ` · ${name(entry.from)} dropped` : ""}`;
+    case "chose": {
+      const who = entry.cause === "contact" ? contact : "You";
+      if (entry.target) return `${who} chose ${name(entry.target)}`;
+      const back = entry.cause === "contact" ? `${contact} went back to automatic` : "Back to automatic";
+      return entry.from && entry.transport ? `${back} · now on ${t}` : back;
+    }
     case "switched":
       if (entry.cause === "you") return `You switched to ${t}`;
       if (entry.cause === "contact") return `${contact} switched to ${t}`;
@@ -59,20 +67,35 @@ export function transportLineText(entry: TransportEntry, contact: string): strin
 /** What tapping a line shows: the transport, since when, why, and the round trip if known. */
 export function transportLineDetails(entry: TransportEntry, contact: string, format: (at: number) => string): { label: string; value: string }[] {
   const rows: { label: string; value: string }[] = [];
-  const live = entry.kind === "flapping" ? entry.live : entry.kind !== "lost" && entry.kind !== "dht-only" && entry.kind !== "dht-left" && !!entry.transport;
+  const live = entry.kind === "flapping" ? entry.live : entry.kind !== "lost" && entry.kind !== "dht-only" && entry.kind !== "dht-left" && entry.kind !== "failed" && !!entry.transport;
   rows.push({ label: "Transport", value: live ? name(entry.transport) : entry.kind === "dht-only" ? "DHT only" : "None live" });
   rows.push({ label: "Since", value: format(entry.at) });
   rows.push({ label: "Why", value: transportLineWhy(entry, contact, format) });
+  if (entry.kind === "back" && entry.downMs !== undefined) rows.push({ label: "Not live for", value: lasting(entry.downMs) });
   if (entry.rttMs !== undefined && live) rows.push({ label: "Round trip", value: `${entry.rttMs} ms` });
   return rows;
 }
+
+const t = (entry: TransportEntry) => name(entry.transport);
 
 function transportLineWhy(entry: TransportEntry, contact: string, format: (at: number) => string): string {
   switch (entry.kind) {
     case "connected": return entry.transport === "webrtc/1"
       ? "The chat opened its live connection. A first pairing always uses WebRTC."
       : "The chat opened its live connection on the transport both apps rank first.";
-    case "back": return `The live connection came back on the same transport.`;
+    case "back": {
+      if (entry.downMs === undefined) return "DHT only ended, and the live connection came back.";
+      const meanwhile = entry.fallback === "dht" ? " Texts went through the DHT meanwhile."
+        : entry.fallback === "hold" ? ` What you sent waited in your storage for ${contact}.` : "";
+      return `The live connection${entry.from ? ` over ${name(entry.from)}` : ""} ended at ${format(entry.at - entry.downMs)} and was down for ${lasting(entry.downMs)}.${meanwhile}${entry.from ? ` It came back over ${t(entry)}.` : ""}`;
+    }
+    case "chose": {
+      const who = entry.cause === "contact" ? `${contact} chose` : "You chose";
+      if (entry.target) return entry.transport === entry.target ? `${who} ${name(entry.target)} for this chat. It was already on it.`
+        : `${who} ${name(entry.target)} for this chat. It moves there when both apps can reach each other over it.`;
+      const back = entry.cause === "contact" ? `${contact} went back to automatic` : "You went back to automatic";
+      return `${back}: the apps choose the transport again.${entry.from && entry.transport ? ` The chat moved from ${name(entry.from)} to ${t(entry)}.` : ""}`;
+    }
     case "switched":
       if (entry.cause === "you") return `You chose ${name(entry.transport)} for this chat. The session moved from ${name(entry.from)} without reconnecting.`;
       if (entry.cause === "contact") return `${contact} chose ${name(entry.transport)} for this chat. The session moved from ${name(entry.from)} without reconnecting.`;
@@ -117,18 +140,62 @@ export function transportOptions(link: Pick<LinkView, "availableTransports" | "p
   });
 }
 
-/** Messages and the chat's transport lines in one timeline, by time. A flapping line stays where it began. */
-export function mergeTimeline<M extends { timestamp: number }>(messages: readonly M[], lines: readonly TransportEntry[]):
-  ({ kind: "message"; message: M } | { kind: "transport"; entry: TransportEntry })[] {
-  const sorted = [...lines].sort((a, b) => (a.since ?? a.at) - (b.since ?? b.at));
-  const out: ({ kind: "message"; message: M } | { kind: "transport"; entry: TransportEntry })[] = [];
+export type TimelineRow<M> = { kind: "message"; message: M } | { kind: "transport"; entry: TransportEntry; earlier: TransportEntry[] };
+
+/**
+ * Messages and the chat's transport rows in one timeline, by time. Rows with no message between them are one row:
+ * the latest, with the ones before it in `earlier` (its details list them), so the timeline never shows a column
+ * of them. A legacy flapping row stays where it began.
+ */
+export function mergeTimeline<M extends { timestamp: number }>(messages: readonly M[], lines: readonly TransportEntry[]): TimelineRow<M>[] {
+  const at = (e: TransportEntry) => e.since ?? e.at;
+  const sorted = [...lines].sort((a, b) => at(a) - at(b));
+  const out: TimelineRow<M>[] = [];
   let i = 0;
+  const rows = (until: number) => {
+    const run: TransportEntry[] = [];
+    while (i < sorted.length && at(sorted[i]) <= until) run.push(sorted[i++]);
+    if (run.length) out.push({ kind: "transport", entry: run[run.length - 1], earlier: run.slice(0, -1) });
+  };
   for (const message of messages) {
-    while (i < sorted.length && (sorted[i].since ?? sorted[i].at) <= message.timestamp) out.push({ kind: "transport", entry: sorted[i++] });
+    rows(message.timestamp);
     out.push({ kind: "message", message });
   }
-  while (i < sorted.length) out.push({ kind: "transport", entry: sorted[i++] });
+  rows(Infinity);
   return out;
+}
+
+/** How long, to the second when short: the connection history is about exact moments. */
+function duration(ms: number): string {
+  return ms < 60_000 ? `${Math.max(1, Math.round(ms / 1_000))} s` : lasting(ms);
+}
+
+/** One event of the connection panel's history, in a line. */
+export function transportEventText(event: TransportEvent, contact: string): string {
+  const t = name(event.transport), rtt = event.rttMs !== undefined ? ` · ${event.rttMs} ms` : "";
+  switch (event.kind) {
+    case "live": {
+      const how = event.started ? " · this app started" : event.downMs !== undefined ? ` · after ${duration(event.downMs)} down` : "";
+      return `Live over ${t}${event.from ? ` (was ${name(event.from)})` : ""}${how}${rtt}`;
+    }
+    case "down":
+      return `Live connection lost${event.from ? ` (${name(event.from)})` : ""}${event.text === "dht" ? " · texts go through the DHT" : event.text === "hold" ? ` · messages wait for ${contact}` : ""}${event.reason ? ` · ${event.reason}` : ""}`;
+    case "switched": {
+      const why = event.cause === "you" ? "your choice" : event.cause === "contact" ? `${contact}'s choice` : event.cause === "dropped" ? "after a drop" : "automatic";
+      return `Moved from ${name(event.from)} to ${t} · ${why}${rtt}`;
+    }
+    case "chose": {
+      const who = event.cause === "contact" ? contact : "You";
+      return event.target ? `${who} chose ${name(event.target)}` : event.cause === "contact" ? `${contact} went back to automatic` : "You went back to automatic";
+    }
+    case "failed": {
+      const reason = event.reason ? shortReason(event.reason) : "";
+      return `Couldn't switch${event.target ? ` to ${name(event.target)}` : " transport"}${reason ? `: ${reason}` : ""}`;
+    }
+    case "attempt": return `Connection attempt failed${event.reason ? `: ${shortReason(event.reason)}` : ""}`;
+    case "dht-only": return event.cause === "contact" ? `${contact} switched to DHT only` : "You switched to DHT only";
+    case "dht-left": return `Left DHT only${event.transport ? ` · set to ${t}` : " · automatic"}`;
+  }
 }
 
 /** The live transport of a chat: on it, and nothing moving. */

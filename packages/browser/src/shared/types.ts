@@ -10,7 +10,7 @@ import type { BitcoinView } from "../engine/paymentAdapters/providers/bitcoinSer
 import type { PaymentReview, PaymentTarget } from "@ghostly/core";
 import type { CapsState, DeliveryMode, DhtDeliveryState, DhtDeliveryView, HoldKind } from "@ghostly/core";
 import type { S3Config } from "../backup/s3";
-import type { TransportCause, TransportEntry } from "../engine/transportLog";
+import type { TransportCause, TransportEntry, TransportEvent } from "../engine/transportLog";
 import type { PublicProfile, ProfileChoice } from '../profiles/public';
 import type { NostrContactCache, NostrContactView, NostrSocialSettings, NostrSocialState } from "../nostr/types";
 import type { ProofLedger, ProofAdapter } from "@ghostly/core";
@@ -42,6 +42,8 @@ export interface StoredLink {
   transportFallback?: boolean;
   /** The chat's connection story, newest last (see engine/transportLog.ts). Local only. */
   transportLog?: TransportEntry[];
+  /** Every connection event, for the connection panel, newest last (see engine/transportLog.ts). Local only. */
+  transportHistory?: TransportEvent[];
   pairedPeerKey?: string;
   /** The inviter's participation key, from a `ghostly1` code (the joiner's side): the only key that may be pinned. */
   peerParticipationKeyZ32?: string;
@@ -684,6 +686,8 @@ export interface LinkView {
   transportLive?: { since: number; cause?: TransportCause };
   /** The chat's connection story, newest last; only for the chat on screen (`setActiveLink`). */
   transportLog?: TransportEntry[];
+  /** Every connection event of the chat on screen, for its connection panel, newest last. */
+  transportHistory?: TransportEvent[];
   id: string;
   myPubKeyZ32: string;
   peerPubKeyZ32: string;

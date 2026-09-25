@@ -96,10 +96,10 @@ export interface GhostLinkEvents {
   onIdentityProof?(frame: Record<string, unknown>): Promise<void>;
   onTransportsChanged?(): void;
   /**
-   * The contact chose a transport for this chat just now (its switch intent went up on the open session).
-   * Nothing new on the wire: read from the `paired-policy` it already sends.
+   * The contact chose a transport for this chat just now (its switch intent went up on the open session), or went
+   * back to automatic (its intent fell to 0). Nothing new on the wire: read from the `paired-policy` it already sends.
    */
-  onPeerTransportChoice?(transport: PairedTransport): void;
+  onPeerTransportChoice?(transport: PairedTransport | "automatic"): void;
   /**
    * A switch to `target` could not connect and the session stayed where it was (both allow fallback). `reason` is
    * known on the side that dialled; the other side learns only that it did not happen.
@@ -400,6 +400,8 @@ export class GhostLink {
         const before = this.peerPolicySeen;
         this.peerPolicySeen = { intent: policy.intent };
         if (before && policy.intent > before.intent) options.events?.onPeerTransportChoice?.(policy.preferred);
+        // Intent 0 is only ever "automatic": the contact dropped its standing choice.
+        else if (before && before.intent > 0 && policy.intent === 0) options.events?.onPeerTransportChoice?.("automatic");
         this.peerDescriptors = policy.descriptors;
         this.peerTransports = transportOrder(policy.available, policy.preferred, true);
         this.peerFallback = policy.fallback;
