@@ -101,10 +101,10 @@ describe("choosing a source from the wallet cards", () => {
   it("the BDK form suggests the servers of the network chosen", async () => {
     const state = walletView({ mode: "testnet", bitcoin: { ...sourceView({ mode: "testnet", offered: offered("onchain", "testnet") }), history: [] } }) as WalletState;
     const { user } = renderApp(<BitcoinWalletPanel wallet={wallet} state={state} />);
-    await user.selectOptions(screen.getByRole("combobox", { name: "Bitcoin source" }), "bdk");
+    await choose(user, screen.getByRole("combobox", { name: "Bitcoin source" }), "bdk");
     const picks = () => [...screen.getByTestId("field-suggestions-esplora").querySelectorAll("[data-value]")].map((b) => b.getAttribute("data-value"));
     expect(picks()).toEqual(["https://blockstream.info/signet/api", "https://mempool.space/signet/api"]);
-    await user.selectOptions(screen.getByLabelText("Network"), "regtest");
+    await choose(user, screen.getByLabelText("Network"), "regtest");
     expect(picks()).toEqual(["http://127.0.0.1:47002"]);
     await user.click(screen.getByRole("button", { name: /e2e regtest stack/ }));
     expect(screen.getByLabelText("Esplora server")).toHaveValue("http://127.0.0.1:47002");
