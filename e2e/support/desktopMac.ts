@@ -47,9 +47,19 @@ function libraryPaths(bundleId: string): string[] {
     join(library, "Application Support", bundleId),
     join(library, "Preferences", `${bundleId}.plist`),
     join(library, "Saved Application State", `${bundleId}.savedState`),
-    // The app's own log goes by the identifier it was built with (src-tauri/tauri.e2e.conf.json), the copies' shared one.
-    join(library, "Logs", BUNDLE_PREFIX.slice(0, -1)),
   ];
+}
+
+/**
+ * What the copies share: the app's log and its files go by the identifier it was built with
+ * (src-tauri/tauri.e2e.conf.json), files in a folder per GHOSTLY_PROFILE. Removed before the apps start and after
+ * they all stopped, never while one runs.
+ */
+export function forgetSharedData(): void {
+  const build = BUNDLE_PREFIX.slice(0, -1);
+  for (const path of [join(homedir(), "Library", "Logs", build), join(homedir(), "Library", "Application Support", build)]) {
+    rmSync(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  }
 }
 
 function forget(bundleId: string): void {

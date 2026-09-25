@@ -273,6 +273,7 @@ npm run test:e2e:desktop-macos     # about 15 s once built
   storage per bundle id, so the copies share nothing. Each starts with its own `GHOSTLY_PROFILE`, stays out of the
   Dock and never takes the focus (the driver sets the accessory activation policy), and is removed with what it
   stored (`~/Library/WebKit/<id>` and the rest) when it stops, and before it starts in case a run stopped halfway.
+  The log and the files folder go by the build's identifier and are shared (`forgetSharedData()`, before and after).
   Nobody has to be at the Mac; the windows do show on its screen.
 - **Network.** The Pkarr relay, a HyperDHT testnet and the shared app ("Atlas", `extension/test/atlas.mjs`) are in
   the test process on 49701-49703, the drivers on 49710-49711. The call's STUN lookups and the wallets' providers

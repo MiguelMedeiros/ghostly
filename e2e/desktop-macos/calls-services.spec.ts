@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import { BIG_SHA256, startAtlas } from "../../extension/test/atlas.mjs";
 import { desktopPerson, type DesktopPerson } from "../matrix/people";
 import { HYPERDHT_TESTNET } from "../matrix/desktop";
-import { openMacDesktop, type MacDesktop } from "../support/desktopMac";
+import { forgetSharedData, openMacDesktop, type MacDesktop } from "../support/desktopMac";
 import { LocalRelay } from "../support/relay";
 
 /**
@@ -152,6 +152,7 @@ test("two Desktop apps on a Mac pair, call with media both ways, share an app, a
     GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap.map((node) => `${node.host}:${node.port}`).join(","),
   };
   const apps: MacDesktop[] = [];
+  forgetSharedData();
   const open = (name: "a" | "b") => async () => {
     const desktop = await openMacDesktop({ name, port: PORTS[name], env });
     apps.push(desktop);
@@ -285,6 +286,7 @@ test("two Desktop apps on a Mac pair, call with media both ways, share an app, a
     throw error;
   } finally {
     await Promise.all(apps.map((d) => d.stop()));
+    forgetSharedData();
     await atlas.server.close();
     relay.close();
     await dht.destroy();
