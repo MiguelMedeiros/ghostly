@@ -6,7 +6,7 @@ import { Reveal } from "@/components/home/Reveal";
 import { developers } from "@/content/developers";
 import { href, type Locale } from "@/lib/i18n";
 import { wisps, wispCount } from "@/lib/wisps";
-import { REPO_URL } from "@/content/shell";
+import { REPO_URL, shell } from "@/content/shell";
 import { BlockGrid } from "./BlockGrid";
 import { Negotiation } from "./Negotiation";
 import { ProtocolLoop } from "./ProtocolLoop";
@@ -122,7 +122,19 @@ export function DevelopersPage({ locale }: { locale: Locale }) {
                   <tr key={r.name}>
                     <th scope="row">{r.name}</th>
                     {r.cells.map((c, i) => (
-                      <td key={i}>{c ? <LevelBadge level={c} locale={locale} small /> : <span className="dim" aria-label="not supported">{t.availability.none}</span>}</td>
+                      <td key={i}>
+                        {c === "available" ? (
+                          <span className="avail-yes" role="img" aria-label={shell[locale].levels.available}>
+                            ✓
+                          </span>
+                        ) : c ? (
+                          <LevelBadge level={c} locale={locale} small />
+                        ) : (
+                          <span className="dim" aria-label="not supported">
+                            {t.availability.none}
+                          </span>
+                        )}
+                      </td>
                     ))}
                   </tr>
                 ))}

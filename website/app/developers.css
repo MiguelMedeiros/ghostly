@@ -483,6 +483,11 @@
 }
 
 /* Availability */
+.avail-yes {
+  color: var(--lvl-available);
+  font-weight: 700;
+  font-size: 16px;
+}
 .avail-scroll {
   overflow: auto;
   border-radius: var(--radius);
