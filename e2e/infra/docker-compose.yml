@@ -375,6 +375,55 @@ services:
     restart: on-failure
     ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47086:2583", "${E2E_INFRA_ADDRESS:-127.0.0.1}:47087:2582"]
 
+  # ── Pubky (WISP 302): Pubky's own testnet, a homeserver with a Pkarr relay and an HTTP relay on a DHT of its own ──
+  # Fixed ports inside the container. The homeserver names itself pubky-homeserver.e2e.ghostly.tools in its Pkarr
+  # record (a name nothing resolves), and signs anyone up: the suites route that name, Pubky's public HTTP relay and
+  # its Pkarr relays to these ports (e2e/support/pubky.ts), so nothing reaches Pubky's servers.
+  pubky-postgres:
+    image: postgres:16
+    container_name: ghostly-e2e-pubky-postgres
+    restart: on-failure
+    environment: { POSTGRES_USER: postgres, POSTGRES_PASSWORD: pubky-e2e-worthless }
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres"]
+      interval: 2s
+      retries: 30
+  pubky-testnet:
+    image: synonymsoft/homeserver-testnet:v0.12.0
+    container_name: ghostly-e2e-pubky-testnet
+    restart: on-failure
+    depends_on: { pubky-postgres: { condition: service_healthy } }
+    environment:
+      TEST_PUBKY_CONNECTION_STRING: postgres://postgres:pubky-e2e-worthless@pubky-postgres:5432/postgres
+      PUBKY_HOMESERVER_TOML: |
+        [general]
+        signup_mode = "open"
+        user_storage_quota_mb = 0
+        [drive]
+        pubky_listen_socket = "0.0.0.0:6287"
+        icann_listen_socket = "0.0.0.0:6286"
+        [default_quotas]
+        [storage]
+        type = "file_system"
+        [admin]
+        enabled = true
+        listen_socket = "0.0.0.0:6288"
+        admin_password = "pubky-e2e-worthless"
+        [metrics]
+        enabled = false
+        listen_socket = "127.0.0.1:6289"
+        [pkdns]
+        public_ip = "127.0.0.1"
+        icann_domain = "pubky-homeserver.e2e.ghostly.tools"
+        user_keys_republisher_interval = 14400
+        [logging]
+        level = "info"
+    entrypoint: ["sh", "-c", "printf '%s' \"$$PUBKY_HOMESERVER_TOML\" > /tmp/homeserver.toml && exec homeserver --homeserver-config /tmp/homeserver.toml"]
+    ports:
+      - "${E2E_INFRA_ADDRESS:-127.0.0.1}:47091:15411"
+      - "${E2E_INFRA_ADDRESS:-127.0.0.1}:47092:15412"
+      - "${E2E_INFRA_ADDRESS:-127.0.0.1}:47093:6286"
+
 volumes:
   bark-captaind:
   bark-postgres:
