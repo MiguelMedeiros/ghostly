@@ -32,8 +32,10 @@ const mark = <T extends object>(value: T): T => { derived.add(value); return val
 const chainNetwork = (chain: string | undefined, fallback: WalletNetwork): WalletNetwork => chain ? walletNetworkOf(chain) : fallback;
 function splitByNetwork(flat: WalletView): Record<WalletNetwork, NetworkWalletsView> {
   const fallback = flat.mode ?? "mainnet";
-  // The flat balance is its mints' network's: a test sets it beside mints of one network.
-  const balanceOf = (network: WalletNetwork) => flat.mints.some((m) => mintNetwork(m.url) === network) || (!flat.mints.length && network === fallback) ? flat.balance : 0;
+  // The flat balance is its mints' network's when they are all of one; mints of both split it by what each holds.
+  const both = WALLET_NETWORKS.every((n) => flat.mints.some((m) => mintNetwork(m.url) === n));
+  const balanceOf = (network: WalletNetwork) => both ? flat.mints.filter((m) => mintNetwork(m.url) === network).reduce((sum, m) => sum + m.balance, 0)
+    : flat.mints.some((m) => mintNetwork(m.url) === network) || (!flat.mints.length && network === fallback) ? flat.balance : 0;
   const on = <V,>(view: V | undefined, network: WalletNetwork, networkOfView: (v: V) => WalletNetwork) => view && networkOfView(view) === network ? view : undefined;
   const build = (network: WalletNetwork): NetworkWalletsView => {
     const mints = flat.mints.filter((m) => mintNetwork(m.url) === network);

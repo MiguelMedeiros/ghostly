@@ -6,7 +6,7 @@ import { servicesPlatform, type WalletState } from "../../lib/platform";
 import { walletView } from "../fakeEngine";
 import { renderApp } from "../render";
 
-// covers: wallet.spark.mainnet-key, wallet.spark.send, wallet.spark.lightning
+// covers: wallet.spark.mainnet-key, wallet.spark.send, wallet.spark.lightning, wallet.instances.networks
 
 /** Made by the Breez SDK on Breez's regtest: a wallet's address, and an invoice of 1234 sats ("probe") from it. */
 const ADDRESS = "sparkrt1pgss87y4e569hncpt9649q5s6x7c3vv9lqwrjlucxfl3a3kk355a3pfkwf2mtr";
@@ -29,14 +29,22 @@ describe("the Spark panel", () => {
     expect(engine.callsTo("sparkCreate")).toEqual([{ network: "bitcoin", apiKey: "breez-key" }]);
   });
 
-  it("a Mainnet wallet says it holds real bitcoin", () => {
-    renderApp(<SparkWalletPanel wallet={wallet} state={ready({ network: "bitcoin" }, { mode: "mainnet" })} />);
-    expect(screen.getByTestId("spark-mainnet-label")).toHaveTextContent("real bitcoin");
+  it("without a key, points to a Testnet Spark wallet made with New, not to a switch of the wallets", () => {
+    const state = walletView({ spark: { configured: false, locked: true, balance: 0, network: "bitcoin", needsKey: true, unavailable: "key" } }) as WalletState;
+    renderApp(<SparkWalletPanel wallet={wallet} state={state} />);
+    expect(screen.getByTestId("spark-needs-key")).toHaveTextContent("Or create a Testnet Spark wallet with New");
+    expect(screen.getByTestId("spark-needs-key").textContent).not.toMatch(/switch/i);
   });
 
-  it("shows the balance and the wallet's own address to receive on", () => {
+  it("a Mainnet wallet says it holds real bitcoin, counted in plain sats", () => {
+    renderApp(<SparkWalletPanel wallet={wallet} state={ready({ network: "bitcoin" }, { mode: "mainnet" })} />);
+    expect(screen.getByTestId("spark-mainnet-label")).toHaveTextContent("real bitcoin");
+    expect(screen.getByTestId("spark-balance")).toHaveTextContent(/^5,000\s*sats/);
+  });
+
+  it("shows the balance in test sats and the wallet's own address to receive on", () => {
     renderApp(<SparkWalletPanel wallet={wallet} state={ready()} />);
-    expect(screen.getByTestId("spark-balance")).toHaveTextContent("5,000");
+    expect(screen.getByTestId("spark-balance")).toHaveTextContent(/^5,000\s*test sats/);
     expect(screen.getByTestId("spark-address")).toHaveTextContent(ADDRESS);
     expect(screen.getByTestId("spark-address-copy")).toBeInTheDocument();
     expect(screen.queryByTestId("spark-address-link"), "no scheme a wallet agrees on: no broken link").toBeNull();
@@ -53,13 +61,13 @@ describe("the Spark panel", () => {
     expect(await screen.findByRole("button", { name: "Approve payment" })).toBeInTheDocument();
   });
 
-  it("an invoice names its amount and memo: nothing to type", async () => {
+  it("an invoice names its amount in test sats and its memo: nothing to type", async () => {
     const { user, engine } = renderApp(<SparkWalletPanel wallet={wallet} state={ready()} />);
     engine.on("preparePayment", ({ amount, target }) => review(amount, target.address) as never);
     await user.click(screen.getByTestId("wallet-send"));
     await user.click(screen.getByLabelText("Spark address or invoice"));
     await user.paste(INVOICE);
-    expect(screen.getByTestId("spark-invoice-summary")).toHaveTextContent("Invoice for 1,234 sats · probe");
+    expect(screen.getByTestId("spark-invoice-summary")).toHaveTextContent("Invoice for 1,234 test sats · probe");
     expect(screen.queryByTestId("spark-amount")).toBeNull();
     await user.click(screen.getByTestId("spark-review"));
     expect(engine.callsTo("preparePayment")[0]).toMatchObject({ amount: 1_234, target: { address: INVOICE } });
@@ -83,7 +91,7 @@ describe("the Spark panel", () => {
   it("with Breez as the Lightning source, it is in use; and the history lists what moved", () => {
     const history = [{ id: "t1", direction: "in" as const, amount: 1_200, fee: 0, at: Date.UTC(2026, 8, 24), status: "completed" as const, via: "spark" as const, memo: "lunch" },
       { id: "t2", direction: "out" as const, amount: 300, fee: 0, at: Date.UTC(2026, 8, 24), status: "pending" as const, via: "lightning" as const }];
-    renderApp(<SparkWalletPanel wallet={wallet} state={ready({ history }, { lightning: { providerId: "breez", status: "ready" } as WalletState["lightning"] })} />);
+    renderApp(<SparkWalletPanel wallet={wallet} state={ready({ history }, { lightning: { mode: "testnet", providerId: "breez", status: "ready", offered: [], recent: [] } as WalletState["lightning"] })} />);
     expect(screen.getByTestId("spark-lightning-on")).toHaveTextContent("In use");
     const rows = screen.getAllByTestId("spark-history-row");
     expect(rows[0]).toHaveTextContent("+1,200Spark · lunch");

@@ -105,8 +105,9 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   }, [shownHere, selectedBlocked, usable, payCards.length]);
   // Pay, or Accept: which ways this chat takes. A chat that has every way off opens on Accept, to turn one on.
   const [mode, setMode] = useState<Mode>(() => onSaveMethods && cards.length && !payCards.length ? "accept" : "pay");
-  // The cards, then the chosen one turned over (deck/Flip.tsx). Without a wallet to show, only the back.
-  const { side, flipped, turn, turnBack } = useCardFlip(state && wallet && cards.length ? "cards" : "back");
+  // The cards, then the chosen one turned over (deck/Flip.tsx). Without a wallet platform, only the back; with one but
+  // no wallet yet, the cards' side says how to make one.
+  const { side, flipped, turn, turnBack } = useCardFlip(state && wallet ? "cards" : "back");
   const [review, setReview] = useState<Review | null>(null);
   const [amount, setAmount] = useState("");
   const [memo, setMemo] = useState("");

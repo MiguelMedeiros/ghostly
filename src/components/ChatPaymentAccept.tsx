@@ -75,7 +75,8 @@ export function ChatPaymentAccept({ peer, contact, cards, onSave }: {
   };
   /**
    * The draft as the engine keeps it: a way of paying is on when one of its cards is, and on the networks of the
-   * cards that are. A way with no card here keeps what the chat had.
+   * cards that are. A network with no card here (no wallet of it yet) keeps its place in the list, for when the way
+   * is on again; a way with no card at all keeps what the chat had.
    */
   const accepts = (): ChatAccepts => {
     const methods = { ...ALL_METHODS_ON, ...saved.paymentMethods };
@@ -84,7 +85,7 @@ export function ChatPaymentAccept({ peer, contact, cards, onSave }: {
       const mine = cards.filter((c) => c.rail === method);
       const kept = WALLET_NETWORKS.filter((n) => !mine.some((c) => c.network === n) && cardOn(saved, method, n));
       const onNow = mine.filter((c) => draft[c.id]).map((c) => c.network);
-      methods[method as PaymentMethodName] = onNow.length > 0 || kept.length > 0;
+      methods[method as PaymentMethodName] = onNow.length > 0;
       networks[method as PaymentMethodName] = WALLET_NETWORKS.filter((n) => onNow.includes(n) || kept.includes(n));
     }
     return { methods, networks };
