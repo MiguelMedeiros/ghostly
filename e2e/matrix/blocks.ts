@@ -90,7 +90,11 @@ export const pair: Block = {
   run: async ({ a, b, combo }) => {
     await a.page.getByTitle(either("New Chat")).click();
     if (combo.delivery === "dht") {
-      await a.page.getByRole("radio", { name: either("Text only") }).click();
+      // DHT only is chosen in the chat's Connection menu (WISP 400), not in its invite.
+      await a.page.getByTestId("connection-options").click();
+      await a.page.getByRole("switch", { name: "DHT-only delivery" }).click();
+      await expect(a.page.getByRole("switch", { name: "DHT-only delivery" })).toBeChecked();
+      await a.page.keyboard.press("Escape");
       await expect.poll(() => copyInvite(a)).toMatch(/^https:\/\/ghostly\.tools\/#ghostly1p/);
     }
     const invite = await copyInvite(a);
@@ -222,7 +226,8 @@ export const delivery: Block = {
       }).toPass({ timeout: 60_000 });
       const back = await away(b);
       await expect(a.page.getByTestId("contact-status")).toHaveAttribute("aria-label", "Away · messages are held", { timeout: 60_000 });
-      await say(a, "held in my S3 for you");
+      // Past the 256 bytes the DHT carries: a short text would take the DHT floor (WISP 403); a longer one is held.
+      await say(a, `held in my S3 for you ${"and more words past what the DHT carries. ".repeat(7)}`);
       await a.page.getByTestId("file-input").setInputFiles({ name: "held.gif", mimeType: "image/gif", buffer: GIF });
       await expect(chatPane(a).locator(".group").filter({ hasText: "held in my S3 for you" })).toContainText(/Held/, { timeout: 60_000 });
       await back();
@@ -640,8 +645,7 @@ export const group: Block = {
       await nickname(c, "Carol");
       await home(a);
       await a.page.getByTitle(either("New Chat")).click();
-      // The group's edges need a live link: this chat is Live even when the scenario's own is DHT.
-      await a.page.getByRole("radio", { name: either("Live chat") }).click();
+      // The group's edges need a live link: a new chat is never DHT only unless someone chooses it.
       await joinWith(c, await copyInvite(a));
       await expect(c.page.getByPlaceholder("Message…")).toBeEnabled({ timeout: 90_000 });
       await go(a, "#/");

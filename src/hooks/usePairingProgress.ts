@@ -18,8 +18,10 @@ export interface PairingProgressState extends PairingProgress {
 
 export interface PairingPresence {
   progress: PairingProgressState | null;
-  /** The pairing scene belongs on screen: a first pairing not live yet, or its short "connected" moment. */
+  /** A first pairing not live yet, or its short "connected" moment: the header indicator is on. */
   show: boolean;
+  /** The scene itself is on: `show`, except once the pairing is on the DHT, where the chat takes over (WISP 400). */
+  scene: boolean;
   celebrating: boolean;
   retry(): Promise<void>;
   retrying: boolean;
@@ -90,12 +92,12 @@ export function usePairingProgress(peerKey: string | undefined, { inviter, enabl
     finally { setRetrying(false); }
   }, [linkId]);
 
-  if (!enabled) return { progress: null, show: false, celebrating: false, retry, retrying, retryError };
+  if (!enabled) return { progress: null, show: false, scene: false, celebrating: false, retry, retrying, retryError };
   const progress: PairingProgressState = reported
     ? { ...reported, linkId, derived: false }
     : { role: role.current, ...derived, since: since.current!.at, startedAt: link?.createdAt || mounted.current, attempt, linkId, derived: true };
   const show = firstPairing && !done && (stage !== "live" || celebrating);
-  return { progress, show, celebrating, retry, retrying, retryError };
+  return { progress, show, scene: show && stage !== "on-dht", celebrating, retry, retrying, retryError };
 }
 
 /** The clock, once a second while `running`: for elapsed times that tick on screen. */

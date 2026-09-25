@@ -7,6 +7,8 @@ export async function pair(host: Peer, guest: Peer) {
   const invite = await copyInvite(host.page);
   await guest.page.getByRole("button", { name: "Join chat", exact: true }).first().click();
   await pasteInvite(guest.page, invite);
+  // The composer is open before the contact is (what is written waits, WISP 400): paired means live on both sides.
+  for (const peer of [host, guest]) await expect(peer.page.getByTestId("connection-options")).toHaveAccessibleName(/Connected · /, { timeout: 90_000 });
   for (const peer of [host, guest]) await expect(peer.page.getByPlaceholder("Message…")).toBeEnabled();
   // Open is not verified: neither side has been asked to compare anything.
   for (const peer of [host, guest]) await expect(peer.page.getByTestId("pair-verified")).toHaveCount(0);

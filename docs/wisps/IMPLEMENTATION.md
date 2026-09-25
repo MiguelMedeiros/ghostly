@@ -60,20 +60,20 @@ Inspection of `dev` at `802b48bc`, rechecked at `8670aeab`. The chat family's re
 | Behaviour | Today | Decided (2026-09-25) |
 |---|---|---|
 | Invite formats created | `pair1/` (streams first) or `pair2d/` (DHT only), chosen at creation ([invite.ts](../../packages/core/src/invite.ts)) | One bech32m `ghostly1…` string (or `https://ghostly.tools/#ghostly1…`), no choice; `pair1/`, `pair2d/` and prefix-less still read ([801](801-invitation-profiles.md)) |
-| First contact | `pair1/`: needs a stream (WebRTC in the product). `pair2d/`: DHT envelope with recipient `invite` ([dhtDelivery.ts](../../packages/core/src/dhtDelivery.ts)) | Both at once; pin on whichever verifies first; same key required on both |
-| First pairing without a stream | `pair1/` does not finish | Ends `on-dht` and chats |
+| First contact | Both at once in every chat: DHT envelope with recipient `invite` ([dhtDelivery.ts](../../packages/core/src/dhtDelivery.ts)) and a stream; a key mismatch on either path stops both ([ghostlink.ts](../../packages/core/src/ghostlink.ts)) | Both at once; pin on whichever verifies first; same key required on both |
+| First pairing without a stream | Ends `on-dht` ([pairingProgress.ts](../../packages/core/src/pairingProgress.ts)) and chats | Ends `on-dht` and chats |
 | Short-text fallback after a drop | Exists for `pair1/` chats once the contact announced DHT support (`GhostLink.textDelivery`, [ghostlink.ts](../../packages/core/src/ghostlink.ts)) | The rule for every chat; every contact announces it from the first contact |
-| Upgrade from DHT to a stream | Automatic after a drop in a `pair1/` chat; never automatic in a `pair2d/` chat (a person switches) | Automatic in every chat that is not `dht-chosen` |
+| Upgrade from DHT to a stream | Automatic in every chat that is not `dht-chosen`; a joined `pair2d/` code no longer sets DHT only | Automatic in every chat that is not `dht-chosen` |
 | DHT only as a choice | Per chat, `setDeliveryMode("dht")`; either side blocks both | Same, listed as **DHT only** in the per-chat Connection menu |
-| Capabilities before a stream exists | Only the envelope's `mode` | Layer-0 capability record: transports, capabilities, native descriptors, name ([03](03-capabilities.md#layer-0-capability-record)) |
-| Native transports without WebRTC first | No: descriptors travel inside an authenticated session | Yes, from the capability record |
-| Second DHT text while one awaits a receipt | Stays in the composer | Queued in the outbox |
-| Files, long text, requests while on the DHT | Held if both allow `hold/1` and the chat is not DHT-only; otherwise attach is refused | Held in `on-dht` and `dht-chosen`; otherwise queued for layer 1 |
-| Mailbox reads while live | Every 30 s | Every 5 min, at once on a drop |
-| Compatibility (prefix-less, v0.4) chats | Read and written; `_msgs` text, legacy WebRTC, calls, legacy files, hosted HTTP | Same; never created; "Continue in a new chat" |
+| Capabilities before a stream exists | Layer-0 capability record ([capsRecord.ts](../../packages/core/src/capsRecord.ts)), revision in the envelope | Layer-0 capability record: transports, capabilities, native descriptors, name ([03](03-capabilities.md#layer-0-capability-record)) |
+| Native transports without WebRTC first | Yes: descriptors from the record; demoted for 1 h after 3 failures | Yes, from the capability record |
+| Second DHT text while one awaits a receipt | Waits in the outbox (`waiting`) ([outbox.ts](../../packages/browser/src/engine/outbox.ts)) | Queued in the outbox |
+| Files, long text, requests while on the DHT | Held if both allow `hold/1` (DHT only too); otherwise wait for live with a cancel | Held in `on-dht` and `dht-chosen`; otherwise queued for layer 1 |
+| Mailbox reads while live | Every 5 min, at once on a drop (10 s, not 4 s, while open on the DHT: relay budget) | Every 5 min, at once on a drop |
+| Compatibility (prefix-less, v0.4) chats | Read and written, marked in the header, "Continue in a new chat" | Same; never created; "Continue in a new chat" |
 | Hosted HTTP in new chats | Yes: `ph` frames on the chat session ([pairedHttp.ts](../../packages/core/src/pairedHttp.ts)) under `services/1` ([pairedCapabilities.ts](../../packages/core/src/pairedCapabilities.ts)), live only | Unchanged |
 | Calls in new chats | Yes: `calls/1`, `paired-call` signals on the live session ([pairedCalls.ts](../../packages/core/src/pairedCalls.ts)), media on its own WebRTC connection; not on Linux Desktop (no WebRTC) | Unchanged |
-| Pairing progress | Stages end `live` or `failed` | Adds terminal `on-dht`; `failed` only for security or an unreachable DHT |
+| Pairing progress | Ends `live` or `on-dht`; `failed` only for key mismatch, rejection, publish, offline | Adds terminal `on-dht`; `failed` only for security or an unreachable DHT |
 | CLI | Legacy `_msgs` only | Unchanged by the Drafts; a DHT-only client of 403 is the natural next step |
 
 ## Follow-up paired-chat implementation (2026-09-20)

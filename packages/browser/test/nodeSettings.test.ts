@@ -9,12 +9,14 @@ import type { StoredLink } from "../src/shared/types";
 
 /** A connected contact: what the engine calls on it, recorded. */
 function stubLink(overrides: Record<string, unknown> = {}) {
+  const session = { setActive: vi.fn(), pollNow: vi.fn(), setFastPoll: vi.fn() };
   return {
+    setChatActive: (active: boolean) => session.setActive(active),
     isDataLinkOpen: true, availableTransports: ["webrtc/1", "iroh/1"],
     allowsPayment: vi.fn(() => true), paymentEnabled: vi.fn(() => true),
     setDeliveryMode: vi.fn(async () => {}), setTransportPreference: vi.fn(async () => {}), setPaymentMethods: vi.fn(),
     setHoldSupport: vi.fn(), setNick: vi.fn(), setAvatar: vi.fn(), refreshServices: vi.fn(async () => {}),
-    stop: vi.fn(async () => {}), wake: vi.fn(), session: { setActive: vi.fn(), pollNow: vi.fn(), setFastPoll: vi.fn() },
+    stop: vi.fn(async () => {}), wake: vi.fn(), session,
     request: vi.fn(async () => ({ status: 200 })), sendMessage: vi.fn(async () => null),
     ...overrides,
   };

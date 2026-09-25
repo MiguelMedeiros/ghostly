@@ -26,6 +26,7 @@ export const SLOW_AFTER_MS: Record<PairingStage, number> = {
   answering: 10_000,
   connecting: 12_000,
   live: Infinity,
+  "on-dht": Infinity,
   failed: Infinity,
 };
 

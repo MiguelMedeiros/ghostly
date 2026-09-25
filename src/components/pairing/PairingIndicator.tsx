@@ -14,13 +14,15 @@ export function PairingIndicator({ progress, onOpen }: { progress: PairingProgre
   const { t } = useI18n();
   const words = usePairingWords();
   const { stage, role } = progress;
-  const ticking = stage !== "live" && stage !== "failed";
+  // On the DHT the chat is usable; the live link is retried underneath, with no clock to watch.
+  const ticking = stage !== "live" && stage !== "failed" && stage !== "on-dht";
   const now = useNow(ticking);
   // `now` only ticks; a stage that began after its last tick still reads from the clock.
   const inStage = Math.max(0, Math.max(now, Date.now()) - progress.since);
   const label = words.stage(stage, role);
   const slow = ticking && inStage >= SLOW_AFTER_MS[stage] ? words.slow(stage) : "";
   const failure = stage === "failed" ? words.reason(failureReason(progress.reason)) : "";
+  const onDht = stage === "on-dht" ? words.onDht(progress.reason) : "";
   const [tip, setTip] = useState(false);
   const tipId = useId();
   const time = ticking ? formatElapsed(inStage) : "";
@@ -44,6 +46,7 @@ export function PairingIndicator({ progress, onOpen }: { progress: PairingProgre
       {label}{time && ` · ${time}`}
       {slow && <span className="mt-0.5 block text-text-secondary">{slow}</span>}
       {failure && <span className="mt-0.5 block text-danger">{failure}</span>}
+      {onDht && <span className="mt-0.5 block text-text-secondary">{onDht}</span>}
     </span>
   </span>;
 }

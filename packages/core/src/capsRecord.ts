@@ -49,7 +49,8 @@ export const CAPS_PUBLISH_SPACING_MS = 30_000;
  */
 export interface CapsDescriptors {
   "iroh/1"?: { id: string; relay?: string };
-  "hyperdht/1"?: { publicKey: string };
+  /** `relay`: a browser's HyperDHT is reached through a relay server, which it names (a public service, not its address). */
+  "hyperdht/1"?: { publicKey: string; relay?: string };
 }
 export interface CapsContent {
   versions: number[];
@@ -81,6 +82,8 @@ const HEX64 = /^[0-9a-f]{64}$/;
 const SIG = /^[A-Za-z0-9_-]{86}$/;
 const Z32 = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;
 const KEY = /^[A-Za-z0-9_-]{43}$/;
+/** A relay server's URL: https, or wss for a browser's relay, and short. */
+const RELAY = /^(https|wss):\/\/[^\s]{1,120}$/;
 const hexToKey = (hex: string) => toBase64Url(Uint8Array.from(hex.match(/../g)!, b => parseInt(b, 16)));
 const keyToHex = (key: string) => Array.from(fromBase64Url(key), b => b.toString(16).padStart(2, "0")).join("");
 
@@ -92,17 +95,23 @@ export function capsDescriptors(descriptors: TransportDescriptors | undefined): 
   const out: CapsDescriptors = {};
   const iroh = descriptors?.["iroh/1"] as { id?: unknown; relay?: unknown } | undefined;
   if (iroh && typeof iroh.id === "string" && HEX64.test(iroh.id))
-    out["iroh/1"] = { id: hexToKey(iroh.id), ...(typeof iroh.relay === "string" && /^https:\/\/[^\s]{1,120}$/.test(iroh.relay) ? { relay: iroh.relay } : {}) };
-  const hyper = descriptors?.["hyperdht/1"] as { publicKey?: unknown } | undefined;
-  if (hyper && typeof hyper.publicKey === "string" && HEX64.test(hyper.publicKey)) out["hyperdht/1"] = { publicKey: hexToKey(hyper.publicKey) };
+    out["iroh/1"] = { id: hexToKey(iroh.id), ...(typeof iroh.relay === "string" && RELAY.test(iroh.relay) ? { relay: iroh.relay } : {}) };
+  const hyper = descriptors?.["hyperdht/1"] as { publicKey?: unknown; relay?: unknown } | undefined;
+  if (hyper && typeof hyper.publicKey === "string" && HEX64.test(hyper.publicKey))
+    out["hyperdht/1"] = { publicKey: hexToKey(hyper.publicKey), ...(typeof hyper.relay === "string" && RELAY.test(hyper.relay) ? { relay: hyper.relay } : {}) };
   return out;
 }
 
-/** A record's descriptors as the transport adapters dial them (Iroh with no direct addresses). */
+/**
+ * A record's descriptors as the transport adapters dial them. With no address in the record, an Iroh path is
+ * relayed; a HyperDHT that names a relay (a browser's) is too: both rank after direct paths and before the DHT
+ * floor (WISP 100, "Relayed"), and a first contact can dial them before WebRTC has failed.
+ */
 export function dialDescriptors(descriptors: CapsDescriptors): TransportDescriptors {
   const out: TransportDescriptors = {};
-  if (descriptors["iroh/1"]) out["iroh/1"] = { id: keyToHex(descriptors["iroh/1"].id), relay: descriptors["iroh/1"].relay ?? null, addresses: [] };
-  if (descriptors["hyperdht/1"]) out["hyperdht/1"] = { publicKey: keyToHex(descriptors["hyperdht/1"].publicKey) };
+  const iroh = descriptors["iroh/1"], hyper = descriptors["hyperdht/1"];
+  if (iroh) out["iroh/1"] = { id: keyToHex(iroh.id), relay: iroh.relay ?? null, addresses: [], relayed: true };
+  if (hyper) out["hyperdht/1"] = { publicKey: keyToHex(hyper.publicKey), ...(hyper.relay ? { relay: hyper.relay, relayed: true } : {}) };
   return out;
 }
 
@@ -117,12 +126,12 @@ function parseDescriptors(value: unknown): CapsDescriptors | null {
   const out: CapsDescriptors = {};
   const iroh = raw["iroh/1"], hyper = raw["hyperdht/1"];
   if (iroh !== undefined) {
-    if (!iroh || typeof iroh.id !== "string" || !KEY.test(iroh.id) || (iroh.relay !== undefined && (typeof iroh.relay !== "string" || !/^https:\/\/[^\s]{1,120}$/.test(iroh.relay)))) return null;
+    if (!iroh || typeof iroh.id !== "string" || !KEY.test(iroh.id) || (iroh.relay !== undefined && (typeof iroh.relay !== "string" || !RELAY.test(iroh.relay)))) return null;
     out["iroh/1"] = { id: iroh.id, ...(iroh.relay !== undefined ? { relay: iroh.relay as string } : {}) };
   }
   if (hyper !== undefined) {
-    if (!hyper || typeof hyper.publicKey !== "string" || !KEY.test(hyper.publicKey)) return null;
-    out["hyperdht/1"] = { publicKey: hyper.publicKey };
+    if (!hyper || typeof hyper.publicKey !== "string" || !KEY.test(hyper.publicKey) || (hyper.relay !== undefined && (typeof hyper.relay !== "string" || !RELAY.test(hyper.relay)))) return null;
+    out["hyperdht/1"] = { publicKey: hyper.publicKey, ...(hyper.relay !== undefined ? { relay: hyper.relay as string } : {}) };
   }
   return out;
 }
@@ -282,8 +291,8 @@ export class CapsExchange {
     if (this.running) return;
     this.running = true;
     void this.update().catch(() => {});
-    // Paired, and the contact's record never read: once. After that, a drop or a new pin is what reads it
-    // again, not every start.
+    // Paired, and the contact's record never read: once. After that, a newer revision named in an envelope,
+    // a drop or a new pin is what reads it again, not every start.
     if (this.options.credentials.peerKey && !this.state.peer) this.refresh(true);
   }
   async stop(): Promise<void> {

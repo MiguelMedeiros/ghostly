@@ -37,7 +37,8 @@ it("persists a new DHT-only conversation, rejects invalid drafts before history,
     await receiver.start();
     await vi.waitFor(() => expect(received).toHaveBeenCalledWith(expect.objectContaining({ text: "second, after the receipt" })), { timeout: 20000 });
     await vi.waitFor(async () => expect((await db.getMessages(linkId)).map(m => m.delivery)).toEqual(["delivered", "delivered", "waiting"]), { timeout: 12000 });
-    expect(received.mock.calls.map(([m]) => m.text)).toEqual(["durable DHT text", "second, after the receipt"]);
+    // In order; a republished envelope may carry one again before its receipt, and the app keeps it once by its id.
+    expect([...new Set(received.mock.calls.map(([m]) => m.text))]).toEqual(["durable DHT text", "second, after the receipt"]);
     expect(attention).toHaveBeenCalledTimes(2);
     expect(attention.mock.calls[0][0].type).toBe("sent");
     const saved = (await db.getLinks()).find(l => l.id === linkId)!;

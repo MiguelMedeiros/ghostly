@@ -84,10 +84,6 @@
     }
   },
   "invite": {
-    "live": "Chat ao vivo",
-    "text": "Só texto",
-    "details": "Detalhes do envio",
-    "textDetails": "Só texto publica mensagens curtas e criptografadas na DHT, mesmo com o contato offline. Até 256 bytes UTF-8, válidas por 5 minutos. A entrega não é garantida.",
     "copy": "Copiar convite",
     "copyFailed": "Não foi possível copiar. Tente novamente ou compartilhe o convite.",
     "shareFailed": "Não foi possível compartilhar. Copie o convite."
@@ -310,7 +306,8 @@
       "answeringJoiner": "Seu contato está respondendo…",
       "connecting": "Abrindo uma conexão direta e criptografada…",
       "live": "Conectado",
-      "failed": "Não foi possível conectar"
+      "failed": "Não foi possível conectar",
+      "onDht": "Na DHT. Já pode conversar; está a ser tentada uma ligação direta"
     },
     "step": {
       "publishing": "Publicar",
@@ -320,7 +317,8 @@
       "answering": "Responder",
       "connecting": "Conectar",
       "live": "Ao vivo",
-      "failed": "Falhou"
+      "failed": "Falhou",
+      "onDht": "Na DHT · a tentar ligação direta"
     },
     "slow": {
       "publishing": "Ainda publicando seu convite. A rede está demorando para responder.",
@@ -340,6 +338,12 @@
       "keyMismatch": "A chave deste contato não bate com a salva. Nada foi aceito.",
       "expired": "Este convite expirou.",
       "unknown": "Algo deu errado ao conectar."
+    },
+    "onDht": {
+      "noCommonTransport": "As vossas apps não partilham nenhum transporte direto. Os textos curtos passam pela DHT.",
+      "transport": "Ainda não foi possível abrir uma ligação direta. Continua a ser tentada em segundo plano.",
+      "chosen": "Foi escolhido Só DHT para esta conversa.",
+      "waiting": "Está a ser tentada uma ligação direta em segundo plano."
     }
   },
   "composer": {

@@ -93,7 +93,7 @@ test("DHT only from the Connection menu: both timelines say who chose it, texts 
   await alice.page.getByTestId("transport-menu").getByTestId("transport-option-dht").click();
   await expect(lineText(alice, "You switched to DHT only")).toHaveCount(1, { timeout: 60_000 });
   await expect(lineText(bob, /^(?!You ).+ switched to DHT only$/)).toHaveCount(1, { timeout: 120_000 });
-  await expect(alice.page.getByTestId("connection-options")).toHaveAttribute("aria-label", "Connection options: DHT only");
+  await expect(alice.page.getByTestId("connection-options")).toHaveAttribute("aria-label", "Connection options: DHT only · chosen by you");
   await say(bob, "over the DHT");
   await expect(chat(alice).getByText("over the DHT")).toBeVisible({ timeout: 120_000 });
 

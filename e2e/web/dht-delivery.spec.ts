@@ -1,6 +1,6 @@
 import { copyInvite } from "../support/clipboard";
 import { pasteInvite } from "../support/clipboard";
-import { test, expect, chat, say, type Peer } from "../support/fixtures";
+import { test, expect, chat, chooseDhtOnly, say, type Peer } from "../support/fixtures";
 import { LocalRelay } from "../support/relay";
 import { composerRow } from "../support/composer";
 
@@ -14,7 +14,7 @@ async function watchStreams(peer: Peer) {
 }
 async function createDht(peer:Peer) {
   await peer.page.getByTitle("New Chat").click();
-  await peer.page.getByRole("radio",{name:"Text only",exact:true}).click();
+  await chooseDhtOnly(peer.page);
   await expect.poll(() => copyInvite(peer.page)).toMatch(/^https:\/\/ghostly\.tools\/#ghostly1p/);
   return copyInvite(peer.page);
 }
@@ -81,7 +81,7 @@ test("DHT and live delivery share history; offline text fallback is independent 
   const fallback=a.page.getByRole("switch",{name:"Fallback",exact:true});
   await fallback.click();await expect(fallback).not.toBeChecked();await a.page.keyboard.press("Escape");
   const returnTo=b.page.url();await b.page.goto("about:blank");
-  await expect(a.page.getByTestId("connection-options")).toHaveAccessibleName(/DHT · offline text/);
+  await expect(a.page.getByTestId("connection-options")).toHaveAccessibleName(/On DHT · retrying live/);
   await say(a,"Offline delivery after stream");await expect(chat(a).getByText("Sent · waiting for receipt",{exact:true})).toBeVisible();
   await b.page.goto(returnTo);await expect(chat(b).getByText("Offline delivery after stream",{exact:true})).toHaveCount(1);
   await mode(a,true);await mode(b,true);await say(b,"Back to DHT");await expect(chat(a).getByText("Back to DHT",{exact:true})).toBeVisible();

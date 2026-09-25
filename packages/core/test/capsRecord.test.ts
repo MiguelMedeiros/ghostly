@@ -11,6 +11,7 @@ import {
   type CapsContent, type CapsState,
 } from "../src/capsRecord";
 import type { PairingCredentials } from "../src/pairedSession";
+import { relayedTransports } from "../src/pairedTransports";
 
 // covers: chat.caps-record
 
@@ -58,7 +59,19 @@ describe("capability record: keys, seal and signature", () => {
     const { aKeys, bKeys } = pair();
     const record = bKeys.open(packetOf(aKeys, aKeys.seal(content(), 1).records));
     expect(JSON.stringify(record)).not.toMatch(/192\.0\.2|2001:db8|49737/);
-    expect(dialDescriptors(record.descriptors)).toEqual({ "iroh/1": { id: IROH.id, relay: IROH.relay, addresses: [] }, "hyperdht/1": { publicKey: HYPER.publicKey } });
+    expect(dialDescriptors(record.descriptors)).toEqual({ "iroh/1": { id: IROH.id, relay: IROH.relay, addresses: [], relayed: true }, "hyperdht/1": { publicKey: HYPER.publicKey } });
+  });
+
+  it("keeps the relay a browser's Iroh or HyperDHT is reached through, and refuses a relay that is not a URL", () => {
+    const { aKeys, bKeys } = pair();
+    // A browser's endpoints as #225 and #231 describe them: relay only.
+    const browser = capsDescriptors({ "iroh/1": { id: IROH.id, relay: "https://relay.example/", addresses: [], relayed: true }, "hyperdht/1": { publicKey: HYPER.publicKey, relayed: true, relay: "wss://hyper.example/relay" } });
+    const record = bKeys.open(packetOf(aKeys, aKeys.seal(content({ descriptors: browser }), 1).records));
+    const dial = dialDescriptors(record.descriptors);
+    expect(dial).toEqual({ "iroh/1": { id: IROH.id, relay: "https://relay.example/", addresses: [], relayed: true }, "hyperdht/1": { publicKey: HYPER.publicKey, relay: "wss://hyper.example/relay", relayed: true } });
+    // Ranked as relayed: after direct paths, before the DHT floor.
+    expect(relayedTransports({}, dial)).toEqual(["iroh/1", "hyperdht/1"]);
+    expect(capsDescriptors({ "hyperdht/1": { publicKey: HYPER.publicKey, relay: "javascript:alert(1)" } })).toEqual({ "hyperdht/1": { publicKey: expect.any(String) } });
   });
 
   it("fits 1,000 bytes; past it drops the name, then the extensions, and fails rather than cut capabilities", () => {

@@ -34,15 +34,51 @@ describe("PairingTracker", () => {
     expect(stages()).toEqual(["resolving", "answering", "connecting", "live"]);
   });
 
-  it("counts attempts: a failed one is followed by the next, and the reason says why", () => {
+  it("counts attempts: a stream that did not come up is no failure, the side goes back between attempts and says why", () => {
     const { t, stages, reported } = tracker("inviter");
     t.published(); t.sawPeer(); t.offerSent(); t.failed("timeout", true); t.offerSent(); t.answerReceived(); t.failed("transport", true, "ICE failed"); t.offerSent(); t.answerReceived(); t.live();
-    expect(stages()).toEqual(["waiting", "waiting", "knocking", "failed", "knocking", "connecting", "failed", "knocking", "connecting", "live"]);
+    expect(stages()).toEqual(["waiting", "waiting", "knocking", "waiting", "knocking", "connecting", "waiting", "knocking", "connecting", "live"]);
     expect(reported.map(p => p.attempt)).toEqual([1, 1, 1, 1, 2, 2, 2, 3, 3, 3]);
-    expect(reported[3]).toMatchObject({ peerSeen: true, reason: "timeout", retryable: true });
-    expect(reported[6]).toMatchObject({ reason: "transport", retryable: true, detail: "ICE failed" });
-    // A detail belongs to the failure it came with, not to the stages after it.
+    expect(reported[3]).toMatchObject({ peerSeen: true, detail: expect.stringContaining("not answered") });
+    expect(reported[3].reason).toBeUndefined();
+    expect(reported[6]).toMatchObject({ detail: "ICE failed" });
+    // A detail belongs to the attempt it came with, not to the stages after it.
     expect(reported[7].detail).toBeUndefined();
+  });
+
+  it("pinned over the DHT, the pairing ends on-dht: attempts go on underneath, and live takes over (WISP 400)", () => {
+    const { t, stages, reported } = tracker("joiner");
+    t.published(); t.offerSent(); t.onDht("waiting");
+    expect(t.progress.stage, "the stream attempt under way goes on: a pin a moment before it opens is no stage").toBe("knocking");
+    t.failed("timeout", true);
+    expect(reported.at(-1)).toMatchObject({ stage: "on-dht", reason: "transport", retryable: true });
+    t.offerSent(); t.answerReceived(); t.reset();
+    expect(t.progress.stage, "background attempts do not take it back to its steps").toBe("on-dht");
+    t.offerSent(); t.live("iroh/1");
+    expect(stages()).toEqual(["knocking", "on-dht", "live"]);
+    expect(reported.at(-1)).toMatchObject({ stage: "live", transport: "iroh/1", attempt: 3 });
+  });
+
+  it("pinned over the DHT with no stream attempt under way: on the DHT at once", () => {
+    const { t, reported } = tracker("inviter");
+    t.published(); t.sawPeer(); t.onDht("waiting");
+    expect(reported.at(-1)).toMatchObject({ stage: "on-dht", reason: "waiting", retryable: true });
+  });
+
+  it("a pin over the DHT while the stream connects ends live, through its steps", () => {
+    const { t, stages } = tracker("joiner");
+    t.published(); t.offerSent(); t.onDht("waiting"); t.answerReceived(); t.live("webrtc/1");
+    expect(stages()).toEqual(["knocking", "connecting", "live"]);
+  });
+
+  it("only a key mismatch, a forged signal, a failed publish or being offline is failed", () => {
+    const { t, reported } = tracker("inviter");
+    t.onDht("no-common-transport");
+    t.failed("key-mismatch", false);
+    expect(reported.at(-1)).toMatchObject({ stage: "failed", reason: "key-mismatch", retryable: false });
+    const chosen = tracker("joiner");
+    chosen.t.onDht("chosen");
+    expect(chosen.reported.at(-1)).toMatchObject({ stage: "on-dht", reason: "chosen", retryable: false });
   });
 
   it("a publish that failed is a retryable failure, and the next publish clears it", () => {

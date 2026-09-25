@@ -10,9 +10,13 @@ export function chatPath(sessionId: string): string {
   return `/chat/${encodeURIComponent(sessionId)}`;
 }
 
+/**
+ * The keys a joined invite gives. Never a delivery mode: DHT only is a choice made in a chat (WISP 400), so a
+ * `pair2d/` code joins like any other and the chat upgrades by itself; the inviter's choice arrives in its envelopes.
+ */
 function keysOf(params: LinkParams): SessionKeys {
   return {
-    seedB64: params.seedB64, peerPubKeyB64: params.peerPubKeyZ32, encKeyB64: params.encKeyB64, profile: params.profile, deliveryMode: params.deliveryMode,
+    seedB64: params.seedB64, peerPubKeyB64: params.peerPubKeyZ32, encKeyB64: params.encKeyB64, profile: params.profile,
     ...(params.peerParticipationKeyZ32 ? { peerParticipationKeyB64: params.peerParticipationKeyZ32 } : {}),
   };
 }

@@ -8,7 +8,9 @@ it("uses an authenticated open channel, never successful discovery alone, for Co
   expect(contactStatus(live,true,"error")).toBe("Connected");
   expect(contactStatus({...live,dataLink:"idle"},true,"online")).toBe("Waiting for contact");
   expect(contactStatus({...live,dataLink:"connecting"},true,"online")).toBe("Connecting");
-  expect(contactStatus({...live,deliveryMode:"dht"},true,"online")).toBe("DHT text · presence unknown");
+  expect(contactStatus({...live,deliveryMode:"dht"},true,"online")).toBe("DHT only · chosen by you");
+  expect(contactStatus({...live,dataLink:"idle",textDelivery:"dht"},true,"online")).toBe("On DHT · retrying live");
+  expect(contactStatus({...live,dataLink:"idle",textDelivery:"dht",dhtDelivery:{mode:"stream",peerMode:"dht",authenticated:true,maxTextBytes:256}},true,"online")).toBe("DHT only · chosen by your contact");
   expect(contactStatus(undefined,true,"online")).toBe("Waiting for contact");
   expect(contactStatus(live,true,"offline")).toBe("Offline");
   expect(contactStatus({...live,pairing:{...live.pairing!,keyMismatch:true}},true,"online")).toBe("Identity mismatch");

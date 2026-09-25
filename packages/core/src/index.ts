@@ -41,7 +41,7 @@ export * from './pubkyRing';
 export * from './ringLink';
 
 export * from "./capsRecord";
-export { DhtDelivery, DHT_TEXT_BYTES, DHT_MESSAGE_TTL, DHT_TEXT_REFUSED, LIVE_POLL_MS, DROP_FAST_MS, RENDEZVOUS_FAST_MS, emptyDhtDeliveryState, type DeliveryMode, type DhtDeliveryState, type DhtDeliveryView } from "./dhtDelivery";
+export { DhtDelivery, DHT_TEXT_BYTES, DHT_MESSAGE_TTL, DHT_TEXT_REFUSED, LIVE_POLL_MS, ACTIVE_DHT_POLL_MS, emptyDhtDeliveryState, type DeliveryMode, type DhtDeliveryState, type DhtDeliveryView } from "./dhtDelivery";
 export * from "./storeForward";
 export * from "./paymentIntent";
 export * from "./bitcoinAddress";

@@ -8,7 +8,10 @@ export function contactStatus(peer: PeerLinkState | null | undefined, paired: bo
   if (peer?.deliveryMode !== "dht" && peer?.dataLink === "open" && (!paired || peer.pairing?.status === "ready")) return "Connected";
   if (status === "error") return "Discovery unavailable";
   if (peer?.textDelivery === "hold") return "Away · messages are held";
-  if (peer?.deliveryMode === "dht" || peer?.textDelivery === "dht") return "DHT text · presence unknown";
+  // The one chat's states (WISP 400): DHT only by choice, or on the DHT while a live link is retried.
+  if (peer?.deliveryMode === "dht") return "DHT only · chosen by you";
+  if (peer?.textDelivery === "dht" && peer.dhtDelivery?.peerMode === "dht") return "DHT only · chosen by your contact";
+  if (peer?.textDelivery === "dht") return "On DHT · retrying live";
   if (peer?.pairing?.status === "confirm") return "Confirm contact";
   if (peer?.dataLink === "connecting" || peer?.pairing?.transitionTarget) return "Connecting";
   return "Waiting for contact";

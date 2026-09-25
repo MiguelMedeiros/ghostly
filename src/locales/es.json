@@ -84,10 +84,6 @@
     }
   },
   "invite": {
-    "live": "Chat en vivo",
-    "text": "Solo texto",
-    "details": "Detalles del envío",
-    "textDetails": "Solo texto publica mensajes cortos cifrados en la DHT, incluso si tu contacto está desconectado. Hasta 256 bytes UTF-8, válidos durante 5 minutos. La entrega no está garantizada.",
     "copy": "Copiar invitación",
     "copyFailed": "No se pudo copiar. Inténtalo de nuevo o comparte la invitación.",
     "shareFailed": "No se pudo compartir. Copia la invitación."
@@ -310,7 +306,8 @@
       "answeringJoiner": "Tu contacto está respondiendo…",
       "connecting": "Abriendo un enlace directo y cifrado…",
       "live": "Conectado",
-      "failed": "No se pudo conectar"
+      "failed": "No se pudo conectar",
+      "onDht": "En la DHT. Ya puedes chatear; se está intentando una conexión directa"
     },
     "step": {
       "publishing": "Publicar",
@@ -320,7 +317,8 @@
       "answering": "Responder",
       "connecting": "Conectar",
       "live": "En vivo",
-      "failed": "Falló"
+      "failed": "Falló",
+      "onDht": "En la DHT · reintentando conexión directa"
     },
     "slow": {
       "publishing": "Todavía publicando tu invitación. La red tarda en responder.",
@@ -340,6 +338,12 @@
       "keyMismatch": "La clave de este contacto no coincide con la guardada. No se aceptó nada.",
       "expired": "Esta invitación ha caducado.",
       "unknown": "Algo salió mal al conectar."
+    },
+    "onDht": {
+      "noCommonTransport": "Vuestras apps no comparten ningún transporte directo. Los textos cortos van por la DHT.",
+      "transport": "Aún no se abrió una conexión directa. Se sigue intentando en segundo plano.",
+      "chosen": "Se eligió Solo DHT para este chat.",
+      "waiting": "Se está intentando una conexión directa en segundo plano."
     }
   },
   "composer": {

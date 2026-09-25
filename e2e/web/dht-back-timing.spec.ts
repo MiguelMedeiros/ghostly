@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { expect, test, type Peer } from "../support/fixtures";
+import { chooseDhtOnly, expect, test, type Peer } from "../support/fixtures";
 
 /**
  * A measurement, not a check: how long a paired chat takes to go live again after both sides leave
@@ -58,7 +58,7 @@ test("time leaving DHT-only after the contact reloaded, step by step", { tag: ["
     await Promise.all([traced(alice, steps), traced(bob, steps)]);
 
     await alice.page.getByTitle("New Chat").click();
-    await alice.page.getByRole("radio", { name: "Text only" }).click();
+    await chooseDhtOnly(alice.page);
     await alice.page.evaluate(() => {
       Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (value: string) => { (window as unknown as { qaInvite: string }).qaInvite = value; } } });
     });

@@ -84,10 +84,6 @@
     }
   },
   "invite": {
-    "live": "实时聊天",
-    "text": "仅文本",
-    "details": "发送详情",
-    "textDetails": "仅文本模式将简短的加密消息发布到DHT，即使联系人处于离线状态。最多256个UTF-8字节，有效期为5分钟。不保证送达。",
     "copy": "复制邀请",
     "copyFailed": "无法复制。请重试或分享邀请。",
     "shareFailed": "无法分享。请复制邀请。"
@@ -310,7 +306,8 @@
       "answeringJoiner": "联系人正在回应…",
       "connecting": "正在建立直接的加密连接…",
       "live": "已连接",
-      "failed": "无法连接"
+      "failed": "无法连接",
+      "onDht": "在 DHT 上。现在就可以聊天；正在尝试直接连接"
     },
     "step": {
       "publishing": "发布",
@@ -320,7 +317,8 @@
       "answering": "回应",
       "connecting": "连接",
       "live": "在线",
-      "failed": "失败"
+      "failed": "失败",
+      "onDht": "在 DHT 上 · 正在重试直连"
     },
     "slow": {
       "publishing": "仍在发布你的邀请，网络响应较慢。",
@@ -340,6 +338,12 @@
       "keyMismatch": "该联系人的密钥与已保存的不一致。没有接受任何数据。",
       "expired": "此邀请已过期。",
       "unknown": "连接时出现问题。"
+    },
+    "onDht": {
+      "noCommonTransport": "你们的应用没有共同的直连方式。短文本通过 DHT 传递。",
+      "transport": "暂时无法建立直连。正在后台重试。",
+      "chosen": "此聊天选择了仅 DHT。",
+      "waiting": "正在后台尝试直接连接。"
     }
   },
   "composer": {

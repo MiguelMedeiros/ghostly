@@ -29,7 +29,7 @@ import { normalizeNostrRelays } from '../nostr/relay';
 import type { NostrDraft, NostrDraftRequest, NostrPublishResult } from '../nostr/types';
 import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
-import { CapsExchange, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
+import { CapsExchange, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, TRANSPORTS, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
 import { fileMessageText, type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
 import {
   DEFAULT_RELAYS,
@@ -860,8 +860,11 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   async joinLink({ inviteCode }: { inviteCode: string }): Promise<{ linkId: string }> {
-    const params = decodeInviteCode(inviteCode);
-    if (!params) throw new Error("That does not look like a Ghostly invite");
+    const decoded = decodeInviteCode(inviteCode);
+    if (!decoded) throw new Error("That does not look like a Ghostly invite");
+    // DHT only is a choice made in a chat, not in its invite (WISP 400): a joined `pair2d/` code starts like any
+    // other and upgrades by itself; the inviter's choice reaches this side in its envelopes.
+    const { deliveryMode: _mode, ...params } = decoded;
     const existing = [...this.links.values()].find((l) => l.stored.seedB64 === params.seedB64);
     if (existing) {
       if (existing.stored.profile !== params.profile) throw new Error("Invitation profile does not match the stored link");
@@ -1033,7 +1036,7 @@ export class GhostlyNode implements EngineImplementation {
     // With automatic profiles on, a stale Nostr profile is refreshed when the chat is opened.
     if (linkId && this.settings.nostr?.autoLoadProfiles) void this.nostrSocial.ledgerChanged(linkId).catch(() => {});
     if (linkId) this.hold.wake(linkId);
-    for (const [id, live] of this.links) live.link?.session.setActive(id === linkId);
+    for (const [id, live] of this.links) live.link?.setChatActive(id === linkId);
     // Opening a chat is someone wanting to talk: reconnect now, not after the wait between attempts.
     if (linkId) this.links.get(linkId)?.link?.wake();
     // The chat on screen carries its connection story in the state.
@@ -2238,7 +2241,12 @@ export class GhostlyNode implements EngineImplementation {
       dht: stored.profile ? { state: stored.dhtDeliveryState, save: async state => {
         await db.patchLink(linkId, { dhtDeliveryState: state });
         live.stored = { ...live.stored, dhtDeliveryState: state };
-      } } : undefined,
+      },
+        // The capability record's revision rides every envelope; a newer one from the contact is read (WISP 03).
+        capsRev: () => live.caps?.rev, peerCapsRev: rev => live.caps?.peerRev(rev),
+        // A contact whose record lacks dht-text/1 gets nothing on the DHT: what would go there waits for live.
+        peerAcceptsText: () => { const peer = live.caps?.peer; return !peer || peer.capabilities.includes(DHT_TEXT_CAPABILITY); },
+      } : undefined,
       native: { peerDescriptors: stored.peerDescriptors, peerTransports: stored.peerTransports,
         peerFallback: stored.peerFallback, preferred: stored.preferredTransport, fallback: stored.transportFallback },
       pairing: credentials ? {
@@ -2449,7 +2457,7 @@ export class GhostlyNode implements EngineImplementation {
       capabilities: ["chat/1", DHT_TEXT_CAPABILITY, ...(live?.stored.hold?.enabled ? [HOLD_CAPABILITY] : []), "files/2",
         ...(cashu || lightning ? ["payments/1"] : []), ...(cashu ? ["payments-cashu/1"] : []), ...(lightning ? ["payments-lightning/1"] : [])],
       extensions: ["ping/1"],
-      descriptors: {},
+      descriptors: capsDescriptors(live?.link?.nativeDescriptors),
       name,
     };
   }
@@ -2466,7 +2474,10 @@ export class GhostlyNode implements EngineImplementation {
    */
   private peerCapsChanged(linkId: string, record: CapsRecord): void {
     const live = this.links.get(linkId);
-    if (!live || live.link?.isDataLinkOpen) return;
+    if (!live) return;
+    // Native transports to try without WebRTC first; a session's own word, when there was one, stays.
+    live.link?.learnPeerTransports(record.transports.filter((t): t is PairedTransport => (TRANSPORTS as readonly string[]).includes(t)), dialDescriptors(record.descriptors));
+    if (live.link?.isDataLinkOpen) return;
     if (record.name !== (live.stored.peerNick ?? "")) {
       live.stored = { ...live.stored, peerNick: record.name };
       void db.patchLink(linkId, { peerNick: record.name });
@@ -2569,6 +2580,8 @@ export class GhostlyNode implements EngineImplementation {
           if (this.shuttingDown || live.stored.deliveryMode === "dht" || live.link !== link || !this.links.has(linkId)) { await endpoint.close(); return; }
           link.registerEndpoint(endpoint);
           delete live.transportErrors[key];
+          // The record says how to dial it, so a contact whose WebRTC never connects can try it (WISP 03).
+          this.capsChanged(linkId);
         } catch (error) {
           live.transportErrors[key] = error instanceof Error ? error.message : "Native adapter could not start. Reopen this chat to retry.";
         }

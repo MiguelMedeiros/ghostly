@@ -15,6 +15,7 @@ export function usePairingWords() {
         case "answering": return role === "inviter" ? t("pairing.stage.answeringInviter") : t("pairing.stage.answeringJoiner");
         case "connecting": return t("pairing.stage.connecting");
         case "live": return t("pairing.stage.live");
+        case "on-dht": return t("pairing.stage.onDht");
         case "failed": return t("pairing.stage.failed");
       }
     },
@@ -28,6 +29,7 @@ export function usePairingWords() {
         case "answering": return t("pairing.step.answering");
         case "connecting": return t("pairing.step.connecting");
         case "live": return t("pairing.step.live");
+        case "on-dht": return t("pairing.step.onDht");
         case "failed": return t("pairing.step.failed");
       }
     },
@@ -41,6 +43,15 @@ export function usePairingWords() {
         case "answering": return t("pairing.slow.answering");
         case "connecting": return t("pairing.slow.connecting");
         default: return "";
+      }
+    },
+    /** Why the chat is on the DHT (WISP 400): no common transport, attempts failed, DHT only chosen, or still trying. */
+    onDht: (reason: string | undefined) => {
+      switch (reason) {
+        case "no-common-transport": return t("pairing.onDht.noCommonTransport");
+        case "transport": return t("pairing.onDht.transport");
+        case "chosen": return t("pairing.onDht.chosen");
+        default: return t("pairing.onDht.waiting");
       }
     },
     reason: (reason: FailureReason) => {

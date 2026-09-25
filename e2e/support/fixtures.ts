@@ -134,6 +134,18 @@ export async function linkLegacy(host: Peer, guest: Peer): Promise<void> {
   await expect(guest.page.getByPlaceholder("Message…")).toBeVisible();
 }
 
+/**
+ * DHT only, chosen in the chat's Connection menu. There is one kind of chat and one invite (WISP 400): the
+ * choice is made in a chat, at any time, never in its invite.
+ */
+export async function chooseDhtOnly(page: Page): Promise<void> {
+  await page.getByTestId("connection-options").click();
+  const choice = page.getByRole("switch", { name: "DHT-only delivery" });
+  if (!await choice.isChecked()) await choice.click();
+  await expect(choice).toBeChecked();
+  await page.keyboard.press("Escape");
+}
+
 /** The open conversation, without the chat list (which previews the last message too). */
 export const chat = (peer: Peer) => peer.page.locator(".chat-wallpaper");
 

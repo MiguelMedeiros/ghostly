@@ -50,8 +50,8 @@ it.each([
   ["waiting", { status: "connecting", peerKey: "peer" }, { dataLink: "connecting", peerOnline: true }, "Connecting…", true],
   ["waiting", { status: "ready", transport: "webrtc/1", transitionTarget: "iroh/1" }, { dataLink: "open" }, "Switching · Iroh", true, " automatic"],
   ["waiting", { status: "waiting", peerKey: "peer" }, { dataLink: "idle", peerParticipationKey: "saved" }, "Waiting for contact", false],
-  ["dht", { status: "ready", transport: "webrtc/1" }, { dataLink: "open", textDelivery: "dht" }, "DHT · offline text", false],
-  ["dht", { status: "connecting" }, { dataLink: "idle", deliveryMode: "dht" }, "DHT only", false],
+  ["dht", { status: "ready", transport: "webrtc/1" }, { dataLink: "open", textDelivery: "dht" }, "On DHT · retrying live", false],
+  ["dht", { status: "connecting" }, { dataLink: "idle", deliveryMode: "dht" }, "DHT only · chosen by you", false],
   ["failure", { status: "error", peerKey: "peer", error: "Relay refused" }, { dataLink: "idle" }, "Connection issue Relay refused", false],
 ] as const)("the header shows the %s icon and no text (%#)", (state, pairing, extra, tooltip, pulse, detail = "") => {
   client.state.settings.online = true;

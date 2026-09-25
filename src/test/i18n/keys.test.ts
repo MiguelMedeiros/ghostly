@@ -64,8 +64,8 @@ describe("the keys components ask for exist in every language", () => {
     expect(literalKeys(componentSources["../../components/MessageBubble.tsx"])).toEqual(
       expect.arrayContaining(["chat.deleteMessage", "chat.deleteMessageHint", "common.cancel", "common.delete"]),
     );
-    expect(literalKeys(componentSources["../../components/InviteCard.tsx"])).toEqual(
-      expect.arrayContaining(["invite.live", "invite.text", "invite.details", "invite.textDetails"]),
+    expect(literalKeys(allSources["../../components/pairing/words.ts"])).toEqual(
+      expect.arrayContaining(["pairing.stage.onDht", "pairing.step.onDht", "pairing.onDht.waiting"]),
     );
   });
 

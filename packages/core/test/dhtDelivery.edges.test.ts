@@ -6,7 +6,7 @@ import { fromBase64Url, randomBytes, toBase64Url, utf8Encode } from "../src/byte
 import { decrypt, encrypt } from "../src/crypto";
 import { createIdentity, identityFromSeed, identityFromSeedB64, publicKeyFromZ32, sign } from "../src/identity";
 import { createLink } from "../src/invite";
-import { DhtDelivery, DHT_MESSAGE_TTL, DHT_TEXT_REFUSED, DROP_FAST_MS, LEAVING_DHT_FAST_MS, LIVE_POLL_MS, RENDEZVOUS_FAST_MS, emptyDhtDeliveryState, type DhtDeliveryState, type DhtDeliveryView } from "../src/dhtDelivery";
+import { DhtDelivery, DHT_MESSAGE_TTL, DHT_TEXT_REFUSED, LEAVING_DHT_FAST_MS, LIVE_POLL_MS, emptyDhtDeliveryState, type DhtDeliveryState, type DhtDeliveryView } from "../src/dhtDelivery";
 import type { PairingCredentials } from "../src/pairedSession";
 import type { GhostRecord, SignedPacket } from "../src/pkarr";
 
@@ -432,24 +432,24 @@ describe("DHT delivery: sending and lifecycle", () => {
     await h.bob.stop();
   });
 
-  it("reads a first contact at the signaling pace for ten minutes, then at 30 s", async () => {
+  it("a first contact is read at 30 s until the contact shows up, then at the signaling pace for two minutes", async () => {
     const h = setup({ pollMs: null, mode: "stream" }); await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
     const first = h.transport.resolve.mock.calls.length;
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(h.transport.resolve.mock.calls.length - first, "an inviter waiting for its contact reads every 4 s").toBe(15);
-    await vi.advanceTimersByTimeAsync(RENDEZVOUS_FAST_MS);
-    const later = h.transport.resolve.mock.calls.length;
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(h.transport.resolve.mock.calls.length - later, "an invite nobody used does not spend the relays' budget").toBe(2);
+    expect(h.transport.resolve.mock.calls.length - first, "an invite nobody opened spends no relay budget").toBe(2);
     h.bob.expect(); await vi.advanceTimersByTimeAsync(0);
     const expected = h.transport.resolve.mock.calls.length;
-    expect(expected - later, "a fresh packet of the contact is looked at once").toBe(3);
+    expect(expected - first, "a fresh packet of the contact is looked at once").toBe(3);
     await vi.advanceTimersByTimeAsync(20_000);
     expect(h.transport.resolve.mock.calls.length - expected).toBe(5);
+    await vi.advanceTimersByTimeAsync(2 * 60_000);
+    const later = h.transport.resolve.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(h.transport.resolve.mock.calls.length - later).toBe(2);
     await h.bob.stop();
   });
 
-  it("reads every 5 minutes while live, at once when layer 1 is lost, then every 4 s for two minutes", async () => {
+  it("reads every 5 minutes while live, at once when layer 1 is lost; 10 s open, 30 s in the background", async () => {
     const h = setup({ pollMs: null, mode: "stream", bobCredentials: pinned() }); await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
     h.bob.setLive(true);
     const live = h.transport.resolve.mock.calls.length;
@@ -460,15 +460,21 @@ describe("DHT delivery: sending and lifecycle", () => {
     h.bob.setLive(false); await vi.advanceTimersByTimeAsync(0);
     const dropped = h.transport.resolve.mock.calls.length;
     expect(dropped - live, "read at once on the drop").toBe(2);
-    await vi.advanceTimersByTimeAsync(DROP_FAST_MS);
-    expect(h.transport.resolve.mock.calls.length - dropped).toBe(30);
+    const lastOptions = () => (h.transport.resolve.mock.lastCall as unknown[] | undefined)?.[1];
+    expect(lastOptions(), "a read asked for is not a background one").toBeUndefined();
     const after = h.transport.resolve.mock.calls.length;
     await vi.advanceTimersByTimeAsync(60_000);
     expect(h.transport.resolve.mock.calls.length - after, "back to 30 s in the background").toBe(2);
+    expect(lastOptions(), "the slow periodic look is served from the relays' background share").toEqual({ background: true });
     h.bob.setActive(true); await vi.advanceTimersByTimeAsync(0);
     const active = h.transport.resolve.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(30_010);
+    expect(h.transport.resolve.mock.calls.length - active, "10 s while the chat is open on the DHT").toBe(3);
+    // A text of ours awaiting its receipt: 4 s, the receipt is what the person watches for.
+    expect(await h.bob.send("hello", Date.now(), ID)).toBeNull();
+    const sent = h.transport.resolve.mock.calls.length;
     await vi.advanceTimersByTimeAsync(20_010);
-    expect(h.transport.resolve.mock.calls.length - active, "4 s while the chat is open on the DHT").toBe(5);
+    expect(h.transport.resolve.mock.calls.length - sent).toBeGreaterThanOrEqual(4);
     await h.bob.stop();
   });
 
