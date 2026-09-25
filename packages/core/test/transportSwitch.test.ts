@@ -105,3 +105,31 @@ it("names the same redial target on both sides: the explicit choice, or none", (
   expect(h.switches.map(s => s.chosenTarget)).toEqual(["hyperdht/1", "hyperdht/1"]);
   h.switches.forEach(s => s.stop());
 });
+it("choosing again what this side's standing choice names raises no intent; an override of the contact's does", () => {
+  const h = peers();
+  const intent = (side: number) => h.switches[1 - side].peerPolicy!.intent;
+  h.policies[0].preferred = "iroh/1"; h.switches[0].chose(); h.flush();
+  expect(intent(0)).toBe(1);
+  h.switches.forEach(s => s.begin("session-2", "iroh/1", true)); h.flush();
+  expect(h.switches[0].standing).toBe(true);
+  // The same choice again, or a new fallback (a policy change, not a choice): the intent stays, the policy goes out,
+  // and nothing moves.
+  h.switches[0].chose(true); h.flush();
+  h.policies[0].fallback = false; h.switches[0].changed(false); h.flush();
+  expect(intent(0)).toBe(1);
+  expect(h.switches.every(s => !s.pending)).toBe(true);
+  expect(h.switches[1].peerPolicy!.fallback).toBe(false);
+  h.policies[0].fallback = true; h.switches[0].changed(false); h.flush();
+  expect(intent(0)).toBe(1);
+  // So a contact's newer choice, sent before it saw those, still wins: no tie for the key order to break.
+  h.policies[1].preferred = "hyperdht/1"; h.switches[1].chose(); h.flush();
+  expect(intent(1)).toBe(2);
+  expect(h.switches.every(s => s.pending?.choices[0] === "hyperdht/1")).toBe(true);
+  expect(h.switches[0].standing).toBe(false);
+  // Choosing Iroh again now overrides the contact's standing choice: that one raises the intent.
+  h.switches.forEach(s => s.begin("session-3", "hyperdht/1", true)); h.flush();
+  h.switches[0].chose(true); h.flush();
+  expect(intent(0)).toBe(3);
+  expect(h.switches.every(s => s.pending?.choices[0] === "iroh/1")).toBe(true);
+  h.switches.forEach(s => s.stop());
+});

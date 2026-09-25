@@ -1426,7 +1426,8 @@ export class GhostlyNode implements EngineImplementation {
 
   /**
    * `chosen`: a choice from the chat's Connection menu, a row in its timeline even when it names the transport already
-   * set. Left out (the RPC), only a change of transport is: the Fallback switch sends the same preference again.
+   * set. Left out (the RPC), only a change of transport is: the Fallback switch sends the same preference again, and
+   * is neither a row nor a switch intent.
    */
   async setTransportPreference({ linkId, preferred, fallback }: { linkId: string; preferred: PairedTransport; fallback: boolean }, chosen?: boolean): Promise<void> {
     const live = this.links.get(linkId);
@@ -1437,7 +1438,8 @@ export class GhostlyNode implements EngineImplementation {
     live.stored = { ...live.stored, ...patch }; this.emitState();
     const log = chosen ? this.transportLogOf(live) : undefined;
     if (log?.chose("you", preferred, Date.now())) this.saveTransportLog(live, log);
-    await live.link.setTransportPreference(preferred, fallback);
+    // Not a choice (the Fallback switch): no switch intent on the wire either, or it could beat the contact's.
+    await live.link.setTransportPreference(preferred, fallback, false, chosen);
   }
 
   /**
@@ -1450,8 +1452,7 @@ export class GhostlyNode implements EngineImplementation {
   async setChatTransport({ linkId, transport }: { linkId: string; transport: PairedTransport | "auto" | "dht" }): Promise<void> {
     const live = this.links.get(linkId);
     if (transport === "dht") { await this.setDeliveryMode({ linkId, mode: "dht" }); return; }
-    const leftDht = live?.stored.deliveryMode === "dht";
-    if (leftDht) {
+    if (live?.stored.deliveryMode === "dht") {
       // The choice is recorded first, so the line that says the chat left DHT only names it. The native adapters
       // were released with DHT only: the preference reaches the link once they are back.
       const preferredTransport = transport === "auto" ? undefined : transport;
@@ -1460,8 +1461,8 @@ export class GhostlyNode implements EngineImplementation {
       await this.setDeliveryMode({ linkId, mode: "stream" });
     }
     if (transport !== "auto") {
-      // Out of DHT only, the row that says so already names the transport.
-      await this.setTransportPreference({ linkId, preferred: transport, fallback: live?.stored.transportFallback ?? true }, !leftDht);
+      // A choice on the wire too; out of DHT only, the log leaves the row to the one that says so (it names it).
+      await this.setTransportPreference({ linkId, preferred: transport, fallback: live?.stored.transportFallback ?? true }, true);
       return;
     }
     if (!live?.stored.profile || !live.link) throw new Error("Transport unavailable");

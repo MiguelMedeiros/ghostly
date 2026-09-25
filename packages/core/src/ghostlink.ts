@@ -706,8 +706,14 @@ export class GhostLink {
    * it dials in, but its switch intent drops to none, so the contact's explicit choice wins on the open session
    * and, without one, the current transport is kept. Never adds an unavailable adapter either way.
    */
-  async setTransportPreference(preferred: PairedTransport, fallback: boolean, automatic = false): Promise<void> {
+  /**
+   * `automatic`: back to the app's rule (no choice of this side's). `choice` false: the same transport with another
+   * fallback (the Fallback switch), a policy change that raises no switch intent. A choice of the transport this side
+   * already chose raises none either while that choice stands (see `TransportSwitch.chose`).
+   */
+  async setTransportPreference(preferred: PairedTransport, fallback: boolean, automatic = false, choice = true): Promise<void> {
     if (!this.options.params.profile || !this.availableTransports.includes(preferred)) throw new Error("Transport unavailable in this runtime");
+    const again = this.preferred === preferred;
     this.preferred = preferred; this.fallback = fallback;
     if (this.paired?.state.status === "ready") {
       if (!this.paired.peerTransportSwitchSupport) {
@@ -715,7 +721,10 @@ export class GhostLink {
         this.transitionError = "Your contact needs an updated app to negotiate a transport change.";
         this.emitPairingState(); return;
       }
-      this.switcher.changed(automatic ? "automatic" : true); this.emitPairingState(); return;
+      if (automatic) this.switcher.changed("automatic");
+      else if (choice) this.switcher.chose(again);
+      else this.switcher.changed(false);
+      this.emitPairingState(); return;
     }
     // A choice made while offline carries no intent into the next session; going automatic clears an older one.
     if (automatic) this.switcher.changed("automatic");
