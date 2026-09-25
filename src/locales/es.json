@@ -341,5 +341,53 @@
       "expired": "Esta invitación ha caducado.",
       "unknown": "Algo salió mal al conectar."
     }
+  },
+  "composer": {
+    "attach": "Adjuntar",
+    "payment": "Pago",
+    "identity": "Identidad",
+    "identityShared": "{{count}} compartida(s) en este chat",
+    "document": "Documento",
+    "media": "Fotos y vídeos",
+    "camera": "Cámara",
+    "expressions": "Emoji y GIF",
+    "emoji": "Emoji",
+    "gif": "GIF",
+    "searchEmoji": "Buscar emoji",
+    "searchGifs": "Buscar GIF",
+    "noEmoji": "No se encontraron emoji",
+    "noGifs": "No se encontraron GIF",
+    "gifsUnavailable": "La búsqueda de GIF no está disponible. Inténtalo de nuevo.",
+    "gifSource": "GifCities · Internet Archive",
+    "skinTone": "Tono de piel",
+    "searchResults": "Resultados de la búsqueda",
+    "emojiCategories": "Categorías de emoji",
+    "gifCategories": "Categorías de GIF",
+    "takePhoto": "Hacer foto",
+    "retake": "Repetir",
+    "sendPhoto": "Enviar foto",
+    "closeCamera": "Cerrar cámara",
+    "cameraFailed": "No se pudo iniciar la cámara.",
+    "category": {
+      "recent": "Recientes",
+      "people": "Caras y personas",
+      "nature": "Animales y naturaleza",
+      "foods": "Comida y bebida",
+      "activity": "Actividades",
+      "places": "Viajes y lugares",
+      "objects": "Objetos",
+      "symbols": "Símbolos",
+      "flags": "Banderas"
+    },
+    "gifCategory": {
+      "ghosts": "Fantasmas",
+      "happy": "Feliz",
+      "sad": "Triste",
+      "love": "Amor",
+      "yes": "Sí",
+      "party": "Fiesta",
+      "animals": "Animales",
+      "retro": "Web retro"
+    }
   }
 }

@@ -341,5 +341,53 @@
       "expired": "此邀请已过期。",
       "unknown": "连接时出现问题。"
     }
+  },
+  "composer": {
+    "attach": "附件",
+    "payment": "付款",
+    "identity": "身份",
+    "identityShared": "此聊天中已分享 {{count}} 个",
+    "document": "文档",
+    "media": "照片和视频",
+    "camera": "相机",
+    "expressions": "表情和 GIF",
+    "emoji": "表情",
+    "gif": "GIF",
+    "searchEmoji": "搜索表情",
+    "searchGifs": "搜索 GIF",
+    "noEmoji": "未找到表情",
+    "noGifs": "未找到 GIF",
+    "gifsUnavailable": "GIF 搜索暂不可用，请重试。",
+    "gifSource": "GifCities · Internet Archive",
+    "skinTone": "肤色",
+    "searchResults": "搜索结果",
+    "emojiCategories": "表情类别",
+    "gifCategories": "GIF 类别",
+    "takePhoto": "拍照",
+    "retake": "重拍",
+    "sendPhoto": "发送照片",
+    "closeCamera": "关闭相机",
+    "cameraFailed": "无法启动相机。",
+    "category": {
+      "recent": "最近使用",
+      "people": "笑脸和人物",
+      "nature": "动物和自然",
+      "foods": "食物和饮料",
+      "activity": "活动",
+      "places": "旅行和地点",
+      "objects": "物品",
+      "symbols": "符号",
+      "flags": "旗帜"
+    },
+    "gifCategory": {
+      "ghosts": "幽灵",
+      "happy": "开心",
+      "sad": "难过",
+      "love": "爱",
+      "yes": "好的",
+      "party": "派对",
+      "animals": "动物",
+      "retro": "复古网页"
+    }
   }
 }

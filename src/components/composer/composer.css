@@ -1,0 +1,305 @@
+/* The chat's composer (MessageInput.tsx), laid out as WhatsApp's: one rounded field holding the +, the smiley and
+   the message, and the mic (or send) beside it. Theme tokens only, so both schemes and every colour theme follow. */
+.composer-field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  min-height: 44px;
+  padding: 2px 4px;
+  border-radius: 22px;
+  background: var(--color-input-bg);
+}
+.composer-icon-button {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: color 0.15s, background-color 0.15s;
+}
+.composer-icon-button svg { transition: transform 0.2s ease; }
+.composer-icon-button:hover:not(:disabled),
+.composer-icon-button[aria-expanded="true"] {
+  color: var(--color-text-primary);
+  background: var(--color-surface-hover);
+}
+.composer-icon-button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+.composer-icon-button:disabled { opacity: 0.3; cursor: not-allowed; }
+/* The + turns into a × while its menu is open. */
+.composer-plus-open svg { transform: rotate(45deg); }
+
+.composer-textarea {
+  width: 100%;
+  min-height: 40px;
+  max-height: 120px;
+  padding: 9px 8px;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 15px;
+  line-height: 22px;
+}
+.composer-textarea::placeholder { color: var(--color-text-muted); }
+.composer-textarea:disabled { opacity: 0.5; }
+
+/* Recording takes the field's place, in the field's shape. */
+.composer-row > .voice-bar { border-radius: 22px; background: var(--color-input-bg); }
+
+@media (max-width: 767px) {
+  .composer-field { min-height: 48px; border-radius: 24px; }
+  .composer-icon-button { width: 44px; height: 44px; }
+  .composer-textarea { min-height: 44px; padding: 11px 4px; }
+  .composer-row > .voice-bar { border-radius: 24px; }
+}
+/* A narrow chat column (a phone held upright, or the chat list dragged wide): the message keeps the room. */
+@container composer (max-width: 340px) {
+  .composer-field { gap: 0; padding-inline: 2px; }
+  .composer-icon-button { width: 36px; }
+}
+
+/* The + menu: a coloured glyph per row, as WhatsApp's attach menu. Light themes take darker inks, so every glyph
+   keeps 3:1 on the menu. */
+.composer-menu {
+  --attach-payment: #ffbc38;
+  --attach-identity: #21c7b0;
+  --attach-document: #a28bff;
+  --attach-media: #4fa3ff;
+  --attach-camera: #ff5c8d;
+  min-width: 13rem;
+  padding-block: 6px;
+  border-radius: 16px;
+}
+:root[data-theme="light"] .composer-menu {
+  --attach-payment: #a15f00;
+  --attach-identity: #00786a;
+  --attach-document: #5b3fe0;
+  --attach-media: #005fc4;
+  --attach-camera: #c8124f;
+}
+.composer-menu [data-menu-item] {
+  gap: 14px;
+  padding: 10px 16px;
+  font-size: 15px;
+  color: var(--color-text-primary);
+}
+.composer-menu [data-menu-item]:focus-visible { box-shadow: inset 0 0 0 2px var(--color-accent); }
+.composer-menu [data-menu-item]:disabled { color: var(--color-text-muted); }
+.composer-menu [data-menu-item]:disabled .composer-menu-icon { opacity: 0.4; filter: grayscale(0.5); }
+.composer-menu-icon { display: flex; }
+.composer-menu-icon[data-action="payment"] { color: var(--attach-payment); }
+.composer-menu-icon[data-action="identity"] { color: var(--attach-identity); }
+.composer-menu-icon[data-action="document"] { color: var(--attach-document); }
+.composer-menu-icon[data-action="media"] { color: var(--attach-media); }
+.composer-menu-icon[data-action="camera"] { color: var(--attach-camera); }
+
+/* The emoji/GIF panel (composer/ExpressionPanel.tsx). */
+.expression-panel {
+  container: expression / inline-size;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--color-panel-header);
+  border: 1px solid var(--color-border);
+  border-radius: 18px;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.3);
+}
+.expression-popover { animation: fade-in 0.15s ease-out; }
+.expression-sheet.sheet {
+  height: var(--expression-height, 60dvh);
+  overflow: hidden;
+  border-radius: 18px 18px 0 0;
+}
+.expression-tab {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--color-border);
+}
+.expression-categories {
+  display: flex;
+  padding: 2px 6px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.expression-category {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+  padding: 10px 0 7px;
+  margin-bottom: -1px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.expression-category:hover { color: var(--color-text-secondary); }
+.expression-category[data-active] { color: var(--color-text-primary); border-bottom-color: var(--color-accent); }
+.expression-category:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; border-radius: 6px; }
+
+.expression-search-row { display: flex; align-items: center; gap: 6px; padding: 10px 12px 4px; }
+.expression-search {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 9999px;
+  background: var(--color-input-bg);
+  color: var(--color-text-muted);
+}
+.expression-search:focus-within { box-shadow: inset 0 0 0 2px var(--color-accent); }
+.expression-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 14px;
+}
+.expression-search input::placeholder { color: var(--color-text-muted); }
+.expression-skin,
+.expression-skins button {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  font-size: 20px;
+  cursor: pointer;
+}
+.expression-skin:hover,
+.expression-skins button:hover,
+.expression-skins button[aria-checked="true"] { background: var(--color-surface-hover); }
+.expression-skin:focus-visible,
+.expression-skins button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+.expression-skins {
+  position: absolute;
+  top: calc(100% + 4px);
+  inset-inline-end: 0;
+  z-index: 2;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--color-border);
+  border-radius: 9999px;
+  background: var(--color-surface-alt);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.25);
+}
+
+.expression-scroll {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 8px 8px;
+}
+.expression-scroll[aria-busy="true"] .gif-masonry { opacity: 0.6; }
+.expression-section-title {
+  margin: 10px 6px 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+.emoji-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); }
+.emoji-cell {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+}
+.emoji-cell:hover { background: var(--color-surface-hover); }
+.emoji-cell:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+@container expression (max-width: 360px) {
+  .emoji-grid { grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); }
+  .emoji-cell { height: 40px; font-size: 25px; }
+}
+.expression-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 160px;
+  margin: 0;
+  font-size: 14px;
+  color: var(--color-text-muted);
+}
+
+.gif-masonry { columns: 2; column-gap: 6px; padding-top: 8px; }
+@container expression (min-width: 420px) { .gif-masonry { columns: 3; } }
+.gif-tile {
+  display: block;
+  width: 100%;
+  margin: 0 0 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  break-inside: avoid;
+  background: var(--color-surface-hover);
+  cursor: pointer;
+}
+.gif-tile img { display: block; width: 100%; height: auto; min-height: 48px; object-fit: contain; image-rendering: pixelated; }
+.gif-tile:hover,
+.gif-tile:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+.gif-source {
+  margin: 8px 0 2px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+/* The switch between emoji and GIFs, at the bottom as in WhatsApp. */
+.expression-switch {
+  align-self: center;
+  display: flex;
+  gap: 2px;
+  margin: 8px auto;
+  padding: 3px;
+  border-radius: 9999px;
+  background: var(--color-input-bg);
+}
+.expression-switch button {
+  width: 56px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color 0.15s, background-color 0.15s;
+}
+.expression-switch button:hover { color: var(--color-text-primary); }
+.expression-switch button[aria-selected="true"] { background: var(--color-surface-hover); color: var(--color-text-primary); }
+.expression-switch button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }

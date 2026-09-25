@@ -68,7 +68,7 @@
   position: absolute;
   inset-block: 0;
   inset-inline-start: 0;
-  inset-inline-end: 48px;
+  inset-inline-end: 52px;
   z-index: 10;
   display: flex;
   align-items: center;
@@ -77,7 +77,7 @@
   background: var(--color-panel-header);
   animation: fade-in 120ms ease-out;
 }
-@media (max-width: 767px) { .voice-bar { inset-inline-end: 52px; } }
+@media (max-width: 767px) { .voice-bar { inset-inline-end: 56px; } }
 /* A phone held in one hand: the timer and "slide to cancel" are all that fit, as in WhatsApp. */
 @media (max-width: 479px) { .voice-hold-live { display: none; } }
 .voice-bar-dot {

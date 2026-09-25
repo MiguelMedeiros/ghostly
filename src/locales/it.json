@@ -341,5 +341,53 @@
       "expired": "Questo invito è scaduto.",
       "unknown": "Qualcosa è andato storto durante la connessione."
     }
+  },
+  "composer": {
+    "attach": "Allega",
+    "payment": "Pagamento",
+    "identity": "Identità",
+    "identityShared": "{{count}} condivise in questa chat",
+    "document": "Documento",
+    "media": "Foto e video",
+    "camera": "Fotocamera",
+    "expressions": "Emoji e GIF",
+    "emoji": "Emoji",
+    "gif": "GIF",
+    "searchEmoji": "Cerca emoji",
+    "searchGifs": "Cerca GIF",
+    "noEmoji": "Nessuna emoji trovata",
+    "noGifs": "Nessuna GIF trovata",
+    "gifsUnavailable": "La ricerca di GIF non è disponibile. Riprova.",
+    "gifSource": "GifCities · Internet Archive",
+    "skinTone": "Tonalità della pelle",
+    "searchResults": "Risultati della ricerca",
+    "emojiCategories": "Categorie di emoji",
+    "gifCategories": "Categorie di GIF",
+    "takePhoto": "Scatta una foto",
+    "retake": "Rifai",
+    "sendPhoto": "Invia foto",
+    "closeCamera": "Chiudi fotocamera",
+    "cameraFailed": "Impossibile avviare la fotocamera.",
+    "category": {
+      "recent": "Recenti",
+      "people": "Faccine e persone",
+      "nature": "Animali e natura",
+      "foods": "Cibo e bevande",
+      "activity": "Attività",
+      "places": "Viaggi e luoghi",
+      "objects": "Oggetti",
+      "symbols": "Simboli",
+      "flags": "Bandiere"
+    },
+    "gifCategory": {
+      "ghosts": "Fantasmi",
+      "happy": "Felice",
+      "sad": "Triste",
+      "love": "Amore",
+      "yes": "Sì",
+      "party": "Festa",
+      "animals": "Animali",
+      "retro": "Web rétro"
+    }
   }
 }

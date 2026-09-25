@@ -59,7 +59,8 @@ describe("GroupPaymentComposer in a community", () => {
   it("the page offers ⚡ in a community", async () => {
     fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined);
     fakeEngine.update({ groups: [group()], edges, wallet: everyWallet() });
-    renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
+    const { user } = renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
+    await user.click(await screen.findByTestId("composer-more"));
     expect(await screen.findByTestId("payment-button")).toBeEnabled();
   });
 });

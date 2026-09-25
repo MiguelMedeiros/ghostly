@@ -11,7 +11,6 @@ import { useCardFlip } from "../deck/useCardFlip";
 import { AddIdentityDialog } from "./AddIdentityDialog";
 import { AddIdCardFace, IdCardFace, IdCardMark } from "./IdCardFace";
 import { idCard, idCardTone, machineLine, type IdCardContent } from "./idCard";
-import { IdentitiesIcon } from "./IdentitiesIcon";
 import { ProviderMark } from "./ProviderMark";
 import "./composer-identities.css";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
@@ -21,22 +20,10 @@ type Shared = NonNullable<LinkView["identities"]>["shared"][number];
 /** Shared in this chat, or about to be: what the card shows as shared. */
 const isOn = (s?: Shared) => !!s && s.status !== "withdrawn" && s.status !== "withdrawal-pending";
 
-const useLink = (peerKey: string) => useEngineState()?.links.find(l => l.peerPubKeyZ32 === peerKey);
-
-/** The composer's identity button: an ID card, with how many of this profile's identities this chat has. */
-export function ComposerIdentityButton({ peerKey, open, onToggle, buttonRef }: { peerKey: string; open: boolean; onToggle: () => void; buttonRef: RefObject<HTMLButtonElement | null> }) {
-  const count = useLink(peerKey)?.identities?.shared.filter(isOn).length ?? 0;
-  const label = count ? `Share identities in this chat, ${count} shared` : "Share identities in this chat";
-  return (
-    <button ref={buttonRef} type="button" onClick={onToggle} data-testid="composer-identities-button" data-count={count}
-      aria-expanded={open} aria-haspopup="dialog" aria-label={label} title={label}
-      className={`relative w-9 h-9 max-md:w-10 max-md:h-11 flex items-center justify-center rounded-full transition-colors cursor-pointer border-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
-        open ? "bg-accent/20 text-accent" : "bg-transparent text-text-secondary hover:text-text-primary hover:bg-surface-hover"}`}>
-      <IdentitiesIcon size={20} />
-      {count > 0 && <span aria-hidden="true" data-testid="composer-identities-count"
-        className="absolute -top-0.5 -right-0.5 max-md:top-0 max-md:right-0 min-w-4 h-4 px-1 rounded-full bg-accent text-on-accent text-[10px] font-semibold leading-4 text-center ring-2 ring-panel-header">{count}</span>}
-    </button>
-  );
+/** How many of this profile's identities the chat's contact sees: the + menu's Identity row says it. */
+export function useSharedIdentityCount(peerKey?: string): number {
+  const link = useEngineState()?.links.find(l => !!peerKey && l.peerPubKeyZ32 === peerKey);
+  return link?.identities?.shared.filter(isOn).length ?? 0;
 }
 
 /** The last card: a blank one that adds an identity. */

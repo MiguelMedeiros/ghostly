@@ -331,7 +331,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
         onKeyDown={onKeyDown}
         onContextMenu={(event) => event.preventDefault()}
         style={{ touchAction: "none" }}
-        className={`voice-record-button relative w-10 h-10 max-md:w-11 max-md:h-11 flex items-center justify-center rounded-full shrink-0 cursor-pointer select-none bg-accent text-on-accent hover:bg-accent-hover transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${unavailable ? "opacity-60" : ""}`}
+        className={`voice-record-button relative w-11 h-11 max-md:w-12 max-md:h-12 flex items-center justify-center rounded-full shrink-0 cursor-pointer select-none bg-accent text-on-accent hover:bg-accent-hover transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${unavailable ? "opacity-60" : ""}`}
       >
         {mode === "locked" ? (
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" /></svg>
