@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { WalletView } from "@ghostly/browser/shared/types";
 import { TEST_MINTS } from "@ghostly/browser/shared/mints";
 import { pageUnit, walletCards, type WalletRail } from "../../components/walletCardData";
+import { WALLET_RAILS } from "../../components/walletCardTypes";
 import { walletView } from "../fakeEngine";
 import { arkReady, barkReady, sparkReady, bitcoinSource, lightningSource, mint, REAL_MINT, TEST_MINT, usdtReady } from "./fixtures";
 
@@ -17,6 +18,8 @@ const pageCardOf = (rail: WalletRail, wallet: Partial<WalletView> = {}) => walle
 
 it("lists every wallet, in the deck's order", () => {
   expect(walletCards(walletView(), TEST_MINTS).map((c) => c.id)).toEqual(["cashu", "lightning", "arkade", "bark", "spark", "bitcoin", "fedimint", "usdt"]);
+  // The website's deck puts its cards in this order (website/components/home/WalletDeck.tsx).
+  expect(walletCards(walletView(), TEST_MINTS).map((c) => c.id)).toEqual(WALLET_RAILS);
 });
 
 describe("Cashu", () => {

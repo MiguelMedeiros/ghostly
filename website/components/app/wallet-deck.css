@@ -1,0 +1,48 @@
+/* Copied from src/components/wallet-deck.css by website/scripts/sync-app-deck.mjs. Edit the app's file, then run npm run sync:app-deck. */
+/* The wallet's cards (components/WalletDeck.tsx): the face of a payment card, on the wallet page, in the chat's deck
+   and on the front of the chat's flipping card. The deck around them (stack, track, lift, glow, arrows) is
+   deck/deck.css; wallet-cards.css sets each wallet's --card-rgb. */
+.wallet-deck-face{--ghost-eye:#141630;position:relative;display:grid;grid-template-rows:auto 1fr auto;grid-template-columns:1fr auto;justify-items:start;box-sizing:border-box;width:100%;height:100%;border-radius:clamp(12px,calc(var(--card-w) * .056),20px);padding:clamp(11px,calc(var(--card-w) * .056),20px) clamp(13px,calc(var(--card-w) * .061),22px);overflow:hidden;color:#fff;text-align:left;
+ background:radial-gradient(circle at 85% 10%,rgba(var(--card-rgb),.3),transparent 55%),linear-gradient(135deg,var(--from,#0f3b44),var(--to,#0b1f2a));border:1px solid rgba(var(--card-rgb),.35);box-shadow:0 30px 60px -30px rgba(0,0,0,.9);transition:border-color .4s}
+/* Each wallet's card colours, on whatever wears its class (the nearest one wins: a card's own over the deck's). */
+.wallet-card-cashu{--from:#0f3b44;--to:#0b1f2a}
+.wallet-card-lightning{--from:#4a3510;--to:#1f1a0e}
+.wallet-card-arkade{--from:#2a2d5c;--to:#141630}
+.wallet-card-bark{--from:#4d2519;--to:#20120e}
+.wallet-card-spark{--from:#3f3514;--to:#17140b}
+.wallet-card-usdt{--from:#0f4034;--to:#0a1f1a}
+.wallet-card-bitcoin{--from:#43250c;--to:#1d140b}
+.wallet-card-fedimint{--from:#35204f;--to:#170f25}
+.wallet-deck-card-glyph{grid-row:1;grid-column:1;color:rgb(var(--card-rgb));display:grid}
+.wallet-deck-card-glyph>svg,.wallet-deck-card-glyph-end>svg{width:clamp(20px,calc(var(--card-w) * .075),27px);height:auto}
+/* The status sits over the corner, out of the grid: a long one never narrows the name and balance below it. */
+.wallet-deck-card-status{position:absolute;top:clamp(11px,calc(var(--card-w) * .056),20px);right:clamp(13px,calc(var(--card-w) * .061),22px);max-width:62%;overflow:hidden;text-overflow:ellipsis;text-align:right;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(9px,calc(var(--card-w) * .031),11px);letter-spacing:.04em;color:rgb(var(--card-rgb));white-space:nowrap;padding-top:2px;transition:opacity .4s}
+.wallet-deck-card-glyph-end{grid-row:1;grid-column:2;justify-self:end;color:rgb(var(--card-rgb));display:none}
+.wallet-deck-card-ghost{position:absolute;right:16%;top:36%;width:clamp(30px,calc(var(--card-w) * .18),64px);color:var(--theme-accent);opacity:.3;pointer-events:none}
+.wallet-deck-card-text{grid-row:3;grid-column:1;display:grid;gap:2px;min-width:0;max-width:100%}
+.wallet-deck-card-name{font-size:clamp(16px,calc(var(--card-w) * .066),24px);font-weight:700;letter-spacing:-.01em;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wallet-deck-card-balance{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(11px,calc(var(--card-w) * .036),13px);letter-spacing:.04em;color:rgba(255,255,255,.88);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wallet-deck-card-detail{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(10px,calc(var(--card-w) * .031),11px);letter-spacing:.04em;color:rgba(255,255,255,.6);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wallet-deck-card-chip{grid-row:3;grid-column:2;align-self:end;justify-self:end;width:clamp(24px,calc(var(--card-w) * .1),36px);height:clamp(18px,calc(var(--card-w) * .075),27px);border-radius:6px;background:linear-gradient(135deg,rgba(255,255,255,.35),rgba(255,255,255,.08))}
+/* A card that cannot be used here says why, over its corner. */
+.wallet-deck-card[data-blocked=true] .wallet-deck-card-status{color:#fff;background:rgba(0,0,0,.45);border-radius:999px;padding:2px 8px;white-space:normal;text-align:right;max-width:70%}
+
+/* In the stack, the cards under the chosen one show their strip only: no status or ghost there, and a card after
+   the chosen one shows its mark on the trailing edge that shows. */
+.wallet-deck[data-mode=stack] .wallet-deck-card:not([data-active=true]) .wallet-deck-card-status{opacity:0}
+.wallet-deck[data-mode=stack] .wallet-deck-face[data-after=true] .wallet-deck-card-glyph-end{display:grid}
+.wallet-deck[data-mode=stack] .wallet-deck-card:not([data-active=true]) .wallet-deck-card-ghost{opacity:0}
+
+/* The card chooses what it shows by its own width (a container query on the face), wherever it is. Large (230px and
+   up): everything. Medium: no detail line. Small (under 180px): the mark, the name and the status; no balance, chip or
+   ghost. (A container query reads the face's content box, the card's width less its padding: 230px of card is
+   about 202px inside, 180px about 154px.) Text a size leaves out stays in the card's accessible name; every line is one line, cut with an ellipsis. */
+.wallet-deck-face{container:wallet-card/inline-size}
+@container wallet-card (width < 202px){
+ .wallet-deck-card-detail{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+}
+@container wallet-card (width < 154px){
+ .wallet-deck-card-balance{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+ .wallet-deck-card-chip,.wallet-deck-card-ghost{display:none}
+ .wallet-deck-card-text{grid-column:1/-1}
+}

@@ -1,3 +1,4 @@
+// Copied from src/components/WalletCards.tsx by website/scripts/sync-app-deck.mjs. Edit the app's file, then run npm run sync:app-deck.
 import type {WalletRail} from './walletCardTypes';
 /** The mark every wallet card wears: on the wallet page's deck, in the chat's and on a card's turned-over back. */
 import './wallet-cards.css';

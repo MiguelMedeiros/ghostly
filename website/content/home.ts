@@ -223,7 +223,6 @@ const en = {
   wallets: {
     title: "One wallet, many ways to pay.",
     lead: "Each payment method is its own card, with its own rules. Pick one to see what it does and how ready it is.",
-    hint: "Choose a card",
     testnet: "A Testnet switch moves every wallet to test networks at once (in development).",
     cards: [
       {
@@ -274,6 +273,22 @@ const en = {
         level: "development" as Level,
         body: "Plain on-chain bitcoin in a chat, through a BDK wallet or your own Bitcoin Core node.",
         limits: "Experimental. BDK on signet, Mutinynet or regtest only; Bitcoin Core needs the desktop app. On-chain payments are offered only inside an open paired session.",
+      },
+      {
+        id: "spark",
+        name: "Spark",
+        kind: "via Breez",
+        level: "development" as Level,
+        body: "Bitcoin on Spark, from one Spark wallet to another in a chat. Each request carries a Spark invoice made for it.",
+        limits: "Experimental. Testnet makes a regtest wallet by itself; Mainnet needs a Breez API key first. The same wallet can be your Lightning source too.",
+      },
+      {
+        id: "fedimint",
+        name: "Fedimint",
+        kind: "federation ecash",
+        level: "development" as Level,
+        body: "Ecash held by a federation of guardians instead of one mint. Join one by its invite, pay in a chat, or pay Lightning through its gateway.",
+        limits: "Experimental, test networks only: Mainnet makes no Fedimint wallet yet. None is joined by default; the guardians of the federation you join hold the backing sats.",
       },
     ],
   },
@@ -561,7 +576,6 @@ const ptBr: HomeCopy = {
   wallets: {
     title: "Uma carteira, muitas formas de pagar.",
     lead: "Cada método de pagamento é um cartão, com as próprias regras. Escolha um para ver o que ele faz e o quanto está pronto.",
-    hint: "Escolha um cartão",
     testnet: "Uma chave de Testnet leva todas as carteiras para redes de teste de uma vez (em desenvolvimento).",
     cards: [
       {
@@ -612,6 +626,22 @@ const ptBr: HomeCopy = {
         level: "development",
         body: "Bitcoin on-chain no chat, por uma carteira BDK ou pelo seu próprio nó Bitcoin Core.",
         limits: "Experimental. BDK só em signet, Mutinynet ou regtest; o Bitcoin Core exige o app desktop. Pagamentos on-chain só são oferecidos dentro de uma sessão pareada aberta.",
+      },
+      {
+        id: "spark",
+        name: "Spark",
+        kind: "via Breez",
+        level: "development",
+        body: "Bitcoin no Spark, de uma carteira Spark para outra numa conversa. Cada pedido leva uma fatura Spark feita para ele.",
+        limits: "Experimental. No Testnet ele cria sozinho uma carteira regtest; na Mainnet precisa antes de uma chave de API da Breez. A mesma carteira também pode ser a sua fonte Lightning.",
+      },
+      {
+        id: "fedimint",
+        name: "Fedimint",
+        kind: "ecash de federação",
+        level: "development",
+        body: "Ecash guardado por uma federação de guardiões em vez de um único mint. Entre numa pelo convite, pague numa conversa ou pague Lightning pelo gateway dela.",
+        limits: "Experimental, só em redes de teste: a Mainnet ainda não cria carteira Fedimint. Nenhuma vem por padrão; os guardiões da federação em que você entrar guardam os sats que dão lastro.",
       },
     ],
   },

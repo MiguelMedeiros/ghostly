@@ -46,7 +46,8 @@ const found = [];
 for (const entry of scanned) {
   for (const path of files(resolve(root, entry))) {
     const file = relative(root, path);
-    if (generated.has(file)) continue;
+    // components/app is the app's deck, copied by sync-app-deck.mjs: it renders the site's words, not its own.
+    if (generated.has(file) || file.startsWith("website/components/app/")) continue;
     readFileSync(path, "utf8")
       .split("\n")
       .forEach((line, i) => {
