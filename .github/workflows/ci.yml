@@ -267,7 +267,7 @@ jobs:
 
       - name: Leave Ghostly's own crates out of the saved Cargo cache
         id: prune
-        if: ${{ !cancelled() && steps.test.outcome == 'success' && steps.cargo-cache.outputs.cache-hit != 'true' && ((github.event_name == 'push' && github.ref == 'refs/heads/dev') || github.head_ref == 'mm/ci-speed') }}
+        if: ${{ !cancelled() && steps.test.outcome == 'success' && steps.cargo-cache.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
         run: |
           rm -rf target/debug/incremental
           find target/debug target/debug/deps target/debug/.fingerprint target/debug/build -maxdepth 1 -name '*ghostly*' -exec rm -rf {} +

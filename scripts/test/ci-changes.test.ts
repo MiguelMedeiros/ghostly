@@ -11,24 +11,29 @@ describe("the website gate", () => {
     for (const file of DECK) expect(covers(WEBSITE_INPUTS, `src/components/${file}`), `src/components/${file}`).toBe(true);
   });
 
-  it("covers every repository file the site's scripts name", () => {
+  it("covers every repository file and folder the site's scripts name", () => {
     // The site's own scripts (not capture/, a manual tool) read the repository by root-relative literals:
-    // sync-references.mjs's documents and excerpts, check-dashes.mjs's list. Any that names an existing file
-    // outside website/ is an input.
+    // sync-references.mjs's documents, folder and excerpts, check-dashes.mjs's list. Any that names an existing file
+    // or folder outside website/ is an input. The deck's folder, src/components, is read file by file (above).
     const dir = join(root, "website/scripts");
     const named = readdirSync(dir)
       .filter((f) => f.endsWith(".mjs"))
-      .flatMap((f) => [...readFileSync(join(dir, f), "utf8").matchAll(/["'`]([\w./-]+\.\w+)["'`]/g)].map((m) => m[1]))
-      .filter((p) => !p.startsWith(".") && !p.startsWith("/") && !p.startsWith("website/"))
-      .filter((p) => {
-        try {
-          return statSync(join(root, p)).isFile();
-        } catch {
-          return false;
-        }
-      });
-    expect(named).toEqual(expect.arrayContaining(["packages/core/src/invite.ts", "packages/core/src/pairedTransports.ts", "CONTRIBUTING.md"]));
-    for (const file of named) expect(covers(WEBSITE_INPUTS, file), file).toBe(true);
+      .flatMap((f) => [...readFileSync(join(dir, f), "utf8").matchAll(/["'`]([\w.-]+(?:\/[\w.-]+)*)["'`]/g)].map((m) => m[1]))
+      .filter((p) => p.includes("/") || p.endsWith(".md"))
+      .filter((p) => !p.startsWith(".") && !p.startsWith("website/") && p !== "src/components");
+    const kind = (p: string) => {
+      try {
+        return statSync(join(root, p)).isDirectory() ? "folder" : "file";
+      } catch {
+        return null;
+      }
+    };
+    const files = named.filter((p) => kind(p) === "file");
+    const folders = named.filter((p) => kind(p) === "folder");
+    expect(files).toEqual(expect.arrayContaining(["packages/core/src/invite.ts", "packages/core/src/pairedTransports.ts", "docs/PROTOCOL.md", "CONTRIBUTING.md"]));
+    expect(folders).toContain("docs/wisps");
+    for (const file of files) expect(covers(WEBSITE_INPUTS, file), file).toBe(true);
+    for (const folder of folders) expect(covers(WEBSITE_INPUTS, `${folder}/any.md`), `${folder}/`).toBe(true);
   });
 });
 
@@ -43,6 +48,10 @@ describe("plan", () => {
   it("a site change runs the website and skips the Desktop jobs", () => {
     expect(plan(["website/app/page.tsx", "website/e2e/bubbles.spec.ts"], ready)).toMatchObject({ website: true, app: false });
     expect(plan(["docs/wisps/101-webrtc.md"], ready)).toMatchObject({ website: true, app: false });
+  });
+
+  it("a document the site does not publish runs neither", () => {
+    expect(plan(["docs/TESTING.md"], ready)).toMatchObject({ website: false, app: false });
   });
 
   it("an app file the site copies or quotes runs both", () => {

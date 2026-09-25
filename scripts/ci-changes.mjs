@@ -18,12 +18,17 @@ export const RUST = /^(src-tauri\/|cli\/|native-transports\/|Cargo\.(toml|lock)$
 
 /**
  * Everything the Website jobs (checks and browser checks) read: a directory ends in `/`. The site builds from
- * website/, docs/ and the files below (website/Dockerfile.dockerignore); the deck check also reads the app's deck.
+ * website/ and the files below (a subset of what website/Dockerfile.dockerignore lets in); the deck check also reads
+ * the app's deck.
  */
 export const WEBSITE_INPUTS = [
   "website/",
-  "docs/",
   // Published under /reference by website/scripts/sync-references.mjs, and scanned by check-dashes.mjs.
+  "docs/wisps/",
+  "docs/PROTOCOL.md",
+  "docs/SDK.md",
+  "docs/USDT-INTEGRATION.md",
+  "docs/DHT-DELIVERY.md",
   "CONTRIBUTING.md",
   "SECURITY.md",
   // Quoted on /developers: sync-references.mjs's excerpt().
