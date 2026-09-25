@@ -71,14 +71,6 @@ function load(name: SoundName): Promise<AudioBuffer> | undefined {
   return decoded.get(name);
 }
 
-/**
- * Whether the sounds of one chat (its session id) are off. Per-chat mute is not in the app yet: when it lands,
- * this reads it, and a sound played for one chat asks here first.
- */
-export function chatSoundsMuted(_chat: string): boolean {
-  return false;
-}
-
 /** Autoplay unlock is attempted only on an actual user gesture. */
 export function installAudioGestures(): () => void {
   if (listening) return () => {};

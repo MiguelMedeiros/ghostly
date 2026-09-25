@@ -125,3 +125,23 @@ test("the connected moment is heard once on each side, together with the scene g
     expect(Math.abs(heard[0].at - liveAt!)).toBeLessThan(100);
   }
 });
+
+test("a chat muted before its contact joins goes live in silence; the contact, not muted, hears it", { tag: ["@feature:chat.paired.pairing-progress", "@feature:app.attention.sounds", "@feature:chats.mute"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("sound-muted-alice"), peer("sound-muted-bob")]);
+  await Promise.all([recordSounds(alice.page), recordSounds(bob.page)]);
+  await alice.page.getByTitle("New Chat").click();
+  await expect(alice.page.getByTestId("pairing-scene")).toHaveAttribute("data-stage", "waiting");
+  await alice.page.getByTestId("chat-options").click();
+  await alice.page.getByTestId("chat-mute-open").click();
+  await alice.page.getByTestId("mute-forever").click();
+  await expect(alice.page.getByTestId("chat-muted")).toBeVisible();
+  const invite = await copyInvite(alice.page);
+  await bob.page.getByRole("button", { name: "Join chat", exact: true }).first().click();
+  await pasteInvite(bob.page, invite);
+  for (const { page } of [alice, bob]) await expect(page.getByTestId("pairing-scene")).toHaveCount(0, { timeout: 15_000 });
+  const [muted, heard] = await Promise.all([sounds(alice.page), sounds(bob.page)]);
+  // The moment still shows on the muted side; only its sound is left out.
+  expect(muted.liveAt).not.toBeNull();
+  expect(muted.heard).toEqual([]);
+  expect(heard.heard).toHaveLength(1);
+});

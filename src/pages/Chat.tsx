@@ -29,7 +29,7 @@ import { IncomingCallNotification } from "../components/IncomingCallNotification
 import { contactStatus } from "../lib/contactStatus";
 import { PeerServices } from "../components/PeerServices";
 import { formatFileSize } from "../lib/format";
-import { chatSoundsMuted, playSound, startRinging } from "../lib/sounds";
+import { playSound, startRinging } from "../lib/sounds";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import {
   isSessionPinned,
@@ -49,7 +49,7 @@ import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { TransportChip, TransportMenu } from "../components/TransportMenu";
 import { MuteMenu, MuteMenuItem, MutedBell } from "../components/ChatMute";
-import { callRings } from "../lib/chatMute";
+import { MUTE_SILENCES, callRings, useChatMute } from "../lib/chatMute";
 import { TransportIcon } from "../components/TransportIcon";
 import { useChatLink } from "../hooks/useChatLink";
 import { TransportLine } from "../components/TransportTimeline";
@@ -188,12 +188,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   // A chat made here (it has an invite to give) is the inviter's side of the pairing; read once, before the
   // invite code is forgotten when the contact shows up.
   const createdHere = useMemo(() => !!getInviteCode(sessionId), [sessionId]);
+  const muted = useChatMute(sessionId) !== undefined;
   const pairing = usePairingProgress(paired ? session?.peerPubKeyB64 : undefined, {
     inviter: createdHere,
     // A DHT-only chat has no live link to wait for: its messages go over the DHT from the start.
     enabled: paired && (deliveryPeer?.deliveryMode ?? session?.deliveryMode) !== "dht",
     createdAt: session?.createdAt,
-    muted: chatSoundsMuted(sessionId),
+    muted: muted && MUTE_SILENCES.connected,
   });
   const pairingSceneId = `pairing-${sessionId}`;
   // Once the contact knocked, the invite has done its job.
