@@ -108,6 +108,11 @@ export class TransportLog {
     return false;
   }
 
+  /** A switch to `target` could not connect, and the chat stayed on the transport it was on. */
+  switchFailed(target: PairedTransport, reason: string, now: number): boolean {
+    return this.failed(target, reason, this.snapshot?.live ? this.snapshot.transport : undefined, now);
+  }
+
   /** A round trip measured on the current transport: the line that started it shows it. */
   rtt(ms: number): boolean {
     const last = this.entries.at(-1);

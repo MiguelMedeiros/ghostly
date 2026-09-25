@@ -57,6 +57,11 @@ const AUTO_CONNECT_MAX_RETRY_MS = 3 * 60_000;
  * older apps drop the frame and must not be cut off for it.
  */
 export const LIVENESS_PING_MS = 15_000;
+/**
+ * After a live switch the old channel stays open this long, unread, before it is closed: the contact swaps on its own
+ * side a round trip later, and seeing its current channel close first would make it drop the whole session.
+ */
+export const SWITCH_RETIRE_MS = 3_000;
 export const LIVENESS_MISSED_PINGS = 3;
 
 export interface IncomingMessage {
@@ -80,6 +85,11 @@ export interface GhostLinkEvents {
    * Nothing new on the wire: read from the `paired-policy` it already sends.
    */
   onPeerTransportChoice?(transport: PairedTransport): void;
+  /**
+   * A switch to `target` could not connect and the session stayed where it was (both allow fallback). `reason` is
+   * known on the side that dialled; the other side learns only that it did not happen.
+   */
+  onTransportSwitchFailed?(target: PairedTransport, reason?: string): void;
   /** A live transport switch completed: the session now runs over `to`, and nothing reconnected. */
   onTransportSwitched?(from: PairedTransport | undefined, to: PairedTransport): void;
   /** Round trip of a liveness ping on the open session, in milliseconds. */
@@ -180,6 +190,8 @@ export class GhostLink {
   private readonly switcher: TransportSwitch;
   private candidate: { channel: FrameChannel; session: PairedSession; binding?: NativeBinding; reject(error: Error): void } | null = null;
   private candidateEpoch = 0;
+  /** Channels a switch replaced, closed after `SWITCH_RETIRE_MS` (or at once on disconnect). */
+  private retiring = new Map<FrameChannel, { timer: ReturnType<typeof setTimeout>; close(): void }>();
   private rtcCandidateWaiter: { resolve(): void; reject(error: Error): void } | null = null;
   private transitionTarget?: PairedTransport;
   private transitionError?: string;
@@ -342,6 +354,7 @@ export class GhostLink {
       state: (error, target) => { this.transitionError = error; this.transitionTarget = target; this.emitPairingState(); },
       prepare: (plan, dial) => { if (dial) void this.prepareSwitch(plan); },
       cancel: () => this.cancelCandidate(),
+      kept: (target, reason) => options.events?.onTransportSwitchFailed?.(target, reason),
     });
   }
 
@@ -507,7 +520,18 @@ export class GhostLink {
     });
   }
 
+  /** Closes what a switch replaced once the contact has had time to move too. */
+  private retire(old: FrameChannel, also: () => void): void {
+    if (this.retiring.has(old)) return;
+    const close = () => { this.retiring.delete(old); old.close(); also(); };
+    this.retiring.set(old, { close, timer: setTimeout(close, SWITCH_RETIRE_MS) });
+  }
+  private closeRetired(): void {
+    for (const { timer, close } of [...this.retiring.values()]) { clearTimeout(timer); close(); }
+  }
+
   disconnect(): void {
+    this.closeRetired();
     this.switcher.stop(); this.cancelCandidate();
     this.transitionTarget = this.transitionError = undefined;
     this.connectionEpoch++;
@@ -959,7 +983,9 @@ export class GhostLink {
     let lastError: unknown;
     for (const transport of plan.choices) {
       if (epoch !== this.candidateEpoch || this.switcher.pending !== plan || this.stopped) return;
-      if (this.paired?.state.transport === transport) { this.switcher.keep(); return; }
+      if (this.paired?.state.transport === transport) {
+        this.switcher.keep(lastError instanceof Error ? lastError.message : undefined); return;
+      }
       try {
         await new Promise<void>((resolve, reject) => {
           let active = true;
@@ -1049,8 +1075,9 @@ export class GhostLink {
             if (files && paired.supports("files/2")) { files.rebind(channel); carried = files; } else files?.closeAll();
             this.pairedHttp?.close(); this.pairedHttp = null;
             this.channel = channel; this.paired = paired; this.activeBinding = binding;
-            oldPaired?.stop(); oldChannel?.close();
-            if (!oldBinding && binding) this.dataLink.close();
+            oldPaired?.stop();
+            // Off WebRTC: its peer connection goes with the channel, unless WebRTC carries the chat again by then.
+            if (oldChannel) this.retire(oldChannel, () => { if (!oldBinding && this.activeBinding) this.dataLink.close(); });
             this.session.setDataLinkOpen(true);
             switched = { from, to: paired.state.transport! };
           }

@@ -1296,7 +1296,9 @@ export class GhostlyNode implements EngineImplementation {
     const patch = { preferredTransport: undefined, transportFallback: undefined };
     await db.patchLink(linkId, patch);
     live.stored = { ...live.stored, ...patch }; this.emitState();
-    await live.link.setTransportPreference("webrtc/1", true, true);
+    // The app's rule: WebRTC first where there is one (Linux WebKitGTK has none), fallback on.
+    const available = live.link.availableTransports;
+    await live.link.setTransportPreference(available.includes("webrtc/1") ? "webrtc/1" : available[0], true, true);
   }
 
   /** The chat's connection story, for paired chats (not group edges). */
@@ -1987,6 +1989,10 @@ export class GhostlyNode implements EngineImplementation {
           if (stored.profile && !stored.group) void this.outboxFor(linkId).flush({ reopened: true }).catch(() => {});
           void this.desk.replay(linkId).catch(() => {});
           this.observeTransport(linkId);
+        },
+        onTransportSwitchFailed: (target, reason) => {
+          const log = this.transportLogOf(live);
+          if (log?.switchFailed(target, reason ?? "It did not connect", Date.now())) this.saveTransportLog(live, log);
         },
         onRtt: ms => { const log = this.transportLogOf(live); if (log?.rtt(ms)) this.saveTransportLog(live, log); else this.emitState(); },
         onDiscoveryError: error => { live.discoveryError = error ?? undefined; this.emitState(); },
