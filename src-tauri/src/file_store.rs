@@ -374,7 +374,7 @@ pub async fn file_bytes_save<R: tauri::Runtime>(
 
 #[cfg(test)]
 mod tests {
-    // covers: files.native-storage
+    // covers: files.storage
     use super::*;
 
     fn store() -> (FileStore, PathBuf) {
