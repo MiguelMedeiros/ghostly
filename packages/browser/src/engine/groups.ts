@@ -721,8 +721,13 @@ export class Groups {
   }
 
   /** `member`: whom it is about, so the apps can name them as they are known now, not as they were then. */
+  /** A line in the group's history; lines at the same time (two members gone in one change) get distinct ones, see `Communities.event`. */
   private async event(groupId: string, event: GroupEvent, text: string, timestamp: number, epoch: number, member?: string): Promise<void> {
+    const last = this.lastEventAt.get(groupId) ?? 0;
+    if (timestamp <= last) timestamp = last + 1;
+    this.lastEventAt.set(groupId, Math.max(last, timestamp));
     await this.host.storeMessage({ linkId: MESSAGE_LINK(groupId), id: `event:${epoch}:${event}:${timestamp}`, text, sender: "peer", event, member, timestamp, via: "datalink" });
   }
+  private readonly lastEventAt = new Map<string, number>();
 }
 

@@ -63,4 +63,24 @@ describe("group picture on headless community engines", { timeout: 120_000 }, ()
     await again.load();
     expect(again.views().find(v => v.id === id)?.picture).toBe(RED);
   });
+
+  it("two changes within one engine tick each leave a line, for the admin and for every member", async () => {
+    // The engine's clock is its last tick's (once a second): lines named by it alone were one line for
+    // both changes, and the second was dropped as already there (e2e/web/group-picture.spec.ts, on a fast relay).
+    const world = new CommunityWorld();
+    const alice = world.add("alice"), bob = world.add("bob");
+    const id = await alice.groups.create("Plaza");
+    const link = await alice.groups.enableLink(id);
+    await bob.groups.joinByLink(`https://app.ghostly.tools/#/join/${link}`);
+    await world.until(() => world.member(bob, id), 10 * 60_000);
+    await world.run(20_000);
+
+    await alice.groups.setPicture(id, RED);
+    await alice.groups.setPicture(id, null);
+    expect(pictureLines(world, alice, id)).toEqual(["You changed the group's picture", "You removed the group's picture"]);
+    await world.until(() => pictureLines(world, bob, id).length === 2, 60_000);
+    const lines = pictureLines(world, bob, id);
+    expect(lines[0]).toMatch(/changed the group's picture$/);
+    expect(lines[1]).toMatch(/removed the group's picture$/);
+  });
 });
