@@ -242,9 +242,9 @@ storing the outcome are one transaction.
   `add-identity-subject`, `add-identity-validity`, `add-identity-field-<name>`, `add-identity-start`, then
   `add-identity-copy-<step>`, `add-identity-paste`, `add-identity-finish`, `add-identity-error`; `add-identity-advanced` unfolds the providers marked `advanced`, and a provider with `subject.preview` shows `add-identity-preview` (`data-status`, one `add-identity-preview-<fact>` per fact) or `add-identity-preview-error` before its signers; an approval elsewhere
   `approval` with `approval-open`, `approval-qr`, `approval-cancel`; saved rows `identity-proof`, removal
-  `identity-proof-remove`, `identity-proof-remove-confirm`, `identity-proof-remove-anyway`, `identity-proof-remove-notes`. Chat: Options → `chat-identities-open` → `chat-identities` with `chat-identity-share`,
+  `identity-proof-remove`, `identity-proof-remove-confirm`, `identity-proof-remove-anyway`, `identity-proof-remove-notes`. Chat: the header's marks `chat-identity-badges` (the contact's Ghostly mark `chat-identity-ghostly-mark` when they shared no proof) → `chat-identities` with `chat-identity-share`,
   `chat-identity-withdraw`, `chat-identity-mine-status`, `chat-identity-received` (`data-status`),
-  `chat-identity-recheck`, `chat-identity-lookup`; header `chat-identity-badges`.
+  `chat-identity-recheck`, `chat-identity-lookup`; each proof's mark in the header `chat-identity-badge`.
 - `e2e/web/atproto-proofs.spec.ts` goes through the real OAuth pages of a local PDS and PLC directory
   (e2e/infra's `atproto` service, `e2e/support/atproto.ts`), gated on `E2E_ATPROTO_PDS_URL`.
 - Real services: gate on `GHOSTLY_<NAME>_LIVE=1`, skip otherwise; never a person's real account or key.

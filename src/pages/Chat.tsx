@@ -526,12 +526,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                   {t("chat.menu.hold")}
                 </MenuItem>
               )}
-              {paired && (
-                <MenuItem testId="chat-identities-open" onClick={() => { setShowIdentities(true); closeMenu(); }}
-                  icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" /><path d="m9 12 2 2 4-4" /></svg>}>
-                  {t("chat.menu.identities")}
-                </MenuItem>
-              )}
               {platform && platform.getPeer(params.peerPubKeyB64) && (
                 <MenuItem testId="chat-services-open" onClick={() => { setShowServices(true); closeMenu(); }}
                   icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>}>
