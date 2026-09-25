@@ -268,6 +268,24 @@ export const transport: Block = {
   },
 };
 
+/* ---------- calls ---------- */
+
+/** The chat calls over its live session (`calls/1`): A rings, B answers, the call connects, A hangs up. */
+export const calls: Block = {
+  id: "calls",
+  run: async ({ a, b }) => {
+    for (const p of [a, b]) {
+      await openChat(p);
+      await expect(p.page.getByTestId("call-audio")).toBeEnabled({ timeout: LIVE_AGAIN_MS });
+    }
+    await a.page.getByTestId("call-audio").click();
+    await b.page.getByTitle("Accept audio call").click();
+    for (const p of [a, b]) await expect(p.page.getByTestId("call-window").getByText(/^\d{1,2}:\d{2}$/)).toBeVisible();
+    await a.page.getByTitle("End call").click();
+    for (const p of [a, b]) await expect(p.page.getByTestId("call-window")).toHaveCount(0);
+  },
+};
+
 /* ---------- files ---------- */
 
 export const files: Block = {
@@ -703,7 +721,7 @@ export const restore: Block = {
 
 /* ---------- the scenario ---------- */
 
-const BLOCKS = new Map([identityBefore, pair, talk, delivery, transport, files, identity, payments, group, restore].map((b) => [b.id, b]));
+const BLOCKS = new Map([identityBefore, pair, talk, delivery, transport, calls, files, identity, payments, group, restore].map((b) => [b.id, b]));
 
 /** How the browser clients act each step out. */
 export const BROWSER_BLOCKS: ReadonlyMap<string, (w: World) => Promise<void>> = new Map([...BLOCKS].map(([id, b]) => [id, b.run]));

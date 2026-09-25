@@ -97,6 +97,15 @@ export const PLAN: readonly Step[] = [
     requires: (c) => (c.delivery === "store-forward" ? ["s3"] : []),
   },
   {
+    id: "calls",
+    title: "a call in the chat: A rings, B answers, A hangs up; where a side cannot call, its button says why",
+    // Before the transport step, which a Linux Desktop pair cannot pass (no WebRTC to pair live with).
+    applies: always,
+    // A Linux Desktop (WebKitGTK) has no WebRTC, so no call media: its buttons say so, and so do its contact's.
+    features: (c) => (withDesktop(c) ? ["calls.paired.live-only"] : ["calls.paired", "calls.paired.negotiate", "calls.audio"]),
+    requires: none,
+  },
+  {
     id: "transport",
     title: "the transport the pair asked for, and what the clients offer",
     applies: always,

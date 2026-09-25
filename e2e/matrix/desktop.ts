@@ -127,4 +127,31 @@ async function transport({ a, b, combo }: DesktopWorld): Promise<void> {
   if (want.settles) for (const p of [a, b]) await connected(p, want.settles);
 }
 
-export const DESKTOP_BLOCKS: ReadonlyMap<string, (w: DesktopWorld) => Promise<void>> = new Map(Object.entries({ pair, talk, delivery, transport }));
+/**
+ * Calls in the chat (`calls/1`). Call media is a WebRTC connection of its own, whatever carries the chat, so a
+ * client without WebRTC (Desktop on Linux: WebKitGTK) cannot call: its buttons say so, and a live contact's say
+ * the contact cannot take calls. Where both sides can, a call is placed, answered and ended.
+ */
+async function calls({ a, b }: DesktopWorld): Promise<void> {
+  for (const p of [a, b]) await p.go(p.chatHash!);
+  const rtc = new Map<Person, boolean>();
+  for (const p of [a, b]) rtc.set(p, (await p.callButton()).rtc);
+  const reason = async (p: Person, other: Person): Promise<string | null> => {
+    if (!rtc.get(p)) return "Calls are not available in this app";
+    if (!/Connected ·/.test(await p.connection())) return "Calls need a live connection";
+    return rtc.get(other) ? null : "Your contact's app cannot take calls";
+  };
+  for (const [p, other] of [[a, b], [b, a]] as const) {
+    await expect.poll(async () => {
+      const [button, want] = [await p.callButton(), await reason(p, other)];
+      return button.title === (want ?? "Audio call") && button.disabled === !!want;
+    }, { timeout: 60_000, message: `${p.name}'s call button says why it is off, or is on` }).toBe(true);
+  }
+  if (await reason(a, b) || await reason(b, a)) return;
+  await a.press("Audio call");
+  await b.press("Accept audio call");
+  await b.press("End call");
+  await expect.poll(async () => (await a.snapshot()).includes("Audio call ended"), { timeout: 60_000 }).toBe(true);
+}
+
+export const DESKTOP_BLOCKS: ReadonlyMap<string, (w: DesktopWorld) => Promise<void>> = new Map(Object.entries({ pair, talk, delivery, transport, calls }));

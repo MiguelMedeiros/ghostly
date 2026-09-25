@@ -552,7 +552,7 @@
     "title": "WISP 401: Chat Session",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "The layer-1 session of every new chat (paired-chat/1): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT and automatic upgrade (decided 2026-09-25; being implemented); calls planned.",
+    "implementation": "The layer-1 session of every new chat (paired-chat/1): WebRTC, and native Iroh/HyperDHT where supported. First contact on the DHT and automatic upgrade (decided 2026-09-25; being implemented); calls (calls/1) and shared apps (services/1) on the live session.",
     "documentKind": "Profile",
     "dependencies": [
       "400-chat.md",
@@ -678,7 +678,7 @@
     "title": "WISP 600: Voice and Video",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "Existing 1:1 calls and screen sharing in compatibility chats (Ghostly 0.4 contacts); calls in every chat being implemented",
+    "implementation": "1:1 calls and screen sharing in every chat: compatibility chats (call) and the chat session (calls/1, live only)",
     "dependencies": [
       "03-capabilities.md",
       "100-transports.md"
@@ -694,7 +694,7 @@
     "title": "WISP 601: WebRTC Media",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "Compatibility chats (Ghostly 0.4 contacts); capture varies by platform; not yet in the chat session of new chats (being implemented).",
+    "implementation": "Compatibility chats (call) and the chat session of every new chat (calls/1); capture varies by platform.",
     "documentKind": "Profile",
     "dependencies": [
       "600-media.md"
@@ -728,7 +728,7 @@
     "title": "WISP 701: HTTP Local Service Profile",
     "status": "Draft",
     "updated": "2026-09-25",
-    "implementation": "Desktop/extension hosting in every chat: data-link frames in compatibility chats, the same frames inside ph frames in the chat session; web viewer where supported.",
+    "implementation": "Desktop/extension hosting in every chat: data-link frames in compatibility chats, the same frames inside ph frames in the chat session (services/1); web viewer where supported.",
     "documentKind": "Profile",
     "dependencies": [
       "700-local-services.md"

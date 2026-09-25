@@ -1,6 +1,6 @@
 # Files and sats in the chat session
 
-`paired-chat/1` now negotiates `files/2` and `payments/1` in its authenticated offer. Both endpoints must advertise support. Old text-only endpoints still pair and chat; new actions stay unavailable with them. Calls, hosted HTTP, external proofs and identities remain outside this change. Pair confirmation, pins, bootstrap and transport preferences are unchanged.
+`paired-chat/1` now negotiates `files/2` and `payments/1` in its authenticated offer. Both endpoints must advertise support. Old text-only endpoints still pair and chat; new actions stay unavailable with them. External proofs and identities remain outside this change. Calls (`calls/1`) and hosted HTTP (`services/1`) came later, announced after the handshake in a `paired-capabilities` frame ([401](401-paired-chat.md#calls-and-shared-apps)), since the offer's 16 entries are full for apps before 0.5. Pair confirmation, pins, bootstrap and transport preferences are unchanged.
 
 ## Files
 
