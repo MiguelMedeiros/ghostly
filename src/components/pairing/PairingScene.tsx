@@ -12,7 +12,7 @@ type Mood = "calm" | "glance" | "happy" | "sad";
 
 function Eyes({ mood }: { mood: Mood }) {
   if (mood === "happy") return <g className="ps-eyes" fill="none" strokeWidth="4" strokeLinecap="round"><path d="M22 38 Q29 30 36 38" /><path d="M44 38 Q51 30 58 38" /></g>;
-  if (mood === "sad") return <g className="ps-eyes" fill="none" strokeWidth="3.5" strokeLinecap="round"><path d="M22 34 L35 38" /><path d="M45 38 L58 34" /><path d="M32 52 Q40 46 48 52" /></g>;
+  if (mood === "sad") return <g className="ps-eyes"><circle cx="29" cy="40" r="4.5" /><circle cx="51" cy="40" r="4.5" /><path d="M20 30 L33 27 M47 27 L60 30" fill="none" strokeWidth="3" strokeLinecap="round" /><path d="M32 55 Q40 49 48 55" fill="none" strokeWidth="3" strokeLinecap="round" /></g>;
   const dx = mood === "glance" ? 3 : 0;
   return <g className="ps-eyes ps-blink"><circle cx={29 + dx} cy="36" r="6" /><circle cx={51 + dx} cy="36" r="6" /><circle className="ps-shine" cx={31 + dx} cy="34" r="2" /><circle className="ps-shine" cx={53 + dx} cy="34" r="2" /></g>;
 }
@@ -143,12 +143,13 @@ export function PairingScene({ progress, contact, retry, retrying, retryError, i
       <p id={titleId} className="ps-label" data-testid="pairing-stage-label">{label}</p>
       {ticking && <p className="ps-time" data-testid="pairing-elapsed"><time dateTime={`PT${Math.floor(inStage / 1000)}S`} aria-label={t("pairing.elapsed", { time: formatElapsed(inStage) })}>{formatElapsed(inStage)}</time>{progress.attempt > 1 && <span> · {t("pairing.attempt", { n: progress.attempt })}</span>}</p>}
       {slow && <p className="ps-slow" data-testid="pairing-slow">{words.slow(stage)}</p>}
+      {slow && progress.detail && <p className="ps-slow ps-detail" data-testid="pairing-detail">{progress.detail}</p>}
       {stage === "live" && <p className="ps-slow">{t("pairing.sayHello")}</p>}
       {reason && <div role="alert" className="ps-failure" data-testid="pairing-failure">
         <p>{words.reason(reason)}</p>
         {progress.detail && <p className="ps-detail">{progress.detail}</p>}
         {progress.retryable ? <button type="button" className="ps-retry" data-testid="pairing-retry" disabled={retrying || !progress.linkId} onClick={retry}>{retrying ? t("pairing.retrying") : t("pairing.retry")}</button>
-          : <p className="ps-detail">{t("pairing.newInvite")}</p>}
+          : reason !== "offline" && <p className="ps-detail">{t("pairing.newInvite")}</p>}
         {retryError && <p className="ps-detail">{retryError}</p>}
       </div>}
     </div>

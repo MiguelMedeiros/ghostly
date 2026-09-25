@@ -59,15 +59,15 @@ describe("the stage, read off today's link fields", () => {
     expect(deriveStage(link && linkView(link), role, true).stage).toBe(stage);
   });
 
-  it("fails with a reason: offline, a pairing error, a key that changed, an invite that could not be published", () => {
-    expect(deriveStage(linkView(live), "joiner", false)).toMatchObject({ stage: "failed", reason: "offline", retryable: true });
+  it("fails with a reason: offline, a pairing error, a key that changed", () => {
+    expect(deriveStage(linkView(live), "joiner", false)).toMatchObject({ stage: "failed", reason: "offline", retryable: false });
     expect(deriveStage(linkView({ ...knocked, pairing: pairing({ status: "error", error: "ICE failed" }) }), "joiner", true))
       .toMatchObject({ stage: "failed", reason: "transport", retryable: true, detail: "ICE failed" });
     expect(deriveStage(linkView({ ...knocked, pairing: pairing({ status: "confirm", keyMismatch: true }) }), "joiner", true))
       .toMatchObject({ stage: "failed", reason: "key-mismatch", retryable: false });
+    // Discovery errors are slow stages, not failures: the engine retries discovery by itself.
     expect(deriveStage(linkView({ ...published, discoveryError: "Could not publish discovery: relay down" }), "inviter", true))
-      .toMatchObject({ stage: "failed", reason: "publish", detail: "Could not publish discovery: relay down" });
-    // A read error on the joiner's side is a slow lookup, not a failure: discovery retries by itself.
+      .toMatchObject({ stage: "publishing", detail: "Could not publish discovery: relay down" });
     expect(deriveStage(linkView({ ...published, discoveryError: "Could not read discovery: timeout" }), "joiner", true))
       .toMatchObject({ stage: "resolving", detail: "Could not read discovery: timeout" });
   });
@@ -121,6 +121,15 @@ describe("the inviter's scene", () => {
     expect(screen.getByTestId("pairing-elapsed")).toHaveTextContent(/^2:0\d$/);
     expect(screen.getByTestId("pairing-slow")).toHaveTextContent("Your contact has not opened the invite yet");
     expect(screen.getByTestId("pairing-announcement")).toHaveTextContent("Your contact has not opened the invite yet");
+  });
+
+  it("an invite the relays refuse is a slow publish with the relay's error, not a failure", () => {
+    const { engine } = renderApp(<Pairing inviter />);
+    show({ ...published, createdAt: Date.now() - 9_000, discoveryError: "Could not publish discovery: 429" }, engine);
+    expect(label()).toBe("Putting your invite on the network…");
+    expect(screen.getByTestId("pairing-slow")).toHaveTextContent("Still publishing your invite.");
+    expect(screen.getByTestId("pairing-detail")).toHaveTextContent("Could not publish discovery: 429");
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("is not a slow wait a few seconds in", () => {
@@ -235,6 +244,15 @@ describe("the engine's own report (the pairing-progress contract)", () => {
     show(report({ stage: "failed", reason: "expired", retryable: false }), engine);
     expect(screen.getByRole("alert")).toHaveTextContent("This invite has expired.");
     expect(screen.getByRole("alert")).toHaveTextContent("Ask your contact for a new invite.");
+    expect(screen.queryByTestId("pairing-retry")).toBeNull();
+  });
+
+  it("offline: says so, with neither Retry nor a new invite to ask for", () => {
+    const { engine } = renderApp(<Pairing inviter />);
+    act(() => engine.update({ settings: { online: false } }));
+    show(published, engine);
+    expect(screen.getByRole("alert")).toHaveTextContent("You are offline. Pairing goes on once you are back online.");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("new invite");
     expect(screen.queryByTestId("pairing-retry")).toBeNull();
   });
 

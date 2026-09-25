@@ -322,7 +322,7 @@
       "publish": "Could not put your invite on the network. Check your connection.",
       "resolve": "Could not find the invite on the network. It may be old or mistyped.",
       "timeout": "Your contact's app did not answer in time.",
-      "offline": "You are offline.",
+      "offline": "You are offline. Pairing goes on once you are back online.",
       "transport": "No direct link could be opened between your devices.",
       "rejected": "Your contact's app refused the connection.",
       "keyMismatch": "This contact's key does not match the saved one. Nothing was accepted.",

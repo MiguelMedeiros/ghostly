@@ -322,7 +322,7 @@
       "publish": "No se pudo publicar tu invitación en la red. Revisa tu conexión.",
       "resolve": "No se encontró la invitación en la red. Puede ser antigua o estar mal copiada.",
       "timeout": "La app de tu contacto no respondió a tiempo.",
-      "offline": "No tienes conexión.",
+      "offline": "No tienes conexión. El emparejamiento sigue cuando vuelvas a estar en línea.",
       "transport": "No se pudo abrir un enlace directo entre tus dispositivos.",
       "rejected": "La app de tu contacto rechazó la conexión.",
       "keyMismatch": "La clave de este contacto no coincide con la guardada. No se aceptó nada.",

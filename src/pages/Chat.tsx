@@ -336,6 +336,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // A chat still pairing opens on its scene, not on the bottom of an empty history.
+  const sceneOn = pairing.show;
+  useEffect(() => {
+    if (sceneOn && messages.length === 0) document.getElementById(pairingSceneId)?.scrollIntoView({ block: "nearest" });
+  }, [sceneOn, messages.length, pairingSceneId]);
+
   // Only what is on screen has been read; a chat kept alive by a call has not.
   useEffect(() => {
     if (visible) markSessionAsRead(sessionId);
@@ -455,7 +461,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 <span role="img" aria-label={statusLabel} data-testid="contact-status"
                   className={`h-2 w-2 shrink-0 rounded-full ${statusLabel === "Connected" ? `bg-green-500 ${pollCountdown.isPolling ? "contact-fetch-pulse" : ""}` : /issue|unavailable|mismatch/.test(statusLabel) ? "bg-danger" : "bg-text-muted"}`} />
                 {showKeySubtitle && (
-                  <span className="text-text-muted/60 text-xs max-md:text-[10px] font-mono whitespace-nowrap">
+                  <span className={`text-text-muted/60 text-xs max-md:text-[10px] font-mono whitespace-nowrap ${pairing.show ? "max-md:hidden" : ""}`}>
                     {truncatedPeerKey}
                   </span>
                 )}
@@ -469,7 +475,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 </div>
               )}
             </div>
-              {pairing.show && pairing.progress && (
+              {/* Until live: the "connected" moment belongs to the scene, and the header goes back to how it was. */}
+              {pairing.show && pairing.progress && pairing.progress.stage !== "live" && (
                 <PairingIndicator progress={pairing.progress}
                   onOpen={() => document.getElementById(pairingSceneId)?.scrollIntoView({ block: "center", behavior: "smooth" })} />
               )}
@@ -625,6 +632,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               </time>
             </p>
           )}
+          {/* The scene and the invite it waits on: side by side where the column has room for both. */}
+          <div className="pairing-invite"><div className="pairing-invite-row">
           {pairing.show && pairing.progress && (
             <PairingScene id={pairingSceneId} progress={pairing.progress} contact={shownName}
               retry={() => void pairing.retry()} retrying={pairing.retrying} retryError={pairing.retryError} />
@@ -632,6 +641,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           {inviteCode && !pairedReady && !invitePast && messages.length === 0 && (
             <InviteCard code={inviteCode} sessionId={sessionId} linkId={deliveryPeer?.id} mode={deliveryPeer?.deliveryMode ?? session?.deliveryMode ?? "stream"} onChange={setInviteCode} />
           )}
+          </div></div>
           {!inviteCode && !pairing.show && messages.length === 0 && (
             <div className="flex items-center justify-center min-h-[200px]">
               <div className="bg-surface-alt/90 rounded-lg px-4 py-2 text-center">

@@ -65,15 +65,16 @@ export function reportedProgress(link: LinkView | undefined): PairingProgress | 
  * progress yet. `link` is absent while a chat just joined is still being set up.
  */
 export function deriveStage(link: LinkView | undefined, role: PairingRole, online: boolean): Pick<PairingProgress, "stage" | "detail" | "reason" | "retryable"> {
-  if (!online) return { stage: "failed", reason: "offline", retryable: true };
+  // Offline is this device's own switch: nothing to retry, pairing goes on once it is back.
+  if (!online) return { stage: "failed", reason: "offline", retryable: false };
   if (!link) return { stage: role === "inviter" ? "publishing" : "resolving" };
   const pair = link.pairing;
   if (pair?.keyMismatch) return { stage: "failed", reason: "key-mismatch", retryable: false };
   if (pair?.status === "error") return { stage: "failed", reason: "transport", retryable: true, detail: pair.error };
   if (pair?.status === "ready" && link.dataLink === "open") return { stage: "live" };
-  const publishFailure = link.discoveryError?.startsWith("Could not publish discovery:") ? link.discoveryError : undefined;
-  if (role === "inviter" && publishFailure && !link.peerOnline && !pair?.peerKey) return { stage: "failed", reason: "publish", retryable: true, detail: publishFailure };
+  // Discovery errors are retried by the engine on its own: the stage goes on, slow, with the error as its detail.
   const detail = link.discoveryError || undefined;
+  if (role === "inviter" && link.discoveryError?.startsWith("Could not publish discovery:") && !link.peerOnline && !pair?.peerKey) return { stage: "publishing", detail };
   if (link.dataLink === "connecting" || link.dataLink === "open" || pair?.status === "negotiating" || pair?.status === "confirm" || (pair?.status === "waiting" && !!pair.peerKey)) return { stage: "connecting", detail };
   if (link.dataLink === "offering" || link.dataLink === "answering") return { stage: "answering", detail };
   if (role === "inviter") {

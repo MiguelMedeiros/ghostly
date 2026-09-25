@@ -322,7 +322,7 @@
       "publish": "Não foi possível colocar seu convite na rede. Verifique sua conexão.",
       "resolve": "Não foi possível encontrar o convite na rede. Ele pode ser antigo ou estar incorreto.",
       "timeout": "O app do seu contato não respondeu a tempo.",
-      "offline": "Você está offline.",
+      "offline": "Você está offline. O pareamento continua quando você voltar a ficar online.",
       "transport": "Não foi possível abrir uma conexão direta entre os seus aparelhos.",
       "rejected": "O app do seu contato recusou a conexão.",
       "keyMismatch": "A chave deste contato não bate com a salva. Nada foi aceito.",

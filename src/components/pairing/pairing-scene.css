@@ -14,8 +14,10 @@
   --ps-eye: #0b141a;
   container: pairing-scene / inline-size;
   margin: 12px auto;
-  width: calc(100% - 2rem);
-  max-width: 24rem;
+  /* A set width, not one from the content: inline-size containment gives the content none, so a shrink-to-fit
+     parent would squeeze the card to its padding. */
+  width: 24rem;
+  max-width: calc(100% - 2rem);
   padding: 12px 12px 14px;
   border: 1px solid var(--theme-border);
   border-radius: 1rem;
@@ -139,7 +141,8 @@
 .ps:is([data-stage="publishing"], [data-stage="waiting"], [data-stage="resolving"], [data-stage="knocking"], [data-stage="failed"]) .ps-peer .ps-float { animation: none; }
 .ps[data-stage="answering"] .ps-peer .ps-body { animation: ps-appear 900ms ease-out both; }
 @keyframes ps-appear { from { opacity: 0; } to { opacity: 1; } }
-.ps[data-stage="failed"] .ps-me .ps-body { fill: var(--ps-muted); }
+/* Grey, not the theme's text colour: the dark eyes must read on it in light and dark themes alike. */
+.ps[data-stage="failed"] .ps-me .ps-body { fill: #94a3b8; }
 .ps[data-stage="failed"] .ps-me .ps-halo { opacity: 0; }
 
 /* Words. */
@@ -198,6 +201,13 @@
 :root[data-reduce-motion="true"] .ps[data-stage="live"] .ps-direct-glow { opacity: 0.3 !important; }
 @media (prefers-reduced-motion: reduce) {
   .ps[data-stage="knocking"] .ps-knock circle:first-child, .ps[data-stage="live"] .ps-direct-glow { opacity: 0.3 !important; }
+}
+
+/* In the chat, the scene and the invite card side by side where the column has room for both (Chat.tsx). */
+.pairing-invite { container: pairing-invite / inline-size; }
+@container pairing-invite (min-width: 46rem) {
+  .pairing-invite-row { display: flex; align-items: flex-start; justify-content: center; gap: 16px; padding: 0 16px; }
+  .pairing-invite-row > * { flex: 0 1 22rem; min-width: 0; margin-inline: 0; }
 }
 
 /* The header's small version (PairingIndicator.tsx). */
