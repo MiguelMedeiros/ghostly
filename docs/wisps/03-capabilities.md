@@ -75,9 +75,9 @@ Capabilities authorize behavior only after local consent. Advertising `http` doe
 
 Use a new negotiated envelope for this profile. Preserve old `_svc` parsing; legacy implicit services are not consent to new capabilities. Move large descriptions off rendezvous and expose only the minimal advertisement needed to connect. Capability fingerprints may correlate devices even when keys differ.
 
-## Open decisions and conformance
+## Decisions, open questions and conformance
 
-Revision 0.2: whether the capability record is its own Pkarr key (proposed, one more read per chat at pairing and on change) or extra labels in the mailbox packet (no extra read, but less room for text); whether `name` belongs there at all (recommendation: yes, so a chat that never goes live still shows a name); test a record over budget, a record whose `rev` goes backwards, a record signed by an unpinned key, and a `pair-offer` that contradicts the record.
+Decided (2026-09-25): the capability record has its own Pkarr key, one more read per chat at pairing and on change, so a text never loses room in the mailbox packet to capabilities; `name` belongs in it, so a chat that never goes live still shows a name. Test a record over budget, a record whose `rev` goes backwards, a record signed by an unpinned key, and a `pair-offer` that contradicts the record.
 
 Choose identifier registry, exact version rules, canonical offer/selection encoding, revision persistence and cancellation behavior. Test overlapping/disjoint versions, malformed limits, unknown required/optional fields, concurrent updates and policy rejection. Both implementations must agree on the same exact enabled set. Existing permissive version parsing is not proof of this negotiation.
 

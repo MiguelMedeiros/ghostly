@@ -43,7 +43,7 @@ A security rejection is not a downgrade: it stops the chat on both layers ([400]
 
 ### Background retry and upgrade
 
-Layer 1 is retried for as long as the app runs and the chat is not `dht-chosen`. There is no give-up timer (Q3 of [400](400-chat.md#compatibility-security-and-open-decisions)). The pace is today's, made the rule:
+Layer 1 is retried for as long as the app runs and the chat is not `dht-chosen`. There is no give-up timer (Q3 of [400](400-chat.md#compatibility-security-and-decisions)). The pace is today's, made the rule:
 
 | Trigger | What happens |
 |---|---|
@@ -54,9 +54,9 @@ Layer 1 is retried for as long as the app runs and the chat is not `dht-chosen`.
 | The contact is not seen | Do not dial; keep reading its presence at the background pace |
 | Both sides leave DHT only | Dial or answer at once, replaying a held offer ([403](403-dht-text.md#choosing-dht-only)) |
 
-A transport that fails three attempts in a row while the contact is online SHOULD be moved to the end of this side's local order for an hour, so a path that is always blocked (a firewall eating UDP) does not delay the others at every retry. Its place is restored when it succeeds or the hour passes.
+A transport that fails three attempts in a row while the contact is online MUST be moved to the end of this side's local order for an hour, so a path that is always blocked (a firewall eating UDP) does not delay the others at every retry. Its place is restored when it succeeds or the hour passes.
 
-While `live`, the chat does not probe for a higher-ranked transport by itself; it changes only when the current one drops or someone switches ([transport switch](TRANSPORT-INCREMENT.md#agreement-and-fallback)). Probing while live is an open question below.
+While `live`, the chat does not probe for a higher-ranked transport by itself; it changes only when the current one drops or someone switches ([transport switch](TRANSPORT-INCREMENT.md#agreement-and-fallback)). Probing while live was considered and decided against (below).
 
 ### DHT only as a choice
 
@@ -92,7 +92,7 @@ Legacy WebRTC negotiation remains a distinct profile. New offers MUST NOT be int
 
 ## Open decisions
 
-Revision 0.2: whether a `live` chat should probe for a higher-ranked transport in the background (recommendation: not in 0.5; a switch is explicit or follows a drop); the per-transport demotion window (recommendation: three failures, one hour); whether the minimal native descriptors in the capability record should also carry direct addresses (recommendation: no, the Iroh endpoint id and the HyperDHT key are dialable through their own discovery, and addresses would expose network location in a record any invite holder can read before the pin).
+Decided (2026-09-25): a `live` chat does not probe for a higher-ranked transport in the background; a switch is explicit or follows a drop, which avoids churn on a working chat. The demotion window is three failures, one hour: long enough to stop paying for a blocked path, short enough to notice a network that changed. The native descriptors in the capability record carry no direct addresses: the Iroh endpoint id and the HyperDHT key are dialable through their own discovery, and addresses would expose network location in a record any invite holder can read before the pin.
 
 Fix canonical encodings, adapter IDs, timeout/retry values, simultaneous negotiation resolution, transcript binding and protection against forced repeated failures. Latency measurement and weighted scoring are experiments, not requirements. Browser/native availability must be reported honestly; a bridge is a separate trust/visibility choice.
 

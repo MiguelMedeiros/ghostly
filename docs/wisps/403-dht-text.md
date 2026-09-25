@@ -41,7 +41,7 @@ The envelope's `mode` field (`"stream"` or `"dht"`) is unchanged. In revision 0.
 1. The invite's secret and the ordered pair of rendezvous keys derive the envelope key and the two directional mailboxes ([DHT delivery](../DHT-DELIVERY.md#invitation-bootstrap-and-encryption)).
 2. The joiner generates and stores its participation key, then publishes a first-contact envelope in its mailbox: intended recipient `invite`, signed by its participation key, sealed with the invitation-derived key. It carries the joiner's `mode` and MAY carry a first text. At the same moment the joiner publishes its capability record ([03](03-capabilities.md#layer-0-capability-record)) and starts a stream attempt ([100](100-transports.md)).
 3. The inviter reads the joiner's mailbox at the signaling pace (every 4 s) from the moment the invite exists until it pins a contact or the invite is withdrawn (new: today the inviter of a streams-first invite reads it every 30 s). It verifies the signature, durably pins the participation key, stores any text, and answers with its own envelope (its key hint in `_dmk`, sealed with the post-pin key) and a receipt.
-4. The joiner pins the inviter's participation key from that answer. The chat is now `on-dht`, or `live` if the stream attempt verified first. Every later envelope uses the post-pin key.
+4. The joiner already pinned the inviter's participation key from the invite ([801](801-invitation-profiles.md#exact-layout)); it verifies the answer against that pin, and refuses an answer signed by any other key as a security rejection. The chat is now `on-dht`, or `live` if the stream attempt verified first. Every later envelope uses the post-pin key. (Codes made before revision 0.2 carry no participation key; for them the joiner pins from the first answer, as today.)
 5. If the stream path pins first, the DHT path MUST find the same participation key when its envelope arrives; a different key is a security rejection on both layers ([400](400-chat.md#candidate-requirements-for-the-one-chat)). Possession of the invite is enough to compete for first admission, as before; the comparison code shown on both sides verifies the pin independently.
 
 ## When text goes over the DHT
@@ -55,7 +55,7 @@ The envelope's `mode` field (`"stream"` or `"dht"`) is unchanged. In revision 0.
 
 A text already sent on layer 1 that loses its session before the receipt is sent again over the DHT under the same id, when it fits (exists today). A text first sent over the DHT whose layer 1 comes back goes again on layer 1 at once; the first receipt on either path ends the other path's retries, and the receiver shows it once.
 
-**Queueing (new).** Only one DHT text per direction may await a receipt. Today a second text stays in the composer until then. Proposed: it goes to the outbox as `queued`, in order, and is published when the previous one is confirmed or expires, or sent on layer 1 when that comes back. The wire rule does not change.
+**Queueing (new; Q4 of [400](400-chat.md#compatibility-security-and-decisions)).** Only one DHT text per direction may await a receipt. Today a second text stays in the composer until then. In this revision it goes to the outbox as `queued`, in order, and is published when the previous one is confirmed or expires, or sent on layer 1 when that comes back. The wire rule does not change.
 
 **Expiry.** A DHT text that expires unconfirmed is queued for layer 1 in `on-dht` (exists today for paired chats), and becomes **Delivery unconfirmed** at once in `dht-chosen` (exists today for DHT-only chats), because nothing else would carry it.
 
@@ -75,7 +75,7 @@ What changes is where the choice is made: not in the invite, but in the chat's C
 | `on-dht`, in the background | 30 s | 30 s |
 | `live` | 30 s | 5 min, and at once when layer 1 is lost |
 
-With every chat running this profile, reads multiply by the number of chats. The relays' per-IP budget (50 requests a minute on pkarr.pubky.org) is the binding limit, which is why reads slow down while layer 1 carries the chat ([400](400-chat.md#compatibility-security-and-open-decisions), Q7).
+With every chat running this profile, reads multiply by the number of chats. The relays' per-IP budget (50 requests a minute on pkarr.pubky.org) is the binding limit, which is why reads slow down while layer 1 carries the chat ([400](400-chat.md#compatibility-security-and-decisions), Q7).
 
 ## What never enters this path
 

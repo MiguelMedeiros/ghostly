@@ -73,7 +73,7 @@ sequenceDiagram
     par First contact on the DHT
         B->>D: first-contact envelope in B's mailbox, signed by B's participation key
         A->>D: read B's mailbox, verify, pin B, reply envelope
-        B->>D: read reply, verify, pin A
+        B->>D: read reply, verify against A's key from the code
     and First contact on a stream
         B->>D: WebRTC offer (_rtc), signed
         A->>D: WebRTC answer (_rtc)
@@ -93,7 +93,7 @@ sequenceDiagram
     A->>B: layer 1 back, queued long text, files and requests flush in order
 ```
 
-1. **Start.** The inviter publishes its presence and a capability record on the DHT ([03](03-capabilities.md)) and hands over the invite. The joiner starts two first contacts at once: a first-contact envelope in its DHT mailbox ([403](403-dht-text.md)) and a stream attempt through `_rtc` signaling ([101](101-webrtc.md)). Each side pins the other's participation key on the first path that verifies. Both paths carry the same key; a different key on the other path is a security rejection, never a fallback.
+1. **Start.** The inviter publishes its presence and a capability record on the DHT ([03](03-capabilities.md)) and hands over the invite. The joiner starts two first contacts at once: a first-contact envelope in its DHT mailbox ([403](403-dht-text.md)) and a stream attempt through `_rtc` signaling ([101](101-webrtc.md)). The joiner pins the inviter's participation key from the code itself ([801](801-invitation-profiles.md)); the inviter pins the joiner's on the first path that verifies. Both paths carry the same key; a different key on the other path is a security rejection, never a fallback.
 2. **Upgrade.** Once pinned, and unless either side chose DHT only, the two apps run the transport negotiation of [100](100-transports.md): the intersection of both capability records, ranked by the rank sum. Native transports can be tried without a WebRTC session first, because their descriptors travel in the capability record (new). The first transport that authenticates wins; the chat moves to `live`.
 3. **Fall back.** When the layer-1 session closes, or three pings in a row go unanswered ([401](401-paired-chat.md#liveness-and-reconnection)), the chat moves to `on-dht` at once. Unconfirmed text is sent again over the DHT under the same message ids; what the DHT cannot carry waits in the outbox, or is held ([4xx](4xx-store-and-forward.md)) where both sides allow it.
 4. **Come back.** Layer 1 is retried in the background with the backoff of [100](100-transports.md#background-retry-and-upgrade). When it authenticates again, the chat moves back to `live`, everything waiting in the outbox goes in order, and the DHT stops carrying text for that chat.
@@ -152,23 +152,23 @@ Future messages need a stable sender-scoped message ID, authenticated channel/pa
 
 Offer per-sender order with explicit gaps; do not promise total order across peers/groups. Bind generation/epoch changes so sequence resets cannot replay old messages. DHT delivery has visible size/retention limits; report failure or truncation policy before losing user content. No group fanout over DHT mailboxes or `_msgs`; groups ([900](900-group-sessions.md)) have their own distribution and are outside this revision.
 
-## Compatibility, security and open decisions
+## Compatibility, security and decisions
 
 The compatibility profile ([402](402-legacy-chat.md)) stays separate: a compatibility chat is never silently converted, and a 0.5 app never creates one. Receipts leak activity and should have declared policy. Publishing every chat's text to the DHT when layer 1 is down exposes to relays what [403](403-dht-text.md) already exposes for DHT-only chats (sizes, timing, the mailbox addresses), now for every chat; the content stays sealed.
 
-Open decisions forced by this revision, each with the editors' recommendation:
+Decisions of this revision, recorded by the maintainer on 2026-09-25 (numbered as they were raised in review):
 
-| # | Question | Recommendation |
+| # | Decided (2026-09-25) | Reason |
 |---|---|---|
-| Q1 | May files and payment requests ride DHT text? | **No.** They ride layer 1, or a hold ([4xx](4xx-store-and-forward.md)) whose content lives in the sender's storage with only a pointer on the DHT. Splitting them across DHT records is what [01](01-ghost-core.md) forbids. |
-| Q2 | Fallback message size: keep 256 bytes, or raise it (the compatibility profile allows 500)? | **Keep 256** ([403](403-dht-text.md)). A post-pin envelope with a receipt already uses most of the 1,000-byte packet. Longer text is queued for layer 1 or held, never fragmented. |
-| Q3 | How long is layer 1 retried? | **Forever while the app runs and the chat is not `dht-chosen`**, paced as in [100](100-transports.md#background-retry-and-upgrade): at once when the contact is seen, then 20 s doubling to 3 min while it stays online, nothing while it is away. No give-up timer. |
-| Q4 | Queue texts beyond the one-outstanding DHT text in the outbox, or keep them in the composer as today? | **Queue** them, in order, as `queued`. The one-outstanding rule stays on the wire. |
-| Q5 | Queue files and payment requests while on the DHT with no hold, or disable attach? | **Queue** them locally, with a cancel, until layer 1 or a hold takes them. Payments themselves are never queued. |
-| Q6 | Should a person be able to forbid DHT text for a chat ("live only")? | **Not in 0.5's UI.** The wire keeps it expressible: a capability record without `dht-text/1` means "send me nothing on the DHT", and the other side then queues. |
-| Q7 | Poll pace of the DHT mailbox while `live` | **Slow it to every 5 minutes while live** (today 30 s), back to 4 s the moment layer 1 is lost. With every chat on the floor, the relays' per-IP budget (50 requests a minute on pkarr.pubky.org) is the limit. |
+| Q1 | Files and payment requests never ride DHT text: they ride layer 1, or a hold ([4xx](4xx-store-and-forward.md)) | A hold keeps the content in the sender's storage with only a pointer on the DHT; splitting bulk data across DHT records is what [01](01-ghost-core.md) forbids |
+| Q2 | DHT text stays at 256 UTF-8 bytes ([403](403-dht-text.md)); longer text is queued or held, never fragmented | A post-pin envelope with a receipt already uses most of the 1,000-byte packet |
+| Q3 | Layer 1 is retried for as long as the app runs and the chat is not `dht-chosen`, with no give-up timer ([100](100-transports.md#background-retry-and-upgrade)) | The pace (at once when the contact is seen, 20 s doubling to 3 min while it is online, nothing while it is away) already bounds the cost |
+| Q4 | Texts beyond the one DHT text awaiting a receipt are queued in the outbox, in order | The one-outstanding rule stays on the wire, and nothing the person wrote is left in the composer |
+| Q5 | Files and payment requests on the DHT with no hold are queued locally with a cancel; payments are never queued | They go by themselves when layer 1 or a hold can take them; a bearer token must not wait in a queue |
+| Q6 | No "live only" setting in 0.5; the wire keeps it expressible (a capability record without `dht-text/1`) | The floor is the point of the model; a future setting needs no new format |
+| Q7 | The DHT mailbox is read every 5 minutes while `live` (today 30 s), and at 4 s from the moment layer 1 is lost | With every chat on the floor, the relays' per-IP budget (about 50 requests a minute on pkarr.pubky.org) is the limit |
 
-Other open decisions stay as before: message ID encoding across profiles, receipt authentication on the DHT, retry limits and retention before Proposed. Offline group catch-up is negotiated peer storage in 900, not a Core promise.
+Still open, as before: message ID encoding across profiles, receipt authentication on the DHT, retry limits and retention before Proposed. Offline group catch-up is negotiated peer storage in 900, not a Core promise.
 
 ## Conformance
 
@@ -180,5 +180,5 @@ Exercise equal timestamps, out-of-order arrivals, duplicated messages across DHT
 
 ## Revision log
 
-- 0.2 (2026-09-25): one chat with a DHT layer and a peer-to-peer layer; chat states; what each state carries; the pairing-progress and transport-row wording; open decisions Q1 to Q7.
+- 0.2 (2026-09-25): one chat with a DHT layer and a peer-to-peer layer; chat states; what each state carries; the pairing-progress and transport-row wording; decisions Q1 to Q7 (decided 2026-09-25).
 - 0.1 (2026-09-20): initial review draft.

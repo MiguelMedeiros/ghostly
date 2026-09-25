@@ -41,17 +41,17 @@ Version 1 payload, in this order, with no separators or length prefixes:
 | 0 to 31 | `joining-seed` | The joiner's rendezvous seed for this chat | 43 characters base64url |
 | 32 to 63 | `inviter-rendezvous-key` | The inviter's Ed25519 rendezvous public key | 52 characters z-base-32 |
 | 64 to 95 | `invite-secret` | Shared secret: seals pre-pin records, derives the mailboxes, the capability records and the hold pointer | 43 characters base64url |
-| 96 to 127 | `inviter-participation-key` | The inviter's Ed25519 participation public key. **Present only if Q9 is adopted** | 52 characters z-base-32 |
+| 96 to 127 | `inviter-participation-key` | The inviter's Ed25519 participation public key (Q9). The joiner pins it from the code | Not in today's codes |
 
-Version 1 has exactly one payload length: 96 bytes, or 128 bytes if Q9 is adopted before any app emits a code. It never has both, and it has no optional fields: a version-1 code of any other length is damaged, not extended.
+Version 1 has exactly one payload length, **128 bytes**, and no optional fields: a version-1 code of any other length is damaged, not extended.
 
-**Length.** 8 characters of `ghostly1`, 1 version symbol, 154 payload symbols (96 bytes) and 6 checksum symbols: **169 characters**. With the Q9 key: 205 payload symbols, **220 characters**. Today's `pair1/` code is 146 characters.
+**Length.** 8 characters of `ghostly1`, 1 version symbol, 205 payload symbols (128 bytes, one padding bit) and 6 checksum symbols: **220 characters**. Today's `pair1/` code is 146 characters; without the participation key it would have been 169.
 
 **The 90-character cap is lifted.** BIP-173 and BIP-350 limit a bech32 string to 90 characters; Ghostly lifts that limit explicitly, as Lightning invoices (BOLT 11) do. Encoders emit exactly the length above. Decoders accept strings up to **1,023 characters** and refuse longer ones before computing a checksum. Libraries default to 90 and must be called with the larger limit (for example `bech32m.decode(code, 1023)` in `@scure/base`, already a dependency of the core). Above 89 characters bech32m no longer *guarantees* catching every error in up to four characters; a random corruption still goes unnoticed with a probability of about one in a billion, which is the same trade Lightning makes.
 
 **Case.** Apps emit the string in lower case in text and in upper case in QR codes. Decoders lower-case the whole string before decoding, so `ghostly1…`, `GHOSTLY1…` and a phone's autocapitalized `Ghostly1…` all read the same. (BIP-173 refuses mixed case; the case carries no data, so accepting it costs nothing and saves a confused newcomer.)
 
-**QR.** In capitals every character of the code is in the QR alphanumeric set, which packs 5.5 bits per character instead of 8. At error correction M the bare code needs QR version 7 (version 8 with the Q9 key), where today's 146-character `pair1/` code in byte mode needs version 8. Measured with the QR encoder the app ships (qrcodegen in `qrcode.react`).
+**QR.** In capitals every character of the code is in the QR alphanumeric set, which packs 5.5 bits per character instead of 8. At error correction M the bare code needs QR version 8, the same as today's 146-character `pair1/` code in byte mode, although it carries 32 more bytes. Measured with the QR encoder the app ships (qrcodegen in `qrcode.react`).
 
 **Link form.** The same string may be shared as a link that opens Ghostly:
 
@@ -59,21 +59,15 @@ Version 1 has exactly one payload length: 96 bytes, or 128 bytes if Q9 is adopte
 https://ghostly.tools/#ghostly1p…
 ```
 
-The code travels in the fragment, which browsers never send to the server. A decoder takes everything after the last `#`, as today's decoder already does. In a QR, the link is encoded as three segments: `HTTPS://GHOSTLY.TOOLS/` alphanumeric, `#` in byte mode, the code alphanumeric; that is QR version 8 (9 with the Q9 key), against version 9 for today's `https://app.ghostly.tools/#/chat/pair1/…` link. Which host is canonical is Q11.
+The code travels in the fragment, which browsers never send to the server. A decoder takes everything after the last `#`, as today's decoder already does. In a QR, the link is encoded as three segments: `HTTPS://GHOSTLY.TOOLS/` alphanumeric, `#` in byte mode, the code alphanumeric; that is QR version 9, the same as today's `https://app.ghostly.tools/#/chat/pair1/…` link. The canonical host is `ghostly.tools` (Q11); `app.ghostly.tools/#ghostly1…` is read too. The page at either host MUST keep the fragment out of analytics, logs and referrers, and hand it to the app without a server round trip.
 
-**Test vector** (synthetic bytes, not keys: seed `00 01 … 1f`, rendezvous key `20 21 … 3f`, secret `40 41 … 5f`; a codec vector only, since a decoder checks lengths and leaves key validity to first use, as today):
-
-```text
-ghostly1pqqqsyqcyq5rqwzqfpg9scrgwpugpzysnzs23v9ccrydpk8qarc0jqgfzyvjz2f389q5j52ev95hz7vp3xgengdfkxuurjw3m8s7nu06qg9pyx3z9ger5sj22fdxy6nj02pg4y56524t9wkzetfd4ch27tu5fqcad
-```
-
-With a participation key `60 61 … 7f` appended (Q9):
+**Test vector** (synthetic bytes, not keys: seed `00 01 … 1f`, rendezvous key `20 21 … 3f`, secret `40 41 … 5f`, participation key `60 61 … 7f`; a codec vector only, since a decoder checks lengths and leaves key validity to first use, as today). Version 1, 220 characters:
 
 ```text
 ghostly1pqqqsyqcyq5rqwzqfpg9scrgwpugpzysnzs23v9ccrydpk8qarc0jqgfzyvjz2f389q5j52ev95hz7vp3xgengdfkxuurjw3m8s7nu06qg9pyx3z9ger5sj22fdxy6nj02pg4y56524t9wkzetfd4ch27tasxzcnrv3jkvemgd94xkmrddehhqutjwd682anh0puh57mu04l8794pd4k
 ```
 
-**What the joiner does with it.** It stores the fields and a fresh participation key, then starts both first contacts at once: the first-contact envelope on the DHT ([403](403-dht-text.md#first-contact)) with its capability record ([03](03-capabilities.md#layer-0-capability-record)), and a stream attempt ([100](100-transports.md)). With the Q9 key it also pins the inviter's participation key from the code before either path answers.
+**What the joiner does with it.** It stores the fields and a fresh participation key, then starts both first contacts at once: the first-contact envelope on the DHT ([403](403-dht-text.md#first-contact)) with its capability record ([03](03-capabilities.md#layer-0-capability-record)), and a stream attempt ([100](100-transports.md)). It also pins the inviter's participation key from the code before either path answers, so an answer signed by any other key, from someone else holding a copy of the invite, is a security rejection.
 
 A copied invitation is a bearer capability; hiding a saved invite after a message does not invalidate other copies. Participation keys are authenticated and durably pinned; possession of an invite can still compete for first admission, and comparing the displayed code verifies the pin separately. Reconnect uses the stored relationship and fresh session context.
 
@@ -90,8 +84,8 @@ A current app reads an invite by these rules, in order. It never guesses: a code
 | A character outside the bech32 alphabet, or the bech32m checksum fails | "This code has a typo. Check it, or ask for the code again." |
 | The checksum is valid as bech32 but not bech32m | "This is not a Ghostly invite." |
 | Version 0 | "This is not a Ghostly invite." (reserved, never emitted) |
-| Version 1, payload of the version-1 length, padding of at most 4 zero bits | A new chat of [400](400-chat.md) |
-| Version 1 with any other payload length, or non-zero padding | "This invite is damaged. Ask for a new one." |
+| Version 1, a 128-byte payload, padding of at most 4 zero bits | A new chat of [400](400-chat.md) |
+| Version 1 with any other payload length (a 96-byte payload included), or non-zero padding | "This invite is damaged. Ask for a new one." |
 | Version 2 to 31 | "This invite was made by a newer Ghostly. Update to join." |
 
 3. Otherwise, the forms made before this revision are still accepted as input:
@@ -128,14 +122,14 @@ So an old app shows its generic invalid-code message and creates nothing: no bro
 
 The stronger single-use admission state machine, atomic global use limits, group admission and authority coordination in [800](800-invite-join.md) remain proposed. This profile does not make those promises. Group invites (`group-entry/1`, `group-community/1`) have their own formats ([9xx group mesh](9xx-group-mesh.md), [9xx group community](9xx-group-community.md)) and are not changed by this revision.
 
-## Open decisions
+## Decisions
 
-| # | Question | Recommendation |
+| # | Decided (2026-09-25) | Reason |
 |---|---|---|
-| Q8 | A new slash prefix (`pair3/`, the first draft of this revision) or one bech32m string? | **Resolved (maintainer, 2026-09-25): one bech32m string, `ghostly1…`**, with the version inside it. It replaces the `pair3/` proposal, which no app ever emitted. |
-| Q9 | Should the code also carry the inviter's participation public key? | **Yes, if decided before 0.5 ships**: it makes version 1 the 128-byte layout (220 characters, QR version 8 at level M, the same as today's bare code). The joiner then pins the inviter from the code, and someone else holding a copy can no longer answer as the inviter. If not adopted, version 1 is the 96-byte layout (169 characters) and the key waits for a later version. |
-| Q10 | Offer "Invite someone on Ghostly 0.4" (make a prefix-less code)? | **No.** The web app is replaced by 0.5 on release; desktop users on 0.4 can make the code themselves or update. |
-| Q11 | Which host is canonical for the link form: `ghostly.tools` or `app.ghostly.tools`? | **`https://ghostly.tools/#ghostly1…`**, with `app.ghostly.tools/#ghostly1…` also read. The site's page can offer the choices a newcomer needs (open in the desktop app, open in the browser, get Ghostly) where the web app would only open itself; the shorter host also keeps the QR at version 8. Either way the page MUST keep the fragment out of analytics, logs and referrers, and hand it to the app without a server round trip. |
+| Q8 | The invite is one bech32m string, `ghostly1…`, with its version inside; it replaces the `pair3/` draft, which no app ever emitted | One word that survives retyping and QR codes, and a version that fails clearly instead of a new slash prefix each time |
+| Q9 | The code carries the inviter's participation public key; version 1 is the 128-byte, 220-character layout | The joiner pins the inviter from the code, so someone else holding a copy can no longer answer as the inviter; the QR stays the size of today's |
+| Q10 | A current app never makes a 0.4-readable (prefix-less) code | The web app is replaced by 0.5 on release; desktop users on 0.4 can make the code themselves or update |
+| Q11 | The canonical link is `https://ghostly.tools/#ghostly1…`; `app.ghostly.tools/#ghostly1…` is read too; the fragment stays out of analytics | The site's page can offer what a newcomer needs (open in the desktop app, open in the browser, get Ghostly), and the shorter host keeps the QR smaller |
 
 ## Evidence and checks
 
@@ -143,5 +137,5 @@ The stronger single-use admission state machine, atomic global use limits, group
 
 ## Revision log
 
-- 0.2 (2026-09-25): one invite format, a bech32m `ghostly1…` string with its version inside (replacing a first `pair3/` draft); exact layout, lengths, QR and link form; reading rules and messages both ways; versioning rule; Q8 resolved, Q9 to Q11.
+- 0.2 (2026-09-25): one invite format, a bech32m `ghostly1…` string with its version inside (replacing a first `pair3/` draft); exact layout, lengths, QR and link form; reading rules and messages both ways; versioning rule; Q8 to Q11 decided; version 1 is the 220-character layout with the inviter's participation key.
 - 0.1 (2026-09-22): `pair1/`, `pair2d/` and legacy imports.
