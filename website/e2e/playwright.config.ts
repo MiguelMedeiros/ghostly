@@ -13,6 +13,7 @@ export default defineConfig({
   outputDir: "../test-results",
   timeout: 60_000,
   workers: 2,
+  fullyParallel: true,
   reporter: [["list"]],
   forbidOnly: !!process.env.CI,
   use: { baseURL: url ?? `http://localhost:${port}` },

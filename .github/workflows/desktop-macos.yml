@@ -36,6 +36,10 @@ jobs:
     name: Desktop calls and shared apps (macOS WKWebView)
     runs-on: macos-15
     timeout-minutes: 60
+    env:
+      # Line numbers in a panic's backtrace are all this test needs of debug info: less of it compiles, links and
+      # caches faster.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -51,9 +55,10 @@ jobs:
           cache: "npm"
 
       - name: Setup Rust
+        id: rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
 
-      # Crates only, not target/: the repository is past GitHub's 10 GB of cache (see e2e.yml's Desktop job).
+      # The crates' sources. Their build (target/) is the next step.
       - name: Cache Cargo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -65,11 +70,24 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-desktop-macos-${{ github.repository }}-
 
+      # The dependencies compiled (target/), which were most of the build's 3 to 4 minutes. The repository's cache is
+      # full (10 GB), so only a push to dev saves them, once per Cargo.lock and toolchain, without Ghostly's own
+      # crates; a pull request restores dev's and never writes one of its own.
+      - name: Restore compiled dependencies
+        id: target-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/
+          key: ${{ runner.os }}-cargo-target-desktop-macos-${{ steps.rust.outputs.cachekey }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-target-desktop-macos-${{ steps.rust.outputs.cachekey }}-
+
       - name: Install dependencies
         run: npm ci
 
       # A debug build with the test driver compiled in, as tools.ghostly.e2e (never the real app's id).
       - name: Build the Desktop app with the test driver
+        id: build
         run: npm run desktop:macos:build
 
       - name: Two Desktop apps pair, call and share an app
@@ -87,6 +105,21 @@ jobs:
             echo "download the \`playwright-report-desktop-macos\` artifact of this run and open its index.html."
             echo "Run it on a Mac: \`npm run desktop:macos:build && npm run test:e2e:desktop-macos\` (e2e/README.md)."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Leave Ghostly's own crates out of the saved dependencies
+        id: prune
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.target-cache.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
+        run: |
+          rm -rf target/debug/bundle target/debug/incremental
+          find target/debug target/debug/deps target/debug/.fingerprint target/debug/build -maxdepth 1 -name '*ghostly*' -exec rm -rf {} +
+          du -sh target
+
+      - name: Save compiled dependencies
+        if: ${{ !cancelled() && steps.prune.outcome == 'success' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/
+          key: ${{ steps.target-cache.outputs.cache-primary-key }}
 
       - name: Upload report
         if: ${{ !cancelled() }}
