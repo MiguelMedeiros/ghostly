@@ -1,6 +1,6 @@
 //! The library the CLI is built on, end to end against a relay held in memory.
 
-// covers: cli.identity, cli.invite, cli.send, cli.recv, chat.dht.delivery
+// covers: cli.identity, cli.invite, cli.send, cli.recv, chat.dht.delivery, invite.code
 
 mod support;
 
@@ -59,6 +59,15 @@ fn an_invite_carries_the_public_key_and_the_shared_key() {
         parse_invite("https://example.com/#x").unwrap_err(),
         "Invalid invite URL: must start with ghost://"
     );
+    // The app's invite is named as such, bare, as a link or in capitals (as a QR holds it).
+    for code in [
+        "ghostly1pqqqsyqcyq5rqwzqfpg9scrgwpugpzysnzs23v9ccryd",
+        "https://ghostly.tools/#ghostly1pqqqsyqcyq5rqwzqfpg9scrgwpugpzysnz",
+        "HTTPS://GHOSTLY.TOOLS/#GHOSTLY1PQQQSYQCYQ5RQWZQFPG9SCRGWPUG",
+        "https://app.ghostly.tools/#/chat/ghostly1pqqqsyqcyq5rqw",
+    ] {
+        assert_eq!(parse_invite(code).unwrap_err(), ghostly::APP_INVITE_ERROR);
+    }
     for url in ["ghost://abc", "ghost://a#b#c"] {
         assert_eq!(
             parse_invite(url).unwrap_err(),

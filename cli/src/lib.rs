@@ -96,7 +96,24 @@ pub fn generate_invite(seed: &str, shared_key: &str) -> Result<InviteOutput, Str
     Ok(InviteOutput { invite_url, pubkey })
 }
 
+/// What the CLI says when handed an app invite (WISP 801): it reads only its own `ghost://` URLs.
+pub const APP_INVITE_ERROR: &str = "This is a Ghostly app invite (ghostly1...). The CLI is a compatibility client and reads only ghost:// invites; open this one in the Ghostly app, or ask for a ghost:// invite.";
+
+/// A `ghostly1` code, bare or in a link, in any case: the app's invite, not the CLI's.
+fn is_app_invite(input: &str) -> bool {
+    let code = input.trim().rsplit('#').next().unwrap_or("");
+    let code = code
+        .strip_prefix("/chat/")
+        .or_else(|| code.strip_prefix("chat/"))
+        .unwrap_or(code);
+    code.get(..8)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("ghostly1"))
+}
+
 pub fn parse_invite(invite_url: &str) -> Result<ParsedInvite, String> {
+    if is_app_invite(invite_url) {
+        return Err(APP_INVITE_ERROR.to_string());
+    }
     let url = invite_url
         .strip_prefix("ghost://")
         .ok_or("Invalid invite URL: must start with ghost://")?;
