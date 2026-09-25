@@ -19,7 +19,8 @@ import { ProfileSwitchSplash } from "./components/ProfileSwitchSplash";
 import { ensureSession, loadSession } from "./lib/storage";
 import { useI18n } from "./contexts/I18nContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { INVITE_REFUSAL_MESSAGE, chatPath, inviteRouteCode, readInvite } from "./lib/url";
+import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, inviteRouteCode, readInvite } from "./lib/url";
+import { onJoinNotice, showJoinNotice, type JoinNoticeKey } from "./lib/joinNotice";
 import { groupPath } from "./lib/groups";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useAnchorHome, useAppNavigation } from "./hooks/useAppNavigation";
@@ -45,7 +46,13 @@ function ChatLinkIntake() {
     const reading = readInvite(rest);
     let sessionId: string | null = null;
     if (reading.ok) {
-      try { sessionId = ensureSession(reading.keys); } catch { sessionId = null; }
+      // This profile's own invite opens the chat that owns it, never a second one; one already joined by opens its chat.
+      const outcome = classifyInvite(reading.keys);
+      if (outcome.kind === "own") { sessionId = outcome.sessionId; showJoinNotice("join.own"); }
+      else {
+        try { sessionId = ensureSession(reading.keys); } catch { sessionId = null; }
+        if (sessionId && outcome.kind === "joined") showJoinNotice("join.alreadyIn");
+      }
     } else if (!rest.includes("/") && !/^ghostly1/i.test(rest) && loadSession(decodeURIComponent(rest))) return; // an ordinary chat address
     if (!sessionId) {
       // Whatever it was, it leaves the address bar and the history: it may hold a key.
@@ -67,6 +74,24 @@ function ChatLinkIntake() {
     <div role="alert" data-testid="invite-link-invalid" onClick={() => setInvalid(null)}
       className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-danger shadow-xl cursor-pointer">
       {t(invalid)}
+    </div>
+  ) : null;
+}
+
+/** "You're already in this chat", or "This is your own invite" from a link: said over the chat it opened, for a moment. */
+function JoinNotice() {
+  const { t } = useI18n();
+  const [notice, setNotice] = useState<JoinNoticeKey | null>(null);
+  useEffect(() => onJoinNotice(setNotice), []);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 6000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+  return notice ? (
+    <div role="status" data-testid="join-notice" onClick={() => setNotice(null)}
+      className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-text-primary shadow-xl cursor-pointer">
+      {t(notice)}
     </div>
   ) : null;
 }
@@ -157,6 +182,7 @@ export function Root() {
             <HashRouter>
               <ErrorBoundary>
               <ChatLinkIntake />
+              <JoinNotice />
               <GroupLinkIntake />
               <HomeAnchor />
               <LockGate>

@@ -1,5 +1,5 @@
-import { inviteLink, readInviteCode, type InviteRefusal, type LinkParams } from "@ghostly/core";
-import type { SessionKeys } from "./storage";
+import { inviteLink, inviteOwnership, readInviteCode, type InviteRefusal, type LinkParams } from "@ghostly/core";
+import { listSessions, type SessionKeys } from "./storage";
 
 /**
  * Where a chat lives in the app: by the id of its stored session. The keys
@@ -44,6 +44,20 @@ export function readInvite(input: string): InviteInput {
 export function parseInvite(input: string): SessionKeys | null {
   const reading = readInvite(input);
   return reading.ok ? reading.keys : null;
+}
+
+/**
+ * What joining these keys would do in this profile: `own` when the invite is one this profile made (its
+ * chat is `sessionId`: sharing it is the contact's way in, not ours), `joined` when this profile already
+ * joined by it, `new` when it is someone else's, unseen. Another profile's chats on the same app are
+ * stored apart, so its invites are new here: two profiles on one app may chat with each other.
+ */
+export type JoinOutcome = { kind: "own" | "joined"; sessionId: string } | { kind: "new" };
+
+export function classifyInvite(keys: SessionKeys): JoinOutcome {
+  const known = listSessions().map((session) => ({ id: session.id, seedB64: session.mySeedB64, peerPubKeyZ32: session.peerPubKeyB64 }));
+  const ownership = inviteOwnership({ seedB64: keys.seedB64 }, known);
+  return ownership.kind === "new" ? ownership : { kind: ownership.kind, sessionId: ownership.link.id };
 }
 
 /** The message key for each refusal (WISP 801, "Reading an invite"). */
