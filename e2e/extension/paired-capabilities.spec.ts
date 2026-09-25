@@ -32,7 +32,8 @@ test("paired extension and web exchange verified files and local-mint sats", { t
   // Every send is reviewed first: nothing leaves before the approval.
   await web.page.getByTestId("payment-composer").getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
   for (const p of [web, ext]) await expect(chat(p).getByTestId("payment-bubble").filter({ hasText: "12" }).getByTestId("payment-state")).toHaveText(/Received/);
-  await web.page.getByTestId("payment-composer").getByRole("button", { name: "Close", exact: true }).click();
+  await web.page.keyboard.press("Escape");
+  await expect(web.page.getByTestId("payment-composer")).toHaveCount(0);
   // Ecash only: the fake mint pays a request's own Lightning invoice by itself and would race the payer.
   await ext.page.getByTitle("Options").click();
   await ext.page.getByTestId("chat-payments-open").click();
