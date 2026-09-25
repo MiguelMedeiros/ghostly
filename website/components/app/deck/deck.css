@@ -1,0 +1,68 @@
+/* Copied from src/components/deck/deck.css by website/scripts/sync-app-deck.mjs. Edit the app's file, then run npm run sync:app-deck. */
+/* A deck of cards (deck/Deck.tsx): the wallet's (wallet-deck.css) and the identities' (identities/id-deck.css). The
+   deck wears the chosen card's colour class (it sets --card-rgb), so the glow behind it and the arrows' marks take
+   that card's ink. On a page the deck takes the whole column (the page's container), wider than the panel below it;
+   a compact one (the chat's) keeps to its box. Each kind of deck brings its face: the face's root is marked
+   `data-deck=face`, and this file places it, lifts it and lights it. */
+.deck{--deck-ease:cubic-bezier(.22,1,.36,1);--deck-spring:cubic-bezier(.34,1.45,.64,1);--bleed:min(100cqw,960px);position:relative;display:grid;gap:10px;isolation:isolate;width:var(--bleed);margin-inline:calc((var(--bleed) - 100%) / -2)}
+/* The chosen card settles like a spring: past its place and back (motion.ts adds the swing on top). */
+@supports(transition-timing-function:linear(0,1)){.deck{--deck-spring:linear(0,.132,.404,.68,.893,1.025,1.084,1.094,1.076,1.05,1.025,1.006,.996,.991,.991,.993,.996,.998,1,1.001,1.001,1)}}
+.deck.deck-compact{width:100%;margin-inline:0;gap:6px}
+.deck-glow{position:absolute;left:0;right:0;top:-12%;height:124%;z-index:-1;pointer-events:none;background:rgb(var(--card-rgb));opacity:.13;-webkit-mask-image:radial-gradient(ellipse closest-side at 50% 50%,#000 0%,rgba(0,0,0,.55) 40%,transparent 100%);mask-image:radial-gradient(ellipse closest-side at 50% 50%,#000 0%,rgba(0,0,0,.55) 40%,transparent 100%)}
+.deck-compact .deck-glow{opacity:.09}
+.deck-track{position:relative;outline:none}
+
+/* A card's button carries no look of its own: the face does. */
+.deck-card{display:block;padding:0;border:0;background:none;color:#fff;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
+/* A card further back is shaded, not filtered: a black overlay whose opacity is --dim (what brightness(1 - dim) would
+   darken it by). Opacity is the compositor's, so the shade fades without the card being painted again; a filter
+   is painted through on every frame, and once more for every card as the page opens. */
+[data-deck=face]::after{content:"";position:absolute;inset:-1px;z-index:2;border-radius:inherit;pointer-events:none;background:#000;opacity:var(--dim,0);transition:opacity .45s var(--deck-ease)}
+.deck-card[data-active=true] [data-deck=face]{border-color:rgba(var(--card-rgb),.75)}
+.deck-card:focus-visible{outline:none}
+.deck-card:focus-visible [data-deck=face]{outline:2px solid #fff;outline-offset:4px}
+/* The light that crosses a card as it comes up, in its ink (motion.ts moves it; at rest it is off the card). */
+[data-deck=sheen]{position:absolute;inset:0;pointer-events:none;opacity:0;mix-blend-mode:screen;
+ background:linear-gradient(105deg,transparent 28%,rgba(var(--card-rgb),.28) 42%,rgba(255,255,255,.34) 50%,rgba(var(--card-rgb),.28) 58%,transparent 72%)}
+/* A card that cannot be used here still comes up, greyed, to say why. */
+.deck-card[data-blocked=true]{cursor:not-allowed}
+.deck-card[data-blocked=true] [data-deck=face]{filter:grayscale(.75)}
+
+/* A mouse: the stack. Each button is the strip of its card that shows (stack.ts); the face is the whole card,
+   placed from its button. Cards keep their places: the chosen one lifts and comes to the top, the others sink and dim
+   by their distance, each shrinking toward the edge that shows so that edge stays put. */
+.deck[data-mode=stack] .deck-track{height:var(--track-h)}
+.deck[data-mode=stack] .deck-card{position:absolute;left:var(--bl);top:0;width:var(--bw);height:var(--track-h)}
+.deck[data-mode=stack] [data-deck=face]{position:absolute;left:var(--fl);top:var(--ft);width:var(--card-w);height:var(--card-h);pointer-events:none;transform-origin:var(--origin);
+ transform:translate(0,var(--y)) scale(var(--s));transition:transform .45s var(--deck-ease),transform-origin .45s var(--deck-ease),border-color .4s}
+.deck[data-mode=stack] .deck-card[data-active=true] [data-deck=face]{transition-duration:.6s,.45s,.4s;transition-timing-function:var(--deck-spring),var(--deck-ease),ease}
+.deck[data-mode=stack] .deck-card[data-active=true] [data-deck=face]::after{transition-duration:.35s}
+/* A compositor layer per card only while the deck is in use (a pointer over it, the focus in it), so a card moves
+   without being painted again; at rest, and as the page opens, the cards are painted with the page (a 2D transform
+   makes no layer of its own). Six layers built as the page opens were most of its first frames' work. */
+.deck[data-mode=stack]:is(:hover,:focus-within) [data-deck=face]{will-change:transform}
+@media(hover:hover){.deck[data-mode=stack] .deck-card:hover:not([data-active=true]) [data-deck=face]::after{opacity:0}}
+
+/* A finger: a snapping track. The chosen card is the one at rest in the centre. */
+.deck[data-mode=track] .deck-track{display:flex;gap:12px;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;padding:10px calc(var(--deck-w) * .12);scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.deck[data-mode=track] .deck-track::-webkit-scrollbar{display:none}
+.deck[data-mode=track] .deck-card{flex:0 0 var(--card-w);aspect-ratio:1.586;scroll-snap-align:center;scale:.94;transition:scale .4s var(--deck-ease)}
+.deck[data-mode=track] .deck-card:not([data-active=true]) [data-deck=face]::after{opacity:.15}
+.deck[data-mode=track] .deck-card[data-active=true]{scale:1;transition-duration:.55s;transition-timing-function:var(--deck-spring)}
+
+/* Under the deck: the arrows, and a mark per card with the chosen one lit. */
+.deck-nav{display:flex;align-items:center;justify-content:center;gap:10px}
+.deck-arrow{display:grid;place-items:center;width:30px;height:30px;border-radius:999px;border:1px solid var(--theme-border-bright);background:var(--theme-surface-alt,transparent);color:var(--theme-text-secondary);cursor:pointer;transition:color .2s,border-color .2s,background-color .2s}
+.deck-arrow:hover{color:rgb(var(--card-rgb));border-color:rgba(var(--card-rgb),.6)}
+.deck-arrow:focus-visible{outline:2px solid rgb(var(--card-rgb));outline-offset:2px}
+.deck-marks{position:relative;display:flex;align-items:center;gap:8px}
+.deck-marks span{display:grid;place-items:center;color:var(--theme-text-muted);opacity:.55;transition:color .3s,opacity .3s,transform .45s var(--deck-spring)}
+.deck-marks span svg{width:14px;height:14px}
+/* A bar under the lit mark slides to the next one (each mark is 14px wide, 8px apart). */
+.deck-marks::after{content:"";position:absolute;left:3px;bottom:-6px;width:8px;height:2px;border-radius:2px;background:rgb(var(--card-rgb));translate:calc(var(--mark-i,0) * 22px) 0;transition:translate .5s var(--deck-spring),background-color .4s}
+.deck-marks span[data-on=true]{color:rgb(var(--card-rgb));opacity:1;transform:scale(1.25)}
+
+/* Reduced motion: the final frame, at once. Everything still stacks, snaps and selects. */
+@media(prefers-reduced-motion:reduce){.deck-card,[data-deck=face],[data-deck=face]::after,.deck-glow,.deck-marks span,.deck-marks::after{transition:none!important}[data-deck=sheen]{display:none}.deck-track{scroll-behavior:auto}}
+:root[data-reduce-motion=true] .deck-card,:root[data-reduce-motion=true] [data-deck=face],:root[data-reduce-motion=true] [data-deck=face]::after,:root[data-reduce-motion=true] .deck-glow,:root[data-reduce-motion=true] .deck-marks span,:root[data-reduce-motion=true] .deck-marks::after{transition:none!important}
+:root[data-reduce-motion=true] [data-deck=sheen]{display:none}

@@ -1,8 +1,7 @@
 import {formatPaymentAmount} from '@ghostly/core';
 import type {WalletState} from '../lib/platform';
-export type WalletRail = 'cashu' | 'lightning' | 'arkade' | 'bark' | 'spark' | 'usdt' | 'bitcoin' | 'fedimint';
-/** The cards a chat can pay with: all of them. */
-export type ChatRail = WalletRail;
+import type {WalletCard} from './walletCardTypes';
+export type {ChatRail,WalletCard,WalletRail} from './walletCardTypes';
 export const CASHU_MINT_SOURCE = 'cashu-mint';
 /** The fee limit an on-chain payment starts with, in sats: a small transaction at a few sat/vB. The review shows the real fee. */
 export const ONCHAIN_FEE_CAP = 2_000;
@@ -11,7 +10,6 @@ export const ONCHAIN_FEE_CAP = 2_000;
  * just "sats" there. In Mainnet a wallet on a test network (a test mint, Bark on signet) still says "test sats".
  */
 export const pageUnit=(state:Pick<WalletState,'mode'>,isTest:boolean)=>isTest&&state.mode!=='testnet'?'test sats':'sats';
-export interface WalletCard {id:WalletRail;name:string;balance:string;detail:string;status:string;ready:boolean}
 /**
  * What each card shows, shared by the wallet page and the chat's payment picker.
  *

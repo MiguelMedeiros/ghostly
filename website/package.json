@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint && node scripts/check-dashes.mjs",
+    "test:e2e": "playwright test -c e2e/playwright.config.ts",
     "sync:references": "node scripts/sync-references.mjs",
+    "sync:app-deck": "node scripts/sync-app-deck.mjs",
     "prebuild": "npm run sync:references"
   },
   "dependencies": {
@@ -21,6 +23,7 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^26.6.2",
     "@types/react": "^19",
