@@ -17,6 +17,12 @@ on:
         description: "Only some of it, e.g. --project=web e2e/web/wallet-lnd.spec.ts (empty: everything)"
         required: false
         type: string
+      jobs:
+        description: "Which jobs: all of them, or desktop (the Desktop scenarios and specs, and the matrix report)"
+        required: false
+        type: choice
+        options: [all, desktop]
+        default: all
 
 permissions:
   contents: read
@@ -28,6 +34,8 @@ concurrency:
 jobs:
   e2e-full:
     name: End-to-end, gated suites included
+    # Not when only the Desktop jobs were asked for (a scheduled run has no inputs: everything).
+    if: ${{ inputs.jobs != 'desktop' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 150
 
@@ -83,6 +91,8 @@ jobs:
   # does not have is reported as partial, not failed.
   matrix:
     name: Combination matrix (${{ matrix.shard }}/4)
+    # Not when only the Desktop jobs were asked for (a scheduled run has no inputs: everything).
+    if: ${{ inputs.jobs != 'desktop' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     strategy:
