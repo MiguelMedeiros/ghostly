@@ -97,10 +97,6 @@ export interface IncomingMessage {
 }
 
 /**
- * The transport a chat is set to reach and is not on yet (WISP 100, "A chosen transport not reached yet"): waited for,
- * never failed. `by`: whose choice names it (absent: a policy alone, such as Fallback off, limits the chat to it).
- */
-/**
  * A native descriptor from the contact's capability record against the one known (a session's, or an older record's).
  * The record carries only how to dial, never an address: the Iroh endpoint id and the relay it is homed on, the
  * HyperDHT key and the relay a browser's goes through. For the same endpoint, a known Iroh descriptor keeps its
@@ -116,6 +112,10 @@ function recordDescriptor(transport: NativeTransport, known: unknown, record: un
   return transport === "iroh/1" ? { ...k, relay: r.relay } : record;
 }
 
+/**
+ * The transport a chat is set to reach and is not on yet (WISP 100, "A chosen transport not reached yet"): waited for,
+ * never failed. `by`: whose choice names it (absent: a policy alone, such as Fallback off, limits the chat to it).
+ */
 export interface TransportWait {
   transport: PairedTransport;
   by?: "you" | "contact";
@@ -952,8 +952,8 @@ export class GhostLink {
 
   /**
    * Where the chat is set to go and is not yet (WISP 100, "A chosen transport not reached yet"). With a session, the
-   * agreement of both policies; without one, only a limit of this side's (Fallback off) says where the chat must go:
-   * otherwise any transport will do, and the chat is simply retrying live.
+   * agreement of both policies; without one, a limit of this side's (Fallback off), or else an explicit choice (this
+   * side's, or the contact's from its record): otherwise any transport will do, and the chat is simply retrying live.
    */
   private wanted(): { transport: PairedTransport; by?: "you" | "contact" } | undefined {
     if (!this.options.params.profile || this.streamBlocked || this.keyStopped || this.stopped || !this.options.pairing?.credentials.peerKey) return undefined;
