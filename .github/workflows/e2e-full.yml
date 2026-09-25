@@ -207,6 +207,13 @@ jobs:
           MATRIX_WORKERS: "2"
         run: xvfb-run -a npm run e2e:matrix -- --no-build --grep @clients:desktop
 
+      # The Desktop specs as well (e2e/desktop/, the E2E workflow's Desktop job), whatever the scenarios did: the
+      # app is built already, and two Desktop apps going live on Iroh or HyperDHT from the DHT
+      # (native-upgrade.spec.ts) should not wait for a release to be checked.
+      - name: Run the Desktop specs
+        if: ${{ !cancelled() }}
+        run: xvfb-run -a npm run test:e2e:desktop
+
       - name: Upload the results
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -214,6 +221,16 @@ jobs:
           name: matrix-blob-desktop
           path: blob-report-matrix
           retention-days: 3
+
+      - name: Upload the Desktop specs' report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report-desktop
+          path: |
+            playwright-report-desktop
+            test-results/desktop
+          retention-days: 14
 
   matrix-report:
     name: Combination matrix report

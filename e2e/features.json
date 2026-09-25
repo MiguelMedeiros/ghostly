@@ -32,7 +32,8 @@
     "gif-api": {"title":"GIFCities search","fake":"stubbed with context.route"},
     "image-host": {"title":"A remote https image host (picture links)","fake":"stubbed with context.route"},
     "iroh-relay": {"title":"An Iroh relay (iroh-relay 1.2, dev mode, plain HTTP on loopback)","env":"GHOSTLY_IROH_RELAY_URL"},
-    "camera": {"title":"A camera / microphone (fake media devices in Chromium)"}
+    "camera": {"title":"A camera / microphone (fake media devices in Chromium)"},
+    "release-v0.4": {"title":"The v0.4.0 web app, built from its tag","stack":"scripts/build-compat-web.mjs"}
   },
   "features": [
     {"id":"app.home","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Home screen: New / Join actions, brand returns home"},
@@ -175,7 +176,9 @@
     {"id":"chat.dht.key-change","wisp":"403","kind":"feature","clients":["web","extension","desktop"],"infra":["pkarr-relay"],"title":"A changed DHT participation key is rejected without replacing the saved contact"},
     {"id":"chat.dht.delivery","wisp":"403","kind":"protocol","clients":["web","extension","desktop","cli"],"infra":["pkarr-relay"],"title":"DHT delivery records: encode, seal, publish, resolve, dedupe"},
     {"id":"chat.one-chat","wisp":"400","kind":"feature","clients":["web","extension","desktop"],"infra":["pkarr-relay"],"title":"One chat, one invite: first contact on the DHT and a stream at once; with no transport the chat opens On DHT and goes live by itself; a drop falls back to the DHT and nothing is lost or shown twice; a key mismatch on either path stops both"},
+    {"id":"chat.native-upgrade","wisp":"03","kind":"feature","clients":["desktop"],"infra":["pkarr-relay"],"title":"Two apps with no WebRTC in common (Linux Desktop) open On DHT and go live on Iroh or HyperDHT by dialling the native descriptors in each other's capability record, with no text lost or doubled"},
     {"id":"chat.compat","wisp":"402","kind":"feature","clients":["web","extension","desktop"],"infra":["pkarr-relay"],"title":"A chat from a v0.4 code is a compatibility chat: marked in the header, kept working both ways, and Continue in a new chat sends a new invite inside it"},
+    {"id":"chat.compat.v04","wisp":"402","kind":"feature","clients":["web"],"infra":["pkarr-relay","release-v0.4"],"title":"A real v0.4.0 build: its invite opens a compatibility chat in the current app, texts go both ways, Continue in a new chat reaches it as a message it says to open in an updated Ghostly, and it refuses a ghostly1 invite without creating anything"},
     {"id":"chat.waiting","wisp":"400","kind":"feature","clients":["web","extension","desktop"],"infra":["pkarr-relay"],"title":"What the chat cannot carry yet waits with a cancel (\"Sends when live\"): a second DHT text, text over 256 bytes, files and Cashu/Lightning requests; a byte counter at 256 while not live"},
     {"id":"chat.caps-record","wisp":"03","kind":"protocol","clients":["web","extension","desktop"],"infra":["pkarr-relay"],"title":"Layer-0 capability record: derived key, sealed before and after the pin, signed, fits 1,000 bytes, rev only moves forward"},
     {"id":"delivery.hold.enable","wisp":"404","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Per-chat switch to hold messages for an away contact (consent in the offer)"},
@@ -458,6 +461,7 @@
     "src/hooks/usePkarr.ts": ["invite.create"],
     "src/hooks/useProfileSwitcher.ts": ["profiles.*","backup.*","storage.s3","groups.*","delivery.hold.*","proofs.page","chats.list.delete","chat.paired.nickname-sync","invite.dht"],
     "src/hooks/usePublicProfiles.ts": ["profiles.share","profiles.public","proofs.peer-proofs"],
+    "src/lib/continueChat.ts": ["chat.compat","chat.compat.v04"],
     "src/lib/avatarImage.ts": ["profiles.picture","profiles.picture.sanitize","groups.picture.*"],
     "src/lib/chatList.ts": ["chats.*","groups.*","settings.chat-list-density","app.attention.unread"],
     "src/lib/connection.ts": ["*"],

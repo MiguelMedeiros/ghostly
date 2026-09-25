@@ -174,3 +174,13 @@ jobs:
             playwright-report-desktop
             test-results
           retention-days: 14
+
+  # The current web app against a real v0.4.0, built from its tag (e2e-compat.yml, about 4 minutes): a contact
+  # still on 0.4 must keep working with the release (WISP 402).
+  compat:
+    name: Compatibility with v0.4.0
+    # The deployed-web-app run tests the web app alone.
+    if: ${{ !inputs.web_url }}
+    uses: ./.github/workflows/e2e-compat.yml
+    with:
+      ref: ${{ inputs.ref }}
