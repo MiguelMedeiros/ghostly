@@ -1,6 +1,6 @@
 import type { Identity } from "./identity";
 import { createRelayPayload, openRelayPayload, parseRelayPayload, type GhostRecord, type SignedPacket } from "./pkarr";
-import type { PkarrRequestOptions, PkarrTransport } from "./transport";
+import { DiscoveryBudgetError, isDiscoveryBudgetError, type PkarrRequestOptions, type PkarrTransport } from "./transport";
 
 /**
  * Public Pkarr relays. They are generic Pkarr infrastructure (an HTTP bridge to
@@ -127,7 +127,8 @@ export class RelayTransport implements PkarrTransport {
         let response = await this.put(relay, pubKeyZ32, payload, previous, options.background);
         // 412: the relay never got `previous` (it was busy, or restarted). There is one writer per key, so insist.
         if (response.status === 412) response = await this.put(relay, pubKeyZ32, payload, undefined, options.background);
-        if (response.status === 429) this.coolDown(relay, response);
+        // The relay's own rate limit: this packet did not go in, and goes once the relay says so.
+        if (response.status === 429) throw new DiscoveryBudgetError(this.coolDown(relay, response), `${relay} responded 429; retry shortly`);
         if (!response.ok) throw new Error(`${relay} responded ${response.status}`);
       }),
     );
@@ -137,7 +138,11 @@ export class RelayTransport implements PkarrTransport {
       for (const relay of this.relays) if (this.writeWaiting.get(relay) !== waitingBefore.get(relay)) this.writeWaiting.delete(relay);
     }
     if (!results.some((r) => r.status === "fulfilled")) {
+      // Every relay held it back for its budget (this client's, or the relay's rate limit): a wait for the first
+      // of them to free a request, not a failure.
+      const held = results.map((r) => (r.status === "rejected" && isDiscoveryBudgetError(r.reason) ? r.reason : null));
       const reasons = results.map((r) => (r.status === "rejected" ? String(r.reason) : "")).join("; ");
+      if (held.every((e) => e !== null)) throw new DiscoveryBudgetError(Math.min(...held.map((e) => e!.retryInMs)), `Publish held back on every relay: ${reasons}`);
       throw new Error(`Publish failed on every relay: ${reasons}`);
     }
   }
@@ -154,13 +159,18 @@ export class RelayTransport implements PkarrTransport {
 
     const start = this.cursor++;
     let reachable = false;
+    // The soonest a relay passed over for its budget takes a request again, and whether one was down instead.
+    let budgetWait = Infinity, down = false;
     for (let i = 0; i < this.relays.length; i++) {
       const relay = this.relays[(start + i) % this.relays.length];
-      if (this.isCoolingDown(relay, "GET") || !this.take(relay, options.background, false)) continue;
+      if (this.networkCoolingDown(relay, "GET")) { down = true; continue; }
+      const limited = this.rateLimitedFor(relay);
+      if (limited > 0) { budgetWait = Math.min(budgetWait, limited); continue; }
+      if (!this.take(relay, options.background, false)) { budgetWait = Math.min(budgetWait, this.freeInMs(relay, options.background, false)); continue; }
       try {
         const response = await this.request(`${relay}/${pubKeyZ32}`, { method: "GET" });
         if (response.status === 429) {
-          this.coolDown(relay, response);
+          budgetWait = Math.min(budgetWait, this.coolDown(relay, response));
           continue;
         }
         if (response.status !== 404) {
@@ -176,21 +186,26 @@ export class RelayTransport implements PkarrTransport {
         // surfaces as a network error. Back off this operation and try the next relay.
         // Unlike an observable 429, this does not establish a relay-wide limit.
         this.networkCooldown.set(`GET ${relay}`, Date.now() + NETWORK_ERROR_COOLDOWN_MS);
+        down = true;
       }
     }
     if (!reachable) {
       const resting = this.relays.every((r) => this.isCoolingDown(r, "GET") || (this.spent.get(r)?.length ?? 0) >= this.perMinute || this.writeFirst(r)
         || (!!options.background && (this.spentBackground.get(r)?.length ?? 0) >= this.backgroundPerMinute));
-      // Holding back is not an outage: report what is already known.
+      // Holding back is not an outage: report what is already known…
       if (resting && this.newest.has(pubKeyZ32)) return this.newest.get(pubKeyZ32)!;
+      // …or, knowing nothing yet, that the read waits for the budget.
+      if (!down && budgetWait < Infinity) throw new DiscoveryBudgetError(budgetWait);
       throw new Error("No Pkarr relay reachable");
     }
     return this.newest.get(pubKeyZ32) ?? null;
   }
 
   private async put(relay: string, pubKeyZ32: string, payload: Uint8Array, replaces?: bigint, background = false): Promise<Response> {
-    if (this.isCoolingDown(relay, "PUT")) throw new Error("Discovery relay is cooling down; retry shortly");
-    if (!this.take(relay, background, true)) throw new Error("Discovery request budget reached; retry shortly");
+    if (this.networkCoolingDown(relay, "PUT")) throw new Error("Discovery relay is cooling down; retry shortly");
+    const limited = this.rateLimitedFor(relay);
+    if (limited > 0) throw new DiscoveryBudgetError(limited, "Discovery relay is cooling down after a 429; retry shortly");
+    if (!this.take(relay, background, true)) throw new DiscoveryBudgetError(this.freeInMs(relay, background, true));
     try { return await this.request(`${relay}/${pubKeyZ32}`, {
       method: "PUT",
       body: payload as BodyInit,
@@ -222,19 +237,45 @@ export class RelayTransport implements PkarrTransport {
     return true;
   }
 
+  /**
+   * How long until this relay's budget takes the request `take` just refused: the oldest request of the minute over
+   * the limit ages out, or a waiting link write has had its turn. `take` keeps the lists to the minute, oldest first.
+   */
+  private freeInMs(relay: string, background: boolean | undefined, write: boolean, now = Date.now()): number {
+    const recent = this.spent.get(relay) ?? [], recentBackground = this.spentBackground.get(relay) ?? [];
+    let wait = 0;
+    if (recent.length >= this.perMinute) wait = Math.max(wait, recent[recent.length - this.perMinute] + 60_000 - now);
+    if (background && recentBackground.length >= this.backgroundPerMinute)
+      wait = Math.max(wait, recentBackground[recentBackground.length - this.backgroundPerMinute] + 60_000 - now);
+    if (!(write && !background) && this.writeFirst(relay, now)) wait = Math.max(wait, this.writeWaiting.get(relay)! + WRITE_FIRST_MS - now);
+    return Math.max(wait, 1);
+  }
+
   /** A link's write is waiting for this relay's budget: reads (and background writes) let it go first. */
   private writeFirst(relay: string, now = Date.now()): boolean {
     return now - (this.writeWaiting.get(relay) ?? -Infinity) < WRITE_FIRST_MS;
   }
 
   private isCoolingDown(relay: string, method: "GET" | "PUT"): boolean {
-    return Math.max(this.coolingDown.get(relay) ?? 0, this.networkCooldown.get(`${method} ${relay}`) ?? 0) > Date.now();
+    return this.rateLimitedFor(relay) > 0 || this.networkCoolingDown(relay, method);
   }
 
-  private coolDown(relay: string, response: Response): void {
+  /** Left alone after failing at the network level. */
+  private networkCoolingDown(relay: string, method: "GET" | "PUT"): boolean {
+    return (this.networkCooldown.get(`${method} ${relay}`) ?? 0) > Date.now();
+  }
+
+  /** How much longer the relay asked (429) to be left alone; 0 when it did not. */
+  private rateLimitedFor(relay: string): number {
+    return Math.max(0, (this.coolingDown.get(relay) ?? 0) - Date.now());
+  }
+
+  /** Leaves the relay alone for as long as its 429 asks; returns that, in ms. */
+  private coolDown(relay: string, response: Response): number {
     const retryAfter = Number.parseInt(response.headers.get("retry-after") ?? "", 10);
     const seconds = Number.isFinite(retryAfter) ? Math.min(Math.max(retryAfter, 1), 120) : 15;
     this.coolingDown.set(relay, Date.now() + seconds * 1000);
+    return seconds * 1000;
   }
 
   private async request(url: string, init: RequestInit): Promise<Response> {

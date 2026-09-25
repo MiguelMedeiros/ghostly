@@ -41,7 +41,7 @@ import { CALLS_CAPABILITY, FILES_CAPABILITY, SERVICES_CAPABILITY, SESSION_CAPABI
 import { FILE_FRAMES } from "./chatFiles";
 import { PAIRED_CALL_FRAME, PairedCalls, parsePairedCallFrame } from "./pairedCalls";
 import { traceLink } from "./linkTrace";
-import type { PkarrTransport } from "./transport";
+import { isDiscoveryBudgetError, type PkarrTransport } from "./transport";
 import { PairingTracker, type PairingProgress, type PairingRole } from "./pairingProgress";
 
 /**
@@ -325,6 +325,8 @@ export class GhostLink {
   private transitionError?: string;
   private applicationOpen = false;
   private stopped = false;
+  /** Connection details this side could not publish were reported as a pairing error, which the next packet out ends. */
+  private signalPublishFailed = false;
   private peerDescriptors: TransportDescriptors;
   private peerTransports?: PairedTransport[];
   private peerFallback: boolean;
@@ -465,7 +467,13 @@ export class GhostLink {
           this.peerMayHaveLeftDht(presence);
           this.maybeAutoConnect(presence);
         },
-        onPublish: result => { if (result.error) this.tracker?.failed("publish", true, result.error); else this.tracker?.published(); },
+        onPublish: result => {
+          // Held back by the relays' request budget: nothing failed, and the session sends it when the budget frees a request.
+          if (result.waiting) return;
+          if (result.error) { this.tracker?.failed("publish", true, result.error); return; }
+          this.tracker?.published();
+          this.publishRecovered();
+        },
         onPeerAck: (ack) => events.onPeerAck?.(ack),
         onCallSignal: (signal) => { if (!options.params.profile) events.onCallSignal?.(signal); },
         onRtcSignal: signal => {
@@ -490,8 +498,13 @@ export class GhostLink {
         // A one-exchange link connected: it closes in a moment, and a packet clearing its offer would only spend the relays' budget.
         if (!signal && options.oneShot && this.dataLink.state === "open") return;
         const report = (error: unknown) => {
-          if (signal && options.params.profile) events.onPairingState?.({ status: "error",
-            error: `Could not publish connection details: ${error instanceof Error ? error.message : "discovery unavailable"}. Reconnect to retry.` });
+          // The relays' request budget held it back: the session publishes it once the budget frees a request, and
+          // the pairing goes on meanwhile. Waiting for the budget is no connection issue.
+          if (isDiscoveryBudgetError(error)) return;
+          if (!signal || !options.params.profile) return;
+          this.signalPublishFailed = true;
+          events.onPairingState?.({ status: "error",
+            error: `Could not publish connection details: ${error instanceof Error ? error.message : "discovery unavailable"}. Retrying.` });
         };
         try {
           if (signal && this.tracker) {
@@ -669,6 +682,19 @@ export class GhostLink {
     const remote = this.switcher?.peerPolicy;
     return !!actual && this.transportOffer().includes(actual) && (!remote || allowedTransports(remote).includes(actual));
   }
+  /**
+   * A packet went out after connection details could not be: the session kept trying (every few seconds), so the
+   * error that was reported is over and the pairing carries on from where it is.
+   */
+  private publishRecovered(): void {
+    if (!this.signalPublishFailed) return;
+    this.signalPublishFailed = false;
+    if (this.stopped || this.keyStopped || this.securityRejected) return;
+    if (this.streamBlocked) this.emitDeliveryState();
+    else if (this.paired?.state) this.emitPairingState();
+    else this.options.events?.onPairingState?.({ status: "connecting" });
+  }
+
   private emitPairingState(): void {
     this.syncWait();
     const state = this.paired?.state;

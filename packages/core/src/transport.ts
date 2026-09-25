@@ -18,6 +18,30 @@ import type { GhostRecord, SignedPacket } from "./pkarr";
  */
 export interface PkarrRequestOptions { background?: boolean; urgent?: boolean }
 
+/**
+ * A request the transport held back to stay within a request budget, its own or a relay's rate limit: nothing went
+ * out, and the same request goes through once the budget frees one, in about `retryInMs`. A wait, never a failure:
+ * whoever publishes tries again then, and says nothing is wrong meanwhile.
+ */
+export class DiscoveryBudgetError extends Error {
+  readonly code = "discovery-budget";
+  constructor(readonly retryInMs: number, message = "Discovery request budget reached; retry shortly") {
+    super(message);
+    this.name = "DiscoveryBudgetError";
+  }
+}
+
+/** Whether `error` is a request the budget held back (`DiscoveryBudgetError`), also from another copy of this module. */
+export function isDiscoveryBudgetError(error: unknown): error is DiscoveryBudgetError {
+  return error instanceof DiscoveryBudgetError || (typeof error === "object" && error !== null && (error as { code?: unknown }).code === "discovery-budget"
+    && typeof (error as { retryInMs?: unknown }).retryInMs === "number");
+}
+
+/** When to try again after the budget held a request back: when it frees one, but never sooner than `min` nor later than `max`. */
+export function budgetRetryMs(error: DiscoveryBudgetError, min: number, max: number): number {
+  return Math.min(max, Math.max(min, Number.isFinite(error.retryInMs) ? error.retryInMs : max));
+}
+
 export interface PkarrTransport {
   publish(identity: Identity, records: GhostRecord[], options?: PkarrRequestOptions): Promise<void>;
   /**
