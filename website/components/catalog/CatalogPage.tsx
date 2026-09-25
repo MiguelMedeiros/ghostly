@@ -64,7 +64,7 @@ export function CatalogPage({ locale }: { locale: Locale }) {
             {candidates.map((c) => (
               <li key={c.id} id={c.id}>
                 <Link href={`${href(locale, "/roadmap")}#${c.id}`}>{c.title}</Link>
-                <span className="dim mono">{c.status}</span>
+                <span className="dim mono">{c.note ? `${c.status}: ${c.note}` : c.status}</span>
               </li>
             ))}
           </ul>

@@ -40,17 +40,18 @@ const en = {
       id: "talk",
       n: "01",
       title: "Talk in more ways",
-      why: "Every new chat is the same kind now. Next it starts on the DHT when no direct path exists and goes live by itself and gets one ghostly1 invite.",
+      why: "Every new chat is the same kind: it comes from one ghostly1 invite, starts on the DHT when no direct path exists and goes live by itself. Next is what a chat shows about the other person, and more clients.",
       now: [
-        { text: "Chats with pinned keys, files, payments and local apps", level: "available" },
-        { text: "Short texts over the DHT when the live link drops", level: "available" },
+        { text: "One ghostly1 invite code, a QR and a ghostly.tools link", level: "available" },
+        { text: "Chats with pinned keys, files of any size, payments and local apps", level: "available" },
+        { text: "A chat with no direct path starts on the DHT and goes live by itself; short texts over the DHT when the live link drops", level: "available" },
         { text: "Calls and screen sharing in every chat, while it is live", level: "available" },
         { text: "Pairing progress you can watch while two apps find each other", level: "available" },
         { text: "Voice messages", level: "available" },
       ],
       next: [
-        { text: "A chat with no direct path starts on the DHT and goes live by itself", level: "planned" },
-        { text: "One ghostly1 invite code and a ghostly.tools link", level: "planned" },
+        { text: "Typing and presence, each a capability of its own that you can keep private", level: "planned" },
+        { text: "Mobile apps, and a CLI that joins the same chats", level: "planned" },
       ],
       gate: "Every client tested against every other one, on each transport it offers.",
       after: [],
@@ -79,7 +80,8 @@ const en = {
       title: "Reach each other in more places",
       why: "New transports widen where two people can meet. Each one is an adapter both sides must support, never a silent bridge.",
       now: [
-        { text: "WebRTC everywhere; Iroh and HyperDHT between desktop apps", level: "available" },
+        { text: "WebRTC (not on Linux desktops); Iroh and HyperDHT between desktop apps", level: "available" },
+        { text: "Iroh in the browser through n0's relays; HyperDHT there only through a relay you set", level: "available" },
       ],
       next: [
         { text: "Local network discovery, generic QUIC and WebSocket relay profiles", level: "planned" },
@@ -109,13 +111,16 @@ const en = {
       title: "Bring an identity, only if you want",
       why: "Nobody needs a public identity to talk. Proofs are optional, several can coexist, and you choose what each contact sees.",
       now: [
-        { text: "Proofs made once, shared per chat: Nostr, a domain, an OpenPGP or SSH key, a Bitcoin address", level: "available" },
+        { text: "Proofs made once, shared per chat: Nostr, a domain, an OpenPGP or SSH key, a Bitcoin address, a DID", level: "available" },
         { text: "Nostr social layer: profile, follows and notes; posting off by default", level: "available" },
+        { text: "A did:dht for every profile, listing only the identities you switch on", level: "available" },
       ],
       next: [
-        { text: "OpenID accounts (Google, Microsoft, Apple, GitLab, Twitch): built, offered once Ghostly's OAuth clients are registered", level: "planned" },
-        { text: "Hardware signers and passkeys", level: "planned" },
-        { text: "Pubky and Keet, and their profiles and content", level: "research" },
+        { text: "Pubky and Bluesky identities, in implementation (#246, #248)", level: "planned" },
+        { text: "OpenID accounts (Google, Microsoft, Apple, GitLab, Twitch): built, blocked until Ghostly's OAuth clients are registered", level: "planned" },
+        { text: "Hardware wallets as signers, and passkeys", level: "planned" },
+        { text: "Keet, blocked until it offers a supported signing API", level: "planned" },
+        { text: "Pubky profiles and content", level: "research" },
       ],
       gate: "Sessions without any proof still work. Proving a key never implies importing a graph or permission to publish.",
       after: ["talk"],
@@ -143,7 +148,7 @@ const en = {
       title: "SDKs, adapters and plugins",
       why: "Let others build pieces without forking the app. A plugin is packaging; the contract stays a WISP.",
       now: [
-        { text: "Contracts as WISP drafts, a CLI for scripts and bots, and @ghostly/sdk: an adapter registers as a plugin", level: "available" },
+        { text: "Contracts as WISP drafts, a compatibility CLI for scripts and bots, and @ghostly/sdk in the repository: an adapter registers as a plugin", level: "available" },
       ],
       next: [
         { text: "Adapter manifests, and the SDK published on npm", level: "planned" },
@@ -186,6 +191,8 @@ const en = {
     lead: "From the adapter roadmap in the repository: transports, rails, providers, identities, hardware, storage and apps. Open any entry for the source notes.",
     source: "Read the full adapter roadmap",
     sourceStatus: "as written in the source",
+    /** The source's statuses that the three levels don't name; shown before the source's note. */
+    states: { "In implementation": "In implementation", Blocked: "Blocked" },
   },
 };
 
@@ -214,17 +221,18 @@ const ptBr: RoadmapCopy = {
       id: "talk",
       n: "01",
       title: "Conversar de mais jeitos",
-      why: "Todo chat novo agora é do mesmo tipo. Em seguida ele começa na DHT quando não há caminho direto e passa sozinho ao link direto e ganha um único convite ghostly1.",
+      why: "Todo chat novo é do mesmo tipo: vem de um único convite ghostly1, começa na DHT quando não há caminho direto e passa sozinho ao link direto. Em seguida vem o que o chat mostra sobre a outra pessoa, e mais clientes.",
       now: [
-        { text: "Chats com chaves fixadas, arquivos, pagamentos e apps locais", level: "available" },
-        { text: "Textos curtos pela DHT quando o link direto cai", level: "available" },
+        { text: "Um único código de convite ghostly1, um QR e um link em ghostly.tools", level: "available" },
+        { text: "Chats com chaves fixadas, arquivos de qualquer tamanho, pagamentos e apps locais", level: "available" },
+        { text: "Um chat sem caminho direto começa na DHT e passa sozinho ao link direto; textos curtos pela DHT quando o link direto cai", level: "available" },
         { text: "Chamadas e compartilhamento de tela em todo chat, enquanto ele está ao vivo", level: "available" },
         { text: "Ver o progresso do pareamento enquanto os dois apps se encontram", level: "available" },
         { text: "Mensagens de voz", level: "available" },
       ],
       next: [
-        { text: "Um chat sem caminho direto começa na DHT e passa sozinho ao link direto", level: "planned" },
-        { text: "Um único código de convite ghostly1 e um link em ghostly.tools", level: "planned" },
+        { text: "Digitando e presença, cada um uma capacidade própria que você pode manter privada", level: "planned" },
+        { text: "Apps para celular, e uma CLI que entra nos mesmos chats", level: "planned" },
       ],
       gate: "Cada cliente testado contra cada outro, em cada transporte que oferece.",
       after: [],
@@ -253,7 +261,8 @@ const ptBr: RoadmapCopy = {
       title: "Encontrar-se em mais lugares",
       why: "Novos transportes ampliam onde duas pessoas podem se encontrar. Cada um é um adapter que os dois lados precisam suportar, nunca uma ponte silenciosa.",
       now: [
-        { text: "WebRTC em todo lugar; Iroh e HyperDHT entre apps desktop", level: "available" },
+        { text: "WebRTC (não no desktop Linux); Iroh e HyperDHT entre apps desktop", level: "available" },
+        { text: "Iroh no navegador pelos relays da n0; HyperDHT lá só por um relay que você define", level: "available" },
       ],
       next: [
         { text: "Descoberta na rede local, perfis QUIC genérico e relay WebSocket", level: "planned" },
@@ -283,13 +292,16 @@ const ptBr: RoadmapCopy = {
       title: "Traga uma identidade, só se quiser",
       why: "Ninguém precisa de identidade pública para conversar. Provas são opcionais, várias podem coexistir e você escolhe o que cada contato vê.",
       now: [
-        { text: "Provas feitas uma vez, compartilhadas por chat: Nostr, um domínio, uma chave OpenPGP ou SSH, um endereço Bitcoin", level: "available" },
+        { text: "Provas feitas uma vez, compartilhadas por chat: Nostr, um domínio, uma chave OpenPGP ou SSH, um endereço Bitcoin, um DID", level: "available" },
         { text: "Camada social do Nostr: perfil, quem segue e notas; publicar desligado por padrão", level: "available" },
+        { text: "Um did:dht para cada perfil, que lista só as identidades que você ligar", level: "available" },
       ],
       next: [
-        { text: "Contas OpenID (Google, Microsoft, Apple, GitLab, Twitch): prontas, oferecidas quando os clientes OAuth do Ghostly forem registrados", level: "planned" },
-        { text: "Signers de hardware e passkeys", level: "planned" },
-        { text: "Pubky e Keet, com os perfis e conteúdos deles", level: "research" },
+        { text: "Identidades Pubky e Bluesky, em implementação (#246, #248)", level: "planned" },
+        { text: "Contas OpenID (Google, Microsoft, Apple, GitLab, Twitch): prontas, bloqueadas até os clientes OAuth do Ghostly serem registrados", level: "planned" },
+        { text: "Carteiras de hardware como signers, e passkeys", level: "planned" },
+        { text: "Keet, bloqueado até oferecer uma API de assinatura suportada", level: "planned" },
+        { text: "Perfis e conteúdos do Pubky", level: "research" },
       ],
       gate: "Sessões sem nenhuma prova continuam funcionando. Provar uma chave nunca implica importar um grafo nem permissão para publicar.",
       after: ["talk"],
@@ -317,7 +329,7 @@ const ptBr: RoadmapCopy = {
       title: "SDKs, adapters e plugins",
       why: "Deixar outras pessoas construírem peças sem fazer fork do app. Plugin é embalagem; o contrato continua sendo um WISP.",
       now: [
-        { text: "Contratos como rascunhos WISP, uma CLI para scripts e bots, e o @ghostly/sdk: um adapter se registra como plugin", level: "available" },
+        { text: "Contratos como rascunhos WISP, uma CLI de compatibilidade para scripts e bots, e o @ghostly/sdk no repositório: um adapter se registra como plugin", level: "available" },
       ],
       next: [
         { text: "Manifestos de adapters, e o SDK publicado no npm", level: "planned" },
@@ -360,75 +372,9 @@ const ptBr: RoadmapCopy = {
     lead: "Do roadmap de adapters no repositório: transportes, trilhos, provedores, identidades, hardware, armazenamento e apps. Abra qualquer item para ver as notas da fonte (em inglês).",
     source: "Ler o roadmap de adapters completo",
     sourceStatus: "como escrito na fonte",
+    states: { "In implementation": "Em implementação", Blocked: "Bloqueado" },
   },
 };
 
 export const roadmap: Localized<RoadmapCopy> = { en, "pt-br": ptBr };
 
-/**
- * Candidate status in the site's levels. The adapter roadmap's status column
- * lags the code on `dev`, so what the app already runs is pinned to
- * "available" here, with the PR that shipped it.
- */
-const AVAILABLE = new Set([
-  // Before 0.5.0
-  "candidate-pkarr-mainline-dht",
-  "candidate-webrtc",
-  "candidate-cashu",
-  "candidate-lightning-bolt11",
-  "candidate-files-and-attachments",
-  "candidate-voice-video-screenshare",
-  "candidate-local-state",
-  // Wallet sources and rails (#77, #78, #79, #82, #86, #88, #90, #188, #192)
-  "candidate-ark-via-bark",
-  "candidate-bitcoin-on-chain",
-  "candidate-lnd",
-  "candidate-core-lightning",
-  "candidate-nwc",
-  "candidate-webln",
-  "candidate-bitcoin-core-rpc",
-  "candidate-bdk",
-  "candidate-esplora",
-  "candidate-spark",
-  "candidate-fedimint",
-  // Identity proofs (#80, #81, #85, #89, #91, #93)
-  "candidate-proof",
-  "candidate-nostr",
-  "candidate-openpgp-pgp",
-  "candidate-ssh",
-  "candidate-bitcoin-address-proof",
-  "candidate-github",
-  "candidate-domain",
-  // Backups (#72): sealed bundles to a file or an S3-compatible bucket
-  "candidate-backup-export-import-migration",
-  "candidate-remote-encrypted-storage",
-  // Paying from another wallet and Lightning addresses (#107, WISP 205)
-  "candidate-manual-external-wallet",
-  "candidate-lightning-address-lnurl-pay",
-  // Nostr social layer (#103): profile, follows, notes, publication; Nostr only
-  "candidate-profile",
-  "candidate-social-graph",
-  "candidate-content-read-search",
-  "candidate-publication",
-  // Private groups and communities (#102, #106, #153); the epoch-key scheme is
-  // the group crypto decided for them
-  "candidate-private-groups",
-  "candidate-group-crypto",
-  // Store-and-forward (#108): hold/1 in the sender's own S3 storage
-  "candidate-store-forward-offline-sync",
-  // @ghostly/sdk (#105): the SDK and plugin registration; manifests with
-  // publisher identity and permissions are not built yet
-  "candidate-sdk-and-manifests",
-]);
-/**
- * Built but not offered: OpenID proofs (#92) wait for Ghostly's OAuth clients
- * to be registered, so for the people using the app they are still planned.
- */
-const NOT_OFFERED = new Set(["candidate-openid-connect-providers-google-microsoft-entra-work-school-and-personal-apple-gitlab-com-twitch"]);
-export function candidateLevel(id: string, status: string): Level {
-  if (NOT_OFFERED.has(id)) return "planned";
-  if (AVAILABLE.has(id)) return "available";
-  if (status.startsWith("Current") || status.startsWith("In development")) return "available";
-  if (/research/i.test(status)) return "research";
-  return "planned";
-}

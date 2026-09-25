@@ -44,7 +44,7 @@ const en = {
       {
         title: "Share it your way.",
         body: "As a link, a QR code or a text code. In person, by message, however you like. Only share it with the person you want to meet.",
-        note: "The QR code scans with a camera or from an image. Planned: one code that starts with ghostly1 and catches typos, and a ghostly.tools link.",
+        note: "The QR code scans with a camera or from an image. The code starts with ghostly1 and catches typos; the link opens on ghostly.tools.",
       },
       {
         title: "Connect.",
@@ -109,12 +109,12 @@ const en = {
       },
       {
         title: "A direct line for the real conversation.",
-        body: "Messages, files and payments travel over a live connection between the two devices: WebRTC in the web app, extension and desktop, and Iroh or HyperDHT between desktop apps. Calls use WebRTC media.",
+        body: "Messages, files and payments travel over a live connection between the two devices: WebRTC in the web app, extension and desktop, Iroh or HyperDHT between desktop apps, and Iroh through a relay when a browser has no direct path. Calls use WebRTC media.",
       },
       {
         title: "Honest about the route.",
         body: "Public STUN servers help the two devices find a route through home routers. When the direct path is lost, short texts keep going through the DHT while the apps look for it again. You can add your own TURN relay in settings.",
-        note: "DHT texts are short: 256 bytes (500 with Ghostly 0.4 contacts). Planned: a first meeting with no direct path starts on the DHT too, and the chat goes live by itself once a path appears.",
+        note: "DHT texts are short: 256 bytes (500 with Ghostly 0.4 contacts). A first meeting with no direct path starts on the DHT too, and the chat goes live by itself once a path appears.",
       },
     ],
     pipe: "live connection",
@@ -141,7 +141,7 @@ const en = {
         icon: "file",
         title: "Send the actual thing.",
         body: "Photos, documents, projects: straight from your device to theirs, checked on arrival.",
-        extra: "Up to 100 MiB per file, with both of you online.",
+        extra: "Any size, with both of you online; a big file picks up where it stopped.",
       },
       {
         id: "calls",
@@ -389,7 +389,7 @@ const ptBr: HomeCopy = {
       {
         title: "Compartilhe do seu jeito.",
         body: "Como link, QR code ou código de texto, pessoalmente ou por mensagem, como preferir. Compartilhe só com quem você quer encontrar.",
-        note: "O QR code é lido pela câmera ou de uma imagem. Planejado: um único código que começa com ghostly1 e detecta erros de digitação, e um link em ghostly.tools.",
+        note: "O QR code é lido pela câmera ou de uma imagem. O código começa com ghostly1 e detecta erros de digitação; o link abre em ghostly.tools.",
       },
       {
         title: "Conecte.",
@@ -454,12 +454,12 @@ const ptBr: HomeCopy = {
       },
       {
         title: "Uma linha direta para a conversa de verdade.",
-        body: "Mensagens, arquivos e pagamentos vão por uma conexão ao vivo entre os dois aparelhos: WebRTC no app web, na extensão e no desktop, e Iroh ou HyperDHT entre apps desktop. Chamadas usam mídia WebRTC.",
+        body: "Mensagens, arquivos e pagamentos vão por uma conexão ao vivo entre os dois aparelhos: WebRTC no app web, na extensão e no desktop, Iroh ou HyperDHT entre apps desktop, e Iroh por um relay quando um navegador não tem caminho direto. Chamadas usam mídia WebRTC.",
       },
       {
         title: "Sincero sobre o caminho.",
         body: "Servidores STUN públicos ajudam os aparelhos a achar uma rota através dos roteadores de casa. Quando o caminho direto se perde, textos curtos continuam passando pela DHT enquanto os apps procuram de novo. Dá para adicionar seu próprio relay TURN nos ajustes.",
-        note: "Textos pela DHT são curtos: 256 bytes (500 com contatos no Ghostly 0.4). Planejado: um primeiro encontro sem caminho direto também começa na DHT, e o chat passa sozinho ao link direto quando um caminho aparece.",
+        note: "Textos pela DHT são curtos: 256 bytes (500 com contatos no Ghostly 0.4). Um primeiro encontro sem caminho direto também começa na DHT, e o chat passa sozinho ao link direto quando um caminho aparece.",
       },
     ],
     pipe: "conexão ao vivo",
@@ -486,7 +486,7 @@ const ptBr: HomeCopy = {
         icon: "file",
         title: "Mande a coisa em si.",
         body: "Fotos, documentos, projetos: direto do seu aparelho para o da outra pessoa, verificados na chegada.",
-        extra: "Até 100 MiB por arquivo, com os dois online.",
+        extra: "Qualquer tamanho, com os dois online; um arquivo grande continua de onde parou.",
       },
       {
         id: "calls",

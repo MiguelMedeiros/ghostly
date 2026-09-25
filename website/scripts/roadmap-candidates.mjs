@@ -33,7 +33,12 @@ const overrides = {
   "Password / payment-gated access": ["8", "Admission policy"],
   "Local HTTP / Bitcoin / Lightning services": ["7", "Service profile"],
 };
-const current = new Set(["Pkarr / Mainline DHT", "WebRTC", "Iroh", "HyperDHT / Hyperswarm", "QR / explicit invitation", "Cashu", "Lightning BOLT11"]);
+// The one status each inventory row carries, in bold: "**Available**", "**In implementation: #123**",
+// "**Blocked: what it waits for**", "**Planned**" or "**Research**" (see "Evidence and readiness" in
+// the roadmap). The site shows it as one of its three levels; the text after the colon is a short
+// plain-text note shown under the entry's title (code marks dropped, no links).
+const STATES = { Available: "available", "In implementation": "planned", Blocked: "planned", Planned: "planned", Research: "research" };
+const STATE = new RegExp(`\\*\\*(${Object.keys(STATES).join("|")})(?:: ([^*]+))?\\*\\*`, "g");
 export function roadmapCandidates(markdown) {
   let section = "", headers = [];
   const entries = [];
@@ -47,9 +52,14 @@ export function roadmapCandidates(markdown) {
     const title = cells[0];
     const [family, kind] = overrides[title] ?? sections[section];
     const detail = cells.slice(1).join(" ");
-    const status = current.has(title) ? "Current, scoped" : ["Ark via Arkade", "USDT through Tether WDK"].includes(title) ? "In development" : /deferred|blocked/i.test(detail) ? "Deferred / research" : /research/i.test(detail) ? "Research" : "Planned";
+    const states = [...detail.matchAll(STATE)];
+    if (states.length !== 1) throw new Error(`Roadmap row "${title}" needs exactly one status (${Object.keys(STATES).join(", ")}) in bold; found ${states.length}`);
+    const [, status, marked] = states[0];
+    const note = marked?.replace(/`/g, "");
+    if (/[[\]()]/.test(note ?? "")) throw new Error(`Roadmap row "${title}": the status note is plain text, links go after it`);
+    if (["In implementation", "Blocked"].includes(status) && !note) throw new Error(`Roadmap row "${title}": ${status} needs a note (the PR, or what it waits for)`);
     const slug = title.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-    entries.push({ id: `candidate-${slug}`, title, family, kind, status, range: /^\d$/.test(family) ? `${family}xx` : "Unassigned", section,
+    entries.push({ id: `candidate-${slug}`, title, family, kind, status, ...(note ? { note } : {}), level: STATES[status], range: /^\d$/.test(family) ? `${family}xx` : "Unassigned", section,
       body: cells.slice(1).map((cell, index) => `**${headers[index + 1]}**\n\n${cell}`).join("\n\n"),
       sourceAnchor: section.toLowerCase().replace(/[^a-z0-9 -]/g, "").replace(/ /g, "-") });
   }
