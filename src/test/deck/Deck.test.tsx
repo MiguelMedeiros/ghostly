@@ -176,6 +176,8 @@ describe("a deck of checks", () => {
     expect(check("c").style.getPropertyValue("--y")).toBe("-5px");
     expect(check("b").style.getPropertyValue("--y")).toBe("0px");
     expect(check("c")).toHaveAttribute("data-checked", "true");
+    // The marks under the deck say which are on too.
+    expect([...document.querySelectorAll(".deck-marks span")].map(m => m.getAttribute("data-checked"))).toEqual(["true", "false", "true", "false"]);
   });
 
   it("turns a card on or off with a click, Space or Enter, and moves with the arrows without turning anything", async () => {

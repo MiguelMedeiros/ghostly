@@ -688,7 +688,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         onSendFile={platform ? sendFile : undefined}
         fileUnavailable={paired ? chatStop ?? (chatLive && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.files ? "Update both peers to send files" : undefined) : undefined}
         // The + → Payment row still opens on these: its Accept side is where this chat's ways of paying are chosen.
-        paymentsUnavailable={!paymentsOn ? "Payments are off in this chat. Turn a way on under + → Payment → Accept." : chatStop ? chatStop : paired && chatLive && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.payments ? "Your contact has payments off in this chat, or needs an updated Ghostly" : undefined}
+        paymentsUnavailable={!paymentsOn ? "Off in this chat: turn a way on in Accept" : chatStop ? chatStop : paired && chatLive && !platform?.getPeer(params.peerPubKeyB64)?.capabilities?.payments ? "Your contact has payments off in this chat, or needs an updated Ghostly" : undefined}
         payments={
           walletState && wallet && peerKey
             ? { balance: walletState.balance, contact: displayName || undefined, onSend: paySend, onRequest: payRequest,

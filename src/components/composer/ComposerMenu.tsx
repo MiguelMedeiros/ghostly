@@ -52,7 +52,7 @@ export function ComposerMenu({ actions, open, onOpenChange, disabled, buttonRef 
         align="start" prefer="up" focusFirst className="composer-menu">
         {actions.map((action) => (
           <MenuItem key={action.id} testId={action.testId} icon={<span className="composer-menu-icon" data-action={action.id}>{action.icon}</span>}
-            disabled={!!action.unavailable} title={action.unavailable} hint={action.unavailable ?? action.hint}
+            disabled={!!action.unavailable} title={action.unavailable ?? action.hint} hint={action.unavailable ?? action.hint}
             data={{ "data-action": action.id, ...action.data }}
             onClick={() => { onOpenChange(false); action.onSelect(); }}>
             {action.label}

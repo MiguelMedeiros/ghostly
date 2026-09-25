@@ -50,7 +50,7 @@ test("each chat accepts its own ways of paying, chosen on the composer's cards",
   await chatPayments(alice.page, { lightning: false, arkade: false, bark: false, spark: false, bitcoin: false, fedimint: false });
   const aliceRow = await button(alice);
   await expect(aliceRow).toBeEnabled();
-  await expect(aliceRow).toContainText("Payments are off in this chat");
+  await expect(aliceRow).toContainText("Off in this chat");
   await aliceRow.click();
   await expect(alice.page.getByTestId("payment-composer")).toHaveAttribute("data-mode", "accept");
   await closePayments(alice.page);

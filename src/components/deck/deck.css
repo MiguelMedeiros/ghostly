@@ -61,6 +61,9 @@
 .deck-marks span svg{width:14px;height:14px}
 /* A bar under the lit mark slides to the next one (each mark is 14px wide, 8px apart). */
 .deck-marks::after{content:"";position:absolute;left:3px;bottom:-6px;width:8px;height:2px;border-radius:2px;background:rgb(var(--card-rgb));translate:calc(var(--mark-i,0) * 22px) 0;transition:translate .5s var(--deck-spring),background-color .4s}
+/* In a deck of checks the marks say which cards are on: lit in their ink, the others faint. */
+.deck-marks span[data-checked=true]{color:rgb(var(--card-rgb));opacity:.8}
+.deck-marks span[data-checked=false]{opacity:.3}
 .deck-marks span[data-on=true]{color:rgb(var(--card-rgb));opacity:1;transform:scale(1.25)}
 
 /* Reduced motion: the final frame, at once. Everything still stacks, snaps and selects. */

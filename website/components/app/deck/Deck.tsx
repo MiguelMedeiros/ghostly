@@ -238,7 +238,7 @@ export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,
    <button type="button" className={part('arrow')} aria-label="Previous card" data-testid={`${name}-prev`} onClick={()=>select(stepCard(active,-1,cards.length))}>
     <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
    </button>
-   <div className={part('marks')} aria-hidden="true" style={{'--mark-i':active} as CSSProperties}>{cards.map((card,i)=><span key={card.id} className={tone(card)} data-on={i===active}>{mark(card)}</span>)}</div>
+   <div className={part('marks')} aria-hidden="true" style={{'--mark-i':active} as CSSProperties}>{cards.map((card,i)=><span key={card.id} className={tone(card)} data-on={i===active} data-checked={kind==='checks'?!!checked?.(card):undefined}>{mark(card)}</span>)}</div>
    <button type="button" className={part('arrow')} aria-label="Next card" data-testid={`${name}-next`} onClick={()=>select(stepCard(active,1,cards.length))}>
     <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
    </button>

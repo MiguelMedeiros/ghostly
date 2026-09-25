@@ -208,7 +208,7 @@ describe("one chat at a time", () => {
 });
 
 describe("the + menu of a chat that chooses its own ways", () => {
-  const OFF = "Payments are off in this chat. Turn a way on under + → Payment → Accept.";
+  const OFF = "Off in this chat: turn a way on in Accept";
   function composerWith(props: Partial<Parameters<typeof MessageInput>[0]>, link: Partial<LinkView> = { paymentMethods: ALL_OFF }) {
     fakeEngine.setState({ links: [linkView(link)], wallet: everyWallet() });
     return renderApp(<LockScreenProvider><MessageInput onSend={async () => null} {...props} /></LockScreenProvider>);
@@ -221,6 +221,7 @@ describe("the + menu of a chat that chooses its own ways", () => {
     const row = screen.getByTestId("payment-button");
     expect(row).toBeEnabled();
     expect(row).toHaveTextContent(OFF);
+    expect(row).toHaveAttribute("title", OFF);
     await user.click(row);
     expect(composer()).toHaveAttribute("data-mode", "accept");
   });
