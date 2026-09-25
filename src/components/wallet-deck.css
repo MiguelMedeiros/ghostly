@@ -17,9 +17,9 @@
 .wallet-deck-card-glyph-end{grid-row:1;grid-column:2;justify-self:end;color:rgb(var(--card-rgb));display:none}
 .wallet-deck-card-ghost{position:absolute;right:16%;top:36%;width:clamp(30px,calc(var(--card-w) * .18),64px);color:var(--theme-accent);opacity:.3;pointer-events:none}
 .wallet-deck-card-text{grid-row:3;grid-column:1;display:grid;gap:2px;min-width:0;max-width:100%}
-.wallet-deck-card-name{font-size:clamp(16px,calc(var(--card-w) * .066),24px);font-weight:700;letter-spacing:-.01em;line-height:1.15}
-.wallet-deck-card-balance{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(11px,calc(var(--card-w) * .036),13px);letter-spacing:.04em;color:rgba(255,255,255,.88);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
-.wallet-deck-card-detail{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(10px,calc(var(--card-w) * .031),11px);letter-spacing:.04em;color:rgba(255,255,255,.6);overflow-wrap:anywhere}
+.wallet-deck-card-name{font-size:clamp(16px,calc(var(--card-w) * .066),24px);font-weight:700;letter-spacing:-.01em;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wallet-deck-card-balance{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(11px,calc(var(--card-w) * .036),13px);letter-spacing:.04em;color:rgba(255,255,255,.88);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wallet-deck-card-detail{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(10px,calc(var(--card-w) * .031),11px);letter-spacing:.04em;color:rgba(255,255,255,.6);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wallet-deck-card-chip{grid-row:3;grid-column:2;align-self:end;justify-self:end;width:clamp(24px,calc(var(--card-w) * .1),36px);height:clamp(18px,calc(var(--card-w) * .075),27px);border-radius:6px;background:linear-gradient(135deg,rgba(255,255,255,.35),rgba(255,255,255,.08))}
 /* A card that cannot be used here says why, over its corner. */
 .wallet-deck-card[data-blocked=true] .wallet-deck-card-status{color:#fff;background:rgba(0,0,0,.45);border-radius:999px;padding:2px 8px;white-space:normal;text-align:right;max-width:70%}
@@ -29,3 +29,17 @@
 .wallet-deck[data-mode=stack] .wallet-deck-card:not([data-active=true]) .wallet-deck-card-status{opacity:0}
 .wallet-deck[data-mode=stack] .wallet-deck-face[data-after=true] .wallet-deck-card-glyph-end{display:grid}
 .wallet-deck[data-mode=stack] .wallet-deck-card:not([data-active=true]) .wallet-deck-card-ghost{opacity:0}
+
+/* The card chooses what it shows by its own width (a container query on the face), wherever it is. Large (230px and
+   up): everything. Medium: no detail line. Small (under 180px): the mark, the name and the status; no balance, chip or
+   ghost. (A container query reads the face's content box, the card's width less its padding: 230px of card is
+   about 202px inside, 180px about 154px.) Text a size leaves out stays in the card's accessible name; every line is one line, cut with an ellipsis. */
+.wallet-deck-face{container:wallet-card/inline-size}
+@container wallet-card (width < 202px){
+ .wallet-deck-card-detail{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+}
+@container wallet-card (width < 154px){
+ .wallet-deck-card-balance{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+ .wallet-deck-card-chip,.wallet-deck-card-ghost{display:none}
+ .wallet-deck-card-text{grid-column:1/-1}
+}
