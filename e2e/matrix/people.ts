@@ -193,18 +193,18 @@ export async function desktopPerson(name: string, options: {
     connection: async () => (await app().attribute('[data-testid="connection-options"]', "aria-label")) ?? "",
     preferTransport: async (preferred, fallback) => {
       await app().click('[data-testid="connection-options"]');
-      // The radios and the switch are transparent inputs over their labels: clicked from the page, as a person's
-      // tap lands. `checked` is the engine's state, drawn back.
+      // Clicked from the page, as a person's tap lands: the options are buttons with role=radio, the switch a
+      // transparent input over its label. What they show checked is the engine's state, drawn back.
       const input = (selector: string) => `(document.querySelector('[data-testid="connection-menu"]') ?? document).querySelector(${JSON.stringify(selector)})`;
-      const radio = (name: string) => input(`input[type=radio][aria-label="${name}"]`);
+      const radio = (name: string) => input(`[role=radio][aria-label="${name}"]`);
       const toggle = input('input[role=switch][aria-label="Fallback"]');
       const offered: string[] = [];
-      for (const name of ["WebRTC", "Iroh", "HyperDHT"]) if (await run<boolean>(`return !${radio(name)}?.disabled;`)) offered.push(name);
+      for (const name of ["WebRTC", "Iroh", "HyperDHT"]) if (await run<boolean>(`const option = ${radio(name)}; return !!option && !option.disabled;`)) offered.push(name);
       // One this app lacks (WebRTC on Linux) cannot be chosen: its option is off, and says why.
       if (preferred && offered.includes(preferred)) {
         await run(`${radio(preferred)}.click();`);
         // The Fallback switch sends the preference the page shows: only once the choice is drawn, or it sends the old one.
-        await expect.poll(() => run<boolean>(`return ${radio(preferred)}.checked;`), { message: `${name} chose ${preferred}` }).toBe(true);
+        await expect.poll(() => run<boolean>(`return ${radio(preferred)}.getAttribute("aria-checked") === "true";`), { message: `${name} chose ${preferred}` }).toBe(true);
       }
       if (await run<boolean>(`return ${toggle}.checked;`) !== fallback) await run(`${toggle}.click();`);
       await expect.poll(() => run<boolean>(`return ${toggle}.checked;`), { message: `${name}'s Fallback is ${fallback ? "on" : "off"}` }).toBe(fallback);
