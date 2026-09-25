@@ -26,7 +26,7 @@ function markSettled(id: string) {
 }
 
 const button =
-  "px-3 py-1.5 max-md:min-h-11 bg-accent text-[#111b21] rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
+  "px-3 py-1.5 max-md:min-h-11 bg-accent text-on-accent rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
 const quiet = "px-3 py-1.5 max-md:min-h-11 bg-black/20 hover:bg-black/30 rounded-lg text-xs font-bold transition-colors cursor-pointer inline-flex items-center";
 
 function useCopy(value: string) {
@@ -53,7 +53,7 @@ function Card({ label, amount, unit, lines, qr, children, testId }: {
   const [showQr, setShowQr] = useState(true);
   return (
     <div className="min-w-[230px] max-md:min-w-[min(230px,68vw)] max-w-[min(300px,72vw)] px-1 py-0.5" data-testid={testId}>
-      <p className="text-[11px] uppercase tracking-wider text-[hsla(0,0%,100%,0.6)] m-0">{label}</p>
+      <p className="text-[11px] uppercase tracking-wider text-text-primary/65 m-0">{label}</p>
       <p className="m-0 mt-0.5 leading-tight">
         {amount === null ? (
           <span className="text-[15px] font-semibold">Any amount</span>
@@ -61,12 +61,12 @@ function Card({ label, amount, unit, lines, qr, children, testId }: {
           <>
             <span className="text-accent mr-1">⚡</span>
             <span className="text-[22px] font-semibold" data-testid="money-amount">{amount.toLocaleString()}</span>
-            <span className="text-[hsla(0,0%,100%,0.6)] text-xs ml-1">{unit === "sat" ? "sats" : unit}</span>
+            <span className="text-text-primary/65 text-xs ml-1">{unit === "sat" ? "sats" : unit}</span>
           </>
         )}
       </p>
       {lines.filter(Boolean).map((line) => (
-        <p key={line} className="text-[12.5px] leading-snug m-0 mt-1 wrap-break-word text-[hsla(0,0%,100%,0.75)]">{line}</p>
+        <p key={line} className="text-[12.5px] leading-snug m-0 mt-1 wrap-break-word text-text-primary/80">{line}</p>
       ))}
       {showQr && (
         <button
@@ -135,9 +135,9 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
       qr={`lightning:${invoice.invoice}`.toUpperCase()}
     >
       {paid ? (
-        <span className="text-accent text-xs font-bold self-center" data-testid="invoice-paid">Paid ✓</span>
+        <span className="text-accent-hover text-xs font-bold self-center" data-testid="invoice-paid">Paid ✓</span>
       ) : pending ? (
-        <span className="text-xs self-center text-[hsla(0,0%,100%,0.75)]" data-testid="invoice-pending">Payment pending at the mint…</span>
+        <span className="text-xs self-center text-text-primary/80" data-testid="invoice-pending">Payment pending at the mint…</span>
       ) : quote ? (
         <>
           <button
@@ -181,7 +181,7 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
           )}
         </>
       )}
-      {error && <p className="text-danger text-xs m-0 basis-full">{error}</p>}
+      {error && <p className="text-danger-ink text-xs m-0 basis-full">{error}</p>}
     </Card>
   );
 }
@@ -193,9 +193,9 @@ function LightningAddressCard({ destination, mine, off }: { destination: Lightni
   const { copied, copy } = useCopy(destination.text);
   return (
     <div className="min-w-[230px] max-md:min-w-[min(230px,68vw)] max-w-[min(300px,72vw)] px-1 py-0.5" data-testid="lnurl-bubble">
-      <p className="text-[11px] uppercase tracking-wider text-[hsla(0,0%,100%,0.6)] m-0">{destination.kind === "address" ? "Lightning address" : "LNURL"}</p>
+      <p className="text-[11px] uppercase tracking-wider text-text-primary/65 m-0">{destination.kind === "address" ? "Lightning address" : "LNURL"}</p>
       <p className="m-0 mt-0.5 leading-tight"><span className="text-accent mr-1">⚡</span><span className="text-[15px] font-semibold break-all" data-testid="lnurl-text">{destination.text}</span></p>
-      <p className="text-[12.5px] leading-snug m-0 mt-1 text-[hsla(0,0%,100%,0.75)]">Pays through {destination.domain}</p>
+      <p className="text-[12.5px] leading-snug m-0 mt-1 text-text-primary/80">Pays through {destination.domain}</p>
       {paying && wallet ? (
         <div className="mt-2"><LightningAddressPay wallet={wallet} text={destination.text} dense onDone={() => setPaying(false)} /></div>
       ) : (
@@ -260,7 +260,7 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
       qr={value}
     >
       {redeemed ? (
-        <span className="text-accent text-xs font-bold self-center" data-testid="token-redeemed">Redeemed ✓</span>
+        <span className="text-accent-hover text-xs font-bold self-center" data-testid="token-redeemed">Redeemed ✓</span>
       ) : (
         wallet && !mine && !off && inspection.accepted && (
           <button
@@ -286,7 +286,7 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
         )
       )}
       <button className={quiet} onClick={copy}>{copied ? "Copied" : "Copy"}</button>
-      {error && <p className="text-danger text-xs m-0 basis-full">{error}</p>}
+      {error && <p className="text-danger-ink text-xs m-0 basis-full">{error}</p>}
     </Card>
   );
 }
@@ -300,7 +300,7 @@ export function InvoiceBubble({ money, mine, peerPubKey }: { money: MoneyInText;
     <>
       {money.rest && <p className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap m-0 mb-1.5">{money.rest}</p>}
       {money.type === "lightning" ? <LightningCard invoice={money.invoice} mine={mine} off={off} /> : money.type === "lnurl" ? <LightningAddressCard destination={money.destination} mine={mine} off={off} /> : <CashuCard value={money.value} mine={mine} off={off} />}
-      {off && !mine && <p className="text-[11px] text-text-muted mt-1" data-testid="money-off">{money.type === "cashu" ? "Cashu" : "Lightning"} is off in this chat.</p>}
+      {off && !mine && <p className="text-[11px] text-text-primary/65 mt-1" data-testid="money-off">{money.type === "cashu" ? "Cashu" : "Lightning"} is off in this chat.</p>}
     </>
   );
 }

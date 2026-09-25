@@ -96,7 +96,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
     return null;
   })();
   const button =
-    "px-3 py-1.5 bg-accent text-[#111b21] rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
+    "px-3 py-1.5 bg-accent text-on-accent rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
   const quiet = "px-3 py-1.5 bg-black/20 hover:bg-black/30 rounded-lg text-xs font-bold transition-colors cursor-pointer";
 
   return (
@@ -107,20 +107,20 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
       data-testid="payment-bubble"
       data-state={payment.state}
     >
-      <p className="text-[11px] uppercase tracking-wider text-[hsla(0,0%,100%,0.6)] m-0">{title}</p>
+      <p className="text-[11px] uppercase tracking-wider text-text-primary/65 m-0">{title}</p>
       <p className="m-0 leading-tight">
         <span className="text-[22px] font-semibold">
 
           {tokenPayment?formatPaymentAmount(payment.amount,payment.target?.decimals):(celebrate ? amountShown : payment.amount).toLocaleString()}
         </span>
-        {" "}<span className="text-xs ml-1 text-[hsla(0,0%,100%,0.7)]">{tokenPayment?payment.target?.asset:testSats?'test sats':'sats'}</span>
+        {" "}<span className="text-xs ml-1 text-text-primary/75">{tokenPayment?payment.target?.asset:testSats?'test sats':'sats'}</span>
       </p>
-      {payment.target && <p className="text-xs text-text-muted">{payment.target.method==="usdt"?"USDT":payment.target.method==="arkade"?"Ark":payment.target.method==="bark"?"Bark":payment.target.method==="spark"?"Spark":payment.target.method==="bitcoin"?"Bitcoin on-chain":payment.target.method==="fedimint"?"Fedimint":"Cashu"} · {payment.target.network}</p>}
-      {!payment.target && fedimint && <p className="text-xs text-text-muted" data-testid="payment-fedimint">Fedimint{isRequest && !outgoing && payment.state === "pending" ? " · you share no federation: Lightning" : ""}</p>}
+      {payment.target && <p className="text-xs text-text-primary/65">{payment.target.method==="usdt"?"USDT":payment.target.method==="arkade"?"Ark":payment.target.method==="bark"?"Bark":payment.target.method==="spark"?"Spark":payment.target.method==="bitcoin"?"Bitcoin on-chain":payment.target.method==="fedimint"?"Fedimint":"Cashu"} · {payment.target.network}</p>}
+      {!payment.target && fedimint && <p className="text-xs text-text-primary/65" data-testid="payment-fedimint">Fedimint{isRequest && !outgoing && payment.state === "pending" ? " · you share no federation: Lightning" : ""}</p>}
       {review && <PaymentReview review={review} wallet={wallet} onClose={()=>setReview(null)}/>}
       {payment.memo && <p className="text-[13px] m-0 mt-0.5 wrap-break-word">{payment.memo}</p>}
       <p
-        className={`text-[11px] m-0 mt-1 ${payment.state === "failed" ? "text-danger" : payment.state === "settled" ? "text-accent" : "text-[hsla(0,0%,100%,0.6)]"}`}
+        className={`text-[11px] m-0 mt-1 ${payment.state === "failed" ? "text-danger-ink" : payment.state === "settled" ? "text-accent-hover" : "text-text-primary/65"}`}
         data-testid="payment-state"
       >
         {payment.lightningPending && payment.state === "pending" ? "Lightning payment pending…" : payment.kind === "payment" && payment.state === "pending" && payment.target?.method === "bitcoin" ? "Waiting for a confirmation…" : STATE_LABEL[payment.kind][payment.state]}
@@ -128,7 +128,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
       </p>
 
       {isRequest && !outgoing && paymentsOff && (payment.state === "pending" || payment.state === "failed") && (
-        <p className="text-xs text-text-muted mt-2" data-testid="payment-off">This way of paying is off in this chat.</p>
+        <p className="text-xs text-text-primary/65 mt-2" data-testid="payment-off">This way of paying is off in this chat.</p>
       )}
       {isRequest && !outgoing && !paymentsOff && (payment.state === "pending" || payment.state === "failed") && !payment.lightningPending && (
         <div className="flex flex-col gap-2 mt-2">
@@ -137,7 +137,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
           {lnReview && (
             <div data-testid="payment-review" className="rounded-lg bg-black/20 p-2 space-y-1 text-xs">
               <p className="m-0">Pay {payment.amount.toLocaleString()} {testSats ? "test sats" : "sats"} over Lightning</p>
-              <p className="m-0 text-[hsla(0,0%,100%,0.7)]">Through {lnReview.source} · fee up to {lnReview.fee.toLocaleString()} sats</p>
+              <p className="m-0 text-text-primary/75">Through {lnReview.source} · fee up to {lnReview.fee.toLocaleString()} sats</p>
               <div className="flex gap-2">
                 <button className={button} disabled={busy} onClick={() => run(async () => { await wallet.payRequest(peerPubKey, payment.id, { via: "lightning", maxFee: Number(feeInput) }); setLnReview(null); })}>Approve payment</button>
                 <button className={quiet} disabled={busy} onClick={() => setLnReview(null)}>Cancel</button>
@@ -177,7 +177,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
           Take it back
         </button>
       )}
-      {error && <p className="text-danger text-[11px] m-0 mt-1">{error}</p>}
+      {error && <p className="text-danger-ink text-[11px] m-0 mt-1">{error}</p>}
     </div>
   );
 }

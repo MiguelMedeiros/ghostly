@@ -79,7 +79,7 @@ function renderTextWithLinks(text: string) {
         href={url}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-[#53bdeb] underline hover:text-[#7fcef1] break-all"
+        className="text-link underline hover:decoration-2 break-all"
       >
         {url}
       </a>,
@@ -93,12 +93,11 @@ function renderTextWithLinks(text: string) {
 }
 
 function TailSvg({ side }: { side: "left" | "right" }) {
-  const color = side === "right" ? "#005c4b" : "#202c33";
   if (side === "right") {
     return (
       <span className="absolute top-0 -end-[8px] rtl:-scale-x-100 block w-[8px] h-[13px] overflow-hidden">
         <svg viewBox="0 0 8 13" width="8" height="13" className="block">
-          <path d="M5 0H0V13C0 13 1.8 8.5 5 4.5C6.4 2.7 8 1 8 1L5 0Z" fill={color} />
+          <path d="M5 0H0V13C0 13 1.8 8.5 5 4.5C6.4 2.7 8 1 8 1L5 0Z" className="fill-sent-bg" />
         </svg>
       </span>
     );
@@ -106,19 +105,21 @@ function TailSvg({ side }: { side: "left" | "right" }) {
   return (
     <span className="absolute top-0 -start-[8px] rtl:-scale-x-100 block w-[8px] h-[13px] overflow-hidden">
       <svg viewBox="0 0 8 13" width="8" height="13" className="block">
-        <path d="M3 0H8V13C8 13 6.2 8.5 3 4.5C1.6 2.7 0 1 0 1L3 0Z" fill={color} />
+        <path d="M3 0H8V13C8 13 6.2 8.5 3 4.5C1.6 2.7 0 1 0 1L3 0Z" className="fill-received-bg" />
       </svg>
     </span>
   );
 }
 
-function CheckIcon({ acked }: { acked: boolean }) {
+/** Ticks sit on the bubble, or (`onPicture`) on the dark chip over a picture, which is dark in every theme. */
+function CheckIcon({ acked, onPicture = false }: { acked: boolean; onPicture?: boolean }) {
+  const ink = onPicture ? (acked ? "text-[#53bdeb]" : "text-[hsla(0,0%,100%,0.9)]") : acked ? "text-link" : "text-text-primary/65";
   return (
     <svg
       width="16"
       height="11"
       viewBox="0 0 16 11"
-      className={`shrink-0 ${acked ? "text-[#53bdeb]" : "text-[hsla(0,0%,100%,0.5)]"}`}
+      className={`shrink-0 ${ink}`}
       fill="none"
     >
       <path
@@ -312,7 +313,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
     
     return (
       <div className={`group flex items-center justify-center gap-1 mb-3.5 px-[63px] max-md:px-2.5 ${enter}`}>
-        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-blue-500/10 text-blue-400">
+        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-blue-500/10 text-link">
           <svg
             width="14"
             height="14"
@@ -328,7 +329,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
             <line x1="15" y1="12" x2="3" y2="12" />
           </svg>
           <span>
-            <span className="font-mono text-blue-300">{pubKeyShort}</span>
+            <span className="font-mono font-semibold">{pubKeyShort}</span>
             {" "}joined the chat
           </span>
           <span className="text-text-muted text-[10px]">{time}</span>
@@ -368,7 +369,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
 
   const timestampEl = (
     <span className="msg-meta inline-flex items-center gap-[3px] float-end relative top-[4px] ms-[8px] select-none">
-      <span className="text-[11px] leading-none text-[hsla(0,0%,100%,0.45)]">
+      <span className="text-[11px] leading-none text-text-primary/65">
         {time}
       </span>
       {isMe && <CheckIcon acked={isAcked} />}
@@ -378,10 +379,12 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
   return (
     <div
       data-message-row
+      data-sender={isMe ? "me" : "peer"}
       className={`group flex items-start gap-1 ${isMe ? "justify-end" : "justify-start"} mb-3.5 px-[63px] max-md:px-2.5 ${enter}`}
       onDoubleClick={() => message.meta && setShowTech((v) => !v)}
     >
       {isMe && onDelete && <MessageActions onDelete={onDelete} align="left" />}
+      {/* Bubbles take the theme's colours; what is inside reads on either one (see e2e/web/bubble-contrast.spec.ts). */}
       <div
         data-message-bubble
         className={`relative max-w-[85%] min-w-[80px] ${
@@ -394,8 +397,8 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
             : "px-[9px] pt-[6px] pb-[8px]"
         } ${
           isMe
-            ? "bg-[#005c4b] text-text-primary"
-            : "bg-[#202c33] text-text-primary"
+            ? "bg-sent-bg text-text-primary"
+            : "bg-received-bg text-text-primary"
         }`}
         style={{
           boxShadow: "0 1px 0.5px rgba(11,20,26,0.13)",
@@ -405,7 +408,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
 
         {/* A paired message carries no name of its own: the contact has one name, known from the link. */}
         {(message.nick || peerNick) && !isMe && (
-          <div className="text-accent-hover text-[12.8px] font-medium mb-[2px] leading-[22px]">
+          <div data-testid="message-nick" className="text-accent-hover text-[12.8px] font-medium mb-[2px] leading-[22px]">
             ~{message.nick || peerNick}
           </div>
         )}
@@ -435,7 +438,7 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
           // a contact's picture waits for a click.
           <div className="clearfix">
             <button type="button" data-testid="image-reveal" onClick={() => setRevealed(true)}
-              className="text-sm text-accent underline decoration-dotted cursor-pointer break-all text-start">
+              className="text-sm text-link underline decoration-dotted cursor-pointer break-all text-start">
               Show picture · {hostOf(message.text.trim())}
             </button>
             {timestampEl}
@@ -450,11 +453,11 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
               loading="lazy"
               onError={() => setImgError(true)}
             />
-            <span className="absolute bottom-[4px] end-[6px] inline-flex items-center gap-[3px] bg-[rgba(11,20,26,0.55)] rounded-full px-[6px] py-[3px]">
+            <span data-picture-time className="absolute bottom-[4px] end-[6px] inline-flex items-center gap-[3px] bg-[rgba(11,20,26,0.55)] rounded-full px-[6px] py-[3px]">
               <span className="text-[11px] leading-none text-[hsla(0,0%,100%,0.9)]">
                 {time}
               </span>
-              {isMe && <CheckIcon acked={isAcked} />}
+              {isMe && <CheckIcon acked={isAcked} onPicture />}
             </span>
           </div>
         ) : bigEmoji ? (
@@ -466,18 +469,18 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
           </div>
         ) : (
           <div className="clearfix">
-            <span className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap">
+            <span data-testid="message-text" className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap">
               {renderTextWithLinks(message.text)}
             </span>
             {timestampEl}
           </div>
         )}
 
-        {isMe && message.delivery && <div className="clear-both pt-1 text-xs text-text-secondary" role="status">
+        {isMe && message.delivery && <div className="clear-both pt-1 text-xs text-text-primary/65" role="status">
           {message.delivery === "delivered" ? "Received by peer" : message.delivery === "held" ? "Held · waiting for your contact" : message.delivery === "sent" ? "Sent · waiting for receipt" : message.delivery === "sending" ? "Sending…" : message.delivery === "queued" ? "Not confirmed yet · sends again by itself" : "Delivery unconfirmed"}
           {message.delivery === "failed" && <>
             <span className="block">{message.deliveryError}</span>
-            <button className="underline text-accent cursor-pointer" onClick={() => {
+            <button className="underline text-link cursor-pointer" onClick={() => {
               const link = engine.linkByPeer(peerPubKey);
               if (link) void engine.call("retryMessage", { linkId: link.id, messageId: message.id }).catch(() => {});
             }}>Retry message</button>
@@ -485,20 +488,20 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
         </div>}
 
         {showTech && message.meta && (
-          <div className="mt-[6px] pt-[6px] border-t border-[hsla(0,0%,100%,0.08)] text-[9px] text-text-secondary space-y-[2px] animate-fade-in font-mono clear-both">
+          <div className="mt-[6px] pt-[6px] border-t border-text-primary/10 text-[9px] text-text-primary/65 space-y-[2px] animate-fade-in font-mono clear-both">
             <div>
-              <span className="text-[#00a884]/60">id:</span> {message.id}
+              <span className="text-accent-hover">id:</span> {message.id}
             </div>
             <div>
-              <span className="text-[#00a884]/60">ts:</span>{" "}
+              <span className="text-accent-hover">ts:</span>{" "}
               {message.timestamp}
             </div>
             <div>
-              <span className="text-[#00a884]/60">dir:</span>{" "}
+              <span className="text-accent-hover">dir:</span>{" "}
               {isMe ? "outbound" : "inbound"}
             </div>
             <div>
-              <span className="text-[#00a884]/60">ack:</span>{" "}
+              <span className="text-accent-hover">ack:</span>{" "}
               {isMe
                 ? isAcked
                   ? `ACKed (${peerAck})`
@@ -506,17 +509,17 @@ export function MessageBubble({ message, peerAck = 0, peerPubKey = "", peerNick 
                 : "N/A"}
             </div>
             <div>
-              <span className="text-[#00a884]/60">dht:</span>{" "}
+              <span className="text-accent-hover">dht:</span>{" "}
               <span className="break-all">
                 {message.meta.dhtKey.slice(0, 20)}...
               </span>
             </div>
             <div>
-              <span className="text-[#00a884]/60">dns:</span>{" "}
+              <span className="text-accent-hover">dns:</span>{" "}
               {message.meta.dnsRecords.join(", ")}
             </div>
             <div>
-              <span className="text-[#00a884]/60">enc:</span> NaCl secretbox
+              <span className="text-accent-hover">enc:</span> NaCl secretbox
             </div>
           </div>
         )}

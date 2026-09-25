@@ -26,7 +26,8 @@
   border-radius: 2px;
   background: currentColor;
 }
-.voice-wave-base { color: hsla(0, 0%, 100%, 0.32); }
+/* The unplayed bars: the text colour, lighter, so they read on either bubble in any theme (3:1 or more). */
+.voice-wave-base { color: color-mix(in srgb, var(--color-text-primary) 55%, transparent); }
 .voice-wave-fill {
   color: var(--voice-fill, var(--color-accent-hover));
   clip-path: inset(0 calc((1 - var(--voice-progress)) * 100%) 0 0);

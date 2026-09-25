@@ -273,7 +273,7 @@ export function VoiceBubble({ file, sender }: { file: ChatFile & { voice: VoiceM
       data-voice-sender={sender}
       data-state={state}
       data-played={played ? "true" : "false"}
-      style={{ ["--voice-fill" as string]: sender === "me" ? "hsla(0,0%,100%,0.92)" : "var(--color-accent-hover)" }}
+      style={{ ["--voice-fill" as string]: sender === "me" ? "var(--color-text-primary)" : "var(--color-accent-hover)" }}
     >
       <div className="flex items-center gap-1.5">
         <button
@@ -282,7 +282,7 @@ export function VoiceBubble({ file, sender }: { file: ChatFile & { voice: VoiceM
           aria-label={state === "playing" ? "Pause voice message" : "Play voice message"}
           disabled={!ready || state === "loading"}
           onClick={() => (state === "playing" ? pause() : void play())}
-          className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full bg-transparent border-none text-[hsla(0,0%,100%,0.9)] cursor-pointer disabled:opacity-40 disabled:cursor-default hover:bg-black/15"
+          className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full bg-transparent border-none text-text-primary/90 cursor-pointer disabled:opacity-40 disabled:cursor-default hover:bg-black/15"
         >
           {state === "playing" ? (
             <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
@@ -311,30 +311,30 @@ export function VoiceBubble({ file, sender }: { file: ChatFile & { voice: VoiceM
             onKeyDown={onWaveKey}
           />
           {/* One line under the waveform, all inside the bubble: what it is and how long, then the speed while it plays. */}
-          <div className="flex items-center gap-1 mt-1 h-[18px] text-[11px] text-[hsla(0,0%,100%,0.6)]" data-testid="voice-meta">
+          <div className="flex items-center gap-1 mt-1 h-[18px] text-[11px] text-text-primary/65" data-testid="voice-meta">
             <svg
               width="12"
               height="12"
               viewBox="0 0 24 24"
               fill="currentColor"
-              className={`shrink-0 ${unplayed ? "text-accent" : ""}`}
+              className={`shrink-0 ${unplayed ? "text-accent-hover" : ""}`}
               data-testid={unplayed ? "voice-unplayed" : "voice-mic"}
               role="img"
               aria-label={unplayed ? "Voice message, not played yet" : "Voice message"}
             >
               <path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" />
             </svg>
-            <span data-testid="voice-time" className={`tabular-nums ${unplayed ? "text-accent font-medium" : ""}`}>
+            <span data-testid="voice-time" className={`tabular-nums ${unplayed ? "text-accent-hover font-medium" : ""}`}>
               {active ? formatVoiceDuration(position * 1000) : formatVoiceDuration(file.voice.duration)}
             </span>
-            {status && <span data-testid="voice-status" className={`min-w-0 ${transfer?.state === "failed" ? "text-danger truncate" : "truncate"}`}>· {status}</span>}
+            {status && <span data-testid="voice-status" className={`min-w-0 ${transfer?.state === "failed" ? "text-danger-ink truncate" : "truncate"}`}>· {status}</span>}
             {active && (
               <button
                 type="button"
                 data-testid="voice-speed"
                 aria-label={`Playback speed ${rate}×`}
                 onClick={() => nextVoiceRate()}
-                className="ms-auto shrink-0 min-w-[34px] h-[18px] px-1.5 rounded-full border-none bg-black/25 text-[hsla(0,0%,100%,0.85)] text-[11px] font-semibold leading-none cursor-pointer hover:bg-black/35 tabular-nums"
+                className="ms-auto shrink-0 min-w-[34px] h-[18px] px-1.5 rounded-full border-none bg-black/25 text-text-primary/85 text-[11px] font-semibold leading-none cursor-pointer hover:bg-black/35 tabular-nums"
               >
                 {rate}×
               </button>
@@ -343,7 +343,7 @@ export function VoiceBubble({ file, sender }: { file: ChatFile & { voice: VoiceM
         </div>
       </div>
       {problem && (
-        <p className="text-[12px] text-danger m-0 mt-1 px-1" role="alert" data-testid="voice-problem" data-error={failure ?? undefined}>
+        <p className="text-[12px] text-danger-ink m-0 mt-1 px-1" role="alert" data-testid="voice-problem" data-error={failure ?? undefined}>
           {problem}{" "}
           {saveUrl && <a href={saveUrl} download={file.name} data-testid="voice-save" className="underline text-inherit">Save</a>}
         </p>
@@ -351,7 +351,7 @@ export function VoiceBubble({ file, sender }: { file: ChatFile & { voice: VoiceM
       {transfer?.state === "failed" && file.id.includes("-out-") && platform?.retryFile && (
         <button className="text-xs underline px-1 py-1 bg-transparent border-none text-inherit cursor-pointer" onClick={() => { setRetryError(""); void platform.retryFile!(file.id).catch((error) => setRetryError(String(error.message ?? error))); }}>Retry sending</button>
       )}
-      {retryError && <p className="text-xs text-danger px-1 m-0" role="alert">{retryError}</p>}
+      {retryError && <p className="text-xs text-danger-ink px-1 m-0" role="alert">{retryError}</p>}
     </div>
   );
 }

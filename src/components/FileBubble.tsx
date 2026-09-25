@@ -62,7 +62,7 @@ export function FileBubble({ file }: { file: ChatFile }) {
             {file.name}
           </p>
           <p
-            className={`text-[11px] m-0 ${transfer?.state === "failed" || missing ? "text-danger" : "text-[hsla(0,0%,100%,0.6)]"}`}
+            className={`text-[11px] m-0 ${transfer?.state === "failed" || missing ? "text-danger-ink" : "text-text-primary/65"}`}
             data-testid="file-status"
           >
             {status}
@@ -87,7 +87,7 @@ export function FileBubble({ file }: { file: ChatFile }) {
       {transfer?.state === "failed" && file.id.includes("-out-") && platform?.retryFile && (
         <button className="text-xs underline px-2 py-1" onClick={() => { setRetryError(""); void platform.retryFile!(file.id).catch(error => setRetryError(String(error.message ?? error))); }}>Retry sending</button>
       )}
-      {retryError && <p className="text-xs text-danger px-2" role="alert">{retryError}</p>}
+      {retryError && <p className="text-xs text-danger-ink px-2" role="alert">{retryError}</p>}
       {transfer?.state === "transferring" && (
         <div className="h-1 mx-2 mb-1 rounded-full bg-black/20 overflow-hidden">
           <div
