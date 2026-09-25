@@ -36,6 +36,9 @@ export * from "./peerProofs";
 
 export * from './domainProofs';
 
+export * from './pkdns';
+export * from './pubkyProofs';
+
 export * from './pubkyRing';
 
 export * from './ringLink';

@@ -4,7 +4,8 @@ import { concatBytes, utf8Decode, utf8Encode } from "./bytes";
  * Minimal DNS wire codec for Pkarr packets. Ghostly publishes TXT records (and,
  * for a did:dht document that names its gateways, NS). Decoding skips every
  * other record type and understands name compression, which the Rust client
- * (simple-dns) emits.
+ * (simple-dns) emits. `decodeDnsAnswers` hands out any record type raw, for
+ * readers of other people's records (Pubky's `_pubky` and homeserver records, pkdns.ts).
  */
 export interface TxtRecord {
   /** Fully qualified name, e.g. `_msgs.<z32 public key>` */
@@ -114,7 +115,8 @@ export function encodeTxtPacket(records: (TxtRecord | NsRecord)[], options: { au
   return writer.bytes();
 }
 
-function readName(data: Uint8Array, start: number): { name: string; next: number } {
+/** A name at `start` (compressed or not), and where the bytes after it begin. Labels are joined with ".", no trailing dot. */
+export function readDnsName(data: Uint8Array, start: number): { name: string; next: number } {
   const labels: string[] = [];
   let pos = start;
   let next = -1;
@@ -149,12 +151,12 @@ export function decodeTxtPacket(data: Uint8Array): TxtRecord[] {
 
   let pos = 12;
   for (let i = 0; i < questions; i++) {
-    pos = readName(data, pos).next + 4;
+    pos = readDnsName(data, pos).next + 4;
   }
 
   const records: TxtRecord[] = [];
   for (let i = 0; i < answers; i++) {
-    const { name, next } = readName(data, pos);
+    const { name, next } = readDnsName(data, pos);
     pos = next;
     if (pos + 10 > data.length) throw new Error("DNS record out of bounds");
     const type = view.getUint16(pos);
@@ -180,6 +182,40 @@ export function decodeTxtPacket(data: Uint8Array): TxtRecord[] {
       }
     }
     pos = end;
+  }
+  return records;
+}
+
+/** One answer record, undecoded: its rdata starts at `offset` in the packet (names in it may point anywhere before). */
+export interface DnsAnswer {
+  name: string;
+  type: number;
+  ttl: number;
+  /** Where the rdata starts in the packet. */
+  offset: number;
+  length: number;
+}
+
+/** Every answer record of a packet, of any type. Names are decompressed; the rdata is left to the caller. */
+export function decodeDnsAnswers(data: Uint8Array): DnsAnswer[] {
+  if (data.length < 12) throw new Error("DNS packet too short");
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const questions = view.getUint16(4);
+  const answers = view.getUint16(6);
+  let pos = 12;
+  for (let i = 0; i < questions; i++) pos = readDnsName(data, pos).next + 4;
+  const records: DnsAnswer[] = [];
+  for (let i = 0; i < answers; i++) {
+    const { name, next } = readDnsName(data, pos);
+    pos = next;
+    if (pos + 10 > data.length) throw new Error("DNS record out of bounds");
+    const type = view.getUint16(pos);
+    const ttl = view.getUint32(pos + 4);
+    const length = view.getUint16(pos + 8);
+    pos += 10;
+    if (pos + length > data.length) throw new Error("DNS rdata out of bounds");
+    records.push({ name, type, ttl, offset: pos, length });
+    pos += length;
   }
   return records;
 }
