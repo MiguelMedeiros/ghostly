@@ -112,6 +112,10 @@ describe("what a muted chat leaves out", () => {
     expect(attentionOutcome("message", false, on, false)).toEqual({ sound: true, notice: false });
   });
 
+  it("leaves out the connected sound of a first pairing (its scene still shows the moment)", () => {
+    expect(MUTE_SILENCES.connected).toBe(true);
+  });
+
   it("leaves calls ringing", () => {
     expect(MUTE_SILENCES.call).toBe(false);
     setChatMute("a", "forever");

@@ -42,6 +42,12 @@ const SOUNDS = {
     { frequency: 440, at: 0, duration: 0.12, gain: 0.1 },
     { frequency: 330, at: 0.12, duration: 0.2, gain: 0.1 },
   ],
+  /** A chat's first pairing went live: two light taps, then the note they resolve to. */
+  connected: [
+    { frequency: 587, at: 0, duration: 0.05, gain: 0.05 },
+    { frequency: 784, at: 0.03, duration: 0.05, gain: 0.06 },
+    { frequency: 784, at: 0.12, duration: 0.5, gain: 0.12 },
+  ],
 } satisfies Record<string, Note[]>;
 
 export type SoundName = keyof typeof SOUNDS;

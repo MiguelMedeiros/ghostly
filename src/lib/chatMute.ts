@@ -6,8 +6,8 @@ import { getPrefix, listSessions } from "./storage";
 /*
  * Muting one chat's notifications, for a while or until turned back on. The choice is this profile's, on this
  * device: kept beside the chat's pin and read mark, never synced and never sent to the contact. Only the sound
- * and the system notification of a new message are left out; messages, receipts, delivery, the unread count
- * and the list order stay as they are.
+ * and the system notification of a new message are left out, and the short sound of a first pairing going live;
+ * messages, receipts, delivery, the unread count and the list order stay as they are.
  *
  * A mute ends by itself: every read compares its end with the clock, so it is over after a restart, or after
  * the app was closed through its end, without any timer. The timer in `useChatMute` only redraws the bell.
@@ -30,8 +30,9 @@ export function muteEnd(choice: MuteChoice, now = Date.now()): MutedUntil {
 /**
  * What a muted chat leaves out. Calls ring anyway: a missed call is not what muting a chat is for, and a call
  * is rarer and more deliberate than a message. Setting `call` to true makes a muted chat's calls come in silent.
+ * `connected`: the short sound of a first pairing going live (its scene still shows the moment).
  */
-export const MUTE_SILENCES: Readonly<Record<"message" | "call", boolean>> = { message: true, call: false };
+export const MUTE_SILENCES: Readonly<Record<"message" | "call" | "connected", boolean>> = { message: true, call: false, connected: true };
 
 /** A group's chat as the mute store names it: the id the engine files the group's messages under. */
 export const groupChat = (groupId: string) => `group:${groupId}`;
