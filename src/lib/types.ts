@@ -71,6 +71,8 @@ export interface ChatSession {
   nickSource?: "profile";
   /** The name given to this chat here; it wins over the contact's own. */
   label?: string;
+  /** A compatibility chat (WISP 402) that invited its contact to a new chat: that chat's session id. */
+  continuedIn?: string;
   /**
    * Messages deleted here, by id. The peer keeps republishing what it sent for
    * a few minutes and the peer engine mirrors its own store into this session,

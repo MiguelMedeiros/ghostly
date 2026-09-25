@@ -42,6 +42,7 @@ import {
   updateSessionLabel,
 } from "../lib/storage";
 import { chatPath, inviteShareText } from "../lib/url";
+import { continueInNewChat } from "../lib/continueChat";
 import { fileMessageText, parseCallSignal, signalHasVideo, type VoiceMeta } from "@ghostly/core";
 import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
 import { useAppNavigation } from "../hooks/useAppNavigation";
@@ -169,6 +170,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
 
   const platform = useServicesPlatform();
   const paired = session?.profile === "paired-chat/1";
+  // A chat made with a v0.4 code (WISP 402): kept working both ways, never created by this app.
+  const compat = !!session && !paired;
   const deliveryPeer = platform?.getPeer(session?.peerPubKeyB64 ?? "");
   const pairedReady = deliveryPeer?.pairing?.status === "ready";
   // A paired chat calls over its live session (`calls/1`); why it cannot right now, if it cannot.
@@ -459,6 +462,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 )}
               </p>
               {paired && <IdentityStack peerKey={params.peerPubKeyB64} open={showIdentities} onOpen={() => setShowIdentities(open => !open)} />}
+              {compat && <span data-testid="compat-chat" title={t("chat.compat.hint")}
+                className="shrink-0 rounded bg-surface-hover px-1.5 py-0.5 text-[10px] leading-none text-text-muted whitespace-nowrap max-md:hidden">{t("chat.compat.label")}</span>}
               </div>
             )}
             <div className="flex min-w-0 items-center gap-2">
@@ -628,6 +633,17 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                   {t("chat.menu.services")}
                 </MenuItem>
               )}
+              {compat && (
+                <MenuItem testId="chat-continue-new" onClick={() => {
+                  closeMenu();
+                  const next = continueInNewChat(sessionId);
+                  if (!next) return;
+                  void sendMessage(next.message).finally(() => nav.conversation(chatPath(next.sessionId)));
+                }}
+                  icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5" /><path d="M16 19h6m-3-3 3 3-3 3" /></svg>}>
+                  {t("chat.menu.continueNew")}
+                </MenuItem>
+              )}
               <MenuItem onClick={() => { forceRefresh(); closeMenu(); }}
                 icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" /><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" /></svg>}>
                 {t("chat.menu.refresh")}
@@ -648,6 +664,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
       </div>
 
       <PeerServices peerPubKey={params.peerPubKeyB64} showLink={!paired} onManage={() => setShowServices(true)} />
+
+      {compat && session?.continuedIn && (
+        <div data-testid="compat-continued" className="flex items-center justify-center gap-2 bg-panel-header/60 px-4 py-1.5 text-xs text-text-secondary">
+          <span>{t("chat.compat.continued")}</span>
+          <button type="button" className="underline text-accent cursor-pointer" onClick={() => nav.conversation(chatPath(session.continuedIn!))}>{t("chat.compat.open")}</button>
+        </div>
+      )}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto chat-wallpaper">
