@@ -94,6 +94,24 @@
       "forget": "Apagar deste dispositivo"
     }
   },
+  "mute": {
+    "open": "Silenciar notificações…",
+    "title": "Silenciar notificações",
+    "unmute": "Reativar notificações",
+    "choice": {
+      "15m": "15 minutos",
+      "1h": "1 hora",
+      "1d": "1 dia",
+      "forever": "Até eu reativar"
+    },
+    "until": "Até {{time}}",
+    "noEnd": "Sem horário para acabar",
+    "mutedUntil": "Silenciado até {{time}}",
+    "muted": "Silenciado",
+    "bell": "Notificações silenciadas",
+    "bellUntil": "Notificações silenciadas até {{time}}",
+    "stillArrive": "As mensagens continuam chegando. As chamadas continuam tocando."
+  },
   "invite": {
     "copy": "Copiar convite",
     "copyFailed": "Não foi possível copiar. Tente novamente ou compartilhe o convite.",

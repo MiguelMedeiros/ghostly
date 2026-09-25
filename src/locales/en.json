@@ -94,6 +94,24 @@
       "forget": "Delete from this device"
     }
   },
+  "mute": {
+    "open": "Mute notifications…",
+    "title": "Mute notifications",
+    "unmute": "Unmute notifications",
+    "choice": {
+      "15m": "15 minutes",
+      "1h": "1 hour",
+      "1d": "1 day",
+      "forever": "Until I unmute"
+    },
+    "until": "Until {{time}}",
+    "noEnd": "No end time",
+    "mutedUntil": "Muted until {{time}}",
+    "muted": "Muted",
+    "bell": "Notifications muted",
+    "bellUntil": "Notifications muted until {{time}}",
+    "stillArrive": "Messages still arrive. Calls still ring."
+  },
   "invite": {
     "copy": "Copy invite",
     "copyFailed": "Could not copy. Try again or share the invite.",

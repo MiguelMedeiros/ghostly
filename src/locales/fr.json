@@ -94,6 +94,24 @@
       "forget": "Supprimer de cet appareil"
     }
   },
+  "mute": {
+    "open": "Couper les notifications…",
+    "title": "Couper les notifications",
+    "unmute": "Réactiver les notifications",
+    "choice": {
+      "15m": "15 minutes",
+      "1h": "1 heure",
+      "1d": "1 jour",
+      "forever": "Jusqu'à ce que je les réactive"
+    },
+    "until": "Jusqu'à {{time}}",
+    "noEnd": "Sans fin prévue",
+    "mutedUntil": "Coupées jusqu'à {{time}}",
+    "muted": "Coupées",
+    "bell": "Notifications coupées",
+    "bellUntil": "Notifications coupées jusqu'à {{time}}",
+    "stillArrive": "Les messages arrivent toujours. Les appels sonnent toujours."
+  },
   "invite": {
     "copy": "Copier l’invitation",
     "copyFailed": "Copie impossible. Réessayez ou partagez l’invitation.",

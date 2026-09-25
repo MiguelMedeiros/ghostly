@@ -94,6 +94,24 @@
       "forget": "Elimina da questo dispositivo"
     }
   },
+  "mute": {
+    "open": "Silenzia notifiche…",
+    "title": "Silenzia notifiche",
+    "unmute": "Riattiva notifiche",
+    "choice": {
+      "15m": "15 minuti",
+      "1h": "1 ora",
+      "1d": "1 giorno",
+      "forever": "Finché non le riattivo"
+    },
+    "until": "Fino alle {{time}}",
+    "noEnd": "Senza scadenza",
+    "mutedUntil": "Silenziata fino alle {{time}}",
+    "muted": "Silenziata",
+    "bell": "Notifiche silenziate",
+    "bellUntil": "Notifiche silenziate fino alle {{time}}",
+    "stillArrive": "I messaggi arrivano comunque. Le chiamate squillano comunque."
+  },
   "invite": {
     "copy": "Copia invito",
     "copyFailed": "Impossibile copiare. Riprova o condividi l’invito.",

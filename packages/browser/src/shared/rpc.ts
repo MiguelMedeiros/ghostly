@@ -248,6 +248,8 @@ export interface AttentionEvent {
   id: string;
   type: "message" | "sent" | "coin" | "confirmed";
   at: number;
+  /** The chat a message event belongs to (its link id, `group:<id>` for a group), so a page can mute one chat. */
+  linkId?: string;
 }
 export type EngineEvent =
   | { kind: "attention"; event: AttentionEvent }

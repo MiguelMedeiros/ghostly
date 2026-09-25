@@ -163,6 +163,7 @@ export function deleteSession(sessionId: string): void {
     `${getPrefix()}read_${sessionId}`,
     `${getPrefix()}invite_${sessionId}`,
     `${getPrefix()}pin_${sessionId}`,
+    `${getPrefix()}mute_${sessionId}`,
     `${getPrefix()}draft_${sessionId}`,
     joinKey(sessionId),
     LEGACY_JOIN_PREFIX + sessionId,

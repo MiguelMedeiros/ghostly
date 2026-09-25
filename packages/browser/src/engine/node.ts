@@ -285,15 +285,15 @@ export class GhostlyNode implements EngineImplementation {
   private readonly feedbackIds = new Set<string>();
   private walletFeedbackReady = false;
   private readonly walletFeedbackIds = new Set<string>();
-  private feedback(type: AttentionEvent["type"], id: string) {
+  private feedback(type: AttentionEvent["type"], id: string, linkId?: string) {
     const key = type + ":" + id;
     if (this.feedbackIds.has(key)) return;
     this.feedbackIds.add(key);
-    this.events.onAttention?.({type, id:key, at:Date.now()});
+    this.events.onAttention?.({type, id:key, at:Date.now(), ...(linkId ? {linkId} : {})});
   }
   private messageFeedback(type: "message" | "sent", message: StoredMessage) {
     if (message.timestamp < this.feedbackStartedAt || message.file || message.paymentId || /^👋 (?:.+ )?joined$/.test(message.text)) return;
-    this.feedback(type, message.linkId + ":" + message.id);
+    this.feedback(type, message.linkId + ":" + message.id, message.linkId);
   }
   /** The next chat's keys, warmed on the network ahead of time (`takeInvite`). */
   private spare: SpareInvite | null = null;

@@ -94,6 +94,24 @@
       "forget": "从此设备删除"
     }
   },
+  "mute": {
+    "open": "静音通知…",
+    "title": "静音通知",
+    "unmute": "取消静音",
+    "choice": {
+      "15m": "15 分钟",
+      "1h": "1 小时",
+      "1d": "1 天",
+      "forever": "直到我取消"
+    },
+    "until": "直到 {{time}}",
+    "noEnd": "不设结束时间",
+    "mutedUntil": "静音至 {{time}}",
+    "muted": "已静音",
+    "bell": "通知已静音",
+    "bellUntil": "通知静音至 {{time}}",
+    "stillArrive": "消息照常接收，来电照常响铃。"
+  },
   "invite": {
     "copy": "复制邀请",
     "copyFailed": "无法复制。请重试或分享邀请。",
