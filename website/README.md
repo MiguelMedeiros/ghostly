@@ -10,6 +10,7 @@ npm ci
 npm run dev -- -p 4330     # sync:references runs on build, run it by hand for dev
 npm run sync:references
 npm run build && npm run lint
+npm run capture            # re-shoot every app screenshot (scripts/capture/README.md)
 ```
 
 After `npm run build`, restart a running dev server: reader routes are static
@@ -30,7 +31,7 @@ After `npm run build`, restart a running dev server: reader routes are static
 | `lib/wisp-editorial.ts` | Per-WISP benefit line, availability and optional video metadata. |
 | `lib/composition.ts` | Blocks and presets of the composition board. |
 | `content/videos/` | The video lesson template and an example script. |
-| `scripts/capture/` | Playwright specs that re-shoot the app screenshots (`public/screenshots/current/`) from a built web app; see its README. |
+| `scripts/capture/` | The app screenshots (`public/screenshots/current/`): `npm run capture` re-shoots all of them from a fresh build of `dev`, with funded test wallets from the shared e2e environment; see its README. |
 
 ## The story spine
 

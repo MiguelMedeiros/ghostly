@@ -1,8 +1,9 @@
 // Shared by the capture specs: people on the built web app, finding each other through the e2e
 // suite's in-process Pkarr relay, each with a name, a picture and something to say. Wallets reach
 // the shared regtest environment (e2e/infra, `.env.e2e`) and nothing else: test coins only.
-import { expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
-import { mkdirSync } from "node:fs";
+import { chromium, expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { LocalRelay } from "../../../e2e/support/relay";
@@ -46,22 +47,38 @@ export const CAST = {
   jules: { name: "Jules", colors: ["#22c55e", "#0ea5e9"], glyph: "🐈‍⬛" },
 } as const satisfies Record<string, Person>;
 
+/** The browser flags playwright.config.ts launches with, for the persistent profiles below. */
+export const BROWSER_ARGS = [
+  // Every peer is on this machine: let ICE use plain host addresses.
+  "--disable-features=WebRtcHideLocalIpsWithMdns",
+  // The calls ring with Chromium's fake camera and microphone, no prompt.
+  "--use-fake-device-for-media-stream",
+  "--use-fake-ui-for-media-stream",
+];
+
+/** A browser profile on disk: a person whose storage outlives one browser, reopened later on a phone with `open(..., { profile })`. */
+export const newProfile = () => mkdtempSync(join(tmpdir(), "ghostly-capture-"));
+
 /**
  * A person on the app: their own browser storage, the relay answering their Pkarr requests, the
  * test mint answered by the infra's mint, the public Mainnet wallet services refused (Testnet only
  * here, and a Mainnet wallet busy with a slow server would hold the switch to Testnet behind it).
  */
-export async function open(browser: Browser, relay: LocalRelay, baseURL: string, name: string, { mobile = false, permissions = CLIPBOARD }: { mobile?: boolean; permissions?: string[] } = {}): Promise<Peer> {
-  const context = await browser.newContext({
+export async function open(browser: Browser, relay: LocalRelay, baseURL: string, name: string, { mobile = false, permissions = CLIPBOARD, profile }: { mobile?: boolean; permissions?: string[]; profile?: string } = {}): Promise<Peer> {
+  const options = {
     baseURL, colorScheme: "dark", deviceScaleFactor: 2, locale: "en-US", timezoneId: EVENING,
     permissions,
     viewport: mobile ? PHONE : DESKTOP,
     ...(mobile ? { isMobile: true, hasTouch: true } : {}),
-  });
+  } as const;
+  // A profile directory keeps everything the app stores (IndexedDB, OPFS, localStorage) between browsers.
+  const context = profile
+    ? await chromium.launchPersistentContext(profile, { ...options, headless: true, args: BROWSER_ARGS })
+    : await browser.newContext(options);
   await relay.attach(context);
   await attachMint(context);
   for (const service of MAINNET_SERVICES) await context.route(service, (route) => route.abort("connectionrefused"));
-  const page = await context.newPage();
+  const page = context.pages()[0] ?? await context.newPage();
   page.on("pageerror", (e) => console.log(`  [${name}] ${e.message}`));
   await page.goto("/");
   await expect(page.getByTitle("New Chat").first()).toBeVisible();
@@ -78,8 +95,13 @@ export async function shot(p: Peer, file: string) {
   console.log("  saved", file);
 }
 
+/** Go to a route of the app by its hash: works on the web and inside the extension's app.html alike. */
+export const route = async (p: Peer, hash: string) => {
+  await p.page.evaluate((h) => { location.hash = h; }, hash);
+};
+
 export const home = async (p: Peer) => {
-  await p.page.goto("/#/");
+  await route(p, "#/");
   await expect(p.page.getByTitle("New Chat").first()).toBeVisible();
 };
 
@@ -101,7 +123,7 @@ export async function portrait(p: Peer, who: Person): Promise<Buffer> {
 
 /** Name and picture, set once on the Profile page: contacts get both when they pair. */
 export async function dress(p: Peer, who: Person, profileName = who.name) {
-  await p.page.goto("/#/profile");
+  await route(p, "#/profile");
   await expect(p.page.getByTestId("profile-page")).toBeVisible();
   await p.page.getByTestId("profile-name").fill(profileName);
   await p.page.getByTestId("profile-name").press("Enter");
@@ -200,4 +222,40 @@ export async function openChatWith(p: Peer, name: string) {
   await home(p);
   await p.page.getByTestId("sidebar").getByText(name, { exact: true }).first().click();
   await expect(p.page.getByPlaceholder("Message…")).toBeVisible();
+}
+
+/**
+ * Ghostly Browser (the built extension, extension/dist) in a Chromium profile of its own, the way
+ * e2e/support/extension.ts opens it: the localhost permission granted up front (Chrome's prompt
+ * cannot be clicked by automation) and the offscreen engine pointed at the test's relay.
+ */
+export async function openExtension(relay: LocalRelay, name: string): Promise<Peer & { dispose: () => void }> {
+  const dist = join(REPO, "extension/dist");
+  if (!existsSync(join(dist, "manifest.json"))) throw new Error("extension/dist is missing: run `npm run build:extension` first (npm run capture does)");
+  const work = mkdtempSync(join(tmpdir(), "ghostly-capture-ext-"));
+  const dir = join(work, "extension");
+  cpSync(dist, dir, { recursive: true });
+  const manifest = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8"));
+  manifest.host_permissions = manifest.optional_host_permissions;
+  delete manifest.optional_host_permissions;
+  writeFileSync(join(dir, "manifest.json"), JSON.stringify(manifest, null, 2));
+  const context = await chromium.launchPersistentContext(join(work, "profile"), {
+    channel: "chromium", headless: true, colorScheme: "dark", deviceScaleFactor: 2, locale: "en-US", timezoneId: EVENING,
+    viewport: DESKTOP,
+    args: [`--disable-extensions-except=${dir}`, `--load-extension=${dir}`, ...BROWSER_ARGS],
+  });
+  // The update check is the one request that would leave this machine: answered with the running version.
+  const version = JSON.parse(readFileSync(join(dist, "manifest.json"), "utf8")).version;
+  await context.route("https://ghostly.tools/latest.json", (route) => route.fulfill({ contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify({ version }) }));
+  const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
+  const id = new URL(worker.url()).host;
+  const page = context.pages()[0] ?? await context.newPage();
+  page.on("pageerror", (e) => console.log(`  [${name}] ${e.message}`));
+  await page.goto(`chrome-extension://${id}/app.html#/settings`);
+  await page.getByTestId("network-relays").fill(await relay.listen());
+  await page.getByTestId("network-save").click();
+  await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+  await page.goto(`chrome-extension://${id}/app.html#/`);
+  await expect(page.getByTitle("New Chat").first()).toBeVisible();
+  return { name, page, context, dispose: () => rmSync(work, { recursive: true, force: true }) };
 }
