@@ -128,8 +128,10 @@ async function transport({ a, b, combo }: DesktopWorld): Promise<void> {
     // Only Desktop is asked for a native transport; a browser keeps WebRTC, strict when the value says so.
     const preferred = p.kind === "desktop" ? want.preferred : want.preferred === "WebRTC" ? "WebRTC" : undefined;
     const offered = await p.preferTransport(preferred, p.kind === "desktop" || want.preferred === "WebRTC" ? want.fallback : true);
-    if (p.kind === "desktop") expect(offered, `${p.name} (Desktop) offers the native transports only`).toEqual(["Iroh", "HyperDHT"]);
-    else expect(offered, `${p.name} (${p.kind}) offers WebRTC only`).toEqual(["WebRTC"]);
+    // The options are off for what this app lacks, and for what the contact's lacks (once its record said so): a
+    // Desktop offers its native transports to a Desktop, and nothing to a browser, which has WebRTC only.
+    if (p.kind === "desktop") expect(offered, `${p.name} (Desktop) offers what both apps have`).toEqual(combo.client === "desktop-desktop" ? ["Iroh", "HyperDHT"] : []);
+    else expect(["WebRTC"], `${p.name} (${p.kind}) offers WebRTC at most`).toEqual(expect.arrayContaining(offered));
   }
   if (want.settles) for (const p of [a, b]) await connected(p, `(?:${want.settles})`);
   else for (const p of [a, b]) await notLive(p);
