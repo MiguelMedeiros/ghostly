@@ -31,6 +31,9 @@ async function useTestRelay(peer: Peer) {
   await peer.page.getByTestId("nostr-relays-save").click();
   await expect(peer.page.getByTestId("nostr-relays-save")).toBeDisabled();
   await expect(relays).toHaveValue(NOSTR_TEST_RELAY);
+  // Kept by the engine, not only shown: a fresh page reads it back.
+  await peer.page.reload();
+  await expect(relays).toHaveValue(NOSTR_TEST_RELAY);
 }
 
 test("a contact's profile, follows and notes load only on request from the person's relays; nothing loads without the shared proof; publication goes through the person's own signer", { tag: ["@feature:nostr.social.profile", "@feature:nostr.social.follows", "@feature:nostr.social.notes", "@feature:nostr.social.no-proof", "@feature:nostr.social.publish", "@feature:proofs.nostr", "@feature:proofs.share"] }, async ({ peer }) => {
