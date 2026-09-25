@@ -202,6 +202,8 @@ npm run e2e:infra:up && npm run test:e2e      # .env.e2e sets E2E_MINT_URL
 | `extension/services.spec.ts` | a local web app shared by one extension and opened by another over WebRTC, stopped, offline, gone |
 | `extension/paired-services.spec.ts` · `services-extras.spec.ts` | sharing from the chat itself; the contact opens it from Services; removed, it is gone everywhere |
 | `desktop/smoke.spec.ts` | the bundled Tauri app opens, and the peer behind it is the one Rust backs |
+| `desktop/native-upgrade.spec.ts` | two Desktop apps with no WebRTC (WebKitGTK) pair, text over the DHT, then go live on Iroh or HyperDHT by dialling each other's capability-record descriptors; On DHT before live, never failed, every text shown once |
+| `compat/v04.spec.ts` | the current app with a real v0.4.0 built from its tag: a compatibility chat both ways (DHT text, then WebRTC), Continue in a new chat, v0.4 refusing a ghostly1 invite — see [Compatibility with v0.4](#compatibility-with-v04) |
 | `desktop-macos/calls-services.spec.ts` | macOS only: two Desktop apps in the system WKWebView pair (ghostly1 invite), place a video call with media both ways, open a local app one of them shares, and show why calls are off on the DHT — see [Desktop on macOS](#desktop-on-macos) |
 
 ## Desktop
@@ -347,6 +349,27 @@ The matrix runs every night with the ephemeral environment (`e2e-full.yml`: four
 job of their own on ubuntu-22.04, then one report with the matrix in the run's summary), not on pull requests. It serves its own
 build on port 47300 (`MATRIX_WEB_PORT`), and its test domain uses 47320-47399.
 
+## Compatibility with v0.4
+
+A contact still on v0.4.0 can only make the old kind of chat, with a prefix-less invite, and cannot read a `ghostly1`
+one (WISP 402). `compat/v04.spec.ts` checks that against v0.4.0 itself rather than a stand-in
+(`web/compat-chat.spec.ts` plays the 0.4 side with a prefix-less session in the current app).
+
+```bash
+npm run test:e2e:compat                                        # builds v0.4.0 the first time (about a minute)
+E2E_WEB_PORT=50310 E2E_COMPAT_PORT=50311 npm run test:e2e:compat  # other ports (defaults 4183 and 4184)
+```
+
+- **The old build.** The release attaches no web build, so `scripts/build-compat-web.mjs` exports the tag with
+  `git archive` (nothing is checked out here), runs its own `npm ci` and `build:web`, and keeps `web/dist` in
+  `~/.cache/ghostly/compat/v0.4.0` (`E2E_COMPAT_CACHE` moves it), shared by every worktree; later runs reuse it,
+  `--force` rebuilds. `--serve <port>` serves it with a small static server: the export keeps no `node_modules`.
+- **The config.** `playwright.compat.config.ts` starts both servers (the current build and v0.4.0) and hands the old
+  one's address to the spec as `config.metadata.compatURL`. Both apps meet on the test's Pkarr relay, as everywhere.
+- **In CI** `e2e-compat.yml` (about 4 minutes, the v0.4.0 build cached by tag) runs nightly on `dev`, as a job of
+  the E2E workflow (so before every release), and by hand. Not on pull requests, like the rest of the app's e2e:
+  v0.4.0 never changes, only `dev` can break it, and a night is soon enough to hear about it.
+
 ## When they run
 
 - Before every release: the `Release` workflow runs them first, and neither the draft release nor the web image is made unless they pass. Desktop is a job of its own there, so a Rust build never holds up the browser tests.
@@ -358,6 +381,9 @@ build on port 47300 (`MATRIX_WEB_PORT`), and its test domain uses 47320-47399.
 
 - Desktop on macOS: on every pull request and push, as part of CI (required), nightly, and by hand
   ([Desktop on macOS](#desktop-on-macos)).
+- The Desktop specs (`e2e/desktop/`): before every release (the E2E workflow's Desktop job) and nightly, after the
+  Desktop scenarios of E2E (full), which build the app anyway.
+- Compatibility with v0.4.0: nightly, before every release and by hand ([Compatibility with v0.4](#compatibility-with-v04)).
 
 Not on pull requests: at about four minutes it would hold up every merge. `npm run check:desktop-bundle` is the exception — it is fast enough to run there.
 
