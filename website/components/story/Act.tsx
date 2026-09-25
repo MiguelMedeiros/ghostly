@@ -3,10 +3,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { motion, useInView, useMotionValue, useMotionValueEvent, useScroll, useSpring, useTransform, type MotionValue } from "motion/react";
 import { Ghost, type GhostMood } from "@/components/ghost/Ghost";
-import { orientationOf, scatter, stepOf, useCards, usePortrait, VIEW_BOX_ORIGIN } from "@/components/home/stage";
+import { EXIT, orientationOf, scatter, stepOf, useCards, usePortrait, VIEW_BOX_ORIGIN } from "@/components/home/stage";
 import { useCalm } from "@/lib/useCalm";
 import { SPRING, useScrub } from "@/lib/motion";
 import { BLOCKING, blockingFor, poseAt, ROOMS, STAGE, valueAt, type Chapter, type Frame } from "./poses";
+import { IDENTITY, lerpFraming, measureFraming, sameFraming, type Framing } from "./framing";
 
 /**
  * One continuous take. The act pins a full-bleed backdrop behind its chapters
@@ -18,8 +19,9 @@ import { BLOCKING, blockingFor, poseAt, ROOMS, STAGE, valueAt, type Chapter, typ
  */
 export type ActChapter = { id: string; chapter: Chapter; kind?: "pinned" | "free" };
 
-type Range = { chapter: Chapter; start: number; end: number; steps: number };
-type Located = { chapter: Chapter; t: number; steps: number };
+/** `framing`: where the chapter's picture sits on this window (story/framing.ts); the actors are drawn in it too. */
+type Range = { chapter: Chapter; start: number; end: number; steps: number; framing: Framing };
+type Located = { chapter: Chapter; t: number; steps: number; i: number };
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
@@ -85,10 +87,10 @@ function LiveAct({ id, chapters, field, bubble, bubbleAvoid, children }: { id: s
         const h = el.offsetHeight;
         const steps = el.querySelectorAll(".scene-step").length || 1;
         const end = c.kind === "free" ? (top + h) / travel : (top + h - vh) / travel;
-        next.push({ chapter: c.chapter, start: top / travel, end, steps });
+        next.push({ chapter: c.chapter, start: top / travel, end, steps, framing: c.kind === "free" ? IDENTITY : measureFraming(el, c.chapter) });
       }
       const prev = rangesRef.current;
-      const same = prev.length === next.length && prev.every((r, i) => r.chapter === next[i].chapter && r.start === next[i].start && r.end === next[i].end && r.steps === next[i].steps);
+      const same = prev.length === next.length && prev.every((r, i) => r.chapter === next[i].chapter && r.start === next[i].start && r.end === next[i].end && r.steps === next[i].steps && sameFraming(r.framing, next[i].framing));
       if (same) return;
       rangesRef.current = next;
       setRanges(next);
@@ -114,12 +116,12 @@ function LiveAct({ id, chapters, field, bubble, bubbleAvoid, children }: { id: s
       if (v >= r.end) continue;
       if (i > 0 && v < r.start) {
         const prev = rs[i - 1];
-        return v < (prev.end + r.start) / 2 ? { chapter: prev.chapter, t: 1, steps: prev.steps } : { chapter: r.chapter, t: 0, steps: r.steps };
+        return v < (prev.end + r.start) / 2 ? { chapter: prev.chapter, t: 1, steps: prev.steps, i: i - 1 } : { chapter: r.chapter, t: 0, steps: r.steps, i };
       }
-      return { chapter: r.chapter, t: r.end === r.start ? 0 : clamp01((v - r.start) / (r.end - r.start)), steps: r.steps };
+      return { chapter: r.chapter, t: r.end === r.start ? 0 : clamp01((v - r.start) / (r.end - r.start)), steps: r.steps, i };
     }
     const last = rs[rs.length - 1];
-    return { chapter: last.chapter, t: 1, steps: last.steps };
+    return { chapter: last.chapter, t: 1, steps: last.steps, i: rs.length - 1 };
   };
 
   // What the window shows of the stage, and where the copy ends: the hero pose is fitted to it (poses.ts fitHero).
@@ -197,6 +199,19 @@ function LiveAct({ id, chapters, field, bubble, bubbleAvoid, children }: { id: s
   // Scaling about the viewBox origin, then translating by focus·(1−s), keeps the focal point still.
   const camX = useTransform([scale, fx], ([s, f]) => (f as number) * (1 - (s as number)));
   const camY = useTransform([scale, fy], ([s, f]) => (f as number) * (1 - (s as number)));
+  // The chapter's framing; it changes to the next chapter's during the actors' glide, so they arrive in it.
+  const framingAt = (v: number): Framing => {
+    const at = locate(v);
+    if (!at) return IDENTITY;
+    const here = rangesRef.current[at.i].framing;
+    const next = rangesRef.current[at.i + 1]?.framing;
+    return next && at.t > EXIT ? lerpFraming(here, next, (at.t - EXIT) / (1 - EXIT)) : here;
+  };
+  // Framings change on resize without a scroll: this nudges the framing values to re-read them.
+  const measured = useMotionValue<number>(0);
+  const framingK = useTransform([actP, measured], ([v]) => framingAt(v as number).k);
+  const framingX = useTransform([actP, measured], ([v]) => framingAt(v as number).x);
+  const framingY = useTransform([actP, measured], ([v]) => framingAt(v as number).y);
   const fieldY = useTransform(actP, [0, 1], [0, -80]);
   // Boo's line stays for the first half of the opening chapter, then fades as he starts to move.
   const bubbleFade = useTransform(actP, (v) => {
@@ -220,6 +235,7 @@ function LiveAct({ id, chapters, field, bubble, bubbleAvoid, children }: { id: s
     // Re-evaluate once the ranges are known.
     const at = locate(actP.get());
     if (at) setScene({ chapter: at.chapter, step: stepOf(at.t, at.steps) });
+    measured.set(measured.get() + 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ranges]);
 
@@ -257,18 +273,20 @@ function LiveAct({ id, chapters, field, bubble, bubbleAvoid, children }: { id: s
               ))}
             </motion.g>
           )}
-          <motion.g style={{ x: camX, y: camY, scale, ...VIEW_BOX_ORIGIN }}>
-            <motion.g className="actor" style={{ x: cx, y: cy, scale: cs, opacity: ca, ...VIEW_BOX_ORIGIN }}>
-              <g className="stage-bob" style={{ animationDelay: "-1.37s" }}>
-                <Ghost who="casper" size={100} mood={casperMood} look={casperLook} float={false} halo phase={1} />
-              </g>
+          <motion.g style={{ x: framingX, y: framingY, scale: framingK, ...VIEW_BOX_ORIGIN }}>
+            <motion.g style={{ x: camX, y: camY, scale, ...VIEW_BOX_ORIGIN }}>
+              <motion.g className="actor" style={{ x: cx, y: cy, scale: cs, opacity: ca, ...VIEW_BOX_ORIGIN }}>
+                <g className="stage-bob" style={{ animationDelay: "-1.37s" }}>
+                  <Ghost who="casper" size={100} mood={casperMood} look={casperLook} float={false} halo phase={1} />
+                </g>
+              </motion.g>
+              <motion.g className="actor" style={{ x: bx, y: by, scale: bs, opacity: ba, ...VIEW_BOX_ORIGIN }}>
+                <g className="stage-bob">
+                  <Ghost who="boo" size={100} mood={booMood} look={booLook} float={false} halo />
+                </g>
+              </motion.g>
+              {bubble && <Bubble text={bubble} x={bx} y={by} s={bs} fade={bubbleFade} orient={orient} rest={poseAt(blockingFor(orient, chapters[0].chapter, frame).boo, 0)} avoid={bubbleAvoid} />}
             </motion.g>
-            <motion.g className="actor" style={{ x: bx, y: by, scale: bs, opacity: ba, ...VIEW_BOX_ORIGIN }}>
-              <g className="stage-bob">
-                <Ghost who="boo" size={100} mood={booMood} look={booLook} float={false} halo />
-              </g>
-            </motion.g>
-            {bubble && <Bubble text={bubble} x={bx} y={by} s={bs} fade={bubbleFade} orient={orient} rest={poseAt(blockingFor(orient, chapters[0].chapter, frame).boo, 0)} avoid={bubbleAvoid} />}
           </motion.g>
         </svg>
       </div>

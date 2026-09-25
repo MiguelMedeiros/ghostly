@@ -54,6 +54,14 @@ first, with a sentence saying what it is for.
 - Actors live in the act backdrop and move only between poses in
   `components/story/poses.ts`. The exit pose of a chapter is the entry pose of
   the next.
+- A chapter's picture never sits on its copy. `components/story/framing.ts`
+  gives each chapter a framing for the window: the whole picture (and the act's
+  actors while the chapter plays) moves away from the copy panel, and scales
+  down only when there is no room to move. It reads the chapter's drawn area
+  from `ART`: when a scene gains something that reaches further, widen its box
+  there. `npm run test:e2e` (Playwright, `e2e/scene-overlap.spec.ts`)
+  fails on any shape touching the copy, at widths 320 to 1920 in four shapes.
+- Windows taller than they are wide get the cards layout, like phones.
 - For any range that depends on state (orientation, locale), use the function
   form of `useTransform`: motion turns array ranges on scroll values into a
   native scroll animation fixed at mount.
@@ -100,7 +108,7 @@ does not light it.
 | Mode | Who | What moves |
 |---|---|---|
 | Film | Desktop with a fine pointer | Pinned acts, scroll-scrubbed through `useScrub`. |
-| Cards | Touch devices and viewports ≤ 860 px | Each step is a card; its scene plays its beat once (`DUR.beat`, `EASE.out`) when it scrolls into view. |
+| Cards | Touch devices, viewports ≤ 860 px and upright windows | Each step is a card; its scene plays its beat once (`DUR.beat`, `EASE.out`) when it scrolls into view. |
 | Stills | `prefers-reduced-motion` and no JavaScript | One finished frame per step; loops show their final frame. |
 
 The layout script in `app/layout.tsx` sets `html.calm`, `html[data-orient]` and
@@ -118,6 +126,8 @@ first paint.
 
 ## Before you ship a change
 
+- `npm run build && npm run test:e2e`: no picture on its copy, no ghost cut
+  by the window or the nav (CI runs it too).
 - `node .spine.mjs <out> 1440` and `node .spine.mjs <out> 390`: look at every
   frame; no overlap, nothing under the nav, text ≥ 12 px on desktop and 11 px
   on phones.
