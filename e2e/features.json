@@ -425,6 +425,8 @@
     "src/lib/time.ts": ["groups.*","nostr.*"],
     "src/lib/types.ts": [],
     "src/lib/url.ts": ["*"],
+    "{src/lib/navigation.ts,src/hooks/useAppNavigation.ts}": ["*"],
+    "src/lib/clipboard.ts": ["invite.*"],
     "src/lib/webrtc.ts": ["transport.webrtc","calls.*"],
     "src/pages/Chat.tsx": ["*"],
     "src/pages/Home.tsx": ["*"],
