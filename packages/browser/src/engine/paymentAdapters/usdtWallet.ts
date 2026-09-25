@@ -69,6 +69,7 @@ export class UsdtWallet {
   get configured() {return !!this.saved;}
   /** A creation waiting on its RPC gives up now, saving nothing. */
   cutShort() {this.gate.interrupt();}
+  resume() {this.gate.resume();}
   create(params:UsdtCreate) {return this.serial(()=>this.createNow(params));}
   private async createNow(params:UsdtCreate) {
     if(usdtMode(params.network)!==this.network)throw new WrongNetworkError(usdtMode(params.network),`${params.network==='ethereum'?'Ethereum':params.network} is a ${networkLabel(usdtMode(params.network))} network: this is the ${networkLabel(this.network)} USDT wallet`);

@@ -8,8 +8,8 @@ export const WALLET_NAMES: Record<WalletType, string> = {
   cashu: "Cashu", lightning: "Lightning", arkade: "Ark", bark: "Bark", spark: "Spark", bitcoin: "Bitcoin", fedimint: "Fedimint", usdt: "USDT",
 };
 
-/** How long a one-click creation waits on its server before it gives up, saving nothing. */
-export const CREATE_TIMEOUT_MS = 60_000;
+/** How long a one-click creation waits on its server before it gives up, saving nothing (tests shorten it). */
+export const createTiming = { timeoutMs: 60_000 };
 
 export const SPARK_MAINNET_NOT_YET = "Spark on Mainnet has not been tried with real funds yet. Create a Testnet Spark wallet (regtest) instead.";
 

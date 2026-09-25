@@ -97,7 +97,7 @@ describe("the LND form", () => {
     expect(() => lnd.validate!(settings("https://n:8080", bakeMacaroon(ADMIN)), "testnet")).toThrow();
   });
 
-  it("is registered, on every platform, in both modes, with its credentials as secrets", () => {
+  it("is registered, on every platform, on both networks, with its credentials as secrets", () => {
     expect(LIGHTNING_PROVIDERS.map((d) => d.id)).toContain("lnd");
     for (const platform of ["web", "extension", "desktop"] as const) for (const mode of ["mainnet", "testnet"] as const) expect(offeredIn(lnd, platform, mode)).toBe(true);
     expect(lnd.fields.filter((f) => f.kind === "secret").map((f) => f.name)).toEqual(["macaroon", "certificate"]);
@@ -190,8 +190,8 @@ describe("the LND provider", () => {
     const events = { changed: vi.fn(), received: vi.fn(), resolved: vi.fn() };
     const cashu = { view: async () => ({ balance: 0, mints: [], history: [], feesPaid: 0 }) } as unknown as CashuWallet;
     const descriptor = { ...lnd, create: async () => new LndLightning(node.transport(), full) };
-    const service = new LightningService(() => [cashuMint, descriptor], () => ({ platform: "web", cashu }), events, CASHU_MINT_SOURCE);
-    await service.start("testnet");
+    const service = new LightningService("testnet", () => [cashuMint, descriptor], () => ({ platform: "web", cashu }), events, CASHU_MINT_SOURCE);
+    await service.start();
     await service.sources.set("lnd", { url: "https://127.0.0.1:1", macaroon: SCOPED });
     await vi.waitFor(() => expect(service.view).toMatchObject({ providerId: "lnd", status: "ready", network: "regtest", balance: 100_000 }));
 

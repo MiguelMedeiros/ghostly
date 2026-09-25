@@ -33,17 +33,17 @@ beforeEach(async () => {
   await transact([STORES.settings, STORES.intents], s => { s[STORES.settings].clear(); s[STORES.intents].clear(); });
 });
 
-test('a new profile gets a working Ark wallet on Bitcoin without any setup, and it reopens by itself', async () => {
-  const first = new ArkWallet(() => {}); await first.start();
-  await first.ensureReady();
+test('a Mainnet Ark wallet made in one click works on Bitcoin with no setup, and it reopens by itself', async () => {
+  const first = new ArkWallet('mainnet', () => {}); await first.start();
+  await first.ensureReady(true);
   expect(first.view).toMatchObject({ configured: true, locked: false, automatic: true, network: 'bitcoin', provider: DEFAULT_ARK.provider, balance: 0 });
   expect(first.view.address).toMatch(/^ark1/);
   const mnemonic = connected(ArkadeAdapter.connect);
   await first.stop();
 
-  const restarted = new ArkWallet(() => {}); await restarted.start();
+  const restarted = new ArkWallet('mainnet', () => {}); await restarted.start();
   expect(restarted.view).toMatchObject({ configured: true, locked: true, automatic: true });
-  await restarted.ensureReady();
+  await restarted.ensureReady(true);
   expect(restarted.view.locked).toBe(false);
   expect(connected(ArkadeAdapter.connect)).toBe(mnemonic);
   expect((await restarted.backup()).mnemonic).toBe(mnemonic);
@@ -52,32 +52,32 @@ test('a new profile gets a working Ark wallet on Bitcoin without any setup, and 
 
 test('an unreachable provider leaves no half-made wallet and a later attempt succeeds', async () => {
   info.mockRejectedValueOnce(new Error('offline'));
-  const wallet = new ArkWallet(() => {}); await wallet.start();
-  await wallet.ensureReady();
+  const wallet = new ArkWallet('mainnet', () => {}); await wallet.start();
+  await wallet.ensureReady(true);
   expect(wallet.view.configured).toBe(false);
   expect(wallet.view.error).toContain('Connecting to Ark');
-  await wallet.ensureReady();
+  await wallet.ensureReady(true);
   expect(wallet.view).toMatchObject({ configured: true, locked: false });
   await wallet.stop();
 });
 
 test('an empty wallet can move to another test network; its seed is archived, never deleted', async () => {
-  // Test networks are the Testnet mode's: there the wallet starts on Mutinynet, and may move while empty.
-  const wallet = new ArkWallet(() => {}); await wallet.start(); await wallet.setMode('testnet');
+  // Test networks are the Testnet wallet's: it starts on Mutinynet, and may move while empty.
+  const wallet = new ArkWallet('testnet', () => {}); await wallet.start();
   info.mockResolvedValueOnce({ network: 'mutinynet', signerPubkey: `02${'ab'.repeat(32)}` });
-  await wallet.ensureReady();
+  await wallet.ensureReady(true);
   expect(wallet.view).toMatchObject({ network: 'mutinynet', locked: false });
   info.mockResolvedValueOnce({ network: 'regtest', signerPubkey: `02${'cd'.repeat(32)}` });
   await wallet.create({ network: 'regtest', provider: 'http://127.0.0.1:43010', explorer: 'http://127.0.0.1:43000/api' });
   expect(wallet.view).toMatchObject({ network: 'regtest', locked: false, automatic: true });
   expect((await settings()).keys.some(k => String(k).startsWith('arkWallet-retired-'))).toBe(true);
-  // Mainnet's networks stay out of reach from here, whatever is empty.
-  await expect(wallet.create({ ...DEFAULT_ARK })).rejects.toThrow('Switch the wallets to Mainnet');
+  // Mainnet's networks stay out of reach from here, whatever is empty: they are the Mainnet wallet's.
+  await expect(wallet.create({ ...DEFAULT_ARK })).rejects.toThrow('this is the Testnet Ark wallet');
   await wallet.stop();
 });
 
 test('a wallet holding funds or with payment history is never replaced', async () => {
-  const wallet = new ArkWallet(() => {}); await wallet.start(); await wallet.ensureReady();
+  const wallet = new ArkWallet('mainnet', () => {}); await wallet.start(); await wallet.ensureReady(true);
   funds.set(connected(ArkadeAdapter.connect), 500);
   await expect(wallet.create({ ...DEFAULT_ARK })).rejects.toThrow('will not be replaced');
   expect(wallet.view.locked).toBe(false);
@@ -88,7 +88,7 @@ test('a wallet holding funds or with payment history is never replaced', async (
 });
 
 test('a backup file needs a chosen password and restores into a wallet that opens by itself', async () => {
-  const wallet = new ArkWallet(() => {}); await wallet.start(); await wallet.ensureReady();
+  const wallet = new ArkWallet('mainnet', () => {}); await wallet.start(); await wallet.ensureReady(true);
   const mnemonic = connected(ArkadeAdapter.connect);
   await expect(wallet.exportBackup('short')).rejects.toThrow('12 characters');
   const backup = await wallet.exportBackup('a chosen backup password');
@@ -96,23 +96,23 @@ test('a backup file needs a chosen password and restores into a wallet that open
   await wallet.stop();
   await transact([STORES.settings], s => { s[STORES.settings].clear(); });
 
-  const restored = new ArkWallet(() => {}); await restored.start();
+  const restored = new ArkWallet('mainnet', () => {}); await restored.start();
   await restored.restoreBackup(backup, 'a chosen backup password');
-  await restored.ensureReady();
+  await restored.ensureReady(true);
   expect(restored.view).toMatchObject({ locked: false, automatic: true });
   expect(connected(ArkadeAdapter.connect)).toBe(mnemonic);
   await restored.stop();
 });
 
-test('a new profile gets a USDT wallet on Ethereum without any setup, and it reopens by itself', async () => {
-  const first = new UsdtWallet(() => {}); await first.start();
-  await first.ensureReady();
+test('a Mainnet USDT wallet made in one click is on Ethereum with no setup, and it reopens by itself', async () => {
+  const first = new UsdtWallet('mainnet', () => {}); await first.start();
+  await first.ensureReady(true);
   expect(first.view).toMatchObject({ configured: true, locked: false, automatic: true, network: 'ethereum', chainId: 1, provider: DEFAULT_USDT.provider, token: DEFAULT_USDT.token, balance: '0' });
   const mnemonic = connected(UsdtAdapter.connect);
   expect(await first.reveal()).toBe(mnemonic);
   await first.stop();
 
-  const restarted = new UsdtWallet(() => {}); await restarted.start(); await restarted.ensureReady();
+  const restarted = new UsdtWallet('mainnet', () => {}); await restarted.start(); await restarted.ensureReady(true);
   expect(restarted.view.locked).toBe(false);
   expect(connected(UsdtAdapter.connect)).toBe(mnemonic);
   funds.set(mnemonic, 1);
@@ -121,10 +121,10 @@ test('a new profile gets a USDT wallet on Ethereum without any setup, and it reo
 });
 
 test('a wallet made with a password keeps asking for it', async () => {
-  const wallet = new UsdtWallet(() => {}); await wallet.start();
+  const wallet = new UsdtWallet('mainnet', () => {}); await wallet.start();
   await wallet.create({ ...DEFAULT_USDT, password: 'an older password wallet' });
   await wallet.stop();
-  const reopened = new UsdtWallet(() => {}); await reopened.start(); await reopened.ensureReady();
+  const reopened = new UsdtWallet('mainnet', () => {}); await reopened.start(); await reopened.ensureReady(true);
   expect(reopened.view).toMatchObject({ locked: true, automatic: false });
   await expect(reopened.unlock()).rejects.toThrow('password');
   await reopened.unlock('an older password wallet');

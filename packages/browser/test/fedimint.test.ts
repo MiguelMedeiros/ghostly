@@ -4,6 +4,7 @@ import { ENDPOINT, PaymentPreflightError, parseFedimintRequestPayload, validateP
 import { FedimintAdapter } from "../src/engine/paymentAdapters/fedimint";
 import { FEDIMINT_MAINNET_UNAVAILABLE, FedimintWallet, fedimintTiming, historyEntry, normalizeInvite } from "../src/engine/paymentAdapters/fedimintWallet";
 import { federationInfo } from "../src/engine/paymentAdapters/fedimintSdk";
+import { WrongNetworkError } from "../src/engine/paymentAdapters/modeGate";
 import { PaymentCoordinator } from "../src/engine/paymentAdapters/coordinator";
 import { intentRepository } from "../src/engine/paymentAdapters/persistence";
 import { FedimintLightning, fedimint as fedimintDescriptor } from "../src/engine/paymentAdapters/providers/fedimint";
@@ -21,10 +22,9 @@ let fake: FakeFedimintSdk;
 let federation: FakeFederation;
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-async function wallet(mode: "mainnet" | "testnet" = "testnet", events = { changed: vi.fn(), received: vi.fn() }) {
-  const w = new FedimintWallet(events, fake.sdk());
+async function wallet(network: "mainnet" | "testnet" = "testnet", events = { changed: vi.fn(), received: vi.fn() }) {
+  const w = new FedimintWallet(network, events, fake.sdk());
   await w.start();
-  await w.setMode(mode);
   return w;
 }
 /** A joined wallet with `sats` in the federation (paid in over Lightning). */
@@ -58,11 +58,13 @@ describe("the Fedimint wallet", () => {
     expect(w.view.history[0]).toMatchObject({ kind: "lightning-in", amount: 2_500, state: "done" });
   });
 
-  it("refuses what is not an invite code, a federation of the other mode's network, and one without ecash", async () => {
+  it("refuses what is not an invite code, a federation of the other network with WrongNetworkError, and one without ecash", async () => {
     const w = await wallet();
     await expect(w.preview("lnbc1xyz")).rejects.toThrow("starts with fed1");
     const real = fake.federation({ network: "bitcoin" });
-    await expect(w.join(real.invite)).rejects.toThrow("real bitcoin");
+    const wrong = await w.join(real.invite).catch((e: unknown) => e);
+    expect(wrong).toBeInstanceOf(WrongNetworkError);
+    expect(wrong).toMatchObject({ network: "mainnet", message: expect.stringContaining("real bitcoin: it belongs in a Mainnet Fedimint wallet") });
     const unknown = fake.federation({ network: undefined });
     await expect(w.join(unknown.invite)).rejects.toThrow("which Bitcoin network");
     const noMint = fake.federation({ modules: ["ln", "wallet"] });
@@ -76,7 +78,7 @@ describe("the Fedimint wallet", () => {
     await expect(w.join(fake.federation({ network: "bitcoin" }).invite)).rejects.toThrow("not available yet");
   });
 
-  it("keeps each mode's federations apart, and one sealed mnemonic per mode for all of them", async () => {
+  it("keeps each network's federations in its own wallet, and one sealed mnemonic per network for all of them", async () => {
     const w = await wallet();
     await w.join(federation.invite);
     const other = fake.federation({ name: "Second", network: "signet" });
@@ -85,12 +87,21 @@ describe("the Fedimint wallet", () => {
     expect(new Set(mnemonics).size, "one mnemonic, a secret per federation derived from it").toBe(1);
     const stored = JSON.stringify(await wrap((await store(STORES.settings, "readonly")).getAll()));
     expect(stored.includes(mnemonics[0]), "the mnemonic is sealed").toBe(false);
-    await w.setMode("mainnet");
-    expect(w.view.federations).toEqual([]);
-    await w.setMode("testnet");
-    await w.ensureReady();
-    expect(w.view.federations.map((f) => f.name)).toEqual(["Regtest federation", "Second"]);
-    expect(w.view.federations.every((f) => f.status === "ready")).toBe(true);
+    const keys = (await wrap((await store(STORES.settings, "readonly")).getAllKeys())).map(String);
+    expect(keys, "only the Testnet wallet stored anything").toEqual(["fedimintWallet-testnet"]);
+    // The Mainnet wallet, open beside it, has its own record and none of the Testnet federations.
+    const mainnet = await wallet("mainnet");
+    await mainnet.ensureReady();
+    expect(mainnet.view.federations).toEqual([]);
+    expect(mainnet.configured).toBe(false);
+    expect(w.configured).toBe(true);
+    expect(w.view.federations.map((f) => f.name), "the Mainnet wallet touched nothing of the Testnet one").toEqual(["Regtest federation", "Second"]);
+    // The Testnet wallet opened again (a restart) finds both federations under its own key.
+    await w.stop();
+    const again = await wallet("testnet");
+    await again.ensureReady();
+    expect(again.view.federations.map((f) => f.name)).toEqual(["Regtest federation", "Second"]);
+    expect(again.view.federations.every((f) => f.status === "ready")).toBe(true);
   });
 
   it("hands notes over and takes them back; notes someone redeemed cannot be taken back", async () => {
@@ -209,7 +220,7 @@ describe("Fedimint in a chat", () => {
     await noLightning.desk.request({ linkId: "l", amount: 5, timestamp: 2, method: "fedimint" });
     expect((noLightning.sent[0].frame.endpoints as [string, string][]).map((e) => e[0]), "Lightning off: no invoice").toEqual([ENDPOINT.fedimint]);
     await expect(chat(w, { fedimint: false }).desk.request({ linkId: "l", amount: 1, timestamp: 3, method: "fedimint" })).rejects.toThrow("Both peers need Fedimint");
-    const empty = await wallet(); await transact([STORES.settings], (s) => { s[STORES.settings].clear(); }); await empty.start(); await empty.setMode("testnet");
+    const empty = await wallet(); await transact([STORES.settings], (s) => { s[STORES.settings].clear(); }); await empty.start();
     await expect(chat(empty).desk.request({ linkId: "l", amount: 1, timestamp: 4, method: "fedimint" })).rejects.toThrow("Join a federation first");
   });
 
@@ -315,7 +326,7 @@ describe("Fedimint in a chat", () => {
   it("the payee refuses notes of a federation it has not joined, and Fedimint when it is off, redeeming nothing", async () => {
     const payer = await funded(1_000);
     const { notes } = await payer.spendNotes(federation.id, 400);
-    const payee = await (async () => { const w = new FedimintWallet({ changed: vi.fn(), received: vi.fn() }, fake.sdk()); await w.start(); await w.setMode("testnet"); return w; })();
+    const payee = await (async () => { const w = new FedimintWallet("testnet", { changed: vi.fn(), received: vi.fn() }, fake.sdk()); await w.start(); return w; })();
     const { desk, sent } = chat(payee);
     await desk.onPayment("l", { id: "p1", timestamp: 1, amount: { value: "400", asset: "sat" }, endpoint: [ENDPOINT.fedimint, notes] });
     expect(sent.at(-1)!.frame).toMatchObject({ id: "p1", ok: false, error: expect.stringContaining("have not joined") });

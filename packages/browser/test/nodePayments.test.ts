@@ -114,14 +114,21 @@ describe("reviewing and approving a payment", () => {
     expect(onchain.broadcasts).toHaveLength(1);
   });
 
-  it("a Testnet source never pays in Mainnet: switching parks it, and switching back brings it again", async () => {
+  it("a Testnet source stays Testnet's whatever the page shows: only a Testnet payment goes through it", async () => {
     const { node, onchain } = track(await bitcoinEngine());
     await node.walletSetMode({ mode: "mainnet" });
-    await vi.waitFor(() => expect(node.getState().wallet.bitcoin).toMatchObject({ status: "none", mode: "mainnet" }));
-    await expect(node.preparePayment({ target: bitcoinTarget(), amount: 1_000, feeCap: 1_000, payee: "someone" })).rejects.toThrow();
-    await node.walletSetMode({ mode: "testnet" });
-    await vi.waitFor(() => expect(node.getState().wallet.bitcoin).toMatchObject({ providerId: "fake-onchain", mode: "testnet" }));
-    expect(await node.bitcoinReceiveAddress()).toMatch(/^bcrt1/);
+    // The page shows Mainnet, which has no source; the Testnet one is still there, connected.
+    expect(node.getState().wallet.bitcoin).toMatchObject({ status: "none", mode: "mainnet" });
+    expect(node.getState().wallet.networks?.testnet.bitcoin).toMatchObject({ providerId: "fake-onchain", status: "ready", mode: "testnet" });
+    expect(node.getState().wallet.wallets?.map((w) => w.id)).toEqual(["bitcoin:testnet"]);
+    // A Testnet address is paid by the Testnet source: the target's chain says which, not the page.
+    const review = await node.preparePayment({ target: bitcoinTarget(), amount: 1_000, feeCap: 1_000, payee: "someone" });
+    expect(review).toMatchObject({ method: "bitcoin", network: "regtest" });
+    // A card of the other network never pays it, and a Mainnet address has no Mainnet source to go through.
+    await expect(node.preparePayment({ target: bitcoinTarget(), amount: 1_000, feeCap: 1_000, payee: "someone", network: "mainnet" })).rejects.toThrow("a Mainnet wallet never pays it");
+    const mainnet: PaymentTarget = { ...bitcoinTarget(), network: "bitcoin", address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq" };
+    await expect(node.preparePayment({ target: mainnet, amount: 1_000, feeCap: 1_000, payee: "someone" })).rejects.toThrow("No Bitcoin source is set up");
+    expect(await node.bitcoinReceiveAddress({ network: "testnet" })).toMatch(/^bcrt1/);
     expect(onchain.broadcasts).toEqual([]);
   });
 
@@ -243,7 +250,9 @@ describe("sending, requesting and asking", () => {
     const { node } = track(engine());
     const request = vi.spyOn(node["desk"], "request").mockResolvedValue({ paymentId: "r" });
     await node.requestPayment({ linkId: "chat", amount: 5, memo: "m", timestamp: 1, method: "bark", ask: "forged-ask" } as never);
-    expect(request).toHaveBeenCalledWith({ linkId: "chat", amount: 5, memo: "m", timestamp: 1, method: "bark" });
+    expect(request).toHaveBeenCalledWith({ linkId: "chat", amount: 5, memo: "m", timestamp: 1, method: "bark", network: "mainnet" });
+    await node.requestPayment({ linkId: "chat", amount: 5, timestamp: 2, method: "bark", network: "testnet" });
+    expect(request).toHaveBeenLastCalledWith(expect.objectContaining({ timestamp: 2, network: "testnet" }));
   });
 
   it("only Ark, Bark, Spark, USDT, on-chain Bitcoin and Fedimint are paid by asking, and only a contact taking them is asked", async () => {
@@ -335,28 +344,30 @@ describe("the Cashu wallet and Lightning", () => {
     expect(node.getState().wallet.lightning).toMatchObject({ providerId: CASHU_MINT_SOURCE });
   });
 
-  it("shows the history of the mode in use, counts test sats waiting in Mainnet, and chimes once per new receipt", async () => {
+  it("keeps each network's history apart, counts test sats waiting while the page shows Mainnet, and chimes once per new receipt", async () => {
     const { node, view, events } = track(engine());
     node["settings"].mints = ["https://real.example", TEST_MINT];
-    vi.spyOn(node["wallet"], "balanceAt").mockImplementation(async (mint) => (mint === TEST_MINT ? 50 : 1_000));
     const tx = (id: string, mint: string, kind = "ecash-in") => ({ id, mint, kind, amount: 10, fee: 1, timestamp: Date.now() + 1_000 });
     const history = [tx("old", "https://real.example"), tx("test", TEST_MINT)];
-    view.mockImplementation(async () => ({ mints: [], balance: 0, history: [...history], feesPaid: 0 }) as never);
+    view.mockImplementation(async (network) => ({ mints: [], balance: network === "testnet" ? 50 : 1_000, history: [...history], feesPaid: 0 }) as never);
     await node["refreshWallet"]();
-    expect(node.getState().wallet).toMatchObject({ mode: "mainnet", waitingTestSats: 50, feesPaid: 1 });
+    expect(node.getState().wallet).toMatchObject({ mode: "mainnet", waitingTestSats: 50, feesPaid: 1, balance: 1_000 });
     expect(node.getState().wallet.history.map((t) => t.id)).toEqual(["old"]);
+    expect(node.getState().wallet.networks?.testnet).toMatchObject({ balance: 50, feesPaid: 1 });
+    expect(node.getState().wallet.networks?.testnet.history.map((t) => t.id)).toEqual(["test"]);
     expect(events.onAttention, "what was there before is not news").not.toHaveBeenCalled();
 
-    history.push(tx("new", "https://real.example", "lightning-in"), tx("paid", "https://real.example", "lightning-out"));
+    // News from either network chimes: a test payment arriving is news too.
+    history.push(tx("new", "https://real.example", "lightning-in"), tx("paid", "https://real.example", "lightning-out"), tx("test-in", TEST_MINT));
     await node["refreshWallet"]();
     await node["refreshWallet"]();
-    expect(events.onAttention.mock.calls.map(([e]) => e.type).sort()).toEqual(["coin", "confirmed"]);
+    expect(events.onAttention.mock.calls.map(([e]) => e.type).sort()).toEqual(["coin", "coin", "confirmed"]);
   });
 
   it("a wallet backup that does not restore connects nothing; one that does, connects", async () => {
     const { node } = track(engine());
     for (const [kind, restore] of [["ark", node.arkRestoreBackup], ["bark", node.barkRestoreBackup], ["usdt", node.usdtRestoreBackup]] as const) {
-      const wallet = node[`${kind}Wallet` as "arkWallet"];
+      const wallet = node[`${kind}Wallets` as "arkWallets"].mainnet;
       const restored = vi.spyOn(wallet, "restoreBackup").mockRejectedValueOnce(new Error("Wrong password")).mockResolvedValueOnce(undefined as never);
       const ready = vi.spyOn(wallet, "ensureReady").mockResolvedValue(undefined as never);
       await expect(restore.call(node, { text: "backup", password: "bad" }), kind).rejects.toThrow("Wrong password");

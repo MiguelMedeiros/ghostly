@@ -40,8 +40,13 @@ export class ModeGate {
   /** The owner's switch to `mode` is applied (its queue reached it): waits are for this mode again. */
   entered(mode: WalletMode) { this.current = mode; }
 
-  /** Waits under way end now (a creation that took too long); later ones wait again. */
-  interrupt() { this.controller.abort(); this.controller = new AbortController(); }
+  /**
+   * A creation took too long: the waits under way end now, and so does every wait that starts until `resume`
+   * (a creation still sealing its seed has not reached its server yet, and must not wait there either).
+   */
+  interrupt() { this.cut = true; this.controller.abort(); this.controller = new AbortController(); }
+  resume() { this.cut = false; }
+  private cut = false;
 
   /** The wallet stopped: every wait ends now, and any later one at once. */
   close() { this.closed = true; this.controller.abort(); }
@@ -51,7 +56,7 @@ export class ModeGate {
     const signal = this.controller.signal;
     return new Promise<T>((resolve, reject) => {
       const give = () => { reject(new ModeChanged()); void work.then((value) => dispose?.(value), () => {}); };
-      if (this.closed || (this.current && this.current !== this.target)) return give();
+      if (this.closed || this.cut || (this.current && this.current !== this.target)) return give();
       signal.addEventListener("abort", give, { once: true });
       work.then(
         (value) => { signal.removeEventListener("abort", give); if (!signal.aborted) resolve(value); },

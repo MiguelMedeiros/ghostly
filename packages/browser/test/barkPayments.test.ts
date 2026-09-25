@@ -22,21 +22,28 @@ function setup(opts: { bark?: boolean; received?: (address: string, amount: numb
   };
   let n = 0;
   const received = vi.fn(opts.received ?? (async () => undefined));
-  const bark = { target: vi.fn(async () => target(`tark1psrvfresh${++n}`)), adapter: { config: { provider, network: "signet" }, received, sync: vi.fn(async () => {}) } };
+  // The Testnet (signet) wallet holds the money; the Mainnet one, open beside it, has no wallet yet.
+  const bark = { network: "testnet", configured: true, target: vi.fn(async () => target(`tark1psrvfresh${++n}`)), adapter: { config: { provider, network: "signet" }, received, sync: vi.fn(async () => {}) } };
+  const mainnet = { network: "mainnet", configured: false, target: vi.fn(async () => { throw new Error("no Mainnet Bark wallet"); }), adapter: undefined };
   const host = { getLink: () => link as unknown as GhostLink, storeMessage: vi.fn(), onChange: vi.fn() };
-  return { desk: new PaymentDesk({} as CashuWallet, host, undefined, undefined, bark as unknown as BarkWallet), sent, link, bark, received, host };
+  const wallets = { mainnet: mainnet as unknown as BarkWallet, testnet: bark as unknown as BarkWallet };
+  return { desk: new PaymentDesk({} as CashuWallet, host, undefined, undefined, wallets), sent, link, bark, mainnet, received, host };
 }
 
-it("a Bark request carries its own fresh address, under the Bark endpoint, and needs Bark on both sides", async () => {
-  const { desk, sent } = setup();
+it("a Bark request carries its own fresh address of its network's wallet, under the Bark endpoint, and needs Bark on both sides", async () => {
+  const { desk, sent, mainnet } = setup();
   await desk.start();
-  await desk.request({ linkId: "l", amount: 1_500, timestamp: 1, method: "bark", memo: "lunch" });
-  await desk.request({ linkId: "l", amount: 700, timestamp: 2, method: "bark" });
+  await desk.request({ linkId: "l", amount: 1_500, timestamp: 1, method: "bark", memo: "lunch", network: "testnet" });
+  await desk.request({ linkId: "l", amount: 700, timestamp: 2, method: "bark", network: "testnet" });
   const endpoints = sent.map((s) => s.frame.endpoints as [string, string][]);
   expect(endpoints.map((e) => e[0][0])).toEqual([ENDPOINT.bark, ENDPOINT.bark]);
+  expect(sent.map((s) => s.frame.network), "the request says its network on the wire").toEqual(["testnet", "testnet"]);
   const addresses = endpoints.map((e) => JSON.parse(e[0][1]).address);
   expect(new Set(addresses).size, "one address per request").toBe(2);
-  expect(rows<StoredPayment>("payments").map((p) => p.target?.method)).toEqual(["bark", "bark"]);
+  expect(rows<StoredPayment>("payments").map((p) => [p.target?.method, p.network])).toEqual([["bark", "testnet"], ["bark", "testnet"]]);
+  await expect(desk.request({ linkId: "l", amount: 5, timestamp: 3, method: "bark", network: "mainnet" }), "a network without a Bark wallet").rejects.toThrow("You have no Mainnet Bark wallet");
+  expect(mainnet.target).not.toHaveBeenCalled();
+  expect(sent).toHaveLength(2);
   const off = setup({ bark: false });
   await expect(off.desk.request({ linkId: "l", amount: 1, timestamp: 3, method: "bark" })).rejects.toThrow("Both peers need Bark");
   await expect(off.desk.ask({ linkId: "l", amount: 1, timestamp: 3, method: "bark" })).rejects.toThrow("does not accept Bark");
@@ -56,12 +63,14 @@ it("the payer keeps a Bark request only when the chat allows Bark and the target
   expect(desk.payment("r3")).toMatchObject({ kind: "request", direction: "in", amount: 500, target: { method: "bark" } });
 });
 
-it("the payee's app answers a Bark ask with a Bark request", async () => {
-  const { desk, sent } = setup();
+it("the payee's app answers a Bark ask with a Bark request from the wallet of the ask's network", async () => {
+  const { desk, sent, bark, mainnet } = setup();
   await desk.start();
-  await desk.onPaymentAsk("l", { id: "ask_000001", timestamp: 1, amount: { value: "900", asset: "sat" }, method: "bark" });
+  await desk.onPaymentAsk("l", { id: "ask_000001", timestamp: 1, amount: { value: "900", asset: "sat" }, method: "bark", network: "testnet" });
   expect(sent).toHaveLength(1);
-  expect(sent[0].frame).toMatchObject({ ask: "ask_000001", amount: { value: "900", asset: "sat" } });
+  expect(sent[0].frame).toMatchObject({ ask: "ask_000001", amount: { value: "900", asset: "sat" }, network: "testnet" });
+  expect(bark.target).toHaveBeenCalledOnce();
+  expect(mainnet.target).not.toHaveBeenCalled();
   expect((sent[0].frame.endpoints as [string, string][])[0][0]).toBe(ENDPOINT.bark);
 });
 

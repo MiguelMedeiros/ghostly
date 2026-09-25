@@ -57,6 +57,7 @@ export class SparkWallet {
   get configured() { return !!this.saved; }
   /** A creation waiting on Spark gives up now, saving nothing. */
   cutShort() { this.gate.interrupt(); }
+  resume() { this.gate.resume(); }
 
   /** Opens the wallet; `create`: makes Testnet's regtest wallet first when there is none. Retries while Spark is unreachable. */
   ensureReady(create = false): Promise<void> {

@@ -8,6 +8,7 @@ import { SparkAdapter } from "../src/engine/paymentAdapters/spark";
 import { SPARK_MAINNET_NEEDS_KEY, SparkWallet, sparkTiming } from "../src/engine/paymentAdapters/sparkWallet";
 import { BreezLightning } from "../src/engine/paymentAdapters/providers/breez";
 import { PaymentCoordinator } from "../src/engine/paymentAdapters/coordinator";
+import { WrongNetworkError } from "../src/engine/paymentAdapters/modeGate";
 import { intentRepository } from "../src/engine/paymentAdapters/persistence";
 import { STORES, openDb, store, transact, wrap } from "../src/shared/idb";
 import { FakeBreezNetwork, type FakeBreezWallet } from "./helpers/fakeBreez";
@@ -192,17 +193,21 @@ describe("the Spark adapter", () => {
 });
 
 describe("the Spark wallet", () => {
-  const make = () => new SparkWallet(vi.fn(), sdk);
+  const make = (network: "mainnet" | "testnet" = "testnet") => new SparkWallet(network, vi.fn(), sdk);
 
-  it("Testnet makes a regtest wallet by itself, sealed, and keeps each mode's wallet apart", async () => {
+  it("Testnet makes a regtest wallet when asked, sealed, and each network's wallet is its own", async () => {
     const wallet = make();
     vi.mocked(generateMnemonic).mockReturnValueOnce(TEST_PHRASE);
-    await wallet.start(); await wallet.setMode("testnet");
+    await wallet.start();
     await wallet.ensureReady();
+    expect(wallet.configured, "opening makes nothing").toBe(false);
+    expect(net.connects).toHaveLength(0);
+    await wallet.ensureReady(true);
+    expect(wallet.configured).toBe(true);
     expect(await wallet.backup()).toEqual({ mnemonic: TEST_PHRASE, network: "regtest", apiKey: undefined });
     expect(wallet.view).toMatchObject({ configured: true, locked: false, network: "regtest", balance: 0, history: [] });
     expect(wallet.view.address).toMatch(/^sparkrt1/);
-    const saved = await wrap((await store(STORES.settings, "readonly")).get("sparkWallet"));
+    const saved = await wrap((await store(STORES.settings, "readonly")).get("sparkWallet-mode-testnet"));
     expect(phraseLeaks(JSON.stringify(saved)), "the phrase is sealed, never stored as text").toEqual([]);
 
     const request = await wallet.target(900, "rent");
@@ -211,35 +216,41 @@ describe("the Spark wallet", () => {
     expect(net.sparkInvoices.get(request.address)).toMatchObject({ amount: 900, memo: "rent" });
     expect(sparkInvoiceDetails(request.address, "regtest"), "what the contact's app reads from it").toMatchObject({ amount: 900, memo: "rent", token: false });
 
-    await wallet.setMode("mainnet");
+    // The Mainnet wallet, open beside it, has none, makes none without a key, and touches nothing of the Testnet one.
+    const mainnet = make("mainnet");
+    await mainnet.start();
+    expect(mainnet.view).toMatchObject({ configured: false, needsKey: true, unavailable: SPARK_MAINNET_NEEDS_KEY });
+    await mainnet.ensureReady(true);
+    expect(mainnet.view.configured, "Mainnet makes nothing by itself").toBe(false);
     expect(await settingsKeys()).toEqual(["sparkWallet-mode-testnet"]);
-    expect(wallet.view).toMatchObject({ configured: false, needsKey: true, unavailable: SPARK_MAINNET_NEEDS_KEY });
-    await wallet.ensureReady();
-    expect(wallet.view.configured, "Mainnet makes nothing by itself").toBe(false);
-    await wallet.setMode("testnet");
-    expect(await settingsKeys()).toEqual(["sparkWallet"]);
-    await wallet.ensureReady();
-    expect((await wallet.backup()).mnemonic, "the same wallet came back").toBe(TEST_PHRASE);
-    await wallet.stop();
+    expect(wallet.view).toMatchObject({ configured: true, locked: false, network: "regtest" });
+    await wallet.stop(); await mainnet.stop();
+    const again = make();
+    await again.start(); await again.ensureReady();
+    expect((await again.backup()).mnemonic, "the same wallet, opened again").toBe(TEST_PHRASE);
+    await again.stop();
   });
 
   it("Mainnet opens a wallet only with a Breez API key, sealed beside the phrase", async () => {
-    const wallet = make();
-    await wallet.start(); await wallet.setMode("mainnet");
+    const wallet = make("mainnet");
+    await wallet.start();
     await expect(wallet.create({ network: "bitcoin" })).rejects.toThrow(SPARK_MAINNET_NEEDS_KEY);
-    await expect(wallet.create({ network: "regtest" })).rejects.toThrow("Switch the wallets to Testnet");
+    const wrong = await wallet.create({ network: "regtest" }).catch((e: unknown) => e);
+    expect(wrong, "a regtest wallet belongs to the Testnet wallet").toBeInstanceOf(WrongNetworkError);
+    expect(wrong).toMatchObject({ network: "testnet", message: "regtest is a Testnet network: this is the Mainnet Spark wallet" });
     expect(await settingsKeys()).toEqual([]);
     await wallet.create({ network: "bitcoin", apiKey: " the-breez-key " });
     expect(wallet.view).toMatchObject({ configured: true, locked: false, network: "bitcoin" });
     expect(net.connects.at(-1)).toMatchObject({ network: "mainnet", apiKey: "the-breez-key" });
-    expect(JSON.stringify(await wrap((await store(STORES.settings, "readonly")).get("sparkWallet")))).not.toContain("the-breez-key");
+    expect(await settingsKeys()).toEqual(["sparkWallet-mode-mainnet"]);
+    expect(JSON.stringify(await wrap((await store(STORES.settings, "readonly")).get("sparkWallet-mode-mainnet")))).not.toContain("the-breez-key");
     expect((await wallet.backup()).apiKey).toBe("the-breez-key");
     await wallet.stop();
   });
 
   it("a wallet holding money or payments is never replaced; an empty one is archived, not deleted", async () => {
     const wallet = make();
-    await wallet.start(); await wallet.setMode("testnet"); await wallet.ensureReady();
+    await wallet.start(); await wallet.ensureReady(true);
     const fake = await fakeOf(wallet.adapter!);
     net.paySparkFromOutside(fake.sparkAddress, 10);
     await expect(wallet.create({ network: "regtest", mnemonic: TEST_PHRASE })).rejects.toThrow("will not be replaced");
@@ -254,7 +265,7 @@ describe("the Spark wallet", () => {
   it("an encrypted backup restores the phrase and the payments into a fresh profile", async () => {
     const wallet = make();
     vi.mocked(generateMnemonic).mockReturnValueOnce(TEST_PHRASE);
-    await wallet.start(); await wallet.setMode("testnet"); await wallet.ensureReady();
+    await wallet.start(); await wallet.ensureReady(true);
     const address = wallet.view.address!;
     await intentRepository.put({ review: { ...review(target(address), 5, 0), state: "submitted" }, prepared: { address, kind: "address", amount: 5, fee: 0, key: crypto.randomUUID() } });
     await expect(wallet.exportBackup("short")).rejects.toThrow("12 characters");
@@ -264,21 +275,26 @@ describe("the Spark wallet", () => {
 
     await transact([STORES.settings, STORES.intents], (s) => { s[STORES.settings].clear(); s[STORES.intents].clear(); });
     const fresh = make();
-    await fresh.start(); await fresh.setMode("testnet");
+    await fresh.start();
     await expect(fresh.restoreBackup(file, "wrong password here")).rejects.toThrow();
     await fresh.restoreBackup(file, "correct horse battery");
     expect((await fresh.backup()).mnemonic).toBe(TEST_PHRASE);
     expect((await intentRepository.list()).map((i) => i.review.state), "an unfinished payment comes back unknown").toEqual(["unknown"]);
     await fresh.ensureReady();
     expect(fresh.view.address, "the same Spark wallet").toBe(address);
-    await fresh.setMode("mainnet");
-    await fresh.stop();
+    const mainnet = make("mainnet");
+    await mainnet.start();
+    const wrong = await mainnet.restoreBackup(file, "correct horse battery", "a-breez-key").catch((e: unknown) => e);
+    expect(wrong, "the Mainnet wallet refuses a Testnet backup").toBeInstanceOf(WrongNetworkError);
+    expect(wrong).toMatchObject({ network: "testnet", message: "This backup is a Testnet Spark wallet" });
+    expect(mainnet.configured).toBe(false);
+    await fresh.stop(); await mainnet.stop();
   });
 
   it("a Spark service that does not answer leaves nothing saved and says it is connecting", async () => {
-    const down = new SparkWallet(vi.fn(), async () => ({ connect: async () => { throw new Error("operators unreachable"); } }));
-    await down.start(); await down.setMode("testnet");
-    await down.ensureReady();
+    const down = new SparkWallet("testnet", vi.fn(), async () => ({ connect: async () => { throw new Error("operators unreachable"); } }));
+    await down.start();
+    await down.ensureReady(true);
     expect(down.view.error).toContain("operators unreachable");
     expect(await settingsKeys()).toEqual([]);
     await down.stop();

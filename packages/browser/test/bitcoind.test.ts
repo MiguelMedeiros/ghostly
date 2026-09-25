@@ -38,7 +38,7 @@ describe("Bitcoin Core source", () => {
     expect(() => btcToSats("1")).toThrow();
   });
 
-  it("is offered on Desktop only, in both modes, and says so", () => {
+  it("is offered on Desktop only, on both networks, and says so", () => {
     expect(offeredIn(bitcoindRpc, "desktop", "testnet") && offeredIn(bitcoindRpc, "desktop", "mainnet")).toBe(true);
     expect(offeredIn(bitcoindRpc, "web", "testnet") || offeredIn(bitcoindRpc, "extension", "mainnet")).toBe(false);
     expect(bitcoindRpc.description).toContain("desktop app");
@@ -58,10 +58,10 @@ describe("Bitcoin Core source", () => {
     expect(credentials({ config: { user: "alice" }, secrets: { password: "a:b" } })).toEqual({ user: "alice", password: "a:b" });
   });
 
-  it("refuses a node on a network of the other mode, a chain it does not know, and a wallet that cannot sign", async () => {
+  it("refuses a node on the other network, a chain it does not know, and a wallet that cannot sign", async () => {
     const node = new MockBitcoind();
     node.chain = "main";
-    await expect(connect(node)).rejects.toThrow("Mainnet mode");
+    await expect(connect(node)).rejects.toThrow("set it up as a Mainnet wallet instead");
     await expect(BitcoindOnchain.connect(CONFIG, "mainnet", node.transport)).resolves.toBeInstanceOf(BitcoindOnchain);
     node.chain = "signet";
     await expect(BitcoindOnchain.connect(CONFIG, "mainnet", node.transport)).rejects.toThrow("not Bitcoin mainnet");
@@ -224,8 +224,8 @@ describe("Bitcoin Core through the payment coordinator", () => {
 
   async function engine(node: MockBitcoind) {
     const descriptor: OnchainProviderDescriptor = { ...bitcoindRpc, platforms: ["web"], create: (s, host) => BitcoindOnchain.connect({ ...CONFIG, url: s.config.url }, host.mode, node.transport, host.signal) };
-    const service = new BitcoinService(() => [descriptor], () => ({ platform: "web", cashu: {} as CashuWallet }), vi.fn());
-    await service.start("testnet");
+    const service = new BitcoinService("testnet", () => [descriptor], () => ({ platform: "web", cashu: {} as CashuWallet }), vi.fn());
+    await service.start();
     await service.sources.set("bitcoind", { url: CONFIG.url, user: "u", password: CONFIG.password });
     return { service, coordinator: new PaymentCoordinator(intentRepository, [service.adapter]) };
   }

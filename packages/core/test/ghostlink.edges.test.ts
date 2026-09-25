@@ -566,6 +566,32 @@ describe("paired payments", () => {
     expect(t.b.supportsPayments).toBe(true);
   });
 
+  it("says the networks of its wallets per way of paying, and reads the contact's; an older contact's none means any", async () => {
+    const t = linkedPair([{ events: payEvents(), paymentNetworks: { cashu: ["testnet"], arkade: ["mainnet", "testnet"] } }, { events: payEvents() }]);
+    await t.ready();
+    await t.settle("b");
+    expect(t.b.peerPaymentNetworks("cashu")).toEqual(["testnet"]);
+    expect(t.b.peerPaymentNetworks("arkade")).toEqual(["mainnet", "testnet"]);
+    expect(t.b.peerPaymentNetworks("usdt"), "said, and none: no USDT wallet").toEqual([]);
+    // B said no networks at all (as an older app): anything may meet.
+    expect(t.a.peerPaymentNetworks("cashu")).toBeUndefined();
+    // A new wallet is told at once on the open session.
+    t.a.setPaymentNetworks({ cashu: ["testnet", "mainnet"], arkade: ["mainnet", "testnet"] });
+    await t.settle("b");
+    expect(t.b.peerPaymentNetworks("cashu")).toEqual(["testnet", "mainnet"]);
+    // A malformed map is ignored and the last good word stays; an unknown method is left out.
+    for (const n of [["testnet"], { cashu: "testnet" }, { cashu: ["regtest"] }, Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`m${i}`, []]))]) t.toB({ t: "paired-payments", m: ["cashu"], n });
+    await t.settle("b");
+    expect(t.b.peerPaymentNetworks("cashu")).toEqual(["testnet", "mainnet"]);
+    t.toB({ t: "paired-payments", m: ["cashu", "future-coin"], n: { cashu: ["mainnet"], "future-coin": ["testnet"] } });
+    await t.settle("b");
+    expect(t.b.peerPaymentNetworks("cashu")).toEqual(["mainnet"]);
+    // A list with no networks at all is an older app again.
+    t.toB({ t: "paired-payments", m: ["cashu"] });
+    await t.settle("b");
+    expect(t.b.peerPaymentNetworks("cashu")).toBeUndefined();
+  });
+
   it("an older contact that did not offer payments in its handshake is sent no payment frames", async () => {
     const onPaymentRequest = vi.fn();
     // An older app never says its payment list on the session, so only the handshake offer counts.

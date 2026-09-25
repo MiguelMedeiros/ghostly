@@ -25,14 +25,14 @@ function lightningDescriptor(fake: FakeLightningProvider, extra: Partial<Lightni
   const received: unknown[] = [];
   return { ...fakeLightning, received, create: async (settings) => { received.push(settings); return fake; }, ...extra };
 }
-function service(descriptors: LightningProviderDescriptor[], platform: ProviderPlatform = "web") {
+function service(descriptors: LightningProviderDescriptor[], platform: ProviderPlatform = "web", network: "mainnet" | "testnet" = "testnet") {
   const events = { changed: vi.fn(), received: vi.fn(), resolved: vi.fn() } satisfies LightningEvents;
   const cashu = { view: async () => ({ balance: 7, mints: [], history: [], feesPaid: 0 }) } as unknown as CashuWallet;
-  return { events, lightning: new LightningService(() => [cashuMint, ...descriptors], () => ({ platform, cashu }), events, CASHU_MINT_SOURCE) };
+  return { events, lightning: new LightningService(network, () => [cashuMint, ...descriptors], () => ({ platform, cashu }), events, CASHU_MINT_SOURCE) };
 }
 
 describe("the provider registry", () => {
-  it("offers a provider only on its platforms and in the mode of its networks", () => {
+  it("offers a provider only on its platforms and on the wallet network of its chains", () => {
     const descriptor = { platforms: ["web"] as ProviderPlatform[], networks: ["regtest"] as const };
     expect(offeredIn(descriptor, "web", "testnet")).toBe(true);
     expect(offeredIn(descriptor, "web", "mainnet")).toBe(false);
@@ -44,24 +44,26 @@ describe("the provider registry", () => {
   });
 });
 
-describe("active sources, one per wallet mode", () => {
-  it("defaults to the Cashu mints, offers what this platform and mode can run, and connects", async () => {
-    const { lightning } = service([lightningDescriptor(new FakeLightningProvider())]);
-    await lightning.start("mainnet");
+describe("active sources, one per network", () => {
+  it("defaults to the Cashu mints, offers what this platform and network can run, and connects", async () => {
+    const { lightning } = service([lightningDescriptor(new FakeLightningProvider())], "web", "mainnet");
+    await lightning.start();
     await lightning.ensureReady();
     expect(lightning.view).toMatchObject({ providerId: CASHU_MINT_SOURCE, isDefault: true, status: "ready", network: "bitcoin" });
     expect(lightning.view.offered.map((d) => d.id)).toEqual([CASHU_MINT_SOURCE]);
-    await lightning.setMode("testnet");
-    await lightning.ensureReady();
-    expect(lightning.view.offered.map((d) => d.id)).toEqual([CASHU_MINT_SOURCE, "fake-lightning"]);
-    expect(lightning.view).toMatchObject({ mode: "testnet", network: "testnet", status: "ready" });
+    const { lightning: testnet } = service([lightningDescriptor(new FakeLightningProvider())]);
+    await testnet.start();
+    await testnet.ensureReady();
+    expect(testnet.view.offered.map((d) => d.id)).toEqual([CASHU_MINT_SOURCE, "fake-lightning"]);
+    expect(testnet.view).toMatchObject({ mode: "testnet", network: "testnet", status: "ready" });
+    await lightning.stop(); await testnet.stop();
   });
 
   it("seals secrets, keeps them out of the view and of plain storage, and hands them back after a restart", async () => {
     const fake = new FakeLightningProvider();
     const descriptor = lightningDescriptor(fake);
     const first = service([descriptor]).lightning;
-    await first.start("testnet");
+    await first.start();
     await first.sources.set("fake-lightning", { alias: "Node A", token: "super-secret-token", behaviour: "settle" });
     expect(first.view).toMatchObject({ providerId: "fake-lightning", status: "ready", config: { alias: "Node A", behaviour: "settle" }, secrets: ["token"] });
     expect(JSON.stringify(first.view)).not.toContain("super-secret-token");
@@ -70,48 +72,49 @@ describe("active sources, one per wallet mode", () => {
     expect((await keys()).filter((k) => k !== "lightningSourceSeen-testnet")).toEqual(["lightningSource-testnet"]);
 
     const again = service([descriptor]).lightning;
-    await again.start("testnet");
+    await again.start();
     await again.ensureReady();
     expect(descriptor.received.at(-1)).toEqual({ config: { alias: "Node A", behaviour: "settle" }, secrets: { token: "super-secret-token" } });
     expect(again.view.status).toBe("ready");
   });
 
-  it("keeps Mainnet and Testnet sources apart: a switch closes one and opens the other", async () => {
+  it("keeps Mainnet and Testnet sources apart: both open at once, each with its own", async () => {
     const fake = new FakeLightningProvider();
     const { lightning } = service([lightningDescriptor(fake)]);
-    await lightning.start("testnet");
+    await lightning.start();
     await lightning.sources.set("fake-lightning", { token: "t", behaviour: "settle" });
-    await lightning.setMode("mainnet");
-    await lightning.ensureReady();
-    expect(fake.closed).toBe(true);
-    expect(lightning.view).toMatchObject({ providerId: CASHU_MINT_SOURCE, mode: "mainnet" });
-    await lightning.setMode("testnet");
-    await lightning.ensureReady();
+    const { lightning: mainnet } = service([lightningDescriptor(fake)], "web", "mainnet");
+    await mainnet.start();
+    await mainnet.ensureReady();
+    expect(mainnet.view).toMatchObject({ providerId: CASHU_MINT_SOURCE, mode: "mainnet", status: "ready" });
+    expect(fake.closed).toBe(false);
     expect(lightning.view).toMatchObject({ providerId: "fake-lightning", mode: "testnet", status: "ready" });
+    await mainnet.stop();
+    expect(lightning.view).toMatchObject({ providerId: "fake-lightning", status: "ready" });
     await lightning.sources.clear();
     expect(lightning.view).toMatchObject({ providerId: CASHU_MINT_SOURCE });
     // The source and the last balance it read are both forgotten.
     expect(await keys()).toEqual([]);
   });
 
-  it("refuses a provider whose network belongs to the other mode, a missing field and a provider not offered here", async () => {
+  it("refuses a provider whose chain belongs to the other network, a missing field and a provider not offered here", async () => {
     const liar = new FakeLightningProvider();
     liar.info = async () => ({ network: "bitcoin", balance: 0 });
     const { lightning } = service([lightningDescriptor(liar, { networks: ["regtest", "bitcoin"] })]);
-    await lightning.start("testnet");
-    await expect(lightning.sources.set("fake-lightning", { token: "t" })).rejects.toThrow("real money: switch the wallets to Mainnet");
+    await lightning.start();
+    await expect(lightning.sources.set("fake-lightning", { token: "t" })).rejects.toThrow("real money: set it up as a Mainnet wallet instead");
     expect(liar.closed).toBe(true);
     await expect(lightning.sources.set("fake-lightning", { behaviour: "settle" })).rejects.toThrow("Enter access token");
     const { lightning: web } = service([lightningDescriptor(new FakeLightningProvider(), { platforms: ["desktop"] })]);
-    await web.start("testnet");
+    await web.start();
     await expect(web.sources.set("fake-lightning", { token: "t" })).rejects.toThrow("not available here");
     expect(await keys()).toEqual([]);
   });
 
   it("says a stored source is gone when this version does not have it, without falling back to another", async () => {
     await transact([STORES.settings], (s) => { s[STORES.settings].put({ providerId: "retired-provider", config: {}, savedAt: 1 }, "lightningSource-mainnet"); });
-    const { lightning } = service([]);
-    await lightning.start("mainnet");
+    const { lightning } = service([], "web", "mainnet");
+    await lightning.start();
     await lightning.ensureReady();
     expect(lightning.view).toMatchObject({ providerId: "retired-provider", status: "error" });
     await expect(lightning.createInvoice(10)).rejects.toThrow("not available in this version");
@@ -122,7 +125,7 @@ describe("Lightning through the active source", () => {
   async function fakeSource(options: ConstructorParameters<typeof FakeLightningProvider>[0] = {}) {
     const fake = new FakeLightningProvider({ settleMs: 60_000, ...options });
     const setup = service([lightningDescriptor(fake)]);
-    await setup.lightning.start("testnet");
+    await setup.lightning.start();
     await setup.lightning.sources.set("fake-lightning", { token: "t" });
     return { fake, ...setup };
   }
@@ -205,10 +208,10 @@ describe("Lightning through the active source", () => {
     await lightning.stop();
   });
 
-  it("in Mainnet, refuses an invoice of a test network", async () => {
-    const { lightning } = service([]);
-    await lightning.start("mainnet");
-    await expect(lightning.quote(fakeInvoice(10, new Uint8Array(32)))).rejects.toThrow("test network");
+  it("a Mainnet source refuses an invoice of a test network", async () => {
+    const { lightning } = service([], "web", "mainnet");
+    await lightning.start();
+    await expect(lightning.quote(fakeInvoice(10, new Uint8Array(32)))).rejects.toThrow("a test network: pay it from a Testnet wallet");
   });
 });
 
@@ -259,8 +262,8 @@ describe("the Cashu mints as a Lightning source", () => {
 describe("on-chain Bitcoin through the payment coordinator", () => {
   async function bitcoin(fake = new FakeOnchainProvider()) {
     const descriptor: OnchainProviderDescriptor = { ...fakeOnchain, create: async () => fake };
-    const service = new BitcoinService(() => [descriptor], () => ({ platform: "web", cashu: {} as CashuWallet }), vi.fn());
-    await service.start("testnet");
+    const service = new BitcoinService("testnet", () => [descriptor], () => ({ platform: "web", cashu: {} as CashuWallet }), vi.fn());
+    await service.start();
     return { fake, service, coordinator: new PaymentCoordinator(intentRepository, [service.adapter]) };
   }
   const target = (address: string): PaymentTarget => ({ method: "bitcoin", network: "regtest", provider: ONCHAIN_PROVIDER, asset: "BTC", unit: "sat", address, expiresAt: Date.now() + 60_000 });
@@ -301,8 +304,8 @@ describe("on-chain Bitcoin through the payment coordinator", () => {
   it("keeps the signal of a source it just set; replacing it aborts only the old one's", async () => {
     const signals: AbortSignal[] = [];
     const descriptor: OnchainProviderDescriptor = { ...fakeOnchain, create: async (_settings, host) => { signals.push(host.signal); return new FakeOnchainProvider(); } };
-    const service = new BitcoinService(() => [descriptor], () => ({ platform: "web", cashu: {} as CashuWallet }), vi.fn());
-    await service.start("testnet");
+    const service = new BitcoinService("testnet", () => [descriptor], () => ({ platform: "web", cashu: {} as CashuWallet }), vi.fn());
+    await service.start();
     await service.sources.set("fake-onchain", { token: "a" });
     expect(signals[0].aborted).toBe(false);
     await service.sources.set("fake-onchain", { token: "b" });
@@ -322,26 +325,27 @@ describe("on-chain Bitcoin through the payment coordinator", () => {
 });
 
 describe("the engine", () => {
-  it("routes the Lightning card through the mode's source, and each mode keeps its own", async () => {
+  it("routes the Lightning card through the network's source, and each network keeps its own", async () => {
     const fake = new FakeLightningProvider({ settleMs: 60_000 });
     const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { automaticWallets: false, providers: { lightning: [cashuMint, lightningDescriptor(fake)], onchain: [] } });
     vi.spyOn(node["wallet"], "view").mockImplementation(async () => ({ mints: [], balance: 0, history: [], feesPaid: 0 }));
     const receive = vi.spyOn(node["wallet"], "receiveLightning");
-    await node["lightning"].start("mainnet");
-    await node.walletSetMode({ mode: "testnet" });
-    await node.lightningSetSource({ providerId: "fake-lightning", values: { token: "t" } });
-    const created = await node.walletReceiveLightning({ amount: 12 });
+    await node["lightnings"].mainnet.start();
+    await node["lightnings"].testnet.start();
+    await node.lightningSetSource({ providerId: "fake-lightning", values: { token: "t" }, network: "testnet" });
+    const created = await node.walletReceiveLightning({ amount: 12, network: "testnet" });
     expect(created).toMatchObject({ source: "fake-lightning" });
     expect(created.invoice).toMatch(/^lnbcrt/);
     expect(receive).not.toHaveBeenCalled();
-    expect(node.getState().wallet.lightning).toMatchObject({ providerId: "fake-lightning", status: "ready" });
+    expect(node.getState().wallet.networks?.testnet.lightning).toMatchObject({ providerId: "fake-lightning", status: "ready" });
 
-    const quote = await node.walletQuoteInvoice({ invoice: fakeInvoice(5, crypto.getRandomValues(new Uint8Array(32))) });
+    const quote = await node.walletQuoteInvoice({ invoice: fakeInvoice(5, crypto.getRandomValues(new Uint8Array(32))), network: "testnet" });
     expect(await node.walletPayQuote({ quote: quote.quote, mint: quote.mint })).toEqual({ paid: true });
 
-    await node.walletSetMode({ mode: "mainnet" });
-    await vi.waitFor(() => expect(node.getState().wallet.lightning).toMatchObject({ mode: "mainnet", providerId: CASHU_MINT_SOURCE }));
-    expect(node.getState().wallet.bitcoin).toMatchObject({ status: "none" });
+    // Mainnet, the network a call naming none acts on, still has its own: the Cashu mints, and no Bitcoin source.
+    expect(node.getState().wallet.networks?.mainnet.lightning).toMatchObject({ mode: "mainnet", providerId: CASHU_MINT_SOURCE });
+    expect(node.getState().wallet).toMatchObject({ mode: "mainnet", lightning: { mode: "mainnet", providerId: CASHU_MINT_SOURCE }, bitcoin: { status: "none" } });
+    expect(node.getState().wallet.networks?.testnet.bitcoin).toMatchObject({ status: "none" });
     await node.shutdown();
   });
 });

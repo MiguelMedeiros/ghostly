@@ -140,8 +140,8 @@ it("the engine's check asks the source what paid the address, or else checks the
   const withReceived = Object.assign(new FakeOnchainProvider(), { received: vi.fn(async () => [{ ...paid, txid: "b".repeat(64), amount: 999 }, paid]) });
   const plain = Object.assign(new FakeOnchainProvider(), { history: vi.fn(async () => [paid]) });
   const service = async (provider: FakeOnchainProvider) => {
-    const s = new BitcoinService(() => [{ ...fakeOnchain, create: async () => provider }], () => ({ platform: "web", cashu: {} as CashuWallet }), vi.fn());
-    await s.start("testnet"); await s.sources.set("fake-onchain", { token: "t" });
+    const s = new BitcoinService("testnet", () => [{ ...fakeOnchain, create: async () => provider }], () => ({ platform: "web", cashu: {} as CashuWallet }), vi.fn());
+    await s.start(); await s.sources.set("fake-onchain", { token: "t" });
     return s;
   };
   const a = await service(withReceived), t = target();

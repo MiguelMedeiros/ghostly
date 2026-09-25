@@ -81,7 +81,7 @@ describe("the NWC connection URI", () => {
     expect(() => nwc.validate!({ config: {}, secrets: { uri: "lnbc1…" } }, "testnet")).toThrow("not a Nostr Wallet Connect URI");
   });
 
-  it("is registered, offered in both modes and on every platform, with the URI as its one secret", () => {
+  it("is registered, offered on both networks and on every platform, with the URI as its one secret", () => {
     expect(LIGHTNING_PROVIDERS.map((d) => d.id)).toContain("nwc");
     expect(nwc.fields).toEqual([expect.objectContaining({ name: "uri", kind: "secret" })]);
     expect(nwc.platforms).toEqual(["web", "extension", "desktop"]);
@@ -291,7 +291,7 @@ describe("NWC as the engine's Lightning source", () => {
     // The real descriptor, with time limits a test can wait for.
     const options: NwcOptions = { requestMs: 1_500, payMs: 1_500 };
     const descriptor = { ...nwc, create: async ({ secrets }: { secrets: Record<string, string> }, host: { signal: AbortSignal }) => NwcLightning.connect(secrets.uri, { ...options, signal: host.signal }) };
-    return { events, lightning: new LightningService(() => [cashuMint, descriptor], () => ({ platform: "web", cashu }), events, CASHU_MINT_SOURCE) };
+    return { events, lightning: new LightningService("testnet", () => [cashuMint, descriptor], () => ({ platform: "web", cashu }), events, CASHU_MINT_SOURCE) };
   }
 
   it("is set up from its URI (sealed, never shown), receives and pays, and a lost answer is reconciled, not paid again", async () => {
@@ -299,7 +299,7 @@ describe("NWC as the engine's Lightning source", () => {
     const payee = await wallet();
     const uri = fake.uri();
     const { lightning, events } = service();
-    await lightning.start("testnet");
+    await lightning.start();
     await lightning.sources.set("nwc", { uri });
     expect(lightning.view).toMatchObject({ providerId: "nwc", status: "ready", network: "regtest", secrets: ["uri"], alias: expect.stringContaining("Hub via") });
     expect(JSON.stringify(lightning.view)).not.toContain(uri.split("secret=")[1]);
@@ -326,7 +326,7 @@ describe("NWC as the engine's Lightning source", () => {
   it("refuses a Mainnet wallet in Testnet before saving anything", async () => {
     const fake = await wallet({ network: "mainnet" });
     const { lightning } = service();
-    await lightning.start("testnet");
+    await lightning.start();
     await expect(lightning.sources.set("nwc", { uri: fake.uri() })).rejects.toThrow("real money");
     expect(await settings()).toEqual([]);
     await lightning.stop();

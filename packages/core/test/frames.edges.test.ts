@@ -244,6 +244,20 @@ describe("payment frames", () => {
     expect(decode({ ...ask, m: "bark", memo: "z".repeat(200) })).toMatchObject({ memo: "z".repeat(140) });
   });
 
+  it("keeps the network a request or an ask names, and drops one that is not Mainnet or Testnet", () => {
+    const req = { t: "pay-req", id, ts: 1, v: "1", u: "sat", e: [["cashu", "x"]] };
+    const ask = { t: "pay-ask", id, ts: 1, v: "1", u: "sat", m: "arkade" };
+    for (const n of ["mainnet", "testnet"]) {
+      expect(decode({ ...req, n })).toMatchObject({ t: "pay-req", n });
+      expect(decode({ ...ask, n })).toMatchObject({ t: "pay-ask", n });
+    }
+    // An older app sends none; a newer one's unknown word is left out, and the frame still stands.
+    for (const n of [undefined, "signet", 1, ["testnet"]]) {
+      expect(decode({ ...req, n })).toMatchObject({ t: "pay-req", n: undefined });
+      expect(decode({ ...ask, n })).toMatchObject({ t: "pay-ask", n: undefined });
+    }
+  });
+
   it("requires a boolean outcome on pay-res, validates the credited amount and truncates the error", () => {
     expect(decode({ t: "pay-res", id, ok: true })).toEqual({ t: "pay-res", id, ok: true, v: undefined, err: undefined });
     expect(decode({ t: "pay-res", id, ok: "true" })).toBeNull();

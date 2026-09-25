@@ -74,6 +74,8 @@ class World {
       groupLinks: group => group === "g" ? [...edges.keys()] : [],
       storeMessage: async message => { messages.push(message); },
       onChange: () => {},
+      // The members try things out on the public test mint: their requests are Testnet's.
+      defaultNetwork: () => "testnet",
     }, undefined, undefined, undefined, lightning as unknown as DeskLightning);
     const member: Member = { name, desk, wallet, lightning, edges, messages, sent };
     this.members.set(name, member);
@@ -222,7 +224,7 @@ describe("a request to the whole group", () => {
     await expect(a.desk.requestFromGroup({ groupId: "g", amount: 100, timestamp: 1, rail: "bitcoin" as never })).rejects.toThrow("Cashu or over Lightning");
     await expect(a.desk.requestFromGroup({ groupId: "g", amount: 0, timestamp: 1, rail: "cashu" })).rejects.toThrow();
     a.wallet.view.mockResolvedValue({ mints: [] });
-    await expect(a.desk.requestFromGroup({ groupId: "g", amount: 100, timestamp: 1, rail: "cashu" })).rejects.toThrow("Add a Cashu mint first");
+    await expect(a.desk.requestFromGroup({ groupId: "g", amount: 100, timestamp: 1, rail: "cashu" })).rejects.toThrow("You have no Testnet Cashu wallet");
   });
 });
 

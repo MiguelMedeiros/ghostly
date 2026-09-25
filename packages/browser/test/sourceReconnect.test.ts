@@ -36,10 +36,10 @@ const descriptor = (server: Server, fields: ProviderDescriptor<Node>["fields"] =
 });
 
 const all: ProviderSources<Node>[] = [];
-function sources(server: Server, extra: { fields?: ProviderDescriptor<Node>["fields"]; balance?: () => number; backoff?: number } = {}) {
+function sources(server: Server, extra: { fields?: ProviderDescriptor<Node>["fields"]; balance?: () => number; backoff?: number; network?: "mainnet" | "testnet" } = {}) {
   const changed = vi.fn();
   const s = new ProviderSources<Node>({
-    kind: "onchain", descriptors: () => [descriptor(server, extra.fields)], host: () => ({ platform: "web" }), changed,
+    kind: "onchain", network: extra.network ?? "testnet", descriptors: () => [descriptor(server, extra.fields)], host: () => ({ platform: "web" }), changed,
     backoff: (failures) => extra.backoff ?? 20 * failures,
     refresh: async () => ({ balance: extra.balance?.() ?? 1_234, unconfirmed: 5 }),
     refreshMs: 60_000,
@@ -50,12 +50,12 @@ function sources(server: Server, extra: { fields?: ProviderDescriptor<Node>["fie
 /** Saves a source (the server up), then "restarts" the app: a new engine reads what was saved. */
 async function saved(server: Server, values: Record<string, string> = { server: "https://a.example" }, extra: Parameters<typeof sources>[1] = {}) {
   const first = sources(server, extra).s;
-  await first.start("testnet");
+  await first.start();
   await first.set("node", values);
   await vi.waitFor(() => expect(first.view.balance).toBeDefined());
   await first.stop();
   const restarted = sources(server, extra);
-  await restarted.s.start("testnet");
+  await restarted.s.start();
   return restarted;
 }
 
@@ -174,15 +174,16 @@ describe("trying again now", () => {
 });
 
 describe("the last balance read", () => {
-  it("is kept per mode and source, and forgotten when another source is chosen or the source removed", async () => {
+  it("is kept per network and source, and forgotten when another source is chosen or the source removed", async () => {
     const server = new Server();
     let unreadable = false;
     const { s } = await saved(server, undefined, { balance: () => { if (unreadable) throw new Error("no balance"); return 1_234; } });
     expect(s.view).toMatchObject({ status: "connecting", balance: 1_234 });
-    // Another mode has its own (none here).
-    await s.setMode("mainnet");
-    expect(s.view.balance).toBeUndefined();
-    await s.setMode("testnet");
+    // The other network has its own (none here), read from the same store.
+    const { s: mainnet } = sources(server, { network: "mainnet" });
+    await mainnet.start();
+    expect(mainnet.view).toMatchObject({ mode: "mainnet", status: "none" });
+    expect(mainnet.view.balance).toBeUndefined();
     expect(s.view.balance).toBe(1_234);
     // The same provider, other settings (another wallet): not this one's balance, even before it reads its own.
     unreadable = true;
@@ -190,7 +191,7 @@ describe("the last balance read", () => {
     expect(s.view.balance).toBeUndefined();
     await s.stop();
     const { s: after } = sources(server, { balance: () => 7 });
-    await after.start("testnet");
+    await after.start();
     expect(after.view.balance).toBeUndefined();
     await after.ensureReady();
     await vi.waitFor(() => expect(after.view.balance).toBe(7));
@@ -237,7 +238,7 @@ describe("Change server", () => {
   it("is refused without a saved source, or for a provider with no server to change", async () => {
     const server = new Server();
     const { s } = sources(server, { fields: [{ name: "server", label: "Server", kind: "url" }] });
-    await s.start("testnet");
+    await s.start();
     await expect(s.reconfigure({ server: "https://b.example" })).rejects.toThrow("no saved source");
     await s.set("node", { server: "https://a.example" });
     await expect(s.reconfigure({ server: "https://b.example" })).rejects.toThrow("Node has no server to change");

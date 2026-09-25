@@ -71,6 +71,7 @@ export class ArkWallet {
   get configured() {return !!this.saved;}
   /** A creation waiting on its server gives up now, saving nothing. */
   cutShort() {this.gate.interrupt();}
+  resume() {this.gate.resume();}
   create(params:ArkCreate) {return this.serial(()=>this.createNow(params));}
   private async createNow(params:ArkCreate) {
     if(!ARK_NETWORKS.includes(params.network))throw new Error("Unsupported Ark network");

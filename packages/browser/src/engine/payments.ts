@@ -228,7 +228,7 @@ export class PaymentDesk {
     if (params.method === "usdt") {
       if(!link.supportsUsdtPayments || !this.usdt)throw new Error("Both peers need USDT support on a connected data link");
       const usdt=this.usdt[network];
-      if(!usdt.configured)throw new Error(mine("USDT"));
+      if(usdt.configured===false)throw new Error(mine("USDT"));
       const target=await usdt.target();
       const unit=target.asset === "USDT" ? "usdt" : "testusdt";
       await this.save({id,linkId:params.linkId,kind:"request",direction:"out",amount:params.amount,unit,memo,state:"pending",createdAt:params.timestamp,target,ask:params.ask,network});
@@ -238,7 +238,7 @@ export class PaymentDesk {
     }
     if (params.method === "arkade") {
       if (!link.supportsArkPayments || !this.ark) throw new Error("Both peers need the Ark payment capability on a connected data link");
-      if (!this.ark[network].configured) throw new Error(mine("Ark"));
+      if (this.ark[network].configured === false) throw new Error(mine("Ark"));
       const target = await this.ark[network].target();
       await this.save({id,linkId:params.linkId,kind:"request",direction:"out",amount:params.amount,unit:UNIT,memo,state:"pending",createdAt:params.timestamp,target,ask:params.ask,network});
       await this.host.storeMessage({linkId:params.linkId,id:`me_${params.timestamp}`,text:`Requested ${params.amount} ${arkSats(target.network)} on Ark`,sender:"me",timestamp:params.timestamp,via:"datalink",paymentId:id});
@@ -247,7 +247,7 @@ export class PaymentDesk {
     }
     if (params.method === "bark") {
       if (!link.supportsBarkPayments || !this.bark) throw new Error("Both peers need Bark on a connected data link");
-      if (!this.bark[network].configured) throw new Error(mine("Bark"));
+      if (this.bark[network].configured === false) throw new Error(mine("Bark"));
       // A fresh address for this request only: what arrives on it is what pays it.
       const target = await this.bark[network].target();
       await this.save({id,linkId:params.linkId,kind:"request",direction:"out",amount:params.amount,unit:UNIT,memo,state:"pending",createdAt:params.timestamp,target,ask:params.ask,network});
@@ -1016,7 +1016,8 @@ export class PaymentDesk {
     this.checkingBark=true;
     try {
       const open=[...this.payments.values()].filter(r=>r.kind==="request" && r.direction==="out" && r.state==="pending" && r.target?.method==="bark");
-      for(const wallet of distinct(this.bark))if(open.some(r=>walletNetworkOf(r.target!.network)===wallet.network))await wallet.adapter?.sync().catch(()=>{});
+      const bark=this.bark;
+      for(const wallet of new Set(open.map(r=>bark[walletNetworkOf(r.target!.network)])))await wallet.adapter?.sync().catch(()=>{});
       for(const request of open) {
         if(request.kind!=="request" || request.direction!=="out" || request.state!=="pending" || request.target?.method!=="bark")continue;
         const adapter=this.bark[walletNetworkOf(request.target.network)].adapter;

@@ -363,6 +363,7 @@ export class ProviderSources<P extends Connectable> {
 
   /** A change waiting on its connection gives up now (a creation that took too long); nothing is saved. */
   cutShort() { this.gate.interrupt(); }
+  resume() { this.gate.resume(); }
 
   /** The connected source's id, when one is connected right now. */
   get activeId(): string | undefined { return this.provider ? this.descriptor?.id : undefined; }

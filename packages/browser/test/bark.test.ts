@@ -6,6 +6,7 @@ import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { BarkAdapter, barkTiming, type BarkConfig } from "../src/engine/paymentAdapters/bark";
 import { BARK_MAINNET_UNAVAILABLE, BarkWallet, TESTNET_BARK } from "../src/engine/paymentAdapters/barkWallet";
 import { PaymentCoordinator } from "../src/engine/paymentAdapters/coordinator";
+import { WrongNetworkError } from "../src/engine/paymentAdapters/modeGate";
 import { intentRepository } from "../src/engine/paymentAdapters/persistence";
 import { STORES, openDb, store, transact, wrap } from "../src/shared/idb";
 import { FakeBarkServer } from "./helpers/fakeBark";
@@ -155,49 +156,68 @@ describe("the Bark adapter", () => {
 });
 
 describe("the Bark wallet", () => {
-  const make = () => new BarkWallet(vi.fn(), async () => server.sdk());
+  const make = (network: "mainnet" | "testnet" = "testnet") => new BarkWallet(network, vi.fn(), async () => server.sdk());
 
-  it("is Testnet only: Mainnet says so and makes no wallet", async () => {
-    const wallet = make();
-    await wallet.start(); await wallet.setMode("mainnet");
-    await wallet.ensureReady();
+  it("is Testnet only: the Mainnet wallet says so and makes no wallet, and the Testnet one refuses Bitcoin", async () => {
+    const wallet = make("mainnet");
+    await wallet.start();
+    await wallet.ensureReady(true);
     expect(wallet.view).toMatchObject({ configured: false, unavailable: BARK_MAINNET_UNAVAILABLE });
-    expect(() => wallet.require()).toThrow("not available yet");
-    await expect(wallet.create({ network: "bitcoin", provider: "https://ark.second.tech", explorer: "https://mempool.second.tech/api" })).rejects.toThrow("Switch the wallets to Testnet");
+    expect(() => wallet.require()).toThrow(BARK_MAINNET_UNAVAILABLE);
+    await expect(wallet.createDefaultNow()).rejects.toThrow(BARK_MAINNET_UNAVAILABLE);
+    const mainnet = { network: "bitcoin", provider: "https://ark.second.tech", explorer: "https://mempool.second.tech/api" } as const;
+    await expect(wallet.create(mainnet)).rejects.toThrow(BARK_MAINNET_UNAVAILABLE);
+    const testnet = make("testnet");
+    await testnet.start();
+    const wrong = await testnet.create(mainnet).catch((e: unknown) => e);
+    expect(wrong).toBeInstanceOf(WrongNetworkError);
+    expect(wrong).toMatchObject({ network: "mainnet", message: "Bitcoin is a Mainnet network: this is the Testnet Bark wallet" });
     expect(await settingsKeys()).toEqual([]);
   });
 
-  it("Testnet makes a signet wallet by itself, pins the server key, and keeps each mode's wallet apart", async () => {
+  it("Testnet makes a signet wallet when asked, pins the server key, and each network's wallet is its own", async () => {
     const wallet = make();
     vi.mocked(generateMnemonic).mockReturnValueOnce(TEST_PHRASE);
-    await wallet.start(); await wallet.setMode("testnet");
+    await wallet.start();
     await wallet.ensureReady();
+    expect(wallet.configured, "opening makes nothing").toBe(false);
+    expect(await settingsKeys()).toEqual([]);
+    await wallet.ensureReady(true);
+    expect(wallet.configured).toBe(true);
     expect((await wallet.backup()).mnemonic).toBe(TEST_PHRASE);
     expect(wallet.view).toMatchObject({ configured: true, locked: false, network: "signet", provider: TESTNET_BARK.provider, balance: 0 });
     expect(wallet.view.address).toMatch(/^tark1p/);
-    const saved = await wrap<{ config: BarkConfig; seed: unknown; deviceKey: string }>((await store(STORES.settings, "readonly")).get("barkWallet"));
+    const saved = await wrap<{ config: BarkConfig; seed: unknown; deviceKey: string }>((await store(STORES.settings, "readonly")).get("barkWallet-mode-testnet"));
     expect(saved.config).toMatchObject({ network: "signet", serverKey: server.key });
     expect(phraseLeaks(JSON.stringify(saved)), "the phrase is sealed, never stored as text").toEqual([]);
 
-    await wallet.setMode("mainnet");
+    // The Mainnet wallet, open beside it, has none and touches nothing of the Testnet one.
+    const mainnet = make("mainnet");
+    await mainnet.start(); await mainnet.ensureReady(true);
+    expect(mainnet.view).toMatchObject({ configured: false, unavailable: BARK_MAINNET_UNAVAILABLE });
     expect(await settingsKeys()).toEqual(["barkWallet-mode-testnet"]);
-    expect(wallet.view).toMatchObject({ configured: false, unavailable: BARK_MAINNET_UNAVAILABLE });
-    await wallet.setMode("testnet");
-    expect(await settingsKeys()).toEqual(["barkWallet"]);
-    await wallet.ensureReady();
-    expect(wallet.view.address).toMatch(/^tark1p/);
+    expect(wallet.view).toMatchObject({ configured: true, locked: false, network: "signet" });
+    const address = wallet.view.address;
+    expect(address).toMatch(/^tark1p/);
     const target = await wallet.target();
     expect(target).toMatchObject({ method: "bark", network: "signet", provider: TESTNET_BARK.provider });
-    expect(target.address).not.toBe(wallet.view.address);
-    await wallet.stop();
+    expect(target.address).not.toBe(address);
+    await wallet.stop(); await mainnet.stop();
+
+    // Opened again (a restart), the Testnet wallet is the same one, under its own key.
+    const again = make();
+    await again.start(); await again.ensureReady();
+    expect((await again.backup()).config).toEqual(saved.config);
+    expect(again.view.address).toMatch(/^tark1p/);
+    await again.stop();
   });
 
   it("a server that never answers leaves no wallet behind, however often it is retried", async () => {
     server.down = true;
     const before = (await indexedDB.databases()).map((d) => d.name ?? "").filter((n) => n.startsWith("ghostly-bark-"));
     const wallet = make();
-    await wallet.start(); await wallet.setMode("testnet");
-    await wallet.ensureReady();
+    await wallet.start();
+    await wallet.ensureReady(true);
     expect(wallet.view.error).toContain("not answering");
     expect(await settingsKeys()).toEqual([]);
     const after = (await indexedDB.databases()).map((d) => d.name ?? "").filter((n) => n.startsWith("ghostly-bark-"));
@@ -207,7 +227,7 @@ describe("the Bark wallet", () => {
 
   it("a wallet holding money or payments is never replaced; an empty one is archived, not deleted", async () => {
     const wallet = make();
-    await wallet.start(); await wallet.setMode("testnet"); await wallet.ensureReady();
+    await wallet.start(); await wallet.ensureReady(true);
     const first = (await wallet.backup()).config;
     walletOf(first).fund(10);
     await wallet.refresh();
@@ -223,7 +243,7 @@ describe("the Bark wallet", () => {
   it("an encrypted backup restores the phrase, the server and the payments into a fresh profile", async () => {
     const wallet = make();
     vi.mocked(generateMnemonic).mockReturnValueOnce(TEST_PHRASE);
-    await wallet.start(); await wallet.setMode("testnet"); await wallet.ensureReady();
+    await wallet.start(); await wallet.ensureReady(true);
     const { mnemonic, config: original } = await wallet.backup();
     await intentRepository.put({ review: { ...review(target("tark1psrvx"), 5, 0), state: "submitted" }, prepared: { address: "tark1psrvx", amount: 5, fee: 0, after: 0 } });
     await expect(wallet.exportBackup("short")).rejects.toThrow("12 characters");
@@ -234,7 +254,7 @@ describe("the Bark wallet", () => {
 
     await transact([STORES.settings, STORES.intents], (s) => { s[STORES.settings].clear(); s[STORES.intents].clear(); });
     const restored = make();
-    await restored.start(); await restored.setMode("testnet");
+    await restored.start();
     await expect(restored.restoreBackup(file, "wrong password here")).rejects.toThrow();
     await restored.restoreBackup(file, "correct horse battery");
     await restored.ensureReady();
@@ -243,9 +263,12 @@ describe("the Bark wallet", () => {
     expect(back.config).toMatchObject({ network: "signet", provider, serverKey: original.serverKey });
     expect(back.config.walletId, "a new local database: the server fills it from the phrase").not.toBe(original.walletId);
     expect((await intentRepository.list()).map((i) => i.review.state), "an unfinished payment comes back as unknown, to reconcile").toEqual(["unknown"]);
-    const other = make();
-    await other.start(); await other.setMode("mainnet");
-    await expect(other.restoreBackup(file, "correct horse battery")).rejects.toThrow("switch the wallets to it first");
+    const other = make("mainnet");
+    await other.start();
+    const wrong = await other.restoreBackup(file, "correct horse battery").catch((e: unknown) => e);
+    expect(wrong, "the Mainnet wallet refuses a Testnet backup").toBeInstanceOf(WrongNetworkError);
+    expect(wrong).toMatchObject({ network: "testnet", message: "This backup is a Testnet Bark wallet" });
+    expect(other.configured).toBe(false);
     await restored.stop();
   });
 });

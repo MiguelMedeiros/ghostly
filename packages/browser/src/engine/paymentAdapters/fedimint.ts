@@ -36,7 +36,7 @@ export class FedimintAdapter implements PaymentAdapter<FedimintPrepared> {
     validatePaymentTarget(target); assertWholeSats(amount);
     if (target.method !== "fedimint") throw new Error("Not a Fedimint payment");
     const federation = this.wallet.federation(target.provider);
-    if (!federation || federation.network !== target.network) throw new Error("You have not joined this federation in this wallet mode");
+    if (!federation || federation.network !== target.network) throw new Error("You have not joined this federation in the Fedimint wallet of its network");
     if (!Number.isSafeInteger(feeCap) || feeCap < 0) throw new Error("Invalid maximum fee");
     const balance = Math.floor(await this.wallet.client(target.provider).balance() / 1000);
     if (balance < amount) throw new Error(`Not enough in this federation: ${balance.toLocaleString()} sats`);

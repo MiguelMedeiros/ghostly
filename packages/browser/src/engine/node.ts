@@ -33,7 +33,7 @@ import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
 import { WALLET_NETWORKS, walletNetworkOf, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/modeGate";
-import { CREATE_TIMEOUT_MS, SPARK_MAINNET_NOT_YET, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
+import { createTiming, SPARK_MAINNET_NOT_YET, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
 import { CapsExchange, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
@@ -1885,6 +1885,7 @@ export class GhostlyNode implements EngineImplementation {
     const { type, network } = params;
     if (!WALLET_TYPES.includes(type)) throw new Error("Unknown kind of wallet");
     if (network !== "mainnet" && network !== "testnet") throw new Error("Choose Mainnet or Testnet");
+    await this.refreshWallet();
     const offer = this.walletView.offers?.find((o) => o.type === type && o.network === network);
     if (offer && !offer.available) throw new Error(offer.reason ?? "This wallet cannot be made here");
     if (offer?.exists && type !== "lightning" && type !== "fedimint") throw new Error(`You already have a ${networkLabel(network)} ${WALLET_NAMES[type]} wallet`);
@@ -1912,7 +1913,7 @@ export class GhostlyNode implements EngineImplementation {
       }
     } catch (error) {
       await this.refreshWallet();
-      throw new Error(createFailure(label, error));
+      throw Object.assign(new Error(createFailure(label, error)), { cause: error });
     }
     await this.refreshWallet();
     const made = this.walletView.wallets?.find((w) => w.type === type && w.network === network);
@@ -1921,15 +1922,15 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /**
-   * A creation that waits on the network gets `CREATE_TIMEOUT_MS`; then its waits are cut short, and what it did
+   * A creation that waits on the network gets `createTiming.timeoutMs`; then its waits are cut short, and what it did
    * decides (a wait cut short saves nothing). It is never raced: a wallet saved just in time is reported as made.
    */
-  private async creating(wallet: { cutShort(): void }, work: () => Promise<unknown>): Promise<void> {
+  private async creating(wallet: { cutShort(): void; resume(): void }, work: () => Promise<unknown>): Promise<void> {
     let late = false;
-    const timer = setTimeout(() => { late = true; wallet.cutShort(); }, CREATE_TIMEOUT_MS);
+    const timer = setTimeout(() => { late = true; wallet.cutShort(); }, createTiming.timeoutMs);
     try { await work(); }
     catch (error) { throw late && error instanceof ModeChanged ? new Error("It did not answer in time") : error; }
-    finally { clearTimeout(timer); }
+    finally { clearTimeout(timer); wallet.resume(); }
   }
 
   /** Cashu of one network: its default mints, only those that answer. None answering is a failure, nothing added. */

@@ -189,6 +189,7 @@ export class FedimintWallet {
   get configured() { return !!this.saved?.federations.length; }
   /** A join waiting on its federation gives up now, saving nothing. */
   cutShort() { this.gate.interrupt(); }
+  resume() { this.gate.resume(); }
   private async closeAll() {
     clearTimeout(this.retry);
     for (const stop of this.unsubscribe.values()) stop();
