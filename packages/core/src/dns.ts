@@ -187,7 +187,7 @@ export function decodeTxtPacket(data: Uint8Array): TxtRecord[] {
 }
 
 /** One answer record, undecoded: its rdata starts at `offset` in the packet (names in it may point anywhere before). */
-export interface DnsAnswer {
+export interface RawDnsAnswer {
   name: string;
   type: number;
   ttl: number;
@@ -197,14 +197,14 @@ export interface DnsAnswer {
 }
 
 /** Every answer record of a packet, of any type. Names are decompressed; the rdata is left to the caller. */
-export function decodeDnsAnswers(data: Uint8Array): DnsAnswer[] {
+export function decodeDnsAnswers(data: Uint8Array): RawDnsAnswer[] {
   if (data.length < 12) throw new Error("DNS packet too short");
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const questions = view.getUint16(4);
   const answers = view.getUint16(6);
   let pos = 12;
   for (let i = 0; i < questions; i++) pos = readDnsName(data, pos).next + 4;
-  const records: DnsAnswer[] = [];
+  const records: RawDnsAnswer[] = [];
   for (let i = 0; i < answers; i++) {
     const { name, next } = readDnsName(data, pos);
     pos = next;
