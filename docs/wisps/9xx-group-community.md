@@ -175,7 +175,7 @@ Two members could open an edge between them for the payment (the edges are deriv
 
 | | 128 members | 256 members |
 |---|---|---|
-| Admission of everyone through the link, in waves of 16, the admin's app closed after the first | 96 s simulated | 742 s simulated (about 21 a minute; 452 to 1248 s over four runs) |
+| Admission of everyone through the link, in waves of 16, the admin's app closed after the first | 96 s simulated | 742 s simulated (about 21 a minute; 452 to 1248 s over four runs); 346 s with the knock bell and pacing of revision 0.4 |
 | Everyone on one roster afterwards | 24 s | 10 s |
 | Admissions that lost a race | 0 | 0 |
 | Hubs; edges per hub (most, mean); edges per member | 3; 50, 43; 1 | 8; 55, 38; 1 |
@@ -188,7 +188,7 @@ Two members could open an edge between them for the payment (the edges are deriv
 
 Payloads sealed to one member (what payments ride on), measured at 64 members on 2026-09-24 (`GROUP_LOAD=64`; the same test runs the phase at 256): 32 payloads between members that are not hubs, all opened by their recipient and by nobody else, within 1 s simulated; 62 frames per payload, one per member, as for text; payloads to 5 members who were away, handed on by whoever was there within 1 s of their return.
 
-This measures the protocol, the topology rules and the cryptography at the cap. It does not measure what only real networks show: WebRTC between hundreds of browsers (the e2e has six), a browser holding the fifty-odd peer connections of a busy hub, public Pkarr relays' rate limits (the 256-member run made 18 035 Pkarr reads and writes in total), or an entry session over the public relays, which on the loaded test machine took from 5 to 80 seconds to come up. The cap is therefore a measured bound for the protocol and a stated one for the network.
+This measures the protocol, the topology rules and the cryptography at the cap. It does not measure what only real networks show: WebRTC between hundreds of browsers (the e2e has six), a browser holding the fifty-odd peer connections of a busy hub, public Pkarr relays' rate limits (the 256-member run made 18 035 Pkarr reads and writes in total, 11 050 with the pacing of revision 0.4), or an entry session over the public relays, which on the loaded test machine took from 5 to 80 seconds to come up. The cap is therefore a measured bound for the protocol and a stated one for the network.
 
 ### Joining, timed
 
