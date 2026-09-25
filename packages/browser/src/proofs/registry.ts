@@ -7,6 +7,7 @@ import { ssh, sshGithub, sshGitlab } from "./providers/ssh";
 import { oidc } from "./providers/oidc";
 import { did } from "./providers/did";
 import { atproto } from "./providers/atproto";
+import { pubky } from "./providers/pubky";
 import { FAKE_IDENTITY_PROVIDERS, testIdentitiesEnabled } from "./testing";
 import { registeredIdentityProviders, reserveAdapterIds } from "../plugins/registry";
 
@@ -17,6 +18,7 @@ import { registeredIdentityProviders, reserveAdapterIds } from "../plugins/regis
  */
 export const IDENTITY_PROVIDERS: readonly IdentityProofProvider[] = [
   nostr,
+  pubky,
   domain,
   openpgp,
   bitcoin,
