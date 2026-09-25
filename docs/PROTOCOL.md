@@ -74,9 +74,9 @@ The advertisement is authenticated twice: by the secretbox (only the link peer c
 
 ## 4. Calls
 
-`_call` carries `{ "t": "o" | "a" | "h" | "v", "ts", "u", "p", "f", "s", "m", "c", "ss", "v", "k" }`: ICE credentials, DTLS fingerprint, setup role, media order, at most two candidates, the SSRCs, and what picture the sender has on. Each side rebuilds a full SDP around these values, because a real SDP does not fit in a packet.
+`_call` carries `{ "t": "o" | "a" | "h" | "v", "ts", "u", "p", "f", "s", "m", "c", "ss", "v", "k", "ap", "vp" }`: ICE credentials, DTLS fingerprint, setup role, media order, at most two candidates, the SSRCs, what picture the sender has on, and the payload types its SDP gives Opus and VP8 when they are not 111 and 96 (§4.2). Each side rebuilds a full SDP around these values, because a real SDP does not fit in a packet.
 
-Receivers validate a signal before any of it reaches an SDP, whether it came from `_call` or a `call` frame: ICE ufrag/pwd are RFC 8839 ice-chars (4-256 and 22-256 long), `f` is 64 hex digits, `s` is `actpass`, `active` or `passive`, `m` holds one or two distinct `a`/`v`, `ss` holds at most two uint32s, `v` is 0 or 1, `k` is `c` or `s`, and each of at most eight candidates is parsed and re-serialized from its parts (non-UDP ones are dropped, malformed ones reject the signal). Signals whose `ts` is more than 120 s away from the receiver's clock are ignored, so a stale packet does not ring.
+Receivers validate a signal before any of it reaches an SDP, whether it came from `_call` or a `call` frame: ICE ufrag/pwd are RFC 8839 ice-chars (4-256 and 22-256 long), `f` is 64 hex digits, `s` is `actpass`, `active` or `passive`, `m` holds one or two distinct `a`/`v`, `ss` holds at most two uint32s, `v` is 0 or 1, `k` is `c` or `s`, `ap` and `vp` are dynamic payload types (35-63 or 96-127) and not the same one, and each of at most eight candidates is parsed and re-serialized from its parts (non-UDP ones are dropped, malformed ones reject the signal). Signals whose `ts` is more than 120 s away from the receiver's clock are ignored, so a stale packet does not ring.
 
 v1 changed two things, both compatible with v0 peers:
 
@@ -101,6 +101,30 @@ Compatible with v0 and v1 peers in both directions, with one cosmetic loss:
 - A v1 peer sends no `v`. It only puts an SSRC on a video section it really sends on, so its SSRC count says whether its picture is on, and that is what a v2 peer reads it by.
 - A v1 peer rings a v2 voice call as an incoming *video* call, since all it has to go by is the media list. Answering it with audio works as it always did; the v1 side simply cannot turn a camera on later, because it does not know its half of the section is open.
 - A v1 peer drops a `"t": "v"` signal as an unknown type, which is what it should do with one.
+
+### 4.2 Payload types (v3)
+
+The rebuilt SDP declares one codec per section: Opus and VP8. Up to v2 it gave them the payload types Chromium
+does, 111 and 96, whatever the sender's SDP said. WebKit (Safari, and Ghostly Desktop on a Mac) offers H264 as 96
+and VP8 as 106, so when it made the offer, the answer rebuilt from the compact signal said `96 VP8` while its own
+offer said `96 H264`: it read the answerer's VP8 as H264 and never showed the answerer's picture. Firefox offers
+Opus as 109.
+
+So a v3 signal says which payload types its SDP gives them, and only when they differ from 111 and 96:
+
+| Key | Meaning |
+|---|---|
+| `ap` | the payload type of Opus in the sender's audio section |
+| `vp` | the payload type of VP8 in the sender's video section |
+
+The receiver rebuilds with them (and with 111 and 96 when they are absent), so the answer to a WebKit offer
+keeps VP8 at 106 and says so in its own `vp`. A signal between two Chromium apps is unchanged. A v2 peer ignores
+both keys and rebuilds with 111 and 96 as before: a call it has with a WebKit offerer still shows only one picture,
+as it did.
+
+v3 also leaves an IPv6 related address out of the candidates it sends (`raddr :: rport 0`, WebKit's IPv6 srflx),
+and accepts one: a v2 receiver checked `raddr` against the extension-token pattern, which has no colon, and
+refused the whole signal, so the call never rang. The related address is informational for ICE.
 
 ## 5. The data link (v1)
 

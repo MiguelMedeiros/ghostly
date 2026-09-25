@@ -1,0 +1,98 @@
+name: Desktop on macOS
+
+# Two Ghostly Desktop apps on one Mac, in the system WKWebView: they pair, place a video call with media both
+# ways, open a local app one of them shares, and show why calls are off on the DHT (e2e/desktop-macos/).
+# The Linux Desktop job cannot: WebKitGTK has no WebRTC, so a Linux pair never goes live. macOS has no
+# WebDriver for WKWebView, so the app is built with the test driver (`npm run desktop:macos:build`, a debug
+# build with --features e2e-driver) and driven through it. See e2e/README.md → "Desktop on macOS".
+#
+# A required check: CI (ci.yml) calls this workflow on every pull request and push, and CI Success needs it. It
+# passed 20 runs in a row on macos-15 before it became one (PR #230). It also runs nightly on dev, and by hand
+# with `repeat` to run the test that many times on one build, which is how a suspected flake is measured.
+# No concurrency group here: called from CI, it would share CI's and cancel itself.
+on:
+  workflow_call:
+    inputs:
+      repeat:
+        required: false
+        default: "1"
+        type: string
+  schedule:
+    - cron: "41 4 * * *"
+  workflow_dispatch:
+    inputs:
+      repeat:
+        description: "Run the test this many times in a row (one build)"
+        required: false
+        default: "1"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  desktop-macos:
+    name: Desktop calls and shared apps (macOS WKWebView)
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # A scheduled run tests dev, the default branch; the others, what started them.
+          ref: ${{ github.event_name == 'schedule' && 'dev' || github.ref }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+      # Crates only, not target/: the repository is past GitHub's 10 GB of cache (see e2e.yml's Desktop job).
+      - name: Cache Cargo
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-desktop-macos-${{ github.repository }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-desktop-macos-${{ github.repository }}-
+
+      - name: Install dependencies
+        run: npm ci
+
+      # A debug build with the test driver compiled in, as tools.ghostly.e2e (never the real app's id).
+      - name: Build the Desktop app with the test driver
+        run: npm run desktop:macos:build
+
+      - name: Two Desktop apps pair, call and share an app
+        env:
+          REPEAT: ${{ inputs.repeat || '1' }}
+        run: npx playwright test -c e2e/playwright.desktop-macos.config.ts --repeat-each "$REPEAT"
+
+      - name: Say what failed
+        if: ${{ failure() }}
+        run: |
+          {
+            echo "### Desktop on macOS failed"
+            echo
+            echo "Each failing run attaches what both apps showed, their console, the call's SDP and the apps' logs:"
+            echo "download the \`playwright-report-desktop-macos\` artifact of this run and open its index.html."
+            echo "Run it on a Mac: \`npm run desktop:macos:build && npm run test:e2e:desktop-macos\` (e2e/README.md)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report-desktop-macos
+          path: |
+            playwright-report-desktop-macos
+            test-results/desktop-macos
+          retention-days: 14

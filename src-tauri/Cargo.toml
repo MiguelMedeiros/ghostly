@@ -3,6 +3,10 @@ name = "ghostly"
 version = "0.4.0"
 edition = "2021"
 
+[features]
+# The macOS end-to-end tests' driver (src/e2e_driver.rs): debug builds only, never shipped.
+e2e-driver = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

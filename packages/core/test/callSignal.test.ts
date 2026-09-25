@@ -67,6 +67,44 @@ const FIREFOX_ANSWER = [
   "",
 ].join("\r\n");
 
+/**
+ * Trimmed from a real macOS WKWebView offer (Ghostly Desktop, e2e/desktop-macos/): mDNS hosts, the IPv6 srflx
+ * before the IPv4 one, with `raddr ::` (apps before 0.5 refused that candidate, and with it the call), and H264
+ * as payload type 96 with VP8 as 106.
+ */
+const WKWEBVIEW_OFFER = [
+  "v=0",
+  "o=- 2412466377843330145 2 IN IP4 127.0.0.1",
+  "s=-",
+  "t=0 0",
+  "a=group:BUNDLE 0",
+  "m=audio 16433 UDP/TLS/RTP/SAVPF 111",
+  "c=IN IP4 203.0.113.9",
+  "a=candidate:874789337 1 udp 2113937151 1215f0e7-60fa-4931-a97f-ee4197a5aa4e.local 60419 typ host generation 0 network-cost 999",
+  "a=candidate:354790382 1 udp 1677732095 2001:db8:8785:c1e7:f5d3:2b6d:efb7:c24c 55917 typ srflx raddr :: rport 0 generation 0 network-cost 999",
+  "a=candidate:1731680029 1 udp 1677729535 203.0.113.9 16433 typ srflx raddr 0.0.0.0 rport 0 generation 0 network-cost 999",
+  "a=ice-ufrag:kgXv",
+  "a=ice-pwd:Q2m1yU7tX8nB4vL0pR6sZ3aW",
+  `a=fingerprint:sha-256 ${FINGERPRINT}`,
+  "a=setup:actpass",
+  "a=mid:0",
+  "a=rtpmap:111 opus/48000/2",
+  "a=ssrc:1645469715 cname:svyNYI+YI3b6fMz+",
+  "m=video 16432 UDP/TLS/RTP/SAVPF 96 97 106 107",
+  "c=IN IP4 203.0.113.9",
+  "a=ice-ufrag:kgXv",
+  "a=ice-pwd:Q2m1yU7tX8nB4vL0pR6sZ3aW",
+  `a=fingerprint:sha-256 ${FINGERPRINT}`,
+  "a=setup:actpass",
+  "a=mid:1",
+  "a=rtpmap:96 H264/90000",
+  "a=rtpmap:97 rtx/90000",
+  "a=rtpmap:106 VP8/90000",
+  "a=rtpmap:107 rtx/90000",
+  "a=ssrc:1458394585 cname:svyNYI+YI3b6fMz+",
+  "",
+].join("\r\n");
+
 function signalFrom(sdp: string, t: "o" | "a"): string {
   return JSON.stringify({ t, ts: NOW, ...extractParamsFromSdp(sdp) });
 }
@@ -89,6 +127,45 @@ describe("call signals", () => {
     expect({ ...again, c: undefined }).toEqual({ u: signal.u, p: signal.p, f: signal.f, s: signal.s, m: signal.m, ss: signal.ss });
     // What our own rebuilt SDP produces validates too.
     expect(parseCallSignal(JSON.stringify({ t: "o", ts: NOW, ...again }), NOW)).not.toBeNull();
+  });
+
+  it("accepts a real WKWebView offer, whose first srflx is IPv6 with `raddr ::`, and leaves the related address out", () => {
+    const signal = parseCallSignal(signalFrom(WKWEBVIEW_OFFER, "o"), NOW)!;
+    expect(signal).not.toBeNull();
+    expect(signal.c).toEqual([
+      "874789337 1 udp 2113937151 1215f0e7-60fa-4931-a97f-ee4197a5aa4e.local 60419 typ host",
+      // Without `raddr :: rport 0`, which apps before 0.5 refuse (and the whole signal with it).
+      "354790382 1 udp 1677732095 2001:db8:8785:c1e7:f5d3:2b6d:efb7:c24c 55917 typ srflx",
+    ]);
+    expect(buildSdpFromSignal(signal)).toContain("a=candidate:354790382 1 udp 1677732095 2001:db8:8785:c1e7:f5d3:2b6d:efb7:c24c 55917 typ srflx\r\n");
+  });
+
+  it("carries a VP8 payload type other than 96, so the SDP rebuilt from WebKit's offer says what WebKit sends", () => {
+    const signal = parseCallSignal(signalFrom(WKWEBVIEW_OFFER, "o"), NOW)!;
+    // Opus is 111 as everywhere: not said.
+    expect(signal).toMatchObject({ vp: 106 });
+    expect(signal.ap).toBeUndefined();
+    const rebuilt = buildSdpFromSignal(signal);
+    expect(rebuilt).toContain("\r\nm=video 9 UDP/TLS/RTP/SAVPF 106\r\n");
+    expect(rebuilt).toContain("\r\na=rtpmap:106 VP8/90000\r\n");
+    expect(rebuilt).toContain("\r\na=rtcp-fb:106 nack pli\r\n");
+    expect(rebuilt).not.toContain(" 96");
+    // The answer made from it keeps 106, and says so.
+    expect(extractParamsFromSdp(rebuilt).vp).toBe(106);
+  });
+
+  it("says nothing about payload types that are already the rebuilt SDP's: a Chromium signal is unchanged", () => {
+    const params = extractParamsFromSdp(CHROME_OFFER);
+    expect(params).not.toHaveProperty("ap");
+    expect(params).not.toHaveProperty("vp");
+    expect(buildSdpFromSignal(parseCallSignal(signalFrom(CHROME_OFFER, "o"), NOW)!)).toContain("\r\na=rtpmap:96 VP8/90000\r\n");
+  });
+
+  it("carries an Opus payload type other than 111 (Firefox offers it as 109)", () => {
+    const firefox = FIREFOX_ANSWER.replace("m=audio 9 UDP/TLS/RTP/SAVPF 111", "m=audio 9 UDP/TLS/RTP/SAVPF 109").replace("a=mid:0", "a=mid:0\r\na=rtpmap:109 opus/48000/2");
+    const signal = parseCallSignal(signalFrom(firefox, "a"), NOW)!;
+    expect(signal.ap).toBe(109);
+    expect(buildSdpFromSignal(signal)).toContain("\r\nm=audio 9 UDP/TLS/RTP/SAVPF 109\r\n");
   });
 
   it("accepts a real Firefox answer", () => {

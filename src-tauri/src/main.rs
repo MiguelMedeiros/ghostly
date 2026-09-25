@@ -5,6 +5,10 @@ mod clipboard;
 mod commands;
 mod crypto;
 mod diagnostics;
+// The macOS end-to-end tests' way into the page (debug builds with `--features e2e-driver` only).
+#[cfg(any(test, feature = "e2e-driver"))]
+#[cfg_attr(not(feature = "e2e-driver"), allow(dead_code))]
+mod e2e_driver;
 mod file_store;
 mod hyperdht;
 mod lnd;
@@ -99,6 +103,15 @@ macro_rules! commands {
     };
 }
 
+/// The system clipboard; an empty one in a build for the end-to-end tests, which never read the clipboard
+/// of the machine they run on.
+fn clipboard_source() -> clipboard::ClipboardSource {
+    #[cfg(feature = "e2e-driver")]
+    return clipboard::ClipboardSource::fixed(|| Ok(String::new()));
+    #[cfg(not(feature = "e2e-driver"))]
+    clipboard::ClipboardSource::system()
+}
+
 fn main() {
     let pkarr = Pkarr::desktop().expect("Failed to create pkarr client");
 
@@ -114,7 +127,7 @@ fn main() {
         .manage(paired_transport::TransportState::default())
         .manage(hyperdht::HyperState::default())
         .manage(oidc::OidcState::default())
-        .manage(clipboard::ClipboardSource::system())
+        .manage(clipboard_source())
         .setup(|app| {
             // The app's log, where the peer and the Pkarr client say how a link is doing.
             if let Ok(dir) = app.path().app_log_dir() {
@@ -124,6 +137,13 @@ fn main() {
             app.manage(file_store::FileStore::new(
                 app.path().app_data_dir()?.join("files"),
             ));
+            #[cfg(feature = "e2e-driver")]
+            {
+                // The apps under test stay out of the Dock and never take the focus from whoever is at the Mac.
+                #[cfg(target_os = "macos")]
+                app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                e2e_driver::start(app.handle());
+            }
             Ok(())
         })
         .register_asynchronous_uri_scheme_protocol(viewer::SCHEME, |ctx, request, responder| {

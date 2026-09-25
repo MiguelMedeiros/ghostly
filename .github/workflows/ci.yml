@@ -295,12 +295,21 @@ jobs:
         run: node scripts/voice-media/check-wkwebview.mjs
 
   # ============================================
+  # Two Desktop apps on a Mac call and share an app (system WKWebView, the test driver)
+  # ============================================
+  # Calls and shared apps need a live chat, which a Linux Desktop pair never has (no WebRTC in WebKitGTK).
+  # desktop-macos.yml builds the app with the test driver and runs e2e/desktop-macos/ (about 4 minutes).
+  desktop-macos:
+    name: Desktop on macOS
+    uses: ./.github/workflows/desktop-macos.yml
+
+  # ============================================
   # All checks passed
   # ============================================
   ci-success:
     name: CI Success
     runs-on: ubuntu-24.04
-    needs: [changes, frontend, tauri, cli, website, desktop-media]
+    needs: [changes, frontend, tauri, cli, website, desktop-media, desktop-macos]
     # Not always(): that also runs in a run cancelled by a newer push, where it would mark the superseded commit
     # failed. A failed job still gets here, and fails this one.
     if: ${{ !cancelled() }}
@@ -314,12 +323,13 @@ jobs:
           CLI: ${{ needs.cli.result }}
           WEBSITE: ${{ needs.website.result }}
           DESKTOP_MEDIA: ${{ needs.desktop-media.result }}
+          DESKTOP_MACOS: ${{ needs.desktop-macos.result }}
         run: |
           # Skipped only counts when `changes` chose to skip the Rust jobs.
           rust_ok() { [[ "$1" == "success" || ( "$1" == "skipped" && "$RUST" == "false" ) ]]; }
-          if [[ "$CHANGES" != "success" || "$FRONTEND" != "success" || "$WEBSITE" != "success" || "$DESKTOP_MEDIA" != "success" ]] || \
+          if [[ "$CHANGES" != "success" || "$FRONTEND" != "success" || "$WEBSITE" != "success" || "$DESKTOP_MEDIA" != "success" || "$DESKTOP_MACOS" != "success" ]] || \
              ! rust_ok "$TAURI" || ! rust_ok "$CLI"; then
-            echo "One or more jobs failed: changes=$CHANGES frontend=$FRONTEND tauri=$TAURI cli=$CLI website=$WEBSITE desktop-media=$DESKTOP_MEDIA"
+            echo "One or more jobs failed: changes=$CHANGES frontend=$FRONTEND tauri=$TAURI cli=$CLI website=$WEBSITE desktop-media=$DESKTOP_MEDIA desktop-macos=$DESKTOP_MACOS"
             exit 1
           fi
           echo "All jobs passed! (tauri=$TAURI cli=$CLI)"

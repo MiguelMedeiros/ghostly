@@ -141,9 +141,14 @@ export interface DesktopPerson extends Person {
   stop(): Promise<void>;
 }
 
-/** A Desktop app of its own (`home`, `profile`), pointed at the test's relay and HyperDHT bootstrap by `env`. */
-export async function desktopPerson(name: string, options: { home: string; env: Record<string, string> }): Promise<DesktopPerson> {
-  const open = () => openDesktop({ profile: `matrix-${name}`, home: options.home, env: options.env });
+/**
+ * A Desktop app of its own (`home`, `profile`), pointed at the test's relay and HyperDHT bootstrap by `env`.
+ * `open` starts it some other way: on a Mac, through the test driver (support/desktopMac.ts).
+ */
+export async function desktopPerson(name: string, options: {
+  home?: string; env: Record<string, string>; open?: () => Promise<{ app: DesktopApp; stop: () => Promise<void> }>;
+}): Promise<DesktopPerson> {
+  const open = options.open ?? (() => openDesktop({ profile: `matrix-${name}`, home: options.home, env: options.env }));
   let session = await open();
   const app = () => session.app;
   const run = <T>(script: string, ...args: unknown[]) => app().execute<T>(script, ...args);

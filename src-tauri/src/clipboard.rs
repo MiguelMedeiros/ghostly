@@ -11,6 +11,7 @@ pub const MAX_CLIPBOARD_BYTES: usize = 64 * 1024;
 pub struct ClipboardSource(Arc<dyn Fn() -> Result<String, String> + Send + Sync>);
 
 impl ClipboardSource {
+    #[cfg_attr(feature = "e2e-driver", allow(dead_code))]
     pub fn system() -> Self {
         Self(Arc::new(|| match arboard::Clipboard::new() {
             Ok(mut clipboard) => match clipboard.get_text() {
@@ -23,7 +24,7 @@ impl ClipboardSource {
         }))
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "e2e-driver"))]
     pub fn fixed(read: impl Fn() -> Result<String, String> + Send + Sync + 'static) -> Self {
         Self(Arc::new(read))
     }
