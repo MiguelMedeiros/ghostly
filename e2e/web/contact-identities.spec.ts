@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { expect, test, type Peer } from "../support/fixtures";
-import { closeIdentities, shareIdentity, theirCards, turnTheirs, backToTheirCards } from "../support/identities";
+import { closeIdentities, headerMarks, shareIdentity, theirCards, turnTheirs, backToTheirCards } from "../support/identities";
 import { LocalNostrRelay, NOSTR_TEST_RELAY } from "../support/nostrRelay";
 import { addNostrIdentity, injectNostrSigner } from "../support/nostrSigner";
 import { pair } from "../support/paired";
@@ -202,4 +202,79 @@ test("a contact's identities: two marks and +1 in the chat list, a stack in the 
   expect(sheet.width).toBeCloseTo(390, 0);
   expect(sheet.y + sheet.height).toBeCloseTo(844, 0);
   await shot(bob, "phone-panel");
+});
+
+test("a contact who shared no proof: the header still has their Ghostly mark, which opens the panel on their Ghostly card, by click or keyboard, on a phone too", { tag: ["@feature:proofs.badges"] }, async ({ peer }) => {
+  test.setTimeout(3 * 60_000);
+  const [alice, bob] = await Promise.all([peer("cn-alice"), peer("cn-bob")]);
+  await pair(alice, bob);
+  const page = bob.page;
+  const stack = headerMarks(bob);
+  const mark = stack.getByTestId("chat-identity-ghostly-mark");
+  const panel = page.getByTestId("chat-identities");
+  const NOTHING = /Their Ghostly identity\. Nothing else shared by .+ yet\.$/;
+
+  // Nothing shared: one quiet mark, no proof's mark and no check, named for what it opens.
+  await expect(mark).toBeVisible();
+  await expect(stack).toHaveAttribute("data-count", "0");
+  await expect(stack.getByTestId("chat-identity-badge")).toHaveCount(0);
+  await expect(stack.locator("[data-testid^=chat-identity-check-]:visible")).toHaveCount(0);
+  await expect(stack).toHaveAccessibleName(/^Identities with .+: Their Ghostly identity\./);
+  await expect(stack).toHaveAttribute("aria-expanded", "false");
+  await mark.hover();
+  await expect(page.getByTestId("chat-identity-tip")).toHaveText(NOTHING);
+  await shot(bob, "ghostly-header");
+
+  // A click opens the panel on their Ghostly card, the only one they have.
+  await stack.click();
+  await expect(panel).toBeVisible();
+  await expect(stack).toHaveAttribute("aria-expanded", "true");
+  await expect(panel.getByTestId("chat-identity-ghostly")).toHaveAttribute("aria-checked", "true");
+  await expect(theirCards(bob)).toHaveCount(0);
+  await expect(panel.getByTestId("chat-identities-none")).toHaveText(/^Nothing else shared by .+ yet\.$/);
+  await shot(bob, "ghostly-panel");
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+
+  // The keyboard: the mark is in the tab order, Enter opens it, Escape closes and gives the focus back.
+  await page.mouse.move(0, 0);
+  await stack.focus();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Shift+Tab");
+  await expect(stack).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(panel).toBeVisible();
+  await expect(panel.getByTestId("chat-identity-ghostly")).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+  await expect(stack).toBeFocused();
+
+  // A phone, and the longest name a chat takes: the name gives way, the mark stays whole beside it, clear of the
+  // header's buttons, and opens the sheet on their Ghostly card.
+  await page.setViewportSize({ width: 390, height: 844 });
+  const name = page.getByTitle("Click to set a name");
+  await name.click();
+  await page.getByPlaceholder("Set a name...").fill("A contact with a very long nam");
+  await page.getByPlaceholder("Set a name...").press("Enter");
+  await expect(name).toHaveText("A contact with a very long nam");
+  await expect(mark).toBeVisible();
+  const box = async (l: ReturnType<typeof page.getByTestId>) => (await l.boundingBox())!;
+  const [n, m] = [await box(name), await box(mark)];
+  expect(await name.evaluate(e => e.scrollWidth > e.clientWidth), "the name is cut, not the mark").toBe(true);
+  expect(n.width).toBeGreaterThan(40);
+  expect(n.x + n.width).toBeLessThanOrEqual(m.x);
+  const mw = await box(stack);
+  expect(mw.x + mw.width).toBeLessThanOrEqual(390);
+  for (const id of ["call-audio", "call-video", "chat-options"]) {
+    const button = page.getByTestId(id);
+    if (await button.isVisible()) expect(mw.x + mw.width, `the mark is clear of ${id}`).toBeLessThanOrEqual((await box(button)).x);
+  }
+  // Nothing lies over it.
+  expect(await mark.evaluate(e => { const r = e.getBoundingClientRect(); return e.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)); })).toBe(true);
+  await shot(bob, "ghostly-phone-header");
+  await stack.click();
+  await expect(panel).toBeVisible();
+  await expect(panel.getByTestId("chat-identity-ghostly")).toHaveAttribute("aria-checked", "true");
+  expect((await box(panel)).width).toBeCloseTo(390, 0);
+  await shot(bob, "ghostly-phone-panel");
 });

@@ -457,7 +457,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                   </svg>
                 )}
               </p>
-              {paired && <IdentityStack peerKey={params.peerPubKeyB64} open={showIdentities} onOpen={() => setShowIdentities(open => !open)} />}
+              {paired && <IdentityStack peerKey={params.peerPubKeyB64} name={shownName} open={showIdentities} onOpen={() => setShowIdentities(open => !open)} />}
               {compat && <span data-testid="compat-chat" title={t("chat.compat.hint")}
                 className="shrink-0 rounded bg-surface-hover px-1.5 py-0.5 text-[10px] leading-none text-text-muted whitespace-nowrap max-md:hidden">{t("chat.compat.label")}</span>}
               </div>
@@ -524,12 +524,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 <MenuItem testId="chat-hold-open" onClick={() => { setShowHold(true); closeMenu(); }}
                   icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 8v13H3V8" /><path d="M1 3h22v5H1z" /><path d="M10 12h4" /></svg>}>
                   {t("chat.menu.hold")}
-                </MenuItem>
-              )}
-              {paired && (
-                <MenuItem testId="chat-identities-open" onClick={() => { setShowIdentities(true); closeMenu(); }}
-                  icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" /><path d="m9 12 2 2 4-4" /></svg>}>
-                  {t("chat.menu.identities")}
                 </MenuItem>
               )}
               {platform && platform.getPeer(params.peerPubKeyB64) && (

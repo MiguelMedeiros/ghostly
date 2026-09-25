@@ -67,7 +67,7 @@ test("an identity is added, shared and withdrawn from the chat's composer", { ta
   await expect(picker).toHaveAttribute("data-side", "cards");
   await expect(nostr.getByTestId("id-card-shared")).toBeVisible();
   await expect(nostr).toBeFocused();
-  await expect(bob.page.getByTestId("chat-identity-badges")).toBeVisible();
+  await expect(bob.page.getByTestId("chat-identity-badge").first()).toBeVisible();
   await openIdentities(bob);
   await expect(theirFace(bob)).toHaveAttribute("data-status", "verified");
   await closeIdentities(bob);
@@ -90,7 +90,7 @@ test("an identity is added, shared and withdrawn from the chat's composer", { ta
   await share.click();
   await expect(picker).toHaveAttribute("data-side", "cards");
   await expect(nostr.getByTestId("id-card-shared")).toHaveCount(0);
-  await expect(bob.page.getByTestId("chat-identity-badges")).toHaveCount(0);
+  await expect(bob.page.getByTestId("chat-identity-ghostly-mark")).toBeVisible();
   await openIdentities(bob);
   await expect(theirFace(bob)).toHaveAttribute("data-status", "withdrawn");
   const bobsCard = await turnTheirs(bob);

@@ -72,7 +72,7 @@ test("a contact's profile, follows and notes load only on request from the perso
   await closeIdentities(carol);
 
   // Bob sees the card, turned over, and nothing was fetched before he asks.
-  await expect(bob.page.getByTestId("chat-identity-badges")).toBeVisible();
+  await expect(bob.page.getByTestId("chat-identity-badge").first()).toBeVisible();
   await openIdentities(bob);
   const back = await turnTheirs(bob, "Nostr");
   const card = back.getByTestId("nostr-contact");

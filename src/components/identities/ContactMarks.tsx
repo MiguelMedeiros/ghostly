@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from "react";
 import { createPortal } from "react-dom";
-import { BADGE_LIMITS, contactBadges, isGood, takeBadges, useReceived, type Badge, type BadgeState } from "./contactBadges";
-import { providerIcon } from "./ProviderIcons";
+import { useI18n } from "../../contexts/I18nContext";
+import { BADGE_LIMITS, contactBadges, isGood, takeBadges, useReceived, type BadgeState } from "./contactBadges";
+import { GHOSTLY } from "./idCard";
+import { PROVIDER_ICONS, providerIcon } from "./ProviderIcons";
 import "./contact-marks.css";
 
 const CLOCK = <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="2" /><path d="M8 5v3.2l2 1.3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>;
@@ -61,26 +63,30 @@ const tipAt = (el: Element) => {
  * then BADGE_ORDER), up to three in a wide column, two in a narrow one and one on a phone (the `chat-column`
  * container), "+N" for the rest, and one check when every mark shown is verified. Hovering a mark, or a long press
  * on a touch screen, names it: "GitHub: mmedeiros · verified 2 h ago". A click opens the contact's identities.
+ * A contact who shared none still has a mark: their Ghostly identity, the panel's first card, quiet on a plain tile
+ * and with no check (it proves nothing), so every chat reaches the contact's identities from its header.
  */
-export function IdentityStack({ peerKey, onOpen, open }: { peerKey: string; onOpen: () => void; open?: boolean }) {
+export function IdentityStack({ peerKey, name, onOpen, open }: { peerKey: string; name: string; onOpen: () => void; open?: boolean }) {
+  const { t } = useI18n();
   const received = useReceived(peerKey);
   const badges = contactBadges(received);
-  const [tip, setTip] = useState<{ badge: Badge; top: number; left: number } | null>(null);
+  const [tip, setTip] = useState<{ label: string; top: number; left: number } | null>(null);
   const press = useRef<{ timer?: ReturnType<typeof setTimeout>; held: boolean }>({ held: false });
   const hide = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => { clearTimeout(press.current.timer); clearTimeout(hide.current); }, []);
-  if (!badges.length) return null;
   const shown = badges.slice(0, BADGE_LIMITS.header);
-  const allGood = (n: number) => shown.slice(0, n).every(b => isGood(b.state));
+  const allGood = (n: number) => shown.length > 0 && shown.slice(0, n).every(b => isGood(b.state));
+  // Nothing shared: the Ghostly mark says what the panel holds, the way a proof's mark names the proof.
+  const ghostly = shown.length ? undefined : `${t("identities.ghostly.theirs")}. ${t("identities.ghostly.nothingElse", { name })}`;
   const markOf = (e: PointerEvent) => (e.target as Element).closest<HTMLElement>("[data-badge]");
   const show = (el: HTMLElement | null) => {
-    const badge = el && badges.find(b => b.id === el.dataset.badge);
-    setTip(badge ? { badge, ...tipAt(el) } : null);
+    const label = el && (el.dataset.badge === GHOSTLY ? ghostly : badges.find(b => b.id === el.dataset.badge)?.label);
+    setTip(el && label ? { label, ...tipAt(el) } : null);
   };
-  const label = badges.map(b => b.label).join("; ");
+  const label = ghostly ?? badges.map(b => b.label).join("; ");
   return (
     <>
-      <button type="button" className="identity-stack" data-testid="chat-identity-badges" data-count={badges.length} aria-expanded={open} aria-label={`Identities: ${label}`}
+      <button type="button" className="identity-stack" data-testid="chat-identity-badges" data-count={badges.length} aria-expanded={open} aria-label={`Identities with ${name}: ${label}`}
         onClick={e => { if (press.current.held) { e.preventDefault(); press.current.held = false; return; } onOpen(); }}
         onPointerOver={e => { if (e.pointerType === "mouse") show(markOf(e)); }}
         onPointerLeave={e => { if (e.pointerType === "mouse") setTip(null); }}
@@ -95,7 +101,11 @@ export function IdentityStack({ peerKey, onOpen, open }: { peerKey: string; onOp
         onPointerCancel={() => clearTimeout(press.current.timer)}
         onContextMenu={e => { if (press.current.held) e.preventDefault(); }}>
         <span className="identity-stack-marks">
-          {shown.map(b => <BadgeMark key={b.id} provider={b.provider} subject={b.subject} state={b.state} data-badge={b.id} data-testid="chat-identity-badge" />)}
+          {ghostly
+            ? <span className="badge-mark" data-state={GHOSTLY} data-icon={GHOSTLY} data-badge={GHOSTLY} data-testid="chat-identity-ghostly-mark" aria-hidden="true">
+              <span className="badge-mark-tile badge-mark-plain">{PROVIDER_ICONS[GHOSTLY].mark(10)}</span>
+            </span>
+            : shown.map(b => <BadgeMark key={b.id} provider={b.provider} subject={b.subject} state={b.state} data-badge={b.id} data-testid="chat-identity-badge" />)}
         </span>
         {([3, 2, 1] as const).map(n => (
           <span key={n} data-upto={n}>
@@ -104,7 +114,7 @@ export function IdentityStack({ peerKey, onOpen, open }: { peerKey: string; onOp
           </span>
         ))}
       </button>
-      {tip && createPortal(<div role="tooltip" className="badge-tip" data-testid="chat-identity-tip" style={{ top: tip.top, left: tip.left }}>{tip.badge.label}</div>, document.body)}
+      {tip && createPortal(<div role="tooltip" className="badge-tip" data-testid="chat-identity-tip" style={{ top: tip.top, left: tip.left }}>{tip.label}</div>, document.body)}
     </>
   );
 }

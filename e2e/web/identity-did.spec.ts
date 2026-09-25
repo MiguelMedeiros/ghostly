@@ -89,7 +89,7 @@ test("a did:key signed outside the app is shown before signing, verified by the 
   await go(alice, withBob);
   await shareIdentity(alice);
   await closeIdentities(alice);
-  await expect(bob.page.getByTestId("chat-identity-badges")).toBeVisible();
+  await expect(bob.page.getByTestId("chat-identity-badge").first()).toBeVisible();
   await openIdentities(bob);
   await expect(theirCards(bob)).toHaveCount(1);
   await expect(theirFace(bob)).toHaveAttribute("data-status", "verified");

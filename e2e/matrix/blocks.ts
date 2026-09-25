@@ -448,7 +448,7 @@ export const identity: Block = {
     await shareIdentity(a, undefined, { timeout: 90_000 });
     await closeIdentities(a);
     await openChat(b);
-    await expect(b.page.getByTestId("chat-identity-badges")).toBeVisible({ timeout: 60_000 });
+    await expect(b.page.getByTestId("chat-identity-badge").first()).toBeVisible({ timeout: 60_000 });
     await openIdentities(b);
     const received = theirCards(b);
     await expect(received).toHaveCount(1);

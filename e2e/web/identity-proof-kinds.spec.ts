@@ -63,7 +63,7 @@ test("every kind of signer: a pasted signature and a provider's attestation, bot
   // With them, Bob verifies both, and says who vouches for the attested one.
   await useFakeIdentities(bob);
   for (const which of ["Your own key", "Attested by issuer.ghostly.test"]) await shareIdentity(alice, which);
-  await expect(bob.page.getByTestId("chat-identity-badges")).toBeVisible();
+  await expect(bob.page.getByTestId("chat-identity-badge").first()).toBeVisible();
   await openIdentities(bob);
   await expect(theirCards(bob)).toHaveCount(2);
   await expect(theirFace(bob, "Attested by issuer.ghostly.test")).toHaveAttribute("data-status", "verified");

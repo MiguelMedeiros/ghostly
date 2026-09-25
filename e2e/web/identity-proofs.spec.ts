@@ -51,7 +51,7 @@ test("a Nostr identity is proven once, shared with one contact only, withdrawn, 
   await shareIdentity(alice);
   await closeIdentities(alice);
 
-  await expect(bob.page.getByTestId("chat-identity-badges")).toBeVisible();
+  await expect(bob.page.getByTestId("chat-identity-badge").first()).toBeVisible();
   await openIdentities(bob);
   await expect(theirCards(bob)).toHaveCount(1);
   await expect(theirFace(bob)).toHaveAttribute("data-status", "verified");
@@ -66,7 +66,7 @@ test("a Nostr identity is proven once, shared with one contact only, withdrawn, 
   await expect(none.getByTestId("chat-identities-none")).toBeVisible();
   await expect(theirCards(carol)).toHaveCount(0);
   await closeIdentities(carol);
-  await expect(carol.page.getByTestId("chat-identity-badges")).toHaveCount(0);
+  await expect(carol.page.getByTestId("chat-identity-ghostly-mark")).toBeVisible();
   // Alice's chat with Carol offers it, but has not shared it.
   await go(alice, withCarol);
   await openIdentities(alice);
@@ -78,7 +78,7 @@ test("a Nostr identity is proven once, shared with one contact only, withdrawn, 
   await stopSharing(alice);
   await expect(await myStatus(alice)).toHaveText("Not shared");
   await closeIdentities(alice);
-  await expect(bob.page.getByTestId("chat-identity-badges")).toHaveCount(0);
+  await expect(bob.page.getByTestId("chat-identity-ghostly-mark")).toBeVisible();
   await openIdentities(bob);
   await expect(theirFace(bob)).toHaveAttribute("data-status", "withdrawn");
   back = await turnTheirs(bob);
@@ -114,7 +114,7 @@ test("removing a proof revokes it for a contact the person never reconnects to",
   await go(alice, withCarol);
   await shareIdentity(alice);
   await closeIdentities(alice);
-  await expect(carol.page.getByTestId("chat-identity-badges")).toBeVisible();
+  await expect(carol.page.getByTestId("chat-identity-badge").first()).toBeVisible();
 
   // Carol's app is closed when Alice removes it: the withdrawal cannot reach her, the revocation goes to Pkarr.
   const carolChat = await chatId(carol);

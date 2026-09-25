@@ -69,7 +69,7 @@ test("an OpenPGP key signed with gpg: refused when it should be, then shared wit
   await closeIdentities(alice);
 
   // Bob's app verified it on its own: fingerprint, how, and the user ID on the card.
-  await expect(bob.page.getByTestId("chat-identity-badges")).toBeVisible();
+  await expect(bob.page.getByTestId("chat-identity-badge").first()).toBeVisible();
   await openIdentities(bob);
   await expect(theirCards(bob)).toHaveCount(1);
   await expect(theirFace(bob)).toHaveAttribute("data-status", "verified");
@@ -87,5 +87,5 @@ test("an OpenPGP key signed with gpg: refused when it should be, then shared wit
   await openIdentities(carol);
   await expect(theirCards(carol)).toHaveCount(0);
   await closeIdentities(carol);
-  await expect(carol.page.getByTestId("chat-identity-badges")).toHaveCount(0);
+  await expect(carol.page.getByTestId("chat-identity-ghostly-mark")).toBeVisible();
 });
