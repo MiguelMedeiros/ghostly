@@ -23,6 +23,37 @@ interface UseWebRTCParams {
   onError?: (error: unknown) => void;
 }
 
+/** How long a failed screen share stays explained in the call window. */
+export const SCREEN_SHARE_ERROR_MS = 8000;
+
+/**
+ * A picker refused faster than this was never shown to anyone: the system or the browser said no by itself
+ * (macOS with Screen Recording off for the app), which is worth explaining, unlike a person closing the picker.
+ */
+const REFUSED_WITHOUT_PICKER_MS = 300;
+
+/**
+ * What to tell the person when sharing the screen failed, or null when there is nothing to tell: closing the
+ * picker, or saying no to it, is a choice and not an error.
+ */
+export function screenShareErrorMessage(error: unknown, elapsedMs = Infinity): string | null {
+  const { name, message } = (error ?? {}) as { name?: unknown; message?: unknown };
+  switch (name) {
+    case "NotAllowedError":
+      // Chromium says "Permission denied by system" when the OS refused; WebKit refuses without a word, at once.
+      return /system/i.test(String(message ?? "")) || elapsedMs < REFUSED_WITHOUT_PICKER_MS
+        ? "Screen sharing is blocked. Allow screen recording for this app in your system's privacy settings."
+        : null;
+    case "NotFoundError":
+      return "There is no screen to share";
+    case "NotSupportedError":
+    case "TypeError":
+      return "Screen sharing is not available here";
+    default:
+      return "Could not share the screen. Try again.";
+  }
+}
+
 /** The video section of the call, once the peers agreed on one. */
 function videoTransceiver(pc: RTCPeerConnection): RTCRtpTransceiver | undefined {
   return pc.getTransceivers().find((t) => t.receiver.track.kind === "video" && t.mid !== null);
@@ -49,6 +80,8 @@ export function useWebRTC({
   /** Whether the call negotiated a video lane we may send on, camera or screen. */
   const [videoLaneOpen, setVideoLaneOpen] = useState(false);
   const [callStartedAt, setCallStartedAt] = useState<number | null>(null);
+  /** Why the last attempt to share the screen failed, for a few seconds. */
+  const [screenShareError, setScreenShareErrorState] = useState<string | null>(null);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -63,6 +96,15 @@ export function useWebRTC({
   const pictureRef = useRef<Picture | null>(null);
   /** What we were showing before the screen took the lane, to go back to when sharing stops. */
   const pictureBeforeShareRef = useRef<Picture | null>(null);
+  /** A share is being started or stopped: the picker may be open. */
+  const shareBusyRef = useRef(false);
+  const screenShareErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const setScreenShareError = useCallback((message: string | null) => {
+    if (screenShareErrorTimerRef.current) clearTimeout(screenShareErrorTimerRef.current);
+    screenShareErrorTimerRef.current = message ? setTimeout(() => setScreenShareErrorState(null), SCREEN_SHARE_ERROR_MS) : null;
+    setScreenShareErrorState(message);
+  }, []);
 
   const setPicture = useCallback((next: Picture | null) => {
     pictureRef.current = next;
@@ -103,8 +145,9 @@ export function useWebRTC({
     setRemotePicture(null);
     setVideoLaneOpen(false);
     pictureBeforeShareRef.current = null;
+    setScreenShareError(null);
     setCallStartedAt(null);
-  }, [setPicture]);
+  }, [setPicture, setScreenShareError]);
 
   /** The lane is open once both sides have described it and our half may send. */
   const refreshVideoLane = useCallback(() => {
@@ -193,7 +236,7 @@ export function useWebRTC({
     return pc;
   }, [updateCallState, setFastPoll, cleanupConnection, publishCallSignal, addCallEventMessage, refreshVideoLane]);
 
-  const showPictureRef = useRef<(next: Picture | null) => Promise<void>>(async () => {});
+  const stopSharingRef = useRef<() => Promise<void>>(async () => {});
 
   /**
    * Puts a picture on the video lane, swaps one for the other, or takes it off.
@@ -203,15 +246,20 @@ export function useWebRTC({
   const showPicture = useCallback(
     async (next: Picture | null) => {
       const pc = pcRef.current;
-      const current = localStreamRef.current;
       const sender = pc ? videoTransceiver(pc)?.sender : undefined;
-      if (!pc || !current || !sender) throw new Error("This call has no video to send on");
+      if (!pc || !localStreamRef.current || !sender) throw new Error("This call has no video to send on");
+      const attempt = attemptRef.current;
 
       let track: MediaStreamTrack | null = null;
       if (next === "camera") {
         track = (await navigator.mediaDevices.getUserMedia({ video: true })).getVideoTracks()[0];
       } else if (next === "screen") {
         track = (await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false })).getVideoTracks()[0];
+      }
+      // The call ended while the prompt or the picker was open: what it gave is let go, and nobody is told.
+      if (attemptRef.current !== attempt) {
+        track?.stop();
+        return;
       }
 
       try {
@@ -221,11 +269,13 @@ export function useWebRTC({
         throw error;
       }
 
+      // Read after the prompt: the picture may have changed while it was open.
+      const current = localStreamRef.current!;
       if (next === "screen" && track) {
         track.contentHint = "detail";
-        // The browser's own "Stop sharing" button ends the track without telling anyone else.
+        // The browser's (or the system's) own "Stop sharing" ends the track without telling anyone else.
         track.onended = () => {
-          if (callStateRef.current !== "idle") void showPictureRef.current(pictureBeforeShareRef.current).catch(() => {});
+          if (callStateRef.current !== "idle") void stopSharingRef.current().catch(() => {});
         };
       }
 
@@ -242,10 +292,24 @@ export function useWebRTC({
     },
     [setPicture, publishPicture],
   );
-  showPictureRef.current = showPicture;
+
+  /**
+   * Back to what was on before the screen: the camera, or no picture at all for a voice call. A camera that
+   * cannot come back (gone, or refused this time) still ends the share, as a voice call.
+   */
+  const stopSharing = useCallback(async () => {
+    const before = pictureBeforeShareRef.current;
+    try {
+      await showPicture(before);
+    } catch (error) {
+      if (before) await showPicture(null);
+      throw error;
+    }
+  }, [showPicture]);
+  stopSharingRef.current = stopSharing;
 
   const startCall = useCallback(
-    async (withVideo: boolean, source: Picture = "camera") => {
+    async (withVideo: boolean) => {
       if (callStateRef.current !== "idle") return;
 
       // A hang-up schedules clearing `_call` a few seconds later; that must not
@@ -264,27 +328,12 @@ export function useWebRTC({
         updateCallState("offering");
         addCallEventMessage?.("call_started", withVideo);
 
-        let stream: MediaStream;
-        if (withVideo && source === "screen") {
-          // To the peer this is an ordinary video call; the picture just happens to be the screen.
-          const display = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
-          const mic = await navigator.mediaDevices.getUserMedia({ audio: true }).catch((error) => {
-            display.getTracks().forEach((track) => track.stop());
-            throw error;
-          });
-          stream = new MediaStream([...mic.getAudioTracks(), ...display.getVideoTracks()]);
-          const screen = display.getVideoTracks()[0];
-          screen.contentHint = "detail";
-          screen.onended = () => {
-            if (callStateRef.current !== "idle") void showPictureRef.current(null).catch(() => {});
-          };
-        } else {
-          stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: withVideo });
-        }
+        // A screen is shared from inside a call (`toggleScreenShare`), never as the way one starts.
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: withVideo });
         if (cancelled()) { stream.getTracks().forEach((track) => track.stop()); return; }
         localStreamRef.current = stream;
         setLocalStream(stream);
-        setPicture(withVideo ? source : null);
+        setPicture(withVideo ? "camera" : null);
 
         const pc = createPeerConnection();
         stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
@@ -310,7 +359,7 @@ export function useWebRTC({
           ...params,
           v: withVideo ? 1 : 0,
         };
-        if (withVideo) signal.k = source === "screen" ? "s" : "c";
+        if (withVideo) signal.k = "c";
 
         const signalStr = JSON.stringify(signal);
         publishCallSignal(signalStr);
@@ -499,16 +548,27 @@ export function useWebRTC({
     }
   }, [showPicture]);
 
+  /** Shares the screen in place of whatever picture is on, or stops and goes back to it. */
   const toggleScreenShare = useCallback(async () => {
+    // One picker at a time: a second press while it is open would ask again, and forget what to go back to.
+    if (shareBusyRef.current) return;
+    shareBusyRef.current = true;
     const sharing = pictureRef.current === "screen";
     if (!sharing) pictureBeforeShareRef.current = pictureRef.current;
+    setScreenShareError(null);
+    const asked = Date.now();
     try {
-      await showPicture(sharing ? pictureBeforeShareRef.current : "screen");
+      if (sharing) await stopSharing();
+      else await showPicture("screen");
     } catch (error) {
+      const message = sharing ? null : screenShareErrorMessage(error, Date.now() - asked);
       // Closing the picker is not an error worth showing.
-      if ((error as DOMException)?.name !== "NotAllowedError") onErrorRef.current?.(error);
+      if (sharing || message) onErrorRef.current?.(error);
+      setScreenShareError(message);
+    } finally {
+      shareBusyRef.current = false;
     }
-  }, [showPicture]);
+  }, [showPicture, stopSharing, setScreenShareError]);
 
   useEffect(() => {
     if (!incomingCallSignal) return;
@@ -560,6 +620,7 @@ export function useWebRTC({
       // A start or an answer still waiting for the microphone or for ICE is cancelled, as a hang-up cancels it.
       attempts.current++;
       if (hangupTimerRef.current) clearTimeout(hangupTimerRef.current);
+      if (screenShareErrorTimerRef.current) clearTimeout(screenShareErrorTimerRef.current);
 
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((t) => {
@@ -577,6 +638,8 @@ export function useWebRTC({
   }, []);
 
   const connected = callState === "connected";
+  // Phones have no screen to capture (no getDisplayMedia): there the share button does not show at all.
+  const screenCapture = typeof navigator.mediaDevices?.getDisplayMedia === "function";
 
   return {
     callState,
@@ -588,9 +651,19 @@ export function useWebRTC({
     isScreenSharing: picture === "screen",
     /** The peer is sending a picture we can show. */
     remoteHasVideo: remotePicture !== null,
+    /** The picture the peer is sending is its screen. */
+    remoteIsScreenSharing: remotePicture === "screen",
     /** A camera or a screen can be turned on right now, even if the call started as audio. */
     canSendVideo: connected && videoLaneOpen,
-    canShareScreen: connected && videoLaneOpen && typeof navigator.mediaDevices?.getDisplayMedia === "function",
+    /** The screen can be shared right now: a connected call with a video lane, voice or video, and a screen to capture. */
+    canShareScreen: connected && videoLaneOpen && screenCapture,
+    /**
+     * Why a connected call cannot carry a screen, where screens can be captured: the peer's offer had no video
+     * section, or its answer refused ours. Null when it can, and where there is no screen to capture.
+     */
+    screenShareUnavailable: connected && screenCapture && !videoLaneOpen ? "Your contact's app cannot show a screen in this call" : null,
+    /** Why sharing the screen just failed, for a few seconds. */
+    screenShareError,
     callStartedAt,
     startCall,
     acceptCall,

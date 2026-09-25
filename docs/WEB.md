@@ -45,7 +45,7 @@ Below 768px the app shows one screen at a time, like a messenger: the chat list,
 
 It installs to the home screen (`manifest.json`, `display: standalone`, Apple metas). There is deliberately no service worker: a cached copy of the app would keep running after the server's copy changed, and the app is small.
 
-Screen sharing needs `getDisplayMedia`, which phone browsers do not have; the buttons do not show there.
+Screen sharing needs `getDisplayMedia`, which phone browsers do not have; the call's Share screen button does not show there. Elsewhere it is in every connected call, voice or video (there is no button for it in the chat header).
 
 ## What a web page cannot do
 

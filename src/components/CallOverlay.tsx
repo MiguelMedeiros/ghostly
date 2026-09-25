@@ -14,10 +14,16 @@ interface CallOverlayProps {
   isScreenSharing?: boolean;
   /** Offer the camera button: the call has a video lane our side may send on. */
   canSendVideo?: boolean;
-  /** Offer the share button: that lane, in a browser that can capture the screen. */
+  /** The share button works: that lane, in a browser that can capture the screen. */
   canShareScreen?: boolean;
+  /** The share button shows, turned off, with this reason: the screen could be captured, but this call cannot carry it. */
+  screenShareUnavailable?: string | null;
+  /** Why sharing the screen just failed. */
+  screenShareError?: string | null;
   /** The peer is sending a picture. */
   remoteHasVideo: boolean;
+  /** The peer's picture is its screen. */
+  remoteIsScreenSharing?: boolean;
   callStartedAt: number | null;
   peerName: string;
   onHangUp: () => void;
@@ -59,7 +65,10 @@ export function CallOverlay({
   isScreenSharing = false,
   canSendVideo = false,
   canShareScreen = false,
+  screenShareUnavailable = null,
+  screenShareError = null,
   remoteHasVideo,
+  remoteIsScreenSharing = false,
   callStartedAt,
   peerName,
   onHangUp,
@@ -149,6 +158,13 @@ export function CallOverlay({
   }[callState];
 
   const showRemoteVideo = remoteHasVideo && remoteStream && callState === "connected";
+  // A screen in place of the camera leaves the camera off, and its button says so.
+  const cameraOn = !isVideoOff && !isScreenSharing;
+  // Sharing is never a surprise, to either side.
+  const sharingNotice = callState !== "connected" ? null
+    : isScreenSharing && remoteIsScreenSharing ? `You and ${peerName} are sharing your screens`
+    : isScreenSharing ? "You're sharing your screen"
+    : remoteIsScreenSharing ? `${peerName} is sharing their screen` : null;
 
   // Hung outside the chat, which may be off screen; the call is not.
   return createPortal(
@@ -214,6 +230,22 @@ export function CallOverlay({
         </p>
       </div>
 
+      {sharingNotice && (
+        <p
+          role="status"
+          data-testid="call-sharing"
+          data-self={isScreenSharing}
+          data-peer={remoteIsScreenSharing}
+          className="call-share-notice absolute top-16 max-md:top-[calc(4rem+env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-10 max-w-[calc(100%-2rem)] flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium bg-accent text-on-accent shadow-lg"
+        >
+          <svg className="shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="2" y="4" width="20" height="13" rx="2" />
+            <path d="M8 21h8M12 17v4" />
+          </svg>
+          <span className="truncate">{sharingNotice}</span>
+        </p>
+      )}
+
       {/* Local video (picture-in-picture) */}
       {!isVideoOff && localStream && (
         <div
@@ -237,6 +269,13 @@ export function CallOverlay({
             style={isScreenSharing ? undefined : { transform: "scaleX(-1)" }}
           />
         </div>
+      )}
+
+      {screenShareError && (
+        <p role="alert" data-testid="share-screen-error"
+          className="call-share-error absolute bottom-32 max-md:bottom-[calc(8.5rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-10 w-max max-w-[calc(100%-2rem)] rounded-lg bg-black/70 px-3 py-2 text-center text-xs text-white">
+          {screenShareError}
+        </p>
       )}
 
       {/* Controls */}
@@ -292,13 +331,13 @@ export function CallOverlay({
           <button
             onClick={onToggleVideo}
             className={`w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
-              isVideoOff
+              !cameraOn
                 ? "bg-danger/30 text-danger"
                 : "bg-white/10 text-white hover:bg-white/20"
             }`}
-            title={isVideoOff ? "Turn camera on" : "Turn camera off"}
+            title={cameraOn ? "Turn camera off" : "Turn camera on"}
           >
-            {isVideoOff ? (
+            {!cameraOn ? (
               <svg
                 width="24"
                 height="24"
@@ -330,15 +369,18 @@ export function CallOverlay({
           </button>
         )}
 
-        {/* Screen share */}
-        {canShareScreen && onToggleScreenShare && (
+        {/* Screen share: in any connected call, voice or video. Where no screen can be captured (phones) it is not here at all. */}
+        {(canShareScreen || screenShareUnavailable) && onToggleScreenShare && (
           <button
             onClick={onToggleScreenShare}
+            disabled={!canShareScreen}
             data-testid="share-screen"
-            className={`w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
-              isScreenSharing ? "bg-accent text-on-accent" : "bg-white/10 text-white hover:bg-white/20"
+            aria-label={isScreenSharing ? "Stop sharing" : "Share screen"}
+            aria-pressed={isScreenSharing}
+            className={`w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+              isScreenSharing ? "bg-accent text-on-accent" : "bg-white/10 text-white enabled:hover:bg-white/20"
             }`}
-            title={isScreenSharing ? "Stop sharing your screen" : "Share your screen"}
+            title={isScreenSharing ? "Stop sharing" : canShareScreen ? "Share screen" : screenShareUnavailable ?? "Share screen"}
           >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="2" y="4" width="20" height="13" rx="2" />

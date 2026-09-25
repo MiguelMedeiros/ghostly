@@ -24,6 +24,7 @@ import { useWebRTC } from "../hooks/useWebRTC";
 import { useSettings } from "../contexts/SettingsContext";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
+import { CallButtons } from "../components/CallButtons";
 import { CallOverlay } from "../components/CallOverlay";
 import { IncomingCallNotification } from "../components/IncomingCallNotification";
 import { contactStatus } from "../lib/contactStatus";
@@ -509,68 +510,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           </div>
         </div>
         <div className="flex items-center gap-1">
-          {/* Audio call button */}
           {paired && <PairingBanner peerKey={params.peerPubKeyB64} />}
-          <button
-            onClick={() => webrtc.startCall(false)}
-            disabled={!!callsBlocked || webrtc.callState !== "idle"}
-            className="p-2 max-md:p-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-            title={callsBlocked ?? "Audio call"}
-            aria-label="Audio call"
-            data-testid="call-audio"
-          >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
-            </svg>
-          </button>
-          {/* Screen share: a video call whose picture is the screen. Phones cannot capture theirs. */}
-          {typeof navigator.mediaDevices?.getDisplayMedia === "function" && (
-            <button
-              onClick={() => webrtc.startCall(true, "screen")}
-              disabled={!!callsBlocked || webrtc.callState !== "idle"}
-              className="max-md:hidden p-2 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-              title={callsBlocked ?? "Share your screen"}
-              aria-label="Share your screen"
-              data-testid="call-screen"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="2" y="4" width="20" height="13" rx="2" />
-                <path d="M8 21h8M12 17v4M12 13V8m0 0l-2.5 2.5M12 8l2.5 2.5" />
-              </svg>
-            </button>
-          )}
-          {/* Video call button */}
-          <button
-            onClick={() => webrtc.startCall(true)}
-            disabled={!!callsBlocked || webrtc.callState !== "idle"}
-            className="p-2 max-md:p-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-            title={callsBlocked ?? "Video call"}
-            aria-label="Video call"
-            data-testid="call-video"
-          >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M23 7l-7 5 7 5V7z" />
-              <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-            </svg>
-          </button>
+          <CallButtons blocked={callsBlocked} busy={webrtc.callState !== "idle"} onCall={(withVideo) => webrtc.startCall(withVideo)} />
           {/* Options dropdown */}
           <div className="relative" ref={menuRef}>
             <button
@@ -786,7 +727,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           isScreenSharing={webrtc.isScreenSharing}
           canSendVideo={webrtc.canSendVideo}
           canShareScreen={webrtc.canShareScreen}
+          screenShareUnavailable={webrtc.screenShareUnavailable}
+          screenShareError={webrtc.screenShareError}
           remoteHasVideo={webrtc.remoteHasVideo}
+          remoteIsScreenSharing={webrtc.remoteIsScreenSharing}
           callStartedAt={webrtc.callStartedAt}
           peerName={shownName}
           onHangUp={() => webrtc.hangUp()}
