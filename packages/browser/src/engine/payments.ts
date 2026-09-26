@@ -74,9 +74,10 @@ export interface PaymentDeskHost {
  * engine hands it the active Lightning source; alone (tests), the desk uses the Cashu mints directly.
  */
 export interface DeskLightning {
-  createInvoice(amount: number, paymentId: string): Promise<{ invoice: string }>;
-  /** `mint`: the Cashu mint that will pay, when it is one. */
-  quote(invoice: string): Promise<{ quote: string; mint?: string; amount: number; feeReserve: number }>;
+  /** `card`: the Lightning card the invoice comes from; absent, the network's default for receiving. */
+  createInvoice(amount: number, paymentId: string, card?: string): Promise<{ invoice: string }>;
+  /** `mint`: the Cashu mint that will pay, when it is one. `card`: the card that pays; absent, the default one. */
+  quote(invoice: string, card?: string): Promise<{ quote: string; mint?: string; amount: number; feeReserve: number }>;
   /** True once paid, false while pending. Throws only when the sats did not go out. */
   pay(quote: { quote: string; mint?: string }, note: string, paymentId: string): Promise<boolean>;
   /**
@@ -240,7 +241,7 @@ export class PaymentDesk {
   }
 
   /** `rail`: a Cashu request carries only ecash, a Lightning one only an invoice; without it, whatever the chat allows. */
-  async request(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | AskMethod; ask?: string; rail?: "cashu" | "lightning"; network?: WalletNetwork }): Promise<{ paymentId: string }> {
+  async request(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | AskMethod; ask?: string; rail?: "cashu" | "lightning"; network?: WalletNetwork; card?: string }): Promise<{ paymentId: string }> {
     const network = params.network ?? this.defaultNetwork();
     const mine = (label: string) => `You have no ${networkLabel(network)} ${label} wallet: create one in Wallet → New`;
     if(params.method === "usdt")assertTokenUnits(params.amount);else assertAmount(params.amount);
@@ -324,7 +325,7 @@ export class PaymentDesk {
     const ecash = params.rail !== "lightning" && !offHere.cashu && (known ? known.includes("cashu") && link.paymentEnabled("cashu") : link.allowsPayment("cashu"));
     const lightning = params.rail !== "cashu" && !offHere.lightning && (known ? known.includes("lightning") && link.paymentEnabled("lightning") : link.allowsPayment("lightning"));
     if (!ecash && !lightning) throw new Error(params.rail && offHere[params.rail] ? offHere[params.rail]! : params.rail ? `${params.rail === "cashu" ? "Cashu" : "Lightning"} is not allowed by both of you here` : held ? "Your contact allowed neither Cashu nor Lightning in this chat" : offHere.cashu && offHere.lightning ? offHere.cashu : "Cashu and Lightning are off in this chat");
-    const quote = lightning ? await this.lightning[network].createInvoice(params.amount, id) : undefined;
+    const quote = lightning ? await this.lightning[network].createInvoice(params.amount, id, params.card) : undefined;
     // A request is in real sats or in test sats, never both: ecash from a test mint, worth nothing, must
     // never settle a request for real money. Only this network's mints are named.
     const own = (await this.wallet.view(network)).mints.map((m) => m.url);
@@ -379,13 +380,13 @@ export class PaymentDesk {
    * Lightning invoice can be paid once, and ecash is checked here before it is redeemed (a later token is refused
    * unredeemed, so its payer takes it back). Two rails at once would let an invoice and a token both pay it.
    */
-  async requestFromGroup(params: { groupId: string; amount: number; memo?: string; timestamp: number; rail: "cashu" | "lightning"; network?: WalletNetwork }): Promise<{ paymentId: string }> {
+  async requestFromGroup(params: { groupId: string; amount: number; memo?: string; timestamp: number; rail: "cashu" | "lightning"; network?: WalletNetwork; card?: string }): Promise<{ paymentId: string }> {
     assertAmount(params.amount);
     if (params.rail !== "cashu" && params.rail !== "lightning") throw new Error("A request to the group is paid in Cashu or over Lightning");
     const network = params.network ?? this.defaultNetwork();
     const id = newId();
     const memo = params.memo?.trim().slice(0, 140) || undefined;
-    const quote = params.rail === "lightning" ? await this.lightning[network].createInvoice(params.amount, id) : undefined;
+    const quote = params.rail === "lightning" ? await this.lightning[network].createInvoice(params.amount, id, params.card) : undefined;
     const own = (await this.wallet.view(network)).mints.map((m) => m.url);
     const mints = params.rail === "cashu" ? own.filter((url) => isWorthlessMint(url) === (network === "testnet")) : [];
     if (params.rail === "cashu" && !mints.length) throw new Error(`You have no ${networkLabel(network)} Cashu wallet: create one in Wallet → New`);
@@ -429,7 +430,7 @@ export class PaymentDesk {
    * Pays a contact's request: ecash when we share a mint with funds, Lightning from any of our mints otherwise.
    * `confirmedReal`: the person confirmed a Mainnet payment as real money; without it one is refused.
    */
-  payRequest(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number; network?: WalletNetwork; confirmedReal?: boolean }): Promise<void> {
+  payRequest(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number; network?: WalletNetwork; confirmedReal?: boolean; card?: string }): Promise<void> {
     const key = `${params.linkId}:${params.paymentId}`;
     const running = this.paying.get(key);
     if (running) return running;
@@ -438,7 +439,7 @@ export class PaymentDesk {
     return operation;
   }
 
-  private async payRequestOnce(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number; network?: WalletNetwork; confirmedReal?: boolean }): Promise<void> {
+  private async payRequestOnce(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number; network?: WalletNetwork; confirmedReal?: boolean; card?: string }): Promise<void> {
     const request = this.payments.get(params.paymentId);
     if (!request || request.kind !== "request" || request.direction !== "in" || request.linkId !== params.linkId) {
       throw new Error("Unknown payment request");
@@ -479,7 +480,8 @@ export class PaymentDesk {
       }
     } else if (!lightning) throw new Error("No way of paying this request is allowed in this chat");
 
-    const quote = await this.lightning[network].quote(request.invoice!);
+    // Through the Lightning card the person picked; the network's default one otherwise.
+    const quote = await this.lightning[network].quote(request.invoice!, params.card);
     if (quote.amount !== request.amount) throw new Error("The invoice does not match the requested amount");
     // Never above the ceiling the person approved, when they set one.
     const feeLimit = Math.min(Math.max(10, Math.ceil(request.amount * 0.03)), params.maxFee ?? Infinity);

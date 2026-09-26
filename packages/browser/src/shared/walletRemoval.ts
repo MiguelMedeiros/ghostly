@@ -21,7 +21,9 @@ export interface WalletRemoval {
   backup: WalletBackup;
   /** Payments through it that are not finished: they must end (or be cancelled) first. */
   pending: number;
-  /** It comes with another wallet and goes with it (Lightning through the Cashu mints). */
+  /** A Lightning card: which one. */
+  card?: string;
+  /** It comes with another wallet and goes with it (Lightning through the Cashu mints, while it is the network's only card). */
   comesWith?: WalletType;
   /**
    * Money it still waits for: requests of ours only it can be paid through, its invoices, paid invoices whose ecash is
@@ -49,7 +51,7 @@ const known = (amount: number, network: WalletNetwork) => ({ empty: amount <= 0,
 const phraseHeld = (secrets: string[] | undefined) => !!secrets?.includes("mnemonic");
 
 /** The parts of a network's view a removal reads. */
-export type RemovalView = Partial<Pick<NetworkWalletsView, "balance" | "lightning" | "bitcoin" | "ark" | "bark" | "spark" | "fedimint" | "usdt" | "awaiting">>;
+export type RemovalView = Partial<Pick<NetworkWalletsView, "balance" | "lightning" | "lightnings" | "bitcoin" | "ark" | "bark" | "spark" | "fedimint" | "usdt" | "awaiting">>;
 
 const ITEM: Record<WalletAwaitingView["kind"], (amount: string) => string> = {
   request: (a) => `A request for ${a} in a chat, still open`,
@@ -59,27 +61,34 @@ const ITEM: Record<WalletAwaitingView["kind"], (amount: string) => string> = {
   sent: (a) => `${a} in ecash you sent, not taken yet`,
 };
 
-function items(type: WalletType, network: WalletNetwork, view: RemovalView | undefined) {
+function items(type: WalletType, network: WalletNetwork, view: RemovalView | undefined, card?: string) {
   const amount = (n: number) => type === "usdt"
     ? `${formatPaymentAmount(String(n), view?.usdt?.decimals ?? 6)} ${network === "testnet" ? "TEST-USDT" : "USDT"}`
     : sats(n, network);
   // Lightning through the mints is the Cashu wallet's: what it waits for is listed there.
-  const mine = (view?.awaiting ?? []).filter((a) => a.type === type);
+  // A Lightning card's own: what went through it (one of several), or through none named.
+  const mine = (view?.awaiting ?? []).filter((a) => a.type === type && (card === undefined || a.card === undefined || a.card === card));
   const item = (a: WalletAwaitingView): RemovalItem => ({ kind: a.kind, text: ITEM[a.kind](amount(a.amount)), amount: amount(a.amount), ...(a.paymentId ? { paymentId: a.paymentId } : {}) });
   // Cashu sent from a mint comes back once the mint is added again; Fedimint notes are taken back through the removed client only.
   const returns = (a: WalletAwaitingView) => a.kind === "sent" && type === "cashu";
   return { awaiting: mine.filter((a) => !returns(a)).map(item), returnable: mine.filter(returns).map(item) };
 }
 
-/** What removing the `type` wallet of `network` takes away. `intents`: the profile's payments (the wallet view's `intents`). */
-export function walletRemoval(type: WalletType, network: WalletNetwork, view: RemovalView | undefined, intents: readonly PaymentReview[] = []): WalletRemoval {
-  const base = { type, network, ...items(type, network, view) };
+/**
+ * What removing the `type` wallet of `network` takes away. `intents`: the profile's payments (the wallet view's
+ * `intents`). `card`: the Lightning card (absent: the network's default for receiving).
+ */
+export function walletRemoval(type: WalletType, network: WalletNetwork, view: RemovalView | undefined, intents: readonly PaymentReview[] = [], card?: string): WalletRemoval {
+  const lnCard = type === "lightning" ? view?.lightnings?.find((c) => (card === undefined ? c.receive : c.card === card)) : undefined;
+  const base = { type, network, ...items(type, network, view, lnCard?.card ?? card), ...(lnCard ? { card: lnCard.card } : card !== undefined ? { card } : {}) };
   const pending = intents.filter((i) => i.method === type && UNFINISHED.has(i.state) && walletNetworkOf(i.network) === network).length;
   switch (type) {
     case "cashu": return { ...base, custody: "device", held: known(view?.balance ?? 0, network), backup: "tokens", pending };
     case "lightning": {
-      const ln = view?.lightning;
-      if (!ln?.providerId || ln.providerId === "cashu-mint") return { ...base, custody: "elsewhere", held: known(0, network), backup: "none", pending: 0, comesWith: "cashu", awaiting: [], returnable: [] };
+      const ln = lnCard ?? view?.lightning;
+      // The mints' card holds nothing of its own (its ecash is the Cashu wallet's): it goes alone next to other cards.
+      const others = (view?.lightnings ?? []).some((c) => c.card !== lnCard?.card);
+      if (!ln?.providerId || ln.providerId === "cashu-mint") return { ...base, custody: "elsewhere", held: known(0, network), backup: "none", pending: 0, ...(others ? {} : { comesWith: "cashu" as const }), awaiting: [], returnable: [] };
       const device = phraseHeld(ln.secrets);
       return { ...base, custody: device ? "device" : "elsewhere", held: ln.status === "ready" && ln.balance !== undefined ? known(ln.balance, network) : device ? "unknown" : known(0, network), backup: "none", pending };
     }

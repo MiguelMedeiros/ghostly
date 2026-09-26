@@ -14,7 +14,7 @@ import { intentRepository } from "./paymentAdapters/persistence";
 import type { ArkPrepared } from "./paymentAdapters/arkade";
 import { CashuAdapter } from "./paymentAdapters/cashu";
 import type { CashuPrepared } from "./wallet";
-import { LightningService } from "./paymentAdapters/providers/lightningService";
+import { CASHU_CARD, LightningCards } from "./paymentAdapters/providers/lightningCards";
 import { BitcoinService, type BitcoinPrepared } from "./paymentAdapters/providers/bitcoinService";
 import { CASHU_MINT_SOURCE } from "./paymentAdapters/providers/cashuMint";
 import { BREEZ_SOURCE } from "./paymentAdapters/providers/breez";
@@ -471,12 +471,20 @@ export class GhostlyNode implements EngineImplementation {
   private stopWatchingAdapters?: () => void;
   /** Read when a source connects, once the constructor has run. */
   private readonly providerHost = (network: WalletNetwork) => ({ platform: this.options.platform ?? "web" as const, cashu: this.wallet, fedimint: this.fedimintWallets[network], invoke: this.options.invoke });
-  /** Lightning of each network, through its active source: the Cashu mints unless the person chose another. */
-  private readonly lightnings: PerNetwork<LightningService> = perNetwork((network) => new LightningService(network, () => this.providers().lightning, () => this.providerHost(network), {
-    changed: () => void this.refreshWallet(),
-    received: (op) => void this.desk.onLightningPaid(op),
-    resolved: (op, paid) => void this.desk.onLightningResolved(op, paid),
-  }, CASHU_MINT_SOURCE));
+  /**
+   * The Lightning cards of each network, each through its own source (the Cashu mints, a node, a wallet connection).
+   * A payment goes through the card picked for it; a request's invoice comes from the network's default for receiving.
+   */
+  private readonly lightnings: PerNetwork<LightningCards> = perNetwork((network) => new LightningCards(network, {
+    descriptors: () => this.providers().lightning,
+    host: () => this.providerHost(network),
+    hasMints: () => this.networkMints(network).length > 0,
+    events: {
+      changed: () => void this.refreshWallet(),
+      received: (op) => void this.desk.onLightningPaid(op),
+      resolved: (op, paid) => void this.desk.onLightningResolved(op, paid),
+    },
+  }));
   /** On-chain Bitcoin of each network, through its active source: none until the person sets one up. */
   private readonly bitcoins: PerNetwork<BitcoinService> = perNetwork((network) => new BitcoinService(network, () => this.providers().onchain, () => this.providerHost(network), () => { void this.refreshWallet(); void this.desk.reconcileBitcoinReceipts().catch(()=>{}); }));
   private readonly desk: PaymentDesk = new PaymentDesk(this.wallet, {
@@ -514,9 +522,9 @@ export class GhostlyNode implements EngineImplementation {
     },
     defaultNetwork: () => "mainnet",
   }, this.arkWallets, this.usdtWallets, this.barkWallets, perNetwork((network) => ({
-    createInvoice: (amount: number, paymentId: string) => this.lightnings[network].createInvoice(amount, { paymentId }),
-    quote: async (invoice: string) => { const quote = await this.lightnings[network].quote(invoice); return { ...quote, mint: quote.source === CASHU_MINT_SOURCE ? quote.mint : undefined }; },
-    pay: (quote: { quote: string }, note: string, paymentId: string) => this.lightnings[network].pay(quote.quote, { note, paymentId }),
+    createInvoice: async (amount: number, paymentId: string, card?: string) => (await this.lightningCard(network, card)).createInvoice(amount, { paymentId }),
+    quote: async (invoice: string, card?: string) => { const quote = await (await this.lightningCard(network, card)).quote(invoice); return { ...quote, mint: quote.source === CASHU_MINT_SOURCE ? quote.mint : undefined }; },
+    pay: (quote: { quote: string }, note: string, paymentId: string) => this.lightningQuote(network, quote.quote).pay(quote.quote, { note, paymentId }),
     // "I paid": the source, the mints and the federations are asked now; the request is paid only once one of them saw it.
     // A test mint's invoice waits for that word (StoredQuote `held`): the one the contact says it paid is let go.
     check: async (paid?: string) => { await Promise.all([this.lightnings[network].reconcile(), paid ? this.wallet.vouch(paid) : this.wallet.checkQuotes(), this.fedimintWallets[network].checkReceives()]); },
@@ -832,7 +840,7 @@ export class GhostlyNode implements EngineImplementation {
     const out = {} as Record<WalletNetwork, WalletAwaitingView[]>;
     for (const network of WALLET_NETWORKS) {
       const lightning = this.lightnings[network];
-      out[network] = walletAwaiting({ network, mints: this.networkMints(network), quotes, lightningOps: await lightning.list(), lightningSource: lightning.view.providerId, payments, now });
+      out[network] = walletAwaiting({ network, mints: this.networkMints(network), quotes, lightningOps: await lightning.list(), lightningSource: lightning.view?.providerId, lightningCard: lightning.receivingId, lightningOwner: (op) => lightning.owner(op), payments, now });
     }
     return out;
   }
@@ -862,7 +870,7 @@ export class GhostlyNode implements EngineImplementation {
       const history = view.history.filter((tx) => !tx.mint || mintNetwork(tx.mint) === network);
       networks[network] = { mints: view.mints, balance: view.balance, history, feesPaid: history.reduce((sum, tx) => sum + tx.fee, 0),
         ark: this.arkWallets[network].view, bark: this.barkWallets[network].view, fedimint: this.fedimintWallets[network].view, spark: this.sparkWallets[network].view,
-        usdt: this.usdtWallets[network].view, lightning: this.lightnings[network].view, bitcoin: this.bitcoins[network].view, awaiting: awaiting[network] };
+        usdt: this.usdtWallets[network].view, lightning: this.lightnings[network].view, lightnings: this.lightnings[network].views(), bitcoin: this.bitcoins[network].view, awaiting: awaiting[network] };
     }
     const wallets = walletInstances(networks);
     // The flat fields are Mainnet's, for a caller from before wallets had their own network; `networks` has both.
@@ -1315,7 +1323,7 @@ export class GhostlyNode implements EngineImplementation {
     for (const live of this.links.values()) live.link?.wake();
     this.hold.wake();
     // A wallet source that could not be reached at start-up (no network yet, a server asleep) tries again.
-    for (const network of WALLET_NETWORKS) { this.lightnings[network].sources.wake(); this.bitcoins[network].sources.wake(); }
+    for (const network of WALLET_NETWORKS) { this.lightnings[network].wake(); this.bitcoins[network].sources.wake(); }
   }
 
   exportLinks() {
@@ -2043,6 +2051,7 @@ export class GhostlyNode implements EngineImplementation {
     if (offer && !offer.available) throw new Error(offer.reason ?? "This wallet cannot be made here");
     if (offer?.exists && type !== "lightning" && type !== "fedimint") throw new Error(`You already have a ${networkLabel(network)} ${WALLET_NAMES[type]} wallet`);
     const label = `${networkLabel(network)} ${WALLET_NAMES[type]}`;
+    let card: string | undefined;
     try {
       if (type === "cashu") await this.createCashu(network);
       else if (type === "arkade") await this.creating(this.arkWallets[network], () => this.arkWallets[network].createDefaultNow());
@@ -2056,20 +2065,22 @@ export class GhostlyNode implements EngineImplementation {
         await this.creating(this.fedimintWallets[network], () => this.fedimintWallets[network].join(params.invite!));
         void this.lightnings[network].ensureReady();
       } else {
-        const service = type === "lightning" ? this.lightnings[network] : this.bitcoins[network];
+        const sources = type === "lightning" ? (await this.lightningCard(network)).sources : this.bitcoins[network].sources;
         const providerId = params.providerId ?? "";
-        const descriptor = service.sources.view.offered.find((d) => d.id === providerId);
+        const descriptor = sources.view.offered.find((d) => d.id === providerId);
         if (!descriptor) throw new Error(`Choose a ${type === "lightning" ? "Lightning" : "Bitcoin"} source that runs on ${networkLabel(network)}`);
         // What the person left blank takes the network's default (a BDK wallet's chain), the rest as typed.
         const values = { ...Object.fromEntries(descriptor.fields.flatMap((f) => f.defaults?.[network] ? [[f.name, f.defaults[network]!]] : [])), ...(params.values ?? {}) };
-        await this.creating(service.sources, () => service.sources.set(providerId, values));
+        // Lightning: one more card, next to the network's others (the same source may be added again, not the same wallet).
+        if (type === "lightning") card = await this.creating(this.lightnings[network], () => this.lightnings[network].add(providerId, values));
+        else await this.creating(sources, () => sources.set(providerId, values));
       }
     } catch (error) {
       await this.refreshWallet();
       throw Object.assign(new Error(createFailure(label, error)), { cause: error });
     }
     await this.refreshWallet();
-    const made = this.walletView.wallets?.find((w) => w.type === type && w.network === network);
+    const made = this.walletView.wallets?.find((w) => w.type === type && w.network === network && (card === undefined || w.card === card));
     if (!made) throw new Error(`The ${label} wallet did not come up. Nothing was lost: try again.`);
     return made;
   }
@@ -2078,10 +2089,10 @@ export class GhostlyNode implements EngineImplementation {
    * A creation that waits on the network gets `createTiming.timeoutMs`; then its waits are cut short, and what it did
    * decides (a wait cut short saves nothing). It is never raced: a wallet saved just in time is reported as made.
    */
-  private async creating(wallet: { cutShort(): void; resume(): void }, work: () => Promise<unknown>): Promise<void> {
+  private async creating<T>(wallet: { cutShort(): void; resume(): void }, work: () => Promise<T>): Promise<T> {
     let late = false;
     const timer = setTimeout(() => { late = true; wallet.cutShort(); }, createTiming.timeoutMs);
-    try { await work(); }
+    try { return await work(); }
     catch (error) { throw late && error instanceof ModeChanged ? new Error("It did not answer in time") : error; }
     finally { clearTimeout(timer); wallet.resume(); }
   }
@@ -2091,9 +2102,9 @@ export class GhostlyNode implements EngineImplementation {
    * Cashu, and Lightning through the mints: the test mint pays an invoice asked of it on purpose. USDT: Aave's Sepolia
    * faucet, paid with the wallet's own test ETH. Never Mainnet; nothing else asks a faucet, Receive included.
    */
-  async walletTestCoins({ type, network }: WalletTestCoins): Promise<TestCoinsResult> {
+  async walletTestCoins({ type, network, card }: WalletTestCoins): Promise<TestCoinsResult> {
     if (network !== "testnet") throw new Error("Test coins are for Testnet wallets only");
-    if (type === "cashu" || (type === "lightning" && (this.lightnings.testnet.view.providerId ?? CASHU_MINT_SOURCE) === CASHU_MINT_SOURCE)) {
+    if (type === "cashu" || (type === "lightning" && ((await this.lightningCard("testnet", card)).view.providerId ?? CASHU_MINT_SOURCE) === CASHU_MINT_SOURCE)) {
       let got: { amount: number };
       try { got = await this.wallet.testCoins(TEST_COINS_SATS, "testnet"); }
       catch (error) { throw faucetError(error); }
@@ -2118,17 +2129,21 @@ export class GhostlyNode implements EngineImplementation {
    * that it becomes unreachable. A payment through it that has not finished stops the removal. Its open requests are
    * closed, and their contacts told, so nobody pays them afterwards. Never logs a seed or a key.
    */
-  async walletRemove({ type, network, acceptLoss }: WalletRemove): Promise<void> {
+  async walletRemove({ type, network, acceptLoss, card: asked }: WalletRemove): Promise<void> {
     if (!WALLET_TYPES.includes(type)) throw new Error("Unknown kind of wallet");
     if (network !== "mainnet" && network !== "testnet") throw new Error("Choose Mainnet or Testnet");
+    await this.lightnings[network].start();
     await this.refreshWallet();
-    const label = `${networkLabel(network)} ${WALLET_NAMES[type]}`;
-    if (!this.walletView.wallets?.some((w) => w.type === type && w.network === network)) throw new Error(`There is no ${label} wallet to remove`);
-    const first = walletRemoval(type, network, this.walletView.networks?.[network], this.walletView.intents);
+    // A Lightning card: the one named, else the network's default for receiving (a caller from before cards).
+    const card = type === "lightning" ? asked ?? this.lightnings[network].receivingId : undefined;
+    const lightningName = card !== undefined ? this.walletView.networks?.[network].lightnings?.find((c) => c.card === card)?.name : undefined;
+    const label = lightningName ? `${networkLabel(network)} Lightning card “${lightningName}”` : `${networkLabel(network)} ${WALLET_NAMES[type]}`;
+    if (!this.walletView.wallets?.some((w) => w.type === type && w.network === network && (card === undefined || w.card === card))) throw new Error(`There is no ${label} wallet to remove`);
+    const first = walletRemoval(type, network, this.walletView.networks?.[network], this.walletView.intents, card);
     if (first.comesWith) throw new Error(`Lightning through the Cashu mints comes with your ${networkLabel(network)} Cashu wallet: remove that wallet to remove it`);
     // Ecash minted now is counted in what it holds, not deleted with its invoice.
-    if (first.awaiting.length) { await this.claimPaid(type, network); await this.refreshWallet(); }
-    const removal = first.awaiting.length ? walletRemoval(type, network, this.walletView.networks?.[network], this.walletView.intents) : first;
+    if (first.awaiting.length) { await this.claimPaid(type, network, card); await this.refreshWallet(); }
+    const removal = first.awaiting.length ? walletRemoval(type, network, this.walletView.networks?.[network], this.walletView.intents, card) : first;
     if (removal.pending) throw new Error(`A payment through this wallet is not finished yet (${removal.pending}). Cancel it or wait for it to settle, then remove the wallet.`);
     if (removalRisksFunds(removal) && acceptLoss !== true) throw new Error(lossRefusal(label, removal));
     // Its open requests close first, while the chats still carry payment frames: once its last wallet goes, a chat
@@ -2145,11 +2160,13 @@ export class GhostlyNode implements EngineImplementation {
       else if (type === "spark") await this.sparkWallets[network].remove();
       else if (type === "usdt") await this.usdtWallets[network].remove();
       else if (type === "fedimint") await this.fedimintWallets[network].remove();
-      else await (type === "lightning" ? this.lightnings[network] : this.bitcoins[network]).sources.clear();
+      else if (type === "lightning") await this.lightnings[network].remove(card!);
+      else await this.bitcoins[network].sources.clear();
     } finally {
       await this.refreshWallet();
     }
-    await this.forgetChatNetwork(type as PaymentMethodName, network);
+    // Another Lightning card of the network still takes what the chats accept on it.
+    if (!this.walletView.wallets?.some((w) => w.type === type && w.network === network)) await this.forgetChatNetwork(type as PaymentMethodName, network);
   }
 
   /**
@@ -2157,9 +2174,9 @@ export class GhostlyNode implements EngineImplementation {
    * its invoices, the chain or server about its requests), so money already there is claimed. Bounded: a mint or a
    * server that does not answer leaves what it holds as it was, still counted as awaited.
    */
-  private async claimPaid(type: WalletType, network: WalletNetwork): Promise<void> {
+  private async claimPaid(type: WalletType, network: WalletNetwork, card?: string): Promise<void> {
     const work = type === "cashu" ? this.wallet.checkQuotes(this.networkMints(network))
-      : type === "lightning" ? this.lightnings[network].reconcile()
+      : type === "lightning" ? this.lightnings[network].card(card).reconcile()
       : type === "fedimint" ? this.fedimintWallets[network].checkReceives()
       : type === "bitcoin" ? this.desk.reconcileBitcoinReceipts()
       : type === "arkade" ? this.desk.reconcileArkReceipts()
@@ -2228,11 +2245,16 @@ export class GhostlyNode implements EngineImplementation {
       const base = { type, network, exists: has(type, network) };
       if (type === "spark" && network === "mainnet") offers.push({ ...base, available: false, reason: SPARK_MAINNET_NOT_YET });
       else if (type === "fedimint") offers.push(network === "mainnet" && !FEDIMINT_MAINNET ? { ...base, available: false, reason: FEDIMINT_MAINNET_UNAVAILABLE } : { ...base, available: true, needs: "invite" });
-      else if (type === "lightning" || type === "bitcoin") {
-        // Lightning through the Cashu mints comes with a Cashu wallet: New offers the other sources.
-        const providers = (type === "lightning" ? view.lightning : view.bitcoin)?.offered.filter((d) => d.id !== CASHU_MINT_SOURCE) ?? [];
-        const custom = type === "lightning" ? !!view.lightning?.providerId && view.lightning.providerId !== CASHU_MINT_SOURCE : base.exists;
-        offers.push(providers.length ? { ...base, exists: custom, available: true, needs: "provider", providers } : { ...base, exists: custom, available: false, reason: `No ${type === "lightning" ? "Lightning source" : "on-chain wallet"} runs on ${networkLabel(network)} here yet` });
+      else if (type === "lightning") {
+        // A network takes several Lightning cards. The Cashu mints' one comes with a Cashu wallet, and is offered again
+        // only to a network that has mints and no such card.
+        const cards = this.lightnings[network], cashuCard = !cards.has(CASHU_CARD) && this.networkMints(network).length > 0;
+        const providers = view.lightning?.offered.filter((d) => d.id !== CASHU_MINT_SOURCE || cashuCard) ?? [];
+        const custom = (view.lightnings ?? []).some((c) => c.providerId !== CASHU_MINT_SOURCE);
+        offers.push(providers.length ? { ...base, exists: custom, several: true, available: true, needs: "provider", providers } : { ...base, exists: custom, several: true, available: false, reason: `No Lightning source runs on ${networkLabel(network)} here yet` });
+      } else if (type === "bitcoin") {
+        const providers = view.bitcoin?.offered ?? [];
+        offers.push(providers.length ? { ...base, available: true, needs: "provider", providers } : { ...base, available: false, reason: `No on-chain wallet runs on ${networkLabel(network)} here yet` });
       } else offers.push({ ...base, available: true });
     }
     return offers;
@@ -2268,27 +2290,31 @@ export class GhostlyNode implements EngineImplementation {
     await this.refreshWallet();
   }
 
-  /** `via: "cashu"`: ecash straight from the network's mints (the Cashu card). Otherwise its active Lightning source. */
-  async walletReceiveLightning({ amount, via, network }: { amount: number; via?: "cashu"; network?: WalletNetwork }) {
+  /**
+   * `via: "cashu"`: ecash straight from the network's mints (the Cashu card). Otherwise the Lightning card named, or the
+   * network's default for receiving.
+   */
+  async walletReceiveLightning({ amount, via, network, card }: { amount: number; via?: "cashu"; network?: WalletNetwork; card?: string }) {
     const n = this.net(network);
     if (via === "cashu") {
       const quote = await this.wallet.receiveLightning(amount, undefined, n);
       return { quote: quote.quote, invoice: quote.invoice, expiresAt: quote.expiresAt, source: CASHU_MINT_SOURCE };
     }
-    const created = await this.lightnings[n].createInvoice(amount);
+    const created = await (await this.lightningCard(n, card)).createInvoice(amount);
     return { quote: created.paymentHash, invoice: created.invoice, expiresAt: created.expiresAt, paymentHash: created.paymentHash, source: created.source };
   }
 
-  walletQuoteInvoice({ invoice, via, network }: { invoice: string; via?: "cashu"; network?: WalletNetwork }) {
+  /** `card`: the Lightning card that will pay; absent, the network's default one. */
+  walletQuoteInvoice({ invoice, via, network, card }: { invoice: string; via?: "cashu"; network?: WalletNetwork; card?: string }) {
     const n = this.net(network);
-    return via === "cashu" ? this.wallet.quoteInvoice(invoice, n) : this.lightnings[n].quote(invoice);
+    return via === "cashu" ? this.wallet.quoteInvoice(invoice, n) : this.lightningCard(n, card).then((c) => c.quote(invoice));
   }
 
   /** `confirmedReal`: the person confirmed a Mainnet payment as real money; without it one is refused. */
   async walletPayQuote({ quote, mint, note, confirmedReal }: { quote: string; mint: string; note?: string; confirmedReal?: boolean }) {
-    // A quote of a network's Lightning source (it knows its own), or a melt quote the Cashu card asked the mints for.
-    const network = WALLET_NETWORKS.find((n) => this.lightnings[n].hasQuote(quote));
-    const lightning = network && this.lightnings[network];
+    // A quote of a Lightning card (each knows its own), or a melt quote the Cashu card asked the mints for.
+    const network = WALLET_NETWORKS.find((n) => this.lightnings[n].withQuote(quote));
+    const lightning = network && this.lightnings[network].withQuote(quote);
     assertConfirmedReal(network ?? mintNetwork(mint), confirmedReal);
     return { paid: lightning ? await lightning.pay(quote, { note }) : await this.wallet.payQuote(quote, mint, note) };
   }
@@ -2296,16 +2322,51 @@ export class GhostlyNode implements EngineImplementation {
   /** A Lightning address or LNURL (LUD-16, LUD-06): resolved here, in the engine, so every platform fetches the same way. */
   lnurlResolve({ text, network }: { text: string; network?: WalletNetwork }) { return this.lightnings[this.net(network)].resolveDestination(text); }
   lnurlInvoice({ id, amount, comment, network }: { id: string; amount: number; comment?: string; network?: WalletNetwork }) { return this.lightnings[this.net(network)].destinationInvoice(id, amount, comment); }
+  /** A Lightning card of a network (the default for receiving without `card`), once the network's cards are open. */
+  private async lightningCard(network: WalletNetwork, card?: string) { const cards = this.lightnings[network]; await cards.start(); return cards.card(card); }
+  /** The Lightning card that holds this quote, or a refusal: nothing is paid without one. */
+  private lightningQuote(network: WalletNetwork, quote: string) {
+    const card = this.lightnings[network].withQuote(quote);
+    if (!card) throw new Error("This quote is no longer valid: check the invoice again");
+    return card;
+  }
 
   checkPayment(params: { linkId: string; paymentId: string }) { return this.desk.checkPayment(params); }
 
-  /** Makes a provider this network's Lightning source, with the values of its form (secrets are sealed). */
-  async lightningSetSource({ providerId, values, network }: { providerId: string; values: Record<string, string>; network?: WalletNetwork }) { await this.lightnings[this.net(network)].sources.set(providerId, values); await this.refreshWallet(); }
-  /** Back to the default source, the Cashu mints. */
-  async lightningClearSource(params?: { network?: WalletNetwork }) { await this.lightnings[this.net(params?.network)].sources.clear(); await this.refreshWallet(); }
-  async lightningRetrySource(params?: { network?: WalletNetwork }) { await this.lightnings[this.net(params?.network)].sources.retryNow(); await this.refreshWallet(); }
-  async lightningReconfigureSource({ values, network }: { values: Record<string, string>; network?: WalletNetwork }) { await this.lightnings[this.net(network)].sources.reconfigure(values); await this.refreshWallet(); }
-  async lightningRefresh(params?: { network?: WalletNetwork }) { const lightning = this.lightnings[this.net(params?.network)]; await lightning.sources.refresh(); await lightning.reconcile(); }
+  /**
+   * A card's source with new values of its form (secrets are sealed): the same provider only, a card keeps its source.
+   * Without `card` (a caller from before cards), "this network's Lightning goes through `providerId`": the card of
+   * that very wallet, or a new one, becomes the default for receiving.
+   */
+  async lightningSetSource({ providerId, values, network, card }: { providerId: string; values: Record<string, string>; network?: WalletNetwork; card?: string }) {
+    const cards = this.lightnings[this.net(network)];
+    const target = await this.lightningCard(this.net(network), card);
+    if (card !== undefined) {
+      if (target.view.providerId !== providerId || providerId === CASHU_MINT_SOURCE) throw new Error("A card keeps its source: add another card with New");
+      await target.sources.set(providerId, values);
+    } else if (providerId === CASHU_MINT_SOURCE) await this.lightningClearSource({ network });
+    else await cards.setReceive((await cards.findSame(providerId, values)) ?? (await cards.add(providerId, values)));
+    await this.refreshWallet();
+  }
+  /**
+   * Back to the Cashu mints (a caller from before cards): the card named, else the default for receiving, is removed,
+   * and the Cashu card becomes the default for receiving.
+   */
+  async lightningClearSource(params?: { network?: WalletNetwork; card?: string }) {
+    const network = this.net(params?.network), cards = this.lightnings[network];
+    await cards.start();
+    const id = params?.card ?? cards.receivingId;
+    if (id !== CASHU_CARD) await cards.remove(id);
+    if (!cards.has(CASHU_CARD) && this.networkMints(network).length) await cards.add(CASHU_MINT_SOURCE, {});
+    if (cards.has(CASHU_CARD) && this.networkMints(network).length) await cards.setReceive(CASHU_CARD);
+    await this.refreshWallet();
+  }
+  async lightningRetrySource(params?: { network?: WalletNetwork; card?: string }) { await (await this.lightningCard(this.net(params?.network), params?.card)).sources.retryNow(); await this.refreshWallet(); }
+  async lightningReconfigureSource({ values, network, card }: { values: Record<string, string>; network?: WalletNetwork; card?: string }) { await (await this.lightningCard(this.net(network), card)).sources.reconfigure(values); await this.refreshWallet(); }
+  async lightningRefresh(params?: { network?: WalletNetwork; card?: string }) { const lightning = await this.lightningCard(this.net(params?.network), params?.card); await lightning.sources.refresh(); await lightning.reconcile(); }
+  /** Makes a card its network's default for receiving: chat requests and Receive use it unless another is picked. */
+  async lightningSetReceive({ network, card }: { network: WalletNetwork; card: string }) { await this.lightnings[this.net(network)].setReceive(card); await this.refreshWallet(); }
+  async lightningRename({ network, card, name }: { network: WalletNetwork; card: string; name: string }) { await this.lightnings[this.net(network)].rename(card, name); await this.refreshWallet(); }
   async bitcoinSetSource({ providerId, values, network }: { providerId: string; values: Record<string, string>; network?: WalletNetwork }) { await this.bitcoins[this.net(network)].sources.set(providerId, values); await this.refreshWallet(); }
   async bitcoinClearSource(params?: { network?: WalletNetwork }) { await this.bitcoins[this.net(params?.network)].sources.clear(); await this.refreshWallet(); }
   async bitcoinRetrySource(params?: { network?: WalletNetwork }) { await this.bitcoins[this.net(params?.network)].sources.retryNow(); await this.refreshWallet(); }
@@ -2401,8 +2462,7 @@ export class GhostlyNode implements EngineImplementation {
   async sparkUseForLightning(params?: { network?: WalletNetwork }) {
     const network = this.net(params?.network);
     const { mnemonic, apiKey } = await this.sparkWallets[network].backup();
-    await this.lightnings[network].sources.set(BREEZ_SOURCE, { mnemonic, ...(apiKey ? { apiKey } : {}) });
-    await this.refreshWallet();
+    await this.lightningSetSource({ providerId: BREEZ_SOURCE, values: { mnemonic, ...(apiKey ? { apiKey } : {}) }, network });
   }
   async preparePayment(params: Parameters<EngineApi["preparePayment"]>[0]) {
     // The card chosen and what it pays are on one network, or nothing is prepared: test coins never pay for real money.
@@ -2491,13 +2551,14 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** `network`: the card's network; the request is paid only by a wallet of that network. */
-  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark"; rail?: "cashu" | "lightning"; network?: WalletNetwork }) {
-    return this.desk.request({ linkId: params.linkId, amount: params.amount, memo: params.memo, timestamp: params.timestamp, method: params.method, network: this.net(params.network),
+  /** `card`: the Lightning card the request's invoice comes from; absent, the network's default for receiving. */
+  requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark"; rail?: "cashu" | "lightning"; network?: WalletNetwork; card?: string }) {
+    return this.desk.request({ linkId: params.linkId, amount: params.amount, memo: params.memo, timestamp: params.timestamp, method: params.method, network: this.net(params.network), card: params.card,
       ...(params.rail === "cashu" || params.rail === "lightning" ? { rail: params.rail } : {}) });
   }
 
   /** A request any member of a group may pay, once (WISP 9xx § Payments). */
-  requestGroupPayment(params: { groupId: string; amount: number; memo?: string; timestamp: number; rail: "cashu" | "lightning"; network?: WalletNetwork }) {
+  requestGroupPayment(params: { groupId: string; amount: number; memo?: string; timestamp: number; rail: "cashu" | "lightning"; network?: WalletNetwork; card?: string }) {
     const group = this.groups.views().find(g => g.id === params.groupId);
     if (group?.status !== "active") throw new Error("You are not in this group");
     if (group.members.length < 2) throw new Error("Nobody else is in the group yet");
@@ -2510,8 +2571,11 @@ export class GhostlyNode implements EngineImplementation {
     return this.desk.ask({ ...params, network: this.net(params.network) });
   }
 
-  /** `network`: the card chosen to pay; a request of the other network is refused, nothing spent. `confirmedReal`: required on Mainnet. */
-  payRequest(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number; network?: WalletNetwork; confirmedReal?: boolean }) {
+  /**
+   * `network`: the card chosen to pay; a request of the other network is refused, nothing spent. `card`: the Lightning card
+   * that pays; absent, the network's default one. `confirmedReal`: required on Mainnet.
+   */
+  payRequest(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number; network?: WalletNetwork; confirmedReal?: boolean; card?: string }) {
     return this.desk.payRequest(params);
   }
 

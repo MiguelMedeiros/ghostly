@@ -2,6 +2,7 @@ import { WALLET_NETWORKS, decodeBolt11, walletNetworkOf, type PaymentMethodName,
 import { mintNetwork } from "../../shared/mints";
 import { WALLET_TYPES, type NetworkWalletsView, type StoredPayment, type WalletInstanceView, type WalletType } from "../../shared/types";
 import { CASHU_MINT_SOURCE } from "./providers/cashuMint";
+import { CASHU_CARD, LEGACY_CARD } from "./providers/lightningCards";
 import { networkLabel } from "./modeGate";
 
 export const WALLET_NAMES: Record<WalletType, string> = {
@@ -14,28 +15,34 @@ export const createTiming = { timeoutMs: 60_000 };
 export const SPARK_MAINNET_NOT_YET = "Spark on Mainnet has not been tried with real funds yet. Create a Testnet Spark wallet (regtest) instead.";
 
 /**
- * The wallets a profile has, read from both networks' views: one per type and network, in the deck's order. A
- * wallet exists once it holds something to open (a seed, a source, a mint); Lightning through the Cashu mints
- * comes with that network's Cashu wallet.
+ * The wallets a profile has, read from both networks' views: one per type and network, in the deck's order, and one
+ * per Lightning card. A wallet exists once it holds something to open (a seed, a source, a mint); Lightning through
+ * the Cashu mints comes with that network's Cashu wallet.
  */
 export function walletInstances(networks: Record<WalletNetwork, NetworkWalletsView>): WalletInstanceView[] {
   const list: WalletInstanceView[] = [];
   for (const type of WALLET_TYPES) for (const network of WALLET_NETWORKS) {
+    if (type === "lightning") { list.push(...lightningInstances(network, networks[network])); continue; }
     const config = instanceConfig(type, networks[network]);
     if (config) list.push({ id: `${type}:${network}`, type, network, config });
   }
   return list;
 }
 
+/** A network's Lightning cards (a view from before cards: its one source, as one card). */
+function lightningInstances(network: WalletNetwork, view: NetworkWalletsView): WalletInstanceView[] {
+  const cards = view.lightnings ?? (view.lightning ? [{ ...view.lightning, card: view.lightning.providerId === CASHU_MINT_SOURCE || !view.lightning.providerId ? CASHU_CARD : LEGACY_CARD, name: "", receive: true }] : []);
+  return cards.flatMap((ln) => {
+    if (!ln.providerId || (ln.providerId === CASHU_MINT_SOURCE && !view.mints.length)) return [];
+    return [{ id: `lightning:${network}:${ln.card}`, type: "lightning" as const, network, config: { providerId: ln.providerId, label: ln.label ?? "" }, card: ln.card, name: ln.name || ln.label || "Lightning", receive: ln.receive }];
+  });
+}
+
 function instanceConfig(type: WalletType, view: NetworkWalletsView): Record<string, string> | undefined {
   const text = (value: unknown) => typeof value === "string" ? value : "";
   switch (type) {
     case "cashu": return view.mints.length ? { mint: view.mints[0].url, mints: String(view.mints.length) } : undefined;
-    case "lightning": {
-      const ln = view.lightning;
-      if (!ln?.providerId || (ln.providerId === CASHU_MINT_SOURCE && !view.mints.length)) return undefined;
-      return { providerId: ln.providerId, label: text(ln.label) };
-    }
+    case "lightning": return undefined;
     case "arkade": return view.ark?.configured ? { chain: text(view.ark.network), provider: text(view.ark.provider) } : undefined;
     case "bark": return view.bark?.configured ? { chain: text(view.bark.network), provider: text(view.bark.provider) } : undefined;
     case "spark": return view.spark?.configured ? { chain: text(view.spark.network) } : undefined;
