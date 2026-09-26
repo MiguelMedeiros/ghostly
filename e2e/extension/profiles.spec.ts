@@ -129,13 +129,13 @@ test("the extension keeps several profiles: create, switch, restore a backup int
   await openChatAt(ext, chatHash);
   await expect(chat(ext).getByText("back home").first()).toBeVisible();
 
-  // The account bar's switcher does the same in one tap, and the peer follows it too.
-  await page.getByTestId("account-profile-switcher").click();
+  // The account bar's switcher (a click on its Profile place) does the same in one tap, and the peer follows it too.
+  await page.getByTestId("account-profile").click();
   await page.getByTestId("profile-switcher").getByTestId("profile-switcher-item").filter({ hasText: "Pessoal (restored)" }).click();
   await expect(page.getByTestId("account-profile")).toHaveAttribute("title", /: Pessoal \(restored\)$/, { timeout: 60_000 });
   await openChatAt(ext, chatHash);
   await reaches(web, ext, "switched in one tap");
-  await page.getByTestId("account-profile-switcher").click();
+  await page.getByTestId("account-profile").click();
   await page.getByTestId("profile-switcher").getByTestId("profile-switcher-item").filter({ hasText: "Pessoal" }).filter({ hasNotText: "restored" }).click();
   await expect(page.getByTestId("account-profile")).toHaveAttribute("title", /: Pessoal$/, { timeout: 60_000 });
 
