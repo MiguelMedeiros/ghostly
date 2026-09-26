@@ -42,15 +42,17 @@ export function useOutsideDismiss(ref: RefObject<HTMLElement | null>, open: bool
 
 /**
  * A modal made of plain elements: focus moves into it when it opens (so keys reach it even when what
- * opened it is gone), Escape anywhere closes it, and focus goes back where it was on close.
+ * opened it is gone), Escape anywhere closes it, and focus goes back where it was on close, unless `restore` says
+ * no (what it made takes the focus instead).
  */
-export function useDialogFocus(ref: RefObject<HTMLElement | null>, onClose: () => void) {
+export function useDialogFocus(ref: RefObject<HTMLElement | null>, onClose: () => void, restore: () => boolean = () => true) {
   const callback = useRef(onClose); callback.current = onClose;
+  const restoring = useRef(restore); restoring.current = restore;
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null;
     if (ref.current && !ref.current.contains(document.activeElement)) ref.current.focus();
     const key = (e: KeyboardEvent) => { if (e.key === "Escape" && !e.defaultPrevented) { e.preventDefault(); callback.current(); } };
     document.addEventListener("keydown", key);
-    return () => { document.removeEventListener("keydown", key); if (before?.isConnected) before.focus(); };
+    return () => { document.removeEventListener("keydown", key); if (before?.isConnected && restoring.current()) before.focus(); };
   }, [ref]);
 }

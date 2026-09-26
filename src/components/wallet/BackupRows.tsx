@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Block, Button, Notice, Row, input } from "./ui";
 import { downloadJson } from "./run";
 import { InputGroup } from "../layout";
@@ -7,10 +7,11 @@ type Open = "none" | "phrase" | "backup" | "restore";
 
 /**
  * Recovery phrase, encrypted backup and restore: the same three rows for every self-custodial wallet. Without
- * `restorePhrase` and `restoreFile` (a backup before removing the wallet), only the first two.
+ * `restorePhrase` and `restoreFile` (a backup before removing the wallet), only the first two. `focusFirst` (a wallet
+ * just made, to back up now) scrolls the rows into view and puts the focus on the phrase's Show.
  */
-export function BackupRows({ name, reveal, exportBackup, restorePhrase, restoreFile, canReplace = false, busy, run }: {
-  name: string; busy: boolean; canReplace?: boolean;
+export function BackupRows({ name, reveal, exportBackup, restorePhrase, restoreFile, canReplace = false, busy, run, focusFirst = false }: {
+  name: string; busy: boolean; canReplace?: boolean; focusFirst?: boolean;
   reveal: () => Promise<string>;
   exportBackup: (password: string) => Promise<string>;
   restorePhrase?: (phrase: string) => Promise<void>;
@@ -21,10 +22,17 @@ export function BackupRows({ name, reveal, exportBackup, restorePhrase, restoreF
   const [phrase, setPhrase] = useState(""), [password, setPassword] = useState(""), [restore, setRestore] = useState(""), [file, setFile] = useState(""), [filePassword, setFilePassword] = useState("");
   const toggle = (next: Open) => { setOpen(open === next ? "none" : next); setPhrase(""); setPassword(""); };
   const slug = name.toLowerCase();
+  const show = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const el = show.current;
+    if (!focusFirst || !el) return;
+    el.scrollIntoView?.({ block: "center" });
+    el.focus({ preventScroll: true });
+  }, [focusFirst]);
   return (
     <>
       <Row label="Recovery phrase" hint="Anyone with it can spend this wallet">
-        <Button onClick={() => open === "phrase" ? toggle("none") : void run(async () => { setPhrase(await reveal()); setOpen("phrase"); })} disabled={busy}>{open === "phrase" ? "Hide" : "Show"}</Button>
+        <Button ref={show} data-testid={`${slug}-recovery-show`} onClick={() => open === "phrase" ? toggle("none") : void run(async () => { setPhrase(await reveal()); setOpen("phrase"); })} disabled={busy}>{open === "phrase" ? "Hide" : "Show"}</Button>
       </Row>
       {open === "phrase" && phrase && <Block><p className="select-all text-sm text-text-primary font-mono leading-relaxed break-words" data-testid={`${slug}-recovery`}>{phrase}</p></Block>}
       <Row label="Wallet backup" hint="This wallet only; the profile backup has everything">

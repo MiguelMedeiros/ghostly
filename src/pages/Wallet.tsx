@@ -1,4 +1,5 @@
-import { useDeferredValue, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useDeferredValue, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import "../components/wallet/wallet-networks.css";
 import { WalletDeck, walletCardTestId } from "../components/WalletDeck";
 import { cardId, networkState, parseCardId, walletCards, type InstanceCard } from "../components/walletCardData";
@@ -20,7 +21,9 @@ import { MONEY_LABEL, NetworkTag } from "../components/NetworkTag";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { useI18n } from "../contexts/I18nContext";
 import { Page, PageAction } from "../components/layout";
-import type { WalletNetwork, WalletPlatform, WalletState } from "../lib/platform";
+import { focusInPlace } from "../lib/focus";
+import { navOnly } from "../lib/navigation";
+import type { WalletInstanceView, WalletNetwork, WalletPlatform, WalletState } from "../lib/platform";
 
 const CARD_KEY = "ghostly-wallet-card";
 /** The card chosen last in this tab: a wallet's id, or (a tab from before wallets had networks) a rail. */
@@ -36,6 +39,11 @@ const rememberedNetwork = (): WalletNetwork | null => {
 };
 /** Real money first, then test money: each network's wallets are a deck of their own, never mixed. */
 const NETWORKS: readonly WalletNetwork[] = ["mainnet", "testnet"];
+/**
+ * A wallet whose real money rests on a recovery phrase kept on this device: made with New, it opens on its backup rows
+ * (Settings), asking for a copy of the phrase before money goes in. Real money with no copy is one lost device from gone.
+ */
+const backupFirst = (made: WalletInstanceView) => made.network === "mainnet" && made.type === "bark";
 const ABOUT: Record<WalletNetwork, string> = { mainnet: "Money you own: spend it with care.", testnet: "Test coins, worth nothing: for trying things out." };
 
 /**
@@ -64,10 +72,20 @@ export function Wallet() {
   // How the last switch went, for the deck's way in (none as the page opens: the deck has no entry motion).
   const [swap, setSwap] = useState<"next" | "prev" | null>(null);
   const [creating, setCreating] = useState<WalletNetwork | null>(null);
+  // "Create a … wallet" elsewhere (a chat's money card) comes here with `newWallet`: New opens on that network, once.
+  const location = useLocation(), navigate = useNavigate();
+  const asked = (location.state as { newWallet?: { network?: unknown } } | null)?.newWallet;
+  useEffect(() => {
+    if (!asked) return;
+    if (isNetwork(asked.network)) setCreating(asked.network);
+    void navigate(location.pathname, { replace: true, state: navOnly(location.state) });
+  }, [asked, location.pathname, location.state, navigate]);
   // The first setup stays in view until it ends: its second wallet, or its one failure, still has something to say.
   const [firstRun, setFirstRun] = useState(false);
-  // A wallet just made: its card is dealt into its deck once it is there.
+  // A wallet just made: its card is dealt into its deck once it is there, and takes the focus.
   const [dealt, setDealt] = useState<string | null>(null);
+  // A wallet just made that asks for its backup first (`backupFirst`): its panel opens on the backup rows, focus there.
+  const [backup, setBackup] = useState<string | null>(null);
   const page = useRef<HTMLDivElement>(null);
   const tabs = useRef<Partial<Record<WalletNetwork, HTMLButtonElement | null>>>({});
   // The deck paints first and the chosen card's panel follows, in a render React can interrupt for frames: the two
@@ -88,17 +106,28 @@ export function Wallet() {
     if (!card) return;
     setChosen((c) => c[card.network] === next ? c : { ...c, [card.network]: next });
     setFocusPanel(focus);
+    setBackup((b) => b === next ? b : null);
     show(card.network);
     try { sessionStorage.setItem(CARD_KEY, next); } catch { /* storage unavailable */ }
   };
   const ids = cards.map((c) => c.id).join();
   useLayoutEffect(() => {
     if (!dealt) return;
-    const face = page.current?.querySelector<HTMLElement>(`[data-testid="${walletCardTestId(dealt)}"] [data-deck=face]`);
-    if (!face) return;
+    const card = page.current?.querySelector<HTMLElement>(`[data-testid="${walletCardTestId(dealt)}"]`);
+    const face = card?.querySelector<HTMLElement>("[data-deck=face]");
+    if (!card || !face) return;
     dealCard(face);
+    // The focus goes to the new card (New's dialog, closing, leaves it to the page), or to its backup rows.
+    if (backup !== dealt) focusInPlace(card);
     setDealt(null);
-  }, [dealt, ids]);
+  }, [dealt, ids, backup]);
+  /** New made `made`: the dialog has closed; its card comes to the front of its network's tab, selected. */
+  const created = (made: WalletInstanceView) => {
+    setCreating(null);
+    select(made.id, false);
+    setBackup(backupFirst(made) ? made.id : null);
+    setDealt(made.id);
+  };
   /** After a removal: the next card of the same network; with none left the tab stays, saying so. */
   const removed = (id: string) => {
     const next = shown.find((c) => c.id !== id);
@@ -154,7 +183,7 @@ export function Wallet() {
               </p>
               {/* Test coins only when asked for: Receive never fills a Testnet wallet by itself. */}
               {panel && parseCardId(panel)?.network === "testnet" && <TestCoins key={`coins-${panel}`} rail={parseCardId(panel)!.rail} network="testnet" wallet={wallet.forNetwork("testnet")} state={networkState(state, "testnet")} />}
-              {panel && <WalletPanel id={panel} wallet={wallet} state={state} focus={focusPanel} onOpen={select} />}
+              {panel && <WalletPanel id={panel} wallet={wallet} state={state} focus={focusPanel} backup={backup === panel} onOpen={select} />}
               {panel && parseCardId(panel) && <RemoveWalletSection key={panel} type={parseCardId(panel)!.rail} network={parseCardId(panel)!.network} wallet={wallet} state={state} onOpen={select} onRemoved={() => removed(panel)} />}
             </div>}
           </div>
@@ -162,14 +191,14 @@ export function Wallet() {
       </div>
       {creating && wallet && state && (
         <NewWalletDialog wallet={wallet} offers={state.offers ?? []} initialNetwork={creating}
-          onClose={() => setCreating(null)} onCreated={(made) => { setCreating(null); select(made.id); setDealt(made.id); }} />
+          onClose={() => setCreating(null)} onCreated={created} />
       )}
     </Page>
   );
 }
 
 /** The chosen wallet's panel, on its own network: its calls and its state are that network's. */
-function WalletPanel({ id, wallet, state, focus, onOpen }: { id: string; wallet: WalletPlatform; state: WalletState; focus: boolean; onOpen: (id: InstanceCard["id"]) => void }) {
+function WalletPanel({ id, wallet, state, focus, backup, onOpen }: { id: string; wallet: WalletPlatform; state: WalletState; focus: boolean; backup: boolean; onOpen: (id: InstanceCard["id"]) => void }) {
   const card = parseCardId(id);
   if (!card) return null;
   const { rail, network } = card;
@@ -177,7 +206,7 @@ function WalletPanel({ id, wallet, state, focus, onOpen }: { id: string; wallet:
   switch (rail) {
     case "cashu": case "lightning": return <CashuWallet key={id} wallet={scoped} state={shown} rail={rail} onOpenCashu={() => onOpen(cardId("cashu", network))} focusAmount={focus} />;
     case "arkade": return <ArkWalletPanel key={id} wallet={scoped} state={shown} />;
-    case "bark": return <BarkWalletPanel key={id} wallet={scoped} state={shown} />;
+    case "bark": return <BarkWalletPanel key={id} wallet={scoped} state={shown} backupNow={backup} />;
     case "spark": return <SparkWalletPanel key={id} wallet={scoped} state={shown} />;
     case "usdt": return <UsdtWalletPanel key={id} wallet={scoped} state={shown} />;
     case "bitcoin": return <BitcoinWalletPanel key={id} wallet={scoped} state={shown} />;
