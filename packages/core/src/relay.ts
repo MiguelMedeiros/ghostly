@@ -1,14 +1,25 @@
 import type { Identity } from "./identity";
 import { createRelayPayload, openRelayPayload, parseRelayPayload, type GhostRecord, type SignedPacket } from "./pkarr";
+import { RelayBreaker, type DiscoveryStatus, type RelayBreakerOptions, type RelayFailure } from "./relayBreaker";
 import { DiscoveryBudgetError, isDiscoveryBudgetError, type PkarrRequestOptions, type PkarrTransport } from "./transport";
 
 /**
  * Public Pkarr relays. They are generic Pkarr infrastructure (an HTTP bridge to
  * the Mainline DHT), not a Ghostly backend: they only ever see signed,
- * encrypted packets. `pkarr.pubky.org` is also in the default relay set of the
- * Rust client used by Ghostly Desktop, so both clients share a fast path.
+ * encrypted packets. Every client uses this list: the browser clients read and
+ * write through it, Ghostly Desktop writes to it (so browser contacts see its
+ * packets) and reads from it only when "Also use Pkarr relays" is on. Adding a
+ * relay is one line here; see docs/RELAYS.md for how one is chosen.
  */
-export const DEFAULT_RELAYS = ["https://pkarr.pubky.org", "https://pkarr.pubky.app"];
+export const DEFAULT_RELAYS = ["https://pkarr.pubky.org", "https://pkarr.pubky.app", "https://relay.pkarr.org"];
+/** Relay lists that were the defaults once: a profile that still has one gets today's defaults. */
+export const PREVIOUS_DEFAULT_RELAYS = [["https://pkarr.pubky.org", "https://pkarr.pubky.app"]];
+
+/** The defaults for `relays` when it is one of the old default lists, `relays` itself otherwise. */
+export function currentRelays(relays: string[]): string[] {
+  const same = (a: string[], b: string[]) => a.length === b.length && a.every((relay, i) => relay === b[i]);
+  return PREVIOUS_DEFAULT_RELAYS.some((old) => same(old, relays)) ? [...DEFAULT_RELAYS] : relays;
+}
 
 /**
  * Requests this client allows itself per relay and minute. Relays limit by IP
@@ -31,6 +42,11 @@ export const BACKGROUND_REQUESTS_PER_MINUTE = 20;
 export const WRITE_FIRST_MS = 5_000;
 /** A relay that fails at the network level is left alone for this long. */
 const NETWORK_ERROR_COOLDOWN_MS = 20_000;
+/**
+ * Relays that allow far fewer requests per address than the others: this client's share of theirs, a minute.
+ * relay.pkarr.org allows 10 (`x-ratelimit-limit`), which a browser cannot read without CORS exposing it.
+ */
+export const RELAY_REQUESTS_PER_MINUTE: Record<string, number> = { "https://relay.pkarr.org": 5 };
 
 export interface RelayTransportOptions {
   relays?: string[];
@@ -41,6 +57,10 @@ export interface RelayTransportOptions {
    * `Infinity` for relays of one's own, with no limit to stay under (a test's relay in the same process).
    */
   requestsPerMinute?: number;
+  /** The circuit breaker's settings (tests shorten its waits); trips are logged with `log`. */
+  breaker?: RelayBreakerOptions;
+  /** Where a relay that trips or recovers is reported; never with a key. `console.info` by default. */
+  log?: (line: string) => void;
 }
 
 export function normalizeRelayUrl(input: string): string | null {
@@ -70,6 +90,10 @@ export class RelayTransport implements PkarrTransport {
   private readonly lastPut = new Map<string, bigint>();
   private readonly perMinute: number;
   private readonly backgroundPerMinute: number;
+  private readonly breaker: RelayBreaker;
+  /** The relay the last read was answered by. */
+  private lastRelay: string | null = null;
+  private readonly listeners = new Set<() => void>();
 
   constructor(options: RelayTransportOptions = {}) {
     this.relays = [];
@@ -78,6 +102,45 @@ export class RelayTransport implements PkarrTransport {
     this.fetchFn = options.fetch ?? ((...args) => fetch(...args));
     this.perMinute = options.requestsPerMinute ?? REQUESTS_PER_MINUTE;
     this.backgroundPerMinute = this.perMinute === REQUESTS_PER_MINUTE ? BACKGROUND_REQUESTS_PER_MINUTE : Math.ceil(this.perMinute * 2 / 3);
+    const log = options.log ?? ((line: string) => console.info(`[ghostly:relay] ${line}`));
+    this.breaker = new RelayBreaker({
+      ...options.breaker,
+      onTrip: (relay, reason, forMs) => {
+        log(`${new URL(relay).host} tripped (${reason}); left alone for ${Math.round(forMs / 1000)} s`);
+        options.breaker?.onTrip?.(relay, reason, forMs);
+        this.changed();
+      },
+      onRecover: (relay) => {
+        log(`${new URL(relay).host} answered again`);
+        options.breaker?.onRecover?.(relay);
+        this.changed();
+      },
+    });
+  }
+
+  /** How reads go and how each relay is doing, for the connection panel. */
+  discovery(): DiscoveryStatus {
+    const relays = this.breaker.health(this.relays).map((health) => {
+      const limited = this.rateLimitedFor(health.relay);
+      return health.state === "ok" && limited > 0 ? { ...health, state: "throttled" as const, until: Date.now() + limited, reason: "rate limited (429)" } : health;
+    });
+    return { path: this.lastRelay ? { via: "relay", relay: this.lastRelay } : null, relays };
+  }
+
+  /** Called when a relay trips or recovers. */
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private changed(): void {
+    for (const listener of this.listeners) try { listener(); } catch { /* a listener that fails must not fail a request */ }
+  }
+
+  /** What the relay did, for its breaker. */
+  private answered(relay: string, failure?: { kind: RelayFailure; reason: string }): void {
+    if (failure) this.breaker.failure(relay, failure.kind, failure.reason);
+    else this.breaker.success(relay);
   }
 
   setRelays(relays: string[]): void {
@@ -185,11 +248,21 @@ export class RelayTransport implements PkarrTransport {
       if (this.networkCoolingDown(relay, "GET")) { down = true; continue; }
       const limited = this.rateLimitedFor(relay);
       if (limited > 0) { budgetWait = Math.min(budgetWait, limited); continue; }
+      // Its breaker is open: a relay throttling us is a wait, one failing is down. The others take its turn.
+      const blocked = this.breaker.blockedFor(relay);
+      if (blocked > 0) {
+        if (this.breaker.blockedKind(relay) === "throttled") budgetWait = Math.min(budgetWait, blocked); else down = true;
+        continue;
+      }
       if (!this.take(relay, options.background, false)) { budgetWait = Math.min(budgetWait, this.freeInMs(relay, options.background, false)); continue; }
+      this.breaker.begin(relay);
+      let status = 0;
       try {
         const response = await this.request(`${relay}/${pubKeyZ32}`, { method: "GET" });
+        status = response.status;
         if (response.status === 429) {
           budgetWait = Math.min(budgetWait, this.coolDown(relay, response));
+          this.answered(relay, { kind: "throttled", reason: "rate limited (429)" });
           continue;
         }
         if (response.status !== 404) {
@@ -198,6 +271,8 @@ export class RelayTransport implements PkarrTransport {
           const known = this.newest.get(pubKeyZ32);
           if (!known || packet.timestampMicros > known.timestampMicros) this.newest.set(pubKeyZ32, packet);
         }
+        this.answered(relay);
+        this.lastRelay = relay;
         reachable = true;
         break;
       } catch {
@@ -205,11 +280,12 @@ export class RelayTransport implements PkarrTransport {
         // surfaces as a network error. Back off this operation and try the next relay.
         // Unlike an observable 429, this does not establish a relay-wide limit.
         this.networkCooldown.set(`GET ${relay}`, Date.now() + NETWORK_ERROR_COOLDOWN_MS);
+        this.answered(relay, { kind: "error", reason: status >= 200 && status < 300 ? "invalid packet" : status ? `HTTP ${status}` : "no answer" });
         down = true;
       }
     }
     if (!reachable) {
-      const resting = this.relays.every((r) => this.isCoolingDown(r, "GET") || (this.spent.get(r)?.length ?? 0) >= this.perMinute || this.writeFirst(r)
+      const resting = this.relays.every((r) => this.isCoolingDown(r, "GET") || this.breaker.blockedFor(r) > 0 || (this.spent.get(r)?.length ?? 0) >= this.limitOf(r) || this.writeFirst(r)
         || (!!options.background && (this.spentBackground.get(r)?.length ?? 0) >= this.backgroundPerMinute));
       // Holding back is not an outage: report what is already known…
       if (resting && this.newest.has(pubKeyZ32)) return this.newest.get(pubKeyZ32)!;
@@ -224,15 +300,28 @@ export class RelayTransport implements PkarrTransport {
     if (this.networkCoolingDown(relay, "PUT")) throw new Error("Discovery relay is cooling down; retry shortly");
     const limited = this.rateLimitedFor(relay);
     if (limited > 0) throw new DiscoveryBudgetError(limited, "Discovery relay is cooling down after a 429; retry shortly");
+    const blocked = this.breaker.blockedFor(relay);
+    if (blocked > 0) {
+      if (this.breaker.blockedKind(relay) === "throttled") throw new DiscoveryBudgetError(blocked, "Discovery relay is throttling this address; retry shortly");
+      throw new Error(`${relay} is left alone after failing; retry shortly`);
+    }
     if (!this.take(relay, background, true)) throw new DiscoveryBudgetError(this.freeInMs(relay, background, true));
-    try { return await this.request(`${relay}/${pubKeyZ32}`, {
+    this.breaker.begin(relay);
+    let response: Response;
+    try { response = await this.request(`${relay}/${pubKeyZ32}`, {
       method: "PUT",
       body: payload as BodyInit,
       headers: replaces === undefined ? undefined : { "If-Match": replaces.toString() },
     }); } catch (error) {
       this.networkCooldown.set(`PUT ${relay}`, Date.now() + NETWORK_ERROR_COOLDOWN_MS);
+      this.answered(relay, { kind: "error", reason: "no answer" });
       throw error;
     }
+    // 409, 412 and 428 are the relay working as it should; its rate limit and its own errors count against it.
+    if (response.status === 429) this.answered(relay, { kind: "throttled", reason: "rate limited (429)" });
+    else if (response.status >= 500) this.answered(relay, { kind: "error", reason: `HTTP ${response.status}` });
+    else this.answered(relay);
+    return response;
   }
 
   /**
@@ -246,7 +335,7 @@ export class RelayTransport implements PkarrTransport {
     this.spent.set(relay, recent);
     this.spentBackground.set(relay, recentBackground);
     const linkWrite = write && !background;
-    if (recent.length >= this.perMinute || (background && recentBackground.length >= this.backgroundPerMinute) || (!linkWrite && this.writeFirst(relay, now))) {
+    if (recent.length >= this.limitOf(relay) || (background && recentBackground.length >= this.backgroundPerMinute) || (!linkWrite && this.writeFirst(relay, now))) {
       if (linkWrite) this.writeWaiting.set(relay, now);
       return false;
     }
@@ -263,11 +352,17 @@ export class RelayTransport implements PkarrTransport {
   private freeInMs(relay: string, background: boolean | undefined, write: boolean, now = Date.now()): number {
     const recent = this.spent.get(relay) ?? [], recentBackground = this.spentBackground.get(relay) ?? [];
     let wait = 0;
-    if (recent.length >= this.perMinute) wait = Math.max(wait, recent[recent.length - this.perMinute] + 60_000 - now);
+    const limit = this.limitOf(relay);
+    if (recent.length >= limit) wait = Math.max(wait, recent[recent.length - limit] + 60_000 - now);
     if (background && recentBackground.length >= this.backgroundPerMinute)
       wait = Math.max(wait, recentBackground[recentBackground.length - this.backgroundPerMinute] + 60_000 - now);
     if (!(write && !background) && this.writeFirst(relay, now)) wait = Math.max(wait, this.writeWaiting.get(relay)! + WRITE_FIRST_MS - now);
     return Math.max(wait, 1);
+  }
+
+  /** Requests allowed to this relay a minute: this client's budget, or less for a relay known to allow few. */
+  private limitOf(relay: string): number {
+    return Math.min(this.perMinute, RELAY_REQUESTS_PER_MINUTE[relay] ?? Infinity);
   }
 
   /** A link's write is waiting for this relay's budget: reads (and background writes) let it go first. */

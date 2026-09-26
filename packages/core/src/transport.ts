@@ -1,3 +1,4 @@
+import type { DiscoveryStatus } from "./relayBreaker";
 import type { Identity } from "./identity";
 import type { GhostRecord, SignedPacket } from "./pkarr";
 
@@ -52,4 +53,13 @@ export interface PkarrTransport {
   /** Most recent packet known for this key, or null when nothing is published. */
   resolve(pubKeyZ32: string, options?: PkarrRequestOptions): Promise<SignedPacket | null>;
   describe(): { protocol: string; relays: string[] };
+  /** How reads go and how each relay is doing, for the connection panel; absent where nothing is known. */
+  discovery?(): DiscoveryStatus;
+  /** Called when that changes in a way worth showing (a relay trips or recovers); returns the unsubscribe. */
+  subscribe?(listener: () => void): () => void;
+  /**
+   * Where the DHT is reached directly (Desktop): the relays from Settings, and whether reads may use them too
+   * (`readRelays`, "Also use Pkarr relays"). Writes go to them either way, so browser contacts see this peer's packets.
+   */
+  configure?(options: { relays: string[]; readRelays: boolean }): void;
 }
