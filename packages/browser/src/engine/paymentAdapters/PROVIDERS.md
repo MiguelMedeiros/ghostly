@@ -1,7 +1,8 @@
 # Wallet providers: sources of Lightning and on-chain Bitcoin
 
 A **provider** is a way to reach money: the Cashu mints, an LND node, a Nostr Wallet Connect wallet, a
-BDK wallet, a Bitcoin Core wallet. Each profile has one **active source** of each kind per wallet mode:
+BDK wallet, a Bitcoin Core wallet. Each profile has one **active source** of on-chain Bitcoin per network, and
+**several Lightning cards** per network, each with its own source (see [Lightning cards](#lightning-cards)):
 
 | Kind | Contract | Default | Used by |
 |---|---|---|---|
@@ -128,12 +129,37 @@ values under a field, filtered by the other fields (`when`): public servers per 
 
 ## Per mode
 
-- Mainnet and Testnet keep separate sources (`lightningSource-mainnet`, `lightningSource-testnet`,
-  `onchainSource-…`). Switching closes one and opens the other; nothing is replaced.
+- Mainnet and Testnet keep separate sources (`onchainSource-mainnet`, `onchainSource-testnet`, and the
+  Lightning cards of each network). Both are open at once; nothing is replaced.
 - `info().network` must be a network of the mode: `bitcoin` is Mainnet, every other network is Testnet.
   A provider on the wrong one is closed and refused.
 - The journal and the on-chain intents carry their mode and provider: another source's operations wait
   until it is active again (only it can answer about them).
+
+## Lightning cards
+
+A network can have several Lightning cards ([providers/lightningCards.ts](providers/lightningCards.ts)): "Alby
+Hub (NWC)", "Home LND", the Cashu mints. Each card is a `LightningService` with its own source, balance and
+journal slice.
+
+- **Storage.** `lightningCards-<network>` lists the cards (`{ id, name, providerId, key? }`) and the default for
+  receiving. A card's source lives under `lightningSource-<network>-<key>`. The card made from the one source a
+  network had before cards (`main`) has no key: it reads `lightningSource-<network>`, where that source always
+  was, so the migration never moves or unseals a secret. With no source saved, the network used the mints, and
+  its first card is the mints' one (`cashu`). Both runs are one IndexedDB transaction, and idempotent.
+- **The mints' card** is at most one per network, shown only while the network has Cashu mints. It holds
+  nothing of its own (its ecash is the Cashu wallet's): it can be removed alone next to another Lightning card,
+  and it comes with the Cashu wallet otherwise. A network left with no card gets it back, as before cards.
+- **Journal.** Operation keys stay `lightningOp-<direction>-<hash>`, one space for every card, so one invoice
+  is paid once whichever card tries. An operation carries its `card`; one journaled before cards belongs to
+  `cashu` (the mints made it) or `main`. A card reconciles and lists only its own, and cannot be removed
+  while a payment through it has not ended.
+- **Routing.** A quote is held by the card that made it, and `walletPayQuote` finds that card. `payRequest`,
+  `walletQuoteInvoice`, `walletReceiveLightning`, `requestPayment` and `requestGroupPayment` take `card`; without
+  it, they use the network's default for receiving. A card id belongs to one network: naming a card of the
+  other network is refused before anything is spent, like any cross-network payment.
+- **The same wallet twice** (the same provider with the same settings) is refused; the settings are compared
+  in the engine, secrets included, and never leave it.
 
 ## Platforms
 
