@@ -190,9 +190,11 @@ for (const unavailable of ["none", "read", "publish", "network", "publication-ne
       const read = route.request().method() === "GET";
       if (read) reads++;
       if (unavailable === "network" || (unavailable === "publication-network" && !read)) return route.abort("failed");
-      const limited = unavailable === (read ? "read" : "publish");
-      return route.fulfill({status: limited ? 429 : read ? 404 : 204,
-        headers: {"access-control-allow-origin":"*", "retry-after":"1"}});
+      // Unavailable is a relay that errs (503). A 429 is the relay's budget, which the app waits out and never
+      // shows as a failure (#271).
+      const down = unavailable === (read ? "read" : "publish");
+      return route.fulfill({status: down ? 503 : read ? 404 : 204,
+        headers: {"access-control-allow-origin":"*"}});
     });
     await page.getByRole("button", {name:"New chat", exact:true}).click();
     await expect.poll(() => copyInvite(page)).toMatch(/^https:\/\/ghostly\.tools\/#ghostly1p/);
