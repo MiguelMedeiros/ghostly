@@ -1296,7 +1296,7 @@ export class GhostlyNode implements EngineImplementation {
         if (!link) return "You are offline. It is sent again once you are back.";
         // The path as it is when the message goes: the details keep it, whatever the session does after.
         const at = Date.now(), snapshot = pathSnapshot(live, message.via);
-        const error = await link.sendMessage(message.text, message.timestamp, message.wireId, message.preview);
+        const error = await link.sendMessage(message.text, message.timestamp, message.wireId, ...(message.preview ? [message.preview] : []));
         await this.noteTextSend(linkId, message, snapshot, at, error, link);
         return error;
       }, message => message.via === "pkarr" ? DHT_MESSAGE_TTL : 20_000, message => {

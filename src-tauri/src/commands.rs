@@ -397,7 +397,7 @@ mod project_link_tests {
             "https://example.com/a b",
             "https://example.com/\"; open -a Calculator",
             "https://example.com/`id`",
-            "http:///nohost",
+            "https://",
             "",
         ] {
             assert!(!super::is_web_link(url), "{url}");
