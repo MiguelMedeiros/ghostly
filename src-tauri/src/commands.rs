@@ -122,6 +122,20 @@ pub async fn publish_records(
     records::publish(&state.pkarr, &keypair, &records).await
 }
 
+/// Settings, Network: the Pkarr relays written to, and whether reads may use them too ("Also use Pkarr relays").
+#[tauri::command]
+pub fn set_pkarr_relays(state: State<'_, AppState>, relays: Vec<String>, read_relays: bool) {
+    state
+        .pkarr
+        .configure(crate::pkarr_network::relay_urls(&relays), read_relays);
+}
+
+/// Where Pkarr reads go and how each relay is doing, for the connection panel.
+#[tauri::command]
+pub fn pkarr_status(state: State<'_, AppState>) -> crate::pkarr_network::DiscoveryStatus {
+    state.pkarr.status()
+}
+
 /// A relay payload signed in the WebView (the profile's did:dht), published as is.
 #[tauri::command]
 pub async fn publish_signed_packet(

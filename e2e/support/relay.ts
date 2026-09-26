@@ -19,7 +19,7 @@ export class LocalRelay {
   gets = 0;
   private server: Server | null = null;
 
-  static readonly pattern = /^https:\/\/pkarr\.pubky\.(org|app)\//;
+  static readonly pattern = /^https:\/\/(pkarr\.pubky\.(org|app)|relay\.pkarr\.org)\//;
 
   private static readonly cors = {
     "access-control-allow-origin": "*",

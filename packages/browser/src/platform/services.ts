@@ -332,8 +332,9 @@ export const servicesPlatform: ServicesPlatform | null = {
       turn: state.settings.iceServers[0] ?? null,
       ...(state.transport.iroh ? { iroh: { relays: state.settings.irohRelays ?? [], defaultRelays: state.transport.iroh.defaults } } : {}),
       hyperdhtRelay: state.settings.hyperdhtRelay ?? DEFAULT_HYPERDHT_RELAY,
+      ...(state.transport.direct ? { readRelays: state.settings.readRelays === true } : {}),
     };
   },
-  setNetwork: ({ relays, turn, irohRelays, hyperdhtRelay }) =>
-    engine.call("updateSettings", { settings: { relays, iceServers: turn?.urls ? [turn] : [], ...(irohRelays ? { irohRelays } : {}), ...(hyperdhtRelay !== undefined ? { hyperdhtRelay } : {}) } }),
+  setNetwork: ({ relays, turn, irohRelays, hyperdhtRelay, readRelays }) =>
+    engine.call("updateSettings", { settings: { relays, iceServers: turn?.urls ? [turn] : [], ...(irohRelays ? { irohRelays } : {}), ...(hyperdhtRelay !== undefined ? { hyperdhtRelay } : {}), ...(readRelays !== undefined ? { readRelays } : {}) } }),
 };

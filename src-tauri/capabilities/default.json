@@ -28,6 +28,8 @@
     "allow-resolve-messages",
     "allow-publish-records",
     "allow-resolve-records",
+    "allow-set-pkarr-relays",
+    "allow-pkarr-status",
     "allow-diagnostic-log",
     "allow-local-fetch",
     "allow-bitcoind-rpc",

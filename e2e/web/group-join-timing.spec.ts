@@ -1,6 +1,7 @@
 import { mkdirSync, appendFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { expect, test, type Peer } from "../support/fixtures";
+import { LocalRelay } from "../support/relay";
 
 /**
  * A measurement, not a check: how long a join through a group's link takes, step by step, with the
@@ -20,7 +21,7 @@ interface Step { t: number; g: string; step: string; role?: string; [key: string
 
 async function traced(peer: Peer, steps: Step[]): Promise<void> {
   // Every Pkarr request the page makes (the app's own budget is 30 a minute per relay): a step of its own.
-  peer.page.on("request", request => { if (/^https:\/\/pkarr\.pubky\.(org|app)\//.test(request.url())) steps.push({ t: Date.now(), g: "", step: `pkarr.${request.method()}`, who: peer.name }); });
+  peer.page.on("request", request => { if (LocalRelay.pattern.test(request.url())) steps.push({ t: Date.now(), g: "", step: `pkarr.${request.method()}`, who: peer.name }); });
   peer.page.on("console", message => {
     const text = message.text();
     if (!text.startsWith("[ghostly:join] ")) return;

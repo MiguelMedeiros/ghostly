@@ -214,3 +214,18 @@ fn says_its_version() {
         format!("ghostly-cli {}", env!("CARGO_PKG_VERSION"))
     );
 }
+
+#[test]
+fn reads_the_dht_alone_unless_told_to_read_the_relays_too() {
+    let output = cli(&["--help"]);
+    assert!(output.status.success());
+    let help = String::from_utf8(output.stdout).unwrap();
+    assert!(help.contains("--read-relays"), "{help}");
+    // The flag is global: it goes before or after the command.
+    let output = cli(&["recv", "--read-relays", "--peer", "p"]);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "still a usage error: no --key"
+    );
+}

@@ -26,3 +26,7 @@ serde_json = "1"
 base64 = "0.23"
 crypto_secretbox = "0.1"
 rand = "0.10"
+
+[dev-dependencies]
+# examples/mainline_testnet.rs: a Mainline DHT on this machine for the Desktop end-to-end tests.
+mainline = "8"

@@ -3,6 +3,7 @@ import { manualFallback } from "../support/clipboard";
 import { pasteInvite } from "../support/clipboard";
 import { chooseDhtOnly, expect, openProfilePage, test } from "../support/fixtures";
 import { pair } from "../support/paired";
+import { LocalRelay } from "../support/relay";
 
 const countChats = (page: import("@playwright/test").Page) => page.evaluate(() => Object.entries(localStorage).filter(([key, value]) => {try {return key.startsWith("ghostly_") && !!JSON.parse(value).mySeedB64;} catch {return false;}}).length);
 
@@ -186,7 +187,7 @@ for (const unavailable of ["none", "read", "publish", "network", "publication-ne
   test(`new chat distinguishes absent contact from discovery ${unavailable} failure`, { tag: ["@feature:invite.discovery-errors"] }, async ({peer}) => {
     const {page, context} = await peer(`new-discovery-${unavailable}`);
     let reads = 0;
-    await context.route(/^https:\/\/pkarr\.pubky\.(org|app)\//, route => {
+    await context.route(LocalRelay.pattern, route => {
       const read = route.request().method() === "GET";
       if (read) reads++;
       if (unavailable === "network" || (unavailable === "publication-network" && !read)) return route.abort("failed");

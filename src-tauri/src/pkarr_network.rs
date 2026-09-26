@@ -1,32 +1,49 @@
-//! Pkarr as Ghostly Desktop reaches it: the Mainline DHT and the public relays.
+//! Pkarr as Ghostly Desktop reaches it: the Mainline DHT, directly, and the public relays.
 //!
-//! A packet is published to both. Reading is where the two differ: a relay
-//! hands over the copy it holds in about 0.3 s, a DHT lookup takes 2.5 s or
-//! more, and the peer polls every second or two while it waits for a signal.
-//! So a read asks one relay and returns, while a DHT lookup for the same key
-//! runs on in the background. Every packet either finds is kept as that key's
-//! newest (signatures verified by pkarr, the newest timestamp wins), and a read
-//! returns the newest seen: one that a peer put only on the DHT is at most one
-//! poll late.
+//! Reads go to the DHT by default. A lookup gives its first answer in about 0.8 s
+//! and finishes (every close node asked, the newest packet among them) in about
+//! 3.4 s; a read that knows nothing of the key yet waits for the first answer, a
+//! read that knows something returns it at once, and the lookup runs on in the
+//! background. Every packet found is kept as that key's newest (signatures
+//! verified by pkarr, the newest timestamp wins), and a read returns the newest
+//! seen: one that arrived during a lookup is at most one poll late.
 //!
-//! Publishing is timed the same way. A relay keeps a packet the moment the PUT
+//! Writes go to the DHT and to the relays. The browser clients can only read
+//! relays, and a relay keeps serving the copy it has for minutes: without our
+//! PUT it would hand a browser contact an old packet. Reading the relays too
+//! ("Also use Pkarr relays" in Settings, `read_relays`) is the accelerator: a
+//! relay hands over the copy it holds in about 0.3 s, so a read asks one relay
+//! and returns, while a DHT lookup for the same key runs on behind it.
+//!
+//! Publishing returns as soon as a write succeeded. With relay reads on it also
+//! reads the packet back from a relay: a relay keeps a packet the moment the PUT
 //! arrives and serves it from then on, but answers only after its own DHT put,
-//! seconds later, and the DHT put from here takes 2 to 6 s. A link publishes
-//! several times while pairing (its presence, its offer, its answer), one after
-//! the other, so waiting for those answers put seconds between each step. Now a
-//! publish returns as soon as the packet can be read back from a relay, or a
-//! write succeeded, whichever is first; the writes run on in the background and
-//! say in the log how they ended.
+//! seconds later, and a link publishes several times while pairing (its
+//! presence, its offer, its answer), one after the other.
+//!
+//! Every relay has a circuit breaker: three failures in a row (no answer, a
+//! server error, its rate limit) and it is left alone for a minute, twice as
+//! long each time it trips again, five minutes at most; then one request
+//! probes it. Reads with relay reads on go to the DHT while every relay is left
+//! alone.
 
 use std::collections::{HashMap, VecDeque};
+use std::net::SocketAddrV4;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use pkarr::dht::{DhtClient, DhtConfig};
 use pkarr::{Client, PublicKey, ResolvePolicy, SignedPacket};
+use serde::Serialize;
 use tokio::sync::watch;
 use url::Url;
 
 use crate::diagnostics;
+
+/// The relays written to before Settings named any: the browser clients' defaults
+/// (`DEFAULT_RELAYS` in packages/core/src/relay.ts). The app hands over the list
+/// in Settings as it starts, so a relay is added there, not here.
+pub const DEFAULT_RELAYS: [&str; 2] = ["https://pkarr.pubky.org", "https://pkarr.pubky.app"];
 
 /// Reads this client allows itself per relay and minute; past it, a read
 /// returns the newest seen and leaves the relays to the DHT lookup. Relays
@@ -50,6 +67,10 @@ const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 const LOOKUP_GRACE: Duration = Duration::from_millis(300);
 /// A background read (nobody waiting on it) spends no relay budget and waits for the lookup this long.
 const BACKGROUND_LOOKUP_WAIT: Duration = Duration::from_secs(4);
+/// A DHT read of a key nothing is known of yet (or of one a signal is due on) waits this long for the
+/// lookup's first answer: 0.5 to 1 s on the real DHT. A key nobody published takes the whole lookup to
+/// say so (3.3 s); the read returns before, and the next poll has the answer.
+const DHT_ANSWER_WAIT: Duration = Duration::from_millis(1_500);
 /// A publish reads its packet back from a relay this soon after the PUTs left, then every so often…
 const READ_BACK_AFTER: Duration = Duration::from_millis(200);
 const READ_BACK_EVERY: Duration = Duration::from_millis(300);
@@ -62,7 +83,7 @@ const RESERVE: i64 = 4;
 const SECOND_OPINION_RESERVE: i64 = 12;
 /// Once a relay said its limit (`x-ratelimit-limit`, a minute's worth per address), this client
 /// allows itself half of it, within these bounds: two apps on one machine share the address.
-const READS_PER_MINUTE_LEAST: usize = 10;
+const READS_PER_MINUTE_LEAST: usize = 5;
 const READS_PER_MINUTE_MOST: usize = 90;
 /// A read-back after a publish waits this long for the relay: one that has the packet answers in
 /// 0.3 s; one that has not is still asking its DHT, and the next read-back will do.
@@ -74,35 +95,112 @@ const MAX_BODY: usize = 4096;
 /// the relay is done, and is served from then on.
 const FIRST_PUT_RETRIES: usize = 7;
 const FIRST_PUT_RETRY_AFTER: Duration = Duration::from_millis(700);
+/// Failures in a row that trip a relay's breaker (as the browser clients', packages/core/src/relayBreaker.ts).
+const BREAKER_THRESHOLD: u32 = 3;
+/// How long a tripped relay is left alone the first time; doubled on each trip in a row, up to the most.
+const BREAKER_BASE: Duration = Duration::from_secs(60);
+const BREAKER_MAX: Duration = Duration::from_secs(300);
+
+/// The DHT as this client reaches it: the Mainline DHT itself, or, in tests, a stand-in behind a Pkarr client.
+#[derive(Clone)]
+pub enum Dht {
+    Mainline(DhtClient),
+    #[cfg_attr(not(test), allow(dead_code))]
+    StandIn(Client),
+}
+
+impl Dht {
+    /// A node of the Mainline DHT, joining through `bootstrap` (the public bootstrap nodes when `None`).
+    pub fn mainline(bootstrap: Option<Vec<SocketAddrV4>>) -> Result<Self, String> {
+        let mut config = DhtConfig::default();
+        config.bootstrap = bootstrap;
+        DhtClient::build(config)
+            .map(Dht::Mainline)
+            .map_err(|e| format!("DHT node: {e}"))
+    }
+
+    async fn publish(&self, packet: &SignedPacket) -> Result<(), String> {
+        match self {
+            Dht::Mainline(dht) => dht
+                .publish(packet)
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
+            Dht::StandIn(client) => client
+                .publish(packet)
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
+        }
+    }
+
+    /// Looks `key` up: `first` is handed the first packet found, the return is the most recent one.
+    async fn resolve(
+        &self,
+        key: &PublicKey,
+        first: impl FnOnce(&SignedPacket),
+    ) -> Option<SignedPacket> {
+        match self {
+            Dht::Mainline(dht) => {
+                let response = dht.resolve(key, None).await;
+                if let Some(packet) = response.first() {
+                    first(packet);
+                }
+                response.complete().await.most_recent.ok()
+            }
+            Dht::StandIn(client) => {
+                let found = client.resolve(key, ResolvePolicy::NetworkOnly).await.ok();
+                if let Some(packet) = &found {
+                    first(packet);
+                }
+                found
+            }
+        }
+    }
+}
 
 pub struct Pkarr {
     inner: Arc<Inner>,
 }
 
 struct Inner {
-    /// Publishes, and looks keys up in the background. The DHT in the app.
-    lookup: Option<Client>,
-    /// The relays, read and written with plain HTTP (`READ_TIMEOUT` / `WRITE_TIMEOUT`, `If-Match` on
-    /// writes, the relay's rate-limit headers read on every answer).
-    relays: Vec<Url>,
+    /// Looks keys up, and is published to. The DHT in the app.
+    lookup: Option<Dht>,
     http: reqwest::Client,
     /// READS_PER_MINUTE for the public relays; none for relays of one's own.
     reads_per_minute: usize,
+    /// The relays were named by `GHOSTLY_PKARR_RELAYS`: Settings do not replace them.
+    fixed_relays: bool,
     state: Mutex<State>,
 }
 
-#[derive(Default)]
 struct State {
     newest: HashMap<PublicKey, Seen>,
     /// Lookups in flight, one per key: a poll never starts a second.
-    lookups: HashMap<PublicKey, watch::Receiver<bool>>,
-    relays: Vec<RelayBudget>,
+    lookups: HashMap<PublicKey, watch::Receiver<u8>>,
+    /// The relays, read and written with plain HTTP (`READ_TIMEOUT` / `WRITE_TIMEOUT`, `If-Match` on
+    /// writes, the relay's rate-limit headers read on every answer).
+    relays: Vec<Relay>,
+    /// Reads may go to the relays ("Also use Pkarr relays"); always, where there is no DHT.
+    read_relays: bool,
     turn: usize,
+    /// Where the last read went.
+    path: Option<Path>,
 }
+
+/// A lookup's progress, as its watch channel carries it.
+const LOOKING: u8 = 0;
+const ANSWERED: u8 = 1;
+const DONE: u8 = 2;
 
 struct Seen {
     packet: SignedPacket,
     read_at: Instant,
+}
+
+struct Relay {
+    url: Url,
+    budget: RelayBudget,
 }
 
 #[derive(Default)]
@@ -115,6 +213,52 @@ struct RelayBudget {
     limit: Option<usize>,
     /// The timestamp of the last packet this client PUT there, per key: what the next PUT replaces.
     last_put: HashMap<PublicKey, pkarr::Timestamp>,
+    breaker: Breaker,
+}
+
+/// Why a request to a relay failed: its rate limit, or anything else.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Failure {
+    Throttled,
+    Error,
+}
+
+#[derive(Default)]
+struct Breaker {
+    failures: u32,
+    /// Trips in a row, without an answer in between: the next wait doubles with each.
+    trips: u32,
+    open_until: Option<Instant>,
+    /// The one request allowed once the wait is over is out.
+    probing: bool,
+    kind: Option<Failure>,
+    reason: String,
+}
+
+/// Where a read went, as the connection panel shows it: `{"via":"dht"}` or `{"via":"relay","relay":…}`.
+#[derive(Serialize, Clone, PartialEq, Debug)]
+#[serde(tag = "via", rename_all = "lowercase")]
+pub enum Path {
+    Dht,
+    Relay { relay: String },
+}
+
+/// A relay's health, as packages/core's `RelayHealth`: `ok`, `throttled` or `failing`, until when (ms since the epoch).
+#[derive(Serialize, PartialEq, Debug)]
+pub struct RelayHealth {
+    relay: String,
+    state: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    until: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+}
+
+/// How reads go and how each relay is doing, as packages/core's `DiscoveryStatus`.
+#[derive(Serialize, PartialEq, Debug)]
+pub struct DiscoveryStatus {
+    path: Option<Path>,
+    relays: Vec<RelayHealth>,
 }
 
 /// What a relay answered a GET with.
@@ -140,70 +284,197 @@ fn brief(error: &str) -> String {
     first.chars().take(40).collect()
 }
 
+fn host(url: &Url) -> String {
+    url.host_str().unwrap_or("relay").to_string()
+}
+
+/// A relay's URL as Settings and the browser clients write it: no trailing slash.
+fn plain(url: &Url) -> String {
+    url.as_str().trim_end_matches('/').to_string()
+}
+
 impl Pkarr {
-    /// The app's: the DHT, and pkarr's default relays for reads and writes —
-    /// or, when `GHOSTLY_PKARR_RELAYS` names some (comma-separated URLs), those
-    /// relays alone: a private network, or the end-to-end tests' relay, which
-    /// is how the scenario matrix pairs Desktop with its other peers offline.
+    /// The app's: the Mainline DHT, read directly, and the default relays, written to. Two variables
+    /// change that, for a private network and the end-to-end tests: `GHOSTLY_PKARR_RELAYS` (comma-separated
+    /// URLs) names the relays, and alone means those relays and nothing else, which is how the scenario matrix
+    /// pairs Desktop with its other peers offline; `GHOSTLY_PKARR_DHT_BOOTSTRAP` (comma-separated `ip:port`)
+    /// joins a DHT of one's own through those nodes instead of the public one.
     pub fn desktop() -> Result<Self, String> {
-        if let Some(relays) = private_relays(std::env::var("GHOSTLY_PKARR_RELAYS").ok().as_deref())?
-        {
-            return Self::private(&relays);
+        let relays = private_relays(std::env::var("GHOSTLY_PKARR_RELAYS").ok().as_deref())?;
+        let bootstrap =
+            dht_bootstrap(std::env::var("GHOSTLY_PKARR_DHT_BOOTSTRAP").ok().as_deref())?;
+        match (relays, bootstrap) {
+            (Some(relays), None) => Self::private(&relays),
+            (relays, bootstrap) => {
+                let fixed = relays.is_some();
+                let relays = relays.unwrap_or_else(|| {
+                    DEFAULT_RELAYS
+                        .map(|url| url.parse().expect("relay URLs"))
+                        .to_vec()
+                });
+                Self::build(
+                    Some(Dht::mainline(bootstrap)?),
+                    &relays,
+                    READS_PER_MINUTE,
+                    false,
+                    fixed,
+                )
+            }
         }
-        let mut dht = Client::builder();
-        dht.no_relays().cache_size(50);
-        let dht = dht.build().map_err(|e| format!("Pkarr client: {e}"))?;
-        let relays = pkarr::DEFAULT_RELAYS.map(|url| url.parse().expect("pkarr's relay URLs"));
-        Self::new(Some(dht), &relays)
     }
 
     /// Relays of one's own and nothing else: no DHT, and no read budget, since
     /// the budget is there for the public relays' limits.
     pub fn private(relays: &[Url]) -> Result<Self, String> {
-        Self::with_budget(None, relays, usize::MAX)
+        Self::build(None, relays, usize::MAX, true, true)
     }
 
-    /// `lookup` is the slow, complete source (the DHT); `relays` the fast one.
+    /// The DHT read directly, `relays` written to; relay reads wait for `configure`.
+    #[cfg(test)]
+    pub fn direct(dht: Dht, relays: &[Url]) -> Result<Self, String> {
+        Self::build(Some(dht), relays, READS_PER_MINUTE, false, false)
+    }
+
+    /// Relays read first, with `lookup` (a stand-in for the slow, complete source) behind them: what
+    /// "Also use Pkarr relays" turns on.
+    #[cfg(test)]
     pub fn new(lookup: Option<Client>, relays: &[Url]) -> Result<Self, String> {
-        Self::with_budget(lookup, relays, READS_PER_MINUTE)
+        Self::build(
+            lookup.map(Dht::StandIn),
+            relays,
+            READS_PER_MINUTE,
+            true,
+            false,
+        )
     }
 
-    fn with_budget(
-        lookup: Option<Client>,
+    fn build(
+        lookup: Option<Dht>,
         relays: &[Url],
         reads_per_minute: usize,
+        read_relays: bool,
+        fixed_relays: bool,
     ) -> Result<Self, String> {
         // One HTTP client for every relay: connections are kept and reused.
         let http = reqwest::Client::builder()
             .build()
             .map_err(|e| format!("HTTP client: {e}"))?;
         let state = State {
-            relays: relays.iter().map(|_| RelayBudget::default()).collect(),
-            ..State::default()
+            newest: HashMap::new(),
+            lookups: HashMap::new(),
+            relays: relays
+                .iter()
+                .map(|url| Relay {
+                    url: url.clone(),
+                    budget: RelayBudget::default(),
+                })
+                .collect(),
+            read_relays: read_relays || lookup.is_none(),
+            turn: 0,
+            path: None,
         };
         Ok(Self {
             inner: Arc::new(Inner {
                 lookup,
-                relays: relays.to_vec(),
                 http,
                 reads_per_minute,
+                fixed_relays,
                 state: Mutex::new(state),
             }),
         })
     }
 
-    /// Publishes to the DHT and every relay. Returns once the packet is out there to be read: a relay
-    /// serves it back, or a write succeeded. The writes run on and log how they ended; an error means
-    /// every one of them failed.
+    /// Settings, Network: the relays written to, and whether reads may use them. Relays named by
+    /// `GHOSTLY_PKARR_RELAYS` stay; without a DHT, reads always use the relays.
+    pub fn configure(&self, relays: Vec<Url>, read_relays: bool) {
+        let mut state = self.inner.state.lock().unwrap();
+        state.read_relays = read_relays || self.inner.lookup.is_none();
+        if self.inner.fixed_relays {
+            return;
+        }
+        let mut kept: Vec<Relay> = std::mem::take(&mut state.relays);
+        state.relays = relays
+            .into_iter()
+            .map(|url| match kept.iter().position(|relay| relay.url == url) {
+                Some(index) => kept.swap_remove(index),
+                None => Relay {
+                    url,
+                    budget: RelayBudget::default(),
+                },
+            })
+            .collect();
+    }
+
+    /// Where reads go and how each relay is doing.
+    pub fn status(&self) -> DiscoveryStatus {
+        let state = self.inner.state.lock().unwrap();
+        let (now, wall) = (Instant::now(), SystemTime::now());
+        let at = |until: Instant| {
+            (wall + until.saturating_duration_since(now))
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .ok()
+        };
+        DiscoveryStatus {
+            path: state.path.clone(),
+            relays: state
+                .relays
+                .iter()
+                .map(|relay| {
+                    let breaker = &relay.budget.breaker;
+                    let (state, until, reason) = if breaker.blocked(now) {
+                        let kind = if breaker.kind == Some(Failure::Throttled) {
+                            "throttled"
+                        } else {
+                            "failing"
+                        };
+                        (
+                            kind,
+                            breaker.open_until.and_then(|until| at(until.max(now))),
+                            Some(breaker.reason.clone()),
+                        )
+                    } else if let Some(until) =
+                        relay.budget.resting_until.filter(|until| *until > now)
+                    {
+                        ("throttled", at(until), Some("rate limited (429)".into()))
+                    } else {
+                        ("ok", None, None)
+                    };
+                    RelayHealth {
+                        relay: plain(&relay.url),
+                        state,
+                        until,
+                        reason,
+                    }
+                })
+                .collect(),
+        }
+    }
+
+    /// Publishes to the DHT and every relay not left alone. Returns once the packet is out there to be read:
+    /// a write succeeded, or (with relay reads on) a relay serves it back. The writes run on and log how
+    /// they ended; an error means every one of them failed.
     pub async fn publish(&self, packet: &SignedPacket) -> Result<(), String> {
         let started = Instant::now();
         let key = packet.public_key();
         let inner = self.inner.clone();
+        let (relays, read_relays) = {
+            let state = inner.state.lock().unwrap();
+            (
+                state
+                    .relays
+                    .iter()
+                    .map(|relay| relay.url.clone())
+                    .collect::<Vec<_>>(),
+                state.read_relays,
+            )
+        };
         // `outcome`: `None` while writes run, then whether any succeeded; `first_ok`: the first success.
         let (outcome_tx, mut outcome) = watch::channel::<Option<Result<(), String>>>(None);
         let (first_ok_tx, mut first_ok) = watch::channel(false);
-        let writes: Vec<(String, Write)> = (0..inner.relays.len())
-            .map(|index| {
+        let writes: Vec<(String, Write)> = relays
+            .into_iter()
+            .map(|url| {
                 let (this, packet) = (
                     Self {
                         inner: inner.clone(),
@@ -211,24 +482,15 @@ impl Pkarr {
                     packet.clone(),
                 );
                 (
-                    inner.relays[index]
-                        .host_str()
-                        .unwrap_or("relay")
-                        .to_string(),
-                    Box::pin(async move { this.relay_put(index, &packet).await }) as _,
+                    host(&url),
+                    Box::pin(async move { this.relay_put(&url, &packet).await }) as _,
                 )
             })
-            .chain(inner.lookup.clone().map(|client| {
+            .chain(inner.lookup.clone().map(|dht| {
                 let packet = packet.clone();
                 (
                     "dht".to_string(),
-                    Box::pin(async move {
-                        client
-                            .publish(&packet)
-                            .await
-                            .map(|_| ())
-                            .map_err(|e| e.to_string())
-                    }) as _,
+                    Box::pin(async move { dht.publish(&packet).await }) as _,
                 )
             }))
             .collect();
@@ -264,6 +526,8 @@ impl Pkarr {
                 ));
                 let _ = outcome_tx.send(Some(if ok {
                     Ok(())
+                } else if errors.is_empty() {
+                    Err("Publish error: nowhere to publish".into())
                 } else {
                     Err(format!("Publish error: {}", errors.join("; ")))
                 }));
@@ -280,8 +544,10 @@ impl Pkarr {
                 .unwrap_or_else(|| Err("Publish error: writes vanished".into()))
         };
         tokio::pin!(settled);
+        // Reading the packet back is a relay read: only where relay reads are on.
+        let read_backs = if read_relays { READ_BACKS } else { 0 };
         let mut wait = READ_BACK_AFTER;
-        for _ in 0..READ_BACKS {
+        for _ in 0..read_backs {
             tokio::select! {
                 result = &mut settled => return self.published(&key, started, "settled", result),
                 _ = async { let _ = first_ok.wait_for(|ok| *ok).await; } => return self.published(&key, started, "written", Ok(())),
@@ -289,23 +555,25 @@ impl Pkarr {
             }
             wait = READ_BACK_EVERY;
             // A read-back is not a poll: it spends none of the read budget (the relay counts it all the same).
-            let Some(index) = self.pick_relay(false) else {
+            let Some(url) = self.pick_relay(false) else {
                 continue;
             };
-            let read = self.relay_get_within(index, &key, READ_BACK_TIMEOUT);
+            let read = self.relay_get_within(&url, &key, READ_BACK_TIMEOUT);
             tokio::pin!(read);
             tokio::select! {
                 result = &mut settled => return self.published(&key, started, "settled", result),
                 _ = async { let _ = first_ok.wait_for(|ok| *ok).await; } => return self.published(&key, started, "written", Ok(())),
                 answer = &mut read => {
                     let visible = matches!(&answer, RelayAnswer::Packet(seen) if seen.timestamp() >= wanted);
-                    self.relay_answered(index, answer);
+                    self.relay_answered(&url, answer);
                     if visible { return self.published(&key, started, "visible", Ok(())); }
                 }
             }
         }
-        let result = settled.await;
-        self.published(&key, started, "settled late", result)
+        tokio::select! {
+            result = &mut settled => self.published(&key, started, if read_backs > 0 { "settled late" } else { "settled" }, result),
+            _ = async { let _ = first_ok.wait_for(|ok| *ok).await; } => self.published(&key, started, "written", Ok(())),
+        }
     }
 
     fn published(
@@ -336,10 +604,13 @@ impl Pkarr {
 
     /// `background`: a look that can wait (a link nobody is watching, nothing expected). It asks no
     /// relay, keeping their budget for links that are signaling, and waits for the DHT lookup instead.
-    /// A foreground read asks one relay and returns what is known the moment the relay answered (or
-    /// `READ_TIMEOUT` passed): a key nobody has yet costs one read, not the DHT lookup's seconds too.
-    /// `urgent`: a signal is due any moment; when the relay asked had nothing newer, a second relay
+    /// `urgent`: a signal is due any moment. On the DHT, the read waits for the lookup's first answer even
+    /// when a packet is known; with relay reads on, when the relay asked had nothing newer, a second relay
     /// with plenty of requests left is asked too (relays do not all serve a fresh packet at once).
+    ///
+    /// With relay reads on, a foreground read asks one relay and returns what is known the moment the
+    /// relay answered (or `READ_TIMEOUT` passed): a key nobody has yet costs one read, not the DHT
+    /// lookup's seconds too.
     pub async fn resolve_with(
         &self,
         key: &PublicKey,
@@ -349,17 +620,29 @@ impl Pkarr {
         let started = Instant::now();
         let before = self.newest(key).map(|p| p.timestamp());
         let lookup = self.look_up(key);
+        let read_relays = self.inner.state.lock().unwrap().read_relays;
         let source;
 
-        if background {
+        if !read_relays {
+            // The DHT, directly (there is one: without it, relay reads are always on).
+            if let Some(progress) = lookup {
+                if background && self.newest(key).is_none() {
+                    let _ = tokio::time::timeout(BACKGROUND_LOOKUP_WAIT, finished(progress)).await;
+                } else if !background && (urgent || self.newest(key).is_none()) {
+                    let _ = tokio::time::timeout(DHT_ANSWER_WAIT, answered(progress)).await;
+                }
+            }
+            self.went(Path::Dht);
+            source = "dht";
+        } else if background {
             if self.newest(key).is_none() {
                 if let Some(done) = lookup {
                     let _ = tokio::time::timeout(BACKGROUND_LOOKUP_WAIT, finished(done)).await;
                 }
             }
             source = "dht";
-        } else if let Some(index) = self.pick_relay(true) {
-            let read = self.relay_get(index, key);
+        } else if let Some(url) = self.pick_relay(true) {
+            let read = self.relay_get(&url, key);
             tokio::pin!(read);
             let answer = match lookup.clone() {
                 Some(done) => tokio::select! {
@@ -378,21 +661,28 @@ impl Pkarr {
                         RelayAnswer::Unreachable(_) => "relay-down",
                         RelayAnswer::Other(_) => "relay-error",
                     };
-                    self.relay_answered(index, answer);
+                    if matches!(answer, RelayAnswer::Packet(_) | RelayAnswer::Missing) {
+                        self.went(Path::Relay { relay: plain(&url) });
+                    }
+                    self.relay_answered(&url, answer);
                     source
                 }
                 // The lookup was quicker. Only an empty handed one waits for the relay.
                 None if self.newest(key).is_none() => {
-                    self.relay_answered(index, read.await);
+                    let answer = read.await;
+                    self.relay_answered(&url, answer);
                     "relay-late"
                 }
-                None => "dht",
+                None => {
+                    self.went(Path::Dht);
+                    "dht"
+                }
             };
             // Nothing newer from that relay, and a signal is due: another relay may have it already.
             if urgent && self.newest(key).map(|p| p.timestamp()) == before {
-                if let Some(other) = self.pick_relay_other_than(index) {
-                    let answer = self.relay_get(other, key).await;
-                    self.relay_answered(other, answer);
+                if let Some(other) = self.pick_relay_other_than(&url) {
+                    let answer = self.relay_get(&other, key).await;
+                    self.relay_answered(&other, answer);
                 }
             }
             if self.newest(key).is_none() {
@@ -401,9 +691,10 @@ impl Pkarr {
                 }
             }
         } else if self.newest(key).is_none() {
-            // No relay budget left: the lookup is all there is.
+            // No relay to ask (budget spent, or every one left alone): the lookup is all there is.
             if let Some(done) = lookup {
                 let _ = tokio::time::timeout(BACKGROUND_LOOKUP_WAIT, finished(done)).await;
+                self.went(Path::Dht);
             }
             source = "dht";
         } else {
@@ -445,86 +736,109 @@ impl Pkarr {
         found
     }
 
+    fn went(&self, path: Path) {
+        self.inner.state.lock().unwrap().path = Some(path);
+    }
+
     /// The lookup running for `key`, started if none is.
-    fn look_up(&self, key: &PublicKey) -> Option<watch::Receiver<bool>> {
-        let client = self.inner.lookup.clone()?;
+    fn look_up(&self, key: &PublicKey) -> Option<watch::Receiver<u8>> {
+        let dht = self.inner.lookup.clone()?;
         let mut state = self.inner.state.lock().unwrap();
-        if let Some(done) = state.lookups.get(key) {
-            return Some(done.clone());
+        if let Some(progress) = state.lookups.get(key) {
+            return Some(progress.clone());
         }
-        let (tx, rx) = watch::channel(false);
+        let (tx, rx) = watch::channel(LOOKING);
         state.lookups.insert(key.clone(), rx.clone());
         let (inner, key) = (self.inner.clone(), key.clone());
         tokio::spawn(async move {
-            let found = client.resolve(&key, ResolvePolicy::NetworkOnly).await.ok();
+            let found = dht
+                .resolve(&key, |first| {
+                    inner.state.lock().unwrap().keep(first.clone());
+                    let _ = tx.send(ANSWERED);
+                })
+                .await;
             let mut state = inner.state.lock().unwrap();
             if let Some(packet) = found {
                 state.keep(packet);
             }
             state.lookups.remove(&key);
-            let _ = tx.send(true);
+            let _ = tx.send(DONE);
         });
         Some(rx)
     }
 
-    /// The relay to ask now: not resting, within this client's budget (spent when `budgeted`), and of
-    /// those the one that says it has the most requests left for this address; in turn when none says.
-    fn pick_relay(&self, budgeted: bool) -> Option<usize> {
+    /// The relay to ask now: not resting nor left alone, within this client's budget (spent when
+    /// `budgeted`), and of those the one that says it has the most requests left for this address; in
+    /// turn when none says.
+    fn pick_relay(&self, budgeted: bool) -> Option<Url> {
         let mut state = self.inner.state.lock().unwrap();
         let now = Instant::now();
         let count = state.relays.len();
         let turn = state.turn;
         state.turn = state.turn.wrapping_add(1);
-        let mut best: Option<(usize, i64, usize)> = None;
+        let mut best: Option<(usize, i64)> = None;
         for offset in 0..count {
             let index = (turn + offset) % count;
-            if !state.relays[index].available(now, self.inner.reads_per_minute) {
+            if !state.relays[index]
+                .budget
+                .available(now, self.inner.reads_per_minute)
+            {
                 continue;
             }
             // Unknown counts as plenty: a relay that never said is one to ask.
-            let remaining = state.relays[index].remaining.unwrap_or(i64::MAX);
+            let remaining = state.relays[index].budget.remaining.unwrap_or(i64::MAX);
             if remaining < RESERVE {
                 continue;
             }
-            if best.is_none_or(|(_, most, _)| remaining > most) {
-                best = Some((index, remaining, offset));
+            if best.is_none_or(|(_, most)| remaining > most) {
+                best = Some((index, remaining));
             }
         }
-        let (index, _, _) = best?;
+        let (index, _) = best?;
+        let budget = &mut state.relays[index].budget;
+        budget.breaker.begin(now);
         if budgeted {
-            state.relays[index].spend(now);
+            budget.spend(now);
         }
-        Some(index)
+        Some(state.relays[index].url.clone())
     }
 
     /// Another relay for a second opinion: available, and with `SECOND_OPINION_RESERVE` requests left there.
-    fn pick_relay_other_than(&self, index: usize) -> Option<usize> {
+    fn pick_relay_other_than(&self, url: &Url) -> Option<Url> {
         let mut state = self.inner.state.lock().unwrap();
         let now = Instant::now();
-        let count = state.relays.len();
-        let other = (0..count).filter(|&i| i != index).find(|&i| {
-            state.relays[i].available(now, self.inner.reads_per_minute)
-                && state.relays[i].remaining.unwrap_or(i64::MAX) >= SECOND_OPINION_RESERVE
+        let reads_per_minute = self.inner.reads_per_minute;
+        let other = (0..state.relays.len()).find(|&i| {
+            state.relays[i].url != *url
+                && state.relays[i].budget.available(now, reads_per_minute)
+                && state.relays[i].budget.remaining.unwrap_or(i64::MAX) >= SECOND_OPINION_RESERVE
         })?;
-        state.relays[other].spend(now);
-        Some(other)
+        let budget = &mut state.relays[other].budget;
+        budget.breaker.begin(now);
+        budget.spend(now);
+        Some(state.relays[other].url.clone())
+    }
+
+    /// Runs `f` on the relay's budget, if the relay is still in the list (Settings may have changed it).
+    fn with_budget<T>(&self, url: &Url, f: impl FnOnce(&mut RelayBudget) -> T) -> Option<T> {
+        let mut state = self.inner.state.lock().unwrap();
+        state
+            .relays
+            .iter_mut()
+            .find(|relay| relay.url == *url)
+            .map(|relay| f(&mut relay.budget))
     }
 
     /// One GET at a relay, as a poll makes it: `READ_TIMEOUT` at most, the relay's rate-limit headers noted.
-    async fn relay_get(&self, index: usize, key: &PublicKey) -> RelayAnswer {
-        self.relay_get_within(index, key, READ_TIMEOUT).await
+    async fn relay_get(&self, url: &Url, key: &PublicKey) -> RelayAnswer {
+        self.relay_get_within(url, key, READ_TIMEOUT).await
     }
 
-    async fn relay_get_within(
-        &self,
-        index: usize,
-        key: &PublicKey,
-        timeout: Duration,
-    ) -> RelayAnswer {
+    async fn relay_get_within(&self, url: &Url, key: &PublicKey, timeout: Duration) -> RelayAnswer {
         let response = match self
             .inner
             .http
-            .get(self.key_url(index, key))
+            .get(key_url(url, key))
             .timeout(timeout)
             .send()
             .await
@@ -534,7 +848,7 @@ impl Pkarr {
             Err(e) if e.is_connect() => return RelayAnswer::Unreachable(e.to_string()),
             Err(e) => return RelayAnswer::Other(e.to_string()),
         };
-        self.note_rate_limit(index, &response);
+        self.note_rate_limit(url, &response);
         match response.status().as_u16() {
             200 => {
                 if response
@@ -557,20 +871,12 @@ impl Pkarr {
             }
             404 => RelayAnswer::Missing,
             429 => RelayAnswer::RateLimited,
-            status => RelayAnswer::Other(format!("status {status}")),
+            status => RelayAnswer::Other(format!("HTTP {status}")),
         }
-    }
-
-    fn key_url(&self, index: usize, key: &PublicKey) -> Url {
-        let mut url = self.inner.relays[index].clone();
-        if let Ok(mut segments) = url.path_segments_mut() {
-            segments.push(&key.to_z32());
-        }
-        url
     }
 
     /// What the relay says about its limit for this address, on every answer.
-    fn note_rate_limit(&self, index: usize, response: &reqwest::Response) {
+    fn note_rate_limit(&self, url: &Url, response: &reqwest::Response) {
         let header = |name: &str| {
             response
                 .headers()
@@ -582,34 +888,56 @@ impl Pkarr {
         if remaining.is_none() && limit.is_none() {
             return;
         }
-        let mut state = self.inner.state.lock().unwrap();
-        let budget = &mut state.relays[index];
-        if remaining.is_some() {
-            budget.remaining = remaining;
-        }
-        if let Some(limit) = limit {
-            budget.limit = Some(limit.max(0) as usize);
+        self.with_budget(url, |budget| {
+            if remaining.is_some() {
+                budget.remaining = remaining;
+            }
+            if let Some(limit) = limit {
+                budget.limit = Some(limit.max(0) as usize);
+            }
+        });
+    }
+
+    /// The relay answered (`None`) or failed, for its breaker; a trip or a recovery is logged, never a key.
+    fn breaker(&self, url: &Url, failure: Option<(Failure, &str)>) {
+        let change = self.with_budget(url, |budget| match failure {
+            None => budget
+                .breaker
+                .succeeded()
+                .then(|| "answered again".to_string()),
+            Some((kind, reason)) => budget
+                .breaker
+                .failed(Instant::now(), kind, reason)
+                .map(|wait| format!("tripped ({reason}); left alone for {} s", wait.as_secs())),
+        });
+        if let Some(Some(line)) = change {
+            diagnostics::log(&format!("pkarr relay {} {line}", host(url)));
         }
     }
 
     /// One PUT at a relay, telling it which packet of ours it replaces (`If-Match`): a relay refuses
     /// (428) to replace a packet whose DHT put is still in flight unless told, and a link publishes in
     /// bursts (its presence, then its offer). 412 means it never got the one named: insist without.
-    async fn relay_put(&self, index: usize, packet: &SignedPacket) -> Result<(), String> {
+    async fn relay_put(&self, url: &Url, packet: &SignedPacket) -> Result<(), String> {
         let key = packet.public_key();
-        let previous = {
-            let mut state = self.inner.state.lock().unwrap();
-            state.relays[index]
-                .last_put
-                .insert(key.clone(), packet.timestamp())
+        let now = Instant::now();
+        let Some(previous) = self.with_budget(url, |budget| {
+            if budget.breaker.blocked(now) {
+                return Err("left alone after failing".to_string());
+            }
+            budget.breaker.begin(now);
+            Ok(budget.last_put.insert(key.clone(), packet.timestamp()))
+        }) else {
+            return Err("no longer in Settings".into());
         };
-        let url = self.key_url(index, &key);
+        let previous = previous?;
+        let target = key_url(url, &key);
         let body = packet.to_relay_payload();
         let send = |replaces: Option<pkarr::Timestamp>| {
             let mut request = self
                 .inner
                 .http
-                .put(url.clone())
+                .put(target.clone())
                 .timeout(WRITE_TIMEOUT)
                 .body(body.clone());
             if let Some(replaces) = replaces {
@@ -617,21 +945,28 @@ impl Pkarr {
             }
             request.send()
         };
-        let mut response = send(previous).await.map_err(|e| brief(&e.to_string()))?;
-        self.note_rate_limit(index, &response);
+        let failed = |e: reqwest::Error| {
+            let reason = if e.is_timeout() {
+                "no answer in time"
+            } else {
+                "no answer"
+            };
+            self.breaker(url, Some((Failure::Error, reason)));
+            brief(&e.to_string())
+        };
+        let mut response = send(previous).await.map_err(&failed)?;
+        self.note_rate_limit(url, &response);
         if response.status().as_u16() == 412 && previous.is_some() {
-            response = send(None).await.map_err(|e| brief(&e.to_string()))?;
-            self.note_rate_limit(index, &response);
+            response = send(None).await.map_err(&failed)?;
+            self.note_rate_limit(url, &response);
         }
         // 428: the relay holds a packet someone else put there moments ago (the inviter warming this
         // key) and its DHT put is still in flight. Learn which, and name it.
         if response.status().as_u16() == 428 && previous.is_none() {
-            if let RelayAnswer::Packet(current) = self.relay_get(index, &key).await {
+            if let RelayAnswer::Packet(current) = self.relay_get(url, &key).await {
                 if current.timestamp() < packet.timestamp() {
-                    response = send(Some(current.timestamp()))
-                        .await
-                        .map_err(|e| brief(&e.to_string()))?;
-                    self.note_rate_limit(index, &response);
+                    response = send(Some(current.timestamp())).await.map_err(&failed)?;
+                    self.note_rate_limit(url, &response);
                 }
             }
         }
@@ -642,42 +977,61 @@ impl Pkarr {
         {
             retries += 1;
             tokio::time::sleep(FIRST_PUT_RETRY_AFTER).await;
-            response = send(None).await.map_err(|e| brief(&e.to_string()))?;
-            self.note_rate_limit(index, &response);
+            response = send(None).await.map_err(&failed)?;
+            self.note_rate_limit(url, &response);
+        }
+        // 409, 412 and 428 are the relay working as it should; its rate limit and its own errors count against it.
+        match response.status().as_u16() {
+            429 => {
+                self.with_budget(url, |budget| budget.rest());
+                self.breaker(url, Some((Failure::Throttled, "rate limited (429)")));
+            }
+            status @ 500.. => self.breaker(url, Some((Failure::Error, &format!("HTTP {status}")))),
+            _ => self.breaker(url, None),
         }
         match response.status().as_u16() {
             200..=299 => Ok(()),
-            429 => {
-                self.inner.state.lock().unwrap().relays[index].rest();
-                Err("rate limited".into())
-            }
+            429 => Err("rate limited".into()),
             409 => Err("relay has a more recent packet".into()),
             428 => Err("relay is still putting another packet".into()),
             status => Err(format!("status {status}")),
         }
     }
 
-    fn relay_answered(&self, index: usize, answer: RelayAnswer) {
-        let mut state = self.inner.state.lock().unwrap();
+    fn relay_answered(&self, url: &Url, answer: RelayAnswer) {
         match answer {
             RelayAnswer::Packet(packet) => {
-                state.keep(packet);
+                self.inner.state.lock().unwrap().keep(packet);
+                self.breaker(url, None);
             }
+            RelayAnswer::Missing => self.breaker(url, None),
             // A missing key times out (the relay is asking its DHT); that is not a reason to rest.
-            RelayAnswer::Missing | RelayAnswer::Timeout => {}
-            RelayAnswer::RateLimited => state.relays[index].rest(),
+            RelayAnswer::Timeout => {}
+            RelayAnswer::RateLimited => {
+                self.with_budget(url, |budget| budget.rest());
+                self.breaker(url, Some((Failure::Throttled, "rate limited (429)")));
+            }
             RelayAnswer::Unreachable(reason) => {
-                state.relays[index].rest();
+                self.with_budget(url, |budget| budget.rest());
                 diagnostics::log(&format!(
                     "pkarr relay {} unreachable: {}",
-                    self.inner.relays[index].host_str().unwrap_or("?"),
+                    host(url),
                     brief(&reason)
                 ));
+                self.breaker(url, Some((Failure::Error, "no answer")));
             }
-            RelayAnswer::Other(reason) => diagnostics::log(&format!(
-                "pkarr relay {} answered oddly: {reason}",
-                self.inner.relays[index].host_str().unwrap_or("?")
-            )),
+            RelayAnswer::Other(reason) => {
+                diagnostics::log(&format!(
+                    "pkarr relay {} answered oddly: {reason}",
+                    host(url)
+                ));
+                let reason = if reason.starts_with("HTTP ") {
+                    reason
+                } else {
+                    "invalid answer".to_string()
+                };
+                self.breaker(url, Some((Failure::Error, &reason)));
+            }
         }
     }
 
@@ -687,6 +1041,14 @@ impl Pkarr {
         seen.read_at = Instant::now();
         Some(seen.packet.clone())
     }
+}
+
+fn key_url(relay: &Url, key: &PublicKey) -> Url {
+    let mut url = relay.clone();
+    if let Ok(mut segments) = url.path_segments_mut() {
+        segments.pop_if_empty().push(&key.to_z32());
+    }
+    url
 }
 
 impl State {
@@ -717,10 +1079,10 @@ impl State {
 }
 
 impl RelayBudget {
-    /// Not resting, and this client has reads left for it this minute: `reads_per_minute` until the
-    /// relay said its own limit, half of that (within bounds) from then on. No cap stays no cap.
+    /// Not resting nor left alone, and this client has reads left for it this minute: `reads_per_minute`
+    /// until the relay said its own limit, half of that (within bounds) from then on. No cap stays no cap.
     fn available(&mut self, now: Instant, reads_per_minute: usize) -> bool {
-        if self.resting_until.is_some_and(|until| until > now) {
+        if self.resting_until.is_some_and(|until| until > now) || self.breaker.blocked(now) {
             return false;
         }
         while self
@@ -748,6 +1110,49 @@ impl RelayBudget {
     }
 }
 
+impl Breaker {
+    /// Left alone: its wait is not over, or it is and the one probe is out.
+    fn blocked(&self, now: Instant) -> bool {
+        match self.open_until {
+            Some(until) if until > now => true,
+            Some(_) => self.probing,
+            None => false,
+        }
+    }
+
+    /// A request goes to the relay now: its probe, when the wait is over.
+    fn begin(&mut self, now: Instant) {
+        if self.open_until.is_some_and(|until| until <= now) {
+            self.probing = true;
+        }
+    }
+
+    /// The relay answered; says whether it had been left alone.
+    fn succeeded(&mut self) -> bool {
+        let recovered = self.open_until.is_some();
+        *self = Breaker::default();
+        recovered
+    }
+
+    /// The relay failed a request; returns how long it is left alone when that tripped it.
+    fn failed(&mut self, now: Instant, kind: Failure, reason: &str) -> Option<Duration> {
+        self.failures += 1;
+        self.kind = Some(kind);
+        self.reason = reason.to_string();
+        if !self.probing && self.failures < BREAKER_THRESHOLD {
+            return None;
+        }
+        let wait = BREAKER_BASE
+            .saturating_mul(2u32.saturating_pow(self.trips))
+            .min(BREAKER_MAX);
+        self.open_until = Some(now + wait);
+        self.trips += 1;
+        self.failures = 0;
+        self.probing = false;
+        Some(wait)
+    }
+}
+
 /// `GHOSTLY_PKARR_RELAYS`, read: `None` when unset or empty, an error for a URL that is not one.
 fn private_relays(list: Option<&str>) -> Result<Option<Vec<Url>>, String> {
     let urls: Vec<&str> = list
@@ -768,9 +1173,43 @@ fn private_relays(list: Option<&str>) -> Result<Option<Vec<Url>>, String> {
         .map(Some)
 }
 
-async fn finished(mut done: watch::Receiver<bool>) {
+/// `GHOSTLY_PKARR_DHT_BOOTSTRAP`, read: `None` when unset or empty, an error for anything but `ip:port`.
+fn dht_bootstrap(list: Option<&str>) -> Result<Option<Vec<SocketAddrV4>>, String> {
+    let nodes: Vec<&str> = list
+        .unwrap_or("")
+        .split(',')
+        .map(str::trim)
+        .filter(|node| !node.is_empty())
+        .collect();
+    if nodes.is_empty() {
+        return Ok(None);
+    }
+    nodes
+        .iter()
+        .map(|node| {
+            node.parse::<SocketAddrV4>()
+                .map_err(|e| format!("GHOSTLY_PKARR_DHT_BOOTSTRAP: {node}: {e}"))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
+}
+
+/// Relay URLs from Settings; any that is not one is left out.
+pub fn relay_urls(relays: &[String]) -> Vec<Url> {
+    relays
+        .iter()
+        .filter_map(|relay| relay.trim().parse::<Url>().ok())
+        .filter(|url| matches!(url.scheme(), "http" | "https"))
+        .collect()
+}
+
+async fn finished(mut progress: watch::Receiver<u8>) {
     // An error means the lookup task is gone, which is finished too.
-    let _ = done.wait_for(|done| *done).await;
+    let _ = progress.wait_for(|at| *at == DONE).await;
+}
+
+async fn answered(mut progress: watch::Receiver<u8>) {
+    let _ = progress.wait_for(|at| *at >= ANSWERED).await;
 }
 
 #[cfg(test)]
@@ -1139,6 +1578,320 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+mod direct {
+    // covers: core.dht-direct, core.relay-breaker, settings.network.native-dht
+    use super::*;
+    use crate::test_support::{pkarr_client, pkarr_relay, Relay};
+    use pkarr::Keypair;
+
+    fn packet(keypair: &Keypair, value: &str) -> SignedPacket {
+        SignedPacket::builder()
+            .txt("_n".try_into().unwrap(), value.try_into().unwrap(), 300)
+            .sign(keypair)
+            .unwrap()
+    }
+
+    fn requests(relay: &Relay, method: &str) -> usize {
+        let requests = relay.requests.lock().unwrap();
+        requests.iter().filter(|r| r.starts_with(method)).count()
+    }
+
+    /// The app as it starts: the DHT (`dht` stands in for it) read directly, `relay` written to.
+    fn native(relay: &Relay, dht: &Relay) -> Pkarr {
+        Pkarr::direct(
+            Dht::StandIn(pkarr_client(dht)),
+            &[relay.url.parse().unwrap()],
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn reads_go_to_the_dht_alone_and_writes_reach_the_relays_too() {
+        let (relay, dht) = (pkarr_relay().await, pkarr_relay().await);
+        let pkarr = native(&relay, &dht);
+        let keypair = Keypair::random();
+        pkarr.publish(&packet(&keypair, "1")).await.unwrap();
+        let key = keypair.public_key().to_z32();
+        for _ in 0..20 {
+            if relay.packets.lock().unwrap().contains_key(&key)
+                && dht.packets.lock().unwrap().contains_key(&key)
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(
+            relay.packets.lock().unwrap().contains_key(&key),
+            "browser contacts read the relays"
+        );
+        assert!(dht.packets.lock().unwrap().contains_key(&key));
+
+        let reader = native(&relay, &dht);
+        let got = reader.resolve(&keypair.public_key()).await.unwrap();
+        assert_eq!(got.timestamp(), packet_timestamp(&dht, &key));
+        assert_eq!(requests(&relay, "GET"), 0, "no read, no read-back");
+        assert_eq!(
+            reader.status().path,
+            Some(Path::Dht),
+            "the panel says DHT direct"
+        );
+    }
+
+    fn packet_timestamp(relay: &Relay, key: &str) -> pkarr::Timestamp {
+        let bytes = relay.packets.lock().unwrap().get(key).cloned().unwrap();
+        let timestamp = u64::from_be_bytes(bytes[64..72].try_into().unwrap());
+        pkarr::Timestamp::from(timestamp)
+    }
+
+    #[tokio::test]
+    async fn a_read_of_a_new_key_waits_for_the_lookups_first_answer_and_no_longer() {
+        let (relay, dht) = (pkarr_relay().await, pkarr_relay().await);
+        let keypair = Keypair::random();
+        dht.packets.lock().unwrap().insert(
+            keypair.public_key().to_z32(),
+            packet(&keypair, "1").to_relay_payload().to_vec(),
+        );
+        *dht.delay.lock().unwrap() = Duration::from_millis(300);
+        let pkarr = native(&relay, &dht);
+        let started = Instant::now();
+        assert!(pkarr.resolve(&keypair.public_key()).await.is_some());
+        assert!(
+            started.elapsed() < DHT_ANSWER_WAIT,
+            "{:?}",
+            started.elapsed()
+        );
+
+        // A key nobody has: the read gives up after the wait, the lookup runs on.
+        *dht.delay.lock().unwrap() = Duration::from_secs(3);
+        let started = Instant::now();
+        assert!(pkarr
+            .resolve(&Keypair::random().public_key())
+            .await
+            .is_none());
+        let took = started.elapsed();
+        assert!(
+            took >= DHT_ANSWER_WAIT && took < DHT_ANSWER_WAIT + Duration::from_millis(500),
+            "{took:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn also_use_pkarr_relays_turns_relay_reads_on_and_off() {
+        let (relay, dht) = (pkarr_relay().await, pkarr_relay().await);
+        let keypair = Keypair::random();
+        let first = packet(&keypair, "1");
+        relay.packets.lock().unwrap().insert(
+            keypair.public_key().to_z32(),
+            first.to_relay_payload().to_vec(),
+        );
+        *dht.delay.lock().unwrap() = Duration::from_secs(2);
+        let pkarr = native(&relay, &dht);
+        pkarr.configure(vec![relay.url.parse().unwrap()], true);
+        assert!(pkarr.resolve(&keypair.public_key()).await.is_some());
+        assert_eq!(requests(&relay, "GET"), 1);
+        assert_eq!(
+            pkarr.status().path,
+            Some(Path::Relay {
+                relay: relay.url.clone()
+            })
+        );
+
+        pkarr.configure(vec![relay.url.parse().unwrap()], false);
+        pkarr.resolve(&keypair.public_key()).await;
+        assert_eq!(requests(&relay, "GET"), 1, "off again: the DHT alone");
+    }
+
+    #[tokio::test]
+    async fn settings_replace_the_relays_written_to_but_not_the_ones_the_environment_names() {
+        let (a, b, dht) = (
+            pkarr_relay().await,
+            pkarr_relay().await,
+            pkarr_relay().await,
+        );
+        let pkarr = native(&a, &dht);
+        pkarr.configure(vec![b.url.parse().unwrap()], false);
+        pkarr
+            .publish(&packet(&Keypair::random(), "1"))
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!((requests(&a, "PUT"), requests(&b, "PUT")), (0, 1));
+
+        // GHOSTLY_PKARR_RELAYS alone: those relays are the network, read every time, whatever Settings say.
+        let private = Pkarr::private(&[a.url.parse().unwrap()]).unwrap();
+        private.configure(vec![b.url.parse().unwrap()], false);
+        let keypair = Keypair::random();
+        private.publish(&packet(&keypair, "1")).await.unwrap();
+        assert!(private.resolve(&keypair.public_key()).await.is_some());
+        assert_eq!(requests(&b, "PUT"), 1);
+    }
+
+    #[tokio::test]
+    async fn a_relay_that_keeps_failing_trips_and_is_written_to_no_more_while_it_waits() {
+        let (relay, dht) = (pkarr_relay().await, pkarr_relay().await);
+        *relay.broken.lock().unwrap() = true;
+        let pkarr = native(&relay, &dht);
+        let keypair = Keypair::random();
+        for i in 0..BREAKER_THRESHOLD {
+            // The DHT write carries each publish.
+            pkarr
+                .publish(&packet(&keypair, &i.to_string()))
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(1_100)).await;
+        }
+        let status = pkarr.status();
+        assert_eq!(status.relays.len(), 1);
+        assert_eq!(status.relays[0].state, "failing");
+        assert_eq!(status.relays[0].reason.as_deref(), Some("HTTP 503"));
+        let until = status.relays[0].until.unwrap();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        assert!(
+            until > now + 55_000 && until <= now + 60_000,
+            "{until} {now}"
+        );
+        let puts = requests(&relay, "PUT");
+        pkarr.publish(&packet(&keypair, "more")).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(requests(&relay, "PUT"), puts, "left alone");
+    }
+
+    #[tokio::test]
+    async fn with_relay_reads_on_the_dht_answers_while_every_relay_is_left_alone() {
+        let (relay, dht) = (pkarr_relay().await, pkarr_relay().await);
+        let keypair = Keypair::random();
+        dht.packets.lock().unwrap().insert(
+            keypair.public_key().to_z32(),
+            packet(&keypair, "dht").to_relay_payload().to_vec(),
+        );
+        *relay.broken.lock().unwrap() = true;
+        let pkarr = Pkarr::new(Some(pkarr_client(&dht)), &[relay.url.parse().unwrap()]).unwrap();
+        for _ in 0..BREAKER_THRESHOLD {
+            pkarr.resolve(&Keypair::random().public_key()).await;
+        }
+        let gets = requests(&relay, "GET");
+        assert_eq!(gets, BREAKER_THRESHOLD as usize);
+        assert!(pkarr.resolve(&keypair.public_key()).await.is_some());
+        assert_eq!(requests(&relay, "GET"), gets, "tripped: not asked");
+        assert_eq!(pkarr.status().path, Some(Path::Dht));
+    }
+
+    #[test]
+    fn the_breaker_trips_waits_probes_and_recovers() {
+        let mut breaker = Breaker::default();
+        let t0 = Instant::now();
+        for _ in 1..BREAKER_THRESHOLD {
+            assert_eq!(breaker.failed(t0, Failure::Error, "no answer"), None);
+        }
+        assert!(!breaker.blocked(t0));
+        assert_eq!(
+            breaker.failed(t0, Failure::Error, "no answer"),
+            Some(BREAKER_BASE)
+        );
+        assert!(breaker.blocked(t0 + BREAKER_BASE - Duration::from_millis(1)));
+        let later = t0 + BREAKER_BASE;
+        assert!(!breaker.blocked(later), "its wait is over: a probe may go");
+        breaker.begin(later);
+        assert!(breaker.blocked(later), "one probe at a time");
+        // The probe failed: twice as long, then the cap.
+        assert_eq!(
+            breaker.failed(later, Failure::Throttled, "rate limited (429)"),
+            Some(BREAKER_BASE * 2)
+        );
+        let mut at = later + BREAKER_BASE * 2;
+        let mut waits = vec![];
+        for _ in 0..4 {
+            breaker.begin(at);
+            let wait = breaker.failed(at, Failure::Error, "HTTP 502").unwrap();
+            waits.push(wait.as_secs());
+            at += wait;
+        }
+        assert_eq!(waits, [240, 300, 300, 300]);
+        breaker.begin(at);
+        assert!(breaker.succeeded(), "it had been left alone");
+        assert!(!breaker.blocked(at));
+        // An answer resets the backoff and the count.
+        for _ in 0..BREAKER_THRESHOLD - 1 {
+            breaker.failed(at, Failure::Error, "no answer");
+        }
+        assert!(
+            !breaker.succeeded() && !breaker.blocked(at),
+            "not tripped: nothing to recover from"
+        );
+        for _ in 0..BREAKER_THRESHOLD {
+            breaker.failed(at, Failure::Error, "no answer");
+        }
+        assert!(breaker.blocked(at + BREAKER_BASE - Duration::from_millis(1)));
+        assert!(!breaker.blocked(at + BREAKER_BASE));
+    }
+
+    #[tokio::test]
+    async fn the_status_reads_as_packages_cores_discovery_status() {
+        let (relay, dht) = (pkarr_relay().await, pkarr_relay().await);
+        let pkarr = native(&relay, &dht);
+        pkarr.resolve(&Keypair::random().public_key()).await;
+        assert_eq!(
+            serde_json::to_value(pkarr.status()).unwrap(),
+            serde_json::json!({ "path": { "via": "dht" }, "relays": [{ "relay": relay.url, "state": "ok" }] })
+        );
+    }
+
+    #[test]
+    fn ghostly_pkarr_dht_bootstrap_is_a_comma_separated_list_of_addresses() {
+        assert_eq!(dht_bootstrap(None).unwrap(), None);
+        assert_eq!(dht_bootstrap(Some(" ")).unwrap(), None);
+        assert_eq!(
+            dht_bootstrap(Some("127.0.0.1:6881, 10.0.0.2:1"))
+                .unwrap()
+                .unwrap(),
+            [
+                "127.0.0.1:6881".parse::<SocketAddrV4>().unwrap(),
+                "10.0.0.2:1".parse().unwrap()
+            ]
+        );
+        assert!(dht_bootstrap(Some("router.example:6881"))
+            .unwrap_err()
+            .contains("GHOSTLY_PKARR_DHT_BOOTSTRAP"));
+        assert_eq!(
+            relay_urls(&[
+                "https://relay.example".into(),
+                "ftp://x".into(),
+                "nonsense".into()
+            ]),
+            ["https://relay.example".parse::<Url>().unwrap()]
+        );
+    }
+
+    /// The real thing in miniature: Mainline DHT nodes on this machine, two apps on it, no relay at all.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn two_apps_find_each_other_on_a_mainline_dht_with_no_relay() {
+        let testnet = mainline::Testnet::builder(8).build().unwrap();
+        let bootstrap: Vec<SocketAddrV4> = testnet
+            .bootstrap
+            .iter()
+            .map(|node| node.parse().unwrap())
+            .collect();
+        let app = || Pkarr::direct(Dht::mainline(Some(bootstrap.clone())).unwrap(), &[]).unwrap();
+        let (alice, bob) = (app(), app());
+        let keypair = Keypair::random();
+        let hello = packet(&keypair, "hello");
+        alice.publish(&hello).await.unwrap();
+        let mut found = None;
+        for _ in 0..10 {
+            found = bob.resolve(&keypair.public_key()).await;
+            if found.is_some() {
+                break;
+            }
+        }
+        assert_eq!(found.unwrap().timestamp(), hello.timestamp());
+        assert_eq!(bob.status().path, Some(Path::Dht));
+    }
+}
+
 /// Timings against the real DHT and relays, printed rather than asserted:
 /// `cargo test --manifest-path src-tauri/Cargo.toml live_ -- --ignored --nocapture --test-threads 1`.
 /// Mind the relays' limit of about 120 requests a minute per IP between runs.
@@ -1224,6 +1977,204 @@ mod live {
         }
         line("missing key, before", &before);
         line("missing key, after", &after);
+    }
+
+    /// DHT-direct timings, the numbers behind native's default: a publish, a reader's first answer and its
+    /// full lookup, for a key another node published, and for a key nobody has; a relay read beside them.
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "reaches the real DHT and relays"]
+    async fn live_dht_direct_latency() {
+        use pkarr::dht::{DhtClient, DhtConfig};
+        let publisher = DhtClient::build(DhtConfig::default()).unwrap();
+        let reader = DhtClient::build(DhtConfig::default()).unwrap();
+        tokio::time::sleep(Duration::from_secs(3)).await; // the DHT nodes bootstrap
+        let http = reqwest::Client::new();
+        let (mut put, mut first, mut full, mut relay) = (vec![], vec![], vec![], vec![]);
+        for round in 0..6 {
+            let keypair = Keypair::random();
+            let started = Instant::now();
+            publisher
+                .publish(&packet(&keypair, &round.to_string()))
+                .await
+                .unwrap();
+            put.push(started.elapsed().as_secs_f64());
+            let started = Instant::now();
+            let response = reader.resolve(&keypair.public_key(), None).await;
+            first.push(started.elapsed().as_secs_f64());
+            let found = response.first().is_some();
+            let outcome = response.complete().await;
+            full.push(started.elapsed().as_secs_f64());
+            println!(
+                "round {round}: first answer {found}, most recent {}",
+                outcome.most_recent.is_ok()
+            );
+            // The same key from a relay, which reads it off the DHT on a miss.
+            let started = Instant::now();
+            let status = http
+                .get(format!(
+                    "https://pkarr.pubky.app/{}",
+                    keypair.public_key().to_z32()
+                ))
+                .send()
+                .await
+                .map(|r| r.status().as_u16())
+                .unwrap_or(0);
+            relay.push(started.elapsed().as_secs_f64());
+            println!("round {round}: relay {status}");
+        }
+        line("DHT publish", &put);
+        line("DHT read, first answer", &first);
+        line("DHT read, complete", &full);
+        line("relay read (pkarr.pubky.app)", &relay);
+        let mut missing = vec![];
+        for _ in 0..3 {
+            let started = Instant::now();
+            let response = reader.resolve(&Keypair::random().public_key(), None).await;
+            assert!(response.first().is_none());
+            missing.push(started.elapsed().as_secs_f64());
+        }
+        line("DHT read, missing key", &missing);
+
+        // A link publishes one key again and again (presence, offer, answer): the closest nodes are known by then.
+        let keypair = Keypair::random();
+        let mut again = vec![];
+        for round in 0..5 {
+            let started = Instant::now();
+            publisher
+                .publish(&packet(&keypair, &format!("again {round}")))
+                .await
+                .unwrap();
+            again.push(started.elapsed().as_secs_f64());
+        }
+        line("DHT publish, same key again", &again);
+    }
+
+    /// Reads `key` every 700 ms (Desktop's `fast` poll while signaling) until a packet at least as new as
+    /// `want` arrives; seconds taken, 30 when it never did.
+    async fn seen_after(pkarr: &Pkarr, key: &PublicKey, want: pkarr::Timestamp) -> f64 {
+        let started = Instant::now();
+        loop {
+            let poll = Instant::now();
+            let got = pkarr.resolve_with(key, false, true).await;
+            if got.is_some_and(|p| p.timestamp() >= want)
+                || started.elapsed() > Duration::from_secs(30)
+            {
+                return started.elapsed().as_secs_f64();
+            }
+            tokio::time::sleep(Duration::from_millis(700).saturating_sub(poll.elapsed())).await;
+        }
+    }
+
+    /// A first contact's path between two Desktops, as the app runs it: the joiner reads the inviter's key, puts
+    /// its offer on a key of its own, the inviter sees it and answers, the joiner sees the answer. Timed with relay
+    /// reads off (DHT direct, the default) and on ("Also use Pkarr relays"); writes reach the relays either way.
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "reaches the real DHT and relays"]
+    async fn live_first_contact_latency() {
+        let relays: Vec<Url> = DEFAULT_RELAYS.map(|url| url.parse().unwrap()).to_vec();
+        for read_relays in [false, true] {
+            let (inviter, joiner) = (Pkarr::desktop().unwrap(), Pkarr::desktop().unwrap());
+            for app in [&inviter, &joiner] {
+                app.configure(relays.clone(), read_relays);
+            }
+            tokio::time::sleep(Duration::from_secs(3)).await; // the DHT nodes bootstrap
+            let mut steps: [Vec<f64>; 6] = Default::default();
+            for round in 0..4 {
+                let (invite, offer) = (Keypair::random(), Keypair::random());
+                inviter.publish(&packet(&invite, "presence")).await.unwrap();
+                // The invite travels to the joiner meanwhile.
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                let started = Instant::now();
+                let presence =
+                    seen_after(&joiner, &invite.public_key(), pkarr::Timestamp::from(0)).await;
+                let at = Instant::now();
+                let offered = packet(&offer, "offer");
+                joiner.publish(&offered).await.unwrap();
+                let put_offer = at.elapsed().as_secs_f64();
+                let seen_offer =
+                    seen_after(&inviter, &offer.public_key(), offered.timestamp()).await;
+                let at = Instant::now();
+                let answer = packet(&invite, "answer");
+                inviter.publish(&answer).await.unwrap();
+                let put_answer = at.elapsed().as_secs_f64();
+                let seen_answer =
+                    seen_after(&joiner, &invite.public_key(), answer.timestamp()).await;
+                let total = started.elapsed().as_secs_f64();
+                println!("relay reads {read_relays}, round {round}: {presence:.2} + {put_offer:.2} + {seen_offer:.2} + {put_answer:.2} + {seen_answer:.2} = {total:.2} s");
+                for (i, t) in [
+                    presence,
+                    put_offer,
+                    seen_offer,
+                    put_answer,
+                    seen_answer,
+                    total,
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    steps[i].push(t);
+                }
+            }
+            let mode = if read_relays {
+                "relay reads on"
+            } else {
+                "DHT direct"
+            };
+            for (name, times) in [
+                "joiner reads the invite's key",
+                "joiner publishes its offer",
+                "inviter sees the offer",
+                "inviter publishes its answer",
+                "joiner sees the answer",
+                "first contact, in all",
+            ]
+            .iter()
+            .zip(&steps)
+            {
+                line(&format!("{mode}: {name}"), times);
+            }
+        }
+    }
+
+    /// A web contact reads a DHT-direct peer through a relay: how long a relay that holds an older packet of
+    /// the key takes to serve a newer one put on the DHT alone.
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "reaches the real DHT and relays"]
+    async fn live_relay_sees_a_dht_only_update() {
+        use pkarr::dht::{DhtClient, DhtConfig};
+        let publisher = DhtClient::build(DhtConfig::default()).unwrap();
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        let http = reqwest::Client::new();
+        let short_ttl = |keypair: &Keypair, value: &str| {
+            SignedPacket::builder()
+                .txt("_n".try_into().unwrap(), value.try_into().unwrap(), 1)
+                .sign(keypair)
+                .unwrap()
+        };
+        for relay in ["https://pkarr.pubky.app", "https://pkarr.pubky.org"] {
+            let keypair = Keypair::random();
+            let url = format!("{relay}/{}", keypair.public_key().to_z32());
+            let read = || async {
+                let response = http.get(&url).send().await.ok()?;
+                let bytes = response.bytes().await.ok()?;
+                SignedPacket::from_relay_payload(&keypair.public_key(), &bytes)
+                    .ok()
+                    .map(|p| p.timestamp().as_u64())
+            };
+            let first = short_ttl(&keypair, "1");
+            publisher.publish(&first).await.unwrap();
+            // The relay reads it off the DHT and keeps it.
+            let started = Instant::now();
+            let at = visible_after(started, first.timestamp().as_u64(), read).await;
+            println!("{relay}: first DHT-only packet served after {at:.2} s");
+            let newer = short_ttl(&keypair, "2");
+            publisher.publish(&newer).await.unwrap();
+            let started = Instant::now();
+            let at = visible_after(started, newer.timestamp().as_u64(), read).await;
+            println!(
+                "{relay}: newer DHT-only packet served after {at:.2} s (30 = never within 30 s)"
+            );
+        }
     }
 
     /// The newest timestamp a reader sees: before (`old`) or after.

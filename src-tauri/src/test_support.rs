@@ -106,6 +106,8 @@ pub struct Relay {
     /// The relay is still putting the packet it holds on the DHT: a PUT replacing it must name it
     /// (`If-Match`, 428 otherwise), as the public relays do.
     pub putting: Arc<Mutex<bool>>,
+    /// The relay is broken: every request gets a 503.
+    pub broken: Arc<Mutex<bool>>,
 }
 
 /// The timestamp of a relay payload (bytes 64..72, microseconds, big-endian).
@@ -123,21 +125,24 @@ pub async fn pkarr_relay() -> Relay {
     let delay = Arc::new(Mutex::new(std::time::Duration::ZERO));
     let headers = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
     let putting = Arc::new(Mutex::new(false));
-    let (store, seen, slow, extra, busy) = (
+    let broken = Arc::new(Mutex::new(false));
+    let (store, seen, slow, extra, busy, down) = (
         packets.clone(),
         requests.clone(),
         delay.clone(),
         headers.clone(),
         putting.clone(),
+        broken.clone(),
     );
     tokio::spawn(async move {
         while let Ok((mut stream, _)) = listener.accept().await {
-            let (store, seen, slow, extra, busy) = (
+            let (store, seen, slow, extra, busy, down) = (
                 store.clone(),
                 seen.clone(),
                 slow.clone(),
                 extra.clone(),
                 busy.clone(),
+                down.clone(),
             );
             tokio::spawn(async move {
                 let Some((head, body)) = read_request(&mut stream).await else {
@@ -165,6 +170,9 @@ pub async fn pkarr_relay() -> Relay {
                     .iter()
                     .map(|(n, v)| (n.as_str(), v.as_str()))
                     .collect();
+                if *down.lock().unwrap() {
+                    return respond(&mut stream, "503 Service Unavailable", &extra, b"").await;
+                }
                 match method {
                     "PUT" => {
                         let held = store
@@ -215,6 +223,7 @@ pub async fn pkarr_relay() -> Relay {
         delay,
         headers,
         putting,
+        broken,
     }
 }
 

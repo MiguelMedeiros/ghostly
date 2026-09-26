@@ -77,6 +77,8 @@ macro_rules! commands {
             commands::publish_records,
             commands::publish_signed_packet,
             commands::resolve_records,
+            commands::set_pkarr_relays,
+            commands::pkarr_status,
             commands::diagnostic_log,
             commands::local_fetch,
             commands::bitcoind_rpc,
@@ -250,7 +252,7 @@ mod tests {
 
     /// Arguments every command accepts, so a refusal is the window's and not the payload's.
     fn arguments() -> serde_json::Value {
-        serde_json::json!({
+        let mut arguments = serde_json::json!({
             "request": false, "id": "1", "body": "x", "seedB64": "x", "events": "__CHANNEL__:1",
             "endpointId": 0, "connectionId": 0, "descriptor": {}, "text": "x",
             "encKeyB64": "x", "keyB64": "x", "plaintext": "x", "encoded": "x",
@@ -261,13 +263,17 @@ mod tests {
             "response": {"status": 200, "headers": [], "bodyB64": ""},
             "port": 0, "expectedState": "x", "space": "x", "prefix": "", "size": 0,
             "offset": 0, "length": 0, "name": "x", "session": "x",
-        })
+        });
+        // Past what one `json!` expands.
+        arguments["relays"] = serde_json::json!([]);
+        arguments["readRelays"] = serde_json::json!(false);
+        arguments
     }
 
     #[test]
     fn build_rs_capabilities_and_permission_files_name_the_same_commands() {
         let declared: BTreeSet<String> = declared().into_iter().collect();
-        assert_eq!(declared.len(), 54, "{declared:?}");
+        assert_eq!(declared.len(), 56, "{declared:?}");
         let granted: BTreeSet<String> = capability()["permissions"]
             .as_array()
             .unwrap()

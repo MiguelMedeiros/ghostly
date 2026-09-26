@@ -2,11 +2,14 @@ import { useEffect, useState } from "react";
 import { iceServerProblem } from "@ghostly/browser/shared/ice";
 import { hyperdhtRelayProblem } from "@ghostly/browser/shared/hyperdhtRelay";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
-import { Block, FieldGrid, Section } from "./layout";
+import { Block, FieldGrid, Row, Section } from "./layout";
+import { Switch } from "./wallet/ui";
 
 /**
- * Settings section for clients that reach Pkarr through relays: which relays, an optional TURN server, and
- * the optional HyperDHT relay that lets paired chats use HyperDHT from a browser.
+ * Settings section for how this client reaches Pkarr and its peers: the Pkarr relays, an optional TURN server,
+ * and the optional HyperDHT relay that lets paired chats use HyperDHT from a browser. A browser reads and
+ * writes through the relays; the Desktop reads the DHT directly, writes to the relays too (contacts on the web
+ * read only relays), and reads from them only when "Also use Pkarr relays" is on.
  */
 export function NetworkSettings() {
   const platform = useServicesPlatform();
@@ -19,6 +22,7 @@ export function NetworkSettings() {
   // the engine is busy (a save can take seconds while the wallets start).
   const [savedAs, setSavedAs] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [switching, setSwitching] = useState(false);
   const loaded = network !== null;
 
   useEffect(() => {
@@ -52,17 +56,32 @@ export function NetworkSettings() {
     setSavedAs(current);
   };
 
+  const direct = network.readRelays !== undefined;
+  // On at once, like the other switches of Settings; the relay list as saved goes with it, not unsaved edits.
+  const readRelays = async (on: boolean) => {
+    setError("");
+    setSwitching(true);
+    try { await platform.setNetwork({ relays: network.relays, turn: network.turn, readRelays: on }); }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setSwitching(false); }
+  };
+
   const field =
     "w-full min-w-0 px-3 py-2 min-h-10 bg-input-bg border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent transition-colors";
 
   return (
     <Section title="Network">
+      {direct && <Row label="Also use Pkarr relays" testId="network-read-relays-row"
+        hint="This app reads the Mainline DHT directly. With this on, it also reads through the relays below: a first contact is found a little sooner, but the relays see which keys it looks up.">
+        <Switch label="Also use Pkarr relays" checked={network.readRelays === true} disabled={switching} onChange={(on) => void readRelays(on)} testId="network-read-relays" />
+      </Row>}
       <Block>
         <div>
           <label htmlFor="network-relays" className="text-text-primary text-sm block">Pkarr relays</label>
           <p className="text-text-muted text-xs mt-0.5">
-            Browsers cannot reach the Mainline DHT directly; relays do it for them. They only see signed, encrypted
-            packets and never carry your messages, calls or services. One per line, all of them are used.
+            {direct
+              ? "Contacts on the web and in the extension cannot reach the Mainline DHT; they read through relays, so this app writes to them too. They only see signed, encrypted packets. One per line."
+              : "Browsers cannot reach the Mainline DHT directly; relays do it for them. They only see signed, encrypted packets and never carry your messages, calls or services. One per line, all of them are used."}
           </p>
         </div>
         <textarea
