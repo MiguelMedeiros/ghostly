@@ -10,7 +10,7 @@ import { NetworkTag } from "./NetworkTag";
 import { PaymentReview } from "./PaymentReview";
 import { WalletMark, type ChatRail } from "./WalletCards";
 import { CardDeck, WalletCardFace } from "./WalletDeck";
-import { ONCHAIN_FEE_CAP, networkState, satsUnit, walletCards, type InstanceCard } from "./walletCardData";
+import { ONCHAIN_FEE_CAP, byNetwork, networkState, satsUnit, walletCards, type InstanceCard } from "./walletCardData";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { ComposerSheet, ComposerSheetHead, ForwardArrow } from "./ComposerSheet";
 import { CardFlip, FlipTurnButton } from "./deck/Flip";
@@ -79,7 +79,8 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
     if (theirs && !theirs[card.rail]!.includes(card.network)) return `Your contact has no ${networkName(card)} wallet`;
     return undefined;
   };
-  const cards = state && wallet ? walletCards(state) : [];
+  // Real money, then test money: the two never mingle in the deck, and every card says its network.
+  const cards = state && wallet ? byNetwork(walletCards(state)) : [];
   // With an Accept side, a card this chat has off is chosen there, not shown on Pay.
   const offHere = (c: InstanceCard) => !!peer && !cardOn(peer, c.rail, c.network);
   const payCards = onSaveMethods ? cards.filter((c) => !offHere(c)) : cards;
@@ -307,7 +308,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
             </button>
           </div>
           : <>
-            <CardDeck<string> compact kind="radios" label="Pay with" name="payment-deck" cards={shown} selected={selected} onSelect={(id) => { pick(id); setError(""); }} onChoose={use}
+            <CardDeck<string> compact tagAll kind="radios" label="Pay with" name="payment-deck" cards={shown} selected={selected} onSelect={(id) => { pick(id); setError(""); }} onChoose={use}
               testId={paymentCardTestId} blocked={(c) => unavailable(c as InstanceCard)} size={{ max: 250, share: .62 }} />
             <p className="composer-sheet-hint" data-blocked={blocked ? true : undefined}>{blocked ?? how(rail)}</p>
             <button type="button" data-testid="payment-use" className="composer-sheet-action" disabled={!!blocked || !card} onClick={() => use(selected)}>
@@ -315,7 +316,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
               <ForwardArrow />
             </button>
           </>}
-      </> : card ? <CardFlip className="payment" flipped={flipped} tone={`wallet-card-${card.rail}`} front={<WalletCardFace card={card} />} back={back} /> : back}
+      </> : card ? <CardFlip className="payment" flipped={flipped} tone={`wallet-card-${card.rail}`} front={<WalletCardFace card={card} tagAll />} back={back} /> : back}
     </ComposerSheet>
   );
 }

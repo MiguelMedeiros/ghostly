@@ -9,7 +9,7 @@ import { fakeEngine, linkView, paymentView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { arkReady, bitcoinSource, everyWallet, mint, REAL_MINT, reviewContext, reviewOf, target, TEST_MINT, usdtReady } from "./fixtures";
 
-// covers: payments.chat.cards, payments.chat.methods, payments.chat.networks, payments.amounts, payments.cashu.send, payments.arkade.send, payments.bark.send, payments.bitcoin.send, payments.usdt.send
+// covers: payments.chat.cards, payments.chat.methods, payments.chat.networks, wallet.instances.sections, payments.amounts, payments.cashu.send, payments.arkade.send, payments.bark.send, payments.bitcoin.send, payments.usdt.send
 
 const OTHER_MINT = "https://mint2.example.com";
 const ALL_ON = { cashu: true, lightning: true, arkade: true, bark: true, spark: true, bitcoin: true, usdt: true, fedimint: true };
@@ -119,9 +119,13 @@ describe("the cards", () => {
   it("shows one card per wallet, each on its own network", () => {
     open();
     expect(screen.getAllByRole("radio").map((r) => r.dataset.testid)).toEqual([
-      "payment-card-cashu-mainnet", "payment-card-lightning-mainnet", "payment-card-arkade-testnet", "payment-card-bark-testnet",
-      "payment-card-spark-testnet", "payment-card-bitcoin-mainnet", "payment-card-usdt-testnet",
+      // Real money first, then test money: the two networks never mingle.
+      "payment-card-cashu-mainnet", "payment-card-lightning-mainnet", "payment-card-bitcoin-mainnet",
+      "payment-card-arkade-testnet", "payment-card-bark-testnet", "payment-card-spark-testnet", "payment-card-usdt-testnet",
     ]);
+    // Every card says its network here, Mainnet too.
+    expect(screen.getByTestId("payment-card-bitcoin-mainnet").querySelector("[data-testid=wallet-card-network]")).toHaveTextContent("Mainnet");
+    expect(screen.getByTestId("payment-card-usdt-testnet").querySelector("[data-testid=wallet-card-network]")).toHaveTextContent("Testnet");
   });
 
   it("starts on the card used last time", () => {
@@ -429,7 +433,8 @@ describe("sending Cashu from the chat's wallet", () => {
   async function sendCashu(mints: ReturnType<typeof mint>[], sats: string) {
     const view = open({ wallet: everyWallet({ mints, balance: mints.reduce((s, m) => s + m.balance, 0) }), balance: 10_000 });
     view.engine.on("preparePayment", reviewOf);
-    await view.user.click(screen.getByTestId("payment-use"));
+    // Real money comes first in the deck: the Cashu card of these mints' network is picked by hand.
+    await view.user.click(screen.getByTestId(`payment-card-cashu-${mints[0].url === TEST_MINT ? "testnet" : "mainnet"}`));
     await view.user.type(amount(), sats);
     await view.user.type(screen.getByRole("textbox", { name: "What for? (optional)" }), "pizza");
     await view.user.click(send());

@@ -26,7 +26,7 @@ test("Fedimint joins nothing on Mainnet yet, and says so; on Testnet New asks fo
   await expect(dialog.getByTestId("new-wallet-invite")).toHaveCount(0);
   // In Testnet, nothing is joined for anyone: New waits for an invite code, and checks it.
   await dialog.getByRole("radio", { name: "Testnet" }).click();
-  await expect(dialog.getByTestId("new-wallet-type-fedimint-status")).toHaveText("Needs an invite");
+  await expect(dialog.getByTestId("new-wallet-type-fedimint-status")).toHaveText("Join with invite…");
   await fedimint.click();
   await dialog.getByTestId("new-wallet-invite").fill("lnbc1notaninvite");
   await dialog.getByTestId("new-wallet-create").click();

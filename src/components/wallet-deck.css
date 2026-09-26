@@ -31,6 +31,7 @@
 .wallet-deck-face[data-checked=false] :is(.wallet-deck-card-glyph,.wallet-deck-card-glyph-end){opacity:.45}
 /* A test wallet's card says so, discreetly, before its status: the network is the card's own. */
 .wallet-deck-card-network{display:inline-block;margin-right:6px;padding:0 5px;border:1px solid currentColor;border-radius:999px;line-height:1.35;text-transform:uppercase;opacity:.85}
+.wallet-deck-card-network[data-network=testnet]{color:#f5c542}
 .wallet-deck-face[data-checked=false] .wallet-deck-card-status{color:rgba(255,255,255,.7)}
 /* A card that cannot be used here says why, over its corner. */
 .wallet-deck-card[data-blocked=true] .wallet-deck-card-status{color:#fff;background:rgba(0,0,0,.45);border-radius:999px;padding:2px 8px;white-space:normal;text-align:right;max-width:70%}

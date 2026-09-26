@@ -34,7 +34,7 @@ test("Spark is not on Mainnet yet: New says so, with its reason, and makes nothi
   await spark.click({ force: true });
   await expect(dialog.getByTestId("new-wallet-progress")).toHaveCount(0);
   await dialog.getByRole("radio", { name: "Testnet" }).click();
-  await expect(dialog.getByTestId("new-wallet-type-spark-status")).toHaveText("One click");
+  await expect(dialog.getByTestId("new-wallet-type-spark-status")).toHaveText("Create");
   await alice.page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   await expect(alice.page.locator("[data-testid^=wallet-card-spark-]")).toHaveCount(0);

@@ -37,6 +37,9 @@ export function walletCards(state:WalletState):InstanceCard[] {
  return (state.wallets??[]).map(w=>walletCard(w.type,w.network,networkState(state,w.network)));
 }
 
+/** Real money first, then test money, each network's cards in the deck's order: a deck that mixes both keeps them apart. */
+export const byNetwork=<C extends {network:WalletNetwork}>(cards:C[]):C[]=>[...cards.filter(c=>c.network==='mainnet'),...cards.filter(c=>c.network==='testnet')];
+
 /** What one wallet's card shows, from its network's state. */
 export function walletCard(rail:WalletRail,network:WalletNetwork,s:WalletState):InstanceCard {
  const unit=satsUnit(network),base={id:cardId(rail,network),rail,network};

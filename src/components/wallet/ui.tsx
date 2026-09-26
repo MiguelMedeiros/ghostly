@@ -32,7 +32,7 @@ const BUTTON = {
   secondary: "bg-surface-alt text-text-primary hover:bg-surface-hover border border-border",
   danger: "bg-transparent text-danger hover:bg-danger/10 border border-border",
 } as const;
-export function Button({ variant = "secondary", className = "", ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: keyof typeof BUTTON }) {
+export function Button({ variant = "secondary", className = "", ...props }: React.ComponentPropsWithRef<"button"> & { variant?: keyof typeof BUTTON }) {
   return <button type="button" {...props} className={`px-4 py-2 min-h-10 max-md:min-h-11 whitespace-nowrap rounded-lg text-sm transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${BUTTON[variant]} ${className}`} />;
 }
 

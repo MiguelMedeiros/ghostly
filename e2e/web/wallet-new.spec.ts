@@ -19,7 +19,7 @@ test("a new profile has no wallet and says how to start; one choice makes Testne
   await expect(alice.page.getByTestId("wallet-mode")).toHaveCount(0);
   await expect(alice.page.getByTestId("testnet-badge")).toHaveCount(0);
   await first.getByTestId("wallet-first-testnet").click();
-  const deck = alice.page.getByRole("tablist", { name: "Wallet integrations" });
+  const deck = alice.page.getByRole("tablist", { name: "Testnet wallets" });
   await expect(deck.getByTestId("wallet-card-cashu-testnet")).toBeVisible({ timeout: 90_000 });
   await expect(deck.getByTestId("wallet-card-usdt-testnet")).toBeVisible({ timeout: 90_000 });
   await expect(deck.getByTestId("wallet-card-cashu-testnet").getByTestId("wallet-card-network")).toHaveText("Testnet");

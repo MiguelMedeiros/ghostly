@@ -101,7 +101,7 @@ export function ChatPaymentAccept({ peer, contact, cards, onSave }: {
   };
 
   return <>
-    <CardDeck<string> compact kind="checks" label={t("payments.accept.deck", { name: contact })} name="payment-accept-deck" cards={shown} selected={active}
+    <CardDeck<string> compact tagAll kind="checks" label={t("payments.accept.deck", { name: contact })} name="payment-accept-deck" cards={shown} selected={active}
       onSelect={setActive} onChoose={toggle} checked={(c) => !!draft[c.id]} testId={acceptCardTestId} size={{ max: 250, share: .62 }} />
     <p className="composer-sheet-hint" data-testid="payment-accept-hint">{card && hint(card)}</p>
     <p className="payment-accept-status" data-testid="payment-accept-status" data-state={state} role="status">{status}</p>

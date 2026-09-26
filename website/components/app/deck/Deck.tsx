@@ -77,9 +77,15 @@ export interface DeckProps<C extends DeckCard> {
  /** The kind of deck, as a class on the deck and, suffixed, on its parts (`wallet-deck`, `wallet-deck-track`…). */
  className:string;
  compact?:boolean;
+ /**
+  * One of two decks over one panel (the wallet page's Mainnet and Testnet), whose card is not the panel's: its
+  * `selected` card sits on top but not lifted, the pointer passing over it chooses nothing (a pointer on its way to the
+  * other deck's panel crosses it), and a click, a key or a swipe on it hands the panel to it.
+  */
+ resting?:boolean;
 }
 
-export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,checked,panel,label,testId,face,mark,tone,blocked,size,name,className,compact}:DeckProps<C>) {
+export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,checked,panel,label,testId,face,mark,tone,blocked,size,name,className,compact,resting=false}:DeckProps<C>) {
  const part=(p:string)=>`deck-${p} ${className}-${p}`;
  const active=Math.max(0,cards.findIndex(card=>card.id===selected));
  const root=useRef<HTMLDivElement>(null),track=useRef<HTMLDivElement>(null),tabs=useRef<(HTMLButtonElement|null)[]>([]);
@@ -88,8 +94,8 @@ export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,
  const layout=useMemo(()=>stackLayout(width,cards.length,size&&{max:size.max,share:size.share}),[width,cards.length,size?.max,size?.share]); // eslint-disable-line react-hooks/exhaustive-deps
  // A mouse gets the stack while its cards stay readable (not yet measured: as it was last time, or a stack).
  const mode=fine&&(width===0||layout.width>=STACK_MIN_CARD)?'stack':'track';
- const latest=useRef({onSelect,ids:cards.map(card=>card.id),selected,mode});
- latest.current={onSelect,ids:cards.map(card=>card.id),selected,mode};
+ const latest=useRef({onSelect,ids:cards.map(card=>card.id),selected,mode,resting});
+ latest.current={onSelect,ids:cards.map(card=>card.id),selected,mode,resting};
  const strips=useMemo(()=>stackStrips(layout,active),[layout,active]);
  const cardWidth=mode==='track'?Math.round(width*.76):layout.width,cardHeight=Math.round(cardWidth/1.586);
  const trackHeight=cardHeight+LIFT+14;
@@ -140,7 +146,7 @@ export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,
  /** The card the deck itself last chose (a key, a click, a swipe, the pointer): any other change came from outside. */
  const own=useRef(chosen);
  const select=(i:number)=>{
-  const id=cards[i]?.id;if(!id)return;own.current=id;if(id!==selected)onSelect(id);
+  const id=cards[i]?.id;if(!id)return;own.current=id;if(id!==selected||resting)onSelect(id);
   // Already at rest there: no scroll, so no end to wait for.
   steer.current=centre(i,true)?{id,until:performance.now()+1000,resnap:false}:null;
  };
@@ -172,9 +178,11 @@ export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,
    }
    steer.current=null;
    const id=latest.current.ids[best];
-   if(id&&id!==latest.current.selected){own.current=id;latest.current.onSelect(id);}
+   if(id&&(id!==latest.current.selected||(latest.current.resting&&touch.current))){own.current=id;latest.current.onSelect(id);}
+   touch.current=false;
   };
-  const touched=()=>{steer.current=null;};
+  // A resting deck is handed the panel by a person's swipe, not by the scroll that centres it as it mounts.
+  const touched=()=>{steer.current=null;touch.current=true;};
   let timer:ReturnType<typeof setTimeout>|undefined;
   const debounced=()=>{clearTimeout(timer);timer=setTimeout(pick,120);};
   const scrollEnd='onscrollend' in window;
@@ -186,10 +194,11 @@ export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,
  // Stack: the card under the pointer comes up at once, on every deck alike (the page's and the chat's): the lift's
  // own spring is the only easing. Only a pointer that moved counts, never a card moving under a still one, and the
  // strips it reads are the ones on screen now.
+ const touch=useRef(false);
  const hover=useRef({x:NaN,y:NaN});
  const onPointerMove=(e:PointerEvent<HTMLDivElement>)=>{
   const h=hover.current;
-  if(mode!=='stack'||e.pointerType!=='mouse'||(e.clientX===h.x&&e.clientY===h.y))return;
+  if(mode!=='stack'||resting||e.pointerType!=='mouse'||(e.clientX===h.x&&e.clientY===h.y))return;
   h.x=e.clientX;h.y=e.clientY;
   const i=stripAt(strips,e.clientX-(track.current?.getBoundingClientRect().left??0));
   if(i<0||i===active)return;
@@ -218,19 +227,19 @@ export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,
  const current=cards[active];
  // The deck wears the chosen card's colour class: its glow and the arrows' marks take that card's ink.
  // Left to right in every language: the stack, its arrows and its marks are placed and moved in physical pixels.
- return <div ref={root} dir="ltr" className={`deck ${className}${current?` ${tone(current)}`:''}${compact?` deck-compact ${className}-compact`:''}`} data-mode={mode} style={{'--deck-w':`${width}px`,'--card-w':`${cardWidth}px`,'--card-h':`${cardHeight}px`,'--track-h':`${trackHeight}px`} as CSSProperties}>
+ return <div ref={root} dir="ltr" className={`deck ${className}${current?` ${tone(current)}`:''}${compact?` deck-compact ${className}-compact`:''}`} data-mode={mode} data-resting={resting||undefined} style={{'--deck-w':`${width}px`,'--card-w':`${cardWidth}px`,'--card-h':`${cardHeight}px`,'--track-h':`${trackHeight}px`} as CSSProperties}>
   <div ref={glow} className={part('glow')} aria-hidden="true"/>
   <div ref={track} className={part('track')} role={kind==='tabs'?'tablist':kind==='checks'?'group':'radiogroup'} aria-label={label} onKeyDown={onKey} onPointerMove={onPointerMove} onPointerLeave={onPointerLeave}>
    {cards.map((card,i)=>{
-    const offset=i-active,distance=Math.abs(offset),why=blocked?.(card),on=i===active,ticked=kind==='checks'?!!checked?.(card):undefined;
+    const offset=i-active,distance=Math.abs(offset),why=blocked?.(card),on=i===active&&!resting,top1=i===active,ticked=kind==='checks'?!!checked?.(card):undefined;
     // The button is the strip of the card that shows; the face is the whole card, placed from the button.
     const strip=strips[i]??{left:0,right:cardWidth},left=layout.lefts[i]??0;
     const place={'--bl':`${Math.round(strip.left)}px`,'--bw':`${Math.max(6,Math.round(strip.right-strip.left))}px`,'--fl':`${Math.round(left)-Math.round(strip.left)}px`,'--ft':`${top}px`,
-     '--y':`${on?-LIFT:ticked?-RAISE:0}px`,'--s':on?1:Math.max(.9,1-.025*distance),'--dim':on?0:1-Math.max(.45,.92-.13*distance),'--origin':offset<0?'left center':offset>0?'right center':'center',zIndex:20-distance} as CSSProperties;
+     '--y':`${on?-LIFT:ticked?-RAISE:0}px`,'--s':top1?1:Math.max(.9,1-.025*distance),'--dim':top1?0:1-Math.max(.45,.92-.13*distance),'--origin':offset<0?'left center':offset>0?'right center':'center',zIndex:20-distance} as CSSProperties;
     const semantics=kind==='tabs'?{role:'tab',id:panel?.tabId(card.id),'aria-selected':on,'aria-controls':panel?.id}:kind==='checks'?{role:'checkbox','aria-checked':ticked}:{role:'radio','aria-checked':on};
-    return <button key={card.id} ref={el=>{tabs.current[i]=el;}} type="button" {...semantics} tabIndex={on?0:-1} aria-disabled={why?true:undefined} title={why}
-     className={`${part('card')} ${tone(card)}`} data-active={on} data-checked={ticked} data-blocked={why?true:undefined} data-testid={testId(card)} style={place} onClick={()=>choose(i)}>
-     {face(card,{active:on,after:offset>0,checked:ticked})}
+    return <button key={card.id} ref={el=>{tabs.current[i]=el;}} type="button" {...semantics} tabIndex={top1?0:-1} aria-disabled={why?true:undefined} title={why}
+     className={`${part('card')} ${tone(card)}`} data-active={top1} data-checked={ticked} data-blocked={why?true:undefined} data-testid={testId(card)} style={place} onClick={()=>choose(i)}>
+     {face(card,{active:top1,after:offset>0,checked:ticked})}
     </button>;
    })}
   </div>
@@ -238,7 +247,7 @@ export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,
    <button type="button" className={part('arrow')} aria-label="Previous card" data-testid={`${name}-prev`} onClick={()=>select(stepCard(active,-1,cards.length))}>
     <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
    </button>
-   <div className={part('marks')} aria-hidden="true" style={{'--mark-i':active} as CSSProperties}>{cards.map((card,i)=><span key={card.id} className={tone(card)} data-on={i===active} data-checked={kind==='checks'?!!checked?.(card):undefined}>{mark(card)}</span>)}</div>
+   <div className={part('marks')} aria-hidden="true" style={{'--mark-i':active} as CSSProperties}>{cards.map((card,i)=><span key={card.id} className={tone(card)} data-on={i===active&&!resting} data-checked={kind==='checks'?!!checked?.(card):undefined}>{mark(card)}</span>)}</div>
    <button type="button" className={part('arrow')} aria-label="Next card" data-testid={`${name}-next`} onClick={()=>select(stepCard(active,1,cards.length))}>
     <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
    </button>

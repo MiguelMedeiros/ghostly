@@ -31,8 +31,11 @@ const known = (amount: number, network: WalletNetwork) => ({ empty: amount <= 0,
 /** A self-custodial source keeps its recovery phrase sealed with it (Breez, a BDK wallet): the money is on this device. */
 const phraseHeld = (secrets: string[] | undefined) => !!secrets?.includes("mnemonic");
 
+/** The parts of a network's view a removal reads. */
+export type RemovalView = Partial<Pick<NetworkWalletsView, "balance" | "lightning" | "bitcoin" | "ark" | "bark" | "spark" | "fedimint" | "usdt">>;
+
 /** What removing the `type` wallet of `network` takes away. `intents`: the profile's payments (the wallet view's `intents`). */
-export function walletRemoval(type: WalletType, network: WalletNetwork, view: NetworkWalletsView | undefined, intents: readonly PaymentReview[] = []): WalletRemoval {
+export function walletRemoval(type: WalletType, network: WalletNetwork, view: RemovalView | undefined, intents: readonly PaymentReview[] = []): WalletRemoval {
   const base = { type, network };
   const pending = intents.filter((i) => i.method === type && UNFINISHED.has(i.state) && walletNetworkOf(i.network) === network).length;
   switch (type) {

@@ -103,7 +103,7 @@ test('wallet cards fit a narrow screen, keep keyboard focus and respect reduced 
  await createWallet(p,'cashu','testnet');
  await createWallet(p,'cashu','mainnet');
  await createWallet(p,'usdt','mainnet');
- const cards=p.page.getByRole('tablist',{name:'Wallet integrations'});
+ const cards=p.page.getByTestId('wallet');
  const usdt=walletCard(p.page,'usdt-mainnet');
  // Cashu and Lightning through it on each network, and USDT: five cards on a snapping track, and the page itself never scrolls sideways at 390 px.
  await expect(cards.getByRole('tab')).toHaveCount(5);
