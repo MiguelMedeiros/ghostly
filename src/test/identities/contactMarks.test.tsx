@@ -163,11 +163,15 @@ describe("IdentityStack (the chat's header)", () => {
     expect(screen.queryByTestId("chat-identity-more-3")).not.toBeInTheDocument();
   });
 
-  it("names a mark on hover", () => {
+  it("names a mark on hover, after a short pause", async () => {
     const { engine } = renderApp(<IdentityStack peerKey="peer" name="Alice" onOpen={() => {}} />);
     act(() => engine.update(withReceived([receivedView({ provider: "ssh-github", subject: "mmedeiros", verified: { subject: "mmedeiros", source: "SSH" }, checkedAt: now() - 7200 })])));
     fireEvent.pointerOver(screen.getByTestId("chat-identity-badge"), { pointerType: "mouse" });
-    expect(screen.getByRole("tooltip")).toHaveTextContent("GitHub (SSH key): mmedeiros · verified 2 hr. ago");
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    const tip = await screen.findByRole("tooltip");
+    expect(within(tip).getByTestId("identity-tip-name")).toHaveTextContent("mmedeiros");
+    expect(tip).toHaveTextContent("GitHub (SSH key)");
+    expect(within(tip).getByTestId("identity-tip-state")).toHaveTextContent("Verified 2 hr. ago");
     fireEvent.pointerLeave(screen.getByTestId("chat-identity-badges"), { pointerType: "mouse" });
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
@@ -181,7 +185,7 @@ describe("IdentityStack (the chat's header)", () => {
       const mark = screen.getByTestId("chat-identity-badge");
       fireEvent.pointerDown(mark, { pointerType: "touch" });
       act(() => { vi.advanceTimersByTime(500); });
-      expect(screen.getByRole("tooltip")).toHaveTextContent(/^Domain: example.org · verified/);
+      expect(screen.getByRole("tooltip")).toHaveTextContent(/^example\.orgDomainVerified/);
       fireEvent.pointerUp(mark, { pointerType: "touch" });
       fireEvent.click(mark);
       expect(onOpen).not.toHaveBeenCalled();
@@ -245,6 +249,7 @@ describe("IdentityStack for a contact who shared no proof", () => {
       act(() => engine.update(withReceived([])));
       const mark = screen.getByTestId("chat-identity-ghostly-mark");
       fireEvent.pointerOver(mark, { pointerType: "mouse" });
+      act(() => { vi.advanceTimersByTime(300); });
       expect(screen.getByRole("tooltip")).toHaveTextContent(NOTHING);
       fireEvent.pointerLeave(screen.getByTestId("chat-identity-badges"), { pointerType: "mouse" });
       expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();

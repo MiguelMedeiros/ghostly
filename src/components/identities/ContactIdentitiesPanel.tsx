@@ -13,6 +13,7 @@ import { NostrContactCard } from "../nostr/NostrContactCard";
 import { useCopyKey } from "../../hooks/useCopyKey";
 import { IdentityPicker } from "./ComposerIdentities";
 import { contactBadges } from "./contactBadges";
+import { ContactFacePicker } from "./ContactFacePicker";
 import { IdCardFace, IdCardMark } from "./IdCardFace";
 import { contactGhostlyCard, GHOSTLY, idCardTone, machineLine, receivedIdCard, type IdCardContent } from "./idCard";
 import { ProviderMark } from "./ProviderMark";
@@ -70,6 +71,7 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
         </button>
       </div>
       <div className="contact-panel-body">
+        <ContactFacePicker peerKey={peerKey} received={received} />
         <section className="contact-panel-section" data-testid="chat-identities-received" aria-label={`Shared by ${name}`}>
           <h3 className="contact-panel-heading">Shared by {name}</h3>
           {link

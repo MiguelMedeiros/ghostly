@@ -124,7 +124,9 @@ test("a contact's identities: two marks and +1 in the chat list, a stack in the 
   await expect(stack.getByTestId("chat-identity-badge").first()).toHaveAttribute("data-icon", "ssh-github");
   await expect(stack.getByTestId("chat-identity-check-3")).toBeVisible();
   await stack.getByTestId("chat-identity-badge").first().hover();
-  await expect(bob.page.getByTestId("chat-identity-tip")).toHaveText(/^GitHub \(SSH key\): octo-cat · verified /);
+  await expect(bob.page.getByTestId("chat-identity-tip").getByTestId("identity-tip-name")).toHaveText("octo-cat");
+  await expect(bob.page.getByTestId("chat-identity-tip")).toContainText("GitHub (SSH key)");
+  await expect(bob.page.getByTestId("chat-identity-tip").getByTestId("identity-tip-state")).toHaveText(/^Verified /);
   await shot(bob, "header");
 
   // A click opens the panel beside the chat, not a modal: the chat stays usable.

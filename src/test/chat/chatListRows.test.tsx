@@ -115,7 +115,9 @@ describe("the chat list's rows (compact, the default)", () => {
     saveSession(chat("k", { nick: "Kim" }));
     const { user } = list();
     const actions = within(rowOf("Kim")).getByTestId("chat-row-actions");
-    expect(actions).toHaveClass("group-has-[:focus-visible]:opacity-100");
+    // Focus inside the layer itself: keyboard focus on the row's identity marks opens their card, not the actions.
+    expect(actions).toHaveClass("has-[:focus-visible]:opacity-100");
+    expect(actions).not.toHaveClass("group-has-[:focus-visible]:opacity-100");
     within(actions).getByRole("button", { name: "Pin chat" }).focus();
     await user.keyboard("{Enter}");
     expect(isSessionPinned("k")).toBe(true);

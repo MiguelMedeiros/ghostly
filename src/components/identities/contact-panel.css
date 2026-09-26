@@ -46,3 +46,11 @@
 .contact-card-nostr .text-text-primary{color:#fff}
 .contact-card-nostr button{min-height:34px;padding:0 12px;border-radius:10px;border:1px solid rgba(var(--card-rgb,36,211,194),.45);background:rgba(var(--card-rgb,36,211,194),.12);color:#fff;font-size:12px;font-weight:600}
 .contact-card-nostr button:hover{background:rgba(var(--card-rgb,36,211,194),.24)}
+
+/* "Show as" (ContactFacePicker.tsx): a one-tap offer of the contact's only profile, then the choice. */
+.contact-face-offer{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:8px 10px;border:1px solid var(--theme-border);border-radius:12px;background:var(--theme-surface-alt);color:var(--theme-text-primary);text-align:start;cursor:pointer;--ring:var(--theme-surface-alt)}
+.contact-face-offer:hover{background:var(--theme-surface-hover)}
+.contact-face-offer:focus-visible{outline:2px solid var(--theme-accent);outline-offset:1px}
+.contact-face-offer>.badge-mark,.contact-face-offer>.badge-mark>.badge-mark-tile{border-radius:999px}
+.contact-face-offer-title{display:block;font-size:13px;font-weight:600;color:var(--theme-accent)}
+.contact-face-offer-name{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--theme-text-secondary)}
