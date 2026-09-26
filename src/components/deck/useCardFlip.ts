@@ -1,4 +1,5 @@
 import {useCallback,useEffect,useLayoutEffect,useRef,useState} from 'react';
+import {playCue} from '../../lib/cues';
 
 /** How long the card takes to turn (flip.css's transitions). */
 export const FLIP_MS=520;
@@ -23,9 +24,9 @@ export function useCardFlip(initial:'cards'|'back'='cards') {
  },[side]);
  const timer=useRef<ReturnType<typeof setTimeout>>(undefined);
  useEffect(()=>()=>clearTimeout(timer.current),[]);
- const turn=useCallback(()=>{clearTimeout(timer.current);setSide('back');},[]);
+ const turn=useCallback(()=>{clearTimeout(timer.current);setSide('back');playCue('flip');},[]);
  const turnBack=useCallback(()=>{
-  setFlipped(false);clearTimeout(timer.current);
+  setFlipped(false);clearTimeout(timer.current);playCue('flip');
   timer.current=setTimeout(()=>setSide('cards'),reducedMotion()?FADE_MS:FLIP_MS);
  },[]);
  return {side,flipped,turn,turnBack};

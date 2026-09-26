@@ -13,6 +13,7 @@ import { RichText } from "./rich/RichText";
 import { EntityCards } from "./chat/EntityCards";
 import { MessageLinkCards } from "./LinkPreviewBubble";
 import { engine } from "@ghostly/browser/platform/engine";
+import { playCue, useCueChat } from "../lib/cues";
 import type { ChatMessage } from "../lib/types";
 
 interface MessageBubbleProps {
@@ -221,6 +222,7 @@ export const MESSAGE_LIST = "[data-message-list]";
  */
 function MessageMenu({ onDelete, onDetails, align }: { onDelete?: () => void; onDetails: () => void; align: "left" | "right" }) {
   const { t } = useI18n();
+  const chat = useCueChat();
   const [open, setOpen] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -272,6 +274,7 @@ function MessageMenu({ onDelete, onDetails, align }: { onDelete?: () => void; on
                 data-testid="message-delete-confirm"
                 onClick={() => {
                   setConfirm(false);
+                  playCue("deleted", { chat });
                   onDelete();
                 }}
                 className="px-2 py-0.5 rounded border border-danger/30 bg-danger/20 text-danger text-xs font-bold hover:bg-danger/30 transition-colors cursor-pointer max-md:min-h-10 max-md:px-4"
@@ -297,6 +300,7 @@ export function MessageBubble(props: MessageBubbleProps) {
 }
 
 function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", onDelete, linkId }: MessageBubbleProps) {
+  const chat = useCueChat();
   // Only what arrives while you watch moves; history is just there.
   const [enter] = useState(() =>
     Date.now() - message.timestamp < 5000
@@ -507,6 +511,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
             {message.deliveryError && <span className="block" data-testid="waiting-reason">{message.deliveryError}</span>}
             {/* Cancelling is deleting what never left: the chat's own delete, so the list forgets it too. */}
             <button className="underline text-link cursor-pointer" data-testid="cancel-waiting" onClick={() => {
+              playCue("deleted", { chat });
               if (onDelete) { onDelete(); return; }
               const link = engine.linkByPeer(peerPubKey);
               if (link) void engine.call("deleteMessage", { linkId: link.id, messageId: message.id }).catch(() => {});

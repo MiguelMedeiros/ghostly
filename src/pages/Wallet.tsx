@@ -24,6 +24,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { Page, PageAction } from "../components/layout";
 import { focusInPlace } from "../lib/focus";
 import { navOnly } from "../lib/navigation";
+import { playCue } from "../lib/cues";
 import type { WalletInstanceView, WalletNetwork, WalletPlatform, WalletState } from "../lib/platform";
 
 const CARD_KEY = "ghostly-wallet-card";
@@ -114,6 +115,7 @@ export function Wallet() {
     const face = card?.querySelector<HTMLElement>("[data-deck=face]");
     if (!card || !face) return;
     dealCard(face);
+    playCue("wallet");
     // The focus goes to the new card (New's dialog, closing, leaves it to the page), or to its backup rows.
     if (backup !== dealt) focusInPlace(card);
     setDealt(null);

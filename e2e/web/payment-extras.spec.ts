@@ -3,6 +3,7 @@ import { TEST_COINS, chat, connect, expect, getTestCoins, link, openChat, openWa
 import { mintEndpoint } from "../support/mint";
 import { composerRow } from "../support/composer";
 import { chatPayments, paymentCard } from "../support/payments";
+import { NOTE, heard, listen } from "../support/sounds";
 
 /**
  * Payments in a chat beyond the happy path: memos, a payment the contact refuses, ecash that was
@@ -20,8 +21,10 @@ test.beforeEach(() => {
  * Two people in one chat, connected. With `testnet`, each first makes a Testnet Cashu wallet with New (a new
  * profile has none), so the chat knows from its first packet that both can take test sats.
  */
-async function chatting(peer: (name: string) => Promise<Peer>, a: string, b: string, { testnet = true } = {}): Promise<[Peer, Peer]> {
+async function chatting(peer: (name: string) => Promise<Peer>, a: string, b: string, { testnet = true, sounds = false } = {}): Promise<[Peer, Peer]> {
   const [alice, bob] = await Promise.all([peer(a), peer(b)]);
+  // `sounds`: what each would hear is recorded (e2e/support/sounds.ts).
+  if (sounds) await Promise.all([listen(alice), listen(bob)]);
   if (testnet) for (const p of [alice, bob]) await useTestnet(p);
   await link(alice, bob);
   await connect(alice, bob);
@@ -83,9 +86,11 @@ test("a request's memo shows on both sides, and test-mint payments say test sats
 });
 
 // The composer's "What for?" goes with a direct send: it is kept on the review and sent with the ecash.
-test("a sent payment's memo shows in both bubbles", { tag: ["@feature:payments.chat.memo", "@feature:payments.cashu.send"] }, async ({ peer }) => {
-  const [alice, bob] = await chatting(peer, "send-memo-alice", "send-memo-bob");
+test("a sent payment's memo shows in both bubbles", { tag: ["@feature:payments.chat.memo", "@feature:payments.cashu.send", "@feature:app.attention.cues"] }, async ({ peer }) => {
+  const [alice, bob] = await chatting(peer, "send-memo-alice", "send-memo-bob", { sounds: true });
   await fund(alice);
+  // Test coins jingle, rather than the coin a payment in makes.
+  await expect.poll(() => heard(alice, NOTE.testcoins)).toBe(1);
   for (const p of [alice, bob]) await openChat(p);
   const review = await prepareSend(alice, 21, "for the tickets");
   await review.getByRole("button", { name: "Approve payment" }).click();
@@ -95,10 +100,13 @@ test("a sent payment's memo shows in both bubbles", { tag: ["@feature:payments.c
     await expect(sent).toContainText("for the tickets");
     await expect(sent).toContainText(/21\s*test sats/);
   }
+  // Settled: the payer hears it go, once (instead of the older "confirmed"); the payee does not.
+  await expect.poll(() => heard(alice, NOTE.paid)).toBe(1);
+  expect(await heard(bob, NOTE.paid)).toBe(0);
 });
 
-test("a payment the contact refuses comes back, and is never shown as paid", { tag: ["@feature:payments.chat.refused", "@feature:wallet.cashu.mint.add", "@feature:wallet.cashu.mint.manage", "@feature:wallet.history"] }, async ({ peer }) => {
-  const [alice, bob] = await chatting(peer, "refused-alice", "refused-bob");
+test("a payment the contact refuses comes back, and is never shown as paid", { tag: ["@feature:app.attention.cues", "@feature:payments.chat.refused", "@feature:wallet.cashu.mint.add", "@feature:wallet.cashu.mint.manage", "@feature:wallet.history"] }, async ({ peer }) => {
+  const [alice, bob] = await chatting(peer, "refused-alice", "refused-bob", { sounds: true });
   // Both have a Testnet Cashu wallet, where Bob's test mint is the public one. Alice keeps her test sats at a
   // mint Bob has not chosen: the local mint under its own address (a mint on this machine belongs to Testnet
   // too, and is never added by itself). Bob's wallet only takes ecash from mints he picked, and refuses.
@@ -126,6 +134,9 @@ test("a payment the contact refuses comes back, and is never shown as paid", { t
   await expect(sent).toHaveAttribute("data-state", "reclaimed");
   // The sheet closed once the payment went out: the bubble is where it is followed.
   await expect(alice.page.getByTestId("payment-composer")).toHaveCount(0);
+  // A soft bonk, once, and never the sound of a payment that went out.
+  await expect.poll(() => heard(alice, NOTE.failed)).toBe(1);
+  expect(await heard(alice, NOTE.paid)).toBe(0);
   // Nothing left to take back.
   await expect(sent.getByRole("button", { name: "Take it back" })).toHaveCount(0);
 

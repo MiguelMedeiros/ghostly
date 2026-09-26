@@ -31,7 +31,8 @@ export interface FileDeskDeps {
   transfers: Map<string, FileTransferView>;
   changed(delayMs?: number): void;
   /** A transfer ended, either way: its local file id and how (for the message's details). */
-  settled?(linkId: string, fileId: string, record: FileTransferRecord): void;
+  /** `seen`: this desk saw the transfer under way before it ended (not a finished one shown again on a restart). */
+  settled?(linkId: string, fileId: string, record: FileTransferRecord, seen: boolean): void;
 }
 
 interface Chat {
@@ -277,10 +278,13 @@ export class FileDesk {
     } else this.speeds.delete(id);
     if (view.stage === "asking" && record.direction === "in") { view.room = this.deps.transfers.get(id)?.room; void this.room(id); }
     this.deps.transfers.set(id, view);
-    if (transferEnded(record) && !this.ended.has(id)) { this.ended.add(id); this.deps.settled?.(linkId, id, record); }
+    if (!transferEnded(record)) this.underway.add(id);
+    else if (!this.ended.has(id)) { this.ended.add(id); this.deps.settled?.(linkId, id, record, this.underway.delete(id)); }
   }
   /** Transfers already reported as ended, by local id. */
   private readonly ended = new Set<string>();
+  /** Transfers seen under way in this run, until they end. */
+  private readonly underway = new Set<string>();
 
   /** The free space an offer is decided against, shown with it. */
   private async room(id: string): Promise<void> {

@@ -90,7 +90,7 @@ import {
   type GroupEntryLink,
   entryParams,
 } from "@ghostly/core";
-import type { AttentionEvent, EngineImplementation } from "../shared/rpc";
+import type { AttentionCue, AttentionEvent, EngineImplementation } from "../shared/rpc";
 import { fileStore, type StoredFile } from "../shared/idb";
 import { fileBytes } from "../shared/fileBytes";
 import { FileAppender, readStored, removeStored, storedSize, streamStored } from "../shared/storedFiles";
@@ -141,7 +141,8 @@ import { TransportLog } from "./transportLog";
 import { S3Store } from "../backup/s3";
 import type { HoldStore } from "../backup/storage";
 import { PaymentDesk } from "./payments";
-import { CashuWallet } from "./wallet";
+import { CashuWallet, TEST_COINS_NOTE } from "./wallet";
+import { groupCue, identityCues, knockCue, paymentCue, transportCue, transportMark, type Cue } from "./cues";
 import { DEFAULT_HYPERDHT_RELAY, hyperdhtRelayProblem } from "../shared/hyperdhtRelay";
 import { traceJoin } from "./joinTrace";
 import { DEFAULT_IROH_RELAYS, createIrohWebEndpoint, irohRelayProblem } from "../platform/irohWeb";
@@ -323,15 +324,31 @@ export class GhostlyNode implements EngineImplementation {
   private readonly feedbackIds = new Set<string>();
   private walletFeedbackReady = false;
   private readonly walletFeedbackIds = new Set<string>();
-  private feedback(type: AttentionEvent["type"], id: string, linkId?: string, mention = false) {
+  /** `cue`: a finer sound the page plays instead of the event's own when its category is on (src/lib/cues.ts). */
+  private feedback(type: AttentionEvent["type"], id: string, linkId?: string, mention = false, cue?: AttentionCue) {
     const key = type + ":" + id;
     if (this.feedbackIds.has(key)) return;
     this.feedbackIds.add(key);
-    this.events.onAttention?.({type, id:key, at:Date.now(), ...(linkId ? {linkId} : {}), ...(mention ? {mention:true} : {})});
+    this.events.onAttention?.({type, id:key, at:Date.now(), ...(linkId ? {linkId} : {}), ...(mention ? {mention:true} : {}), ...(cue ? {cue} : {})});
+  }
+  /** A fact that had no sound before the sound categories: its cue is its only sound (engine/cues.ts). */
+  private cueFeedback({ cue, key }: Cue, linkId?: string) {
+    this.feedback("cue", cue + ":" + key, linkId, false, cue);
   }
   private messageFeedback(type: "message" | "sent", message: StoredMessage) {
     if (message.timestamp < this.feedbackStartedAt || message.file || message.paymentId || /^👋 (?:.+ )?joined$/.test(message.text)) return;
-    this.feedback(type, message.linkId + ":" + message.id, message.linkId, type === "message" && !!message.mentioned);
+    this.feedback(type, message.linkId + ":" + message.id, message.linkId, type === "message" && !!message.mentioned, groupCue(message));
+  }
+  /**
+   * The chat a link's facts belong to, as the pages mute it: a group member's edge, or a community member's
+   * payment link, files them in the group (as `storeMessage` does); any other link is its own chat.
+   */
+  private chatOf(linkId: string | undefined): string | undefined {
+    if (!linkId) return undefined;
+    const edge = this.links.get(linkId)?.stored;
+    if (edge?.group && edge.groupPeer && !edge.groupEntry) return `group:${edge.group}`;
+    const pay = parsePayLink(linkId);
+    return pay ? `group:${pay.groupId}` : linkId;
   }
   /** The next chat's keys, warmed on the network ahead of time (`takeInvite`). */
   private spare: SpareInvite | null = null;
@@ -350,7 +367,10 @@ export class GhostlyNode implements EngineImplementation {
     storeMessage: (message) => this.storeMessage(message),
     transfers: this.transfers,
     changed: (delayMs) => this.emitState(delayMs),
-    settled: (linkId, fileId, record) => void this.noteFileEnd(linkId, fileId, record.state === "done" ? undefined : record.error ?? record.state),
+    settled: (linkId, fileId, record, seen) => {
+      if (seen && record.direction === "in" && record.state === "done") this.cueFeedback({ cue: "downloaded", key: fileId }, this.chatOf(linkId));
+      void this.noteFileEnd(linkId, fileId, record.state === "done" ? undefined : record.error ?? record.state);
+    },
   });
   private stateTimer: ReturnType<typeof setTimeout> | null = null;
   private paymentTimer:ReturnType<typeof setTimeout>|null=null;
@@ -417,6 +437,7 @@ export class GhostlyNode implements EngineImplementation {
     reconcile:(review,prepared)=>new CashuAdapter(this.wallet,(r,t)=>this.desk.recordCashu(r,t)).reconcile(review,prepared as CashuPrepared),
   }], (review) => {
     if (review.state === "settled") this.feedback("confirmed", review.id);
+    if (review.state === "failed") this.cueFeedback({ cue: "failed", key: review.id }, this.chatOf(review.linkId));
     void this.refreshWallet();
   });
   /**
@@ -480,6 +501,8 @@ export class GhostlyNode implements EngineImplementation {
         if (payment.kind === "payment" && payment.direction === "out" && payment.state === "settled" && payment.createdAt >= this.feedbackStartedAt) {
           this.feedback("confirmed", payment.id);
         }
+        const cue = paymentCue(payment, this.feedbackStartedAt);
+        if (cue) this.cueFeedback(cue, this.chatOf(payment.group ? `group:${payment.group}` : payment.linkId));
       }
       void this.groupPayments.sync().catch(() => {});
       this.awaitingSoon();
@@ -568,7 +591,9 @@ export class GhostlyNode implements EngineImplementation {
   private readonly identities = new IdentityProofs({
     ledger: linkId => { const stored = this.links.get(linkId)?.stored; return stored?.profile ? stored.identities ?? emptyIdentityLedger() : undefined; },
     updateLedger: async (linkId, change) => {
+      const before = this.links.get(linkId)?.stored.identities;
       const identities = await db.updateIdentities(linkId, change);
+      for (const cue of identityCues(before, identities)) this.cueFeedback(cue, linkId);
       const live = this.links.get(linkId);
       if (live) live.stored = { ...live.stored, identities };
       void this.nostrSocial.ledgerChanged(linkId).catch(() => {});
@@ -823,7 +848,7 @@ export class GhostlyNode implements EngineImplementation {
       const fresh = !this.walletFeedbackIds.has(tx.id);
       this.walletFeedbackIds.add(tx.id);
       if (this.walletFeedbackReady && fresh && tx.amount > 0 && tx.timestamp >= this.feedbackStartedAt) {
-        if (tx.kind === "lightning-in" || tx.kind === "ecash-in") this.feedback("coin", tx.id);
+        if (tx.kind === "lightning-in" || tx.kind === "ecash-in") this.feedback("coin", tx.id, undefined, false, tx.note === TEST_COINS_NOTE ? "testcoins" : undefined);
         if (tx.kind === "lightning-out") this.feedback("confirmed", tx.id);
       }
     }
@@ -1176,7 +1201,12 @@ export class GhostlyNode implements EngineImplementation {
   // -- identity proofs ------------------------------------------------------
 
   beginIdentityProof(params: { provider: string; subject: string; validityDays?: number }) { return this.identities.begin(params); }
-  completeIdentityProof(params: { draftId: string; evidence: unknown }) { return this.identities.complete(params); }
+  async completeIdentityProof(params: { draftId: string; evidence: unknown }) {
+    const proof = await this.identities.complete(params);
+    // Proofs are checked before they are kept: added is verified.
+    this.cueFeedback({ cue: "sealed", key: proof.id });
+    return proof;
+  }
   cancelIdentityProof(params: { draftId: string }): void { this.identities.cancel(params); }
   removeIdentityProof(params: { id: string }): Promise<void> { return this.identities.remove(params); }
   shareIdentityProof(params: { linkId: string; id: string }): Promise<void> { return this.identities.share(params); }
@@ -1764,6 +1794,7 @@ export class GhostlyNode implements EngineImplementation {
     const transfer = this.transfers.get(fileId);
     if (!transfer) return;
     if (linkId) void this.noteFileEnd(linkId, fileId, error);
+    if (linkId && !error && transfer.direction === "in" && transfer.state === "transferring") this.cueFeedback({ cue: "downloaded", key: fileId }, this.chatOf(linkId));
     this.transfers.set(fileId, error ? { ...transfer, state: "failed", error } : { ...transfer, state: "done", transferred: transfer.size });
     const state = this.transfers.get(fileId)!;
     void fileStore.updateTransfer(fileId, state).catch(() => {});
@@ -1849,7 +1880,7 @@ export class GhostlyNode implements EngineImplementation {
   private observeTransport(linkId: string): void {
     const live = this.links.get(linkId), log = live && this.transportLogOf(live);
     if (!live || !log || !live.link || this.shuttingDown) return;
-    const pairing = live.pairing;
+    const pairing = live.pairing, mark = transportMark(log.entries, log.history);
     const changed = log.observe({
       live: live.dataLink === "open" && pairing?.status === "ready" && !!pairing.transport && live.link.isDataLinkOpen,
       transport: pairing?.transport,
@@ -1863,7 +1894,10 @@ export class GhostlyNode implements EngineImplementation {
       error: pairing?.status === "error" ? pairing.error : undefined,
       waiting: live.link.transportWait,
     }, Date.now());
-    if (changed) this.saveTransportLog(live, log);
+    if (!changed) return;
+    this.saveTransportLog(live, log);
+    const cue = transportCue(mark, log.entries, log.history);
+    if (cue) this.cueFeedback(cue, linkId);
   }
 
   private saveTransportLog(live: LiveLink, log: TransportLog): void {
@@ -2886,7 +2920,11 @@ export class GhostlyNode implements EngineImplementation {
       // Private groups are announced on paired chats; their admission frames arrive here.
       groupsSupport: !!stored.profile,
       events: {
-        onPairingProgress: progress => { live.pairingProgress = progress; this.emitState(); },
+        onPairingProgress: progress => {
+          if (knockCue(live.pairingProgress, progress)) this.cueFeedback({ cue: "knock", key: `${linkId}:${progress.startedAt}` }, linkId);
+          live.pairingProgress = progress;
+          this.emitState();
+        },
         onGroupFrame: stored.profile ? frame => this.groups.handleContactFrame(linkId, frame) : undefined,
         onGroupsSupport: () => this.emitState(),
         onDhtDelivery: () => { if (stored.profile && !stored.group) void this.outboxes.get(linkId)?.flush().catch(() => {}); this.observeTransport(linkId); this.emitState(); },

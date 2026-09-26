@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { CueChat } from "../lib/cues";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { EngineState, GroupJoinStage, GroupPayNote, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
@@ -182,6 +183,7 @@ export function GroupChat() {
   };
 
   return (
+    <CueChat.Provider value={groupChat(groupId)}>
     <div className="flex-1 flex flex-col h-full bg-chat-bg" data-testid="group-chat" data-status={group.status ?? "invitation"}>
       <div className="h-14 header-safe flex items-center justify-between px-4 max-md:pl-1 max-md:pr-1 bg-panel-header border-b border-border shrink-0">
         <div className="flex items-center gap-3 max-md:gap-1.5 min-w-0">
@@ -278,5 +280,6 @@ export function GroupChat() {
       {confirmForget && <DeleteChatDialog name={group.name} onClose={() => setConfirmForget(false)}
         onConfirm={() => { setConfirmForget(false); forgetChatMute(groupChat(groupId)); void engine.call("forgetGroup", { groupId }).catch(() => {}); nav.home(); }} />}
     </div>
+    </CueChat.Provider>
   );
 }

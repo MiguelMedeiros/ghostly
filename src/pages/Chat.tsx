@@ -33,6 +33,7 @@ import { contactStatus } from "../lib/contactStatus";
 import { PeerServices } from "../components/PeerServices";
 import { formatFileSize } from "../lib/format";
 import { playSound, startRinging } from "../lib/sounds";
+import { CueChat } from "../lib/cues";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import {
   isSessionPinned,
@@ -403,6 +404,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
 
   return (
     // The chat's column, and beside it (over it when narrow) the contact's identities: the page is their container.
+    <CueChat.Provider value={sessionId}>
     <div className="chat-pane flex-1 h-full">
     <div className="chat-column flex-1 flex flex-col h-full min-w-0 bg-chat-bg">
       {/* Chat Header */}
@@ -777,6 +779,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         card={identityCard} onClose={() => setShowIdentities(false)} />
     )}
     </div>
+    </CueChat.Provider>
   );
 }
 

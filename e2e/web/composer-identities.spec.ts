@@ -3,6 +3,7 @@ import { injectNostrSigner } from "../support/nostrSigner";
 import { closeIdentities, openIdentities, theirFace, turnTheirs } from "../support/identities";
 import { pair } from "../support/paired";
 import { composerRow } from "../support/composer";
+import { INTERFACE_NOTES, NOTE, heard, listen } from "../support/sounds";
 
 const chatId = (peer: Peer) => peer.page.evaluate(() => location.hash);
 
@@ -13,8 +14,10 @@ const chatId = (peer: Peer) => peer.page.evaluate(() => location.hash);
  * once the contact's app checked it. Turned over again, Stop sharing: a line in both chats, and the contact sees it is
  * no longer shared.
  */
-test("an identity is added, shared and withdrawn from the chat's composer, and both chats show it", { tag: ["@feature:proofs.composer", "@feature:proofs.share", "@feature:proofs.withdraw", "@feature:proofs.timeline"] }, async ({ peer }) => {
+test("an identity is added, shared and withdrawn from the chat's composer, and both chats show it", { tag: ["@feature:proofs.composer", "@feature:proofs.share", "@feature:proofs.withdraw", "@feature:proofs.timeline", "@feature:app.attention.cues"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("cid-alice"), peer("cid-bob")]);
+  // What each would hear (e2e/support/sounds.ts): the Identities category's cues.
+  await Promise.all([listen(alice), listen(bob)]);
   await injectNostrSigner(alice);
   await pair(alice, bob);
   const withBob = await chatId(alice);
@@ -39,6 +42,8 @@ test("an identity is added, shared and withdrawn from the chat's composer, and b
   await add.getByTestId("add-identity-start").click();
   await expect(add).toHaveCount(0);
   expect(await chatId(alice)).toBe(withBob);
+  // Added, so verified: a stamp, once.
+  await expect.poll(() => heard(alice, NOTE.sealed)).toBe(1);
 
   // The new card comes up chosen, not shared yet: one line on what Bob would see, and "Use Nostr" in its colour.
   const nostr = picker.getByTestId("composer-identity").filter({ hasText: "Nostr" });
@@ -78,6 +83,12 @@ test("an identity is added, shared and withdrawn from the chat's composer, and b
   await expect(theirs).toHaveAttribute("data-state", "verified", { timeout: 60_000 });
   await expect(theirs.getByTestId("identity-share-subject")).toContainText("npub1");
   await expect(bob.page.getByTestId("chat-identity-badge").first()).toBeVisible();
+  // Bob hears the card come in, then its check once his app verified it, each once; Alice turned cards over and moved
+  // along the deck without a sound (Interface sounds are off by default).
+  await expect.poll(() => heard(bob, NOTE.shared)).toBe(1);
+  await expect.poll(() => heard(bob, NOTE.checked)).toBe(1);
+  expect(await heard(alice, NOTE.shared, NOTE.checked)).toBe(0);
+  for (const p of [alice, bob]) expect(await heard(p, ...INTERFACE_NOTES)).toBe(0);
   // Tapping Bob's card opens Alice's identities on that card.
   await theirs.getByRole("button").click();
   await expect(bob.page.getByTestId("chat-identities")).toBeVisible();
@@ -89,6 +100,8 @@ test("an identity is added, shared and withdrawn from the chat's composer, and b
   await bob.page.reload();
   await expect(theirs).toHaveCount(1, { timeout: 30_000 });
   await expect(theirs).toHaveAttribute("data-state", "verified");
+  // Nor are their sounds.
+  expect(await heard(bob, NOTE.shared, NOTE.checked)).toBe(2);
 
   // The + menu's Identity row says one is shared here; it opens the picker again.
   await expect(await row()).toHaveAttribute("data-count", "1");
@@ -128,8 +141,8 @@ test("an identity is added, shared and withdrawn from the chat's composer, and b
 
   // On a phone the + menu is a sheet from the bottom; the input keeps its width.
   await alice.page.setViewportSize({ width: 390, height: 844 });
-  const input = await alice.page.getByPlaceholder("Message…").boundingBox();
-  expect(input!.width).toBeGreaterThan(200);
+  // Read once the layout has settled at the new width.
+  await expect.poll(async () => (await alice.page.getByPlaceholder("Message…").boundingBox())?.width ?? 0).toBeGreaterThan(200);
   await plus.click();
   const menu = alice.page.getByTestId("composer-menu");
   await expect(menu).toHaveAttribute("data-menu", "sheet");

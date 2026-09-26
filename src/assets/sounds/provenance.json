@@ -30,8 +30,9 @@
     {
       "name": "request",
       "duration": 0.5,
-      "prompt": "Two small muted taps, gentle request, unobtrusive.",
-      "generatedAt": "2026-09-22T17:29:50.338Z"
+      "prompt": "One light bright register ding, a single small rounded bell tap, a payment request arrived. Not a droplet.",
+      "generatedAt": "2026-09-26T13:40:12.629Z",
+      "edit": "take 3 of 6; gain +3.0 dB to -18 LUFS; fade out from 0.32 s"
     },
     {
       "name": "ring",
@@ -56,6 +57,132 @@
       "duration": 0.9,
       "prompt": "Two gentle glass taps, one from each side, then a soft upward resolution. Peaceful, reassuring, connected. Short clean fade.",
       "generatedAt": "2026-09-25T14:52:50.638Z"
+    },
+    {
+      "name": "paid",
+      "duration": 0.5,
+      "prompt": "A short soft outgoing whoosh carrying one small rounded glass coin away, payment sent. Brief airy tail.",
+      "generatedAt": "2026-09-26T13:40:08.373Z",
+      "edit": "take 1 of 3; gain +5.8 dB to -18 LUFS"
+    },
+    {
+      "name": "realmoney",
+      "duration": 0.5,
+      "prompt": "One deeper serious wooden tick, low and firm, a considered confirmation. Very short and dry.",
+      "generatedAt": "2026-09-26T13:40:14.561Z",
+      "edit": "take 1 of 3; gain +7.2 dB to -18 LUFS"
+    },
+    {
+      "name": "testcoins",
+      "duration": 0.5,
+      "prompt": "A tiny playful jingle of three small toy coins, light plastic and glass, cheerful and quick.",
+      "generatedAt": "2026-09-26T13:40:17.379Z",
+      "edit": "take 2 of 3; gain +1.1 dB to -18 LUFS"
+    },
+    {
+      "name": "failed",
+      "duration": 0.5,
+      "prompt": "One soft short low muted bonk, gentle and forgiving, something did not go through. Rounded, not alarming.",
+      "generatedAt": "2026-09-26T13:40:19.660Z",
+      "edit": "take 2 of 3; gain -0.6 dB to -19 LUFS"
+    },
+    {
+      "name": "sealed",
+      "duration": 0.5,
+      "prompt": "One soft stamp and seal thunk, a warm felt stamp pressed on paper, verified. Low, round, satisfying.",
+      "generatedAt": "2026-09-26T13:40:21.348Z",
+      "edit": "take 1 of 3; gain +3.3 dB to -18 LUFS"
+    },
+    {
+      "name": "shared",
+      "duration": 0.5,
+      "prompt": "A quick soft card flip, one paper card turning over with an airy flutter. Light and brief.",
+      "generatedAt": "2026-09-26T13:40:23.648Z",
+      "edit": "take 1 of 6; gain +4.8 dB to -20 LUFS; fade out from 0.32 s"
+    },
+    {
+      "name": "checked",
+      "duration": 0.5,
+      "prompt": "One bright small glass check tick, rising and clean, verification done. Crisp but soft, very short.",
+      "generatedAt": "2026-09-26T13:40:25.835Z",
+      "edit": "take 1 of 3; gain +5.9 dB to -19 LUFS"
+    },
+    {
+      "name": "knock",
+      "duration": 0.5,
+      "prompt": "Two soft wooden knocks on a small door, knock-knock, friendly and quiet, someone arrived. Rounded, close.",
+      "generatedAt": "2026-09-26T13:40:28.304Z",
+      "edit": "take 1 of 3; gain +2.0 dB to -18 LUFS"
+    },
+    {
+      "name": "switched",
+      "duration": 0.5,
+      "prompt": "A very subtle soft airy swoosh passing by, barely there, a quiet change of route. Faint and brief.",
+      "generatedAt": "2026-09-26T13:40:30.751Z",
+      "edit": "take 3 of 3; gain +3.7 dB to -24 LUFS"
+    },
+    {
+      "name": "back",
+      "duration": 0.5,
+      "prompt": "One soft rounded rising blip, small and calm, connection restored. Very short, gentle glass.",
+      "generatedAt": "2026-09-26T13:40:33.383Z",
+      "edit": "take 2 of 3; gain -2.1 dB to -20 LUFS"
+    },
+    {
+      "name": "mention",
+      "duration": 0.5,
+      "prompt": "Two quick bright rising glass notes with a small sparkle, someone called your name. A bit more present than a droplet.",
+      "generatedAt": "2026-09-26T13:42:01.581Z",
+      "edit": "take 5 of 6; gain +1.5 dB to -16 LUFS"
+    },
+    {
+      "name": "spoiler",
+      "duration": 0.5,
+      "prompt": "One small soft bubble pop, playful and round, hidden text revealed. Very short, no splash.",
+      "generatedAt": "2026-09-26T13:40:37.959Z",
+      "edit": "take 1 of 3; gain -3.6 dB to -20 LUFS"
+    },
+    {
+      "name": "downloaded",
+      "duration": 0.5,
+      "prompt": "One short bright plim, a single small glass pluck, a file finished downloading. Clean and tiny.",
+      "generatedAt": "2026-09-26T13:40:40.191Z",
+      "edit": "take 1 of 3; gain +2.4 dB to -20 LUFS"
+    },
+    {
+      "name": "deleted",
+      "duration": 0.5,
+      "prompt": "A soft ghostly fwip fading downward, a breathy airy sweep that dissolves away. Gentle, not sad.",
+      "generatedAt": "2026-09-26T13:42:04.329Z",
+      "edit": "take 4 of 6; gain +3.3 dB to -20 LUFS"
+    },
+    {
+      "name": "slide",
+      "duration": 0.5,
+      "prompt": "A very quiet soft card slide, one paper card gliding across felt, barely audible. Short and smooth.",
+      "generatedAt": "2026-09-26T13:40:44.126Z",
+      "edit": "take 3 of 3; gain -10.5 dB to -26 LUFS"
+    },
+    {
+      "name": "flip",
+      "duration": 0.5,
+      "prompt": "A quiet soft card flip, one card turning over with a light paper flutter. Short and clean.",
+      "generatedAt": "2026-09-26T13:40:48.199Z",
+      "edit": "take 2 of 3; gain -2.3 dB to -24 LUFS; fade out from 0.32 s"
+    },
+    {
+      "name": "wallet",
+      "duration": 0.5,
+      "prompt": "A short soft cha-ching, a tiny rounded glass bell and one coin, a new wallet. Warm, small, not metallic.",
+      "generatedAt": "2026-09-26T13:42:06.036Z",
+      "edit": "take 6 of 6; gain -4.7 dB to -18 LUFS"
+    },
+    {
+      "name": "group",
+      "duration": 0.5,
+      "prompt": "A quick soft ghostly chorus, three airy glass tones rising together like a tiny wordless choir. Warm, brief.",
+      "generatedAt": "2026-09-26T13:42:08.489Z",
+      "edit": "take 6 of 6; gain -2.4 dB to -18 LUFS"
     }
   ]
 }

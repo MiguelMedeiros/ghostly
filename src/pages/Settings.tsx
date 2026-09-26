@@ -18,6 +18,8 @@ import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { Button, Switch } from "../components/wallet/ui";
 import { setLoadPublicProfiles, useLoadPublicProfiles } from "../hooks/usePublicProfileRequest";
 import { Select } from "../components/ui/Select";
+import { CATEGORY_PREVIEW, categoryOn } from "../lib/cues";
+import { playSound } from "../lib/sounds";
 import {
   hashPassword,
   verifyPassword,
@@ -28,6 +30,8 @@ import {
   COLOR_SCHEME_OPTIONS,
   APP_WEBSITE,
   APP_LICENSE,
+  CUE_CATEGORIES,
+  DEFAULT_CUES,
   type ColorScheme,
   type Language,
 } from "../lib/settings";
@@ -292,6 +296,20 @@ export function Settings() {
         <Row label={t("settings.notificationSounds")} hint={t("settings.notificationSoundsDescription")}>
           <Switch testId="settings-sounds" label={t("settings.notificationSounds")} checked={settings.notifications.soundEnabled} onChange={(on) => updateNotifications({ soundEnabled: on })} />
         </Row>
+        {CUE_CATEGORIES.map((category) => {
+          const name = t(`settings.cues.${category}` as const), off = !settings.notifications.soundEnabled;
+          return (
+            <Row key={category} label={name} hint={t(`settings.cues.${category}Hint` as const)} testId={`settings-cues-${category}-row`}>
+              <button type="button" data-testid={`settings-cues-${category}-preview`} disabled={off} onClick={() => playSound(CATEGORY_PREVIEW[category])}
+                aria-label={t("settings.cues.preview", { name })} title={t("settings.cues.preview", { name })}
+                className="grid place-items-center w-8 h-8 rounded-full text-text-secondary hover:text-accent hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z" /></svg>
+              </button>
+              <Switch testId={`settings-cues-${category}`} label={name} disabled={off} checked={categoryOn(category, { ...settings.notifications, soundEnabled: true })}
+                onChange={(on) => updateNotifications({ cues: { ...DEFAULT_CUES, ...settings.notifications.cues, [category]: on } })} />
+            </Row>
+          );
+        })}
         <Row label={t("settings.systemNotifications")}
           hint={<span role="status">{noticePermission === "denied" ? t("settings.noticesDenied") : noticePermission === "unavailable" ? t("settings.noticesUnavailable") : t("settings.noticesRunning")}</span>}>
           <Switch testId="settings-system-notifications" label={t("settings.systemNotifications")} checked={systemOn} disabled={requestingNotice} onChange={() => void toggleNotices()} />

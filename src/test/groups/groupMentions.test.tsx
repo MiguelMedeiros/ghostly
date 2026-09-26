@@ -218,7 +218,8 @@ describe("Still notify me when I'm mentioned", () => {
     };
     expect(await send(event({}))).toEqual([]);
     expect(sound.notice).not.toHaveBeenCalled();
-    expect(await send(event({ mention: true }))).toEqual(["message"]);
+    // Its own sound (Chat sounds are on unless turned off: src/lib/cues.ts).
+    expect(await send(event({ mention: true }))).toEqual(["mention"]);
     await waitFor(() => expect(sound.notice).toHaveBeenCalledTimes(1));
     setMentionsNotify(groupChat("g1"), false);
     expect(await send(event({ mention: true }))).toEqual([]);

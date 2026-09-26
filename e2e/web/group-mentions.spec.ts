@@ -11,8 +11,9 @@ import { expect, openProfilePage, say, test, type Peer } from "../support/fixtur
  * stand-in Notification keeps what it was asked to show, and the clock is Playwright's.
  */
 
-/** The note only the message sound plays (src/lib/sounds.ts). */
+/** Notes only the message sound, and only a mention's own sound, play (src/lib/sounds.ts). */
 const MESSAGE_NOTE = 880;
+const MENTION_NOTE = 1480;
 
 async function setName(peer: Peer, name: string): Promise<void> {
   await openProfilePage(peer.page);
@@ -64,9 +65,9 @@ async function observe(peer: Peer): Promise<void> {
   await expect(peer.page.getByTitle("New Chat")).toBeVisible();
 }
 
-/** How many message sounds, and notifications, this peer has had. */
-const heard = (peer: Peer) =>
-  peer.page.evaluate((note) => (JSON.parse(localStorage.getItem("qa-notes") ?? "[]") as number[]).filter((hz) => hz === note).length, MESSAGE_NOTE);
+/** How many sounds of a message or a mention (or only those of `note`), and notifications, this peer has had. */
+const heard = (peer: Peer, notes: number[] = [MESSAGE_NOTE, MENTION_NOTE]) =>
+  peer.page.evaluate((notes) => (JSON.parse(localStorage.getItem("qa-notes") ?? "[]") as number[]).filter((hz) => notes.includes(hz)).length, notes);
 const notices = (peer: Peer) => peer.page.evaluate(() => (JSON.parse(localStorage.getItem("qa-notices") ?? "[]") as unknown[]).length);
 
 const groupChat = (peer: Peer) => peer.page.getByTestId("group-chat");
@@ -102,7 +103,7 @@ async function mentionBob(alice: Peer, text: string): Promise<void> {
   await expect(groupChat(alice).getByText(text)).toBeVisible();
 }
 
-test("three members: A mentions B, B's muted group still notifies, C's stays quiet", { tag: ["@feature:groups.mentions", "@feature:groups.mentions.notify", "@feature:groups.protocol.mentions"] }, async ({ peer }) => {
+test("three members: A mentions B, B's muted group still notifies, C's stays quiet", { tag: ["@feature:groups.mentions", "@feature:groups.mentions.notify", "@feature:groups.protocol.mentions", "@feature:app.attention.cues"] }, async ({ peer }) => {
   test.setTimeout(12 * 60_000);
   const [alice, bob, carol] = await Promise.all(["alice", "bob", "carol"].map(name => peer(name)));
   await Promise.all([setName(alice, "Alice"), setName(bob, "Bob"), setName(carol, "Carol")]);
@@ -139,8 +140,9 @@ test("three members: A mentions B, B's muted group still notifies, C's stays qui
   await expect(groupChat(alice).getByTestId("mention")).toHaveText("@Bob");
   await expect(groupChat(alice).getByTestId("mention")).not.toHaveAttribute("data-me");
 
-  // Bob: heard, notified, and an @ beside the unread dot.
+  // Bob: heard (the mention's own sound, not a message's), notified, and an @ beside the unread dot.
   await expect.poll(() => heard(bob), { timeout: 120_000 }).toBe(before.bob + 1);
+  expect(await heard(bob, [MENTION_NOTE])).toBe(1);
   await expect.poll(() => notices(bob)).toBe(before.bobNotices + 1);
   await expect(row(bob).getByTestId("group-row-mention")).toBeVisible();
   await expect(row(bob).getByTestId("group-row-mention")).not.toHaveAttribute("data-muted");
