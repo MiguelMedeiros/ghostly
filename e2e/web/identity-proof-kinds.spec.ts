@@ -1,6 +1,7 @@
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { expect, test, type Peer } from "../support/fixtures";
 import { closeIdentities, openIdentities, shareIdentity, theirCards, theirFace } from "../support/identities";
+import { composerRow } from "../support/composer";
 import { pair } from "../support/paired";
 import { choose } from "../support/select";
 
@@ -52,7 +53,8 @@ test("every kind of signer: a pasted signature and a provider's attestation, bot
 
   // Bob's app has no fake providers: it says it cannot verify them, and nothing is sent.
   await alice.page.evaluate(h => { location.hash = h; }, chatHash);
-  const mine = (await openIdentities(alice)).getByTestId("chat-identities-mine");
+  await (await composerRow(alice.page, "composer-identities-button")).click();
+  const mine = alice.page.getByTestId("composer-identities");
   // The picker opens on the Ghostly card; the arrow brings the first proof forward without turning it over.
   await mine.getByTestId("composer-identity-deck-next").click();
   await expect(mine.getByTestId("composer-identity").first()).toHaveAttribute("aria-checked", "true");
