@@ -94,7 +94,7 @@ describe("the Spark panel", () => {
     renderApp(<SparkWalletPanel wallet={wallet} state={ready({ history }, { lightning: { mode: "testnet", providerId: "breez", status: "ready", offered: [], recent: [] } as WalletState["lightning"] })} />);
     expect(screen.getByTestId("spark-lightning-on")).toHaveTextContent("In use");
     const rows = screen.getAllByTestId("spark-history-row");
-    expect(rows[0]).toHaveTextContent("+1,200Spark · lunch");
-    expect(rows[1]).toHaveTextContent("−300Lightning · pending");
+    expect(rows[0]).toHaveTextContent("+1,200 test satsSpark · lunch");
+    expect(rows[1]).toHaveTextContent("−300 test satsLightning · pending");
   });
 });

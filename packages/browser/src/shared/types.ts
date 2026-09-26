@@ -1,4 +1,3 @@
-import type { WalletMode } from "./mints";
 import type { GroupMention, LinkPreview, PairingProgress, PaymentMethodName, VoiceMeta } from "@ghostly/core";
 import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
@@ -484,19 +483,12 @@ export interface WalletCreate {
 }
 
 export interface WalletView {
-  /**
-   * The network the legacy page shows (the old Mainnet/Testnet switch). Absent means mainnet. Every wallet keeps
-   * its own network whatever this says: `networks` has both.
-   */
-  mode?: WalletMode;
-  /** Both networks' wallets, open side by side. */
+  /** Both networks' wallets, open side by side. The flat fields below are Mainnet's, for a caller naming no network. */
   networks?: Record<WalletNetwork, NetworkWalletsView>;
   /** The wallets this profile has, in the deck's order. */
   wallets?: WalletInstanceView[];
   /** What New can make on each network. */
   offers?: WalletOffer[];
-  /** On Mainnet: test sats held at test mints (a contact may have sent some), shown once in Testnet. */
-  waitingTestSats?: number;
   ark?: ArkWalletView;
   /** Second's Ark (Bark): a different Ark server from `ark`, not interchangeable with it. */
   bark?: BarkWalletView;
@@ -770,8 +762,6 @@ export interface Settings {
   mints: string[];
   /** False until the default mints were put in place once; after that the list is the user's. */
   mintsInitialized: boolean;
-  /** Real money, or test networks: every wallet follows it. Absent means mainnet. */
-  walletMode?: WalletMode;
   /** The Nostr social layer: relays, automatic profile loading, publication. Absent means the defaults, everything off. */
   nostr?: NostrSocialSettings;
   /**

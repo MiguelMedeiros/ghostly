@@ -38,7 +38,7 @@ the person runs (or a custodian's); Ghostly does not provide one, and this draft
   exactly the one amount when they coincide) before the callback is fetched; an amount outside them never
   reaches the service.
 - **The invoice is checked before any wallet sees it**: it decodes, its amount is exactly the millisats asked
-  for, it has a payment hash, it is not expired, it is on a network of the wallet mode, and it commits to the
+  for, it has a payment hash, it is not expired, it is on the network of the wallet that pays it, and it commits to the
   metadata the person was shown: its `h` tag is the sha256 of the metadata string, or it carries that exact
   string as its description (the same commitment, unhashed; how an invoice issued by a Cashu mint commits).
 - **Paying is the ordinary invoice path** of [203](203-lightning.md): quoted and paid through the active

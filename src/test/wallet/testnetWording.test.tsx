@@ -46,7 +46,7 @@ describe("the wallet panels' unit", () => {
   });
 
   it("Cashu never offers to switch to Testnet, even with test sats waiting there", () => {
-    const state = onNetwork("mainnet", { mints: [mint(REAL_MINT, 1_300)], balance: 1_300, waitingTestSats: 500 });
+    const state = onNetwork("mainnet", { mints: [mint(REAL_MINT, 1_300), mint(TEST_MINT, 500)], balance: 1_800 });
     renderApp(<CashuWallet wallet={wallet} state={state} rail="cashu" onOpenCashu={() => {}} />);
     expect(screen.queryByTestId("wallet-waiting-test-sats")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Switch to Testnet" })).not.toBeInTheDocument();

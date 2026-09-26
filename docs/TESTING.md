@@ -705,7 +705,7 @@ Last full run: 2026-09-24.
 
 **82 scenarios**: 50 passed (5 of them with blocks skipped), 27 failed, 5 skipped · 63 min · seed 20260924 — 25 failed after the two reruns marked in the table, once the harness was fixed
 
-| id | clients (A↔B) | transport | delivery | wallet mode | rail · source | identity proof | group | B's profile | B's language | B's screen | result |
+| id | clients (A↔B) | transport | delivery | wallet network | rail · source | identity proof | group | B's profile | B's language | B's screen | result |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | `mx-00812e0d` | web-web | webrtc | dht | testnet | ln-breez | domain | link | restored | en | phone | ✅ partial — payments: needs Breez's hosted regtest, which e2e/infra cannot run offline, with a funded counterpart wallet (GHOSTLY_BREEZ_COUNTERPART; its |
 | `mx-01bfacbf` | web-web | webrtc | store-forward | testnet | cashu | ssh | mesh | restored | pt | phone | ✅ |

@@ -52,8 +52,7 @@ function engine(options: { lightning?: FakeLightningProvider; onchain?: FakeOnch
 /** A Testnet engine with the fake on-chain wallet as its Bitcoin source. */
 async function bitcoinEngine(onchain = new FakeOnchainProvider()) {
   const setup = engine({ onchain });
-  await setup.node.walletSetMode({ mode: "testnet" });
-  await setup.node.bitcoinSetSource({ providerId: "fake-onchain", values: { token: "chain-secret-token" } });
+  await setup.node.bitcoinSetSource({ providerId: "fake-onchain", values: { token: "chain-secret-token" }, network: "testnet" });
   return setup;
 }
 
@@ -114,10 +113,9 @@ describe("reviewing and approving a payment", () => {
     expect(onchain.broadcasts).toHaveLength(1);
   });
 
-  it("a Testnet source stays Testnet's whatever the page shows: only a Testnet payment goes through it", async () => {
+  it("a Testnet source stays Testnet's: only a Testnet payment goes through it", async () => {
     const { node, onchain } = track(await bitcoinEngine());
-    await node.walletSetMode({ mode: "mainnet" });
-    // The page shows Mainnet, which has no source; the Testnet one is still there, connected.
+    // Mainnet has no source; the Testnet one is there, connected.
     expect(node.getState().wallet.bitcoin).toMatchObject({ status: "none", mode: "mainnet" });
     expect(node.getState().wallet.networks?.testnet.bitcoin).toMatchObject({ providerId: "fake-onchain", status: "ready", mode: "testnet" });
     expect(node.getState().wallet.wallets?.map((w) => w.id)).toEqual(["bitcoin:testnet"]);
@@ -134,14 +132,14 @@ describe("reviewing and approving a payment", () => {
 
   it("the source's secret never reaches the state the pages see", async () => {
     const { node } = track(await bitcoinEngine());
-    await node.lightningSetSource({ providerId: "fake-lightning", values: { token: "lightning-secret-token" } });
+    await node.lightningSetSource({ providerId: "fake-lightning", values: { token: "lightning-secret-token" }, network: "testnet" });
     const state = JSON.stringify(node.getState());
     expect(state).not.toContain("chain-secret-token");
     expect(state).not.toContain("lightning-secret-token");
-    expect(node.getState().wallet.bitcoin).toMatchObject({ providerId: "fake-onchain", status: "ready" });
-    await node.bitcoinRefresh();
-    await node.bitcoinClearSource();
-    expect(node.getState().wallet.bitcoin).toMatchObject({ status: "none" });
+    expect(node.getState().wallet.networks?.testnet.bitcoin).toMatchObject({ providerId: "fake-onchain", status: "ready" });
+    await node.bitcoinRefresh({ network: "testnet" });
+    await node.bitcoinClearSource({ network: "testnet" });
+    expect(node.getState().wallet.networks?.testnet.bitcoin).toMatchObject({ status: "none" });
   });
 
   it("without its wallet, an unknown outcome stays unknown: nothing is failed and nothing is sent again", async () => {
@@ -319,29 +317,28 @@ describe("the Cashu wallet and Lightning", () => {
     expect((await db.getSettings()).mints).toEqual(["https://b.example"]);
   });
 
-  it("the Cashu card goes to the mints; everything else to the Lightning source of the mode", async () => {
+  it("the Cashu card goes to the mints; everything else to the Lightning source of its network", async () => {
     const { node, lightning } = track(engine());
-    await node.walletSetMode({ mode: "testnet" });
-    await node.lightningSetSource({ providerId: "fake-lightning", values: { token: "t" } });
+    await node.lightningSetSource({ providerId: "fake-lightning", values: { token: "t" }, network: "testnet" });
     const invoice = fakeInvoice(9, new Uint8Array(32).fill(3));
     vi.spyOn(node["wallet"], "receiveLightning").mockResolvedValue({ quote: "q", mint: TEST_MINT, amount: 9, invoice, createdAt: 0, expiresAt: 5 } as never);
     const cashuQuote = vi.spyOn(node["wallet"], "quoteInvoice").mockResolvedValue({ quote: "melt", mint: TEST_MINT, amount: 9, feeReserve: 1 });
     const cashuPay = vi.spyOn(node["wallet"], "payQuote").mockResolvedValue(true);
 
-    expect(await node.walletReceiveLightning({ amount: 9, via: "cashu" })).toEqual({ quote: "q", invoice, expiresAt: 5, source: CASHU_MINT_SOURCE });
+    expect(await node.walletReceiveLightning({ amount: 9, via: "cashu", network: "testnet" })).toEqual({ quote: "q", invoice, expiresAt: 5, source: CASHU_MINT_SOURCE });
     expect(lightning.invoices.size).toBe(0);
-    expect(await node.walletReceiveLightning({ amount: 9 })).toMatchObject({ source: "fake-lightning" });
+    expect(await node.walletReceiveLightning({ amount: 9, network: "testnet" })).toMatchObject({ source: "fake-lightning" });
     expect(lightning.invoices.size).toBe(1);
 
-    expect(await node.walletQuoteInvoice({ invoice, via: "cashu" })).toMatchObject({ quote: "melt" });
-    expect(await node.walletPayQuote({ quote: "melt", mint: TEST_MINT })).toEqual({ paid: true });
+    expect(await node.walletQuoteInvoice({ invoice, via: "cashu", network: "testnet" })).toMatchObject({ quote: "melt" });
+    expect(await node.walletPayQuote({ quote: "melt", mint: TEST_MINT, network: "testnet" })).toEqual({ paid: true });
     expect(cashuQuote).toHaveBeenCalledOnce();
     expect(cashuPay).toHaveBeenCalledWith("melt", TEST_MINT, undefined);
     expect(lightning.paid).toEqual([]);
 
-    await node.lightningRefresh();
-    await node.lightningClearSource();
-    expect(node.getState().wallet.lightning).toMatchObject({ providerId: CASHU_MINT_SOURCE });
+    await node.lightningRefresh({ network: "testnet" });
+    await node.lightningClearSource({ network: "testnet" });
+    expect(node.getState().wallet.networks?.testnet.lightning).toMatchObject({ providerId: CASHU_MINT_SOURCE });
   });
 
   it("keeps each network's history apart, counts test sats waiting while the page shows Mainnet, and chimes once per new receipt", async () => {
@@ -351,7 +348,7 @@ describe("the Cashu wallet and Lightning", () => {
     const history = [tx("old", "https://real.example"), tx("test", TEST_MINT)];
     view.mockImplementation(async (network) => ({ mints: [], balance: network === "testnet" ? 50 : 1_000, history: [...history], feesPaid: 0 }) as never);
     await node["refreshWallet"]();
-    expect(node.getState().wallet).toMatchObject({ mode: "mainnet", waitingTestSats: 50, feesPaid: 1, balance: 1_000 });
+    expect(node.getState().wallet).toMatchObject({ feesPaid: 1, balance: 1_000 });
     expect(node.getState().wallet.history.map((t) => t.id)).toEqual(["old"]);
     expect(node.getState().wallet.networks?.testnet).toMatchObject({ balance: 50, feesPaid: 1 });
     expect(node.getState().wallet.networks?.testnet.history.map((t) => t.id)).toEqual(["test"]);

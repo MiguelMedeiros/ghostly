@@ -33,7 +33,7 @@ Two formats wallets produce today; a verifier accepts exactly these and nothing 
 - **Checked scripts only.** Without a full script interpreter the verifier checks P2WPKH, P2TR key path, P2SH-P2WPKH and P2PKH, applying BIP-322's required rules for them: SIGHASH_ALL (or SIGHASH_DEFAULT for P2TR), strict DER, low S, compressed keys in witness v0, exact `to_sign` shape (one input spending `to_spend:0`, one zero-value `OP_RETURN` output, version 0 or 2). Everything else is **inconclusive**, which a proof treats as not proven: multisig and other P2WSH/P2SH scripts, a Taproot script path whose control block commits to the output key, an annex, witness versions above 1.
 - **Proof of funds (`pof…`) is refused**, deliberately: it is the one BIP-322 variant about coins, and this proof makes no claim about coins.
 - **Time locks.** The official full vectors set nLockTime and nSequence (BIP-322: "valid at time T and age S"). For the single-key scripts checked, those gate when a real spend could confirm, not who holds the key; the verifier accepts them and reports T and S.
-- **Networks.** The verifier takes the mode, Mainnet (`bc1…`, `1…`, `3…`) or Testnet (every test network: `tb1…` testnet3/testnet4/signet/mutinynet, `bcrt1…` regtest, `m…`/`n…`/`2…`), and refuses an address of the other one with a reason naming the mode to switch to. The provider takes the mode from the address itself, since a contact verifies whatever its own wallet mode, and labels a test-network proof "test network" in its short form and its verified source.
+- **Networks.** The verifier takes the wallet's network, Mainnet (`bc1…`, `1…`, `3…`) or Testnet (every test network: `tb1…` testnet3/testnet4/signet/mutinynet, `bcrt1…` regtest, `m…`/`n…`/`2…`), and refuses an address of the other one with a reason naming the mode to switch to. The provider takes the mode from the address itself, since a contact verifies whatever network its own wallet is on, and labels a test-network proof "test network" in its short form and its verified source.
 
 ## Statement and signing
 
@@ -50,7 +50,7 @@ Person-facing steps per wallet live in `packages/browser/src/proofs/bitcoinWalle
 
 ## Open decisions
 
-Hardware wallets' current BIP-322 support and message-length limits per model and firmware (roadmap, "Hardware and signing"); whether to add a script interpreter for multisig; whether the wallet mode should restrict which network's addresses a person may prove (today the address's own prefix decides, and test-network proofs are labelled as such); "sign with my Ghostly wallet", once an on-chain source can sign messages (`OnchainProvider` cannot; Bitcoin Core's `signmessage` is legacy-only), showing the statement and asking first.
+Hardware wallets' current BIP-322 support and message-length limits per model and firmware (roadmap, "Hardware and signing"); whether to add a script interpreter for multisig; whether a wallet's network should restrict which network's addresses a person may prove (today the address's own prefix decides, and test-network proofs are labelled as such); "sign with my Ghostly wallet", once an on-chain source can sign messages (`OnchainProvider` cannot; Bitcoin Core's `signmessage` is legacy-only), showing the statement and asking first.
 
 ## References
 

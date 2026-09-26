@@ -93,7 +93,7 @@ import { fileStore, type StoredFile } from "../shared/idb";
 import { fileBytes } from "../shared/fileBytes";
 import { FileAppender, readStored, removeStored, storedSize, streamStored } from "../shared/storedFiles";
 import { FileDesk } from "./fileDesk";
-import { DEFAULT_MINTS, TEST_MINT, mintNetwork, type WalletMode } from "../shared/mints";
+import { DEFAULT_MINTS, TEST_MINT, mintNetwork } from "../shared/mints";
 import type {
   EngineState,
   GroupEdgeView,
@@ -345,9 +345,8 @@ export class GhostlyNode implements EngineImplementation {
     received: (paymentId) => void this.desk.onLightningPaid({ paymentId }),
   }, () => (this.options.fedimintSdk ?? loadFedimintSdk)()));
   private readonly sparkWallets = perNetwork((network) => new SparkWallet(network, () => { void this.refreshWallet(); void this.desk.reconcileSparkReceipts().catch(()=>{}); }));
-  /** The network the legacy wallet page shows (the old Mainnet/Testnet switch), and what a call naming none acts on. */
-  private get viewNetwork(): WalletNetwork { return this.settings.walletMode === "testnet" ? "testnet" : "mainnet"; }
-  private net(network?: WalletNetwork): WalletNetwork { return network === "mainnet" || network === "testnet" ? network : this.viewNetwork; }
+  /** What a call naming no network acts on (a caller from before wallets had their own): Mainnet. */
+  private net(network?: WalletNetwork): WalletNetwork { return network === "testnet" ? "testnet" : "mainnet"; }
   /** The Fedimint wallet that joined this federation, whichever network it is on. */
   private fedimintOf(federation: string | undefined): FedimintWallet | undefined { return federation ? WALLET_NETWORKS.map((n) => this.fedimintWallets[n]).find((w) => w.federation(federation)) : undefined; }
   /**
@@ -459,7 +458,7 @@ export class GhostlyNode implements EngineImplementation {
       void this.groupPayments.sync().catch(() => {});
       this.emitState();
     },
-    defaultNetwork: () => this.viewNetwork,
+    defaultNetwork: () => "mainnet",
   }, this.arkWallets, this.usdtWallets, this.barkWallets, perNetwork((network) => ({
     createInvoice: (amount: number, paymentId: string) => this.lightnings[network].createInvoice(amount, { paymentId }),
     quote: async (invoice: string) => { const quote = await this.lightnings[network].quote(invoice); return { ...quote, mint: quote.source === CASHU_MINT_SOURCE ? quote.mint : undefined }; },
@@ -717,7 +716,6 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   private async refreshWallet(): Promise<void> {
-    const mode = this.viewNetwork;
     const networks = {} as Record<WalletNetwork, NetworkWalletsView>;
     let everything: WalletTx[] = [];
     for (const network of WALLET_NETWORKS) {
@@ -729,9 +727,9 @@ export class GhostlyNode implements EngineImplementation {
         ark: this.arkWallets[network].view, bark: this.barkWallets[network].view, fedimint: this.fedimintWallets[network].view, spark: this.sparkWallets[network].view,
         usdt: this.usdtWallets[network].view, lightning: this.lightnings[network].view, bitcoin: this.bitcoins[network].view };
     }
-    const shown = networks[mode];
     const wallets = walletInstances(networks);
-    this.walletView = { ...shown, mode, waitingTestSats: mode === "mainnet" ? networks.testnet.balance : 0, networks, wallets, offers: this.walletOffers(networks, wallets), intents: (await intentRepository.list()).map((saved) => saved.review) };
+    // The flat fields are Mainnet's, for a caller from before wallets had their own network; `networks` has both.
+    this.walletView = { ...networks.mainnet, networks, wallets, offers: this.walletOffers(networks, wallets), intents: (await intentRepository.list()).map((saved) => saved.review) };
     this.announcePaymentNetworks(wallets);
     for (const tx of everything) {
       const fresh = !this.walletFeedbackIds.has(tx.id);
@@ -1860,16 +1858,6 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /**
-   * What a call naming no network acts on (the network older pages showed with the Mainnet/Testnet switch). Nothing
-   * is parked, closed or made: every wallet stays open on its own network, and the page names the network of each.
-   */
-  async walletSetMode({ mode }: { mode: WalletMode }): Promise<void> {
-    if (mode !== "mainnet" && mode !== "testnet") throw new Error("Unknown wallet mode");
-    await this.updateSettings({ settings: { walletMode: mode } });
-    await this.refreshWallet();
-  }
-
-  /**
    * New → a type → a network: the wallet is made in one click, with the known-good defaults of that network, and
    * checked before its card appears: the server answers, the mint says who it is, the chain is the right one. On
    * failure nothing is saved and the error says what to try again. Types that need one thing (a Fedimint invite,
@@ -2091,9 +2079,9 @@ export class GhostlyNode implements EngineImplementation {
     void this.lightnings[wallet.network].ensureReady();
     return result;
   }
-  fedimintLeave(params: { federation: string }) { return (this.fedimintOf(params.federation) ?? this.fedimintWallets[this.viewNetwork]).leave(params.federation); }
+  fedimintLeave(params: { federation: string }) { return (this.fedimintOf(params.federation) ?? this.fedimintWallets.mainnet).leave(params.federation); }
   async fedimintRefresh(params?: { network?: WalletNetwork }) { for (const network of params?.network ? [params.network] : WALLET_NETWORKS) await this.fedimintWallets[network].refresh(); }
-  async fedimintSpendNotes(params: { federation: string; amount: number }) { const { notes, operationId } = await (this.fedimintOf(params.federation) ?? this.fedimintWallets[this.viewNetwork]).spendNotes(params.federation, params.amount); return { notes, operation: operationId }; }
+  async fedimintSpendNotes(params: { federation: string; amount: number }) { const { notes, operationId } = await (this.fedimintOf(params.federation) ?? this.fedimintWallets.mainnet).spendNotes(params.federation, params.amount); return { notes, operation: operationId }; }
   /** Pasted notes go to the wallet that joined their federation, whichever network it is on. */
   async fedimintReceiveNotes(params: { notes: string; network?: WalletNetwork }) {
     for (const network of WALLET_NETWORKS) {
@@ -2102,8 +2090,8 @@ export class GhostlyNode implements EngineImplementation {
     }
     return this.fedimintWallets[this.net(params.network)].receiveNotes(params.notes);
   }
-  fedimintInvoice(params: { federation: string; amount: number; memo?: string }) { return (this.fedimintOf(params.federation) ?? this.fedimintWallets[this.viewNetwork]).createInvoice(params.federation, params.amount, params.memo ?? "").then(({ invoice }) => ({ invoice })); }
-  fedimintTakeBack(params: { federation: string; operation: string }) { return (this.fedimintOf(params.federation) ?? this.fedimintWallets[this.viewNetwork]).takeBack(params.federation, params.operation); }
+  fedimintInvoice(params: { federation: string; amount: number; memo?: string }) { return (this.fedimintOf(params.federation) ?? this.fedimintWallets.mainnet).createInvoice(params.federation, params.amount, params.memo ?? "").then(({ invoice }) => ({ invoice })); }
+  fedimintTakeBack(params: { federation: string; operation: string }) { return (this.fedimintOf(params.federation) ?? this.fedimintWallets.mainnet).takeBack(params.federation, params.operation); }
   fedimintBackup(params?: { network?: WalletNetwork }) { return this.fedimintWallets[this.net(params?.network)].backup(); }
   fedimintExportBackup(params: { password: string; network?: WalletNetwork }) { return this.fedimintWallets[this.net(params.network)].exportBackup(params.password); }
   async fedimintRestoreBackup(params: { text: string; password: string; network?: WalletNetwork }) { return (await this.restoreInto(this.fedimintWallets, params.network, (w) => w.restoreBackup(params.text, params.password))).result; }

@@ -63,11 +63,11 @@ export function SparkWalletPanel({ wallet, state }: { wallet: WalletPlatform; st
     <Notice>Nothing leaves before you approve. Spark addresses and invoices only; a Lightning invoice goes through the Lightning card.</Notice>
    </div>}
    {review && <PaymentReview key={review.id} review={review} wallet={wallet} onClose={() => { setReview(null); setTo(""); setAmount(""); }} />}
-   {intents.filter(i => i.id !== review?.id && i.state !== "settled").map(i => <Button key={i.id} className="block w-full text-left" onClick={() => setReview(i)}>{i.amount.toLocaleString()} sats · {i.state}</Button>)}
+   {intents.filter(i => i.id !== review?.id && i.state !== "settled").map(i => <Button key={i.id} className="block w-full text-left" onClick={() => setReview(i)}>{i.amount.toLocaleString()} {unit} · {i.state}</Button>)}
    {!!spark.history?.length && <Section title="History">
     <ul className="divide-y divide-border" data-testid="spark-history">
      {spark.history.map(entry => <li key={entry.id} className="flex items-center gap-3 py-2 text-sm" data-testid="spark-history-row">
-      <span className={entry.direction === "in" ? "text-green-500" : "text-text-primary"}>{entry.direction === "in" ? "+" : "−"}{entry.amount.toLocaleString()}</span>
+      <span className={entry.direction === "in" ? "text-green-500" : "text-text-primary"}>{entry.direction === "in" ? "+" : "−"}{entry.amount.toLocaleString()} <span className="text-xs text-text-muted">{unit}</span></span>
       <span className="flex-1 min-w-0 truncate text-text-muted text-xs">{entry.via === "spark" ? "Spark" : entry.via === "lightning" ? "Lightning" : entry.via === "onchain" ? "On-chain" : "Other"}{entry.memo ? ` · ${entry.memo}` : ""}{entry.status !== "completed" ? ` · ${entry.status}` : ""}{entry.fee ? ` · fee ${entry.fee}` : ""}</span>
       <span className="text-text-muted text-xs tabular-nums">{when(entry.at)}</span>
      </li>)}

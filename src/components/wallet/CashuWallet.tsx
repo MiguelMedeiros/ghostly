@@ -144,7 +144,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: Wall
           <div className="bg-surface rounded-xl p-4 space-y-2 animate-fade-in" data-testid="wallet-history-list">
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-text-muted">
               <span>{state.history.length === 0 ? "Nothing yet" : `${state.history.length} movement${state.history.length === 1 ? "" : "s"}`}</span>
-              <span data-testid="wallet-fees-paid">Fees paid: {state.feesPaid.toLocaleString()} sats</span>
+              <span data-testid="wallet-fees-paid">Fees paid: {state.feesPaid.toLocaleString()} {testnet ? "test sats" : "sats"}</span>
             </div>
             <div className="max-h-80 overflow-y-auto divide-y divide-border">
               {state.history.map((tx) => {
@@ -154,7 +154,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: Wall
                   <div key={tx.id} className="text-sm py-2" data-testid="wallet-tx">
                     <div className="flex items-baseline justify-between gap-2">
                       <span className="text-text-primary truncate">{TX_LABEL[tx.kind]}</span>
-                      <span className={`font-semibold shrink-0 tabular-nums ${incoming ? "text-accent" : "text-text-primary"}`}>{incoming ? "+" : "−"}{tx.amount.toLocaleString()}</span>
+                      <span className={`font-semibold shrink-0 tabular-nums ${incoming ? "text-accent" : "text-text-primary"}`}>{incoming ? "+" : "−"}{tx.amount.toLocaleString()} <span className="text-xs font-normal text-text-muted">{testnet ? "test sats" : "sats"}</span></span>
                     </div>
                     <div className="flex items-baseline justify-between gap-2 text-xs text-text-muted">
                       <span className="truncate">{new Date(tx.timestamp).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} · {mint?.name ?? new URL(tx.mint).hostname}{tx.note ? ` · ${tx.note}` : ""}</span>
@@ -169,7 +169,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu }: { wallet: Wall
         {notice && <Notice tone="success" testId="wallet-notice">{notice}</Notice>}
         {error && <Notice tone="error" testId="wallet-error">{error}</Notice>}
         {(state.intents ?? []).filter((i) => i.method === "cashu" && i.id !== review?.id).map((i) => (
-          <Button key={i.id} className="block w-full text-left" onClick={() => setReview(i)}>{i.amount} sats · {i.state}</Button>
+          <Button key={i.id} className="block w-full text-left" onClick={() => setReview(i)}>{i.amount} {testnet ? "test sats" : "sats"} · {i.state}</Button>
         ))}
         {review && <PaymentReview key={review.id} review={review} wallet={wallet} onClose={() => setReview(null)} />}
       </div>

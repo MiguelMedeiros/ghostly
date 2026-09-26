@@ -816,3 +816,9 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
   .sidebar-new-split > .sidebar-header-action { width: auto; }
   [data-testid="sidebar-chat-actions"] > .sidebar-header-action { width: 100%; }
 }
+
+/* Which money: "Test money" or "Real money", wherever money moves. Words first; the colour only echoes them. */
+.network-tag{display:inline-block;padding:0 6px;border:1px solid currentColor;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.04em;line-height:1.7;text-transform:uppercase;vertical-align:middle;white-space:nowrap}
+.network-tag[data-network="testnet"]{color:#e0a800}
+.network-tag[data-network="mainnet"]{color:var(--color-accent)}
+.payment-back-network{margin-left:8px;font-size:9px}

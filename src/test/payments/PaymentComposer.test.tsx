@@ -195,6 +195,7 @@ describe("the cards", () => {
     expect(back).toHaveAttribute("data-network", "testnet");
     expect(screen.getByTestId("payment-composer")).toHaveAttribute("data-network", "testnet");
     expect(within(back).getByText("Ark · Testnet")).toBeInTheDocument();
+    expect(within(back).getByTestId("payment-back-network")).toHaveTextContent("Test money");
     expect(within(back).getByText("5,000 test sats · with Alice")).toBeInTheDocument();
     expect(screen.queryByRole("radiogroup")).not.toBeInTheDocument();
   });
@@ -205,6 +206,7 @@ describe("the cards", () => {
     const back = screen.getByTestId("payment-back");
     expect(back).toHaveAttribute("data-network", "mainnet");
     expect(within(back).getByText("Cashu")).toBeInTheDocument();
+    expect(within(back).getByTestId("payment-back-network")).toHaveTextContent("Real money");
     expect(within(back).getByText("1,000 sats · with Alice")).toBeInTheDocument();
   });
 

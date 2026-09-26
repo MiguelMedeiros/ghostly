@@ -10,14 +10,14 @@ import { arkReady, barkReady, sparkReady, bitcoinSource, lightningSource, mint, 
 
 const cardsOf = (wallet: Partial<WalletView> = {}) => walletCards(walletView(wallet) as WalletState);
 /** One wallet's card, as the wallet page and the chat's picker show it, by its id (`cashu:testnet`). */
-const cardOf = (id: string, wallet: Partial<WalletView> = {}) => {
+const cardOf = (id: string, wallet: Parameters<typeof walletView>[0] = {}) => {
   const card = cardsOf(wallet).find((c) => c.id === id);
   if (!card) throw new Error(`no ${id} card among ${cardsOf(wallet).map((c) => c.id).join(", ") || "none"}`);
   const { id: _, rail: __, network: ___, ...shown } = card;
   return shown;
 };
 /** What one type's card on one network shows, even before that wallet has anything to be listed for. */
-const faceOf = (rail: WalletRail, network: WalletNetwork, wallet: Partial<WalletView> = {}) => {
+const faceOf = (rail: WalletRail, network: WalletNetwork, wallet: Parameters<typeof walletView>[0] = {}) => {
   const { id: _, rail: __, network: ___, ...shown } = walletCard(rail, network, networkState(walletView(wallet) as WalletState, network));
   return shown;
 };
@@ -90,7 +90,7 @@ describe("a test wallet's amounts always say test sats, a Mainnet one's plain sa
     ]);
   });
 
-  it("whatever the old profile-wide mode says", () => {
+  it("whatever network a flat fixture falls back to", () => {
     expect(cardOf("arkade:testnet", { mode: "mainnet", ark: arkReady({ network: "mutinynet", balance: 5_000 }) }).balance).toBe("5,000 test sats");
     expect(cardOf("cashu:testnet", { mode: "testnet", mints: [mint(TEST_MINT, 500)], balance: 500 }).balance).toBe("500 test sats");
   });

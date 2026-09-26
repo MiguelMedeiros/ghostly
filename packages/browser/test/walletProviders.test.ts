@@ -344,7 +344,8 @@ describe("the engine", () => {
 
     // Mainnet, the network a call naming none acts on, still has its own: the Cashu mints, and no Bitcoin source.
     expect(node.getState().wallet.networks?.mainnet.lightning).toMatchObject({ mode: "mainnet", providerId: CASHU_MINT_SOURCE });
-    expect(node.getState().wallet).toMatchObject({ mode: "mainnet", lightning: { mode: "mainnet", providerId: CASHU_MINT_SOURCE }, bitcoin: { status: "none" } });
+    // The flat fields are Mainnet's, for a caller naming no network.
+    expect(node.getState().wallet).toMatchObject({ lightning: { mode: "mainnet", providerId: CASHU_MINT_SOURCE }, bitcoin: { status: "none" } });
     expect(node.getState().wallet.networks?.testnet.bitcoin).toMatchObject({ status: "none" });
     await node.shutdown();
   });

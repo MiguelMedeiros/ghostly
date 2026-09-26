@@ -8,7 +8,7 @@
 | Revision | 0.1 |
 | Updated | 2026-09-23 |
 | Dependencies | [Payment Negotiation 200](200-payments.md), [Capabilities 03](03-capabilities.md), authenticated live data transport |
-| Implementation | Experimental browser adapter, Second's Bark SDK `@secondts/bark` 0.24.0 (bark 0.7.1, WebAssembly). Testnet mode only: every Testnet profile starts a signet wallet on Second's server; Mainnet makes none yet. Regtest evidence below. |
+| Implementation | Experimental browser adapter, Second's Bark SDK `@secondts/bark` 0.24.0 (bark 0.7.1, WebAssembly). Testnet only (New offers no Mainnet Bark yet): New makes a signet wallet on Second's server; Mainnet makes none yet. Regtest evidence below. |
 
 ## Scope and provider choice
 
@@ -58,7 +58,7 @@ Source: [`bark.ts`](../../packages/browser/src/engine/paymentAdapters/bark.ts), 
 Checked on 2026-09-23 with worthless coins only:
 
 - Unit tests against a fake SDK shaped on the real one: review sends nothing; the intent is written before the send; Arkade addresses, other servers' addresses, other networks and providers are refused; fee over the cap, a fee grown after review and a missing journal stop before anything leaves; a send that errors after leaving settles from the history, one that errors with nothing sent stays `unknown` and reconciling never sends again; a changed server key refuses to open; a reopened wallet waits for its server. The desk settles a request only from the payee's own history (the receipt alone settles nothing, one receive pays one request, a lost receipt still settles). Mode parking, Mainnet unavailability, no-replace/archival and the encrypted backup round trip are covered.
-- Real SDK in Chromium against Second's signet server: a wallet opens in about 3 s, the address is `tark1p…`, and the SDK refuses an Arkade address. Two browser profiles in Testnet mode each open a signet wallet by themselves; turning Bark off in one chat disables it for the contact with the reason, while Arkade stays available.
+- Real SDK in Chromium against Second's signet server: a wallet opens in about 3 s, the address is `tark1p…`, and the SDK refuses an Arkade address. Two browser profiles, each with a Testnet Bark wallet, each open a signet wallet by themselves; turning Bark off in one chat disables it for the contact with the reason, while Arkade stays available.
 - Real SDK in Chromium against local regtest (bitcoind 31.0, captaind 0.7.1 without Lightning, electrs): the funder (bark CLI) paid 20,000 sats to Alice's Bark address (movement `successful`, VTXO `8b3c05b3…:0`); 30,000 sats sent on-chain to Bob (txid `95e9beaf9acaa7d294fd90a02f1c6d8567d230895ad142a90c88251de44d0b31`) were boarded to 29,888 after the on-chain fee; Alice paid Bob 5,000 from the wallet page (Ark transaction `d5300750469177ab0cbc8f9216d66aad59c141b65798c7735376bbf7f659866f`); Bob paid Alice 2,000 by Send in the chat (her app answered his ask with a request) and she paid his 1,000 request. Final balances 16,000 (Alice) and 33,888 (Bob), both checked in each app; out-of-round payments cost no fee on that server.
 
 ```sh

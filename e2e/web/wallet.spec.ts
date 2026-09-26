@@ -82,7 +82,7 @@ test.describe("wallet", { tag: "@network" }, () => {
     expect(txs[2]).toContain("no fee");
     expect(txs[1]).toMatch(/fee \d/);
     expect(txs[0]).toMatch(/fee \d/);
-    const fees = Number((await alice.page.getByTestId("wallet-fees-paid").textContent())!.match(/(\d+) sats/)![1]);
+    const fees = Number((await alice.page.getByTestId("wallet-fees-paid").textContent())!.match(/(\d+) (?:test )?sats/)![1]);
     await expect.poll(() => balance(alice), "balance = received - sent - fees, to the sat").toBe(100 - 21 - 10 - fees);
     await alice.page.screenshot({ path: testInfo.outputPath("cashu-chat-history.png"), fullPage: true });
     await expect(alice.page.getByTestId("mint-fees").filter({ hasText: "0.1 sat per proof" })).toBeVisible();

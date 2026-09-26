@@ -18,20 +18,22 @@ export type StatePatch = { [K in keyof EngineState]?: EngineState[K] extends unk
  * lands on its own network, read from its chain (a test mint, Mutinynet, Sepolia…), and the wallets the profile has
  * follow from that, as the engine lists them. A test may give `networks`, `wallets` or `offers` itself instead.
  */
-export function walletView(patch: Partial<WalletView> = {}): WalletView {
-  const flat: WalletView = { mode: "mainnet", mints: [], balance: 0, history: [], feesPaid: 0, ...patch };
+export function walletView(patch: Partial<WalletView> & { mode?: WalletNetwork } = {}): WalletView & { mode: WalletNetwork } {
+  // `mode` is the fixture's word: the network a flat view with no chain of its own belongs to (Mainnet by default). It
+  // comes back on the view as the network the flat fields are bound to, as `wallet.forNetwork(n).getState()` sets it.
+  const { mode = "mainnet", ...rest } = patch;
+  const flat: WalletView = { mints: [], balance: 0, history: [], feesPaid: 0, ...rest };
   // What this made before (a state patched again) is made again from the flat fields; what a test gave, kept.
   const given = <T extends object>(value: T | undefined) => value && !derived.has(value) ? value : undefined;
-  const networks = given(patch.networks) ?? mark(splitByNetwork(flat));
+  const networks = given(patch.networks) ?? mark(splitByNetwork(flat, mode));
   const wallets = given(patch.wallets) ?? mark(walletInstances(networks));
-  return { ...flat, networks, wallets, offers: given(patch.offers) ?? mark(offersFor(networks, wallets)) };
+  return { ...flat, mode, networks, wallets, offers: given(patch.offers) ?? mark(offersFor(networks, wallets)) };
 }
 const derived = new WeakSet<object>();
 const mark = <T extends object>(value: T): T => { derived.add(value); return value; };
 
 const chainNetwork = (chain: string | undefined, fallback: WalletNetwork): WalletNetwork => chain ? walletNetworkOf(chain) : fallback;
-function splitByNetwork(flat: WalletView): Record<WalletNetwork, NetworkWalletsView> {
-  const fallback = flat.mode ?? "mainnet";
+function splitByNetwork(flat: WalletView, fallback: WalletNetwork): Record<WalletNetwork, NetworkWalletsView> {
   // The flat balance is its mints' network's when they are all of one; mints of both split it by what each holds.
   const both = WALLET_NETWORKS.every((n) => flat.mints.some((m) => mintNetwork(m.url) === n));
   const balanceOf = (network: WalletNetwork) => both ? flat.mints.filter((m) => mintNetwork(m.url) === network).reduce((sum, m) => sum + m.balance, 0)

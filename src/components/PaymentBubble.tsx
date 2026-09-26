@@ -8,6 +8,7 @@ import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { isWorthlessMint, mintNetwork } from "@ghostly/browser/shared/mints";
 import { ONCHAIN_FEE_CAP } from "./walletCardData";
 import { Select } from "./ui/Select";
+import { MONEY_LABEL, NetworkTag } from "./NetworkTag";
 
 const STATE_LABEL = {
   payment: { pending: "Waiting for your contact…", settled: "Received", failed: "Failed", reclaimed: "Taken back" },
@@ -82,8 +83,12 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
     : !tokenPayment && (payment.mint ? isWorthlessMint(payment.mint) : payment.mints?.length ? payment.mints.every(isWorthlessMint)
       // A request with only an invoice: its chain says (test mints use lnbc, but they come with their mints).
       : !!payment.invoice && (decodeBolt11(payment.invoice)?.network ?? "bitcoin") !== "bitcoin");
+  const network = testSats ? "testnet" : "mainnet";
   /** The wallets of the payment's own network: only they pay it, quote its invoice or show its mints. */
-  const onNet = wallet.forNetwork(testSats ? "testnet" : "mainnet");
+  const onNet = wallet.forNetwork(network);
+  // A request for money of a network this profile has no wallet on: said in words, and nothing here can pay it.
+  const known = wallet.getState()?.wallets;
+  const noWallet = isRequest && !outgoing && !!known && !known.some((w) => w.network === network);
   const sharedMints=(onNet.getState()?.mints??[]).filter(m=>payment.mints?.includes(m.url));
   const selectedMint=sharedMints.find(m=>m.url===mint)?.url ?? sharedMints[0]?.url;
   // Its invoice, through the Lightning source, when ecash cannot pay it here: no shared mint, or Cashu off.
@@ -113,7 +118,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
       data-testid="payment-bubble"
       data-state={payment.state}
     >
-      <p className="text-[11px] uppercase tracking-wider text-text-primary/65 m-0">{title}</p>
+      <p className="text-[11px] uppercase tracking-wider text-text-primary/65 m-0 flex items-center gap-2">{title}<NetworkTag network={network} testId="payment-network" /></p>
       <p className="m-0 leading-tight">
         <span className="text-[22px] font-semibold">
 
@@ -136,13 +141,18 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
       {isRequest && !outgoing && paymentsOff && (payment.state === "pending" || payment.state === "failed") && (
         <p className="text-xs text-text-primary/65 mt-2" data-testid="payment-off">This way of paying is off in this chat.</p>
       )}
+      {isRequest && !outgoing && !paymentsOff && noWallet && (payment.state === "pending" || payment.state === "failed") && (
+        <p className="text-xs text-text-primary/65 mt-2" data-testid="payment-network-missing">{MONEY_LABEL[network]} is asked for ({tokenPayment ? payment.target?.asset : testSats ? "test sats" : "sats"}), and you have no {network === "testnet" ? "Testnet" : "Mainnet"} wallet to pay it from. Make one under Wallets, or ask for {MONEY_LABEL[network === "testnet" ? "mainnet" : "testnet"].toLowerCase()} instead.</p>
+      )}
       {isRequest && !outgoing && !paymentsOff && (payment.state === "pending" || payment.state === "failed") && !payment.lightningPending && (
         <div className="flex flex-col gap-2 mt-2">
+          {/* Paying from here needs a wallet of the request's network; another wallet can still be pointed at it. */}
+          {!noWallet && <>
           {!payment.target && !viaLightning && <label className="block space-y-1 text-xs">Cashu mint<Select size="sm" aria-label="Cashu mint" value={selectedMint ?? ""} onChange={setMint} disabled={!sharedMints.length} placeholder="No shared configured mint" options={sharedMints.map(m => ({ value: m.url, label: m.url, description: `${m.balance.toLocaleString()} sats` }))} /></label>}
           <label className="text-xs">{tokenPayment?'Maximum gas (ETH)':'Maximum fee (sats)'}<input aria-label={tokenPayment?'Maximum gas (ETH)':'Maximum fee (sats)'} className="block w-20 bg-input-bg rounded p-1" inputMode="numeric" value={feeInput} onChange={e=>setFeeCap(e.target.value.replace(tokenPayment?/[^0-9.]/g:/\D/g,""))}/></label>
           {lnReview && (
             <div data-testid="payment-review" className="rounded-lg bg-black/20 p-2 space-y-1 text-xs">
-              <p className="m-0">Pay {payment.amount.toLocaleString()} {testSats ? "test sats" : "sats"} over Lightning</p>
+              <p className="m-0 flex items-center gap-2">Pay {payment.amount.toLocaleString()} {testSats ? "test sats" : "sats"} over Lightning<NetworkTag network={network} testId="payment-lightning-network" /></p>
               <p className="m-0 text-text-primary/75">Through {lnReview.source} · fee up to {lnReview.fee.toLocaleString()} sats</p>
               <div className="flex gap-2">
                 <button className={button} disabled={busy} onClick={() => run(async () => { await onNet.payRequest(peerPubKey, payment.id, { via: "lightning", maxFee: Number(feeInput) }); setLnReview(null); })}>Approve payment</button>
@@ -165,6 +175,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
           })}>
             {busy ? "Preparing…" : "Review payment"}
           </button>
+          </>}
           {externalUri && (
             <button className={quiet} data-testid="payment-external" aria-expanded={external} title="Scan, copy or open it in a wallet that is not Ghostly" onClick={() => setExternal((open) => !open)}>
               {external ? "Hide" : "Pay with another wallet"}
