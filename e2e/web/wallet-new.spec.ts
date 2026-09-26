@@ -1,4 +1,4 @@
-import { chat, connect, createWallet, expect, link, openChat, openWallet, test, useFakeProviders, type Peer } from "../support/fixtures";
+import { chat, connect, createWallet, expect, getTestCoins, link, openChat, openWallet, test, useFakeProviders, type Peer } from "../support/fixtures";
 import { mockMainnetMints } from "../support/mint";
 import { closePayments, openPayments, paymentCard } from "../support/payments";
 
@@ -95,12 +95,8 @@ test("two people pay on the same network; a card of a network the contact has no
   await expect(card).not.toHaveAttribute("aria-disabled", "true", { timeout: 30_000 });
   await closePayments(alice.page);
 
-  // Test sats in, over Lightning (the test mint pays its own invoices), then 21 of them to Bob.
-  await openWallet(alice, "cashu-testnet");
-  await alice.page.getByTestId("wallet-receive").click();
-  await alice.page.getByTestId("wallet-receive-amount").fill("100");
-  await alice.page.getByTestId("wallet-create-invoice").click();
-  await expect(alice.page.getByTestId("wallet-paid")).toBeVisible({ timeout: 60_000 });
+  // Test sats in with Get test coins, then 21 of them to Bob.
+  await getTestCoins(alice);
   await openChat(alice);
   await openPayments(alice.page);
   await card.click();

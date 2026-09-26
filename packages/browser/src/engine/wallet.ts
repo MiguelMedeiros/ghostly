@@ -20,7 +20,7 @@ import {
 } from "@cashu/cashu-ts";
 import { STORES, openDb, store, transact, wrap } from "../shared/idb";
 import type { PaymentReview, WalletNetwork } from "@ghostly/core";
-import { isTestMint } from "../shared/mints";
+import { isTestMint, paysItsOwnInvoices } from "../shared/mints";
 import type {
   CashuInspection,
   MintInfoView,
@@ -48,6 +48,8 @@ const QUOTE_POLL_MS = 4_000;
 /** A Lightning payment can stay in flight for minutes or hours; the mint is asked again this often. */
 const MELT_POLL_MS = 30_000;
 const MAX_AMOUNT = 1_000_000;
+/** How long "Get test coins" waits for the test mint to mark its invoice paid before saying the coins come later. */
+const TEST_COINS_WAIT_MS = 30_000;
 const HISTORY_SHOWN = 100;
 export interface CashuPrepared {mint:string;swap:SerializedSwapPreview;token?:string}
 
@@ -234,10 +236,66 @@ export class CashuWallet {
       createdAt: Date.now(),
       expiresAt: response.expiry ? response.expiry * 1000 : null,
       paymentId,
+      // A test mint says "paid" to every invoice: that is not someone paying this one.
+      ...(paysItsOwnInvoices(mint) ? { held: true } : {}),
     };
     await wrap((await store(STORES.quotes, "readwrite")).put(quote));
     void this.pollQuotes();
     return quote;
+  }
+
+  /**
+   * A payer says it paid this invoice of ours (a contact's app, once its payment went through). A held quote (a test
+   * mint's, which reads paid by itself) is minted from now on; on any other mint the mint's own answer decides, as
+   * always. Returns whether the invoice is one of ours.
+   */
+  async vouch(invoice: string): Promise<boolean> {
+    const wanted = invoice.trim().toLowerCase();
+    const quote = (await wrap<StoredQuote[]>((await store(STORES.quotes, "readonly")).getAll())).find((q) => q.invoice.toLowerCase() === wanted);
+    if (!quote) return false;
+    if (quote.held) await wrap((await store(STORES.quotes, "readwrite")).put({ ...quote, held: undefined } satisfies StoredQuote));
+    await this.pollQuotes();
+    return true;
+  }
+
+  /** True while an invoice of ours waits for a payer's word (see `vouch`): whatever its mint says, it is not paid. */
+  async isHeld(quote: string): Promise<boolean> {
+    return !!(await wrap<StoredQuote | undefined>((await store(STORES.quotes, "readonly")).get(quote)))?.held;
+  }
+
+  /**
+   * "Get test coins": a test mint pays its own invoices, so an invoice asked of it on purpose is its faucet. Only a
+   * mint that does (`paysItsOwnInvoices`), never real money. Waits a little for the mint to say paid, then mints;
+   * a mint slower than that has its quote minted by the regular poll.
+   */
+  async testCoins(amount: number, network: WalletNetwork = "testnet"): Promise<{ mint: string; amount: number }> {
+    assertAmount(amount);
+    const mint = this.getMints(network).find(paysItsOwnInvoices);
+    if (!mint) throw new Error("This wallet has no test mint to ask for test coins");
+    const response = await within(MINT_TIMEOUT_MS, (await this.wallet(mint)).createMintQuoteBolt11(amount, "Ghostly test coins"), mint);
+    const quote: StoredQuote = {
+      quote: response.quote,
+      mint,
+      amount,
+      invoice: response.request,
+      createdAt: Date.now(),
+      expiresAt: response.expiry ? response.expiry * 1000 : null,
+      testCoins: true,
+    };
+    await wrap((await store(STORES.quotes, "readwrite")).put(quote));
+    const deadline = Date.now() + TEST_COINS_WAIT_MS;
+    for (;;) {
+      const minted = await this.locked(mint, () => this.settleQuote(quote.quote));
+      if (minted) {
+        this.events.onChange();
+        return { mint, amount };
+      }
+      if (Date.now() > deadline) {
+        void this.pollQuotes();
+        throw new Error(`${new URL(mint).host} has not paid its test coins yet: they show up here once it does`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
   }
 
   /** Asks the mints about the open invoices now, without waiting for the next round. */
@@ -252,11 +310,16 @@ export class CashuWallet {
     this.quoteTimer = null;
     const quotes = await wrap<StoredQuote[]>((await store(STORES.quotes, "readonly")).getAll());
 
-    for (const { quote, mint } of quotes.filter((q) => !q.issuedUnclaimed)) {
+    // A held quote is not asked about: its mint's "paid" means nothing. It only goes once it has expired.
+    for (const held of quotes.filter((q) => q.held && q.expiresAt && q.expiresAt + 60_000 < Date.now())) {
+      await wrap((await store(STORES.quotes, "readwrite")).delete(held.quote));
+    }
+    for (const { quote, mint } of quotes.filter((q) => !q.issuedUnclaimed && !q.held)) {
       try {
         const paid = await this.locked(mint, () => this.settleQuote(quote));
         if (paid) {
-          this.events.onQuotePaid(paid);
+          // Test coins are no invoice anyone else knows of.
+          if (!paid.testCoins) this.events.onQuotePaid(paid);
           this.events.onChange();
         }
       } catch {
@@ -265,14 +328,14 @@ export class CashuWallet {
     }
 
     const remaining = await wrap<StoredQuote[]>((await store(STORES.quotes, "readonly")).getAll());
-    if (remaining.some((q) => !q.issuedUnclaimed)) this.quoteTimer = setTimeout(() => void this.pollQuotes(), QUOTE_POLL_MS);
+    if (remaining.some((q) => !q.issuedUnclaimed && !q.held)) this.quoteTimer = setTimeout(() => void this.pollQuotes(), QUOTE_POLL_MS);
   }
 
   /** Runs under the mint's lock, so two rounds never mint one quote twice. Returns the quote once its ecash is in. */
   private async settleQuote(id: string): Promise<StoredQuote | null> {
     // Another round may have settled it while this one waited for the lock.
     const quote = await wrap<StoredQuote | undefined>((await store(STORES.quotes, "readonly")).get(id));
-    if (!quote || quote.issuedUnclaimed) return null;
+    if (!quote || quote.issuedUnclaimed || quote.held) return null;
     const wallet = await this.wallet(quote.mint);
     const { state } = await wallet.checkMintQuoteBolt11(quote.quote);
 
@@ -292,7 +355,7 @@ export class CashuWallet {
 
     const proofs = await wallet.mintProofsBolt11(quote.amount, quote.quote);
     const minted = sats(proofs);
-    const tx = walletTx(quote.mint, "lightning-in", minted, quote.amount - minted, quote.paymentId ? "Request paid over Lightning" : undefined);
+    const tx = walletTx(quote.mint, "lightning-in", minted, quote.amount - minted, quote.paymentId ? "Request paid over Lightning" : quote.testCoins ? "Test coins from the test mint" : undefined);
     await transact([STORES.proofs, STORES.walletTx, STORES.quotes], (stores) => {
       for (const p of proofs) stores[STORES.proofs].put(toStored(quote.mint, p));
       stores[STORES.walletTx].put(tx);

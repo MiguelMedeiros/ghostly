@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { Interface } from "ethers";
 import { USDT_LOCAL } from "../support/usdt-local.mjs";
 import { strangerInvoice } from "../support/bolt11";
-import { chat, connect, createWallet, expect, link, openChat, openWallet, test, type Peer, type PeerOptions, type WalletKind } from "../support/fixtures";
+import { TEST_COINS, chat, connect, createWallet, expect, getTestCoins, link, openChat, openWallet, test, type Peer, type PeerOptions, type WalletKind } from "../support/fixtures";
 import { composerRow } from "../support/composer";
 import { chatPayments, paymentCard } from "../support/payments";
 
@@ -34,26 +34,19 @@ const composer = async (p: Peer, card: string, amount: string) => {
   await paymentCard(p.page, `${card}-testnet`).click();
   await p.page.getByTestId("payment-amount").fill(amount);
 };
-/** Lightning off in this chat for the payee: the test mint pays a request's own invoice by itself. */
+/** Lightning off in this chat for the payee: its requests are paid in ecash only. */
 async function ecashOnly(p: Peer) {
   await chatPayments(p.page, { lightning: false });
-}
-async function receiveOverLightning(p: Peer, sats: number) {
-  await openWallet(p, "cashu-testnet");
-  await p.page.getByTestId("wallet-receive").click();
-  await p.page.getByTestId("wallet-receive-amount").fill(String(sats));
-  await p.page.getByTestId("wallet-create-invoice").click();
-  await expect(p.page.getByTestId("wallet-paid")).toContainText(`${sats} sats received`, { timeout: 60_000 });
 }
 const testSats = (p: Peer) => p.page.getByTestId("wallet-balance");
 
 test.describe("Cashu and Lightning", { tag: "@network" }, () => {
   test.describe.configure({ retries: 2 });
 
-  test("Cashu: in over Lightning, a Send in the chat, and a Request paid in the chat", { tag: ["@feature:wallet.cashu.receive-lightning", "@feature:payments.cashu.send", "@feature:payments.cashu.request", "@feature:payments.chat.review"] }, async ({ peer }) => {
+  test("Cashu: test coins in, a Send in the chat, and a Request paid in the chat", { tag: ["@feature:wallet.test-coins", "@feature:payments.cashu.send", "@feature:payments.cashu.request", "@feature:payments.chat.review"] }, async ({ peer }) => {
     const [alice, bob] = await twoInTestnet(peer, ["cashu-alice", "cashu-bob"]);
-    await receiveOverLightning(alice, 100);
-    await expect(testSats(alice)).toHaveText(/^100\s*test sats/);
+    await getTestCoins(alice);
+    await expect(testSats(alice)).toHaveText(/^10,000\s*test sats/);
 
     await openChat(alice);
     await composer(alice, "cashu", "21");
@@ -74,22 +67,26 @@ test.describe("Cashu and Lightning", { tag: "@network" }, () => {
     await expect(testSats(bob)).toHaveText(/^31\s*test sats/, { timeout: 30_000 });
   });
 
-  // A test mint marks its own invoices paid by itself: one peer paying the other's invoice at the same
-  // mint proves nothing (the mint refuses it as already paid). So each side is tested on its own: in, an
-  // invoice of this wallet paid by the test mint; out, the wallet paying an invoice the mint does not own.
-  test("Lightning: in through an invoice, out by paying someone else's invoice from Send", { tag: ["@feature:wallet.lightning.cashu-mint.receive", "@feature:wallet.lightning.cashu-mint.pay", "@feature:wallet.cashu.receive-lightning"] }, async ({ peer }) => {
+  // A test mint marks its own invoices paid by itself, so its "paid" is nobody paying: Receive only makes the
+  // invoice, and the balance stays where it was (the wallet waits for a payer's word, which a chat carries). Out,
+  // the wallet pays an invoice the mint does not own.
+  test("Lightning: Receive only makes an invoice, out by paying someone else's invoice from Send", { tag: ["@feature:wallet.lightning.cashu-mint.receive", "@feature:wallet.lightning.cashu-mint.pay", "@feature:wallet.cashu.receive-lightning", "@feature:wallet.testnet.receive-held"] }, async ({ peer }) => {
     const [alice, bob] = await twoInTestnet(peer, ["ln-alice", "ln-bob"]);
-    await receiveOverLightning(alice, 100);
-    await expect(testSats(alice)).toHaveText(/^100\s*test sats/);
+    await getTestCoins(alice);
+    await expect(testSats(alice)).toHaveText(/^10,000\s*test sats/);
 
     await openWallet(bob, "lightning-testnet");
     await bob.page.getByTestId("wallet-receive").click();
     await bob.page.getByTestId("wallet-receive-amount").fill("25");
     await bob.page.getByTestId("wallet-create-invoice").click();
     await expect(bob.page.getByTestId("wallet-invoice")).toHaveText(/^\s*lnbc/);
-    await expect(bob.page.getByTestId("wallet-paid")).toContainText("25 sats received", { timeout: 60_000 });
+    await expect(bob.page.getByTestId("wallet-panel")).toContainText("counts only once a contact pays it in a chat");
+    // The mint reads it paid within a poll or two (4 s each): nothing comes of it.
+    await bob.page.waitForTimeout(12_000);
+    await expect(bob.page.getByTestId("wallet-paid")).toHaveCount(0);
+    await expect(bob.page.getByTestId("wallet-invoice")).toBeVisible();
     await openWallet(bob, "cashu-testnet");
-    await expect(testSats(bob)).toHaveText(/^25\s*test sats/);
+    await expect(testSats(bob)).toHaveText(/^0\s*test sats/);
 
     await openWallet(alice, "lightning-testnet");
     await alice.page.getByTestId("wallet-send").click();
@@ -100,9 +97,9 @@ test.describe("Cashu and Lightning", { tag: "@network" }, () => {
     await openWallet(alice, "cashu-testnet");
     // The balance counts down to its new value (useCountUp, 0.7 s): read once, it can be anywhere on the way.
     await expect(async () => {
-      const left = Number((await testSats(alice).innerText()).match(/^(\d+)/)![1]);
-      expect(left, "100 in, 25 out and at most the fee reserve").toBeLessThanOrEqual(75);
-      expect(left).toBeGreaterThanOrEqual(70);
+      const left = Number((await testSats(alice).innerText()).replace(/,/g, "").match(/^(\d+)/)![1]);
+      expect(left, "test coins in, 25 out and at most the fee reserve").toBeLessThanOrEqual(TEST_COINS - 25);
+      expect(left).toBeGreaterThanOrEqual(TEST_COINS - 30);
     }).toPass({ timeout: 15_000 });
   });
 });

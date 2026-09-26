@@ -153,6 +153,8 @@ describe("paying a request with Cashu", () => {
     engine.on("preparePayment", reviewOf);
     const picker = screen.getByRole("combobox", { name: "Cashu mint" });
     expect(picker).toHaveAttribute("data-value", TEST_MINT);
+    // The test mint's balance is test sats, never plain sats.
+    expect(picker).toHaveTextContent("900 test sats");
     await user.click(payButton());
     await screen.findByRole("region", { name: "Payment review" });
     expect(engine.callsTo("preparePayment")[0]).toMatchObject({ network: "testnet", target: { network: "cashu-test", provider: TEST_MINT } });

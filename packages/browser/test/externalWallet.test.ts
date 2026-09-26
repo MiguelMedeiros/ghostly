@@ -5,7 +5,7 @@ import type { CashuWallet } from "../src/engine/wallet";
 import type { ArkWallet } from "../src/engine/paymentAdapters/arkWallet";
 import type { StoredPayment } from "../src/shared/types";
 import { resetDb, rows, seed } from "./fakes";
-// covers: payments.external
+// covers: payments.external, wallet.testnet.receive-held
 
 vi.mock("../src/shared/idb", async () => (await import("./fakes")).idbModule);
 
@@ -139,5 +139,50 @@ describe("the payee is asked to look", () => {
     expect(state("r2")?.state).toBe("pending");
     expect(sent).toEqual([{ kind: "res", frame: { id: "r1", ok: true } }]);
     expect(state("c1")).toBeUndefined();
+  });
+});
+
+describe("a test mint's invoice waits for the payer's word", () => {
+  const check = (endpoint: [string, string]) => ({ id: "c1", requestId: "r1", timestamp: 1, amount: { value: "21", asset: "sat" }, endpoint });
+
+  it("the payee lets go of the invoice the contact says it paid, and only that one", async () => {
+    const { desk, lightning } = setup([outgoing({ invoice: INVOICE, network: "testnet" })]);
+    await desk.start();
+    await desk.onPayment("l", check([ENDPOINT.bolt11, INVOICE.toUpperCase()]));
+    expect(lightning.check).toHaveBeenLastCalledWith(INVOICE);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 10_000);
+    // Another invoice is not this request's: the contact cannot speak for it, the wallet only looks.
+    await desk.onPayment("l", check([ENDPOINT.bolt11, "lnbc1someoneelse"]));
+    expect(lightning.check).toHaveBeenLastCalledWith(undefined);
+    vi.useRealTimers();
+  });
+
+  it("the payer of a Testnet request over Lightning says so; a Mainnet payment needs no word", async () => {
+    for (const network of ["testnet", "mainnet"] as const) {
+      resetDb();
+      const { desk, lightning, link, sent, state } = setup([incoming({ invoice: INVOICE, network })]);
+      vi.mocked(lightning.quote).mockResolvedValue({ quote: "m1", amount: 21, feeReserve: 1 });
+      vi.mocked(lightning.pay).mockResolvedValue(true);
+      await desk.start();
+      await desk.payRequest({ linkId: "l", paymentId: "r1", via: "lightning", network });
+      expect(state("r1")?.state).toBe("settled");
+      const said = sent.filter((s) => s.kind === "pay").map((s) => s.frame);
+      if (network === "testnet") expect(said).toMatchObject([{ requestId: "r1", amount: { value: "21", asset: "sat" }, endpoint: [ENDPOINT.bolt11, INVOICE] }]);
+      else expect(said, "Mainnet").toEqual([]);
+      expect(link.sendPayment).toHaveBeenCalledTimes(network === "testnet" ? 1 : 0);
+    }
+  });
+
+  it("a payment left pending says so once it settles", async () => {
+    const { desk, lightning, sent, state } = setup([incoming({ invoice: INVOICE, network: "testnet" })]);
+    vi.mocked(lightning.quote).mockResolvedValue({ quote: "m1", amount: 21, feeReserve: 1 });
+    vi.mocked(lightning.pay).mockResolvedValue(false);
+    await desk.start();
+    await desk.payRequest({ linkId: "l", paymentId: "r1", via: "lightning", network: "testnet" });
+    expect(sent).toEqual([]);
+    await desk.onLightningResolved({ paymentId: "r1" }, true);
+    expect(state("r1")?.state).toBe("settled");
+    expect(sent.map((s) => s.frame.endpoint)).toEqual([[ENDPOINT.bolt11, INVOICE]]);
   });
 });

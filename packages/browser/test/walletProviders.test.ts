@@ -223,6 +223,7 @@ describe("the Cashu mints as a Lightning source", () => {
     quoteInvoice: vi.fn().mockResolvedValue({ quote: "m1", mint: MINT, amount: 40, feeReserve: 2 }),
     payQuote: vi.fn().mockResolvedValue(true),
     mintQuoteState: vi.fn().mockResolvedValue("UNPAID"),
+    isHeld: vi.fn().mockResolvedValue(false),
     meltQuoteState: vi.fn().mockResolvedValue("PENDING"),
     view: vi.fn().mockResolvedValue({ balance: 99 }),
   });
@@ -235,6 +236,9 @@ describe("the Cashu mints as a Lightning source", () => {
     expect((await provider.invoiceStatus(created)).state).toBe("open");
     cashu.mintQuoteState.mockResolvedValue("ISSUED");
     expect((await provider.invoiceStatus(created)).state).toBe("paid");
+    // A test mint's invoice reads paid by itself: until a payer says it paid, it is open.
+    cashu.isHeld.mockResolvedValue(true);
+    expect((await provider.invoiceStatus(created)).state).toBe("open");
   });
 
   it("pays the very melt quote whose fee was shown", async () => {

@@ -42,7 +42,8 @@ export class CashuMintLightning implements LightningProvider {
 
   async invoiceStatus(invoice: LightningInvoice) {
     const { mint, quote } = parseRef(invoice.ref);
-    const state = await this.wallet.mintQuoteState(mint, quote);
+    // A test mint's invoice reads paid by itself: until a payer says it paid, it is open (see CashuWallet.vouch).
+    const state = await this.wallet.isHeld(quote) ? "UNPAID" : await this.wallet.mintQuoteState(mint, quote);
     if (state === "PAID" || state === "ISSUED") return { state: "paid" as const, amount: invoice.amount };
     return { state: invoice.expiresAt < Date.now() ? "expired" as const : "open" as const };
   }

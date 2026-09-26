@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { chat, connect, expect, link, openChat, openWallet, say, test, useTestnet, type Peer } from "../support/fixtures";
+import { TEST_COINS, chat, connect, expect, getTestCoins, link, openChat, openWallet, say, test, useTestnet, type Peer } from "../support/fixtures";
 import { mintEndpoint } from "../support/mint";
 import { composerRow } from "../support/composer";
 import { chatPayments, paymentCard } from "../support/payments";
@@ -28,14 +28,8 @@ async function chatting(peer: (name: string) => Promise<Peer>, a: string, b: str
   return [alice, bob];
 }
 
-/** Fills the wallet over Lightning at its primary mint; the local mint pays its own invoices. */
-async function fund(p: Peer, sats: number): Promise<void> {
-  await openWallet(p, "cashu-testnet");
-  await p.page.getByTestId("wallet-receive").click();
-  await p.page.getByTestId("wallet-receive-amount").fill(String(sats));
-  await p.page.getByTestId("wallet-create-invoice").click();
-  await expect(p.page.getByTestId("wallet-paid")).toBeVisible();
-}
+/** Test sats at the wallet's first test mint, from Get test coins (the local mint pays its own faucet invoice). */
+const fund = (p: Peer) => getTestCoins(p);
 
 /** The Testnet Cashu panel's balance: every sat there is a test sat, and it says so. */
 const balanceOf = async (page: Page) =>
@@ -58,7 +52,7 @@ const bubble = (p: Peer, text: string | RegExp) => chat(p).getByTestId("payment-
 
 test("a request's memo shows on both sides, and test-mint payments say test sats", { tag: ["@feature:payments.chat.memo", "@feature:payments.cashu.test-sats", "@feature:payments.cashu.send", "@feature:payments.chat.review"] }, async ({ peer }) => {
   const [alice, bob] = await chatting(peer, "memo-alice", "memo-bob");
-  await fund(alice, 100);
+  await fund(alice);
   for (const p of [alice, bob]) await openChat(p);
 
   // A request with a memo: both bubbles carry it, in test sats.
@@ -91,7 +85,7 @@ test("a request's memo shows on both sides, and test-mint payments say test sats
 // The composer's "What for?" goes with a direct send: it is kept on the review and sent with the ecash.
 test("a sent payment's memo shows in both bubbles", { tag: ["@feature:payments.chat.memo", "@feature:payments.cashu.send"] }, async ({ peer }) => {
   const [alice, bob] = await chatting(peer, "send-memo-alice", "send-memo-bob");
-  await fund(alice, 100);
+  await fund(alice);
   for (const p of [alice, bob]) await openChat(p);
   const review = await prepareSend(alice, 21, "for the tickets");
   await review.getByRole("button", { name: "Approve payment" }).click();
@@ -116,8 +110,8 @@ test("a payment the contact refuses comes back, and is never shown as paid", { t
   await expect(row).toBeVisible();
   await row.getByRole("button", { name: "Make primary" }).click();
   await expect(alice.page.getByTestId("mint-row").first()).toContainText(own.replace(/^https?:\/\//, ""));
-  await fund(alice, 60);
-  await expect.poll(() => balanceOf(alice.page)).toBe(60);
+  await fund(alice);
+  await expect.poll(() => balanceOf(alice.page)).toBe(TEST_COINS);
   for (const p of [alice, bob]) await openChat(p);
 
   const review = await prepareSend(alice, 21);
@@ -146,8 +140,8 @@ test("a payment the contact refuses comes back, and is never shown as paid", { t
 
   // The sats are Alice's again, less the mint's fee for swapping them twice.
   await openWallet(alice, "cashu-testnet");
-  await expect.poll(() => balanceOf(alice.page)).toBeGreaterThanOrEqual(56);
-  expect(await balanceOf(alice.page)).toBeLessThan(60);
+  await expect.poll(() => balanceOf(alice.page)).toBeGreaterThanOrEqual(TEST_COINS - 4);
+  expect(await balanceOf(alice.page)).toBeLessThan(TEST_COINS);
   await alice.page.getByTestId("wallet-history").click();
   await expect(alice.page.getByTestId("wallet-tx").filter({ hasText: "Took a payment back" })).toHaveCount(1);
   await expect(alice.page.getByTestId("wallet-tx").filter({ hasText: "Sent ecash" })).toHaveCount(1);
@@ -155,8 +149,8 @@ test("a payment the contact refuses comes back, and is never shown as paid", { t
 
 test("a contact who turns Cashu off stops a reviewed payment before anything is spent", { tag: ["@feature:payments.chat.method-off", "@feature:payments.chat.review"] }, async ({ peer }) => {
   const [alice, bob] = await chatting(peer, "off-alice", "off-bob");
-  await fund(alice, 50);
-  await expect.poll(() => balanceOf(alice.page)).toBe(50);
+  await fund(alice);
+  await expect.poll(() => balanceOf(alice.page)).toBe(TEST_COINS);
   await openChat(alice);
   await openChat(bob);
   const review = await prepareSend(alice, 21);
@@ -174,14 +168,14 @@ test("a contact who turns Cashu off stops a reviewed payment before anything is 
   await expect(chat(bob).getByTestId("payment-bubble")).toHaveCount(0);
   await review.getByRole("button", { name: "Cancel" }).click();
   await openWallet(alice, "cashu-testnet");
-  await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^50\s*test sats/);
+  await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^10,000\s*test sats/);
 });
 
 // Every send from the chat is reviewed; ecash the contact never picks up can still be taken back.
 test("ecash the contact never picks up can be taken back", { tag: ["@feature:payments.cashu.reclaim"] }, async ({ peer }) => {
   const [alice, bob] = await chatting(peer, "unredeemed-alice", "unredeemed-bob");
-  await fund(alice, 50);
-  await expect.poll(() => balanceOf(alice.page)).toBe(50);
+  await fund(alice);
+  await expect.poll(() => balanceOf(alice.page)).toBe(TEST_COINS);
   for (const p of [alice, bob]) await openChat(p);
   // Bob's wallet cannot reach the mint to redeem: the token stays unspent, and Alice's payment waits.
   await bob.context.route(/^https:\/\/testnut\.cashu\.space\/v1\/swap/, () => new Promise<void>(() => {}));
@@ -194,7 +188,7 @@ test("ecash the contact never picks up can be taken back", { tag: ["@feature:pay
   await sent.getByRole("button", { name: "Take it back" }).click();
   await expect(sent.getByTestId("payment-state")).toHaveText(/^Taken back/);
   await openWallet(alice, "cashu-testnet");
-  await expect.poll(() => balanceOf(alice.page)).toBeGreaterThanOrEqual(47);
+  await expect.poll(() => balanceOf(alice.page)).toBeGreaterThanOrEqual(TEST_COINS - 3);
 });
 
 test("a Lightning invoice pasted into the chat is a card with a QR code to hide and a Copy button", { tag: ["@feature:payments.lightning.invoice-card"] }, async ({ peer }) => {

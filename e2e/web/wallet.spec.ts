@@ -1,11 +1,12 @@
-import { chat, connect, createWallet, expect, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
+import { TEST_COINS, chat, connect, createWallet, expect, getTestCoins, link, openChat, openWallet, test, useTestnet, type Peer } from "../support/fixtures";
 import { TEST_MINT, mintEndpoint, mockMainnetMints } from "../support/mint";
 import { composerRow } from "../support/composer";
 import { chatPayments, paymentCard } from "../support/payments";
 
 /**
  * Sats move through a real Cashu mint: the test mint, whose sats are worthless
- * and whose invoices pay themselves. That is the public one unless
+ * and whose invoices read paid by themselves (Receive waits for a payer anyway;
+ * test sats come from Get test coins). That is the public one unless
  * `E2E_MINT_URL` names another — CI runs its own, see support/mint.ts — so
  * these tests need the internet only when nobody gave them a mint.
  * A new profile has no wallet: each test makes the Testnet Cashu wallets it needs with New, before the two meet.
@@ -30,16 +31,21 @@ test.describe("wallet", { tag: "@network" }, () => {
     return (await peer.page.getByTestId("wallet-invoice").textContent())!.trim();
   }
 
-  test("Lightning in, ecash between two people, requests, history and fees", { tag: ["@feature:wallet.cashu.receive-lightning", "@feature:payments.cashu.send", "@feature:payments.cashu.request", "@feature:payments.chat.review", "@feature:wallet.history"] }, async ({ peer }, testInfo) => {
+  test("Receive waits, test coins in, ecash between two people, requests, history and fees", { tag: ["@feature:wallet.cashu.receive-lightning", "@feature:wallet.testnet.receive-held", "@feature:wallet.test-coins", "@feature:payments.cashu.send", "@feature:payments.cashu.request", "@feature:payments.chat.review", "@feature:wallet.history"] }, async ({ peer }, testInfo) => {
     const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
     for (const p of [alice, bob]) await useTestnet(p);
     await link(alice, bob);
     await connect(alice, bob);
 
+    // Receive only makes the invoice: the test mint reads it paid by itself (a poll every 4 s), and nothing comes of it.
     const invoice = await receive(alice, 100);
     expect(invoice.startsWith("lnbc"), "the mint issued a Lightning invoice").toBe(true);
-    await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^100\s*test sats/);
-    await expect(alice.page.getByTestId("wallet-paid")).toBeVisible();
+    await alice.page.waitForTimeout(12_000);
+    await expect(alice.page.getByTestId("wallet-paid")).toHaveCount(0);
+    await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^0\s*test sats/);
+    // Test sats come when asked for.
+    await getTestCoins(alice);
+    await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^10,000\s*test sats/);
 
     await openChat(alice);
     await (await composerRow(alice.page, "payment-button")).click();
@@ -59,8 +65,7 @@ test.describe("wallet", { tag: "@network" }, () => {
     await expect(sent(alice)).toHaveText(/Received/);
     await directReview.getByRole("button", { name: "Close", exact: true }).click();
 
-    // Bob asks for ecash only: with Lightning on, the test mint would pay the request's own invoice by
-    // itself, racing Alice (it is a faucet), and the request could be paid before she gets to it.
+    // Bob asks for ecash only: the request is paid in ecash, reviewed.
     await chatPayments(bob.page, { lightning: false });
     await (await composerRow(bob.page, "payment-button")).click();
     await paymentCard(bob.page, "cashu-testnet").click();
@@ -78,12 +83,12 @@ test.describe("wallet", { tag: "@network" }, () => {
     await alice.page.getByTestId("wallet-history").click();
     const txs = await alice.page.getByTestId("wallet-tx").allTextContents();
     expect(txs).toHaveLength(3);
-    // The test mint charges 100 ppk: each ecash payment costs a sat or two, the Lightning receive nothing.
+    // The test mint charges 100 ppk: each ecash payment costs a sat or two, the test coins nothing.
     expect(txs[2]).toContain("no fee");
     expect(txs[1]).toMatch(/fee \d/);
     expect(txs[0]).toMatch(/fee \d/);
     const fees = Number((await alice.page.getByTestId("wallet-fees-paid").textContent())!.match(/(\d+) (?:test )?sats/)![1]);
-    await expect.poll(() => balance(alice), "balance = received - sent - fees, to the sat").toBe(100 - 21 - 10 - fees);
+    await expect.poll(() => balance(alice), "balance = received - sent - fees, to the sat").toBe(TEST_COINS - 21 - 10 - fees);
     await alice.page.screenshot({ path: testInfo.outputPath("cashu-chat-history.png"), fullPage: true });
     await expect(alice.page.getByTestId("mint-fees").filter({ hasText: "0.1 sat per proof" })).toBeVisible();
   });
@@ -97,8 +102,8 @@ test.describe("wallet", { tag: "@network" }, () => {
     await createWallet(bob, "cashu", "testnet");
     await link(alice, bob);
     await connect(alice, bob);
-    await receive(alice, 50);
-    await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^50\s*test sats/);
+    await getTestCoins(alice);
+    await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^10,000\s*test sats/);
     await openChat(alice);
     await (await composerRow(alice.page, "payment-button")).click();
     await paymentCard(alice.page, "cashu-testnet").click();
@@ -122,8 +127,8 @@ test.describe("wallet", { tag: "@network" }, () => {
     for (const p of [alice, bob]) await useTestnet(p);
     await link(alice, bob);
     await connect(alice, bob);
-    await receive(alice, 50);
-    await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^50\s*test sats/);
+    await getTestCoins(alice);
+    await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^10,000\s*test sats/);
 
     const pasted = await receive(bob, 12);
     await openChat(bob);
@@ -137,8 +142,8 @@ test.describe("wallet", { tag: "@network" }, () => {
     await expect(chat(bob).getByTestId("invoice-bubble").last().getByTestId("invoice-pay"), "nobody pays their own invoice").toHaveCount(0);
 
     await card.getByTestId("invoice-pay").click();
-    // The wallet quotes it, fee reserve included, before anything is paid. The test mint settles its own
-    // invoices, so this one is already paid: the card has to say so without spending anything.
+    // The wallet quotes it, fee reserve included, before anything is paid. The test mint marks its own
+    // invoices paid, so it answers this one is already paid: the card has to say so without spending anything.
     await card.getByTestId("invoice-confirm").click();
     await expect(card.getByTestId("invoice-paid")).toBeVisible();
   });

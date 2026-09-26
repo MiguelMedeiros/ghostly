@@ -11,6 +11,7 @@ import { BitcoinWalletPanel } from "../components/BitcoinWalletPanel";
 import { NewWalletDialog } from "../components/wallet/NewWalletDialog";
 import { FirstWallet } from "../components/wallet/FirstWallet";
 import { RemoveWalletSection } from "../components/wallet/RemoveWallet";
+import { TestCoins } from "../components/wallet/TestCoins";
 import { NETWORK_NAME } from "../components/wallet/names";
 import { dealCard } from "../components/wallet/motion";
 import { Button } from "../components/wallet/ui";
@@ -93,6 +94,8 @@ export function Wallet() {
               <NetworkTag network={selected.network} testId="wallet-panel-network" />
               <span className="font-medium text-text-primary">{selected.name}</span>
             </p>
+            {/* Test coins only when asked for: Receive never fills a Testnet wallet by itself. */}
+            {panel && parseCardId(panel)?.network === "testnet" && <TestCoins key={`coins-${panel}`} rail={parseCardId(panel)!.rail} network="testnet" wallet={wallet.forNetwork("testnet")} state={networkState(state, "testnet")} />}
             {panel && <WalletPanel id={panel} wallet={wallet} state={state} onOpen={select} />}
             {panel && parseCardId(panel) && <RemoveWalletSection key={panel} type={parseCardId(panel)!.rail} network={parseCardId(panel)!.network} wallet={wallet} state={state} onOpen={select} onRemoved={() => removed(panel)} />}
           </div>

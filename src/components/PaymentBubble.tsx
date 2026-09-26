@@ -148,7 +148,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
         <div className="flex flex-col gap-2 mt-2">
           {/* Paying from here needs a wallet of the request's network; another wallet can still be pointed at it. */}
           {!noWallet && <>
-          {!payment.target && !viaLightning && <label className="block space-y-1 text-xs">Cashu mint<Select size="sm" aria-label="Cashu mint" value={selectedMint ?? ""} onChange={setMint} disabled={!sharedMints.length} placeholder="No shared configured mint" options={sharedMints.map(m => ({ value: m.url, label: m.url, description: `${m.balance.toLocaleString()} sats` }))} /></label>}
+          {!payment.target && !viaLightning && <label className="block space-y-1 text-xs">Cashu mint<Select size="sm" aria-label="Cashu mint" value={selectedMint ?? ""} onChange={setMint} disabled={!sharedMints.length} placeholder="No shared configured mint" options={sharedMints.map(m => ({ value: m.url, label: m.url, description: `${m.balance.toLocaleString()} ${testSats ? "test sats" : "sats"}` }))} /></label>}
           <label className="text-xs">{tokenPayment?'Maximum gas (ETH)':'Maximum fee (sats)'}<input aria-label={tokenPayment?'Maximum gas (ETH)':'Maximum fee (sats)'} className="block w-20 bg-input-bg rounded p-1" inputMode="numeric" value={feeInput} onChange={e=>setFeeCap(e.target.value.replace(tokenPayment?/[^0-9.]/g:/\D/g,""))}/></label>
           {lnReview && (
             <div data-testid="payment-review" className="rounded-lg bg-black/20 p-2 space-y-1 text-xs">

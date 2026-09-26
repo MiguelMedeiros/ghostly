@@ -5,7 +5,7 @@ import { DEFAULT_MINTS, TEST_MINT } from "../src/shared/mints";
 import { FakeBarkServer } from "./helpers/fakeBark";
 import { FakeBreezNetwork } from "./helpers/fakeBreez";
 import { FakeFedimintSdk } from "./helpers/fakeFedimint";
-// covers: wallet.instances.create, wallet.instances.networks, wallet.bark.mainnet-off, wallet.fedimint.mainnet-off
+// covers: wallet.instances.create, wallet.instances.networks, wallet.bark.mainnet-off, wallet.fedimint.mainnet-off, wallet.test-coins
 
 // Every server is faked: these tests cover what one click makes, checks and saves, never a network.
 const info = vi.fn(async () => ({ network: "mutinynet", signerPubkey: `02${"ab".repeat(32)}` }));
@@ -208,5 +208,42 @@ describe("each network's wallets say which ways of paying they bring", () => {
     const calls = setPaymentNetworks.mock.calls.length;
     await node["refreshWallet"]();
     expect(setPaymentNetworks, "nothing new, nothing said").toHaveBeenCalledTimes(calls);
+  });
+});
+
+describe("Get test coins, pressed on a Testnet wallet", () => {
+  it("never on Mainnet, and never for a wallet whose faucet Ghostly cannot ask", async () => {
+    const { node, started } = engine();
+    await started;
+    const asked = vi.spyOn(node["wallet"], "testCoins");
+    await expect(node.walletTestCoins({ type: "cashu", network: "mainnet" })).rejects.toThrow("Testnet wallets only");
+    await expect(node.walletTestCoins({ type: "arkade", network: "testnet" })).rejects.toThrow("open it instead");
+    expect(asked).not.toHaveBeenCalled();
+  });
+
+  it("Cashu, and Lightning through the mints: 10,000 test sats from the test mint", async () => {
+    const { node, started } = engine();
+    await started;
+    const asked = vi.spyOn(node["wallet"], "testCoins").mockResolvedValue({ mint: TEST_MINT, amount: 10_000 });
+    expect(await node.walletTestCoins({ type: "cashu", network: "testnet" })).toEqual({ amount: 10_000, unit: "test sats" });
+    expect(await node.walletTestCoins({ type: "lightning", network: "testnet" })).toEqual({ amount: 10_000, unit: "test sats" });
+    expect(asked.mock.calls).toEqual([[10_000, "testnet"], [10_000, "testnet"]]);
+  });
+
+  it("a faucet that refuses says why: rate limited, or what failed", async () => {
+    const { node, started } = engine();
+    await started;
+    const asked = vi.spyOn(node["wallet"], "testCoins").mockRejectedValueOnce(Object.assign(new Error("Too Many Requests"), { status: 429 }));
+    await expect(node.walletTestCoins({ type: "cashu", network: "testnet" })).rejects.toThrow("Rate limited: the faucet is busy. Try again in a minute.");
+    asked.mockRejectedValueOnce(new Error("testnut.cashu.space did not answer"));
+    await expect(node.walletTestCoins({ type: "cashu", network: "testnet" })).rejects.toThrow("The faucet did not answer: testnut.cashu.space did not answer");
+  });
+
+  it("USDT: 1,000 TEST-USDT from the Sepolia faucet, on its way once the transaction is sent", async () => {
+    const { node, started } = engine();
+    await started;
+    const asked = vi.spyOn(node["usdtWallets"].testnet, "getTestTokens").mockResolvedValue("0xhash");
+    expect(await node.walletTestCoins({ type: "usdt", network: "testnet" })).toEqual({ amount: 1_000, unit: "TEST-USDT", pending: true });
+    expect(asked).toHaveBeenCalledOnce();
   });
 });
