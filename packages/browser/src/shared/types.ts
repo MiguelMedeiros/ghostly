@@ -1,5 +1,5 @@
 import type { WalletMode } from "./mints";
-import type { GroupMention, PairingProgress, PaymentMethodName, VoiceMeta } from "@ghostly/core";
+import type { GroupMention, LinkPreview, PairingProgress, PaymentMethodName, VoiceMeta } from "@ghostly/core";
 import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
 import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
@@ -551,6 +551,8 @@ export interface StoredMessage {
   mentioned?: true;
   /** How this message travelled, as the engine saw it go or come (the message's details view). */
   details?: MessageDetails;
+  /** A link preview that came with the text (WISP 401 § Link previews): made by the sender's app, never fetched here. */
+  preview?: LinkPreview;
 }
 
 /**

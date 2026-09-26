@@ -20,6 +20,7 @@ export * from "./ghostlink";
 export * from "./files";
 export * from "./chatFiles";
 export * from "./voice";
+export * from "./linkPreview";
 export * from "./payments";
 export * from "./bolt11";
 export * from "./paymentUri";

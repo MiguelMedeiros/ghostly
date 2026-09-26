@@ -37,7 +37,7 @@ import { createTiming, SPARK_MAINNET_NOT_YET, WALLET_NAMES, createFailure, cross
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
 import { CapsExchange, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
-import { fileMessageText, type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
+import { fileMessageText, parseLinkPreview, pairedMessageFrame, type LinkPreview, type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
 import {
   DEFAULT_RELAYS,
   GhostLink,
@@ -1167,7 +1167,7 @@ export class GhostlyNode implements EngineImplementation {
     }));
   }
 
-  async sendMessage(params: { linkId: string; text: string; timestamp?: number }): Promise<{ error: string | null; refused?: boolean }> {
+  async sendMessage(params: { linkId: string; text: string; timestamp?: number; preview?: LinkPreview }): Promise<{ error: string | null; refused?: boolean }> {
     const { linkId, text } = params;
     const live = this.links.get(linkId);
     if (!live?.link) return { error: "You are offline" };
@@ -1175,7 +1175,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!trimmed) return { error: null };
 
     const timestamp = params.timestamp ?? Date.now();
-    if (live.stored.profile) return this.sendChatText(live, trimmed, timestamp);
+    if (live.stored.profile) return this.sendChatText(live, trimmed, timestamp, params.preview === undefined ? undefined : parseLinkPreview(params.preview, trimmed));
     const via = live.link.isDataLinkOpen ? "datalink" : "pkarr";
     // What the DHT cannot carry is refused before it is kept: it must not show as sent.
     const bytes = new TextEncoder().encode(trimmed).length;
@@ -1199,7 +1199,7 @@ export class GhostlyNode implements EngineImplementation {
    * both sides allow it; otherwise kept as `waiting` ("Sends when live") and sent by itself, in order, once
    * the chat can carry it. Only what must never wait, or a security stop, is refused.
    */
-  private async sendChatText(live: LiveLink, trimmed: string, timestamp: number): Promise<{ error: string | null; refused?: boolean }> {
+  private async sendChatText(live: LiveLink, trimmed: string, timestamp: number, preview?: LinkPreview): Promise<{ error: string | null; refused?: boolean }> {
     const { link } = live, linkId = live.stored.id;
     if (!link) return { error: "You are offline" };
     const bytes = new TextEncoder().encode(trimmed).length;
@@ -1211,7 +1211,7 @@ export class GhostlyNode implements EngineImplementation {
     if (delivery === "stream" || (delivery === "dht" && bytes <= DHT_TEXT_BYTES)) {
       const validationError = link.validateText(trimmed, timestamp, wireId);
       if (!validationError) {
-        await this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp, via: delivery === "dht" ? "pkarr" : "datalink", delivery: "sending" });
+        await this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp, via: delivery === "dht" ? "pkarr" : "datalink", delivery: "sending", ...(preview && { preview }) });
         await this.outboxFor(linkId).transmit(id);
         // The durable row carries delivery errors and an explicit retry action.
         return { error: null };
@@ -1220,7 +1220,7 @@ export class GhostlyNode implements EngineImplementation {
     }
     if (this.holdingFor(live) && bytes <= HOLD_LIMITS.maxTextBytes) {
       // Longer than the DHT carries, and both sides allow held items: it waits in this device's storage, sealed for them.
-      await this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp, via: "hold", delivery: "sending" });
+      await this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp, via: "hold", delivery: "sending", ...(preview && { preview }) });
       // The durable row carries the outcome; the promise only says whether it could start.
       void this.hold.hold(linkId, { kind: "text", id: wireId, messageId: id, bytes, timestamp }).catch(() => {});
       return { error: null };
@@ -1228,7 +1228,7 @@ export class GhostlyNode implements EngineImplementation {
     const reason = delivery === "dht" && bytes <= DHT_TEXT_BYTES ? "Waits for the text before it to be confirmed."
       : delivery === "dht" ? `Longer than the ${DHT_TEXT_BYTES} bytes the DHT carries: it is sent when you are live.`
       : "Sent when your contact is reachable.";
-    await this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp, via: "datalink", delivery: "waiting", deliveryError: reason });
+    await this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp, via: "datalink", delivery: "waiting", deliveryError: reason, ...(preview && { preview }) });
     await this.outboxFor(linkId).wait(id, reason);
     return { error: null };
   }
@@ -1296,7 +1296,7 @@ export class GhostlyNode implements EngineImplementation {
         if (!link) return "You are offline. It is sent again once you are back.";
         // The path as it is when the message goes: the details keep it, whatever the session does after.
         const at = Date.now(), snapshot = pathSnapshot(live, message.via);
-        const error = await link.sendMessage(message.text, message.timestamp, message.wireId);
+        const error = await link.sendMessage(message.text, message.timestamp, message.wireId, message.preview);
         await this.noteTextSend(linkId, message, snapshot, at, error, link);
         return error;
       }, message => message.via === "pkarr" ? DHT_MESSAGE_TTL : 20_000, message => {
@@ -1372,7 +1372,7 @@ export class GhostlyNode implements EngineImplementation {
     const wire: MessageDetails["wire"] = snapshot.path === "dht" ? { frame: "_dm envelope", protocol: "dht-text/1", plaintextBytes, ...(dht && { wireBytes: dht.packetBytes }) }
       : snapshot.path === "legacy-dht" ? { frame: "_msgs record", protocol: "legacy/1", plaintextBytes }
       : snapshot.path === "legacy-datalink" ? { frame: "m", protocol: "legacy/1", plaintextBytes }
-      : { frame: "paired-message", protocol: "chat/1", plaintextBytes, wireBytes: utf8Encode(JSON.stringify({ t: "paired-message", id: message.wireId, ts: message.timestamp, m: message.text })).length };
+      : { frame: "paired-message", protocol: "chat/1", plaintextBytes, wireBytes: utf8Encode(pairedMessageFrame(message.wireId ?? "", message.timestamp, message.text, message.preview)).length };
     return this.noteDetails(linkId, message.id, details => ({ ...withSend(details, send), ...(!error && { sentAt: at, wire }),
       ...(dht && { dht: { seq: dht.seq, issued: dht.issued, expires: dht.expires, packetBytes: dht.packetBytes, nonce: dht.nonce, recordKey: dht.recordKey, records: dht.records } }) }));
   }
@@ -1388,7 +1388,7 @@ export class GhostlyNode implements EngineImplementation {
         ...(batch && { dht: { issued: batch.packetTimestamp, records: batch.rawRecordNames } }) };
     }
     if (!paired) return { wire: { frame: "m", protocol: "legacy/1", plaintextBytes } };
-    return { wire: { frame: "paired-message", protocol: "chat/1", plaintextBytes, wireBytes: utf8Encode(JSON.stringify({ t: "paired-message", id: message.id, ts: message.timestamp, m: message.text })).length } };
+    return { wire: { frame: "paired-message", protocol: "chat/1", plaintextBytes, wireBytes: utf8Encode(pairedMessageFrame(message.id ?? "", message.timestamp, message.text, message.preview)).length } };
   }
 
   /** A held item's fate, on its message: stored for the contact (with the item's place in the mailbox), failed, or picked up. */
@@ -2776,6 +2776,7 @@ export class GhostlyNode implements EngineImplementation {
             via: message.via,
             nick: message.nick,
             details: GhostlyNode.receivedTextDetails(!!stored.profile, message),
+            ...(message.preview && { preview: message.preview }),
           });
         },
         onCallSignal: (signal) => this.events.onCallSignal(linkId, signal),

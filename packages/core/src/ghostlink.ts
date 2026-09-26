@@ -8,6 +8,7 @@ import { identityFromSeedB64 } from "./identity";
 import { TRANSPORTS, rankTransports, relayedTransports, transportOrder, type NativeEndpoint, type NativeBinding, type NativeTransport, type PairedTransport, type TransportDescriptors } from "./pairedTransports";
 import { sanitizeNick } from "./text";
 import { sanitizeAvatar } from "./avatar";
+import { parseLinkPreview, type LinkPreview } from "./linkPreview";
 import { randomBytes, toBase64Url, utf8Encode } from "./bytes";
 import { fitSignedPairedSignal, verifyPairedSignal } from "./pairedSignal";
 import { PairedSession, type PairingState, type PairingCredentials, type PaymentMethodName } from "./pairedSession";
@@ -94,6 +95,22 @@ export interface IncomingMessage {
   batch?: ResolvedLink;
   /** A paired chat's text from the DHT floor: the envelope it came in (`DhtPacketFacts`). */
   packet?: DhtPacketFacts;
+  /** The link preview the sender's app attached (`pv`, WISP 401 § Link previews), already checked against the text. */
+  preview?: LinkPreview;
+}
+
+/** Largest `paired-message` frame sent with a preview: a session fails on a frame over 60 KiB (`PairedSession`). */
+export const MAX_PAIRED_MESSAGE_FRAME = 56 * 1024;
+
+/**
+ * A `paired-message` frame. The preview (`pv`) is left out when the frame would pass `MAX_PAIRED_MESSAGE_FRAME`
+ * with it: the text matters, the card does not.
+ */
+export function pairedMessageFrame(id: string, ts: number, m: string, preview?: LinkPreview): string {
+  const plain = JSON.stringify({ t: "paired-message", id, ts, m });
+  if (!preview) return plain;
+  const withPreview = JSON.stringify({ t: "paired-message", id, ts, m, pv: preview });
+  return withPreview.length <= MAX_PAIRED_MESSAGE_FRAME ? withPreview : plain;
 }
 
 /**
@@ -1327,8 +1344,12 @@ export class GhostLink {
     return role === "joiner" || (role !== "inviter" && this.myPubKeyZ32 < this.options.params.peerPubKeyZ32) ? "you" : "contact";
   }
 
-  /** Chat goes over the data link when it is up, through Pkarr otherwise. */
-  async sendMessage(text: string, timestamp = Date.now(), stableId?: string): Promise<string | null> {
+  /**
+   * Chat goes over the data link when it is up, through Pkarr otherwise. A `preview` (WISP 401 § Link previews) goes
+   * only with a paired message on the live session, and only while the frame stays within what a session takes;
+   * the DHT has no room for one, and the text goes without it.
+   */
+  async sendMessage(text: string, timestamp = Date.now(), stableId?: string, preview?: LinkPreview): Promise<string | null> {
     const trimmed = text.trim();
     if (!trimmed) return null;
     if (this.textDelivery === "dht" && this.dht) return this.dht.send(trimmed, timestamp, stableId ?? toBase64Url(randomBytes(16)));
@@ -1339,7 +1360,7 @@ export class GhostLink {
       const id = stableId ?? toBase64Url(randomBytes(16));
       if (!/^[A-Za-z0-9_-]{22}$/.test(id)) return "Invalid message ID";
       this.pairedPending.set(id, timestamp);
-      try { this.channel.send(JSON.stringify({ t: "paired-message", id, ts: timestamp, m: trimmed })); return null; }
+      try { this.channel.send(pairedMessageFrame(id, timestamp, trimmed, preview)); return null; }
       catch { this.pairedPending.delete(id); return "The connection closed before sending. Reconnect and retry."; }
     }
     if (this.channel && trimmed.length <= LIMITS.maxChatMessageBytes / 4) {
@@ -2033,7 +2054,9 @@ export class GhostLink {
           if (frame.t === "paired-message" && typeof frame.m === "string" &&
             utf8Encode(frame.m).length <= LIMITS.maxChatMessageBytes &&
             typeof frame.ts === "number" && Number.isSafeInteger(frame.ts) && frame.ts > 0) {
-            await this.options.events?.onMessage?.({ id: frame.id, text: frame.m, timestamp: frame.ts, via: "datalink" });
+            // A bad preview is dropped, never the message (older apps ignore `pv` altogether).
+            const preview = frame.pv === undefined ? undefined : parseLinkPreview(frame.pv, frame.m);
+            await this.options.events?.onMessage?.({ id: frame.id, text: frame.m, timestamp: frame.ts, via: "datalink", ...(preview && { preview }) });
             if (this.channel === channel && this.isDataLinkOpen)
               channel.send(JSON.stringify({ t: "paired-received", id: frame.id }));
           } else if (frame.t === "paired-received") {
