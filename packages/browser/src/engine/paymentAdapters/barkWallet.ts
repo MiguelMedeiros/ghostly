@@ -145,6 +145,18 @@ export class BarkWallet {
   }
   /** Shutting down: nothing reconnects afterwards. */
   async stop() { this.stopped = true; this.gate.close(); await this.serial(() => this.lock()); }
+  /** The person removes this wallet (see ArkWallet.remove): closed, its record and its databases deleted. */
+  remove(): Promise<void> {
+    this.gate.interrupt();
+    return this.serial(async () => {
+      const saved = this.saved;
+      await this.lock();
+      await transact([STORES.settings], (s) => { s[STORES.settings].delete(this.key); });
+      this.saved = undefined;
+      if (saved) await forget(saved.config.walletId);
+      this.view = this.idle(); this.changed();
+    }).finally(() => this.gate.resume());
+  }
   async lock() { clearTimeout(this.timer); clearTimeout(this.retry); const adapter = this.adapter; this.adapter = undefined; this.view = { ...this.view, locked: true, address: undefined }; this.changed(); await adapter?.dispose(); }
 
   /** Stopping ends it where it is: a wallet shutting down needs no balance. */

@@ -324,6 +324,37 @@ export class FedimintWallet {
     this.render();
   }); }
 
+  /**
+   * The person removes this wallet (the engine checked what it holds and what they confirmed): every federation is
+   * closed, and the wallet's record (its sealed mnemonic and its federations), their client databases and their
+   * open chat invoices are deleted. Federations left before, archived under their own keys, stay as they were.
+   */
+  remove(): Promise<void> {
+    this.gate.interrupt();
+    clearTimeout(this.retry);
+    return this.serial(async () => {
+      const federations = this.saved?.federations ?? [];
+      await this.closeAll();
+      const ids = new Set(federations.map((f) => f.id));
+      const all = await wrap<IDBValidKey[]>((await store(STORES.settings, "readonly")).getAllKeys());
+      const receives: string[] = [];
+      for (const k of all) {
+        if (typeof k !== "string" || !k.startsWith("fedimintReceive-")) continue;
+        const r = await wrap<Partial<Receive> | undefined>((await store(STORES.settings, "readonly")).get(k));
+        if (r?.federation && ids.has(r.federation)) receives.push(k);
+      }
+      await transact([STORES.settings], (stores) => {
+        stores[STORES.settings].delete(key(this.network));
+        for (const k of receives) stores[STORES.settings].delete(k);
+      });
+      this.saved = undefined;
+      this.history = [];
+      const sdk = federations.length ? await this.sdk().catch(() => undefined) : undefined;
+      for (const f of federations) await sdk?.remove(f.database).catch(() => {});
+      this.render();
+    }).finally(() => this.gate.resume());
+  }
+
   /** The open client of a federation of this network. */
   client(federationId: string): FedimintClient {
     const client = this.clients.get(federationId);

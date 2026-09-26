@@ -482,6 +482,14 @@ export interface WalletCreate {
   invite?: string;
 }
 
+/** What Remove asks the engine to take away (see `walletRemove`). */
+export interface WalletRemove {
+  type: WalletType;
+  network: WalletNetwork;
+  /** The person confirmed that what it holds on this device becomes unreachable without its backup. */
+  acceptLoss?: boolean;
+}
+
 export interface WalletView {
   /** Both networks' wallets, open side by side. The flat fields below are Mainnet's, for a caller naming no network. */
   networks?: Record<WalletNetwork, NetworkWalletsView>;

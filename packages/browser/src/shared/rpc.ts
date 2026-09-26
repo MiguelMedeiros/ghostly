@@ -12,7 +12,7 @@ import type { SparkNetwork, WalletNetwork } from "@ghostly/core";
 import type { ProfileChoice } from '../profiles/public';
 import type { ProofChallenge, ProofEvidence, ProofAdapter } from "@ghostly/core";
 import type { LinkParams, LinkPreview, PairedTransport, DeliveryMode } from "@ghostly/core";
-import type { CashuInspection, EngineState, MessageDetailsView, MessageFile, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView } from "./types";
+import type { CashuInspection, EngineState, MessageDetailsView, MessageFile, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView, WalletRemove } from "./types";
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from "../nostr/types";
 
 /** UI → engine calls. The extension carries them over a runtime port, the web app calls the peer in the same page. */
@@ -144,6 +144,8 @@ export interface EngineApi {
   walletAddMint(params: { url: string; primary?: boolean }): { url: string; name: string };
   /** New → a type → a network: made in one click and checked before its card appears; nothing saved on failure. */
   walletCreate(params: WalletCreate): WalletInstanceView;
+  /** Removes one wallet, its keys and config; refused while it holds money on this device and `acceptLoss` is not set. */
+  walletRemove(params: WalletRemove): void;
   /** The app is in front again: chats look now, and dropped ones reconnect at once. */
   wake(): void;
   /** The primary mint is where Lightning invoices are created. */
@@ -179,7 +181,7 @@ export interface EngineApi {
   walletReceiveToken(params: { token: string }): { amount: number };
   walletInspectCashu(params: { text: string }): { inspection: CashuInspection | null };
   /** Everything held, as tokens: the only backup there is for now. */
-  walletExport(): { mint: string; token: string; amount: number }[];
+  walletExport(params?: { network?: WalletNetwork }): { mint: string; token: string; amount: number }[];
   sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; network?:WalletNetwork }): { paymentId: string };
   requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark"; rail?: "cashu" | "lightning"; network?:WalletNetwork }): { paymentId: string };
   /** A request any member of a group may pay, once (WISP 9xx § Payments). */

@@ -2,7 +2,7 @@ import { generateMnemonic, validateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { RestArkProvider } from "@arkade-os/sdk";
 import { validatePaymentTarget, type PaymentTarget } from "@ghostly/core";
-import { store, STORES, transact, wrap } from "../../shared/idb";
+import { deleteDatabase, store, STORES, transact, wrap } from "../../shared/idb";
 import { ARK_NETWORKS, ArkadeAdapter, type ArkConfig } from "./arkade";
 import { newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "./persistence";
 import { snapshotArkDatabase,restoreArkDatabase,encodeBackup,decodeBackup,type ArkDatabaseSnapshot } from "./backup";
@@ -103,6 +103,22 @@ export class ArkWallet {
   }
   /** Shutting down: nothing reconnects afterwards. */
   async stop() {this.stopped=true;this.gate.close();await this.serial(()=>this.lock());}
+  /**
+   * The person removes this wallet (the engine checked what it holds and what they confirmed): an opening under way
+   * gives up, the wallet closes, and its record and its SDK database are deleted. Another can be made afterwards;
+   * retired wallets, under their own keys, stay as they were.
+   */
+  remove():Promise<void> {
+    this.gate.interrupt();
+    return this.serial(async()=>{
+      const saved=this.saved;
+      await this.lock();
+      await transact([STORES.settings],s=>{s[STORES.settings].delete(this.key);});
+      this.saved=undefined;
+      if(saved)await deleteDatabase(`ghostly-ark-${saved.config.walletId}`);
+      this.view={configured:false,locked:true,balance:0};this.changed();
+    }).finally(()=>this.gate.resume());
+  }
   async lock() {clearTimeout(this.timer);clearTimeout(this.retry);const adapter=this.adapter;this.adapter=undefined;this.view={...this.view,locked:true,address:undefined};this.changed();await adapter?.dispose();}
   async backup(password?:string) {if(!this.saved)throw new Error("No Ark wallet to back up");return {mnemonic:await unsealSeed(this.saved.seed,this.saved.deviceKey??password??""),config:this.saved.config};}
   /** The backup file is always sealed with a password the person chooses, even for a wallet that opens by itself. */

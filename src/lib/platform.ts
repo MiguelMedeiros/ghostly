@@ -9,8 +9,8 @@ import type { FedimintFederationView, FedimintWalletView } from "@ghostly/browse
 import type { FederationInfo } from "@ghostly/browser/engine/paymentAdapters/fedimintSdk";
 import type { SparkCreate, SparkWalletView } from "@ghostly/browser/engine/paymentAdapters/sparkWallet";
 import type { SparkNetwork, WalletNetwork } from "@ghostly/core";
-import type { NetworkWalletsView, WalletCreate, WalletInstanceView, WalletOffer, WalletType } from "@ghostly/browser/shared/types";
-export type { NetworkWalletsView, WalletCreate, WalletInstanceView, WalletOffer, WalletType, WalletNetwork };
+import type { NetworkWalletsView, WalletCreate, WalletInstanceView, WalletOffer, WalletRemove, WalletType } from "@ghostly/browser/shared/types";
+export type { NetworkWalletsView, WalletCreate, WalletInstanceView, WalletOffer, WalletRemove, WalletType, WalletNetwork };
 import type { LightningView } from "@ghostly/browser/engine/paymentAdapters/providers/lightningService";
 import type { BitcoinView } from "@ghostly/browser/engine/paymentAdapters/providers/bitcoinService";
 import type { DataLinkState, ServiceAd, PairingState, TransportWait } from "@ghostly/core";
@@ -229,6 +229,8 @@ export interface WalletPlatform {
   forNetwork(network: WalletNetwork): WalletPlatform;
   /** New → a type → a network: made in one click and checked before its card appears; nothing saved on failure. */
   create(params: WalletCreate): Promise<WalletInstanceView>;
+  /** Removes one wallet (its keys, its config, what chats keep about it); refused while it holds money on this device unless `acceptLoss`. */
+  remove(params: WalletRemove): Promise<void>;
   usdtCreate(params:UsdtCreate):Promise<void>;
   usdtUnlock(password:string):Promise<void>;
   /** The recovery phrase; a wallet that opens by itself needs no password. */
