@@ -142,9 +142,12 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
   const use = (next: string) => {
     pick(next); setError("");
     rememberRail(chat, next);
+    leaving.current = false;
     turn();
   };
-  const backToCards = () => { setError(""); turnBack(); };
+  /** The card is turning back to the deck (until another is turned over). */
+  const leaving = useRef(false);
+  const backToCards = () => { leaving.current = true; setError(""); turnBack(); };
   /**
    * Escape steps back: from a turned card to the deck, and only then out of the sheet. Wherever the focus is (a click
    * on the card's text leaves it on the page), so this listens on the document before anything else does; the
@@ -153,7 +156,8 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, reviewCon
    */
   const escapeToCards = useRef<() => boolean>(() => false);
   escapeToCards.current = () => {
-    if (side !== "back" || !flipped || !cards.length || review) return false;
+    // Already on its way back to the deck: a second Escape closes.
+    if (side !== "back" || leaving.current || !cards.length || review) return false;
     backToCards();
     return true;
   };

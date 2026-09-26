@@ -261,6 +261,20 @@ describe("the cards", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("steps back on Escape while the card is still turning over, and closes on one while it turns back", async () => {
+    document.documentElement.dataset.reduceMotion = "true";
+    const { user, onClose } = open();
+    await user.click(card("arkade-testnet"));
+    // No wait for the turn to end: the Escape is for the card being chosen, not for the sheet.
+    await user.keyboard("{Escape}");
+    expect(onClose).not.toHaveBeenCalled();
+    expect(await screen.findByRole("radiogroup", { name: "Pay with" })).toBeInTheDocument();
+    await user.click(card("arkade-testnet"));
+    await user.click(screen.getByRole("button", { name: "Back to the cards" }));
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("steps back on Escape wherever the focus is, a click on the card's text having left it on the page", async () => {
     document.documentElement.dataset.reduceMotion = "true";
     const { user, onClose } = open();
