@@ -198,7 +198,7 @@ function routeCookieSession(transport: PubkyCookieSession): () => void {
     const body = request.body ? new Uint8Array(await request.arrayBuffer()) : null;
     let answer;
     try { answer = await transport.fetch({ url: request.url, method: request.method, headers: [...request.headers], body }); }
-    catch (e) { throw new TypeError(e instanceof Error ? e.message : String(e), { cause: e }); }
+    catch (e) { throw Object.assign(new TypeError(e instanceof Error ? e.message : String(e)), { cause: e }); }
     const response = new Response(NO_BODY.has(answer.status) ? null : answer.body as BodyInit, { status: answer.status, headers: answer.headers });
     // The SDK parses the answer's URL, which a Response made here does not have: it is the request's (no redirects).
     Object.defineProperty(response, "url", { value: request.url });

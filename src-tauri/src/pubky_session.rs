@@ -93,9 +93,7 @@ fn set_cookie(value: &str) -> Option<(String, Option<String>)> {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    let expired = cookie
-        .max_age()
-        .is_some_and(|age| age.whole_seconds() <= 0)
+    let expired = cookie.max_age().is_some_and(|age| age.whole_seconds() <= 0)
         || cookie
             .expires_datetime()
             .is_some_and(|at| at.unix_timestamp() <= now)
@@ -226,7 +224,9 @@ mod tests {
         let log = seen.clone();
         tokio::spawn(async move {
             while let Ok((mut stream, _)) = listener.accept().await {
-                let Some((head, body)) = read_request(&mut stream).await else { continue };
+                let Some((head, body)) = read_request(&mut stream).await else {
+                    continue;
+                };
                 log.lock().unwrap().push((head.clone(), body));
                 let line = head.lines().next().unwrap_or_default().to_string();
                 let authorized = head
@@ -237,7 +237,10 @@ mod tests {
                         &mut stream,
                         "200 OK",
                         &[
-                            ("Set-Cookie", "owner=s3cret; HttpOnly; Secure; SameSite=None; Path=/"),
+                            (
+                                "Set-Cookie",
+                                "owner=s3cret; HttpOnly; Secure; SameSite=None; Path=/",
+                            ),
                             ("Content-Type", "application/octet-stream"),
                         ],
                         b"session",
@@ -269,28 +272,74 @@ mod tests {
     async fn a_cookie_session_writes_with_the_cookie_the_page_never_sees() {
         let (url, seen) = homeserver();
         let session = id(1);
-        let signin = fetch(session.clone(), format!("{url}/session"), "POST".into(), vec![("pubky-host".into(), "owner".into())], Some(STANDARD.encode(b"token")))
-            .await
-            .unwrap();
+        let signin = fetch(
+            session.clone(),
+            format!("{url}/session"),
+            "POST".into(),
+            vec![("pubky-host".into(), "owner".into())],
+            Some(STANDARD.encode(b"token")),
+        )
+        .await
+        .unwrap();
         assert_eq!(signin.status, 200);
-        assert!(signin.headers.iter().all(|(n, _)| n != "set-cookie"), "{:?}", signin.headers);
+        assert!(
+            signin.headers.iter().all(|(n, _)| n != "set-cookie"),
+            "{:?}",
+            signin.headers
+        );
         assert_eq!(STANDARD.decode(signin.body_b64).unwrap(), b"session");
 
-        let put = fetch(session.clone(), format!("{url}/storage/owner/pub/ghostly.app/proofs/f/a.txt"), "PUT".into(), vec![("content-type".into(), "text/plain".into())], Some(STANDARD.encode(b"proof")))
-            .await
-            .unwrap();
+        let put = fetch(
+            session.clone(),
+            format!("{url}/storage/owner/pub/ghostly.app/proofs/f/a.txt"),
+            "PUT".into(),
+            vec![("content-type".into(), "text/plain".into())],
+            Some(STANDARD.encode(b"proof")),
+        )
+        .await
+        .unwrap();
         assert_eq!(put.status, 201);
 
         // Another approval has its own jar: no cookie, refused.
-        let other = fetch(id(2), format!("{url}/storage/owner/pub/x.txt"), "PUT".into(), vec![], Some(STANDARD.encode(b"x")))
-            .await
-            .unwrap();
+        let other = fetch(
+            id(2),
+            format!("{url}/storage/owner/pub/x.txt"),
+            "PUT".into(),
+            vec![],
+            Some(STANDARD.encode(b"x")),
+        )
+        .await
+        .unwrap();
         assert_eq!(other.status, 401);
         close(id(2));
 
         // Signing out clears the cookie; the jar is empty after that.
-        assert_eq!(fetch(session.clone(), format!("{url}/session"), "DELETE".into(), vec![], None).await.unwrap().status, 200);
-        assert_eq!(fetch(session.clone(), format!("{url}/storage/owner/pub/x.txt"), "PUT".into(), vec![], None).await.unwrap().status, 401);
+        assert_eq!(
+            fetch(
+                session.clone(),
+                format!("{url}/session"),
+                "DELETE".into(),
+                vec![],
+                None
+            )
+            .await
+            .unwrap()
+            .status,
+            200
+        );
+        assert_eq!(
+            fetch(
+                session.clone(),
+                format!("{url}/storage/owner/pub/x.txt"),
+                "PUT".into(),
+                vec![],
+                None
+            )
+            .await
+            .unwrap()
+            .status,
+            401
+        );
         close(session.clone());
 
         let requests = seen.lock().unwrap().clone();
@@ -298,7 +347,11 @@ mod tests {
         assert!(head.starts_with("POST /session HTTP/1.1"), "{head}");
         assert!(head.to_ascii_lowercase().contains("pubky-host: owner"));
         assert_eq!(body, b"token");
-        assert!(requests[1].0.contains("cookie: owner=s3cret"), "{}", requests[1].0);
+        assert!(
+            requests[1].0.contains("cookie: owner=s3cret"),
+            "{}",
+            requests[1].0
+        );
         assert_eq!(requests[1].1, b"proof");
         assert!(!requests[2].0.to_ascii_lowercase().contains("cookie:"));
         assert!(!requests[4].0.to_ascii_lowercase().contains("cookie:"));
@@ -307,12 +360,21 @@ mod tests {
     #[tokio::test]
     async fn a_cookie_the_page_sends_is_not_forwarded() {
         let (url, seen) = homeserver();
-        let answer = fetch(id(3), format!("{url}/storage/owner/pub/x.txt"), "PUT".into(), vec![("Cookie".into(), "owner=s3cret".into())], None)
-            .await
-            .unwrap();
+        let answer = fetch(
+            id(3),
+            format!("{url}/storage/owner/pub/x.txt"),
+            "PUT".into(),
+            vec![("Cookie".into(), "owner=s3cret".into())],
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(answer.status, 401);
         close(id(3));
-        assert!(!seen.lock().unwrap()[0].0.to_ascii_lowercase().contains("cookie:"));
+        assert!(!seen.lock().unwrap()[0]
+            .0
+            .to_ascii_lowercase()
+            .contains("cookie:"));
     }
 
     #[tokio::test]
@@ -329,19 +391,49 @@ mod tests {
             "file:///session",
             "not a url",
         ] {
-            let error = fetch(id(4), url.into(), "GET".into(), vec![], None).await.unwrap_err();
-            assert!(error == "Not a Pubky homeserver session request" || error.starts_with("Invalid URL"), "{url}: {error}");
+            let error = fetch(id(4), url.into(), "GET".into(), vec![], None)
+                .await
+                .unwrap_err();
+            assert!(
+                error == "Not a Pubky homeserver session request"
+                    || error.starts_with("Invalid URL"),
+                "{url}: {error}"
+            );
         }
         for method in ["PATCH", "OPTIONS", "CONNECT", "GE T"] {
-            let error = fetch(id(4), "https://homeserver.example/session".into(), method.into(), vec![], None).await.unwrap_err();
+            let error = fetch(
+                id(4),
+                "https://homeserver.example/session".into(),
+                method.into(),
+                vec![],
+                None,
+            )
+            .await
+            .unwrap_err();
             assert_eq!(error, "Invalid method");
         }
         assert_eq!(
-            fetch("short".into(), "https://homeserver.example/session".into(), "GET".into(), vec![], None).await.unwrap_err(),
+            fetch(
+                "short".into(),
+                "https://homeserver.example/session".into(),
+                "GET".into(),
+                vec![],
+                None
+            )
+            .await
+            .unwrap_err(),
             "Invalid session"
         );
         assert_eq!(
-            fetch(id(4), "https://homeserver.example/session".into(), "POST".into(), vec![], Some(STANDARD.encode(vec![0u8; MAX_BODY_BYTES + 1]))).await.unwrap_err(),
+            fetch(
+                id(4),
+                "https://homeserver.example/session".into(),
+                "POST".into(),
+                vec![],
+                Some(STANDARD.encode(vec![0u8; MAX_BODY_BYTES + 1]))
+            )
+            .await
+            .unwrap_err(),
             "Body too large"
         );
         assert!(sessions().lock().unwrap().get(&id(4)).is_none());
@@ -359,9 +451,15 @@ mod tests {
 
     #[test]
     fn a_set_cookie_that_expires_removes_the_cookie() {
-        assert_eq!(set_cookie("a=1; Path=/"), Some(("a".into(), Some("1".into()))));
+        assert_eq!(
+            set_cookie("a=1; Path=/"),
+            Some(("a".into(), Some("1".into())))
+        );
         assert_eq!(set_cookie("a=1; Max-Age=0"), Some(("a".into(), None)));
-        assert_eq!(set_cookie("a=1; Expires=Thu, 01 Jan 1970 00:00:00 GMT"), Some(("a".into(), None)));
+        assert_eq!(
+            set_cookie("a=1; Expires=Thu, 01 Jan 1970 00:00:00 GMT"),
+            Some(("a".into(), None))
+        );
         assert_eq!(set_cookie("a="), Some(("a".into(), None)));
         assert_eq!(set_cookie("garbage"), None);
     }
