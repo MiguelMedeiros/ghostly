@@ -44,6 +44,10 @@ test("a Pubky identity approved in Passport is verified by a contact; removing i
     const logs = collectLogs(alice);
     await attachPubky(alice.context, relay, approver);
     await attachPubky(bob.context, relay);
+    // Bob's app cannot read Quad9, the default resolver, as in the Mac desktop app and Safari (WebKit reaches it over
+    // HTTP/3, whose answers carry no CORS header): his check must ask the next resolver for the homeserver's address.
+    let quad9 = 0;
+    await bob.context.route(/^https:\/\/dns\.quad9\.net\//, (route) => { quad9++; return route.abort("failed"); });
     await pair(alice, bob);
     const withBob = await chatId(alice);
 
@@ -84,6 +88,15 @@ test("a Pubky identity approved in Passport is verified by a contact; removing i
     await go(alice, withBob);
     await shareIdentity(alice, "Pubky");
     await closeIdentities(alice);
+    // Both timelines: one card, verified; no stop line.
+    const shares = (p: Peer) => p.page.getByTestId("identity-share");
+    await expect(shares(bob)).toHaveCount(1);
+    await expect(shares(bob)).toHaveAttribute("data-side", "theirs");
+    await expect(shares(bob)).toHaveAttribute("data-state", "verified", { timeout: 60_000 });
+    await expect(shares(alice)).toHaveAttribute("data-state", "verified", { timeout: 30_000 });
+    await expect(shares(alice)).toHaveAttribute("data-kind", "shared");
+    await expect(shares(alice)).toHaveCount(1);
+    expect(quad9).toBeGreaterThan(0);
     await openIdentities(bob);
     await expect(theirFace(bob)).toHaveAttribute("data-status", "verified");
     await expect(theirCards(bob)).toContainText("Pubky");
