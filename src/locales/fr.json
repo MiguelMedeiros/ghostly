@@ -527,5 +527,23 @@
       "text": "Aucun moyen de paiement n'est activé dans cette conversation.",
       "action": "Choisir ce que cette conversation accepte"
     }
+  },
+  "secretGuard": {
+    "mnemonicTitle": "Envoyer une phrase de récupération ?",
+    "mnemonic": "Ceci ressemble à une phrase de récupération de portefeuille. Quiconque la voit peut prendre vos fonds. Envoyer quand même ?",
+    "nsecTitle": "Envoyer une clé privée Nostr ?",
+    "nsec": "Ceci ressemble à une clé privée Nostr (nsec). Quiconque la voit peut publier en votre nom et lire vos messages privés. Envoyer quand même ?",
+    "bitcoinKeyTitle": "Envoyer une clé privée ?",
+    "bitcoinKey": "Ceci ressemble à une clé privée Bitcoin. Quiconque la voit peut prendre vos fonds. Envoyer quand même ?",
+    "hexKeyTitle": "Envoyer une clé privée ?",
+    "hexKey": "Ceci ressemble à une clé privée ou à une graine. Quiconque la voit peut prendre vos fonds ou agir en votre nom. Envoyer quand même ?",
+    "cashuTitle": "Envoyer {{amount}} à {{contact}} ?",
+    "cashuUnknownTitle": "Envoyer cet ecash à {{contact}} ?",
+    "cashu": "Ceci est un jeton Cashu : c'est de l'argent, et il appartient à qui l'encaisse en premier. Une fois envoyé, il ne peut pas être repris.",
+    "sat": "{{count}} sat",
+    "sats": "{{count}} sats",
+    "thisChat": "cette conversation",
+    "send": "Envoyer",
+    "sendAnyway": "Envoyer quand même"
   }
 }

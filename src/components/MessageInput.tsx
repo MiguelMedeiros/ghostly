@@ -8,6 +8,8 @@ import type { VoiceMeta } from "@ghostly/core";
 import { useI18n } from "../contexts/I18nContext";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { ComposerMenu, type ComposerAction } from "./composer/ComposerMenu";
+import { SecretGuardDialog } from "./SecretGuardDialog";
+import { findSecret, type SecretFinding } from "../lib/parse/secrets";
 import { ExpressionPanel } from "./composer/ExpressionPanel";
 import { CameraCapture, cameraByFileInput, useHasCamera } from "./composer/CameraCapture";
 import { CameraGlyph, DocumentGlyph, IdentityGlyph, MediaGlyph, PaymentGlyph, ServicesGlyph, SmileIcon } from "./composer/icons";
@@ -54,6 +56,8 @@ interface MessageInputProps {
   identities?: { peerKey: string; contact: string };
   /** A 1:1 chat's shared services, from the + menu: which of yours the contact can open, and theirs (`composerServices`). */
   services?: ComposerServices;
+  /** Who reads what is sent here, for the secret guard's Cashu question (a group's name); the contact otherwise. */
+  recipient?: string;
 }
 
 const DEFAULT_MAX = 500;
@@ -79,6 +83,7 @@ export function MessageInput({
   services,
   fileUnavailable,
   paymentsUnavailable,
+  recipient,
 }: MessageInputProps) {
   const { t } = useI18n();
   const phone = useIsMobile();
@@ -96,6 +101,7 @@ export function MessageInput({
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState(() => draftId ? getSessionDraft(draftId) : "");
   const [toast, setToast] = useState<string | null>(null);
+  const [secret, setSecret] = useState<SecretFinding | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const caretRef = useRef<number | null>(null);
@@ -108,7 +114,8 @@ export function MessageInput({
   }, []);
 
   useEffect(() => {
-    if (draftId) setSessionDraft(draftId, text);
+    // A draft holding a seed or a key is not written to storage; ecash is, since the draft may be its only copy.
+    if (draftId) { const found = findSecret(text); setSessionDraft(draftId, found && found.kind !== "cashu" ? "" : text); }
     const input=textareaRef.current;
     if(input && text) { input.style.height="auto"; input.style.height=`${Math.min(input.scrollHeight,120)}px`; }
   }, [draftId,text]);
@@ -128,10 +135,13 @@ export function MessageInput({
     );
   }, []);
 
-  const handleSubmit = async () => {
+  /** `confirmed` once the secret guard was answered Send; until then text that looks like a secret asks first. */
+  const handleSubmit = async (confirmed = false) => {
     if (!text.trim() || disabled) return;
     const bytes = new TextEncoder().encode(text.trim()).length;
     if (maxBytes && bytes > maxBytes) { showToast(`This text is ${bytes} UTF-8 bytes. DHT allows up to ${maxBytes}; shorten it or use a live connection. Your draft is kept.`); return; }
+    const found = confirmed ? null : findSecret(text);
+    if (found) { setSecret(found); return; }
     const err = await onSend(text);
     if (err) {
       showToast(err);
@@ -321,7 +331,7 @@ export function MessageInput({
           />
         ) : <button
           aria-label="Send message"
-          onClick={handleSubmit}
+          onClick={() => handleSubmit()}
           disabled={disabled || !text.trim()}
           className="composer-send w-11 h-11 max-md:w-12 max-md:h-12 flex items-center justify-center bg-accent rounded-full text-on-accent hover:bg-accent-hover transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shrink-0"
         >
@@ -373,6 +383,10 @@ export function MessageInput({
             if (!phone && (!at || at === document.body || at.closest("[data-testid='expression-panel']"))) textareaRef.current?.focus();
           }}
         />
+      )}
+      {secret && (
+        <SecretGuardDialog finding={secret} recipient={recipient ?? payments?.contact ?? identities?.contact}
+          onCancel={() => setSecret(null)} onConfirm={() => { setSecret(null); void handleSubmit(true); }} />
       )}
       {showCamera && onSendFile && (
         <CameraCapture onClose={() => setShowCamera(false)} onSend={(file) => {

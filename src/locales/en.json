@@ -527,5 +527,23 @@
       "text": "No way of paying is on in this chat.",
       "action": "Choose what this chat accepts"
     }
+  },
+  "secretGuard": {
+    "mnemonicTitle": "Send a wallet seed?",
+    "mnemonic": "This looks like a wallet seed. Anyone who sees it can take your funds. Send anyway?",
+    "nsecTitle": "Send a Nostr private key?",
+    "nsec": "This looks like a Nostr private key (nsec). Anyone who sees it can post as you and read your private messages. Send anyway?",
+    "bitcoinKeyTitle": "Send a private key?",
+    "bitcoinKey": "This looks like a Bitcoin private key. Anyone who sees it can take your funds. Send anyway?",
+    "hexKeyTitle": "Send a private key?",
+    "hexKey": "This looks like a private key or a seed. Anyone who sees it can take your funds or act as you. Send anyway?",
+    "cashuTitle": "Send {{amount}} to {{contact}}?",
+    "cashuUnknownTitle": "Send this ecash to {{contact}}?",
+    "cashu": "This is a Cashu token: it is money, and whoever redeems it first keeps it. Once sent it cannot be taken back.",
+    "sat": "{{count}} sat",
+    "sats": "{{count}} sats",
+    "thisChat": "this chat",
+    "send": "Send",
+    "sendAnyway": "Send anyway"
   }
 }

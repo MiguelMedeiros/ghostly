@@ -527,5 +527,23 @@
       "text": "No hay ninguna forma de pago activa en este chat.",
       "action": "Elegir qué acepta este chat"
     }
+  },
+  "secretGuard": {
+    "mnemonicTitle": "¿Enviar una semilla de cartera?",
+    "mnemonic": "Esto parece una semilla de cartera. Quien la vea puede llevarse tus fondos. ¿Enviar de todos modos?",
+    "nsecTitle": "¿Enviar una clave privada de Nostr?",
+    "nsec": "Esto parece una clave privada de Nostr (nsec). Quien la vea puede publicar como tú y leer tus mensajes privados. ¿Enviar de todos modos?",
+    "bitcoinKeyTitle": "¿Enviar una clave privada?",
+    "bitcoinKey": "Esto parece una clave privada de Bitcoin. Quien la vea puede llevarse tus fondos. ¿Enviar de todos modos?",
+    "hexKeyTitle": "¿Enviar una clave privada?",
+    "hexKey": "Esto parece una clave privada o una semilla. Quien la vea puede llevarse tus fondos o actuar como tú. ¿Enviar de todos modos?",
+    "cashuTitle": "¿Enviar {{amount}} a {{contact}}?",
+    "cashuUnknownTitle": "¿Enviar este ecash a {{contact}}?",
+    "cashu": "Esto es un token Cashu: es dinero, y se lo queda quien lo canjee primero. Una vez enviado no se puede recuperar.",
+    "sat": "{{count}} sat",
+    "sats": "{{count}} sats",
+    "thisChat": "este chat",
+    "send": "Enviar",
+    "sendAnyway": "Enviar de todos modos"
   }
 }
