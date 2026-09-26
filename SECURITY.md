@@ -33,23 +33,31 @@ We ask that you give us up to 90 days before publishing details, and less when t
 
 In scope:
 
-- the Ghost Protocol as described in [docs/PROTOCOL.md](docs/PROTOCOL.md) and as implemented in `packages/core`
+- the Ghost Protocol as described in [docs/PROTOCOL.md](docs/PROTOCOL.md) and the [WISPs](docs/wisps/README.md), and as implemented in `packages/core`
 - Ghostly Desktop (`src-tauri`, `src`), Ghostly Browser (`extension`), Ghostly on the web (`web`), the CLI (`cli`)
-- the wallet and payments (`packages/browser/src/engine`)
+- the wallets and payments (`packages/browser/src/engine`), on Mainnet and on Testnet
+- identity proofs and public profiles (`packages/browser/src/proofs`)
 - the sites [ghostly.tools](https://ghostly.tools) and [app.ghostly.tools](https://app.ghostly.tools), and this repository's build and release pipeline
 
 Especially interesting: anything that lets a contact, a relay, a mint or a network attacker read messages, impersonate someone, reach a service or a local address they should not, run code in the app, or take someone's sats.
 
+Past findings and their fixes are listed in [docs/SECURITY-REVIEW.md](docs/SECURITY-REVIEW.md).
+
 Out of scope:
 
-- the Pkarr relays, Mainline DHT nodes, STUN/TURN servers and Cashu mints themselves (report those to their operators)
+- the Pkarr relays, Mainline DHT nodes, Iroh relays, STUN/TURN servers, Cashu mints, Ark servers, Fedimint federations, Lightning nodes and identity providers themselves (report those to their operators)
 - attacks that need an already compromised device or browser profile
 - denial of service by flooding public infrastructure
 - missing hardening with no demonstrated impact
 
 ## Supported versions
 
-Security fixes go into the latest release. Please update before reporting, and make sure the issue still reproduces there.
+| Version | Security fixes |
+|---|---|
+| 1.0.x, the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest) | yes |
+| below 1.0 (0.x previews) | no, please update to the latest release |
+
+Fixes ship as a patch release of the latest version. Please update before reporting, and make sure the issue still reproduces there.
 
 ## Safe harbor
 
