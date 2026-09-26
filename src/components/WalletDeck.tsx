@@ -3,8 +3,8 @@ import type {InstanceCard} from './walletCardData';
 import {CardDeck} from './WalletCardDeck';
 export {CardDeck,WalletCardFace,type CardDeckProps} from './WalletCardDeck';
 
-/** A wallet card's test id: its kind and its network (`wallet-card-cashu-testnet`). */
-export const walletCardTestId=(id:string)=>`wallet-card-${id.replace(':','-')}`;
+/** A wallet card's test id: its kind and its network (`wallet-card-cashu-testnet`), and one Lightning card of several's id. */
+export const walletCardTestId=(id:string)=>`wallet-card-${id.replace(/:/g,'-')}`;
 
 /**
  * The wallet page's deck: tabs over the chosen card's panel, one card per wallet. The page shows one network's at a

@@ -47,16 +47,18 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const shortReason = (reason: string) => reason.split(/(?<=\.)\s/)[0];
 
 type Phase = { type: WalletType; state: "busy" | "done" | "error"; step: number; text?: string; made?: WalletInstanceView };
-type Action = "create" | "connect" | "join" | "join-another" | "added" | "off";
+type Action = "create" | "connect" | "add-another" | "join" | "join-another" | "added" | "off";
 
 /** What clicking a kind does on this network, as its button says it. */
 function actionOf(type: WalletType, offer: WalletOffer | undefined): Action {
   if (!offer?.available) return "off";
   if (offer.exists && type === "fedimint") return "join-another";
+  // A network takes several Lightning cards: another source (or the same source's other wallet) is one more.
+  if (offer.several) return offer.exists ? "add-another" : "connect";
   if (offer.exists) return "added";
   return offer.needs === "invite" ? "join" : offer.needs === "provider" ? "connect" : "create";
 }
-const ACTION_LABEL: Record<Action, string> = { create: "Create", connect: "Connect…", join: "Join with invite…", "join-another": "Join another…", added: "Added", off: "Not yet" };
+const ACTION_LABEL: Record<Action, string> = { create: "Create", connect: "Connect…", "add-another": "Add another…", join: "Join with invite…", "join-another": "Join another…", added: "Added", off: "Not yet" };
 const BUSY_LABEL: Record<WalletType, string> = { cashu: "Creating…", lightning: "Connecting…", arkade: "Creating…", bark: "Creating…", spark: "Creating…", bitcoin: "Connecting…", fedimint: "Joining…", usdt: "Creating…" };
 
 /**

@@ -13,6 +13,8 @@ export const WALLET_RAILS: readonly WalletRail[] = ['cashu','lightning','arkade'
  * a wallet's own id where a rail can have a card per network (the app's wallets). `rail` is the kind of wallet when
  * `id` is not it; `network` puts a small Testnet tag on a test wallet's card.
  */
-export interface WalletCard<Id extends string = WalletRail> {id:Id;rail?:WalletRail;network?:'mainnet'|'testnet';name:string;balance:string;detail:string;status:string;ready:boolean}
+export interface WalletCard<Id extends string = WalletRail> {id:Id;rail?:WalletRail;network?:'mainnet'|'testnet';name:string;balance:string;detail:string;status:string;ready:boolean;
+ /** A short mark beside the status: the default Lightning card for receiving says "Default". */
+ tag?:string}
 /** The kind of wallet a card is. */
 export const railOf=(card:Pick<WalletCard<string>,'id'|'rail'>):WalletRail=>card.rail??card.id as WalletRail;

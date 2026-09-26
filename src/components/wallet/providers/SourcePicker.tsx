@@ -83,14 +83,15 @@ export function ProviderConfigForm({ descriptor, mode, busy, onSubmit }: Provide
 }
 
 /**
- * Where a card's money comes from: the source in use for this mode, and the providers that can replace
- * it, each with its own form. Mainnet and Testnet keep separate sources. A source that is not connected
- * can be tried again now (Retry), and one with a server can move to another (Change server) keeping its
- * wallet; `changing` / `onChanging` let the card open that form from its own Change server button.
+ * Where a card's money comes from: the source in use for this mode, and (with `onSet`) the providers that can
+ * replace it, each with its own form. Mainnet and Testnet keep separate sources; a Lightning card keeps its own
+ * (no `onSet`: another source is another card, made with New). A source that is not connected can be tried again
+ * now (Retry), and one with a server can move to another (Change server) keeping its wallet; `changing` /
+ * `onChanging` let the card open that form from its own Change server button.
  */
 export function SourcePicker({ kind, view, onSet, onClear, onRetry, onReconfigure, changing, onChanging }: {
   kind: "lightning" | "onchain"; view: SourceView;
-  onSet: (providerId: string, values: Record<string, string>) => Promise<void>; onClear?: () => Promise<void>;
+  onSet?: (providerId: string, values: Record<string, string>) => Promise<void>; onClear?: () => Promise<void>;
   onRetry?: () => Promise<void>; onReconfigure?: (values: Record<string, string>) => Promise<void>;
   changing?: boolean; onChanging?: (open: boolean) => void;
 }) {
@@ -105,13 +106,13 @@ export function SourcePicker({ kind, view, onSet, onClear, onRetry, onReconfigur
   const current = offered.find((d) => d.id === view.providerId);
   const serverFields = onReconfigure ? changeableFields(view) : [];
   const failing = view.status === "error" || (view.status === "connecting" && !!view.failures);
-  const submit = (values: Record<string, string>) => void run(async () => { setSaved(""); await onSet(descriptor!.id, values); setChosen(""); setSaved(`${descriptor!.label} is now your ${kind === "onchain" ? "Bitcoin" : "Lightning"} source.`); });
+  const submit = (values: Record<string, string>) => void run(async () => { setSaved(""); await onSet!(descriptor!.id, values); setChosen(""); setSaved(`${descriptor!.label} is now your ${kind === "onchain" ? "Bitcoin" : "Lightning"} source.`); });
   const reconfigure = (values: Record<string, string>) => void run(async () => { setSaved(""); await onReconfigure!(values); setServerOpen(false); setSaved(`${view.label ?? "The source"} now uses that server.`); });
 
   return (
     <Section title="Source" testId={`${kind}-source`}>
       <Row testId={`${kind}-source-current`}
-        label={view.providerId ? <>{view.label ?? view.providerId}{view.isDefault && <span className="text-accent ml-2 text-[10px] uppercase tracking-wider">Default</span>}</> : "No source"}
+        label={view.providerId ? <>{view.label ?? view.providerId}{view.isDefault && onSet && <span className="text-accent ml-2 text-[10px] uppercase tracking-wider">Default</span>}</> : "No source"}
         hint={<span data-testid={`${kind}-source-status`}>{sourceStatus(view)}</span>}>
         {onRetry && failing && view.providerId && <Button disabled={busy} onClick={() => void run(onRetry)} data-testid={`${kind}-source-retry`}>Retry</Button>}
         {serverFields.length > 0 && !serverOpen && <Button disabled={busy} onClick={() => { setServerOpen(true); setSaved(""); }} data-testid={`${kind}-source-change-server`}>Change server</Button>}
@@ -120,7 +121,10 @@ export function SourcePicker({ kind, view, onSet, onClear, onRetry, onReconfigur
       {serverOpen && serverFields.length > 0 && (
         <Block><ServerForm kind={kind} fields={serverFields} config={view.config ?? {}} busy={busy} onSubmit={reconfigure} onCancel={() => setServerOpen(false)} /></Block>
       )}
-      <Block>
+      {!onSet ? (saved || error) && <Block>
+        {saved && <Notice tone="success" testId={`${kind}-source-saved`}>{saved}</Notice>}
+        {error && <Notice tone="error" testId={`${kind}-source-error`}>{error}</Notice>}
+      </Block> : <Block>
         {offered.length === 0 ? (
           <Notice testId={`${kind}-source-none-offered`}>No {kind === "onchain" ? "on-chain Bitcoin" : "Lightning"} provider is available here yet{view.mode === "testnet" ? " in Testnet" : ""}.</Notice>
         ) : (
@@ -145,7 +149,7 @@ export function SourcePicker({ kind, view, onSet, onClear, onRetry, onReconfigur
         {saved && <Notice tone="success" testId={`${kind}-source-saved`}>{saved}</Notice>}
         {error && <Notice tone="error" testId={`${kind}-source-error`}>{error}</Notice>}
         <Notice>{view.mode === "testnet" ? "This is the Testnet wallet's source; a Mainnet wallet has its own." : "This is the Mainnet wallet's source; a Testnet wallet has its own."}</Notice>
-      </Block>
+      </Block>}
     </Section>
   );
 }

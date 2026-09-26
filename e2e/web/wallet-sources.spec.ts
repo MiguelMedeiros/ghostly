@@ -1,10 +1,11 @@
-import { createWallet, expect, openWallet, showNetwork, test, useFakeProviders, type Peer, type WalletNetwork } from "../support/fixtures";
+import { createWallet, expect, lightningCard, openWallet, showNetwork, test, useFakeProviders, type Peer, type WalletNetwork } from "../support/fixtures";
 import { mockMainnetMints } from "../support/mint";
 import { choose, optionsOf, close } from "../support/select";
 
 /**
  * Where Lightning and on-chain Bitcoin come from: a source per wallet, each wallet on its own network. New makes
- * one with the source picked in its dialog; a wallet already made changes its source on its card. The sources here
+ * one with the source picked in its dialog; a Lightning card keeps its source (another source is another card), an
+ * on-chain wallet changes its source on its card. The sources here
  * are the fake ones (regtest, in memory), so nothing leaves this machine; real providers run the same picker with
  * their own form, and their own gated e2e (see e2e/README.md). Mainnet Cashu runs against mocked mints.
  */
@@ -34,16 +35,11 @@ test("a Cashu wallet's Lightning card starts on its mints, and each network offe
     await openWallet(alice, `lightning-${network}`);
     const source = alice.page.getByTestId("lightning-source");
     await expect(source.getByTestId("lightning-source-current")).toContainText("Cashu mints");
-    await expect(source.getByTestId("lightning-source-current")).toContainText("Default");
     await expect(alice.page.getByTestId(`wallet-card-lightning-${network}`)).toContainText("Invoices via Cashu");
-    const select = source.getByTestId("lightning-source-select");
-    await expect(select).toHaveText(/^\d+ available…$/);
-    const options = await optionsOf(select);
-    await expect(options.filter({ hasText: "Cashu mints" })).toHaveCount(1);
-    await expect(options.filter({ hasText: "(test)" })).toHaveCount(0);
-    await close(select);
+    // A card keeps its source: another source is another card, made with New.
+    await expect(source.getByTestId("lightning-source-select")).toHaveCount(0);
 
-    // New offers the other sources, for a Lightning wallet of their own: never the mints (they come with Cashu), never a fake.
+    // New offers the other sources, for a Lightning card of their own: never the mints (they come with Cashu), never a fake.
     const dialog = await newDialog(alice, network);
     await expect(dialog.getByTestId("new-wallet-type-lightning-status")).toHaveText("Connect…");
     // Connect… opens the source's own step: its form, and a way back to every kind.
@@ -59,30 +55,32 @@ test("a Cashu wallet's Lightning card starts on its mints, and each network offe
   }
 });
 
-test("a Lightning source is picked per wallet: invoices go through it, and the Mainnet wallet keeps its own", { tag: ["@feature:wallet.lightning.sources", "@feature:wallet.instances.networks"] }, async ({ peer }) => {
+test("Lightning cards: New adds one of its own beside the mints' card; invoices go through the card; the default moves; removing it leaves the other", { tag: ["@feature:wallet.lightning.cards", "@feature:wallet.lightning.sources", "@feature:wallet.instances.networks", "@feature:wallet.instances.remove"] }, async ({ peer }) => {
   const alice = await peer("sources-lightning");
   await mockMainnetMints(alice.context);
   await useFakeProviders(alice);
   await createWallet(alice, "cashu", "testnet");
   await createWallet(alice, "cashu", "mainnet");
-  await openWallet(alice, "lightning-testnet");
   const page = alice.page, source = page.getByTestId("lightning-source");
-  const testnetCard = page.getByTestId("wallet-card-lightning-testnet"), mainnetCard = page.getByTestId("wallet-card-lightning-mainnet");
 
-  await choose(source.getByTestId("lightning-source-select"), "fake-lightning");
-  const form = source.getByTestId("provider-form-fake-lightning");
-  await form.getByLabel("Name").fill("Test node");
-  await form.getByLabel("Access token").fill("not-a-real-secret");
-  await form.getByTestId("provider-save").click();
-  await expect(source.getByTestId("lightning-source-saved")).toBeVisible();
+  await createWallet(alice, "lightning", "testnet", { provider: "fake-lightning", fill: async (form) => {
+    await form.getByLabel("Name").fill("Test node");
+    await form.getByLabel("Access token").fill("not-a-real-secret");
+    await form.getByTestId("provider-save").click();
+  } });
+  // Two cards now: the mints' one, and the new one, selected; a card of one's own takes receiving over from the mints.
+  const mints = lightningCard(page, "testnet", "Cashu"), node = lightningCard(page, "testnet", "Test node");
+  await expect(lightningCard(page, "testnet")).toHaveCount(2);
+  await expect(node).toHaveAttribute("aria-selected", "true");
+  await expect(node.getByTestId("wallet-card-tag")).toHaveText("Default");
+  await expect(mints.getByTestId("wallet-card-tag")).toHaveCount(0);
   await expect(source.getByTestId("lightning-source-current")).toContainText("Fake Lightning (test)");
   await expect(source.getByTestId("lightning-source-status")).toContainText("Connected");
-  await expect(testnetCard).toContainText("Via Test node");
   await expect(page.getByTestId("wallet-balance")).toContainText("100,000");
   // The secret is sealed in the engine: never back in the page.
   expect(await page.content()).not.toContain("not-a-real-secret");
 
-  // Receive: the invoice is the source's (regtest), and it is seen paid through the source.
+  // Receive: the invoice is the card's source's (regtest), and it is seen paid through it.
   await page.getByTestId("wallet-receive").click();
   await page.getByTestId("wallet-receive-amount").fill("12");
   await page.getByTestId("wallet-create-invoice").click();
@@ -90,18 +88,24 @@ test("a Lightning source is picked per wallet: invoices go through it, and the M
   await expect(page.getByTestId("wallet-paid")).toContainText("12 sats received", { timeout: 30_000 });
   await expect(page.getByTestId("lightning-recent").getByTestId("lightning-op").first()).toContainText("paid");
 
-  // The Mainnet Lightning wallet has its own source, open beside it: still the mints. The Testnet one keeps the fake.
+  // The Mainnet Lightning wallet has its own cards: still only the mints'.
   await openWallet(alice, "lightning-mainnet");
-  await expect(mainnetCard).toContainText("Invoices via Cashu");
+  await expect(page.getByTestId("wallet-card-lightning-mainnet")).toContainText("Invoices via Cashu");
   await expect(source.getByTestId("lightning-source-current")).toContainText("Cashu mints");
-  await showNetwork(page, "testnet");
-  await expect(testnetCard).toContainText("Via Test node");
 
-  // Back to the default.
-  await openWallet(alice, "lightning-testnet");
-  await source.getByTestId("lightning-source-clear").click();
-  await expect(source.getByTestId("lightning-source-current")).toContainText("Cashu mints");
-  await expect(testnetCard).toContainText("Invoices via Cashu");
+  // The mints' card made the default for receiving, from its own settings.
+  await showNetwork(page, "testnet");
+  await mints.click();
+  await page.getByTestId("lightning-card-default").click();
+  await expect(mints.getByTestId("wallet-card-tag")).toHaveText("Default");
+  await expect(node.getByTestId("wallet-card-tag")).toHaveCount(0);
+
+  // Removing the node's card forgets it; the mints' card stays, alone again: the network's Lightning.
+  await node.click();
+  await page.getByTestId("wallet-remove").click();
+  await page.getByTestId("wallet-remove-confirm").click();
+  await expect(page.getByTestId("wallet-card-lightning-testnet")).toContainText("Invoices via Cashu");
+  await expect(lightningCard(page, "testnet")).toHaveCount(1);
 });
 
 test("no Bitcoin wallet until New makes one with a source, on Testnet only; then it pays on-chain through it", { tag: ["@feature:wallet.onchain.sources", "@feature:wallet.instances.create"] }, async ({ peer }) => {

@@ -19,7 +19,7 @@ import './wallet-deck.css';
 export function WalletCardFace({card,after,checked,tagAll,corner}:{card:WalletCard<string>;after?:boolean;checked?:boolean;tagAll?:boolean;corner?:ReactNode}) {
  return <span className="wallet-deck-face" data-deck="face" data-after={after||undefined} data-checked={checked}>
   <span className="wallet-deck-card-glyph" aria-hidden="true"><WalletMark rail={railOf(card)}/></span>
-  <span className="wallet-deck-card-status">{card.network&&(card.network==='testnet'||tagAll)&&<span className="wallet-deck-card-network" data-network={card.network} data-testid="wallet-card-network">{card.network==='testnet'?'Testnet':'Mainnet'}</span>}{card.status}</span>
+  <span className="wallet-deck-card-status">{card.network&&(card.network==='testnet'||tagAll)&&<span className="wallet-deck-card-network" data-network={card.network} data-testid="wallet-card-network">{card.network==='testnet'?'Testnet':'Mainnet'}</span>}{card.tag&&<span className="wallet-deck-card-tag" data-testid="wallet-card-tag">{card.tag}</span>}{card.status}</span>
   {/* A card after the chosen one shows only its trailing edge: its mark is there too. */}
   <span className="wallet-deck-card-glyph-end" aria-hidden="true"><WalletMark rail={railOf(card)}/></span>
   <span className="wallet-deck-card-ghost" data-deck="ghost" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C7.582 2 4 5.582 4 10v8c0 .75.6 1 1 .6l2-1.6 2 1.6c.4.3.8.3 1.2 0L12 17l1.8 1.6c.4.3.8.3 1.2 0l2-1.6 2 1.6c.4.4 1 .15 1-.6v-8c0-4.418-3.582-8-8-8z"/><circle cx="9" cy="9" r="1.5" fill="var(--ghost-eye)"/><circle cx="15" cy="9" r="1.5" fill="var(--ghost-eye)"/></svg></span>

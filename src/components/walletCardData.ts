@@ -1,18 +1,26 @@
 import {formatPaymentAmount} from '@ghostly/core';
-import type {WalletNetwork, WalletState} from '../lib/platform';
+import type {WalletInstanceView, WalletNetwork, WalletPlatform, WalletState} from '../lib/platform';
 import type {WalletCard,WalletRail} from './walletCardTypes';
 export type {ChatRail,WalletCard,WalletRail} from './walletCardTypes';
 export const CASHU_MINT_SOURCE = 'cashu-mint';
 /** The fee limit an on-chain payment starts with, in sats: a small transaction at a few sat/vB. The review shows the real fee. */
 export const ONCHAIN_FEE_CAP = 2_000;
 
-/** A wallet's card: one type on one network. `id` is the wallet's own (`cashu:testnet`). */
-export interface InstanceCard extends WalletCard<string> {rail:WalletRail;network:WalletNetwork}
-export const cardId=(rail:WalletRail,network:WalletNetwork)=>`${rail}:${network}`;
-export const parseCardId=(id:string):{rail:WalletRail;network:WalletNetwork}|undefined=>{
- const [rail,network]=id.split(':');
- return network==='mainnet'||network==='testnet'?{rail:rail as WalletRail,network}:undefined;
+/**
+ * A wallet's card: one type on one network. `id` is the wallet's own (`cashu:testnet`). A network with several
+ * Lightning cards has one per card (`lightning:testnet:<card>`, `card` its id); its only one is `lightning:testnet`.
+ */
+export interface InstanceCard extends WalletCard<string> {rail:WalletRail;network:WalletNetwork;card?:string;
+ /** One Lightning card of several: the network's default for receiving. */
+ receive?:boolean}
+export const cardId=(rail:WalletRail,network:WalletNetwork,card?:string)=>card?`${rail}:${network}:${card}`:`${rail}:${network}`;
+export const parseCardId=(id:string):{rail:WalletRail;network:WalletNetwork;card?:string}|undefined=>{
+ const [rail,network,card]=id.split(':');
+ return network==='mainnet'||network==='testnet'?{rail:rail as WalletRail,network,...(card?{card}:{})}:undefined;
 };
+/** A wallet card's deck id: a network's only Lightning card is its Lightning (`lightning:testnet`), one of several its own. */
+export const deckId=(w:Pick<WalletInstanceView,'type'|'network'|'card'>,state:WalletState)=>cardId(w.type,w.network,w.type==='lightning'&&lightningCount(state,w.network)>1?w.card:undefined);
+const lightningCount=(state:WalletState,network:WalletNetwork)=>(state.wallets??[]).filter(w=>w.type==='lightning'&&w.network===network).length;
 /** A test wallet's sats are test sats wherever they show: its card says Testnet, and its amounts say so too. */
 export const satsUnit=(network:WalletNetwork)=>network==='testnet'?'test sats':'sats';
 
@@ -26,28 +34,67 @@ export function lightningNetworkFor(state:WalletState|null|undefined,chain?:stri
  return has('mainnet')||!has('testnet')?'mainnet':'testnet';
 }
 
-/** One network's wallets, as the cards read them: that network's own views, else (an older engine) the flat state. */
-export const networkState=(state:WalletState,network:WalletNetwork):WalletState=>({...state,...state.networks?.[network],mode:network});
+/**
+ * One network's wallets, as the cards read them: that network's own views, else (an older engine) the flat state.
+ * `card`: `lightning` is that Lightning card's, as a platform bound to it (`wallet.forLightning`) sees it.
+ */
+export const networkState=(state:WalletState,network:WalletNetwork,card?:string):WalletState=>{
+ const here=state.networks?.[network];
+ const lightning=card?here?.lightnings?.find(c=>c.card===card)??here?.lightning:here?.lightning??state.lightning;
+ return {...state,...here,lightning,mode:network};
+};
+/**
+ * The Lightning cards of a network that can pay an invoice, in the deck's order, and the one to start on: the first
+ * that is ready and holds enough (when it says), else the first ready one, else the first.
+ */
+export function lightningPayers(state:WalletState|null|undefined,amount?:number):{cards:NonNullable<WalletState['lightnings']>;first?:string} {
+ const cards=(state?.lightnings??[]).filter(c=>c.capabilities?.send!==false);
+ const ready=cards.filter(c=>c.status==='ready');
+ const first=ready.find(c=>amount===undefined||c.balance===undefined||c.balance>=amount)??ready[0]??cards[0];
+ return {cards,first:first?.card};
+}
+/** The platform a card's panel and payments go through: its network's, and its own Lightning card when it is one of several. */
+export const cardWallet=(wallet:WalletPlatform,card:Pick<InstanceCard,'network'|'card'>)=>card.card?wallet.forNetwork(card.network).forLightning(card.card):wallet.forNetwork(card.network);
 
 /**
  * The wallets' cards, shared by the wallet page and the chat's payment picker: one per wallet the profile has, each
  * on its network, in the deck's order.
  */
-export function walletCards(state:WalletState):InstanceCard[] {
- // A network's Lightning shows as its default card for receiving (the one `state.lightning` describes).
- return (state.wallets??[]).filter(w=>w.type!=='lightning'||w.receive!==false).map(w=>walletCard(w.type,w.network,networkState(state,w.network)));
+export function walletCards(state:WalletState,{lightning='cards'}:{lightning?:'cards'|'default'}={}):InstanceCard[] {
+ return (state.wallets??[]).flatMap(w=>{
+  if(w.type!=='lightning')return [walletCard(w.type,w.network,networkState(state,w.network))];
+  // The Accept side: one Lightning card per network, the default for receiving (a request's invoice comes from it).
+  if(lightning==='default')return w.receive===false?[]:[walletCard(w.type,w.network,networkState(state,w.network))];
+  const card=deckId(w,state)===cardId(w.type,w.network)?undefined:w.card;
+  return [walletCard(w.type,w.network,networkState(state,w.network,w.card),card)];
+ });
 }
 
+/** A network's default Lightning card before its other Lightning cards, the rest in order: a request starts on it. */
+export const receivingFirst=<C extends InstanceCard>(cards:C[]):C[]=>{
+ const out=[...cards];
+ for(const network of ['mainnet','testnet'] as const){
+  // The places a network's Lightning cards hold, filled again with the default one first.
+  const at=out.flatMap((c,i)=>c.rail==='lightning'&&c.network===network?[i]:[]);
+  const ln=at.map(i=>out[i]),sorted=[...ln.filter(c=>c.receive),...ln.filter(c=>!c.receive)];
+  at.forEach((i,k)=>{out[i]=sorted[k];});
+ }
+ return out;
+};
 /** Real money first, then test money, each network's cards in the deck's order: a deck that mixes both keeps them apart. */
 export const byNetwork=<C extends {network:WalletNetwork}>(cards:C[]):C[]=>[...cards.filter(c=>c.network==='mainnet'),...cards.filter(c=>c.network==='testnet')];
 
-/** What one wallet's card shows, from its network's state. */
-export function walletCard(rail:WalletRail,network:WalletNetwork,s:WalletState):InstanceCard {
- const unit=satsUnit(network),base={id:cardId(rail,network),rail,network};
+/** What one wallet's card shows, from its network's state. `card`: one Lightning card of several on its network. */
+export function walletCard(rail:WalletRail,network:WalletNetwork,s:WalletState,card?:string):InstanceCard {
+ const unit=satsUnit(network),base={id:cardId(rail,network,card),rail,network,...(card?{card}:{})};
  const cashu=`${Math.max(0,s.balance).toLocaleString()} ${unit}`;
  switch(rail) {
   case 'cashu': return {...base,name:'Cashu',balance:cashu,detail:network==='testnet'?'Ecash · test mints':'Ecash · your mints',status:s.mints.length?'Ready':'Set up',ready:s.mints.length>0};
-  case 'lightning': return {...base,...lightningCard(s,cashu,unit)};
+  case 'lightning': {
+   const face=lightningCard(s,cashu,unit);
+   // One of several: its own name, and the network's default for receiving says so.
+   return card?{...base,...face,name:s.lightning?.name||face.name,...(s.lightning?.receive?{tag:'Default',receive:true}:{})}:{...base,...face};
+  }
   case 'arkade': {
    const ark=s.ark,ready=!!ark?.configured&&!ark.locked&&!!ark.address;
    // Ready means it can receive: an Ark wallet that has no address yet (its provider has not answered) is not.

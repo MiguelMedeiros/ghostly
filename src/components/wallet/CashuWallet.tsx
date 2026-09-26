@@ -9,6 +9,7 @@ import { LightningAddressPay } from "./LightningAddressPay";
 import { useRun } from "./run";
 import { ButtonGroup, InputGroup, Truncate } from "../layout";
 import { SourcePicker } from "./providers/SourcePicker";
+import { LightningCardSettings } from "./LightningCardSettings";
 import { CASHU_MINT_SOURCE } from "../walletCardData";
 
 const TX_LABEL = {
@@ -209,8 +210,9 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
               ))}
             </Section>
           )}
-          {ln && <SourcePicker kind="lightning" view={ln} onSet={(id, values) => wallet.lightningSetSource(id, values)} onClear={() => wallet.lightningClearSource()}
-            onRetry={() => wallet.lightningRetrySource()} onReconfigure={(values) => wallet.lightningReconfigureSource(values)} />}
+          <LightningCardSettings key={ln?.card} wallet={wallet} state={state} />
+          {/* A card keeps its source: another source is another card (New). */}
+          {ln && <SourcePicker kind="lightning" view={ln} onRetry={() => wallet.lightningRetrySource()} onReconfigure={(values) => wallet.lightningReconfigureSource(values)} />}
           {viaMint && (
             <Section title="Settings">
               <Row label="Balance" hint="Lightning uses your Cashu balance: invoices are paid into, and paid from, your Cashu mints."><Button onClick={onOpenCashu}>Cashu settings</Button></Row>

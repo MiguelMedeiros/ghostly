@@ -8,7 +8,7 @@ import { SwitchLook } from "./wallet/ui";
 import type { InstanceCard } from "./walletCardData";
 
 /** A card's test id on the Accept side: its kind and its network (`payment-accept-cashu-testnet`). */
-export const acceptCardTestId = (id: string) => `payment-accept-${id.replace(":", "-")}`;
+export const acceptCardTestId = (id: string) => `payment-accept-${id.replace(/:/g, "-")}`;
 
 /**
  * The payment composer's Accept side (PaymentComposer.tsx): which ways of paying this chat accepts from the contact,

@@ -12,6 +12,7 @@ import type { SparkNetwork, WalletNetwork } from "@ghostly/core";
 import type { NetworkWalletsView, TestCoinsResult, WalletCreate, WalletInstanceView, WalletOffer, WalletRemove, WalletTestCoins, WalletType } from "@ghostly/browser/shared/types";
 export type { NetworkWalletsView, TestCoinsResult, WalletCreate, WalletInstanceView, WalletOffer, WalletRemove, WalletTestCoins, WalletType, WalletNetwork };
 import type { LightningView } from "@ghostly/browser/engine/paymentAdapters/providers/lightningService";
+import type { LightningCardView } from "@ghostly/browser/engine/paymentAdapters/providers/lightningCards";
 import type { BitcoinView } from "@ghostly/browser/engine/paymentAdapters/providers/bitcoinService";
 import type { DataLinkState, ServiceAd, PairingState, TransportWait } from "@ghostly/core";
 import type { ChatFile } from "./types";
@@ -161,8 +162,13 @@ export interface WalletState {
   fedimint?: FedimintWalletView;
   spark?: SparkWalletView;
   usdt?: UsdtWalletView;
-  /** The Lightning source of this network (the Cashu mints by default) and its latest operations. */
-  lightning?: LightningView;
+  /**
+   * The Lightning card of this network the calls act on: the one a platform is bound to (`forLightning`), else the
+   * network's default for receiving. Its source (the Cashu mints by default) and its latest operations.
+   */
+  lightning?: LightningView & Partial<Pick<LightningCardView, "card" | "name" | "receive">>;
+  /** Every Lightning card of this network, in the order they were added. */
+  lightnings?: LightningCardView[];
   /** The on-chain Bitcoin source of this network, if one is set up. */
   bitcoin?: BitcoinView;
   intents?: PaymentReview[];
@@ -234,6 +240,14 @@ export interface WalletPlatform {
   network?: WalletNetwork;
   /** The same wallet calls, acting on one network's wallets, and that network's state. */
   forNetwork(network: WalletNetwork): WalletPlatform;
+  /** The Lightning card the calls act on, when bound to one (`forLightning`). */
+  lightningCard?: string;
+  /** The same wallet calls, their Lightning ones through one card of the bound network; `state.lightning` is that card's. */
+  forLightning(card: string): WalletPlatform;
+  /** Makes the bound Lightning card its network's default for receiving. */
+  lightningSetReceive(): Promise<void>;
+  /** Renames the bound Lightning card. */
+  lightningRename(name: string): Promise<void>;
   /** New → a type → a network: made in one click and checked before its card appears; nothing saved on failure. */
   create(params: WalletCreate): Promise<WalletInstanceView>;
   /** Removes one wallet (its keys, its config, what chats keep about it); refused while it holds money on this device unless `acceptLoss`. */
@@ -300,7 +314,7 @@ export interface WalletPlatform {
   removeMint(url: string): Promise<void>;
   /** The primary mint (first in the list) is where Lightning invoices are created. */
   setPrimaryMint(url: string): Promise<void>;
-  /** An invoice from the active Lightning source; `via: "cashu"` asks the Cashu mints whatever the source. */
+  /** An invoice from the bound Lightning card (else the default for receiving); `via: "cashu"` asks the Cashu mints. */
   receiveLightning(amount: number, via?: "cashu"): Promise<{ invoice: string; expiresAt: number | null; paymentHash?: string; source?: string }>;
   quoteInvoice(invoice: string, via?: "cashu"): Promise<{ quote: string; mint: string; amount: number; feeReserve: number; source?: string }>;
   /**

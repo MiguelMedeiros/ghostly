@@ -110,17 +110,16 @@ describe("choosing a source from the wallet cards", () => {
     expect(screen.getByLabelText("Esplora server")).toHaveValue("http://127.0.0.1:47002");
   });
 
-  it("the Lightning card sends lightningSetSource, and Back to Cashu mints sends lightningClearSource", async () => {
-    const ln = { ...sourceView({ offered: offered("lightning", "mainnet"), providerId: "lnd", label: "LND node", status: "ready" as const, network: "bitcoin" as const }), recent: [] };
+  it("a Lightning card keeps its source: no source to pick or clear; Retry goes to it", async () => {
+    const ln = { ...sourceView({ offered: offered("lightning", "mainnet"), providerId: "lnd", label: "LND node", status: "error" as const, failures: 3, network: "bitcoin" as const }), recent: [] };
     const state = walletView({ lightning: ln }) as WalletState;
     const { user, engine } = renderApp(<CashuWallet wallet={wallet} state={state} rail="lightning" onOpenCashu={() => {}} />);
-    engine.on("lightningSetSource", () => undefined).on("lightningClearSource", () => undefined);
-    await choose(user, screen.getByRole("combobox", { name: "Lightning source" }), "nwc");
-    await user.type(screen.getByLabelText("Connection URI"), "nostr+walletconnect://wallet");
-    await user.click(screen.getByRole("button", { name: "Use Nostr Wallet Connect" }));
-    expect(await screen.findByTestId("lightning-source-saved")).toHaveTextContent("Nostr Wallet Connect is now your Lightning source.");
-    expect(engine.callsTo("lightningSetSource")).toEqual([{ providerId: "nwc", values: { uri: "nostr+walletconnect://wallet" } }]);
-    await user.click(screen.getByRole("button", { name: "Back to Cashu mints" }));
-    expect(engine.callsTo("lightningClearSource")).toHaveLength(1);
+    engine.on("lightningRetrySource", () => undefined);
+    expect(screen.getByTestId("lightning-source-current")).toHaveTextContent("LND node");
+    expect(screen.queryByRole("combobox", { name: "Lightning source" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("lightning-source-clear")).not.toBeInTheDocument();
+    expect(screen.queryByText(/a Mainnet wallet has its own|a Testnet wallet has its own/)).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("lightning-source-retry"));
+    expect(engine.callsTo("lightningRetrySource")).toHaveLength(1);
   });
 });

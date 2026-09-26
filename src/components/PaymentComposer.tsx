@@ -10,7 +10,7 @@ import { NetworkTag } from "./NetworkTag";
 import { PaymentReview } from "./PaymentReview";
 import { WalletMark, type ChatRail } from "./WalletCards";
 import { CardDeck, WalletCardFace } from "./WalletDeck";
-import { ONCHAIN_FEE_CAP, byNetwork, networkState, satsUnit, walletCards, type InstanceCard } from "./walletCardData";
+import { ONCHAIN_FEE_CAP, byNetwork, cardWallet, networkState, receivingFirst, satsUnit, walletCards, type InstanceCard } from "./walletCardData";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { ComposerSheet, ComposerSheetHead, ForwardArrow } from "./ComposerSheet";
 import { CardFlip, FlipTurnButton } from "./deck/Flip";
@@ -27,7 +27,8 @@ interface PaymentComposerProps {
   /** `confirmedReal`: the person confirmed a Mainnet send as real money (the engine refuses one without it). */
   onSend: (amount: number, memo: string, network?: WalletNetwork, confirmedReal?: boolean) => Promise<string | null>;
   /** `rail`: the card it was made on, for a request that must carry that way of paying only (groups). `network`: the card's. */
-  onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", rail?: ChatRail, network?: WalletNetwork) => Promise<string | null>;
+  /** `lightningCard`: the Lightning card picked (one of several on its network), whose invoice the request carries. */
+  onRequest: (amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", rail?: ChatRail, network?: WalletNetwork, lightningCard?: string) => Promise<string | null>;
   onClose: () => void;
   /**
    * A payment sent or a request made: the sheet is done, and the chat's bubble shows the rest. Without it, `onClose`.
@@ -89,7 +90,10 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
     return undefined;
   };
   // Real money, then test money: the two never mingle in the deck, and every card says its network.
-  const cards = state && wallet ? byNetwork(walletCards(state)) : [];
+  // A network's default Lightning card leads its Lightning cards: a request starts on it unless another is picked.
+  const cards = state && wallet ? byNetwork(receivingFirst(walletCards(state))) : [];
+  // Accept keeps one Lightning card per network: a request's invoice comes from the default for receiving.
+  const acceptCards = state && wallet ? byNetwork(walletCards(state, { lightning: "default" })) : [];
   // With an Accept side, a card this chat has off is chosen there, not shown on Pay.
   const offHere = (c: InstanceCard) => !!peer && !cardOn(peer, c.rail, c.network);
   const payCards = onSaveMethods ? cards.filter((c) => !offHere(c)) : cards;
@@ -146,8 +150,8 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   const rail: ChatRail = card?.rail ?? rails?.[0] ?? "cashu";
   const network: WalletNetwork | undefined = card?.network;
   /** The chosen card's own network: its state, and the calls that go through its wallets. */
-  const here = state && network ? networkState(state, network) : state;
-  const bound = wallet && network ? wallet.forNetwork(network) : wallet;
+  const here = state && network ? networkState(state, network, card?.card) : state;
+  const bound = wallet && card ? cardWallet(wallet, card) : wallet;
   const method: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark" = rail === "lightning" ? "cashu" : rail;
   const usdt = here?.usdt;
   const unit = method === "usdt" ? (network === "testnet" || (usdt?.chainId && usdt.chainId !== 1) ? "TEST-USDT" : "USDT") : satsUnit(network ?? "mainnet");
@@ -251,7 +255,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   const request = async () => {
     setError(""); setBusy("request");
     try {
-      const err = await onRequest(method === "usdt" ? parsePaymentAmount(amount, decimals) : value, memo, method, rail, network);
+      const err = await onRequest(method === "usdt" ? parsePaymentAmount(amount, decimals) : value, memo, method, rail, network, ...(card?.card ? [card.card] : []));
       if (err) setError(err); else onDone();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not prepare request"); }
     finally { setBusy(null); }
@@ -373,7 +377,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
           {/* Not keyed by the network: Accept keeps both networks' switches while the tab changes. Each deck is. */}
           <div role="tabpanel" id="payment-tab-panel" aria-labelledby={`payment-tab-${net}`} data-testid="payment-tab-panel" data-network={net}
             className="payment-tab-panel wallet-network-view" data-swap={swap ?? undefined} onAnimationEnd={(e) => { if (e.target === e.currentTarget) setSwap(null); }}>
-          {accepting && onSaveMethods ? <ChatPaymentAccept peer={peer} contact={who} cards={cards} network={net} onSave={onSaveMethods} empty={noWallet} />
+          {accepting && onSaveMethods ? <ChatPaymentAccept peer={peer} contact={who} cards={acceptCards} network={net} onSave={onSaveMethods} empty={noWallet} />
           : !mine.includes(net) ? noWallet
           : !shown.length && onSaveMethods ? <div className="payment-none" data-testid="payment-none">
             <p className="composer-sheet-hint">{t("payments.none.text")}</p>
@@ -398,7 +402,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
 }
 
 /** A card's test id in the chat: its kind and its network (`payment-card-cashu-testnet`). */
-export const paymentCardTestId = (id: string) => `payment-card-${id.replace(":", "-")}`;
+export const paymentCardTestId = (id: string) => `payment-card-${id.replace(/:/g, "-")}`;
 
 /**
  * The room the sheet has over the composer on a desktop: from its bottom edge (over the message field) up to the
