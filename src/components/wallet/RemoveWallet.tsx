@@ -15,9 +15,11 @@ import { Block, Button, Notice, Row, Section } from "./ui";
  * The last section of a wallet's details: remove it. A card that comes with another wallet (Lightning through the
  * Cashu mints) says which one to remove instead.
  */
-export function RemoveWalletSection({ type, network, wallet, state, onRemoved, onOpen }: {
+export function RemoveWalletSection({ type, network, card, wallet, state, onRemoved, onOpen }: {
   type: WalletType;
   network: WalletNetwork;
+  /** One Lightning card of several on its network. */
+  card?: string;
   wallet: WalletPlatform;
   state: WalletState;
   onRemoved: () => void;
@@ -25,8 +27,8 @@ export function RemoveWalletSection({ type, network, wallet, state, onRemoved, o
   onOpen: (id: string) => void;
 }) {
   const [asking, setAsking] = useState(false);
-  const removal = walletRemoval(type, network, networkState(state, network), state.intents);
-  const label = walletLabel(type, network);
+  const removal = walletRemoval(type, network, networkState(state, network), state.intents, card);
+  const label = card ? networkState(state, network, card).lightning?.name || walletLabel(type, network) : walletLabel(type, network);
   return (
     <Section title="Remove" testId="wallet-remove-section">
       {removal.comesWith ? (
@@ -38,14 +40,14 @@ export function RemoveWalletSection({ type, network, wallet, state, onRemoved, o
           <Button variant="danger" data-testid="wallet-remove" aria-haspopup="dialog" onClick={() => setAsking(true)}>Remove {label}…</Button>
         </Row>
       )}
-      {asking && <RemoveWalletDialog removal={removal} wallet={wallet.forNetwork(network)} source={sourceName(type, network, state)} onClose={() => setAsking(false)} onRemoved={() => { setAsking(false); onRemoved(); }} />}
+      {asking && <RemoveWalletDialog removal={removal} wallet={wallet.forNetwork(network)} source={sourceName(type, network, state, card)} onClose={() => setAsking(false)} onRemoved={() => { setAsking(false); onRemoved(); }} />}
     </Section>
   );
 }
 
 /** Where a Lightning or on-chain wallet keeps its money (the source's name), for "the money stays in …". */
-function sourceName(type: WalletType, network: WalletNetwork, state: WalletState): string | undefined {
-  const view = networkState(state, network), source = type === "lightning" ? view.lightning : type === "bitcoin" ? view.bitcoin : undefined;
+function sourceName(type: WalletType, network: WalletNetwork, state: WalletState, card?: string): string | undefined {
+  const view = networkState(state, network, card), source = type === "lightning" ? view.lightning : type === "bitcoin" ? view.bitcoin : undefined;
   return source?.alias ?? source?.label ?? undefined;
 }
 
@@ -79,7 +81,7 @@ export function RemoveWalletDialog({ removal, wallet, source, onClose, onRemoved
     element.showModal(); cancel.current?.focus();
     return () => { element.close(); if (previous?.isConnected) previous.focus(); };
   }, []);
-  const remove = () => void run(async () => { await wallet.remove({ type, network, ...(risks ? { acceptLoss: true } : {}) }); onRemoved(); });
+  const remove = () => void run(async () => { await wallet.remove({ type, network, ...(removal.card ? { card: removal.card } : {}), ...(risks ? { acceptLoss: true } : {}) }); onRemoved(); });
 
   const what = removal.custody === "elsewhere"
     ? `Your money stays ${source ? `in ${source}` : "where it is"}: Ghostly only forgets how to reach it. You can connect it again later.`

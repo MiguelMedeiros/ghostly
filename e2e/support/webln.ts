@@ -1,6 +1,5 @@
 import type { WebLNProvider } from "../../packages/browser/src/engine/paymentAdapters/providers/webln";
-import { expect, type Peer } from "./fixtures";
-import { choose } from "./select";
+import { createWallet, expect, type Peer } from "./fixtures";
 
 const METHODS = ["enable", "getInfo", "makeInvoice", "sendPayment", "getBalance", "lookupInvoice"] as const;
 
@@ -25,12 +24,11 @@ export async function installWebln(peer: Peer, wallet: WebLNProvider): Promise<v
   await expect(peer.page.getByTitle("New Chat")).toBeVisible();
 }
 
-/** Chooses the browser wallet as this mode's Lightning source, on the Lightning card. */
+/** Adds a Testnet Lightning card through the browser wallet (Wallets → New), its panel open. */
 export async function connectWebln(peer: Peer): Promise<void> {
-  const source = peer.page.getByTestId("lightning-source");
-  await choose(source.getByTestId("lightning-source-select"), "webln");
-  await expect(source.getByTestId("webln-found")).toBeVisible();
-  await source.getByTestId("provider-form-webln").getByRole("button", { name: "Connect browser wallet" }).click();
-  await expect(source.getByTestId("lightning-source-saved")).toBeVisible({ timeout: 30_000 });
-  await expect(source.getByTestId("lightning-source-status")).toContainText("Connected");
+  await createWallet(peer, "lightning", "testnet", { provider: "webln", timeout: 30_000, fill: async (form) => {
+    await expect(form.getByTestId("webln-found")).toBeVisible();
+    await form.getByRole("button", { name: "Connect browser wallet" }).click();
+  } });
+  await expect(peer.page.getByTestId("lightning-source").getByTestId("lightning-source-status")).toContainText("Connected");
 }

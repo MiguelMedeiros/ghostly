@@ -5,6 +5,7 @@ import { LightningAddressPay } from "./wallet/LightningAddressPay";
 import { lightningNetworkFor } from "./walletCardData";
 import { MONEY_LABEL, NetworkTag, satsOf } from "./NetworkTag";
 import { ConfirmRealMoney } from "./ConfirmRealMoney";
+import { LightningPayWith, useLightningPayer } from "./LightningPayWith";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import type { CashuInspection } from "../lib/platform";
 import type { MoneyInText } from "../lib/money";
@@ -109,7 +110,10 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
   // Bitcoin (a test mint's look the same) goes to the Mainnet wallet when there is one, else the Testnet one; the
   // money named is that wallet's, since that is what leaves.
   const network = lightningNetworkFor(all?.getState(), invoice.network);
-  const wallet = all?.forNetwork(network);
+  const onNetwork = all?.forNetwork(network);
+  // The Lightning card that pays, on a network with several: the first eligible one until another is picked.
+  const lightningPayer = useLightningPayer(onNetwork, invoice.amountSat ?? undefined);
+  const wallet = lightningPayer.payer;
   // No Lightning wallet of that network (the profile's wallets are known): said in words, nothing here pays it.
   const known = all?.getState()?.wallets;
   const noWallet = !!known && !known.some((w) => w.type === "lightning" && w.network === network);
@@ -185,6 +189,7 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
         </>
       ) : (
         <>
+          {wallet && !mine && !off && !expired && !noWallet && invoice.amountSat !== null && <LightningPayWith payer={lightningPayer} unit={satsOf(network)} disabled={busy} testId="invoice-lightning-card" />}
           {wallet && !mine && !off && !expired && !noWallet && invoice.amountSat !== null && (
             <button className={button} disabled={busy} data-testid="invoice-pay" onClick={() => run(async () => setQuote(await wallet.quoteInvoice(invoice.invoice)))}>
               {busy ? "Checking…" : "Pay"}
@@ -206,7 +211,9 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
 /** A Lightning address or LNURL: resolved and paid through the Lightning source, step by step, when tapped. */
 function LightningAddressCard({ destination, mine, off }: { destination: LightningDestination; mine: boolean; off: boolean }) {
   const all = useServicesPlatform()?.wallet;
-  const wallet = all?.forNetwork(lightningNetworkFor(all.getState()));
+  const network = lightningNetworkFor(all?.getState());
+  const lightningPayer = useLightningPayer(all?.forNetwork(network));
+  const wallet = lightningPayer.payer;
   const [paying, setPaying] = useState(false);
   const { copied, copy } = useCopy(destination.text);
   return (
@@ -218,6 +225,7 @@ function LightningAddressCard({ destination, mine, off }: { destination: Lightni
         <div className="mt-2"><LightningAddressPay wallet={wallet} text={destination.text} dense onDone={() => setPaying(false)} /></div>
       ) : (
         <div className="flex flex-wrap gap-1.5 mt-2">
+          {wallet && !mine && !off && <LightningPayWith payer={lightningPayer} unit={satsOf(network)} testId="lnurl-lightning-card" />}
           {wallet && !mine && !off && <button className={button} data-testid="lnurl-pay-open" onClick={() => setPaying(true)}>Pay</button>}
           <button className={quiet} onClick={copy}>{copied ? "Copied" : "Copy"}</button>
         </div>

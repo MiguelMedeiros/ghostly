@@ -7,6 +7,7 @@ import { useCountUp } from "../hooks/useCountUp";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { isWorthlessMint, mintNetwork } from "@ghostly/browser/shared/mints";
 import { ONCHAIN_FEE_CAP } from "./walletCardData";
+import { LightningPayWith, lightningPayer as payerOf } from "./LightningPayWith";
 import { Select } from "./ui/Select";
 import { MONEY_LABEL, NetworkTag } from "./NetworkTag";
 import { ConfirmRealMoney } from "./ConfirmRealMoney";
@@ -29,6 +30,8 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
   const [lnReview,setLnReview] = useState<{ fee: number; source: string } | null>(null);
   /** Real money over Lightning: Approve opens the second step, and only it pays. */
   const [lnConfirming,setLnConfirming] = useState(false);
+  /** The Lightning card that pays, when the network has several (the first eligible one until another is picked). */
+  const lnCard = useState("");
   const [mint,setMint] = useState("");
   const [feeCap,setFeeCap] = useState<string|null>(null);
   const [busy, setBusy] = useState(false);
@@ -89,6 +92,8 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
   const network = testSats ? "testnet" : "mainnet";
   /** The wallets of the payment's own network: only they pay it, quote its invoice or show its mints. */
   const onNet = wallet.forNetwork(network);
+  const lightningPayer = payerOf(onNet, payment.amount, lnCard);
+  const payer = lightningPayer.payer ?? onNet, payerCard = lightningPayer.card;
   // A request for money of a network this profile has no wallet on: said in words, and nothing here can pay it.
   const known = wallet.getState()?.wallets;
   const noWallet = isRequest && !outgoing && !!known && !known.some((w) => w.network === network);
@@ -99,7 +104,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
   // Lightning's default ceiling is the one the engine pays requests under.
   const feeInput=feeCap??(tokenPayment?'0.001':payment.target?.method==='bitcoin'?String(ONCHAIN_FEE_CAP):viaLightning?String(Math.max(10,Math.ceil(payment.amount*0.03))):'10');
   const payLightning = (confirmedReal: boolean) => run(async () => {
-    await onNet.payRequest(peerPubKey, payment.id, { via: "lightning", maxFee: Number(feeInput), ...(confirmedReal ? { confirmedReal } : {}) });
+    await payer.payRequest(peerPubKey, payment.id, { via: "lightning", maxFee: Number(feeInput), ...(confirmedReal ? { confirmedReal } : {}) });
     setLnReview(null); setLnConfirming(false);
   });
   /** What another wallet can pay: the request's invoice, or the address it carries. Ecash-only requests have nothing to show. */
@@ -157,6 +162,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
           {/* Paying from here needs a wallet of the request's network; another wallet can still be pointed at it. */}
           {!noWallet && <>
           {!payment.target && !viaLightning && <label className="block space-y-1 text-xs">Cashu mint<Select size="sm" aria-label="Cashu mint" value={selectedMint ?? ""} onChange={setMint} disabled={!sharedMints.length} placeholder="No shared configured mint" options={sharedMints.map(m => ({ value: m.url, label: m.url, description: `${m.balance.toLocaleString()} ${testSats ? "test sats" : "sats"}` }))} /></label>}
+          {viaLightning && <LightningPayWith payer={lightningPayer} unit={testSats ? "test sats" : "sats"} disabled={busy || !!lnReview} testId="payment-lightning-card" />}
           <label className="text-xs">{tokenPayment?'Maximum gas (ETH)':'Maximum fee (sats)'}<input aria-label={tokenPayment?'Maximum gas (ETH)':'Maximum fee (sats)'} className="block w-20 bg-input-bg rounded p-1" inputMode="numeric" value={feeInput} onChange={e=>setFeeCap(e.target.value.replace(tokenPayment?/[^0-9.]/g:/\D/g,""))}/></label>
           {lnReview && (
             <div data-testid="payment-review" className="rounded-lg bg-black/20 p-2 space-y-1 text-xs">
@@ -173,11 +179,11 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
           <button data-testid="payment-pay" className={button} disabled={busy || (!payment.target && !viaLightning && !selectedMint) || !!review || !!lnReview} onClick={() => run(async () => {
             if (viaLightning) {
               // What the Lightning source would spend, shown before anything is asked of it.
-              const quote = await onNet.quoteInvoice(payment.invoice!);
+              const quote = await payer.quoteInvoice(payment.invoice!);
               if (quote.amount !== payment.amount) throw new Error("The invoice does not match the requested amount");
               if (quote.feeReserve > Number(feeInput)) throw new Error(`The Lightning fee (up to ${quote.feeReserve} sats) is above your maximum`);
-              const ln = onNet.getState()?.lightning;
-              setLnReview({ fee: quote.feeReserve, source: quote.source && quote.source === ln?.providerId ? ln.alias ?? ln.label ?? quote.source : quote.source ?? "the Cashu mints" });
+              const ln = payer.getState()?.lightning;
+              setLnReview({ fee: quote.feeReserve, source: quote.source && quote.source === ln?.providerId ? (payerCard && ln.name) || ln.alias || ln.label || quote.source : quote.source ?? "the Cashu mints" });
               return;
             }
             const target=payment.target ?? {method:"cashu" as const,network:mintNetwork(selectedMint!) === "testnet" ? "cashu-test" as const : "bitcoin" as const,provider:selectedMint!,asset:"BTC" as const,unit:"sat" as const,address:payment.id,expiresAt:Date.now()+15*60*1000};

@@ -66,7 +66,7 @@ export function TestCoins({ rail, network, wallet, state }: { rail: WalletRail; 
   const ask = async () => {
     setAsking(true); setGot(null); setError(null);
     try {
-      const result = await wallet.testCoins({ type: rail, network });
+      const result = await wallet.testCoins({ type: rail, network, ...(wallet.lightningCard ? { card: wallet.lightningCard } : {}) });
       setGot(`+${result.amount.toLocaleString("en-US")} ${result.unit}${result.pending ? " on the way: it shows up here in a few seconds" : ""}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

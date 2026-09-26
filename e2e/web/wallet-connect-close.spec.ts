@@ -1,11 +1,11 @@
 import { FakeNwcWallet, TestRelay } from "../../packages/browser/test/helpers/fakeNwc";
-import { createWallet, expect, openWallet, test, type Peer } from "../support/fixtures";
+import { createWallet, expect, lightningCard, openWallet, test, type Peer } from "../support/fixtures";
 import { choose } from "../support/select";
 
 /**
  * Connecting a wallet ends where it started, with no extra click: New closes by itself once the wallet is made and
- * its card is in front of its network's tab, selected, with the focus on it; a card's Source → Change source closes
- * its form and shows the new source as the one in use.
+ * its card is in front of its network's tab, selected, with the focus on it. Another wallet connected the same way
+ * is one more Lightning card, shown the same way.
  *  - Always: a fake NWC wallet service on a relay in this test process.
  *  - GHOSTLY_NWC_REGTEST=1: the Alby Hubs of e2e/infra, on regtest Lightning.
  */
@@ -25,12 +25,13 @@ async function connectWithNew(p: Peer, uri: string) {
 
 /** Closed, the card in front on the Testnet tab and focused, its source the NWC wallet. */
 async function expectShown(p: Peer, alias: string | RegExp) {
-  const card = p.page.getByTestId("wallet-card-lightning-testnet");
+  const card = lightningCard(p.page, "testnet").and(p.page.locator('[aria-selected="true"]'));
   await expect(p.page.getByTestId("new-wallet")).toHaveCount(0, { timeout: 30_000 });
   await expect(p.page.getByTestId("wallet-network-testnet")).toHaveAttribute("aria-selected", "true");
   await expect(card).toHaveAttribute("aria-selected", "true");
   await expect(card).toBeFocused();
-  await expect(p.page.getByTestId("wallet-panel-title")).toContainText("Lightning");
+  // A network's only Lightning card is its Lightning; one of several shows its own name ("Fake hub (NWC)").
+  await expect(p.page.getByTestId("wallet-panel-title")).toContainText(/Lightning|\(NWC\)/);
   const source = p.page.getByTestId("lightning-source");
   await expect(source.getByTestId("lightning-source-current")).toContainText("Nostr Wallet Connect");
   await expect(source.getByTestId("lightning-source-status")).toContainText(alias);
@@ -62,7 +63,7 @@ test.describe("on regtest Lightning", () => {
   test.skip(process.env.GHOSTLY_NWC_REGTEST !== "1", "Requires e2e/infra (npm run e2e:infra:up) and GHOSTLY_NWC_REGTEST=1");
   test.describe.configure({ timeout: 120_000 });
 
-  test("an Alby Hub connected with New, then another from the card's settings: each ends shown as the source in use", { tag: ["@gated", "@feature:wallet.instances.create", "@feature:wallet.lightning.nwc.connect", "@feature:wallet.lightning.sources"] }, async ({ peer }) => {
+  test("an Alby Hub connected with New, then another one: each a card of its own, shown as it is made", { tag: ["@gated", "@feature:wallet.instances.create", "@feature:wallet.lightning.nwc.connect", "@feature:wallet.lightning.cards"] }, async ({ peer }) => {
     const regtest = await import("../support/nwc-regtest/regtest.mjs");
     await regtest.ready();
     const [aliceUri, bobUri] = [await regtest.nwcUri("alice", { fresh: true }), await regtest.nwcUri("bob", { fresh: true })];
@@ -70,14 +71,10 @@ test.describe("on regtest Lightning", () => {
     await connectWithNew(alice, aliceUri);
     await expectShown(alice, /Connected · alice via/);
 
-    // Settings → Change source → another hub: the form closes and the new one is in use, saying so.
-    const source = alice.page.getByTestId("lightning-source");
-    await choose(source.getByTestId("lightning-source-select"), "nwc");
-    await source.getByTestId("provider-form-nwc").getByLabel("Connection URI").fill(bobUri);
-    await source.getByTestId("provider-save").click();
-    await expect(source.getByTestId("lightning-source-saved")).toHaveText("Nostr Wallet Connect is now your Lightning source.", { timeout: 30_000 });
-    await expect(source.getByTestId("lightning-source-config")).toHaveCount(0);
-    await expect(source.getByTestId("lightning-source-status")).toContainText(/Connected · bob via/);
-    await expect(alice.page.getByTestId("wallet-card-lightning-testnet")).toHaveAttribute("aria-selected", "true");
+    // Another hub with New: one more card, in front and selected; the first one stays, still the default for receiving.
+    await connectWithNew(alice, bobUri);
+    await expectShown(alice, /Connected · bob via/);
+    await expect(lightningCard(alice.page, "testnet")).toHaveCount(2);
+    await expect(lightningCard(alice.page, "testnet", "alice").getByTestId("wallet-card-tag")).toHaveText("Default");
   });
 });

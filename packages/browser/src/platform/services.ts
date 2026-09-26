@@ -40,11 +40,18 @@ function preparingChanged(force = false): void {
  * The wallet calls, acting on one network's wallets when bound to it (the card they are made on), else on the
  * network older pages showed. A payment still goes through the wallet of its own network either way.
  */
-function walletPlatform(network?: WalletNetwork): WalletPlatform {
+function walletPlatform(network?: WalletNetwork, card?: string): WalletPlatform {
   const on = network ? { network } : undefined;
+  // The Lightning calls of a platform bound to one card go through it; unbound, through the network's default.
+  const ln = { ...on, ...(card ? { card } : {}) };
+  const bound = () => { if (!network || !card) throw new Error("Pick a Lightning card first"); return { network, card }; };
   return {
     network,
+    lightningCard: card,
     forNetwork: (next) => walletPlatform(next),
+    forLightning: (next) => walletPlatform(network, next),
+    lightningSetReceive: () => engine.call("lightningSetReceive", bound()),
+    lightningRename: (name) => engine.call("lightningRename", { ...bound(), name }),
     create: (params) => engine.call("walletCreate", params),
     remove: (params) => engine.call("walletRemove", params),
     testCoins: (params) => engine.call("walletTestCoins", params),
@@ -97,19 +104,22 @@ function walletPlatform(network?: WalletNetwork): WalletPlatform {
     getState: () => {
       const state = engine.state?.wallet;
       if (!state || !network) return state ?? null;
-      // One network's wallets, in the shape every panel reads; what the profile has and can make stays whole.
-      return { ...state, ...state.networks?.[network], mode: network };
+      // One network's wallets, in the shape every panel reads; what the profile has and can make stays whole. Bound to
+      // a Lightning card, `lightning` is that card's.
+      const here = state.networks?.[network];
+      const lightning = card ? here?.lightnings?.find((c) => c.card === card) ?? here?.lightning : here?.lightning;
+      return { ...state, ...here, lightning, mode: network };
     },
     // The test mint is for trying things out right away, so it takes over as primary.
     addMint: async (url) => void (await engine.call("walletAddMint", { url, primary: TEST_MINTS.includes(url) })),
     setPrimaryMint: (url) => engine.call("walletSetPrimaryMint", { url }),
     removeMint: (url) => engine.call("walletRemoveMint", { url }),
-    receiveLightning: (amount, via) => engine.call("walletReceiveLightning", { amount, via, ...(network?{network}:{}) }),
-    quoteInvoice: (invoice, via) => engine.call("walletQuoteInvoice", { invoice, via, ...(network?{network}:{}) }),
-    lightningSetSource: (providerId, values) => engine.call("lightningSetSource", { providerId, values, ...(network?{network}:{}) }),
-    lightningClearSource: () => engine.call("lightningClearSource", on),
-    lightningRetrySource: () => engine.call("lightningRetrySource", on),
-    lightningReconfigureSource: (values) => engine.call("lightningReconfigureSource", { values, ...(network?{network}:{}) }),
+    receiveLightning: (amount, via) => engine.call("walletReceiveLightning", { amount, via, ...ln }),
+    quoteInvoice: (invoice, via) => engine.call("walletQuoteInvoice", { invoice, via, ...ln }),
+    lightningSetSource: (providerId, values) => engine.call("lightningSetSource", { providerId, values, ...ln }),
+    lightningClearSource: () => engine.call("lightningClearSource", ln),
+    lightningRetrySource: () => engine.call("lightningRetrySource", ln),
+    lightningReconfigureSource: (values) => engine.call("lightningReconfigureSource", { values, ...ln }),
     bitcoinSetSource: (providerId, values) => engine.call("bitcoinSetSource", { providerId, values, ...(network?{network}:{}) }),
     bitcoinClearSource: () => engine.call("bitcoinClearSource", on),
     bitcoinRetrySource: () => engine.call("bitcoinRetrySource", on),
@@ -138,14 +148,14 @@ function walletPlatform(network?: WalletNetwork): WalletPlatform {
       const link = engine.linkByPeer(peerPubKeyZ32);
       if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
       const timestamp = Date.now();
-      const { paymentId } = await engine.call("requestPayment", { linkId: link.id, amount, memo, timestamp, method, rail, ...(network?{network}:{}) });
+      const { paymentId } = await engine.call("requestPayment", { linkId: link.id, amount, memo, timestamp, method, rail, ...ln });
       return { timestamp, paymentId };
     },
     async payRequest(peerPubKeyZ32, paymentId, options) {
       const link = engine.linkByPeer(peerPubKeyZ32);
       if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
       const { confirmedReal, ...rest } = options ?? {};
-      await engine.call("payRequest", { linkId: link.id, paymentId, ...rest, ...(network?{network}:{}), ...(confirmedReal ? { confirmedReal: true as const } : {}) });
+      await engine.call("payRequest", { linkId: link.id, paymentId, ...rest, ...ln, ...(confirmedReal ? { confirmedReal: true as const } : {}) });
     },
     reclaim: (paymentId) => engine.call("reclaimPayment", { paymentId }),
     getPayment: (paymentId) => engine.state?.payments[paymentId] ?? null,

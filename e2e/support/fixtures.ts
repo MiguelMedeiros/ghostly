@@ -269,14 +269,17 @@ export interface CreateWallet {
 /**
  * Wallets → New → a network → a kind, as a person does: made in one click, checked by the app before its card
  * appears. A kind that needs one thing gets it (`invite`, or a source and its form). Nothing is done when the card
- * is there already. A failure fails the test with the dialog's own message.
+ * is there already, but for Lightning with a source (a network takes several Lightning cards: this adds one) and
+ * Fedimint (another federation). A failure fails the test with the dialog's own message.
  */
 export async function createWallet(peer: Peer, kind: WalletKind, network: WalletNetwork = "testnet", options: CreateWallet = {}): Promise<void> {
   const page = peer.page;
   await openWallet(peer);
   await showNetwork(page, network);
-  const card = page.getByTestId(`wallet-card-${kind}-${network}`);
-  if (await card.count() && kind !== "fedimint") return;
+  // `wallet-card-lightning-testnet`, or one of several Lightning cards (`wallet-card-lightning-testnet-<card>`).
+  const card = page.locator(`[data-testid="wallet-card-${kind}-${network}"], [data-testid^="wallet-card-${kind}-${network}-"]`);
+  const another = kind === "fedimint" || (kind === "lightning" && !!options.provider);
+  if (await card.count() && !another) return;
   await page.getByTestId("wallet-add").click();
   const dialog = page.getByTestId("new-wallet");
   await dialog.getByRole("radio", { name: network === "testnet" ? "Testnet" : "Mainnet" }).click();
@@ -293,8 +296,15 @@ export async function createWallet(peer: Peer, kind: WalletKind, network: Wallet
   }
   const error = dialog.getByTestId("new-wallet-error");
   await expect.poll(async () => await error.isVisible() ? `failed: ${await error.innerText()}` : await dialog.isVisible() ? "open" : "made", { timeout: options.timeout ?? 90_000 }).toBe("made");
-  await expect(card).toBeVisible();
+  // New selects the card it made.
+  await expect(card.and(page.locator('[aria-selected="true"]'))).toBeVisible();
 }
+
+/** A network's Lightning card chosen on the Wallets page: its only one, or the one of several whose face says `name`. */
+export const lightningCard = (page: Page, network: WalletNetwork, name?: string | RegExp): Locator => {
+  const cards = page.locator(`[data-testid="wallet-card-lightning-${network}"], [data-testid^="wallet-card-lightning-${network}-"]`);
+  return name ? cards.filter({ hasText: name }) : cards;
+};
 
 /** Wallets on test networks, made with New: Testnet Cashu (the public test mint, answered by the suite's own) unless others are named. */
 export async function useTestnet(peer: Peer, kinds: WalletKind[] = ["cashu"]): Promise<void> {

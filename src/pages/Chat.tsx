@@ -237,10 +237,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const wallet = platform?.wallet;
   const walletState = wallet?.getState() ?? null;
   const pay = useCallback(
-    async (kind: "send" | "request", amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", network?: WalletNetwork, confirmedReal?: boolean): Promise<string | null> => {
+    async (kind: "send" | "request", amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", network?: WalletNetwork, confirmedReal?: boolean, lightningCard?: string): Promise<string | null> => {
       if (!wallet || !peerKey) return null;
-      // The card's own wallet: the request or the ecash is of its network.
-      const card = network ? wallet.forNetwork(network) : wallet;
+      // The card's own wallet: the request or the ecash is of its network, a request's invoice of its Lightning card.
+      const onNetwork = network ? wallet.forNetwork(network) : wallet;
+      const card = lightningCard ? onNetwork.forLightning(lightningCard) : onNetwork;
       try {
         const { timestamp, paymentId } = await (kind === "request" ? card.request(peerKey, amount, memo || undefined, method) : card.send(peerKey, amount, memo || undefined, confirmedReal));
         const sats = network === "testnet" ? "test sats" : "sats";
@@ -255,7 +256,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     [wallet, peerKey, addSystemMessage],
   );
   const paySend = useCallback((amount: number, memo: string, network?: WalletNetwork, confirmedReal?: boolean) => pay("send", amount, memo, undefined, network, confirmedReal), [pay]);
-  const payRequest = useCallback((amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", _rail?: unknown, network?: WalletNetwork) => pay("request", amount, memo, method, network), [pay]);
+  const payRequest = useCallback((amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", _rail?: unknown, network?: WalletNetwork, lightningCard?: string) => pay("request", amount, memo, method, network, undefined, lightningCard), [pay]);
 
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);

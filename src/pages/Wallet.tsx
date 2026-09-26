@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { WALLET_NETWORKS as NETWORKS, isWalletNetwork as isNetwork } from "@ghostly/core";
 import { NetworkTabs } from "../components/wallet/NetworkTabs";
 import { WalletDeck, walletCardTestId } from "../components/WalletDeck";
-import { cardId, networkState, parseCardId, walletCards, type InstanceCard } from "../components/walletCardData";
+import { cardId, cardWallet, deckId, networkState, parseCardId, walletCards, type InstanceCard } from "../components/walletCardData";
 import { CashuWallet } from "../components/wallet/CashuWallet";
 import { ArkWalletPanel } from "../components/ArkWalletPanel";
 import { BarkWalletPanel } from "../components/BarkWalletPanel";
@@ -67,7 +67,10 @@ export function Wallet() {
   const shown = cards.filter((c) => c.network === network);
   // The card each tab showed last (a remembered rail, from an older tab, picks that rail's first wallet).
   const [chosen, setChosen] = useState<Record<WalletNetwork, string>>(() => { const r = remembered(); return { mainnet: r, testnet: r }; });
-  const selected = shown.find((c) => c.id === chosen[network]) ?? shown.find((c) => c.rail === chosen[network]) ?? shown[0];
+  // A Lightning card's id changes as a second one comes or goes (`lightning:testnet` ↔ `lightning:testnet:<card>`): the same card still.
+  const same = parseCardId(chosen[network]);
+  const selected = shown.find((c) => c.id === chosen[network]) ?? shown.find((c) => c.rail === chosen[network])
+    ?? (same && shown.find((c) => c.rail === same.rail && c.network === same.network && (!same.card || !c.card || c.card === same.card))) ?? shown[0];
   // How the last switch went, for the deck's way in (none as the page opens: the deck has no entry motion).
   const [swap, setSwap] = useState<"next" | "prev" | null>(null);
   const [creating, setCreating] = useState<WalletNetwork | null>(null);
@@ -123,8 +126,9 @@ export function Wallet() {
   /** New made `made`: the dialog has closed; its card comes to the front of its network's tab, selected. */
   const created = (made: WalletInstanceView) => {
     setCreating(null);
-    // Its card in the deck (a Lightning card's instance id names its card too).
-    const id = cardId(made.type, made.network);
+    // Its card in the deck: a network's only Lightning card is its Lightning, one of several its own.
+    const wallets = state?.wallets?.some((w) => w.id === made.id) ? state.wallets : [...(state?.wallets ?? []), made];
+    const id = state ? deckId(made, { ...state, wallets }) : cardId(made.type, made.network);
     select(id, false);
     setBackup(backupFirst(made) ? id : null);
     setDealt(id);
@@ -161,9 +165,9 @@ export function Wallet() {
                 <span className="font-medium text-text-primary">{selected.name}</span>
               </p>
               {/* Test coins only when asked for: Receive never fills a Testnet wallet by itself. */}
-              {panel && parseCardId(panel)?.network === "testnet" && <TestCoins key={`coins-${panel}`} rail={parseCardId(panel)!.rail} network="testnet" wallet={wallet.forNetwork("testnet")} state={networkState(state, "testnet")} />}
+              {panel && parseCardId(panel)?.network === "testnet" && <TestCoins key={`coins-${panel}`} rail={parseCardId(panel)!.rail} network="testnet" wallet={cardWallet(wallet, parseCardId(panel)!)} state={networkState(state, "testnet", parseCardId(panel)!.card)} />}
               {panel && <WalletPanel id={panel} wallet={wallet} state={state} focus={focusPanel} backup={backup === panel} onOpen={select} />}
-              {panel && parseCardId(panel) && <RemoveWalletSection key={panel} type={parseCardId(panel)!.rail} network={parseCardId(panel)!.network} wallet={wallet} state={state} onOpen={select} onRemoved={() => removed(panel)} />}
+              {panel && parseCardId(panel) && <RemoveWalletSection key={panel} type={parseCardId(panel)!.rail} network={parseCardId(panel)!.network} card={parseCardId(panel)!.card} wallet={wallet} state={state} onOpen={select} onRemoved={() => removed(panel)} />}
             </div>}
           </div>
         </>}
@@ -181,7 +185,7 @@ function WalletPanel({ id, wallet, state, focus, backup, onOpen }: { id: string;
   const card = parseCardId(id);
   if (!card) return null;
   const { rail, network } = card;
-  const scoped = wallet.forNetwork(network), shown = networkState(state, network);
+  const scoped = cardWallet(wallet, card), shown = networkState(state, network, card.card);
   switch (rail) {
     case "cashu": case "lightning": return <CashuWallet key={id} wallet={scoped} state={shown} rail={rail} onOpenCashu={() => onOpen(cardId("cashu", network))} focusAmount={focus} />;
     case "arkade": return <ArkWalletPanel key={id} wallet={scoped} state={shown} />;

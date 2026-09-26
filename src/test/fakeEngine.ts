@@ -60,8 +60,14 @@ function offersFor(networks: Record<WalletNetwork, NetworkWalletsView>, wallets:
     const exists = wallets.some((w) => w.type === type && w.network === network);
     if ((type === "spark" || type === "fedimint") && network === "mainnet") return { type, network, exists, available: false, reason: `${type} on Mainnet is not available yet` };
     if (type === "fedimint") return { type, network, exists, available: true, needs: "invite" };
-    if (type === "lightning" || type === "bitcoin") {
-      const providers = (type === "lightning" ? networks[network].lightning : networks[network].bitcoin)?.offered?.filter((d) => d.id !== "cashu-mint") ?? [];
+    if (type === "lightning") {
+      // As the engine: several Lightning cards per network; `exists` says one of the person's own is there.
+      const providers = networks[network].lightning?.offered?.filter((d) => d.id !== "cashu-mint") ?? [];
+      const own = (networks[network].lightnings ?? (networks[network].lightning ? [networks[network].lightning!] : [])).some((c) => c.providerId && c.providerId !== "cashu-mint");
+      return providers.length ? { type, network, exists: own, several: true, available: true, needs: "provider", providers } : { type, network, exists: own, several: true, available: false, reason: "No source runs here yet" };
+    }
+    if (type === "bitcoin") {
+      const providers = networks[network].bitcoin?.offered ?? [];
       return providers.length ? { type, network, exists, available: true, needs: "provider", providers } : { type, network, exists, available: false, reason: "No source runs here yet" };
     }
     return { type, network, exists, available: true };
