@@ -4,7 +4,8 @@ export type NoticePermission = NotificationPermission | "unavailable" | "misplac
 interface ExtensionNotifications {
   runtime: {id?:string;getURL(path:string):string};
   permissions: {contains(options:{permissions:string[]}):Promise<boolean>;request(options:{permissions:string[]}):Promise<boolean>};
-  notifications: {
+  /** Absent until the user grants the optional "notifications" permission. */
+  notifications?: {
     create(id:string,options:{type:"basic";iconUrl:string;title:string;message:string;silent:boolean}):Promise<string>;
     clear?(id:string):Promise<boolean>;
     onClicked?:{addListener(listener:(id:string)=>void):void};
@@ -41,11 +42,18 @@ function opened(id:string):boolean{
   for(const open of openers) open(chat);
   return true;
 }
+/** Latched only once something listens: the extension has no notifications API until that permission is granted. */
 function listen(){
   if(listening) return;
+  if(native()){
+    listening=true;
+    void import("@tauri-apps/api/event").then(({listen})=>listen<string>("notification-open",({payload})=>opened(payload))).catch(()=>{listening=false;});
+    return;
+  }
+  const clicks=extension()?.notifications?.onClicked;
+  if(!clicks) return;
   listening=true;
-  if(native()) void import("@tauri-apps/api/event").then(({listen})=>listen<string>("notification-open",({payload})=>opened(payload))).catch(()=>{listening=false;});
-  else extension()?.notifications.onClicked?.addListener(id=>{if(opened(id)) void extension()?.notifications.clear?.(id);});
+  clicks.addListener(id=>{if(opened(id)) void extension()?.notifications?.clear?.(id);});
 }
 /** Called with the chat whose notification was clicked. */
 export function onNotificationOpen(open:(chat:string)=>void):()=>void{
@@ -84,6 +92,8 @@ export async function showPrivateNotification(id:string,body:string,chat?:string
     chats.set(id,chat);
     // The newest few: an old notification still opens the app, only not a chat.
     if(chats.size>64) chats.delete(chats.keys().next().value as string);
+    // The permission may have been granted after the page started listening.
+    if(openers.size) listen();
   }
   try {
     if(native()){
@@ -91,7 +101,7 @@ export async function showPrivateNotification(id:string,body:string,chat?:string
       (await import("@tauri-apps/plugin-notification")).sendNotification({title:"Ghostly",body,silent:true});
     }else{
       const chrome=extension();
-      if(chrome) await chrome.notifications.create(id,{type:"basic",iconUrl:chrome.runtime.getURL("icons/128.png"),title:"Ghostly",message:body,silent:true});
+      if(chrome) await chrome.notifications?.create(id,{type:"basic",iconUrl:chrome.runtime.getURL("icons/128.png"),title:"Ghostly",message:body,silent:true});
       else {
         const notice=new Notification("Ghostly",{body,tag:id,silent:true});
         notice.onclick=()=>{window.focus();opened(id);notice.close();};

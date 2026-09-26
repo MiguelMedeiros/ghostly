@@ -213,6 +213,29 @@ describe("where a notification goes, and what a click opens", () => {
     expect(opened).toHaveBeenCalledWith("chat-a");
     expect(chrome.notifications.clear).toHaveBeenCalledWith("event-1");
   });
+  it("extension without the notifications permission: listening does not throw, and a grant later still opens chats", async () => {
+    // "notifications" is an optional permission: until the user grants it, chrome.notifications is undefined.
+    let clicked: ((id: string) => void) | undefined;
+    const chrome: { runtime: object; permissions: object; notifications?: object } = {
+      runtime: { id: "ext", getURL: (path: string) => `chrome-extension://ext/${path}` },
+      permissions: { contains: vi.fn(async () => false), request: vi.fn(async () => true) },
+    };
+    (globalThis as { chrome?: unknown }).chrome = chrome;
+    const { showPrivateNotification, onNotificationOpen, notificationPermission } = await lib();
+    const opened = vi.fn();
+    expect(() => onNotificationOpen(opened)).not.toThrow();
+    expect(await notificationPermission()).toBe("default");
+    // Granted from Settings: the API appears in the running page.
+    const notifications = { create: vi.fn(async (id: string) => id), clear: vi.fn(async () => true), onClicked: { addListener: (listener: (id: string) => void) => { clicked = listener; } } };
+    chrome.notifications = notifications;
+    chrome.permissions = { contains: vi.fn(async () => true), request: vi.fn(async () => true) };
+    vi.spyOn(window, "focus").mockImplementation(() => {});
+    await showPrivateNotification("event-1", "New message", "chat-a");
+    expect(notifications.create).toHaveBeenCalledWith("event-1", expect.objectContaining({ message: "New message" }));
+    clicked!("event-1");
+    expect(opened).toHaveBeenCalledWith("chat-a");
+    expect(notifications.clear).toHaveBeenCalledWith("event-1");
+  });
 });
 
 describe("Settings → System notifications", () => {
@@ -293,6 +316,15 @@ describe("AttentionFeedback: which chat a notification opens", () => {
   let n = 0;
   const event = (patch: Partial<AttentionEvent>): AttentionEvent => ({ id: `note-${++n}`, type: "message", at: Date.now(), ...patch });
   function Where() { return <p data-testid="where">{useLocation().pathname}</p>; }
+
+  it("extension without the notifications permission: the page starts", () => {
+    (globalThis as { chrome?: unknown }).chrome = {
+      runtime: { id: "ext", getURL: (path: string) => `chrome-extension://ext/${path}` },
+      permissions: { contains: vi.fn(async () => false), request: vi.fn(async () => false) },
+    };
+    renderApp(<><AttentionFeedback /><Routes><Route path="*" element={<Where />} /></Routes></>);
+    expect(screen.getByTestId("where")).toBeInTheDocument();
+  });
 
   it("a click on a message's notification opens its 1:1 chat or its group", async () => {
     FakeNotification.permission = "granted";
