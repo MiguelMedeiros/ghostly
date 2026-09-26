@@ -51,12 +51,15 @@ test("Bark on Mainnet: New offers it in one click and checks Second's server fir
   await expect(alice.page.locator("[data-testid^=wallet-card-bark-]")).toHaveCount(0);
 });
 
-test("a Mainnet Bark wallet refuses a server on another network: a signet server where Second's Bitcoin one should be", { tag: ["@network", "@feature:wallet.bark.mainnet"] }, async ({ peer }) => {
+test("a Mainnet Bark wallet refuses a chain on another network: signet servers where Second's Bitcoin ones should be", { tag: ["@network", "@feature:wallet.bark.mainnet"] }, async ({ peer }) => {
   test.slow();
   const alice = await peer("bark-mainnet-signet");
   const seen = await guardMainnetBark(alice, "signet");
   const dialog = await createMainnetBark(alice);
-  await expect(dialog.getByTestId("new-wallet-error")).toContainText("That Bark server does not run on bitcoin", { timeout: 90_000 });
+  // The SDK checks the chain source's genesis block first; the engine then checks the Ark server's own network
+  // (that one is covered in bark.test.ts with a server that answers as signet).
+  await expect(dialog.getByTestId("new-wallet-error")).toContainText(/Network mismatch: expected Bitcoin|does not run on bitcoin/, { timeout: 90_000 });
+  await expect(dialog.getByTestId("new-wallet-error")).toContainText("Nothing was saved");
   expect(seen.length).toBeGreaterThan(0);
   await alice.page.keyboard.press("Escape");
   await expect(alice.page.locator("[data-testid^=wallet-card-bark-]")).toHaveCount(0);
