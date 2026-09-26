@@ -152,7 +152,7 @@ the seeds takes ~0.15 s over SSH, and 3-4 s locally with the Mac at load 60.
 
 ## No servers
 
-Peers find each other through Pkarr relays. Here the relay is `support/relay.ts`, inside the test process: requests to the public relays are answered from memory, and the extension, whose peer runs where requests cannot be intercepted, is pointed at its local address in Settings → Network. So tests do not wait on the public relays, are never rate limited, and never see each other's packets. WebRTC connects the browsers directly on this machine. GIFCities is stubbed the same way.
+Peers find each other through Pkarr relays. Here the relay is `support/relay.ts`, inside the test process: requests to the public relays are answered from memory, and the extension, whose peer runs where requests cannot be intercepted, is pointed at its local address in Settings → Advanced → Network. So tests do not wait on the public relays, are never rate limited, and never see each other's packets. WebRTC connects the browsers directly on this machine. GIFCities is stubbed the same way.
 
 GifCities and the Wayback Machine (`GIFCITIES`, `WAYBACK` in `support/fixtures.ts`) are **never** reached. GifCities limits requests per IP, answering with a 200 HTML page that has no CORS header (a browser page sees a failed request, which `route.abort("failed")` plays; `route.fulfill` cannot, since Playwright adds the CORS header itself), and our runs share the IPs Ghostly's own apps use: in September 2026 they were likely part of why it ran out. Each context gets `guardArchive(context)` first and the stubs after it. The guard answers only what gets past the stubs and aborts it, and the automatic `archiveGuard` fixture then fails the test. A spec with answers of its own adds a `context.route(GIFCITIES, handler)` (later routes win) and removes it with `unroute(GIFCITIES, handler)`. A bare `unroute(GIFCITIES)` drops the guard too. The Desktop suites cannot route requests, so they do not open the GIF panel.
 
@@ -232,7 +232,7 @@ Two things to know:
 - Build with `tauri build`, not `cargo build`. A plain cargo debug build points the WebView at `devUrl`, and with no dev server running the window only says "Connection refused". `--debug --no-bundle` keeps the compile short and skips the installers; the test runs the binary from `target/`, newest of `debug` and `release`.
 - The app runs under `GHOSTLY_PROFILE=e2e`, so a test never opens your own chats.
 
-The test needs no network either. It asserts what only the Desktop wiring can produce: Settings → Network says `Mainline DHT (BEP44) — Direct UDP` (Rust reaching the DHT, where a browser would say `Pkarr relays (HTTP) → …`), and sharing a local web app is offered. If `ghostlyPlatformModules()` ever swaps `src/desktop/host.ts` for a browser stand-in, this goes red.
+The test needs no network either. It asserts what only the Desktop wiring can produce: Settings → Advanced → Network says `Mainline DHT (BEP44) — Direct UDP` (Rust reaching the DHT, where a browser would say `Pkarr relays (HTTP) → …`), and sharing a local web app is offered. If `ghostlyPlatformModules()` ever swaps `src/desktop/host.ts` for a browser stand-in, this goes red.
 
 ### On macOS
 

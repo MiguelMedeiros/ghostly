@@ -151,6 +151,14 @@ for (const width of WIDTHS) {
     await expect(page.getByTestId("settings-page")).toBeVisible();
     await page.getByRole("switch", { name: "Lock Screen" }).click(); // opens the password form
     await expectTidy(page, "[data-testid=settings-page]", "Settings");
+    // Every ⓘ open: the longest the rows get.
+    for (const more of await page.getByTestId("row-info").all()) await more.click();
+    await expectTidy(page, "[data-testid=settings-page]", "Settings, every ⓘ open");
+
+    await page.goto("/#/settings/advanced");
+    await expect(page.getByTestId("settings-advanced-page")).toBeVisible();
+    for (const more of await page.getByTestId("row-info").all()) await more.click();
+    await expectTidy(page, "[data-testid=settings-advanced-page]", "Settings, Advanced");
 
     await page.goto("/#/profile");
     await expect(page.getByTestId("profile-page")).toBeVisible();

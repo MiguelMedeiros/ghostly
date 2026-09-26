@@ -14,7 +14,7 @@ export function DomainProofSettings() {
   const current = DOH_RESOLVERS.find(r => r.id === resolver)!;
   return (
     <Section title={t("network.identityChecks")}>
-      <Row label={<span id="doh-resolver-label">{t("network.domainLookups")}</span>} hint={t("network.domainLookupsHint")} info={t("network.domainLookupsInfo", { name: current.name })}>
+      <Row testId="doh-resolver-row" label={<span id="doh-resolver-label">{t("network.domainLookups")}</span>} hint={t("network.domainLookupsHint")} info={t("network.domainLookupsInfo", { name: current.name })}>
         <Select
           fit
           id="doh-resolver"

@@ -7,7 +7,7 @@ test("notification permission is explicit and independent of persistent sound pr
   Object.defineProperty(window,"Notification",{value:Notice,configurable:true});
  });
  await page.goto("/#/settings");await page.reload();
- const sound=page.getByRole("switch",{name:"Notification sounds",exact:true});
+ const sound=page.getByTestId("settings-sounds");
  const notice=page.getByRole("switch",{name:"System notifications",exact:true});
  await expect(sound).toBeChecked();await expect(notice).not.toBeChecked();
  expect(await page.evaluate(()=>localStorage.getItem("qa-permission"))).toBeNull();
@@ -60,6 +60,6 @@ for(const permission of ["denied","unavailable"]){
   await page.addInitScript(value=>{Object.defineProperty(window,"Notification",{value:value==="unavailable"?undefined:class {static permission="denied";static async requestPermission(){return "denied";}}});},permission);
   await page.goto("/#/settings");await page.reload();
   const toggle=page.getByRole("switch",{name:"System notifications",exact:true});await toggle.click();await expect(toggle).not.toBeChecked();
-  await expect(page.getByRole("status")).toContainText(permission==="denied"?"blocked":"unavailable");
+  await expect(page.getByRole("status")).toContainText(permission==="denied"?/blocked/i:/not available/i);
  });
 }

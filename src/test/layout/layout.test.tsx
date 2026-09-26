@@ -1,7 +1,7 @@
 import { screen } from "@testing-library/react";
 import { Link, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
-import { Block, ButtonGroup, FieldGrid, InputGroup, LinkRow, Page, PageAction, Row, Section, Truncate } from "../../components/layout";
+import { Block, ButtonGroup, Field, FieldGrid, InputGroup, LinkRow, Page, PageAction, Row, Section, Truncate } from "../../components/layout";
 import { renderApp } from "../render";
 
 // covers: app.responsive
@@ -53,6 +53,39 @@ describe("Row", () => {
   it("has no controls container without children", () => {
     renderApp(<Row testId="row" label="Alone" />);
     expect(screen.getByTestId("row").children).toHaveLength(1);
+  });
+});
+
+describe("a row's ⓘ", () => {
+  it("keeps the longer explanation out of the way until asked for, then shows it under the hint", async () => {
+    const { user } = renderApp(<Row label="Link previews" hint="Short hint" info="The long story."><button>x</button></Row>);
+    const more = screen.getByRole("button", { name: "More info" });
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("The long story.")).toBeNull();
+    expect(screen.getByText("Short hint")).toBeInTheDocument();
+
+    await user.click(more);
+    expect(more).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("The long story.")).toHaveAttribute("id", more.getAttribute("aria-controls"));
+    await user.click(more);
+    expect(screen.queryByText("The long story.")).toBeNull();
+  });
+
+  it("is not there when there is nothing more to say", () => {
+    renderApp(<Row label="Sounds" hint="Messages and calls"><button>x</button></Row>);
+    expect(screen.queryByRole("button", { name: "More info" })).toBeNull();
+  });
+
+  it("works on a Field too, whose label names its field and whose trailing sits beside the label", async () => {
+    const { user } = renderApp(
+      <Field label="Pkarr relays" htmlFor="relays" hint="One per line" info="What relays see." trailing={<button>Reset</button>}>
+        <textarea id="relays" />
+      </Field>,
+    );
+    expect(screen.getByLabelText("Pkarr relays").tagName).toBe("TEXTAREA");
+    expect(screen.getByRole("button", { name: "Reset" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "More info" }));
+    expect(screen.getByText("What relays see.")).toBeInTheDocument();
   });
 });
 

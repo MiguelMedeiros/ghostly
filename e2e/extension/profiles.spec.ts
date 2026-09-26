@@ -28,7 +28,7 @@ async function switchTo(page: Page, name: string): Promise<void> {
 
 /** A profile's network settings are its own: point a new one at the test relay too, so nothing leaves the machine. */
 async function useRelay(page: Page, relay: string): Promise<void> {
-  await page.evaluate(() => { location.hash = "#/settings"; });
+  await page.evaluate(() => { location.hash = "#/settings/advanced"; });
   await page.getByTestId("network-relays").fill(relay);
   await page.getByTestId("network-save").click();
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();

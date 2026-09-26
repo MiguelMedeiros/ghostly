@@ -41,6 +41,7 @@ test("lock screen: a reload stays locked, the password can be changed, and the l
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
 
   // Changing it takes the current one first.
+  await page.getByTestId("settings-password-edit").click();
   await field(page, "Current password").fill("not it");
   await field(page, "New password").fill("second secret");
   await field(page, "Confirm password").fill("second secret");

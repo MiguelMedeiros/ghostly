@@ -23,7 +23,7 @@ test("with WebRTC blocked, two browsers keep chatting over Iroh through a relay,
   const relay = endpoints.irohRelay;
   const [alice, bob] = await Promise.all([peer("alice", { irohRelay: relay }), peer("bob", { irohRelay: relay })]);
   // The setting stuck: after a reload, Network shows the relay the peer now uses.
-  await alice.page.goto("/#/settings");
+  await alice.page.goto("/#/settings/advanced");
   await alice.page.reload();
   await expect(alice.page.getByTestId("network-iroh-relays")).toHaveValue(relay);
   await alice.page.goto("/#/");
@@ -68,7 +68,7 @@ test("an Iroh relay address the app cannot use is refused in Settings", {
   tag: ["@feature:settings.network.iroh-relays"],
 }, async ({ peer }) => {
   const alice = await peer("alice", { irohRelay: endpoints.irohRelay });
-  await alice.page.goto("/#/settings");
+  await alice.page.goto("/#/settings/advanced");
   const field = alice.page.getByTestId("network-iroh-relays");
   await field.fill("http://relay.example.org/");
   await alice.page.getByTestId("network-save").click();

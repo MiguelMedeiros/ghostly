@@ -30,14 +30,14 @@ test("color theme and mode apply at once and survive a reload", { tag: ["@featur
   const { page } = await peer("alice");
   await page.goto("/#/settings");
   const html = page.locator("html");
-  await page.getByRole("button", { name: /Purple/ }).click();
+  await page.getByTestId("settings-theme-purple").click();
   await expect(html).toHaveAttribute("data-color-theme", "purple");
   await page.getByRole("button", { name: "Light", exact: true }).click();
   await expect(html).toHaveAttribute("data-theme", "light");
   await page.reload();
   await expect(html).toHaveAttribute("data-color-theme", "purple");
   await expect(html).toHaveAttribute("data-theme", "light");
-  await page.getByRole("button", { name: /Monochrome/ }).click();
+  await page.getByTestId("settings-theme-monochrome").click();
   await expect(html).toHaveAttribute("data-color-theme", "monochrome");
   await page.getByRole("button", { name: "Dark", exact: true }).click();
   await expect(html).toHaveAttribute("data-theme", "dark");
@@ -87,12 +87,12 @@ test("<html lang> and <html dir> follow the language, from the first paint", { t
 test("reduce motion is a switch", { tag: ["@feature:app.reduce-motion", "@feature:app.attention.sounds"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await page.goto("/#/settings");
-  const reduce = page.getByRole("switch", { name: "Reduce motion" });
+  const reduce = page.getByTestId("settings-reduce-motion");
   await expect(reduce).toHaveAttribute("aria-checked", "false");
   await reduce.click();
   await expect(reduce).toHaveAttribute("aria-checked", "true");
   await expect(page.locator("html")).toHaveAttribute("data-reduce-motion", /.*/);
-  const sounds = page.getByRole("switch", { name: "Notification sounds" });
+  const sounds = page.getByTestId("settings-sounds");
   await expect(sounds).toHaveAttribute("aria-checked", "true");
   await sounds.click();
   await expect(sounds).toHaveAttribute("aria-checked", "false");
@@ -131,8 +131,10 @@ test("lock screen: a password locks the app, only it unlocks it", { tag: ["@feat
   await page.getByRole("button", { name: "Unlock" }).click();
   await expect(page.getByText("Ghostly is locked")).toHaveCount(0);
 
-  // Removing it asks for the current one.
+  // Removing it asks for the current one, in the form that opens on demand.
   await page.goto("/#/settings");
+  await expect(passwords).toHaveCount(0);
+  await page.getByTestId("settings-password-edit").click();
   await passwords.nth(0).fill("wrong");
   await page.getByRole("button", { name: "Remove password" }).click();
   await expect(page.getByText("Incorrect password")).toBeVisible();
@@ -161,7 +163,10 @@ test("lock screen: locks by itself after the chosen idle time", { tag: ["@featur
 
 test("network: relays can be changed and reset", { tag: ["@feature:settings.network.relays"] }, async ({ peer }) => {
   const { page } = await peer("alice");
+  // Rarely changed: under Advanced, a page of its own.
   await page.goto("/#/settings");
+  await page.getByTestId("settings-advanced").click();
+  await expect(page).toHaveURL(/#\/settings\/advanced$/);
   const relays = page.getByTestId("network-relays");
   await expect(relays).toHaveValue("https://pkarr.pubky.org\nhttps://pkarr.pubky.app");
   await relays.fill("https://relay.example.org/\nnot a url");

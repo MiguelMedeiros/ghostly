@@ -77,7 +77,7 @@ export function NetworkSettings() {
       {direct && <Row label={t("network.readRelays")} hint={t("network.readRelaysHint")} info={t("network.readRelaysInfo")} testId="network-read-relays-row">
         <Switch label={t("network.readRelays")} checked={network.readRelays === true} disabled={switching} onChange={(on) => void readRelays(on)} testId="network-read-relays" />
       </Row>}
-      <Field label={t("network.relays")} htmlFor="network-relays" hint={t("network.relaysHint")} info={t(direct ? "network.relaysInfoDirect" : "network.relaysInfoWeb")}
+      <Field testId="network-relays-field" label={t("network.relays")} htmlFor="network-relays" hint={t("network.relaysHint")} info={t(direct ? "network.relaysInfoDirect" : "network.relaysInfoWeb")}
         trailing={<button onClick={() => setRelays(network.defaultRelays.join("\n"))} aria-label={t("network.resetRelays")} className={reset}>{t("network.reset")}</button>}>
         <textarea id="network-relays" value={relays} onChange={(e) => setRelays(e.target.value)} rows={2} spellCheck={false} data-testid="network-relays"
           className={`${field} font-mono text-sm resize-y`} />

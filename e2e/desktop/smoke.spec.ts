@@ -18,6 +18,7 @@ test("Desktop opens, with the peer Rust backs behind it", { tag: ["@feature:desk
   await expect.poll(() => app.text('[title="New Chat"]')).not.toBeNull();
 
   await app.click('[title="Settings"]');
+  await app.click('[data-testid="settings-advanced"]');
 
   // Only `src/desktop/host.ts` describes Pkarr this way. The browser stand-in
   // would say "Pkarr relays (HTTP) → Mainline DHT (BEP44)": Rust is reaching

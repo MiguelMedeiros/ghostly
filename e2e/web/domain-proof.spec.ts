@@ -125,12 +125,17 @@ test("a domain proven by /.well-known/ghostly.json is fetched from the domain it
 
 test("the resolver that checks domain proofs is the person's choice, says what it learns, and is kept", { tag: ["@feature:proofs.domain.resolver"] }, async ({ peer }) => {
   const { page } = await peer("dom-settings");
-  await page.goto("/#/settings");
+  await page.goto("/#/settings/advanced");
   const resolver = page.getByTestId("doh-resolver");
   await expect(resolver).toHaveAttribute("data-value", "quad9");
-  await expect(page.getByText(/learns which domain was looked up/)).toContainText("Quad9");
+  // What the resolver learns: behind the row's ⓘ, naming the one chosen.
+  const row = page.getByTestId("doh-resolver-row");
+  await row.getByTestId("row-info").click();
+  const learns = row.getByTestId("row-info-text");
+  await expect(learns).toContainText("learns which domain was looked up");
+  await expect(learns).toContainText("Quad9");
   await choose(resolver, "cloudflare");
-  await expect(page.getByText(/learns which domain was looked up/)).toContainText("Cloudflare");
+  await expect(learns).toContainText("Cloudflare");
   await page.reload();
   await expect(page.getByTestId("doh-resolver")).toHaveAttribute("data-value", "cloudflare");
 });
