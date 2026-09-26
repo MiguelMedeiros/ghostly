@@ -4,7 +4,7 @@ import type { WalletInstanceView, WalletOffer, WalletView } from "@ghostly/brows
 import { NETWORK_KEY, Wallet } from "../../pages/Wallet";
 import { walletView } from "../fakeEngine";
 import { renderApp } from "../render";
-import { arkReady, barkReady, mint, REAL_MINT, TEST_MINT, usdtReady } from "../payments/fixtures";
+import { arkReady, barkReady, lightningSource, mint, REAL_MINT, TEST_MINT, usdtReady } from "../payments/fixtures";
 import { offered } from "./descriptors";
 import { choose } from "../select";
 
@@ -127,30 +127,32 @@ describe("New, in the header", () => {
     expect(await screen.findByTestId("ark-wallet", {}, { timeout: 5000 })).toBeInTheDocument();
   });
 
-  it("a Mainnet Bark wallet, once made, offers its backup before its card is dealt; Done shows the card", async () => {
+  it("a Mainnet Bark wallet closes on Ready like the others: its card is selected, its panel opens on the backup rows", async () => {
     const { user, engine } = renderApp(<Wallet />);
     engine.update({ wallet: walletView({ mints: [mint(REAL_MINT, 10)], balance: 10, offers: offers() }) });
     engine.on("walletCreate", (params) => {
-      engine.update({ wallet: walletView({ mints: [mint(REAL_MINT, 10)], balance: 10, bark: barkReady({ network: "bitcoin", provider: "https://ark.second.tech" }), offers: offers({ "bark:mainnet": { exists: true } }) }) });
+      engine.update({ wallet: walletView({ mints: [mint(REAL_MINT, 10)], balance: 10, bark: barkReady({ network: "bitcoin", provider: "https://ark.second.tech", terms: "https://second.tech/terms" }), offers: offers({ "bark:mainnet": { exists: true } }) }) });
       return made(params.type, params.network);
     });
     engine.on("barkBackup", () => ({ mnemonic: "one two three four five six seven eight nine ten eleven twelve", config: { network: "bitcoin", provider: "https://ark.second.tech", explorer: "https://mempool.second.tech/api", serverKey: "03", walletId: "w" } }));
     await user.click(await screen.findByTestId("wallet-add"));
     await user.click(screen.getByTestId("new-wallet-type-bark"));
     expect(engine.callsTo("walletCreate")).toEqual([{ type: "bark", network: "mainnet" }]);
-    const backup = await screen.findByTestId("new-wallet-backup");
-    expect(backup).toHaveTextContent("It holds real bitcoin, and its recovery phrase lives only on this device.");
-    expect(within(backup).getByTestId("new-wallet-terms")).toHaveAttribute("href", "https://second.tech/terms");
-    // It stays open until the person is done: no card is dealt meanwhile, and the phrase shows only on Show.
-    await new Promise((resolve) => setTimeout(resolve, 900));
-    expect(screen.getByTestId("new-wallet")).toBeInTheDocument();
-    expect(within(backup).queryByTestId("bark-recovery")).not.toBeInTheDocument();
-    await user.click(within(backup).getByRole("button", { name: "Show" }));
-    expect(await within(backup).findByTestId("bark-recovery")).toHaveTextContent(/^one two three/);
-    expect(engine.callsTo("barkBackup")).toEqual([{ network: "mainnet" }]);
-    await user.click(within(backup).getByTestId("new-wallet-backup-done"));
+    // No step left in the dialog: it closes by itself and the new card is in front, on the Mainnet tab.
     await waitFor(() => expect(screen.queryByTestId("new-wallet")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("new-wallet-backup")).not.toBeInTheDocument();
     expect(await screen.findByTestId("wallet-card-bark-mainnet")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("wallet-network-mainnet")).toHaveAttribute("aria-selected", "true");
+    // Its settings ask for the backup now, with the focus on the phrase's Show; the phrase shows only on Show.
+    const settings = await screen.findByTestId("bark-settings", {}, { timeout: 5000 });
+    expect(within(settings).getByTestId("bark-backup-now")).toHaveTextContent("it holds real bitcoin, and its recovery phrase lives only on this device");
+    expect(within(settings).getByTestId("bark-terms")).toHaveAttribute("href", "https://second.tech/terms");
+    const show = within(settings).getByTestId("bark-recovery-show");
+    await waitFor(() => expect(show).toHaveFocus());
+    expect(within(settings).queryByTestId("bark-recovery")).not.toBeInTheDocument();
+    await user.click(show);
+    expect(await within(settings).findByTestId("bark-recovery")).toHaveTextContent(/^one two three/);
+    expect(engine.callsTo("barkBackup")).toEqual([{ network: "mainnet" }]);
   });
 
   it("a Testnet Bark wallet closes on Ready as the others do: no backup step for test coins", async () => {
@@ -160,7 +162,7 @@ describe("New, in the header", () => {
     await user.click(await screen.findByTestId("wallet-add"));
     await user.click(screen.getByTestId("new-wallet-type-bark"));
     await waitFor(() => expect(screen.queryByTestId("new-wallet")).not.toBeInTheDocument());
-    expect(screen.queryByTestId("new-wallet-backup")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("bark-backup-now")).not.toBeInTheDocument();
   });
 
   it("a creation that fails says why once, leaves the dialog open, and tries again on request", async () => {
@@ -201,6 +203,63 @@ describe("New, in the header", () => {
     await choose(user, within(form).getByRole("combobox", { name: "Source" }), "nwc");
     expect(await within(form).findByTestId("provider-form-nwc")).toBeInTheDocument();
     expect(engine.callsTo("walletCreate")).toHaveLength(1);
+  });
+});
+
+describe("a wallet connected with New", () => {
+  it("closes by itself once connected, brings the new card to the front of its tab, selected, with the focus on it", async () => {
+    const { user, engine } = renderApp(<Wallet />);
+    engine.update({ wallet: walletView({ mints: [mint(REAL_MINT, 10)], balance: 10, offers: offers() }) });
+    engine.on("walletCreate", (params) => {
+      engine.update({ wallet: walletView({ mints: [mint(REAL_MINT, 10)], balance: 10, lightning: lightningSource({ mode: "testnet", providerId: "nwc", label: "Nostr Wallet Connect", alias: "Alby Hub", network: "regtest" }), offers: offers({ "lightning:testnet": { exists: true } }) }) });
+      return made(params.type, params.network);
+    });
+    await user.click(await screen.findByTestId("wallet-add"));
+    await user.click(screen.getByTestId("new-wallet-network-testnet"));
+    await user.click(screen.getByTestId("new-wallet-type-lightning"));
+    const form = await screen.findByTestId("new-wallet-provider");
+    await choose(user, within(form).getByRole("combobox", { name: "Source" }), "nwc");
+    await user.type(within(form).getByLabelText("Connection URI"), "nostr+walletconnect://wallet");
+    await user.click(within(form).getByTestId("provider-save"));
+    expect(engine.callsTo("walletCreate")).toEqual([{ type: "lightning", network: "testnet", providerId: "nwc", values: expect.objectContaining({ uri: "nostr+walletconnect://wallet" }) }]);
+    // No extra click: the dialog closes, the Testnet tab shows, and the new card is the selected one.
+    await waitFor(() => expect(screen.queryByTestId("new-wallet")).not.toBeInTheDocument());
+    const card = screen.getByTestId("wallet-card-lightning-testnet");
+    expect(card).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("wallet-network-testnet")).toHaveAttribute("aria-selected", "true");
+    // The focus is on the new card, not back on New.
+    expect(card).toHaveFocus();
+    expect(await screen.findByTestId("lightning-source-current", {}, { timeout: 5000 })).toHaveTextContent("Nostr Wallet Connect");
+  });
+
+  it("a failed connection keeps the dialog and its form, with the error; Escape then closes it with nothing made", async () => {
+    const { user, engine } = renderApp(<Wallet />);
+    engine.update({ wallet: walletView({ mints: [mint(REAL_MINT, 10)], balance: 10, offers: offers() }) });
+    engine.on("walletCreate", () => { throw new Error("Could not create the Testnet Lightning wallet: Could not connect to Nostr Wallet Connect: no answer from its relay. Nothing was saved; try again."); });
+    await user.click(await screen.findByTestId("wallet-add"));
+    await user.click(screen.getByTestId("new-wallet-network-testnet"));
+    await user.click(screen.getByTestId("new-wallet-type-lightning"));
+    const form = await screen.findByTestId("new-wallet-provider");
+    await choose(user, within(form).getByRole("combobox", { name: "Source" }), "nwc");
+    await user.type(within(form).getByLabelText("Connection URI"), "nostr+walletconnect://wallet");
+    await user.click(within(form).getByTestId("provider-save"));
+    expect(await screen.findByTestId("new-wallet-error")).toHaveTextContent("no answer from its relay. Nothing was saved");
+    // Still open on the form, what was typed kept: submitting again is the retry.
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    expect(screen.getByTestId("new-wallet")).toBeInTheDocument();
+    expect(within(form).getByLabelText("Connection URI")).toHaveValue("nostr+walletconnect://wallet");
+    await user.click(within(form).getByTestId("provider-save"));
+    expect(engine.callsTo("walletCreate")).toHaveLength(2);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("new-wallet")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("wallet-card-lightning-testnet")).not.toBeInTheDocument();
+    expect(screen.getByTestId("wallet-add")).toHaveFocus();
+  });
+
+  it("\"Create a … wallet\" from a chat opens New on that network, once", async () => {
+    const { engine } = renderApp(<Wallet />, { route: { pathname: "/wallet", state: { newWallet: { type: "arkade", network: "testnet" } } } });
+    engine.update({ wallet: walletView({ mints: [mint(REAL_MINT, 10)], balance: 10, offers: offers() }) });
+    expect(await screen.findByTestId("new-wallet")).toHaveAttribute("data-network", "testnet");
   });
 });
 

@@ -20,8 +20,11 @@ const days = (blocks: number) => { const n = Math.max(1, Math.round(blocks / 144
 /** Bark's out-of-round payments cost nothing today; the cap only stops a surprise, and the review shows the real fee. */
 const feeCap = (amount: number) => Math.max(100, Math.ceil(amount / 100));
 
-/** Second's Ark: its own server, its own addresses. It pays Bark addresses of the same server, not Arkade ones. */
-export function BarkWalletPanel({ wallet, state }: { wallet: WalletPlatform; state: WalletState }) {
+/**
+ * Second's Ark: its own server, its own addresses. It pays Bark addresses of the same server, not Arkade ones.
+ * `backupNow`: a Mainnet wallet just made with New opens on its backup rows, asking for a copy of its phrase first.
+ */
+export function BarkWalletPanel({ wallet, state, backupNow = false }: { wallet: WalletPlatform; state: WalletState; backupNow?: boolean }) {
  const bark = state.bark;
  const { busy, error, run } = useRun();
  const [action, setAction] = useState<Action>("receive");
@@ -67,7 +70,8 @@ export function BarkWalletPanel({ wallet, state }: { wallet: WalletPlatform; sta
   {error && <Notice tone="error">{error}</Notice>}
   {bark?.error && ready && <Notice tone="warning">{bark.error}</Notice>}
 
-  {(ready || stuck) && <Section title="Settings">
+  {(ready || stuck) && <Section title="Settings" testId="bark-settings">
+   {backupNow && real && ready && <Block><Notice tone="warning" testId="bark-backup-now">Back up this wallet now: it holds real bitcoin, and its recovery phrase lives only on this device. Write the phrase down, or download the encrypted backup, before you put money in.</Notice></Block>}
    {real ? <Row label="Network" hint="Real bitcoin, on Second's server"><span className="text-sm text-text-secondary" data-testid="bark-network">Bitcoin</span></Row>
    : <Row label="Network" hint={stuck ? "This server is not answering. You can switch to another one." : canReplace ? "Test networks use worthless coins." : "Only while this wallet is empty and has no payments."}>
     <Segmented label="Bark network" value={network} disabled={busy || !canReplace} options={TEST_NETWORKS.map(value => ({ value, label: NETWORKS[value].label }))} onChange={next => void run(() => use(next))} />
@@ -80,7 +84,7 @@ export function BarkWalletPanel({ wallet, state }: { wallet: WalletPlatform; sta
    </Block>}
    <Row label="Automatic renewal" hint="Refreshes coins close to expiry while Ghostly is open"><span className="text-sm text-text-secondary">On</span></Row>
    {bark.terms && <Row label="Server terms" hint="Second's terms apply to its server"><a className="text-sm text-link underline" href={bark.terms} target="_blank" rel="noreferrer noopener" data-testid="bark-terms">Read</a></Row>}
-   <BackupRows name="Bark" busy={busy} run={run} canReplace={canReplace}
+   <BackupRows name="Bark" busy={busy} run={run} canReplace={canReplace} focusFirst={backupNow && real}
     reveal={async () => (await wallet.barkBackup()).mnemonic} exportBackup={pw => wallet.barkExportBackup(pw)}
     restorePhrase={mnemonic => use(network, { provider: bark.provider, explorer: NETWORKS[network].explorer, mnemonic })} restoreFile={(text, pw) => wallet.barkRestoreBackup(text, pw)} />
    <Notice>The phrase brings back what Second's server holds for this wallet; payment history comes from the backup file.</Notice></>}

@@ -4,10 +4,7 @@ import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
 import { WalletMark } from "../WalletCards";
 import { MONEY_LABEL } from "../NetworkTag";
 import { Select } from "../ui/Select";
-import { BackupRows } from "./BackupRows";
-import { useRun } from "./run";
 import { Button, Notice, input } from "./ui";
-import { exportBackup, reveal } from "./walletPhrase";
 import { NETWORK_NAME, WALLET_NAME } from "./names";
 import { ProviderConfigForm } from "./providers/SourcePicker";
 import { PROVIDER_FORMS } from "./providers/forms";
@@ -38,13 +35,6 @@ const STEPS: Record<WalletType, [string, string]> = {
   fedimint: ["Reading the invite", "Joining the federation"],
   usdt: ["Creating keys", "Checking the token on its chain"],
 };
-/**
- * Kinds whose Mainnet wallet is a recovery phrase kept on this device: once made, New offers to back it up before the
- * card is dealt, instead of closing by itself. Real money with no copy of its phrase is one lost device from gone.
- */
-const BACKUP_AT_CREATION: ReadonlySet<WalletType> = new Set(["bark"]);
-/** A server's terms, shown with the backup step when the wallet is made on it. */
-const TERMS: Partial<Record<WalletType, string>> = { bark: "https://second.tech/terms" };
 /** The deck's order. */
 const TYPES: WalletType[] = ["cashu", "lightning", "arkade", "bark", "spark", "bitcoin", "fedimint", "usdt"];
 const NETWORKS: WalletNetwork[] = ["mainnet", "testnet"];
@@ -74,7 +64,9 @@ const BUSY_LABEL: Record<WalletType, string> = { cashu: "Creating…", lightning
  * card that says what clicking it does: Create (one click, with the network's known-good defaults), Connect… (a
  * source's form), Join with invite…, or why it is not there yet; the ones already made say Added. While a wallet is
  * made the chosen card says so and the steps show; the engine checks the server before the card appears, and a
- * failure says why once, with Try again, leaving nothing half made. On a phone it is a sheet.
+ * failure says why once, with Try again, leaving nothing half made. Made, it closes by itself (every kind, real money
+ * too) and `onCreated` shows the wallet: the page selects its card, and a wallet to back up opens on its backup rows.
+ * Focus then goes to what the page chose, not back to New. On a phone it is a sheet.
  */
 export function NewWalletDialog({ wallet, offers, initialNetwork = "testnet", onClose, onCreated }: {
   wallet: WalletPlatform;
@@ -93,13 +85,14 @@ export function NewWalletDialog({ wallet, offers, initialNetwork = "testnet", on
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
   const later = (ms: number, run: () => void) => { timers.current.push(setTimeout(run, ms)); };
-  const finish = (made: WalletInstanceView) => { timers.current.forEach(clearTimeout); onCreated(made); };
+  // Made: the page decides where the focus goes (the new card, or its backup), so the dialog does not hand it back to New.
+  const finished = useRef(false);
+  const finish = (made: WalletInstanceView) => { timers.current.forEach(clearTimeout); finished.current = true; onCreated(made); };
   // Closing while it is being made would leave it made unseen: the dialog waits. Once it is made, closing shows it.
   const close = () => { if (phase?.state === "done" && phase.made) finish(phase.made); else if (!busy) onClose(); };
-  useDialogFocus(dialog, close);
+  useDialogFocus(dialog, close, () => !finished.current);
   const backdrop = useBackdropDismiss(close);
   const offer = (type: WalletType) => offers.find((o) => o.type === type && o.network === network);
-  const backupFirst = (type: WalletType) => network === "mainnet" && BACKUP_AT_CREATION.has(type);
 
   const create = async (type: WalletType, extra: { invite?: string; providerId?: string; values?: Record<string, string> } = {}) => {
     if (busy) return;
@@ -108,7 +101,7 @@ export function NewWalletDialog({ wallet, offers, initialNetwork = "testnet", on
     try {
       const made = await wallet.create({ type, network, ...extra });
       setPhase({ type, state: "done", step: 2, made });
-      if (!backupFirst(type)) later(READY_MS, () => finish(made));
+      later(READY_MS, () => finish(made));
     } catch (e) { setPhase({ type, state: "error", step: 1, text: message(e) }); }
   };
   const pick = (type: WalletType) => {
@@ -220,7 +213,6 @@ export function NewWalletDialog({ wallet, offers, initialNetwork = "testnet", on
         )}
 
         {phase && phase.state !== "error" && <Progress phase={phase} network={network} />}
-        {phase?.state === "done" && phase.made && backupFirst(phase.type) && <BackupStep wallet={wallet.forNetwork(network)} type={phase.type} onDone={() => finish(phase.made!)} />}
         {error && (
           <div className="space-y-2" role="alert">
             <Notice tone="error" testId="new-wallet-error">{error.text}</Notice>
@@ -228,25 +220,6 @@ export function NewWalletDialog({ wallet, offers, initialNetwork = "testnet", on
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-/**
- * Right after a Mainnet wallet with a recovery phrase is made: write the phrase down, or download the wallet's
- * encrypted backup, then Done. Skipping is allowed (Done, Escape, ×); the same rows stay on the wallet's page.
- */
-function BackupStep({ wallet, type, onDone }: { wallet: WalletPlatform; type: WalletType; onDone: () => void }) {
-  const { busy, error, run } = useRun();
-  const terms = TERMS[type];
-  return (
-    <div className="space-y-3" data-testid="new-wallet-backup">
-      <p className="text-sm font-semibold text-text-primary">Back up this wallet now</p>
-      <p className="text-xs text-text-secondary">It holds real bitcoin, and its recovery phrase lives only on this device. Write the phrase down on paper, or download the encrypted backup, before you put money in.</p>
-      <BackupRows name={WALLET_NAME[type]} busy={busy} run={run} reveal={() => reveal(wallet, type)} exportBackup={(password) => exportBackup(wallet, type, password)} />
-      {error && <Notice tone="error">{error}</Notice>}
-      {terms && <p className="text-[11px] text-text-muted">Using this server accepts its operator's <a className="text-link underline" href={terms} target="_blank" rel="noreferrer noopener" data-testid="new-wallet-terms">terms</a>.</p>}
-      <Button variant="primary" className="w-full" data-testid="new-wallet-backup-done" onClick={onDone}>Done</Button>
     </div>
   );
 }
