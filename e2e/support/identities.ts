@@ -1,4 +1,3 @@
-import type { Locator } from "@playwright/test";
 import { composerRow } from "./composer";
 import { expect, type Peer } from "./fixtures";
 
