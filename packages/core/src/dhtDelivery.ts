@@ -425,7 +425,9 @@ export class DhtDelivery {
     // is safe because the durable message table deduplicates the stable ID.
     let nextReceipt = this.state.receipt;
     if (message) {
-      await this.options.message({ id: message[0], timestamp: message[1], text: message[2] }, DhtDelivery.facts(body, packet.records, packet.pubKeyZ32));
+      // The text this side owes a receipt for was stored already (the receipt is saved only after it): a retransmission
+      // that crossed the receipt, or the same envelope moved to the pinned mailbox, is not handed over twice.
+      if (nextReceipt?.id !== message[0]) await this.options.message({ id: message[0], timestamp: message[1], text: message[2] }, DhtDelivery.facts(body, packet.records, packet.pubKeyZ32));
       if (nextReceipt?.id !== message[0]) nextReceipt = { id: message[0], expires, attempts: 0 };
       // Asked for again (the text sent anew after a lost session): its receipt goes at once again.
       else if (nextReceipt.settled) { const { settled: _settled, next: _next, ...asked } = nextReceipt; nextReceipt = asked; }

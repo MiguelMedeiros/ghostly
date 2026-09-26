@@ -1854,7 +1854,8 @@ export class GhostLink {
         cashuPaymentsSupport: this.paymentEnabled("cashu"),
         lightningPaymentsSupport: this.paymentEnabled("lightning"),
         paymentsSupport: PAYMENT_METHODS.some(m => this.paymentEnabled(m)) && !!this.options.events?.onPayment && !!this.options.events?.onPaymentRequest && !!this.options.events?.onPaymentResult,
-        onState: () => { if (this.channel === channel && !(this.unproven(channel) && paired.state.status === "error")) this.emitPairingState(); },
+        // A connection dialled in on a pinned chat says nothing until it authenticated: one refused leaves no trace in the state.
+        onState: () => { if (this.channel === channel && (!this.unproven(channel) || paired.state.status === "ready")) this.emitPairingState(); },
         onFailure: () => {
           if (this.unproven(channel)) {
             if (paired.state.keyMismatch) this.dht?.foreignKeySeen("stream");

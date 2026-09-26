@@ -2,6 +2,7 @@ import { copyInvite } from "../support/clipboard";
 import { pasteInvite } from "../support/clipboard";
 import { test, expect, chat, chooseDhtOnly, say, setDhtOnly, type Peer } from "../support/fixtures";
 import { LocalRelay } from "../support/relay";
+import { DhtDelivery, createIdentity, createRelayPayload, decodeInviteCode } from "@ghostly/core";
 import { composerRow } from "../support/composer";
 
 async function watchStreams(peer: Peer) {
@@ -91,7 +92,7 @@ test("DHT network publication failures are visible and never claimed as receipt"
   await expect(received(a)).toHaveCount(0);
 });
 
-test("a changed DHT participation key is rejected without replacing the saved contact",{ tag: ["@feature:chat.dht.key-change", "@feature:core.peer-keys"] },async({peer})=>{
+test("a changed DHT participation key is ignored: the saved contact stays, and nothing stops",{ tag: ["@feature:chat.dht.key-change", "@feature:core.peer-keys"] },async({peer})=>{
   const a=await peer("dht-pinned"),b=await peer("dht-changed");await join(b,await createDht(a));
   await expect(a.page.getByPlaceholder("Message…")).toBeEnabled();
   await say(a,"Before the identity change");await expect(chat(b).getByText("Before the identity change",{exact:true})).toBeVisible();await expect(received(a)).toHaveCount(1);
@@ -100,8 +101,37 @@ test("a changed DHT participation key is rejected without replacing the saved co
   // Controlled corruption of this disposable peer's own persisted identity models key loss/replacement.
   await b.page.evaluate(()=>new Promise<void>((resolve,reject)=>{const request=indexedDB.open("ghostly");request.onsuccess=()=>{const db=request.result;const tx=db.transaction("links","readwrite"),store=tx.objectStore("links"),query=store.getAll();query.onsuccess=()=>{const link=query.result[0];link.participationSeed=btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+","-").replaceAll("/","_").replace(/=+$/,"");store.put(link);};tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>reject(tx.error);};request.onerror=()=>reject(request.error);}));
   await b.page.reload();
-  await expect(a.page.getByTestId("connection-options")).toHaveAccessibleName(/Connection issue/);
-  await a.page.getByTestId("connection-options").click();await expect(a.page.getByRole("alert")).toContainText(/key|identity|pinned|contact/i);
-  await expect(a.page.getByPlaceholder("Message…")).toBeDisabled();
+  await say(b,"After the identity change");
+  // The DHT is written under keys any copy of the invite derives: another key there proves nothing, so it is never a stop (WISP 400).
+  await a.page.waitForTimeout(15_000);
+  await expect(chat(a).getByText("After the identity change",{exact:true})).toHaveCount(0);
+  await expect(a.page.getByTestId("connection-options")).not.toHaveAccessibleName(/Connection issue/);
+  await expect(a.page.getByPlaceholder("Message…")).toBeEnabled();
   expect(await readPin()).toBe(before);
+});
+
+test("a copy of the invite, publishing in the joiner's DHT mailbox with a key of its own, neither stops the chat nor loses a text",{ tag: ["@feature:chat.dht.key-change", "@feature:chat.dht.send"] },async({peer,relay})=>{
+  const a=await peer("dht-owner"),b=await peer("dht-joiner");
+  const invite=await createDht(a);await join(b,invite);
+  await say(a,"Before the copy");await expect(chat(b).getByText("Before the copy",{exact:true})).toBeVisible();await expect(received(a)).toHaveCount(1);
+  await say(b,"Answer before the copy");await expect(chat(a).getByText("Answer before the copy",{exact:true})).toBeVisible();
+  // Someone else who kept the link: the joiner's link keys from it, and a participation key of its own, republishing.
+  const params=decodeInviteCode(invite)!;
+  const copy=new DhtDelivery({params,mode:"dht",credentials:{seedB64:createIdentity().seedB64},
+    transport:{publish:async(identity,records)=>{relay.packets.set(identity.pubKeyZ32,Buffer.from(createRelayPayload(identity,records)));},resolve:async()=>null,describe:()=>({protocol:"copy",relays:[]})},
+    save:async()=>{},pin:async()=>{},message:async()=>{},receipt:async()=>{},changed:()=>{}});
+  await copy.start();
+  const flood=setInterval(()=>{void copy.send("from a copy",Date.now(),"copycopycopycopycopyco");},3_000);
+  try {
+    await a.page.waitForTimeout(10_000);
+    await say(b,"After the copy");
+    await expect(chat(a).getByText("After the copy",{exact:true})).toBeVisible({timeout:60_000});
+    await say(a,"Reply after the copy");
+    await expect(chat(b).getByText("Reply after the copy",{exact:true})).toBeVisible({timeout:60_000});
+  } finally { clearInterval(flood);await copy.stop(); }
+  await expect(chat(a).getByText("from a copy",{exact:true})).toHaveCount(0);
+  for(const p of [a,b]){
+    await expect(p.page.getByTestId("connection-options")).not.toHaveAccessibleName(/Connection issue/);
+    await expect(p.page.getByPlaceholder("Message…")).toBeEnabled();
+  }
 });
