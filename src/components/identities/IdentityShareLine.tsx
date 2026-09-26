@@ -9,11 +9,11 @@ import { ProviderMark } from "./ProviderMark";
 const time = (at: number) => new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 /** Where a share stands, as the card's corner shows it. `waiting`: mine, the contact not connected yet. `unanswered`: theirs, never presented. */
-export type ShareMark = "verifying" | "verified" | "failed" | "waiting" | "unanswered";
+type ShareMark = "verifying" | "verified" | "failed" | "waiting" | "unanswered";
 const MARK_TEXT: Record<ShareMark, string> = { verifying: "Checking", verified: "Verified", failed: "Not verified", waiting: "Waiting", unanswered: "Not checked" };
 
 /** The mark a share wears now: its entry's state, told apart where the entry alone cannot say it. */
-export function shareMark(entry: IdentityTimelineEntry, link: Pick<LinkView, "identities"> | undefined, now = Date.now()): ShareMark {
+function shareMark(entry: IdentityTimelineEntry, link: Pick<LinkView, "identities"> | undefined, now = Date.now()): ShareMark {
   if (entry.state === "verified" || entry.state === "failed") return entry.state;
   if (entry.side === "mine") return link?.identities?.shared.find(s => s.id === entry.proof)?.status === "queued" ? "waiting" : "verifying";
   // The contact asked for a challenge and never answered it: it can no longer be answered.
